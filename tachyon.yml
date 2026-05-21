@@ -1,7 +1,0 @@
-apiVersion: tachyon/v1
-kind: CloudApp
-metadata:
-  name: tachyonfield-golf
-  tenant_id: tn_01ks18jhh1xvggktfzjx5jqsen
-spec:
-  framework: none
