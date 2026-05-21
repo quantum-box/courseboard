@@ -2,7 +2,11 @@ use std::{env, net::SocketAddr};
 
 use anyhow::Context;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-use tachyonfield_golf::{build_router, run_migrations, AppState};
+use std::sync::Arc;
+use tachyonfield_golf::{
+    auth::{AuthConfig, OidcJwtVerifier},
+    build_router, run_migrations, AppState,
+};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -32,7 +36,11 @@ async fn main() -> anyhow::Result<()> {
 
     run_migrations(&pool).await?;
 
-    let state = AppState::new(pool);
+    let auth_config = AuthConfig::from_env().context("load Tachyon Auth OIDC config")?;
+    let token_verifier = OidcJwtVerifier::discover(auth_config)
+        .await
+        .context("initialize Tachyon Auth OIDC verifier")?;
+    let state = AppState::new(pool, Arc::new(token_verifier));
     let app = build_router(state);
     let addr: SocketAddr = env::var("BIND_ADDR")
         .unwrap_or_else(|_| "0.0.0.0:8080".to_string())

@@ -15,9 +15,12 @@ compute:
 env:
   BIND_ADDR: 0.0.0.0:8080
   DATABASE_URL: sqlite://data/tachyonfield-golf.db
+  TACHYON_AUTH_ISSUER_URL: https://app.n1.tachy.one
+  EXPECTED_AUDIENCE: tachyonfield-golf
+  EXPECTED_CLIENT_ID: tachyonfield-core
 
 auth:
   provider: tachyon-auth
   mode: oauth2_client_credentials
   audience: tachyonfield-golf
-  enforcement: bearer_token_required_placeholder
+  enforcement: oidc_jwks_jwt_required
