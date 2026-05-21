@@ -1,0 +1,13 @@
+/target/
+
+# Local SQLite databases
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+data/
+
+# Local temp files
+*.tmp
+*.temp
+.DS_Store
