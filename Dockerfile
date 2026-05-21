@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1
+
+FROM rust:1-bookworm AS builder
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends pkg-config libsqlite3-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY Cargo.toml Cargo.lock ./
+COPY migrations ./migrations
+COPY src ./src
+
+RUN cargo build --release --locked
+
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN useradd --system --uid 10001 --create-home --home-dir /app appuser \
+    && mkdir -p /app/data \
+    && chown -R appuser:appuser /app
+
+COPY --from=builder /app/target/release/tachyonfield-golf /app/bin/tachyonfield-golf
+
+ENV BIND_ADDR=0.0.0.0:8080
+ENV DATABASE_URL=sqlite:///app/data/tachyonfield-golf.db
+
+EXPOSE 8080
+
+USER appuser
+
+CMD ["/app/bin/tachyonfield-golf"]
