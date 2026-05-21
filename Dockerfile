@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM rust:1-bookworm AS builder
+FROM public.ecr.aws/docker/library/rust:1-bookworm AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ COPY src ./src
 
 RUN cargo build --release --locked
 
-FROM debian:bookworm-slim AS runtime
+FROM public.ecr.aws/docker/library/debian:bookworm-slim AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 \
