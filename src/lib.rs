@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{env, sync::Arc};
 
 pub mod auth;
 
@@ -13,6 +13,7 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{migrate::Migrator, FromRow, SqlitePool};
 use thiserror::Error;
 
@@ -57,6 +58,30 @@ pub fn build_router(state: AppState) -> Router {
             )),
         )
         .with_state(state)
+}
+
+pub async fn build_app_from_env() -> anyhow::Result<Router> {
+    let database_url =
+        env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://tachyonfield-golf.db".to_string());
+    let connect_options: SqliteConnectOptions = database_url
+        .parse()
+        .map_err(|error| anyhow::anyhow!("DATABASE_URL must be a valid SQLite URL: {error}"))?;
+    let pool = SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect_with(
+            connect_options
+                .create_if_missing(true)
+                .journal_mode(SqliteJournalMode::Wal),
+        )
+        .await?;
+
+    run_migrations(&pool).await?;
+
+    let auth_config = auth::AuthConfig::from_env()?;
+    let token_verifier = auth::OidcJwtVerifier::discover(auth_config).await?;
+    let state = AppState::new(pool, Arc::new(token_verifier));
+
+    Ok(build_router(state))
 }
 
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), AppError> {
