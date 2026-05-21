@@ -1,0 +1,23 @@
+app:
+  name: tachyonfield-golf
+  runtime: container
+  entrypoint: target/release/tachyonfield-golf
+
+compute:
+  service: tachyon-compute
+  region: ap-northeast-1
+  port: 8080
+  healthcheck:
+    path: /healthz
+    interval_seconds: 30
+    timeout_seconds: 5
+
+env:
+  BIND_ADDR: 0.0.0.0:8080
+  DATABASE_URL: sqlite://data/tachyonfield-golf.db
+
+auth:
+  provider: tachyon-auth
+  mode: oauth2_client_credentials
+  audience: tachyonfield-golf
+  enforcement: bearer_token_required_placeholder
