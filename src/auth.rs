@@ -179,7 +179,7 @@ impl TokenVerifier for OidcJwtVerifier {
             .map_err(|_| AuthError::InvalidToken)?;
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_issuer(&[self.issuer.as_str()]);
-        validation.set_audience(&[self.expected_audience.as_str()]);
+        validation.validate_aud = false;
         validation.validate_nbf = true;
         validation.leeway = MAX_CLOCK_SKEW_SECONDS;
         validation.required_spec_claims.insert("exp".to_string());
@@ -198,6 +198,13 @@ impl TokenVerifier for OidcJwtVerifier {
             .client_id
             .clone()
             .or_else(|| token_data.claims.azp.clone());
+        let audience_matches =
+            audience_contains(&token_data.claims.aud, self.expected_audience.as_str())
+                || client_id.as_deref() == Some(self.expected_audience.as_str());
+        if !audience_matches {
+            return Err(AuthError::InvalidToken);
+        }
+
         if !self.expected_client_ids.is_empty() {
             let authorized = client_id
                 .as_ref()
@@ -213,6 +220,14 @@ impl TokenVerifier for OidcJwtVerifier {
             subject: token_data.claims.sub,
             client_id,
         })
+    }
+}
+
+fn audience_contains(audience: &serde_json::Value, expected: &str) -> bool {
+    match audience {
+        serde_json::Value::String(value) => value == expected,
+        serde_json::Value::Array(values) => values.iter().any(|value| value == expected),
+        _ => false,
     }
 }
 

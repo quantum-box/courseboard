@@ -16,6 +16,11 @@ tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "
 tower = "0.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+lambda_http = "0.13"
+
+[[bin]]
+name = "lambda-tachyonfield-golf"
+path = "bin/lambda.rs"
 
 [dev-dependencies]
 base64 = "0.22"

@@ -1,0 +1,30 @@
+apiVersion: apps.tachy.one/v1alpha
+kind: CloudApps
+metadata:
+  name: tachyonfield-golf
+  tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
+spec:
+  apps:
+    - name: tachyonfield-golf
+      repository:
+        url: https://github.com/quantum-box/tachyonfield-golf
+        owner: quantum-box
+        name: tachyonfield-golf
+        defaultBranch: main
+      rootDirectory: ""
+      framework: cargo_lambda
+      deploymentTarget: lambda
+      build:
+        package: tachyonfield-golf
+        binary: lambda-tachyonfield-golf
+        release: true
+        arch: arm64
+      envVars:
+        - name: DATABASE_URL
+          value: sqlite:///tmp/tachyonfield-golf.db
+        - name: TACHYON_AUTH_ISSUER_URL
+          value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+        - name: EXPECTED_AUDIENCE
+          value: 5002hok6cj8mjmt3gepdpdq98i
+        - name: EXPECTED_CLIENT_ID
+          value: 5002hok6cj8mjmt3gepdpdq98i
