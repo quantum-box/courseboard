@@ -1,0 +1,258 @@
+use std::{
+    collections::HashSet,
+    env,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+
+const DEFAULT_HTTP_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_CLOCK_SKEW_SECONDS: u64 = 60;
+
+pub trait TokenVerifier: Send + Sync {
+    fn verify(&self, token: &str) -> Result<AuthenticatedPrincipal, AuthError>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthenticatedPrincipal {
+    pub issuer: String,
+    pub subject: Option<String>,
+    pub client_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuthConfig {
+    pub issuer_url: String,
+    pub expected_audience: String,
+    pub expected_client_ids: HashSet<String>,
+}
+
+impl AuthConfig {
+    pub fn from_env() -> Result<Self, AuthConfigError> {
+        let issuer_url = env::var("OIDC_ISSUER_URL")
+            .or_else(|_| env::var("TACHYON_AUTH_ISSUER_URL"))
+            .map_err(|_| AuthConfigError::MissingIssuer)?;
+        let expected_audience =
+            env::var("EXPECTED_AUDIENCE").map_err(|_| AuthConfigError::MissingAudience)?;
+        let expected_client_ids = env::var("EXPECTED_CLIENT_ID")
+            .ok()
+            .map(|value| parse_csv_set(&value))
+            .unwrap_or_default();
+
+        Ok(Self {
+            issuer_url,
+            expected_audience,
+            expected_client_ids,
+        })
+    }
+}
+
+fn parse_csv_set(value: &str) -> HashSet<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+#[derive(Debug, Error)]
+pub enum AuthConfigError {
+    #[error("OIDC_ISSUER_URL or TACHYON_AUTH_ISSUER_URL must be set")]
+    MissingIssuer,
+    #[error("EXPECTED_AUDIENCE must be set")]
+    MissingAudience,
+}
+
+#[derive(Debug, Error)]
+pub enum AuthInitError {
+    #[error("discovery document request failed")]
+    DiscoveryRequest(#[source] reqwest::Error),
+    #[error("discovery document returned unsuccessful status {0}")]
+    DiscoveryStatus(reqwest::StatusCode),
+    #[error("JWKS request failed")]
+    JwksRequest(#[source] reqwest::Error),
+    #[error("JWKS returned unsuccessful status {0}")]
+    JwksStatus(reqwest::StatusCode),
+    #[error("issuer in discovery document did not match configured issuer")]
+    IssuerMismatch,
+}
+
+#[derive(Debug, Error)]
+pub enum AuthError {
+    #[error("bearer token is required")]
+    MissingToken,
+    #[error("bearer token is malformed")]
+    MalformedToken,
+    #[error("token key id is missing")]
+    MissingKeyId,
+    #[error("token signing key was not found")]
+    UnknownKeyId,
+    #[error("token signature or claims are invalid")]
+    InvalidToken,
+    #[error("token issued-at time is in the future")]
+    InvalidIssuedAt,
+    #[error("token client is not authorized")]
+    UnauthorizedClient,
+}
+
+#[derive(Clone)]
+pub struct OidcJwtVerifier {
+    issuer: String,
+    expected_audience: String,
+    expected_client_ids: HashSet<String>,
+    jwks: Jwks,
+}
+
+impl OidcJwtVerifier {
+    pub async fn discover(config: AuthConfig) -> Result<Self, AuthInitError> {
+        let client = reqwest::Client::builder()
+            .timeout(DEFAULT_HTTP_TIMEOUT)
+            .build()
+            .expect("reqwest client config must be valid");
+        let discovery_url = format!(
+            "{}/.well-known/openid-configuration",
+            config.issuer_url.trim_end_matches('/')
+        );
+
+        let discovery_response = client
+            .get(discovery_url)
+            .send()
+            .await
+            .map_err(AuthInitError::DiscoveryRequest)?;
+        if !discovery_response.status().is_success() {
+            return Err(AuthInitError::DiscoveryStatus(discovery_response.status()));
+        }
+        let discovery = discovery_response
+            .json::<DiscoveryDocument>()
+            .await
+            .map_err(AuthInitError::DiscoveryRequest)?;
+        let configured_issuer = config.issuer_url.trim_end_matches('/');
+        if discovery.issuer.trim_end_matches('/') != configured_issuer {
+            return Err(AuthInitError::IssuerMismatch);
+        }
+
+        let jwks_response = client
+            .get(discovery.jwks_uri)
+            .send()
+            .await
+            .map_err(AuthInitError::JwksRequest)?;
+        if !jwks_response.status().is_success() {
+            return Err(AuthInitError::JwksStatus(jwks_response.status()));
+        }
+        let jwks = jwks_response
+            .json::<Jwks>()
+            .await
+            .map_err(AuthInitError::JwksRequest)?;
+
+        Ok(Self::from_jwks(config, jwks))
+    }
+
+    pub fn from_jwks(config: AuthConfig, jwks: Jwks) -> Self {
+        Self {
+            issuer: config.issuer_url.trim_end_matches('/').to_string(),
+            expected_audience: config.expected_audience,
+            expected_client_ids: config.expected_client_ids,
+            jwks,
+        }
+    }
+}
+
+impl TokenVerifier for OidcJwtVerifier {
+    fn verify(&self, token: &str) -> Result<AuthenticatedPrincipal, AuthError> {
+        let header = decode_header(token).map_err(|_| AuthError::MalformedToken)?;
+        let kid = header.kid.ok_or(AuthError::MissingKeyId)?;
+        let key = self
+            .jwks
+            .keys
+            .iter()
+            .find(|key| key.kid.as_deref() == Some(kid.as_str()))
+            .ok_or(AuthError::UnknownKeyId)?;
+
+        if key.kty != "RSA" || key.alg.as_deref().is_some_and(|alg| alg != "RS256") {
+            return Err(AuthError::InvalidToken);
+        }
+
+        let decoding_key = DecodingKey::from_rsa_components(&key.n, &key.e)
+            .map_err(|_| AuthError::InvalidToken)?;
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_issuer(&[self.issuer.as_str()]);
+        validation.set_audience(&[self.expected_audience.as_str()]);
+        validation.validate_nbf = true;
+        validation.leeway = MAX_CLOCK_SKEW_SECONDS;
+        validation.required_spec_claims.insert("exp".to_string());
+        validation.required_spec_claims.insert("iat".to_string());
+
+        let token_data = decode::<JwtClaims>(token, &decoding_key, &validation)
+            .map_err(|_| AuthError::InvalidToken)?;
+
+        let now = unix_timestamp();
+        if token_data.claims.iat > now + MAX_CLOCK_SKEW_SECONDS {
+            return Err(AuthError::InvalidIssuedAt);
+        }
+
+        let client_id = token_data
+            .claims
+            .client_id
+            .clone()
+            .or_else(|| token_data.claims.azp.clone());
+        if !self.expected_client_ids.is_empty() {
+            let authorized = client_id
+                .as_ref()
+                .or(token_data.claims.sub.as_ref())
+                .is_some_and(|value| self.expected_client_ids.contains(value));
+            if !authorized {
+                return Err(AuthError::UnauthorizedClient);
+            }
+        }
+
+        Ok(AuthenticatedPrincipal {
+            issuer: token_data.claims.iss,
+            subject: token_data.claims.sub,
+            client_id,
+        })
+    }
+}
+
+fn unix_timestamp() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock must be after UNIX_EPOCH")
+        .as_secs()
+}
+
+#[derive(Debug, Deserialize)]
+struct DiscoveryDocument {
+    issuer: String,
+    jwks_uri: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Jwks {
+    pub keys: Vec<Jwk>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Jwk {
+    pub kty: String,
+    pub kid: Option<String>,
+    pub n: String,
+    pub e: String,
+    pub alg: Option<String>,
+    #[serde(rename = "use")]
+    pub key_use: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct JwtClaims {
+    iss: String,
+    sub: Option<String>,
+    aud: serde_json::Value,
+    exp: u64,
+    nbf: Option<u64>,
+    iat: u64,
+    client_id: Option<String>,
+    azp: Option<String>,
+}

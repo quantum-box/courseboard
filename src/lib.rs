@@ -1,5 +1,8 @@
 use std::sync::Arc;
 
+pub mod auth;
+
+use auth::{AuthError, TokenVerifier};
 use axum::{
     body::Body,
     extract::{FromRef, State},
@@ -18,12 +21,14 @@ static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 #[derive(Clone)]
 pub struct AppState {
     rules: Arc<SqliteTaxRuleRepository>,
+    token_verifier: Arc<dyn TokenVerifier>,
 }
 
 impl AppState {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: SqlitePool, token_verifier: Arc<dyn TokenVerifier>) -> Self {
         Self {
             rules: Arc::new(SqliteTaxRuleRepository::new(pool)),
+            token_verifier,
         }
     }
 }
@@ -34,12 +39,22 @@ impl FromRef<AppState> for Arc<SqliteTaxRuleRepository> {
     }
 }
 
+impl FromRef<AppState> for Arc<dyn TokenVerifier> {
+    fn from_ref(state: &AppState) -> Self {
+        state.token_verifier.clone()
+    }
+}
+
 pub fn build_router(state: AppState) -> Router {
+    let auth_state = state.clone();
     Router::new()
         .route("/healthz", get(healthz))
         .route(
             "/calculate",
-            post(calculate).route_layer(middleware::from_fn(require_bearer_token)),
+            post(calculate).route_layer(middleware::from_fn_with_state(
+                auth_state,
+                require_valid_token,
+            )),
         )
         .with_state(state)
 }
@@ -53,7 +68,11 @@ async fn healthz() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
 
-async fn require_bearer_token(req: Request<Body>, next: Next) -> Result<Response, AppError> {
+async fn require_valid_token(
+    State(verifier): State<Arc<dyn TokenVerifier>>,
+    req: Request<Body>,
+    next: Next,
+) -> Result<Response, AppError> {
     let Some(value) = req.headers().get(AUTHORIZATION) else {
         return Err(AppError::Unauthorized);
     };
@@ -66,6 +85,7 @@ async fn require_bearer_token(req: Request<Body>, next: Next) -> Result<Response
     if token.trim().is_empty() {
         return Err(AppError::Unauthorized);
     }
+    verifier.verify(token).map_err(AppError::from)?;
 
     Ok(next.run(req).await)
 }
@@ -220,8 +240,10 @@ struct ErrorResponse {
 
 #[derive(Debug, Error)]
 pub enum AppError {
-    #[error("authorization bearer token is required")]
+    #[error("authorization failed")]
     Unauthorized,
+    #[error("authenticated client is not authorized")]
+    Forbidden,
     #[error("{0}")]
     BadRequest(&'static str),
     #[error("tax rule was not found for tenant, prefecture, and course grade")]
@@ -232,10 +254,25 @@ pub enum AppError {
     Migration(#[from] sqlx::migrate::MigrateError),
 }
 
+impl From<AuthError> for AppError {
+    fn from(value: AuthError) -> Self {
+        match value {
+            AuthError::UnauthorizedClient => AppError::Forbidden,
+            AuthError::MissingToken
+            | AuthError::MalformedToken
+            | AuthError::MissingKeyId
+            | AuthError::UnknownKeyId
+            | AuthError::InvalidToken
+            | AuthError::InvalidIssuedAt => AppError::Unauthorized,
+        }
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error) = match self {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
+            AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),
             AppError::Database(_) | AppError::Migration(_) => {
@@ -254,23 +291,30 @@ impl IntoResponse for AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::{AuthConfig, Jwk, Jwks, OidcJwtVerifier};
     use axum::http::{header::CONTENT_TYPE, Method};
+    use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     use http_body_util::BodyExt;
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+    use rand::rngs::OsRng;
+    use rsa::{pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts, RsaPrivateKey};
     use sqlx::sqlite::SqlitePoolOptions;
+    use std::collections::HashSet;
     use tower::ServiceExt;
 
-    async fn test_app() -> Router {
+    async fn test_app(auth: &TestAuth) -> Router {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
             .await
             .expect("connect test sqlite");
         run_migrations(&pool).await.expect("run migrations");
-        build_router(AppState::new(pool))
+        build_router(AppState::new(pool, Arc::new(auth.verifier())))
     }
 
     async fn calculate_with_players(players: serde_json::Value) -> CalculateResponse {
-        let app = test_app().await;
+        let auth = TestAuth::new();
+        let app = test_app(&auth).await;
         let body = serde_json::json!({
             "tenant_id": "scc",
             "prefecture": "hokkaido",
@@ -282,7 +326,7 @@ mod tests {
                 Request::builder()
                     .method(Method::POST)
                     .uri("/calculate")
-                    .header(AUTHORIZATION, "Bearer test-token")
+                    .header(AUTHORIZATION, format!("Bearer {}", auth.valid_token()))
                     .header(CONTENT_TYPE, "application/json")
                     .body(Body::from(body.to_string()))
                     .unwrap(),
@@ -370,7 +414,8 @@ mod tests {
 
     #[tokio::test]
     async fn bearer_token_is_required() {
-        let app = test_app().await;
+        let auth = TestAuth::new();
+        let app = test_app(&auth).await;
         let response = app
             .oneshot(
                 Request::builder()
@@ -392,5 +437,176 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn malformed_token_is_rejected() {
+        let auth = TestAuth::new();
+        let app = test_app(&auth).await;
+        let response = app
+            .oneshot(calculate_request("Bearer not-a-jwt", "scc"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn valid_jwks_signed_token_is_accepted() {
+        let auth = TestAuth::new();
+        let app = test_app(&auth).await;
+        let response = app
+            .oneshot(calculate_request(
+                &format!("Bearer {}", auth.valid_token()),
+                "scc",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn wrong_audience_is_rejected() {
+        let auth = TestAuth::new();
+        let app = test_app(&auth).await;
+        let response = app
+            .oneshot(calculate_request(
+                &format!(
+                    "Bearer {}",
+                    auth.token_with("test-issuer", "wrong-audience", "field-core")
+                ),
+                "scc",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn wrong_issuer_is_rejected() {
+        let auth = TestAuth::new();
+        let app = test_app(&auth).await;
+        let response = app
+            .oneshot(calculate_request(
+                &format!(
+                    "Bearer {}",
+                    auth.token_with(
+                        "https://wrong-issuer.example",
+                        "tachyonfield-golf",
+                        "field-core"
+                    )
+                ),
+                "scc",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn wrong_client_id_is_forbidden() {
+        let auth = TestAuth::new();
+        let app = test_app(&auth).await;
+        let response = app
+            .oneshot(calculate_request(
+                &format!(
+                    "Bearer {}",
+                    auth.token_with("test-issuer", "tachyonfield-golf", "other-client")
+                ),
+                "scc",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+
+    fn calculate_request(authorization: &str, tenant_id: &str) -> Request<Body> {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/calculate")
+            .header(AUTHORIZATION, authorization)
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(
+                serde_json::json!({
+                    "tenant_id": tenant_id,
+                    "prefecture": "hokkaido",
+                    "course_grade": "A",
+                    "players": [{ "age": 42, "has_disability_cert": false }]
+                })
+                .to_string(),
+            ))
+            .unwrap()
+    }
+
+    struct TestAuth {
+        private_key: RsaPrivateKey,
+    }
+
+    impl TestAuth {
+        fn new() -> Self {
+            Self {
+                private_key: RsaPrivateKey::new(&mut OsRng, 2048).unwrap(),
+            }
+        }
+
+        fn verifier(&self) -> OidcJwtVerifier {
+            let public_key = self.private_key.to_public_key();
+            OidcJwtVerifier::from_jwks(
+                AuthConfig {
+                    issuer_url: "test-issuer".to_string(),
+                    expected_audience: "tachyonfield-golf".to_string(),
+                    expected_client_ids: HashSet::from(["field-core".to_string()]),
+                },
+                Jwks {
+                    keys: vec![Jwk {
+                        kty: "RSA".to_string(),
+                        kid: Some("test-key".to_string()),
+                        n: b64url(&public_key.n().to_bytes_be()),
+                        e: b64url(&public_key.e().to_bytes_be()),
+                        alg: Some("RS256".to_string()),
+                        key_use: Some("sig".to_string()),
+                    }],
+                },
+            )
+        }
+
+        fn valid_token(&self) -> String {
+            self.token_with("test-issuer", "tachyonfield-golf", "field-core")
+        }
+
+        fn token_with(&self, issuer: &str, audience: &str, client_id: &str) -> String {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs();
+            let claims = serde_json::json!({
+                "iss": issuer,
+                "sub": client_id,
+                "aud": audience,
+                "iat": now,
+                "nbf": now.saturating_sub(10),
+                "exp": now + 300,
+                "client_id": client_id,
+                "azp": client_id
+            });
+            let mut header = Header::new(Algorithm::RS256);
+            header.kid = Some("test-key".to_string());
+            let private_key_der = self.private_key.to_pkcs1_der().unwrap();
+
+            encode(
+                &header,
+                &claims,
+                &EncodingKey::from_rsa_der(private_key_der.as_bytes()),
+            )
+            .unwrap()
+        }
+    }
+
+    fn b64url(bytes: &[u8]) -> String {
+        URL_SAFE_NO_PAD.encode(bytes)
     }
 }
