@@ -53,6 +53,13 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/calculate",
             post(calculate).route_layer(middleware::from_fn_with_state(
+                auth_state.clone(),
+                require_valid_token,
+            )),
+        )
+        .route(
+            "/simulate/range",
+            post(simulate_range).route_layer(middleware::from_fn_with_state(
                 auth_state,
                 require_valid_token,
             )),
@@ -126,11 +133,7 @@ async fn calculate(
     }
 
     let rule = rules
-        .find_rule(
-            &request.tenant_id,
-            &request.prefecture,
-            &request.course_grade,
-        )
+        .find_rule_by_green_fee(&request.tenant_id, &request.prefecture, request.green_fee)
         .await?
         .ok_or(AppError::RuleNotFound)?;
 
@@ -155,9 +158,56 @@ async fn calculate(
         .collect();
 
     Ok(Json(CalculateResponse {
+        course_grade: rule.course_grade,
         tax_amount,
         breakdown,
     }))
+}
+
+async fn simulate_range(
+    State(rules): State<Arc<SqliteTaxRuleRepository>>,
+    Json(request): Json<SimulateRangeRequest>,
+) -> Result<Json<SimulateRangeResponse>, AppError> {
+    request.validate()?;
+
+    let mut rows = Vec::new();
+    let mut green_fee = request.green_fee_range.min;
+    while green_fee <= request.green_fee_range.max {
+        let rule = rules
+            .find_rule_by_green_fee(&request.tenant_id, &request.prefecture, green_fee)
+            .await?
+            .ok_or(AppError::RuleNotFound)?;
+        let visitors = (request.base_visitors as f64
+            * ((green_fee as f64) / (request.base_green_fee as f64)).powf(request.price_elasticity))
+        .round() as i64;
+        let taxable_visitors = (visitors as f64 * request.taxable_ratio).round() as i64;
+        let revenue = green_fee * visitors;
+        let tax_total = taxable_visitors * rule.fee;
+        let variable_cost = request.variable_cost_per_visitor * visitors;
+        let profit = revenue - tax_total - variable_cost - request.fixed_cost;
+        let profit_margin_pct = if revenue == 0 {
+            0.0
+        } else {
+            ((profit as f64) / (revenue as f64)) * 100.0
+        };
+
+        rows.push(SimulateRangeRow {
+            green_fee,
+            course_grade: rule.course_grade,
+            visitors,
+            taxable_visitors,
+            revenue,
+            tax_total,
+            variable_cost,
+            fixed_cost: request.fixed_cost,
+            profit,
+            profit_margin_pct,
+        });
+
+        green_fee += request.green_fee_range.step;
+    }
+
+    Ok(Json(SimulateRangeResponse { rows }))
 }
 
 fn exemption_reason(player: &Player, rule: &TaxRule) -> Option<String> {
@@ -184,31 +234,38 @@ impl SqliteTaxRuleRepository {
         Self { pool }
     }
 
-    async fn find_rule(
+    async fn find_rule_by_green_fee(
         &self,
         tenant_id: &str,
         prefecture: &str,
-        course_grade: &str,
+        green_fee: i64,
     ) -> Result<Option<TaxRule>, AppError> {
         let rule = sqlx::query_as::<_, TaxRule>(
             r#"
             SELECT
-                tenant_id,
-                prefecture,
-                course_grade,
-                fee,
-                minor_exempt_under_age,
-                senior_exempt_min_age,
-                disability_cert_exempt
-            FROM golf_tax_rules
-            WHERE tenant_id = ?1
-              AND prefecture = ?2
-              AND course_grade = ?3
+                r.tenant_id,
+                r.prefecture,
+                r.course_grade,
+                r.fee,
+                r.minor_exempt_under_age,
+                r.senior_exempt_min_age,
+                r.disability_cert_exempt
+            FROM golf_grade_thresholds t
+            JOIN golf_tax_rules r
+              ON r.tenant_id = t.tenant_id
+             AND r.prefecture = t.prefecture
+             AND r.course_grade = t.course_grade
+            WHERE t.tenant_id = ?1
+              AND t.prefecture = ?2
+              AND t.min_green_fee <= ?3
+              AND (t.max_green_fee IS NULL OR ?3 < t.max_green_fee)
+            ORDER BY t.min_green_fee DESC
+            LIMIT 1
             "#,
         )
         .bind(tenant_id)
         .bind(prefecture)
-        .bind(course_grade)
+        .bind(green_fee)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -218,6 +275,7 @@ impl SqliteTaxRuleRepository {
 
 #[derive(Debug, FromRow)]
 struct TaxRule {
+    course_grade: String,
     fee: i64,
     minor_exempt_under_age: i64,
     senior_exempt_min_age: i64,
@@ -228,7 +286,7 @@ struct TaxRule {
 pub struct CalculateRequest {
     pub tenant_id: String,
     pub prefecture: String,
-    pub course_grade: String,
+    pub green_fee: i64,
     pub players: Vec<Player>,
 }
 
@@ -240,6 +298,7 @@ pub struct Player {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CalculateResponse {
+    pub course_grade: String,
     pub tax_amount: i64,
     pub breakdown: Vec<PlayerBreakdown>,
 }
@@ -250,6 +309,78 @@ pub struct PlayerBreakdown {
     pub fee: i64,
     pub exempt: bool,
     pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SimulateRangeRequest {
+    pub tenant_id: String,
+    pub prefecture: String,
+    pub green_fee_range: GreenFeeRange,
+    pub base_visitors: i64,
+    pub base_green_fee: i64,
+    pub price_elasticity: f64,
+    pub taxable_ratio: f64,
+    pub fixed_cost: i64,
+    pub variable_cost_per_visitor: i64,
+}
+
+impl SimulateRangeRequest {
+    fn validate(&self) -> Result<(), AppError> {
+        if self.green_fee_range.min < 0 {
+            return Err(AppError::BadRequest(
+                "green_fee_range.min must be non-negative",
+            ));
+        }
+        if self.green_fee_range.max < self.green_fee_range.min {
+            return Err(AppError::BadRequest(
+                "green_fee_range.max must be greater than or equal to min",
+            ));
+        }
+        if self.green_fee_range.step <= 0 {
+            return Err(AppError::BadRequest(
+                "green_fee_range.step must be positive",
+            ));
+        }
+        if self.base_visitors < 0 {
+            return Err(AppError::BadRequest("base_visitors must be non-negative"));
+        }
+        if self.base_green_fee <= 0 {
+            return Err(AppError::BadRequest("base_green_fee must be positive"));
+        }
+        if !(0.0..=1.0).contains(&self.taxable_ratio) {
+            return Err(AppError::BadRequest(
+                "taxable_ratio must be between 0 and 1",
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GreenFeeRange {
+    pub min: i64,
+    pub max: i64,
+    pub step: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct SimulateRangeResponse {
+    pub rows: Vec<SimulateRangeRow>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct SimulateRangeRow {
+    pub green_fee: i64,
+    pub course_grade: String,
+    pub visitors: i64,
+    pub taxable_visitors: i64,
+    pub revenue: i64,
+    pub tax_total: i64,
+    pub variable_cost: i64,
+    pub fixed_cost: i64,
+    pub profit: i64,
+    pub profit_margin_pct: f64,
 }
 
 #[derive(Debug, Serialize)]
@@ -271,7 +402,7 @@ pub enum AppError {
     Forbidden,
     #[error("{0}")]
     BadRequest(&'static str),
-    #[error("tax rule was not found for tenant, prefecture, and course grade")]
+    #[error("tax rule was not found for tenant, prefecture, and green fee")]
     RuleNotFound,
     #[error("database error")]
     Database(#[from] sqlx::Error),
@@ -337,13 +468,24 @@ mod tests {
         build_router(AppState::new(pool, Arc::new(auth.verifier())))
     }
 
-    async fn calculate_with_players(players: serde_json::Value) -> CalculateResponse {
+    async fn calculate_with_green_fee(green_fee: i64) -> CalculateResponse {
+        calculate_with_players(
+            green_fee,
+            serde_json::json!([{ "age": 42, "has_disability_cert": false }]),
+        )
+        .await
+    }
+
+    async fn calculate_with_players(
+        green_fee: i64,
+        players: serde_json::Value,
+    ) -> CalculateResponse {
         let auth = TestAuth::new();
         let app = test_app(&auth).await;
         let body = serde_json::json!({
             "tenant_id": "scc",
             "prefecture": "hokkaido",
-            "course_grade": "A",
+            "green_fee": green_fee,
             "players": players
         });
         let response = app
@@ -367,6 +509,7 @@ mod tests {
     #[tokio::test]
     async fn taxable_adult_pays_hokkaido_fee() {
         let response = calculate_with_players(
+            8000,
             serde_json::json!([{ "age": 42, "has_disability_cert": false }]),
         )
         .await;
@@ -374,6 +517,7 @@ mod tests {
         assert_eq!(
             response,
             CalculateResponse {
+                course_grade: "A".to_string(),
                 tax_amount: 400,
                 breakdown: vec![PlayerBreakdown {
                     player_index: 0,
@@ -388,6 +532,7 @@ mod tests {
     #[tokio::test]
     async fn minor_is_exempt_in_hokkaido() {
         let response = calculate_with_players(
+            8000,
             serde_json::json!([{ "age": 17, "has_disability_cert": false }]),
         )
         .await;
@@ -399,6 +544,7 @@ mod tests {
     #[tokio::test]
     async fn age_70_is_exempt_in_hokkaido() {
         let response = calculate_with_players(
+            8000,
             serde_json::json!([{ "age": 70, "has_disability_cert": false }]),
         )
         .await;
@@ -409,9 +555,11 @@ mod tests {
 
     #[tokio::test]
     async fn disability_certificate_is_exempt_in_hokkaido() {
-        let response =
-            calculate_with_players(serde_json::json!([{ "age": 42, "has_disability_cert": true }]))
-                .await;
+        let response = calculate_with_players(
+            8000,
+            serde_json::json!([{ "age": 42, "has_disability_cert": true }]),
+        )
+        .await;
 
         assert_eq!(response.tax_amount, 0);
         assert_eq!(
@@ -422,19 +570,87 @@ mod tests {
 
     #[tokio::test]
     async fn mixed_players_total_only_counts_taxable_players() {
-        let response = calculate_with_players(serde_json::json!([
-            { "age": 42, "has_disability_cert": false },
-            { "age": 17, "has_disability_cert": false },
-            { "age": 70, "has_disability_cert": false },
-            { "age": 55, "has_disability_cert": true },
-            { "age": 69, "has_disability_cert": false }
-        ]))
+        let response = calculate_with_players(
+            8000,
+            serde_json::json!([
+                { "age": 42, "has_disability_cert": false },
+                { "age": 17, "has_disability_cert": false },
+                { "age": 70, "has_disability_cert": false },
+                { "age": 55, "has_disability_cert": true },
+                { "age": 69, "has_disability_cert": false }
+            ]),
+        )
         .await;
 
         assert_eq!(response.tax_amount, 800);
         assert_eq!(response.breakdown.len(), 5);
         assert_eq!(response.breakdown[0].fee, 400);
         assert_eq!(response.breakdown[4].fee, 400);
+    }
+
+    #[tokio::test]
+    async fn green_fee_resolves_course_grade_boundaries() {
+        let grade_a = calculate_with_green_fee(8000).await;
+        assert_eq!(grade_a.course_grade, "A");
+        assert_eq!(grade_a.tax_amount, 400);
+
+        let grade_b = calculate_with_green_fee(6999).await;
+        assert_eq!(grade_b.course_grade, "B");
+        assert_eq!(grade_b.tax_amount, 350);
+
+        let grade_a_boundary = calculate_with_green_fee(7000).await;
+        assert_eq!(grade_a_boundary.course_grade, "A");
+        assert_eq!(grade_a_boundary.tax_amount, 400);
+    }
+
+    #[tokio::test]
+    async fn simulate_range_returns_profit_and_tax_totals() {
+        let auth = TestAuth::new();
+        let app = test_app(&auth).await;
+        let body = serde_json::json!({
+            "tenant_id": "scc",
+            "prefecture": "hokkaido",
+            "green_fee_range": { "min": 3500, "max": 12000, "step": 500 },
+            "base_visitors": 60,
+            "base_green_fee": 8000,
+            "price_elasticity": -1.2,
+            "taxable_ratio": 0.85,
+            "fixed_cost": 300000,
+            "variable_cost_per_visitor": 1500
+        });
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/simulate/range")
+                    .header(AUTHORIZATION, format!("Bearer {}", auth.valid_token()))
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let simulation: SimulateRangeResponse = serde_json::from_slice(&bytes).unwrap();
+
+        assert_eq!(simulation.rows.len(), 18);
+        let first = &simulation.rows[0];
+        assert_eq!(first.green_fee, 3500);
+        assert_eq!(first.course_grade, "C");
+        assert_eq!(first.visitors, 162);
+        assert_eq!(first.taxable_visitors, 138);
+        assert_eq!(first.revenue, 567000);
+        assert_eq!(first.tax_total, 41400);
+        assert_eq!(first.variable_cost, 243000);
+        assert_eq!(first.fixed_cost, 300000);
+        assert_eq!(first.profit, -17400);
+        assert!(first.profit_margin_pct < 0.0);
+        assert!(simulation
+            .rows
+            .iter()
+            .any(|row| row.green_fee == 12000 && row.profit > 0 && row.tax_total > 0));
     }
 
     #[tokio::test]
@@ -451,7 +667,7 @@ mod tests {
                         serde_json::json!({
                             "tenant_id": "scc",
                             "prefecture": "hokkaido",
-                            "course_grade": "A",
+                            "green_fee": 8000,
                             "players": [{ "age": 42, "has_disability_cert": false }]
                         })
                         .to_string(),
@@ -559,7 +775,7 @@ mod tests {
                 serde_json::json!({
                     "tenant_id": tenant_id,
                     "prefecture": "hokkaido",
-                    "course_grade": "A",
+                    "green_fee": 8000,
                     "players": [{ "age": 42, "has_disability_cert": false }]
                 })
                 .to_string(),

@@ -36,7 +36,7 @@ Request:
 {
   "tenant_id": "scc",
   "prefecture": "hokkaido",
-  "course_grade": "A",
+  "green_fee": 8000,
   "players": [{ "age": 42, "has_disability_cert": false }]
 }
 ```
@@ -45,6 +45,7 @@ Response:
 
 ```json
 {
+  "course_grade": "A",
   "tax_amount": 400,
   "breakdown": [
     { "player_index": 0, "fee": 400, "exempt": false, "reason": null }
@@ -52,12 +53,59 @@ Response:
 }
 ```
 
-The SCC/Hokkaido seed currently includes course grade `A` with a 400 yen fee.
+The SCC/Hokkaido seed resolves course grade from green fee:
+
+- `A`: 7,000 yen and above, 400 yen per taxable visitor
+- `B`: 5,000-6,999 yen, 350 yen per taxable visitor
+- `C`: 3,500-4,999 yen, 300 yen per taxable visitor
+- `D`: under 3,500 yen, 200 yen per taxable visitor
+
 Hokkaido exemptions in the seed are:
 
 - Age under 18
 - Age 70 or older
 - Disability certificate holder
+
+### `POST /simulate/range`
+
+Requires the same `Authorization` and `Content-Type` headers as `/calculate`.
+
+Request:
+
+```json
+{
+  "tenant_id": "scc",
+  "prefecture": "hokkaido",
+  "green_fee_range": { "min": 3500, "max": 12000, "step": 500 },
+  "base_visitors": 60,
+  "base_green_fee": 8000,
+  "price_elasticity": -1.2,
+  "taxable_ratio": 0.85,
+  "fixed_cost": 300000,
+  "variable_cost_per_visitor": 1500
+}
+```
+
+Response:
+
+```json
+{
+  "rows": [
+    {
+      "green_fee": 3500,
+      "course_grade": "C",
+      "visitors": 162,
+      "taxable_visitors": 138,
+      "revenue": 567000,
+      "tax_total": 41400,
+      "variable_cost": 243000,
+      "fixed_cost": 300000,
+      "profit": -17400,
+      "profit_margin_pct": -3.068783068783069
+    }
+  ]
+}
+```
 
 ## Tachyon Auth M2M
 
@@ -105,7 +153,7 @@ curl -sS http://localhost:8080/calculate \
   -d '{
     "tenant_id": "scc",
     "prefecture": "hokkaido",
-    "course_grade": "A",
+    "green_fee": 8000,
     "players": [{ "age": 42, "has_disability_cert": false }]
   }'
 ```

@@ -70,7 +70,7 @@ curl -sS "$TACHYONFIELD_GOLF_URL/calculate" \
   -d '{
     "tenant_id": "scc",
     "prefecture": "hokkaido",
-    "course_grade": "A",
+    "green_fee": 8000,
     "players": [{ "age": 42, "has_disability_cert": false }]
   }'
 ```
