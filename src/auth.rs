@@ -209,7 +209,8 @@ impl TokenVerifier for OidcJwtVerifier {
             let authorized = client_id
                 .as_ref()
                 .or(token_data.claims.sub.as_ref())
-                .is_some_and(|value| self.expected_client_ids.contains(value));
+                .is_some_and(|value| self.expected_client_ids.contains(value))
+                || audience_contains_any(&token_data.claims.aud, &self.expected_client_ids);
             if !authorized {
                 return Err(AuthError::UnauthorizedClient);
             }
@@ -227,6 +228,17 @@ fn audience_contains(audience: &serde_json::Value, expected: &str) -> bool {
     match audience {
         serde_json::Value::String(value) => value == expected,
         serde_json::Value::Array(values) => values.iter().any(|value| value == expected),
+        _ => false,
+    }
+}
+
+fn audience_contains_any(audience: &serde_json::Value, expected: &HashSet<String>) -> bool {
+    match audience {
+        serde_json::Value::String(value) => expected.contains(value),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .filter_map(|value| value.as_str())
+            .any(|value| expected.contains(value)),
         _ => false,
     }
 }
@@ -264,6 +276,7 @@ pub struct Jwk {
 struct JwtClaims {
     iss: String,
     sub: Option<String>,
+    #[serde(default)]
     aud: serde_json::Value,
     exp: u64,
     nbf: Option<u64>,

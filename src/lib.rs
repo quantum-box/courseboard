@@ -459,13 +459,17 @@ mod tests {
     use tower::ServiceExt;
 
     async fn test_app(auth: &TestAuth) -> Router {
+        test_app_with_verifier(auth.verifier()).await
+    }
+
+    async fn test_app_with_verifier(verifier: OidcJwtVerifier) -> Router {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
             .await
             .expect("connect test sqlite");
         run_migrations(&pool).await.expect("run migrations");
-        build_router(AppState::new(pool, Arc::new(auth.verifier())))
+        build_router(AppState::new(pool, Arc::new(verifier)))
     }
 
     async fn calculate_with_green_fee(green_fee: i64) -> CalculateResponse {
@@ -708,6 +712,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn access_token_without_audience_uses_client_id() {
+        let auth = TestAuth::new();
+        let app = test_app_with_verifier(
+            auth.verifier_with("field-core", HashSet::from(["field-core".to_string()])),
+        )
+        .await;
+        let response = app
+            .oneshot(calculate_request(
+                &format!(
+                    "Bearer {}",
+                    auth.token_with_claims(serde_json::json!({
+                        "iss": "test-issuer",
+                        "sub": "87f4fa48-b0d1-70ab-ae9f-cfa01ec164c3",
+                        "client_id": "field-core"
+                    }))
+                ),
+                "scc",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn id_token_without_client_id_uses_audience_for_client_authorization() {
+        let auth = TestAuth::new();
+        let app = test_app_with_verifier(
+            auth.verifier_with("field-core", HashSet::from(["field-core".to_string()])),
+        )
+        .await;
+        let response = app
+            .oneshot(calculate_request(
+                &format!(
+                    "Bearer {}",
+                    auth.token_with_claims(serde_json::json!({
+                        "iss": "test-issuer",
+                        "sub": "87f4fa48-b0d1-70ab-ae9f-cfa01ec164c3",
+                        "aud": "field-core"
+                    }))
+                ),
+                "scc",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn wrong_audience_is_rejected() {
         let auth = TestAuth::new();
         let app = test_app(&auth).await;
@@ -795,12 +849,23 @@ mod tests {
         }
 
         fn verifier(&self) -> OidcJwtVerifier {
+            self.verifier_with(
+                "tachyonfield-golf",
+                HashSet::from(["field-core".to_string()]),
+            )
+        }
+
+        fn verifier_with(
+            &self,
+            expected_audience: &str,
+            expected_client_ids: HashSet<String>,
+        ) -> OidcJwtVerifier {
             let public_key = self.private_key.to_public_key();
             OidcJwtVerifier::from_jwks(
                 AuthConfig {
                     issuer_url: "test-issuer".to_string(),
-                    expected_audience: "tachyonfield-golf".to_string(),
-                    expected_client_ids: HashSet::from(["field-core".to_string()]),
+                    expected_audience: expected_audience.to_string(),
+                    expected_client_ids,
                 },
                 Jwks {
                     keys: vec![Jwk {
@@ -820,20 +885,24 @@ mod tests {
         }
 
         fn token_with(&self, issuer: &str, audience: &str, client_id: &str) -> String {
+            self.token_with_claims(serde_json::json!({
+                "iss": issuer,
+                "sub": client_id,
+                "aud": audience,
+                "client_id": client_id,
+                "azp": client_id
+            }))
+        }
+
+        fn token_with_claims(&self, mut claims: serde_json::Value) -> String {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs();
-            let claims = serde_json::json!({
-                "iss": issuer,
-                "sub": client_id,
-                "aud": audience,
-                "iat": now,
-                "nbf": now.saturating_sub(10),
-                "exp": now + 300,
-                "client_id": client_id,
-                "azp": client_id
-            });
+            let claims = claims.as_object_mut().expect("claims must be an object");
+            claims.insert("iat".to_string(), serde_json::json!(now));
+            claims.insert("nbf".to_string(), serde_json::json!(now.saturating_sub(10)));
+            claims.insert("exp".to_string(), serde_json::json!(now + 300));
             let mut header = Header::new(Algorithm::RS256);
             header.kid = Some("test-key".to_string());
             let private_key_der = self.private_key.to_pkcs1_der().unwrap();
