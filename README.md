@@ -127,6 +127,8 @@ tachyonfield ERP endpoints:
 - `GET /v1/erp/staff-availability`
 - `GET/POST /v1/erp/staff-assignments`
 - `PATCH /v1/erp/staff-assignments/:id`
+- `POST /v1/erp/reservations/:id/staff-assignment`
+- `POST /v1/erp/reservations/:id/staff-assignment/unassign`
 
 Profile create/edit maps caddie language to generic `staff_profile` data and
 shows the linked `staff_member_id`. Active and inactive profiles are counted and
@@ -134,6 +136,12 @@ rendered distinctly. The shift calendar lists generic `staff_assignment` rows,
 creates/edits them, and cancels by PATCHing `status=cancelled`; the field API
 does not expose hard DELETE in the current contract. Availability is read from
 `staff-availability`.
+
+`GET /admin/reservations` provides the reservation dispatch workflow. Operators
+enter a tenant, reservation ID, date, and time window; the Cloud App recommends
+caddies by reading generic staff profile, availability, and assignment data.
+Assign and unassign actions call the generic reservation staff-assignment API,
+keeping golf-specific recommendation logic in this extension.
 
 Configure the generic field API client with deployment secrets or environment
 variables:

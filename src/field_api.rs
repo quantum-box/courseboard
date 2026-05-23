@@ -41,6 +41,16 @@ pub trait FieldApi: Send + Sync {
         input: StaffAssignmentInput,
     ) -> Result<StaffAssignment, FieldApiError>;
     async fn cancel_staff_assignment(&self, id: &str) -> Result<StaffAssignment, FieldApiError>;
+    async fn assign_reservation_staff(
+        &self,
+        reservation_id: &str,
+        input: ReservationStaffAssignmentInput,
+    ) -> Result<StaffAssignment, FieldApiError>;
+    async fn unassign_reservation_staff(
+        &self,
+        reservation_id: &str,
+        input: ReservationStaffUnassignmentInput,
+    ) -> Result<StaffAssignment, FieldApiError>;
 }
 
 pub type DynFieldApi = Arc<dyn FieldApi>;
@@ -209,6 +219,34 @@ impl FieldApi for FieldApiClient {
         )
         .await
     }
+
+    async fn assign_reservation_staff(
+        &self,
+        reservation_id: &str,
+        input: ReservationStaffAssignmentInput,
+    ) -> Result<StaffAssignment, FieldApiError> {
+        self.send(
+            Method::POST,
+            &format!("/v1/erp/reservations/{reservation_id}/staff-assignment"),
+            &[],
+            Some(input.into_api_payload()),
+        )
+        .await
+    }
+
+    async fn unassign_reservation_staff(
+        &self,
+        reservation_id: &str,
+        input: ReservationStaffUnassignmentInput,
+    ) -> Result<StaffAssignment, FieldApiError> {
+        self.send(
+            Method::POST,
+            &format!("/v1/erp/reservations/{reservation_id}/staff-assignment/unassign"),
+            &[],
+            Some(input.into_api_payload()),
+        )
+        .await
+    }
 }
 
 fn profile_query(filter: StaffProfileFilter) -> Vec<(&'static str, String)> {
@@ -227,6 +265,7 @@ fn shift_query(filter: ShiftFilter) -> Vec<(&'static str, String)> {
             "staff_profile_id",
             filter.staff_profile_id.unwrap_or_default(),
         ),
+        ("reservation_id", filter.reservation_id.unwrap_or_default()),
     ]
 }
 
@@ -338,6 +377,7 @@ pub struct ShiftFilter {
     pub date_from: Option<String>,
     pub date_to: Option<String>,
     pub staff_profile_id: Option<String>,
+    pub reservation_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -415,6 +455,41 @@ impl StaffAssignmentInput {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReservationStaffAssignmentInput {
+    pub tenant_id: String,
+    pub staff_profile_id: String,
+    pub date: String,
+    pub starts_at: String,
+    pub ends_at: String,
+    pub note: Option<String>,
+}
+
+impl ReservationStaffAssignmentInput {
+    fn into_api_payload(self) -> Value {
+        json!({
+            "tenant_id": self.tenant_id,
+            "staff_profile_id": self.staff_profile_id,
+            "date": self.date,
+            "starts_at": self.starts_at,
+            "ends_at": self.ends_at,
+            "status": "assigned",
+            "note": self.note.unwrap_or_default()
+        })
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReservationStaffUnassignmentInput {
+    pub tenant_id: String,
+}
+
+impl ReservationStaffUnassignmentInput {
+    fn into_api_payload(self) -> Value {
+        json!({ "tenant_id": self.tenant_id })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,5 +529,23 @@ mod tests {
         assert_eq!(payload["display_name"], "Aiko Sato");
         assert_eq!(payload["role"], "caddie");
         assert_eq!(payload["email"], "aiko@example.test");
+    }
+
+    #[test]
+    fn reservation_assignment_payload_uses_generic_staff_profile() {
+        let payload = ReservationStaffAssignmentInput {
+            tenant_id: "scc".to_string(),
+            staff_profile_id: "sp_123".to_string(),
+            date: "2026-06-01".to_string(),
+            starts_at: "08:00".to_string(),
+            ends_at: "12:30".to_string(),
+            note: Some("front nine support".to_string()),
+        }
+        .into_api_payload();
+
+        assert_eq!(payload["tenant_id"], "scc");
+        assert_eq!(payload["staff_profile_id"], "sp_123");
+        assert_eq!(payload["status"], "assigned");
+        assert_eq!(payload["note"], "front nine support");
     }
 }
