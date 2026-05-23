@@ -1,6 +1,8 @@
 use std::{env, sync::Arc};
 
+mod admin_ui;
 pub mod auth;
+pub mod field_api;
 
 use auth::{AuthError, TokenVerifier};
 use axum::{
@@ -12,6 +14,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{migrate::Migrator, FromRow, SqlitePool};
@@ -23,6 +26,8 @@ static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 pub struct AppState {
     rules: Arc<SqliteTaxRuleRepository>,
     token_verifier: Arc<dyn TokenVerifier>,
+    field_api: Option<DynFieldApi>,
+    field_api_config_error: Option<String>,
 }
 
 impl AppState {
@@ -30,6 +35,44 @@ impl AppState {
         Self {
             rules: Arc::new(SqliteTaxRuleRepository::new(pool)),
             token_verifier,
+            field_api: None,
+            field_api_config_error: Some(
+                "TACHYON_FIELD_API_URL is not configured for the admin UI".to_string(),
+            ),
+        }
+    }
+
+    pub fn with_field_api(
+        pool: SqlitePool,
+        token_verifier: Arc<dyn TokenVerifier>,
+        field_api: DynFieldApi,
+    ) -> Self {
+        Self {
+            rules: Arc::new(SqliteTaxRuleRepository::new(pool)),
+            token_verifier,
+            field_api: Some(field_api),
+            field_api_config_error: None,
+        }
+    }
+
+    fn with_optional_field_api(
+        pool: SqlitePool,
+        token_verifier: Arc<dyn TokenVerifier>,
+        field_api: Result<FieldApiClient, field_api::FieldApiConfigError>,
+    ) -> Self {
+        match field_api {
+            Ok(client) => Self {
+                rules: Arc::new(SqliteTaxRuleRepository::new(pool)),
+                token_verifier,
+                field_api: Some(Arc::new(client)),
+                field_api_config_error: None,
+            },
+            Err(error) => Self {
+                rules: Arc::new(SqliteTaxRuleRepository::new(pool)),
+                token_verifier,
+                field_api: None,
+                field_api_config_error: Some(error.to_string()),
+            },
         }
     }
 }
@@ -48,8 +91,53 @@ impl FromRef<AppState> for Arc<dyn TokenVerifier> {
 
 pub fn build_router(state: AppState) -> Router {
     let auth_state = state.clone();
+    let admin_auth_state = state.clone();
     Router::new()
         .route("/healthz", get(healthz))
+        .route(
+            "/admin",
+            get(admin_ui::redirect_admin).route_layer(middleware::from_fn_with_state(
+                admin_auth_state.clone(),
+                require_valid_token,
+            )),
+        )
+        .route(
+            "/admin/caddies",
+            get(admin_ui::caddies_index)
+                .post(admin_ui::create_caddie)
+                .route_layer(middleware::from_fn_with_state(
+                    admin_auth_state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/admin/caddies/:id",
+            post(admin_ui::update_caddie).route_layer(middleware::from_fn_with_state(
+                admin_auth_state.clone(),
+                require_valid_token,
+            )),
+        )
+        .route(
+            "/admin/shifts",
+            post(admin_ui::create_shift).route_layer(middleware::from_fn_with_state(
+                admin_auth_state.clone(),
+                require_valid_token,
+            )),
+        )
+        .route(
+            "/admin/shifts/:id",
+            post(admin_ui::update_shift).route_layer(middleware::from_fn_with_state(
+                admin_auth_state.clone(),
+                require_valid_token,
+            )),
+        )
+        .route(
+            "/admin/shifts/:id/cancel",
+            post(admin_ui::cancel_shift).route_layer(middleware::from_fn_with_state(
+                admin_auth_state,
+                require_valid_token,
+            )),
+        )
         .route(
             "/calculate",
             post(calculate).route_layer(middleware::from_fn_with_state(
@@ -86,7 +174,8 @@ pub async fn build_app_from_env() -> anyhow::Result<Router> {
 
     let auth_config = auth::AuthConfig::from_env()?;
     let token_verifier = auth::OidcJwtVerifier::discover(auth_config).await?;
-    let state = AppState::new(pool, Arc::new(token_verifier));
+    let field_api = FieldApiClient::from_env();
+    let state = AppState::with_optional_field_api(pool, Arc::new(token_verifier), field_api);
 
     Ok(build_router(state))
 }
