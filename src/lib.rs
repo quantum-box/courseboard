@@ -3,6 +3,7 @@ use std::{env, sync::Arc};
 mod admin_ui;
 pub mod auth;
 pub mod field_api;
+pub mod smart_assign;
 
 use auth::{AuthError, TokenVerifier};
 use axum::{

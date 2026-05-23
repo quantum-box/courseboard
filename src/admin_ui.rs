@@ -10,6 +10,10 @@ use crate::{
         ReservationStaffUnassignmentInput, ShiftFilter, StaffAssignment, StaffAssignmentInput,
         StaffAvailability, StaffProfile, StaffProfileFilter, StaffProfileInput,
     },
+    smart_assign::{
+        recommend_caddies, RecommendationReason, RecommendationStatus, SmartAssignRecommendation,
+        SmartAssignRequest,
+    },
     AppState,
 };
 
@@ -30,6 +34,20 @@ pub struct ReservationQuery {
     pub date: Option<String>,
     pub starts_at: Option<String>,
     pub ends_at: Option<String>,
+    pub course_id: Option<String>,
+    pub customer_id: Option<String>,
+}
+
+impl From<&ReservationQuery> for SmartAssignRequest {
+    fn from(value: &ReservationQuery) -> Self {
+        Self {
+            date: value.date.clone(),
+            starts_at: value.starts_at.clone(),
+            ends_at: value.ends_at.clone(),
+            course_id: value.course_id.clone(),
+            customer_id: value.customer_id.clone(),
+        }
+    }
 }
 
 pub async fn redirect_admin() -> Redirect {
@@ -187,23 +205,8 @@ struct ReservationData {
     profiles: Vec<StaffProfile>,
     availability: Vec<StaffAvailability>,
     assignments: Vec<StaffAssignment>,
-    recommendations: Vec<CaddieRecommendation>,
+    recommendations: Vec<SmartAssignRecommendation>,
     current_assignment: Option<StaffAssignment>,
-}
-
-struct CaddieRecommendation {
-    profile: StaffProfile,
-    score: i64,
-    status: RecommendationStatus,
-    reasons: Vec<&'static str>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum RecommendationStatus {
-    Recommended,
-    Available,
-    Busy,
-    Inactive,
 }
 
 async fn load_admin_data(
@@ -272,7 +275,12 @@ async fn load_reservation_data(
     let current_assignment = reservation_id
         .as_deref()
         .and_then(|id| current_assignment_for_reservation(&assignments, id).cloned());
-    let recommendations = recommend_caddies(&profiles, &availability, &assignments, &query);
+    let recommendations = recommend_caddies(
+        &profiles,
+        &availability,
+        &assignments,
+        &SmartAssignRequest::from(&query),
+    );
 
     Ok(ReservationData {
         profiles,
@@ -368,6 +376,8 @@ fn render_reservation_page(query: &ReservationQuery, data: &ReservationData) -> 
     <label>Date <input type="date" name="date" required value="{date}"></label>
     <label>Start <input type="time" name="starts_at" required value="{starts_at}"></label>
     <label>End <input type="time" name="ends_at" required value="{ends_at}"></label>
+    <label>Course <input name="course_id" value="{course_id}" placeholder="optional"></label>
+    <label>Customer <input name="customer_id" value="{customer_id}" placeholder="optional"></label>
     <button type="submit">Recommend</button>
   </form>
 </section>
@@ -385,6 +395,8 @@ fn render_reservation_page(query: &ReservationQuery, data: &ReservationData) -> 
         date = escape(query.date.as_deref().unwrap_or_default()),
         starts_at = escape(query.starts_at.as_deref().unwrap_or_default()),
         ends_at = escape(query.ends_at.as_deref().unwrap_or_default()),
+        course_id = escape(query.course_id.as_deref().unwrap_or_default()),
+        customer_id = escape(query.customer_id.as_deref().unwrap_or_default()),
         profile_count = data.profiles.len(),
         available_count = data.availability.len(),
         assignment_count = data.assignments.len(),
@@ -445,7 +457,7 @@ fn current_assignment_panel(
 
 fn recommendations_table(
     query: &ReservationQuery,
-    recommendations: &[CaddieRecommendation],
+    recommendations: &[SmartAssignRecommendation],
 ) -> String {
     let rows = recommendations
         .iter()
@@ -460,13 +472,13 @@ fn recommendations_table(
     <thead><tr><th>Rank</th><th>Caddie</th><th>Score</th><th>Status</th><th>Why</th><th>Action</th></tr></thead>
     <tbody>{rows}</tbody>
   </table>
-  <p class="note">Recommendation is calculated in this Cloud App from generic staff profile, availability, and assignment data. The final assignment calls the generic reservation staff assignment API.</p>
+  <p class="note">Recommendation is calculated by deterministic smart-assign rules in this Cloud App from generic staff profile, availability, and assignment data. Tie break is shift start, caddie code, then profile id.</p>
 </section>
 "#
     )
 }
 
-fn recommendation_row(query: &ReservationQuery, item: &CaddieRecommendation) -> String {
+fn recommendation_row(query: &ReservationQuery, item: &SmartAssignRecommendation) -> String {
     let can_assign = item.status != RecommendationStatus::Busy
         && item.status != RecommendationStatus::Inactive
         && required_reservation_fields_present(query);
@@ -517,7 +529,7 @@ fn recommendation_row(query: &ReservationQuery, item: &CaddieRecommendation) -> 
         score = item.score,
         status_class = recommendation_status_class(&item.status),
         status = recommendation_status_label(&item.status),
-        reasons = escape(&item.reasons.join(", ")),
+        reasons = escape(&reason_labels(&item.reasons).join(", ")),
         action = action,
     )
 }
@@ -845,110 +857,6 @@ fn profile_options(profiles: &[StaffProfile]) -> String {
         .collect()
 }
 
-fn recommend_caddies(
-    profiles: &[StaffProfile],
-    availability: &[StaffAvailability],
-    assignments: &[StaffAssignment],
-    query: &ReservationQuery,
-) -> Vec<CaddieRecommendation> {
-    let mut recommendations = profiles
-        .iter()
-        .cloned()
-        .map(|profile| {
-            let inactive = profile.status.as_deref() == Some("inactive");
-            let busy = is_profile_busy(&profile.id, assignments, query);
-            let available = is_profile_available(&profile.id, availability, query);
-            let assignment_load = active_assignment_count(&profile.id, assignments);
-
-            let mut reasons = Vec::new();
-            let mut score = 50 - assignment_load;
-            let status = if inactive {
-                reasons.push("inactive profile");
-                score = 0;
-                RecommendationStatus::Inactive
-            } else if busy {
-                reasons.push("already assigned in requested window");
-                score = 5;
-                RecommendationStatus::Busy
-            } else if available {
-                reasons.push("availability covers requested tee time");
-                if assignment_load == 0 {
-                    reasons.push("no active assignment on selected date");
-                }
-                score += 50;
-                RecommendationStatus::Recommended
-            } else {
-                reasons.push("no matching availability row");
-                if assignment_load > 0 {
-                    reasons.push("has other active assignments");
-                }
-                RecommendationStatus::Available
-            };
-
-            CaddieRecommendation {
-                profile,
-                score,
-                status,
-                reasons,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    recommendations.sort_by(|left, right| {
-        right
-            .score
-            .cmp(&left.score)
-            .then_with(|| display_name(&left.profile).cmp(display_name(&right.profile)))
-    });
-    recommendations
-}
-
-fn is_profile_available(
-    staff_profile_id: &str,
-    availability: &[StaffAvailability],
-    query: &ReservationQuery,
-) -> bool {
-    let Some(date) = query.date.as_deref().filter(|value| !value.is_empty()) else {
-        return false;
-    };
-    availability.iter().any(|item| {
-        item.staff_profile_id.as_deref() == Some(staff_profile_id)
-            && item.date.as_deref() == Some(date)
-            && item.status.as_deref().unwrap_or("available") != "unavailable"
-            && covers_requested_time(item.starts_at.as_deref(), item.ends_at.as_deref(), query)
-    })
-}
-
-fn is_profile_busy(
-    staff_profile_id: &str,
-    assignments: &[StaffAssignment],
-    query: &ReservationQuery,
-) -> bool {
-    let Some(date) = query.date.as_deref().filter(|value| !value.is_empty()) else {
-        return false;
-    };
-    assignments.iter().any(|assignment| {
-        assignment.staff_profile_id.as_deref() == Some(staff_profile_id)
-            && assignment.date.as_deref() == Some(date)
-            && assignment.status.as_deref() != Some("cancelled")
-            && overlaps_requested_time(
-                assignment.starts_at.as_deref(),
-                assignment.ends_at.as_deref(),
-                query,
-            )
-    })
-}
-
-fn active_assignment_count(staff_profile_id: &str, assignments: &[StaffAssignment]) -> i64 {
-    assignments
-        .iter()
-        .filter(|assignment| {
-            assignment.staff_profile_id.as_deref() == Some(staff_profile_id)
-                && assignment.status.as_deref() != Some("cancelled")
-        })
-        .count() as i64
-}
-
 fn current_assignment_for_reservation<'a>(
     assignments: &'a [StaffAssignment],
     reservation_id: &str,
@@ -957,34 +865,6 @@ fn current_assignment_for_reservation<'a>(
         assignment.reservation_id.as_deref() == Some(reservation_id)
             && assignment.status.as_deref() != Some("cancelled")
     })
-}
-
-fn covers_requested_time(
-    starts_at: Option<&str>,
-    ends_at: Option<&str>,
-    query: &ReservationQuery,
-) -> bool {
-    let Some(request_start) = query.starts_at.as_deref().filter(|value| !value.is_empty()) else {
-        return true;
-    };
-    let Some(request_end) = query.ends_at.as_deref().filter(|value| !value.is_empty()) else {
-        return true;
-    };
-    starts_at.unwrap_or("") <= request_start && ends_at.unwrap_or("99:99") >= request_end
-}
-
-fn overlaps_requested_time(
-    starts_at: Option<&str>,
-    ends_at: Option<&str>,
-    query: &ReservationQuery,
-) -> bool {
-    let Some(request_start) = query.starts_at.as_deref().filter(|value| !value.is_empty()) else {
-        return true;
-    };
-    let Some(request_end) = query.ends_at.as_deref().filter(|value| !value.is_empty()) else {
-        return true;
-    };
-    starts_at.unwrap_or("") < request_end && ends_at.unwrap_or("99:99") > request_start
 }
 
 fn required_reservation_fields_present(query: &ReservationQuery) -> bool {
@@ -1004,6 +884,10 @@ fn recommendation_status_class(status: &RecommendationStatus) -> &'static str {
         RecommendationStatus::Recommended | RecommendationStatus::Available => "active",
         RecommendationStatus::Busy | RecommendationStatus::Inactive => "inactive",
     }
+}
+
+fn reason_labels(reasons: &[RecommendationReason]) -> Vec<&'static str> {
+    reasons.iter().map(RecommendationReason::label).collect()
 }
 
 fn recommendation_status_label(status: &RecommendationStatus) -> &'static str {
@@ -1120,6 +1004,8 @@ mod tests {
             date: Some("2026-06-01".to_string()),
             starts_at: Some("08:00".to_string()),
             ends_at: Some("12:00".to_string()),
+            course_id: None,
+            customer_id: None,
         };
         let profiles = vec![
             StaffProfile {
@@ -1173,7 +1059,12 @@ mod tests {
             extra: serde_json::Value::Null,
         }];
 
-        let recommendations = recommend_caddies(&profiles, &availability, &assignments, &query);
+        let recommendations = recommend_caddies(
+            &profiles,
+            &availability,
+            &assignments,
+            &SmartAssignRequest::from(&query),
+        );
 
         assert_eq!(recommendations[0].profile.id, "sp_available");
         assert_eq!(recommendations[0].status, RecommendationStatus::Recommended);

@@ -143,6 +143,13 @@ caddies by reading generic staff profile, availability, and assignment data.
 Assign and unassign actions call the generic reservation staff-assignment API,
 keeping golf-specific recommendation logic in this extension.
 
+Smart assign is deterministic and rule-based. It scores active caddies, shift
+coverage for the requested tee time, lack of overlapping assignments, optional
+course knowledge matches, optional customer/member ratings of 4 or higher, and
+rookie/senior metadata when present. Recommendation reasons are rendered in the
+UI, and ties are sorted by shift start, caddie code, then staff profile ID so
+the same inputs always produce the same order.
+
 Configure the generic field API client with deployment secrets or environment
 variables:
 
