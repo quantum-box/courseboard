@@ -134,9 +134,29 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/admin/shifts/:id/cancel",
             post(admin_ui::cancel_shift).route_layer(middleware::from_fn_with_state(
-                admin_auth_state,
+                admin_auth_state.clone(),
                 require_valid_token,
             )),
+        )
+        .route(
+            "/admin/reservations",
+            get(admin_ui::reservations_index).route_layer(middleware::from_fn_with_state(
+                admin_auth_state.clone(),
+                require_valid_token,
+            )),
+        )
+        .route(
+            "/admin/reservations/:reservation_id/assign",
+            post(admin_ui::assign_reservation_caddie).route_layer(middleware::from_fn_with_state(
+                admin_auth_state.clone(),
+                require_valid_token,
+            )),
+        )
+        .route(
+            "/admin/reservations/:reservation_id/unassign",
+            post(admin_ui::unassign_reservation_caddie).route_layer(
+                middleware::from_fn_with_state(admin_auth_state, require_valid_token),
+            ),
         )
         .route(
             "/calculate",
