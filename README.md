@@ -1,15 +1,20 @@
 # tachyonfield-golf
 
-TACHYON Field golf extension Cloud App. This service is an API-only extension
-deployed independently to Tachyon Compute and called by TACHYON Field core.
+TACHYON Field golf extension Cloud App. This service is deployed independently
+to Tachyon Compute and called by TACHYON Field core for golf-specific workflows.
+It exposes protected tax calculation APIs plus an operational admin UI for golf
+caddie profile and shift management.
 
 ## Architecture
 
-- Independent Rust + axum REST API server.
+- Independent Rust + axum REST API server with minimal server-rendered HTML for
+  the golf admin UI.
 - Deployed as a Tachyon Compute Cloud App via `tachyon.yaml`.
 - TACHYON Field core calls `POST /calculate`; this app returns numeric tax
   results only.
-- Storefront and user-facing UI remain in TACHYON Field core.
+- Storefront and user-facing UI remain in TACHYON Field core. Golf-specific
+  caddie administration lives in this Cloud App and consumes generic
+  tachyonfield APIs.
 - Tax rates and exemption rules are tenant-scoped and backed by SQLite in this
   skeleton. Startup runs deterministic migrations and seeds SCC/Hokkaido data.
 - Tachyon Auth M2M authentication is expected through OAuth2 client credentials.
@@ -107,6 +112,42 @@ Response:
 }
 ```
 
+## Admin UI
+
+`GET /admin` redirects to `GET /admin/caddies`. The admin UI is protected with
+the same bearer-token middleware as the protected POST APIs, so it should be
+accessed through an internal admin gateway or with an `Authorization: Bearer
+<access-token>` header.
+
+The UI labels staff as caddies, but the integration boundary uses only generic
+tachyonfield ERP endpoints:
+
+- `GET/POST /v1/erp/staff-profiles`
+- `PATCH /v1/erp/staff-profiles/:id`
+- `GET /v1/erp/staff-availability`
+- `GET/POST /v1/erp/staff-assignments`
+- `PATCH /v1/erp/staff-assignments/:id`
+
+Profile create/edit maps caddie language to generic `staff_profile` data and
+shows the linked `staff_member_id`. Active and inactive profiles are counted and
+rendered distinctly. The shift calendar lists generic `staff_assignment` rows,
+creates/edits them, and cancels by PATCHing `status=cancelled`; the field API
+does not expose hard DELETE in the current contract. Availability is read from
+`staff-availability`.
+
+Configure the generic field API client with deployment secrets or environment
+variables:
+
+```bash
+TACHYON_FIELD_API_URL=https://field-api.example.internal/
+TACHYON_FIELD_API_BEARER_TOKEN=<field-api-access-token>
+```
+
+`TACHYON_FIELD_API_BEARER_TOKEN` is a placeholder contract for the current
+static bearer token provider. If Tachyon Auth client-credentials acquisition is
+added later, it should replace that provider without changing the UI handlers.
+Never commit real tokens, client secrets, expanded env files, or bearer values.
+
 ## Tachyon Auth M2M
 
 Set the OIDC issuer and expected token claims through environment variables:
@@ -140,6 +181,8 @@ The default database is `sqlite://tachyonfield-golf.db`. Override with
 TACHYON_AUTH_ISSUER_URL=https://app.n1.tachy.one \
 EXPECTED_AUDIENCE=tachyonfield-golf \
 EXPECTED_CLIENT_ID=tachyonfield-core \
+TACHYON_FIELD_API_URL=https://field-api.example.internal/ \
+TACHYON_FIELD_API_BEARER_TOKEN='<field-api-access-token>' \
 DATABASE_URL=sqlite://data/tachyonfield-golf.db \
 cargo run
 ```
