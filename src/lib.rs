@@ -2,6 +2,7 @@ use std::{env, sync::Arc};
 
 mod admin_ui;
 pub mod auth;
+pub mod demo_seed;
 pub mod field_api;
 pub mod smart_assign;
 

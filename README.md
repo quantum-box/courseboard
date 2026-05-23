@@ -150,6 +150,14 @@ rookie/senior metadata when present. Recommendation reasons are rendered in the
 UI, and ties are sorted by shift start, caddie code, then staff profile ID so
 the same inputs always produce the same order.
 
+Demo seed and headless E2E coverage live in `src/demo_seed.rs`. The seed models
+a small golf course tenant with caddies, shifts, reservations, an existing busy
+assignment, and past member rating metadata. The regression test proves the
+profile → shift → recommendation → reservation assignment flow and verifies that
+an overlapping second reservation marks the already assigned caddie as busy. See
+[docs/golf-mvp-demo.md](docs/golf-mvp-demo.md) for the trace evidence and local
+runner.
+
 Configure the generic field API client with deployment secrets or environment
 variables:
 
