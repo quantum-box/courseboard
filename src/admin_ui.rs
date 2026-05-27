@@ -3,6 +3,7 @@ use axum::{
     response::{Html, IntoResponse, Redirect, Response},
 };
 use serde::Deserialize;
+use serde_json::Value;
 
 use crate::{
     field_api::{
@@ -36,6 +37,12 @@ pub struct ReservationQuery {
     pub ends_at: Option<String>,
     pub course_id: Option<String>,
     pub customer_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct DispatchQuery {
+    pub tenant_id: Option<String>,
+    pub date: Option<String>,
 }
 
 impl From<&ReservationQuery> for SmartAssignRequest {
@@ -151,6 +158,20 @@ pub async fn reservations_index(
     }
 }
 
+pub async fn dispatch_index(
+    State(state): State<AppState>,
+    Query(query): Query<DispatchQuery>,
+) -> Response {
+    let Some(field_api) = state.field_api.clone() else {
+        return render_config_error(state.field_api_config_error).into_response();
+    };
+
+    match load_dispatch_data(field_api, query.clone()).await {
+        Ok(data) => Html(render_dispatch_page(&query, &data)).into_response(),
+        Err(error) => Html(render_error_page(&error)).into_response(),
+    }
+}
+
 pub async fn assign_reservation_caddie(
     State(state): State<AppState>,
     Path(reservation_id): Path<String>,
@@ -209,6 +230,28 @@ struct ReservationData {
     current_assignment: Option<StaffAssignment>,
 }
 
+struct DispatchData {
+    rows: Vec<CaddieDispatchRow>,
+}
+
+#[derive(Clone)]
+struct CaddieDispatchRow {
+    profile: StaffProfile,
+    status: DayStatus,
+    shift: Option<StaffAvailability>,
+    assignments: Vec<StaffAssignment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DayStatus {
+    Scheduled,
+    CheckedIn,
+    Waiting,
+    Assigned,
+    Absent,
+    Cancelled,
+}
+
 async fn load_admin_data(
     field_api: DynFieldApi,
     query: AdminQuery,
@@ -241,6 +284,35 @@ async fn load_admin_data(
         profiles,
         availability,
         assignments,
+    })
+}
+
+async fn load_dispatch_data(
+    field_api: DynFieldApi,
+    query: DispatchQuery,
+) -> Result<DispatchData, FieldApiError> {
+    let tenant_id = query.tenant_id.clone().filter(|value| !value.is_empty());
+    let date = query.date.clone().filter(|value| !value.is_empty());
+    let profiles = field_api
+        .list_staff_profiles(StaffProfileFilter {
+            tenant_id: tenant_id.clone(),
+            status: None,
+        })
+        .await?;
+    let shift_filter = ShiftFilter {
+        tenant_id,
+        date_from: date.clone(),
+        date_to: date,
+        staff_profile_id: None,
+        reservation_id: None,
+    };
+    let availability = field_api
+        .list_staff_availability(shift_filter.clone())
+        .await?;
+    let assignments = field_api.list_staff_assignments(shift_filter).await?;
+
+    Ok(DispatchData {
+        rows: build_dispatch_rows(&profiles, &availability, &assignments),
     })
 }
 
@@ -312,6 +384,131 @@ fn render_error_page(error: &FieldApiError) -> String {
             r#"<section class="panel error"><h2>Field API request failed</h2><p>{}</p></section>"#,
             escape(&error.to_string())
         ),
+    )
+}
+
+fn render_dispatch_page(query: &DispatchQuery, data: &DispatchData) -> String {
+    let assigned = data
+        .rows
+        .iter()
+        .filter(|row| row.status == DayStatus::Assigned)
+        .count();
+    let waiting = data
+        .rows
+        .iter()
+        .filter(|row| row.status == DayStatus::Waiting)
+        .count();
+    let checked_in = data
+        .rows
+        .iter()
+        .filter(|row| row.status == DayStatus::CheckedIn)
+        .count();
+    let absent = data
+        .rows
+        .iter()
+        .filter(|row| row.status == DayStatus::Absent)
+        .count();
+    let body = format!(
+        r#"
+<section class="toolbar">
+  <form method="get" action="/admin/dispatch">
+    <label>Tenant <input name="tenant_id" required value="{tenant_id}" placeholder="scc"></label>
+    <label>Date <input type="date" name="date" required value="{date}"></label>
+    <button type="submit">Open board</button>
+  </form>
+</section>
+<section class="metrics" aria-label="Daily dispatch counts">
+  <div><strong>{assigned}</strong><span>Assigned</span></div>
+  <div><strong>{waiting}</strong><span>Waiting</span></div>
+  <div><strong>{checked_in}</strong><span>Checked-in</span></div>
+  <div><strong>{absent}</strong><span>Absent</span></div>
+</section>
+{dispatch_table}
+"#,
+        tenant_id = escape(query.tenant_id.as_deref().unwrap_or_default()),
+        date = escape(query.date.as_deref().unwrap_or_default()),
+        assigned = assigned,
+        waiting = waiting,
+        checked_in = checked_in,
+        absent = absent,
+        dispatch_table = dispatch_table(&data.rows),
+    );
+
+    page("Daily caddie dispatch board", &body)
+}
+
+fn dispatch_table(rows: &[CaddieDispatchRow]) -> String {
+    let rows = rows.iter().map(dispatch_row).collect::<String>();
+
+    format!(
+        r#"
+<section class="panel">
+  <h2>Daily board</h2>
+  <table>
+    <thead><tr><th>Caddie</th><th>Day status</th><th>Scheduled shift</th><th>Tee-time assignment</th><th>Notes</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+  <p class="note">Day status is derived from generic staff availability and staff assignment rows. This MVP does not implement HR, payroll, or time-clock behavior; writable attendance transitions need a generic field API contract for daily staff status.</p>
+</section>
+"#
+    )
+}
+
+fn dispatch_row(row: &CaddieDispatchRow) -> String {
+    let shift = row
+        .shift
+        .as_ref()
+        .map(|shift| {
+            format!(
+                "{}-{}",
+                escape(shift.starts_at.as_deref().unwrap_or_default()),
+                escape(shift.ends_at.as_deref().unwrap_or_default())
+            )
+        })
+        .unwrap_or_else(|| r#"<span class="note">No shift</span>"#.to_string());
+    let assignment = if row.assignments.is_empty() {
+        r#"<span class="note">No reservation assignment</span>"#.to_string()
+    } else {
+        row.assignments
+            .iter()
+            .map(|assignment| {
+                format!(
+                    r#"<div>{starts_at}-{ends_at} <code>{reservation_id}</code> <span class="status {status_class}">{status}</span></div>"#,
+                    starts_at = escape(assignment.starts_at.as_deref().unwrap_or_default()),
+                    ends_at = escape(assignment.ends_at.as_deref().unwrap_or_default()),
+                    reservation_id = escape(assignment.reservation_id.as_deref().unwrap_or_default()),
+                    status_class = assignment_status_class(assignment.status.as_deref().unwrap_or("scheduled")),
+                    status = escape(assignment.status.as_deref().unwrap_or("scheduled")),
+                )
+            })
+            .collect::<String>()
+    };
+    let notes = row
+        .shift
+        .as_ref()
+        .and_then(|shift| shift.note.as_deref())
+        .unwrap_or_default();
+
+    format!(
+        r#"<tr class="{row_class}">
+  <td>{name}<br><code>{profile_id}</code></td>
+  <td><span class="status {status_class}">{status}</span></td>
+  <td>{shift}</td>
+  <td>{assignment}</td>
+  <td>{notes}</td>
+</tr>"#,
+        row_class = if matches!(row.status, DayStatus::Absent | DayStatus::Cancelled) {
+            "muted-row"
+        } else {
+            ""
+        },
+        name = escape(display_name(&row.profile)),
+        profile_id = escape(&row.profile.id),
+        status_class = day_status_class(&row.status),
+        status = day_status_label(&row.status),
+        shift = shift,
+        assignment = assignment,
+        notes = escape(notes),
     )
 }
 
@@ -761,6 +958,139 @@ fn availability_table(availability: &[StaffAvailability], profiles: &[StaffProfi
     )
 }
 
+fn build_dispatch_rows(
+    profiles: &[StaffProfile],
+    availability: &[StaffAvailability],
+    assignments: &[StaffAssignment],
+) -> Vec<CaddieDispatchRow> {
+    let mut rows = profiles
+        .iter()
+        .filter(|profile| profile.role.as_deref().unwrap_or("caddie") == "caddie")
+        .cloned()
+        .map(|profile| {
+            let profile_availability = availability
+                .iter()
+                .filter(|item| item.staff_profile_id.as_deref() == Some(profile.id.as_str()))
+                .cloned()
+                .collect::<Vec<_>>();
+            let profile_assignments = assignments
+                .iter()
+                .filter(|item| item.staff_profile_id.as_deref() == Some(profile.id.as_str()))
+                .cloned()
+                .collect::<Vec<_>>();
+            let shift = primary_shift(&profile_availability).cloned();
+            let status = derive_day_status(&profile, &profile_availability, &profile_assignments);
+
+            CaddieDispatchRow {
+                profile,
+                status,
+                shift,
+                assignments: profile_assignments,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    rows.sort_by(|left, right| {
+        day_status_sort_key(&left.status)
+            .cmp(&day_status_sort_key(&right.status))
+            .then_with(|| {
+                left.shift
+                    .as_ref()
+                    .and_then(|shift| shift.starts_at.as_deref())
+                    .unwrap_or("99:99")
+                    .cmp(
+                        right
+                            .shift
+                            .as_ref()
+                            .and_then(|shift| shift.starts_at.as_deref())
+                            .unwrap_or("99:99"),
+                    )
+            })
+            .then_with(|| display_name(&left.profile).cmp(display_name(&right.profile)))
+            .then_with(|| left.profile.id.cmp(&right.profile.id))
+    });
+    rows
+}
+
+fn derive_day_status(
+    profile: &StaffProfile,
+    availability: &[StaffAvailability],
+    assignments: &[StaffAssignment],
+) -> DayStatus {
+    let active_assignments = assignments
+        .iter()
+        .filter(|assignment| !is_cancelled_status(assignment.status.as_deref()))
+        .collect::<Vec<_>>();
+    if active_assignments.iter().any(|assignment| {
+        assignment
+            .reservation_id
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+            && assignment.status.as_deref().unwrap_or("assigned") != "scheduled"
+    }) {
+        return DayStatus::Assigned;
+    }
+
+    if profile.status.as_deref() == Some("inactive") {
+        return DayStatus::Absent;
+    }
+
+    let normalized_shift_status = primary_shift(availability)
+        .and_then(|shift| operational_status_from_extra(&shift.extra).or(shift.status.as_deref()))
+        .map(normalize_status);
+
+    match normalized_shift_status.as_deref() {
+        Some("cancelled") => DayStatus::Cancelled,
+        Some("absent") | Some("unavailable") | Some("no_show") => DayStatus::Absent,
+        Some("waiting") | Some("standby") => DayStatus::Waiting,
+        Some("checked_in") | Some("on_site") | Some("arrived") => DayStatus::CheckedIn,
+        Some(_) => DayStatus::Scheduled,
+        None if assignments
+            .iter()
+            .any(|item| is_cancelled_status(item.status.as_deref())) =>
+        {
+            DayStatus::Cancelled
+        }
+        None => DayStatus::Absent,
+    }
+}
+
+fn primary_shift(availability: &[StaffAvailability]) -> Option<&StaffAvailability> {
+    availability.iter().min_by(|left, right| {
+        left.starts_at
+            .as_deref()
+            .unwrap_or("99:99")
+            .cmp(right.starts_at.as_deref().unwrap_or("99:99"))
+            .then_with(|| left.id.cmp(&right.id))
+    })
+}
+
+fn operational_status_from_extra(extra: &Value) -> Option<&str> {
+    extra
+        .get("day_status")
+        .or_else(|| extra.get("attendance_status"))
+        .and_then(Value::as_str)
+}
+
+fn normalize_status(status: &str) -> String {
+    status.trim().to_ascii_lowercase().replace('-', "_")
+}
+
+fn is_cancelled_status(status: Option<&str>) -> bool {
+    status.is_some_and(|value| normalize_status(value) == "cancelled")
+}
+
+fn day_status_sort_key(status: &DayStatus) -> u8 {
+    match status {
+        DayStatus::Assigned => 0,
+        DayStatus::Waiting => 1,
+        DayStatus::CheckedIn => 2,
+        DayStatus::Scheduled => 3,
+        DayStatus::Absent => 4,
+        DayStatus::Cancelled => 5,
+    }
+}
+
 fn page(title: &str, body: &str) -> String {
     format!(
         r#"<!doctype html>
@@ -794,7 +1124,12 @@ fn page(title: &str, body: &str) -> String {
     .metrics span, .note {{ color: #66727d; font-size: 12px; }}
     .status {{ display: inline-block; border-radius: 999px; padding: 3px 8px; font-weight: 700; font-size: 12px; }}
     .status.active {{ background: #dff3ea; color: #0e654d; }}
+    .status.assigned {{ background: #dff3ea; color: #0e654d; }}
+    .status.waiting {{ background: #fff3cd; color: #725200; }}
+    .status.checked-in {{ background: #dceefe; color: #145a88; }}
+    .status.scheduled {{ background: #e8edf3; color: #3d4d5c; }}
     .status.inactive {{ background: #eceff3; color: #66727d; }}
+    .status.cancelled {{ background: #f5e5e1; color: #8a3b2d; }}
     .muted-row {{ color: #78838e; background: #fafbfc; }}
     .inline-form {{ display: grid; gap: 6px; grid-template-columns: repeat(4, minmax(110px, 1fr)); align-items: end; min-width: 560px; }}
     .stack-form {{ display: grid; gap: 6px; min-width: 220px; }}
@@ -811,7 +1146,7 @@ fn page(title: &str, body: &str) -> String {
   </style>
 </head>
 <body>
-  <header><h1>{title}</h1><nav><a href="/admin/caddies">Caddies</a><a href="/admin/reservations">Reservation dispatch</a></nav></header>
+  <header><h1>{title}</h1><nav><a href="/admin/caddies">Caddies</a><a href="/admin/dispatch">Daily dispatch board</a><a href="/admin/reservations">Reservation dispatch</a></nav></header>
   <main>{body}</main>
 </body>
 </html>"#,
@@ -896,6 +1231,36 @@ fn recommendation_status_label(status: &RecommendationStatus) -> &'static str {
         RecommendationStatus::Available => "available",
         RecommendationStatus::Busy => "busy",
         RecommendationStatus::Inactive => "inactive",
+    }
+}
+
+fn day_status_class(status: &DayStatus) -> &'static str {
+    match status {
+        DayStatus::Scheduled => "scheduled",
+        DayStatus::CheckedIn => "checked-in",
+        DayStatus::Waiting => "waiting",
+        DayStatus::Assigned => "assigned",
+        DayStatus::Absent => "inactive",
+        DayStatus::Cancelled => "cancelled",
+    }
+}
+
+fn day_status_label(status: &DayStatus) -> &'static str {
+    match status {
+        DayStatus::Scheduled => "scheduled",
+        DayStatus::CheckedIn => "checked-in",
+        DayStatus::Waiting => "waiting",
+        DayStatus::Assigned => "assigned",
+        DayStatus::Absent => "absent",
+        DayStatus::Cancelled => "cancelled",
+    }
+}
+
+fn assignment_status_class(status: &str) -> &'static str {
+    if normalize_status(status) == "cancelled" {
+        "cancelled"
+    } else {
+        "assigned"
     }
 }
 
@@ -1069,5 +1434,133 @@ mod tests {
         assert_eq!(recommendations[0].profile.id, "sp_available");
         assert_eq!(recommendations[0].status, RecommendationStatus::Recommended);
         assert_eq!(recommendations[1].status, RecommendationStatus::Busy);
+    }
+
+    #[test]
+    fn dispatch_rows_show_derived_daily_statuses_next_to_assignments() {
+        let profiles = vec![
+            test_profile("sp_assigned", "Assigned Caddie", "active"),
+            test_profile("sp_waiting", "Waiting Caddie", "active"),
+            test_profile("sp_checked_in", "Checked In Caddie", "active"),
+            test_profile("sp_absent", "Absent Caddie", "active"),
+            test_profile("sp_cancelled", "Cancelled Caddie", "active"),
+        ];
+        let availability = vec![
+            test_availability(
+                "sa_assigned",
+                "sp_assigned",
+                "available",
+                serde_json::Value::Null,
+            ),
+            test_availability(
+                "sa_waiting",
+                "sp_waiting",
+                "available",
+                serde_json::json!({ "day_status": "waiting" }),
+            ),
+            test_availability(
+                "sa_checked_in",
+                "sp_checked_in",
+                "checked_in",
+                serde_json::Value::Null,
+            ),
+            test_availability("sa_absent", "sp_absent", "absent", serde_json::Value::Null),
+            test_availability(
+                "sa_cancelled",
+                "sp_cancelled",
+                "cancelled",
+                serde_json::Value::Null,
+            ),
+        ];
+        let assignments = vec![test_assignment(
+            "asg_assigned",
+            "sp_assigned",
+            "res_tee_001",
+            "08:00",
+            "12:00",
+            "assigned",
+        )];
+
+        let rows = build_dispatch_rows(&profiles, &availability, &assignments);
+
+        assert_eq!(rows[0].profile.id, "sp_assigned");
+        assert_eq!(rows[0].status, DayStatus::Assigned);
+        assert_eq!(rows[1].status, DayStatus::Waiting);
+        assert_eq!(rows[2].status, DayStatus::CheckedIn);
+        assert_eq!(rows[3].status, DayStatus::Absent);
+        assert_eq!(rows[4].status, DayStatus::Cancelled);
+
+        let html = render_dispatch_page(
+            &DispatchQuery {
+                tenant_id: Some("scc".to_string()),
+                date: Some("2026-06-01".to_string()),
+            },
+            &DispatchData { rows },
+        );
+        assert!(html.contains("Daily board"));
+        assert!(html.contains("assigned"));
+        assert!(html.contains("waiting"));
+        assert!(html.contains("checked-in"));
+        assert!(html.contains("res_tee_001"));
+        assert!(html.contains("generic staff availability and staff assignment"));
+        assert!(html.contains("HR, payroll, or time-clock"));
+    }
+
+    fn test_profile(id: &str, display_name: &str, status: &str) -> StaffProfile {
+        StaffProfile {
+            id: id.to_string(),
+            tenant_id: Some("scc".to_string()),
+            staff_member_id: Some(format!("sm_{id}")),
+            display_name: Some(display_name.to_string()),
+            status: Some(status.to_string()),
+            role: Some("caddie".to_string()),
+            phone: None,
+            email: None,
+            notes: None,
+            extra: serde_json::Value::Null,
+        }
+    }
+
+    fn test_availability(
+        id: &str,
+        staff_profile_id: &str,
+        status: &str,
+        extra: serde_json::Value,
+    ) -> StaffAvailability {
+        StaffAvailability {
+            id: id.to_string(),
+            tenant_id: Some("scc".to_string()),
+            staff_profile_id: Some(staff_profile_id.to_string()),
+            staff_member_id: None,
+            date: Some("2026-06-01".to_string()),
+            starts_at: Some("07:00".to_string()),
+            ends_at: Some("13:00".to_string()),
+            status: Some(status.to_string()),
+            note: Some("front desk demo".to_string()),
+            extra,
+        }
+    }
+
+    fn test_assignment(
+        id: &str,
+        staff_profile_id: &str,
+        reservation_id: &str,
+        starts_at: &str,
+        ends_at: &str,
+        status: &str,
+    ) -> StaffAssignment {
+        StaffAssignment {
+            id: id.to_string(),
+            tenant_id: Some("scc".to_string()),
+            staff_profile_id: Some(staff_profile_id.to_string()),
+            staff_member_id: Some(format!("sm_{staff_profile_id}")),
+            reservation_id: Some(reservation_id.to_string()),
+            date: Some("2026-06-01".to_string()),
+            starts_at: Some(starts_at.to_string()),
+            ends_at: Some(ends_at.to_string()),
+            status: Some(status.to_string()),
+            note: None,
+            extra: serde_json::Value::Null,
+        }
     }
 }

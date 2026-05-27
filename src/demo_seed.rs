@@ -84,6 +84,7 @@ pub fn small_course_seed() -> DemoSeed {
                 "sp_demo_aiko",
                 "07:00",
                 "13:00",
+                "checked_in",
             ),
             shift(
                 &tenant_id,
@@ -91,6 +92,7 @@ pub fn small_course_seed() -> DemoSeed {
                 "sp_demo_mika",
                 "07:00",
                 "13:00",
+                "available",
             ),
             shift(
                 &tenant_id,
@@ -98,6 +100,7 @@ pub fn small_course_seed() -> DemoSeed {
                 "sp_demo_ren",
                 "07:00",
                 "13:00",
+                "waiting",
             ),
             shift(
                 &tenant_id,
@@ -105,6 +108,7 @@ pub fn small_course_seed() -> DemoSeed {
                 "sp_demo_inactive",
                 "07:00",
                 "13:00",
+                "absent",
             ),
         ],
         reservations: vec![
@@ -243,6 +247,7 @@ fn shift(
     staff_profile_id: &str,
     starts_at: &str,
     ends_at: &str,
+    status: &str,
 ) -> StaffAvailability {
     StaffAvailability {
         id: id.to_string(),
@@ -252,7 +257,7 @@ fn shift(
         date: Some("2026-06-01".to_string()),
         starts_at: Some(starts_at.to_string()),
         ends_at: Some(ends_at.to_string()),
-        status: Some("available".to_string()),
+        status: Some(status.to_string()),
         note: Some("demo seed".to_string()),
         extra: Value::Null,
     }

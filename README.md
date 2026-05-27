@@ -137,6 +137,14 @@ creates/edits them, and cancels by PATCHing `status=cancelled`; the field API
 does not expose hard DELETE in the current contract. Availability is read from
 `staff-availability`.
 
+`GET /admin/dispatch` provides the daily caddie dispatch board for course
+operations. Operators enter a tenant and date; the Cloud App derives each
+caddie's day status from generic staff availability and staff assignment rows,
+then renders scheduled / checked-in / waiting / assigned / absent / cancelled
+state next to tee-time reservation assignments. The board is scoped to
+operational dispatch only and does not implement HR, payroll, or time-clock
+behavior.
+
 `GET /admin/reservations` provides the reservation dispatch workflow. Operators
 enter a tenant, reservation ID, date, and time window; the Cloud App recommends
 caddies by reading generic staff profile, availability, and assignment data.
@@ -151,12 +159,18 @@ UI, and ties are sorted by shift start, caddie code, then staff profile ID so
 the same inputs always produce the same order.
 
 Demo seed and headless E2E coverage live in `src/demo_seed.rs`. The seed models
-a small golf course tenant with caddies, shifts, reservations, an existing busy
-assignment, and past member rating metadata. The regression test proves the
-profile → shift → recommendation → reservation assignment flow and verifies that
-an overlapping second reservation marks the already assigned caddie as busy. See
-[docs/golf-mvp-demo.md](docs/golf-mvp-demo.md) for the trace evidence and local
-runner.
+a small golf course tenant with caddies, daily status inputs, shifts,
+reservations, an existing busy assignment, and past member rating metadata. The
+regression test proves the profile → shift → recommendation → reservation
+assignment flow and verifies that an overlapping second reservation marks the
+already assigned caddie as busy. See
+[docs/golf-mvp-demo.md](docs/golf-mvp-demo.md) for the trace evidence, dispatch
+board notes, and local runner.
+
+The current generic field API contract is enough to render the daily board. If
+operators need writable check-in, waiting, absence, or cancellation transitions,
+that should be added as a generic daily staff status update contract in
+TACHYON Field, not as golf-specific core code.
 
 Configure the generic field API client with deployment secrets or environment
 variables:
