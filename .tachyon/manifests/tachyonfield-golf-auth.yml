@@ -1,0 +1,12 @@
+actions:
+- context: field_extension_golf
+  name: CalculateTax
+  description: Calculate golf extension tax for a TACHYON Field reservation
+policies:
+- name: field-extension:golf:calculator
+  description: Allows TACHYON Field core to call the golf extension tax calculation API
+  global: true
+  actions:
+  - action: field_extension_golf:CalculateTax
+    effect: allow
+  action_patterns: []
