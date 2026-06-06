@@ -77,6 +77,17 @@ deployment secrets and must not be committed.
 See [docs/m2m-auth.md](docs/m2m-auth.md) for the TACHYON Field core OAuth2
 client credentials call sequence.
 
+## Auth Policy Manifest
+
+Extension-owned Tachyon Auth actions and policies are managed in this repository:
+
+- `.tachyon/manifests/tachyonfield-golf-auth.yml`
+- action: `field_extension_golf:CalculateTax`
+- policy: `field-extension:golf:calculator`
+
+Attach `field-extension:golf:calculator` to the TACHYON Field core M2M client
+that is allowed to call `POST /calculate`.
+
 ## Local Development
 
 Run the service:
