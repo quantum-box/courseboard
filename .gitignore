@@ -1,4 +1,10 @@
 /target/
+**/node_modules/
+desktop/dist/
+desktop/.vite/
+desktop/*.tsbuildinfo
+.playwright-mcp/
+ui/
 
 # Local SQLite databases
 *.db

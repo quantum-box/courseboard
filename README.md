@@ -1,34 +1,110 @@
-# tachyonfield-golf
+# Course Board
 
-TACHYON Field golf extension Cloud App. This service is deployed independently
-to Tachyon Compute and called by TACHYON Field core for golf-specific workflows.
-It exposes protected tax calculation APIs plus an operational admin UI for golf
-caddie profile and shift management.
+Course Board は、TACHYON Field のゴルフ場オペレーション向け Cloud App です。
+Tachyon Compute に独立してデプロイし、ゴルフ場固有の Rust API と React UI を
+このリポジトリで管理します。
 
-## Architecture
+リポジトリ名は `quantum-box/courseboard` です。既存の Cloud App ID、Auth
+audience、Auth policy は、deployment / registry / auth policy の移行が完了する
+までは互換性のため `tachyonfield-golf` 系の名前を残しています。
 
-- Independent Rust + axum REST API server with minimal server-rendered HTML for
-  the golf admin UI.
-- Deployed as a Tachyon Compute Cloud App via `tachyon.yaml`.
-- TACHYON Field core calls `POST /calculate`; this app returns numeric tax
-  results only.
-- Storefront and user-facing UI remain in TACHYON Field core. Golf-specific
-  caddie administration lives in this Cloud App and consumes generic
-  tachyonfield APIs.
-- Tax rates and exemption rules are tenant-scoped and backed by SQLite in this
-  skeleton. Startup runs deterministic migrations and seeds SCC/Hokkaido data.
-- Tachyon Auth M2M authentication is expected through OAuth2 client credentials.
-  `POST /calculate` requires a valid JWT access token verified through OIDC
-  discovery and JWKS from Tachyon Auth / Auth Platform.
+## アーキテクチャ
 
-PR #80 in `quantum-box/tachyonfield` is a reference implementation only. This
-repository is the separate Cloud App implementation.
+- Rust + axum の独立した REST API サーバです。
+- React + Vite UI は `desktop/` 配下にあります。ブラウザで開ける UI として使います。
+- `tachyon.yaml` を通じて Tachyon Compute Cloud App としてデプロイします。
+- TACHYON Field core は `POST /calculate` を呼び、この app は税額計算結果だけを返します。
+- キャンセル料徴収では Course Board が Field API に Field invoice を作成し、公開 payment URL を SMS で送ります。
+- 税率、免除ルール、キャンセル料 collection は tenant scope で SQLite に保存します。
+- Tachyon Auth M2M 認証は OAuth2 client credentials を前提にします。
+  operator endpoint は Tachyon Auth / Auth Platform の OIDC discovery と JWKS で検証できる JWT access token を要求します。
 
-## API
+`quantum-box/tachyonfield` の PR #80 は reference implementation です。この
+repository は分離された Cloud App 実装です。
+
+## キャンセル料徴収
+
+まず移植する対象はキャンセル料徴収 flow です。
+
+1. Operator が Course Board にキャンセル料 collection を作成します。
+2. Course Board は operator の bearer token と tenant context を引き継いで TACHYON Field API に Field invoice を作成します。
+3. Course Board は自分の公開 payment URL を SMS で送信します。
+4. お客様は URL を開き、Course Board の画面に埋め込まれた Stripe Payment Element で支払います。
+5. Stripe publishable key、PaymentIntent client secret、支払い状態は Field public invoice API から取得します。
+6. Field invoice の status が `Paid` になったら、Course Board の collection も paid に同期します。
+
+Course Board は Stripe secret key を持ちません。Stripe の支払い準備は Field invoice
+側に集約し、Course Board は埋め込みフォームに必要な公開情報だけを受け取ります。
+
+### `POST /cancellation-fee-collections`
+
+operator endpoint は既存の bearer-token middleware で保護します。
+
+```http
+POST /cancellation-fee-collections
+Authorization: Bearer <access-token>
+Content-Type: application/json
+```
+
+Request:
+
+```json
+{
+  "tenant_id": "scc",
+  "reference": "RSV-1001",
+  "customer_name": "山田 太郎",
+  "customer_phone": "+819012345678",
+  "amount": 5000,
+  "currency": "JPY",
+  "due_date": "2026-07-04",
+  "reason": "当日キャンセル",
+  "send_sms": true
+}
+```
+
+Response には公開 payment URL と SMS status が含まれます。
+
+```json
+{
+  "collection": {
+    "id": "cfc_...",
+    "tenant_id": "scc",
+    "reference": "RSV-1001",
+    "customer_name": "山田 太郎",
+    "amount": 5000,
+    "currency": "JPY",
+    "due_date": "2026-07-04",
+    "reason": "当日キャンセル",
+    "payment_url": "https://courseboard.example/ui/index.html#/pay/...",
+    "field_invoice_id": "inv_...",
+    "status": "pending",
+    "sms_status": "sent",
+    "paid_at": null
+  },
+  "sms_message": "Course Boardより、キャンセル料5000円のお支払いをお願いします..."
+}
+```
+
+`TACHYON_FIELD_API_URL` が未設定、または Field invoice 作成に失敗した場合、
+Course Board は collection と壊れた支払いリンクを作成せず、`502 provider_error`
+を返します。
+
+### 公開 payment endpoint
+
+SMS から開く公開 endpoint です。operator bearer token は要求しません。
+
+- `GET /public/cancellation-fees/{token}`
+- `POST /public/cancellation-fees/{token}/stripe-payment-intent`
+- `POST /public/cancellation-fees/{token}/confirm`
+
+`GET /public/cancellation-fees/{token}` は Field invoice の公開状態を読み、paid
+であれば Course Board 側の collection も paid に同期します。
+
+## 税額計算 API
 
 ### `POST /calculate`
 
-Requires:
+必要な header:
 
 ```http
 Authorization: Bearer <access-token>
@@ -58,22 +134,22 @@ Response:
 }
 ```
 
-The SCC/Hokkaido seed resolves course grade from green fee:
+SCC/Hokkaido seed は green fee から course grade を解決します。
 
-- `A`: 7,000 yen and above, 400 yen per taxable visitor
-- `B`: 5,000-6,999 yen, 350 yen per taxable visitor
-- `C`: 3,500-4,999 yen, 300 yen per taxable visitor
-- `D`: under 3,500 yen, 200 yen per taxable visitor
+- `A`: 7,000 円以上、課税対象者 1 人あたり 400 円
+- `B`: 5,000-6,999 円、課税対象者 1 人あたり 350 円
+- `C`: 3,500-4,999 円、課税対象者 1 人あたり 300 円
+- `D`: 3,500 円未満、課税対象者 1 人あたり 200 円
 
-Hokkaido exemptions in the seed are:
+Hokkaido seed の免除条件:
 
-- Age under 18
-- Age 70 or older
-- Disability certificate holder
+- 18 歳未満
+- 70 歳以上
+- 障害者手帳の保持者
 
 ### `POST /simulate/range`
 
-Requires the same `Authorization` and `Content-Type` headers as `/calculate`.
+`/calculate` と同じ `Authorization` / `Content-Type` header が必要です。
 
 Request:
 
@@ -114,13 +190,12 @@ Response:
 
 ## Admin UI
 
-`GET /admin` redirects to `GET /admin/caddies`. The admin UI is protected with
-the same bearer-token middleware as the protected POST APIs, so it should be
-accessed through an internal admin gateway or with an `Authorization: Bearer
-<access-token>` header.
+`GET /admin` は `GET /admin/caddies` に redirect します。admin UI は保護された
+POST API と同じ bearer-token middleware を使うため、内部 admin gateway 経由、
+または `Authorization: Bearer <access-token>` header 付きでアクセスします。
 
-The UI labels staff as caddies, but the integration boundary uses only generic
-tachyonfield ERP endpoints:
+UI 上は staff を caddie と表示しますが、integration boundary は generic な
+TACHYON Field ERP endpoint だけを使います。
 
 - `GET/POST /v1/erp/staff-profiles`
 - `PATCH /v1/erp/staff-profiles/:id`
@@ -130,64 +205,41 @@ tachyonfield ERP endpoints:
 - `POST /v1/erp/reservations/:id/staff-assignment`
 - `POST /v1/erp/reservations/:id/staff-assignment/unassign`
 
-Profile create/edit maps caddie language to generic `staff_profile` data and
-shows the linked `staff_member_id`. Active and inactive profiles are counted and
-rendered distinctly. The shift calendar lists generic `staff_assignment` rows,
-creates/edits them, and cancels by PATCHing `status=cancelled`; the field API
-does not expose hard DELETE in the current contract. Availability is read from
-`staff-availability`.
+Profile create/edit は caddie language を generic `staff_profile` data に map し、
+linked `staff_member_id` を表示します。Active / inactive profile は別々に count
+して表示します。Shift calendar は generic `staff_assignment` row を表示し、
+作成・編集・cancel を行います。現時点の Field API contract は hard DELETE を
+公開していないため、cancel は `status=cancelled` の PATCH として扱います。
+Availability は `staff-availability` から read します。
 
-`GET /admin/dispatch` provides the daily caddie dispatch board for course
-operations. Operators enter a tenant and date; the Cloud App derives each
-caddie's day status from generic staff availability and staff assignment rows,
-then renders scheduled / checked-in / waiting / assigned / absent / cancelled
-state next to tee-time reservation assignments. The board is scoped to
-operational dispatch only and does not implement HR, payroll, or time-clock
-behavior.
+`GET /admin/dispatch` は daily caddie dispatch board です。operator が tenant と
+date を入力すると、Course Board は generic staff availability と staff
+assignment row から caddie の day status を導出し、tee-time reservation
+assignment と並べて scheduled / checked-in / waiting / assigned / absent /
+cancelled state を表示します。この board は dispatch operation に scoped し、
+HR、payroll、time-clock behavior は実装しません。
 
-`GET /admin/reservations` provides the reservation dispatch workflow. Operators
-enter a tenant, reservation ID, date, and time window; the Cloud App recommends
-caddies by reading generic staff profile, availability, and assignment data.
-Assign and unassign actions call the generic reservation staff-assignment API,
-keeping golf-specific recommendation logic in this extension.
+`GET /admin/reservations` は reservation dispatch workflow です。operator が tenant、
+reservation ID、date、time window を入力すると、Course Board は generic staff
+profile、availability、assignment data を読み、caddie recommendation を返します。
+Assign / unassign は generic reservation staff-assignment API を呼びます。
 
-Smart assign is deterministic and rule-based. It scores active caddies, shift
-coverage for the requested tee time, lack of overlapping assignments, optional
-course knowledge matches, optional customer/member ratings of 4 or higher, and
-rookie/senior metadata when present. Recommendation reasons are rendered in the
-UI, and ties are sorted by shift start, caddie code, then staff profile ID so
-the same inputs always produce the same order.
+Smart assign は deterministic な rule-based scoring です。active caddie、tee time
+を覆う shift、overlap の有無、course knowledge、member rating、rookie/senior
+metadata を評価します。同点は shift start、caddie code、staff profile ID の順に
+sort し、同じ input なら同じ recommendation になります。
 
-Demo seed and headless E2E coverage live in `src/demo_seed.rs`. The seed models
-a small golf course tenant with caddies, daily status inputs, shifts,
-reservations, an existing busy assignment, and past member rating metadata. The
-regression test proves the profile → shift → recommendation → reservation
-assignment flow and verifies that an overlapping second reservation marks the
-already assigned caddie as busy. See
-[docs/golf-mvp-demo.md](docs/golf-mvp-demo.md) for the trace evidence, dispatch
-board notes, and local runner.
+Demo seed と headless E2E coverage は `src/demo_seed.rs` にあります。詳細は
+[docs/golf-mvp-demo.md](docs/golf-mvp-demo.md) を参照してください。
 
-The current generic field API contract is enough to render the daily board. If
-operators need writable check-in, waiting, absence, or cancellation transitions,
-that should be added as a generic daily staff status update contract in
-TACHYON Field, not as golf-specific core code.
+現在の generic Field API contract で daily board の read model は表示できます。
+check-in、waiting、absence、cancellation transition を書き込みたい場合は、
+golf-specific core code ではなく generic daily staff status update contract として
+TACHYON Field 側に追加します。
 
-Configure the generic field API client with deployment secrets or environment
-variables:
+## 環境変数
 
-```bash
-TACHYON_FIELD_API_URL=https://field-api.example.internal/
-TACHYON_FIELD_API_BEARER_TOKEN=<field-api-access-token>
-```
-
-`TACHYON_FIELD_API_BEARER_TOKEN` is a placeholder contract for the current
-static bearer token provider. If Tachyon Auth client-credentials acquisition is
-added later, it should replace that provider without changing the UI handlers.
-Never commit real tokens, client secrets, expanded env files, or bearer values.
-
-## Tachyon Auth M2M
-
-Set the OIDC issuer and expected token claims through environment variables:
+### Tachyon Auth M2M
 
 ```bash
 TACHYON_AUTH_ISSUER_URL=https://app.n1.tachy.one
@@ -195,35 +247,84 @@ EXPECTED_AUDIENCE=tachyonfield-golf
 EXPECTED_CLIENT_ID=tachyonfield-core
 ```
 
-`OIDC_ISSUER_URL` is accepted as an alias for `TACHYON_AUTH_ISSUER_URL`.
-`EXPECTED_CLIENT_ID` is optional and may be a comma-separated list. Secret values
-such as client secrets and token endpoint credentials must be provided through
-deployment secrets and must not be committed.
+`OIDC_ISSUER_URL` は `TACHYON_AUTH_ISSUER_URL` の alias として利用できます。
+`EXPECTED_CLIENT_ID` は optional で、comma-separated list も指定できます。client
+secret や token endpoint credential などの secret は deployment secret として
+渡し、commit してはいけません。
 
-See [docs/m2m-auth.md](docs/m2m-auth.md) for the TACHYON Field core OAuth2
-client credentials call sequence.
+TACHYON Field core からの OAuth2 client credentials 呼び出し手順は
+[docs/m2m-auth.md](docs/m2m-auth.md) を参照してください。
+
+### Field API と SMS
+
+Field invoice を作成するには `TACHYON_FIELD_API_URL` が必要です。ローカルや
+sandbox の Field API に向ける場合もこの値を明示してください。未設定の場合、
+Course Board はキャンセル料 collection と支払いリンクを作成しません。
+
+```bash
+COURSEBOARD_PUBLIC_UI_BASE_URL=https://courseboard.example/ui/index.html
+COURSEBOARD_SMS_SENDER_NAME="Course Board"
+TACHYON_FIELD_API_URL=https://tachyon-field-api.example.internal
+```
+
+SMS provider secret がない場合、SMS 送信は `skipped` として記録されます。
+
+```bash
+TWILIO_ACCOUNT_SID=AC...
+TWILIO_AUTH_TOKEN=...
+TWILIO_MESSAGING_SERVICE_SID=MG...
+# or
+TWILIO_FROM_NUMBER=+1...
+```
+
+provider secret は commit せず、Cloud App secret として設定してください。
+
+Generic Field API admin client は deployment secrets または environment variables で
+設定します。
+
+```bash
+TACHYON_FIELD_API_URL=https://field-api.example.internal/
+TACHYON_FIELD_API_BEARER_TOKEN=<field-api-access-token>
+```
+
+`TACHYON_FIELD_API_BEARER_TOKEN` は現在の static bearer token provider 用の placeholder
+contract です。Tachyon Auth client-credentials acquisition を追加する場合は、UI
+handler を変えず provider 実装だけを差し替えます。
 
 ## Auth Policy Manifest
 
-Extension-owned Tachyon Auth actions and policies are managed in this repository:
+Extension-owned Tachyon Auth actions and policies はこの repository で管理します。
 
 - `.tachyon/manifests/tachyonfield-golf-auth.yml`
 - action: `field_extension_golf:CalculateTax`
 - policy: `field-extension:golf:calculator`
 
-Attach `field-extension:golf:calculator` to the TACHYON Field core M2M client
-that is allowed to call `POST /calculate`.
+`POST /calculate` を呼べる TACHYON Field core M2M client に
+`field-extension:golf:calculator` を attach します。
 
 ## Local Development
 
-Run the service:
+サービスを起動します。
 
 ```bash
 cargo run
 ```
 
-The default database is `sqlite://tachyonfield-golf.db`. Override with
-`DATABASE_URL` if needed:
+ローカル開発で reachable な Tachyon Auth issuer がない場合は、dev-only static bearer
+verifier を使えます。
+
+```bash
+COURSEBOARD_DEV_BEARER_TOKEN=local-dev-token \
+DATABASE_URL=sqlite:///tmp/courseboard-local.db \
+COURSEBOARD_PUBLIC_UI_BASE_URL=http://127.0.0.1:8080/ui/index.html \
+cargo run
+```
+
+この bypass は `COURSEBOARD_DEV_BEARER_TOKEN` を明示した場合だけ有効です。
+production では OIDC configuration を使います。
+
+デフォルト DB は `sqlite://tachyonfield-golf.db` です。必要に応じて
+`DATABASE_URL` を上書きします。
 
 ```bash
 TACHYON_AUTH_ISSUER_URL=https://app.n1.tachy.one \
@@ -235,7 +336,7 @@ DATABASE_URL=sqlite://data/tachyonfield-golf.db \
 cargo run
 ```
 
-Example request:
+税額計算 API の例:
 
 ```bash
 curl -sS http://localhost:8080/calculate \
@@ -249,7 +350,28 @@ curl -sS http://localhost:8080/calculate \
   }'
 ```
 
-Run checks:
+React UI をブラウザで起動します。
+
+```bash
+cd desktop
+npm install
+VITE_COURSEBOARD_API_BASE_URL=http://localhost:8080 npm run dev
+```
+
+デフォルト UI route はキャンセル料 SMS payment link 作成画面です。公開 SMS payment
+page は `/#/pay/{token}` です。legacy course-map prototype は `/#/course-map` に
+残しています。
+
+Rust server の static `/ui` hosting を確認する場合:
+
+```bash
+cd desktop
+VITE_BASE_PATH=/ui/ npm run build
+rm -rf ../ui
+cp -R dist ../ui
+```
+
+## Checks
 
 ```bash
 cargo fmt

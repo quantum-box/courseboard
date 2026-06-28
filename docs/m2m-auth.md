@@ -1,12 +1,18 @@
-# Tachyon Auth M2M Authentication
+# Tachyon Auth M2M 認証
 
-`tachyonfield-golf` is an API-only Cloud App. TACHYON Field core calls
-`POST /calculate` with an OAuth2 client credentials access token from Tachyon
-Auth / Auth Platform.
+Course Board の operator API は、Tachyon Auth / Auth Platform の OAuth2 client
+credentials で発行された access token を受け取ります。
+
+既存の Cloud App ID と Auth audience は、registry、deployment、auth policy の
+rename が完了するまでは `tachyonfield-golf` を使います。repository は
+`quantum-box/courseboard` です。
+
+公開 payment endpoint の `/public/cancellation-fees/{token}` 以下は SMS から開く
+お客様向け endpoint なので、operator bearer token は要求しません。
 
 ## Runtime Configuration
 
-Configure these values through deployment config or secrets:
+deployment config または secret で次の値を設定します。
 
 ```bash
 TACHYON_AUTH_ISSUER_URL=https://app.n1.tachy.one
@@ -14,45 +20,45 @@ EXPECTED_AUDIENCE=tachyonfield-golf
 EXPECTED_CLIENT_ID=tachyonfield-core
 ```
 
-`OIDC_ISSUER_URL` is also accepted as an alias for
-`TACHYON_AUTH_ISSUER_URL`. `EXPECTED_CLIENT_ID` is optional; when set, the JWT
-`client_id`, `azp`, or `sub` claim must match one of the comma-separated values.
+`OIDC_ISSUER_URL` は `TACHYON_AUTH_ISSUER_URL` の alias として使えます。
+`EXPECTED_CLIENT_ID` は optional です。設定した場合、JWT の `client_id`、`azp`、
+または `sub` claim が comma-separated list のいずれかに一致する必要があります。
 
-Do not commit client secrets. The client id, client secret, requested audience,
-and scopes for TACHYON Field core must be managed through deployment secrets or
-the platform secret store.
+client secret は commit しません。TACHYON Field core の client id、client secret、
+requested audience、scope は deployment secrets または platform secret store で
+管理します。
 
 ## Verification Flow
 
-On startup the Cloud App:
+Course Board は起動時に次の順で token verifier を構成します。
 
-1. Reads `TACHYON_AUTH_ISSUER_URL` or `OIDC_ISSUER_URL`.
-2. Fetches `/.well-known/openid-configuration`.
-3. Verifies that the discovery document issuer matches the configured issuer.
-4. Fetches the `jwks_uri` from the discovery document.
-5. Caches the JWKS in memory for JWT verification.
+1. `TACHYON_AUTH_ISSUER_URL` または `OIDC_ISSUER_URL` を読む。
+2. `/.well-known/openid-configuration` を取得する。
+3. discovery document の issuer が設定値と一致することを確認する。
+4. discovery document の `jwks_uri` を取得する。
+5. JWKS を memory に cache し、JWT verification に使う。
 
-Each `POST /calculate` request must include:
+`POST /calculate` や `POST /cancellation-fee-collections` などの operator API には
+次の header が必要です。
 
 ```http
 Authorization: Bearer <access-token>
 ```
 
-The Cloud App rejects requests without a valid token. Validation is fail-closed
-and checks the JWT signature, `iss`, `aud`, `exp`, `nbf`, `iat`, and optional
-authorized client id.
+token がない、または無効な request は拒否します。validation は fail-closed で、
+JWT signature、`iss`、`aud`、`exp`、`nbf`、`iat`、optional authorized client id
+を検証します。
 
-## TACHYON Field Core Call Sequence
+## TACHYON Field Core からの呼び出し
 
-TACHYON Field core should:
+TACHYON Field core は次の流れで Course Board を呼びます。
 
-1. Read its Tachyon Auth token endpoint, client id, client secret, audience, and
-   scope from deployment config or secrets.
-2. Request an access token with OAuth2 client credentials.
-3. Call `tachyonfield-golf` with `Authorization: Bearer <access-token>`.
-4. Refresh the token before expiry or request a new token when needed.
+1. Tachyon Auth token endpoint、client id、client secret、audience、scope を deployment config または secrets から読む。
+2. OAuth2 client credentials で access token を取得する。
+3. `Authorization: Bearer <access-token>` 付きで Course Board operator API を呼ぶ。
+4. token expiry 前に refresh するか、必要に応じて新しい token を取得する。
 
-Example shape with placeholder values only:
+placeholder 値だけを使った例です。
 
 ```bash
 TOKEN="$(
@@ -64,7 +70,7 @@ TOKEN="$(
   jq -r .access_token
 )"
 
-curl -sS "$TACHYONFIELD_GOLF_URL/calculate" \
+curl -sS "$COURSEBOARD_URL/calculate" \
   -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{
@@ -75,6 +81,5 @@ curl -sS "$TACHYONFIELD_GOLF_URL/calculate" \
   }'
 ```
 
-The exact Tachyon Auth issuer path, token endpoint, scope, and audience are
-environment-specific. Use `https://app.n1.tachy.one` as the Auth Platform
-reference issuer unless deployment config specifies a more precise issuer URL.
+Tachyon Auth issuer path、token endpoint、scope、audience は環境ごとに異なります。
+deployment config がより具体的な issuer URL を持つ場合はその値を使います。
