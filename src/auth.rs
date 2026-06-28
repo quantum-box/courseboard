@@ -15,6 +15,31 @@ pub trait TokenVerifier: Send + Sync {
     fn verify(&self, token: &str) -> Result<AuthenticatedPrincipal, AuthError>;
 }
 
+#[derive(Clone)]
+pub struct StaticBearerVerifier {
+    token: String,
+}
+
+impl StaticBearerVerifier {
+    pub fn new(token: String) -> Self {
+        Self { token }
+    }
+}
+
+impl TokenVerifier for StaticBearerVerifier {
+    fn verify(&self, token: &str) -> Result<AuthenticatedPrincipal, AuthError> {
+        if token == self.token {
+            Ok(AuthenticatedPrincipal {
+                issuer: "local-dev".to_string(),
+                subject: Some("local-dev".to_string()),
+                client_id: Some("local-dev".to_string()),
+            })
+        } else {
+            Err(AuthError::InvalidToken)
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthenticatedPrincipal {
     pub issuer: String,

@@ -2,6 +2,7 @@ use std::{env, sync::Arc};
 
 mod admin_ui;
 pub mod auth;
+pub mod cancellation_fees;
 pub mod demo_seed;
 pub mod field_api;
 pub mod smart_assign;
@@ -16,17 +17,22 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use cancellation_fees::{CancellationFeeConfig, SqliteCancellationFeeRepository};
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{migrate::Migrator, FromRow, SqlitePool};
 use thiserror::Error;
+use tower_http::services::{ServeDir, ServeFile};
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Clone)]
 pub struct AppState {
     rules: Arc<SqliteTaxRuleRepository>,
+    cancellation_fees: Arc<SqliteCancellationFeeRepository>,
+    cancellation_fee_config: CancellationFeeConfig,
+    http_client: reqwest::Client,
     token_verifier: Arc<dyn TokenVerifier>,
     field_api: Option<DynFieldApi>,
     field_api_config_error: Option<String>,
@@ -34,8 +40,23 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(pool: SqlitePool, token_verifier: Arc<dyn TokenVerifier>) -> Self {
+        Self::new_with_cancellation_fee_config(
+            pool,
+            token_verifier,
+            CancellationFeeConfig::from_env(),
+        )
+    }
+
+    pub fn new_with_cancellation_fee_config(
+        pool: SqlitePool,
+        token_verifier: Arc<dyn TokenVerifier>,
+        cancellation_fee_config: CancellationFeeConfig,
+    ) -> Self {
         Self {
-            rules: Arc::new(SqliteTaxRuleRepository::new(pool)),
+            rules: Arc::new(SqliteTaxRuleRepository::new(pool.clone())),
+            cancellation_fees: Arc::new(SqliteCancellationFeeRepository::new(pool)),
+            cancellation_fee_config,
+            http_client: reqwest::Client::new(),
             token_verifier,
             field_api: None,
             field_api_config_error: Some(
@@ -49,8 +70,25 @@ impl AppState {
         token_verifier: Arc<dyn TokenVerifier>,
         field_api: DynFieldApi,
     ) -> Self {
+        Self::with_field_api_and_cancellation_fee_config(
+            pool,
+            token_verifier,
+            field_api,
+            CancellationFeeConfig::from_env(),
+        )
+    }
+
+    pub fn with_field_api_and_cancellation_fee_config(
+        pool: SqlitePool,
+        token_verifier: Arc<dyn TokenVerifier>,
+        field_api: DynFieldApi,
+        cancellation_fee_config: CancellationFeeConfig,
+    ) -> Self {
         Self {
-            rules: Arc::new(SqliteTaxRuleRepository::new(pool)),
+            rules: Arc::new(SqliteTaxRuleRepository::new(pool.clone())),
+            cancellation_fees: Arc::new(SqliteCancellationFeeRepository::new(pool)),
+            cancellation_fee_config,
+            http_client: reqwest::Client::new(),
             token_verifier,
             field_api: Some(field_api),
             field_api_config_error: None,
@@ -62,15 +100,22 @@ impl AppState {
         token_verifier: Arc<dyn TokenVerifier>,
         field_api: Result<FieldApiClient, field_api::FieldApiConfigError>,
     ) -> Self {
+        let cancellation_fee_config = CancellationFeeConfig::from_env();
         match field_api {
             Ok(client) => Self {
-                rules: Arc::new(SqliteTaxRuleRepository::new(pool)),
+                rules: Arc::new(SqliteTaxRuleRepository::new(pool.clone())),
+                cancellation_fees: Arc::new(SqliteCancellationFeeRepository::new(pool)),
+                cancellation_fee_config,
+                http_client: reqwest::Client::new(),
                 token_verifier,
                 field_api: Some(Arc::new(client)),
                 field_api_config_error: None,
             },
             Err(error) => Self {
-                rules: Arc::new(SqliteTaxRuleRepository::new(pool)),
+                rules: Arc::new(SqliteTaxRuleRepository::new(pool.clone())),
+                cancellation_fees: Arc::new(SqliteCancellationFeeRepository::new(pool)),
+                cancellation_fee_config,
+                http_client: reqwest::Client::new(),
                 token_verifier,
                 field_api: None,
                 field_api_config_error: Some(error.to_string()),
@@ -91,10 +136,33 @@ impl FromRef<AppState> for Arc<dyn TokenVerifier> {
     }
 }
 
+impl FromRef<AppState> for Arc<SqliteCancellationFeeRepository> {
+    fn from_ref(state: &AppState) -> Self {
+        state.cancellation_fees.clone()
+    }
+}
+
+impl FromRef<AppState> for CancellationFeeConfig {
+    fn from_ref(state: &AppState) -> Self {
+        state.cancellation_fee_config.clone()
+    }
+}
+
+impl FromRef<AppState> for reqwest::Client {
+    fn from_ref(state: &AppState) -> Self {
+        state.http_client.clone()
+    }
+}
+
 pub fn build_router(state: AppState) -> Router {
     let auth_state = state.clone();
     let admin_auth_state = state.clone();
+    let collection_auth_state = state.clone();
     Router::new()
+        .nest_service(
+            "/ui",
+            ServeDir::new("ui").not_found_service(ServeFile::new("ui/index.html")),
+        )
         .route("/healthz", get(healthz))
         .route(
             "/admin",
@@ -181,6 +249,25 @@ pub fn build_router(state: AppState) -> Router {
                 require_valid_token,
             )),
         )
+        .route(
+            "/cancellation-fee-collections",
+            post(cancellation_fees::create_collection).route_layer(middleware::from_fn_with_state(
+                collection_auth_state,
+                require_valid_token,
+            )),
+        )
+        .route(
+            "/public/cancellation-fees/:token",
+            get(cancellation_fees::get_public_collection),
+        )
+        .route(
+            "/public/cancellation-fees/:token/stripe-payment-intent",
+            post(cancellation_fees::create_stripe_payment_intent),
+        )
+        .route(
+            "/public/cancellation-fees/:token/confirm",
+            post(cancellation_fees::confirm_stripe_payment),
+        )
         .with_state(state)
 }
 
@@ -201,10 +288,17 @@ pub async fn build_app_from_env() -> anyhow::Result<Router> {
 
     run_migrations(&pool).await?;
 
-    let auth_config = auth::AuthConfig::from_env()?;
-    let token_verifier = auth::OidcJwtVerifier::discover(auth_config).await?;
+    let token_verifier: Arc<dyn TokenVerifier> = if let Ok(token) =
+        env::var("COURSEBOARD_DEV_BEARER_TOKEN")
+    {
+        tracing::warn!("using COURSEBOARD_DEV_BEARER_TOKEN static verifier for local development");
+        Arc::new(auth::StaticBearerVerifier::new(token))
+    } else {
+        let auth_config = auth::AuthConfig::from_env()?;
+        Arc::new(auth::OidcJwtVerifier::discover(auth_config).await?)
+    };
     let field_api = FieldApiClient::from_env();
-    let state = AppState::with_optional_field_api(pool, Arc::new(token_verifier), field_api);
+    let state = AppState::with_optional_field_api(pool, token_verifier, field_api);
 
     Ok(build_router(state))
 }
@@ -522,6 +616,10 @@ pub enum AppError {
     BadRequest(&'static str),
     #[error("tax rule was not found for tenant, prefecture, and green fee")]
     RuleNotFound,
+    #[error("{0}")]
+    NotFound(&'static str),
+    #[error("external provider error: {0}")]
+    Provider(String),
     #[error("database error")]
     Database(#[from] sqlx::Error),
     #[error("migration error")]
@@ -549,6 +647,8 @@ impl IntoResponse for AppError {
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),
+            AppError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
+            AppError::Provider(_) => (StatusCode::BAD_GATEWAY, "provider_error"),
             AppError::Database(_) | AppError::Migration(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_server_error")
             }
@@ -566,7 +666,10 @@ impl IntoResponse for AppError {
 mod tests {
     use super::*;
     use crate::auth::{AuthConfig, Jwk, Jwks, OidcJwtVerifier};
-    use axum::http::{header::CONTENT_TYPE, Method};
+    use axum::{
+        http::{header::CONTENT_TYPE, HeaderMap, Method},
+        routing::{get, post},
+    };
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     use http_body_util::BodyExt;
     use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
@@ -581,13 +684,93 @@ mod tests {
     }
 
     async fn test_app_with_verifier(verifier: OidcJwtVerifier) -> Router {
+        test_app_with_verifier_and_cancellation_fee_config(
+            verifier,
+            CancellationFeeConfig::from_env(),
+        )
+        .await
+    }
+
+    async fn test_app_with_verifier_and_cancellation_fee_config(
+        verifier: OidcJwtVerifier,
+        config: CancellationFeeConfig,
+    ) -> Router {
         let pool = SqlitePoolOptions::new()
             .max_connections(1)
             .connect("sqlite::memory:")
             .await
             .expect("connect test sqlite");
         run_migrations(&pool).await.expect("run migrations");
-        build_router(AppState::new(pool, Arc::new(verifier)))
+        build_router(AppState::new_with_cancellation_fee_config(
+            pool,
+            Arc::new(verifier),
+            config,
+        ))
+    }
+
+    fn cancellation_fee_config(field_api_url: Option<String>) -> CancellationFeeConfig {
+        CancellationFeeConfig {
+            public_ui_base_url: "http://courseboard.local/ui/index.html".to_string(),
+            sms_sender_name: "Course Board".to_string(),
+            field_api_url,
+            twilio_account_sid: None,
+            twilio_auth_token: None,
+            twilio_messaging_service_sid: None,
+            twilio_from_number: None,
+        }
+    }
+
+    async fn spawn_test_field_api() -> String {
+        async fn create_invoice(
+            headers: HeaderMap,
+            Json(body): Json<serde_json::Value>,
+        ) -> (StatusCode, Json<serde_json::Value>) {
+            let authorization = headers
+                .get(AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .expect("authorization header");
+            assert!(authorization.starts_with("Bearer "));
+            assert_eq!(
+                headers
+                    .get("x-operator-id")
+                    .and_then(|value| value.to_str().ok()),
+                Some("scc")
+            );
+            assert_eq!(body["clientName"], "山田 太郎");
+            assert_eq!(body["lineItems"][0]["unitPrice"], 5000);
+            (
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "id": "inv_test_courseboard",
+                    "paymentLinkUrl": "https://field.example/pay/inv_test_courseboard"
+                })),
+            )
+        }
+
+        async fn public_invoice() -> Json<serde_json::Value> {
+            Json(serde_json::json!({
+                "id": "inv_test_courseboard",
+                "tenantId": "scc",
+                "status": "Sent"
+            }))
+        }
+
+        let app = Router::new()
+            .route("/v1/invoices", post(create_invoice))
+            .route(
+                "/v1/public/invoices/:tenant_id/:invoice_id",
+                get(public_invoice),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test Field API");
+        let addr = listener.local_addr().expect("test Field API addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve test Field API");
+        });
+        format!("http://{addr}")
     }
 
     async fn calculate_with_green_fee(green_fee: i64) -> CalculateResponse {
@@ -827,6 +1010,112 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn creates_cancellation_fee_collection_and_public_payment_link() {
+        let auth = TestAuth::new();
+        let field_api_url = spawn_test_field_api().await;
+        let app = test_app_with_verifier_and_cancellation_fee_config(
+            auth.verifier(),
+            cancellation_fee_config(Some(field_api_url)),
+        )
+        .await;
+        let body = serde_json::json!({
+            "tenant_id": "scc",
+            "reference": "RSV-1001",
+            "customer_name": "山田 太郎",
+            "customer_phone": "+819012345678",
+            "amount": 5000,
+            "currency": "JPY",
+            "due_date": "2026-07-04",
+            "reason": "当日キャンセル",
+            "send_sms": false
+        });
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/cancellation-fee-collections")
+                    .header(AUTHORIZATION, format!("Bearer {}", auth.valid_token()))
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let created: cancellation_fees::CreateCancellationFeeCollectionResponse =
+            serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(created.collection.amount, 5000);
+        assert_eq!(created.collection.currency, "JPY");
+        assert_eq!(created.collection.sms_status, "not_requested");
+        assert_eq!(
+            created.collection.field_invoice_id.as_deref(),
+            Some("inv_test_courseboard")
+        );
+        assert!(created.collection.payment_url.contains("index.html#/pay/"));
+        assert!(created.sms_message.contains("キャンセル料5000円"));
+
+        let token = created
+            .collection
+            .payment_url
+            .rsplit('/')
+            .next()
+            .expect("payment token");
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!("/public/cancellation-fees/{token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let public: cancellation_fees::CancellationFeeCollectionResponse =
+            serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(public.reference.as_deref(), Some("RSV-1001"));
+        assert_eq!(public.customer_name, "山田 太郎");
+    }
+
+    #[tokio::test]
+    async fn cancellation_fee_collection_requires_field_api_url() {
+        let auth = TestAuth::new();
+        let app = test_app_with_verifier_and_cancellation_fee_config(
+            auth.verifier(),
+            cancellation_fee_config(None),
+        )
+        .await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/cancellation-fee-collections")
+                    .header(AUTHORIZATION, format!("Bearer {}", auth.valid_token()))
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "tenant_id": "scc",
+                            "customer_name": "山田 太郎",
+                            "customer_phone": "+819012345678",
+                            "amount": 5000,
+                            "due_date": "2026-07-04"
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     }
 
     #[tokio::test]

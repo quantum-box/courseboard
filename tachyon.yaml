@@ -7,9 +7,9 @@ spec:
   apps:
     - name: tachyonfield-golf
       repository:
-        url: https://github.com/quantum-box/tachyonfield-golf
+        url: https://github.com/quantum-box/courseboard
         owner: quantum-box
-        name: tachyonfield-golf
+        name: courseboard
         defaultBranch: main
       rootDirectory: ""
       framework: cargo_lambda

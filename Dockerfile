@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM public.ecr.aws/docker/library/rust:1-bookworm AS builder
+FROM rust:1-bookworm AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,20 @@ COPY src ./src
 
 RUN cargo build --release --locked
 
-FROM public.ecr.aws/docker/library/debian:bookworm-slim AS runtime
+FROM node:22-bookworm AS ui_builder
+
+WORKDIR /app/desktop
+
+COPY desktop/package.json desktop/package-lock.json ./
+RUN npm ci
+
+COPY desktop/index.html desktop/tsconfig.json desktop/tsconfig.node.json desktop/vite.config.ts ./
+COPY desktop/src ./src
+COPY desktop/public ./public
+
+RUN VITE_BASE_PATH=/ui/ npm run build
+
+FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 \
@@ -27,6 +40,7 @@ RUN useradd --system --uid 10001 --create-home --home-dir /app appuser \
     && chown -R appuser:appuser /app
 
 COPY --from=builder /app/target/release/tachyonfield-golf /app/bin/tachyonfield-golf
+COPY --from=ui_builder /app/desktop/dist /app/ui
 
 ENV BIND_ADDR=0.0.0.0:8080
 ENV DATABASE_URL=sqlite:///app/data/tachyonfield-golf.db

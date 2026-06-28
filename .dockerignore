@@ -1,6 +1,11 @@
 target/
 .git/
 .github/
+.playwright-mcp/
+**/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+ui/
 *.db
 *.db-*
 *.sqlite
