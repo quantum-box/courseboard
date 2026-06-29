@@ -758,27 +758,6 @@ mod tests {
         assert_eq!(payload["note"], "front nine support");
     }
 
-    // Captures the `x-operator-id` header of the last request the test server saw.
-    async fn spawn_erp_server(
-        route: &'static str,
-        seen_operator: Arc<Mutex<Option<String>>>,
-        response_body: Value,
-    ) -> std::net::SocketAddr {
-        let handler = {
-            let seen_operator = seen_operator.clone();
-            move |headers: axum::http::HeaderMap| {
-                let seen_operator = seen_operator.clone();
-                let response_body = response_body.clone();
-                async move {
-                    *seen_operator.lock().unwrap() = headers
-                        .get("x-operator-id")
-                        .and_then(|value| value.to_str().ok())
-                        .map(str::to_string);
-                    axum::Json(response_body)
-                }
-            }
-        };
-        let app = axum::Router::new().route(route, axum::routing::any(handler));
     async fn spawn_token_server(handler: axum::routing::MethodRouter) -> std::net::SocketAddr {
         let app = axum::Router::new().route("/token", handler);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -789,54 +768,6 @@ mod tests {
         addr
     }
 
-    fn test_client(addr: std::net::SocketAddr) -> FieldApiClient {
-        FieldApiClient::new(
-            format!("http://{addr}"),
-            Arc::new(StaticBearerTokenProvider::new(Some("tok".to_string()))),
-        )
-        .unwrap()
-    }
-
-    #[tokio::test]
-    async fn list_staff_profiles_sends_operator_id_and_unwraps_items_envelope() {
-        let seen = Arc::new(Mutex::new(None));
-        let addr = spawn_erp_server(
-            "/v1/erp/staff-profiles",
-            seen.clone(),
-            json!({ "items": [{ "id": "sp_1", "tenant_id": "scc" }] }),
-        )
-        .await;
-
-        let profiles = test_client(addr)
-            .list_staff_profiles(StaffProfileFilter {
-                tenant_id: Some("scc".to_string()),
-                status: None,
-            })
-            .await
-            .unwrap();
-
-        assert_eq!(profiles.len(), 1);
-        assert_eq!(profiles[0].id, "sp_1");
-        assert_eq!(seen.lock().unwrap().as_deref(), Some("scc"));
-    }
-
-    #[tokio::test]
-    async fn cancel_staff_assignment_sends_operator_id() {
-        let seen = Arc::new(Mutex::new(None));
-        let addr = spawn_erp_server(
-            "/v1/erp/staff-assignments/asg_1",
-            seen.clone(),
-            json!({ "id": "asg_1", "tenant_id": "scc", "status": "cancelled" }),
-        )
-        .await;
-
-        let assignment = test_client(addr)
-            .cancel_staff_assignment("asg_1", "scc")
-            .await
-            .unwrap();
-
-        assert_eq!(assignment.id, "asg_1");
-        assert_eq!(seen.lock().unwrap().as_deref(), Some("scc"));
     #[tokio::test]
     async fn client_credentials_provider_acquires_and_caches_token() {
         use std::sync::atomic::{AtomicUsize, Ordering};
@@ -895,6 +826,83 @@ mod tests {
             FieldApiError::TokenStatus { status, .. } if status == StatusCode::UNAUTHORIZED
         ));
     }
-}
+
+    // Captures the `x-operator-id` header of the last request the test server saw.
+    async fn spawn_erp_server(
+        route: &'static str,
+        seen_operator: Arc<Mutex<Option<String>>>,
+        response_body: Value,
+    ) -> std::net::SocketAddr {
+        let handler = {
+            let seen_operator = seen_operator.clone();
+            move |headers: axum::http::HeaderMap| {
+                let seen_operator = seen_operator.clone();
+                let response_body = response_body.clone();
+                async move {
+                    *seen_operator.lock().unwrap() = headers
+                        .get("x-operator-id")
+                        .and_then(|value| value.to_str().ok())
+                        .map(str::to_string);
+                    axum::Json(response_body)
+                }
+            }
+        };
+        let app = axum::Router::new().route(route, axum::routing::any(handler));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        addr
+    }
+
+    fn test_client(addr: std::net::SocketAddr) -> FieldApiClient {
+        FieldApiClient::new(
+            format!("http://{addr}"),
+            Arc::new(StaticBearerTokenProvider::new(Some("tok".to_string()))),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn list_staff_profiles_sends_operator_id_and_unwraps_items_envelope() {
+        let seen = Arc::new(Mutex::new(None));
+        let addr = spawn_erp_server(
+            "/v1/erp/staff-profiles",
+            seen.clone(),
+            json!({ "items": [{ "id": "sp_1", "tenant_id": "scc" }] }),
+        )
+        .await;
+
+        let profiles = test_client(addr)
+            .list_staff_profiles(StaffProfileFilter {
+                tenant_id: Some("scc".to_string()),
+                status: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].id, "sp_1");
+        assert_eq!(seen.lock().unwrap().as_deref(), Some("scc"));
+    }
+
+    #[tokio::test]
+    async fn cancel_staff_assignment_sends_operator_id() {
+        let seen = Arc::new(Mutex::new(None));
+        let addr = spawn_erp_server(
+            "/v1/erp/staff-assignments/asg_1",
+            seen.clone(),
+            json!({ "id": "asg_1", "tenant_id": "scc", "status": "cancelled" }),
+        )
+        .await;
+
+        let assignment = test_client(addr)
+            .cancel_staff_assignment("asg_1", "scc")
+            .await
+            .unwrap();
+
+        assert_eq!(assignment.id, "asg_1");
+        assert_eq!(seen.lock().unwrap().as_deref(), Some("scc"));
     }
 }
