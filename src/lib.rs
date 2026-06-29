@@ -1,5 +1,7 @@
 use std::{env, sync::Arc};
 
+use anyhow::Context;
+
 mod admin_ui;
 pub mod auth;
 pub mod cancellation_fees;
@@ -294,7 +296,11 @@ pub async fn build_app_from_env() -> anyhow::Result<Router> {
         tracing::warn!("using COURSEBOARD_DEV_BEARER_TOKEN static verifier for local development");
         Arc::new(auth::StaticBearerVerifier::new(token))
     } else {
-        let auth_config = auth::AuthConfig::from_env()?;
+        let auth_config = auth::AuthConfig::from_env().context(
+            "auth configuration is incomplete. For local development, set \
+             COURSEBOARD_DEV_BEARER_TOKEN to use the static dev bypass; otherwise \
+             configure OIDC_ISSUER_URL (or TACHYON_AUTH_ISSUER_URL) and EXPECTED_AUDIENCE",
+        )?;
         Arc::new(auth::OidcJwtVerifier::discover(auth_config).await?)
     };
     let field_api = FieldApiClient::from_env();
