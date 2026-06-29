@@ -2,6 +2,7 @@
 name = "tachyonfield-golf"
 version = "0.1.0"
 edition = "2021"
+default-run = "tachyonfield-golf"
 
 [dependencies]
 anyhow = "1.0"
