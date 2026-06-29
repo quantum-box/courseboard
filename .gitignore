@@ -13,6 +13,11 @@ ui/
 *.sqlite3
 data/
 
+# Local environment overrides
+.env
+.env.*
+!.env.example
+
 # Local temp files
 *.tmp
 *.temp

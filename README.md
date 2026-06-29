@@ -287,9 +287,28 @@ TACHYON_FIELD_API_URL=https://field-api.example.internal/
 TACHYON_FIELD_API_BEARER_TOKEN=<field-api-access-token>
 ```
 
-`TACHYON_FIELD_API_BEARER_TOKEN` は現在の static bearer token provider 用の placeholder
-contract です。Tachyon Auth client-credentials acquisition を追加する場合は、UI
-handler を変えず provider 実装だけを差し替えます。
+`TACHYON_FIELD_API_BEARER_TOKEN` は static bearer token provider 用の placeholder
+contract です。
+
+Course Board 自身が Tachyon Auth に OAuth2 client-credentials でログインしてトークンを
+取得することもできます。次の env がすべて揃っていると、static token の代わりに
+client-credentials provider が選択され、取得したトークンは失効直前までキャッシュされます。
+
+```bash
+TACHYON_FIELD_API_URL=https://field-api.example.internal/
+TACHYON_FIELD_API_TOKEN_URL=https://app.n1.tachy.one/oauth2/token
+TACHYON_FIELD_API_CLIENT_ID=<client-id>
+TACHYON_FIELD_API_CLIENT_SECRET=<client-secret>
+# optional
+TACHYON_FIELD_API_SCOPE=<scope>
+TACHYON_FIELD_API_AUDIENCE=<audience>
+```
+
+`TACHYON_FIELD_API_TOKEN_URL` / `TACHYON_FIELD_API_CLIENT_ID` /
+`TACHYON_FIELD_API_CLIENT_SECRET` が未設定なら従来通り `TACHYON_FIELD_API_BEARER_TOKEN`
+の static token に fallback します。client secret は commit せず deployment secret として
+渡します。ERP エンドポイントを呼ぶには、この client の principal に対象 tenant の ERP
+ポリシーが attach されている必要があります。
 
 ## Auth Policy Manifest
 
@@ -322,6 +341,17 @@ cargo run
 
 この bypass は `COURSEBOARD_DEV_BEARER_TOKEN` を明示した場合だけ有効です。
 production では OIDC configuration を使います。
+
+毎回 inline で環境変数を渡す代わりに、リポジトリ root に `.env` を置けます。起動時に
+`.env` が自動で読み込まれます（存在しなくてもエラーにはなりません）。`.env.example`
+を `.env` にコピーして使ってください。`.env` は `.gitignore` 済みで、本番のシークレット
+は従来通り deployment secret / 環境変数で注入します。
+
+```bash
+cp .env.example .env
+# 必要に応じて .env を編集
+cargo run
+```
 
 デフォルト DB は `sqlite://tachyonfield-golf.db` です。必要に応じて
 `DATABASE_URL` を上書きします。

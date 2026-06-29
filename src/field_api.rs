@@ -1,4 +1,8 @@
-use std::{env, sync::Arc, time::Duration};
+use std::{
+    env,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use reqwest::{header::AUTHORIZATION, Client, Method, StatusCode, Url};
@@ -70,11 +74,18 @@ impl FieldApiClient {
     pub fn from_env() -> Result<Self, FieldApiConfigError> {
         let base_url =
             env::var("TACHYON_FIELD_API_URL").map_err(|_| FieldApiConfigError::MissingBaseUrl)?;
-        let bearer_token = env::var("TACHYON_FIELD_API_BEARER_TOKEN").ok();
-        Self::new(
-            base_url,
-            Arc::new(StaticBearerTokenProvider::new(bearer_token)),
-        )
+        // Prefer self-acquired OAuth2 client-credentials tokens when configured,
+        // so Course Board logs in to Tachyon Auth itself instead of relying on a
+        // static bearer token. Falls back to the static provider for tests and
+        // gateway-fronted deployments.
+        let token_provider: Arc<dyn FieldApiTokenProvider> =
+            match ClientCredentialsConfig::from_env() {
+                Some(config) => Arc::new(ClientCredentialsTokenProvider::new(config)),
+                None => Arc::new(StaticBearerTokenProvider::new(
+                    env::var("TACHYON_FIELD_API_BEARER_TOKEN").ok(),
+                )),
+            };
+        Self::new(base_url, token_provider)
     }
 
     pub fn new(
@@ -355,6 +366,138 @@ impl FieldApiTokenProvider for StaticBearerTokenProvider {
     }
 }
 
+fn non_empty_env(key: &str) -> Option<String> {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+/// OAuth2 client-credentials configuration for acquiring Field API tokens.
+#[derive(Clone)]
+pub struct ClientCredentialsConfig {
+    pub token_url: String,
+    pub client_id: String,
+    pub client_secret: String,
+    pub scope: Option<String>,
+    pub audience: Option<String>,
+}
+
+impl ClientCredentialsConfig {
+    /// Builds a config when the required env vars are all present, otherwise
+    /// returns `None` so callers can fall back to a static bearer token.
+    pub fn from_env() -> Option<Self> {
+        Some(Self {
+            token_url: non_empty_env("TACHYON_FIELD_API_TOKEN_URL")?,
+            client_id: non_empty_env("TACHYON_FIELD_API_CLIENT_ID")?,
+            client_secret: non_empty_env("TACHYON_FIELD_API_CLIENT_SECRET")?,
+            scope: non_empty_env("TACHYON_FIELD_API_SCOPE"),
+            audience: non_empty_env("TACHYON_FIELD_API_AUDIENCE"),
+        })
+    }
+}
+
+#[derive(Deserialize)]
+struct TokenResponse {
+    access_token: String,
+    #[serde(default)]
+    expires_in: Option<u64>,
+}
+
+struct CachedToken {
+    access_token: String,
+    expires_at: Instant,
+}
+
+/// Acquires Field API access tokens via the OAuth2 client-credentials grant and
+/// caches them until shortly before they expire.
+pub struct ClientCredentialsTokenProvider {
+    config: ClientCredentialsConfig,
+    client: Client,
+    cache: Mutex<Option<CachedToken>>,
+}
+
+impl ClientCredentialsTokenProvider {
+    // Refresh a little before the real expiry to avoid races with the field API.
+    const EXPIRY_SKEW: Duration = Duration::from_secs(60);
+    const DEFAULT_TTL_SECS: u64 = 3600;
+
+    pub fn new(config: ClientCredentialsConfig) -> Self {
+        let client = Client::builder()
+            .timeout(DEFAULT_HTTP_TIMEOUT)
+            .build()
+            .expect("reqwest client config must be valid");
+        Self {
+            config,
+            client,
+            cache: Mutex::new(None),
+        }
+    }
+
+    async fn fetch_token(&self) -> Result<CachedToken, FieldApiError> {
+        let mut form: Vec<(&str, &str)> = vec![("grant_type", "client_credentials")];
+        if let Some(scope) = &self.config.scope {
+            form.push(("scope", scope));
+        }
+        if let Some(audience) = &self.config.audience {
+            form.push(("audience", audience));
+        }
+
+        let response = self
+            .client
+            .post(&self.config.token_url)
+            .basic_auth(&self.config.client_id, Some(&self.config.client_secret))
+            .form(&form)
+            .send()
+            .await
+            .map_err(FieldApiError::TokenRequest)?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let message = response.text().await.unwrap_or_default();
+            return Err(FieldApiError::TokenStatus { status, message });
+        }
+
+        let body = response
+            .json::<TokenResponse>()
+            .await
+            .map_err(FieldApiError::TokenRequest)?;
+        let ttl = body
+            .expires_in
+            .unwrap_or(Self::DEFAULT_TTL_SECS)
+            .saturating_sub(Self::EXPIRY_SKEW.as_secs());
+
+        Ok(CachedToken {
+            access_token: body.access_token,
+            expires_at: Instant::now() + Duration::from_secs(ttl),
+        })
+    }
+}
+
+#[async_trait]
+impl FieldApiTokenProvider for ClientCredentialsTokenProvider {
+    async fn bearer_token(&self) -> Result<String, FieldApiError> {
+        if let Some(token) = self
+            .cache
+            .lock()
+            .expect("token cache mutex must not be poisoned")
+            .as_ref()
+            .filter(|cached| cached.expires_at > Instant::now())
+            .map(|cached| cached.access_token.clone())
+        {
+            return Ok(token);
+        }
+
+        let fresh = self.fetch_token().await?;
+        let token = fresh.access_token.clone();
+        *self
+            .cache
+            .lock()
+            .expect("token cache mutex must not be poisoned") = Some(fresh);
+        Ok(token)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum FieldApiConfigError {
     #[error("TACHYON_FIELD_API_URL must be set for the admin UI")]
@@ -375,6 +518,10 @@ pub enum FieldApiError {
     Status { status: StatusCode, message: String },
     #[error("field API response could not be decoded: {0}")]
     Decode(String),
+    #[error("field API token request failed")]
+    TokenRequest(#[source] reqwest::Error),
+    #[error("field API token endpoint returned {status}: {message}")]
+    TokenStatus { status: StatusCode, message: String },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -632,6 +779,8 @@ mod tests {
             }
         };
         let app = axum::Router::new().route(route, axum::routing::any(handler));
+    async fn spawn_token_server(handler: axum::routing::MethodRouter) -> std::net::SocketAddr {
+        let app = axum::Router::new().route("/token", handler);
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
@@ -688,5 +837,62 @@ mod tests {
 
         assert_eq!(assignment.id, "asg_1");
         assert_eq!(seen.lock().unwrap().as_deref(), Some("scc"));
+    #[tokio::test]
+    async fn client_credentials_provider_acquires_and_caches_token() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let addr = spawn_token_server(axum::routing::post({
+            let hits = hits.clone();
+            move || {
+                let hits = hits.clone();
+                async move {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    axum::Json(json!({ "access_token": "tok-abc", "expires_in": 3600 }))
+                }
+            }
+        }))
+        .await;
+
+        let provider = ClientCredentialsTokenProvider::new(ClientCredentialsConfig {
+            token_url: format!("http://{addr}/token"),
+            client_id: "cb".to_string(),
+            client_secret: "secret".to_string(),
+            scope: Some("field-erp".to_string()),
+            audience: None,
+        });
+
+        let first = provider.bearer_token().await.unwrap();
+        let second = provider.bearer_token().await.unwrap();
+
+        assert_eq!(first, "tok-abc");
+        assert_eq!(second, "tok-abc");
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "token should be cached after the first fetch"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_credentials_provider_surfaces_token_endpoint_errors() {
+        let addr = spawn_token_server(axum::routing::post(|| async {
+            (StatusCode::UNAUTHORIZED, "invalid_client")
+        }))
+        .await;
+
+        let provider = ClientCredentialsTokenProvider::new(ClientCredentialsConfig {
+            token_url: format!("http://{addr}/token"),
+            client_id: "cb".to_string(),
+            client_secret: "secret".to_string(),
+            scope: None,
+            audience: None,
+        });
+
+        let error = provider.bearer_token().await.unwrap_err();
+        assert!(matches!(
+            error,
+            FieldApiError::TokenStatus { status, .. } if status == StatusCode::UNAUTHORIZED
+        ));
     }
 }
