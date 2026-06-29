@@ -2057,6 +2057,7 @@ dependencies = [
  "async-trait",
  "axum",
  "base64",
+ "dotenvy",
  "http-body-util",
  "jsonwebtoken",
  "lambda_http",

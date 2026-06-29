@@ -323,6 +323,17 @@ cargo run
 この bypass は `COURSEBOARD_DEV_BEARER_TOKEN` を明示した場合だけ有効です。
 production では OIDC configuration を使います。
 
+毎回 inline で環境変数を渡す代わりに、リポジトリ root に `.env` を置けます。起動時に
+`.env` が自動で読み込まれます（存在しなくてもエラーにはなりません）。`.env.example`
+を `.env` にコピーして使ってください。`.env` は `.gitignore` 済みで、本番のシークレット
+は従来通り deployment secret / 環境変数で注入します。
+
+```bash
+cp .env.example .env
+# 必要に応じて .env を編集
+cargo run
+```
+
 デフォルト DB は `sqlite://tachyonfield-golf.db` です。必要に応じて
 `DATABASE_URL` を上書きします。
 
