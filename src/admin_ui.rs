@@ -133,12 +133,24 @@ pub async fn update_shift(
     }
 }
 
-pub async fn cancel_shift(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+#[derive(Debug, Deserialize)]
+pub struct CancelShiftForm {
+    pub tenant_id: String,
+}
+
+pub async fn cancel_shift(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Form(form): Form<CancelShiftForm>,
+) -> Response {
     let Some(field_api) = state.field_api.clone() else {
         return render_config_error(state.field_api_config_error).into_response();
     };
 
-    match field_api.cancel_staff_assignment(&id).await {
+    match field_api
+        .cancel_staff_assignment(&id, &form.tenant_id)
+        .await
+    {
         Ok(_) => Redirect::to("/admin/caddies").into_response(),
         Err(error) => Html(render_error_page(&error)).into_response(),
     }
@@ -873,6 +885,7 @@ fn assignments_table(assignments: &[StaffAssignment], profiles: &[StaffProfile])
       <button type="submit">Save</button>
     </form>
     <form method="post" action="/admin/shifts/{id}/cancel" class="cancel-form">
+      <input type="hidden" name="tenant_id" value="{tenant_id}">
       <button type="submit">Cancel</button>
     </form>
   </td>

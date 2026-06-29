@@ -40,7 +40,11 @@ pub trait FieldApi: Send + Sync {
         id: &str,
         input: StaffAssignmentInput,
     ) -> Result<StaffAssignment, FieldApiError>;
-    async fn cancel_staff_assignment(&self, id: &str) -> Result<StaffAssignment, FieldApiError>;
+    async fn cancel_staff_assignment(
+        &self,
+        id: &str,
+        operator_id: &str,
+    ) -> Result<StaffAssignment, FieldApiError>;
     async fn assign_reservation_staff(
         &self,
         reservation_id: &str,
@@ -95,6 +99,7 @@ impl FieldApiClient {
         &self,
         method: Method,
         path: &str,
+        operator_id: Option<&str>,
         query: &[(&str, String)],
         body: Option<Value>,
     ) -> Result<T, FieldApiError> {
@@ -107,6 +112,12 @@ impl FieldApiClient {
             .client
             .request(method, url)
             .header(AUTHORIZATION, format!("Bearer {token}"));
+
+        // The generic Field ERP API scopes every request to a tenant via the
+        // `x-operator-id` header; without it the API rejects the call with 400.
+        if let Some(operator_id) = operator_id.filter(|value| !value.is_empty()) {
+            request = request.header("x-operator-id", operator_id);
+        }
 
         for (key, value) in query.iter().filter(|(_, value)| !value.is_empty()) {
             request = request.query(&[(key, value)]);
@@ -123,7 +134,17 @@ impl FieldApiClient {
             return Err(FieldApiError::Status { status, message });
         }
 
-        response.json::<T>().await.map_err(FieldApiError::Request)
+        // List endpoints wrap their results in an `{ "items": [...] }` envelope.
+        // Unwrap it when present so list responses deserialize into `Vec<T>`,
+        // while single-resource responses (no `items` array) pass through.
+        let value: Value = response.json().await.map_err(FieldApiError::Request)?;
+        let value = match value {
+            Value::Object(mut map) if map.get("items").is_some_and(Value::is_array) => {
+                map.remove("items").unwrap_or(Value::Null)
+            }
+            other => other,
+        };
+        serde_json::from_value(value).map_err(|error| FieldApiError::Decode(error.to_string()))
     }
 }
 
@@ -133,18 +154,27 @@ impl FieldApi for FieldApiClient {
         &self,
         filter: StaffProfileFilter,
     ) -> Result<Vec<StaffProfile>, FieldApiError> {
+        let operator_id = filter.tenant_id.clone();
         let query = profile_query(filter);
-        self.send(Method::GET, "/v1/erp/staff-profiles", &query, None)
-            .await
+        self.send(
+            Method::GET,
+            "/v1/erp/staff-profiles",
+            operator_id.as_deref(),
+            &query,
+            None,
+        )
+        .await
     }
 
     async fn create_staff_profile(
         &self,
         input: StaffProfileInput,
     ) -> Result<StaffProfile, FieldApiError> {
+        let operator_id = input.tenant_id.clone();
         self.send(
             Method::POST,
             "/v1/erp/staff-profiles",
+            Some(&operator_id),
             &[],
             Some(input.into_api_payload()),
         )
@@ -156,9 +186,11 @@ impl FieldApi for FieldApiClient {
         id: &str,
         input: StaffProfileInput,
     ) -> Result<StaffProfile, FieldApiError> {
+        let operator_id = input.tenant_id.clone();
         self.send(
             Method::PATCH,
             &format!("/v1/erp/staff-profiles/{id}"),
+            Some(&operator_id),
             &[],
             Some(input.into_api_payload()),
         )
@@ -169,27 +201,43 @@ impl FieldApi for FieldApiClient {
         &self,
         filter: ShiftFilter,
     ) -> Result<Vec<StaffAvailability>, FieldApiError> {
+        let operator_id = filter.tenant_id.clone();
         let query = shift_query(filter);
-        self.send(Method::GET, "/v1/erp/staff-availability", &query, None)
-            .await
+        self.send(
+            Method::GET,
+            "/v1/erp/staff-availability",
+            operator_id.as_deref(),
+            &query,
+            None,
+        )
+        .await
     }
 
     async fn list_staff_assignments(
         &self,
         filter: ShiftFilter,
     ) -> Result<Vec<StaffAssignment>, FieldApiError> {
+        let operator_id = filter.tenant_id.clone();
         let query = shift_query(filter);
-        self.send(Method::GET, "/v1/erp/staff-assignments", &query, None)
-            .await
+        self.send(
+            Method::GET,
+            "/v1/erp/staff-assignments",
+            operator_id.as_deref(),
+            &query,
+            None,
+        )
+        .await
     }
 
     async fn create_staff_assignment(
         &self,
         input: StaffAssignmentInput,
     ) -> Result<StaffAssignment, FieldApiError> {
+        let operator_id = input.tenant_id.clone();
         self.send(
             Method::POST,
             "/v1/erp/staff-assignments",
+            Some(&operator_id),
             &[],
             Some(input.into_api_payload(false)),
         )
@@ -201,19 +249,26 @@ impl FieldApi for FieldApiClient {
         id: &str,
         input: StaffAssignmentInput,
     ) -> Result<StaffAssignment, FieldApiError> {
+        let operator_id = input.tenant_id.clone();
         self.send(
             Method::PATCH,
             &format!("/v1/erp/staff-assignments/{id}"),
+            Some(&operator_id),
             &[],
             Some(input.into_api_payload(false)),
         )
         .await
     }
 
-    async fn cancel_staff_assignment(&self, id: &str) -> Result<StaffAssignment, FieldApiError> {
+    async fn cancel_staff_assignment(
+        &self,
+        id: &str,
+        operator_id: &str,
+    ) -> Result<StaffAssignment, FieldApiError> {
         self.send(
             Method::PATCH,
             &format!("/v1/erp/staff-assignments/{id}"),
+            Some(operator_id),
             &[],
             Some(json!({ "status": "cancelled" })),
         )
@@ -225,9 +280,11 @@ impl FieldApi for FieldApiClient {
         reservation_id: &str,
         input: ReservationStaffAssignmentInput,
     ) -> Result<StaffAssignment, FieldApiError> {
+        let operator_id = input.tenant_id.clone();
         self.send(
             Method::POST,
             &format!("/v1/erp/reservations/{reservation_id}/staff-assignment"),
+            Some(&operator_id),
             &[],
             Some(input.into_api_payload()),
         )
@@ -239,9 +296,11 @@ impl FieldApi for FieldApiClient {
         reservation_id: &str,
         input: ReservationStaffUnassignmentInput,
     ) -> Result<StaffAssignment, FieldApiError> {
+        let operator_id = input.tenant_id.clone();
         self.send(
             Method::POST,
             &format!("/v1/erp/reservations/{reservation_id}/staff-assignment/unassign"),
+            Some(&operator_id),
             &[],
             Some(input.into_api_payload()),
         )
@@ -314,6 +373,8 @@ pub enum FieldApiError {
     Request(#[source] reqwest::Error),
     #[error("field API returned {status}: {message}")]
     Status { status: StatusCode, message: String },
+    #[error("field API response could not be decoded: {0}")]
+    Decode(String),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -493,6 +554,7 @@ impl ReservationStaffUnassignmentInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     #[test]
     fn staff_profile_accepts_generic_staff_member_fields() {
@@ -547,5 +609,84 @@ mod tests {
         assert_eq!(payload["staff_profile_id"], "sp_123");
         assert_eq!(payload["status"], "assigned");
         assert_eq!(payload["note"], "front nine support");
+    }
+
+    // Captures the `x-operator-id` header of the last request the test server saw.
+    async fn spawn_erp_server(
+        route: &'static str,
+        seen_operator: Arc<Mutex<Option<String>>>,
+        response_body: Value,
+    ) -> std::net::SocketAddr {
+        let handler = {
+            let seen_operator = seen_operator.clone();
+            move |headers: axum::http::HeaderMap| {
+                let seen_operator = seen_operator.clone();
+                let response_body = response_body.clone();
+                async move {
+                    *seen_operator.lock().unwrap() = headers
+                        .get("x-operator-id")
+                        .and_then(|value| value.to_str().ok())
+                        .map(str::to_string);
+                    axum::Json(response_body)
+                }
+            }
+        };
+        let app = axum::Router::new().route(route, axum::routing::any(handler));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        addr
+    }
+
+    fn test_client(addr: std::net::SocketAddr) -> FieldApiClient {
+        FieldApiClient::new(
+            format!("http://{addr}"),
+            Arc::new(StaticBearerTokenProvider::new(Some("tok".to_string()))),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn list_staff_profiles_sends_operator_id_and_unwraps_items_envelope() {
+        let seen = Arc::new(Mutex::new(None));
+        let addr = spawn_erp_server(
+            "/v1/erp/staff-profiles",
+            seen.clone(),
+            json!({ "items": [{ "id": "sp_1", "tenant_id": "scc" }] }),
+        )
+        .await;
+
+        let profiles = test_client(addr)
+            .list_staff_profiles(StaffProfileFilter {
+                tenant_id: Some("scc".to_string()),
+                status: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].id, "sp_1");
+        assert_eq!(seen.lock().unwrap().as_deref(), Some("scc"));
+    }
+
+    #[tokio::test]
+    async fn cancel_staff_assignment_sends_operator_id() {
+        let seen = Arc::new(Mutex::new(None));
+        let addr = spawn_erp_server(
+            "/v1/erp/staff-assignments/asg_1",
+            seen.clone(),
+            json!({ "id": "asg_1", "tenant_id": "scc", "status": "cancelled" }),
+        )
+        .await;
+
+        let assignment = test_client(addr)
+            .cancel_staff_assignment("asg_1", "scc")
+            .await
+            .unwrap();
+
+        assert_eq!(assignment.id, "asg_1");
+        assert_eq!(seen.lock().unwrap().as_deref(), Some("scc"));
     }
 }
