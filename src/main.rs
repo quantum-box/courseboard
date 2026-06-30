@@ -1,7 +1,5 @@
-use std::{env, net::SocketAddr};
-
 use anyhow::Context;
-use tachyonfield_golf::build_app_from_env;
+use courseboard::{build_app, config::RuntimeConfig};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -9,18 +7,16 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "tachyonfield_golf=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "courseboard=info,tower_http=info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let app = build_app_from_env().await.context("build app")?;
-    let addr: SocketAddr = env::var("BIND_ADDR")
-        .unwrap_or_else(|_| "0.0.0.0:8080".to_string())
-        .parse()
-        .context("BIND_ADDR must be host:port")?;
+    let config = RuntimeConfig::from_args();
+    let addr = config.bind_addr;
+    let app = build_app(config).await.context("build app")?;
 
-    tracing::info!(%addr, "starting tachyonfield-golf");
+    tracing::info!(%addr, "starting courseboard");
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .context("bind listener")?;

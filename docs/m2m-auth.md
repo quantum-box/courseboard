@@ -12,7 +12,9 @@ rename が完了するまでは `tachyonfield-golf` を使います。repository
 
 ## Runtime Configuration
 
-deployment config または secret で次の値を設定します。
+runtime 設定は `RuntimeConfig` に集約し、`clap` で CLI flag と environment
+variable を同じ設定として扱います。deployment config または secret で次の値を
+設定します。
 
 ```bash
 TACHYON_AUTH_ISSUER_URL=https://app.n1.tachy.one
@@ -30,9 +32,10 @@ requested audience、scope は deployment secrets または platform secret stor
 
 ## Verification Flow
 
-Course Board は起動時に次の順で token verifier を構成します。
+Course Board は起動時に `RuntimeConfig` から次の順で token verifier を構成します。
 
-1. `TACHYON_AUTH_ISSUER_URL` または `OIDC_ISSUER_URL` を読む。
+1. `--tachyon-auth-issuer-url` / `TACHYON_AUTH_ISSUER_URL`、または
+   `--oidc-issuer-url` / `OIDC_ISSUER_URL` を解決する。
 2. `/.well-known/openid-configuration` を取得する。
 3. discovery document の issuer が設定値と一致することを確認する。
 4. discovery document の `jwks_uri` を取得する。

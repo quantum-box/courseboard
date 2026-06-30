@@ -15,13 +15,13 @@ spec:
       framework: cargo_lambda
       deploymentTarget: lambda
       build:
-        package: tachyonfield-golf
-        binary: lambda-tachyonfield-golf
+        package: courseboard
+        binary: lambda-courseboard
         release: true
         arch: arm64
       envVars:
         - name: DATABASE_URL
-          value: sqlite:///tmp/tachyonfield-golf.db
+          value: sqlite:///tmp/courseboard.db
         - name: TACHYON_AUTH_ISSUER_URL
           value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
         - name: EXPECTED_AUDIENCE

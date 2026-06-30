@@ -1,4 +1,4 @@
-use std::{env, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use reqwest::{header::AUTHORIZATION, Client, Method, StatusCode, Url};
@@ -6,6 +6,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
 
+pub const DEFAULT_FIELD_API_URL: &str = "https://tachyon-field-api.txcloud.app";
 const DEFAULT_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[async_trait]
@@ -63,10 +64,10 @@ pub struct FieldApiClient {
 }
 
 impl FieldApiClient {
-    pub fn from_env() -> Result<Self, FieldApiConfigError> {
-        let base_url =
-            env::var("TACHYON_FIELD_API_URL").map_err(|_| FieldApiConfigError::MissingBaseUrl)?;
-        let bearer_token = env::var("TACHYON_FIELD_API_BEARER_TOKEN").ok();
+    pub fn from_config(
+        base_url: impl AsRef<str>,
+        bearer_token: Option<String>,
+    ) -> Result<Self, FieldApiConfigError> {
         Self::new(
             base_url,
             Arc::new(StaticBearerTokenProvider::new(bearer_token)),
@@ -298,7 +299,7 @@ impl FieldApiTokenProvider for StaticBearerTokenProvider {
 
 #[derive(Debug, Error)]
 pub enum FieldApiConfigError {
-    #[error("TACHYON_FIELD_API_URL must be set for the admin UI")]
+    #[error("TACHYON_FIELD_API_URL is not configured and no default Field API URL is available")]
     MissingBaseUrl,
     #[error("TACHYON_FIELD_API_URL must be a valid URL")]
     InvalidBaseUrl,

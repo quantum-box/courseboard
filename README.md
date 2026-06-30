@@ -4,9 +4,9 @@ Course Board は、TACHYON Field のゴルフ場オペレーション向け Clou
 Tachyon Compute に独立してデプロイし、ゴルフ場固有の Rust API と React UI を
 このリポジトリで管理します。
 
-リポジトリ名は `quantum-box/courseboard` です。既存の Cloud App ID、Auth
-audience、Auth policy は、deployment / registry / auth policy の移行が完了する
-までは互換性のため `tachyonfield-golf` 系の名前を残しています。
+リポジトリ名、Rust package、ローカル実行 binary は `courseboard` です。既存の
+Cloud App ID、Auth audience、Auth policy は、deployment / registry / auth policy
+の移行が完了するまでは互換性のため `tachyonfield-golf` 系の名前を残しています。
 
 ## アーキテクチャ
 
@@ -237,7 +237,11 @@ check-in、waiting、absence、cancellation transition を書き込みたい場�
 golf-specific core code ではなく generic daily staff status update contract として
 TACHYON Field 側に追加します。
 
-## 環境変数
+## Runtime Configuration
+
+runtime 設定は `src/config.rs` の `RuntimeConfig` に集約しています。`clap` が
+CLI flag と対応する environment variable を読み、各 module は `env::var` を直接
+呼びません。たとえば `--database-url` と `DATABASE_URL` は同じ設定です。
 
 ### Tachyon Auth M2M
 
@@ -257,14 +261,23 @@ TACHYON Field core からの OAuth2 client credentials 呼び出し手順は
 
 ### Field API と SMS
 
-Field invoice を作成するには `TACHYON_FIELD_API_URL` が必要です。ローカルや
-sandbox の Field API に向ける場合もこの値を明示してください。未設定の場合、
+Field API は default で production の `https://tachyon-field-api.txcloud.app` に
+接続します。ローカルや sandbox の Field API に向ける場合は
+`TACHYON_FIELD_API_URL` で上書きしてください。Field invoice 作成に失敗した場合、
 Course Board はキャンセル料 collection と支払いリンクを作成しません。
+
+```bash
+--public-ui-base-url=https://courseboard.example/ui/index.html
+--sms-sender-name="Course Board"
+--tachyon-field-api-url=https://tachyon-field-api.txcloud.app
+```
+
+対応する environment variable:
 
 ```bash
 COURSEBOARD_PUBLIC_UI_BASE_URL=https://courseboard.example/ui/index.html
 COURSEBOARD_SMS_SENDER_NAME="Course Board"
-TACHYON_FIELD_API_URL=https://tachyon-field-api.example.internal
+TACHYON_FIELD_API_URL=https://tachyon-field-api.txcloud.app
 ```
 
 SMS provider secret がない場合、SMS 送信は `skipped` として記録されます。
@@ -283,7 +296,14 @@ Generic Field API admin client は deployment secrets または environment vari
 設定します。
 
 ```bash
-TACHYON_FIELD_API_URL=https://field-api.example.internal/
+--tachyon-field-api-url=https://tachyon-field-api.txcloud.app
+--field-api-bearer-token=<field-api-access-token>
+```
+
+対応する environment variable:
+
+```bash
+TACHYON_FIELD_API_URL=https://tachyon-field-api.txcloud.app
 TACHYON_FIELD_API_BEARER_TOKEN=<field-api-access-token>
 ```
 
@@ -314,26 +334,26 @@ cargo run
 verifier を使えます。
 
 ```bash
-COURSEBOARD_DEV_BEARER_TOKEN=local-dev-token \
-DATABASE_URL=sqlite:///tmp/courseboard-local.db \
-COURSEBOARD_PUBLIC_UI_BASE_URL=http://127.0.0.1:8080/ui/index.html \
-cargo run
+cargo run -- \
+  --dev-bearer-token=local-dev-token \
+  --database-url=sqlite:///tmp/courseboard-local.db \
+  --public-ui-base-url=http://127.0.0.1:8080/ui/index.html
 ```
 
 この bypass は `COURSEBOARD_DEV_BEARER_TOKEN` を明示した場合だけ有効です。
 production では OIDC configuration を使います。
 
-デフォルト DB は `sqlite://tachyonfield-golf.db` です。必要に応じて
+デフォルト DB は `sqlite://courseboard.db` です。必要に応じて
 `DATABASE_URL` を上書きします。
 
 ```bash
-TACHYON_AUTH_ISSUER_URL=https://app.n1.tachy.one \
-EXPECTED_AUDIENCE=tachyonfield-golf \
-EXPECTED_CLIENT_ID=tachyonfield-core \
-TACHYON_FIELD_API_URL=https://field-api.example.internal/ \
-TACHYON_FIELD_API_BEARER_TOKEN='<field-api-access-token>' \
-DATABASE_URL=sqlite://data/tachyonfield-golf.db \
-cargo run
+cargo run -- \
+  --tachyon-auth-issuer-url=https://app.n1.tachy.one \
+  --expected-audience=tachyonfield-golf \
+  --expected-client-id=tachyonfield-core \
+  --tachyon-field-api-url=https://tachyon-field-api.txcloud.app \
+  --field-api-bearer-token='<field-api-access-token>' \
+  --database-url=sqlite://data/courseboard.db
 ```
 
 税額計算 API の例:

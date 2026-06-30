@@ -9,7 +9,7 @@ phases:
       - |
         set -euo pipefail
 
-        image_name="${IMAGE_NAME:-tachyonfield-golf}"
+        image_name="${IMAGE_NAME:-courseboard}"
         image_tag="${IMAGE_TAG:-${INTERNAL_BUILD_ID:-${CODEBUILD_RESOLVED_SOURCE_VERSION:-latest}}}"
         docker_context_path="${CODEBUILD_SRC_DIR:-$(pwd)}"
 
