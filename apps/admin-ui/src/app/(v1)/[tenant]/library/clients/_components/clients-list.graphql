@@ -1,0 +1,13 @@
+fragment ItemOnClientField on Client {
+  id
+  name
+  email
+  phoneNumber
+  headOfficeAddress {
+    state
+    city
+    address1
+  }
+  industry
+  capital
+}

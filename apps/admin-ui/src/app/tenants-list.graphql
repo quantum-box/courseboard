@@ -1,0 +1,10 @@
+query getTenantList {
+  operators {
+    ...OperatorListItem
+  }
+}
+
+fragment OperatorListItem on Operator {
+  id
+  operatorName
+}

@@ -1,0 +1,7 @@
+query accountMenuContent($id: ID!) {
+  operator(id: $id) {
+    id
+    name
+    operatorName
+  }
+}

@@ -1,0 +1,83 @@
+query getConsumerOrderDetail($orderId: ID!) {
+  consumerOrder(orderId: $orderId) {
+    id
+    tenantId
+    cartId
+    userId
+    sessionId
+    status
+    paymentStatus
+    shippingName
+    shippingAddress
+    shippingPhone
+    customerEmail
+    customerId
+    customerName
+    salesChannel
+    salesChannelDetail
+    sourceMedium
+    sourceCampaign
+    subtotalNanodollar
+    shippingFeeNanodollar
+    totalNanodollar
+    items {
+      id
+      productId
+      productName
+      quantity
+      unitPriceNanodollar
+      subtotalNanodollar
+    }
+    confirmedAt
+    shippedAt
+    deliveredAt
+    cancelledAt
+    refundedAt
+    createdAt
+    updatedAt
+  }
+}
+
+mutation cancelConsumerOrderMutation($orderId: ID!) {
+  cancelOrder(orderId: $orderId)
+}
+
+mutation confirmConsumerOrderMutation($orderId: ID!) {
+  confirmOrder(orderId: $orderId) {
+    id
+    status
+    confirmedAt
+  }
+}
+
+mutation prepareConsumerOrderMutation($orderId: ID!) {
+  prepareOrder(orderId: $orderId) {
+    id
+    status
+  }
+}
+
+mutation shipConsumerOrderMutation($orderId: ID!) {
+  shipOrder(orderId: $orderId) {
+    id
+    status
+    shippedAt
+  }
+}
+
+mutation deliverConsumerOrderMutation($orderId: ID!) {
+  deliverOrder(orderId: $orderId) {
+    id
+    status
+    deliveredAt
+  }
+}
+
+mutation refundConsumerOrderMutation($orderId: ID!) {
+  refundOrder(orderId: $orderId) {
+    id
+    status
+    paymentStatus
+    refundedAt
+  }
+}

@@ -1,0 +1,109 @@
+query getDailySales($from: String!, $to: String!) {
+  dailySales(from: $from, to: $to) {
+    date
+    totalNanodollar
+    orderCount
+  }
+}
+
+query getMonthlySales($from: String!, $to: String!) {
+  monthlySales(from: $from, to: $to) {
+    yearMonth
+    totalNanodollar
+    orderCount
+  }
+}
+
+query getTopSkus($from: String!, $to: String!, $limit: Int = 10) {
+  topSkus(from: $from, to: $to, limit: $limit) {
+    productId
+    productName
+    totalQuantity
+    totalNanodollar
+  }
+}
+
+query getCustomerSales(
+  $from: String!
+  $to: String!
+  $channel: String
+  $limit: Int = 10
+  $offset: Int = 0
+) {
+  customerSales(
+    from: $from
+    to: $to
+    channel: $channel
+    limit: $limit
+    offset: $offset
+  ) {
+    customerKey
+    customerId
+    customerName
+    customerKind
+    salesChannel
+    salesChannelDetail
+    totalNanodollar
+    orderCount
+    firstOrderDate
+    lastOrderDate
+  }
+}
+
+query getChannelSales($from: String!, $to: String!) {
+  channelSales(from: $from, to: $to) {
+    salesChannel
+    salesChannelDetail
+    totalNanodollar
+    orderCount
+    customerCount
+  }
+}
+
+query getSalesAnalyticsV2Dashboard(
+  $from: String!
+  $to: String!
+  $channel: String
+  $sku: String
+  $customerSegment: String
+) {
+  salesAnalyticsV2Dashboard(
+    from: $from
+    to: $to
+    channel: $channel
+    sku: $sku
+    customerSegment: $customerSegment
+  ) {
+    summary {
+      totalRevenueNanodollar
+      grossProfitNanodollar
+      grossMarginPercent
+      orderCount
+      unitsSold
+      averageOrderValueNanodollar
+      inventoryTurnover
+    }
+    channelRows {
+      channel
+      totalRevenueNanodollar
+      grossProfitNanodollar
+      orderCount
+      unitsSold
+      grossMarginPercent
+    }
+    skuRows {
+      productId
+      productName
+      totalRevenueNanodollar
+      grossProfitNanodollar
+      totalQuantity
+      currentStockQuantity
+      inventoryTurnover
+    }
+    exportColumns {
+      key
+      label
+      unit
+    }
+  }
+}

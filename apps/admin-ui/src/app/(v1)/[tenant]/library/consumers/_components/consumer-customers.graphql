@@ -1,0 +1,12 @@
+query consumerCustomersForAdmin($email: String, $limit: Int = 100) {
+  customers(email: $email, limit: $limit) {
+    data {
+      id
+      name
+      email
+      phone
+      description
+    }
+    hasMore
+  }
+}

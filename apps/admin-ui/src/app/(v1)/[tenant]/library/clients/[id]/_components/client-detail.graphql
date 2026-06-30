@@ -1,0 +1,35 @@
+fragment ClientDetailOnProviderField on ProviderObject {
+  providerTenantId
+  providerName
+  providerPrimaryId
+}
+
+fragment ClientDetailOnClientField on Client {
+  id
+  name
+  corporationNumber
+  headOfficeAddress {
+    postalCode
+    state
+    city
+    address1
+    address2
+  }
+  representative
+  capital
+  industry
+  listed
+  founded
+  email
+  phoneNumber
+  faxNumber
+  providers {
+    ...ClientDetailOnProviderField
+  }
+}
+
+query clientDetail($id: ID!) {
+  client(id: $id) {
+    ...ClientDetailOnClientField
+  }
+}

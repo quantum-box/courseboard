@@ -1,0 +1,84 @@
+query getStockDetail($productId: ID!) {
+  storefrontProduct(productId: $productId) {
+    id
+    name
+    kind
+    listPrice
+    billingCycle
+    imageIds
+  }
+  productStock(productId: $productId) {
+    id
+    productId
+    quantityOnHand
+    quantityReserved
+    quantityAvailable
+    lowStockThreshold
+    trackInventory
+    createdAt
+    updatedAt
+  }
+}
+
+query getStockMovementsForDetail(
+  $productId: ID!
+  $limit: Int = 20
+  $offset: Int = 0
+) {
+  stockMovements(productId: $productId, limit: $limit, offset: $offset) {
+    items {
+      id
+      productId
+      movementType
+      quantity
+      referenceType
+      referenceId
+      note
+      createdAt
+    }
+    limit
+    offset
+  }
+}
+
+mutation receiveStockMutation($productId: ID!, $input: StockQuantityInput!) {
+  receiveStock(productId: $productId, input: $input) {
+    id
+    productId
+    quantityOnHand
+    quantityReserved
+    quantityAvailable
+  }
+}
+
+mutation adjustStockMutation($productId: ID!, $input: StockQuantityInput!) {
+  adjustStock(productId: $productId, input: $input) {
+    id
+    productId
+    quantityOnHand
+    quantityReserved
+    quantityAvailable
+  }
+}
+
+mutation issueStockMutation($productId: ID!, $input: StockQuantityInput!) {
+  issueStock(productId: $productId, input: $input) {
+    id
+    productId
+    quantityOnHand
+    quantityReserved
+    quantityAvailable
+  }
+}
+
+mutation updateReorderPointMutation(
+  $productId: ID!
+  $input: ReorderPointInput!
+) {
+  updateReorderPoint(productId: $productId, input: $input) {
+    id
+    productId
+    lowStockThreshold
+    quantityAvailable
+  }
+}

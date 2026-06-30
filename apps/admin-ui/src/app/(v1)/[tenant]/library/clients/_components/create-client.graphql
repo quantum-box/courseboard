@@ -1,0 +1,15 @@
+mutation createClientForClientsList($input: ClientInput!) {
+	createClient(input: $input) {
+		id
+		name
+		email
+		phoneNumber
+		industry
+		capital
+		headOfficeAddress {
+			state
+			city
+			address1
+		}
+	}
+}

@@ -1,0 +1,47 @@
+query GetPlatformManifestTemplate {
+  platformManifestTemplate {
+    id
+    operatorId
+    value
+  }
+}
+
+mutation SaveManifest($input: SaveManifestInput!) {
+  saveManifest(input: $input) {
+    apiVersion
+    kind
+    metadata {
+      name
+      operatorId
+    }
+    spec
+  }
+}
+
+mutation CopyOperatorManifest($input: CopyOperatorManifestInput!) {
+  copyOperatorManifest(input: $input) {
+    apiVersion
+    kind
+    metadata {
+      name
+      operatorId
+    }
+    spec
+  }
+}
+
+query GetOAuthConfigs {
+  oauthConfigs {
+    provider
+    clientId
+    redirectUri
+  }
+}
+
+mutation CheckAliasAvailability($alias: String!) {
+  checkAliasAvailability(alias: $alias) {
+    available
+    message
+    errorCode
+  }
+}

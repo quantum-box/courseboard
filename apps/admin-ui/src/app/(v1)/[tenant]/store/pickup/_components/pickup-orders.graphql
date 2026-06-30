@@ -1,0 +1,54 @@
+query getPickupOrders($limit: Int = 20, $offset: Int = 0) {
+  consumerOrders(limit: $limit, offset: $offset) {
+    items {
+      id
+      tenantId
+      userId
+      sessionId
+      status
+      fulfillmentMethod
+      paymentMethod
+      shippingName
+      shippingPhone
+      subtotalNanodollar
+      totalNanodollar
+      items {
+        id
+        productId
+        productName
+        quantity
+        unitPriceNanodollar
+        subtotalNanodollar
+      }
+      pickupDeadline
+      readyAt
+      pickedUpAt
+      cancelledAt
+      createdAt
+      updatedAt
+    }
+    limit
+    offset
+  }
+}
+
+mutation readyOrder($orderId: ID!) {
+  readyOrder(orderId: $orderId) {
+    id
+    status
+    readyAt
+    pickupDeadline
+  }
+}
+
+mutation pickupOrder($orderId: ID!) {
+  pickupOrder(orderId: $orderId) {
+    id
+    status
+    pickedUpAt
+  }
+}
+
+mutation cancelOrder($orderId: ID!) {
+  cancelOrder(orderId: $orderId)
+}

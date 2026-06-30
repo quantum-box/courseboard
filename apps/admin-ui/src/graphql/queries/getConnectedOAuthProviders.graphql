@@ -1,0 +1,3 @@
+query GetConnectedOAuthProviders($operatorId: ID!) {
+  connectedOauthProviders(operatorId: $operatorId)
+}
