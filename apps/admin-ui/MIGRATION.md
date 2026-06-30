@@ -18,7 +18,7 @@ tachyonfield の `apps/admin-ui`（vinext + React + NextAuth v5 + Cognito）を*
 - [ ] **golf だけに間引き**：残すのは「認証 scaffold＋app shell」＋`src/app/(v1)/[tenant]/extensions/golf-course/caddies/*`（配車ボード）と `staff/*`（HRM）。非 golf のルート/feature を削除。
 - [ ] **バックエンド向き先**：`TACHYON_FIELD_API_URL` を tachyon-field-api(:50056) に。golf REST(`/v1/erp/extensions/golf-course/*`, `/v1/erp/hrm/*`) は当面 tachyonfield ERP 側にあるのでそこを叩く。将来 courseboard(Rust) に移設。
 - [ ] **Cognito 設定（Ao/AWS・1回）**：courseboard フロントの**コールバックURL登録**＋認可コードフロー有効化。courseboard 用の `COGNITO_CLIENT_ID/_SECRET/_ISSUER/_DOMAIN/_REGION`、`AUTH_SECRET`、`AUTH_URL` を環境に設定。
-- [ ] **デプロイ先決定**：vinext のまま Cloudflare(worker/wrangler.json あり) で出すか、stock Next に寄せるか。courseboard のデプロイ(tachyon.yaml は Rust lambda のみ)に front をどう足すか。
+- [x] **デプロイ先決定 → Cloudflare Workers**（tachyonfield `fieldadmin` と同型）。vinext のまま。`tachyon.yaml` に frontend CloudApp `golfadmin` を追加済み・`wrangler.json` の name を `golfadmin` に変更済み。バック=AWS Lambda(既存)／フロント=Cloudflare Workers。build/secret は platform 連携で要検証。
 - [ ] **ブランディング/不要物除去**：sentry/photon/その他 Field 固有設定の要否を整理。`public/` の Field アセットも golf 用に差し替え/削減。
 - [ ] **ビルド検証**：`npm install` → `npm run build`（この sandbox では未実施）。
 

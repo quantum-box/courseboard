@@ -28,3 +28,50 @@ spec:
           value: 5002hok6cj8mjmt3gepdpdq98i
         - name: EXPECTED_CLIENT_ID
           value: 5002hok6cj8mjmt3gepdpdq98i
+
+    # --- Frontend (admin UI) — Cloudflare Workers, same pattern as tachyonfield `fieldadmin` ---
+    # vinext app copied into apps/admin-ui. Backend stays AWS Lambda above; this is a separate
+    # Cloudflare Worker deploy. Secrets (COGNITO_CLIENT_ID/SECRET, AUTH_SECRET) are injected via
+    # the platform secret store, NOT listed here. Auth is Cognito-only (no backend verify).
+    # NOTE: build command / output path below mirror fieldadmin and need validation against the
+    # Tachyon platform once apps/admin-ui builds (npm vs pnpm, lockfile).
+    - name: golfadmin
+      repository:
+        url: https://github.com/quantum-box/courseboard
+        owner: quantum-box
+        name: courseboard
+        defaultBranch: main
+      rootDirectory: apps/admin-ui
+      framework: worker
+      deploymentTarget: cloudflare_workers
+      watchPaths:
+        - apps/admin-ui/**
+      build:
+        installCommand: npm install
+        command: npm run build
+        outputDirectory: apps/admin-ui/dist/server/index.js
+        nodeVersion: "24"
+      envVars:
+        - name: ROOT_DIRECTORY
+          value: apps/admin-ui
+        - name: PACKAGE_NAME
+          value: courseboard-admin-ui
+        - name: OUTPUT_DIR
+          value: apps/admin-ui/dist/server/index.js
+        - name: TACHYON_DEPLOYMENT_TARGET
+          value: cloudflare_workers
+        - name: NEXT_PUBLIC_SITE_NAME
+          value: Course Board
+        # Golf ERP endpoints currently live in tachyonfield's Field API; point the frontend there.
+        - name: NEXT_PUBLIC_BACKEND_API_URL
+          value: https://tachyon-field-api.txcloud.app
+        - name: TACHYON_FIELD_API_URL
+          value: https://tachyon-field-api.txcloud.app
+        - name: BACKEND_API_URL
+          value: https://tachyon-field-api.txcloud.app
+        # Auth: Cognito only. Issuer/region are non-secret; client id/secret + AUTH_SECRET come
+        # from the platform secret store (courseboard's own Cognito app client, provisioned by Ao).
+        - name: COGNITO_ISSUER
+          value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+        - name: COGNITO_REGION
+          value: ap-northeast-1
