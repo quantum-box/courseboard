@@ -5,7 +5,7 @@ use clap::Parser;
 use crate::{
     auth::{AuthConfig, AuthConfigError},
     cancellation_fees::CancellationFeeConfig,
-    field_api::DEFAULT_FIELD_API_URL,
+    field_api::{ClientCredentialsConfig, DEFAULT_FIELD_API_URL},
 };
 
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:8080";
@@ -53,6 +53,16 @@ pub struct RuntimeConfig {
     pub courseboard_field_api_url: Option<String>,
     #[arg(long, env = "TACHYON_FIELD_API_BEARER_TOKEN")]
     pub field_api_bearer_token: Option<String>,
+    #[arg(long, env = "TACHYON_FIELD_API_TOKEN_URL")]
+    pub field_api_token_url: Option<String>,
+    #[arg(long, env = "TACHYON_FIELD_API_CLIENT_ID")]
+    pub field_api_client_id: Option<String>,
+    #[arg(long, env = "TACHYON_FIELD_API_CLIENT_SECRET")]
+    pub field_api_client_secret: Option<String>,
+    #[arg(long, env = "TACHYON_FIELD_API_SCOPE")]
+    pub field_api_scope: Option<String>,
+    #[arg(long, env = "TACHYON_FIELD_API_AUDIENCE")]
+    pub field_api_audience: Option<String>,
 
     #[arg(long, env = "TWILIO_ACCOUNT_SID")]
     pub twilio_account_sid: Option<String>,
@@ -112,6 +122,16 @@ impl RuntimeConfig {
         non_empty(self.field_api_bearer_token.as_deref())
     }
 
+    pub fn field_api_client_credentials_config(&self) -> Option<ClientCredentialsConfig> {
+        Some(ClientCredentialsConfig {
+            token_url: non_empty(self.field_api_token_url.as_deref())?,
+            client_id: non_empty(self.field_api_client_id.as_deref())?,
+            client_secret: non_empty(self.field_api_client_secret.as_deref())?,
+            scope: non_empty(self.field_api_scope.as_deref()),
+            audience: non_empty(self.field_api_audience.as_deref()),
+        })
+    }
+
     pub fn dev_bearer_token(&self) -> Option<String> {
         non_empty(self.dev_bearer_token.as_deref())
     }
@@ -135,6 +155,11 @@ impl Default for RuntimeConfig {
             field_api_url: None,
             courseboard_field_api_url: None,
             field_api_bearer_token: None,
+            field_api_token_url: None,
+            field_api_client_id: None,
+            field_api_client_secret: None,
+            field_api_scope: None,
+            field_api_audience: None,
             twilio_account_sid: None,
             twilio_auth_token: None,
             twilio_messaging_service_sid: None,
@@ -203,5 +228,32 @@ mod tests {
         assert_eq!(auth.expected_audience, "courseboard");
         assert!(auth.expected_client_ids.contains("field-core"));
         assert!(auth.expected_client_ids.contains("field-admin"));
+    }
+
+    #[test]
+    fn field_api_client_credentials_requires_all_required_values() {
+        let incomplete = RuntimeConfig {
+            field_api_token_url: Some("https://auth.example/token".to_string()),
+            field_api_client_id: Some("client".to_string()),
+            ..RuntimeConfig::default()
+        };
+        assert!(incomplete.field_api_client_credentials_config().is_none());
+
+        let complete = RuntimeConfig {
+            field_api_token_url: Some("https://auth.example/token".to_string()),
+            field_api_client_id: Some("client".to_string()),
+            field_api_client_secret: Some("secret".to_string()),
+            field_api_scope: Some("field:read".to_string()),
+            field_api_audience: Some("field-api".to_string()),
+            ..RuntimeConfig::default()
+        };
+        let config = complete
+            .field_api_client_credentials_config()
+            .expect("client credentials config");
+        assert_eq!(config.token_url, "https://auth.example/token");
+        assert_eq!(config.client_id, "client");
+        assert_eq!(config.client_secret, "secret");
+        assert_eq!(config.scope.as_deref(), Some("field:read"));
+        assert_eq!(config.audience.as_deref(), Some("field-api"));
     }
 }

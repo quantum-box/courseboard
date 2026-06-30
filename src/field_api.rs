@@ -1,4 +1,7 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use reqwest::{header::AUTHORIZATION, Client, Method, StatusCode, Url};
@@ -41,7 +44,11 @@ pub trait FieldApi: Send + Sync {
         id: &str,
         input: StaffAssignmentInput,
     ) -> Result<StaffAssignment, FieldApiError>;
-    async fn cancel_staff_assignment(&self, id: &str) -> Result<StaffAssignment, FieldApiError>;
+    async fn cancel_staff_assignment(
+        &self,
+        id: &str,
+        operator_id: &str,
+    ) -> Result<StaffAssignment, FieldApiError>;
     async fn assign_reservation_staff(
         &self,
         reservation_id: &str,
@@ -66,12 +73,18 @@ pub struct FieldApiClient {
 impl FieldApiClient {
     pub fn from_config(
         base_url: impl AsRef<str>,
+        client_credentials_config: Option<ClientCredentialsConfig>,
         bearer_token: Option<String>,
     ) -> Result<Self, FieldApiConfigError> {
-        Self::new(
-            base_url,
-            Arc::new(StaticBearerTokenProvider::new(bearer_token)),
-        )
+        // Prefer self-acquired OAuth2 client-credentials tokens when configured,
+        // so Course Board logs in to Tachyon Auth itself instead of relying on a
+        // static bearer token. Falls back to the static provider for tests and
+        // gateway-fronted deployments.
+        let token_provider: Arc<dyn FieldApiTokenProvider> = match client_credentials_config {
+            Some(config) => Arc::new(ClientCredentialsTokenProvider::new(config)),
+            None => Arc::new(StaticBearerTokenProvider::new(bearer_token)),
+        };
+        Self::new(base_url, token_provider)
     }
 
     pub fn new(
@@ -96,6 +109,7 @@ impl FieldApiClient {
         &self,
         method: Method,
         path: &str,
+        operator_id: Option<&str>,
         query: &[(&str, String)],
         body: Option<Value>,
     ) -> Result<T, FieldApiError> {
@@ -108,6 +122,12 @@ impl FieldApiClient {
             .client
             .request(method, url)
             .header(AUTHORIZATION, format!("Bearer {token}"));
+
+        // The generic Field ERP API scopes every request to a tenant via the
+        // `x-operator-id` header; without it the API rejects the call with 400.
+        if let Some(operator_id) = operator_id.filter(|value| !value.is_empty()) {
+            request = request.header("x-operator-id", operator_id);
+        }
 
         for (key, value) in query.iter().filter(|(_, value)| !value.is_empty()) {
             request = request.query(&[(key, value)]);
@@ -124,7 +144,17 @@ impl FieldApiClient {
             return Err(FieldApiError::Status { status, message });
         }
 
-        response.json::<T>().await.map_err(FieldApiError::Request)
+        // List endpoints wrap their results in an `{ "items": [...] }` envelope.
+        // Unwrap it when present so list responses deserialize into `Vec<T>`,
+        // while single-resource responses (no `items` array) pass through.
+        let value: Value = response.json().await.map_err(FieldApiError::Request)?;
+        let value = match value {
+            Value::Object(mut map) if map.get("items").is_some_and(Value::is_array) => {
+                map.remove("items").unwrap_or(Value::Null)
+            }
+            other => other,
+        };
+        serde_json::from_value(value).map_err(|error| FieldApiError::Decode(error.to_string()))
     }
 }
 
@@ -134,18 +164,27 @@ impl FieldApi for FieldApiClient {
         &self,
         filter: StaffProfileFilter,
     ) -> Result<Vec<StaffProfile>, FieldApiError> {
+        let operator_id = filter.tenant_id.clone();
         let query = profile_query(filter);
-        self.send(Method::GET, "/v1/erp/staff-profiles", &query, None)
-            .await
+        self.send(
+            Method::GET,
+            "/v1/erp/staff-profiles",
+            operator_id.as_deref(),
+            &query,
+            None,
+        )
+        .await
     }
 
     async fn create_staff_profile(
         &self,
         input: StaffProfileInput,
     ) -> Result<StaffProfile, FieldApiError> {
+        let operator_id = input.tenant_id.clone();
         self.send(
             Method::POST,
             "/v1/erp/staff-profiles",
+            Some(&operator_id),
             &[],
             Some(input.into_api_payload()),
         )
@@ -157,9 +196,11 @@ impl FieldApi for FieldApiClient {
         id: &str,
         input: StaffProfileInput,
     ) -> Result<StaffProfile, FieldApiError> {
+        let operator_id = input.tenant_id.clone();
         self.send(
             Method::PATCH,
             &format!("/v1/erp/staff-profiles/{id}"),
+            Some(&operator_id),
             &[],
             Some(input.into_api_payload()),
         )
@@ -170,27 +211,43 @@ impl FieldApi for FieldApiClient {
         &self,
         filter: ShiftFilter,
     ) -> Result<Vec<StaffAvailability>, FieldApiError> {
+        let operator_id = filter.tenant_id.clone();
         let query = shift_query(filter);
-        self.send(Method::GET, "/v1/erp/staff-availability", &query, None)
-            .await
+        self.send(
+            Method::GET,
+            "/v1/erp/staff-availability",
+            operator_id.as_deref(),
+            &query,
+            None,
+        )
+        .await
     }
 
     async fn list_staff_assignments(
         &self,
         filter: ShiftFilter,
     ) -> Result<Vec<StaffAssignment>, FieldApiError> {
+        let operator_id = filter.tenant_id.clone();
         let query = shift_query(filter);
-        self.send(Method::GET, "/v1/erp/staff-assignments", &query, None)
-            .await
+        self.send(
+            Method::GET,
+            "/v1/erp/staff-assignments",
+            operator_id.as_deref(),
+            &query,
+            None,
+        )
+        .await
     }
 
     async fn create_staff_assignment(
         &self,
         input: StaffAssignmentInput,
     ) -> Result<StaffAssignment, FieldApiError> {
+        let operator_id = input.tenant_id.clone();
         self.send(
             Method::POST,
             "/v1/erp/staff-assignments",
+            Some(&operator_id),
             &[],
             Some(input.into_api_payload(false)),
         )
@@ -202,19 +259,26 @@ impl FieldApi for FieldApiClient {
         id: &str,
         input: StaffAssignmentInput,
     ) -> Result<StaffAssignment, FieldApiError> {
+        let operator_id = input.tenant_id.clone();
         self.send(
             Method::PATCH,
             &format!("/v1/erp/staff-assignments/{id}"),
+            Some(&operator_id),
             &[],
             Some(input.into_api_payload(false)),
         )
         .await
     }
 
-    async fn cancel_staff_assignment(&self, id: &str) -> Result<StaffAssignment, FieldApiError> {
+    async fn cancel_staff_assignment(
+        &self,
+        id: &str,
+        operator_id: &str,
+    ) -> Result<StaffAssignment, FieldApiError> {
         self.send(
             Method::PATCH,
             &format!("/v1/erp/staff-assignments/{id}"),
+            Some(operator_id),
             &[],
             Some(json!({ "status": "cancelled" })),
         )
@@ -226,9 +290,11 @@ impl FieldApi for FieldApiClient {
         reservation_id: &str,
         input: ReservationStaffAssignmentInput,
     ) -> Result<StaffAssignment, FieldApiError> {
+        let operator_id = input.tenant_id.clone();
         self.send(
             Method::POST,
             &format!("/v1/erp/reservations/{reservation_id}/staff-assignment"),
+            Some(&operator_id),
             &[],
             Some(input.into_api_payload()),
         )
@@ -240,9 +306,11 @@ impl FieldApi for FieldApiClient {
         reservation_id: &str,
         input: ReservationStaffUnassignmentInput,
     ) -> Result<StaffAssignment, FieldApiError> {
+        let operator_id = input.tenant_id.clone();
         self.send(
             Method::POST,
             &format!("/v1/erp/reservations/{reservation_id}/staff-assignment/unassign"),
+            Some(&operator_id),
             &[],
             Some(input.into_api_payload()),
         )
@@ -297,6 +365,117 @@ impl FieldApiTokenProvider for StaticBearerTokenProvider {
     }
 }
 
+/// OAuth2 client-credentials configuration for acquiring Field API tokens.
+#[derive(Clone)]
+pub struct ClientCredentialsConfig {
+    pub token_url: String,
+    pub client_id: String,
+    pub client_secret: String,
+    pub scope: Option<String>,
+    pub audience: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct TokenResponse {
+    access_token: String,
+    #[serde(default)]
+    expires_in: Option<u64>,
+}
+
+struct CachedToken {
+    access_token: String,
+    expires_at: Instant,
+}
+
+/// Acquires Field API access tokens via the OAuth2 client-credentials grant and
+/// caches them until shortly before they expire.
+pub struct ClientCredentialsTokenProvider {
+    config: ClientCredentialsConfig,
+    client: Client,
+    cache: Mutex<Option<CachedToken>>,
+}
+
+impl ClientCredentialsTokenProvider {
+    // Refresh a little before the real expiry to avoid races with the field API.
+    const EXPIRY_SKEW: Duration = Duration::from_secs(60);
+    const DEFAULT_TTL_SECS: u64 = 3600;
+
+    pub fn new(config: ClientCredentialsConfig) -> Self {
+        let client = Client::builder()
+            .timeout(DEFAULT_HTTP_TIMEOUT)
+            .build()
+            .expect("reqwest client config must be valid");
+        Self {
+            config,
+            client,
+            cache: Mutex::new(None),
+        }
+    }
+
+    async fn fetch_token(&self) -> Result<CachedToken, FieldApiError> {
+        let mut form: Vec<(&str, &str)> = vec![("grant_type", "client_credentials")];
+        if let Some(scope) = &self.config.scope {
+            form.push(("scope", scope));
+        }
+        if let Some(audience) = &self.config.audience {
+            form.push(("audience", audience));
+        }
+
+        let response = self
+            .client
+            .post(&self.config.token_url)
+            .basic_auth(&self.config.client_id, Some(&self.config.client_secret))
+            .form(&form)
+            .send()
+            .await
+            .map_err(FieldApiError::TokenRequest)?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let message = response.text().await.unwrap_or_default();
+            return Err(FieldApiError::TokenStatus { status, message });
+        }
+
+        let body = response
+            .json::<TokenResponse>()
+            .await
+            .map_err(FieldApiError::TokenRequest)?;
+        let ttl = body
+            .expires_in
+            .unwrap_or(Self::DEFAULT_TTL_SECS)
+            .saturating_sub(Self::EXPIRY_SKEW.as_secs());
+
+        Ok(CachedToken {
+            access_token: body.access_token,
+            expires_at: Instant::now() + Duration::from_secs(ttl),
+        })
+    }
+}
+
+#[async_trait]
+impl FieldApiTokenProvider for ClientCredentialsTokenProvider {
+    async fn bearer_token(&self) -> Result<String, FieldApiError> {
+        if let Some(token) = self
+            .cache
+            .lock()
+            .expect("token cache mutex must not be poisoned")
+            .as_ref()
+            .filter(|cached| cached.expires_at > Instant::now())
+            .map(|cached| cached.access_token.clone())
+        {
+            return Ok(token);
+        }
+
+        let fresh = self.fetch_token().await?;
+        let token = fresh.access_token.clone();
+        *self
+            .cache
+            .lock()
+            .expect("token cache mutex must not be poisoned") = Some(fresh);
+        Ok(token)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum FieldApiConfigError {
     #[error("TACHYON_FIELD_API_URL is not configured and no default Field API URL is available")]
@@ -315,6 +494,12 @@ pub enum FieldApiError {
     Request(#[source] reqwest::Error),
     #[error("field API returned {status}: {message}")]
     Status { status: StatusCode, message: String },
+    #[error("field API response could not be decoded: {0}")]
+    Decode(String),
+    #[error("field API token request failed")]
+    TokenRequest(#[source] reqwest::Error),
+    #[error("field API token endpoint returned {status}: {message}")]
+    TokenStatus { status: StatusCode, message: String },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -494,6 +679,7 @@ impl ReservationStaffUnassignmentInput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
 
     #[test]
     fn staff_profile_accepts_generic_staff_member_fields() {
@@ -548,5 +734,153 @@ mod tests {
         assert_eq!(payload["staff_profile_id"], "sp_123");
         assert_eq!(payload["status"], "assigned");
         assert_eq!(payload["note"], "front nine support");
+    }
+
+    async fn spawn_token_server(handler: axum::routing::MethodRouter) -> std::net::SocketAddr {
+        let app = axum::Router::new().route("/token", handler);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        addr
+    }
+
+    #[tokio::test]
+    async fn client_credentials_provider_acquires_and_caches_token() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let addr = spawn_token_server(axum::routing::post({
+            let hits = hits.clone();
+            move || {
+                let hits = hits.clone();
+                async move {
+                    hits.fetch_add(1, Ordering::SeqCst);
+                    axum::Json(json!({ "access_token": "tok-abc", "expires_in": 3600 }))
+                }
+            }
+        }))
+        .await;
+
+        let provider = ClientCredentialsTokenProvider::new(ClientCredentialsConfig {
+            token_url: format!("http://{addr}/token"),
+            client_id: "cb".to_string(),
+            client_secret: "secret".to_string(),
+            scope: Some("field-erp".to_string()),
+            audience: None,
+        });
+
+        let first = provider.bearer_token().await.unwrap();
+        let second = provider.bearer_token().await.unwrap();
+
+        assert_eq!(first, "tok-abc");
+        assert_eq!(second, "tok-abc");
+        assert_eq!(
+            hits.load(Ordering::SeqCst),
+            1,
+            "token should be cached after the first fetch"
+        );
+    }
+
+    #[tokio::test]
+    async fn client_credentials_provider_surfaces_token_endpoint_errors() {
+        let addr = spawn_token_server(axum::routing::post(|| async {
+            (StatusCode::UNAUTHORIZED, "invalid_client")
+        }))
+        .await;
+
+        let provider = ClientCredentialsTokenProvider::new(ClientCredentialsConfig {
+            token_url: format!("http://{addr}/token"),
+            client_id: "cb".to_string(),
+            client_secret: "secret".to_string(),
+            scope: None,
+            audience: None,
+        });
+
+        let error = provider.bearer_token().await.unwrap_err();
+        assert!(matches!(
+            error,
+            FieldApiError::TokenStatus { status, .. } if status == StatusCode::UNAUTHORIZED
+        ));
+    }
+
+    // Captures the `x-operator-id` header of the last request the test server saw.
+    async fn spawn_erp_server(
+        route: &'static str,
+        seen_operator: Arc<Mutex<Option<String>>>,
+        response_body: Value,
+    ) -> std::net::SocketAddr {
+        let handler = {
+            let seen_operator = seen_operator.clone();
+            move |headers: axum::http::HeaderMap| {
+                let seen_operator = seen_operator.clone();
+                let response_body = response_body.clone();
+                async move {
+                    *seen_operator.lock().unwrap() = headers
+                        .get("x-operator-id")
+                        .and_then(|value| value.to_str().ok())
+                        .map(str::to_string);
+                    axum::Json(response_body)
+                }
+            }
+        };
+        let app = axum::Router::new().route(route, axum::routing::any(handler));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        addr
+    }
+
+    fn test_client(addr: std::net::SocketAddr) -> FieldApiClient {
+        FieldApiClient::new(
+            format!("http://{addr}"),
+            Arc::new(StaticBearerTokenProvider::new(Some("tok".to_string()))),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn list_staff_profiles_sends_operator_id_and_unwraps_items_envelope() {
+        let seen = Arc::new(Mutex::new(None));
+        let addr = spawn_erp_server(
+            "/v1/erp/staff-profiles",
+            seen.clone(),
+            json!({ "items": [{ "id": "sp_1", "tenant_id": "scc" }] }),
+        )
+        .await;
+
+        let profiles = test_client(addr)
+            .list_staff_profiles(StaffProfileFilter {
+                tenant_id: Some("scc".to_string()),
+                status: None,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(profiles.len(), 1);
+        assert_eq!(profiles[0].id, "sp_1");
+        assert_eq!(seen.lock().unwrap().as_deref(), Some("scc"));
+    }
+
+    #[tokio::test]
+    async fn cancel_staff_assignment_sends_operator_id() {
+        let seen = Arc::new(Mutex::new(None));
+        let addr = spawn_erp_server(
+            "/v1/erp/staff-assignments/asg_1",
+            seen.clone(),
+            json!({ "id": "asg_1", "tenant_id": "scc", "status": "cancelled" }),
+        )
+        .await;
+
+        let assignment = test_client(addr)
+            .cancel_staff_assignment("asg_1", "scc")
+            .await
+            .unwrap();
+
+        assert_eq!(assignment.id, "asg_1");
+        assert_eq!(seen.lock().unwrap().as_deref(), Some("scc"));
     }
 }

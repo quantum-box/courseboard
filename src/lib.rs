@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use anyhow::Context;
+
 mod admin_ui;
 pub mod auth;
 pub mod cancellation_fees;
@@ -294,12 +296,19 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
         tracing::warn!("using COURSEBOARD_DEV_BEARER_TOKEN static verifier for local development");
         Arc::new(auth::StaticBearerVerifier::new(token))
     } else {
-        let auth_config = config.auth_config()?;
+        let auth_config = config.auth_config().context(
+            "auth configuration is incomplete. For local development, set \
+             COURSEBOARD_DEV_BEARER_TOKEN to use the static dev bypass; otherwise \
+             configure OIDC_ISSUER_URL (or TACHYON_AUTH_ISSUER_URL) and EXPECTED_AUDIENCE",
+        )?;
         Arc::new(auth::OidcJwtVerifier::discover(auth_config).await?)
     };
     let cancellation_fee_config = config.cancellation_fee_config();
-    let field_api =
-        FieldApiClient::from_config(config.field_api_base_url(), config.field_api_bearer_token());
+    let field_api = FieldApiClient::from_config(
+        config.field_api_base_url(),
+        config.field_api_client_credentials_config(),
+        config.field_api_bearer_token(),
+    );
     let state =
         AppState::with_optional_field_api(pool, token_verifier, field_api, cancellation_fee_config);
 
