@@ -316,25 +316,16 @@ export const createAuthConfig = (
 			},
 			jwt: async ({ token, account, profile }): Promise<JWT> => {
 				if (account?.access_token) {
-					let verifiedUser: VerifyResponse['user'] | undefined
-					try {
-						const { user } = await verifyAccessToken(account.access_token)
-						verifiedUser = user
-					} catch (error) {
-						console.error('Failed to verify access token:', error)
-						return {
-							...token,
-							accessToken: '',
-							error: 'VerifyAccessTokenError',
-						}
-					}
-
+					// Cognito-only auth (no backend verify, per Ao): derive the user
+					// directly from the Cognito token/profile claims. resolveJwtUser
+					// falls back to the Cognito `sub`/`cognito:username` for id when no
+					// verified user is supplied.
 					return {
 						...token,
 						user: resolveJwtUser({
 							token,
 							profile: profile as Record<string, unknown> | undefined,
-							verifiedUser,
+							verifiedUser: undefined,
 						}),
 						accessToken: account.access_token as string,
 						refreshToken:
