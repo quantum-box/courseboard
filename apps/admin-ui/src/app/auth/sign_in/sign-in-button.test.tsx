@@ -46,7 +46,7 @@ describe('SignInButton', () => {
 		expect(React.isValidElement(googleForm)).toBe(true)
 		if (!React.isValidElement(googleForm)) return
 		const formProps = googleForm.props as FormElementProps
-		expect(formProps.action).toBe('/api/auth/signin/cognito')
+		expect(formProps.action).toBe('/api/auth/signin/tachyon')
 		expect(formProps.method).toBe('get')
 		const hiddenInput = React.Children.toArray(formProps.children)[0]
 		expect(React.isValidElement(hiddenInput)).toBe(true)
@@ -64,7 +64,7 @@ describe('SignInButton', () => {
 		expect(React.isValidElement(hostedUiForm)).toBe(true)
 		if (!React.isValidElement(hostedUiForm)) return
 		const formProps = hostedUiForm.props as FormElementProps
-		expect(formProps.action).toBe('/api/auth/signin/cognito')
+		expect(formProps.action).toBe('/api/auth/signin/tachyon')
 		expect(formProps.method).toBe('get')
 		const hiddenInputs = React.Children.toArray(formProps.children).filter(
 			(child) =>

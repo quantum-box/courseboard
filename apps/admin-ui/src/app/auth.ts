@@ -287,24 +287,39 @@ export const createAuthConfig = (
 	instrumentation: AuthInstrumentationOptions = {},
 	options: { authUrl?: string } = {},
 ): NextAuthConfig => {
-	const cognitoIssuer = getRuntimeEnv('COGNITO_ISSUER') as string
+	// Platform auth (Cloud App `auth.enabled`): the Tachyon platform provisions the
+	// OAuth2 client on the Tachyon user pool and injects COGNITO_CLIENT_ID/SECRET/
+	// USER_POOL_ID. It registers the callback at /api/auth/callback/tachyon, so the
+	// provider id must be "tachyon" (not the default "cognito"). Derive the issuer
+	// from the injected user pool id when COGNITO_ISSUER is not explicitly set.
+	const cognitoRegion = getRuntimeEnv('COGNITO_REGION') ?? 'ap-northeast-1'
+	const cognitoUserPoolId = getRuntimeEnv('COGNITO_USER_POOL_ID')
+	const cognitoIssuer =
+		(getRuntimeEnv('COGNITO_ISSUER') as string | undefined) ??
+		(cognitoUserPoolId
+			? `https://cognito-idp.${cognitoRegion}.amazonaws.com/${cognitoUserPoolId}`
+			: '')
 	const cognitoDomain =
 		getRuntimeEnv('COGNITO_DOMAIN') ?? 'https://auth-pool.n1.tachy.one'
 	const authSecret = getAuthSecret(options)
-	const cognitoProvider = CognitoProvider({
-		clientId: getRuntimeEnv('COGNITO_CLIENT_ID') as string,
-		clientSecret: getRuntimeEnv('COGNITO_CLIENT_SECRET') as string,
-		issuer: cognitoIssuer,
-		authorization: {
-			url: `${cognitoDomain}/oauth2/authorize`,
-			params: {
-				scope: 'openid profile email aws.cognito.signin.user.admin',
+	const cognitoProvider = {
+		...CognitoProvider({
+			clientId: getRuntimeEnv('COGNITO_CLIENT_ID') as string,
+			clientSecret: getRuntimeEnv('COGNITO_CLIENT_SECRET') as string,
+			issuer: cognitoIssuer,
+			authorization: {
+				url: `${cognitoDomain}/oauth2/authorize`,
+				params: {
+					scope: 'openid profile email aws.cognito.signin.user.admin',
+				},
 			},
-		},
-		token: `${cognitoDomain}/oauth2/token`,
-		userinfo: `${cognitoDomain}/oauth2/userInfo`,
-		jwks_endpoint: `${cognitoIssuer}/.well-known/jwks.json`,
-	})
+			token: `${cognitoDomain}/oauth2/token`,
+			userinfo: `${cognitoDomain}/oauth2/userInfo`,
+			jwks_endpoint: `${cognitoIssuer}/.well-known/jwks.json`,
+		}),
+		// Match the platform-registered callback /api/auth/callback/tachyon.
+		id: 'tachyon',
+	}
 
 	return {
 		providers: [cognitoProvider],
