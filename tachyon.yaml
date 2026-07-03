@@ -28,3 +28,60 @@ spec:
           value: 5002hok6cj8mjmt3gepdpdq98i
         - name: EXPECTED_CLIENT_ID
           value: 5002hok6cj8mjmt3gepdpdq98i
+
+    # --- Frontend (admin UI) — Cloudflare Workers. vinext app copied into apps/admin-ui.
+    # Backend stays AWS Lambda above; this is a separate Cloudflare Worker deploy.
+    # Auth is handled by the Cloud App PLATFORM (auth.enabled below), NOT by the app:
+    # no per-app Cognito client, no callback URL. Login happens at the platform
+    # (app.txcloud.app); golfadmin.txcloud.app (and preview envs) are gated automatically.
+    - name: golfadmin
+      repository:
+        url: https://github.com/quantum-box/courseboard
+        owner: quantum-box
+        name: courseboard
+        defaultBranch: main
+      rootDirectory: apps/admin-ui
+      framework: worker
+      deploymentTarget: cloudflare_workers
+      # Platform-handled login (per Ao) — Cloud App standard. When enabled, the
+      # platform auto-creates the `golfadmin-web` OAuth2 client on the Tachyon
+      # user pool, auto-registers callbacks
+      #   https://golfadmin.txcloud.app/api/auth/callback/tachyon (+ pr previews),
+      # and injects clientId/clientSecret/userPoolId env vars; txcloud-proxy then
+      # gates access by the NextAuth session cookie. No manual Cognito client /
+      # callback registration.
+      # FOLLOW-UP (app code): the copied admin-ui uses the NextAuth "cognito"
+      # provider (callback /api/auth/callback/cognito). To match the platform it
+      # must use provider id "tachyon" (callback /api/auth/callback/tachyon)
+      # pointed at the Tachyon user pool, reading the injected client env vars.
+      # The exact `auth.env` mapping may also be required — validate against the
+      # platform / with Ao.
+      auth:
+        enabled: true
+      watchPaths:
+        - apps/admin-ui/**
+      build:
+        # pnpm (matches source admin-ui). Native build scripts are approved via
+        # apps/admin-ui/pnpm-workspace.yaml (allowBuilds); pnpm-lock.yaml pins deps.
+        installCommand: corepack enable && corepack pnpm install --frozen-lockfile
+        command: corepack pnpm run build
+        outputDirectory: apps/admin-ui/dist/server/index.js
+        nodeVersion: "24"
+      envVars:
+        - name: ROOT_DIRECTORY
+          value: apps/admin-ui
+        - name: PACKAGE_NAME
+          value: courseboard-admin-ui
+        - name: OUTPUT_DIR
+          value: apps/admin-ui/dist/server/index.js
+        - name: TACHYON_DEPLOYMENT_TARGET
+          value: cloudflare_workers
+        - name: NEXT_PUBLIC_SITE_NAME
+          value: Course Board
+        # Golf ERP endpoints currently live in tachyonfield's Field API; point the frontend there.
+        - name: NEXT_PUBLIC_BACKEND_API_URL
+          value: https://tachyon-field-api.txcloud.app
+        - name: TACHYON_FIELD_API_URL
+          value: https://tachyon-field-api.txcloud.app
+        - name: BACKEND_API_URL
+          value: https://tachyon-field-api.txcloud.app

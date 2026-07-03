@@ -4,7 +4,8 @@ desktop/dist/
 desktop/.vite/
 desktop/*.tsbuildinfo
 .playwright-mcp/
-ui/
+# Root-anchored so it doesn't swallow apps/admin-ui/src/components/ui (shadcn/Radix UI).
+/ui/
 
 # Local SQLite databases
 *.db
