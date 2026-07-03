@@ -14,8 +14,10 @@ tachyonfield の `apps/admin-ui`（vinext + React + NextAuth v5 + Cognito）を*
 - **コピー方式**（共有パッケージ化はしない）。golf 以外は間引く。
 
 ## 残作業チェックリスト
-- [ ] **認証を Cognito-only に簡素化**：`src/app/auth.ts` の backend verify (`verifyAccessToken`/`AUTH_BACKEND_API_URL`) と password-session 層を削除。`accessToken` を JWT/セッションに載せるだけにする。
-- [ ] **golf だけに間引き**：残すのは「認証 scaffold＋app shell」＋`src/app/(v1)/[tenant]/extensions/golf-course/caddies/*`（配車ボード）と `staff/*`（HRM）。非 golf のルート/feature を削除。
+- [x] **認証を Cognito-only に簡素化**：`src/app/auth.ts` の jwt callback から backend verify (`verifyAccessToken`/`AUTH_BACKEND_API_URL`) 呼び出しを削除し、Cognito の token/profile claims から `resolveJwtUser` で解決（`verifiedUser: undefined`、id は `sub`/`cognito:username` fallback、role 既定 GENERAL）。**tsc で新規エラーゼロを確認**。※ role を Cognito groups から解決するのは follow-up。password-session 層は Cognito ログインに無害なので温存。
+- [x] **standalone tsconfig**：`courseboard/tooling/tsconfig/{base,nextjs}.json` を追加（monorepo 相対 extends の解決）。
+- [~] **非golf 間引き（scope B・一次）**：非golf 17バーティカル(accounting/analytics/audit-logs/billing/billing-accounts/consumer-orders/deals/invoices/quotations/reports/saas-subscriptions/store/inventory/tenants/library/products/agent)＋document-pdf を削除、**tsc 0エラー**。残置: dashboard/home/photon/settings/reservations/cancellation-fees/erp/extension-host/apps と orders/procurement/imports（kept ページが `_lib`/`action` を共有）。**finer な golf-only 抽出（共有lib切り出し・汎用ERPページ要否）は follow-up（要プロダクト判断）**。
+- [ ] **本番ビルド**：`npm run build`（vinext）。ローカルは rolldown ネイティブバイナリ不足（不安定 install の環境要因）で未完 → **CI/Tachyon platform の綺麗な環境で実施**。tsc は通過済み。
 - [ ] **バックエンド向き先**：`TACHYON_FIELD_API_URL` を tachyon-field-api(:50056) に。golf REST(`/v1/erp/extensions/golf-course/*`, `/v1/erp/hrm/*`) は当面 tachyonfield ERP 側にあるのでそこを叩く。将来 courseboard(Rust) に移設。
 - [ ] **Cognito クライアント発行（自己発行・1回／手動プロビジョニング不要）**：auth-platform の
   `POST /v1/auth/oauth2-clients`（`tachyoncli` が叩くエンドポイント）で**ログイン用クライアントを丸ごと発行**する。
