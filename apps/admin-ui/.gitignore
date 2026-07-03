@@ -40,3 +40,4 @@ next-env.d.ts
 /playwright/.cache/
 /dist/
 .vinext/
+.wrangler/
