@@ -47,8 +47,10 @@ spec:
       watchPaths:
         - apps/admin-ui/**
       build:
-        installCommand: npm install
-        command: npm run build
+        # pnpm (matches source admin-ui). Native build scripts are approved via
+        # apps/admin-ui/pnpm-workspace.yaml (allowBuilds); pnpm-lock.yaml pins deps.
+        installCommand: corepack enable && corepack pnpm install --frozen-lockfile
+        command: corepack pnpm run build
         outputDirectory: apps/admin-ui/dist/server/index.js
         nodeVersion: "24"
       envVars:
