@@ -1,5 +1,0 @@
-query clientListPage {
-  clients {
-    ...ItemOnClientField
-  }
-}

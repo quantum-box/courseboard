@@ -1,5 +1,0 @@
-query getProuctForProductsList($id: ID!) {
-  product(productId: $id) {
-    ...ProductItemForProductsList
-  }
-}
