@@ -29,12 +29,11 @@ spec:
         - name: EXPECTED_CLIENT_ID
           value: 5002hok6cj8mjmt3gepdpdq98i
 
-    # --- Frontend (admin UI) — Cloudflare Workers, same pattern as tachyonfield `fieldadmin` ---
-    # vinext app copied into apps/admin-ui. Backend stays AWS Lambda above; this is a separate
-    # Cloudflare Worker deploy. Secrets (COGNITO_CLIENT_ID/SECRET, AUTH_SECRET) are injected via
-    # the platform secret store, NOT listed here. Auth is Cognito-only (no backend verify).
-    # NOTE: build command / output path below mirror fieldadmin and need validation against the
-    # Tachyon platform once apps/admin-ui builds (npm vs pnpm, lockfile).
+    # --- Frontend (admin UI) — Cloudflare Workers. vinext app copied into apps/admin-ui.
+    # Backend stays AWS Lambda above; this is a separate Cloudflare Worker deploy.
+    # Auth is handled by the Cloud App PLATFORM (auth.enabled below), NOT by the app:
+    # no per-app Cognito client, no callback URL. Login happens at the platform
+    # (app.txcloud.app); golfadmin.txcloud.app (and preview envs) are gated automatically.
     - name: golfadmin
       repository:
         url: https://github.com/quantum-box/courseboard
@@ -44,6 +43,21 @@ spec:
       rootDirectory: apps/admin-ui
       framework: worker
       deploymentTarget: cloudflare_workers
+      # Platform-handled login (per Ao) — Cloud App standard. When enabled, the
+      # platform auto-creates the `golfadmin-web` OAuth2 client on the Tachyon
+      # user pool, auto-registers callbacks
+      #   https://golfadmin.txcloud.app/api/auth/callback/tachyon (+ pr previews),
+      # and injects clientId/clientSecret/userPoolId env vars; txcloud-proxy then
+      # gates access by the NextAuth session cookie. No manual Cognito client /
+      # callback registration.
+      # FOLLOW-UP (app code): the copied admin-ui uses the NextAuth "cognito"
+      # provider (callback /api/auth/callback/cognito). To match the platform it
+      # must use provider id "tachyon" (callback /api/auth/callback/tachyon)
+      # pointed at the Tachyon user pool, reading the injected client env vars.
+      # The exact `auth.env` mapping may also be required — validate against the
+      # platform / with Ao.
+      auth:
+        enabled: true
       watchPaths:
         - apps/admin-ui/**
       build:
@@ -71,9 +85,3 @@ spec:
           value: https://tachyon-field-api.txcloud.app
         - name: BACKEND_API_URL
           value: https://tachyon-field-api.txcloud.app
-        # Auth: Cognito only. Issuer/region are non-secret; client id/secret + AUTH_SECRET come
-        # from the platform secret store (courseboard's own Cognito app client, provisioned by Ao).
-        - name: COGNITO_ISSUER
-          value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
-        - name: COGNITO_REGION
-          value: ap-northeast-1
