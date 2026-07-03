@@ -17,7 +17,21 @@ tachyonfield の `apps/admin-ui`（vinext + React + NextAuth v5 + Cognito）を*
 - [ ] **認証を Cognito-only に簡素化**：`src/app/auth.ts` の backend verify (`verifyAccessToken`/`AUTH_BACKEND_API_URL`) と password-session 層を削除。`accessToken` を JWT/セッションに載せるだけにする。
 - [ ] **golf だけに間引き**：残すのは「認証 scaffold＋app shell」＋`src/app/(v1)/[tenant]/extensions/golf-course/caddies/*`（配車ボード）と `staff/*`（HRM）。非 golf のルート/feature を削除。
 - [ ] **バックエンド向き先**：`TACHYON_FIELD_API_URL` を tachyon-field-api(:50056) に。golf REST(`/v1/erp/extensions/golf-course/*`, `/v1/erp/hrm/*`) は当面 tachyonfield ERP 側にあるのでそこを叩く。将来 courseboard(Rust) に移設。
-- [ ] **Cognito 設定（Ao/AWS・1回）**：courseboard フロントの**コールバックURL登録**＋認可コードフロー有効化。courseboard 用の `COGNITO_CLIENT_ID/_SECRET/_ISSUER/_DOMAIN/_REGION`、`AUTH_SECRET`、`AUTH_URL` を環境に設定。
+- [ ] **Cognito クライアント発行（自己発行・1回／手動プロビジョニング不要）**：auth-platform の
+  `POST /v1/auth/oauth2-clients`（`tachyoncli` が叩くエンドポイント）で**ログイン用クライアントを丸ごと発行**する。
+  実装確認済み（tachyon-apps `packages/auth/src/interface_adapter/axum/oauth2_client_handler.rs`）: リクエストは
+  `redirect_uris`(コールバックURL) / `allowed_scopes` / `grant_types`(`authorization_code`/`refresh_token`) を受け取る。
+  ```jsonc
+  { "name": "courseboard-golfadmin",
+    "redirect_uris": ["https://<golfadminホスト>/api/auth/callback/cognito",
+                       "http://localhost:3001/api/auth/callback/cognito"],
+    "allowed_scopes": ["openid","profile","email","aws.cognito.signin.user.admin"],
+    "grant_types": ["authorization_code","refresh_token"] }
+  // → 返却 client_id/secret を COGNITO_CLIENT_ID / COGNITO_CLIENT_SECRET へ（secret store）
+  ```
+  唯一の変数は `redirect_uris` の **golfadmin ホスト名**（Cloudflare Worker のドメイン確定後）。
+  `AUTH_SECRET` はこちらで生成。**旧「Ao/AWS 手動プロビジョニング」ランブックは不要になったため破棄。**
+- 認可(authz)は作業なし：方式A（ユーザートークン転送）で tachyonfield が本人の Field 権限で認可。
 - [x] **デプロイ先決定 → Cloudflare Workers**（tachyonfield `fieldadmin` と同型）。vinext のまま。`tachyon.yaml` に frontend CloudApp `golfadmin` を追加済み・`wrangler.json` の name を `golfadmin` に変更済み。バック=AWS Lambda(既存)／フロント=Cloudflare Workers。build/secret は platform 連携で要検証。
 - [ ] **ブランディング/不要物除去**：sentry/photon/その他 Field 固有設定の要否を整理。`public/` の Field アセットも golf 用に差し替え/削減。
 - [ ] **ビルド検証**：`npm install` → `npm run build`（この sandbox では未実施）。
