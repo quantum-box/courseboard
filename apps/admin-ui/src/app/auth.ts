@@ -73,12 +73,12 @@ function getAuthSecret(options: { authUrl?: string } = {}) {
 	}
 
 	if (options.authUrl && options.authUrl !== resolveAuthUrl()) {
-		return `fieldadmin-preview-auth-secret:${options.authUrl}`
+		return `golfadmin-preview-auth-secret:${options.authUrl}`
 	}
 
 	const fallbackAuthUrl = resolveAuthUrl()
-	if (fallbackAuthUrl !== 'https://fieldadmin.txcloud.app') {
-		return `fieldadmin-preview-auth-secret:${fallbackAuthUrl}`
+	if (fallbackAuthUrl !== 'https://golfadmin.txcloud.app') {
+		return `golfadmin-preview-auth-secret:${fallbackAuthUrl}`
 	}
 
 	throw new Error('AUTH_SECRET or NEXTAUTH_SECRET must be configured')
