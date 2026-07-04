@@ -1,6 +1,6 @@
 {
   "$schema": "../../node_modules/wrangler/config-schema.json",
-  "name": "golfadmin",
+  "name": "courseboard",
   "main": "worker/index.ts",
   "workers_dev": false,
   "preview_urls": false,

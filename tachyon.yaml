@@ -33,8 +33,8 @@ spec:
     # Backend stays AWS Lambda above; this is a separate Cloudflare Worker deploy.
     # Auth is handled by the Cloud App PLATFORM (auth.enabled below), NOT by the app:
     # no per-app Cognito client, no callback URL. Login happens at the platform
-    # (app.txcloud.app); golfadmin.txcloud.app (and preview envs) are gated automatically.
-    - name: golfadmin
+    # (app.txcloud.app); courseboard.txcloud.app (and preview envs) are gated automatically.
+    - name: courseboard
       repository:
         url: https://github.com/quantum-box/courseboard
         owner: quantum-box
@@ -44,9 +44,9 @@ spec:
       framework: worker
       deploymentTarget: cloudflare_workers
       # Platform-handled login (per Ao) — Cloud App standard. When enabled, the
-      # platform auto-creates the `golfadmin-web` OAuth2 client on the Tachyon
+      # platform auto-creates the `courseboard-web` OAuth2 client on the Tachyon
       # user pool, auto-registers callbacks
-      #   https://golfadmin.txcloud.app/api/auth/callback/tachyon (+ pr previews),
+      #   https://courseboard.txcloud.app/api/auth/callback/tachyon (+ pr previews),
       # and injects clientId/clientSecret/userPoolId env vars; txcloud-proxy then
       # gates access by the NextAuth session cookie. No manual Cognito client /
       # callback registration.
@@ -96,21 +96,21 @@ spec:
           type: credential
           valueFrom:
             oauth2ClientRef:
-              name: golfadmin-web
+              name: courseboard-web
               field: clientId
         - name: AUTH_SECRET
           type: credential
           valueFrom:
-            secret: golfadmin/AUTH_SECRET
+            secret: courseboard/AUTH_SECRET
         - name: NEXTAUTH_SECRET
           type: credential
           valueFrom:
-            secret: golfadmin/NEXTAUTH_SECRET
+            secret: courseboard/NEXTAUTH_SECRET
         - name: COGNITO_CLIENT_SECRET
           type: credential
           valueFrom:
             oauth2ClientRef:
-              name: golfadmin-web
+              name: courseboard-web
               field: clientSecret
         # Golf ERP endpoints currently live in tachyonfield's Field API; point the frontend there.
         - name: NEXT_PUBLIC_BACKEND_API_URL
@@ -123,13 +123,13 @@ spec:
 apiVersion: apps.tachy.one/v1alpha
 kind: OAuth2Client
 metadata:
-  name: golfadmin-web
+  name: courseboard-web
   tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
 spec:
   redirectUris:
-    - https://golfadmin.txcloud.app/api/auth/callback/tachyon
-    - https://*--golfadmin.txcloud.app/api/auth/callback/tachyon
-    - https://*.golfadmin.txcloud.app/api/auth/callback/tachyon
+    - https://courseboard.txcloud.app/api/auth/callback/tachyon
+    - https://*--courseboard.txcloud.app/api/auth/callback/tachyon
+    - https://*.courseboard.txcloud.app/api/auth/callback/tachyon
   allowedScopes:
     - openid
     - profile

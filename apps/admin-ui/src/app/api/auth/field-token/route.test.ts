@@ -16,7 +16,7 @@ vi.mock('app/auth', () => ({
 }))
 
 function request(body: unknown) {
-	return new Request('https://golfadmin.txcloud.app/api/auth/field-token', {
+	return new Request('https://courseboard.txcloud.app/api/auth/field-token', {
 		body: JSON.stringify(body),
 		headers: { 'content-type': 'application/json' },
 		method: 'POST',

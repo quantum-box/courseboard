@@ -28,7 +28,7 @@ const nextConfig = {
 	experimental: {
 		instrumentationHook: true,
 		serverActions: {
-			allowedOrigins: ['fieldadmin.txcloud.app', '*.txcloud.app'],
+			allowedOrigins: ['courseboard.txcloud.app', '*.txcloud.app'],
 		},
 	},
 	transpilePackages: [
