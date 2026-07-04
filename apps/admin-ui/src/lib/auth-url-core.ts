@@ -1,4 +1,4 @@
-const DEFAULT_AUTH_URL = 'https://fieldadmin.txcloud.app'
+const DEFAULT_AUTH_URL = 'https://golfadmin.txcloud.app'
 const TXCLOUD_HOST_SUFFIX = '.txcloud.app'
 const WORKERS_DEV_HOST_SUFFIX = '.workers.dev'
 

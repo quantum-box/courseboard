@@ -227,12 +227,12 @@ describe('createAuthConfig', () => {
 		const config = createAuthConfig(
 			{},
 			{
-				authUrl: 'https://pr357--fieldadmin.txcloud.app',
+				authUrl: 'https://pr357--golfadmin.txcloud.app',
 			},
 		)
 
 		expect(config.secret).toBe(
-			'fieldadmin-preview-auth-secret:https://pr357--fieldadmin.txcloud.app',
+			'golfadmin-preview-auth-secret:https://pr357--golfadmin.txcloud.app',
 		)
 	})
 })
@@ -338,7 +338,7 @@ describe('getAuthPkceDiagnostics', () => {
 		vi.stubEnv('AUTH_SECRET', 'test-auth-secret')
 
 		await expect(
-			getAuthPkceDiagnostics(new Request('https://fieldadmin.txcloud.app')),
+			getAuthPkceDiagnostics(new Request('https://golfadmin.txcloud.app')),
 		).resolves.toEqual({ decrypt: false, present: false })
 	})
 })
