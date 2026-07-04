@@ -101,7 +101,7 @@ type MenuGroupKey =
 	| 'extensions'
 	| 'settings'
 
-const STORAGE_KEY = 'tachyon-field-admin-nav-open-groups'
+const STORAGE_KEY = 'courseboard-admin-nav-open-groups'
 
 const defaultOpenGroups: Record<MenuGroupKey, boolean> = {
 	customers: true,

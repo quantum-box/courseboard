@@ -1,5 +1,5 @@
 const PINNED_NAVIGATION_STORAGE_KEY_PREFIX =
-	'tachyon-field-admin-pinned-nav-items'
+	'courseboard-admin-pinned-nav-items'
 
 export function getPinnedNavigationStorageKey(
 	modePrefix: string,

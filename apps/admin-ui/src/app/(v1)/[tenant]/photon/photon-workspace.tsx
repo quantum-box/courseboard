@@ -148,7 +148,7 @@ export function PhotonWorkspace({
 	) => {
 		const operation = createPhotonWorkspaceOperation(
 			{
-				platformId: 'tachyon-field-admin-ui',
+				platformId: 'courseboard-admin-ui',
 				tenantId: tenant,
 				actorUserId: userId,
 			},

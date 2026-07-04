@@ -10,7 +10,7 @@ import React, {
 
 export type AdminLocale = 'ja' | 'en'
 
-const STORAGE_KEY = 'tachyon-field-admin-locale'
+const STORAGE_KEY = 'courseboard-admin-locale'
 
 type AdminI18nContextValue = {
 	locale: AdminLocale

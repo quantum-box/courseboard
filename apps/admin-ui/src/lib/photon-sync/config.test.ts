@@ -28,7 +28,7 @@ describe('photon sync config', () => {
 		})
 
 		expect(namespace).toBe(
-			'tachyon-field-admin-ui:photon:v2:tn_platform:op_tenant:us_actor',
+			'courseboard-admin-ui:photon:v2:tn_platform:op_tenant:us_actor',
 		)
 	})
 

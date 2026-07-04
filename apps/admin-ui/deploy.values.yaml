@@ -1,5 +1,5 @@
 image:
-  repository: "asia-northeast1-docker.pkg.dev/tachyon-403814/tachyon-apps/tachyon-field-admin"
+  repository: "asia-northeast1-docker.pkg.dev/tachyon-403814/tachyon-apps/courseboard-admin-ui"
   tag: "latest"
 
 livenessProbePath: /api/health
@@ -8,12 +8,12 @@ extraEnvs:
   - name: "NEXTAUTH_SECRET"
     valueFrom:
       secretKeyRef:
-        name: "tachyon-field-admin-ui-secrets"
+        name: "courseboard-admin-ui-secrets"
         key: "NEXTAUTH_SECRET"
   - name: "NEXTAUTH_URL"
-    value: "https://tachyonfield.txcloud.app"
+    value: "https://courseboard.txcloud.app"
   - name: "AUTH_URL"
-    value: "https://tachyonfield.txcloud.app"
+    value: "https://courseboard.txcloud.app"
   - name: "AUTH_ISSUER"
     value: "https://auth.tachy.one/auth/realms/tachyon"
   - name: "AUTH_CLIENT_ID"

@@ -11,7 +11,7 @@ RUN apk update
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
 COPY . .
-RUN pnpm dlx turbo@2.5.4 prune --scope=tachyon-field-admin-ui --docker
+RUN pnpm dlx turbo@2.5.4 prune --scope=courseboard-admin-ui --docker
 
 # Add lockfile and package.json's of isolated subworkspace
 FROM base AS installer
@@ -45,12 +45,12 @@ RUN echo "NEXT_PUBLIC_BACKEND_API_URL=$NEXT_PUBLIC_BACKEND_API_URL" >> .env.prod
 RUN echo "INTEGRATION_API_URL=$INTEGRATION_API_URL" >> .env.production
 
 # AUTH_SECRET / NEXTAUTH_SECRET are embedded at build time because the
-# tachyon-field-admin Cloud Run service does not inject them at runtime. They are
+# courseboard-admin Cloud Run service does not inject them at runtime. They are
 # read by `next.config.js` env and inlined into the standalone bundle.
 ENV AUTH_SECRET=$AUTH_SECRET
 ENV NEXTAUTH_SECRET=$NEXTAUTH_SECRET
 
-RUN pnpm exec turbo run build --filter=tachyon-field-admin-ui...
+RUN pnpm exec turbo run build --filter=courseboard-admin-ui...
 
 FROM node:24-alpine AS runner
 WORKDIR /app

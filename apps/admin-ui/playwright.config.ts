@@ -12,9 +12,11 @@ export default defineConfig({
 	timeout: 30_000,
 	use: {
 		baseURL:
-			process.env.TACHYON_FIELD_ADMIN_URL || process.env.FIELD_ADMIN_URL ||
+			process.env.COURSEBOARD_ADMIN_URL ||
+			process.env.TACHYON_FIELD_ADMIN_URL ||
+			process.env.FIELD_ADMIN_URL ||
 			process.env.FIELD_ADMIN_UI_URL ||
-			'https://fieldadmin.txcloud.app',
+			'https://courseboard.txcloud.app',
 		trace: 'on-first-retry',
 		screenshot: 'only-on-failure',
 		launchOptions: slowMo > 0 ? { slowMo } : undefined,

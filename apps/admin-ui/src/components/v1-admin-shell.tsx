@@ -7,8 +7,8 @@ import { PanelRightIcon } from 'lucide-react'
 import { RouteProgressBar } from 'components/route-progress-bar'
 import { useEffect, useMemo, useState } from 'react'
 
-const SIDEBAR_CLOSED_KEY_PREFIX = 'tachyon-field-admin-sidebar-collapsed'
-const TENANT_NAME_KEY_PREFIX = 'tachyon-field-admin-tenant-name'
+const SIDEBAR_CLOSED_KEY_PREFIX = 'courseboard-admin-sidebar-collapsed'
+const TENANT_NAME_KEY_PREFIX = 'courseboard-admin-tenant-name'
 const TENANT_NAME_EMPTY_CACHE_VALUE = '__tachyon_field_admin_empty_tenant_name__'
 
 export function getSidebarClosedStorageKey(modePrefix: string, tenant: string) {

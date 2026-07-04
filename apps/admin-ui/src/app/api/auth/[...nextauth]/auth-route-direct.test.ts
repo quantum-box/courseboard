@@ -21,7 +21,7 @@ import {
 	handleSigninProviderRequest,
 } from './auth-route'
 
-describe('fieldadmin Auth.js direct route adapter', () => {
+describe('courseboard Auth.js direct route adapter', () => {
 	beforeEach(() => {
 		mocks.auth.mockReset()
 		mocks.createAuthConfig.mockReset()
@@ -33,14 +33,14 @@ describe('fieldadmin Auth.js direct route adapter', () => {
 			secret: 'test-secret',
 		})
 		mocks.resolveAuthUrl.mockImplementation((request?: Request) => {
-			if (!request) return 'https://golfadmin.txcloud.app'
+			if (!request) return 'https://courseboard.txcloud.app'
 			const forwardedHost = request.headers.get('x-forwarded-host')
 			if (forwardedHost?.endsWith('.txcloud.app')) {
 				return `https://${forwardedHost}`
 			}
 			const url = new URL(request.url)
 			if (url.hostname.endsWith('.workers.dev')) {
-				return 'https://golfadmin.txcloud.app'
+				return 'https://courseboard.txcloud.app'
 			}
 			return url.origin
 		})
@@ -48,10 +48,10 @@ describe('fieldadmin Auth.js direct route adapter', () => {
 
 	it('canonicalizes callback requests before passing them to Auth core', async () => {
 		const request = new Request(
-			'https://golfadmin.quantum-box.workers.dev/api/auth/callback/cognito?code=present',
+			'https://courseboard.quantum-box.workers.dev/api/auth/callback/cognito?code=present',
 			{
 				headers: {
-					host: 'golfadmin.quantum-box.workers.dev',
+					host: 'courseboard.quantum-box.workers.dev',
 					cookie: '__Secure-authjs.pkce.code_verifier=value-length-only',
 				},
 			},
@@ -62,18 +62,18 @@ describe('fieldadmin Auth.js direct route adapter', () => {
 
 		const authRequest = mocks.auth.mock.calls[0]?.[0] as Request
 		expect(mocks.createAuthConfig).toHaveBeenCalledWith(instrumentation, {
-			authUrl: 'https://golfadmin.txcloud.app',
+			authUrl: 'https://courseboard.txcloud.app',
 		})
 		expect(mocks.auth).toHaveBeenCalledWith(
 			authRequest,
 			expect.objectContaining({ basePath: '/api/auth' }),
 		)
 		expect(authRequest.url).toBe(
-			'https://golfadmin.txcloud.app/api/auth/callback/cognito?code=present',
+			'https://courseboard.txcloud.app/api/auth/callback/cognito?code=present',
 		)
-		expect(authRequest.headers.get('host')).toBe('golfadmin.txcloud.app')
+		expect(authRequest.headers.get('host')).toBe('courseboard.txcloud.app')
 		expect(authRequest.headers.get('x-forwarded-host')).toBe(
-			'golfadmin.txcloud.app',
+			'courseboard.txcloud.app',
 		)
 		expect(authRequest.headers.get('cookie')).toBe(
 			'__Secure-authjs.pkce.code_verifier=value-length-only',
@@ -82,10 +82,10 @@ describe('fieldadmin Auth.js direct route adapter', () => {
 
 	it('still normalizes provider sign-in requests before calling Auth core', async () => {
 		const request = new Request(
-			'https://golfadmin.quantum-box.workers.dev/api/auth/signin/cognito?identity_provider=Google',
+			'https://courseboard.quantum-box.workers.dev/api/auth/signin/cognito?identity_provider=Google',
 			{
 				headers: {
-					'x-forwarded-host': 'pr357--golfadmin.txcloud.app',
+					'x-forwarded-host': 'pr357--courseboard.txcloud.app',
 					'x-forwarded-proto': 'https',
 				},
 				method: 'GET',
@@ -99,7 +99,7 @@ describe('fieldadmin Auth.js direct route adapter', () => {
 		expect(authRequest).toBeInstanceOf(Request)
 		expect(authRequest.method).toBe('POST')
 		expect(authRequest.url).toBe(
-			'https://pr357--golfadmin.txcloud.app/api/auth/signin/cognito?identity_provider=Google',
+			'https://pr357--courseboard.txcloud.app/api/auth/signin/cognito?identity_provider=Google',
 		)
 		expect(authConfig.skipCSRFCheck).toBe(Symbol.for('skip-csrf-check'))
 	})

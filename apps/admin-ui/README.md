@@ -1,13 +1,13 @@
-# TACHYON Field Admin UI
+# Course Board Admin UI
 
-Next.js admin UI for TACHYON Field.
+Next.js admin UI for Course Board.
 
 ## Local Development
 
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
-pnpm --filter tachyon-field-admin-ui dev
+pnpm --filter courseboard-admin-ui dev
 ```
 
 Open `http://localhost:3001`.

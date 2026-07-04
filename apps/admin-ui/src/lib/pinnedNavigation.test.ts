@@ -8,10 +8,10 @@ import {
 describe('getPinnedNavigationStorageKey', () => {
 	it('scopes pinned navigation by tenant and mode', () => {
 		expect(getPinnedNavigationStorageKey('', 'tn_prod')).toBe(
-			'tachyon-field-admin-pinned-nav-items:production:tn_prod',
+			'courseboard-admin-pinned-nav-items:production:tn_prod',
 		)
 		expect(getPinnedNavigationStorageKey('/sandbox', 'tn_prod')).toBe(
-			'tachyon-field-admin-pinned-nav-items:sandbox:tn_prod',
+			'courseboard-admin-pinned-nav-items:sandbox:tn_prod',
 		)
 		expect(getPinnedNavigationStorageKey('', 'tn_other')).not.toBe(
 			getPinnedNavigationStorageKey('', 'tn_prod'),

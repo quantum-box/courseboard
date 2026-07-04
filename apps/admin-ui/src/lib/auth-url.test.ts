@@ -8,13 +8,13 @@ import {
 describe('canonicalizeAuthUrl', () => {
 	it('forces workers.dev URLs to the final txcloud auth origin', () => {
 		expect(
-			canonicalizeAuthUrl('https://golfadmin.quantum-box.workers.dev'),
-		).toBe('https://golfadmin.txcloud.app')
+			canonicalizeAuthUrl('https://courseboard.quantum-box.workers.dev'),
+		).toBe('https://courseboard.txcloud.app')
 	})
 
 	it('keeps txcloud preview URLs intact', () => {
-		expect(canonicalizeAuthUrl('https://pr357--golfadmin.txcloud.app/')).toBe(
-			'https://pr357--golfadmin.txcloud.app',
+		expect(canonicalizeAuthUrl('https://pr357--courseboard.txcloud.app/')).toBe(
+			'https://pr357--courseboard.txcloud.app',
 		)
 	})
 })
@@ -23,37 +23,37 @@ describe('resolveAuthUrlFromEnv', () => {
 	it('prefers txcloud CF_PAGES_URL on preview deployments', () => {
 		expect(
 			resolveAuthUrlFromEnv({
-				cfPagesUrl: 'https://pr357--golfadmin.txcloud.app/',
-				authUrl: 'https://golfadmin.txcloud.app',
-				nextAuthUrl: 'https://golfadmin.txcloud.app',
+				cfPagesUrl: 'https://pr357--courseboard.txcloud.app/',
+				authUrl: 'https://courseboard.txcloud.app',
+				nextAuthUrl: 'https://courseboard.txcloud.app',
 			}),
-		).toBe('https://pr357--golfadmin.txcloud.app')
+		).toBe('https://pr357--courseboard.txcloud.app')
 	})
 
 	it('does not use workers.dev CF_PAGES_URL for auth callbacks', () => {
 		expect(
 			resolveAuthUrlFromEnv({
-				cfPagesUrl: 'https://golfadmin.quantum-box.workers.dev',
-				authUrl: 'https://golfadmin.txcloud.app',
+				cfPagesUrl: 'https://courseboard.quantum-box.workers.dev',
+				authUrl: 'https://courseboard.txcloud.app',
 			}),
-		).toBe('https://golfadmin.txcloud.app')
+		).toBe('https://courseboard.txcloud.app')
 	})
 
 	it('falls back to the canonical auth URL when only workers.dev is present', () => {
 		expect(
 			resolveAuthUrlFromEnv({
-				cfPagesUrl: 'https://golfadmin.quantum-box.workers.dev',
+				cfPagesUrl: 'https://courseboard.quantum-box.workers.dev',
 			}),
-		).toBe('https://golfadmin.txcloud.app')
+		).toBe('https://courseboard.txcloud.app')
 	})
 
 	it('falls back to AUTH_URL when CF_PAGES_URL is unset', () => {
 		expect(
 			resolveAuthUrlFromEnv({
-				authUrl: 'https://golfadmin.txcloud.app',
+				authUrl: 'https://courseboard.txcloud.app',
 				nextAuthUrl: 'https://preview.example.com',
 			}),
-		).toBe('https://golfadmin.txcloud.app')
+		).toBe('https://courseboard.txcloud.app')
 	})
 
 	it('falls back to NEXTAUTH_URL and strips trailing slashes', () => {
@@ -70,14 +70,14 @@ describe('resolveAuthUrlFromRequest', () => {
 		expect(
 			resolveAuthUrlFromRequest({
 				headers: new Headers({
-					host: 'golfadmin.quantum-box.workers.dev',
-					'x-forwarded-host': 'pr357--golfadmin.txcloud.app',
+					host: 'courseboard.quantum-box.workers.dev',
+					'x-forwarded-host': 'pr357--courseboard.txcloud.app',
 					'x-forwarded-proto': 'https',
 				}),
 				requestUrl:
-					'https://golfadmin.quantum-box.workers.dev/api/auth/signin/cognito',
+					'https://courseboard.quantum-box.workers.dev/api/auth/signin/cognito',
 			}),
-		).toBe('https://pr357--golfadmin.txcloud.app')
+		).toBe('https://pr357--courseboard.txcloud.app')
 	})
 
 	it('uses standard Forwarded txcloud host when present', () => {
@@ -85,22 +85,22 @@ describe('resolveAuthUrlFromRequest', () => {
 			resolveAuthUrlFromRequest({
 				headers: new Headers({
 					forwarded:
-						'for=192.0.2.10;proto=https;host=pr357--golfadmin.txcloud.app',
+						'for=192.0.2.10;proto=https;host=pr357--courseboard.txcloud.app',
 					host: 'internal.worker',
 				}),
 				requestUrl: 'http://internal.worker/api/auth/callback/cognito',
 			}),
-		).toBe('https://pr357--golfadmin.txcloud.app')
+		).toBe('https://pr357--courseboard.txcloud.app')
 	})
 
 	it('does not resolve workers.dev as an auth callback origin', () => {
 		expect(
 			resolveAuthUrlFromRequest({
 				headers: new Headers({
-					host: 'golfadmin.quantum-box.workers.dev',
+					host: 'courseboard.quantum-box.workers.dev',
 				}),
 				requestUrl:
-					'https://golfadmin.quantum-box.workers.dev/api/auth/signin/cognito',
+					'https://courseboard.quantum-box.workers.dev/api/auth/signin/cognito',
 			}),
 		).toBeUndefined()
 	})

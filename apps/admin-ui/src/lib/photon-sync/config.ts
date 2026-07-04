@@ -7,8 +7,8 @@ import type {
 } from './types'
 
 const DEFAULT_SCHEMA_VERSION = 1
-const DEFAULT_APP_BUILD = 'tachyon-field-admin-ui'
-const NAMESPACE_PREFIX = 'tachyon-field-admin-ui:photon'
+const DEFAULT_APP_BUILD = 'courseboard-admin-ui'
+const NAMESPACE_PREFIX = 'courseboard-admin-ui:photon'
 const KNOWN_DOMAINS: PhotonSyncDomain[] = [
 	'erp.orders',
 	'erp.inventory',

@@ -11,12 +11,12 @@ describe('getSidebarClosedStorageKey', () => {
 		expect(
 			getSidebarClosedStorageKey('', 'tn_01kshr165k3wwr8xyk0e6vy36c'),
 		).toBe(
-			'tachyon-field-admin-sidebar-collapsed:production:tn_01kshr165k3wwr8xyk0e6vy36c',
+			'courseboard-admin-sidebar-collapsed:production:tn_01kshr165k3wwr8xyk0e6vy36c',
 		)
 		expect(
 			getSidebarClosedStorageKey('/sandbox', 'tn_01kshr165k3wwr8xyk0e6vy36c'),
 		).toBe(
-			'tachyon-field-admin-sidebar-collapsed:sandbox:tn_01kshr165k3wwr8xyk0e6vy36c',
+			'courseboard-admin-sidebar-collapsed:sandbox:tn_01kshr165k3wwr8xyk0e6vy36c',
 		)
 		expect(
 			getSidebarClosedStorageKey('', 'tn_01ks18jhh1xvggktfzjx5jqsen'),
@@ -27,7 +27,7 @@ describe('getSidebarClosedStorageKey', () => {
 describe('tenant name cache helpers', () => {
 	it('scopes tenant name cache by tenant', () => {
 		expect(getTenantNameStorageKey('tn_operator_1')).toBe(
-			'tachyon-field-admin-tenant-name:tn_operator_1',
+			'courseboard-admin-tenant-name:tn_operator_1',
 		)
 		expect(getTenantNameStorageKey('tn_operator_1')).not.toBe(
 			getTenantNameStorageKey('tn_operator_2'),
