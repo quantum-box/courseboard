@@ -17,22 +17,25 @@ describe('Course Board production API runtime env', () => {
 		expect(manifest).toContain(`value: ${FIELD_API_URL}`)
 	})
 
-	it('points courseboard backend env at the field API endpoint', () => {
+	it('keeps browser env public and routes server backend through internal service', () => {
 		const manifest = readFileSync(files.root, 'utf8')
 		const appManifest = readAppManifest(manifest, 'courseboard')
 		expect(appManifest, 'courseboard app manifest present').not.toBe('')
 
-		// Browser-exposed env must stay on the public URL. Server-side env
-		// (BACKEND_API_URL / TACHYON_FIELD_API_URL) currently also uses the
-		// public URL; once PLT-2442 provisions tachyon-field-api into the
-		// hosting tenant these two switch to valueFrom.internalService (same
-		// split as tachyonfield PR #468) and this test must assert that split.
-		for (const name of [
+		// Browser-exposed env must stay on the public URL; server-side env
+		// resolves the internal origin via PLT-2405 internalService (same
+		// split as tachyonfield PR #468) to avoid the worker-subrequest 522
+		// (PLT-2373). Requires tachyon-field-api registered in the hosting
+		// tenant (PLT-2442).
+		expect(
+			readEnvValue(appManifest, 'NEXT_PUBLIC_BACKEND_API_URL'),
 			'NEXT_PUBLIC_BACKEND_API_URL',
-			'BACKEND_API_URL',
-			'TACHYON_FIELD_API_URL',
-		]) {
-			expect(readEnvValue(appManifest, name), name).toBe(FIELD_API_URL)
+		).toBe(FIELD_API_URL)
+
+		for (const name of ['BACKEND_API_URL', 'TACHYON_FIELD_API_URL']) {
+			expect(readInternalServiceAppName(appManifest, name), name).toBe(
+				'tachyon-field-api',
+			)
 		}
 	})
 
@@ -61,6 +64,17 @@ function readAppManifest(manifest: string, appName: string) {
 	)
 
 	return match?.[0] ?? ''
+}
+
+function readInternalServiceAppName(manifest: string, name: string) {
+	const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+	const match = manifest.match(
+		new RegExp(
+			`- name: ${escapedName}\\n\\s+valueFrom:\\n\\s+internalService:\\n\\s+appName: (.+)`,
+		),
+	)
+
+	return match?.[1]?.trim()
 }
 
 function readEnvValue(manifest: string, name: string) {
