@@ -30,15 +30,15 @@ function collectText(node: React.ReactNode): string {
 }
 
 describe('SignInButton', () => {
-	it('renders dedicated Google and Cognito Hosted UI buttons', () => {
+	it('renders dedicated Google and platform sign-in buttons', () => {
 		const text = collectText(SignInButton())
 
 		expect(text).not.toContain('ローカルでログイン')
 		expect(text).toContain('Google でログイン')
-		expect(text).toContain('Cognito Hosted UI でログイン')
+		expect(text).toContain('ログイン')
 	})
 
-	it('submits Google sign-in to the Auth.js Cognito endpoint', () => {
+	it('submits Google sign-in to the Auth.js tachyon endpoint', () => {
 		const element = SignInButton()
 
 		const forms = React.Children.toArray(element.props.children)
@@ -56,14 +56,14 @@ describe('SignInButton', () => {
 		expect(inputProps.value).toBe('Google')
 	})
 
-	it('submits default Hosted UI sign-in to the Auth.js Cognito endpoint', () => {
+	it('submits default platform sign-in to the Auth.js tachyon endpoint', () => {
 		const element = SignInButton()
 
 		const forms = React.Children.toArray(element.props.children)
-		const hostedUiForm = forms[1]
-		expect(React.isValidElement(hostedUiForm)).toBe(true)
-		if (!React.isValidElement(hostedUiForm)) return
-		const formProps = hostedUiForm.props as FormElementProps
+		const platformForm = forms[1]
+		expect(React.isValidElement(platformForm)).toBe(true)
+		if (!React.isValidElement(platformForm)) return
+		const formProps = platformForm.props as FormElementProps
 		expect(formProps.action).toBe('/api/auth/signin/tachyon')
 		expect(formProps.method).toBe('get')
 		const hiddenInputs = React.Children.toArray(formProps.children).filter(

@@ -6,10 +6,10 @@ const FIELD_API_URL = 'https://tachyon-field-api.txcloud.app'
 const LEGACY_FIELD_API_URL = 'https://field.api.n1.tachy.one'
 
 const files = {
-	root: fileURLToPath(new URL('../../../../tachyon.yml', import.meta.url)),
+	root: fileURLToPath(new URL('../../../../tachyon.yaml', import.meta.url)),
 }
 
-describe('TACHYON Field production API runtime env', () => {
+describe('Course Board production API runtime env', () => {
 	it('keeps the root Cloud Apps manifest on the field API endpoint', () => {
 		const manifest = readFileSync(files.root, 'utf8')
 
@@ -17,24 +17,22 @@ describe('TACHYON Field production API runtime env', () => {
 		expect(manifest).toContain(`value: ${FIELD_API_URL}`)
 	})
 
-	it('sets storefront and admin production backend env to the same endpoint', () => {
+	it('points courseboard backend env at the field API endpoint', () => {
 		const manifest = readFileSync(files.root, 'utf8')
-		const appManifests = {
-			admin: readAppManifest(manifest, 'fieldadmin'),
-			field: readAppManifest(manifest, 'field'),
-			storefront: readAppManifest(manifest, 'tachyonfield'),
-		}
+		const appManifest = readAppManifest(manifest, 'courseboard')
+		expect(appManifest, 'courseboard app manifest present').not.toBe('')
 
+		// Browser-exposed env must stay on the public URL. Server-side env
+		// (BACKEND_API_URL / TACHYON_FIELD_API_URL) currently also uses the
+		// public URL; once PLT-2442 provisions tachyon-field-api into the
+		// hosting tenant these two switch to valueFrom.internalService (same
+		// split as tachyonfield PR #468) and this test must assert that split.
 		for (const name of [
 			'NEXT_PUBLIC_BACKEND_API_URL',
 			'BACKEND_API_URL',
 			'TACHYON_FIELD_API_URL',
 		]) {
-			for (const [app, appManifest] of Object.entries(appManifests)) {
-				expect(readEnvValue(appManifest, name), `${app} ${name}`).toBe(
-					FIELD_API_URL,
-				)
-			}
+			expect(readEnvValue(appManifest, name), name).toBe(FIELD_API_URL)
 		}
 	})
 

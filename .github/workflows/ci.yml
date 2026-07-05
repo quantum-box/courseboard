@@ -54,6 +54,9 @@ jobs:
       - name: Typecheck
         run: pnpm exec tsc --noEmit -p tsconfig.json
 
+      - name: Unit tests
+        run: pnpm run test
+
       - name: Build
         run: pnpm run build
         env:
