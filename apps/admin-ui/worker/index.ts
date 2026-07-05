@@ -34,6 +34,7 @@ interface Env {
       };
     };
   };
+  [key: string]: unknown;
 }
 
 interface ExecutionContext {
@@ -47,6 +48,13 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
+    (globalThis as typeof globalThis & { __env__?: Record<string, string> }).__env__ =
+      Object.fromEntries(
+        Object.entries(env).filter(
+          (entry): entry is [string, string] => typeof entry[1] === "string",
+        ),
+      );
+
     const url = new URL(request.url);
 
     if (isImageOptimizationPath(url.pathname)) {
