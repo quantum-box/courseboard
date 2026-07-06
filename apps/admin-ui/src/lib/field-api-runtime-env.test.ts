@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 
 const FIELD_API_URL = 'https://tachyon-field-api.txcloud.app'
 const LEGACY_FIELD_API_URL = 'https://field.api.n1.tachy.one'
+const FIELD_CANONICAL_TENANT_ID = 'tn_01ks18jhh1xvggktfzjx5jqsen'
+const LEGACY_HOSTING_TENANT_ID = 'tn_01hjjn348rn3t49zz6hvmfq67p'
 
 const files = {
 	root: fileURLToPath(new URL('../../../../tachyon.yaml', import.meta.url)),
@@ -37,6 +39,21 @@ describe('Course Board production API runtime env', () => {
 				'tachyon-field-api',
 			)
 		}
+	})
+
+	it('targets the Field canonical tenant for the canary transfer', () => {
+		const manifest = readFileSync(files.root, 'utf8')
+
+		expect(readMetadataTenantId(manifest, 'CloudApps')).toBe(
+			FIELD_CANONICAL_TENANT_ID,
+		)
+		expect(readMetadataTenantId(manifest, 'OAuth2Client')).toBe(
+			FIELD_CANONICAL_TENANT_ID,
+		)
+		expect(readEnvValue(readAppManifest(manifest, 'courseboard'), 'NEXT_PUBLIC_PLATFORM_ID')).toBe(
+			FIELD_CANONICAL_TENANT_ID,
+		)
+		expect(manifest).not.toContain(`tenantId: ${LEGACY_HOSTING_TENANT_ID}`)
 	})
 
 	it('does not keep legacy field API env fallbacks in runtime source', () => {
@@ -81,6 +98,17 @@ function readEnvValue(manifest: string, name: string) {
 	const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 	const match = manifest.match(
 		new RegExp(`- name: ${escapedName}\\n\\s+value: (.+)`),
+	)
+
+	return match?.[1]?.trim()
+}
+
+function readMetadataTenantId(manifest: string, kind: string) {
+	const escapedKind = kind.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+	const match = manifest.match(
+		new RegExp(
+			`kind: ${escapedKind}\\nmetadata:\\n\\s+name: .+\\n\\s+tenantId: (.+)`,
+		),
 	)
 
 	return match?.[1]?.trim()
