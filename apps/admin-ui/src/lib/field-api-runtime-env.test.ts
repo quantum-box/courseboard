@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest'
 
 const FIELD_API_URL = 'https://tachyon-field-api.txcloud.app'
 const LEGACY_FIELD_API_URL = 'https://field.api.n1.tachy.one'
+const FIELD_CANONICAL_TENANT_ID = 'tn_01ks18jhh1xvggktfzjx5jqsen'
+const LEGACY_HOSTING_TENANT_ID = 'tn_01hjjn348rn3t49zz6hvmfq67p'
 
 const files = {
 	root: fileURLToPath(new URL('../../../../tachyon.yaml', import.meta.url)),
@@ -17,23 +19,41 @@ describe('Course Board production API runtime env', () => {
 		expect(manifest).toContain(`value: ${FIELD_API_URL}`)
 	})
 
-	it('points courseboard backend env at the field API endpoint', () => {
+	it('keeps browser env public and routes server backend through internal service', () => {
 		const manifest = readFileSync(files.root, 'utf8')
 		const appManifest = readAppManifest(manifest, 'courseboard')
 		expect(appManifest, 'courseboard app manifest present').not.toBe('')
 
-		// Browser-exposed env must stay on the public URL. Server-side env
-		// (BACKEND_API_URL / TACHYON_FIELD_API_URL) currently also uses the
-		// public URL; once PLT-2442 provisions tachyon-field-api into the
-		// hosting tenant these two switch to valueFrom.internalService (same
-		// split as tachyonfield PR #468) and this test must assert that split.
-		for (const name of [
+		// Browser-exposed env must stay on the public URL; server-side env
+		// resolves the internal origin via PLT-2405 internalService (same
+		// split as tachyonfield PR #468) to avoid the worker-subrequest 522
+		// (PLT-2373). Requires tachyon-field-api registered in the hosting
+		// tenant (PLT-2442).
+		expect(
+			readEnvValue(appManifest, 'NEXT_PUBLIC_BACKEND_API_URL'),
 			'NEXT_PUBLIC_BACKEND_API_URL',
-			'BACKEND_API_URL',
-			'TACHYON_FIELD_API_URL',
-		]) {
-			expect(readEnvValue(appManifest, name), name).toBe(FIELD_API_URL)
+		).toBe(FIELD_API_URL)
+
+		for (const name of ['BACKEND_API_URL', 'TACHYON_FIELD_API_URL']) {
+			expect(readInternalServiceAppName(appManifest, name), name).toBe(
+				'tachyon-field-api',
+			)
 		}
+	})
+
+	it('targets the Field canonical tenant for the canary transfer', () => {
+		const manifest = readFileSync(files.root, 'utf8')
+
+		expect(readMetadataTenantId(manifest, 'CloudApps')).toBe(
+			FIELD_CANONICAL_TENANT_ID,
+		)
+		expect(readMetadataTenantId(manifest, 'OAuth2Client')).toBe(
+			FIELD_CANONICAL_TENANT_ID,
+		)
+		expect(readEnvValue(readAppManifest(manifest, 'courseboard'), 'NEXT_PUBLIC_PLATFORM_ID')).toBe(
+			FIELD_CANONICAL_TENANT_ID,
+		)
+		expect(manifest).not.toContain(`tenantId: ${LEGACY_HOSTING_TENANT_ID}`)
 	})
 
 	it('does not keep legacy field API env fallbacks in runtime source', () => {
@@ -63,10 +83,32 @@ function readAppManifest(manifest: string, appName: string) {
 	return match?.[0] ?? ''
 }
 
+function readInternalServiceAppName(manifest: string, name: string) {
+	const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+	const match = manifest.match(
+		new RegExp(
+			`- name: ${escapedName}\\n\\s+valueFrom:\\n\\s+internalService:\\n\\s+appName: (.+)`,
+		),
+	)
+
+	return match?.[1]?.trim()
+}
+
 function readEnvValue(manifest: string, name: string) {
 	const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 	const match = manifest.match(
 		new RegExp(`- name: ${escapedName}\\n\\s+value: (.+)`),
+	)
+
+	return match?.[1]?.trim()
+}
+
+function readMetadataTenantId(manifest: string, kind: string) {
+	const escapedKind = kind.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+	const match = manifest.match(
+		new RegExp(
+			`kind: ${escapedKind}\\nmetadata:\\n\\s+name: .+\\n\\s+tenantId: (.+)`,
+		),
 	)
 
 	return match?.[1]?.trim()
