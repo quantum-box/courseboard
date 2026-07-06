@@ -72,6 +72,39 @@ export async function fetchDailyBudgetsAction(
 		: result
 }
 
+export type DailyBudgetAchievement = {
+	date: string
+	targetRevenue: number
+	actualRevenue: number
+	revenueAchievementRate: number | null
+	targetAverageSpend: number
+	actualAverageSpend: number | null
+	targetCaddyAttachedRatio: number
+	actualCaddyAttachedRatio: number | null
+	reservationCount: number
+	playerCount: number
+}
+
+/**
+ * T09: 日別の予算達成率（目標 vs 実績）。
+ * バックエンド未対応（404 等）の場合は success:false を返し、画面側で
+ * セクションを丸ごと非表示にする（デプロイ順序に依存しない）。
+ */
+export async function fetchDailyBudgetAchievementAction(
+	tenant: string,
+	from: string,
+	to: string,
+) {
+	const params = new URLSearchParams({ from, to })
+	const result = await golfFetchJson<{ items: DailyBudgetAchievement[] }>(
+		`/v1/erp/extensions/golf-course/daily-budgets/achievement?${params.toString()}`,
+		tenant,
+	)
+	return result.success
+		? { success: true as const, data: result.data.items }
+		: result
+}
+
 export async function upsertDailyBudgetAction(
 	tenant: string,
 	input: {

@@ -226,6 +226,7 @@ export default async function ReservationProductsPage({
 										initialSlots={
 											golfProductSlotsMap[product.reservationServiceId] ?? []
 										}
+										playType={product.playType}
 									/>
 								</div>
 							))}

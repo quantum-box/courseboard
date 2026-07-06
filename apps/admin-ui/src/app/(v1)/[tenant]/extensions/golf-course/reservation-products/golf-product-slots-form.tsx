@@ -4,7 +4,9 @@ import { Button } from 'components/ui/button'
 import { Input } from 'components/ui/input'
 import React from 'react'
 import {
+	fetchCaddieSlotCapacityAction,
 	replaceGolfProductSlotsAction,
+	type CaddieSlotCapacity,
 	type GolfProductSlot,
 } from './golf-product-slots-action'
 
@@ -36,10 +38,12 @@ export function GolfProductSlotsForm({
 	tenant,
 	serviceId,
 	initialSlots,
+	playType,
 }: {
 	tenant: string
 	serviceId: string
 	initialSlots: GolfProductSlot[]
+	playType?: 'caddie' | 'self'
 }) {
 	const [rows, setRows] = React.useState<SlotRow[]>(
 		initialSlots.length > 0 ? slotsToRows(initialSlots) : [],
@@ -60,6 +64,68 @@ export function GolfProductSlotsForm({
 
 	function removeRow(index: number) {
 		setRows(prev => prev.filter((_, i) => i !== index))
+		setSaved(false)
+	}
+
+	// T09: キャディ稼働からの自動算出
+	const [capacityDate, setCapacityDate] = React.useState('')
+	const [capacity, setCapacity] = React.useState<CaddieSlotCapacity | null>(
+		null,
+	)
+	const [capacityPending, setCapacityPending] = React.useState(false)
+	const [capacityError, setCapacityError] = React.useState<string | null>(null)
+
+	async function handleAutoCalc() {
+		if (!capacityDate) return
+		setCapacityPending(true)
+		setCapacityError(null)
+		setCapacity(null)
+		const result = await fetchCaddieSlotCapacityAction(tenant, capacityDate)
+		setCapacityPending(false)
+		if (result.success) {
+			setCapacity(result.data)
+		} else {
+			setCapacityError(result.message)
+		}
+	}
+
+	function applyCapacity() {
+		if (!capacity || !capacityDate) return
+		const weekday = new Date(`${capacityDate}T00:00:00+09:00`).getUTCDay()
+		const noon = '12:00'
+		setRows(prev => {
+			const matching = prev.filter(r => r.weekday === weekday)
+			if (matching.length === 0) {
+				return [
+					...prev,
+					{
+						weekday,
+						startTime: '07:00',
+						endTime: noon,
+						maxGroups: capacity.morningCapacity,
+						maxPlayers: 0,
+					},
+					{
+						weekday,
+						startTime: noon,
+						endTime: '15:00',
+						maxGroups: capacity.afternoonCapacity,
+						maxPlayers: 0,
+					},
+				]
+			}
+			return prev.map(r =>
+				r.weekday === weekday
+					? {
+							...r,
+							maxGroups:
+								r.startTime < noon
+									? capacity.morningCapacity
+									: capacity.afternoonCapacity,
+						}
+					: r,
+			)
+		})
 		setSaved(false)
 	}
 
@@ -169,6 +235,49 @@ export function GolfProductSlotsForm({
 				<p className='text-xs text-muted-foreground'>
 					スロットがありません。追加ボタンで受付枠を設定してください。（0=制限なし）
 				</p>
+			)}
+			{playType !== 'self' && (
+				<div className='rounded-md border border-dashed p-3'>
+					<p className='mb-2 text-xs font-medium'>
+						キャディ稼働から枠数を自動算出
+					</p>
+					<div className='flex flex-wrap items-center gap-2'>
+						<Input
+							type='date'
+							value={capacityDate}
+							onChange={e => setCapacityDate(e.target.value)}
+							className='h-8 w-40 text-xs'
+						/>
+						<Button
+							type='button'
+							variant='outline'
+							size='sm'
+							disabled={capacityPending || !capacityDate}
+							onClick={handleAutoCalc}
+						>
+							{capacityPending ? '算出中…' : '算出'}
+						</Button>
+						{capacity && (
+							<>
+								<span className='text-xs text-muted-foreground'>
+									午前 {capacity.morningCapacity} 組 / 午後{' '}
+									{capacity.afternoonCapacity} 組（計 {capacity.totalRounds}{' '}
+									ラウンド、稼働 {capacity.activeCaddies - capacity.unavailable}
+									/{capacity.activeCaddies} 名
+									{capacity.assumedAvailable > 0 &&
+										`、うち${capacity.assumedAvailable}名は希望休未登録=稼働扱い`}
+									）
+								</span>
+								<Button type='button' size='sm' onClick={applyCapacity}>
+									この日の曜日の枠に反映
+								</Button>
+							</>
+						)}
+					</div>
+					{capacityError && (
+						<p className='mt-1 text-xs text-destructive'>{capacityError}</p>
+					)}
+				</div>
 			)}
 			<div className='flex items-center gap-2'>
 				<Button type='button' variant='outline' size='sm' onClick={addRow}>
