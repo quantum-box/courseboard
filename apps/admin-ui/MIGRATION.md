@@ -45,3 +45,19 @@ tachyonfield の `apps/admin-ui`（vinext + React + NextAuth v5 + Cognito）を*
 
 ## 由来
 コピー元: `tachyonfield/apps/admin-ui` @ main `b94cfb3a`（2026-07-01 時点最新）。vinext ^0.1.6 / next ^14.2 / next-auth ^5(beta) / urql / Tailwind3 / Radix。
+
+## 稼働チェックリスト（2026-07-06 時点の残依存）
+
+本番 https://courseboard.txcloud.app は認証・全画面レンダリング・CI(ユニットテスト含む)まで完了。
+データ表示までの残りは下記 3 点のみ（いずれもプラットフォーム/tachyonfield 側のオペレーション）。
+
+| # | 依存 | 内容 | 解けたら行う courseboard 側の作業 |
+|---|------|------|-----------------------------------|
+| 1 | PLT-2442 (tachyon-apps#6379) | `tachyon-field-api` を hosting tenant `tn_01hjjn348rn3t49zz6hvmfq67p` に登録（worker サブリクエスト 522 = PLT-2373 の恒久対応前提） | **PR #29 を ready 化してマージ**（internalService 切替）。マージ後 https://courseboard.txcloud.app/api/smoke/field-api-subrequest が `ok:true` になること |
+| 2 | 本番 DB migration 適用（〜20260618000000, DDL のみ） | `staff_members.hired_at` 等の不足で `/v1/erp/staff` が 500 | なし（自動で直る）。スタッフ/HRM 画面で確認 |
+| 3 | 本番 DB migration 適用（20260627010000〜, PLT-2343 ガードレール=CPO/CEO 承認要） | `golf_courses` 等の golf テーブル群が未作成で golf 拡張 API が 500 | なし（自動で直る）。キャディ配車/コース/予約商品/予算画面で確認 |
+
+補足:
+- golf_course 拡張は tenant `tn_01ks18…` で **有効化済み**（2026-07-06, `POST /v1/erp/extensions/golf_course/enable`）。無効化は `/disable` で可逆。
+- データ層の疎通はトークン直叩きで検証済み: orders / reservations / purchase-orders / vendors / resources / reservation-types / extensions / extensions-audit = 200。
+- 522 の切り分け用診断: courseboard/fieldadmin 両方に `/api/smoke/field-api-subrequest`（public）。
