@@ -156,6 +156,13 @@ export default async function GolfCourseExtensionPortalPage({
 							meta='マスタ'
 						/>
 						<PortalRow
+							href={`${prefix}/${tenant}${golfCourseAdminPaths.policy}`}
+							icon={FlagIcon}
+							title='予約ポリシー'
+							description='セルフロック（キャディ付き優先枠）と客単価判定のルールを設定します。'
+							meta='レベニュー'
+						/>
+						<PortalRow
 							href={`${prefix}/${tenant}/reservations`}
 							icon={CalendarCheckIcon}
 							title='予約一覧'

@@ -715,3 +715,51 @@ export async function deleteCaddieAvailabilityAction(
 	revalidatePath(`/${tenant}/extensions/golf-course/caddies/${caddieProfileId}`)
 	return { success: true as const }
 }
+
+// ─── T09: キャディ自動配置 ──────────────────────────────────────────────────
+
+export type AutoAssignPlanItem = {
+	reservationId: string
+	scheduledAt: string
+	caddieProfileId: string
+	caddieDisplayName: string
+	rationale: string[]
+}
+
+export type AutoAssignResult = {
+	dryRun: boolean
+	assigned: AutoAssignPlanItem[]
+	skipped: { reservationId: string; reason: string }[]
+}
+
+/**
+ * T09: 対象日のキャディ付き予約へ自動配置（dryRun でプレビュー）。
+ * バックエンド未対応（404）の場合は notSupported を返す。
+ */
+export async function autoAssignCaddiesAction(
+	tenant: string,
+	date: string,
+	dryRun: boolean,
+) {
+	const result = await golfFetch(
+		'/v1/erp/extensions/golf-course/caddie-auto-assignments',
+		tenant,
+		{
+			method: 'POST',
+			body: JSON.stringify({ date, dryRun }),
+		},
+	)
+	if (!result.ok) {
+		if (result.error.status === 404 || result.error.status === 405) {
+			return { success: false as const, notSupported: true as const,
+				message: '自動配置APIが未対応です（バックエンド更新後に有効になります）' }
+		}
+		return { success: false as const, notSupported: false as const, message: result.error.message }
+	}
+	const data = (await result.response.json()) as AutoAssignResult
+	if (!dryRun) {
+		revalidatePath(`/${tenant}/extensions/golf-course/caddies`)
+	}
+	return { success: true as const, data }
+}
+

@@ -9,6 +9,7 @@ export const golfCourseAdminPaths = {
 	caddies: '/extensions/golf-course/caddies',
 	settlement: '/extensions/golf-course/settlement',
 	budgets: '/extensions/golf-course/budgets',
+	policy: '/extensions/golf-course/policy',
 } as const
 
 export const golfCourseApiPaths = {
