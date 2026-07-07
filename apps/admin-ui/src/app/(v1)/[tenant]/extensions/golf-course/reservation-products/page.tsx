@@ -148,9 +148,9 @@ export default async function ReservationProductsPage({
 							catalogProducts={catalogProductsResult.products}
 							catalogProductsError={catalogProductsResult.error}
 							reservationTypes={reservationTypes}
-							catalogProductsHref={
-								`${prefix}/${tenant}/library/products` as Route
-							}
+							// 商品マスタは Field 管理画面側に集約する方針のため（PLT-2477）、
+							// 削除済みの /library/products へはリンクしない。href を渡さず
+							// 「商品マスタを開く」導線を非表示にする。Field 側 URL 確定後に外部 URL を渡す。
 							updateConfigAction={updateReservationProductConfigAction.bind(
 								null,
 								tenant,
