@@ -1,0 +1,33 @@
+query getProuctsForAdmin($limit: Int!, $offset: Int!) {
+  products(limit: $limit, offset: $offset) {
+    totalCount
+    pageInfo {
+      limit
+      offset
+      hasNextPage
+    }
+    items {
+      ...ProductItemForProductsList
+    }
+  }
+}
+
+fragment ProductItemForProductsList on Product {
+  id
+  name
+  kind
+  listPrice
+  status
+  skuCode
+  publicationStatus
+  publicationName
+  createdAt
+  imageFiles
+  variants {
+    id
+    name
+    code
+    status
+    metadata
+  }
+}
