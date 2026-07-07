@@ -45,6 +45,7 @@ import {
 	updateAssignmentStatusFromFormAction,
 	updateCaddieProfileFromFormAction,
 } from '../action'
+import { fetchGolfCoursesAction } from '../../courses/action'
 import { CaddieAvailabilityCalendar } from '../caddie-availability-calendar'
 import {
 	CaddieCoursesForm,
@@ -87,6 +88,7 @@ export default async function GolfCaddieDetailPage({
 		ratingsResult,
 		courseMembershipsResult,
 		availabilitiesResult,
+		coursesResult,
 	] =
 		await Promise.all([
 			fetchCaddieProfileAction(tenant, caddieId),
@@ -94,6 +96,7 @@ export default async function GolfCaddieDetailPage({
 			fetchCaddieRatingsAction(tenant, caddieId),
 			fetchCaddieCourseMembershipsAction(tenant, caddieId),
 			fetchCaddieAvailabilitiesAction(tenant, caddieId, fromDate, toDate),
+			fetchGolfCoursesAction(tenant),
 		])
 	if (!profileResult.success) {
 		notFound()
@@ -104,9 +107,10 @@ export default async function GolfCaddieDetailPage({
 	const courseMemberships = courseMembershipsResult.success
 		? courseMembershipsResult.data
 		: []
-	// Golf courses list: fetched via golf-course API (requires T01)
-	// Falls back to empty if not yet available
-	const courseOptions: GolfCourseOption[] = []
+	// Golf courses list from the courses API (T01).
+	const courseOptions: GolfCourseOption[] = coursesResult.success
+		? coursesResult.data.map(course => ({ id: course.id, name: course.name }))
+		: []
 	const availabilities = availabilitiesResult.success
 		? availabilitiesResult.data
 		: []

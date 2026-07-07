@@ -21,6 +21,7 @@ import { getServerModePrefix } from 'lib/mode'
 import { ArrowLeftIcon } from 'lucide-react'
 import type { Route } from 'next'
 import Link from 'next/link'
+import { fetchGolfCoursesAction } from '../courses/action'
 import type { GolfCourseOption } from './budget-forms'
 import { BudgetCsvImportForm, BudgetUpsertForm } from './budget-forms'
 import {
@@ -63,8 +64,11 @@ export default async function DailyBudgetsPage({
 	)
 	const achievements = achievementResult.success ? achievementResult.data : null
 
-	// Course options from T01 courses API (empty until T01 merges)
-	const courseOptions: GolfCourseOption[] = []
+	// Course options from the courses API (T01).
+	const coursesResult = await fetchGolfCoursesAction(tenant)
+	const courseOptions: GolfCourseOption[] = coursesResult.success
+		? coursesResult.data.map(course => ({ id: course.id, name: course.name }))
+		: []
 
 	return (
 		<V1Layout
