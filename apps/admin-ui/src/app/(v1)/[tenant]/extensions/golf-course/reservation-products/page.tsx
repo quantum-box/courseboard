@@ -13,9 +13,9 @@ import {
 	GOLF_COURSE_EXTENSION_KEY,
 	golfCourseAdminPaths,
 } from 'lib/extension-admin-registry'
-import { getGraphqlSdk } from 'lib/graphqlClient'
 import { libraryMasterErrorDetails } from 'lib/library-master-errors'
 import { getServerModePrefix } from 'lib/mode'
+import { getServerGraphqlSdk } from 'lib/serverGraphqlClient'
 import { ArrowLeftIcon, CalendarDaysIcon, ClockIcon, CreditCardIcon, PackageIcon } from 'lucide-react'
 import type { Route } from 'next'
 import Link from 'next/link'
@@ -257,7 +257,7 @@ function toReservationProductConfig(config?: Record<string, unknown> | null) {
 async function fetchCatalogProducts(tenant: string) {
 	try {
 		const session = await authWithCheck()
-		const sdk = getGraphqlSdk(session, tenant)
+		const sdk = getServerGraphqlSdk(session, tenant)
 		const response = await sdk.getProuctsForAdmin({ limit: 100, offset: 0 })
 		return {
 			products: (response.products?.items ?? []).map(product => ({
