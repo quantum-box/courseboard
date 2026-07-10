@@ -4,7 +4,7 @@ import { AdminTextTranslator } from 'components/admin-text-translator'
 import { AdminI18nProvider } from 'lib/admin-i18n'
 import './globals.css'
 
-const SITE_NAME = process.env.NEXT_PUBLIC_SITE_NAME ?? 'TACHYON Field'
+const SITE_NAME = process.env.NEXT_PUBLIC_SITE_NAME ?? 'Course Board'
 
 export const runtime = 'edge'
 
@@ -15,7 +15,7 @@ export const metadata: Metadata = {
 	},
 	icons: {
 		icon: '/favicon.ico',
-		apple: '/brand/tachyon-field-logo-mark-square-transparent.png',
+		apple: '/brand/courseboard-icon-square.png',
 	},
 }
 

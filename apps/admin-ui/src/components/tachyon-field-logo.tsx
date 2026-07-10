@@ -13,14 +13,14 @@ export function TachyonFieldLogo({
 }: TachyonFieldLogoProps) {
 	const src =
 		tone === 'dark'
-			? '/brand/tachyon-field-logo-cropped-dark-transparent.png'
-			: '/brand/tachyon-field-logo-cropped-transparent.png'
+			? '/brand/courseboard-logo-dark.png'
+			: '/brand/courseboard-logo.png'
 
 	return (
 		<div className={cn('inline-flex items-center', className)}>
 			<img
 				src={src}
-				alt='TACHYON Field'
+				alt='Course Board'
 				className={cn('h-6 w-auto shrink-0 object-contain', markClassName)}
 			/>
 		</div>
