@@ -1,6 +1,5 @@
 use std::{
     collections::HashSet,
-    env,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -52,35 +51,6 @@ pub struct AuthConfig {
     pub issuer_url: String,
     pub expected_audience: String,
     pub expected_client_ids: HashSet<String>,
-}
-
-impl AuthConfig {
-    pub fn from_env() -> Result<Self, AuthConfigError> {
-        let issuer_url = env::var("OIDC_ISSUER_URL")
-            .or_else(|_| env::var("TACHYON_AUTH_ISSUER_URL"))
-            .map_err(|_| AuthConfigError::MissingIssuer)?;
-        let expected_audience =
-            env::var("EXPECTED_AUDIENCE").map_err(|_| AuthConfigError::MissingAudience)?;
-        let expected_client_ids = env::var("EXPECTED_CLIENT_ID")
-            .ok()
-            .map(|value| parse_csv_set(&value))
-            .unwrap_or_default();
-
-        Ok(Self {
-            issuer_url,
-            expected_audience,
-            expected_client_ids,
-        })
-    }
-}
-
-fn parse_csv_set(value: &str) -> HashSet<String> {
-    value
-        .split(',')
-        .map(str::trim)
-        .filter(|item| !item.is_empty())
-        .map(ToOwned::to_owned)
-        .collect()
 }
 
 #[derive(Debug, Error)]

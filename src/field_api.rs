@@ -1,5 +1,4 @@
 use std::{
-    env,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -10,6 +9,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
 
+pub const DEFAULT_FIELD_API_URL: &str = "https://tachyon-field-api.txcloud.app";
 const DEFAULT_HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[async_trait]
@@ -71,20 +71,19 @@ pub struct FieldApiClient {
 }
 
 impl FieldApiClient {
-    pub fn from_env() -> Result<Self, FieldApiConfigError> {
-        let base_url =
-            env::var("TACHYON_FIELD_API_URL").map_err(|_| FieldApiConfigError::MissingBaseUrl)?;
+    pub fn from_config(
+        base_url: impl AsRef<str>,
+        client_credentials_config: Option<ClientCredentialsConfig>,
+        bearer_token: Option<String>,
+    ) -> Result<Self, FieldApiConfigError> {
         // Prefer self-acquired OAuth2 client-credentials tokens when configured,
         // so Course Board logs in to Tachyon Auth itself instead of relying on a
         // static bearer token. Falls back to the static provider for tests and
         // gateway-fronted deployments.
-        let token_provider: Arc<dyn FieldApiTokenProvider> =
-            match ClientCredentialsConfig::from_env() {
-                Some(config) => Arc::new(ClientCredentialsTokenProvider::new(config)),
-                None => Arc::new(StaticBearerTokenProvider::new(
-                    env::var("TACHYON_FIELD_API_BEARER_TOKEN").ok(),
-                )),
-            };
+        let token_provider: Arc<dyn FieldApiTokenProvider> = match client_credentials_config {
+            Some(config) => Arc::new(ClientCredentialsTokenProvider::new(config)),
+            None => Arc::new(StaticBearerTokenProvider::new(bearer_token)),
+        };
         Self::new(base_url, token_provider)
     }
 
@@ -366,13 +365,6 @@ impl FieldApiTokenProvider for StaticBearerTokenProvider {
     }
 }
 
-fn non_empty_env(key: &str) -> Option<String> {
-    env::var(key)
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
 /// OAuth2 client-credentials configuration for acquiring Field API tokens.
 #[derive(Clone)]
 pub struct ClientCredentialsConfig {
@@ -381,20 +373,6 @@ pub struct ClientCredentialsConfig {
     pub client_secret: String,
     pub scope: Option<String>,
     pub audience: Option<String>,
-}
-
-impl ClientCredentialsConfig {
-    /// Builds a config when the required env vars are all present, otherwise
-    /// returns `None` so callers can fall back to a static bearer token.
-    pub fn from_env() -> Option<Self> {
-        Some(Self {
-            token_url: non_empty_env("TACHYON_FIELD_API_TOKEN_URL")?,
-            client_id: non_empty_env("TACHYON_FIELD_API_CLIENT_ID")?,
-            client_secret: non_empty_env("TACHYON_FIELD_API_CLIENT_SECRET")?,
-            scope: non_empty_env("TACHYON_FIELD_API_SCOPE"),
-            audience: non_empty_env("TACHYON_FIELD_API_AUDIENCE"),
-        })
-    }
 }
 
 #[derive(Deserialize)]
@@ -500,7 +478,7 @@ impl FieldApiTokenProvider for ClientCredentialsTokenProvider {
 
 #[derive(Debug, Error)]
 pub enum FieldApiConfigError {
-    #[error("TACHYON_FIELD_API_URL must be set for the admin UI")]
+    #[error("TACHYON_FIELD_API_URL is not configured and no default Field API URL is available")]
     MissingBaseUrl,
     #[error("TACHYON_FIELD_API_URL must be a valid URL")]
     InvalidBaseUrl,

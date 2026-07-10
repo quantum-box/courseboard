@@ -1,5 +1,3 @@
-use std::env;
-
 use axum::{
     extract::{Path, State},
     http::{
@@ -12,7 +10,7 @@ use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, SqlitePool};
 
-use crate::AppError;
+use crate::{field_api::DEFAULT_FIELD_API_URL, AppError};
 
 #[derive(Clone)]
 pub struct CancellationFeeConfig {
@@ -26,22 +24,6 @@ pub struct CancellationFeeConfig {
 }
 
 impl CancellationFeeConfig {
-    pub fn from_env() -> Self {
-        Self {
-            public_ui_base_url: env::var("COURSEBOARD_PUBLIC_UI_BASE_URL")
-                .unwrap_or_else(|_| "http://localhost:5173".to_string()),
-            sms_sender_name: env::var("COURSEBOARD_SMS_SENDER_NAME")
-                .unwrap_or_else(|_| "Course Board".to_string()),
-            field_api_url: non_empty_env("TACHYON_FIELD_API_URL")
-                .or_else(|| non_empty_env("FIELD_API_URL"))
-                .or_else(|| non_empty_env("COURSEBOARD_FIELD_API_URL")),
-            twilio_account_sid: non_empty_env("TWILIO_ACCOUNT_SID"),
-            twilio_auth_token: non_empty_env("TWILIO_AUTH_TOKEN"),
-            twilio_messaging_service_sid: non_empty_env("TWILIO_MESSAGING_SERVICE_SID"),
-            twilio_from_number: non_empty_env("TWILIO_FROM_NUMBER"),
-        }
-    }
-
     fn payment_url(&self, token: &str) -> String {
         let base_url = self.public_ui_base_url.trim_end_matches('/');
         if base_url.ends_with(".html") {
@@ -58,15 +40,18 @@ impl CancellationFeeConfig {
     }
 }
 
-fn non_empty_env(key: &str) -> Option<String> {
-    env::var(key).ok().and_then(|value| {
-        let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_string())
+impl Default for CancellationFeeConfig {
+    fn default() -> Self {
+        Self {
+            public_ui_base_url: "http://localhost:5173".to_string(),
+            sms_sender_name: "Course Board".to_string(),
+            field_api_url: Some(DEFAULT_FIELD_API_URL.to_string()),
+            twilio_account_sid: None,
+            twilio_auth_token: None,
+            twilio_messaging_service_sid: None,
+            twilio_from_number: None,
         }
-    })
+    }
 }
 
 #[derive(Clone)]

@@ -1,13 +1,14 @@
 [package]
-name = "tachyonfield-golf"
+name = "courseboard"
 version = "0.1.0"
 edition = "2021"
-default-run = "tachyonfield-golf"
+default-run = "courseboard"
 
 [dependencies]
 anyhow = "1.0"
 axum = "0.7"
 async-trait = "0.1"
+clap = { version = "4.5", features = ["derive", "env"] }
 dotenvy = "0.15"
 jsonwebtoken = "9.3"
 rand = "0.8"
@@ -25,7 +26,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 lambda_http = "0.13"
 
 [[bin]]
-name = "lambda-tachyonfield-golf"
+name = "lambda-courseboard"
 path = "bin/lambda.rs"
 
 [dev-dependencies]

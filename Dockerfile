@@ -9,6 +9,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY Cargo.toml Cargo.lock ./
+COPY bin ./bin
 COPY migrations ./migrations
 COPY src ./src
 
@@ -39,14 +40,14 @@ RUN useradd --system --uid 10001 --create-home --home-dir /app appuser \
     && mkdir -p /app/data \
     && chown -R appuser:appuser /app
 
-COPY --from=builder /app/target/release/tachyonfield-golf /app/bin/tachyonfield-golf
+COPY --from=builder /app/target/release/courseboard /app/bin/courseboard
 COPY --from=ui_builder /app/desktop/dist /app/ui
 
 ENV BIND_ADDR=0.0.0.0:8080
-ENV DATABASE_URL=sqlite:///app/data/tachyonfield-golf.db
+ENV DATABASE_URL=sqlite:///app/data/courseboard.db
 
 EXPOSE 8080
 
 USER appuser
 
-CMD ["/app/bin/tachyonfield-golf"]
+CMD ["/app/bin/courseboard"]

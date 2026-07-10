@@ -1,10 +1,11 @@
-use std::{env, sync::Arc};
+use std::sync::Arc;
 
 use anyhow::Context;
 
 mod admin_ui;
 pub mod auth;
 pub mod cancellation_fees;
+pub mod config;
 pub mod demo_seed;
 pub mod field_api;
 pub mod smart_assign;
@@ -15,11 +16,12 @@ use axum::{
     extract::{FromRef, State},
     http::{header::AUTHORIZATION, Request, StatusCode},
     middleware::{self, Next},
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Redirect, Response},
     routing::{get, post},
     Json, Router,
 };
 use cancellation_fees::{CancellationFeeConfig, SqliteCancellationFeeRepository};
+use config::RuntimeConfig;
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
@@ -45,7 +47,7 @@ impl AppState {
         Self::new_with_cancellation_fee_config(
             pool,
             token_verifier,
-            CancellationFeeConfig::from_env(),
+            CancellationFeeConfig::default(),
         )
     }
 
@@ -62,7 +64,7 @@ impl AppState {
             token_verifier,
             field_api: None,
             field_api_config_error: Some(
-                "TACHYON_FIELD_API_URL is not configured for the admin UI".to_string(),
+                "Field API client is not configured for the admin UI".to_string(),
             ),
         }
     }
@@ -76,7 +78,7 @@ impl AppState {
             pool,
             token_verifier,
             field_api,
-            CancellationFeeConfig::from_env(),
+            CancellationFeeConfig::default(),
         )
     }
 
@@ -101,8 +103,8 @@ impl AppState {
         pool: SqlitePool,
         token_verifier: Arc<dyn TokenVerifier>,
         field_api: Result<FieldApiClient, field_api::FieldApiConfigError>,
+        cancellation_fee_config: CancellationFeeConfig,
     ) -> Self {
-        let cancellation_fee_config = CancellationFeeConfig::from_env();
         match field_api {
             Ok(client) => Self {
                 rules: Arc::new(SqliteTaxRuleRepository::new(pool.clone())),
@@ -161,6 +163,7 @@ pub fn build_router(state: AppState) -> Router {
     let admin_auth_state = state.clone();
     let collection_auth_state = state.clone();
     Router::new()
+        .route("/", get(redirect_ui))
         .nest_service(
             "/ui",
             ServeDir::new("ui").not_found_service(ServeFile::new("ui/index.html")),
@@ -273,9 +276,8 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-pub async fn build_app_from_env() -> anyhow::Result<Router> {
-    let database_url =
-        env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite://tachyonfield-golf.db".to_string());
+pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
+    let database_url = config.database_url.clone();
     let connect_options: SqliteConnectOptions = database_url
         .parse()
         .map_err(|error| anyhow::anyhow!("DATABASE_URL must be a valid SQLite URL: {error}"))?;
@@ -290,21 +292,25 @@ pub async fn build_app_from_env() -> anyhow::Result<Router> {
 
     run_migrations(&pool).await?;
 
-    let token_verifier: Arc<dyn TokenVerifier> = if let Ok(token) =
-        env::var("COURSEBOARD_DEV_BEARER_TOKEN")
-    {
+    let token_verifier: Arc<dyn TokenVerifier> = if let Some(token) = config.dev_bearer_token() {
         tracing::warn!("using COURSEBOARD_DEV_BEARER_TOKEN static verifier for local development");
         Arc::new(auth::StaticBearerVerifier::new(token))
     } else {
-        let auth_config = auth::AuthConfig::from_env().context(
+        let auth_config = config.auth_config().context(
             "auth configuration is incomplete. For local development, set \
              COURSEBOARD_DEV_BEARER_TOKEN to use the static dev bypass; otherwise \
              configure OIDC_ISSUER_URL (or TACHYON_AUTH_ISSUER_URL) and EXPECTED_AUDIENCE",
         )?;
         Arc::new(auth::OidcJwtVerifier::discover(auth_config).await?)
     };
-    let field_api = FieldApiClient::from_env();
-    let state = AppState::with_optional_field_api(pool, token_verifier, field_api);
+    let cancellation_fee_config = config.cancellation_fee_config();
+    let field_api = FieldApiClient::from_config(
+        config.field_api_base_url(),
+        config.field_api_client_credentials_config(),
+        config.field_api_bearer_token(),
+    );
+    let state =
+        AppState::with_optional_field_api(pool, token_verifier, field_api, cancellation_fee_config);
 
     Ok(build_router(state))
 }
@@ -316,6 +322,10 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), AppError> {
 
 async fn healthz() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
+}
+
+async fn redirect_ui() -> Redirect {
+    Redirect::temporary("/ui/")
 }
 
 async fn require_valid_token(
@@ -692,7 +702,7 @@ mod tests {
     async fn test_app_with_verifier(verifier: OidcJwtVerifier) -> Router {
         test_app_with_verifier_and_cancellation_fee_config(
             verifier,
-            CancellationFeeConfig::from_env(),
+            CancellationFeeConfig::default(),
         )
         .await
     }
