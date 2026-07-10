@@ -1,0 +1,8 @@
+fragment ProductPriceTableForCustomer on Product {
+  id
+  name
+  description
+  listPrice
+  kind
+  billingCycle
+}

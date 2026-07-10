@@ -1,0 +1,80 @@
+fragment RecentOrder on Order {
+  id
+  clientId
+  quotesId
+  currency
+  subtotal
+  tax
+  total
+  orderDate
+  client {
+    name
+  }
+  quote {
+    title
+  }
+}
+
+query recentOrder {
+  orders {
+    ...RecentOrder
+  }
+}
+
+query detailOrderForSearch {
+  orders {
+    id
+  }
+}
+
+fragment DetailOrder on Order {
+  id
+  clientId
+  quotesId
+  currency
+  subtotal
+  tax
+  total
+  orderDate
+  lineItems {
+    name
+    quantity
+    unitPrice
+    discount
+  }
+  client {
+    name
+    email
+    phoneNumber
+  }
+  quote {
+    title
+  }
+}
+
+query detailOrder($id: ID!) {
+  order(id: $id) {
+    ...DetailOrder
+  }
+}
+
+mutation CreateDeliveryNotePdf($orderId: ID!) {
+  createDeliveryNotePdf(orderId: $orderId) {
+    signedUrl
+    expiresAt
+  }
+}
+
+query currentMonthlyRevenue($endDate: String!) {
+  recurringRevenue(revenueCycle: "MONTHLY", endDate: $endDate) {
+    amount
+    changePercentage
+  }
+}
+
+query currentWeeklyRevenue($endDate: String!) {
+  recurringRevenue(revenueCycle: "WEEKLY", endDate: $endDate) {
+    amount
+    changePercentage
+  }
+}

@@ -1,0 +1,10 @@
+# pnpm 11 reads settings from here (the package.json "pnpm" field is no longer
+# read). Approve the native deps whose install/build scripts must run so that
+# `pnpm install` / `pnpm run build` don't fail with ERR_PNPM_IGNORED_BUILDS.
+allowBuilds:
+  '@biomejs/biome': true
+  '@parcel/watcher': true
+  '@sentry/cli': true
+  esbuild: true
+  sharp: true
+  workerd: true

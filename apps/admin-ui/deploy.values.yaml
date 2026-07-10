@@ -1,0 +1,43 @@
+image:
+  repository: "asia-northeast1-docker.pkg.dev/tachyon-403814/tachyon-apps/courseboard-admin-ui"
+  tag: "latest"
+
+livenessProbePath: /api/health
+
+extraEnvs:
+  - name: "NEXTAUTH_SECRET"
+    valueFrom:
+      secretKeyRef:
+        name: "courseboard-admin-ui-secrets"
+        key: "NEXTAUTH_SECRET"
+  - name: "NEXTAUTH_URL"
+    value: "https://courseboard.txcloud.app"
+  - name: "AUTH_URL"
+    value: "https://courseboard.txcloud.app"
+  - name: "AUTH_ISSUER"
+    value: "https://auth.tachy.one/auth/realms/tachyon"
+  - name: "AUTH_CLIENT_ID"
+    value: "tachyon"
+  - name: "NEXT_PUBLIC_BACKEND_API_URL"
+    value: "https://tachyon-field-api.txcloud.app"
+  - name: "TACHYON_FIELD_API_URL"
+    value: "https://tachyon-field-api.txcloud.app"
+
+service:
+  port: 8080
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 250Mi
+
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 1
+      preference:
+        matchExpressions:
+        - key: cloud.google.com/gke-spot
+          operator: In
+          values:
+          - "true"

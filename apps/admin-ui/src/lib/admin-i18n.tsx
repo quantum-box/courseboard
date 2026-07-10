@@ -1,0 +1,507 @@
+'use client'
+
+import React, {
+	createContext,
+	useContext,
+	useEffect,
+	useMemo,
+	useState,
+} from 'react'
+
+export type AdminLocale = 'ja' | 'en'
+
+const STORAGE_KEY = 'courseboard-admin-locale'
+
+type AdminI18nContextValue = {
+	locale: AdminLocale
+	setLocale: (locale: AdminLocale) => void
+	t: (key: AdminMessageKey) => string
+}
+
+const messages = {
+	ja: {
+		'common.enabled': '有効',
+		'common.disabled': '無効',
+		'common.default': '標準',
+		'common.valid': '有効',
+		'common.needsChanges': '要修正',
+		'common.workspace': 'ワークスペース',
+		'common.logout': 'ログアウト',
+		'common.adminConsole': '管理コンソール',
+		'common.menuToggle': 'メニューを切り替える',
+		'nav.global': 'グローバルナビゲーション',
+		'nav.home': 'ホーム',
+		'nav.customers': '顧客',
+		'nav.sales': '販売',
+		'nav.billing': '請求',
+		'nav.master': 'マスタ',
+		'nav.inventory': '在庫',
+		'nav.hrm': '人材',
+		'nav.reservations': '予約',
+		'nav.reservation-settings': '予約設定',
+		'nav.golf-reservation-products': 'ゴルフ予約商品',
+		'nav.accounting': '会計',
+		'nav.reports': 'レポート',
+		'nav.extensions': 'アプリ',
+		'nav.settings': '設定',
+		'nav.pinned': 'ピン留め',
+		'nav.pin': 'ピン留め',
+		'nav.unpin': 'ピン留めを解除',
+		'nav.library': '取引先',
+		'nav.consumers': 'コンシューマー',
+		'nav.agent': '書類Agent',
+		'nav.deals': '商談',
+		'nav.quotations': '見積',
+		'nav.orders': '受注',
+		'nav.consumer-orders': 'EC注文',
+		'nav.store-pickup': '店頭受取',
+		'nav.coupons': 'クーポン',
+		'nav.billing-center': '請求管理',
+		'nav.saas-subscriptions': 'SaaS契約',
+		'nav.invoices': '請求書',
+		'nav.cancellation-fees': 'キャンセル料',
+		'nav.ar-ap': '債権・債務',
+		'nav.revenue-reconciliation': '売上照合',
+		'nav.products': '商品',
+		'nav.stock': '在庫数',
+		'nav.low-stock': '低在庫',
+		'nav.locations': '拠点',
+		'nav.transfers': '在庫移動',
+		'nav.purchase-orders': '発注',
+		'nav.procurement': '入荷OCR',
+		'nav.vendors': '仕入先',
+		'nav.staff': 'スタッフ',
+		'nav.erp-dashboard': 'ダッシュボード',
+		'nav.sales-ledger': '売上台帳',
+		'nav.purchase-ledger': '仕入台帳',
+		'nav.journal-classifications': '仕訳レビュー',
+		'nav.evidence': '証憑',
+		'nav.monthly-close': '月次締め',
+		'nav.audit-logs': '監査ログ',
+		'nav.reports-home': 'レポート一覧',
+		'nav.analytics': '売上分析',
+		'nav.automated-reports': '自動レポート',
+		'nav.tenant-extensions': '予約商品・プラン',
+		'nav.golf-simulator': 'ゴルフ料金計算',
+		'nav.tenant-settings': 'テナント設定',
+		'nav.users': 'メンバー',
+		'nav.api-keys': 'APIキー',
+		'nav.account-security': 'アカウントセキュリティ',
+		'nav.erp-rollout': 'ERP有効化',
+		'nav.scope': '対応範囲',
+		'nav.tenants': 'テナント',
+		'nav.billing-accounts': '請求アカウント',
+		'language.title': '言語設定',
+		'language.description': '管理画面の表示言語を切り替えます。',
+		'language.current': '現在の言語',
+		'language.ja': '日本語',
+		'language.en': 'English',
+		'language.switchTo': '言語を切り替え',
+		'settings.title': '設定',
+		'settings.scopeTitle': '対応範囲について',
+		'settings.scopeDescription':
+			'GA版で対応する機能と、現時点でGAネイティブ機能の範囲外となる領域を確認します',
+		'settings.scopeButton': '対応範囲を確認',
+		'settings.erpTitle': 'ERP有効化',
+		'settings.erpDescription':
+			'このテナントのERP有効化状態と適用元を確認します',
+		'settings.erpButton': 'ERP有効化を確認',
+		'settings.securityTitle': 'アカウントセキュリティ',
+		'settings.securityDescription':
+			'パスキー登録とGoogle連携の設定状態を確認します',
+		'settings.securityButton': 'セキュリティ設定を確認',
+		'external.title': '外部サービス連携',
+		'external.description': '接続されている外部サービスの状態を確認できます',
+		'external.refresh': '更新',
+		'external.fetchFailed': '連携設定を取得できませんでした',
+		'external.fetchRetry':
+			'連携設定と外部サービスの情報を取得できませんでした。再読み込みするか、少し待ってから再試行してください。',
+		'external.fetchNetwork':
+			'連携設定と外部サービスの情報を取得できませんでした。ネットワーク状態を確認して再試行してください。',
+		'external.fetchTemporary':
+			'連携APIまたは外部サービスが一時的に利用できません。再読み込みするか、少し待ってから再試行してください。',
+		'external.reload': '再読み込み',
+		'external.payment': '決済',
+		'external.tenant': 'テナント',
+		'external.platform': 'プラットフォーム',
+		'external.host': 'システム',
+		'external.notConfigured': '未設定',
+		'external.oauth': 'OAuth連携済みサービス',
+		'external.paymentServices': '決済サービス',
+		'external.aiServices': 'AIサービス',
+		'external.otherServices': 'その他のサービス',
+		'external.noServices': '外部サービスが設定されていません',
+		'external.syncing': '同期中...',
+		'external.syncFailed': '同期に失敗しました',
+		'external.syncError': '同期処理中にエラーが発生しました',
+		'external.products': '商品',
+		'external.variants': 'バリアント',
+		'external.skipped': 'スキップ',
+		'external.errorDetails': 'エラー詳細',
+		'external.moreErrors': '他',
+		'external.squareSyncTitle': 'Square 商品同期',
+		'external.squareSyncDescription':
+			'Square Catalog から商品データを TACHYON Field に同期します',
+		'external.squareSyncButton': 'Square 商品同期を実行',
+		'extensions.title': 'アプリ',
+		'extensions.description':
+			'TACHYON Field OS に追加する業種別アプリと、公開予約に連携する設定を管理します。',
+		'extensions.reservations': '予約管理',
+		'extensions.tenantSettings': 'テナント設定',
+		'extensions.statusLoadError': 'アプリ状態を読み込めませんでした',
+		'extensions.historyTitle': '設定履歴',
+		'extensions.historyDescription': 'アプリ設定の直近の変更履歴です。',
+		'extensions.noHistory': '設定履歴はまだありません。',
+		'extensions.productSettings': 'ゴルフ予約商品設定',
+		'extensions.productDescription':
+			'ゴルフ場の公開予約に出す商品、プレープラン、受付条件を設定します。',
+		'extensions.enabledAt': '有効化日時',
+		'extensions.disabledAt': '無効化日時',
+		'extensions.configVersion': '設定バージョン',
+		'extensions.validation': '設定状態',
+		'extensions.validationErrors': '設定の確認事項',
+		'extensions.defaultPlan': '標準プラン',
+		'extensions.standardPlan': '通常プラン',
+		'extensions.lightPlan': 'ライトプラン',
+		'extensions.publicProductName': '公開商品名',
+		'extensions.publicProductDescription': '公開説明',
+		'extensions.productsMaster': 'ゴルフ予約商品',
+		'extensions.productsMasterDescription':
+			'商品マスタの商品をゴルフ予約フォームに出す条件を管理します。',
+		'extensions.editProductsMaster': 'ゴルフ予約商品を設定',
+		'extensions.productOne': 'プラン1',
+		'extensions.productTwo': 'プラン2',
+		'extensions.productEnabled': '公開する',
+		'extensions.productName': '商品・プラン名',
+		'extensions.catalogProduct': '商品マスタの商品',
+		'extensions.selectCatalogProduct': '商品を選択',
+		'extensions.noCatalogProductsTitle': '商品マスタに商品がありません',
+		'extensions.noCatalogProductsDescription':
+			'予約に出す商品は商品マスタを正とします。先に商品マスタで商品を作成してください。',
+		'extensions.openCatalogProducts': '商品マスタを開く',
+		'extensions.productItemDescription': '説明',
+		'extensions.price': '料金',
+		'extensions.usesCatalogPrice': '商品マスタの価格を使用',
+		'extensions.prepaymentPolicy': '予約時決済',
+		'extensions.prepaymentDepositRequired': 'デポジット必須',
+		'extensions.prepaymentFullRequired': '全額決済必須',
+		'extensions.prepaymentOptional': '任意（現地決済も可）',
+		'extensions.prepaymentNone': '予約時決済なし',
+		'extensions.depositRatio': '事前決済率（%）',
+		'extensions.formFields': '予約フォーム項目',
+		'extensions.fieldPartySize': '人数',
+		'extensions.fieldNotes': '要望欄',
+		'extensions.fieldContact': '連絡先',
+		'extensions.duration': '標準所要時間（分）',
+		'extensions.availabilityCalendar': '販売カレンダー',
+		'extensions.availabilityCalendarDescription':
+			'曜日や特定日で、公開予約に表示する商品を切り替えます。除外日は常に非表示になります。',
+		'extensions.availabilityStartDate': '開始日',
+		'extensions.availabilityEndDate': '終了日',
+		'extensions.availabilityWeekdays': '曜日',
+		'extensions.availabilityIncludedDates': '追加営業日',
+		'extensions.availabilityExcludedDates': '除外日',
+		'extensions.bookingMode': '受付方式',
+		'extensions.bookingModeDescription':
+			'ゴルフ場のティータイムのように、公開予約で固定の枠だけを選ばせる場合は「枠から選択」にします。',
+		'extensions.bookingModeTime': '時間を選択',
+		'extensions.bookingModeTimeDescription':
+			'日付、開始時刻、利用時間を利用者が選びます。',
+		'extensions.bookingModeSlot': '枠から選択',
+		'extensions.bookingModeSlotDescription':
+			'管理画面で登録した予約枠だけを表示します。',
+		'extensions.slotName': '枠名',
+		'extensions.slotStartsAt': '開始日時',
+		'extensions.slotDurationMinutes': '所要分',
+		'extensions.slotRemainingQuantity': '残枠',
+		'extensions.slotRepeats': '繰り返し',
+		'extensions.slotRepeatsWeekly': '毎週',
+		'extensions.durationHelp':
+			'飲食、施設、レッスン、診療など業種に合わせた所要時間を設定します。',
+		'extensions.maxPeople': '1予約の最大人数',
+		'extensions.optionPolicy': '追加オプション',
+		'extensions.optionOptional': '予約時に選択',
+		'extensions.optionRequired': '必須',
+		'extensions.optionDisabled': '提供しない',
+		'extensions.memberDeposit': '会員前受金率（%）',
+		'extensions.guestDeposit': '一般前受金率（%）',
+		'extensions.savePlan': '予約プランを保存',
+		'extensions.enablePlan': '予約プランを有効化',
+		'extensions.disablePlan': '予約プランを無効化',
+		'extensions.saveConfig': '設定を保存',
+		'extensions.enable': '有効化',
+		'extensions.disable': '無効化',
+		'extensions.status': '状態',
+		'extensions.actor': '操作者',
+	},
+	en: {
+		'common.enabled': 'Enabled',
+		'common.disabled': 'Disabled',
+		'common.default': 'Default',
+		'common.valid': 'Valid',
+		'common.needsChanges': 'Needs changes',
+		'common.workspace': 'Workspace',
+		'common.logout': 'Log out',
+		'common.adminConsole': 'Admin Console',
+		'common.menuToggle': 'Toggle menu',
+		'nav.global': 'Global navigation',
+		'nav.home': 'Home',
+		'nav.customers': 'Customers',
+		'nav.sales': 'Sales',
+		'nav.billing': 'Billing',
+		'nav.master': 'Master',
+		'nav.inventory': 'Inventory',
+		'nav.hrm': 'HRM',
+		'nav.reservations': 'Reservations',
+		'nav.reservation-settings': 'Reservation Settings',
+		'nav.golf-reservation-products': 'Golf Reservation Products',
+		'nav.accounting': 'Accounting',
+		'nav.reports': 'Reports',
+		'nav.extensions': 'Apps',
+		'nav.settings': 'Settings',
+		'nav.pinned': 'Pinned',
+		'nav.pin': 'Pin',
+		'nav.unpin': 'Unpin',
+		'nav.library': 'Partners',
+		'nav.consumers': 'Consumers',
+		'nav.agent': 'Document Agent',
+		'nav.deals': 'Deals',
+		'nav.quotations': 'Quotations',
+		'nav.orders': 'Orders',
+		'nav.consumer-orders': 'EC Orders',
+		'nav.store-pickup': 'Pickup',
+		'nav.coupons': 'Coupons',
+		'nav.billing-center': 'Billing Center',
+		'nav.saas-subscriptions': 'SaaS Subscriptions',
+		'nav.invoices': 'Invoices',
+		'nav.cancellation-fees': 'Cancellation Fees',
+		'nav.ar-ap': 'Receivables / Payables',
+		'nav.revenue-reconciliation': 'Revenue Reconciliation',
+		'nav.products': 'Products',
+		'nav.stock': 'Stock',
+		'nav.low-stock': 'Low Stock',
+		'nav.locations': 'Locations',
+		'nav.transfers': 'Transfers',
+		'nav.purchase-orders': 'Purchase Orders',
+		'nav.procurement': 'Receiving OCR',
+		'nav.vendors': 'Vendors',
+		'nav.staff': 'Staff',
+		'nav.erp-dashboard': 'Dashboard',
+		'nav.sales-ledger': 'Sales Ledger',
+		'nav.purchase-ledger': 'Purchase Ledger',
+		'nav.journal-classifications': 'Journal Review',
+		'nav.evidence': 'Evidence',
+		'nav.monthly-close': 'Monthly Close',
+		'nav.audit-logs': 'Audit Logs',
+		'nav.reports-home': 'Reports Home',
+		'nav.analytics': 'Sales Analytics',
+		'nav.automated-reports': 'Automated Reports',
+		'nav.tenant-extensions': 'Reservation Products',
+		'nav.golf-simulator': 'Golf Pricing',
+		'nav.tenant-settings': 'Tenant Settings',
+		'nav.users': 'Members',
+		'nav.api-keys': 'API Keys',
+		'nav.account-security': 'Account Security',
+		'nav.erp-rollout': 'ERP Rollout',
+		'nav.scope': 'Scope',
+		'nav.tenants': 'Tenants',
+		'nav.billing-accounts': 'Billing Accounts',
+		'language.title': 'Language',
+		'language.description':
+			'Choose the display language for the admin console.',
+		'language.current': 'Current language',
+		'language.ja': '日本語',
+		'language.en': 'English',
+		'language.switchTo': 'Switch language',
+		'settings.title': 'Settings',
+		'settings.scopeTitle': 'Scope',
+		'settings.scopeDescription':
+			'Review what is covered in the GA release and what remains outside the native GA scope.',
+		'settings.scopeButton': 'Review scope',
+		'settings.erpTitle': 'ERP rollout',
+		'settings.erpDescription':
+			'Review ERP enablement status and source for this tenant.',
+		'settings.erpButton': 'Review ERP rollout',
+		'settings.securityTitle': 'Account security',
+		'settings.securityDescription':
+			'Review passkey registration and Google account linking status.',
+		'settings.securityButton': 'Review security settings',
+		'external.title': 'External services',
+		'external.description': 'Review connected external service status.',
+		'external.refresh': 'Refresh',
+		'external.fetchFailed': 'Could not load integration settings',
+		'external.fetchRetry':
+			'Could not load integration settings or external service data. Reload or try again shortly.',
+		'external.fetchNetwork':
+			'Could not load integration settings or external service data. Check the network and try again.',
+		'external.fetchTemporary':
+			'The integration API or external service is temporarily unavailable. Reload or try again shortly.',
+		'external.reload': 'Reload',
+		'external.payment': 'Payment',
+		'external.tenant': 'Tenant',
+		'external.platform': 'Platform',
+		'external.host': 'System',
+		'external.notConfigured': 'Not configured',
+		'external.oauth': 'Connected OAuth services',
+		'external.paymentServices': 'Payment services',
+		'external.aiServices': 'AI services',
+		'external.otherServices': 'Other services',
+		'external.noServices': 'No external services are configured',
+		'external.syncing': 'Syncing...',
+		'external.syncFailed': 'Sync failed',
+		'external.syncError': 'An error occurred during sync',
+		'external.products': 'Products',
+		'external.variants': 'Variants',
+		'external.skipped': 'Skipped',
+		'external.errorDetails': 'Error details',
+		'external.moreErrors': 'More',
+		'external.squareSyncTitle': 'Square product sync',
+		'external.squareSyncDescription':
+			'Sync product data from Square Catalog to TACHYON Field.',
+		'external.squareSyncButton': 'Run Square product sync',
+		'extensions.title': 'Apps',
+		'extensions.description':
+			'Manage industry apps installed on TACHYON Field OS and settings linked to public reservations.',
+		'extensions.reservations': 'Reservations',
+		'extensions.tenantSettings': 'Tenant settings',
+		'extensions.statusLoadError': 'App status could not be loaded',
+		'extensions.historyTitle': 'Settings history',
+		'extensions.historyDescription': 'Recent changes to app settings.',
+		'extensions.noHistory': 'No settings history has been recorded.',
+		'extensions.productSettings': 'Golf Reservation Product Settings',
+		'extensions.productDescription':
+			'Configure products, play plans, and booking rules shown on the golf reservation page.',
+		'extensions.enabledAt': 'Enabled at',
+		'extensions.disabledAt': 'Disabled at',
+		'extensions.configVersion': 'Config version',
+		'extensions.validation': 'Validation',
+		'extensions.validationErrors': 'Config validation errors',
+		'extensions.defaultPlan': 'Default plan',
+		'extensions.standardPlan': 'Standard plan',
+		'extensions.lightPlan': 'Light plan',
+		'extensions.publicProductName': 'Public product name',
+		'extensions.publicProductDescription': 'Public description',
+		'extensions.productsMaster': 'Golf reservation products',
+		'extensions.productsMasterDescription':
+			'Choose product master items and configure their golf booking rules.',
+		'extensions.editProductsMaster': 'Configure golf reservation products',
+		'extensions.productOne': 'Plan 1',
+		'extensions.productTwo': 'Plan 2',
+		'extensions.productEnabled': 'Publish',
+		'extensions.productName': 'Product / plan name',
+		'extensions.catalogProduct': 'Product master item',
+		'extensions.selectCatalogProduct': 'Select product',
+		'extensions.noCatalogProductsTitle': 'No product master items found',
+		'extensions.noCatalogProductsDescription':
+			'Reservable products use the product master as the source of truth. Create products there first.',
+		'extensions.openCatalogProducts': 'Open product master',
+		'extensions.productItemDescription': 'Description',
+		'extensions.price': 'Price',
+		'extensions.usesCatalogPrice': 'Uses product master price',
+		'extensions.prepaymentPolicy': 'Reservation payment',
+		'extensions.prepaymentDepositRequired': 'Deposit required',
+		'extensions.prepaymentFullRequired': 'Full payment required',
+		'extensions.prepaymentOptional': 'Optional; pay onsite allowed',
+		'extensions.prepaymentNone': 'No reservation-time payment',
+		'extensions.depositRatio': 'Prepayment ratio (%)',
+		'extensions.formFields': 'Reservation form fields',
+		'extensions.fieldPartySize': 'Party size',
+		'extensions.fieldNotes': 'Notes',
+		'extensions.fieldContact': 'Contact details',
+		'extensions.duration': 'Default duration (minutes)',
+		'extensions.availabilityCalendar': 'Sales calendar',
+		'extensions.availabilityCalendarDescription':
+			'Control which products appear for each weekday or date. Excluded dates are always hidden.',
+		'extensions.availabilityStartDate': 'Start date',
+		'extensions.availabilityEndDate': 'End date',
+		'extensions.availabilityWeekdays': 'Weekdays',
+		'extensions.availabilityIncludedDates': 'Additional open dates',
+		'extensions.availabilityExcludedDates': 'Excluded dates',
+		'extensions.bookingMode': 'Booking mode',
+		'extensions.bookingModeDescription':
+			'Use slot selection when guests should only choose fixed tee times registered by admins.',
+		'extensions.bookingModeTime': 'Choose time',
+		'extensions.bookingModeTimeDescription':
+			'Guests choose the date, start time, and duration.',
+		'extensions.bookingModeSlot': 'Choose from slots',
+		'extensions.bookingModeSlotDescription':
+			'Only reservation slots registered in the admin screen are shown.',
+		'extensions.slotName': 'Slot name',
+		'extensions.slotStartsAt': 'Start date/time',
+		'extensions.slotDurationMinutes': 'Minutes',
+		'extensions.slotRemainingQuantity': 'Remaining',
+		'extensions.slotRepeats': 'Repeat',
+		'extensions.slotRepeatsWeekly': 'Weekly',
+		'extensions.durationHelp':
+			'Set the duration for restaurants, facilities, lessons, clinics, or other reservation businesses.',
+		'extensions.maxPeople': 'Max people per booking',
+		'extensions.optionPolicy': 'Additional option',
+		'extensions.optionOptional': 'Selectable at booking',
+		'extensions.optionRequired': 'Required',
+		'extensions.optionDisabled': 'Not offered',
+		'extensions.memberDeposit': 'Member deposit ratio (%)',
+		'extensions.guestDeposit': 'General deposit ratio (%)',
+		'extensions.savePlan': 'Save reservation plan',
+		'extensions.enablePlan': 'Enable reservation plan',
+		'extensions.disablePlan': 'Disable reservation plan',
+		'extensions.saveConfig': 'Save config',
+		'extensions.enable': 'enable',
+		'extensions.disable': 'disable',
+		'extensions.status': 'status',
+		'extensions.actor': 'actor',
+	},
+} as const
+
+export type AdminMessageKey = keyof typeof messages.ja
+
+const AdminI18nContext = createContext<AdminI18nContextValue | null>(null)
+
+export function AdminI18nProvider({ children }: { children: React.ReactNode }) {
+	const [locale, setLocaleState] = useState<AdminLocale>('ja')
+
+	useEffect(() => {
+		const stored = window.localStorage.getItem(STORAGE_KEY)
+		if (stored === 'ja' || stored === 'en') {
+			setLocaleState(stored)
+			return
+		}
+		const browserLocale = window.navigator.language.toLowerCase()
+		setLocaleState(browserLocale.startsWith('ja') ? 'ja' : 'en')
+	}, [])
+
+	const value = useMemo<AdminI18nContextValue>(() => {
+		const setLocale = (nextLocale: AdminLocale) => {
+			window.localStorage.setItem(STORAGE_KEY, nextLocale)
+			document.documentElement.lang = nextLocale
+			setLocaleState(nextLocale)
+		}
+		return {
+			locale,
+			setLocale,
+			t: key => messages[locale][key] ?? messages.ja[key] ?? key,
+		}
+	}, [locale])
+
+	useEffect(() => {
+		document.documentElement.lang = locale
+	}, [locale])
+
+	return (
+		<AdminI18nContext.Provider value={value}>
+			{children}
+		</AdminI18nContext.Provider>
+	)
+}
+
+export function useAdminI18n() {
+	const context = useContext(AdminI18nContext)
+	if (!context) {
+		throw new Error('useAdminI18n must be used inside AdminI18nProvider')
+	}
+	return context
+}
+
+export function T({ k }: { k: AdminMessageKey }) {
+	const { t } = useAdminI18n()
+	return <>{t(k)}</>
+}

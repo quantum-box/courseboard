@@ -29,3 +29,45 @@ jobs:
 
       - name: Run tests
         run: cargo test
+
+  frontend:
+    name: Frontend (admin-ui)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/admin-ui
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm exec tsc --noEmit -p tsconfig.json
+
+      - name: Unit tests
+        run: pnpm run test
+
+      - name: Build
+        run: pnpm run build
+        env:
+          COGNITO_ISSUER: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_placeholder
+          COGNITO_REGION: ap-northeast-1
+          COGNITO_USER_POOL_ID: ap-northeast-1_placeholder
+          COGNITO_CLIENT_ID: build-placeholder
+          COGNITO_CLIENT_SECRET: build-placeholder
+          COGNITO_DOMAIN: https://auth-pool.n1.tachy.one
+          AUTH_SECRET: build-placeholder-secret-min-32-characters
+          NEXT_PUBLIC_BACKEND_API_URL: https://tachyon-field-api.txcloud.app
+          NEXT_PUBLIC_PLATFORM_ID: tn_placeholder
+          TACHYON_FIELD_API_URL: https://tachyon-field-api.txcloud.app
+          BACKEND_API_URL: https://tachyon-field-api.txcloud.app
