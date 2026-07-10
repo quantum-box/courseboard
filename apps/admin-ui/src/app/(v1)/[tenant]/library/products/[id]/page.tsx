@@ -11,7 +11,7 @@ import {
 	BreadcrumbSeparator,
 } from 'components/ui/breadcrumb'
 import { V1Layout } from 'components/v1-layout'
-import { getGraphqlSdk } from 'lib/graphqlClient'
+import { getServerGraphqlSdk } from 'lib/serverGraphqlClient'
 import { getServerModePrefix } from 'lib/mode'
 import type { Route } from 'next'
 import Link from 'next/link'
@@ -23,7 +23,10 @@ export default async function ProductDetailsPage({
 	params: { id: string; tenant: string }
 }) {
 	const session = await authWithCheck()
-	const sdk = getGraphqlSdk(session, tenant)
+	// Server-resolved (internalService) Field API — same as reservation SSR
+	// (#36). The client-facing getGraphqlSdk resolves the public URL, which is
+	// not reliably reachable from worker subrequests (PLT-2501 follow-up).
+	const sdk = getServerGraphqlSdk(session, tenant)
 	const mp = getServerModePrefix(tenant)
 
 	let product: Awaited<ReturnType<typeof sdk.productDetail>>['product'] | null =
@@ -36,7 +39,10 @@ export default async function ProductDetailsPage({
 		const result = await sdk.productDetail({ productId: id })
 		product = result.product
 		payment_providers = result.payment_providers ?? []
-	} catch {
+	} catch (error) {
+		// Leave a trace before collapsing every failure into a 404 — a fetch
+		// error is not "product does not exist" (PLT-2501).
+		console.error('productDetail failed; rendering notFound', error)
 		notFound()
 	}
 

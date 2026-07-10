@@ -46,7 +46,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from 'components/ui/tabs'
 import { deleteProduct } from 'features/delete-product'
 import { type ProductItemForProductsListFragment } from 'gen/graphql'
-import { getGraphqlSdk } from 'lib/graphqlClient'
+import { getServerGraphqlSdk } from 'lib/serverGraphqlClient'
 import { getServerModePrefix } from 'lib/mode'
 import { Kind, ProductStatus, PublicationStatus } from 'lib/product-constants'
 import {
@@ -90,7 +90,10 @@ export async function ProductsList({
 	tenant: string
 }) {
 	const session = await authWithCheck()
-	const sdk = getGraphqlSdk(session, tenant)
+	// Server-resolved (internalService) Field API — same as reservation SSR
+	// (#36). The client-facing getGraphqlSdk resolves the public URL, which is
+	// not reliably reachable from worker subrequests (PLT-2501 follow-up).
+	const sdk = getServerGraphqlSdk(session, tenant)
 	const mp = getServerModePrefix(tenant)
 	const pageParam = Number(page ?? '1')
 	const currentPage =
@@ -114,8 +117,11 @@ export async function ProductsList({
 			totalCount = connection.totalCount ?? 0
 			pageInfo = connection.pageInfo ?? pageInfo
 		}
-	} catch {
-		// New tenant may not have products data yet
+	} catch (error) {
+		// Render the empty state, but never swallow the failure silently —
+		// a fetch error here is indistinguishable from "no products" for the
+		// user, so at least leave a trace in the worker logs (PLT-2501).
+		console.error('getProuctsForAdmin failed; rendering empty state', error)
 	}
 
 	const start = totalCount === 0 ? 0 : pageInfo.offset + 1
