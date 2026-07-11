@@ -6,6 +6,7 @@ import { backendMutationFailureFromResponse } from 'lib/backend-mutation-error'
 import { revalidatePath } from 'next/cache'
 import { redirect } from 'next/navigation'
 import { normalizeSmsPhoneNumber } from './new/phone-number'
+import { fetchInvoicesAction } from '../invoices/action'
 
 const PLATFORM_ID =
 	process.env.NEXT_PUBLIC_PLATFORM_ID || 'tn_01hjjn348rn3t49zz6hvmfq67p'
@@ -22,6 +23,13 @@ export type CancellationFeeActionState = {
 	message?: string
 	statusCode?: number
 	invoiceId?: string
+}
+
+export async function fetchCancellationFeeInvoicesAction(
+	tenant: string,
+	status?: string,
+) {
+	return fetchInvoicesAction(tenant, status)
 }
 
 async function cancellationFeeFetch(
