@@ -61,6 +61,7 @@ import {
 	normalizePinnedNavigationPaths,
 	togglePinnedNavigationPath,
 } from 'lib/pinnedNavigation'
+import { golfCourseAdminPaths } from 'lib/extension-admin-registry'
 import { cn } from 'lib/utils'
 import type { Route } from 'next'
 import Link from 'next/link'
@@ -113,7 +114,7 @@ const defaultOpenGroups: Record<MenuGroupKey, boolean> = {
 	reservations: true,
 	accounting: false,
 	reports: false,
-	extensions: false,
+	extensions: true,
 	settings: false,
 }
 
@@ -326,7 +327,8 @@ export const workspaceSettingsItems: MenuItem[] = [
 	},
 ]
 
-export const menuGroups: MenuGroup[] = [
+// フル ERP ナビ定義（温存）。courseboard では下の最小 menuGroups だけを表示する。
+export const allMenuGroups: MenuGroup[] = [
 	{
 		key: 'customers',
 		labelKey: 'nav.customers',
@@ -658,6 +660,79 @@ export const menuGroups: MenuGroup[] = [
 				icon: CalculatorIcon,
 				matchPrefixes: ['/golf-simulator'],
 				adminOnly: true,
+			},
+		],
+	},
+]
+
+// courseboard 用の最小ナビ。ゴルフ機能とキャンセル料のみを表示する。
+// 他の汎用 ERP メニューは allMenuGroups に温存してあり、必要になれば戻せる。
+export const menuGroups: MenuGroup[] = [
+	{
+		key: 'extensions',
+		labelKey: 'nav.golf-course',
+		items: [
+			{
+				key: 'extensions',
+				labelKey: 'nav.golf-portal',
+				path: golfCourseAdminPaths.portal,
+				icon: AppWindowIcon,
+				matchExactPaths: [golfCourseAdminPaths.portal],
+			},
+			{
+				key: 'extensions',
+				labelKey: 'nav.golf-courses',
+				path: golfCourseAdminPaths.courses,
+				icon: FolderIcon,
+				matchPrefixes: [golfCourseAdminPaths.courses],
+			},
+			{
+				key: 'extensions',
+				labelKey: 'nav.golf-reservation-products',
+				path: golfCourseAdminPaths.reservationProducts,
+				icon: CalendarCheckIcon,
+				matchPrefixes: [golfCourseAdminPaths.reservationProducts],
+			},
+			{
+				key: 'extensions',
+				labelKey: 'nav.golf-caddies',
+				path: golfCourseAdminPaths.caddies,
+				icon: UsersIcon,
+				matchPrefixes: [golfCourseAdminPaths.caddies],
+			},
+			{
+				key: 'extensions',
+				labelKey: 'nav.golf-budgets',
+				path: golfCourseAdminPaths.budgets,
+				icon: BarChart3Icon,
+				matchPrefixes: [golfCourseAdminPaths.budgets],
+			},
+			{
+				key: 'extensions',
+				labelKey: 'nav.golf-policy',
+				path: golfCourseAdminPaths.policy,
+				icon: SettingsIcon,
+				matchPrefixes: [golfCourseAdminPaths.policy],
+			},
+			{
+				key: 'extensions',
+				labelKey: 'nav.golf-settlement',
+				path: golfCourseAdminPaths.settlement,
+				icon: ReceiptTextIcon,
+				matchPrefixes: [golfCourseAdminPaths.settlement],
+			},
+		],
+	},
+	{
+		key: 'billing',
+		labelKey: 'nav.cancellation-fees',
+		items: [
+			{
+				key: 'cancellation-fees',
+				labelKey: 'nav.cancellation-fees',
+				path: '/cancellation-fees/new',
+				icon: CreditCardIcon,
+				matchPrefixes: ['/cancellation-fees'],
 			},
 		],
 	},
