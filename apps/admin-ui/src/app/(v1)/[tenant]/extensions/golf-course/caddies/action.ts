@@ -115,6 +115,35 @@ async function golfFetch(path: string, tenant: string, init?: RequestInit) {
 	})
 }
 
+// T09: キャディ付枠の自動算出
+export type CaddieSupply = {
+	date: string
+	availableCaddies: number
+	twoRoundCapable: number
+	caddieSupply: number
+	morningCapacity: number
+	afternoonCapacity: number
+	safetyBuffer: number
+	caddieAttachedCap: number
+	currentCaddieAttached: number
+	remaining: number
+}
+
+export async function fetchCaddieSupplyAction(
+	tenant: string,
+	date: string,
+	safetyBuffer?: number,
+) {
+	const params = new URLSearchParams({ date })
+	if (safetyBuffer !== undefined && Number.isFinite(safetyBuffer)) {
+		params.set('safetyBuffer', String(Math.max(0, Math.trunc(safetyBuffer))))
+	}
+	return golfFetchJson<CaddieSupply>(
+		`/v1/erp/extensions/golf-course/caddie-supply?${params.toString()}`,
+		tenant,
+	)
+}
+
 export async function fetchCaddieProfilesAction(tenant: string) {
 	const result = await golfFetchJson<{ items: CaddieProfile[] }>(
 		'/v1/erp/extensions/golf-course/caddie-profiles',

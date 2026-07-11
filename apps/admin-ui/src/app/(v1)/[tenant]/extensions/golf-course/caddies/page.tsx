@@ -1,5 +1,6 @@
 import { Badge } from 'components/ui/badge'
 import { CaddieAutoAssign } from './caddie-auto-assign'
+import { CaddieSupplyCard } from './caddie-supply-card'
 import {
 	Breadcrumb,
 	BreadcrumbItem,
@@ -302,6 +303,8 @@ export default async function GolfCaddiesPage({
 					<SummaryCard title='キャンセル' value={dispatchSummary.cancelled} />
 					<SummaryCard title='推奨候補' value={recommendations.length} />
 				</div>
+
+				<CaddieSupplyCard tenant={tenant} />
 
 				<Card>
 					<CardHeader>
