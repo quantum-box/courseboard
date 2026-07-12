@@ -55,7 +55,12 @@ function yen(amount: number): string {
 
 async function loadFont(appBaseUrl: string): Promise<Uint8Array> {
 	const fontUrl = `${appBaseUrl.replace(/\/$/, '')}/fonts/ipag.ttf`
-	const resp = await fetch(fontUrl)
+	const runtimeGlobal = globalThis as typeof globalThis & {
+		__workerAssets__?: { fetch(request: Request): Promise<Response> }
+	}
+	const resp = runtimeGlobal.__workerAssets__
+		? await runtimeGlobal.__workerAssets__.fetch(new Request(fontUrl))
+		: await fetch(fontUrl)
 	if (!resp.ok) throw new Error(`Font load failed: ${resp.status} ${fontUrl}`)
 	return new Uint8Array(await resp.arrayBuffer())
 }

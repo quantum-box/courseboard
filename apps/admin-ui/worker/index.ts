@@ -48,12 +48,16 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<Response> {
-    (globalThis as typeof globalThis & { __env__?: Record<string, string> }).__env__ =
-      Object.fromEntries(
-        Object.entries(env).filter(
-          (entry): entry is [string, string] => typeof entry[1] === "string",
-        ),
-      );
+    const runtimeGlobal = globalThis as typeof globalThis & {
+      __env__?: Record<string, string>;
+      __workerAssets__?: Pick<Fetcher, "fetch">;
+    };
+    runtimeGlobal.__env__ = Object.fromEntries(
+      Object.entries(env).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+    runtimeGlobal.__workerAssets__ = env.ASSETS;
 
     const url = new URL(request.url);
 
