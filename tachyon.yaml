@@ -40,7 +40,9 @@ spec:
       build:
         # pnpm (matches source admin-ui). Native build scripts are approved via
         # apps/admin-ui/pnpm-workspace.yaml (allowBuilds); pnpm-lock.yaml pins deps.
-        installCommand: corepack enable && corepack pnpm install --frozen-lockfile
+        # Keep pnpm's SQLite store index Pod-local. The runner cache PVC is shared
+        # by concurrent builds for this app and a malformed index blocks all reruns.
+        installCommand: corepack enable && pnpm_config_store_dir=/tmp/tachyon-pnpm-store corepack pnpm install --frozen-lockfile
         command: corepack pnpm run build
         outputDirectory: apps/admin-ui/dist/server/index.js
         nodeVersion: "24"
