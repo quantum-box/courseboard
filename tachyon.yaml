@@ -95,13 +95,9 @@ spec:
         - name: NEXT_PUBLIC_BACKEND_API_URL
           value: https://tachyon-field-api.txcloud.app
         - name: TACHYON_FIELD_API_URL
-          valueFrom:
-            internalService:
-              appName: tachyon-field-api
+          value: https://tachyon-field-api.txcloud.app
         - name: BACKEND_API_URL
-          valueFrom:
-            internalService:
-              appName: tachyon-field-api
+          value: https://tachyon-field-api.txcloud.app
 ---
 apiVersion: apps.tachy.one/v1alpha
 kind: OAuth2Client
