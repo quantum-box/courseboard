@@ -5,6 +5,10 @@ const authMocks = vi.hoisted(() => ({
 	verifyAccessToken: vi.fn(),
 }))
 
+const navigationMocks = vi.hoisted(() => ({
+	redirect: vi.fn(),
+}))
+
 vi.mock('app/auth', () => ({
 	authWithCheck: authMocks.authWithCheck,
 	verifyAccessToken: authMocks.verifyAccessToken,
@@ -15,7 +19,7 @@ vi.mock('next/cache', () => ({
 }))
 
 vi.mock('next/navigation', () => ({
-	redirect: vi.fn(),
+	redirect: navigationMocks.redirect,
 }))
 
 function validCancellationFeeFormData() {
@@ -27,6 +31,21 @@ function validCancellationFeeFormData() {
 	formData.set('dueDate', '2026-07-31')
 	formData.set('clientName', 'Test Customer')
 	return formData
+}
+
+function createdInvoice() {
+	return Response.json({ id: 'inv_test', status: 'Draft' }, { status: 201 })
+}
+
+function fulfilledSmsInvoice(overrides: Record<string, unknown> = {}) {
+	return Response.json({
+		id: 'inv_test',
+		status: 'Sent',
+		paymentLinkUrl: 'https://tachyon-field.test/pay/inv_test',
+		paymentLinkStatus: 'Ready',
+		smsDeliveryStatus: 'Sent',
+		...overrides,
+	})
 }
 
 describe('createCancellationFeeAction auth delegation', () => {
@@ -43,9 +62,10 @@ describe('createCancellationFeeAction auth delegation', () => {
 	})
 
 	it('verifies the session user token before creating the cancellation fee invoice', async () => {
-		const fetchMock = vi.fn(async () =>
-			Response.json({ id: 'inv_test', status: 'Draft' }),
-		)
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(createdInvoice())
+			.mockResolvedValueOnce(fulfilledSmsInvoice())
 		vi.stubGlobal('fetch', fetchMock)
 
 		const { createCancellationFeeAction } = await import('./action')
@@ -67,13 +87,25 @@ describe('createCancellationFeeAction auth delegation', () => {
 				method: 'POST',
 			}),
 		)
+		expect(fetchMock).toHaveBeenCalledWith(
+			'https://tachyon-field-api.test/v1/invoices/inv_test/fulfill',
+			expect.objectContaining({
+				headers: expect.objectContaining({
+					Authorization: 'Bearer user-access-token',
+					'x-operator-id': 'tn_operator',
+					'x-platform-id': 'tn_platform',
+				}),
+				method: 'POST',
+			}),
+		)
 	})
 
 	it('does not create a double-slash Field API path when the runtime base URL has a trailing slash', async () => {
 		vi.stubEnv('TACHYON_FIELD_API_URL', 'https://tachyon-field-api.test/')
-		const fetchMock = vi.fn(async () =>
-			Response.json({ id: 'inv_test', status: 'Sent' }, { status: 201 }),
-		)
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(createdInvoice())
+			.mockResolvedValueOnce(fulfilledSmsInvoice())
 		vi.stubGlobal('fetch', fetchMock)
 
 		const { createCancellationFeeAction } = await import('./action')
@@ -86,6 +118,13 @@ describe('createCancellationFeeAction auth delegation', () => {
 		expect(fetchMock).toHaveBeenCalledWith(
 			'https://tachyon-field-api.test/v1/invoices',
 			expect.any(Object),
+		)
+		expect(fetchMock).toHaveBeenCalledWith(
+			'https://tachyon-field-api.test/v1/invoices/inv_test/fulfill',
+			expect.any(Object),
+		)
+		expect(navigationMocks.redirect).toHaveBeenCalledWith(
+			'/tn_operator/invoices/inv_test',
 		)
 		expect(result).toBeUndefined()
 	})
@@ -162,5 +201,84 @@ describe('createCancellationFeeAction auth delegation', () => {
 		})
 		expect(result.message).toContain('HTTP 503')
 		expect(result.message).toContain('SMS provider billing is not enabled')
+	})
+
+	it('keeps the created invoice visible when fulfillment fails upstream', async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(createdInvoice())
+			.mockResolvedValueOnce(
+				Response.json({ message: 'notification unavailable' }, { status: 503 }),
+			)
+		vi.stubGlobal('fetch', fetchMock)
+
+		const { createCancellationFeeAction } = await import('./action')
+		const result = await createCancellationFeeAction(
+			'tn_operator',
+			{ status: 'idle' },
+			validCancellationFeeFormData(),
+		)
+
+		expect(result).toMatchObject({
+			status: 'delivery_error',
+			invoiceId: 'inv_test',
+			statusCode: 503,
+		})
+		expect(result.message).toContain('notification unavailable')
+		expect(navigationMocks.redirect).not.toHaveBeenCalled()
+	})
+
+	it('does not report success when fulfillment returns no issued payment link', async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(createdInvoice())
+			.mockResolvedValueOnce(
+				fulfilledSmsInvoice({
+					paymentLinkUrl: null,
+					paymentLinkStatus: 'Pending',
+				}),
+			)
+		vi.stubGlobal('fetch', fetchMock)
+
+		const { createCancellationFeeAction } = await import('./action')
+		const result = await createCancellationFeeAction(
+			'tn_operator',
+			{ status: 'idle' },
+			validCancellationFeeFormData(),
+		)
+
+		expect(result).toMatchObject({
+			status: 'delivery_error',
+			invoiceId: 'inv_test',
+		})
+		expect(result.message).toContain('支払いリンクが発行されていません')
+		expect(navigationMocks.redirect).not.toHaveBeenCalled()
+	})
+
+	it('does not report success while the selected delivery is incomplete', async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValueOnce(createdInvoice())
+			.mockResolvedValueOnce(
+				fulfilledSmsInvoice({
+					status: 'Draft',
+					smsDeliveryStatus: 'Pending',
+				}),
+			)
+		vi.stubGlobal('fetch', fetchMock)
+
+		const { createCancellationFeeAction } = await import('./action')
+		const result = await createCancellationFeeAction(
+			'tn_operator',
+			{ status: 'idle' },
+			validCancellationFeeFormData(),
+		)
+
+		expect(result).toMatchObject({
+			status: 'delivery_error',
+			invoiceId: 'inv_test',
+		})
+		expect(result.message).toContain('送信が完了していません')
+		expect(navigationMocks.redirect).not.toHaveBeenCalled()
 	})
 })

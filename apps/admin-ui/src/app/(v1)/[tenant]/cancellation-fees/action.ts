@@ -14,6 +14,10 @@ const PLATFORM_ID =
 type InvoiceData = {
 	id: string
 	status?: string
+	paymentLinkUrl?: string | null
+	paymentLinkStatus?: 'Pending' | 'Ready' | 'Failed' | null
+	emailDeliveryStatus?: 'Pending' | 'Sent' | 'Failed' | null
+	smsDeliveryStatus?: 'Pending' | 'Sent' | 'Failed' | null
 }
 
 class UnverifiedUserAccessTokenError extends Error {}
@@ -74,6 +78,14 @@ function errorState(
 	statusCode?: number,
 ): CancellationFeeActionState {
 	return { status: 'error', message, statusCode }
+}
+
+function deliveryErrorState(
+	invoiceId: string,
+	message: string,
+	statusCode?: number,
+): CancellationFeeActionState {
+	return { status: 'delivery_error', invoiceId, message, statusCode }
 }
 
 export async function createCancellationFeeAction(
@@ -181,15 +193,66 @@ export async function createCancellationFeeAction(
 		return errorState(failure.message, failure.status)
 	}
 
-	const invoice = (await res.json()) as InvoiceData
+	const invoice = (await res.json().catch(() => null)) as InvoiceData | null
+	if (!invoice?.id) {
+		return errorState(
+			'請求書の作成応答を確認できませんでした。請求書一覧を確認してから再試行してください。',
+			502,
+		)
+	}
 	revalidatePath(`/${tenant}/invoices`)
-	if (invoice.status === 'SendFailed') {
-		return {
-			status: 'delivery_error',
-			invoiceId: invoice.id,
-			message:
-				'請求書は作成済みですが、メールまたはSMSの送信だけ失敗しました。請求書詳細から再送できます。',
-		}
+
+	let fulfillmentResponse: Response
+	try {
+		fulfillmentResponse = await cancellationFeeFetch(
+			`/v1/invoices/${encodeURIComponent(invoice.id)}/fulfill`,
+			tenant,
+			accessToken,
+			{
+				method: 'POST',
+				signal: AbortSignal.timeout(40_000),
+			},
+		)
+	} catch {
+		return deliveryErrorState(
+			invoice.id,
+			'請求書は作成済みですが、支払いリンクまたは通知処理に接続できませんでした。請求書詳細から再試行してください。',
+		)
+	}
+	if (!fulfillmentResponse.ok) {
+		const failure = await backendMutationFailureFromResponse(
+			fulfillmentResponse,
+			'請求書は作成済みですが、支払いリンクまたは通知処理に失敗しました',
+		)
+		return deliveryErrorState(
+			invoice.id,
+			`${failure.message}。請求書詳細から再試行してください。`,
+			failure.status,
+		)
+	}
+
+	const fulfilledInvoice = (await fulfillmentResponse
+		.json()
+		.catch(() => null)) as InvoiceData | null
+	revalidatePath(`/${tenant}/invoices/${invoice.id}`)
+	if (
+		fulfilledInvoice?.paymentLinkStatus !== 'Ready' ||
+		!fulfilledInvoice.paymentLinkUrl
+	) {
+		return deliveryErrorState(
+			invoice.id,
+			'請求書は作成済みですが、支払いリンクが発行されていません。請求書詳細から再試行してください。',
+		)
+	}
+
+	const selectedDeliveriesSent =
+		(!sendEmail || fulfilledInvoice.emailDeliveryStatus === 'Sent') &&
+		(!sendSms || fulfilledInvoice.smsDeliveryStatus === 'Sent')
+	if (fulfilledInvoice.status !== 'Sent' || !selectedDeliveriesSent) {
+		return deliveryErrorState(
+			invoice.id,
+			'請求書と支払いリンクは作成済みですが、メールまたはSMSの送信が完了していません。請求書詳細から再送できます。',
+		)
 	}
 	redirect(`/${tenant}/invoices/${invoice.id}`)
 }
