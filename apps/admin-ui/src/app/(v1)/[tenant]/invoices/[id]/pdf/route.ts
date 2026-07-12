@@ -1,18 +1,18 @@
 import type { InvoiceData } from 'app/(v1)/[tenant]/invoices/action'
 import { auth } from 'app/auth'
+import { resolveAuthUrl } from 'lib/auth-url'
 import { buildDocumentPdf } from 'lib/document-pdf'
 import {
 	getDocumentPdfSettings,
 	resolveDocumentPdfTemplate,
 } from 'lib/document-pdf-settings'
-import { resolveAuthUrl } from 'lib/auth-url'
 import { getRuntimeEnv } from 'lib/runtime-env'
 import { joinServerBackendPath } from 'lib/serverBackendUrl'
 
 const DEFAULT_PLATFORM_ID = 'tn_01hjjn348rn3t49zz6hvmfq67p'
 
-function getAppBaseUrl(): string {
-	return resolveAuthUrl()
+function getAppBaseUrl(request: Request): string {
+	return resolveAuthUrl(request)
 }
 
 export async function GET(
@@ -82,7 +82,7 @@ export async function GET(
 			notes: invoice.notes,
 			paymentLinkUrl: invoice.paymentLinkUrl,
 		},
-		getAppBaseUrl(),
+		getAppBaseUrl(request),
 		{
 			template,
 			logoImage: settings.logoImage,
