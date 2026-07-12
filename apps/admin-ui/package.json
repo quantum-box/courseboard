@@ -99,6 +99,7 @@
     "@vitejs/plugin-react": "^6.0.2",
     "@vitejs/plugin-rsc": "^0.5.27",
     "encoding": "^0.1.13",
+    "happy-dom": "^20.10.6",
     "openapi2aspida": "^0.24.0",
     "react-server-dom-webpack": "^19.2.7",
     "vinext": "^0.1.6",

@@ -3,7 +3,7 @@
 import { Input } from 'components/ui/input'
 import { Textarea } from 'components/ui/textarea'
 import * as React from 'react'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { FieldLabel, RequirementBadge } from './field-label'
 
 type CancellationFeeSmsFieldsProps = {
@@ -17,6 +17,8 @@ export function CancellationFeeSmsFields({
 }: CancellationFeeSmsFieldsProps) {
 	const [sendEmail, setSendEmail] = useState(true)
 	const [sendSms, setSendSms] = useState(false)
+	const emailInputRef = useRef<HTMLInputElement>(null)
+	const phoneInputRef = useRef<HTMLInputElement>(null)
 
 	return (
 		<>
@@ -25,6 +27,7 @@ export function CancellationFeeSmsFields({
 					送付先メール
 				</FieldLabel>
 				<Input
+					ref={emailInputRef}
 					name='clientEmail'
 					type='email'
 					defaultValue={defaultEmail}
@@ -47,7 +50,13 @@ export function CancellationFeeSmsFields({
 					name='sendEmail'
 					type='checkbox'
 					checked={sendEmail}
-					onChange={event => setSendEmail(event.currentTarget.checked)}
+					onChange={event => {
+						const enabled = event.currentTarget.checked
+						if (!enabled) {
+							emailInputRef.current?.setCustomValidity('')
+						}
+						setSendEmail(enabled)
+					}}
 					className='h-4 w-4'
 				/>
 				<span className='space-y-0.5'>
@@ -62,6 +71,7 @@ export function CancellationFeeSmsFields({
 					送付先電話番号
 				</FieldLabel>
 				<Input
+					ref={phoneInputRef}
 					name='clientPhone'
 					type='tel'
 					placeholder='09012345678'
@@ -83,7 +93,13 @@ export function CancellationFeeSmsFields({
 					name='sendSms'
 					type='checkbox'
 					checked={sendSms}
-					onChange={event => setSendSms(event.currentTarget.checked)}
+					onChange={event => {
+						const enabled = event.currentTarget.checked
+						if (!enabled) {
+							phoneInputRef.current?.setCustomValidity('')
+						}
+						setSendSms(enabled)
+					}}
 					className='h-4 w-4'
 				/>
 				<span className='space-y-0.5'>
