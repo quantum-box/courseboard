@@ -78,10 +78,40 @@ describe('invoice PDF route', () => {
 		})
 
 		expect(response.status).toBe(200)
+		expect(new Uint8Array(await response.arrayBuffer())).toEqual(
+			new TextEncoder().encode('%PDF-test'),
+		)
+		expect(response.headers.get('content-type')).toBe('application/pdf')
+		expect(response.headers.get('content-disposition')).toContain('inline')
 		expect(mocks.buildDocumentPdf).toHaveBeenCalledWith(
 			expect.objectContaining({ documentNumber: 'INV-TEST' }),
 			'https://pr2512--courseboard.txcloud.app',
 			expect.objectContaining({ template: 'simple' }),
+		)
+	})
+
+	it('returns a diagnostic response when PDF rendering throws', async () => {
+		const error = new Error(
+			'Font load failed: 404 https://courseboard.txcloud.app/fonts/ipag.ttf',
+		)
+		mocks.buildDocumentPdf.mockRejectedValue(error)
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+		const response = await GET(
+			new Request(
+				'https://courseboard.txcloud.app/tn_test/invoices/inv_test/pdf?preview=1',
+			),
+			{ params: { tenant: 'tn_test', id: 'inv_test' } },
+		)
+
+		expect(response.status).toBe(500)
+		expect(await response.text()).toBe(
+			'PDF render failed: Font load failed: 404 https://courseboard.txcloud.app/fonts/ipag.ttf',
+		)
+		expect(response.headers.get('cache-control')).toBe('private, no-store')
+		expect(consoleError).toHaveBeenCalledWith(
+			'Invoice PDF render failed',
+			error,
 		)
 	})
 })
