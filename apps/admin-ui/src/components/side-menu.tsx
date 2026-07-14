@@ -771,8 +771,25 @@ type MenuEntry = {
 	item: MenuItem
 }
 
-function getVisibleMenuEntries(userRole?: string | null) {
-	return menuGroups.flatMap(group =>
+// ゴルフ機能の nav グループ（アイテムが golf-course 配下を指す）判定。
+function isGolfNavGroup(group: MenuGroup): boolean {
+	return group.items.some(item =>
+		item.path.startsWith('/extensions/golf-course'),
+	)
+}
+
+// ゴルフ拡張が無効なテナントではゴルフ関連グループを出さない。
+export function getNavGroups(isGolfEnabled = true): MenuGroup[] {
+	return isGolfEnabled
+		? menuGroups
+		: menuGroups.filter(group => !isGolfNavGroup(group))
+}
+
+function getVisibleMenuEntries(
+	userRole?: string | null,
+	groups: MenuGroup[] = menuGroups,
+) {
+	return groups.flatMap(group =>
 		group.items
 			.filter(item => !item.adminOnly || isAdminRole(userRole))
 			.map(item => ({
@@ -1218,6 +1235,7 @@ function GroupedNavigation({
 	closeOnNavigate = false,
 	collapsed = false,
 	userRole,
+	isGolfEnabled = true,
 }: {
 	selectedMenu?: MenuOptions
 	tenantId: string
@@ -1225,12 +1243,14 @@ function GroupedNavigation({
 	closeOnNavigate?: boolean
 	collapsed?: boolean
 	userRole?: string | null
+	isGolfEnabled?: boolean
 }) {
 	const pathname = usePathname()
 	const { t } = useAdminI18n()
+	const groups = useMemo(() => getNavGroups(isGolfEnabled), [isGolfEnabled])
 	const visibleEntries = useMemo(
-		() => getVisibleMenuEntries(userRole),
-		[userRole],
+		() => getVisibleMenuEntries(userRole, groups),
+		[userRole, groups],
 	)
 	const { pinnedEntries, pinnedPathSet, togglePinnedPath } =
 		usePinnedNavigationPaths(modePrefix, tenantId, visibleEntries)
@@ -1278,7 +1298,7 @@ function GroupedNavigation({
 				tenantId={tenantId}
 				togglePinnedPath={togglePinnedPath}
 			/>
-			{menuGroups.map(group => (
+			{groups.map(group => (
 				<MenuGroupSection
 					key={group.key}
 					group={group}
@@ -1482,12 +1502,14 @@ export function GlobalNavigation({
 	modePrefix,
 	tenantName: _tenantName,
 	userRole,
+	isGolfEnabled = true,
 }: {
 	selectedMenu?: MenuOptions
 	tenantId: string
 	modePrefix: string
 	tenantName?: string | null
 	userRole?: string | null
+	isGolfEnabled?: boolean
 }) {
 	const { t } = useAdminI18n()
 	return (
@@ -1499,6 +1521,7 @@ export function GlobalNavigation({
 						tenantId={tenantId}
 						modePrefix={modePrefix}
 						userRole={userRole}
+						isGolfEnabled={isGolfEnabled}
 					/>
 				</div>
 			</div>
@@ -1512,6 +1535,7 @@ export function GlobalNavigation({
 export function SideMenu({
 	isOpen = true,
 	isPreview = false,
+	isGolfEnabled = true,
 	onMouseLeave,
 	onRequestClose,
 	onRequestPin,
@@ -1525,6 +1549,7 @@ export function SideMenu({
 }: {
 	isOpen?: boolean
 	isPreview?: boolean
+	isGolfEnabled?: boolean
 	onMouseLeave?: () => void
 	onRequestClose?: () => void
 	onRequestPin?: () => void
@@ -1591,6 +1616,7 @@ export function SideMenu({
 					tenantId={tenantId}
 					modePrefix={modePrefix}
 					userRole={userRole}
+					isGolfEnabled={isGolfEnabled}
 				/>
 			</div>
 			<AccountFooter
@@ -1616,6 +1642,7 @@ export function SideMenuSheet({
 	tenantName,
 	username,
 	userRole,
+	isGolfEnabled = true,
 }: {
 	navigationSearch?: React.ReactNode
 	selectedMenu?: MenuOptions
@@ -1624,6 +1651,7 @@ export function SideMenuSheet({
 	tenantName?: string | null
 	username?: string | null
 	userRole?: string | null
+	isGolfEnabled?: boolean
 }) {
 	const { t } = useAdminI18n()
 	return (
@@ -1662,6 +1690,7 @@ export function SideMenuSheet({
 						modePrefix={modePrefix}
 						closeOnNavigate
 						userRole={userRole}
+						isGolfEnabled={isGolfEnabled}
 					/>
 				</div>
 				<AccountFooter
