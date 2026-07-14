@@ -1,6 +1,8 @@
+import { fetchExtensionStatusesAction } from 'app/(v1)/[tenant]/extensions/action'
 import { authWithCheck } from 'app/auth'
 import type { MenuOptions } from 'components/side-menu'
 import { V1AdminShell } from 'components/v1-admin-shell'
+import { GOLF_COURSE_EXTENSION_KEY } from 'lib/extension-admin-registry'
 import { getKnownOperatorName, getServerModePrefix } from 'lib/mode'
 import { cn } from 'lib/utils'
 import type { Session } from 'next-auth'
@@ -26,10 +28,23 @@ export async function V1Layout({
 		session.user.username?.trim() || session.user.id?.trim() || null
 	const modePrefix = getServerModePrefix(tenant)
 
+	// ゴルフ拡張が有効なテナントでのみ、サイドバーにゴルフ機能を表示する。
+	// 未有効テナント（他ワークスペース等）でゴルフ画面へ誘導すると 400 になるため。
+	// 判定に失敗した場合は表示側に倒す（ゴルフ運用が主目的のアプリのため）。
+	const statusesResult = await fetchExtensionStatusesAction(tenant)
+	const isGolfEnabled = statusesResult.success
+		? statusesResult.data.some(
+				item =>
+					item.extensionKey === GOLF_COURSE_EXTENSION_KEY &&
+					item.tenantStatus === 'enabled',
+			)
+		: true
+
 	return (
 		<V1AdminShell
 			breadcrumbs={Breadcrumbs}
 			current={current}
+			isGolfEnabled={isGolfEnabled}
 			modePrefix={modePrefix}
 			tenant={tenant}
 			tenantName={tenantName}
