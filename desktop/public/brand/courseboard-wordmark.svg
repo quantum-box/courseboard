@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 288" role="img" aria-labelledby="title desc">
+  <title id="title">Course Board wordmark</title>
+  <desc id="desc">Course Board horizontal wordmark with a two by two rounded tile mark.</desc>
+  <defs>
+    <clipPath id="topRightTile">
+      <rect x="132" y="24" width="88" height="88" rx="15" />
+    </clipPath>
+  </defs>
+  <g>
+    <rect x="28" y="24" width="88" height="88" rx="15" fill="#101b20" />
+    <rect x="132" y="24" width="88" height="88" rx="15" fill="#2f963b" />
+    <rect x="28" y="128" width="88" height="88" rx="15" fill="#101b20" />
+    <rect x="132" y="128" width="88" height="88" rx="15" fill="#101b20" />
+    <g clip-path="url(#topRightTile)" fill="#ffffff">
+      <rect x="161" y="66" width="12" height="52" rx="4" />
+      <path d="M173 58c0-5 5-8 10-5l36 19c8 4 8 15 0 19l-36 19c-5 3-10 0-10-5V58Z" />
+    </g>
+  </g>
+  <text x="276" y="159" fill="#101b20" font-family="Avenir Next, Helvetica, Arial, sans-serif" font-size="84" font-weight="700" letter-spacing="0">Course Board</text>
+</svg>

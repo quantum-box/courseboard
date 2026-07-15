@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Course Board mark for dark backgrounds</title>
+  <desc id="desc">A two by two rounded tile mark with light tiles and a green golf flag tile.</desc>
+  <defs>
+    <clipPath id="topRightTile">
+      <rect x="272" y="56" width="184" height="184" rx="30" />
+    </clipPath>
+  </defs>
+  <rect x="56" y="56" width="184" height="184" rx="30" fill="#eef4ef" />
+  <rect x="272" y="56" width="184" height="184" rx="30" fill="#38a448" />
+  <rect x="56" y="272" width="184" height="184" rx="30" fill="#eef4ef" />
+  <rect x="272" y="272" width="184" height="184" rx="30" fill="#eef4ef" />
+  <g clip-path="url(#topRightTile)" fill="#ffffff">
+    <rect x="332" y="150" width="22" height="98" rx="6" />
+    <path d="M354 135c0-7 7-12 14-8l66 35c13 7 13 25 0 32l-66 35c-7 4-14-1-14-8V135Z" />
+  </g>
+</svg>

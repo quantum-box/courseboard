@@ -8,13 +8,17 @@ pub mod cancellation_fees;
 pub mod config;
 pub mod demo_seed;
 pub mod field_api;
+pub mod field_proxy;
 pub mod smart_assign;
 
 use auth::{AuthError, TokenVerifier};
 use axum::{
     body::Body,
     extract::{FromRef, State},
-    http::{header::AUTHORIZATION, Request, StatusCode},
+    http::{
+        header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE},
+        HeaderName, HeaderValue, Method, Request, StatusCode,
+    },
     middleware::{self, Next},
     response::{IntoResponse, Redirect, Response},
     routing::{get, post},
@@ -27,7 +31,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
 use sqlx::{migrate::Migrator, FromRow, SqlitePool};
 use thiserror::Error;
-use tower_http::services::{ServeDir, ServeFile};
+use tower_http::{
+    cors::{AllowOrigin, CorsLayer},
+    services::{ServeDir, ServeFile},
+};
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
@@ -262,6 +269,18 @@ pub fn build_router(state: AppState) -> Router {
             )),
         )
         .route(
+            "/field-api/*path",
+            get(field_proxy::proxy_field_api)
+                .post(field_proxy::proxy_field_api)
+                .patch(field_proxy::proxy_field_api)
+                .put(field_proxy::proxy_field_api)
+                .delete(field_proxy::proxy_field_api)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/public/cancellation-fees/:token",
             get(cancellation_fees::get_public_collection),
         )
@@ -274,6 +293,34 @@ pub fn build_router(state: AppState) -> Router {
             post(cancellation_fees::confirm_stripe_payment),
         )
         .with_state(state)
+        .layer(courseboard_cors_layer())
+}
+
+fn courseboard_cors_layer() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(AllowOrigin::list([
+            HeaderValue::from_static("tauri://localhost"),
+            HeaderValue::from_static("http://tauri.localhost"),
+            HeaderValue::from_static("https://tauri.localhost"),
+            HeaderValue::from_static("http://localhost:5173"),
+            HeaderValue::from_static("http://127.0.0.1:5173"),
+        ]))
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PATCH,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([
+            AUTHORIZATION,
+            CONTENT_TYPE,
+            HeaderName::from_static("x-operator-id"),
+            HeaderName::from_static("x-platform-id"),
+            HeaderName::from_static("idempotency-key"),
+        ])
+        .expose_headers([CONTENT_DISPOSITION, CONTENT_TYPE])
 }
 
 pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {

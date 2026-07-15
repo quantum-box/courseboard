@@ -11,6 +11,7 @@ import {
 import { Input } from 'components/ui/input'
 import {
 	buildHref,
+	buildMenuItemHref,
 	dashboardItem,
 	isAdminRole,
 	menuGroups,
@@ -25,6 +26,7 @@ import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 type NavigationCommand = {
+	externalDocument: boolean
 	groupLabel: string
 	href: string
 	icon: IconComponent
@@ -60,6 +62,7 @@ export function NavigationCommandPalette({
 	const commands = useMemo<NavigationCommand[]>(() => {
 		const entries: NavigationCommand[] = [
 			{
+				externalDocument: false,
 				groupLabel: t('nav.global'),
 				href: buildHref(modePrefix, tenantId, dashboardItem.path),
 				icon: dashboardItem.icon,
@@ -77,8 +80,9 @@ export function NavigationCommandPalette({
 				}
 				const label = t(item.labelKey)
 				entries.push({
+					externalDocument: Boolean(item.courseboardRoute),
 					groupLabel,
-					href: buildHref(modePrefix, tenantId, item.path),
+					href: buildMenuItemHref(modePrefix, tenantId, item),
 					icon: item.icon,
 					keywords: `${label} ${groupLabel} ${item.path}`,
 					label,
@@ -94,6 +98,7 @@ export function NavigationCommandPalette({
 			}
 			const label = t(item.labelKey)
 			entries.push({
+				externalDocument: false,
 				groupLabel: settingsGroupLabel,
 				href: buildHref(modePrefix, tenantId, item.path),
 				icon: item.icon,
@@ -155,6 +160,10 @@ export function NavigationCommandPalette({
 
 		setIsOpen(false)
 		announceRouteNavigationStart()
+		if (command.externalDocument) {
+			window.location.assign(command.href)
+			return
+		}
 		router.push(command.href as Route)
 	}
 

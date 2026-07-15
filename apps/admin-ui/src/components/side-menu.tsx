@@ -77,6 +77,8 @@ export type MenuItem = {
 	key: MenuOptions
 	labelKey: AdminMessageKey
 	path: string
+	/** Hash route in the shared React/Vite/Tauri Courseboard application. */
+	courseboardRoute?: string
 	icon: IconComponent
 	matchExactPaths?: string[]
 	matchPrefixes?: string[]
@@ -676,6 +678,7 @@ export const menuGroups: MenuGroup[] = [
 				key: 'extensions',
 				labelKey: 'nav.golf-portal',
 				path: golfCourseAdminPaths.portal,
+				courseboardRoute: '/golf',
 				icon: AppWindowIcon,
 				matchExactPaths: [golfCourseAdminPaths.portal],
 			},
@@ -683,6 +686,7 @@ export const menuGroups: MenuGroup[] = [
 				key: 'extensions',
 				labelKey: 'nav.golf-courses',
 				path: golfCourseAdminPaths.courses,
+				courseboardRoute: '/golf/courses',
 				icon: FolderIcon,
 				matchPrefixes: [golfCourseAdminPaths.courses],
 			},
@@ -690,6 +694,7 @@ export const menuGroups: MenuGroup[] = [
 				key: 'extensions',
 				labelKey: 'nav.golf-reservation-products',
 				path: golfCourseAdminPaths.reservationProducts,
+				courseboardRoute: '/golf/products',
 				icon: CalendarCheckIcon,
 				matchPrefixes: [golfCourseAdminPaths.reservationProducts],
 			},
@@ -697,6 +702,7 @@ export const menuGroups: MenuGroup[] = [
 				key: 'extensions',
 				labelKey: 'nav.golf-caddies',
 				path: golfCourseAdminPaths.caddies,
+				courseboardRoute: '/golf/caddies',
 				icon: UsersIcon,
 				matchPrefixes: [golfCourseAdminPaths.caddies],
 			},
@@ -704,6 +710,7 @@ export const menuGroups: MenuGroup[] = [
 				key: 'extensions',
 				labelKey: 'nav.golf-budgets',
 				path: golfCourseAdminPaths.budgets,
+				courseboardRoute: '/golf/budgets',
 				icon: BarChart3Icon,
 				matchPrefixes: [golfCourseAdminPaths.budgets],
 			},
@@ -711,6 +718,7 @@ export const menuGroups: MenuGroup[] = [
 				key: 'extensions',
 				labelKey: 'nav.golf-policy',
 				path: golfCourseAdminPaths.policy,
+				courseboardRoute: '/golf/policy',
 				icon: SettingsIcon,
 				matchPrefixes: [golfCourseAdminPaths.policy],
 			},
@@ -718,6 +726,7 @@ export const menuGroups: MenuGroup[] = [
 				key: 'extensions',
 				labelKey: 'nav.golf-settlement',
 				path: golfCourseAdminPaths.settlement,
+				courseboardRoute: '/golf/settlement',
 				icon: ReceiptTextIcon,
 				matchPrefixes: [golfCourseAdminPaths.settlement],
 			},
@@ -731,6 +740,7 @@ export const menuGroups: MenuGroup[] = [
 				key: 'cancellation-fees',
 				labelKey: 'nav.cancellation-fees',
 				path: '/cancellation-fees/new',
+				courseboardRoute: '/cancellation-fees',
 				icon: CreditCardIcon,
 				matchPrefixes: ['/cancellation-fees'],
 			},
@@ -764,6 +774,19 @@ function getDefaultOpenGroupsForRole(role?: string | null) {
 
 export function buildHref(modePrefix: string, tenantId: string, path: string) {
 	return `${modePrefix}/${tenantId}${path}`
+}
+
+export function buildMenuItemHref(
+	modePrefix: string,
+	tenantId: string,
+	item: Pick<MenuItem, 'path' | 'courseboardRoute'>,
+) {
+	if (!item.courseboardRoute) {
+		return buildHref(modePrefix, tenantId, item.path)
+	}
+
+	const mode = modePrefix === '/sandbox' ? 'sandbox' : 'production'
+	return `/courseboard-ui/index.html?tenant=${encodeURIComponent(tenantId)}&mode=${mode}#${item.courseboardRoute}`
 }
 
 type MenuEntry = {
@@ -938,6 +961,7 @@ export function NavItem({
 	collapsed = false,
 	isSelected = false,
 	onClick,
+	externalDocument = false,
 }: {
 	href: string
 	icon?: IconComponent
@@ -946,6 +970,7 @@ export function NavItem({
 	collapsed?: boolean
 	isSelected?: boolean
 	onClick?: () => void
+	externalDocument?: boolean
 }) {
 	const label = typeof children === 'string' ? children : undefined
 	const selectedClassName =
@@ -953,19 +978,8 @@ export function NavItem({
 	const defaultClassName =
 		'text-muted-foreground hover:bg-muted hover:text-foreground'
 
-	return (
-		<Link
-			className={`self-stretch h-7 rounded-md py-1 items-center gap-2 inline-flex transition-colors ${
-				isSelected ? selectedClassName : defaultClassName
-			} ${
-				collapsed ? 'justify-center px-0' : 'justify-start px-2'
-			} ${className}`}
-			href={href as Route}
-			prefetch={false}
-			aria-current={isSelected ? 'page' : undefined}
-			title={label}
-			onClick={onClick}
-		>
+	const content = (
+		<>
 			{Icon && <Icon className='h-3.5 w-3.5 shrink-0' />}
 			{typeof children === 'string' ? (
 				<span
@@ -978,6 +992,38 @@ export function NavItem({
 			) : (
 				children
 			)}
+		</>
+	)
+	const linkClassName = `self-stretch h-7 rounded-md py-1 items-center gap-2 inline-flex transition-colors ${
+				isSelected ? selectedClassName : defaultClassName
+			} ${
+				collapsed ? 'justify-center px-0' : 'justify-start px-2'
+			} ${className}`
+
+	if (externalDocument) {
+		return (
+			<a
+				className={linkClassName}
+				href={href}
+				aria-current={isSelected ? 'page' : undefined}
+				title={label}
+				onClick={onClick}
+			>
+				{content}
+			</a>
+		)
+	}
+
+	return (
+		<Link
+			className={linkClassName}
+			href={href as Route}
+			prefetch={false}
+			aria-current={isSelected ? 'page' : undefined}
+			title={label}
+			onClick={onClick}
+		>
+			{content}
 		</Link>
 	)
 }
@@ -1005,6 +1051,7 @@ function NavMenuItemRow({
 	const navItem = (
 		<NavItem
 			collapsed={collapsed}
+			externalDocument={Boolean(item.courseboardRoute)}
 			href={href}
 			icon={item.icon}
 			isSelected={isSelected}
@@ -1137,7 +1184,7 @@ function MenuGroupSection({
 								collapsed={collapsed}
 								key={`${group.key}-${item.path}`}
 								closeOnNavigate={closeOnNavigate}
-								href={buildHref(modePrefix, tenantId, item.path)}
+								href={buildMenuItemHref(modePrefix, tenantId, item)}
 								isSelected={isItemSelected(
 									item,
 									selectedMenu,
@@ -1198,7 +1245,7 @@ function PinnedNavigationSection({
 						key={`pinned-${groupKey}-${item.path}`}
 						closeOnNavigate={closeOnNavigate}
 						collapsed={collapsed}
-						href={buildHref(modePrefix, tenantId, item.path)}
+						href={buildMenuItemHref(modePrefix, tenantId, item)}
 						isPinned={pinnedPathSet.has(item.path)}
 						isSelected={isItemSelected(item, selectedMenu, pathname, tenantId)}
 						item={item}
