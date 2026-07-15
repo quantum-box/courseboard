@@ -1,8 +1,8 @@
 import { authWithCheck } from 'app/auth'
 import { AgentChatFloating } from 'app/(v1)/agent-chat-floating'
 import { ClientOnly } from 'components/client-only'
-import { resolveTenantPathSegment } from 'lib/tenantPath'
-import { notFound } from 'next/navigation'
+import { isTenantUlid, resolveTenantPathSegment } from 'lib/tenantPath'
+import { notFound, redirect } from 'next/navigation'
 
 export default async function TenantLayout({
 	children,
@@ -16,6 +16,14 @@ export default async function TenantLayout({
 	const resolvedTenant = await resolveTenantPathSegment(session, tenant)
 	if (!resolvedTenant) {
 		notFound()
+	}
+	if (!isTenantUlid(tenant)) {
+		// Pages and server actions forward the raw URL segment as
+		// x-operator-id, which the backend only accepts as a tenant id
+		// (a slug segment makes every ERP call fail with an opaque
+		// Tachyon auth 400). Never render under an alias segment; send
+		// it to the canonical id-based URL instead.
+		redirect(`/${resolvedTenant.id}/home`)
 	}
 
 	return (
