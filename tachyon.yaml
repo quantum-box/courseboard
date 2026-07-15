@@ -111,7 +111,7 @@ spec:
         name: courseboard
         defaultBranch: feature/courseboard-v2
       rootDirectory: apps/admin-ui
-      framework: vinext
+      framework: worker
       deploymentTarget: cloudflare_workers
       auth:
         enabled: true
