@@ -16,7 +16,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return <AuthLoadingScreen authorizing={state.status === 'authorizing'} />
   }
   if (state.status === 'anonymous') {
-    return <SignInScreen reason={state.reason} onSignIn={provider => { void auth.signIn(provider) }} />
+    return (
+      <SignInScreen
+        reason={state.reason}
+        passwordSignInAvailable={auth.passwordSignInAvailable}
+        onSignIn={provider => { void auth.signIn(provider) }}
+        onPasswordSignIn={(username, password) => { void auth.signInWithPassword(username, password) }}
+      />
+    )
   }
   if (state.status === 'selecting-tenant') {
     return (

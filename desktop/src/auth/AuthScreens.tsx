@@ -10,7 +10,7 @@ import {
   RefreshCw,
   ShieldCheck,
 } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import type { AuthReason, AuthTenant } from './types'
 
 function AuthFrame({ children }: { children: ReactNode }) {
@@ -41,7 +41,19 @@ export function AuthLoadingScreen({ authorizing = false }: { authorizing?: boole
   )
 }
 
-export function SignInScreen({ reason, onSignIn }: { reason?: AuthReason; onSignIn(provider?: 'Google'): void }) {
+export function SignInScreen({ reason, passwordSignInAvailable, onSignIn, onPasswordSignIn }: {
+  reason?: AuthReason
+  passwordSignInAvailable: boolean
+  onSignIn(provider?: 'Google'): void
+  onPasswordSignIn(username: string, password: string): void
+}) {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    onPasswordSignIn(username.trim(), password)
+  }
+
   return (
     <AuthFrame>
       <div className="auth-card">
@@ -54,14 +66,45 @@ export function SignInScreen({ reason, onSignIn }: { reason?: AuthReason; onSign
             <div><strong>セッションが失効しました</strong><span>安全のためログアウトしました。もう一度ログインしてください。</span></div>
           </div>
         ) : null}
-        <div className="auth-actions">
-          <Button type="button" variant="secondary" onClick={() => onSignIn('Google')}>
-            <strong className="google-mark">G</strong> Googleでログイン
-          </Button>
-          <Button type="button" variant="primary" onClick={() => onSignIn()}>
-            <LogIn /> ログイン
-          </Button>
-        </div>
+        {passwordSignInAvailable ? (
+          <form className="auth-login-form" onSubmit={submit}>
+            <label>
+              <span>ユーザー名またはメールアドレス</span>
+              <input
+                name="username"
+                type="text"
+                autoComplete="username"
+                value={username}
+                onChange={event => setUsername(event.target.value)}
+                required
+                autoFocus
+              />
+            </label>
+            <label>
+              <span>パスワード</span>
+              <input
+                name="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={event => setPassword(event.target.value)}
+                required
+              />
+            </label>
+            <Button type="submit" variant="primary" disabled={!username.trim() || !password}>
+              <LogIn /> ログイン
+            </Button>
+          </form>
+        ) : (
+          <div className="auth-actions">
+            <Button type="button" variant="secondary" onClick={() => onSignIn('Google')}>
+              <strong className="google-mark">G</strong> Googleでログイン
+            </Button>
+            <Button type="button" variant="primary" onClick={() => onSignIn()}>
+              <LogIn /> ログイン
+            </Button>
+          </div>
+        )}
         <p className="auth-legal">続行すると、利用規約およびプライバシーポリシーに同意したものとみなされます。</p>
       </div>
     </AuthFrame>

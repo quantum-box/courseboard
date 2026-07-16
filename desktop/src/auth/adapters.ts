@@ -42,11 +42,27 @@ type NativeAuthConfiguration = {
   scopes: string[]
 }
 
+type BrowserPkceConfiguration = Omit<NativeAuthConfiguration, 'authorizationEndpoint' | 'profileEndpoint'> & {
+  loginEndpoint: string
+  authorizationEndpoint: string
+  profileEndpoint: string
+}
+
 type NativeTokenPayload = {
   access_token?: string
   refresh_token?: string
   expires_in?: number
   token_type?: string
+}
+
+type BrowserLoginPayload = {
+  status?: 'authenticated' | 'new_password_required'
+  session_token?: string
+  session?: string
+}
+
+type BrowserAuthorizationPayload = {
+  authorization_code?: string
 }
 
 type NativeTenantPayload = string | {
@@ -175,6 +191,71 @@ function nativeAuthConfiguration(): NativeAuthConfiguration {
   }
 }
 
+function browserPkceConfiguration(): BrowserPkceConfiguration {
+  if (import.meta.env.VITE_COURSEBOARD_BROWSER_CLIENT_SECRET) {
+    throw new AuthConfigurationError(
+      'client secretをブラウザへ埋め込めません',
+      'VITE_COURSEBOARD_BROWSER_CLIENT_SECRETを削除し、PKCE対応public clientを使用してください。',
+    )
+  }
+
+  const clientId = import.meta.env.VITE_COURSEBOARD_BROWSER_CLIENT_ID?.trim()
+  if (!clientId) {
+    throw new AuthConfigurationError(
+      'ブラウザ認証の設定が必要です',
+      'TachyonでPKCE対応public clientを発行し、VITE_COURSEBOARD_BROWSER_CLIENT_IDを設定してください。',
+    )
+  }
+
+  const redirectUri = import.meta.env.VITE_COURSEBOARD_BROWSER_REDIRECT_URI
+    ?? 'http://127.0.0.1:5173/oauth/callback'
+  const redirect = new URL(redirectUri)
+  if (
+    redirect.protocol !== 'http:'
+    || redirect.hostname !== '127.0.0.1'
+    || redirect.port !== '5173'
+    || redirect.pathname !== '/oauth/callback'
+  ) {
+    throw new AuthConfigurationError(
+      'ブラウザ認証のredirect URIが不正です',
+      'ローカルViteではhttp://127.0.0.1:5173/oauth/callbackを使用してください。',
+    )
+  }
+
+  const scopes = (import.meta.env.VITE_COURSEBOARD_BROWSER_SCOPES ?? 'openid profile email')
+    .split(/\s+/)
+    .filter(Boolean)
+  if (!scopes.includes('openid')) {
+    throw new AuthConfigurationError(
+      'ブラウザ認証のscopeが不正です',
+      'VITE_COURSEBOARD_BROWSER_SCOPESにはopenidが必要です。',
+    )
+  }
+
+  return {
+    loginEndpoint: httpsEndpoint(
+      import.meta.env.VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT
+        ?? 'https://api.n1.tachy.one/oauth2/login',
+      'login endpoint',
+    ),
+    authorizationEndpoint: httpsEndpoint(
+      import.meta.env.VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT
+        ?? 'https://api.n1.tachy.one/oauth2/authorize',
+      'authorization endpoint',
+    ),
+    tokenEndpoint: httpsEndpoint(
+      import.meta.env.VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT
+        ?? 'https://api.n1.tachy.one/oauth2/token',
+      'token endpoint',
+    ),
+    profileEndpoint: import.meta.env.VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT
+      ?? 'https://api.n1.tachy.one/v1/me',
+    clientId,
+    redirectUri,
+    scopes,
+  }
+}
+
 function nativeTenant(payload: NativeTenantPayload) {
   if (typeof payload === 'string') return envTenant(payload)
   if (!payload.id) return undefined
@@ -191,6 +272,15 @@ function nativeTenant(payload: NativeTenantPayload) {
 
 function authErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
+}
+
+async function responseError(response: Response, fallback: string) {
+  try {
+    const payload = await response.json() as { error?: string; message?: string }
+    return payload.message?.trim() || payload.error?.trim() || fallback
+  } catch {
+    return fallback
+  }
 }
 
 class WebSessionAdapter implements AuthAdapter {
@@ -253,6 +343,175 @@ class DevelopmentAdapter implements AuthAdapter {
   async signIn() {}
   async getAccessToken() { return this.token }
   async signOut() { window.location.reload() }
+}
+
+class BrowserPkceAdapter implements AuthAdapter {
+  private readonly configuration = browserPkceConfiguration()
+  private accessToken?: string
+  private accessTokenExpiresAt = 0
+  private refreshToken?: string
+  private tokenRequest?: Promise<string | undefined>
+
+  async bootstrap(): Promise<AuthBootstrapResult> {
+    if (!this.accessToken || Date.now() >= this.accessTokenExpiresAt - 60_000) {
+      const refreshed = await this.getAccessToken()
+      if (!refreshed) return { kind: 'anonymous' }
+    }
+    return this.loadProfile()
+  }
+
+  async signIn() {
+    throw new NativeAuthorizationError('ユーザー名とパスワードを入力してください。')
+  }
+
+  async signInWithPassword(username: string, password: string) {
+    const loginResponse = await fetch(this.configuration.loginEndpoint, {
+      method: 'POST',
+      credentials: 'omit',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ username, password }),
+    })
+    if (!loginResponse.ok) {
+      throw new NativeAuthorizationError(await responseError(
+        loginResponse,
+        'ユーザー名またはパスワードを確認してください。',
+      ))
+    }
+    const login = await loginResponse.json() as BrowserLoginPayload
+    if (login.status === 'new_password_required' || login.session) {
+      throw new NativeAuthorizationError(
+        '初回パスワード変更が必要です。Tachyon Account Centerで変更してから、もう一度ログインしてください。',
+      )
+    }
+    if (!login.session_token) {
+      throw new NativeAuthorizationError('Tachyon Authからログインセッションを受信できませんでした。')
+    }
+
+    const transaction = await createPkceTransaction(this.configuration.redirectUri)
+    const authorizationResponse = await fetch(this.configuration.authorizationEndpoint, {
+      method: 'POST',
+      credentials: 'omit',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${login.session_token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        client_id: this.configuration.clientId,
+        redirect_uri: this.configuration.redirectUri,
+        response_type: 'code',
+        scope: this.configuration.scopes.join(' '),
+        state: transaction.state,
+        code_challenge: transaction.challenge,
+        code_challenge_method: 'S256',
+      }),
+    })
+    if (!authorizationResponse.ok) {
+      throw new NativeAuthorizationError(await responseError(
+        authorizationResponse,
+        'ログインセッションを認可codeへ交換できませんでした。',
+      ))
+    }
+    const authorization = await authorizationResponse.json() as BrowserAuthorizationPayload
+    if (!authorization.authorization_code) {
+      throw new NativeAuthorizationError('Tachyon Authから認可codeを受信できませんでした。')
+    }
+    await this.exchangeToken({
+      grant_type: 'authorization_code',
+      client_id: this.configuration.clientId,
+      redirect_uri: this.configuration.redirectUri,
+      code: authorization.authorization_code,
+      code_verifier: transaction.verifier,
+    })
+  }
+
+  async getAccessToken(forceRefresh = false) {
+    const hasFreshToken = this.accessToken && Date.now() < this.accessTokenExpiresAt - 60_000
+    if (!forceRefresh && hasFreshToken) return this.accessToken
+    if (!this.refreshToken) return undefined
+    if (this.tokenRequest) return this.tokenRequest
+
+    this.tokenRequest = this.refreshAccessToken().finally(() => {
+      this.tokenRequest = undefined
+    })
+    return this.tokenRequest
+  }
+
+  async signOut() {
+    this.accessToken = undefined
+    this.accessTokenExpiresAt = 0
+    this.refreshToken = undefined
+    window.location.assign('/')
+  }
+
+  private async refreshAccessToken() {
+    if (!this.refreshToken) return undefined
+    await this.exchangeToken({
+      grant_type: 'refresh_token',
+      client_id: this.configuration.clientId,
+      refresh_token: this.refreshToken,
+    }, this.refreshToken)
+    return this.accessToken
+  }
+
+  private async exchangeToken(
+    body: Record<string, string>,
+    existingRefreshToken?: string,
+  ) {
+    const response = await fetch(this.configuration.tokenEndpoint, {
+      method: 'POST',
+      credentials: 'omit',
+      cache: 'no-store',
+      redirect: 'error',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+    if (!response.ok) throw new NativeAuthorizationError('認証codeをtokenへ交換できませんでした。')
+    const payload = await response.json() as NativeTokenPayload
+    if (!payload.access_token || (payload.token_type && payload.token_type.toLowerCase() !== 'bearer')) {
+      throw new NativeAuthorizationError('token endpointから有効なBearer tokenが返りませんでした。')
+    }
+    this.accessToken = payload.access_token
+    this.accessTokenExpiresAt = jwtExpiry(payload.access_token)
+      ?? Date.now() + Math.max(60, Number(payload.expires_in) || 300) * 1000
+    this.refreshToken = payload.refresh_token ?? existingRefreshToken
+  }
+
+  private async loadProfile(): Promise<AuthBootstrapResult> {
+    if (!this.accessToken) return { kind: 'anonymous' }
+    const response = await fetch(this.configuration.profileEndpoint, {
+      credentials: 'omit',
+      cache: 'no-store',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${this.accessToken}`,
+      },
+    })
+    if (response.status === 401) {
+      this.accessToken = undefined
+      this.accessTokenExpiresAt = 0
+      this.refreshToken = undefined
+      throw new NativeAuthorizationError(
+        'ログインには成功しましたが、Tachyonのユーザー情報を確認できませんでした。',
+      )
+    }
+    if (!response.ok) throw new Error('ブラウザ認証profileを取得できませんでした。')
+
+    const payload = await response.json() as NativeProfilePayload
+    const user = sessionUser(payload)
+    if (!user) throw new Error('ブラウザ認証profileにユーザー情報がありません。')
+    const tenantPayloads = payload.tenants ?? payload.user?.tenants ?? []
+    const tenants = tenantPayloads.map(nativeTenant).filter((tenant): tenant is AuthTenant => Boolean(tenant))
+    return { kind: 'authenticated', user, tenants, partial: payload.partial }
+  }
 }
 
 class NativePkceAdapter implements AuthAdapter {
@@ -465,6 +724,9 @@ export function createAuthAdapter(): AuthAdapter {
       )
     }
     return new DevelopmentAdapter()
+  }
+  if (import.meta.env.VITE_COURSEBOARD_AUTH_MODE === 'browser-pkce') {
+    return new BrowserPkceAdapter()
   }
   return platformKind() === 'web' ? new WebSessionAdapter() : new NativePkceAdapter()
 }
