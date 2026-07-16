@@ -3,6 +3,7 @@
 import { joinServerBackendPath } from 'lib/serverBackendUrl'
 import { authWithCheck } from 'app/auth'
 import { getGraphqlSdk } from 'lib/graphqlClient'
+import { ReliableFetchError } from 'lib/reliable-fetch'
 import {
 	listLowStockAlerts,
 	listStockLevels,
@@ -281,6 +282,14 @@ function errorMessage(message: string, reason: unknown) {
 }
 
 function isCommerceApiNotFoundError(reason: unknown) {
+	// The consumer-orders GraphQL call surfaces a missing commerce
+	// integration either as a resolver error message or as a plain
+	// HTTP 404 from the endpoint (ReliableFetchError). Treat both as
+	// "order source unavailable" so tenants without EC integration see
+	// the benign 未設定 state instead of a raw fetch error.
+	if (reason instanceof ReliableFetchError) {
+		return reason.failure.status === 404
+	}
 	return (
 		reason instanceof Error &&
 		reason.message.includes('Commerce API error (404)')

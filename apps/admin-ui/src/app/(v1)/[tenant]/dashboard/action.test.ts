@@ -127,6 +127,49 @@ describe('fetchHomeDashboardAction', () => {
 		expect(dashboard.errors).toEqual([])
 	})
 
+	it('treats an HTTP 404 from the orders endpoint as an unconfigured optional metric', async () => {
+		const { fetchHomeDashboardAction } = await import('./action')
+		const { ReliableFetchError } = await import('lib/reliable-fetch')
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async () =>
+				Response.json({
+					period: '2026-05-29',
+					summary: {
+						totalSales: 1200,
+						squareSales: 700,
+						invoiceSales: 500,
+						unpaidInvoiceCount: 0,
+						unpaidInvoiceAmount: 0,
+						newCustomersThisMonth: 0,
+					},
+					monthlySales: [],
+					pipelineRows: [],
+					recentTransactions: [],
+				}),
+			),
+		)
+		getConsumerOrdersForAdmin.mockRejectedValue(
+			new ReliableFetchError({
+				kind: 'unknown',
+				status: 404,
+				message: 'データ取得に失敗しました (HTTP 404)',
+				retryable: false,
+				attempts: 1,
+			}),
+		)
+		listStockLevels.mockResolvedValue({ items: [], source: 'api' })
+		listLowStockAlerts.mockResolvedValue({ items: [] })
+
+		const dashboard = await fetchHomeDashboardAction('tenant_1', 'today')
+
+		expect(dashboard.metrics.orderCount).toEqual({
+			value: null,
+			error: '注文連携が未設定です',
+		})
+		expect(dashboard.errors).toEqual([])
+	})
+
 	it('does not expose Tachyon auth response details in dashboard errors', async () => {
 		const { fetchHomeDashboardAction } = await import('./action')
 		vi.stubGlobal(
