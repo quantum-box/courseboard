@@ -30,12 +30,12 @@ jobs:
       - name: Run tests
         run: cargo test
 
-  frontend:
-    name: Frontend (admin-ui)
+  web_host:
+    name: Desktop web host
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: apps/admin-ui
+        working-directory: desktop/web-host
     steps:
       - name: Checkout
         uses: actions/checkout@v4

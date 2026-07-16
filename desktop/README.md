@@ -50,15 +50,15 @@ npm run dev
 Vite は `/field-api/*` を `http://127.0.0.1:8080` へ proxy します。別の API を使う場合は
 `VITE_DEV_API_PROXY_TARGET` を指定します。この Rust proxy はローカル開発専用です。
 
-production Web bundle は `apps/admin-ui` の build 時に `/courseboard-ui/` へ組み込まれ、
+production Web bundle は `desktop/web-host` の build 時に `/courseboard-ui/` へ組み込まれ、
 Auth.js と同一 origin で配信されます。既存サイドナビのゴルフ関連7画面とキャンセル料は
 `/courseboard-ui/index.html#/*` へ遷移します。
 
 Rust imageの`/ui/index.html#/pay/*`はSMSから開く公開支払い専用です。Docker buildでは
 operator routeをAuth.js hostへhard redirectするため、Rust static hostingを第二のoperator Web配布経路にはしません。
 
-既存 Courseboard Web の Auth.js セッションを使って Vite を直接開発する場合は、旧管理画面を
-起動したうえで `VITE_AUTH_PROXY_TARGET=http://127.0.0.1:3001` を指定します。
+既存 Courseboard Web の Auth.js セッションを使って Vite を直接開発する場合は、
+`desktop/web-host` を起動したうえで `VITE_AUTH_PROXY_TARGET=http://127.0.0.1:3001` を指定します。
 
 ## Tauri desktop
 
