@@ -24,7 +24,6 @@ import {
 	CheckCircleIcon,
 	ChevronLeftIcon,
 	ChevronDownIcon,
-	ChevronRightIcon,
 	ClipboardCheckIcon,
 	CreditCardIcon,
 	FileTextIcon,
@@ -101,115 +100,6 @@ type MenuGroupKey =
 	| 'reports'
 	| 'extensions'
 	| 'settings'
-
-const STORAGE_KEY = 'courseboard-admin-nav-open-groups'
-
-const defaultOpenGroups: Record<MenuGroupKey, boolean> = {
-	customers: true,
-	sales: true,
-	billing: true,
-	master: true,
-	inventory: true,
-	hrm: true,
-	reservations: true,
-	accounting: false,
-	reports: false,
-	extensions: true,
-	settings: false,
-}
-
-const roleOpenGroups: Record<string, Partial<Record<MenuGroupKey, boolean>>> = {
-	OWNER: {
-		customers: false,
-		sales: true,
-		billing: true,
-		master: true,
-		inventory: false,
-		hrm: true,
-		reservations: true,
-		accounting: false,
-		reports: true,
-		extensions: false,
-		settings: false,
-	},
-	MANAGER: {
-		customers: true,
-		sales: true,
-		billing: true,
-		master: true,
-		inventory: false,
-		hrm: true,
-		reservations: false,
-		accounting: false,
-		reports: false,
-		extensions: false,
-		settings: false,
-	},
-	STORE: {
-		customers: false,
-		sales: true,
-		billing: false,
-		master: true,
-		inventory: true,
-		hrm: true,
-		reservations: true,
-		accounting: false,
-		reports: false,
-		extensions: false,
-		settings: false,
-	},
-	GENERAL: {
-		customers: false,
-		sales: true,
-		billing: false,
-		master: true,
-		inventory: true,
-		hrm: true,
-		reservations: true,
-		accounting: false,
-		reports: false,
-		extensions: false,
-		settings: false,
-	},
-	'FIELD:ADMIN': {
-		customers: false,
-		sales: false,
-		billing: false,
-		master: true,
-		inventory: false,
-		hrm: true,
-		reservations: false,
-		accounting: true,
-		reports: true,
-		extensions: true,
-		settings: true,
-	},
-	'FIELD:STAFF': {
-		customers: false,
-		sales: true,
-		billing: false,
-		master: true,
-		inventory: true,
-		reservations: true,
-		accounting: false,
-		reports: false,
-		extensions: false,
-		settings: false,
-	},
-	'FIELD:VIEWER': {
-		customers: false,
-		sales: false,
-		billing: true,
-		master: false,
-		inventory: false,
-		hrm: false,
-		reservations: false,
-		accounting: true,
-		reports: true,
-		extensions: false,
-		settings: false,
-	},
-}
 
 export type MenuOptions =
 	| 'home'
@@ -755,13 +645,6 @@ function normalizeRole(role?: string | null) {
 	return normalized
 }
 
-function getDefaultOpenGroupsForRole(role?: string | null) {
-	return {
-		...defaultOpenGroups,
-		...(roleOpenGroups[normalizeRole(role)] ?? roleOpenGroups.GENERAL),
-	}
-}
-
 export function buildHref(modePrefix: string, tenantId: string, path: string) {
 	return `${modePrefix}/${tenantId}${path}`
 }
@@ -887,66 +770,6 @@ function getActiveGroups(
 		.map(group => group.key)
 }
 
-function useOpenGroups(
-	selectedMenu: MenuOptions | undefined,
-	tenantId: string,
-	pathname: string | null,
-	userRole?: string | null,
-) {
-	const activeGroups = useMemo(
-		() => getActiveGroups(selectedMenu, pathname, tenantId),
-		[selectedMenu, pathname, tenantId],
-	)
-	const roleDefaultOpenGroups = useMemo(
-		() => getDefaultOpenGroupsForRole(userRole),
-		[userRole],
-	)
-	const [openGroups, setOpenGroups] = useState<Record<MenuGroupKey, boolean>>(
-		() => roleDefaultOpenGroups,
-	)
-
-	useEffect(() => {
-		const nextOpenGroups: Record<MenuGroupKey, boolean> = {
-			...roleDefaultOpenGroups,
-		}
-		const storedValue = window.localStorage.getItem(STORAGE_KEY)
-
-		if (storedValue) {
-			try {
-				const parsedValue = JSON.parse(storedValue) as Partial<
-					Record<MenuGroupKey, boolean>
-				>
-				for (const group of menuGroups) {
-					if (typeof parsedValue[group.key] === 'boolean') {
-						nextOpenGroups[group.key] = parsedValue[group.key] ?? false
-					}
-				}
-			} catch {
-				window.localStorage.removeItem(STORAGE_KEY)
-			}
-		}
-
-		for (const groupKey of activeGroups) {
-			nextOpenGroups[groupKey] = true
-		}
-
-		setOpenGroups(nextOpenGroups)
-	}, [activeGroups, roleDefaultOpenGroups])
-
-	const toggleGroup = (groupKey: MenuGroupKey) => {
-		setOpenGroups(currentOpenGroups => {
-			const nextOpenGroups = {
-				...currentOpenGroups,
-				[groupKey]: !currentOpenGroups[groupKey],
-			}
-			window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextOpenGroups))
-			return nextOpenGroups
-		})
-	}
-
-	return { activeGroups, openGroups, toggleGroup }
-}
-
 export function NavItem({
 	href,
 	icon: Icon,
@@ -1067,32 +890,23 @@ function NavMenuItemRow({
 
 function GroupHeader({
 	group,
-	isOpen,
 	isActive,
-	onToggle,
 }: {
 	group: MenuGroup
-	isOpen: boolean
 	isActive: boolean
-	onToggle: () => void
 }) {
-	const ChevronIcon = isOpen ? ChevronDownIcon : ChevronRightIcon
 	const { t } = useAdminI18n()
 
 	return (
-		<button
-			type='button'
-			aria-expanded={isOpen}
-			onClick={onToggle}
-			className={`flex h-7 w-full items-center justify-between rounded-md px-2 text-left text-[11px] font-semibold transition-colors ${
+		<div
+			className={`flex h-7 w-full items-center rounded-md px-2 text-left text-[11px] font-semibold ${
 				isActive
 					? 'bg-muted text-foreground'
-					: 'text-muted-foreground hover:bg-muted hover:text-foreground'
+					: 'text-muted-foreground'
 			}`}
 		>
 			<span className='truncate'>{t(group.labelKey)}</span>
-			<ChevronIcon className='h-3.5 w-3.5 shrink-0' />
-		</button>
+		</div>
 	)
 }
 
@@ -1102,9 +916,7 @@ function MenuGroupSection({
 	tenantId,
 	selectedMenu,
 	pathname,
-	openGroups,
 	activeGroups,
-	toggleGroup,
 	pinnedPathSet,
 	togglePinnedPath,
 	closeOnNavigate,
@@ -1116,9 +928,7 @@ function MenuGroupSection({
 	tenantId: string
 	selectedMenu?: MenuOptions
 	pathname: string | null
-	openGroups: Record<MenuGroupKey, boolean>
 	activeGroups: MenuGroupKey[]
-	toggleGroup: (groupKey: MenuGroupKey) => void
 	pinnedPathSet: Set<string>
 	togglePinnedPath: (path: string) => void
 	closeOnNavigate?: boolean
@@ -1126,7 +936,6 @@ function MenuGroupSection({
 	userRole?: string | null
 }) {
 	const { t } = useAdminI18n()
-	const isOpen = openGroups[group.key]
 	const isActive = activeGroups.includes(group.key)
 	const visibleItems = group.items.filter(
 		item => !item.adminOnly || isAdminRole(userRole),
@@ -1139,37 +948,30 @@ function MenuGroupSection({
 	return (
 		<div className='grid gap-0.5'>
 			{collapsed ? null : (
-				<GroupHeader
-					group={group}
-					isOpen={isOpen}
-					isActive={isActive}
-					onToggle={() => toggleGroup(group.key)}
-				/>
+				<GroupHeader group={group} isActive={isActive} />
 			)}
-			{(isOpen || collapsed) && (
-				<div className={`grid gap-0.5 ${collapsed ? '' : 'pl-1.5'}`}>
-					{visibleItems.map(item => {
-						return (
-							<NavMenuItemRow
-								collapsed={collapsed}
-								key={`${group.key}-${item.path}`}
-								closeOnNavigate={closeOnNavigate}
-								href={buildHref(modePrefix, tenantId, item.path)}
-								isSelected={isItemSelected(
-									item,
-									selectedMenu,
-									pathname,
-									tenantId,
-								)}
-								isPinned={pinnedPathSet.has(item.path)}
-								item={item}
-								label={t(item.labelKey)}
-								onTogglePin={togglePinnedPath}
-							/>
-						)
-					})}
-				</div>
-			)}
+			<div className={`grid gap-0.5 ${collapsed ? '' : 'pl-1.5'}`}>
+				{visibleItems.map(item => {
+					return (
+						<NavMenuItemRow
+							collapsed={collapsed}
+							key={`${group.key}-${item.path}`}
+							closeOnNavigate={closeOnNavigate}
+							href={buildHref(modePrefix, tenantId, item.path)}
+							isSelected={isItemSelected(
+								item,
+								selectedMenu,
+								pathname,
+								tenantId,
+							)}
+							isPinned={pinnedPathSet.has(item.path)}
+							item={item}
+							label={t(item.labelKey)}
+							onTogglePin={togglePinnedPath}
+						/>
+					)
+				})}
+			</div>
 		</div>
 	)
 }
@@ -1254,11 +1056,9 @@ function GroupedNavigation({
 	)
 	const { pinnedEntries, pinnedPathSet, togglePinnedPath } =
 		usePinnedNavigationPaths(modePrefix, tenantId, visibleEntries)
-	const { activeGroups, openGroups, toggleGroup } = useOpenGroups(
-		selectedMenu,
-		tenantId,
-		pathname,
-		userRole,
+	const activeGroups = useMemo(
+		() => getActiveGroups(selectedMenu, pathname, tenantId),
+		[selectedMenu, pathname, tenantId],
 	)
 	const dashboardSelected = isItemSelected(
 		dashboardItem,
@@ -1306,9 +1106,7 @@ function GroupedNavigation({
 					tenantId={tenantId}
 					selectedMenu={selectedMenu}
 					pathname={pathname}
-					openGroups={openGroups}
 					activeGroups={activeGroups}
-					toggleGroup={toggleGroup}
 					pinnedPathSet={pinnedPathSet}
 					togglePinnedPath={togglePinnedPath}
 					closeOnNavigate={closeOnNavigate}
