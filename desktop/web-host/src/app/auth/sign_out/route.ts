@@ -21,7 +21,7 @@ function expireAuthSessionCookies(response: NextResponse, requestUrl: URL) {
 function signOut(request: Request) {
 	const requestUrl = new URL(request.url)
 	const redirectUrl = new URL(
-		'/auth/sign_in',
+		'/api/auth/signin',
 		canonicalizeAuthUrl(resolveAuthUrl(request)),
 	)
 	if (requestUrl.searchParams.get('error') === 'expired') {
