@@ -16,6 +16,8 @@ type AuthContextValue = {
   user?: AuthUser
   tenant?: AuthTenant
   signIn(provider?: 'Google'): Promise<void>
+  passwordSignInAvailable: boolean
+  signInWithPassword(username: string, password: string): Promise<void>
   signOut(reason?: AuthReason): Promise<void>
   selectTenant(tenant: AuthTenant): void
   switchTenant(): void
@@ -161,6 +163,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [adapter])
 
+  const signInWithPassword = useCallback(async (username: string, password: string) => {
+    if (!adapter?.signInWithPassword) return
+    configureApiAuth(null)
+    setState({ status: 'authorizing' })
+    try {
+      await adapter.signInWithPassword(username, password)
+      setAttempt(value => value + 1)
+    } catch (error) {
+      if (error instanceof AuthConfigurationError) {
+        setState({ status: 'unavailable', title: error.title, message: error.message })
+        return
+      }
+      setState({
+        status: 'error',
+        message: error instanceof Error ? error.message : 'ログインできませんでした。',
+      })
+    }
+  }, [adapter])
+
   const selectTenant = useCallback((tenant: AuthTenant) => {
     if (state.status !== 'selecting-tenant' && state.status !== 'forbidden') return
     if (!state.user || !availableTenants.some(available => available.id === tenant.id)) return
@@ -184,12 +205,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     state,
     ...identity,
     signIn,
+    passwordSignInAvailable: Boolean(adapter?.signInWithPassword),
+    signInWithPassword,
     signOut,
     selectTenant,
     switchTenant,
     retry: () => setAttempt(value => value + 1),
     denyAccess,
-  }), [denyAccess, identity, selectTenant, signIn, signOut, state, switchTenant])
+  }), [adapter, denyAccess, identity, selectTenant, signIn, signInWithPassword, signOut, state, switchTenant])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

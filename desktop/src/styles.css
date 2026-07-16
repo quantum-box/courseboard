@@ -1342,7 +1342,10 @@ button,
 }
 
 .auth-card-wide {
+  display: flex;
   width: min(100%, 520px);
+  max-height: calc(100dvh - clamp(48px, 12vw, 152px));
+  flex-direction: column;
 }
 
 .auth-card h2 {
@@ -1376,6 +1379,42 @@ button,
 .auth-actions > button {
   width: 100%;
   justify-content: center;
+}
+
+.auth-login-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.auth-login-form label {
+  display: grid;
+  gap: 6px;
+  color: hsl(var(--nui-foreground));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.auth-login-form input {
+  width: 100%;
+  height: 40px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 0 12px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-foreground));
+}
+
+.auth-login-form input:focus {
+  border-color: hsl(var(--nui-primary));
+  outline: 2px solid hsl(var(--nui-primary) / 18%);
+  outline-offset: 1px;
+}
+
+.auth-login-form > button {
+  width: 100%;
+  justify-content: center;
+  margin-top: 3px;
 }
 
 .google-mark {
@@ -1439,8 +1478,14 @@ button,
 
 .tenant-list {
   display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
   gap: 8px;
   margin: 22px 0 14px;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .tenant-option {
@@ -1586,6 +1631,10 @@ button,
 
   .auth-card {
     padding: 24px;
+  }
+
+  .auth-card-wide {
+    max-height: calc(100dvh - 48px);
   }
 
   .console-shell,

@@ -33,6 +33,7 @@ export type AuthBootstrapResult =
 export interface AuthAdapter {
   bootstrap(): Promise<AuthBootstrapResult>
   signIn(provider?: 'Google'): Promise<void>
+  signInWithPassword?(username: string, password: string): Promise<void>
   getAccessToken(forceRefresh?: boolean): Promise<string | undefined>
   signOut(reason?: AuthReason): Promise<void>
 }

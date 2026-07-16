@@ -60,6 +60,34 @@ operator routeをAuth.js hostへhard redirectするため、Rust static hosting�
 既存 Courseboard Web の Auth.js セッションを使って Vite を直接開発する場合は、
 `desktop/web-host` を起動したうえで `VITE_AUTH_PROXY_TARGET=http://127.0.0.1:3001` を指定します。
 
+実Tachyon/CognitoアカウントでローカルViteへログインする場合は、secretを持たない
+PKCE対応public clientをTachyon Authに登録し、次のように起動します。画面で入力した
+ユーザー名とパスワードをTachyon AuthのCognitoログインAPIへ送り、callback URIは
+`http://127.0.0.1:5173/oauth/callback`を登録してください。
+
+ログイン済みTachyon CLI profileからpublic clientを取得し、`.env.local`を自動設定できます。
+
+```bash
+cd desktop
+npm run auth:env
+npm run dev -- --host 127.0.0.1
+```
+
+別profileを使う場合は`npm run auth:env -- --profile field`、書き込まず確認する場合は
+`npm run auth:env -- --dry-run`を使用します。このコマンドはclient secretを取得・保存しません。
+
+```bash
+VITE_COURSEBOARD_AUTH_MODE=browser-pkce \
+VITE_COURSEBOARD_BROWSER_CLIENT_ID=tachyon_oc_... \
+VITE_AUTH_PROXY_TARGET=https://courseboard.txcloud.app \
+VITE_DEV_API_PROXY_TARGET=https://courseboard.txcloud.app \
+npm run dev -- --host 127.0.0.1
+```
+
+パスワードは保存しません。authorization code、access token、refresh tokenはメモリだけに保持され、
+client secretは発行・bundleしません。ユーザーとテナントはTachyon Authの`/v1/me`で確認します。
+GoogleログインやCognito Managed Loginには依存しません。
+
 ## Tauri desktop
 
 ```bash
