@@ -18,7 +18,7 @@ spec:
         name: courseboard
         defaultBranch: main
       rootDirectory: apps/admin-ui
-      framework: worker
+      framework: vinext
       deploymentTarget: cloudflare_workers
       # Platform-handled login (per Ao) — Cloud App standard. When enabled, the
       # platform auto-creates the `courseboard-web` OAuth2 client on the Tachyon
@@ -37,13 +37,14 @@ spec:
         enabled: true
       watchPaths:
         - apps/admin-ui/**
+        - desktop/**
       build:
         # pnpm (matches source admin-ui). Native build scripts are approved via
         # apps/admin-ui/pnpm-workspace.yaml (allowBuilds); pnpm-lock.yaml pins deps.
         # Keep pnpm's SQLite store index Pod-local. The runner cache PVC is shared
         # by concurrent builds for this app and a malformed index blocks all reruns.
-        installCommand: corepack enable && pnpm_config_store_dir=/tmp/tachyon-pnpm-store corepack pnpm install --frozen-lockfile
-        command: corepack pnpm run build
+        installCommand: corepack enable && pnpm_config_store_dir=/tmp/tachyon-pnpm-store corepack pnpm install --frozen-lockfile && cd ../../desktop && npm ci --no-audit --no-fund
+        command: cd ../../desktop && VITE_BASE_PATH=/courseboard-ui/ npm run build && rm -rf ../apps/admin-ui/public/courseboard-ui && mkdir -p ../apps/admin-ui/public/courseboard-ui && cp -R dist/. ../apps/admin-ui/public/courseboard-ui/ && cd ../apps/admin-ui && corepack pnpm run build
         outputDirectory: apps/admin-ui/dist/server/index.js
         nodeVersion: "24"
       envVars:
@@ -102,6 +103,203 @@ spec:
           valueFrom:
             internalService:
               appName: tachyon-field-api
+      environments:
+        preview:
+          envVars:
+            - name: ROOT_DIRECTORY
+              value: apps/admin-ui
+            - name: PACKAGE_NAME
+              value: courseboard-admin-ui
+            - name: OUTPUT_DIR
+              value: apps/admin-ui/dist/server/index.js
+            - name: TACHYON_DEPLOYMENT_TARGET
+              value: cloudflare_workers
+            - name: NEXT_PUBLIC_SITE_NAME
+              value: Course Board
+            - name: NEXT_PUBLIC_PLATFORM_ID
+              value: tn_01ks18jhh1xvggktfzjx5jqsen
+            - name: AUTH_BACKEND_API_URL
+              value: https://api.n1.tachy.one
+            - name: TACHYON_API_URL
+              value: https://api.n1.tachy.one
+            - name: NEXT_PUBLIC_TACHYON_API_URL
+              value: https://api.n1.tachy.one
+            - name: COGNITO_ISSUER
+              value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+            - name: COGNITO_DOMAIN
+              value: https://auth-pool.n1.tachy.one
+            - name: COGNITO_REGION
+              value: ap-northeast-1
+            - name: COGNITO_CLIENT_ID
+              type: credential
+              valueFrom:
+                oauth2ClientRef:
+                  name: courseboard-web
+                  field: clientId
+            - name: AUTH_SECRET
+              type: credential
+              valueFrom:
+                secret: courseboard/AUTH_SECRET
+            - name: NEXTAUTH_SECRET
+              type: credential
+              valueFrom:
+                secret: courseboard/NEXTAUTH_SECRET
+            - name: COGNITO_CLIENT_SECRET
+              type: credential
+              valueFrom:
+                oauth2ClientRef:
+                  name: courseboard-web
+                  field: clientSecret
+            - name: NEXT_PUBLIC_BACKEND_API_URL
+              value: https://tachyon-field-api.txcloud.app
+            - name: TACHYON_FIELD_API_URL
+              value: https://tachyon-field-api.txcloud.app
+            - name: BACKEND_API_URL
+              value: https://tachyon-field-api.txcloud.app
+    # --- React/Vite Course Board v2 — same-origin Auth.js and Field API BFF.
+    - name: courseboardv2
+      repository:
+        url: https://github.com/quantum-box/courseboard
+        owner: quantum-box
+        name: courseboard
+        defaultBranch: feature/courseboard-v2
+      rootDirectory: apps/admin-ui
+      framework: worker
+      deploymentTarget: cloudflare_workers
+      auth:
+        enabled: true
+      watchPaths:
+        - apps/admin-ui/**
+        - desktop/**
+      build:
+        installCommand: corepack enable && pnpm_config_store_dir=/tmp/tachyon-pnpm-store corepack pnpm install --frozen-lockfile && cd ../../desktop && npm ci --no-audit --no-fund
+        command: cd ../../desktop && VITE_BASE_PATH=/courseboard-ui/ npm run build && rm -rf ../apps/admin-ui/public/courseboard-ui && mkdir -p ../apps/admin-ui/public/courseboard-ui && cp -R dist/. ../apps/admin-ui/public/courseboard-ui/ && cd ../apps/admin-ui && corepack pnpm run build
+        outputDirectory: apps/admin-ui/dist/server/index.js
+        nodeVersion: "24"
+      envVars:
+        - name: ROOT_DIRECTORY
+          value: apps/admin-ui
+        - name: PACKAGE_NAME
+          value: courseboard-admin-ui
+        - name: OUTPUT_DIR
+          value: apps/admin-ui/dist/server/index.js
+        - name: TACHYON_DEPLOYMENT_TARGET
+          value: cloudflare_workers
+        - name: COURSEBOARD_REACT_ROOT
+          value: "true"
+        - name: NEXT_PUBLIC_SITE_NAME
+          value: Course Board v2
+        - name: NEXT_PUBLIC_SITE_URL
+          value: https://courseboardv2.txcloud.app
+        - name: AUTH_URL
+          value: https://courseboardv2.txcloud.app
+        - name: NEXTAUTH_URL
+          value: https://courseboardv2.txcloud.app
+        - name: NEXT_PUBLIC_PLATFORM_ID
+          value: tn_01ks18jhh1xvggktfzjx5jqsen
+        - name: AUTH_BACKEND_API_URL
+          value: https://api.n1.tachy.one
+        - name: TACHYON_API_URL
+          value: https://api.n1.tachy.one
+        - name: NEXT_PUBLIC_TACHYON_API_URL
+          value: https://api.n1.tachy.one
+        - name: COGNITO_ISSUER
+          value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+        - name: COGNITO_DOMAIN
+          value: https://auth-pool.n1.tachy.one
+        - name: COGNITO_REGION
+          value: ap-northeast-1
+        - name: COGNITO_CLIENT_ID
+          type: credential
+          valueFrom:
+            oauth2ClientRef:
+              name: courseboardv2-web
+              field: clientId
+        - name: AUTH_SECRET
+          type: credential
+          valueFrom:
+            secret: courseboard/AUTH_SECRET
+        - name: NEXTAUTH_SECRET
+          type: credential
+          valueFrom:
+            secret: courseboard/NEXTAUTH_SECRET
+        - name: COGNITO_CLIENT_SECRET
+          type: credential
+          valueFrom:
+            oauth2ClientRef:
+              name: courseboardv2-web
+              field: clientSecret
+        - name: NEXT_PUBLIC_BACKEND_API_URL
+          value: https://tachyon-field-api.txcloud.app
+        - name: TACHYON_FIELD_API_URL
+          valueFrom:
+            internalService:
+              appName: tachyon-field-api
+        - name: BACKEND_API_URL
+          valueFrom:
+            internalService:
+              appName: tachyon-field-api
+      environments:
+        preview:
+          envVars:
+            - name: ROOT_DIRECTORY
+              value: apps/admin-ui
+            - name: PACKAGE_NAME
+              value: courseboard-admin-ui
+            - name: OUTPUT_DIR
+              value: apps/admin-ui/dist/server/index.js
+            - name: TACHYON_DEPLOYMENT_TARGET
+              value: cloudflare_workers
+            - name: COURSEBOARD_REACT_ROOT
+              value: "true"
+            - name: NEXT_PUBLIC_SITE_NAME
+              value: Course Board v2
+            - name: NEXT_PUBLIC_SITE_URL
+              value: https://courseboardv2.txcloud.app
+            - name: AUTH_URL
+              value: https://courseboardv2.txcloud.app
+            - name: NEXTAUTH_URL
+              value: https://courseboardv2.txcloud.app
+            - name: NEXT_PUBLIC_PLATFORM_ID
+              value: tn_01ks18jhh1xvggktfzjx5jqsen
+            - name: AUTH_BACKEND_API_URL
+              value: https://api.n1.tachy.one
+            - name: TACHYON_API_URL
+              value: https://api.n1.tachy.one
+            - name: NEXT_PUBLIC_TACHYON_API_URL
+              value: https://api.n1.tachy.one
+            - name: COGNITO_ISSUER
+              value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+            - name: COGNITO_DOMAIN
+              value: https://auth-pool.n1.tachy.one
+            - name: COGNITO_REGION
+              value: ap-northeast-1
+            - name: COGNITO_CLIENT_ID
+              type: credential
+              valueFrom:
+                oauth2ClientRef:
+                  name: courseboardv2-web
+                  field: clientId
+            - name: AUTH_SECRET
+              type: credential
+              valueFrom:
+                secret: courseboard/AUTH_SECRET
+            - name: NEXTAUTH_SECRET
+              type: credential
+              valueFrom:
+                secret: courseboard/NEXTAUTH_SECRET
+            - name: COGNITO_CLIENT_SECRET
+              type: credential
+              valueFrom:
+                oauth2ClientRef:
+                  name: courseboardv2-web
+                  field: clientSecret
+            - name: NEXT_PUBLIC_BACKEND_API_URL
+              value: https://tachyon-field-api.txcloud.app
+            - name: TACHYON_FIELD_API_URL
+              value: https://tachyon-field-api.txcloud.app
+            - name: BACKEND_API_URL
+              value: https://tachyon-field-api.txcloud.app
 ---
 apiVersion: apps.tachy.one/v1alpha
 kind: OAuth2Client
@@ -113,6 +311,26 @@ spec:
     - https://courseboard.txcloud.app/api/auth/callback/tachyon
     - https://*--courseboard.txcloud.app/api/auth/callback/tachyon
     - https://*.courseboard.txcloud.app/api/auth/callback/tachyon
+  allowedScopes:
+    - openid
+    - profile
+    - email
+    - aws.cognito.signin.user.admin
+  grantTypes:
+    - authorization_code
+    - password
+  useTachyonUserPool: true
+---
+apiVersion: apps.tachy.one/v1alpha
+kind: OAuth2Client
+metadata:
+  name: courseboardv2-web
+  tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
+spec:
+  redirectUris:
+    - https://courseboardv2.txcloud.app/api/auth/callback/tachyon
+    - https://*--courseboardv2.txcloud.app/api/auth/callback/tachyon
+    - https://*.courseboardv2.txcloud.app/api/auth/callback/tachyon
   allowedScopes:
     - openid
     - profile

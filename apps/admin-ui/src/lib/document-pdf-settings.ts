@@ -43,8 +43,14 @@ export function resolveDocumentPdfTemplate(
 export async function getDocumentPdfSettings(
 	tenantId: string,
 	accessToken: string,
+	platformId?: string,
 ): Promise<DocumentPdfSettings> {
-	const res = await documentPdfSettingsFetch(tenantId, accessToken)
+	const res = await documentPdfSettingsFetch(
+		tenantId,
+		accessToken,
+		undefined,
+		platformId,
+	)
 	if (res.status === 404) return defaultDocumentPdfSettings
 	if (!res.ok) {
 		console.error('Failed to fetch document PDF settings:', await res.text())
@@ -73,13 +79,16 @@ function documentPdfSettingsFetch(
 	tenantId: string,
 	accessToken: string,
 	init?: RequestInit,
+	platformId?: string,
 ) {
 	return fetch(joinServerBackendPath('/v1/field/document-pdf-settings'), {
 		...init,
 		headers: {
 			'Content-Type': 'application/json',
 			'x-platform-id':
-				getRuntimeEnv('NEXT_PUBLIC_PLATFORM_ID') ?? DEFAULT_PLATFORM_ID,
+				platformId ??
+				getRuntimeEnv('NEXT_PUBLIC_PLATFORM_ID') ??
+				DEFAULT_PLATFORM_ID,
 			'x-operator-id': tenantId,
 			Authorization: `Bearer ${accessToken}`,
 			...(init?.headers ?? {}),

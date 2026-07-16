@@ -8,8 +8,14 @@ import { TachyonFieldLogo } from 'components/tachyon-field-logo'
 import { TenantPickerClient } from 'components/tenant-picker-client'
 import { LogOut } from 'lucide-react'
 import { redirect } from 'next/navigation'
+import { getCourseboardRootRedirect } from './courseboard-root'
 
 export default async function TenantsList() {
+	const courseboardRootRedirect = getCourseboardRootRedirect()
+	if (courseboardRootRedirect) {
+		redirect(courseboardRootRedirect)
+	}
+
 	await authWithCheck()
 
 	return (

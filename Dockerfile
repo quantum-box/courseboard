@@ -20,13 +20,19 @@ FROM node:22-bookworm AS ui_builder
 WORKDIR /app/desktop
 
 COPY desktop/package.json desktop/package-lock.json ./
-RUN npm ci
+# native-ui itself is resolved from the pinned Git revision in package.json.
+RUN npm install --no-audit --no-fund
 
 COPY desktop/index.html desktop/tsconfig.json desktop/tsconfig.node.json desktop/vite.config.ts ./
+COPY desktop/postcss.config.cjs desktop/tailwind.config.ts ./
 COPY desktop/src ./src
 COPY desktop/public ./public
 
-RUN VITE_BASE_PATH=/ui/ npm run build
+# The Rust image keeps only the public payment route. Operator routes hard-
+# navigate to the Auth.js/vinext deployment, which owns session and tenant auth.
+RUN VITE_BASE_PATH=/ui/ \
+    VITE_COURSEBOARD_OPERATOR_WEB_URL=https://courseboard.txcloud.app/courseboard-ui/index.html \
+    npm run build
 
 FROM debian:bookworm-slim AS runtime
 

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Course Board favicon</title>
+  <desc id="desc">A compact two by two tile icon with a green golf flag tile.</desc>
+  <defs>
+    <clipPath id="topRightTile">
+      <rect x="136" y="28" width="92" height="92" rx="15" />
+    </clipPath>
+  </defs>
+  <rect x="28" y="28" width="92" height="92" rx="15" fill="#101b20" />
+  <rect x="136" y="28" width="92" height="92" rx="15" fill="#2f963b" />
+  <rect x="28" y="136" width="92" height="92" rx="15" fill="#101b20" />
+  <rect x="136" y="136" width="92" height="92" rx="15" fill="#101b20" />
+  <g clip-path="url(#topRightTile)" fill="#ffffff">
+    <rect x="165" y="72" width="13" height="54" rx="4" />
+    <path d="M178 63c0-5 5-8 10-5l37 20c8 4 8 15 0 19l-37 20c-5 3-10 0-10-5V63Z" />
+  </g>
+</svg>

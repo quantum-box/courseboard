@@ -6,6 +6,7 @@ type RuntimeGlobal = typeof globalThis & {
 
 const buildTimeEnv: RuntimeEnv = {
 	CF_PAGES_URL: process.env.CF_PAGES_URL,
+	COURSEBOARD_REACT_ROOT: process.env.COURSEBOARD_REACT_ROOT,
 	AUTH_URL: process.env.AUTH_URL,
 	AUTH_SECRET: process.env.AUTH_SECRET,
 	NEXTAUTH_URL: process.env.NEXTAUTH_URL,

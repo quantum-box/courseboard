@@ -1,9 +1,8 @@
 import { FormEvent, useMemo, useState } from 'react'
 import {
-  apiJson,
+  courseboardApiJson,
   CreateCollectionResponse,
   fieldTenant,
-  operatorApiBaseUrl,
   yen,
 } from './api'
 
@@ -24,7 +23,6 @@ const defaultDueDate = () => {
 
 export function CollectionConsole() {
   const tenantId = useMemo(() => fieldTenant(), [])
-  const apiBase = useMemo(() => operatorApiBaseUrl(), [])
   const [form, setForm] = useState<FormState>({
     reference: '',
     customerName: '',
@@ -44,8 +42,7 @@ export function CollectionConsole() {
     setError(null)
     setResult(null)
     try {
-      const response = await apiJson<CreateCollectionResponse>(
-        apiBase,
+      const response = await courseboardApiJson<CreateCollectionResponse>(
         '/cancellation-fee-collections',
         {
           method: 'POST',
