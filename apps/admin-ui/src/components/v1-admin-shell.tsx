@@ -42,6 +42,7 @@ export function V1AdminShell({
 	breadcrumbs,
 	children,
 	current,
+	isGolfEnabled = true,
 	modePrefix,
 	tenant,
 	tenantName,
@@ -51,6 +52,7 @@ export function V1AdminShell({
 	breadcrumbs?: React.ReactNode
 	children: React.ReactNode
 	current?: MenuOptions
+	isGolfEnabled?: boolean
 	modePrefix: string
 	tenant: string
 	tenantName?: string | null
@@ -199,12 +201,14 @@ export function V1AdminShell({
 				</div>
 			) : null}
 			<SideMenu
+				isGolfEnabled={isGolfEnabled}
 				isOpen={isSidebarVisible}
 				isPreview={isSidebarClosed && isSidebarPreviewOpen}
 				modePrefix={modePrefix}
 				navigationSearch={
 					<NavigationCommandPalette
 						buttonClassName='w-full justify-start'
+						isGolfEnabled={isGolfEnabled}
 						labelAlwaysVisible
 						modePrefix={modePrefix}
 						tenantId={tenant}
@@ -227,10 +231,12 @@ export function V1AdminShell({
 			>
 				<header className='sticky top-0 z-30 flex min-h-14 items-center border-b bg-background px-3 sm:hidden'>
 					<SideMenuSheet
+						isGolfEnabled={isGolfEnabled}
 						modePrefix={modePrefix}
 						navigationSearch={
 							<NavigationCommandPalette
 								buttonClassName='w-full justify-start'
+								isGolfEnabled={isGolfEnabled}
 								labelAlwaysVisible
 								modePrefix={modePrefix}
 								tenantId={tenant}

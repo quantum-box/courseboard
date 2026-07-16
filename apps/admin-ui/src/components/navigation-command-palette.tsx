@@ -13,8 +13,8 @@ import {
 	buildHref,
 	buildMenuItemHref,
 	dashboardItem,
+	getNavGroups,
 	isAdminRole,
-	menuGroups,
 	workspaceSettingsItems,
 	type IconComponent,
 } from 'components/side-menu'
@@ -45,12 +45,14 @@ export function NavigationCommandPalette({
 	modePrefix,
 	tenantId,
 	userRole,
+	isGolfEnabled = true,
 }: {
 	buttonClassName?: string
 	labelAlwaysVisible?: boolean
 	modePrefix: string
 	tenantId: string
 	userRole?: string | null
+	isGolfEnabled?: boolean
 }) {
 	const { t } = useAdminI18n()
 	const router = useRouter()
@@ -72,7 +74,7 @@ export function NavigationCommandPalette({
 			},
 		]
 
-		for (const group of menuGroups) {
+		for (const group of getNavGroups(isGolfEnabled)) {
 			const groupLabel = t(group.labelKey)
 			for (const item of group.items) {
 				if (item.adminOnly && !isAdminRole(userRole)) {
@@ -109,7 +111,7 @@ export function NavigationCommandPalette({
 		}
 
 		return entries
-	}, [modePrefix, tenantId, t, userRole])
+	}, [modePrefix, tenantId, t, userRole, isGolfEnabled])
 
 	const filteredCommands = useMemo(() => {
 		const normalizedQuery = normalizeQuery(query)
