@@ -67,20 +67,9 @@ spec:
           value: https://auth-pool.n1.tachy.one
         - name: COGNITO_REGION
           value: ap-northeast-1
-        - name: COGNITO_CLIENT_ID
-          type: credential
-          valueFrom:
-            oauth2ClientRef:
-              name: courseboard-web
-              field: clientId
-        # AUTH_SECRET / NEXTAUTH_SECRET remain direct encrypted Cloud App env
-        # values so this migration does not rotate active Auth.js sessions.
-        - name: COGNITO_CLIENT_SECRET
-          type: credential
-          valueFrom:
-            oauth2ClientRef:
-              name: courseboard-web
-              field: clientSecret
+        # COGNITO_CLIENT_ID / COGNITO_CLIENT_SECRET / AUTH_SECRET /
+        # NEXTAUTH_SECRET remain direct encrypted Cloud App env values. Keeping
+        # them outside manifest reconciliation avoids rotating active sessions.
         # Golf ERP endpoints currently live in tachyonfield's Field API; point the frontend there.
         - name: NEXT_PUBLIC_BACKEND_API_URL
           value: https://tachyon-field-api.txcloud.app
