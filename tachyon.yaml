@@ -17,7 +17,7 @@ spec:
         name: courseboard
         defaultBranch: main
       rootDirectory: desktop/web-host
-      framework: vinext
+      framework: worker
       deploymentTarget: cloudflare_workers
       # Do not put the Cloud App login gateway in front of Auth.js. The web host
       # owns /api/auth/* and uses the explicit courseboard-web OAuth2 client.
