@@ -103,6 +103,59 @@ spec:
           valueFrom:
             internalService:
               appName: tachyon-field-api
+      environments:
+        preview:
+          envVars:
+            - name: ROOT_DIRECTORY
+              value: apps/admin-ui
+            - name: PACKAGE_NAME
+              value: courseboard-admin-ui
+            - name: OUTPUT_DIR
+              value: apps/admin-ui/dist/server/index.js
+            - name: TACHYON_DEPLOYMENT_TARGET
+              value: cloudflare_workers
+            - name: NEXT_PUBLIC_SITE_NAME
+              value: Course Board
+            - name: NEXT_PUBLIC_PLATFORM_ID
+              value: tn_01ks18jhh1xvggktfzjx5jqsen
+            - name: AUTH_BACKEND_API_URL
+              value: https://api.n1.tachy.one
+            - name: TACHYON_API_URL
+              value: https://api.n1.tachy.one
+            - name: NEXT_PUBLIC_TACHYON_API_URL
+              value: https://api.n1.tachy.one
+            - name: COGNITO_ISSUER
+              value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+            - name: COGNITO_DOMAIN
+              value: https://auth-pool.n1.tachy.one
+            - name: COGNITO_REGION
+              value: ap-northeast-1
+            - name: COGNITO_CLIENT_ID
+              type: credential
+              valueFrom:
+                oauth2ClientRef:
+                  name: courseboard-web
+                  field: clientId
+            - name: AUTH_SECRET
+              type: credential
+              valueFrom:
+                secret: courseboard/AUTH_SECRET
+            - name: NEXTAUTH_SECRET
+              type: credential
+              valueFrom:
+                secret: courseboard/NEXTAUTH_SECRET
+            - name: COGNITO_CLIENT_SECRET
+              type: credential
+              valueFrom:
+                oauth2ClientRef:
+                  name: courseboard-web
+                  field: clientSecret
+            - name: NEXT_PUBLIC_BACKEND_API_URL
+              value: https://tachyon-field-api.txcloud.app
+            - name: TACHYON_FIELD_API_URL
+              value: https://tachyon-field-api.txcloud.app
+            - name: BACKEND_API_URL
+              value: https://tachyon-field-api.txcloud.app
     # --- React/Vite Course Board v2 — same-origin Auth.js and Field API BFF.
     - name: courseboardv2
       repository:
@@ -186,6 +239,67 @@ spec:
           valueFrom:
             internalService:
               appName: tachyon-field-api
+      environments:
+        preview:
+          envVars:
+            - name: ROOT_DIRECTORY
+              value: apps/admin-ui
+            - name: PACKAGE_NAME
+              value: courseboard-admin-ui
+            - name: OUTPUT_DIR
+              value: apps/admin-ui/dist/server/index.js
+            - name: TACHYON_DEPLOYMENT_TARGET
+              value: cloudflare_workers
+            - name: COURSEBOARD_REACT_ROOT
+              value: "true"
+            - name: NEXT_PUBLIC_SITE_NAME
+              value: Course Board v2
+            - name: NEXT_PUBLIC_SITE_URL
+              value: https://courseboardv2.txcloud.app
+            - name: AUTH_URL
+              value: https://courseboardv2.txcloud.app
+            - name: NEXTAUTH_URL
+              value: https://courseboardv2.txcloud.app
+            - name: NEXT_PUBLIC_PLATFORM_ID
+              value: tn_01ks18jhh1xvggktfzjx5jqsen
+            - name: AUTH_BACKEND_API_URL
+              value: https://api.n1.tachy.one
+            - name: TACHYON_API_URL
+              value: https://api.n1.tachy.one
+            - name: NEXT_PUBLIC_TACHYON_API_URL
+              value: https://api.n1.tachy.one
+            - name: COGNITO_ISSUER
+              value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+            - name: COGNITO_DOMAIN
+              value: https://auth-pool.n1.tachy.one
+            - name: COGNITO_REGION
+              value: ap-northeast-1
+            - name: COGNITO_CLIENT_ID
+              type: credential
+              valueFrom:
+                oauth2ClientRef:
+                  name: courseboardv2-web
+                  field: clientId
+            - name: AUTH_SECRET
+              type: credential
+              valueFrom:
+                secret: courseboard/AUTH_SECRET
+            - name: NEXTAUTH_SECRET
+              type: credential
+              valueFrom:
+                secret: courseboard/NEXTAUTH_SECRET
+            - name: COGNITO_CLIENT_SECRET
+              type: credential
+              valueFrom:
+                oauth2ClientRef:
+                  name: courseboardv2-web
+                  field: clientSecret
+            - name: NEXT_PUBLIC_BACKEND_API_URL
+              value: https://tachyon-field-api.txcloud.app
+            - name: TACHYON_FIELD_API_URL
+              value: https://tachyon-field-api.txcloud.app
+            - name: BACKEND_API_URL
+              value: https://tachyon-field-api.txcloud.app
 ---
 apiVersion: apps.tachy.one/v1alpha
 kind: OAuth2Client
