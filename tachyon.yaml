@@ -213,7 +213,7 @@ spec:
           type: credential
           valueFrom:
             oauth2ClientRef:
-              name: courseboardv2-web
+              name: courseboard-web
               field: clientId
         - name: AUTH_SECRET
           type: credential
@@ -227,7 +227,7 @@ spec:
           type: credential
           valueFrom:
             oauth2ClientRef:
-              name: courseboardv2-web
+              name: courseboard-web
               field: clientSecret
         - name: NEXT_PUBLIC_BACKEND_API_URL
           value: https://tachyon-field-api.txcloud.app
@@ -278,7 +278,7 @@ spec:
               type: credential
               valueFrom:
                 oauth2ClientRef:
-                  name: courseboardv2-web
+                  name: courseboard-web
                   field: clientId
             - name: AUTH_SECRET
               type: credential
@@ -292,7 +292,7 @@ spec:
               type: credential
               valueFrom:
                 oauth2ClientRef:
-                  name: courseboardv2-web
+                  name: courseboard-web
                   field: clientSecret
             - name: NEXT_PUBLIC_BACKEND_API_URL
               value: https://tachyon-field-api.txcloud.app
@@ -311,6 +311,9 @@ spec:
     - https://courseboard.txcloud.app/api/auth/callback/tachyon
     - https://*--courseboard.txcloud.app/api/auth/callback/tachyon
     - https://*.courseboard.txcloud.app/api/auth/callback/tachyon
+    - https://courseboardv2.txcloud.app/api/auth/callback/tachyon
+    - https://*--courseboardv2.txcloud.app/api/auth/callback/tachyon
+    - https://*.courseboardv2.txcloud.app/api/auth/callback/tachyon
   allowedScopes:
     - openid
     - profile
