@@ -73,10 +73,17 @@ spec:
         # Golf ERP endpoints currently live in tachyonfield's Field API; point the frontend there.
         - name: NEXT_PUBLIC_BACKEND_API_URL
           value: https://tachyon-field-api.txcloud.app
+        # Worker subrequests to the public Field API host are blocked by
+        # Cloudflare (PLT-2373); production must call the Field API through
+        # the platform-internal service binding, like the pre-v2 manifest.
         - name: TACHYON_FIELD_API_URL
-          value: https://tachyon-field-api.txcloud.app
+          valueFrom:
+            internalService:
+              appName: tachyon-field-api
         - name: BACKEND_API_URL
-          value: https://tachyon-field-api.txcloud.app
+          valueFrom:
+            internalService:
+              appName: tachyon-field-api
       environments:
         preview:
           envVars:
