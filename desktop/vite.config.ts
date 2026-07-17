@@ -1,6 +1,10 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
+export function authProxy(target: string) {
+  return { target, changeOrigin: false }
+}
+
 export default defineConfig(({ mode }) => {
   // Vite exposes .env files to application code automatically, but config-time
   // proxy targets must be loaded explicitly.
@@ -28,9 +32,12 @@ export default defineConfig(({ mode }) => {
         '/cancellation-fee-collections': { target: apiProxyTarget, changeOrigin: true },
         '/public/cancellation-fees': { target: apiProxyTarget, changeOrigin: true },
         ...(authProxyTarget ? {
-          '/api/auth': { target: authProxyTarget, changeOrigin: true },
-          '/api/tenant-name': { target: authProxyTarget, changeOrigin: true },
-          '/auth': { target: authProxyTarget, changeOrigin: true },
+          // Auth.js derives redirect_uri and cookie origin from the incoming
+          // host. Preserve 127.0.0.1:5173 so Cognito returns through Vite and
+          // the resulting HttpOnly cookie belongs to the UI origin.
+          '/api/auth': authProxy(authProxyTarget),
+          '/api/tenant-name': authProxy(authProxyTarget),
+          '/auth': authProxy(authProxyTarget),
         } : {}),
       },
     },

@@ -15,9 +15,9 @@ export { isAdminRole }
 export { resolveAuthUrl }
 
 const DEFAULT_AUTH_BACKEND_URL = 'https://api.n1.tachy.one'
-const DEFAULT_PLATFORM_ID = 'tn_01hjjn348rn3t49zz6hvmfq67p'
 export const PASSWORD_SESSION_COOKIE_NAME = 'tachyon-password-session'
 export const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
+export const AUTH_SIGN_IN_PATH = '/courseboard-ui/index.html'
 const TOKEN_REFRESH_WINDOW_SECONDS = 5 * 60
 const PASSWORD_SESSION_COOKIE_CHUNK_SIZE = 3800
 const PASSWORD_SESSION_COOKIE_MAX_CHUNKS = 12
@@ -54,9 +54,22 @@ export const AUTH_SESSION_COOKIE_NAMES = [
 type VerifyResponse = {
 	user: {
 		id: string
-		role: string
+		username?: string
+		name?: string | null
+		email?: string | null
+		role?: string
 		tenants?: string[]
 	}
+	tenants?: Array<
+		| string
+		| {
+				id?: string
+				name?: string
+				slug?: string
+				mode?: 'production' | 'sandbox'
+				platformId?: string
+		  }
+	>
 }
 
 type AuthInstrumentationOptions = {
@@ -218,6 +231,7 @@ export function splitPasswordSessionCookieValue(value: string) {
 async function persistPasswordSessionToken(token: JWT) {
 	const sessionToken = await encodePasswordSessionToken(token)
 	const cookieStore = cookies()
+	const secure = new URL(resolveAuthUrl()).protocol === 'https:'
 	for (const name of AUTH_SESSION_COOKIE_NAMES) {
 		cookieStore.delete(name)
 	}
@@ -227,7 +241,7 @@ async function persistPasswordSessionToken(token: JWT) {
 			maxAge: SESSION_MAX_AGE_SECONDS,
 			path: '/',
 			sameSite: 'lax',
-			secure: false,
+			secure,
 		})
 	}
 }
@@ -261,18 +275,17 @@ export async function verifyAccessToken(
 	accessToken: string,
 ): Promise<VerifyResponse> {
 	const backendUrl =
-		getRuntimeEnv('AUTH_BACKEND_API_URL') ?? DEFAULT_AUTH_BACKEND_URL
-	const platformId =
-		getRuntimeEnv('NEXT_PUBLIC_PLATFORM_ID') ?? DEFAULT_PLATFORM_ID
+		getRuntimeEnv('TACHYON_API_URL') ??
+		getRuntimeEnv('AUTH_BACKEND_API_URL') ??
+		DEFAULT_AUTH_BACKEND_URL
 	const response = await fetch(
-		`${backendUrl.replace(/\/+$/, '')}/auth/v1beta/verify`,
+		`${backendUrl.replace(/\/+$/, '')}/v1/me`,
 		{
-			body: JSON.stringify({ token: accessToken }),
 			headers: {
-				'content-type': 'application/json',
-				'x-platform-id': platformId,
+				accept: 'application/json',
+				authorization: `Bearer ${accessToken}`,
 			},
-			method: 'POST',
+			cache: 'no-store',
 		},
 	)
 
@@ -508,6 +521,17 @@ async function getPasswordSession(
 				await persistPasswordSessionToken(sessionToken)
 			} catch (error) {
 				console.error('Failed to persist refreshed password session:', error)
+				return {
+					accessToken: '',
+					error: 'RefreshAccessTokenError',
+					expires: new Date(sessionExpiresAt * 1000).toISOString(),
+					user: {
+						...sessionToken.user,
+						email: sessionToken.user.email,
+						emailVerified: null,
+						role: sessionToken.user.role ?? 'GENERAL',
+					},
+				} as Session
 			}
 		}
 		if (Date.now() / 1000 > sessionExpiresAt) {
@@ -568,6 +592,16 @@ async function refreshAuthJsSession(): Promise<Session | null> {
 	const expiresAt =
 		(refreshedToken.expires_at as number | undefined) ??
 		Math.floor(Date.now() / 1000 + SESSION_MAX_AGE_SECONDS)
+	try {
+		// A refresh is only complete after the next request can read the rotated
+		// access/refresh token pair. Migrate the Auth.js JWT into the same
+		// server-owned cookie used by password sessions so the BFF can persist it
+		// without exposing either token to the browser runtime.
+		await persistPasswordSessionToken(refreshedToken)
+	} catch (error) {
+		console.error('Failed to persist refreshed Auth.js session:', error)
+		return null
+	}
 	return sessionFromJwtToken(refreshedToken, expiresAt)
 }
 
@@ -599,13 +633,18 @@ export async function refreshAuthSession(): Promise<Session | null> {
 	) {
 		return passwordSession
 	}
-	return refreshAuthJsSession()
+	const authJsSession = await refreshAuthJsSession()
+	if (authJsSession) {
+		return authJsSession
+	}
+	clearAuthSessionCookies()
+	return null
 }
 
 export async function authWithCheck() {
 	const session = await auth()
 	if (!session) {
-		redirect(authRedirectUrl('/api/auth/signin'))
+		redirect(authRedirectUrl(AUTH_SIGN_IN_PATH))
 	}
 	if (
 		session?.error === 'RefreshAccessTokenError' ||

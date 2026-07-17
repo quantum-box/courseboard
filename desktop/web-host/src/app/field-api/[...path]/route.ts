@@ -328,6 +328,14 @@ async function proxyFieldRequest(
 			redirect: 'manual',
 			signal: controller.signal,
 		})
+		if (upstream.status === 401 && principal.source === 'bearer') {
+			return proxyError(
+				request,
+				502,
+				'FIELD_API_OAUTH_INCOMPATIBLE',
+				'Field API rejected a token already verified by Tachyon Auth',
+			)
+		}
 		const responseHeaders = new Headers({ 'cache-control': 'no-store' })
 		for (const name of ['content-type', 'content-disposition', 'etag']) {
 			const value = upstream.headers.get(name)

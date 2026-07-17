@@ -72,7 +72,14 @@ describe('courseboard auth context', () => {
 
 	it('verifies a native bearer and never trusts it without verification', async () => {
 		verifyAccessTokenMock.mockResolvedValue({
-			user: { id: 'us_native', role: 'ADMIN', tenants: ['tn_claimed'] },
+			user: {
+				id: 'us_native',
+				username: 'operator',
+				name: 'Native Operator',
+				email: 'operator@example.com',
+				role: 'ADMIN',
+				tenants: ['tn_claimed'],
+			},
 		})
 
 		const principal = await resolveBearerCourseboardPrincipal(
@@ -85,7 +92,13 @@ describe('courseboard auth context', () => {
 			source: 'bearer',
 			session: {
 				accessToken: 'native.jwt.token',
-				user: { id: 'us_native', role: 'ADMIN' },
+				user: {
+					id: 'us_native',
+					username: 'operator',
+					name: 'Native Operator',
+					email: 'operator@example.com',
+					role: 'ADMIN',
+				},
 			},
 		})
 		expect(verifyAccessTokenMock).toHaveBeenCalledWith('native.jwt.token')
@@ -109,6 +122,49 @@ describe('courseboard auth context', () => {
 				}),
 			),
 		).resolves.toBeUndefined()
+	})
+
+	it('uses a verified username when the profile has no separate user id', async () => {
+		verifyAccessTokenMock.mockResolvedValue({
+			tenants: [
+				{
+					id: 'tn_profile',
+					name: 'Profile tenant',
+					mode: 'production',
+				},
+			],
+			user: {
+				username: 'operator',
+				email: 'operator@example.com',
+				role: 'GENERAL',
+			},
+		})
+
+		const principal = await resolveBearerCourseboardPrincipal(
+			new Request('https://courseboard.example/field-api/v1/invoices', {
+				headers: { authorization: 'Bearer native.jwt.token' },
+			}),
+		)
+
+		expect(principal).toMatchObject({
+			source: 'bearer',
+			verifiedTenants: [
+				{
+					id: 'tn_profile',
+					name: 'Profile tenant',
+					mode: 'production',
+				},
+			],
+			session: {
+				user: { id: 'operator', username: 'operator' },
+			},
+		})
+
+		await expect(loadCourseboardTenants(principal!)).resolves.toMatchObject({
+			kind: 'ok',
+			tenants: [{ id: 'tn_profile' }],
+		})
+		expect(fetchTenantsMock).not.toHaveBeenCalled()
 	})
 
 	it('prefers the canonical cookie principal over a client bearer', async () => {

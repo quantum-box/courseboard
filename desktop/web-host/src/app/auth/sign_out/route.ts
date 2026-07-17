@@ -1,4 +1,8 @@
-import { AUTH_SESSION_COOKIE_NAMES, resolveAuthUrl } from 'app/auth'
+import {
+	AUTH_SESSION_COOKIE_NAMES,
+	AUTH_SIGN_IN_PATH,
+	resolveAuthUrl,
+} from 'app/auth'
 import { canonicalizeAuthUrl } from 'lib/auth-url-core'
 import { NextResponse } from 'next/server'
 
@@ -18,11 +22,29 @@ function expireAuthSessionCookies(response: NextResponse, requestUrl: URL) {
 	}
 }
 
+function publicRequestOrigin(request: Request, requestUrl: URL) {
+	const forwardedHost = request.headers.get('x-forwarded-host')
+	if (!forwardedHost) return requestUrl.origin
+	const forwardedProto = request.headers
+		.get('x-forwarded-proto')
+		?.split(',', 1)[0]
+		?.trim()
+	const protocol =
+		forwardedProto === 'http' || forwardedProto === 'https'
+			? forwardedProto
+			: requestUrl.protocol.slice(0, -1)
+	return `${protocol}://${forwardedHost}`
+}
+
 function signOut(request: Request) {
 	const requestUrl = new URL(request.url)
-	const redirectUrl = new URL(
-		'/api/auth/signin',
+	const authOrigin = new URL(
 		canonicalizeAuthUrl(resolveAuthUrl(request)),
+	).origin
+	const requestOrigin = publicRequestOrigin(request, requestUrl)
+	const redirectUrl = new URL(
+		requestOrigin === authOrigin ? AUTH_SIGN_IN_PATH : '/auth/sign_out',
+		authOrigin,
 	)
 	if (requestUrl.searchParams.get('error') === 'expired') {
 		redirectUrl.searchParams.set('error', 'expired')

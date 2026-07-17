@@ -7,10 +7,22 @@ Auth.js/Cognito and Field API BFF host for the shared React/Tauri Course Board U
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
-pnpm --filter courseboard-web-host dev
+cd ..
+npm run auth:env
+cd web-host
+pnpm dev
 ```
 
-Open `http://localhost:3001`.
+In another terminal, start Vite and open `http://127.0.0.1:5173`:
+
+```bash
+cd desktop
+npm run dev -- --host 127.0.0.1
+```
+
+`npm run auth:env` creates or reuses the local confidential Cognito client and
+writes its secret only to the ignored `web-host/.env.local` with mode `0600`.
+The browser uses the same Auth.js cookie and Cognito refresh path as production.
 
 ## Photon Engine / Live Integration
 
