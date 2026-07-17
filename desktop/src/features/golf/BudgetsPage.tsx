@@ -3,7 +3,6 @@ import {
   CalendarRange,
   Download,
   FileSpreadsheet,
-  RefreshCw,
   Save,
   Target,
   Upload,
@@ -36,6 +35,7 @@ import {
   NativeSelect,
   Notice,
   PageHeader,
+  PageRefreshButton,
   Panel,
   ResourceError,
 } from '../../components/Page'
@@ -344,9 +344,7 @@ export function BudgetsPage() {
         title="日次予算"
         description="対象月の売上・客単価・キャディ付き比率を、予約実績と並べて調整します。"
         actions={(
-          <Button type="button" onClick={() => void load()} disabled={loading}>
-            <RefreshCw className={loading ? 'spin' : ''} /> 更新
-          </Button>
+          <PageRefreshButton onClick={() => void load()} loading={loading} label="更新" />
         )}
       />
 

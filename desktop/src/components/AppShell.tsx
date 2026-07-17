@@ -56,7 +56,12 @@ import {
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useAuth } from '../auth/AuthProvider'
 import { navigate } from '../lib/router'
-import { platformLabel } from '../lib/platform'
+import { platformKind, platformLabel } from '../lib/platform'
+import {
+  isPageRefreshShortcut,
+  navigationShortcutDigit,
+  navigationShortcutLabel,
+} from '../lib/shortcuts'
 
 export type NavigationItem = {
   route: string
@@ -118,20 +123,28 @@ export function AppShell({ route, children }: { route: string; children: ReactNo
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isPageRefreshShortcut(event)) {
+        const refreshButton = document.querySelector<HTMLButtonElement>('[data-page-refresh]')
+        if (refreshButton) {
+          event.preventDefault()
+          if (!refreshButton.disabled) refreshButton.click()
+        }
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         setCommandOpen(value => !value)
       }
-      if ((event.metaKey || event.ctrlKey) && /^[1-8]$/.test(event.key)) {
-        const item = allNavigation[Number(event.key) - 1]
+      const shortcutDigit = navigationShortcutDigit(event, platformKind())
+      if (shortcutDigit) {
+        const item = allNavigation[Number(shortcutDigit) - 1]
         if (item) {
           event.preventDefault()
           navigate(item.route)
         }
       }
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [])
 
   const title = useMemo(() => routeTitle(route), [route])
@@ -289,7 +302,7 @@ export function AppShell({ route, children }: { route: string; children: ReactNo
                 >
                   <Icon />
                   <span className="command-copy"><strong>{item.label}</strong><small>{item.description}</small></span>
-                  {item.shortcut ? <Kbd>⌘{item.shortcut}</Kbd> : null}
+                  {item.shortcut ? <Kbd>{navigationShortcutLabel(item.shortcut, platformKind())}</Kbd> : null}
                 </CommandItem>
               )
             })}
@@ -318,7 +331,7 @@ function NavigationRow({ item, active, collapsed }: { item: NavigationItem; acti
         <SidebarItem type="button" active={active} onClick={() => navigate(item.route)}>
           <Icon />
           <SidebarItemLabel>{item.label}</SidebarItemLabel>
-          {item.shortcut ? <Kbd>⌘{item.shortcut}</Kbd> : null}
+          {item.shortcut ? <Kbd>{navigationShortcutLabel(item.shortcut, platformKind())}</Kbd> : null}
         </SidebarItem>
       </TooltipTrigger>
       {collapsed ? <TooltipContent side="right">{item.label}</TooltipContent> : null}

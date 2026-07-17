@@ -3,7 +3,6 @@ import {
   Flag,
   Pencil,
   Plus,
-  RefreshCw,
   Save,
   Trash2,
   X,
@@ -21,6 +20,7 @@ import {
   NativeSelect,
   Notice,
   PageHeader,
+  PageRefreshButton,
   Panel,
   ResourceError,
   type DataTableColumn,
@@ -279,9 +279,7 @@ export function CoursesPage() {
         description="ホール数とスタート間隔を含むコースマスタを、Web・デスクトップ・モバイルで共通管理します。"
         actions={(
           <>
-            <Button type="button" onClick={() => void loadCourses()} disabled={loading}>
-              <RefreshCw className={loading ? 'spin' : ''} /> 更新
-            </Button>
+            <PageRefreshButton onClick={() => void loadCourses()} loading={loading} label="更新" />
             <Button type="button" variant="primary" onClick={beginCreate}>
               <Plus /> コース追加
             </Button>
