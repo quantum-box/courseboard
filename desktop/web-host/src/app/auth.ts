@@ -605,7 +605,7 @@ export async function refreshAuthSession(): Promise<Session | null> {
 export async function authWithCheck() {
 	const session = await auth()
 	if (!session) {
-		redirect(authRedirectUrl('/auth/sign_in'))
+		redirect(authRedirectUrl('/api/auth/signin'))
 	}
 	if (
 		session?.error === 'RefreshAccessTokenError' ||

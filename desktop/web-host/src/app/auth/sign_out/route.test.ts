@@ -40,7 +40,7 @@ describe('courseboard sign_out route', () => {
 
 		expect(response.status).toBe(303)
 		expect(response.headers.get('location')).toBe(
-			'https://courseboard.txcloud.app/auth/sign_in',
+			'https://courseboard.txcloud.app/api/auth/signin',
 		)
 		expect(mocks.resolveAuthUrl).toHaveBeenCalledOnce()
 	})
@@ -58,7 +58,7 @@ describe('courseboard sign_out route', () => {
 
 		expect(response.status).toBe(303)
 		expect(response.headers.get('location')).toBe(
-			'https://courseboard.txcloud.app/auth/sign_in',
+			'https://courseboard.txcloud.app/api/auth/signin',
 		)
 	})
 
@@ -78,7 +78,7 @@ describe('courseboard sign_out route', () => {
 
 		expect(response.status).toBe(303)
 		expect(response.headers.get('location')).toBe(
-			'https://pr357--courseboard.txcloud.app/auth/sign_in?error=expired',
+			'https://pr357--courseboard.txcloud.app/api/auth/signin?error=expired',
 		)
 	})
 
@@ -91,7 +91,7 @@ describe('courseboard sign_out route', () => {
 
 		expect(response.status).toBe(303)
 		expect(response.headers.get('location')).toBe(
-			'https://courseboard.txcloud.app/auth/sign_in',
+			'https://courseboard.txcloud.app/api/auth/signin',
 		)
 	})
 })
