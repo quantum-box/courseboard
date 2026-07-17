@@ -1,4 +1,4 @@
-import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
+import { Badge, Button, Input, Kbd } from '@tachyon-sdk/native-ui'
 import type {
   ComponentProps,
   FormEvent,
@@ -8,6 +8,7 @@ import type {
   TextareaHTMLAttributes,
 } from 'react'
 import { AlertTriangle, Inbox, LoaderCircle, RefreshCw } from 'lucide-react'
+import { pageRefreshShortcutLabel } from '../lib/shortcuts'
 
 export function PageHeader({
   eyebrow,
@@ -124,13 +125,35 @@ export function ResourceError({
       tone="danger"
       title="読み込みに失敗しました"
       actions={onRetry ? (
-        <Button type="button" size="sm" onClick={onRetry}>
-          <RefreshCw /> 再試行
-        </Button>
+        <PageRefreshButton size="sm" onClick={onRetry} label="再試行" />
       ) : undefined}
     >
       {message}
     </Notice>
+  )
+}
+
+export function PageRefreshButton({
+  label = '再読み込み',
+  loading = false,
+  disabled,
+  ...props
+}: Omit<ComponentProps<typeof Button>, 'children'> & {
+  label?: string
+  loading?: boolean
+}) {
+  return (
+    <Button
+      {...props}
+      type="button"
+      data-page-refresh=""
+      aria-keyshortcuts="Meta+R Control+R"
+      disabled={disabled || loading}
+    >
+      <RefreshCw className={loading ? 'spin' : ''} />
+      {label}
+      <Kbd>{pageRefreshShortcutLabel()}</Kbd>
+    </Button>
   )
 }
 

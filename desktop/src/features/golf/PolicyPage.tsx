@@ -7,6 +7,7 @@ import {
   NativeTextarea,
   Notice,
   PageHeader,
+  PageRefreshButton,
   Panel,
   ResourceError,
 } from '../../components/Page'
@@ -14,7 +15,6 @@ import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import {
   Clock3,
   Plus,
-  RefreshCw,
   Save,
   ShieldCheck,
   Trash2,
@@ -379,9 +379,7 @@ export function PolicyPage() {
             <Badge variant={exists ? 'success' : 'warning'}>
               {exists ? '設定済み' : '未作成'}
             </Badge>
-            <Button type="button" onClick={() => void load()}>
-              <RefreshCw /> 再読み込み
-            </Button>
+            <PageRefreshButton onClick={() => void load()} />
             <Button type="submit" variant="primary" disabled={saving}>
               <Save /> {saving ? '保存中…' : '変更を保存'}
             </Button>

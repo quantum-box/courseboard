@@ -4,7 +4,6 @@ import {
   Check,
   ClipboardCheck,
   Plus,
-  RefreshCw,
   Save,
   Sparkles,
   Trash2,
@@ -25,10 +24,16 @@ import {
   NativeTextarea,
   Notice,
   PageHeader,
+  PageRefreshButton,
   Panel,
   ResourceError,
   type DataTableColumn,
 } from '../../components/Page'
+import {
+  buildGolfExtensionConfig,
+  golfExtensionConfigToDraft,
+  type GolfExtensionConfigDraft,
+} from './extension-config'
 import {
   applyCapacityToSlots,
   calculateCaddieCapacity,
@@ -112,14 +117,6 @@ function todayInTokyo() {
   }).format(new Date())
 }
 
-function parseConfigJson(value: string) {
-  const parsed: unknown = JSON.parse(value)
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('設定JSONはオブジェクト形式で入力してください。')
-  }
-  return parsed as Record<string, unknown>
-}
-
 function validateProduct(draft: GolfReservationProductDraft) {
   if (!draft.serviceId.trim()) return '予約サービスIDを入力してください。'
   if (!/^[A-Za-z0-9._:-]+$/.test(draft.serviceId.trim())) {
@@ -139,7 +136,9 @@ function validateProduct(draft: GolfReservationProductDraft) {
 export function ReservationProductsPage() {
   const tenant = fieldTenant()
   const [extension, setExtension] = useState<ExtensionStatus | null>(null)
-  const [configText, setConfigText] = useState('{}')
+  const [configDraft, setConfigDraft] = useState<GolfExtensionConfigDraft>(
+    () => golfExtensionConfigToDraft({}),
+  )
   const [products, setProducts] = useState<GolfReservationProduct[]>([])
   const [slotsByService, setSlotsByService] = useState<Record<string, EditableSlot[]>>({})
   const [slotLoadErrors, setSlotLoadErrors] = useState<Record<string, string>>({})
@@ -200,7 +199,7 @@ export function ReservationProductsPage() {
       })
 
       setExtension(nextExtension)
-      setConfigText(JSON.stringify(nextExtension?.configJson ?? {}, null, 2))
+      setConfigDraft(golfExtensionConfigToDraft(nextExtension?.configJson ?? {}))
       setProducts(nextProducts)
       setSlotsByService(nextSlots)
       setSlotLoadErrors(nextSlotErrors)
@@ -229,8 +228,8 @@ export function ReservationProductsPage() {
   )
   const selectedSlots = selectedServiceId ? slotsByService[selectedServiceId] ?? [] : []
   const totalSlots = Object.values(slotsByService).reduce((sum, slots) => sum + slots.length, 0)
-  const persistedConfigText = JSON.stringify(extension?.configJson ?? {}, null, 2)
-  const configDirty = configText !== persistedConfigText
+  const persistedConfigDraft = golfExtensionConfigToDraft(extension?.configJson ?? {})
+  const configDirty = JSON.stringify(configDraft) !== JSON.stringify(persistedConfigDraft)
   const hasUnsavedChanges = configDirty || dirtyServiceIds.length > 0
 
   function requestReload() {
@@ -239,6 +238,12 @@ export function ReservationProductsPage() {
       && !window.confirm('未保存の設定または受付枠があります。破棄して再読み込みしますか？')
     ) return
     void loadPage()
+  }
+
+  function changeConfigDraft(patch: Partial<GolfExtensionConfigDraft>) {
+    setConfigDraft(current => ({ ...current, ...patch }))
+    setConfigError(null)
+    setMessage(null)
   }
 
   function beginCreateProduct() {
@@ -280,22 +285,20 @@ export function ReservationProductsPage() {
     setConfigError(null)
     setMessage(null)
     try {
-      const configJson = parseConfigJson(configText)
+      const configJson = buildGolfExtensionConfig(configDraft, extension?.configJson ?? {})
       await fieldApiText(extensionConfigPath, {
         method: 'PATCH',
         body: JSON.stringify({ scopeType: 'tenant', configJson }),
       })
       setExtension(current => current ? { ...current, configJson } : current)
-      setConfigText(JSON.stringify(configJson, null, 2))
+      setConfigDraft(golfExtensionConfigToDraft(configJson))
       setMessage({
         tone: 'success',
         title: 'アプリ設定を保存しました',
-        body: '新しい設定JSONをゴルフ拡張へ反映しました。',
+        body: '新しい基本設定をゴルフ拡張へ反映しました。',
       })
     } catch (error) {
-      setConfigError(error instanceof SyntaxError
-        ? 'JSONの構文が正しくありません。括弧、カンマ、引用符を確認してください。'
-        : errorMessage(error))
+      setConfigError(errorMessage(error))
     } finally {
       setConfigSaving(false)
     }
@@ -649,9 +652,7 @@ export function ReservationProductsPage() {
         description="拡張設定、プレー区分、曜日別受付枠、キャディ供給量を一つの作業面で管理します。"
         actions={(
           <>
-            <Button type="button" onClick={requestReload}>
-              <RefreshCw /> 再読み込み
-            </Button>
+            <PageRefreshButton onClick={requestReload} />
             <Button type="button" variant="primary" onClick={beginCreateProduct}>
               <Plus /> 予約サービスを追加
             </Button>
@@ -681,7 +682,7 @@ export function ReservationProductsPage() {
 
       <Panel
         title="ゴルフ拡張設定"
-        description="APIへ送信するtenant scopeの設定JSONです。保存前に構文と差分を確認してください。"
+        description="予約商品の既定値と公開画面に表示する内容を設定します。"
         actions={(
           <div className="flex items-center gap-2">
             <Badge variant={extension?.tenantStatus === 'enabled' ? 'success' : 'warning'}>
@@ -708,23 +709,85 @@ export function ReservationProductsPage() {
             </ul>
           </Notice>
         ) : null}
-        <div className="grid gap-3">
-          <Field
-            label="設定JSON"
-            hint={`最終更新 ${formatUpdatedAt(extension?.updatedAt)} · JSON objectのみ保存できます。`}
-            required
-          >
-            <NativeTextarea
-              value={configText}
-              onChange={event => {
-                setConfigText(event.target.value)
-                setConfigError(null)
-              }}
-              rows={14}
-              spellCheck={false}
-              className="font-mono text-xs"
-            />
-          </Field>
+        <div className="grid gap-4">
+          <FormGrid columns={3}>
+            <Field label="カート利用" required>
+              <NativeSelect
+                value={configDraft.cartPolicy}
+                onChange={event => changeConfigDraft({
+                  cartPolicy: event.target.value as GolfExtensionConfigDraft['cartPolicy'],
+                })}
+              >
+                <option value="optional">任意</option>
+                <option value="required">必須</option>
+                <option value="unavailable">利用不可</option>
+              </NativeSelect>
+            </Field>
+            <Field label="既定ホール数" required>
+              <NativeSelect
+                value={configDraft.defaultHoles}
+                onChange={event => changeConfigDraft({ defaultHoles: event.target.value })}
+              >
+                <option value="18">18ホール</option>
+                <option value="9">9ホール</option>
+              </NativeSelect>
+            </Field>
+            <Field label="既定の所要時間" hint="30〜720分" required>
+              <Input
+                type="number"
+                min="30"
+                max="720"
+                step="1"
+                value={configDraft.defaultDurationMinutes}
+                onChange={event => changeConfigDraft({ defaultDurationMinutes: event.target.value })}
+              />
+            </Field>
+            <Field label="1枠の最大人数" hint="1〜4人" required>
+              <Input
+                type="number"
+                min="1"
+                max="4"
+                step="1"
+                value={configDraft.maxPlayersPerTeeTime}
+                onChange={event => changeConfigDraft({ maxPlayersPerTeeTime: event.target.value })}
+              />
+            </Field>
+            <Field label="会員デポジット率" hint="0〜100%" required>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={configDraft.memberDepositPercent}
+                onChange={event => changeConfigDraft({ memberDepositPercent: event.target.value })}
+              />
+            </Field>
+            <Field label="ゲストデポジット率" hint="0〜100%" required>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                step="0.01"
+                value={configDraft.guestDepositPercent}
+                onChange={event => changeConfigDraft({ guestDepositPercent: event.target.value })}
+              />
+            </Field>
+          </FormGrid>
+          <FormGrid columns={2}>
+            <Field label="公開商品名" hint="予約画面に表示するプラン名">
+              <Input
+                value={configDraft.publicProductName}
+                onChange={event => changeConfigDraft({ publicProductName: event.target.value })}
+              />
+            </Field>
+            <Field label="公開商品説明" hint={`最終更新 ${formatUpdatedAt(extension?.updatedAt)}`}>
+              <NativeTextarea
+                rows={3}
+                value={configDraft.publicProductDescription}
+                onChange={event => changeConfigDraft({ publicProductDescription: event.target.value })}
+              />
+            </Field>
+          </FormGrid>
           {configError ? (
             <Notice tone="danger" title="設定を保存できません">{configError}</Notice>
           ) : null}
@@ -735,7 +798,7 @@ export function ReservationProductsPage() {
               disabled={configSaving}
               onClick={() => void saveExtensionConfig()}
             >
-              <Save /> {configSaving ? '保存中' : '設定JSONを保存'}
+              <Save /> {configSaving ? '保存中' : '基本設定を保存'}
             </Button>
           </div>
         </div>
@@ -976,7 +1039,7 @@ export function ReservationProductsPage() {
       ) : null}
 
       <Notice tone="info" title="設定モデルについて">
-        拡張設定JSONとゴルフ固有の予約サービス・受付枠は別APIです。この画面では両方を管理できますが、同期は行わず、それぞれ明示的に保存します。
+        拡張の基本設定とゴルフ固有の予約サービス・受付枠は別APIです。この画面では両方を管理できますが、同期は行わず、それぞれ明示的に保存します。
       </Notice>
     </div>
   )

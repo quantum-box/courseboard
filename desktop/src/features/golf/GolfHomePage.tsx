@@ -1,9 +1,9 @@
 import { Badge, Button } from '@tachyon-sdk/native-ui'
-import { ArrowRight, CheckCircle2, CircleOff, RefreshCw, ShieldAlert } from 'lucide-react'
+import { ArrowRight, CheckCircle2, CircleOff, ShieldAlert } from 'lucide-react'
 import { useCallback } from 'react'
 import { fieldApiJson } from '../../api'
 import { golfNavigation } from '../../components/AppShell'
-import { Metric, MetricGrid, Notice, PageHeader, Panel, ResourceError, LoadingState } from '../../components/Page'
+import { LoadingState, Metric, MetricGrid, Notice, PageHeader, PageRefreshButton, Panel, ResourceError } from '../../components/Page'
 import { useResource } from '../../hooks/useResource'
 import { navigate } from '../../lib/router'
 
@@ -32,9 +32,12 @@ export function GolfHomePage() {
         title="ゴルフアプリ"
         description="公開予約、コース、キャディ、予算、請求を同じ運用面から管理します。"
         actions={(
-          <Button type="button" variant="primary" onClick={() => navigate('golf/products')}>
-            予約商品を開く <ArrowRight />
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <PageRefreshButton onClick={resource.refresh} label="更新" />
+            <Button type="button" variant="primary" onClick={() => navigate('golf/products')}>
+              予約商品を開く <ArrowRight />
+            </Button>
+          </div>
         )}
       />
 
@@ -45,7 +48,7 @@ export function GolfHomePage() {
           Field API の extension registry とテナント設定を確認してください。
         </Notice>
       ) : null}
-      {resource.data ? <ExtensionSummary extension={resource.data} onRefresh={resource.refresh} /> : null}
+      {resource.data ? <ExtensionSummary extension={resource.data} /> : null}
 
       <section className="feature-grid" aria-label="ゴルフ運用機能">
         {golfNavigation.slice(1).map((item, index) => {
@@ -84,18 +87,13 @@ export function GolfHomePage() {
   )
 }
 
-function ExtensionSummary({ extension, onRefresh }: { extension: ExtensionStatus; onRefresh: () => void }) {
+function ExtensionSummary({ extension }: { extension: ExtensionStatus }) {
   const enabled = extension.tenantStatus === 'enabled'
   return (
     <Panel
       className="extension-summary"
       title="Extension runtime"
       description="Field API registry とテナント設定の現在値"
-      actions={(
-        <Button type="button" size="sm" onClick={onRefresh}>
-          <RefreshCw /> 更新
-        </Button>
-      )}
     >
       <MetricGrid>
         <Metric

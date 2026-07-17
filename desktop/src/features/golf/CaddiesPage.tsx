@@ -56,6 +56,7 @@ import {
   NativeTextarea,
   Notice,
   PageHeader,
+  PageRefreshButton,
   Panel,
   ResourceError,
   SearchInput,
@@ -482,10 +483,10 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
         description="朝の供給判断から配車、勤務、プロフィール、給与連携までをひとつの作業面で管理します。"
         actions={(
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-            <Button
-              type="button"
+            <PageRefreshButton
               variant="secondary"
               className="min-h-10 flex-1 sm:flex-none"
+              label="更新"
               onClick={() => {
                 profilesResource.refresh()
                 assignmentsResource.refresh()
@@ -494,9 +495,7 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
                 coursesResource.refresh()
                 attendanceResource.refresh()
               }}
-            >
-              <RefreshCw /> 更新
-            </Button>
+            />
             <Button
               type="button"
               variant="primary"
