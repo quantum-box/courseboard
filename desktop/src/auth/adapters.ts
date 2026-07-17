@@ -446,7 +446,6 @@ class BrowserPkceAdapter implements AuthAdapter {
     this.accessToken = undefined
     this.accessTokenExpiresAt = 0
     this.refreshToken = undefined
-    window.location.assign('/')
   }
 
   private async refreshAccessToken() {

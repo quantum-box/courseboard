@@ -1,0 +1,17 @@
+apiVersion: apps.tachy.one/v1alpha
+kind: OAuth2Client
+metadata:
+  name: courseboard-local-web
+  tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
+spec:
+  redirectUris:
+    - http://127.0.0.1:5173/api/auth/callback/tachyon
+  allowedScopes:
+    - openid
+    - profile
+    - email
+    - aws.cognito.signin.user.admin
+  grantTypes:
+    - authorization_code
+    - password
+  useTachyonUserPool: true

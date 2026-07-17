@@ -168,6 +168,33 @@ describe('/field-api/[...path] BFF', () => {
 		)
 	})
 
+	it('does not expire a verified OAuth session when Field API rejects the token format', async () => {
+		resolveFieldCourseboardPrincipalMock.mockResolvedValue({
+			...principal,
+			source: 'bearer',
+		})
+		const fetchMock = vi.fn().mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					message: 'Tachyon auth verify_user rejected the request',
+				}),
+				{ status: 401, headers: { 'content-type': 'application/json' } },
+			),
+		)
+		vi.stubGlobal('fetch', fetchMock)
+
+		const response = await GET(
+			request('/v1/erp/extensions/status'),
+			routeContext('/v1/erp/extensions/status'),
+		)
+
+		expect(response.status).toBe(502)
+		await expect(response.json()).resolves.toEqual({
+			code: 'FIELD_API_OAUTH_INCOMPATIBLE',
+			message: 'Field API rejected a token already verified by Tachyon Auth',
+		})
+	})
+
 	it('accepts a URL-encoded colon in a decoded service id', async () => {
 		const fetchMock = vi
 			.fn()

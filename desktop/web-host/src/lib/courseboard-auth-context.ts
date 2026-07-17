@@ -5,6 +5,7 @@ import {
 } from 'app/auth'
 import type { Session } from 'next-auth'
 import { PLATFORM_IDS } from './mode'
+import { getTenantMode } from './tenant-list'
 import fetchTenants, {
 	TenantFetchError,
 	getPartialTenantFetchTenants,
@@ -18,6 +19,7 @@ const BEARER_TOKEN_PATTERN = /^[A-Za-z0-9\-._~+/]+=*$/
 export type CourseboardPrincipal = {
 	session: Session
 	source: 'web-session' | 'bearer'
+	verifiedTenants?: Tenant[]
 }
 
 export type CourseboardTenantResult =
@@ -83,24 +85,85 @@ async function principalFromBearer(
 
 	try {
 		const verification = (await verifyAccessToken(accessToken)) as {
+			tenants?: unknown
 			user?: {
 				id?: unknown
+				username?: unknown
+				name?: unknown
+				email?: unknown
 				role?: unknown
 				tenants?: unknown
 			}
 		}
-		if (typeof verification.user?.id !== 'string') return undefined
+		const userId = [
+			verification.user?.id,
+			verification.user?.username,
+			verification.user?.email,
+		].find((value): value is string =>
+			typeof value === 'string' && value.length > 0,
+		)
+		if (!userId || !verification.user) return undefined
 		const tenants = Array.isArray(verification.user.tenants)
 			? verification.user.tenants.filter(
 					(tenant): tenant is string => typeof tenant === 'string',
 				)
 			: undefined
+		const profileTenantPayloads = Array.isArray(verification.tenants)
+			? verification.tenants
+			: Array.isArray(verification.user.tenants)
+				? verification.user.tenants
+				: undefined
+		const verifiedTenants = profileTenantPayloads?.flatMap(payload => {
+			if (typeof payload === 'string') {
+				return [
+					{
+						id: payload,
+						name: payload,
+						mode: getTenantMode({ id: payload }),
+					},
+				]
+			}
+			if (!payload || typeof payload !== 'object') return []
+			const tenant = payload as Record<string, unknown>
+			if (typeof tenant.id !== 'string' || tenant.id.length === 0) return []
+			const platformId =
+				typeof tenant.platformId === 'string'
+					? tenant.platformId
+					: undefined
+			const mode =
+				tenant.mode === 'production' || tenant.mode === 'sandbox'
+					? tenant.mode
+					: getTenantMode({ id: tenant.id, platformId })
+			return [
+				{
+					id: tenant.id,
+					name:
+						typeof tenant.name === 'string' && tenant.name.length > 0
+							? tenant.name
+							: tenant.id,
+					...(typeof tenant.slug === 'string' ? { slug: tenant.slug } : {}),
+					...(platformId ? { platformId } : {}),
+					mode,
+				},
+			]
+		})
 		const session = {
 			accessToken,
 			expires: new Date(Date.now() + 5 * 60_000).toISOString(),
 			user: {
-				id: verification.user.id,
-				username: verification.user.id,
+				id: userId,
+				username:
+					typeof verification.user.username === 'string'
+						? verification.user.username
+						: userId,
+				...(typeof verification.user.name === 'string' ||
+				verification.user.name === null
+					? { name: verification.user.name }
+					: {}),
+				...(typeof verification.user.email === 'string' ||
+				verification.user.email === null
+					? { email: verification.user.email }
+					: {}),
 				role:
 					typeof verification.user.role === 'string'
 						? verification.user.role
@@ -108,7 +171,11 @@ async function principalFromBearer(
 				...(tenants ? { tenants } : {}),
 			},
 		} as Session
-		return { session, source: 'bearer' }
+		return {
+			session,
+			source: 'bearer',
+			...(verifiedTenants ? { verifiedTenants } : {}),
+		}
 	} catch {
 		return undefined
 	}
@@ -174,6 +241,14 @@ async function fetchCourseboardTenantsOnce(
 export async function loadCourseboardTenants(
 	principal: CourseboardPrincipal,
 ): Promise<CourseboardTenantResult> {
+	if (principal.source === 'bearer' && principal.verifiedTenants) {
+		return {
+			kind: 'ok',
+			session: principal.session,
+			tenants: principal.verifiedTenants,
+			partial: false,
+		}
+	}
 	const firstResult = await fetchCourseboardTenantsOnce(principal.session)
 	if (
 		firstResult.kind !== 'unauthorized' ||

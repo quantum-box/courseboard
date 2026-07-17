@@ -44,16 +44,18 @@ import {
 	getAuthSecretFingerprint,
 	PASSWORD_SESSION_COOKIE_NAME,
 	refreshAuthSession,
+	verifyAccessToken,
 } from './auth'
 import { resolveAccountExpiresAt } from './auth-token'
 import { isAdminRole, resolveJwtUser } from './auth-user'
 import { cognitoRefreshAccessToken } from './cognito'
 import { cookies } from 'next/headers'
-import { decode } from 'next-auth/jwt'
+import { decode, encode } from 'next-auth/jwt'
 
 afterEach(() => {
 	vi.clearAllMocks()
 	vi.unstubAllEnvs()
+	vi.unstubAllGlobals()
 })
 
 describe('isAdminRole', () => {
@@ -245,6 +247,52 @@ describe('getAuthSecretFingerprint', () => {
 	})
 })
 
+describe('verifyAccessToken', () => {
+	it('validates bearer tokens through the current Tachyon profile endpoint', async () => {
+		vi.stubEnv('TACHYON_API_URL', 'https://auth.example.test/')
+		const fetchMock = vi.fn().mockResolvedValue(
+			Response.json({
+				user: {
+					id: 'us_native',
+					username: 'operator',
+					role: 'GENERAL',
+				},
+			}),
+		)
+		vi.stubGlobal('fetch', fetchMock)
+
+		await expect(verifyAccessToken('native.jwt.token')).resolves.toEqual({
+			user: {
+				id: 'us_native',
+				username: 'operator',
+				role: 'GENERAL',
+			},
+		})
+		expect(fetchMock).toHaveBeenCalledWith(
+			'https://auth.example.test/v1/me',
+			{
+				cache: 'no-store',
+				headers: {
+					accept: 'application/json',
+					authorization: 'Bearer native.jwt.token',
+				},
+			},
+		)
+	})
+
+	it('rejects bearer tokens refused by the profile endpoint', async () => {
+		vi.stubEnv('TACHYON_API_URL', 'https://auth.example.test')
+		vi.stubGlobal(
+			'fetch',
+			vi.fn().mockResolvedValue(new Response(null, { status: 401 })),
+		)
+
+		await expect(verifyAccessToken('expired.jwt.token')).rejects.toThrow(
+			'Failed to verify access token: 401',
+		)
+	})
+})
+
 describe('clearAuthSessionCookies', () => {
 	it('clears password-session chunks and Auth.js session cookies', () => {
 		const deleteCookie = vi.fn()
@@ -281,6 +329,7 @@ describe('clearAuthSessionCookies', () => {
 describe('refreshAuthSession', () => {
 	it('refreshes Auth.js sessions stored in chunked cookies', async () => {
 		vi.stubEnv('AUTH_SECRET', 'test-auth-secret')
+		vi.stubEnv('AUTH_URL', 'https://courseboard.txcloud.app')
 
 		const getCookie = vi.fn((name: string) => {
 			const values: Record<string, string> = {
@@ -290,8 +339,12 @@ describe('refreshAuthSession', () => {
 			const value = values[name]
 			return value ? { value } : undefined
 		})
+		const deleteCookie = vi.fn()
+		const setCookie = vi.fn()
 		vi.mocked(cookies).mockReturnValue({
+			delete: deleteCookie,
 			get: getCookie,
+			set: setCookie,
 		} as never)
 
 		const token = {
@@ -311,6 +364,7 @@ describe('refreshAuthSession', () => {
 			expires_at: 1780822800,
 		} as JWT
 		vi.mocked(decode).mockResolvedValue(token)
+		vi.mocked(encode).mockResolvedValue('encoded-refreshed-session')
 		vi.mocked(cognitoRefreshAccessToken).mockResolvedValue(refreshedToken)
 
 		const session = await refreshAuthSession()
@@ -323,6 +377,16 @@ describe('refreshAuthSession', () => {
 			}),
 		)
 		expect(cognitoRefreshAccessToken).toHaveBeenCalledWith(token)
+		expect(deleteCookie).toHaveBeenCalledWith('authjs.session-token.0')
+		expect(setCookie).toHaveBeenCalledWith(
+			PASSWORD_SESSION_COOKIE_NAME,
+			'encoded-refreshed-session',
+			expect.objectContaining({
+				httpOnly: true,
+				sameSite: 'lax',
+				secure: true,
+			}),
+		)
 		expect(session).toMatchObject({
 			accessToken: 'new-access-token',
 			user: {
@@ -330,6 +394,43 @@ describe('refreshAuthSession', () => {
 				role: 'OWNER',
 			},
 		})
+	})
+
+	it('clears stale cookies when an Auth.js refresh cannot be persisted', async () => {
+		vi.stubEnv('AUTH_SECRET', 'test-auth-secret')
+		const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+		const token = {
+			accessToken: 'old-access-token',
+			expires_at: 0,
+			refreshToken: 'refresh-token',
+			user: {
+				email: 'operator@example.com',
+				id: 'user_1',
+				role: 'OWNER',
+			},
+		} as JWT
+		const deleteCookie = vi.fn()
+		vi.mocked(cookies).mockReturnValue({
+			delete: deleteCookie,
+			get: vi.fn((name: string) =>
+				name === 'authjs.session-token' ? { value: 'encoded-token' } : undefined,
+			),
+			set: vi.fn(),
+		} as never)
+		vi.mocked(decode).mockResolvedValue(token)
+		vi.mocked(cognitoRefreshAccessToken).mockResolvedValue({
+			...token,
+			accessToken: 'new-access-token',
+			expires_at: 1780822800,
+		} as JWT)
+		vi.mocked(encode).mockRejectedValue(new Error('cookie write failed'))
+
+		await expect(refreshAuthSession()).resolves.toBeNull()
+
+		expect(deleteCookie).toHaveBeenCalledWith('authjs.session-token')
+		expect(deleteCookie).toHaveBeenCalledWith(PASSWORD_SESSION_COOKIE_NAME)
+		consoleError.mockRestore()
 	})
 })
 
