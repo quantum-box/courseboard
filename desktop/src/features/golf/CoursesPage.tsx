@@ -4,7 +4,6 @@ import {
   Flag,
   Pencil,
   Plus,
-  RefreshCw,
   Save,
   Trash2,
   X,
@@ -23,6 +22,7 @@ import {
   NativeSelect,
   Notice,
   PageHeader,
+  PageRefreshButton,
   Panel,
   ResourceError,
   type DataTableColumn,
@@ -287,9 +287,7 @@ export function CoursesPage() {
             <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
               <ArrowLeft /> 設定へ戻る
             </Button>
-            <Button type="button" onClick={() => void loadCourses()} disabled={loading} title="⌘R">
-              <RefreshCw className={loading ? 'spin' : ''} /> 更新
-            </Button>
+            <PageRefreshButton onClick={() => void loadCourses()} loading={loading} label="更新" />
             <Button type="button" variant="primary" onClick={beginCreate}>
               <Plus /> コース追加
             </Button>

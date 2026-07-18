@@ -6,7 +6,6 @@ import {
   FileWarning,
   Link2,
   ReceiptText,
-  RefreshCw,
   RotateCcw,
   Users,
 } from 'lucide-react'
@@ -33,6 +32,7 @@ import {
   MetricGrid,
   Notice,
   PageHeader,
+  PageRefreshButton,
   Panel,
   ResourceError,
 } from '../../components/Page'
@@ -216,9 +216,7 @@ export function SettlementPage() {
         description="予約、キャディ費用、キャンセル料、Square照合を月単位で締め前に確認します。"
         actions={(
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" onClick={() => void load()} disabled={loading} title="⌘R">
-              <RefreshCw className={loading ? 'spin' : ''} /> 更新
-            </Button>
+            <PageRefreshButton onClick={() => void load()} loading={loading} label="更新" />
             <Button type="button" onClick={() => void exportCsv()} disabled={exporting}>
               <Download /> {exporting ? '出力中…' : 'CSVを出力'}
             </Button>

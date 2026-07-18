@@ -15,6 +15,12 @@ const files = {
 			import.meta.url,
 		),
 	),
+	localOauth: fileURLToPath(
+		new URL(
+			'../../../../.tachyon/manifests/courseboard-local-web-oauth-client.yaml',
+			import.meta.url,
+		),
+	),
 }
 
 describe('Course Board production API runtime env', () => {
@@ -42,6 +48,7 @@ describe('Course Board production API runtime env', () => {
 	it('targets the Field canonical tenant for the canary transfer', () => {
 		const manifest = readFileSync(files.root, 'utf8')
 		const oauthManifest = readFileSync(files.oauth, 'utf8')
+		const localOauthManifest = readFileSync(files.localOauth, 'utf8')
 
 		expect(readMetadataTenantId(manifest, 'CloudApps')).toBe(
 			FIELD_CANONICAL_TENANT_ID,
@@ -49,10 +56,22 @@ describe('Course Board production API runtime env', () => {
 		expect(readMetadataTenantId(oauthManifest, 'OAuth2Client')).toBe(
 			FIELD_CANONICAL_TENANT_ID,
 		)
+		expect(readMetadataTenantId(localOauthManifest, 'OAuth2Client')).toBe(
+			FIELD_CANONICAL_TENANT_ID,
+		)
 		expect(readEnvValue(readAppManifest(manifest, 'courseboard'), 'NEXT_PUBLIC_PLATFORM_ID')).toBe(
 			FIELD_CANONICAL_TENANT_ID,
 		)
 		expect(manifest).not.toContain(`tenantId: ${LEGACY_HOSTING_TENANT_ID}`)
+	})
+
+	it('registers the local Auth.js callback instead of the browser PKCE callback', () => {
+		const localOauthManifest = readFileSync(files.localOauth, 'utf8')
+
+		expect(localOauthManifest).toContain(
+			'http://127.0.0.1:5173/api/auth/callback/tachyon',
+		)
+		expect(localOauthManifest).not.toContain('127.0.0.1:5173/oauth/callback')
 	})
 
 	it('does not keep legacy field API env fallbacks in runtime source', () => {

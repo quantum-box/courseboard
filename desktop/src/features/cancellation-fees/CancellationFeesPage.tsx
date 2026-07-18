@@ -7,7 +7,6 @@ import {
   Mail,
   MessageSquareText,
   Plus,
-  RefreshCw,
   Save,
   Send,
 } from 'lucide-react'
@@ -25,6 +24,7 @@ import {
   NativeTextarea,
   Notice,
   PageHeader,
+  PageRefreshButton,
   Panel,
   ResourceError,
 } from '../../components/Page'
@@ -141,7 +141,7 @@ export function CancellationFeesPage() {
               <option value="all">すべて</option>
               {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </NativeSelect>
-            <Button type="button" size="sm" onClick={resource.refresh} title="⌘R"><RefreshCw /> 更新</Button>
+            <PageRefreshButton size="sm" onClick={resource.refresh} label="更新" />
           </div>
         )}
       >
@@ -277,7 +277,12 @@ export function NewCancellationFeePage() {
         eyebrow="New collection"
         title="キャンセル料請求"
         description="Stripe 支払いリンク付きの請求書を作成し、選択した送信方法で案内します。"
-        actions={<Button type="button" onClick={() => navigate('cancellation-fees')}><ArrowLeft /> 一覧へ</Button>}
+        actions={(
+          <div className="flex flex-wrap gap-2">
+            {orderId ? <PageRefreshButton onClick={orderResource.refresh} label="受注を更新" /> : null}
+            <Button type="button" onClick={() => navigate('cancellation-fees')}><ArrowLeft /> 一覧へ</Button>
+          </div>
+        )}
       />
 
       {error ? <Notice tone="danger" title="作成できませんでした">{error}</Notice> : null}
@@ -465,7 +470,12 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
         eyebrow={invoice.invoiceNumber}
         title={invoice.clientName ?? invoice.clientId}
         description={`作成日 ${invoice.createdAt.slice(0, 10)} · 支払期限 ${invoice.dueDate.slice(0, 10)}`}
-        actions={<Button type="button" onClick={() => navigate('cancellation-fees')}><ArrowLeft /> 一覧へ</Button>}
+        actions={(
+          <div className="flex flex-wrap gap-2">
+            <PageRefreshButton onClick={resource.refresh} label="更新" />
+            <Button type="button" onClick={() => navigate('cancellation-fees')}><ArrowLeft /> 一覧へ</Button>
+          </div>
+        )}
       />
       {notice ? <Notice tone={notice.tone}>{notice.message}</Notice> : null}
       <MetricGrid>

@@ -9,6 +9,7 @@ vi.mock('app/auth', () => ({
 		'authjs.session-token',
 		'__Secure-authjs.session-token',
 	],
+	AUTH_SIGN_IN_PATH: '/courseboard-ui/index.html',
 	resolveAuthUrl: mocks.resolveAuthUrl,
 }))
 
@@ -31,7 +32,7 @@ describe('courseboard sign_out route', () => {
 		})
 	})
 
-	it('redirects workers.dev logout requests to the canonical txcloud sign-in URL', () => {
+	it('routes workers.dev logout through the canonical origin before sign-in', () => {
 		const response = GET(
 			new Request('https://courseboard.quantum-box.workers.dev/auth/sign_out', {
 				headers: { host: 'courseboard.quantum-box.workers.dev' },
@@ -40,9 +41,25 @@ describe('courseboard sign_out route', () => {
 
 		expect(response.status).toBe(303)
 		expect(response.headers.get('location')).toBe(
-			'https://courseboard.txcloud.app/auth/sign_in',
+			'https://courseboard.txcloud.app/auth/sign_out',
+		)
+		expect(response.headers.get('set-cookie')).toContain(
+			'authjs.session-token=',
 		)
 		expect(mocks.resolveAuthUrl).toHaveBeenCalledOnce()
+	})
+
+	it('preserves the expired reason across canonical logout routing', () => {
+		const response = GET(
+			new Request(
+				'https://courseboard.quantum-box.workers.dev/auth/sign_out?error=expired',
+				{ headers: { host: 'courseboard.quantum-box.workers.dev' } },
+			),
+		)
+
+		expect(response.headers.get('location')).toBe(
+			'https://courseboard.txcloud.app/auth/sign_out?error=expired',
+		)
 	})
 
 	it('canonicalizes workers.dev even when the resolved auth URL is polluted', () => {
@@ -58,7 +75,7 @@ describe('courseboard sign_out route', () => {
 
 		expect(response.status).toBe(303)
 		expect(response.headers.get('location')).toBe(
-			'https://courseboard.txcloud.app/auth/sign_in',
+			'https://courseboard.txcloud.app/courseboard-ui/index.html',
 		)
 	})
 
@@ -78,7 +95,7 @@ describe('courseboard sign_out route', () => {
 
 		expect(response.status).toBe(303)
 		expect(response.headers.get('location')).toBe(
-			'https://pr357--courseboard.txcloud.app/auth/sign_in?error=expired',
+			'https://pr357--courseboard.txcloud.app/courseboard-ui/index.html?error=expired',
 		)
 	})
 
@@ -91,7 +108,24 @@ describe('courseboard sign_out route', () => {
 
 		expect(response.status).toBe(303)
 		expect(response.headers.get('location')).toBe(
-			'https://courseboard.txcloud.app/auth/sign_in',
+			'https://courseboard.txcloud.app/courseboard-ui/index.html',
+		)
+	})
+
+	it('falls back to the request protocol for local forwarded hosts', () => {
+		mocks.resolveAuthUrl.mockReturnValue('http://127.0.0.1:3001')
+
+		const response = GET(
+			new Request('http://127.0.0.1:3001/auth/sign_out', {
+				headers: {
+					host: '127.0.0.1:3001',
+					'x-forwarded-host': '127.0.0.1:3001',
+				},
+			}),
+		)
+
+		expect(response.headers.get('location')).toBe(
+			'http://127.0.0.1:3001/courseboard-ui/index.html',
 		)
 	})
 })

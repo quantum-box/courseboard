@@ -4,7 +4,6 @@ import {
   Check,
   ClipboardCheck,
   Plus,
-  RefreshCw,
   Save,
   Sparkles,
   Trash2,
@@ -25,6 +24,7 @@ import {
   NativeSelect,
   Notice,
   PageHeader,
+  PageRefreshButton,
   Panel,
   ResourceError,
   type DataTableColumn,
@@ -601,9 +601,7 @@ export function ReservationProductsPage() {
         description="プレー区分、曜日別受付枠、キャディ供給量を管理します。既定通貨・タイムゾーンは設定画面で変更します。"
         actions={(
           <>
-            <Button type="button" onClick={requestReload} title="⌘R">
-              <RefreshCw /> 再読み込み
-            </Button>
+            <PageRefreshButton onClick={requestReload} />
             <Button type="button" variant="primary" onClick={beginCreateProduct}>
               <Plus /> 予約サービスを追加
             </Button>

@@ -62,6 +62,12 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode }
 import { useAuth } from '../auth/AuthProvider'
 import { PageReloadProvider, usePageReload } from '../lib/pageReload'
 import { navigate } from '../lib/router'
+import { platformKind } from '../lib/platform'
+import {
+  isPageRefreshShortcut,
+  navigationShortcutDigit,
+  navigationShortcutLabel,
+} from '../lib/shortcuts'
 import { CourseBoardBrand } from './CourseBoardBrand'
 import { WorkspaceHelpPanel } from './WorkspaceHelp'
 
@@ -285,27 +291,31 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isPageRefreshShortcut(event)) {
+        const refreshButton = document.querySelector<HTMLButtonElement>('[data-page-refresh]')
+        if (refreshButton) {
+          event.preventDefault()
+          if (!refreshButton.disabled) refreshButton.click()
+        } else if (triggerPageReload()) {
+          // Prefer in-app data reload when no PageRefreshButton is mounted.
+          event.preventDefault()
+        }
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         setCommandOpen(value => !value)
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'r') {
-        // Prefer in-app data reload over the browser/Tauri hard refresh
-        // whenever the current screen registered a handler.
-        if (triggerPageReload()) {
-          event.preventDefault()
-        }
-      }
-      if ((event.metaKey || event.ctrlKey) && /^[1-7]$/.test(event.key)) {
-        const item = allNavigation.find(entry => entry.shortcut === event.key)
+      const shortcutDigit = navigationShortcutDigit(event, platformKind())
+      if (shortcutDigit) {
+        const item = allNavigation.find(entry => entry.shortcut === shortcutDigit)
         if (item) {
           event.preventDefault()
           navigate(item.route)
         }
       }
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
+    window.addEventListener('keydown', onKeyDown, true)
+    return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [triggerPageReload])
 
   const clearHoverLeaveTimer = () => {
@@ -552,7 +562,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
                   >
                     <Icon />
                     <span className="command-copy"><strong>{item.label}</strong><small>{item.description}</small></span>
-                    {item.shortcut ? <Kbd>⌘{item.shortcut}</Kbd> : null}
+                    {item.shortcut ? <Kbd>{navigationShortcutLabel(item.shortcut, platformKind())}</Kbd> : null}
                   </CommandItem>
                 )
               })}
@@ -576,6 +586,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
                 >
                   <Icon />
                   <span className="command-copy"><strong>{item.label}</strong><small>{item.description}</small></span>
+                  {item.shortcut ? <Kbd>{navigationShortcutLabel(item.shortcut, platformKind())}</Kbd> : null}
                 </CommandItem>
               )
             })}
@@ -620,7 +631,7 @@ function NavigationRow({
           <SidebarItem type="button" active={active} onClick={() => navigate(item.route)}>
             <Icon />
             <SidebarItemLabel>{item.label}</SidebarItemLabel>
-            {item.shortcut ? <Kbd className="nav-shortcut">⌘{item.shortcut}</Kbd> : null}
+            {item.shortcut ? <Kbd className="nav-shortcut">{navigationShortcutLabel(item.shortcut, platformKind())}</Kbd> : null}
           </SidebarItem>
         </TooltipTrigger>
         {collapsed ? <TooltipContent side="right">{item.label}</TooltipContent> : null}

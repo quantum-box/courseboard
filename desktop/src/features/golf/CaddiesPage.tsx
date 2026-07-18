@@ -57,6 +57,7 @@ import {
   NativeTextarea,
   Notice,
   PageHeader,
+  PageRefreshButton,
   Panel,
   ResourceError,
   SearchInput,
@@ -544,15 +545,12 @@ export function CaddiesPage({
         actions={(
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
             {view !== 'payroll' ? (
-              <Button
-                type="button"
+              <PageRefreshButton
                 variant="secondary"
                 className="min-h-10 flex-1 sm:flex-none"
+                label="更新"
                 onClick={refreshCurrentView}
-                title="⌘R"
-              >
-                <RefreshCw /> 更新
-              </Button>
+              />
             ) : null}
             {view === 'roster' ? (
               <Button
