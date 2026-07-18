@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
+import { peekMockCarts } from '../dev/mockCartSimulator'
 import type { CartColor, CartUpdate } from '../types'
 
 const CART_COLOR_HEX: Record<CartColor, number> = {
@@ -53,13 +54,12 @@ const COURSE_IMAGE = '/sora-map.png'
 
 export function CourseMap({ carts }: CourseMapProps) {
   const mountRef = useRef<HTMLDivElement>(null)
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
-  const cameraRef = useRef<THREE.OrthographicCamera | null>(null)
-  const sceneRef = useRef<THREE.Scene | null>(null)
-  const cartLayerRef = useRef<THREE.Group | null>(null)
   const cartMeshes = useRef<Map<string, THREE.Group>>(new Map())
+  const cartsRef = useRef(carts)
   // World extents — set after the texture loads so the plane matches the image aspect.
   const worldRef = useRef<{ w: number; h: number; cartScale: number }>({ w: 100, h: 100, cartScale: 1 })
+
+  cartsRef.current = carts
 
   useEffect(() => {
     const mount = mountRef.current
@@ -68,26 +68,58 @@ export function CourseMap({ carts }: CourseMapProps) {
 
     const scene = new THREE.Scene()
     scene.background = new THREE.Color('#0e1c12')
-    sceneRef.current = scene
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true })
-    renderer.setPixelRatio(window.devicePixelRatio)
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false })
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    renderer.setClearColor('#0e1c12', 1)
     mountEl.appendChild(renderer.domElement)
-    rendererRef.current = renderer
 
     // Cart layer above the map texture.
     const cartLayer = new THREE.Group()
     cartLayer.position.z = 0.5
     scene.add(cartLayer)
-    cartLayerRef.current = cartLayer
 
     // Camera (sized after texture loads).
     const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -10, 10)
-    cameraRef.current = camera
+
+    let rafId = 0
+    let running = true
+    let lastW = 0
+    let lastH = 0
+
+    function syncCartMeshes() {
+      const { w: ww, h: wh, cartScale } = worldRef.current
+      const cartsNow = peekMockCarts() ?? cartsRef.current
+      const seen = new Set<string>()
+      for (const cart of cartsNow) {
+        seen.add(cart.id)
+        let mesh = cartMeshes.current.get(cart.id)
+        if (!mesh) {
+          mesh = makeCart(CART_COLOR_HEX[cart.color] ?? 0xffffff, cartScale)
+          cartMeshes.current.set(cart.id, mesh)
+          cartLayer.add(mesh)
+        }
+        // Cart coords are authored in the image's own units: x in [0,100], y in [0, 100/aspect].
+        // The world plane is centered at origin, so subtract half-extents.
+        const wx = (cart.x / 100) * ww - ww / 2
+        const wy = wh / 2 - (cart.y / 100) * ww
+        mesh.position.set(wx, wy, 0)
+      }
+      for (const [id, mesh] of cartMeshes.current) {
+        if (!seen.has(id)) {
+          cartLayer.remove(mesh)
+          cartMeshes.current.delete(id)
+        }
+      }
+    }
 
     function fitCameraToWorld() {
       const w = mountEl.clientWidth
       const h = mountEl.clientHeight
+      if (w <= 0 || h <= 0) return
+      if (w === lastW && h === lastH) return
+      lastW = w
+      lastH = h
       renderer.setSize(w, h, false)
 
       const aspect = w / h
@@ -110,7 +142,14 @@ export function CourseMap({ carts }: CourseMapProps) {
       camera.position.set(0, 0, 5)
       camera.lookAt(0, 0, 0)
       camera.updateProjectionMatrix()
+    }
+
+    function frame() {
+      if (!running) return
+      syncCartMeshes()
+      fitCameraToWorld()
       renderer.render(scene, camera)
+      rafId = window.requestAnimationFrame(frame)
     }
 
     // Load the course map texture.
@@ -141,6 +180,8 @@ export function CourseMap({ carts }: CourseMapProps) {
           mesh.scale.set(cartScale, cartScale, 1)
         }
 
+        lastW = 0
+        lastH = 0
         fitCameraToWorld()
       },
       undefined,
@@ -150,53 +191,23 @@ export function CourseMap({ carts }: CourseMapProps) {
     )
 
     fitCameraToWorld()
+    rafId = window.requestAnimationFrame(frame)
 
-    const ro = new ResizeObserver(fitCameraToWorld)
+    const ro = new ResizeObserver(() => {
+      lastW = 0
+      lastH = 0
+    })
     ro.observe(mountEl)
 
     return () => {
+      running = false
+      window.cancelAnimationFrame(rafId)
       ro.disconnect()
       mountEl.removeChild(renderer.domElement)
       renderer.dispose()
       cartMeshes.current.clear()
     }
   }, [])
-
-  // Update cart markers when carts prop changes.
-  // Cart coordinates are 0..100 in both axes; we map them to world coordinates that
-  // are centered around (0,0) and sized to the texture's aspect ratio.
-  useEffect(() => {
-    const layer = cartLayerRef.current
-    const renderer = rendererRef.current
-    const camera = cameraRef.current
-    const scene = sceneRef.current
-    if (!layer || !renderer || !camera || !scene) return
-
-    const { w: ww, h: wh, cartScale } = worldRef.current
-
-    const seen = new Set<string>()
-    for (const cart of carts) {
-      seen.add(cart.id)
-      let mesh = cartMeshes.current.get(cart.id)
-      if (!mesh) {
-        mesh = makeCart(CART_COLOR_HEX[cart.color] ?? 0xffffff, cartScale)
-        cartMeshes.current.set(cart.id, mesh)
-        layer.add(mesh)
-      }
-      // Cart coords are authored in the image's own units: x in [0,100], y in [0, 100/aspect].
-      // The world plane is centered at origin, so subtract half-extents.
-      const wx = (cart.x / 100) * ww - ww / 2
-      const wy = wh / 2 - (cart.y / 100) * ww
-      mesh.position.set(wx, wy, 0)
-    }
-    for (const [id, mesh] of cartMeshes.current) {
-      if (!seen.has(id)) {
-        layer.remove(mesh)
-        cartMeshes.current.delete(id)
-      }
-    }
-    renderer.render(scene, camera)
-  }, [carts])
 
   return (
     <div className="map-container" ref={mountRef} style={{ width: '100%', height: '100%' }}>

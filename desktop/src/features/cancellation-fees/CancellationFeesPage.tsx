@@ -29,6 +29,7 @@ import {
   ResourceError,
 } from '../../components/Page'
 import { useResource } from '../../hooks/useResource'
+import { useRegisterPageReload } from '../../lib/pageReload'
 import { openExternal } from '../../lib/platform'
 import { currentRouteSearchParams, navigate } from '../../lib/router'
 
@@ -109,6 +110,7 @@ export function CancellationFeesPage() {
   }, [status])
   const resource = useResource(loader, [status])
   const summary = useMemo(() => summarize(resource.data ?? []), [resource.data])
+  useRegisterPageReload(resource.refresh)
 
   return (
     <div className="page-stack">
@@ -139,7 +141,7 @@ export function CancellationFeesPage() {
               <option value="all">すべて</option>
               {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </NativeSelect>
-            <Button type="button" size="sm" onClick={resource.refresh}><RefreshCw /> 更新</Button>
+            <Button type="button" size="sm" onClick={resource.refresh} title="⌘R"><RefreshCw /> 更新</Button>
           </div>
         )}
       >
@@ -389,6 +391,7 @@ export function NewCancellationFeePage() {
 export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) {
   const loader = useCallback(() => fieldApiJson<InvoiceData>(`/v1/invoices/${encodeURIComponent(invoiceId)}`), [invoiceId])
   const resource = useResource(loader, [invoiceId])
+  useRegisterPageReload(resource.refresh)
   const [fulfilling, setFulfilling] = useState(false)
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; message: string } | null>(null)
 

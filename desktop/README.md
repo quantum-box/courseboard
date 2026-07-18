@@ -15,7 +15,8 @@ Course Board のゴルフ運用とキャンセル料請求を、1つの React 19
 - 予約ポリシー: 受付制御、セルフ枠、客単価判断
 - 月次精算: KPI、CSV、未収キャンセル料、Square invoice 発行
 - キャンセル料: 一覧、集計、請求作成、Stripe link、メール / SMS、同意確認、再送、入金確認
-- コースマップ: desktop のローカルカート simulator（既存機能）
+- コースマップ: Tauri desktop のローカルカート simulator。Vite のみの開発時は
+  ブラウザ側モックへフォールバック（`VITE_COURSEBOARD_MOCK_DATA` と同じゲート）
 - 公開支払い: `/#/pay/{token}` の Stripe Payment Element（既存リンク互換）
 
 ## セットアップ
@@ -49,8 +50,9 @@ npm run dev
 
 `VITE_COURSEBOARD_AUTH_MODE=development` ではユーザー / テナントに加え、Field API の
 参照データもクライアント側 fixture でモックします（設定・コース・キャディ・予算・
-精算・キャンセル料の一覧など）。ローカル Rust API の実データを使う場合は
-`VITE_COURSEBOARD_MOCK_DATA=false` を付けてください。
+精算・キャンセル料の一覧など）。コースマップも Tauri の `ws://127.0.0.1:9001`
+が無いときはブラウザ側モックでカートを動かします。ローカル Rust API / Tauri
+simulator の実データを使う場合は `VITE_COURSEBOARD_MOCK_DATA=false` を付けてください。
 
 Vite は `/field-api/*` を `http://127.0.0.1:8080` へ proxy します。別の API を使う場合は
 `VITE_DEV_API_PROXY_TARGET` を指定します。この Rust proxy はローカル開発専用です。

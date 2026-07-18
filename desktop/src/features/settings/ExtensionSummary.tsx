@@ -21,7 +21,7 @@ export function ExtensionSummary({ extension, onRefresh }: { extension: Extensio
       title="Extension runtime"
       description="Field API registry とテナント設定の現在値"
       actions={(
-        <Button type="button" size="sm" onClick={onRefresh}>
+        <Button type="button" size="sm" onClick={onRefresh} title="⌘R">
           <RefreshCw /> 更新
         </Button>
       )}

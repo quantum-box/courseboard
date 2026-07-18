@@ -1,10 +1,10 @@
 import { ApiError, fieldApiJson, fieldTenant } from '../../api'
+import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   Field,
   FormGrid,
   LoadingState,
   NativeSelect,
-  NativeTextarea,
   Notice,
   PageHeader,
   Panel,
@@ -74,7 +74,6 @@ type PolicyDraft = {
   spendJudgmentEnabled: boolean
   minPerPlayer: string
   spendAction: 'reject' | 'review'
-  metadataJson: string
 }
 
 const WEEKDAYS = [
@@ -105,7 +104,6 @@ function emptyDraft(): PolicyDraft {
     spendJudgmentEnabled: false,
     minPerPlayer: '',
     spendAction: 'review',
-    metadataJson: '{}',
   }
 }
 
@@ -132,7 +130,6 @@ function policyToDraft(policy: GolfReservationPolicy | null): PolicyDraft {
       policy.policyHooksJson?.spendJudgment?.action === 'reject'
         ? 'reject'
         : 'review',
-    metadataJson: JSON.stringify(policy.metadataJson ?? {}, null, 2) ?? '{}',
   }
 }
 
@@ -183,18 +180,6 @@ function validateWindows(windows: SelfLockWindow[]) {
   return errors
 }
 
-function parseMetadata(value: string) {
-  try {
-    const parsed: unknown = value.trim() ? JSON.parse(value) : {}
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { value: null, error: '追加メタデータはJSONオブジェクトで入力してください。' }
-    }
-    return { value: parsed, error: null }
-  } catch {
-    return { value: null, error: '追加メタデータのJSON構文を確認してください。' }
-  }
-}
-
 function policyValidation(draft: PolicyDraft) {
   const errors: string[] = []
   const defaultHoles = Number(draft.defaultHoles)
@@ -240,10 +225,8 @@ function policyValidation(draft: PolicyDraft) {
     errors.push('客単価の基準額は0円以上の整数で入力してください。')
   }
   if (draft.selfLockEnabled) errors.push(...validateWindows(draft.windows))
-  const metadata = parseMetadata(draft.metadataJson)
-  if (metadata.error) errors.push(metadata.error)
 
-  return { errors, metadata: metadata.value }
+  return { errors }
 }
 
 export function PolicyPage() {
@@ -256,6 +239,7 @@ export function PolicyPage() {
   const [saved, setSaved] = useState(false)
   const [exists, setExists] = useState(false)
   const [preservedHooks, setPreservedHooks] = useState<GolfPolicyHooks>({})
+  const [preservedMetadata, setPreservedMetadata] = useState<unknown>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -266,6 +250,7 @@ export function PolicyPage() {
       )
       setDraft(policyToDraft(policy))
       setPreservedHooks(policy.policyHooksJson ?? {})
+      setPreservedMetadata(policy.metadataJson ?? {})
       setExists(true)
       setSaved(false)
       setSaveError(null)
@@ -273,6 +258,7 @@ export function PolicyPage() {
       if (error instanceof ApiError && error.status === 404) {
         setDraft(emptyDraft())
         setPreservedHooks({})
+        setPreservedMetadata({})
         setExists(false)
         setSaved(false)
         setSaveError(null)
@@ -287,6 +273,8 @@ export function PolicyPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useRegisterPageReload(load)
 
   function changeDraft(patch: Partial<PolicyDraft>) {
     setDraft(previous => ({ ...previous, ...patch }))
@@ -350,7 +338,8 @@ export function PolicyPage() {
                 action: draft.spendAction,
               },
             } satisfies GolfPolicyHooks,
-            metadataJson: validation.metadata,
+            // Advanced integration JSON is edited under Settings, not here.
+            metadataJson: preservedMetadata ?? {},
           }),
         },
       )
@@ -379,7 +368,7 @@ export function PolicyPage() {
             <Badge variant={exists ? 'success' : 'warning'}>
               {exists ? '設定済み' : '未作成'}
             </Badge>
-            <Button type="button" onClick={() => void load()}>
+            <Button type="button" onClick={() => void load()} title="⌘R">
               <RefreshCw /> 再読み込み
             </Button>
             <Button type="submit" variant="primary" disabled={saving}>
@@ -619,21 +608,6 @@ export function PolicyPage() {
             </Field>
           </FormGrid>
         </div>
-      </Panel>
-
-      <Panel
-        title="追加メタデータ"
-        description="他システム連携用の任意JSON。通常の運用では空のオブジェクトのままで構いません。"
-      >
-        <Field label="metadataJson" hint="JSONオブジェクトのみ">
-          <NativeTextarea
-            rows={7}
-            className="font-mono text-xs"
-            value={draft.metadataJson}
-            onChange={event => changeDraft({ metadataJson: event.target.value })}
-            spellCheck={false}
-          />
-        </Field>
       </Panel>
 
       {saveError ? (

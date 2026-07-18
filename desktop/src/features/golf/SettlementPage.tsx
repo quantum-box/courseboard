@@ -36,6 +36,7 @@ import {
   Panel,
   ResourceError,
 } from '../../components/Page'
+import { useRegisterPageReload } from '../../lib/pageReload'
 import { openExternal } from '../../lib/platform'
 
 type GolfMonthlySettlementPeriod = {
@@ -144,6 +145,8 @@ export function SettlementPage() {
     void load()
   }, [load])
 
+  useRegisterPageReload(load)
+
   async function exportCsv() {
     setExporting(true)
     setExportError(null)
@@ -213,7 +216,7 @@ export function SettlementPage() {
         description="予約、キャディ費用、キャンセル料、Square照合を月単位で締め前に確認します。"
         actions={(
           <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" onClick={() => void load()} disabled={loading}>
+            <Button type="button" onClick={() => void load()} disabled={loading} title="⌘R">
               <RefreshCw className={loading ? 'spin' : ''} /> 更新
             </Button>
             <Button type="button" onClick={() => void exportCsv()} disabled={exporting}>

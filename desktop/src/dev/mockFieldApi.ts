@@ -37,6 +37,30 @@ const TENANT_ID = () =>
 const NOW = '2026-07-18T09:00:00+09:00'
 const TODAY = '2026-07-18'
 
+let mockReservationPolicy: Record<string, unknown> = {
+  tenantId: 'scc',
+  reservationTypeId: 'golf_standard',
+  defaultHoles: 18,
+  maxPlayersPerTeeTime: 4,
+  cartPolicy: 'optional',
+  memberDepositBps: 2000,
+  guestDepositBps: 3000,
+  cutoffHours: 48,
+  policyHooksJson: {
+    selfLock: {
+      enabled: true,
+      windows: [{ weekdays: ['sat', 'sun'], start: '06:00', end: '10:00' }],
+    },
+    spendJudgment: {
+      enabled: true,
+      minPerPlayer: 12000,
+      action: 'review',
+    },
+  },
+  metadataJson: {},
+  updatedAt: NOW,
+}
+
 const mockCourses = [
   {
     id: 'course_east',
@@ -522,28 +546,7 @@ function resolveGet(path: string): Json | null | undefined {
   if (pathname === '/v1/erp/staff') return items(mockStaff.map(member => ({ ...member })))
 
   if (pathname === '/v1/erp/extensions/golf-course/reservation-policy') {
-    return {
-      tenantId: TENANT_ID() || 'scc',
-      reservationTypeId: 'golf_standard',
-      defaultHoles: 18,
-      maxPlayersPerTeeTime: 4,
-      cartPolicy: 'optional',
-      memberDepositBps: 2000,
-      guestDepositBps: 3000,
-      cutoffHours: 48,
-      policyHooksJson: {
-        selfLock: {
-          enabled: true,
-          windows: [{ weekdays: ['sat', 'sun'], start: '06:00', end: '10:00' }],
-        },
-        spendJudgment: {
-          enabled: true,
-          minPerPlayer: 12000,
-          action: 'review',
-        },
-      },
-      metadataJson: null,
-    }
+    return { ...mockReservationPolicy, tenantId: TENANT_ID() || 'scc' }
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/daily-budgets') {
@@ -639,11 +642,13 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
 
   if (pathname === '/v1/erp/extensions/golf-course/reservation-policy'
     && (method === 'PUT' || method === 'PATCH' || method === 'POST')) {
-    return hit({
+    mockReservationPolicy = {
+      ...mockReservationPolicy,
+      ...(body && typeof body === 'object' ? body as typeof mockReservationPolicy : {}),
       tenantId: TENANT_ID() || 'scc',
-      ...(body ?? {}),
       updatedAt: NOW,
-    })
+    }
+    return hit({ ...mockReservationPolicy })
   }
 
   // Mutations beyond browse fixtures stay explicit so developers know to opt out.

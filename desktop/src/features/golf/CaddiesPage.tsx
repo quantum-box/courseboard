@@ -31,6 +31,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -43,6 +44,7 @@ import {
   fieldApiText,
   fieldTenant,
 } from '../../api'
+import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   DataTable,
   EmptyState,
@@ -499,7 +501,7 @@ export function CaddiesPage({
     navigate(`golf/caddies/${encodeURIComponent(profileId)}`)
   }
 
-  function refreshCurrentView() {
+  const refreshCurrentView = useCallback(() => {
     if (view === 'roster') {
       profilesResource.refresh()
       staffResource.refresh()
@@ -518,9 +520,18 @@ export function CaddiesPage({
     if (view === 'attendance') {
       profilesResource.refresh()
       attendanceResource.refresh()
-      return
     }
-  }
+  }, [
+    view,
+    profilesResource.refresh,
+    staffResource.refresh,
+    coursesResource.refresh,
+    assignmentsResource.refresh,
+    attendanceResource.refresh,
+    recommendationsResource.refresh,
+  ])
+
+  useRegisterPageReload(view === 'payroll' ? null : refreshCurrentView)
 
   const copy = VIEW_COPY[view]
 
@@ -538,6 +549,7 @@ export function CaddiesPage({
                 variant="secondary"
                 className="min-h-10 flex-1 sm:flex-none"
                 onClick={refreshCurrentView}
+                title="⌘R"
               >
                 <RefreshCw /> 更新
               </Button>
@@ -2423,6 +2435,7 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
     ),
     [yearMonth],
   )
+  useRegisterPageReload(resource.refresh)
   const rows = resource.data?.items ?? []
   const totals = rows.reduce(
     (value, row) => ({
@@ -2510,7 +2523,7 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
         title="キャディ別集計"
         description="未紐付け、退勤未記録、割当に対する未出勤をCSV出力前に確認してください。"
         actions={(
-          <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={resource.refresh}>
+          <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={resource.refresh} title="⌘R">
             <RefreshCw /> 更新
           </Button>
         )}

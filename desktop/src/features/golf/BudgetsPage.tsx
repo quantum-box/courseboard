@@ -25,6 +25,7 @@ import {
   fieldTenant,
   yen,
 } from '../../api'
+import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   DataTable,
   EmptyState,
@@ -198,6 +199,8 @@ export function BudgetsPage() {
     void load()
   }, [load])
 
+  useRegisterPageReload(load)
+
   useEffect(() => {
     if (courses.length === 0) return
     setDraft(previous => {
@@ -344,7 +347,7 @@ export function BudgetsPage() {
         title="日次予算"
         description="対象月の売上・客単価・キャディ付き比率を、予約実績と並べて調整します。"
         actions={(
-          <Button type="button" onClick={() => void load()} disabled={loading}>
+          <Button type="button" onClick={() => void load()} disabled={loading} title="⌘R">
             <RefreshCw className={loading ? 'spin' : ''} /> 更新
           </Button>
         )}
@@ -480,7 +483,7 @@ export function BudgetsPage() {
               {courses.length === 0 ? (
                 <EmptyState
                   title="コースが登録されていません"
-                  description="先にコース管理でコースを作成してください。"
+                  description="設定 → コース管理 でコースを作成してください。"
                 />
               ) : (
                 <form className="grid gap-4" onSubmit={saveBudget}>

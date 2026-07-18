@@ -1,5 +1,6 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import {
+  ArrowLeft,
   Flag,
   Pencil,
   Plus,
@@ -10,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { fieldApiJson, fieldApiText, fieldTenant } from '../../api'
+import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   DataTable,
   EmptyState,
@@ -25,6 +27,7 @@ import {
   ResourceError,
   type DataTableColumn,
 } from '../../components/Page'
+import { navigate } from '../../lib/router'
 import {
   courseToDraft,
   emptyCourseDraft,
@@ -96,6 +99,8 @@ export function CoursesPage() {
   useEffect(() => {
     void loadCourses()
   }, [loadCourses])
+
+  useRegisterPageReload(loadCourses)
 
   function beginCreate() {
     setDraft(emptyCourseDraft())
@@ -274,12 +279,15 @@ export function CoursesPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow={`Golf operations · ${tenant}`}
+        eyebrow={`Settings · ${tenant}`}
         title="コース管理"
-        description="ホール数とスタート間隔を含むコースマスタを、Web・デスクトップ・モバイルで共通管理します。"
+        description="テナント導入時に整えるコースマスタです。日常運用ではあまり開きません。ホール数とスタート間隔は予約商品・キャディ対応コースの前提になります。"
         actions={(
           <>
-            <Button type="button" onClick={() => void loadCourses()} disabled={loading}>
+            <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
+              <ArrowLeft /> 設定へ戻る
+            </Button>
+            <Button type="button" onClick={() => void loadCourses()} disabled={loading} title="⌘R">
               <RefreshCw className={loading ? 'spin' : ''} /> 更新
             </Button>
             <Button type="button" variant="primary" onClick={beginCreate}>

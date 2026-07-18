@@ -88,18 +88,25 @@ function decodeRouteSegment(value: string) {
 
 function CourseMapPage() {
   const { carts, status } = useCartUpdates(WS_URL)
+  const live = status === 'online' || status === 'mock'
   return (
     <div className="course-map-page">
       <div className="map-toolbar">
         <div>
-          <span className={`connection-dot ${status === 'online' ? 'online' : ''}`} />
+          <span className={`connection-dot ${live ? 'online' : ''}`} />
           {status === 'online'
             ? `リアルタイム · ${carts.length}台`
-            : status === 'connecting'
-              ? 'シミュレーターへ接続中'
-              : 'シミュレーターはオフライン'}
+            : status === 'mock'
+              ? `開発モック · ${carts.length}台`
+              : status === 'connecting'
+                ? 'シミュレーターへ接続中'
+                : 'シミュレーターはオフライン'}
         </div>
-        <span>Desktop simulator · ws://127.0.0.1:9001</span>
+        <span>
+          {status === 'mock'
+            ? 'Browser mock · Tauri WS unavailable'
+            : 'Desktop simulator · ws://127.0.0.1:9001'}
+        </span>
       </div>
       <div className="course-map-stage"><CourseMap carts={carts} /></div>
     </div>
