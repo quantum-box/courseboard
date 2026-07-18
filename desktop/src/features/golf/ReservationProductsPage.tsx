@@ -22,7 +22,6 @@ import {
   Metric,
   MetricGrid,
   NativeSelect,
-  NativeTextarea,
   Notice,
   PageHeader,
   Panel,
@@ -69,6 +68,18 @@ type PageMessage = {
   body: string
 }
 
+type ExtensionConfigDraft = {
+  defaultCurrency: string
+  timezone: string
+}
+
+const defaultExtensionConfig: ExtensionConfigDraft = {
+  defaultCurrency: 'JPY',
+  timezone: 'Asia/Tokyo',
+}
+
+const currencyOptions = ['JPY', 'USD', 'EUR'] as const
+
 let clientSlotSequence = 0
 
 function slotsPath(serviceId: string) {
@@ -112,12 +123,42 @@ function todayInTokyo() {
   }).format(new Date())
 }
 
-function parseConfigJson(value: string) {
-  const parsed: unknown = JSON.parse(value)
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('設定JSONはオブジェクト形式で入力してください。')
+function configDraftFromJson(configJson?: Record<string, unknown> | null): ExtensionConfigDraft {
+  const defaultCurrency = typeof configJson?.defaultCurrency === 'string'
+    ? configJson.defaultCurrency.trim()
+    : ''
+  const timezone = typeof configJson?.timezone === 'string'
+    ? configJson.timezone.trim()
+    : ''
+  return {
+    defaultCurrency: defaultCurrency || defaultExtensionConfig.defaultCurrency,
+    timezone: timezone || defaultExtensionConfig.timezone,
   }
-  return parsed as Record<string, unknown>
+}
+
+function validateExtensionConfig(draft: ExtensionConfigDraft) {
+  if (!draft.defaultCurrency.trim()) return '通貨を選択してください。'
+  if (!/^[A-Z]{3}$/.test(draft.defaultCurrency.trim())) {
+    return '通貨はISO 4217の3文字コードで入力してください。'
+  }
+  if (!draft.timezone.trim()) return 'タイムゾーンを入力してください。'
+  return null
+}
+
+function buildConfigJson(
+  draft: ExtensionConfigDraft,
+  previous?: Record<string, unknown> | null,
+): Record<string, unknown> {
+  const previousConfig = previous && typeof previous === 'object' && !Array.isArray(previous)
+    ? { ...previous }
+    : {}
+  delete previousConfig.defaultCurrency
+  delete previousConfig.timezone
+  return {
+    ...previousConfig,
+    defaultCurrency: draft.defaultCurrency.trim(),
+    timezone: draft.timezone.trim(),
+  }
 }
 
 function validateProduct(draft: GolfReservationProductDraft) {
@@ -139,7 +180,7 @@ function validateProduct(draft: GolfReservationProductDraft) {
 export function ReservationProductsPage() {
   const tenant = fieldTenant()
   const [extension, setExtension] = useState<ExtensionStatus | null>(null)
-  const [configText, setConfigText] = useState('{}')
+  const [configDraft, setConfigDraft] = useState<ExtensionConfigDraft>(defaultExtensionConfig)
   const [products, setProducts] = useState<GolfReservationProduct[]>([])
   const [slotsByService, setSlotsByService] = useState<Record<string, EditableSlot[]>>({})
   const [slotLoadErrors, setSlotLoadErrors] = useState<Record<string, string>>({})
@@ -200,7 +241,7 @@ export function ReservationProductsPage() {
       })
 
       setExtension(nextExtension)
-      setConfigText(JSON.stringify(nextExtension?.configJson ?? {}, null, 2))
+      setConfigDraft(configDraftFromJson(nextExtension?.configJson))
       setProducts(nextProducts)
       setSlotsByService(nextSlots)
       setSlotLoadErrors(nextSlotErrors)
@@ -229,9 +270,16 @@ export function ReservationProductsPage() {
   )
   const selectedSlots = selectedServiceId ? slotsByService[selectedServiceId] ?? [] : []
   const totalSlots = Object.values(slotsByService).reduce((sum, slots) => sum + slots.length, 0)
-  const persistedConfigText = JSON.stringify(extension?.configJson ?? {}, null, 2)
-  const configDirty = configText !== persistedConfigText
+  const persistedConfig = useMemo(
+    () => configDraftFromJson(extension?.configJson),
+    [extension?.configJson],
+  )
+  const configDirty = configDraft.defaultCurrency !== persistedConfig.defaultCurrency
+    || configDraft.timezone !== persistedConfig.timezone
   const hasUnsavedChanges = configDirty || dirtyServiceIds.length > 0
+  const knownCurrency = currencyOptions.includes(
+    configDraft.defaultCurrency as (typeof currencyOptions)[number],
+  )
 
   function requestReload() {
     if (
@@ -276,26 +324,30 @@ export function ReservationProductsPage() {
   }
 
   async function saveExtensionConfig() {
+    const validationError = validateExtensionConfig(configDraft)
+    if (validationError) {
+      setConfigError(validationError)
+      return
+    }
+
     setConfigSaving(true)
     setConfigError(null)
     setMessage(null)
     try {
-      const configJson = parseConfigJson(configText)
+      const configJson = buildConfigJson(configDraft, extension?.configJson)
       await fieldApiText(extensionConfigPath, {
         method: 'PATCH',
         body: JSON.stringify({ scopeType: 'tenant', configJson }),
       })
       setExtension(current => current ? { ...current, configJson } : current)
-      setConfigText(JSON.stringify(configJson, null, 2))
+      setConfigDraft(configDraftFromJson(configJson))
       setMessage({
         tone: 'success',
         title: 'アプリ設定を保存しました',
-        body: '新しい設定JSONをゴルフ拡張へ反映しました。',
+        body: '通貨とタイムゾーンをゴルフ拡張へ反映しました。',
       })
     } catch (error) {
-      setConfigError(error instanceof SyntaxError
-        ? 'JSONの構文が正しくありません。括弧、カンマ、引用符を確認してください。'
-        : errorMessage(error))
+      setConfigError(errorMessage(error))
     } finally {
       setConfigSaving(false)
     }
@@ -681,7 +733,7 @@ export function ReservationProductsPage() {
 
       <Panel
         title="ゴルフ拡張設定"
-        description="APIへ送信するtenant scopeの設定JSONです。保存前に構文と差分を確認してください。"
+        description="tenant scopeの既定通貨とタイムゾーンです。保存するとゴルフ拡張のconfig APIへ反映されます。"
         actions={(
           <div className="flex items-center gap-2">
             <Badge variant={extension?.tenantStatus === 'enabled' ? 'success' : 'warning'}>
@@ -709,22 +761,58 @@ export function ReservationProductsPage() {
           </Notice>
         ) : null}
         <div className="grid gap-3">
-          <Field
-            label="設定JSON"
-            hint={`最終更新 ${formatUpdatedAt(extension?.updatedAt)} · JSON objectのみ保存できます。`}
-            required
-          >
-            <NativeTextarea
-              value={configText}
-              onChange={event => {
-                setConfigText(event.target.value)
-                setConfigError(null)
-              }}
-              rows={14}
-              spellCheck={false}
-              className="font-mono text-xs"
-            />
-          </Field>
+          <FormGrid columns={2}>
+            <Field
+              label="既定通貨"
+              hint={`最終更新 ${formatUpdatedAt(extension?.updatedAt)} · ISO 4217`}
+              required
+            >
+              {knownCurrency ? (
+                <NativeSelect
+                  value={configDraft.defaultCurrency}
+                  onChange={event => {
+                    setConfigDraft(current => ({
+                      ...current,
+                      defaultCurrency: event.target.value,
+                    }))
+                    setConfigError(null)
+                  }}
+                >
+                  {currencyOptions.map(code => (
+                    <option key={code} value={code}>{code}</option>
+                  ))}
+                </NativeSelect>
+              ) : (
+                <Input
+                  value={configDraft.defaultCurrency}
+                  onChange={event => {
+                    setConfigDraft(current => ({
+                      ...current,
+                      defaultCurrency: event.target.value.toUpperCase(),
+                    }))
+                    setConfigError(null)
+                  }}
+                  placeholder="JPY"
+                  maxLength={3}
+                  required
+                />
+              )}
+            </Field>
+            <Field label="タイムゾーン" hint="IANA timezone" required>
+              <Input
+                value={configDraft.timezone}
+                onChange={event => {
+                  setConfigDraft(current => ({
+                    ...current,
+                    timezone: event.target.value,
+                  }))
+                  setConfigError(null)
+                }}
+                placeholder="Asia/Tokyo"
+                required
+              />
+            </Field>
+          </FormGrid>
           {configError ? (
             <Notice tone="danger" title="設定を保存できません">{configError}</Notice>
           ) : null}
@@ -732,10 +820,10 @@ export function ReservationProductsPage() {
             <Button
               type="button"
               variant="primary"
-              disabled={configSaving}
+              disabled={configSaving || !configDirty}
               onClick={() => void saveExtensionConfig()}
             >
-              <Save /> {configSaving ? '保存中' : '設定JSONを保存'}
+              <Save /> {configSaving ? '保存中' : '設定を保存'}
             </Button>
           </div>
         </div>
@@ -976,7 +1064,7 @@ export function ReservationProductsPage() {
       ) : null}
 
       <Notice tone="info" title="設定モデルについて">
-        拡張設定JSONとゴルフ固有の予約サービス・受付枠は別APIです。この画面では両方を管理できますが、同期は行わず、それぞれ明示的に保存します。
+        拡張のtenant設定とゴルフ固有の予約サービス・受付枠は別APIです。この画面では両方を管理できますが、同期は行わず、それぞれ明示的に保存します。
       </Notice>
     </div>
   )

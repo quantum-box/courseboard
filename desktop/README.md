@@ -47,6 +47,11 @@ VITE_COURSEBOARD_API_BEARER=local-dev-token \
 npm run dev
 ```
 
+`VITE_COURSEBOARD_AUTH_MODE=development` ではユーザー / テナントに加え、Field API の
+参照データもクライアント側 fixture でモックします（設定・コース・キャディ・予算・
+精算・キャンセル料の一覧など）。ローカル Rust API の実データを使う場合は
+`VITE_COURSEBOARD_MOCK_DATA=false` を付けてください。
+
 Vite は `/field-api/*` を `http://127.0.0.1:8080` へ proxy します。別の API を使う場合は
 `VITE_DEV_API_PROXY_TARGET` を指定します。この Rust proxy はローカル開発専用です。
 

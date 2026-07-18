@@ -1,3 +1,9 @@
+import {
+  resolveMockFieldApiJson,
+  resolveMockFieldApiText,
+  type MockFieldResult,
+} from './dev/mockFieldApi'
+
 export type CancellationFeeCollection = {
   id: string
   tenant_id: string
@@ -240,13 +246,23 @@ export async function courseboardApiBlob(path: string, init?: RequestInit) {
   return response.blob()
 }
 
+function unwrapMockResult<T>(result: MockFieldResult<T>): T | undefined {
+  if (result.kind === 'disabled') return undefined
+  if (result.kind === 'error') throw new ApiError(result.message, result.status)
+  return result.data
+}
+
 export async function fieldApiJson<T>(path: string, init?: RequestInit) {
   const normalized = path.startsWith('/') ? path : `/${path}`
+  const mocked = unwrapMockResult(resolveMockFieldApiJson(normalized, init))
+  if (mocked !== undefined) return mocked as T
   return protectedJson<T>(`/field-api${normalized}`, init)
 }
 
 export async function fieldApiText(path: string, init?: RequestInit) {
   const normalized = path.startsWith('/') ? path : `/${path}`
+  const mocked = unwrapMockResult(resolveMockFieldApiText(normalized, init))
+  if (mocked !== undefined) return mocked
   const response = await protectedFetch(`/field-api${normalized}`, init)
   if (!response.ok) throw await parseError(response)
   return response.text()

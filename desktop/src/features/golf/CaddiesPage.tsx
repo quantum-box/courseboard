@@ -15,7 +15,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  CircleDollarSign,
   ClipboardCheck,
   Clock,
   Download,
@@ -67,7 +66,7 @@ import { navigate } from '../../lib/router'
 const GOLF_API = '/v1/erp/extensions/golf-course'
 
 type ListResponse<T> = { items: T[] }
-type View = 'dispatch' | 'profiles' | 'payroll'
+type View = 'roster' | 'dispatch' | 'attendance' | 'payroll'
 type SkillLevel = 'rookie' | 'regular' | 'veteran'
 type Rank = 'A' | 'B' | 'C' | 'D'
 type AvailabilityStatus =
@@ -394,9 +393,34 @@ function FlashNotice({ flash, onDismiss }: { flash: Flash; onDismiss: () => void
   )
 }
 
-export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } = {}) {
+const VIEW_COPY: Record<View, { title: string; description: string }> = {
+  roster: {
+    title: 'キャディ名簿',
+    description: 'プロフィール、スタッフ連携、希望休、評価を管理します。',
+  },
+  dispatch: {
+    title: 'キャディ配置',
+    description: '当日の割当を主作業にし、供給判断と自動配置は補助ツールとして使います。',
+  },
+  attendance: {
+    title: 'キャディ勤怠',
+    description: '出勤状態と割当を照合し、その場で打刻します。',
+  },
+  payroll: {
+    title: 'キャディ給与',
+    description: '勤怠と確定費用を月次で照合し、給与CSVへ渡します。',
+  },
+}
+
+export function CaddiesPage({
+  initialView = 'roster',
+  initialProfileId,
+}: {
+  initialView?: View
+  initialProfileId?: string
+} = {}) {
   const tenant = fieldTenant()
-  const [view, setView] = useState<View>(initialProfileId ? 'profiles' : 'dispatch')
+  const [view, setView] = useState<View>(initialView)
   const [operationDate, setOperationDate] = useState(todayJst)
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(initialProfileId ?? null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -437,15 +461,25 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
   )
 
   useEffect(() => {
-    if (profiles.length === 0) return
+    setView(initialView)
+  }, [initialView])
+
+  useEffect(() => {
+    if (initialProfileId) {
+      setSelectedProfileId(initialProfileId)
+      setView('roster')
+    }
+  }, [initialProfileId])
+
+  useEffect(() => {
+    if (view !== 'roster' || profiles.length === 0) return
     if (selectedProfileId && profiles.some(profile => profile.id === selectedProfileId)) return
     if (initialProfileId && profiles.some(profile => profile.id === initialProfileId)) {
       setSelectedProfileId(initialProfileId)
-      setView('profiles')
       return
     }
     setSelectedProfileId(profiles[0]?.id ?? null)
-  }, [initialProfileId, profiles, selectedProfileId])
+  }, [initialProfileId, profiles, selectedProfileId, view])
 
   function refreshPeople() {
     profilesResource.refresh()
@@ -461,86 +495,70 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
 
   function selectProfile(profileId: string) {
     setSelectedProfileId(profileId)
-    setView('profiles')
+    setView('roster')
     navigate(`golf/caddies/${encodeURIComponent(profileId)}`)
   }
 
-  function selectView(nextView: View) {
-    setView(nextView)
-    if (nextView === 'profiles' && selectedProfileId) {
-      navigate(`golf/caddies/${encodeURIComponent(selectedProfileId)}`)
+  function refreshCurrentView() {
+    if (view === 'roster') {
+      profilesResource.refresh()
+      staffResource.refresh()
+      coursesResource.refresh()
+      assignmentsResource.refresh()
+      attendanceResource.refresh()
       return
     }
-    navigate('golf/caddies')
+    if (view === 'dispatch') {
+      profilesResource.refresh()
+      assignmentsResource.refresh()
+      recommendationsResource.refresh()
+      attendanceResource.refresh()
+      return
+    }
+    if (view === 'attendance') {
+      profilesResource.refresh()
+      attendanceResource.refresh()
+      return
+    }
   }
+
+  const copy = VIEW_COPY[view]
 
   return (
     <div className="page-stack">
       <PageHeader
         eyebrow={`Golf operations · ${tenant}`}
-        title="キャディ運用"
-        description="朝の供給判断から配車、勤務、プロフィール、給与連携までをひとつの作業面で管理します。"
+        title={copy.title}
+        description={copy.description}
         actions={(
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-            <Button
-              type="button"
-              variant="secondary"
-              className="min-h-10 flex-1 sm:flex-none"
-              onClick={() => {
-                profilesResource.refresh()
-                assignmentsResource.refresh()
-                recommendationsResource.refresh()
-                staffResource.refresh()
-                coursesResource.refresh()
-                attendanceResource.refresh()
-              }}
-            >
-              <RefreshCw /> 更新
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              className="min-h-10 flex-1 sm:flex-none"
-              onClick={() => setCreateOpen(true)}
-            >
-              <Plus /> キャディを追加
-            </Button>
+            {view !== 'payroll' ? (
+              <Button
+                type="button"
+                variant="secondary"
+                className="min-h-10 flex-1 sm:flex-none"
+                onClick={refreshCurrentView}
+              >
+                <RefreshCw /> 更新
+              </Button>
+            ) : null}
+            {view === 'roster' ? (
+              <Button
+                type="button"
+                variant="primary"
+                className="min-h-10 flex-1 sm:flex-none"
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus /> キャディを追加
+              </Button>
+            ) : null}
           </div>
         )}
       />
 
-      <div
-        className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-surface p-1"
-        role="tablist"
-        aria-label="キャディ運用メニュー"
-      >
-        <ViewButton active={view === 'dispatch'} onClick={() => selectView('dispatch')}>
-          <ClipboardCheck /> <span>本日の配車</span>
-        </ViewButton>
-        <ViewButton active={view === 'profiles'} onClick={() => selectView('profiles')}>
-          <Users /> <span>プロフィール</span>
-        </ViewButton>
-        <ViewButton active={view === 'payroll'} onClick={() => selectView('payroll')}>
-          <CircleDollarSign /> <span>給与</span>
-        </ViewButton>
-      </div>
-
       <FlashNotice flash={flash} onDismiss={() => setFlash(null)} />
 
-      {view === 'dispatch' ? (
-        <DispatchView
-          date={operationDate}
-          onDateChange={setOperationDate}
-          profilesResource={profilesResource}
-          assignmentsResource={assignmentsResource}
-          recommendationsResource={recommendationsResource}
-          attendanceResource={attendanceResource}
-          onChanged={refreshDispatch}
-          setFlash={setFlash}
-        />
-      ) : null}
-
-      {view === 'profiles' ? (
+      {view === 'roster' ? (
         <ProfilesView
           profilesResource={profilesResource}
           assignmentsResource={assignmentsResource}
@@ -556,6 +574,33 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
         />
       ) : null}
 
+      {view === 'dispatch' ? (
+        <DispatchView
+          date={operationDate}
+          onDateChange={setOperationDate}
+          profilesResource={profilesResource}
+          assignmentsResource={assignmentsResource}
+          recommendationsResource={recommendationsResource}
+          attendanceResource={attendanceResource}
+          onChanged={refreshDispatch}
+          setFlash={setFlash}
+        />
+      ) : null}
+
+      {view === 'attendance' ? (
+        <AttendanceView
+          date={operationDate}
+          onDateChange={setOperationDate}
+          profiles={profiles}
+          attendanceResource={attendanceResource}
+          onChanged={() => {
+            attendanceResource.refresh()
+            assignmentsResource.refresh()
+          }}
+          setFlash={setFlash}
+        />
+      ) : null}
+
       {view === 'payroll' ? (
         <PayrollView setFlash={setFlash} />
       ) : null}
@@ -567,7 +612,7 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
         staffLoading={staffResource.loading}
         onCreated={id => {
           setCreateOpen(false)
-          setView('profiles')
+          setView('roster')
           if (id) selectProfile(id)
           refreshPeople()
           setFlash({
@@ -578,32 +623,6 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
         }}
       />
     </div>
-  )
-}
-
-function ViewButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={`flex min-h-11 items-center justify-center gap-2 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:text-sm ${
-        active
-          ? 'bg-background text-foreground shadow-sm'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-      }`}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -637,21 +656,25 @@ function DispatchView({
   ).length
 
   return (
-    <div className="space-y-4">
-      <Panel
-        className="overflow-hidden border-primary/20 bg-selected/30"
-        title="運用日"
-        description="供給・勤怠・自動配置・割当を同じ営業日で揃えます。"
-        actions={(
-          <Input
-            type="date"
-            aria-label="運用日"
-            value={date}
-            onChange={event => onDateChange(event.target.value)}
-            className="min-h-10 w-full bg-background sm:w-44"
-          />
-        )}
-      >
+    <div className="space-y-6">
+      <section className="app-section space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="section-title">割当ボード</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {date} の担当を完了・キャンセルまで更新します。勤怠打刻はサイドバーの「勤怠」へ。
+            </p>
+          </div>
+          <Field label="運用日" className="w-full sm:w-44">
+            <Input
+              type="date"
+              aria-label="運用日"
+              value={date}
+              onChange={event => onDateChange(event.target.value)}
+              className="min-h-10"
+            />
+          </Field>
+        </div>
         <MetricGrid>
           <Metric label="登録キャディ" value={`${profiles.length}人`} detail="全プロフィール" />
           <Metric
@@ -668,35 +691,6 @@ function DispatchView({
             tone={waiting > 0 ? 'warning' : 'success'}
           />
         </MetricGrid>
-      </Panel>
-
-      <DailySupplyPanel date={date} />
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <AutoAssignPanel
-          date={date}
-          onChanged={onChanged}
-          setFlash={setFlash}
-        />
-        <RecommendationsPanel resource={recommendationsResource} />
-      </div>
-
-      <AttendancePanel
-        resource={attendanceResource}
-        profiles={profiles}
-        onChanged={onChanged}
-        setFlash={setFlash}
-      />
-
-      <Panel
-        title="割当ボード"
-        description={`${date} の配車を完了・キャンセルまで更新できます。`}
-        actions={(
-          <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={assignmentsResource.refresh}>
-            <RefreshCw /> 更新
-          </Button>
-        )}
-      >
         {assignmentsResource.loading ? <LoadingState label="割当を読み込み中" /> : null}
         {assignmentsResource.error ? (
           <ResourceError error={assignmentsResource.error} onRetry={assignmentsResource.refresh} />
@@ -709,7 +703,72 @@ function DispatchView({
             setFlash={setFlash}
           />
         ) : null}
-      </Panel>
+      </section>
+
+      <section className="app-section space-y-4">
+        <div>
+          <h2 className="section-title">供給と自動配置</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            キャディ付枠の残量確認と、未割当予約への提案です。販売枠の変更はコース予約側で行います。
+          </p>
+        </div>
+        <DailySupplyPanel date={date} />
+        <div className="grid gap-4 xl:grid-cols-2">
+          <AutoAssignPanel
+            date={date}
+            onChanged={onChanged}
+            setFlash={setFlash}
+          />
+          <RecommendationsPanel resource={recommendationsResource} />
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function AttendanceView({
+  date,
+  onDateChange,
+  profiles,
+  attendanceResource,
+  onChanged,
+  setFlash,
+}: {
+  date: string
+  onDateChange: (date: string) => void
+  profiles: CaddieProfile[]
+  attendanceResource: ResourceValue<AttendanceResponse>
+  onChanged: () => void
+  setFlash: (flash: Flash) => void
+}) {
+  return (
+    <div className="space-y-4">
+      <section className="app-section space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="section-title">出勤ボード</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {date} の割当と出勤状態を照合します。スタッフ未連携のキャディは名簿で紐付けてください。
+            </p>
+          </div>
+          <Field label="運用日" className="w-full sm:w-44">
+            <Input
+              type="date"
+              aria-label="運用日"
+              value={date}
+              onChange={event => onDateChange(event.target.value)}
+              className="min-h-10"
+            />
+          </Field>
+        </div>
+      </section>
+      <AttendancePanel
+        resource={attendanceResource}
+        profiles={profiles}
+        onChanged={onChanged}
+        setFlash={setFlash}
+        showHeader={false}
+      />
     </div>
   )
 }
@@ -936,11 +995,13 @@ function AttendancePanel({
   profiles,
   onChanged,
   setFlash,
+  showHeader = true,
 }: {
   resource: ResourceValue<AttendanceResponse>
   profiles: CaddieProfile[]
   onChanged: () => void
   setFlash: (flash: Flash) => void
+  showHeader?: boolean
 }) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const profileMap = useMemo(
@@ -955,7 +1016,7 @@ function AttendancePanel({
       setFlash({
         tone: 'warning',
         title: 'スタッフが未紐付けです',
-        message: 'プロフィール画面でスタッフを紐付けてから勤怠を記録してください。',
+        message: '名簿でスタッフを紐付けてから勤怠を記録してください。',
       })
       return
     }
@@ -1036,16 +1097,8 @@ function AttendancePanel({
     },
   ]
 
-  return (
-    <Panel
-      title="出勤ボード"
-      description="本日の割当と出勤状態を照合し、その場で打刻します。"
-      actions={(
-        <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={resource.refresh}>
-          <RefreshCw /> 更新
-        </Button>
-      )}
-    >
+  const body = (
+    <>
       {resource.loading ? <LoadingState label="勤怠を読み込み中" /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {resource.data ? (
@@ -1056,6 +1109,22 @@ function AttendancePanel({
           empty={<EmptyState title="本日の勤怠対象はいません" description="割当またはプロフィールを確認してください。" />}
         />
       ) : null}
+    </>
+  )
+
+  if (!showHeader) return <div className="space-y-3">{body}</div>
+
+  return (
+    <Panel
+      title="出勤ボード"
+      description="本日の割当と出勤状態を照合し、その場で打刻します。"
+      actions={(
+        <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={resource.refresh}>
+          <RefreshCw /> 更新
+        </Button>
+      )}
+    >
+      {body}
     </Panel>
   )
 }

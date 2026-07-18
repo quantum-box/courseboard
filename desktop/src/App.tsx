@@ -17,6 +17,7 @@ import { GolfHomePage } from './features/golf/GolfHomePage'
 import { PolicyPage } from './features/golf/PolicyPage'
 import { ReservationProductsPage } from './features/golf/ReservationProductsPage'
 import { SettlementPage } from './features/golf/SettlementPage'
+import { SettingsPage } from './features/settings/SettingsPage'
 import { useCartUpdates } from './hooks/useCartUpdates'
 import { navigate, useRoute } from './lib/router'
 import { PaymentPage } from './PaymentPage'
@@ -56,10 +57,13 @@ function RouteContent({ route }: { route: string }) {
   if (route === 'golf/courses') return <CoursesPage />
   if (route === 'golf/products') return <ReservationProductsPage />
   if (route === 'golf/caddies' || route.startsWith('golf/caddies/')) {
-    const profileId = route === 'golf/caddies'
-      ? undefined
-      : decodeRouteSegment(route.slice('golf/caddies/'.length))
-    return <CaddiesPage key={route} initialProfileId={profileId} />
+    const segment = route === 'golf/caddies'
+      ? ''
+      : decodeRouteSegment(route.slice('golf/caddies/'.length).split('/')[0] ?? '')
+    if (segment === 'dispatch' || segment === 'attendance' || segment === 'payroll') {
+      return <CaddiesPage key={route} initialView={segment} />
+    }
+    return <CaddiesPage key={route} initialView="roster" initialProfileId={segment || undefined} />
   }
   if (route === 'golf/budgets') return <BudgetsPage />
   if (route === 'golf/policy') return <PolicyPage />
@@ -70,6 +74,7 @@ function RouteContent({ route }: { route: string }) {
     return <CancellationFeeDetailPage invoiceId={decodeRouteSegment(route.slice('cancellation-fees/'.length))} />
   }
   if (route === 'course-map') return <CourseMapPage />
+  if (route === 'settings') return <SettingsPage />
   return <NotFoundPage />
 }
 
@@ -108,7 +113,7 @@ function NotFoundPage() {
       <h1>画面が見つかりません</h1>
       <p>指定された Course Board の画面は移動または削除されています。</p>
       <Button type="button" variant="primary" onClick={() => navigate('golf')}>
-        <ArrowLeft /> ゴルフアプリへ戻る
+        <ArrowLeft /> ホームへ戻る
       </Button>
     </div>
   )
