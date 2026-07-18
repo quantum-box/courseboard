@@ -143,7 +143,7 @@ export function IntegrationMetadataPanel() {
         <div className="grid gap-3">
           {policyMissing ? (
             <Notice tone="warning" title="予約ポリシーが未作成です">
-              先に「予約ポリシー」画面で基本設定を保存してから、ここへ連携キーを追加してください。
+              先に設定の「テナントマスタ」→「予約ポリシー」で基本設定を保存してから、ここへ連携キーを追加してください。
             </Notice>
           ) : null}
 

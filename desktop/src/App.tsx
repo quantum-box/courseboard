@@ -17,6 +17,7 @@ import { GolfHomePage } from './features/golf/GolfHomePage'
 import { PolicyPage } from './features/golf/PolicyPage'
 import { ReservationProductsPage } from './features/golf/ReservationProductsPage'
 import { SettlementPage } from './features/golf/SettlementPage'
+import { TimelinePage } from './features/golf/timeline/TimelinePage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { useCartUpdates } from './hooks/useCartUpdates'
 import { navigate, useRoute } from './lib/router'
@@ -56,6 +57,7 @@ function RouteContent({ route }: { route: string }) {
   if (route === 'golf') return <GolfHomePage />
   if (route === 'golf/courses') return <CoursesPage />
   if (route === 'golf/products') return <ReservationProductsPage />
+  if (route === 'golf/timeline') return <TimelinePage />
   if (route === 'golf/caddies' || route.startsWith('golf/caddies/')) {
     const segment = route === 'golf/caddies'
       ? ''

@@ -12,6 +12,7 @@ import {
 } from '../../components/Page'
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import {
+  ArrowLeft,
   Clock3,
   Plus,
   RefreshCw,
@@ -28,6 +29,7 @@ import {
   useMemo,
   useState,
 } from 'react'
+import { navigate } from '../../lib/router'
 
 type SelfLockWindow = {
   weekdays: string[]
@@ -360,11 +362,14 @@ export function PolicyPage() {
   return (
     <form className="page-stack" onSubmit={savePolicy}>
       <PageHeader
-        eyebrow={`Golf operations · ${tenant}`}
+        eyebrow={`Settings · ${tenant}`}
         title="予約ポリシー"
-        description="予約枠の基本条件、デポジット、優先時間帯、客単価判定をひとつのルールとして管理します。"
+        description="テナント導入時に整える受付ルールです。日常運用ではあまり開きません。予約枠の基本条件、デポジット、セルフロック、客単価判定をひとつのポリシーとして管理します。"
         actions={(
           <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
+              <ArrowLeft /> 設定へ戻る
+            </Button>
             <Badge variant={exists ? 'success' : 'warning'}>
               {exists ? '設定済み' : '未作成'}
             </Badge>

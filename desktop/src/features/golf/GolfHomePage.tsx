@@ -12,8 +12,8 @@ export function GolfHomePage() {
         title="ホーム"
         description="公開予約、コース、キャディ、予算、請求を同じ運用面から管理します。"
         actions={(
-          <Button type="button" variant="primary" onClick={() => navigate('golf/products')}>
-            予約商品を開く
+          <Button type="button" variant="primary" onClick={() => navigate('golf/timeline')}>
+            運用タイムラインを開く
           </Button>
         )}
       />
@@ -40,8 +40,8 @@ export function GolfHomePage() {
       <Panel title="今日の運用順序" description="マスタ更新から締め処理まで、同じデータを順に引き継ぎます。">
         <div className="operations-track">
           {[
-            ['01', '商品と枠', '公開前にコース・商品・受付枠を確認'],
-            ['02', 'キャディ配置', '名簿の希望休を見て、配置で担当を確定'],
+            ['01', 'タイムライン', '当日の予約とキャディ割当を時間軸で確認'],
+            ['02', 'キャディ配置', '未割当・衝突を見て配置で担当を確定'],
             ['03', '売上と請求', '予算進捗、キャンセル料、未収を確認'],
             ['04', '月次精算', '予約・費用・Square明細を締める'],
           ].map(([step, label, detail]) => (

@@ -1,4 +1,4 @@
-import { ChevronRight, FolderTree } from 'lucide-react'
+import { ChevronRight, FolderTree, Settings2 } from 'lucide-react'
 import { useCallback } from 'react'
 import { fieldApiJson } from '../../api'
 import { LoadingState, Notice, PageHeader, Panel, ResourceError } from '../../components/Page'
@@ -38,6 +38,18 @@ export function SettingsPage() {
           <span className="settings-master-copy">
             <strong>コース管理</strong>
             <small>コース名・ホール数・スタート間隔・タイムゾーン。予約商品やキャディ対応コースの前提です。</small>
+          </span>
+          <ChevronRight className="settings-master-arrow" aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          className="settings-master-link"
+          onClick={() => navigate('golf/policy')}
+        >
+          <span className="settings-master-icon"><Settings2 /></span>
+          <span className="settings-master-copy">
+            <strong>予約ポリシー</strong>
+            <small>既定ホール・人数・カート・締切・デポジット・セルフロック・客単価判定。導入時に一度整えます。</small>
           </span>
           <ChevronRight className="settings-master-arrow" aria-hidden="true" />
         </button>

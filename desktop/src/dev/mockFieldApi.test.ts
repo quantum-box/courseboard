@@ -53,4 +53,23 @@ describe('mockFieldApi', () => {
     if (csv.kind !== 'hit') return
     expect(csv.data).toContain('gross_amount')
   })
+
+  it('returns tee sheet and expanded caddie assignment fixtures', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    const sheet = resolveMockFieldApiJson(
+      '/v1/erp/extensions/golf-course/tee-sheet?date=2026-07-18',
+    )
+    expect(sheet.kind).toBe('hit')
+    if (sheet.kind !== 'hit') return
+    const body = sheet.data as { items: unknown[] }
+    expect(body.items.length).toBeGreaterThanOrEqual(10)
+
+    const assignments = resolveMockFieldApiJson(
+      '/v1/erp/extensions/golf-course/caddie-assignments',
+    )
+    expect(assignments.kind).toBe('hit')
+    if (assignments.kind !== 'hit') return
+    const assignmentBody = assignments.data as { items: unknown[] }
+    expect(assignmentBody.items.length).toBeGreaterThanOrEqual(6)
+  })
 })

@@ -23,11 +23,19 @@ describe('getPageHelp', () => {
     expect(getPageHelp('golf/caddies/payroll').title).toBe('給与')
   })
 
+  it('returns timeline help for the day board route', () => {
+    const help = getPageHelp('golf/timeline')
+    expect(help.title).toBe('運用タイムライン')
+    expect(help.usage.length).toBeGreaterThanOrEqual(4)
+    expect(help.data.some(section => section.heading.includes('予約（ティー）'))).toBe(true)
+  })
+
   it('covers major operational routes with usage and data sections', () => {
     const routes = [
       'golf',
       'golf/courses',
       'golf/policy',
+      'golf/timeline',
       'course-map',
       'golf/budgets',
       'golf/settlement',

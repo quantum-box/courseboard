@@ -33,6 +33,7 @@ import {
   BarChart3,
   Building2,
   CalendarCheck,
+  CalendarRange,
   ChevronsLeft,
   ChevronsRight,
   CircleDollarSign,
@@ -90,8 +91,8 @@ export const navigationSections: NavigationSection[] = [
     id: 'course-booking',
     label: 'コース予約',
     items: [
-      { route: 'golf/products', label: 'ゴルフ予約商品', description: 'プレープランと受付枠', icon: CalendarCheck, shortcut: '2' },
-      { route: 'golf/policy', label: '予約ポリシー', description: '受付制御と客単価判定', icon: Settings2, shortcut: '3' },
+      { route: 'golf/timeline', label: '運用タイムライン', description: '予約とキャディ割当を時間軸で可視化', icon: CalendarRange, shortcut: '2' },
+      { route: 'golf/products', label: 'ゴルフ予約商品', description: 'プレープランと受付枠', icon: CalendarCheck, shortcut: '3' },
       { route: 'course-map', label: 'コースマップ', description: 'カート位置をリアルタイム表示', icon: Map },
     ],
   },
@@ -126,6 +127,12 @@ export const settingsNavigation: NavigationItem[] = [
     label: 'コース管理',
     description: 'コースとスタート間隔（初期設定）',
     icon: FolderTree,
+  },
+  {
+    route: 'golf/policy',
+    label: '予約ポリシー',
+    description: '受付制御と客単価判定（初期設定）',
+    icon: Settings2,
   },
 ]
 

@@ -798,8 +798,8 @@ export function ReservationProductsPage() {
           description="希望休が未登録のアクティブキャディは稼働可能として計算します。結果は選択中サービスの同一曜日へ反映します。"
           actions={<Badge variant="outline"><Users /> 稼働連携</Badge>}
         >
-          <FormGrid columns={3}>
-            <Field label="対象日" required>
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="対象日" required className="w-full sm:w-44">
               <Input
                 type="date"
                 value={capacityDate}
@@ -810,16 +810,14 @@ export function ReservationProductsPage() {
                 }}
               />
             </Field>
-            <div className="flex items-end">
-              <Button
-                type="button"
-                disabled={capacityLoading || !capacityDate}
-                onClick={() => void calculateCapacity()}
-              >
-                <Sparkles /> {capacityLoading ? '算出中' : '供給量を算出'}
-              </Button>
-            </div>
-          </FormGrid>
+            <Button
+              type="button"
+              disabled={capacityLoading || !capacityDate}
+              onClick={() => void calculateCapacity()}
+            >
+              <Sparkles /> {capacityLoading ? '算出中' : '供給量を算出'}
+            </Button>
+          </div>
 
           {capacityError ? (
             <Notice tone="danger" title="供給量を算出できません">{capacityError}</Notice>
