@@ -1,0 +1,19 @@
+apiVersion: apps.tachy.one/v1alpha
+kind: OAuth2Client
+metadata:
+  name: courseboard-native
+  tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
+spec:
+  clientType: public
+  redirectUris:
+    - courseboard://oauth/callback
+  allowedScopes:
+    - openid
+    - profile
+    - email
+  grantTypes:
+    - authorization_code
+    - refresh_token
+  identityProviders:
+    - COGNITO
+  useTachyonUserPool: true
