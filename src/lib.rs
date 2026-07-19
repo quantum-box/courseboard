@@ -612,7 +612,13 @@ async fn require_valid_token(
     }
     if let Err(error) = verifier.verify(token) {
         tracing::warn!(error = %error, "bearer token verification failed");
-        return Err(AppError::from(error));
+        let category = HeaderValue::from_static(error.category());
+        let mut response = AppError::from(error).into_response();
+        response.headers_mut().insert(
+            HeaderName::from_static("x-courseboard-auth-error"),
+            category,
+        );
+        return Ok(response);
     }
 
     Ok(next.run(req).await)
@@ -1280,6 +1286,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            response.headers().get("x-courseboard-auth-error"),
+            Some(&HeaderValue::from_static("malformed_token"))
+        );
     }
 
     #[tokio::test]
