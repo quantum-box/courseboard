@@ -119,7 +119,7 @@ impl AssignmentStatus {
             "in_progress" | "checked_in" | "on_course" => Self::InProgress,
             "completed" => Self::Completed,
             "cancelled" | "canceled" => Self::Cancelled,
-            other if other.is_empty() => Self::Other,
+            "" => Self::Other,
             _ => Self::Other,
         }
     }

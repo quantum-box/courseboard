@@ -224,7 +224,7 @@ pub fn format_datetime_with_offset(value: DateTime<chrono::Utc>, offset: FixedOf
 
 pub fn format_jst_wall_clock(date: NaiveDate, hour: u32, minute: u32, jst: FixedOffset) -> String {
     let naive =
-        date.and_time(NaiveTime::from_hms_opt(hour, minute, 0).unwrap_or_else(|| NaiveTime::MIN));
+        date.and_time(NaiveTime::from_hms_opt(hour, minute, 0).unwrap_or(NaiveTime::MIN));
     jst.from_local_datetime(&naive)
         .single()
         .unwrap_or_else(|| jst.from_utc_datetime(&naive))
