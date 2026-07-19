@@ -160,6 +160,9 @@ spec:
         - migrations/**
         - src/**
       build:
+        # Runner image intermittently lacks cargo on PATH (exit 127 since ~11:12 UTC).
+        # Same runner rn_01ktkg4t29hxx9846f714jng8v succeeded at 10:23 UTC without this.
+        installCommand: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable && . $HOME/.cargo/env && rustup target add aarch64-unknown-linux-gnu && cargo install cargo-lambda --locked
         package: courseboard
         binary: lambda-courseboard
         release: true
