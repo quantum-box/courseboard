@@ -91,6 +91,9 @@ describe('protected API 401 handling', () => {
     })
     expect(onUnauthorized).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(2)
+    const firstHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers)
+    expect(firstHeaders.get('authorization')).toBe('Bearer stale-token')
+    expect(firstHeaders.get('x-courseboard-authorization')).toBe('Bearer stale-token')
   })
 
   it('calls onUnauthorized when refresh cannot produce a token', async () => {

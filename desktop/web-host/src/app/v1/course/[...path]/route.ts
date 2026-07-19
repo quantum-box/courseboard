@@ -249,6 +249,7 @@ async function proxyCourseRequest(
 	const headers = new Headers({
 		accept: safePassthroughHeader(request, 'accept', 512) ?? 'application/json',
 		authorization: `Bearer ${tenantResult.session.accessToken}`,
+		'x-courseboard-authorization': `Bearer ${tenantResult.session.accessToken}`,
 		'x-operator-id': authorizedTenant.id,
 		'x-platform-id': PLATFORM_IDS[authorizedTenant.mode],
 	})
