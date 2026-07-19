@@ -2,29 +2,35 @@
 //! monthly settlement, and tenant extension config/status.
 
 use chrono::{DateTime, NaiveDate, Utc};
+use derive_getters::Getters;
 use serde_json::Value;
 
-use super::CourseError;
+use super::{BudgetId, CourseError, CourseId, ReservationId, TenantId};
 
 /// Tenant reservation policy for golf play.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct ReservationPolicy {
-    tenant_id: String,
+    #[getter(skip)]
+    tenant_id: TenantId,
+    #[getter(skip)]
     reservation_type_id: String,
     default_holes: i32,
     max_players_per_tee_time: i32,
+    #[getter(skip)]
     cart_policy: String,
     member_deposit_bps: i32,
     guest_deposit_bps: i32,
     cutoff_hours: i32,
+    #[getter(skip)]
     policy_hooks_json: Option<Value>,
+    #[getter(skip)]
     metadata_json: Option<Value>,
 }
 
 impl ReservationPolicy {
     #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
-        tenant_id: impl Into<String>,
+        tenant_id: impl Into<TenantId>,
         reservation_type_id: impl Into<String>,
         default_holes: i32,
         max_players_per_tee_time: i32,
@@ -49,7 +55,7 @@ impl ReservationPolicy {
         }
     }
 
-    pub fn tenant_id(&self) -> &str {
+    pub fn tenant_id(&self) -> &TenantId {
         &self.tenant_id
     }
 
@@ -57,28 +63,8 @@ impl ReservationPolicy {
         &self.reservation_type_id
     }
 
-    pub fn default_holes(&self) -> i32 {
-        self.default_holes
-    }
-
-    pub fn max_players_per_tee_time(&self) -> i32 {
-        self.max_players_per_tee_time
-    }
-
     pub fn cart_policy(&self) -> &str {
         &self.cart_policy
-    }
-
-    pub fn member_deposit_bps(&self) -> i32 {
-        self.member_deposit_bps
-    }
-
-    pub fn guest_deposit_bps(&self) -> i32 {
-        self.guest_deposit_bps
-    }
-
-    pub fn cutoff_hours(&self) -> i32 {
-        self.cutoff_hours
     }
 
     pub fn policy_hooks_json(&self) -> Option<&Value> {
@@ -145,21 +131,33 @@ impl UpdateReservationPolicy {
 }
 
 /// Daily revenue / mix budget for a course.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct DailyBudget {
-    id: String,
-    golf_course_id: String,
+    #[getter(skip)]
+    id: BudgetId,
+    #[getter(skip)]
+    golf_course_id: CourseId,
+    #[getter(copy)]
     date: NaiveDate,
     target_revenue: i64,
     target_average_spend: i64,
     target_caddy_attached_ratio: f64,
+    #[getter(copy)]
     updated_at: Option<DateTime<Utc>>,
 }
 
 impl DailyBudget {
+    pub fn id(&self) -> &BudgetId {
+        &self.id
+    }
+
+    pub fn golf_course_id(&self) -> &CourseId {
+        &self.golf_course_id
+    }
+
     pub fn reconstitute(
-        id: impl Into<String>,
-        golf_course_id: impl Into<String>,
+        id: impl Into<BudgetId>,
+        golf_course_id: impl Into<CourseId>,
         date: NaiveDate,
         target_revenue: i64,
         target_average_spend: i64,
@@ -181,39 +179,11 @@ impl DailyBudget {
             updated_at,
         })
     }
-
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    pub fn golf_course_id(&self) -> &str {
-        &self.golf_course_id
-    }
-
-    pub fn date(&self) -> NaiveDate {
-        self.date
-    }
-
-    pub fn target_revenue(&self) -> i64 {
-        self.target_revenue
-    }
-
-    pub fn target_average_spend(&self) -> i64 {
-        self.target_average_spend
-    }
-
-    pub fn target_caddy_attached_ratio(&self) -> f64 {
-        self.target_caddy_attached_ratio
-    }
-
-    pub fn updated_at(&self) -> Option<DateTime<Utc>> {
-        self.updated_at
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpsertDailyBudget {
-    pub golf_course_id: String,
+    pub golf_course_id: CourseId,
     pub date: NaiveDate,
     pub target_revenue: i64,
     pub target_average_spend: i64,
@@ -228,10 +198,6 @@ impl UpsertDailyBudget {
         target_average_spend: i64,
         target_caddy_attached_ratio: f64,
     ) -> Result<Self, CourseError> {
-        let golf_course_id = golf_course_id.into().trim().to_string();
-        if golf_course_id.is_empty() {
-            return Err(CourseError::BadRequest("golf course id is required"));
-        }
         if target_revenue < 0 || target_average_spend < 0 {
             return Err(CourseError::BadRequest("budget amounts must be >= 0"));
         }
@@ -241,7 +207,7 @@ impl UpsertDailyBudget {
             ));
         }
         Ok(Self {
-            golf_course_id,
+            golf_course_id: CourseId::try_new(golf_course_id)?,
             date,
             target_revenue,
             target_average_spend,
@@ -252,20 +218,24 @@ impl UpsertDailyBudget {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DailyBudgetQuery {
-    pub golf_course_id: Option<String>,
+    pub golf_course_id: Option<CourseId>,
     pub from: Option<NaiveDate>,
     pub to: Option<NaiveDate>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct BudgetAchievement {
+    #[getter(copy)]
     date: NaiveDate,
     target_revenue: i64,
     actual_revenue: i64,
+    #[getter(copy)]
     revenue_achievement_rate: Option<f64>,
     target_average_spend: i64,
+    #[getter(copy)]
     actual_average_spend: Option<i64>,
     target_caddy_attached_ratio: f64,
+    #[getter(copy)]
     actual_caddy_attached_ratio: Option<f64>,
     reservation_count: i64,
     player_count: i64,
@@ -299,46 +269,6 @@ impl BudgetAchievement {
         }
     }
 
-    pub fn date(&self) -> NaiveDate {
-        self.date
-    }
-
-    pub fn target_revenue(&self) -> i64 {
-        self.target_revenue
-    }
-
-    pub fn actual_revenue(&self) -> i64 {
-        self.actual_revenue
-    }
-
-    pub fn revenue_achievement_rate(&self) -> Option<f64> {
-        self.revenue_achievement_rate
-    }
-
-    pub fn target_average_spend(&self) -> i64 {
-        self.target_average_spend
-    }
-
-    pub fn actual_average_spend(&self) -> Option<i64> {
-        self.actual_average_spend
-    }
-
-    pub fn target_caddy_attached_ratio(&self) -> f64 {
-        self.target_caddy_attached_ratio
-    }
-
-    pub fn actual_caddy_attached_ratio(&self) -> Option<f64> {
-        self.actual_caddy_attached_ratio
-    }
-
-    pub fn reservation_count(&self) -> i64 {
-        self.reservation_count
-    }
-
-    pub fn player_count(&self) -> i64 {
-        self.player_count
-    }
-
     pub fn met_revenue_target(&self) -> bool {
         self.revenue_achievement_rate
             .map(|rate| rate >= 1.0)
@@ -346,14 +276,21 @@ impl BudgetAchievement {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct SettlementPeriod {
+    #[getter(skip)]
     year_month: String,
+    #[getter(copy)]
     start_date: NaiveDate,
+    #[getter(copy)]
     end_date: NaiveDate,
 }
 
 impl SettlementPeriod {
+    pub fn year_month(&self) -> &str {
+        &self.year_month
+    }
+
     pub fn new(year_month: impl Into<String>, start_date: NaiveDate, end_date: NaiveDate) -> Self {
         Self {
             year_month: year_month.into(),
@@ -361,35 +298,28 @@ impl SettlementPeriod {
             end_date,
         }
     }
-
-    pub fn year_month(&self) -> &str {
-        &self.year_month
-    }
-
-    pub fn start_date(&self) -> NaiveDate {
-        self.start_date
-    }
-
-    pub fn end_date(&self) -> NaiveDate {
-        self.end_date
-    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct UnpaidCancellationItem {
-    reservation_id: String,
+    #[getter(skip)]
+    reservation_id: ReservationId,
+    #[getter(skip)]
     reservation_number: String,
     cancellation_fee_amount: i64,
+    #[getter(skip)]
     checkout_url: Option<String>,
     link_issued: bool,
+    #[getter(skip)]
     payment_status: String,
+    #[getter(skip)]
     invoice_id: Option<String>,
 }
 
 impl UnpaidCancellationItem {
     #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
-        reservation_id: impl Into<String>,
+        reservation_id: impl Into<ReservationId>,
         reservation_number: impl Into<String>,
         cancellation_fee_amount: i64,
         checkout_url: Option<String>,
@@ -408,7 +338,7 @@ impl UnpaidCancellationItem {
         }
     }
 
-    pub fn reservation_id(&self) -> &str {
+    pub fn reservation_id(&self) -> &ReservationId {
         &self.reservation_id
     }
 
@@ -416,16 +346,8 @@ impl UnpaidCancellationItem {
         &self.reservation_number
     }
 
-    pub fn cancellation_fee_amount(&self) -> i64 {
-        self.cancellation_fee_amount
-    }
-
     pub fn checkout_url(&self) -> Option<&str> {
         self.checkout_url.as_deref()
-    }
-
-    pub fn link_issued(&self) -> bool {
-        self.link_issued
     }
 
     pub fn payment_status(&self) -> &str {
@@ -438,7 +360,7 @@ impl UnpaidCancellationItem {
 }
 
 /// Monthly settlement report for golf operations.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct MonthlySettlement {
     period: SettlementPeriod,
     reservations_gross_amount: i64,
@@ -448,15 +370,20 @@ pub struct MonthlySettlement {
     reservation_count: i64,
     caddie_fees_total: i64,
     caddie_assignment_count: i64,
+    #[getter(skip)]
     caddie_fees_currency: String,
     cancellations_fee_outstanding_amount: i64,
     cancellations_count: i64,
     square_payments_total: i64,
     square_refunds_total: i64,
     square_unreconciled_lines: i64,
+    #[getter(skip)]
     square_warning: Option<String>,
-    reservation_ids: Vec<String>,
-    unpaid_cancellation_reservation_ids: Vec<String>,
+    #[getter(skip)]
+    reservation_ids: Vec<ReservationId>,
+    #[getter(skip)]
+    unpaid_cancellation_reservation_ids: Vec<ReservationId>,
+    #[getter(skip)]
     unpaid_cancellation_items: Vec<UnpaidCancellationItem>,
 }
 
@@ -478,8 +405,8 @@ impl MonthlySettlement {
         square_refunds_total: i64,
         square_unreconciled_lines: i64,
         square_warning: Option<String>,
-        reservation_ids: Vec<String>,
-        unpaid_cancellation_reservation_ids: Vec<String>,
+        reservation_ids: Vec<ReservationId>,
+        unpaid_cancellation_reservation_ids: Vec<ReservationId>,
         unpaid_cancellation_items: Vec<UnpaidCancellationItem>,
     ) -> Self {
         Self {
@@ -504,71 +431,19 @@ impl MonthlySettlement {
         }
     }
 
-    pub fn period(&self) -> &SettlementPeriod {
-        &self.period
-    }
-
-    pub fn reservations_gross_amount(&self) -> i64 {
-        self.reservations_gross_amount
-    }
-
-    pub fn reservations_collected_amount(&self) -> i64 {
-        self.reservations_collected_amount
-    }
-
-    pub fn reservations_refunded_amount(&self) -> i64 {
-        self.reservations_refunded_amount
-    }
-
-    pub fn reservations_payment_pending_amount(&self) -> i64 {
-        self.reservations_payment_pending_amount
-    }
-
-    pub fn reservation_count(&self) -> i64 {
-        self.reservation_count
-    }
-
-    pub fn caddie_fees_total(&self) -> i64 {
-        self.caddie_fees_total
-    }
-
-    pub fn caddie_assignment_count(&self) -> i64 {
-        self.caddie_assignment_count
-    }
-
     pub fn caddie_fees_currency(&self) -> &str {
         &self.caddie_fees_currency
-    }
-
-    pub fn cancellations_fee_outstanding_amount(&self) -> i64 {
-        self.cancellations_fee_outstanding_amount
-    }
-
-    pub fn cancellations_count(&self) -> i64 {
-        self.cancellations_count
-    }
-
-    pub fn square_payments_total(&self) -> i64 {
-        self.square_payments_total
-    }
-
-    pub fn square_refunds_total(&self) -> i64 {
-        self.square_refunds_total
-    }
-
-    pub fn square_unreconciled_lines(&self) -> i64 {
-        self.square_unreconciled_lines
     }
 
     pub fn square_warning(&self) -> Option<&str> {
         self.square_warning.as_deref()
     }
 
-    pub fn reservation_ids(&self) -> &[String] {
+    pub fn reservation_ids(&self) -> &[ReservationId] {
         &self.reservation_ids
     }
 
-    pub fn unpaid_cancellation_reservation_ids(&self) -> &[String] {
+    pub fn unpaid_cancellation_reservation_ids(&self) -> &[ReservationId] {
         &self.unpaid_cancellation_reservation_ids
     }
 
@@ -582,14 +457,20 @@ impl MonthlySettlement {
 }
 
 /// Golf extension runtime status (single tenant-scoped row).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct ExtensionStatus {
+    #[getter(skip)]
     extension_key: String,
+    #[getter(skip)]
     tenant_status: Option<String>,
+    #[getter(copy)]
     config_version: Option<i64>,
+    #[getter(skip)]
     config_json: Option<Value>,
     validation_valid: bool,
+    #[getter(skip)]
     validation_errors: Vec<String>,
+    #[getter(copy)]
     updated_at: Option<DateTime<Utc>>,
 }
 
@@ -622,24 +503,12 @@ impl ExtensionStatus {
         self.tenant_status.as_deref()
     }
 
-    pub fn config_version(&self) -> Option<i64> {
-        self.config_version
-    }
-
     pub fn config_json(&self) -> Option<&Value> {
         self.config_json.as_ref()
     }
 
-    pub fn validation_valid(&self) -> bool {
-        self.validation_valid
-    }
-
     pub fn validation_errors(&self) -> &[String] {
         &self.validation_errors
-    }
-
-    pub fn updated_at(&self) -> Option<DateTime<Utc>> {
-        self.updated_at
     }
 
     pub fn is_enabled(&self) -> bool {

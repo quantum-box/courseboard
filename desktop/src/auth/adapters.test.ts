@@ -8,6 +8,8 @@ describe('DevelopmentAdapter', () => {
     vi.stubEnv('VITE_COURSEBOARD_TENANT_ID', 'courseboard_id')
     vi.stubEnv('VITE_COURSEBOARD_TENANT_NAME', 'CourseBoard Demo')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    // Exclusive development opt-in: no browser-pkce public client.
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_CLIENT_ID', '')
     vi.stubGlobal('window', {
       location: {
         search: '',
@@ -74,6 +76,35 @@ describe('DevelopmentAdapter', () => {
     })
     expect(result.kind === 'authenticated' && result.tenants[0]?.slug).toBeUndefined()
   })
+
+  it('fails visibly instead of falling back to Local operator when browser-pkce is also configured', async () => {
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_CLIENT_ID', 'local-public-client')
+    const { createAuthAdapter } = await import('./adapters')
+    const { AuthConfigurationError } = await import('./types')
+
+    expect(() => createAuthAdapter()).toThrow(AuthConfigurationError)
+    try {
+      createAuthAdapter()
+      expect.unreachable('expected AuthConfigurationError')
+    } catch (error) {
+      expect(error).toBeInstanceOf(AuthConfigurationError)
+      expect(error).toMatchObject({
+        title: '認証モードが衝突しています',
+        message: expect.stringContaining('browser-pkce'),
+      })
+    }
+  })
+
+  it('bootstraps as Local operator only for explicit development opt-in', async () => {
+    const { createAuthAdapter } = await import('./adapters')
+    const adapter = createAuthAdapter()
+    const result = await adapter.bootstrap()
+
+    expect(result).toMatchObject({
+      kind: 'authenticated',
+      user: { id: 'local-operator', name: 'Local operator', role: 'DEVELOPMENT' },
+    })
+  })
 })
 
 function memoryStorage() {
@@ -131,6 +162,15 @@ describe('BrowserPkceAdapter', () => {
 
     expect(typeof adapter.signInWithPassword).toBe('function')
     expect(await adapter.bootstrap()).toEqual({ kind: 'anonymous' })
+  })
+
+  it('uses browser-pkce when a public client is configured even if AUTH_MODE is unset', async () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', '')
+    const { createAuthAdapter } = await import('./adapters')
+    const adapter = createAuthAdapter()
+
+    expect(typeof adapter.signInWithPassword).toBe('function')
+    await expect(adapter.signIn()).rejects.toThrow(/ユーザー名とパスワード/)
   })
 
   it('rejects username/password prompts when signIn is used without credentials', async () => {

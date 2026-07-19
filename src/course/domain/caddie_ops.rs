@@ -3,8 +3,12 @@
 //! auto-assign, payroll, and ratings.
 
 use chrono::{DateTime, NaiveDate, Utc};
+use derive_getters::Getters;
 
-use super::{CaddieRank, CaddieSkillLevel, CourseError};
+use super::{
+    AssignmentId, AvailabilityId, CaddieId, CaddieRank, CaddieSkillLevel, CourseError, CourseId,
+    MembershipId, RatingId, ReservationId,
+};
 
 /// Input for creating or updating a caddie profile.
 #[derive(Debug, Clone, PartialEq)]
@@ -84,8 +88,8 @@ impl UpsertCaddie {
 /// Input for creating or updating a caddie assignment.
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpsertCaddieAssignment {
-    pub caddie_id: String,
-    pub reservation_id: Option<String>,
+    pub caddie_id: CaddieId,
+    pub reservation_id: Option<ReservationId>,
     pub round_reference: Option<String>,
     pub scheduled_at: DateTime<Utc>,
     pub status: Option<String>,
@@ -110,15 +114,9 @@ impl UpsertCaddieAssignment {
         recommendation_score: Option<i32>,
         notes: Option<String>,
     ) -> Result<Self, CourseError> {
-        let caddie_id = caddie_id.into().trim().to_string();
-        if caddie_id.is_empty() {
-            return Err(CourseError::BadRequest("caddie id is required"));
-        }
         Ok(Self {
-            caddie_id,
-            reservation_id: reservation_id
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
+            caddie_id: CaddieId::try_new(caddie_id)?,
+            reservation_id: ReservationId::from_optional(reservation_id),
             round_reference: round_reference
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
@@ -142,19 +140,34 @@ impl UpsertCaddieAssignment {
 }
 
 /// Course membership for a caddie (many-to-many).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct CaddieCourseMembership {
-    id: String,
-    caddie_id: String,
-    golf_course_id: String,
+    #[getter(skip)]
+    id: MembershipId,
+    #[getter(skip)]
+    caddie_id: CaddieId,
+    #[getter(skip)]
+    golf_course_id: CourseId,
     is_primary: bool,
 }
 
 impl CaddieCourseMembership {
+    pub fn id(&self) -> &MembershipId {
+        &self.id
+    }
+
+    pub fn caddie_id(&self) -> &CaddieId {
+        &self.caddie_id
+    }
+
+    pub fn golf_course_id(&self) -> &CourseId {
+        &self.golf_course_id
+    }
+
     pub fn reconstitute(
-        id: impl Into<String>,
-        caddie_id: impl Into<String>,
-        golf_course_id: impl Into<String>,
+        id: impl Into<MembershipId>,
+        caddie_id: impl Into<CaddieId>,
+        golf_course_id: impl Into<CourseId>,
         is_primary: bool,
     ) -> Self {
         Self {
@@ -164,29 +177,13 @@ impl CaddieCourseMembership {
             is_primary,
         }
     }
-
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    pub fn caddie_id(&self) -> &str {
-        &self.caddie_id
-    }
-
-    pub fn golf_course_id(&self) -> &str {
-        &self.golf_course_id
-    }
-
-    pub fn is_primary(&self) -> bool {
-        self.is_primary
-    }
 }
 
 /// Replacement set for a caddie's course memberships.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplaceCaddieMemberships {
-    pub course_ids: Vec<String>,
-    pub primary_course_id: Option<String>,
+    pub course_ids: Vec<CourseId>,
+    pub primary_course_id: Option<CourseId>,
 }
 
 impl ReplaceCaddieMemberships {
@@ -194,14 +191,11 @@ impl ReplaceCaddieMemberships {
         course_ids: Vec<String>,
         primary_course_id: Option<String>,
     ) -> Result<Self, CourseError> {
-        let course_ids: Vec<String> = course_ids
+        let course_ids: Vec<CourseId> = course_ids
             .into_iter()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
+            .filter_map(|value| CourseId::from_optional(Some(value)))
             .collect();
-        let primary_course_id = primary_course_id
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty());
+        let primary_course_id = CourseId::from_optional(primary_course_id);
         if let Some(primary) = primary_course_id.as_ref() {
             if !course_ids.iter().any(|id| id == primary) {
                 return Err(CourseError::BadRequest(
@@ -253,21 +247,27 @@ impl AvailabilityStatus {
 }
 
 /// Caddie day availability record.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct CaddieAvailability {
-    id: String,
-    caddie_id: String,
+    #[getter(skip)]
+    id: AvailabilityId,
+    #[getter(skip)]
+    caddie_id: CaddieId,
+    #[getter(copy)]
     date: NaiveDate,
+    #[getter(copy)]
     status: AvailabilityStatus,
     two_round_request: bool,
+    #[getter(skip)]
     health_note: Option<String>,
+    #[getter(copy)]
     updated_at: Option<DateTime<Utc>>,
 }
 
 impl CaddieAvailability {
     pub fn reconstitute(
-        id: impl Into<String>,
-        caddie_id: impl Into<String>,
+        id: impl Into<AvailabilityId>,
+        caddie_id: impl Into<CaddieId>,
         date: NaiveDate,
         status: AvailabilityStatus,
         two_round_request: bool,
@@ -287,38 +287,22 @@ impl CaddieAvailability {
         }
     }
 
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> &AvailabilityId {
         &self.id
     }
 
-    pub fn caddie_id(&self) -> &str {
+    pub fn caddie_id(&self) -> &CaddieId {
         &self.caddie_id
-    }
-
-    pub fn date(&self) -> NaiveDate {
-        self.date
-    }
-
-    pub fn status(&self) -> AvailabilityStatus {
-        self.status
-    }
-
-    pub fn two_round_request(&self) -> bool {
-        self.two_round_request
     }
 
     pub fn health_note(&self) -> Option<&str> {
         self.health_note.as_deref()
     }
-
-    pub fn updated_at(&self) -> Option<DateTime<Utc>> {
-        self.updated_at
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpsertCaddieAvailability {
-    pub caddie_id: String,
+    pub caddie_id: CaddieId,
     pub date: NaiveDate,
     pub status: AvailabilityStatus,
     pub two_round_request: bool,
@@ -333,12 +317,8 @@ impl UpsertCaddieAvailability {
         two_round_request: bool,
         health_note: Option<String>,
     ) -> Result<Self, CourseError> {
-        let caddie_id = caddie_id.into().trim().to_string();
-        if caddie_id.is_empty() {
-            return Err(CourseError::BadRequest("caddie id is required"));
-        }
         Ok(Self {
-            caddie_id,
+            caddie_id: CaddieId::try_new(caddie_id)?,
             date,
             status: AvailabilityStatus::parse(status.as_ref()),
             two_round_request,
@@ -351,31 +331,38 @@ impl UpsertCaddieAvailability {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AvailabilityQuery {
-    pub caddie_id: Option<String>,
+    pub caddie_id: Option<CaddieId>,
     pub from: Option<NaiveDate>,
     pub to: Option<NaiveDate>,
     pub date: Option<NaiveDate>,
 }
 
 /// Dispatch recommendation candidate.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct CaddieRecommendation {
-    caddie_id: String,
+    #[getter(skip)]
+    caddie_id: CaddieId,
+    #[getter(skip)]
     display_name: String,
+    #[getter(copy)]
     skill_level: CaddieSkillLevel,
+    #[getter(copy)]
     rating_average: Option<f64>,
     rating_count: i64,
     rounds_assigned: i64,
     recommendation_score: i32,
+    #[getter(skip)]
     recommended_role: String,
+    #[getter(skip)]
     pairing_display_name: Option<String>,
+    #[getter(skip)]
     rationale: Vec<String>,
 }
 
 impl CaddieRecommendation {
     #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
-        caddie_id: impl Into<String>,
+        caddie_id: impl Into<CaddieId>,
         display_name: impl Into<String>,
         skill_level: CaddieSkillLevel,
         rating_average: Option<f64>,
@@ -400,32 +387,12 @@ impl CaddieRecommendation {
         }
     }
 
-    pub fn caddie_id(&self) -> &str {
+    pub fn caddie_id(&self) -> &CaddieId {
         &self.caddie_id
     }
 
     pub fn display_name(&self) -> &str {
         &self.display_name
-    }
-
-    pub fn skill_level(&self) -> CaddieSkillLevel {
-        self.skill_level
-    }
-
-    pub fn rating_average(&self) -> Option<f64> {
-        self.rating_average
-    }
-
-    pub fn rating_count(&self) -> i64 {
-        self.rating_count
-    }
-
-    pub fn rounds_assigned(&self) -> i64 {
-        self.rounds_assigned
-    }
-
-    pub fn recommendation_score(&self) -> i32 {
-        self.recommendation_score
     }
 
     pub fn recommended_role(&self) -> &str {
@@ -443,7 +410,7 @@ impl CaddieRecommendation {
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RecommendationQuery {
-    pub reservation_id: Option<String>,
+    pub reservation_id: Option<ReservationId>,
     pub scheduled_at: Option<DateTime<Utc>>,
     pub player_count: Option<i32>,
     pub include_rookie_pairing: bool,
@@ -451,11 +418,15 @@ pub struct RecommendationQuery {
 }
 
 /// Attendance snapshot row for an operation date.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct AttendanceSnapshot {
-    caddie_id: String,
+    #[getter(skip)]
+    caddie_id: CaddieId,
+    #[getter(skip)]
     display_name: String,
+    #[getter(skip)]
     staff_id: Option<String>,
+    #[getter(skip)]
     attendance_status: String,
     today_assignments: i64,
     rounds_without_clock_in_today: i64,
@@ -463,7 +434,7 @@ pub struct AttendanceSnapshot {
 
 impl AttendanceSnapshot {
     pub fn reconstitute(
-        caddie_id: impl Into<String>,
+        caddie_id: impl Into<CaddieId>,
         display_name: impl Into<String>,
         staff_id: Option<String>,
         attendance_status: impl Into<String>,
@@ -480,7 +451,7 @@ impl AttendanceSnapshot {
         }
     }
 
-    pub fn caddie_id(&self) -> &str {
+    pub fn caddie_id(&self) -> &CaddieId {
         &self.caddie_id
     }
 
@@ -496,42 +467,33 @@ impl AttendanceSnapshot {
         &self.attendance_status
     }
 
-    pub fn today_assignments(&self) -> i64 {
-        self.today_assignments
-    }
-
-    pub fn rounds_without_clock_in_today(&self) -> i64 {
-        self.rounds_without_clock_in_today
-    }
-
     pub fn is_working(&self) -> bool {
         self.attendance_status.eq_ignore_ascii_case("working")
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct AttendanceSnapshotReport {
+    #[getter(copy)]
     date: NaiveDate,
+    #[getter(skip)]
     items: Vec<AttendanceSnapshot>,
 }
 
 impl AttendanceSnapshotReport {
-    pub fn new(date: NaiveDate, items: Vec<AttendanceSnapshot>) -> Self {
-        Self { date, items }
-    }
-
-    pub fn date(&self) -> NaiveDate {
-        self.date
-    }
-
     pub fn items(&self) -> &[AttendanceSnapshot] {
         &self.items
+    }
+
+    pub fn new(date: NaiveDate, items: Vec<AttendanceSnapshot>) -> Self {
+        Self { date, items }
     }
 }
 
 /// Caddie-attached tee capacity derived from supply.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct CaddieSupply {
+    #[getter(copy)]
     date: NaiveDate,
     available_caddies: i64,
     two_round_capable: i64,
@@ -572,65 +534,46 @@ impl CaddieSupply {
         }
     }
 
-    pub fn date(&self) -> NaiveDate {
-        self.date
-    }
-
-    pub fn available_caddies(&self) -> i64 {
-        self.available_caddies
-    }
-
-    pub fn two_round_capable(&self) -> i64 {
-        self.two_round_capable
-    }
-
-    pub fn caddie_supply(&self) -> i64 {
-        self.caddie_supply
-    }
-
-    pub fn morning_capacity(&self) -> i64 {
-        self.morning_capacity
-    }
-
-    pub fn afternoon_capacity(&self) -> i64 {
-        self.afternoon_capacity
-    }
-
-    pub fn safety_buffer(&self) -> i64 {
-        self.safety_buffer
-    }
-
-    pub fn caddie_attached_cap(&self) -> i64 {
-        self.caddie_attached_cap
-    }
-
-    pub fn current_caddie_attached(&self) -> i64 {
-        self.current_caddie_attached
-    }
-
-    pub fn remaining(&self) -> i64 {
-        self.remaining
-    }
-
     pub fn is_over_capacity(&self) -> bool {
         self.remaining < 0
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct AutoAssignPlanItem {
-    reservation_id: String,
+    #[getter(skip)]
+    reservation_id: ReservationId,
+    #[getter(copy)]
     scheduled_at: DateTime<Utc>,
-    caddie_id: String,
+    #[getter(skip)]
+    caddie_id: CaddieId,
+    #[getter(skip)]
     caddie_display_name: String,
+    #[getter(skip)]
     rationale: Vec<String>,
 }
 
 impl AutoAssignPlanItem {
+    pub fn reservation_id(&self) -> &ReservationId {
+        &self.reservation_id
+    }
+
+    pub fn caddie_id(&self) -> &CaddieId {
+        &self.caddie_id
+    }
+
+    pub fn caddie_display_name(&self) -> &str {
+        &self.caddie_display_name
+    }
+
+    pub fn rationale(&self) -> &[String] {
+        &self.rationale
+    }
+
     pub fn reconstitute(
-        reservation_id: impl Into<String>,
+        reservation_id: impl Into<ReservationId>,
         scheduled_at: DateTime<Utc>,
-        caddie_id: impl Into<String>,
+        caddie_id: impl Into<CaddieId>,
         caddie_display_name: impl Into<String>,
         rationale: Vec<String>,
     ) -> Self {
@@ -642,55 +585,39 @@ impl AutoAssignPlanItem {
             rationale,
         }
     }
-
-    pub fn reservation_id(&self) -> &str {
-        &self.reservation_id
-    }
-
-    pub fn scheduled_at(&self) -> DateTime<Utc> {
-        self.scheduled_at
-    }
-
-    pub fn caddie_id(&self) -> &str {
-        &self.caddie_id
-    }
-
-    pub fn caddie_display_name(&self) -> &str {
-        &self.caddie_display_name
-    }
-
-    pub fn rationale(&self) -> &[String] {
-        &self.rationale
-    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct AutoAssignSkippedItem {
-    reservation_id: String,
+    #[getter(skip)]
+    reservation_id: ReservationId,
+    #[getter(skip)]
     reason: String,
 }
 
 impl AutoAssignSkippedItem {
-    pub fn new(reservation_id: impl Into<String>, reason: impl Into<String>) -> Self {
-        Self {
-            reservation_id: reservation_id.into(),
-            reason: reason.into(),
-        }
-    }
-
-    pub fn reservation_id(&self) -> &str {
+    pub fn reservation_id(&self) -> &ReservationId {
         &self.reservation_id
     }
 
     pub fn reason(&self) -> &str {
         &self.reason
     }
+
+    pub fn new(reservation_id: impl Into<ReservationId>, reason: impl Into<String>) -> Self {
+        Self {
+            reservation_id: reservation_id.into(),
+            reason: reason.into(),
+        }
+    }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct AutoAssignResult {
     dry_run: bool,
+    #[getter(skip)]
     assigned: Vec<AutoAssignPlanItem>,
+    #[getter(skip)]
     skipped: Vec<AutoAssignSkippedItem>,
 }
 
@@ -707,10 +634,6 @@ impl AutoAssignResult {
         }
     }
 
-    pub fn dry_run(&self) -> bool {
-        self.dry_run
-    }
-
     pub fn assigned(&self) -> &[AutoAssignPlanItem] {
         &self.assigned
     }
@@ -724,14 +647,21 @@ impl AutoAssignResult {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct PayrollPeriod {
+    #[getter(skip)]
     year_month: String,
+    #[getter(copy)]
     start_date: NaiveDate,
+    #[getter(copy)]
     end_date: NaiveDate,
 }
 
 impl PayrollPeriod {
+    pub fn year_month(&self) -> &str {
+        &self.year_month
+    }
+
     pub fn new(year_month: impl Into<String>, start_date: NaiveDate, end_date: NaiveDate) -> Self {
         Self {
             year_month: year_month.into(),
@@ -739,29 +669,21 @@ impl PayrollPeriod {
             end_date,
         }
     }
-
-    pub fn year_month(&self) -> &str {
-        &self.year_month
-    }
-
-    pub fn start_date(&self) -> NaiveDate {
-        self.start_date
-    }
-
-    pub fn end_date(&self) -> NaiveDate {
-        self.end_date
-    }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct PayrollRow {
-    caddie_id: String,
+    #[getter(skip)]
+    caddie_id: CaddieId,
+    #[getter(skip)]
     display_name: String,
+    #[getter(skip)]
     staff_id: Option<String>,
     worked_minutes: i64,
     shifted_minutes: i64,
     assigned_rounds: i64,
     confirmed_fee_total: i64,
+    #[getter(skip)]
     currency: String,
     open_clock_in: bool,
     rounds_without_clock_in: i64,
@@ -770,7 +692,7 @@ pub struct PayrollRow {
 impl PayrollRow {
     #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
-        caddie_id: impl Into<String>,
+        caddie_id: impl Into<CaddieId>,
         display_name: impl Into<String>,
         staff_id: Option<String>,
         worked_minutes: i64,
@@ -802,7 +724,7 @@ impl PayrollRow {
         }
     }
 
-    pub fn caddie_id(&self) -> &str {
+    pub fn caddie_id(&self) -> &CaddieId {
         &self.caddie_id
     }
 
@@ -814,48 +736,21 @@ impl PayrollRow {
         self.staff_id.as_deref()
     }
 
-    pub fn worked_minutes(&self) -> i64 {
-        self.worked_minutes
-    }
-
-    pub fn shifted_minutes(&self) -> i64 {
-        self.shifted_minutes
-    }
-
-    pub fn assigned_rounds(&self) -> i64 {
-        self.assigned_rounds
-    }
-
-    pub fn confirmed_fee_total(&self) -> i64 {
-        self.confirmed_fee_total
-    }
-
     pub fn currency(&self) -> &str {
         &self.currency
     }
-
-    pub fn open_clock_in(&self) -> bool {
-        self.open_clock_in
-    }
-
-    pub fn rounds_without_clock_in(&self) -> i64 {
-        self.rounds_without_clock_in
-    }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct PayrollSummary {
     period: PayrollPeriod,
+    #[getter(skip)]
     items: Vec<PayrollRow>,
 }
 
 impl PayrollSummary {
     pub fn new(period: PayrollPeriod, items: Vec<PayrollRow>) -> Self {
         Self { period, items }
-    }
-
-    pub fn period(&self) -> &PayrollPeriod {
-        &self.period
     }
 
     pub fn items(&self) -> &[PayrollRow] {
@@ -867,23 +762,30 @@ impl PayrollSummary {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct CaddieRating {
-    id: String,
-    caddie_id: String,
-    assignment_id: Option<String>,
-    reservation_id: Option<String>,
+    #[getter(skip)]
+    id: RatingId,
+    #[getter(skip)]
+    caddie_id: CaddieId,
+    #[getter(skip)]
+    assignment_id: Option<AssignmentId>,
+    #[getter(skip)]
+    reservation_id: Option<ReservationId>,
+    #[getter(skip)]
     customer_id: String,
     score: i32,
+    #[getter(skip)]
     comment: Option<String>,
+    #[getter(copy)]
     created_at: Option<DateTime<Utc>>,
 }
 
 impl CaddieRating {
     #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
-        id: impl Into<String>,
-        caddie_id: impl Into<String>,
+        id: impl Into<RatingId>,
+        caddie_id: impl Into<CaddieId>,
         assignment_id: Option<String>,
         reservation_id: Option<String>,
         customer_id: impl Into<String>,
@@ -897,8 +799,8 @@ impl CaddieRating {
         Ok(Self {
             id: id.into(),
             caddie_id: caddie_id.into(),
-            assignment_id,
-            reservation_id,
+            assignment_id: AssignmentId::from_optional(assignment_id),
+            reservation_id: ReservationId::from_optional(reservation_id),
             customer_id: customer_id.into(),
             score,
             comment,
@@ -906,35 +808,27 @@ impl CaddieRating {
         })
     }
 
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> &RatingId {
         &self.id
     }
 
-    pub fn caddie_id(&self) -> &str {
+    pub fn caddie_id(&self) -> &CaddieId {
         &self.caddie_id
     }
 
-    pub fn assignment_id(&self) -> Option<&str> {
-        self.assignment_id.as_deref()
+    pub fn assignment_id(&self) -> Option<&AssignmentId> {
+        self.assignment_id.as_ref()
     }
 
-    pub fn reservation_id(&self) -> Option<&str> {
-        self.reservation_id.as_deref()
+    pub fn reservation_id(&self) -> Option<&ReservationId> {
+        self.reservation_id.as_ref()
     }
 
     pub fn customer_id(&self) -> &str {
         &self.customer_id
     }
 
-    pub fn score(&self) -> i32 {
-        self.score
-    }
-
     pub fn comment(&self) -> Option<&str> {
         self.comment.as_deref()
-    }
-
-    pub fn created_at(&self) -> Option<DateTime<Utc>> {
-        self.created_at
     }
 }

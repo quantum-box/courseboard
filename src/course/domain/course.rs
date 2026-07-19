@@ -1,8 +1,9 @@
 //! Golf course aggregate (tenant course master).
 
 use chrono::{DateTime, Utc};
+use derive_getters::Getters;
 
-use super::CourseError;
+use super::{CourseError, CourseId};
 
 /// Number of holes offered by a course or product.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -108,18 +109,28 @@ impl UpsertCourse {
 }
 
 /// Golf course master entity owned by course-api.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct Course {
-    id: String,
+    #[getter(skip)]
+    id: CourseId,
+    #[getter(skip)]
     name: String,
+    #[getter(skip)]
     short_name: Option<String>,
+    #[getter(copy)]
     hole_count: HoleCount,
+    #[getter(skip)]
     timezone: String,
+    #[getter(copy)]
     start_interval_minutes: StartIntervalMinutes,
     is_active: bool,
+    #[getter(skip)]
     business_hours_open: Option<String>,
+    #[getter(skip)]
     business_hours_close: Option<String>,
+    #[getter(copy)]
     created_at: Option<DateTime<Utc>>,
+    #[getter(copy)]
     updated_at: Option<DateTime<Utc>>,
 }
 
@@ -127,7 +138,7 @@ impl Course {
     /// Reconstitute a course loaded from a gateway / store.
     #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
-        id: impl Into<String>,
+        id: impl Into<CourseId>,
         name: impl Into<String>,
         short_name: Option<String>,
         hole_count: i32,
@@ -161,7 +172,7 @@ impl Course {
         }
     }
 
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> &CourseId {
         &self.id
     }
 
@@ -173,20 +184,8 @@ impl Course {
         self.short_name.as_deref()
     }
 
-    pub fn hole_count(&self) -> HoleCount {
-        self.hole_count
-    }
-
     pub fn timezone(&self) -> &str {
         &self.timezone
-    }
-
-    pub fn start_interval_minutes(&self) -> StartIntervalMinutes {
-        self.start_interval_minutes
-    }
-
-    pub fn is_active(&self) -> bool {
-        self.is_active
     }
 
     pub fn business_hours_open(&self) -> Option<&str> {
@@ -195,14 +194,6 @@ impl Course {
 
     pub fn business_hours_close(&self) -> Option<&str> {
         self.business_hours_close.as_deref()
-    }
-
-    pub fn created_at(&self) -> Option<DateTime<Utc>> {
-        self.created_at
-    }
-
-    pub fn updated_at(&self) -> Option<DateTime<Utc>> {
-        self.updated_at
     }
 
     pub fn display_label(&self) -> &str {

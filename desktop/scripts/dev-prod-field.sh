@@ -42,15 +42,32 @@ case "${TACHYON_FIELD_API_URL}" in
     ;;
 esac
 
+warn_if_api_port_busy() {
+  local pids
+  pids="$(lsof -nP -iTCP:8080 -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+  echo "WARNING: TCP :8080 is already in use (PID(s): $pids)." >&2
+  echo "  mise 'no exit status' usually means bacon/mise was SIGTERM/SIGINT'd (agent pkill, Ctrl-C, or shell teardown) — not a Rust panic." >&2
+  echo "  Inspect: lsof -nP -iTCP:8080 -sTCP:LISTEN" >&2
+  ps -p $(echo "$pids" | tr '\n' ',') -o pid=,etime=,args= 2>/dev/null \
+    | sed -E 's/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/<jwt>/g' >&2 || true
+}
+
 start_api() {
   cd "$ROOT"
+  warn_if_api_port_busy
   if [[ "${COURSEBOARD_API_ONCE:-0}" == "1" ]]; then
     echo "Starting courseboard on :8080 once (no watch; Field: ${TACHYON_FIELD_API_URL})"
     exec bash "$ROOT/desktop/scripts/run-courseboard-with-env.sh"
   fi
   echo "Starting courseboard on :8080 with bacon hot-reload (job: api; Field: ${TACHYON_FIELD_API_URL})"
   echo "Rust save or .env.prod-field change → rebuild + restart (re-reads Field bearer)."
-  exec bacon api
+  if [[ "${COURSEBOARD_BACON_UI:-0}" == "1" ]]; then
+    exec bacon api
+  fi
+  exec bacon --headless api
 }
 
 start_vite() {

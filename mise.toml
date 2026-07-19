@@ -22,7 +22,7 @@ dir = "desktop"
 run = "npm run field:env"
 
 [tasks."courseboard:api"]
-description = "Start course-api on :8080 with bacon hot-reload (.env.browser-pkce; OIDC inbound, prod Field outbound)"
+description = "Start course-api on :8080 with bacon --headless (.env.browser-pkce; OIDC inbound, prod Field outbound). Run in your own terminal — agents pkill :8080."
 run = "desktop/scripts/dev-browser-pkce.sh api"
 
 [tasks."courseboard:api-refresh"]

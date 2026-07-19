@@ -16,12 +16,12 @@ use super::field_gateway::{
     FieldGolfCaddieProfileDto,
 };
 use crate::course::domain::{
-    AttendanceSnapshot, AttendanceSnapshotReport, AutoAssignPlanItem, AutoAssignResult,
-    AutoAssignSkippedItem, AvailabilityQuery, AvailabilityStatus, Caddie, CaddieAssignment,
-    CaddieAvailability, CaddieCourseMembership, CaddieRating, CaddieRecommendation,
-    CaddieSkillLevel, CaddieSupply, CourseError, GatewayCredentials, GolfOpsGateway, PayrollPeriod,
-    PayrollRow, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie,
-    UpsertCaddieAssignment, UpsertCaddieAvailability,
+    AssignmentId, AttendanceSnapshot, AttendanceSnapshotReport, AutoAssignPlanItem,
+    AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery, AvailabilityStatus, Caddie,
+    CaddieAssignment, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating,
+    CaddieRecommendation, CaddieSkillLevel, CaddieSupply, CourseError, GatewayCredentials,
+    GolfOpsGateway, PayrollPeriod, PayrollRow, PayrollSummary, RecommendationQuery,
+    ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 
 const GOLF: &str = "/v1/erp/extensions/golf-course";
@@ -110,7 +110,7 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
     async fn update_caddie(
         &self,
         credentials: GatewayCredentials<'_>,
-        caddie_id: &str,
+        caddie_id: &CaddieId,
         input: UpsertCaddie,
     ) -> Result<Caddie, CourseError> {
         let body = upsert_caddie_body(&input);
@@ -145,7 +145,7 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
     async fn update_caddie_assignment(
         &self,
         credentials: GatewayCredentials<'_>,
-        assignment_id: &str,
+        assignment_id: &AssignmentId,
         input: UpsertCaddieAssignment,
     ) -> Result<CaddieAssignment, CourseError> {
         let body = json!({
@@ -179,7 +179,7 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
     async fn list_caddie_memberships(
         &self,
         credentials: GatewayCredentials<'_>,
-        caddie_id: &str,
+        caddie_id: &CaddieId,
     ) -> Result<Vec<CaddieCourseMembership>, CourseError> {
         let path = format!(
             "{GOLF}/caddie-profiles/{}/courses",
@@ -193,7 +193,7 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
     async fn replace_caddie_memberships(
         &self,
         credentials: GatewayCredentials<'_>,
-        caddie_id: &str,
+        caddie_id: &CaddieId,
         input: ReplaceCaddieMemberships,
     ) -> Result<Vec<CaddieCourseMembership>, CourseError> {
         let body = json!({
@@ -271,7 +271,7 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
     async fn delete_caddie_availability(
         &self,
         credentials: GatewayCredentials<'_>,
-        caddie_id: &str,
+        caddie_id: &CaddieId,
         date: NaiveDate,
     ) -> Result<(), CourseError> {
         let path = format!(
@@ -472,7 +472,7 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
     async fn list_caddie_ratings(
         &self,
         credentials: GatewayCredentials<'_>,
-        caddie_id: Option<&str>,
+        caddie_id: Option<&CaddieId>,
     ) -> Result<Vec<CaddieRating>, CourseError> {
         let path = match caddie_id {
             Some(id) => format!(
@@ -506,7 +506,8 @@ fn upsert_caddie_body(input: &UpsertCaddie) -> Value {
     })
 }
 
-fn urlencoding_query(value: &str) -> String {
+fn urlencoding_query(value: impl AsRef<str>) -> String {
+    let value = value.as_ref();
     value
         .chars()
         .map(|ch| match ch {

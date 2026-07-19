@@ -1,8 +1,9 @@
 //! Caddie roster and assignment aggregates.
 
 use chrono::{DateTime, Utc};
+use derive_getters::Getters;
 
-use super::CourseError;
+use super::{AssignmentId, CaddieId, CourseError, ReservationId};
 
 /// Skill band used for dispatch recommendations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,21 +131,30 @@ impl AssignmentStatus {
 }
 
 /// Caddie profile (roster) owned by course-api.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct Caddie {
-    id: String,
+    #[getter(skip)]
+    id: CaddieId,
+    #[getter(skip)]
     display_name: String,
+    #[getter(skip)]
     staff_id: Option<String>,
+    #[getter(rename = "is_active")]
     active: bool,
+    #[getter(copy)]
     skill_level: CaddieSkillLevel,
+    #[getter(copy)]
     rank: CaddieRank,
+    #[getter(skip)]
     employment_status: String,
     base_fee_amount: i64,
+    #[getter(skip)]
     currency: String,
     max_rounds_per_day: i32,
     can_two_rounds: bool,
     monthly_contract_rounds: i32,
     desired_income: i32,
+    #[getter(copy)]
     rating_average: Option<f64>,
     rating_count: i64,
 }
@@ -152,7 +162,7 @@ pub struct Caddie {
 impl Caddie {
     #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
-        id: impl Into<String>,
+        id: impl Into<CaddieId>,
         display_name: impl Into<String>,
         staff_id: Option<String>,
         active: bool,
@@ -196,7 +206,7 @@ impl Caddie {
         }
     }
 
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> &CaddieId {
         &self.id
     }
 
@@ -208,52 +218,12 @@ impl Caddie {
         self.staff_id.as_deref()
     }
 
-    pub fn is_active(&self) -> bool {
-        self.active
-    }
-
-    pub fn skill_level(&self) -> CaddieSkillLevel {
-        self.skill_level
-    }
-
-    pub fn rank(&self) -> CaddieRank {
-        self.rank
-    }
-
     pub fn employment_status(&self) -> &str {
         &self.employment_status
     }
 
-    pub fn base_fee_amount(&self) -> i64 {
-        self.base_fee_amount
-    }
-
     pub fn currency(&self) -> &str {
         &self.currency
-    }
-
-    pub fn max_rounds_per_day(&self) -> i32 {
-        self.max_rounds_per_day
-    }
-
-    pub fn can_two_rounds(&self) -> bool {
-        self.can_two_rounds
-    }
-
-    pub fn monthly_contract_rounds(&self) -> i32 {
-        self.monthly_contract_rounds
-    }
-
-    pub fn desired_income(&self) -> i32 {
-        self.desired_income
-    }
-
-    pub fn rating_average(&self) -> Option<f64> {
-        self.rating_average
-    }
-
-    pub fn rating_count(&self) -> i64 {
-        self.rating_count
     }
 
     /// Whether this caddie can accept a new assignment in the roster sense.
@@ -267,28 +237,40 @@ impl Caddie {
 }
 
 /// Assignment of a caddie to a reservation / round.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Getters)]
 pub struct CaddieAssignment {
-    id: String,
-    caddie_id: String,
-    reservation_id: Option<String>,
+    #[getter(skip)]
+    id: AssignmentId,
+    #[getter(skip)]
+    caddie_id: CaddieId,
+    #[getter(skip)]
+    reservation_id: Option<ReservationId>,
+    #[getter(skip)]
     round_reference: Option<String>,
+    #[getter(copy)]
     scheduled_at: DateTime<Utc>,
+    #[getter(copy)]
     duration_minutes: Option<i32>,
+    #[getter(copy)]
     status: AssignmentStatus,
     /// Original status token from the source system (for stable API responses).
+    #[getter(skip)]
     status_label: String,
+    #[getter(copy)]
     role: AssignmentRole,
+    #[getter(skip)]
     role_label: String,
     fee_amount: i64,
+    #[getter(skip)]
     fee_currency: String,
+    #[getter(skip)]
     notes: Option<String>,
 }
 
 impl CaddieAssignment {
     #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
-        id: impl Into<String>,
+        id: impl Into<AssignmentId>,
         caddie_id: impl Into<String>,
         reservation_id: Option<String>,
         round_reference: Option<String>,
@@ -300,18 +282,13 @@ impl CaddieAssignment {
         fee_currency: impl Into<String>,
         notes: Option<String>,
     ) -> Result<Self, CourseError> {
-        let caddie_id = caddie_id.into();
-        if caddie_id.trim().is_empty() {
-            return Err(CourseError::BadRequest("caddie id is required"));
-        }
+        let caddie_id = CaddieId::try_new(caddie_id)?;
         let status_label = status_label.into();
         let role_label = role_label.into();
         Ok(Self {
             id: id.into(),
             caddie_id,
-            reservation_id: reservation_id
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
+            reservation_id: ReservationId::from_optional(reservation_id),
             round_reference: round_reference
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
@@ -334,48 +311,28 @@ impl CaddieAssignment {
         })
     }
 
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> &AssignmentId {
         &self.id
     }
 
-    pub fn caddie_id(&self) -> &str {
+    pub fn caddie_id(&self) -> &CaddieId {
         &self.caddie_id
     }
 
-    pub fn reservation_id(&self) -> Option<&str> {
-        self.reservation_id.as_deref()
+    pub fn reservation_id(&self) -> Option<&ReservationId> {
+        self.reservation_id.as_ref()
     }
 
     pub fn round_reference(&self) -> Option<&str> {
         self.round_reference.as_deref()
     }
 
-    pub fn scheduled_at(&self) -> DateTime<Utc> {
-        self.scheduled_at
-    }
-
-    pub fn duration_minutes(&self) -> Option<i32> {
-        self.duration_minutes
-    }
-
-    pub fn status(&self) -> AssignmentStatus {
-        self.status
-    }
-
     pub fn status_label(&self) -> &str {
         &self.status_label
     }
 
-    pub fn role(&self) -> AssignmentRole {
-        self.role
-    }
-
     pub fn role_label(&self) -> &str {
         &self.role_label
-    }
-
-    pub fn fee_amount(&self) -> i64 {
-        self.fee_amount
     }
 
     pub fn fee_currency(&self) -> &str {
@@ -387,8 +344,8 @@ impl CaddieAssignment {
     }
 
     /// Whether this assignment covers a specific reservation.
-    pub fn covers_reservation(&self, reservation_id: &str) -> bool {
-        self.reservation_id.as_deref() == Some(reservation_id)
+    pub fn covers_reservation(&self, reservation_id: &ReservationId) -> bool {
+        self.reservation_id.as_ref() == Some(reservation_id)
     }
 
     pub fn is_linked_to_reservation(&self) -> bool {

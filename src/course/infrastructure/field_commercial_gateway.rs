@@ -11,7 +11,7 @@ use super::field_gateway::{
 };
 use crate::course::domain::{
     BudgetAchievement, CourseError, DailyBudget, DailyBudgetQuery, ExtensionStatus,
-    GatewayCredentials, GolfCommercialGateway, MonthlySettlement, ReservationPolicy,
+    GatewayCredentials, GolfCommercialGateway, MonthlySettlement, ReservationId, ReservationPolicy,
     SettlementPeriod, UnpaidCancellationItem, UpdateExtensionConfig, UpdateReservationPolicy,
     UpsertDailyBudget,
 };
@@ -238,7 +238,8 @@ impl GolfCommercialGateway for FieldGolfCommercialGateway {
     }
 }
 
-fn urlencoding_query(value: &str) -> String {
+fn urlencoding_query(value: impl AsRef<str>) -> String {
+    let value = value.as_ref();
     value
         .chars()
         .map(|ch| match ch {
@@ -327,8 +328,18 @@ fn map_settlement(value: FieldSettlementDto) -> MonthlySettlement {
         value.square.refunds_total,
         value.square.unreconciled_lines,
         value.square.warning,
-        value.drilldown.reservation_ids,
-        value.drilldown.unpaid_cancellation_reservation_ids,
+        value
+            .drilldown
+            .reservation_ids
+            .into_iter()
+            .map(ReservationId::new)
+            .collect(),
+        value
+            .drilldown
+            .unpaid_cancellation_reservation_ids
+            .into_iter()
+            .map(ReservationId::new)
+            .collect(),
         unpaid,
     )
 }

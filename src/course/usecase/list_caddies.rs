@@ -1,10 +1,8 @@
-//! Caddie roster / assignment list use cases.
+//! ListCaddiesUseCase: one use case, one public entrypoint (`execute`).
 
 use std::sync::Arc;
 
-use crate::course::domain::{
-    Caddie, CaddieAssignment, CourseError, GatewayCredentials, GolfOpsGateway,
-};
+use crate::course::domain::{Caddie, CourseError, GatewayCredentials, GolfOpsGateway};
 
 pub struct ListCaddiesUseCase {
     ops: Arc<dyn GolfOpsGateway>,
@@ -23,23 +21,6 @@ impl ListCaddiesUseCase {
     }
 }
 
-pub struct ListCaddieAssignmentsUseCase {
-    ops: Arc<dyn GolfOpsGateway>,
-}
-
-impl ListCaddieAssignmentsUseCase {
-    pub fn new(ops: Arc<dyn GolfOpsGateway>) -> Self {
-        Self { ops }
-    }
-
-    pub async fn execute(
-        &self,
-        credentials: GatewayCredentials<'_>,
-    ) -> Result<Vec<CaddieAssignment>, CourseError> {
-        self.ops.list_caddie_assignments(credentials).await
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -48,11 +29,13 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery, CaddieAvailability,
-        CaddieCourseMembership, CaddieRank, CaddieRating, CaddieRecommendation, CaddieSkillLevel,
-        CaddieSupply, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie,
+        AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery,
+        CaddieAssignment, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRank,
+        CaddieRating, CaddieRecommendation, CaddieSkillLevel, CaddieSupply, PayrollSummary,
+        RecommendationQuery, ReplaceCaddieMemberships, ReservationId, UpsertCaddie,
         UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
+    use crate::course::usecase::ListCaddieAssignmentsUseCase;
 
     struct FakeOps {
         caddies: Mutex<Vec<Caddie>>,
@@ -79,7 +62,7 @@ mod tests {
         async fn update_caddie(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _caddie_id: &str,
+            _caddie_id: &CaddieId,
             _input: UpsertCaddie,
         ) -> Result<Caddie, CourseError> {
             Err(CourseError::BadRequest("not used in test"))
@@ -95,7 +78,7 @@ mod tests {
         async fn update_caddie_assignment(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _assignment_id: &str,
+            _assignment_id: &AssignmentId,
             _input: UpsertCaddieAssignment,
         ) -> Result<CaddieAssignment, CourseError> {
             Err(CourseError::BadRequest("not used in test"))
@@ -104,7 +87,7 @@ mod tests {
         async fn list_caddie_memberships(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _caddie_id: &str,
+            _caddie_id: &CaddieId,
         ) -> Result<Vec<CaddieCourseMembership>, CourseError> {
             Ok(vec![])
         }
@@ -112,7 +95,7 @@ mod tests {
         async fn replace_caddie_memberships(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _caddie_id: &str,
+            _caddie_id: &CaddieId,
             _input: ReplaceCaddieMemberships,
         ) -> Result<Vec<CaddieCourseMembership>, CourseError> {
             Ok(vec![])
@@ -137,7 +120,7 @@ mod tests {
         async fn delete_caddie_availability(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _caddie_id: &str,
+            _caddie_id: &CaddieId,
             _date: NaiveDate,
         ) -> Result<(), CourseError> {
             Ok(())
@@ -199,7 +182,7 @@ mod tests {
         async fn list_caddie_ratings(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _caddie_id: Option<&str>,
+            _caddie_id: Option<&CaddieId>,
         ) -> Result<Vec<CaddieRating>, CourseError> {
             Ok(vec![])
         }
@@ -241,7 +224,7 @@ mod tests {
             None,
         )
         .expect("assignment");
-        assert!(assignment.covers_reservation("res_1"));
+        assert!(assignment.covers_reservation(&ReservationId::new("res_1")));
         assert!(assignment.is_linked_to_reservation());
         assert!(assignment.role().is_primary());
         assert_eq!(assignment.status_label(), "assigned");

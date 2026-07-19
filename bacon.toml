@@ -12,6 +12,8 @@ env.CARGO_TERM_COLOR = "always"
 
 # Long-running course-api: rebuild + restart on Rust source / env changes.
 # Wrapper re-sources COURSEBOARD_LOCAL_ENV_FILE each run (OIDC / Field URL).
+# mise "no exit status" = bacon/mise got a signal (agent pkill / Ctrl-C / shell teardown).
+# Compile failures do not exit this job; bacon stays watching. Prefer --headless via mise.
 [jobs.api]
 command = ["bash", "desktop/scripts/run-courseboard-with-env.sh"]
 need_stdout = true

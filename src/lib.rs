@@ -36,6 +36,8 @@ use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     services::{ServeDir, ServeFile},
 };
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
@@ -176,6 +178,10 @@ pub fn build_router(state: AppState) -> Router {
             "/ui",
             ServeDir::new("ui").not_found_service(ServeFile::new("ui/index.html")),
         )
+        .merge(SwaggerUi::new("/swagger-ui").url(
+            "/openapi.json",
+            course::interfaces::openapi::CourseApiDoc::openapi(),
+        ))
         .route("/healthz", get(healthz))
         .route(
             "/admin",

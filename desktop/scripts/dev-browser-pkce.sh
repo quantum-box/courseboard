@@ -54,9 +54,26 @@ load_api_env() {
   require_field_api_url
 }
 
+# Agents often steal :8080 with a one-off binary; surface that before bacon dies confusingly.
+warn_if_api_port_busy() {
+  local pids
+  pids="$(lsof -nP -iTCP:8080 -sTCP:LISTEN -t 2>/dev/null || true)"
+  if [[ -z "$pids" ]]; then
+    return 0
+  fi
+  echo "WARNING: TCP :8080 is already in use (PID(s): $pids)." >&2
+  echo "  mise 'no exit status' usually means bacon/mise was SIGTERM/SIGINT'd (agent pkill, Ctrl-C, or shell teardown) — not a Rust panic." >&2
+  echo "  Inspect: lsof -nP -iTCP:8080 -sTCP:LISTEN" >&2
+  echo "  Prefer one interactive terminal for: mise run courseboard:api" >&2
+  echo "  Do not start a second courseboard from an agent shell while bacon is watching." >&2
+  ps -p $(echo "$pids" | tr '\n' ',') -o pid=,etime=,args= 2>/dev/null \
+    | sed -E 's/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/<jwt>/g' >&2 || true
+}
+
 start_api() {
   load_api_env
   cd "$ROOT"
+  warn_if_api_port_busy
   echo "Static COURSEBOARD_DEV_BEARER_TOKEN is cleared for this process."
   if [[ "${COURSEBOARD_API_ONCE:-0}" == "1" ]]; then
     echo "Starting courseboard on :8080 once (no watch; browser-pkce OIDC, Field: ${TACHYON_FIELD_API_URL})"
@@ -65,12 +82,21 @@ start_api() {
   echo "Starting courseboard on :8080 with bacon hot-reload (job: api; browser-pkce OIDC, Field: ${TACHYON_FIELD_API_URL})"
   echo "Rust save or .env.browser-pkce change → rebuild + restart."
   echo "Field uses the UI login bearer. Session expired? Sign out and sign in again at http://127.0.0.1:5173"
-  exec bacon api
+  # Headless keeps the watch loop alive without the bacon TUI (q-to-quit / redraw noise).
+  # Override with COURSEBOARD_BACON_UI=1 for the interactive bacon UI.
+  if [[ "${COURSEBOARD_BACON_UI:-0}" == "1" ]]; then
+    exec bacon api
+  fi
+  exec bacon --headless api
 }
 
 start_vite() {
   cd "$ROOT/desktop"
   unset VITE_AUTH_PROXY_TARGET || true
+  # Process env wins over .env.local in Vite. Clear CLI JWT / development overrides
+  # so an accidental export cannot force DevelopmentAdapter ("Local operator").
+  unset VITE_COURSEBOARD_AUTH_MODE || true
+  unset VITE_COURSEBOARD_API_BEARER || true
   # desktop/.env.local from pkce:env sets browser-pkce + proxy to :8080.
   echo "Starting Vite on http://127.0.0.1:5173/ (reads desktop/.env.local)"
   exec npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
@@ -92,6 +118,8 @@ case "$MODE" in
     (
       cd "$ROOT/desktop"
       unset VITE_AUTH_PROXY_TARGET || true
+      unset VITE_COURSEBOARD_AUTH_MODE || true
+      unset VITE_COURSEBOARD_API_BEARER || true
       npm run dev -- --host 127.0.0.1 --port 5173 --strictPort
     ) &
     vite_pid=$!

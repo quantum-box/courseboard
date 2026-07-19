@@ -894,8 +894,34 @@ function jwtExpiry(token: string) {
   }
 }
 
+function browserPkceClientConfigured() {
+  return Boolean(import.meta.env.VITE_COURSEBOARD_BROWSER_CLIENT_ID?.trim())
+}
+
+/**
+ * Pick the auth adapter from an explicit mode.
+ *
+ * Never silently fall back to DevelopmentAdapter ("Local operator") when a
+ * browser-pkce public client is also configured — that usually means a process
+ * env override stomped desktop/.env.local. Fail visibly instead.
+ */
 export function createAuthAdapter(): AuthAdapter {
-  if (import.meta.env.VITE_COURSEBOARD_AUTH_MODE === 'development') {
+  const authMode = import.meta.env.VITE_COURSEBOARD_AUTH_MODE
+  const browserClientConfigured = browserPkceClientConfigured()
+
+  if (authMode === 'browser-pkce') {
+    return new BrowserPkceAdapter()
+  }
+
+  if (authMode === 'development') {
+    if (browserClientConfigured) {
+      throw new AuthConfigurationError(
+        '認証モードが衝突しています',
+        'VITE_COURSEBOARD_AUTH_MODE=development と browser-pkce の client id が同時に設定されています。'
+          + ' ブラウザログインを使う場合は AUTH_MODE=browser-pkce にし、開発用 VITE_COURSEBOARD_API_BEARER を外してください。'
+          + ' CLI JWT ショートカットだけ使う場合は VITE_COURSEBOARD_BROWSER_* を削除してください（npm run field:env）。',
+      )
+    }
     if (!import.meta.env.VITE_COURSEBOARD_API_BEARER) {
       throw new AuthConfigurationError(
         '開発認証を開始できません',
@@ -904,8 +930,11 @@ export function createAuthAdapter(): AuthAdapter {
     }
     return new DevelopmentAdapter()
   }
-  if (import.meta.env.VITE_COURSEBOARD_AUTH_MODE === 'browser-pkce') {
+
+  // Do not treat a leftover browser client id + missing AUTH_MODE as Local operator.
+  if (browserClientConfigured) {
     return new BrowserPkceAdapter()
   }
+
   return platformKind() === 'web' ? new WebSessionAdapter() : new NativePkceAdapter()
 }

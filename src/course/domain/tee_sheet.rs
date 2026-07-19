@@ -1,9 +1,10 @@
 //! Tee sheet day board composed from reservations + golf catalog.
 
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, TimeZone};
+use derive_getters::Getters;
 
 use super::product::PlayType;
-use super::CourseError;
+use super::{CourseError, CourseId, ReservationId};
 
 const JST_OFFSET_SECS: i32 = 9 * 3600;
 pub const DEFAULT_TIMEZONE: &str = "Asia/Tokyo";
@@ -40,28 +41,37 @@ impl TeeSheetStatus {
 }
 
 /// One tee-time row on a day board.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct TeeSheetItem {
-    id: String,
+    #[getter(skip)]
+    id: ReservationId,
+    #[getter(skip)]
     reservation_number: String,
-    golf_course_id: String,
+    #[getter(skip)]
+    golf_course_id: CourseId,
+    #[getter(skip)]
     course_name: String,
+    #[getter(skip)]
     tee_time: String,
     duration_minutes: i32,
+    #[getter(copy)]
     play_type: PlayType,
     party_size: i32,
+    #[getter(skip)]
     party_name: String,
+    #[getter(copy)]
     status: TeeSheetStatus,
     holes: i32,
+    #[getter(skip)]
     notes: Option<String>,
 }
 
 impl TeeSheetItem {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        id: impl Into<String>,
+        id: impl Into<ReservationId>,
         reservation_number: impl Into<String>,
-        golf_course_id: impl Into<String>,
+        golf_course_id: impl Into<CourseId>,
         course_name: impl Into<String>,
         tee_time: impl Into<String>,
         duration_minutes: i32,
@@ -88,7 +98,7 @@ impl TeeSheetItem {
         }
     }
 
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> &ReservationId {
         &self.id
     }
 
@@ -96,7 +106,7 @@ impl TeeSheetItem {
         &self.reservation_number
     }
 
-    pub fn golf_course_id(&self) -> &str {
+    pub fn golf_course_id(&self) -> &CourseId {
         &self.golf_course_id
     }
 
@@ -108,28 +118,8 @@ impl TeeSheetItem {
         &self.tee_time
     }
 
-    pub fn duration_minutes(&self) -> i32 {
-        self.duration_minutes
-    }
-
-    pub fn play_type(&self) -> PlayType {
-        self.play_type
-    }
-
-    pub fn party_size(&self) -> i32 {
-        self.party_size
-    }
-
     pub fn party_name(&self) -> &str {
         &self.party_name
-    }
-
-    pub fn status(&self) -> TeeSheetStatus {
-        self.status
-    }
-
-    pub fn holes(&self) -> i32 {
-        self.holes
     }
 
     pub fn notes(&self) -> Option<&str> {
@@ -142,12 +132,17 @@ impl TeeSheetItem {
 }
 
 /// Day board for a tenant-local calendar date.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct TeeSheet {
+    #[getter(copy)]
     date: NaiveDate,
+    #[getter(skip)]
     timezone: String,
+    #[getter(skip)]
     day_start: String,
+    #[getter(skip)]
     day_end: String,
+    #[getter(skip)]
     items: Vec<TeeSheetItem>,
 }
 
@@ -183,10 +178,6 @@ impl TeeSheet {
             format_jst_wall_clock(date, DEFAULT_DAY_END_HOUR, 0, jst),
             Vec::new(),
         ))
-    }
-
-    pub fn date(&self) -> NaiveDate {
-        self.date
     }
 
     pub fn timezone(&self) -> &str {

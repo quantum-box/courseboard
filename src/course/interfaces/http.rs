@@ -11,11 +11,14 @@ use axum::{
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
+
+use super::openapi::ErrorBody;
 
 use crate::course::domain::{
-    Caddie, CaddieAssignment, Course, CourseError, GatewayCredentials, ProductSlot,
-    ReservationProduct, Resource, TeeSheet, TeeSheetItem, TeeSheetQuery, UpsertCourse,
-    UpsertReservationProduct,
+    Caddie, CaddieAssignment, Course, CourseError, CourseId, GatewayCredentials, ProductSlot,
+    ReservationProduct, ReservationServiceId, Resource, TeeSheet, TeeSheetItem, TeeSheetQuery,
+    UpsertCourse, UpsertReservationProduct,
 };
 use crate::course::infrastructure::{
     FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
@@ -107,22 +110,23 @@ impl From<CourseError> for AppError {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
-pub struct ItemsResponse<T> {
+pub struct ItemsResponse<T: ToSchema> {
     pub items: Vec<T>,
 }
 
 // ─── Tee sheet ────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(rename_all = "camelCase")]
 pub struct TeeSheetQueryParams {
     pub date: NaiveDate,
     pub golf_course_id: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TeeSheetItemDto {
     pub id: String,
@@ -140,7 +144,7 @@ pub struct TeeSheetItemDto {
     pub notes: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TeeSheetResponse {
     pub date: NaiveDate,
@@ -182,6 +186,19 @@ impl From<TeeSheet> for TeeSheetResponse {
 }
 
 /// GET /v1/course/tee-sheet
+#[utoipa::path(
+    get,
+    path = "/v1/course/tee-sheet",
+    tag = "course",
+    params(TeeSheetQueryParams),
+    responses(
+        (status = 200, description = "Tee sheet for the requested date", body = TeeSheetResponse),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn get_tee_sheet(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -200,7 +217,7 @@ pub async fn get_tee_sheet(
             credentials,
             TeeSheetQuery {
                 date: query.date,
-                golf_course_id: query.golf_course_id,
+                golf_course_id: CourseId::from_optional(query.golf_course_id),
             },
         )
         .await
@@ -210,7 +227,7 @@ pub async fn get_tee_sheet(
 
 // ─── Courses ──────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CourseDto {
     pub id: String,
@@ -229,14 +246,14 @@ pub struct CourseDto {
     pub updated_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BusinessHoursDto {
     pub open: String,
     pub close: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertCourseRequest {
     pub name: String,
@@ -290,6 +307,17 @@ fn parse_upsert_course(body: UpsertCourseRequest) -> Result<UpsertCourse, AppErr
 }
 
 /// GET /v1/course/courses
+#[utoipa::path(
+    get,
+    path = "/v1/course/courses",
+    tag = "course",
+    responses(
+        (status = 200, description = "List golf courses", body = inline(ItemsResponse<CourseDto>)),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn list_courses(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -306,6 +334,19 @@ pub async fn list_courses(
 }
 
 /// POST /v1/course/courses
+#[utoipa::path(
+    post,
+    path = "/v1/course/courses",
+    tag = "course",
+    request_body = UpsertCourseRequest,
+    responses(
+        (status = 201, description = "Course created", body = CourseDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn create_course(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -322,6 +363,20 @@ pub async fn create_course(
 }
 
 /// PATCH /v1/course/courses/:id
+#[utoipa::path(
+    patch,
+    path = "/v1/course/courses/{id}",
+    tag = "course",
+    params(("id" = String, Path, description = "Course ID")),
+    request_body = UpsertCourseRequest,
+    responses(
+        (status = 200, description = "Course updated", body = CourseDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn update_course(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -329,6 +384,7 @@ pub async fn update_course(
     Json(body): Json<UpsertCourseRequest>,
 ) -> Result<Json<CourseDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let course_id = CourseId::try_new(course_id).map_err(AppError::from)?;
     let input = parse_upsert_course(body)?;
     let use_case = UpdateCourseUseCase::new(catalog_gateway(&state));
     let course = use_case
@@ -339,12 +395,25 @@ pub async fn update_course(
 }
 
 /// DELETE /v1/course/courses/:id
+#[utoipa::path(
+    delete,
+    path = "/v1/course/courses/{id}",
+    tag = "course",
+    params(("id" = String, Path, description = "Course ID")),
+    responses(
+        (status = 204, description = "Course deleted"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn delete_course(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(course_id): Path<String>,
 ) -> Result<StatusCode, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let course_id = CourseId::try_new(course_id).map_err(AppError::from)?;
     let use_case = DeleteCourseUseCase::new(catalog_gateway(&state));
     use_case
         .execute(credentials, &course_id)
@@ -355,7 +424,7 @@ pub async fn delete_course(
 
 // ─── Resources ────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceDto {
     pub id: String,
@@ -373,8 +442,8 @@ impl From<&Resource> for ResourceDto {
         Self {
             id: value.id().to_string(),
             name: value.name().to_string(),
-            reservation_resource_id: value.reservation_resource_id().map(str::to_string),
-            golf_course_id: value.golf_course_id().map(str::to_string),
+            reservation_resource_id: value.reservation_resource_id().map(ToString::to_string),
+            golf_course_id: value.golf_course_id().map(ToString::to_string),
             resource_kind: value.kind().as_str().to_string(),
             active: value.is_active(),
         }
@@ -382,6 +451,17 @@ impl From<&Resource> for ResourceDto {
 }
 
 /// GET /v1/course/resources
+#[utoipa::path(
+    get,
+    path = "/v1/course/resources",
+    tag = "course",
+    responses(
+        (status = 200, description = "List resources", body = inline(ItemsResponse<ResourceDto>)),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn list_resources(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -399,7 +479,7 @@ pub async fn list_resources(
 
 // ─── Reservation products ─────────────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReservationProductDto {
     pub id: String,
@@ -415,7 +495,10 @@ impl From<&ReservationProduct> for ReservationProductDto {
     fn from(value: &ReservationProduct) -> Self {
         Self {
             id: value.id().to_string(),
-            tenant_id: value.tenant_id().unwrap_or("").to_string(),
+            tenant_id: value
+                .tenant_id()
+                .map(ToString::to_string)
+                .unwrap_or_default(),
             extension_key: "golf_course".to_string(),
             reservation_service_id: value.reservation_service_id().to_string(),
             play_type: value.play_type().as_str().to_string(),
@@ -425,7 +508,7 @@ impl From<&ReservationProduct> for ReservationProductDto {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertReservationProductRequest {
     pub play_type: String,
@@ -433,7 +516,7 @@ pub struct UpsertReservationProductRequest {
     pub expected_duration_minutes: Option<i32>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ProductSlotDto {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -448,7 +531,7 @@ pub struct ProductSlotDto {
 impl From<&ProductSlot> for ProductSlotDto {
     fn from(value: &ProductSlot) -> Self {
         Self {
-            id: value.id().map(str::to_string),
+            id: value.id().map(ToString::to_string),
             weekday: value.weekday(),
             start_time: value.start_time().to_string(),
             end_time: value.end_time().to_string(),
@@ -458,13 +541,24 @@ impl From<&ProductSlot> for ProductSlotDto {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplaceProductSlotsRequest {
     pub slots: Vec<ProductSlotDto>,
 }
 
 /// GET /v1/course/reservation-products
+#[utoipa::path(
+    get,
+    path = "/v1/course/reservation-products",
+    tag = "course",
+    responses(
+        (status = 200, description = "List reservation products", body = inline(ItemsResponse<ReservationProductDto>)),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn list_reservation_products(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -481,6 +575,20 @@ pub async fn list_reservation_products(
 }
 
 /// POST /v1/course/reservation-products/:service_id
+#[utoipa::path(
+    post,
+    path = "/v1/course/reservation-products/{service_id}",
+    tag = "course",
+    params(("service_id" = String, Path, description = "Reservation service ID")),
+    request_body = UpsertReservationProductRequest,
+    responses(
+        (status = 200, description = "Reservation product upserted", body = ReservationProductDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn upsert_reservation_product(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -504,12 +612,25 @@ pub async fn upsert_reservation_product(
 }
 
 /// GET /v1/course/reservation-products/:service_id/slots
+#[utoipa::path(
+    get,
+    path = "/v1/course/reservation-products/{service_id}/slots",
+    tag = "course",
+    params(("service_id" = String, Path, description = "Reservation service ID")),
+    responses(
+        (status = 200, description = "List product slots", body = inline(ItemsResponse<ProductSlotDto>)),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn list_product_slots(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(service_id): Path<String>,
 ) -> Result<Json<ItemsResponse<ProductSlotDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let service_id = ReservationServiceId::try_new(service_id).map_err(AppError::from)?;
     let use_case = ListProductSlotsUseCase::new(catalog_gateway(&state));
     let items = use_case
         .execute(credentials, &service_id)
@@ -521,6 +642,20 @@ pub async fn list_product_slots(
 }
 
 /// PUT /v1/course/reservation-products/:service_id/slots
+#[utoipa::path(
+    put,
+    path = "/v1/course/reservation-products/{service_id}/slots",
+    tag = "course",
+    params(("service_id" = String, Path, description = "Reservation service ID")),
+    request_body = ReplaceProductSlotsRequest,
+    responses(
+        (status = 200, description = "Product slots replaced", body = inline(ItemsResponse<ProductSlotDto>)),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn replace_product_slots(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -528,6 +663,7 @@ pub async fn replace_product_slots(
     Json(body): Json<ReplaceProductSlotsRequest>,
 ) -> Result<Json<ItemsResponse<ProductSlotDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let service_id = ReservationServiceId::try_new(service_id).map_err(AppError::from)?;
     let slots = body
         .slots
         .into_iter()
@@ -555,7 +691,7 @@ pub async fn replace_product_slots(
 
 // ─── Caddies / assignments ────────────────────────────────────────────────────
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CaddieDto {
     pub id: String,
@@ -599,7 +735,7 @@ impl From<&Caddie> for CaddieDto {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CaddieAssignmentDto {
     pub id: String,
@@ -625,7 +761,7 @@ impl From<&CaddieAssignment> for CaddieAssignmentDto {
         Self {
             id: value.id().to_string(),
             caddie_profile_id: value.caddie_id().to_string(),
-            reservation_id: value.reservation_id().map(str::to_string),
+            reservation_id: value.reservation_id().map(ToString::to_string),
             round_reference: value.round_reference().map(str::to_string),
             scheduled_at: value.scheduled_at(),
             duration_minutes: value.duration_minutes(),
@@ -639,6 +775,17 @@ impl From<&CaddieAssignment> for CaddieAssignmentDto {
 }
 
 /// GET /v1/course/caddie-profiles
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-profiles",
+    tag = "course-ops",
+    responses(
+        (status = 200, description = "List caddie profiles", body = inline(ItemsResponse<CaddieDto>)),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn list_caddies(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -655,6 +802,17 @@ pub async fn list_caddies(
 }
 
 /// GET /v1/course/caddie-assignments
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-assignments",
+    tag = "course-ops",
+    responses(
+        (status = 200, description = "List caddie assignments", body = inline(ItemsResponse<CaddieAssignmentDto>)),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn list_caddie_assignments(
     State(state): State<AppState>,
     headers: HeaderMap,

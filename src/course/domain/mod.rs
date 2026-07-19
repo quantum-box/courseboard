@@ -8,6 +8,7 @@ mod caddie_ops;
 mod commercial;
 mod course;
 mod error;
+mod ids;
 mod ports;
 mod product;
 mod reservation;
@@ -31,6 +32,10 @@ pub use commercial::{
 };
 pub use course::{Course, HoleCount, StartIntervalMinutes, UpsertCourse};
 pub use error::CourseError;
+pub use ids::{
+    AssignmentId, AvailabilityId, BudgetId, CaddieId, CourseId, MembershipId, ProductId,
+    ProductSlotId, RatingId, ReservationId, ReservationServiceId, ResourceId, TenantId,
+};
 pub use ports::{
     GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
     ReservationGateway, TeeSheetQuery,

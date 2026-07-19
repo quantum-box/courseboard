@@ -1,7 +1,8 @@
 //! Reservation product (play package sold on the tee sheet).
 
 use super::course::HoleCount;
-use super::CourseError;
+use super::{CourseError, ProductId, ProductSlotId, ReservationServiceId, TenantId};
+use derive_getters::Getters;
 
 /// Whether a product requires a caddie.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +67,7 @@ impl DurationMinutes {
 /// Command to upsert a reservation product for a service id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpsertReservationProduct {
-    pub reservation_service_id: String,
+    pub reservation_service_id: ReservationServiceId,
     pub play_type: PlayType,
     pub hole_count: HoleCount,
     pub expected_duration_minutes: DurationMinutes,
@@ -79,15 +80,8 @@ impl UpsertReservationProduct {
         hole_count: i32,
         expected_duration_minutes: i32,
     ) -> Result<Self, CourseError> {
-        let service_id = reservation_service_id.into();
-        let trimmed = service_id.trim();
-        if trimmed.is_empty() {
-            return Err(CourseError::BadRequest(
-                "reservation service id is required",
-            ));
-        }
         Ok(Self {
-            reservation_service_id: trimmed.to_string(),
+            reservation_service_id: ReservationServiceId::try_new(reservation_service_id)?,
             play_type: PlayType::parse(play_type.as_ref()),
             hole_count: HoleCount::try_new(hole_count).or_else(|_| {
                 // Products historically allow non-9/18 in some tenants; accept positive.
@@ -103,30 +97,34 @@ impl UpsertReservationProduct {
 }
 
 /// Sellable golf reservation product linked to an ERP reservation service.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct ReservationProduct {
-    id: String,
-    tenant_id: Option<String>,
-    reservation_service_id: String,
+    #[getter(skip)]
+    id: ProductId,
+    #[getter(skip)]
+    tenant_id: Option<TenantId>,
+    #[getter(skip)]
+    reservation_service_id: ReservationServiceId,
+    #[getter(copy)]
     play_type: PlayType,
+    #[getter(copy)]
     hole_count: HoleCount,
+    #[getter(copy)]
     expected_duration_minutes: DurationMinutes,
 }
 
 impl ReservationProduct {
     pub fn reconstitute(
-        id: impl Into<String>,
+        id: impl Into<ProductId>,
         tenant_id: Option<String>,
-        reservation_service_id: impl Into<String>,
+        reservation_service_id: impl Into<ReservationServiceId>,
         play_type: PlayType,
         hole_count: i32,
         expected_duration_minutes: i32,
     ) -> Self {
         Self {
             id: id.into(),
-            tenant_id: tenant_id
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
+            tenant_id: TenantId::from_optional(tenant_id),
             reservation_service_id: reservation_service_id.into(),
             play_type,
             hole_count: HoleCount::from_raw(hole_count),
@@ -134,28 +132,16 @@ impl ReservationProduct {
         }
     }
 
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> &ProductId {
         &self.id
     }
 
-    pub fn tenant_id(&self) -> Option<&str> {
-        self.tenant_id.as_deref()
+    pub fn tenant_id(&self) -> Option<&TenantId> {
+        self.tenant_id.as_ref()
     }
 
-    pub fn reservation_service_id(&self) -> &str {
+    pub fn reservation_service_id(&self) -> &ReservationServiceId {
         &self.reservation_service_id
-    }
-
-    pub fn play_type(&self) -> PlayType {
-        self.play_type
-    }
-
-    pub fn hole_count(&self) -> HoleCount {
-        self.hole_count
-    }
-
-    pub fn expected_duration_minutes(&self) -> DurationMinutes {
-        self.expected_duration_minutes
     }
 
     pub fn requires_caddie(&self) -> bool {
@@ -169,11 +155,14 @@ impl ReservationProduct {
 }
 
 /// Weekday-scoped acceptance slot for a reservation product.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct ProductSlot {
-    id: Option<String>,
+    #[getter(skip)]
+    id: Option<ProductSlotId>,
     weekday: u8,
+    #[getter(skip)]
     start_time: String,
+    #[getter(skip)]
     end_time: String,
     max_groups: i32,
     max_players: i32,
@@ -192,7 +181,7 @@ impl ProductSlot {
             return Err(CourseError::BadRequest("weekday must be 0..=6"));
         }
         Ok(Self {
-            id,
+            id: ProductSlotId::from_optional(id),
             weekday,
             start_time: start_time.into(),
             end_time: end_time.into(),
@@ -201,12 +190,8 @@ impl ProductSlot {
         })
     }
 
-    pub fn id(&self) -> Option<&str> {
-        self.id.as_deref()
-    }
-
-    pub fn weekday(&self) -> u8 {
-        self.weekday
+    pub fn id(&self) -> Option<&ProductSlotId> {
+        self.id.as_ref()
     }
 
     pub fn start_time(&self) -> &str {
@@ -215,13 +200,5 @@ impl ProductSlot {
 
     pub fn end_time(&self) -> &str {
         &self.end_time
-    }
-
-    pub fn max_groups(&self) -> i32 {
-        self.max_groups
-    }
-
-    pub fn max_players(&self) -> i32 {
-        self.max_players
     }
 }

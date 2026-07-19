@@ -9,13 +9,16 @@ use axum::{
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::{IntoParams, ToSchema};
+
+use super::openapi::ErrorBody;
 
 use super::http::{credentials, ops_gateway, CaddieAssignmentDto, CaddieDto, ItemsResponse};
 use crate::course::domain::{
-    AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery, CaddieAvailability,
-    CaddieCourseMembership, CaddieRating, CaddieRecommendation, CaddieSupply, PayrollSummary,
-    RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability,
+    AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery,
+    CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation,
+    CaddieSupply, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, ReservationId,
+    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 use crate::course::usecase::{
     AutoAssignCaddiesUseCase, CreateCaddieUseCase, DeleteCaddieAvailabilityUseCase,
@@ -26,7 +29,7 @@ use crate::course::usecase::{
 };
 use crate::{AppError, AppState};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertCaddieRequest {
     pub display_name: String,
@@ -81,6 +84,19 @@ fn parse_upsert_caddie(body: UpsertCaddieRequest) -> Result<UpsertCaddie, AppErr
 }
 
 /// POST /v1/course/caddie-profiles
+#[utoipa::path(
+    post,
+    path = "/v1/course/caddie-profiles",
+    tag = "course-ops",
+    request_body = UpsertCaddieRequest,
+    responses(
+        (status = 201, description = "Caddie created", body = CaddieDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn create_caddie(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -97,6 +113,20 @@ pub async fn create_caddie(
 }
 
 /// PATCH /v1/course/caddie-profiles/:id
+#[utoipa::path(
+    patch,
+    path = "/v1/course/caddie-profiles/{id}",
+    tag = "course-ops",
+    params(("id" = String, Path, description = "Caddie profile ID")),
+    request_body = UpsertCaddieRequest,
+    responses(
+        (status = 200, description = "Caddie updated", body = CaddieDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn update_caddie(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -104,6 +134,7 @@ pub async fn update_caddie(
     Json(body): Json<UpsertCaddieRequest>,
 ) -> Result<Json<CaddieDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let caddie_id = CaddieId::try_new(caddie_id).map_err(AppError::from)?;
     let input = parse_upsert_caddie(body)?;
     let use_case = UpdateCaddieUseCase::new(ops_gateway(&state));
     let caddie = use_case
@@ -113,7 +144,7 @@ pub async fn update_caddie(
     Ok(Json(CaddieDto::from(&caddie)))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertCaddieAssignmentRequest {
     pub caddie_profile_id: String,
@@ -137,6 +168,20 @@ pub struct UpsertCaddieAssignmentRequest {
 }
 
 /// PATCH /v1/course/caddie-assignments/:id
+#[utoipa::path(
+    patch,
+    path = "/v1/course/caddie-assignments/{id}",
+    tag = "course-ops",
+    params(("id" = String, Path, description = "Assignment ID")),
+    request_body = UpsertCaddieAssignmentRequest,
+    responses(
+        (status = 200, description = "Assignment updated", body = CaddieAssignmentDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn update_caddie_assignment(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -144,6 +189,7 @@ pub async fn update_caddie_assignment(
     Json(body): Json<UpsertCaddieAssignmentRequest>,
 ) -> Result<Json<CaddieAssignmentDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let assignment_id = AssignmentId::try_new(assignment_id).map_err(AppError::from)?;
     let input = UpsertCaddieAssignment::try_new(
         body.caddie_profile_id,
         body.reservation_id,
@@ -165,7 +211,7 @@ pub async fn update_caddie_assignment(
     Ok(Json(CaddieAssignmentDto::from(&assignment)))
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MembershipDto {
     pub id: String,
@@ -185,7 +231,7 @@ impl From<&CaddieCourseMembership> for MembershipDto {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplaceMembershipsRequest {
     pub course_ids: Vec<String>,
@@ -194,12 +240,25 @@ pub struct ReplaceMembershipsRequest {
 }
 
 /// GET /v1/course/caddie-profiles/:id/courses
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-profiles/{id}/courses",
+    tag = "course-ops",
+    params(("id" = String, Path, description = "Caddie profile ID")),
+    responses(
+        (status = 200, description = "List caddie course memberships", body = inline(ItemsResponse<MembershipDto>)),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn list_caddie_memberships(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(caddie_id): Path<String>,
 ) -> Result<Json<ItemsResponse<MembershipDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let caddie_id = CaddieId::try_new(caddie_id).map_err(AppError::from)?;
     let use_case = ListCaddieMembershipsUseCase::new(ops_gateway(&state));
     let items = use_case
         .execute(credentials, &caddie_id)
@@ -211,6 +270,20 @@ pub async fn list_caddie_memberships(
 }
 
 /// PUT /v1/course/caddie-profiles/:id/courses
+#[utoipa::path(
+    put,
+    path = "/v1/course/caddie-profiles/{id}/courses",
+    tag = "course-ops",
+    params(("id" = String, Path, description = "Caddie profile ID")),
+    request_body = ReplaceMembershipsRequest,
+    responses(
+        (status = 200, description = "Memberships replaced", body = inline(ItemsResponse<MembershipDto>)),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn replace_caddie_memberships(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -218,6 +291,7 @@ pub async fn replace_caddie_memberships(
     Json(body): Json<ReplaceMembershipsRequest>,
 ) -> Result<Json<ItemsResponse<MembershipDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let caddie_id = CaddieId::try_new(caddie_id).map_err(AppError::from)?;
     let input = ReplaceCaddieMemberships::try_new(body.course_ids, body.primary_course_id)
         .map_err(AppError::from)?;
     let use_case = ReplaceCaddieMembershipsUseCase::new(ops_gateway(&state));
@@ -230,7 +304,7 @@ pub async fn replace_caddie_memberships(
     }))
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AvailabilityDto {
     pub id: String,
@@ -258,7 +332,8 @@ impl From<&CaddieAvailability> for AvailabilityDto {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(rename_all = "camelCase")]
 pub struct AvailabilityQueryParams {
     pub caddie_profile_id: Option<String>,
@@ -267,7 +342,7 @@ pub struct AvailabilityQueryParams {
     pub date: Option<NaiveDate>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertAvailabilityRequest {
     pub caddie_profile_id: String,
@@ -281,6 +356,18 @@ pub struct UpsertAvailabilityRequest {
 }
 
 /// GET /v1/course/caddie-availabilities
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-availabilities",
+    tag = "course-ops",
+    params(AvailabilityQueryParams),
+    responses(
+        (status = 200, description = "List caddie availabilities", body = inline(ItemsResponse<AvailabilityDto>)),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn list_caddie_availabilities(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -292,7 +379,7 @@ pub async fn list_caddie_availabilities(
         .execute(
             credentials,
             AvailabilityQuery {
-                caddie_id: query.caddie_profile_id,
+                caddie_id: CaddieId::from_optional(query.caddie_profile_id),
                 from: query.from,
                 to: query.to,
                 date: query.date,
@@ -306,6 +393,19 @@ pub async fn list_caddie_availabilities(
 }
 
 /// POST /v1/course/caddie-availabilities
+#[utoipa::path(
+    post,
+    path = "/v1/course/caddie-availabilities",
+    tag = "course-ops",
+    request_body = UpsertAvailabilityRequest,
+    responses(
+        (status = 201, description = "Availability upserted", body = AvailabilityDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn upsert_caddie_availability(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -329,12 +429,28 @@ pub async fn upsert_caddie_availability(
 }
 
 /// DELETE /v1/course/caddie-availabilities/:caddie_id/:date
+#[utoipa::path(
+    delete,
+    path = "/v1/course/caddie-availabilities/{caddie_id}/{date}",
+    tag = "course-ops",
+    params(
+        ("caddie_id" = String, Path, description = "Caddie profile ID"),
+        ("date" = String, Path, description = "Availability date (YYYY-MM-DD)"),
+    ),
+    responses(
+        (status = 204, description = "Availability deleted"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn delete_caddie_availability(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path((caddie_id, date)): Path<(String, NaiveDate)>,
 ) -> Result<StatusCode, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let caddie_id = CaddieId::try_new(caddie_id).map_err(AppError::from)?;
     let use_case = DeleteCaddieAvailabilityUseCase::new(ops_gateway(&state));
     use_case
         .execute(credentials, &caddie_id, date)
@@ -343,7 +459,7 @@ pub async fn delete_caddie_availability(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationDto {
     pub caddie_profile_id: String,
@@ -377,7 +493,8 @@ impl From<&CaddieRecommendation> for RecommendationDto {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationQueryParams {
     pub reservation_id: Option<String>,
@@ -389,6 +506,18 @@ pub struct RecommendationQueryParams {
 }
 
 /// GET /v1/course/caddie-recommendations
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-recommendations",
+    tag = "course-ops",
+    params(RecommendationQueryParams),
+    responses(
+        (status = 200, description = "List caddie recommendations", body = inline(ItemsResponse<RecommendationDto>)),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn list_caddie_recommendations(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -400,7 +529,7 @@ pub async fn list_caddie_recommendations(
         .execute(
             credentials,
             RecommendationQuery {
-                reservation_id: query.reservation_id,
+                reservation_id: ReservationId::from_optional(query.reservation_id),
                 scheduled_at: query.scheduled_at,
                 player_count: query.player_count,
                 include_rookie_pairing: query.include_rookie_pairing,
@@ -414,7 +543,7 @@ pub async fn list_caddie_recommendations(
     }))
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AttendanceSnapshotDto {
     pub caddie_profile_id: String,
@@ -426,7 +555,7 @@ pub struct AttendanceSnapshotDto {
     pub rounds_without_clock_in_today: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AttendanceReportDto {
     pub date: NaiveDate,
@@ -453,13 +582,26 @@ impl From<AttendanceSnapshotReport> for AttendanceReportDto {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(rename_all = "camelCase")]
 pub struct AttendanceQueryParams {
     pub date: Option<NaiveDate>,
 }
 
 /// GET /v1/course/caddie-attendance-snapshot
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-attendance-snapshot",
+    tag = "course-ops",
+    params(AttendanceQueryParams),
+    responses(
+        (status = 200, description = "Attendance snapshot", body = AttendanceReportDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn get_attendance_snapshot(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -474,7 +616,7 @@ pub async fn get_attendance_snapshot(
     Ok(Json(AttendanceReportDto::from(report)))
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CaddieSupplyDto {
     pub date: NaiveDate,
@@ -506,7 +648,8 @@ impl From<&CaddieSupply> for CaddieSupplyDto {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(rename_all = "camelCase")]
 pub struct SupplyQueryParams {
     pub date: NaiveDate,
@@ -514,6 +657,18 @@ pub struct SupplyQueryParams {
 }
 
 /// GET /v1/course/caddie-supply
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-supply",
+    tag = "course-ops",
+    params(SupplyQueryParams),
+    responses(
+        (status = 200, description = "Caddie supply summary", body = CaddieSupplyDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn get_caddie_supply(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -528,7 +683,7 @@ pub async fn get_caddie_supply(
     Ok(Json(CaddieSupplyDto::from(&supply)))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoAssignRequest {
     pub date: NaiveDate,
@@ -536,7 +691,7 @@ pub struct AutoAssignRequest {
     pub dry_run: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoAssignPlanItemDto {
     pub reservation_id: String,
@@ -546,14 +701,14 @@ pub struct AutoAssignPlanItemDto {
     pub rationale: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoAssignSkippedDto {
     pub reservation_id: String,
     pub reason: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoAssignResultDto {
     pub dry_run: bool,
@@ -589,6 +744,19 @@ impl From<AutoAssignResult> for AutoAssignResultDto {
 }
 
 /// POST /v1/course/caddie-auto-assignments
+#[utoipa::path(
+    post,
+    path = "/v1/course/caddie-auto-assignments",
+    tag = "course-ops",
+    request_body = AutoAssignRequest,
+    responses(
+        (status = 200, description = "Auto-assignment plan", body = AutoAssignResultDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn auto_assign_caddies(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -603,7 +771,7 @@ pub async fn auto_assign_caddies(
     Ok(Json(AutoAssignResultDto::from(result)))
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PayrollPeriodDto {
     pub year_month: String,
@@ -611,7 +779,7 @@ pub struct PayrollPeriodDto {
     pub end_date: NaiveDate,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PayrollRowDto {
     pub caddie_profile_id: String,
@@ -627,7 +795,7 @@ pub struct PayrollRowDto {
     pub rounds_without_clock_in: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PayrollSummaryDto {
     pub period: PayrollPeriodDto,
@@ -662,13 +830,27 @@ impl From<&PayrollSummary> for PayrollSummaryDto {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[schema(as = OpsYearMonthQuery)]
 #[serde(rename_all = "camelCase")]
 pub struct YearMonthQuery {
     pub year_month: String,
 }
 
 /// GET /v1/course/caddie-payroll-summary
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-payroll-summary",
+    tag = "course-ops",
+    params(YearMonthQuery),
+    responses(
+        (status = 200, description = "Payroll summary", body = PayrollSummaryDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn get_payroll_summary(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -684,6 +866,18 @@ pub async fn get_payroll_summary(
 }
 
 /// GET /v1/course/caddie-payroll-summary/export.csv
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-payroll-summary/export.csv",
+    tag = "course-ops",
+    params(YearMonthQuery),
+    responses(
+        (status = 200, description = "Payroll CSV export", content_type = "text/csv"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn export_payroll_csv(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -698,7 +892,7 @@ pub async fn export_payroll_csv(
     Ok(csv_response(csv))
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RatingDto {
     pub id: String,
@@ -720,8 +914,8 @@ impl From<&CaddieRating> for RatingDto {
         Self {
             id: value.id().to_string(),
             caddie_profile_id: value.caddie_id().to_string(),
-            assignment_id: value.assignment_id().map(str::to_string),
-            reservation_id: value.reservation_id().map(str::to_string),
+            assignment_id: value.assignment_id().map(ToString::to_string),
+            reservation_id: value.reservation_id().map(ToString::to_string),
             customer_id: value.customer_id().to_string(),
             score: value.score(),
             comment: value.comment().map(str::to_string),
@@ -730,22 +924,36 @@ impl From<&CaddieRating> for RatingDto {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
 #[serde(rename_all = "camelCase")]
 pub struct RatingsQueryParams {
     pub caddie_profile_id: Option<String>,
 }
 
 /// GET /v1/course/caddie-ratings
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-ratings",
+    tag = "course-ops",
+    params(RatingsQueryParams),
+    responses(
+        (status = 200, description = "List caddie ratings", body = inline(ItemsResponse<RatingDto>)),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 502, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
 pub async fn list_caddie_ratings(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(query): Query<RatingsQueryParams>,
 ) -> Result<Json<ItemsResponse<RatingDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let caddie_id = CaddieId::from_optional(query.caddie_profile_id);
     let use_case = ListCaddieRatingsUseCase::new(ops_gateway(&state));
     let items = use_case
-        .execute(credentials, query.caddie_profile_id.as_deref())
+        .execute(credentials, caddie_id.as_ref())
         .await
         .map_err(AppError::from)?;
     Ok(Json(ItemsResponse {

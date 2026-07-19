@@ -6,10 +6,10 @@ use std::sync::Arc;
 use chrono::NaiveDate;
 
 use crate::course::domain::{
-    format_datetime_with_offset, format_jst_wall_clock, jst_offset, Course, CourseError,
+    format_datetime_with_offset, format_jst_wall_clock, jst_offset, Course, CourseError, CourseId,
     GatewayCredentials, GolfCatalogGateway, PlayType, Reservation, ReservationGateway,
-    ReservationProduct, Resource, TeeSheet, TeeSheetItem, TeeSheetQuery, TeeSheetStatus,
-    DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR, DEFAULT_TIMEZONE,
+    ReservationProduct, ReservationServiceId, Resource, TeeSheet, TeeSheetItem, TeeSheetQuery,
+    TeeSheetStatus, DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR, DEFAULT_TIMEZONE,
 };
 
 const DEFAULT_DURATION_MINUTES: i32 = 270;
@@ -45,7 +45,7 @@ impl GetTeeSheetUseCase {
 
         build_tee_sheet(
             query.date,
-            query.golf_course_id.as_deref(),
+            query.golf_course_id.as_ref(),
             &reservations,
             &courses,
             &resources,
@@ -56,14 +56,14 @@ impl GetTeeSheetUseCase {
 
 pub(crate) fn build_tee_sheet(
     date: NaiveDate,
-    golf_course_id: Option<&str>,
+    golf_course_id: Option<&CourseId>,
     reservations: &[Reservation],
     courses: &[Course],
     resources: &[Resource],
     products: &[ReservationProduct],
 ) -> Result<TeeSheet, CourseError> {
     let jst = jst_offset()?;
-    let product_by_service: HashMap<&str, &ReservationProduct> = products
+    let product_by_service: HashMap<&ReservationServiceId, &ReservationProduct> = products
         .iter()
         .map(|product| (product.reservation_service_id(), product))
         .collect();
@@ -81,7 +81,7 @@ pub(crate) fn build_tee_sheet(
         .filter_map(|reservation| {
             let (course_id, course_name) = resolve_course(reservation, resources, courses);
             if let Some(filter_id) = golf_course_id {
-                if course_id != filter_id {
+                if &course_id != filter_id {
                     return None;
                 }
             }
@@ -111,7 +111,7 @@ fn resolve_course(
     reservation: &Reservation,
     resources: &[Resource],
     courses: &[Course],
-) -> (String, String) {
+) -> (CourseId, String) {
     if let Some(course_id) = reservation.golf_course_id() {
         let course_name = courses
             .iter()
@@ -120,11 +120,11 @@ fn resolve_course(
             .or_else(|| {
                 resources
                     .iter()
-                    .find(|resource| resource.id() == course_id)
+                    .find(|resource| resource.id().as_str() == course_id.as_str())
                     .map(|resource| resource.name().to_string())
             })
             .unwrap_or_else(|| course_id.to_string());
-        return (course_id.to_string(), course_name);
+        return (course_id.clone(), course_name);
     }
 
     if let Some(resource_id) = reservation.resource_id() {
@@ -132,27 +132,30 @@ fn resolve_course(
             .iter()
             .find(|resource| resource.matches_reservation_resource(resource_id))
         {
-            let course_id = resource.resolved_course_id().to_string();
+            let course_id = resource.resolved_course_id();
             let course_name = courses
                 .iter()
-                .find(|course| course.id() == course_id)
+                .find(|course| course.id() == &course_id)
                 .map(|course| course.name().to_string())
                 .unwrap_or_else(|| resource.name().to_string());
             return (course_id, course_name);
         }
 
-        if let Some(course) = courses.iter().find(|course| course.id() == resource_id) {
-            return (course.id().to_string(), course.name().to_string());
+        if let Some(course) = courses
+            .iter()
+            .find(|course| course.id().as_str() == resource_id.as_str())
+        {
+            return (course.id().clone(), course.name().to_string());
         }
     }
 
-    (String::new(), "Unassigned course".to_string())
+    (CourseId::new(""), "Unassigned course".to_string())
 }
 
 fn to_tee_sheet_item(
     reservation: &Reservation,
     product: Option<&ReservationProduct>,
-    golf_course_id: &str,
+    golf_course_id: &CourseId,
     course_name: &str,
     jst: chrono::FixedOffset,
 ) -> TeeSheetItem {
@@ -235,7 +238,7 @@ mod tests {
         async fn update_course(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _course_id: &str,
+            _course_id: &CourseId,
             _input: UpsertCourse,
         ) -> Result<Course, CourseError> {
             Err(CourseError::Provider("not implemented".into()))
@@ -244,7 +247,7 @@ mod tests {
         async fn delete_course(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _course_id: &str,
+            _course_id: &CourseId,
         ) -> Result<(), CourseError> {
             Err(CourseError::Provider("not implemented".into()))
         }
@@ -274,7 +277,7 @@ mod tests {
         async fn list_product_slots(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _service_id: &str,
+            _service_id: &ReservationServiceId,
         ) -> Result<Vec<ProductSlot>, CourseError> {
             Ok(Vec::new())
         }
@@ -282,7 +285,7 @@ mod tests {
         async fn replace_product_slots(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _service_id: &str,
+            _service_id: &ReservationServiceId,
             _slots: Vec<ProductSlot>,
         ) -> Result<Vec<ProductSlot>, CourseError> {
             Ok(Vec::new())
@@ -351,14 +354,14 @@ mod tests {
         reservation = Reservation::reconstitute(
             reservation.id(),
             reservation.reservation_number(),
-            reservation.service_id().map(str::to_string),
-            reservation.resource_id().map(str::to_string),
+            reservation.service_id().map(|id| id.to_string()),
+            reservation.resource_id().map(|id| id.to_string()),
             reservation.customer_name().map(str::to_string),
             reservation.status(),
             reservation.starts_at(),
             reservation.starts_at(),
             reservation.quantity(),
-            reservation.golf_course_id().map(str::to_string),
+            reservation.golf_course_id().map(|id| id.to_string()),
             reservation.notes().map(str::to_string),
         );
         let product = ReservationProduct::reconstitute(
@@ -373,7 +376,7 @@ mod tests {
         let item = to_tee_sheet_item(
             &reservation,
             Some(&product),
-            "course_east",
+            &CourseId::new("course_east"),
             "East Course",
             jst,
         );
@@ -417,9 +420,10 @@ mod tests {
             240,
         )];
 
+        let filter = CourseId::new("course_east");
         let sheet = build_tee_sheet(
             date,
-            Some("course_east"),
+            Some(&filter),
             &[reservation],
             &courses,
             &resources,
@@ -481,7 +485,7 @@ mod tests {
                 },
                 TeeSheetQuery {
                     date,
-                    golf_course_id: Some("course_east".into()),
+                    golf_course_id: Some(CourseId::new("course_east")),
                 },
             )
             .await

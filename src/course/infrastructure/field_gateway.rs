@@ -15,9 +15,10 @@ use serde_json::{json, Value};
 
 use crate::config::EMPTY_COURSE_STORE_URL;
 use crate::course::domain::{
-    Caddie, CaddieAssignment, CaddieRank, CaddieSkillLevel, Course, CourseError,
+    Caddie, CaddieAssignment, CaddieRank, CaddieSkillLevel, Course, CourseError, CourseId,
     GatewayCredentials, GolfCatalogGateway, PlayType, ProductSlot, Reservation, ReservationGateway,
-    ReservationProduct, Resource, ResourceKind, UpsertCourse, UpsertReservationProduct,
+    ReservationProduct, ReservationServiceId, Resource, ResourceKind, UpsertCourse,
+    UpsertReservationProduct,
 };
 use crate::field_api::DEFAULT_FIELD_API_URL;
 
@@ -118,7 +119,7 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
     async fn update_course(
         &self,
         credentials: GatewayCredentials<'_>,
-        course_id: &str,
+        course_id: &CourseId,
         input: UpsertCourse,
     ) -> Result<Course, CourseError> {
         let body = upsert_course_body(&input);
@@ -141,7 +142,7 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
     async fn delete_course(
         &self,
         credentials: GatewayCredentials<'_>,
-        course_id: &str,
+        course_id: &CourseId,
     ) -> Result<(), CourseError> {
         let path = format!(
             "/v1/erp/extensions/golf-course/courses/{}",
@@ -215,7 +216,7 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
     async fn list_product_slots(
         &self,
         credentials: GatewayCredentials<'_>,
-        service_id: &str,
+        service_id: &ReservationServiceId,
     ) -> Result<Vec<ProductSlot>, CourseError> {
         let path = format!(
             "/v1/erp/extensions/golf-course/reservation-products/{}/slots",
@@ -229,7 +230,7 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
     async fn replace_product_slots(
         &self,
         credentials: GatewayCredentials<'_>,
-        service_id: &str,
+        service_id: &ReservationServiceId,
         slots: Vec<ProductSlot>,
     ) -> Result<Vec<ProductSlot>, CourseError> {
         let body = json!({
@@ -267,7 +268,8 @@ pub(crate) fn normalize_base_url(field_api_url: Option<&str>) -> String {
         .to_string()
 }
 
-pub(crate) fn urlencoding_path(value: &str) -> String {
+pub(crate) fn urlencoding_path(value: impl AsRef<str>) -> String {
+    let value = value.as_ref();
     // Path segments only need percent-encoding for reserved characters.
     value
         .chars()

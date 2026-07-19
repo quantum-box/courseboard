@@ -4,27 +4,40 @@
 //! the domain.
 
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
+use derive_getters::Getters;
+
+use super::{CourseId, ReservationId, ReservationServiceId, ResourceId};
 
 /// Party reservation that may appear on a tee sheet.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct Reservation {
-    id: String,
+    #[getter(skip)]
+    id: ReservationId,
+    #[getter(skip)]
     reservation_number: String,
-    service_id: Option<String>,
-    resource_id: Option<String>,
+    #[getter(skip)]
+    service_id: Option<ReservationServiceId>,
+    #[getter(skip)]
+    resource_id: Option<ResourceId>,
+    #[getter(skip)]
     customer_name: Option<String>,
+    #[getter(skip)]
     status: String,
+    #[getter(copy)]
     starts_at: DateTime<Utc>,
+    #[getter(copy)]
     ends_at: DateTime<Utc>,
     quantity: i32,
-    golf_course_id: Option<String>,
+    #[getter(skip)]
+    golf_course_id: Option<CourseId>,
+    #[getter(skip)]
     notes: Option<String>,
 }
 
 impl Reservation {
     #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
-        id: impl Into<String>,
+        id: impl Into<ReservationId>,
         reservation_number: impl Into<String>,
         service_id: Option<String>,
         resource_id: Option<String>,
@@ -39,12 +52,8 @@ impl Reservation {
         Self {
             id: id.into(),
             reservation_number: reservation_number.into(),
-            service_id: service_id
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
-            resource_id: resource_id
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
+            service_id: ReservationServiceId::from_optional(service_id),
+            resource_id: ResourceId::from_optional(resource_id),
             customer_name: customer_name
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
@@ -52,14 +61,12 @@ impl Reservation {
             starts_at,
             ends_at,
             quantity: quantity.max(1),
-            golf_course_id: golf_course_id
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
+            golf_course_id: CourseId::from_optional(golf_course_id),
             notes,
         }
     }
 
-    pub fn id(&self) -> &str {
+    pub fn id(&self) -> &ReservationId {
         &self.id
     }
 
@@ -67,12 +74,12 @@ impl Reservation {
         &self.reservation_number
     }
 
-    pub fn service_id(&self) -> Option<&str> {
-        self.service_id.as_deref()
+    pub fn service_id(&self) -> Option<&ReservationServiceId> {
+        self.service_id.as_ref()
     }
 
-    pub fn resource_id(&self) -> Option<&str> {
-        self.resource_id.as_deref()
+    pub fn resource_id(&self) -> Option<&ResourceId> {
+        self.resource_id.as_ref()
     }
 
     pub fn customer_name(&self) -> Option<&str> {
@@ -83,20 +90,8 @@ impl Reservation {
         &self.status
     }
 
-    pub fn starts_at(&self) -> DateTime<Utc> {
-        self.starts_at
-    }
-
-    pub fn ends_at(&self) -> DateTime<Utc> {
-        self.ends_at
-    }
-
-    pub fn quantity(&self) -> i32 {
-        self.quantity
-    }
-
-    pub fn golf_course_id(&self) -> Option<&str> {
-        self.golf_course_id.as_deref()
+    pub fn golf_course_id(&self) -> Option<&CourseId> {
+        self.golf_course_id.as_ref()
     }
 
     pub fn notes(&self) -> Option<&str> {

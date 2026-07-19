@@ -2,13 +2,14 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use super::{
-    AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery, BudgetAchievement, Caddie,
-    CaddieAssignment, CaddieAvailability, CaddieCourseMembership, CaddieRating,
-    CaddieRecommendation, CaddieSupply, Course, CourseError, DailyBudget, DailyBudgetQuery,
-    ExtensionStatus, MonthlySettlement, PayrollSummary, ProductSlot, RecommendationQuery,
-    ReplaceCaddieMemberships, Reservation, ReservationPolicy, ReservationProduct, Resource,
-    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
+    AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery, BudgetAchievement,
+    Caddie, CaddieAssignment, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating,
+    CaddieRecommendation, CaddieSupply, Course, CourseError, CourseId, DailyBudget,
+    DailyBudgetQuery, ExtensionStatus, MonthlySettlement, PayrollSummary, ProductSlot,
+    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationPolicy,
+    ReservationProduct, ReservationServiceId, Resource, UpdateExtensionConfig,
+    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -23,7 +24,7 @@ pub struct GatewayCredentials<'a> {
 #[derive(Debug, Clone)]
 pub struct TeeSheetQuery {
     pub date: NaiveDate,
-    pub golf_course_id: Option<String>,
+    pub golf_course_id: Option<CourseId>,
 }
 
 /// Port for listing generic ERP reservations used by the tee-sheet.
@@ -55,14 +56,14 @@ pub trait GolfCatalogGateway: Send + Sync {
     async fn update_course(
         &self,
         credentials: GatewayCredentials<'_>,
-        course_id: &str,
+        course_id: &CourseId,
         input: UpsertCourse,
     ) -> Result<Course, CourseError>;
 
     async fn delete_course(
         &self,
         credentials: GatewayCredentials<'_>,
-        course_id: &str,
+        course_id: &CourseId,
     ) -> Result<(), CourseError>;
 
     async fn list_resources(
@@ -84,13 +85,13 @@ pub trait GolfCatalogGateway: Send + Sync {
     async fn list_product_slots(
         &self,
         credentials: GatewayCredentials<'_>,
-        service_id: &str,
+        service_id: &ReservationServiceId,
     ) -> Result<Vec<ProductSlot>, CourseError>;
 
     async fn replace_product_slots(
         &self,
         credentials: GatewayCredentials<'_>,
-        service_id: &str,
+        service_id: &ReservationServiceId,
         slots: Vec<ProductSlot>,
     ) -> Result<Vec<ProductSlot>, CourseError>;
 }
@@ -112,7 +113,7 @@ pub trait GolfOpsGateway: Send + Sync {
     async fn update_caddie(
         &self,
         credentials: GatewayCredentials<'_>,
-        caddie_id: &str,
+        caddie_id: &CaddieId,
         input: UpsertCaddie,
     ) -> Result<Caddie, CourseError>;
 
@@ -124,20 +125,20 @@ pub trait GolfOpsGateway: Send + Sync {
     async fn update_caddie_assignment(
         &self,
         credentials: GatewayCredentials<'_>,
-        assignment_id: &str,
+        assignment_id: &AssignmentId,
         input: UpsertCaddieAssignment,
     ) -> Result<CaddieAssignment, CourseError>;
 
     async fn list_caddie_memberships(
         &self,
         credentials: GatewayCredentials<'_>,
-        caddie_id: &str,
+        caddie_id: &CaddieId,
     ) -> Result<Vec<CaddieCourseMembership>, CourseError>;
 
     async fn replace_caddie_memberships(
         &self,
         credentials: GatewayCredentials<'_>,
-        caddie_id: &str,
+        caddie_id: &CaddieId,
         input: ReplaceCaddieMemberships,
     ) -> Result<Vec<CaddieCourseMembership>, CourseError>;
 
@@ -156,7 +157,7 @@ pub trait GolfOpsGateway: Send + Sync {
     async fn delete_caddie_availability(
         &self,
         credentials: GatewayCredentials<'_>,
-        caddie_id: &str,
+        caddie_id: &CaddieId,
         date: NaiveDate,
     ) -> Result<(), CourseError>;
 
@@ -201,7 +202,7 @@ pub trait GolfOpsGateway: Send + Sync {
     async fn list_caddie_ratings(
         &self,
         credentials: GatewayCredentials<'_>,
-        caddie_id: Option<&str>,
+        caddie_id: Option<&CaddieId>,
     ) -> Result<Vec<CaddieRating>, CourseError>;
 }
 
