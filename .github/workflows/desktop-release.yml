@@ -1,0 +1,168 @@
+name: Desktop release
+
+on:
+  push:
+    tags:
+      - "desktop-v*.*.*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Semantic version to build
+        required: true
+        type: string
+      publish:
+        description: Publish installers to the download bucket
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  RELEASE_BASE_URL: https://downloads.courseboard.txcloud.app
+
+jobs:
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      value: ${{ steps.version.outputs.value }}
+    steps:
+      - name: Resolve and validate version
+        id: version
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            version="${MANUAL_VERSION}"
+          else
+            version="${TAG_NAME#desktop-v}"
+          fi
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid semantic version: ${version}" >&2
+            exit 1
+          fi
+          echo "value=${version}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            os: macos-14
+            bundle_glob: desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          - platform: windows-x64
+            os: windows-latest
+            bundle_glob: desktop/src-tauri/target/release/bundle/msi/*.msi
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build desktop installer
+        run: npm run tauri:build -- --config '{"version":"${{ needs.version.outputs.value }}"}'
+        env:
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard.txcloud.app
+          VITE_COURSEBOARD_NATIVE_DEEP_LINK_READY: "false"
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-${{ matrix.platform }}
+          path: ${{ matrix.bundle_glob }}
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish downloads
+    needs: [version, build]
+    # Tag pushes always produce retained build artifacts. Publishing is an
+    # explicit, environment-protected action until both platform signing
+    # identities have been connected and verified in this workflow.
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == true
+    runs-on: ubuntu-latest
+    environment: desktop-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installer-*
+          path: downloaded
+          merge-multiple: false
+
+      - name: Normalize installer names
+        shell: bash
+        run: |
+          mkdir -p release
+          mac_installer="$(find downloaded/installer-macos-arm64 -type f -name '*.dmg' -print -quit)"
+          windows_installer="$(find downloaded/installer-windows-x64 -type f -name '*.msi' -print -quit)"
+          test -n "${mac_installer}"
+          test -n "${windows_installer}"
+          cp "${mac_installer}" release/courseboard-macos-arm64.dmg
+          cp "${windows_installer}" release/courseboard-windows-x64.msi
+
+      - name: Create release manifest
+        run: |
+          node desktop/scripts/create-release-manifest.mjs \
+            "${{ needs.version.outputs.value }}" \
+            release \
+            release/latest.json \
+            "${RELEASE_BASE_URL}"
+
+      - name: Configure R2 credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          aws-region: auto
+
+      - name: Publish versioned and latest downloads
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          VERSION: ${{ needs.version.outputs.value }}
+        run: |
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 cp release/ "s3://${R2_BUCKET}/releases/${VERSION}/" --recursive --endpoint-url "${endpoint}"
+          aws s3 cp release/courseboard-macos-arm64.dmg "s3://${R2_BUCKET}/releases/latest/courseboard-macos-arm64.dmg" --endpoint-url "${endpoint}"
+          aws s3 cp release/courseboard-windows-x64.msi "s3://${R2_BUCKET}/releases/latest/courseboard-windows-x64.msi" --endpoint-url "${endpoint}"
+          aws s3 cp release/latest.json "s3://${R2_BUCKET}/releases/latest.json" --endpoint-url "${endpoint}" --content-type application/json --cache-control 'public,max-age=300'
