@@ -236,6 +236,7 @@ jobs:
           test -n "${APPLE_PROVISIONING_PROFILE_BASE64}"
           certificate_path="${RUNNER_TEMP}/courseboard-distribution.p12"
           profile_path="${RUNNER_TEMP}/courseboard.mobileprovision"
+          profile_plist_path="${RUNNER_TEMP}/courseboard-profile.plist"
           keychain_path="${RUNNER_TEMP}/courseboard-signing.keychain-db"
           printf '%s' "${APPLE_CERTIFICATE_BASE64}" | base64 --decode > "${certificate_path}"
           printf '%s' "${APPLE_PROVISIONING_PROFILE_BASE64}" | base64 --decode > "${profile_path}"
@@ -246,7 +247,15 @@ jobs:
           security list-keychain -d user -s "${keychain_path}"
           security set-key-partition-list -S apple-tool:,apple: -k "${KEYCHAIN_PASSWORD}" "${keychain_path}"
           mkdir -p "${HOME}/Library/MobileDevice/Provisioning Profiles"
-          cp "${profile_path}" "${HOME}/Library/MobileDevice/Provisioning Profiles/courseboard.mobileprovision"
+          security cms -D -i "${profile_path}" > "${profile_plist_path}"
+          profile_uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "${profile_plist_path}")"
+          cp "${profile_path}" "${HOME}/Library/MobileDevice/Provisioning Profiles/${profile_uuid}.mobileprovision"
+
+      - name: Configure manual App Store signing
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PROVISIONING_PROFILE_SPECIFIER: CourseBoard App Store 20260719
+        run: node scripts/configure-ios-signing.mjs
 
       - name: Build signed App Store IPA
         env:
