@@ -524,7 +524,8 @@ class BrowserPkceAdapter implements AuthAdapter {
   }
 
   async getAccessToken(forceRefresh = false) {
-    if (!this.accessToken && !this.refreshToken) {
+    // Rehydrate when either side of the pair is missing (memory/storage skew).
+    if (!this.accessToken || !this.refreshToken) {
       this.restoreSession()
     }
     const hasFreshToken = isFreshAccessToken(this.accessToken, this.accessTokenExpiresAt)
@@ -596,6 +597,7 @@ class BrowserPkceAdapter implements AuthAdapter {
       }
       // Network / 5xx: keep durable tokens and fall back to the current access token
       // (even if slightly stale) so navigation does not soft-sign-out on a blip.
+      if (!this.accessToken) this.restoreSession()
       return this.accessToken
     }
   }
@@ -1087,7 +1089,7 @@ class CognitoBrowserPkceAdapter implements AuthAdapter {
   }
 
   async getAccessToken(forceRefresh = false) {
-    if (!this.accessToken && !this.refreshToken) {
+    if (!this.accessToken || !this.refreshToken) {
       this.restoreSession()
     }
     const hasFreshToken = isFreshAccessToken(this.accessToken, this.accessTokenExpiresAt)
@@ -1185,6 +1187,7 @@ class CognitoBrowserPkceAdapter implements AuthAdapter {
       }
       // Network / 5xx: keep durable tokens and fall back to the current access token
       // (even if slightly stale) so navigation does not soft-sign-out on a blip.
+      if (!this.accessToken) this.restoreSession()
       return this.accessToken
     }
   }
