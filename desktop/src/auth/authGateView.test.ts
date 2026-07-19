@@ -163,6 +163,11 @@ describe('sessionExpiredNotice', () => {
     expect(sessionExpiredNotice('logout')).toBeUndefined()
     expect(sessionExpiredNotice(undefined)).toBeUndefined()
   })
+
+  it('does not toast expiry without a prior authenticated session (navigation / cold start)', () => {
+    expect(sessionExpiredNotice('expired', false)).toBeUndefined()
+    expect(sessionExpiredNotice('expired', true)).toBe('Your session expired. Please sign in again.')
+  })
 })
 
 describe('ready session snapshot', () => {

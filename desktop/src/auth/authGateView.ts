@@ -50,8 +50,15 @@ export function sessionVerifyingNotice(state: AuthState): string | undefined {
   return undefined
 }
 
-export function sessionExpiredNotice(reason?: AuthReason): string | undefined {
-  if (reason !== 'expired') return undefined
+/**
+ * Session-expired toast only when a prior authenticated session definitively
+ * failed verification. Cold start / navigation / missing reason must not toast.
+ */
+export function sessionExpiredNotice(
+  reason?: AuthReason,
+  hadAuthenticatedSession = true,
+): string | undefined {
+  if (reason !== 'expired' || !hadAuthenticatedSession) return undefined
   return 'Your session expired. Please sign in again.'
 }
 

@@ -157,10 +157,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then(result => {
         if (cancelled) return
         if (result.kind === 'anonymous') {
+          const hadAuthenticatedSession = holdingSession || Boolean(heldPrevious)
+          // Ambiguous anonymous while a prior session is held (e.g. transient
+          // token refresh) — keep the shell; do not flash session-expired.
+          if (result.reason !== 'expired' && hadAuthenticatedSession && heldPrevious) {
+            activateTenant(heldPrevious.user, heldPrevious.tenant)
+            return
+          }
           configureApiAuth(null)
           clearLastReadySession()
           setAvailableTenants([])
-          const notice = sessionExpiredNotice(result.reason)
+          const notice = sessionExpiredNotice(result.reason, hadAuthenticatedSession)
           if (notice) setSessionNotice(notice)
           setState({ status: 'anonymous', reason: result.reason })
           return
@@ -187,6 +194,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         if (error instanceof AuthConfigurationError) {
           setState({ status: 'unavailable', title: error.title, message: error.message })
+          return
+        }
+        // Network / CORS / proxy failures during revalidation must not look like expiry.
+        if (holdingSession && heldPrevious) {
+          activateTenant(heldPrevious.user, heldPrevious.tenant)
           return
         }
         setState({
