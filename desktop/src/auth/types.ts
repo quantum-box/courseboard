@@ -17,7 +17,13 @@ export type AuthTenant = {
 export type AuthReason = 'expired' | 'logout'
 
 export type AuthState =
-  | { status: 'booting' }
+  | {
+      status: 'booting'
+      /** Last known identity while revalidating (in-memory or restored snapshot). */
+      previous?: { user: AuthUser; tenant: AuthTenant }
+      /** Durable tokens/cookies suggest a session exists; keep the shell + toast. */
+      restorable?: boolean
+    }
   | { status: 'anonymous'; reason?: AuthReason }
   | { status: 'authorizing' }
   | { status: 'selecting-tenant'; user: AuthUser; tenants: AuthTenant[] }

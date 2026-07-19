@@ -9,7 +9,7 @@ import {
   RefreshCw,
   ShieldCheck,
 } from 'lucide-react'
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { CourseBoardBrand } from '../components/CourseBoardBrand'
 import type { AuthReason, AuthTenant } from './types'
 
@@ -32,15 +32,52 @@ function AuthFrame({ children }: { children: ReactNode }) {
   )
 }
 
+/** Minimal cold-start placeholder when no prior session hint exists (not a verify takeover). */
+export function AuthBootScreen() {
+  return (
+    <main className="auth-neutral-loading" role="status" aria-label="Loading">
+      <LoaderCircle className="auth-spinner" />
+    </main>
+  )
+}
+
+/** Neutral full-page status while redirecting into an external sign-in flow. */
 export function AuthLoadingScreen({ authorizing = false }: { authorizing?: boolean }) {
   return (
-    <AuthFrame>
-      <div className="auth-card auth-centered" role="status">
-        <LoaderCircle className="auth-spinner" />
-        <h2>{authorizing ? 'ログインへ移動しています' : '認証状態を確認しています'}</h2>
-        <p>安全なセッションを確認しています。しばらくお待ちください。</p>
-      </div>
-    </AuthFrame>
+    <main className="auth-neutral-loading" role="status">
+      <LoaderCircle className="auth-spinner" />
+      {authorizing ? (
+        <>
+          <h2>Redirecting to sign in…</h2>
+          <p>Please wait while we open the secure sign-in flow.</p>
+        </>
+      ) : null}
+    </main>
+  )
+}
+
+export function AuthSessionToast({ message, onDismiss, sticky = false }: {
+  message: string
+  onDismiss(): void
+  /** When true, keep the toast until the parent clears it (e.g. verifying). */
+  sticky?: boolean
+}) {
+  useEffect(() => {
+    if (sticky) return
+    const timer = window.setTimeout(onDismiss, 7000)
+    return () => window.clearTimeout(timer)
+  }, [message, onDismiss, sticky])
+
+  return (
+    <div className="auth-session-toast" role="status">
+      <ShieldCheck aria-hidden="true" />
+      <p>{message}</p>
+      {sticky ? null : (
+        <button type="button" className="auth-session-toast-dismiss" onClick={onDismiss} aria-label="Dismiss">
+          ×
+        </button>
+      )}
+    </div>
   )
 }
 

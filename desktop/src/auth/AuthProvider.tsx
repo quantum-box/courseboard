@@ -2,6 +2,14 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { configureApiAuth } from '../api'
 import { createAuthAdapter } from './adapters'
 import {
+  beginBoot,
+  clearLastReadySession,
+  hasRestorableBrowserSession,
+  readLastReadySession,
+  sessionExpiredNotice,
+  writeLastReadySession,
+} from './authGateView'
+import {
   AuthConfigurationError,
   type AuthAdapter,
   type AuthReason,
@@ -15,6 +23,8 @@ type AuthContextValue = {
   state: AuthState
   user?: AuthUser
   tenant?: AuthTenant
+  sessionNotice?: string
+  dismissSessionNotice(): void
   signIn(provider?: 'Google'): Promise<void>
   passwordSignInAvailable: boolean
   signInWithPassword(username: string, password: string): Promise<void>
@@ -42,16 +52,39 @@ function replaceRequestedTenant(tenantId?: string) {
 
 function resolveIdentity(state: AuthState) {
   if (state.status === 'ready') return { user: state.user, tenant: state.tenant }
+  if (state.status === 'booting' && state.previous) {
+    return { user: state.previous.user, tenant: state.previous.tenant }
+  }
   if (state.status === 'selecting-tenant') return { user: state.user, tenant: undefined }
   if (state.status === 'forbidden') return { user: state.user, tenant: state.tenant }
   return { user: undefined, tenant: undefined }
 }
 
+function bootHints() {
+  const snapshot = readLastReadySession()
+  return {
+    snapshot,
+    restorable: Boolean(snapshot) || hasRestorableBrowserSession(),
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [adapter, setAdapter] = useState<AuthAdapter | null>(null)
-  const [state, setState] = useState<AuthState>({ status: 'booting' })
+  const [state, setState] = useState<AuthState>(() => {
+    const hints = bootHints()
+    if (hints.snapshot) {
+      return {
+        status: 'booting',
+        previous: { user: hints.snapshot.user, tenant: hints.snapshot.tenant },
+        restorable: true,
+      }
+    }
+    if (hints.restorable) return { status: 'booting', restorable: true }
+    return { status: 'booting' }
+  })
   const [availableTenants, setAvailableTenants] = useState<AuthTenant[]>([])
   const [attempt, setAttempt] = useState(0)
+  const [sessionNotice, setSessionNotice] = useState<string | undefined>()
 
   useEffect(() => {
     try {
@@ -65,6 +98,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const dismissSessionNotice = useCallback(() => {
+    setSessionNotice(undefined)
+  }, [])
+
   const denyAccess = useCallback(() => {
     configureApiAuth(null)
     setState(current => current.status === 'ready'
@@ -74,6 +111,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async (reason: AuthReason = 'logout') => {
     configureApiAuth(null)
+    clearLastReadySession()
+    const notice = sessionExpiredNotice(reason)
+    if (notice) setSessionNotice(notice)
     setState({ status: 'anonymous', reason })
     await adapter?.signOut(reason)
   }, [adapter])
@@ -93,19 +133,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const activateTenant = useCallback((user: AuthUser, tenant: AuthTenant) => {
     if (!bindTenant(tenant)) return
+    writeLastReadySession(user, tenant)
     setState({ status: 'ready', user, tenant })
   }, [bindTenant])
 
   useEffect(() => {
     if (!adapter) return
     let cancelled = false
-    configureApiAuth(null)
-    setState({ status: 'booting' })
+    let holdingSession = false
+    let heldPrevious: { user: AuthUser; tenant: AuthTenant } | undefined
+    setState(current => {
+      const boot = beginBoot(current, bootHints())
+      holdingSession = boot.holdingSession
+      if (boot.next.status === 'booting') heldPrevious = boot.next.previous
+      return boot.next
+    })
+    if (holdingSession && heldPrevious) {
+      bindTenant(heldPrevious.tenant)
+    } else if (!holdingSession) {
+      configureApiAuth(null)
+    }
     adapter.bootstrap()
       .then(result => {
         if (cancelled) return
         if (result.kind === 'anonymous') {
+          configureApiAuth(null)
+          clearLastReadySession()
           setAvailableTenants([])
+          const notice = sessionExpiredNotice(result.reason)
+          if (notice) setSessionNotice(notice)
           setState({ status: 'anonymous', reason: result.reason })
           return
         }
@@ -140,9 +196,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
     return () => {
       cancelled = true
-      configureApiAuth(null)
     }
-  }, [activateTenant, adapter, attempt])
+  }, [activateTenant, adapter, attempt, bindTenant])
 
   const signIn = useCallback(async (provider?: 'Google') => {
     if (!adapter) return
@@ -204,6 +259,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AuthContextValue>(() => ({
     state,
     ...identity,
+    sessionNotice,
+    dismissSessionNotice,
     signIn,
     passwordSignInAvailable: Boolean(adapter?.signInWithPassword),
     signInWithPassword,
@@ -212,7 +269,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     switchTenant,
     retry: () => setAttempt(value => value + 1),
     denyAccess,
-  }), [adapter, denyAccess, identity, selectTenant, signIn, signInWithPassword, signOut, state, switchTenant])
+  }), [
+    adapter,
+    denyAccess,
+    dismissSessionNotice,
+    identity,
+    selectTenant,
+    sessionNotice,
+    signIn,
+    signInWithPassword,
+    signOut,
+    state,
+    switchTenant,
+  ])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
