@@ -1471,15 +1471,10 @@ mod tests {
     #[tokio::test]
     async fn allowlisted_client_id_is_accepted_without_primary_audience() {
         let auth = TestAuth::new();
-        let app = test_app_with_verifier(
-            auth.verifier_with(
-                "courseboard-web",
-                HashSet::from([
-                    "courseboard-web".to_string(),
-                    "local-prod-pkce".to_string(),
-                ]),
-            ),
-        )
+        let app = test_app_with_verifier(auth.verifier_with(
+            "courseboard-web",
+            HashSet::from(["courseboard-web".to_string(), "local-prod-pkce".to_string()]),
+        ))
         .await;
         let response = app
             .oneshot(calculate_request(

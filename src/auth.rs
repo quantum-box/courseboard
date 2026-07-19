@@ -231,9 +231,9 @@ impl TokenVerifier for OidcJwtVerifier {
 fn audience_claim_present(audience: &serde_json::Value) -> bool {
     match audience {
         serde_json::Value::String(value) => !value.is_empty(),
-        serde_json::Value::Array(values) => values.iter().any(|value| {
-            value.as_str().is_some_and(|entry| !entry.is_empty())
-        }),
+        serde_json::Value::Array(values) => values
+            .iter()
+            .any(|value| value.as_str().is_some_and(|entry| !entry.is_empty())),
         _ => false,
     }
 }
