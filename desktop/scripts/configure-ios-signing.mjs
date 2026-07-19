@@ -14,9 +14,10 @@ if (!teamId || !profileName || !bundleId) {
 
 const projectDirectory = resolve("src-tauri/gen/apple");
 const projectSpec = resolve(projectDirectory, "project.yml");
-const marker = "        ENABLE_BITCODE: false\n";
+const signingMarker = "        ENABLE_BITCODE: false\n";
+const encryptionMarker = "        LSRequiresIPhoneOS: true\n";
 const signingSettings = [
-  marker.trimEnd(),
+  signingMarker.trimEnd(),
   "        CODE_SIGN_STYLE: Manual",
   '        CODE_SIGN_IDENTITY: "Apple Distribution"',
   `        DEVELOPMENT_TEAM: ${teamId}`,
@@ -25,11 +26,24 @@ const signingSettings = [
 ].join("\n");
 
 const source = readFileSync(projectSpec, "utf8");
-if (!source.includes(marker)) {
+if (!source.includes(signingMarker)) {
   throw new Error(`Could not find iOS signing settings marker in ${projectSpec}`);
 }
+if (!source.includes(encryptionMarker)) {
+  throw new Error(`Could not find iOS encryption marker in ${projectSpec}`);
+}
 
-writeFileSync(projectSpec, source.replace(marker, signingSettings));
+let configuredSource = source;
+if (!configuredSource.includes("        CODE_SIGN_STYLE: Manual\n")) {
+  configuredSource = configuredSource.replace(signingMarker, signingSettings);
+}
+if (!configuredSource.includes("        ITSAppUsesNonExemptEncryption: false\n")) {
+  configuredSource = configuredSource.replace(
+    encryptionMarker,
+    `${encryptionMarker}        ITSAppUsesNonExemptEncryption: false\n`,
+  );
+}
+writeFileSync(projectSpec, configuredSource);
 execFileSync("xcodegen", ["generate", "--spec", projectSpec], {
   cwd: projectDirectory,
   stdio: "inherit",
@@ -37,6 +51,21 @@ execFileSync("xcodegen", ["generate", "--spec", projectSpec], {
 
 const exportOptions = resolve(projectDirectory, "ExportOptions.plist");
 const plistBuddy = "/usr/libexec/PlistBuddy";
+for (const key of [
+  "teamID",
+  "signingStyle",
+  "signingCertificate",
+  "provisioningProfiles",
+]) {
+  try {
+    execFileSync(plistBuddy, ["-c", `Delete :${key}`, exportOptions], {
+      stdio: "ignore",
+    });
+  } catch {
+    // A freshly generated export options plist does not contain these keys yet.
+  }
+}
+
 const plistCommands = [
   "Set :method app-store-connect",
   `Add :teamID string ${teamId}`,
