@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const teamId = process.env.APPLE_DEVELOPMENT_TEAM;
@@ -44,6 +44,21 @@ if (!configuredSource.includes("        ITSAppUsesNonExemptEncryption: false\n")
   );
 }
 writeFileSync(projectSpec, configuredSource);
+
+const iosIconDirectory = resolve("src-tauri/icons/ios");
+const generatedIconDirectory = resolve(
+  projectDirectory,
+  "Assets.xcassets/AppIcon.appiconset",
+);
+for (const icon of readdirSync(iosIconDirectory).filter((file) =>
+  file.endsWith(".png"),
+)) {
+  copyFileSync(
+    resolve(iosIconDirectory, icon),
+    resolve(generatedIconDirectory, icon),
+  );
+}
+
 execFileSync("xcodegen", ["generate", "--spec", projectSpec], {
   cwd: projectDirectory,
   stdio: "inherit",
