@@ -93,6 +93,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Authenticate private native dependencies
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.PHOTON_DEPLOY_KEY }}
+
+      - name: Use SSH for private GitHub dependencies
+        run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -186,6 +194,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Authenticate private native dependencies
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.PHOTON_DEPLOY_KEY }}
+
+      - name: Use SSH for private GitHub dependencies
+        run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
 
       - name: Setup Node
         uses: actions/setup-node@v4
