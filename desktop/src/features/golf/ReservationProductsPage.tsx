@@ -11,7 +11,8 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { fieldApiJson, fieldApiText, fieldTenant } from '../../api'
+import { courseboardApiJson, fieldTenant } from '../../api'
+import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   DataTable,
   EmptyState,
@@ -21,7 +22,6 @@ import {
   Metric,
   MetricGrid,
   NativeSelect,
-  NativeTextarea,
   Notice,
   PageHeader,
   PageRefreshButton,
@@ -29,11 +29,6 @@ import {
   ResourceError,
   type DataTableColumn,
 } from '../../components/Page'
-import {
-  buildGolfExtensionConfig,
-  golfExtensionConfigToDraft,
-  type GolfExtensionConfigDraft,
-} from './extension-config'
 import {
   applyCapacityToSlots,
   calculateCaddieCapacity,
@@ -47,19 +42,15 @@ import {
   type CapacityAvailability,
   type CapacityProfile,
   type CaddieSlotCapacity,
-  type ExtensionStatus,
   type GolfProductSlot,
   type GolfReservationProduct,
   type GolfReservationProductDraft,
   type PlayType,
 } from './models'
 
-const extensionKey = 'golf_course'
-const extensionsStatusPath = '/v1/erp/extensions/status'
-const extensionConfigPath = `/v1/erp/extensions/${extensionKey}/config`
-const productsPath = '/v1/erp/extensions/golf-course/reservation-products'
-const caddieProfilesPath = '/v1/erp/extensions/golf-course/caddie-profiles'
-const caddieAvailabilitiesPath = '/v1/erp/extensions/golf-course/caddie-availabilities'
+const productsPath = '/v1/course/reservation-products'
+const caddieProfilesPath = '/v1/course/caddie-profiles'
+const caddieAvailabilitiesPath = '/v1/course/caddie-availabilities'
 
 type EditableSlot = GolfProductSlot & { clientKey: string }
 
@@ -135,10 +126,6 @@ function validateProduct(draft: GolfReservationProductDraft) {
 
 export function ReservationProductsPage() {
   const tenant = fieldTenant()
-  const [extension, setExtension] = useState<ExtensionStatus | null>(null)
-  const [configDraft, setConfigDraft] = useState<GolfExtensionConfigDraft>(
-    () => golfExtensionConfigToDraft({}),
-  )
   const [products, setProducts] = useState<GolfReservationProduct[]>([])
   const [slotsByService, setSlotsByService] = useState<Record<string, EditableSlot[]>>({})
   const [slotLoadErrors, setSlotLoadErrors] = useState<Record<string, string>>({})
@@ -148,8 +135,6 @@ export function ReservationProductsPage() {
   const [loadError, setLoadError] = useState<unknown>(null)
   const [message, setMessage] = useState<PageMessage | null>(null)
 
-  const [configSaving, setConfigSaving] = useState(false)
-  const [configError, setConfigError] = useState<string | null>(null)
   const [productEditor, setProductEditor] = useState<ProductEditorState>(null)
   const [productDraft, setProductDraft] = useState<GolfReservationProductDraft>(emptyProductDraft)
   const [productSaving, setProductSaving] = useState(false)
@@ -166,15 +151,11 @@ export function ReservationProductsPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const [statusResponse, productResponse] = await Promise.all([
-        fieldApiJson<{ items: ExtensionStatus[] }>(extensionsStatusPath),
-        fieldApiJson<{ items: GolfReservationProduct[] }>(productsPath),
-      ])
-      const nextExtension = statusResponse.items.find(item => item.extensionKey === extensionKey) ?? null
+      const productResponse = await courseboardApiJson<{ items: GolfReservationProduct[] }>(productsPath)
       const nextProducts = productResponse.items
       const slotResults = await Promise.all(nextProducts.map(async product => {
         try {
-          const response = await fieldApiJson<{ items: GolfProductSlot[] }>(
+          const response = await courseboardApiJson<{ items: GolfProductSlot[] }>(
             slotsPath(product.reservationServiceId),
           )
           return {
@@ -198,8 +179,6 @@ export function ReservationProductsPage() {
         if (result.error) nextSlotErrors[result.serviceId] = result.error
       })
 
-      setExtension(nextExtension)
-      setConfigDraft(golfExtensionConfigToDraft(nextExtension?.configJson ?? {}))
       setProducts(nextProducts)
       setSlotsByService(nextSlots)
       setSlotLoadErrors(nextSlotErrors)
@@ -228,23 +207,17 @@ export function ReservationProductsPage() {
   )
   const selectedSlots = selectedServiceId ? slotsByService[selectedServiceId] ?? [] : []
   const totalSlots = Object.values(slotsByService).reduce((sum, slots) => sum + slots.length, 0)
-  const persistedConfigDraft = golfExtensionConfigToDraft(extension?.configJson ?? {})
-  const configDirty = JSON.stringify(configDraft) !== JSON.stringify(persistedConfigDraft)
-  const hasUnsavedChanges = configDirty || dirtyServiceIds.length > 0
+  const hasUnsavedChanges = dirtyServiceIds.length > 0
 
-  function requestReload() {
+  const requestReload = useCallback(() => {
     if (
       hasUnsavedChanges
-      && !window.confirm('未保存の設定または受付枠があります。破棄して再読み込みしますか？')
+      && !window.confirm('未保存の受付枠があります。破棄して再読み込みしますか？')
     ) return
     void loadPage()
-  }
+  }, [hasUnsavedChanges, loadPage])
 
-  function changeConfigDraft(patch: Partial<GolfExtensionConfigDraft>) {
-    setConfigDraft(current => ({ ...current, ...patch }))
-    setConfigError(null)
-    setMessage(null)
-  }
+  useRegisterPageReload(requestReload)
 
   function beginCreateProduct() {
     setProductDraft(emptyProductDraft())
@@ -280,30 +253,6 @@ export function ReservationProductsPage() {
     }))
   }
 
-  async function saveExtensionConfig() {
-    setConfigSaving(true)
-    setConfigError(null)
-    setMessage(null)
-    try {
-      const configJson = buildGolfExtensionConfig(configDraft, extension?.configJson ?? {})
-      await fieldApiText(extensionConfigPath, {
-        method: 'PATCH',
-        body: JSON.stringify({ scopeType: 'tenant', configJson }),
-      })
-      setExtension(current => current ? { ...current, configJson } : current)
-      setConfigDraft(golfExtensionConfigToDraft(configJson))
-      setMessage({
-        tone: 'success',
-        title: 'アプリ設定を保存しました',
-        body: '新しい基本設定をゴルフ拡張へ反映しました。',
-      })
-    } catch (error) {
-      setConfigError(errorMessage(error))
-    } finally {
-      setConfigSaving(false)
-    }
-  }
-
   async function saveProduct(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!productEditor) return
@@ -314,7 +263,7 @@ export function ReservationProductsPage() {
     }
     if (
       hasUnsavedChanges
-      && !window.confirm('未保存の設定または受付枠があります。先に保存せず、プレー設定を反映しますか？')
+      && !window.confirm('未保存の受付枠があります。先に保存せず、プレー設定を反映しますか？')
     ) return
 
     const serviceId = productDraft.serviceId.trim()
@@ -322,7 +271,7 @@ export function ReservationProductsPage() {
     setProductError(null)
     setMessage(null)
     try {
-      await fieldApiText(`${productsPath}/${encodeURIComponent(serviceId)}`, {
+      await courseboardApiJson(`${productsPath}/${encodeURIComponent(serviceId)}`, {
         method: 'POST',
         body: JSON.stringify({
           playType: productDraft.playType,
@@ -401,7 +350,7 @@ export function ReservationProductsPage() {
         maxGroups: slot.maxGroups,
         maxPlayers: slot.maxPlayers,
       }))
-      await fieldApiText(slotsPath(serviceId), {
+      await courseboardApiJson(slotsPath(serviceId), {
         method: 'PUT',
         body: JSON.stringify({ slots }),
       })
@@ -431,8 +380,8 @@ export function ReservationProductsPage() {
     try {
       const query = `from=${encodeURIComponent(capacityDate)}&to=${encodeURIComponent(capacityDate)}`
       const [profilesResponse, availabilityResponse] = await Promise.all([
-        fieldApiJson<{ items: CapacityProfile[] }>(caddieProfilesPath),
-        fieldApiJson<{ items: CapacityAvailability[] }>(`${caddieAvailabilitiesPath}?${query}`),
+        courseboardApiJson<{ items: CapacityProfile[] }>(caddieProfilesPath),
+        courseboardApiJson<{ items: CapacityAvailability[] }>(`${caddieAvailabilitiesPath}?${query}`),
       ])
       setCapacity(calculateCaddieCapacity(
         profilesResponse.items,
@@ -649,7 +598,7 @@ export function ReservationProductsPage() {
       <PageHeader
         eyebrow={`Golf inventory · ${tenant}`}
         title="ゴルフ予約商品"
-        description="拡張設定、プレー区分、曜日別受付枠、キャディ供給量を一つの作業面で管理します。"
+        description="プレー区分、曜日別受付枠、キャディ供給量を管理します。既定通貨・タイムゾーンは設定画面で変更します。"
         actions={(
           <>
             <PageRefreshButton onClick={requestReload} />
@@ -661,12 +610,6 @@ export function ReservationProductsPage() {
       />
 
       <MetricGrid>
-        <Metric
-          label="ゴルフ拡張"
-          value={extension?.tenantStatus === 'enabled' ? '有効' : '無効'}
-          detail={`設定 v${extension?.configVersion ?? '—'}`}
-          tone={extension?.tenantStatus === 'enabled' ? 'success' : 'warning'}
-        />
         <Metric label="予約サービス" value={products.length} detail="プレー設定済み" />
         <Metric label="受付枠" value={totalSlots} detail="全サービス合計" />
         <Metric
@@ -679,130 +622,6 @@ export function ReservationProductsPage() {
       {message ? (
         <Notice tone={message.tone} title={message.title}>{message.body}</Notice>
       ) : null}
-
-      <Panel
-        title="ゴルフ拡張設定"
-        description="予約商品の既定値と公開画面に表示する内容を設定します。"
-        actions={(
-          <div className="flex items-center gap-2">
-            <Badge variant={extension?.tenantStatus === 'enabled' ? 'success' : 'warning'}>
-              {extension?.tenantStatus === 'enabled' ? '有効' : '無効'}
-            </Badge>
-            <Badge variant={extension?.validation?.valid === false ? 'destructive' : 'outline'}>
-              {extension?.validation?.valid === false ? '検証エラー' : '検証済み'}
-            </Badge>
-            {configDirty ? <Badge variant="warning">未保存</Badge> : null}
-          </div>
-        )}
-      >
-        {!extension ? (
-          <Notice tone="warning" title="拡張状態を取得できません">
-            extension key「{extensionKey}」がstatus応答にありません。設定を保存する前に有効化状態を確認してください。
-          </Notice>
-        ) : null}
-        {extension?.validation?.errors?.length ? (
-          <Notice tone="danger" title="現在の設定に検証エラーがあります">
-            <ul className="grid gap-1 pl-4">
-              {extension.validation.errors.map(validationError => (
-                <li key={validationError}>{validationError}</li>
-              ))}
-            </ul>
-          </Notice>
-        ) : null}
-        <div className="grid gap-4">
-          <FormGrid columns={3}>
-            <Field label="カート利用" required>
-              <NativeSelect
-                value={configDraft.cartPolicy}
-                onChange={event => changeConfigDraft({
-                  cartPolicy: event.target.value as GolfExtensionConfigDraft['cartPolicy'],
-                })}
-              >
-                <option value="optional">任意</option>
-                <option value="required">必須</option>
-                <option value="unavailable">利用不可</option>
-              </NativeSelect>
-            </Field>
-            <Field label="既定ホール数" required>
-              <NativeSelect
-                value={configDraft.defaultHoles}
-                onChange={event => changeConfigDraft({ defaultHoles: event.target.value })}
-              >
-                <option value="18">18ホール</option>
-                <option value="9">9ホール</option>
-              </NativeSelect>
-            </Field>
-            <Field label="既定の所要時間" hint="30〜720分" required>
-              <Input
-                type="number"
-                min="30"
-                max="720"
-                step="1"
-                value={configDraft.defaultDurationMinutes}
-                onChange={event => changeConfigDraft({ defaultDurationMinutes: event.target.value })}
-              />
-            </Field>
-            <Field label="1枠の最大人数" hint="1〜4人" required>
-              <Input
-                type="number"
-                min="1"
-                max="4"
-                step="1"
-                value={configDraft.maxPlayersPerTeeTime}
-                onChange={event => changeConfigDraft({ maxPlayersPerTeeTime: event.target.value })}
-              />
-            </Field>
-            <Field label="会員デポジット率" hint="0〜100%" required>
-              <Input
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={configDraft.memberDepositPercent}
-                onChange={event => changeConfigDraft({ memberDepositPercent: event.target.value })}
-              />
-            </Field>
-            <Field label="ゲストデポジット率" hint="0〜100%" required>
-              <Input
-                type="number"
-                min="0"
-                max="100"
-                step="0.01"
-                value={configDraft.guestDepositPercent}
-                onChange={event => changeConfigDraft({ guestDepositPercent: event.target.value })}
-              />
-            </Field>
-          </FormGrid>
-          <FormGrid columns={2}>
-            <Field label="公開商品名" hint="予約画面に表示するプラン名">
-              <Input
-                value={configDraft.publicProductName}
-                onChange={event => changeConfigDraft({ publicProductName: event.target.value })}
-              />
-            </Field>
-            <Field label="公開商品説明" hint={`最終更新 ${formatUpdatedAt(extension?.updatedAt)}`}>
-              <NativeTextarea
-                rows={3}
-                value={configDraft.publicProductDescription}
-                onChange={event => changeConfigDraft({ publicProductDescription: event.target.value })}
-              />
-            </Field>
-          </FormGrid>
-          {configError ? (
-            <Notice tone="danger" title="設定を保存できません">{configError}</Notice>
-          ) : null}
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              variant="primary"
-              disabled={configSaving}
-              onClick={() => void saveExtensionConfig()}
-            >
-              <Save /> {configSaving ? '保存中' : '基本設定を保存'}
-            </Button>
-          </div>
-        </div>
-      </Panel>
 
       {productEditor ? (
         <Panel
@@ -977,8 +796,8 @@ export function ReservationProductsPage() {
           description="希望休が未登録のアクティブキャディは稼働可能として計算します。結果は選択中サービスの同一曜日へ反映します。"
           actions={<Badge variant="outline"><Users /> 稼働連携</Badge>}
         >
-          <FormGrid columns={3}>
-            <Field label="対象日" required>
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="対象日" required className="w-full sm:w-44">
               <Input
                 type="date"
                 value={capacityDate}
@@ -989,16 +808,14 @@ export function ReservationProductsPage() {
                 }}
               />
             </Field>
-            <div className="flex items-end">
-              <Button
-                type="button"
-                disabled={capacityLoading || !capacityDate}
-                onClick={() => void calculateCapacity()}
-              >
-                <Sparkles /> {capacityLoading ? '算出中' : '供給量を算出'}
-              </Button>
-            </div>
-          </FormGrid>
+            <Button
+              type="button"
+              disabled={capacityLoading || !capacityDate}
+              onClick={() => void calculateCapacity()}
+            >
+              <Sparkles /> {capacityLoading ? '算出中' : '供給量を算出'}
+            </Button>
+          </div>
 
           {capacityError ? (
             <Notice tone="danger" title="供給量を算出できません">{capacityError}</Notice>
@@ -1038,9 +855,6 @@ export function ReservationProductsPage() {
         </Notice>
       ) : null}
 
-      <Notice tone="info" title="設定モデルについて">
-        拡張の基本設定とゴルフ固有の予約サービス・受付枠は別APIです。この画面では両方を管理できますが、同期は行わず、それぞれ明示的に保存します。
-      </Notice>
     </div>
   )
 }

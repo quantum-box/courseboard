@@ -17,6 +17,8 @@ import { GolfHomePage } from './features/golf/GolfHomePage'
 import { PolicyPage } from './features/golf/PolicyPage'
 import { ReservationProductsPage } from './features/golf/ReservationProductsPage'
 import { SettlementPage } from './features/golf/SettlementPage'
+import { TimelinePage } from './features/golf/timeline/TimelinePage'
+import { SettingsPage } from './features/settings/SettingsPage'
 import { useCartUpdates } from './hooks/useCartUpdates'
 import { navigate, useRoute } from './lib/router'
 import { PaymentPage } from './PaymentPage'
@@ -54,12 +56,26 @@ function OperatorWebRedirect({ href }: { href: string }) {
 function RouteContent({ route }: { route: string }) {
   if (route === 'golf') return <GolfHomePage />
   if (route === 'golf/courses') return <CoursesPage />
-  if (route === 'golf/products') return <ReservationProductsPage />
+  if (route === 'golf/products' || route === 'golf/reservation-products') {
+    return <ReservationProductsPage />
+  }
+  if (route === 'golf/timeline') return <TimelinePage />
   if (route === 'golf/caddies' || route.startsWith('golf/caddies/')) {
-    const profileId = route === 'golf/caddies'
-      ? undefined
-      : decodeRouteSegment(route.slice('golf/caddies/'.length))
-    return <CaddiesPage key={route} initialProfileId={profileId} />
+    const segment = route === 'golf/caddies'
+      ? ''
+      : decodeRouteSegment(route.slice('golf/caddies/'.length).split('/')[0] ?? '')
+    // Keep a stable key so selecting a caddie (or switching roster/dispatch tabs)
+    // updates props instead of remounting and flashing every useResource loader.
+    if (segment === 'dispatch' || segment === 'attendance' || segment === 'payroll') {
+      return <CaddiesPage key="golf/caddies" initialView={segment} />
+    }
+    return (
+      <CaddiesPage
+        key="golf/caddies"
+        initialView="roster"
+        initialProfileId={segment || undefined}
+      />
+    )
   }
   if (route === 'golf/budgets') return <BudgetsPage />
   if (route === 'golf/policy') return <PolicyPage />
@@ -70,6 +86,7 @@ function RouteContent({ route }: { route: string }) {
     return <CancellationFeeDetailPage invoiceId={decodeRouteSegment(route.slice('cancellation-fees/'.length))} />
   }
   if (route === 'course-map') return <CourseMapPage />
+  if (route === 'settings') return <SettingsPage />
   return <NotFoundPage />
 }
 
@@ -83,18 +100,25 @@ function decodeRouteSegment(value: string) {
 
 function CourseMapPage() {
   const { carts, status } = useCartUpdates(WS_URL)
+  const live = status === 'online' || status === 'mock'
   return (
     <div className="course-map-page">
       <div className="map-toolbar">
         <div>
-          <span className={`connection-dot ${status === 'online' ? 'online' : ''}`} />
+          <span className={`connection-dot ${live ? 'online' : ''}`} />
           {status === 'online'
             ? `リアルタイム · ${carts.length}台`
-            : status === 'connecting'
-              ? 'シミュレーターへ接続中'
-              : 'シミュレーターはオフライン'}
+            : status === 'mock'
+              ? `開発モック · ${carts.length}台`
+              : status === 'connecting'
+                ? 'シミュレーターへ接続中'
+                : 'シミュレーターはオフライン'}
         </div>
-        <span>Desktop simulator · ws://127.0.0.1:9001</span>
+        <span>
+          {status === 'mock'
+            ? 'Browser mock · Tauri WS unavailable'
+            : 'Desktop simulator · ws://127.0.0.1:9001'}
+        </span>
       </div>
       <div className="course-map-stage"><CourseMap carts={carts} /></div>
     </div>
@@ -108,7 +132,7 @@ function NotFoundPage() {
       <h1>画面が見つかりません</h1>
       <p>指定された Course Board の画面は移動または削除されています。</p>
       <Button type="button" variant="primary" onClick={() => navigate('golf')}>
-        <ArrowLeft /> ゴルフアプリへ戻る
+        <ArrowLeft /> ホームへ戻る
       </Button>
     </div>
   )

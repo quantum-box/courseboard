@@ -15,7 +15,6 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  CircleDollarSign,
   ClipboardCheck,
   Clock,
   Download,
@@ -32,6 +31,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import {
+  useCallback,
   useEffect,
   useMemo,
   useState,
@@ -40,10 +40,13 @@ import {
 } from 'react'
 import {
   downloadText,
+  courseboardApiJson,
+  courseboardApiText,
   fieldApiJson,
   fieldApiText,
   fieldTenant,
 } from '../../api'
+import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   DataTable,
   EmptyState,
@@ -65,10 +68,10 @@ import {
 import { useResource } from '../../hooks/useResource'
 import { navigate } from '../../lib/router'
 
-const GOLF_API = '/v1/erp/extensions/golf-course'
+const COURSE_API = '/v1/course'
 
 type ListResponse<T> = { items: T[] }
-type View = 'dispatch' | 'profiles' | 'payroll'
+type View = 'roster' | 'dispatch' | 'attendance' | 'payroll'
 type SkillLevel = 'rookie' | 'regular' | 'veteran'
 type Rank = 'A' | 'B' | 'C' | 'D'
 type AvailabilityStatus =
@@ -395,25 +398,50 @@ function FlashNotice({ flash, onDismiss }: { flash: Flash; onDismiss: () => void
   )
 }
 
-export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } = {}) {
+const VIEW_COPY: Record<View, { title: string; description: string }> = {
+  roster: {
+    title: 'キャディ名簿',
+    description: 'プロフィール、スタッフ連携、希望休、評価を管理します。',
+  },
+  dispatch: {
+    title: 'キャディ配置',
+    description: '当日の割当を主作業にし、供給判断と自動配置は補助ツールとして使います。',
+  },
+  attendance: {
+    title: 'キャディ勤怠',
+    description: '出勤状態と割当を照合し、その場で打刻します。',
+  },
+  payroll: {
+    title: 'キャディ給与',
+    description: '勤怠と確定費用を月次で照合し、給与CSVへ渡します。',
+  },
+}
+
+export function CaddiesPage({
+  initialView = 'roster',
+  initialProfileId,
+}: {
+  initialView?: View
+  initialProfileId?: string
+} = {}) {
   const tenant = fieldTenant()
-  const [view, setView] = useState<View>(initialProfileId ? 'profiles' : 'dispatch')
+  const [view, setView] = useState<View>(initialView)
   const [operationDate, setOperationDate] = useState(todayJst)
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(initialProfileId ?? null)
   const [createOpen, setCreateOpen] = useState(false)
   const [flash, setFlash] = useState<Flash>(null)
 
   const profilesResource = useResource(
-    () => fieldApiJson<ListResponse<CaddieProfile>>(`${GOLF_API}/caddie-profiles`),
+    () => courseboardApiJson<ListResponse<CaddieProfile>>(`${COURSE_API}/caddie-profiles`),
     [],
   )
   const assignmentsResource = useResource(
-    () => fieldApiJson<ListResponse<CaddieAssignment>>(`${GOLF_API}/caddie-assignments`),
+    () => courseboardApiJson<ListResponse<CaddieAssignment>>(`${COURSE_API}/caddie-assignments`),
     [],
   )
   const recommendationsResource = useResource(
-    () => fieldApiJson<ListResponse<CaddieRecommendation>>(
-      `${GOLF_API}/caddie-recommendations?playerCount=4&includeRookiePairing=true&limit=5`,
+    () => courseboardApiJson<ListResponse<CaddieRecommendation>>(
+      `${COURSE_API}/caddie-recommendations?playerCount=4&includeRookiePairing=true&limit=5`,
     ),
     [],
   )
@@ -422,12 +450,12 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
     [],
   )
   const coursesResource = useResource(
-    () => fieldApiJson<ListResponse<GolfCourse>>(`${GOLF_API}/courses`),
+    () => courseboardApiJson<ListResponse<GolfCourse>>(`${COURSE_API}/courses`),
     [],
   )
   const attendanceResource = useResource(
-    () => fieldApiJson<AttendanceResponse>(
-      `${GOLF_API}/caddie-attendance-snapshot?date=${encodeURIComponent(operationDate)}`,
+    () => courseboardApiJson<AttendanceResponse>(
+      `${COURSE_API}/caddie-attendance-snapshot?date=${encodeURIComponent(operationDate)}`,
     ),
     [operationDate],
   )
@@ -438,15 +466,25 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
   )
 
   useEffect(() => {
-    if (profiles.length === 0) return
+    setView(initialView)
+  }, [initialView])
+
+  useEffect(() => {
+    if (initialProfileId) {
+      setSelectedProfileId(initialProfileId)
+      setView('roster')
+    }
+  }, [initialProfileId])
+
+  useEffect(() => {
+    if (view !== 'roster' || profiles.length === 0) return
     if (selectedProfileId && profiles.some(profile => profile.id === selectedProfileId)) return
     if (initialProfileId && profiles.some(profile => profile.id === initialProfileId)) {
       setSelectedProfileId(initialProfileId)
-      setView('profiles')
       return
     }
     setSelectedProfileId(profiles[0]?.id ?? null)
-  }, [initialProfileId, profiles, selectedProfileId])
+  }, [initialProfileId, profiles, selectedProfileId, view])
 
   function refreshPeople() {
     profilesResource.refresh()
@@ -462,84 +500,77 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
 
   function selectProfile(profileId: string) {
     setSelectedProfileId(profileId)
-    setView('profiles')
+    setView('roster')
     navigate(`golf/caddies/${encodeURIComponent(profileId)}`)
   }
 
-  function selectView(nextView: View) {
-    setView(nextView)
-    if (nextView === 'profiles' && selectedProfileId) {
-      navigate(`golf/caddies/${encodeURIComponent(selectedProfileId)}`)
+  const refreshCurrentView = useCallback(() => {
+    if (view === 'roster') {
+      profilesResource.refresh()
+      staffResource.refresh()
+      coursesResource.refresh()
+      assignmentsResource.refresh()
+      attendanceResource.refresh()
       return
     }
-    navigate('golf/caddies')
-  }
+    if (view === 'dispatch') {
+      profilesResource.refresh()
+      assignmentsResource.refresh()
+      recommendationsResource.refresh()
+      attendanceResource.refresh()
+      return
+    }
+    if (view === 'attendance') {
+      profilesResource.refresh()
+      attendanceResource.refresh()
+    }
+  }, [
+    view,
+    profilesResource.refresh,
+    staffResource.refresh,
+    coursesResource.refresh,
+    assignmentsResource.refresh,
+    attendanceResource.refresh,
+    recommendationsResource.refresh,
+  ])
+
+  useRegisterPageReload(view === 'payroll' ? null : refreshCurrentView)
+
+  const copy = VIEW_COPY[view]
 
   return (
     <div className="page-stack">
       <PageHeader
         eyebrow={`Golf operations · ${tenant}`}
-        title="キャディ運用"
-        description="朝の供給判断から配車、勤務、プロフィール、給与連携までをひとつの作業面で管理します。"
+        title={copy.title}
+        description={copy.description}
         actions={(
           <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-            <PageRefreshButton
-              variant="secondary"
-              className="min-h-10 flex-1 sm:flex-none"
-              label="更新"
-              onClick={() => {
-                profilesResource.refresh()
-                assignmentsResource.refresh()
-                recommendationsResource.refresh()
-                staffResource.refresh()
-                coursesResource.refresh()
-                attendanceResource.refresh()
-              }}
-            />
-            <Button
-              type="button"
-              variant="primary"
-              className="min-h-10 flex-1 sm:flex-none"
-              onClick={() => setCreateOpen(true)}
-            >
-              <Plus /> キャディを追加
-            </Button>
+            {view !== 'payroll' ? (
+              <PageRefreshButton
+                variant="secondary"
+                className="min-h-10 flex-1 sm:flex-none"
+                label="更新"
+                onClick={refreshCurrentView}
+              />
+            ) : null}
+            {view === 'roster' ? (
+              <Button
+                type="button"
+                variant="primary"
+                className="min-h-10 flex-1 sm:flex-none"
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus /> キャディを追加
+              </Button>
+            ) : null}
           </div>
         )}
       />
 
-      <div
-        className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-surface p-1"
-        role="tablist"
-        aria-label="キャディ運用メニュー"
-      >
-        <ViewButton active={view === 'dispatch'} onClick={() => selectView('dispatch')}>
-          <ClipboardCheck /> <span>本日の配車</span>
-        </ViewButton>
-        <ViewButton active={view === 'profiles'} onClick={() => selectView('profiles')}>
-          <Users /> <span>プロフィール</span>
-        </ViewButton>
-        <ViewButton active={view === 'payroll'} onClick={() => selectView('payroll')}>
-          <CircleDollarSign /> <span>給与</span>
-        </ViewButton>
-      </div>
-
       <FlashNotice flash={flash} onDismiss={() => setFlash(null)} />
 
-      {view === 'dispatch' ? (
-        <DispatchView
-          date={operationDate}
-          onDateChange={setOperationDate}
-          profilesResource={profilesResource}
-          assignmentsResource={assignmentsResource}
-          recommendationsResource={recommendationsResource}
-          attendanceResource={attendanceResource}
-          onChanged={refreshDispatch}
-          setFlash={setFlash}
-        />
-      ) : null}
-
-      {view === 'profiles' ? (
+      {view === 'roster' ? (
         <ProfilesView
           profilesResource={profilesResource}
           assignmentsResource={assignmentsResource}
@@ -555,6 +586,33 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
         />
       ) : null}
 
+      {view === 'dispatch' ? (
+        <DispatchView
+          date={operationDate}
+          onDateChange={setOperationDate}
+          profilesResource={profilesResource}
+          assignmentsResource={assignmentsResource}
+          recommendationsResource={recommendationsResource}
+          attendanceResource={attendanceResource}
+          onChanged={refreshDispatch}
+          setFlash={setFlash}
+        />
+      ) : null}
+
+      {view === 'attendance' ? (
+        <AttendanceView
+          date={operationDate}
+          onDateChange={setOperationDate}
+          profiles={profiles}
+          attendanceResource={attendanceResource}
+          onChanged={() => {
+            attendanceResource.refresh()
+            assignmentsResource.refresh()
+          }}
+          setFlash={setFlash}
+        />
+      ) : null}
+
       {view === 'payroll' ? (
         <PayrollView setFlash={setFlash} />
       ) : null}
@@ -566,7 +624,7 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
         staffLoading={staffResource.loading}
         onCreated={id => {
           setCreateOpen(false)
-          setView('profiles')
+          setView('roster')
           if (id) selectProfile(id)
           refreshPeople()
           setFlash({
@@ -577,32 +635,6 @@ export function CaddiesPage({ initialProfileId }: { initialProfileId?: string } 
         }}
       />
     </div>
-  )
-}
-
-function ViewButton({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={`flex min-h-11 items-center justify-center gap-2 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 sm:text-sm ${
-        active
-          ? 'bg-background text-foreground shadow-sm'
-          : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-      }`}
-    >
-      {children}
-    </button>
   )
 }
 
@@ -636,21 +668,25 @@ function DispatchView({
   ).length
 
   return (
-    <div className="space-y-4">
-      <Panel
-        className="overflow-hidden border-primary/20 bg-selected/30"
-        title="運用日"
-        description="供給・勤怠・自動配置・割当を同じ営業日で揃えます。"
-        actions={(
-          <Input
-            type="date"
-            aria-label="運用日"
-            value={date}
-            onChange={event => onDateChange(event.target.value)}
-            className="min-h-10 w-full bg-background sm:w-44"
-          />
-        )}
-      >
+    <div className="space-y-6">
+      <section className="app-section space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="section-title">割当ボード</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {date} の担当を完了・キャンセルまで更新します。勤怠打刻はサイドバーの「勤怠」へ。
+            </p>
+          </div>
+          <Field label="運用日" className="w-full sm:w-44">
+            <Input
+              type="date"
+              aria-label="運用日"
+              value={date}
+              onChange={event => onDateChange(event.target.value)}
+              className="min-h-10"
+            />
+          </Field>
+        </div>
         <MetricGrid>
           <Metric label="登録キャディ" value={`${profiles.length}人`} detail="全プロフィール" />
           <Metric
@@ -667,35 +703,6 @@ function DispatchView({
             tone={waiting > 0 ? 'warning' : 'success'}
           />
         </MetricGrid>
-      </Panel>
-
-      <DailySupplyPanel date={date} />
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <AutoAssignPanel
-          date={date}
-          onChanged={onChanged}
-          setFlash={setFlash}
-        />
-        <RecommendationsPanel resource={recommendationsResource} />
-      </div>
-
-      <AttendancePanel
-        resource={attendanceResource}
-        profiles={profiles}
-        onChanged={onChanged}
-        setFlash={setFlash}
-      />
-
-      <Panel
-        title="割当ボード"
-        description={`${date} の配車を完了・キャンセルまで更新できます。`}
-        actions={(
-          <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={assignmentsResource.refresh}>
-            <RefreshCw /> 更新
-          </Button>
-        )}
-      >
         {assignmentsResource.loading ? <LoadingState label="割当を読み込み中" /> : null}
         {assignmentsResource.error ? (
           <ResourceError error={assignmentsResource.error} onRetry={assignmentsResource.refresh} />
@@ -708,7 +715,72 @@ function DispatchView({
             setFlash={setFlash}
           />
         ) : null}
-      </Panel>
+      </section>
+
+      <section className="app-section space-y-4">
+        <div>
+          <h2 className="section-title">供給と自動配置</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            キャディ付枠の残量確認と、未割当予約への提案です。販売枠の変更はコース予約側で行います。
+          </p>
+        </div>
+        <DailySupplyPanel date={date} />
+        <div className="grid gap-4 xl:grid-cols-2">
+          <AutoAssignPanel
+            date={date}
+            onChanged={onChanged}
+            setFlash={setFlash}
+          />
+          <RecommendationsPanel resource={recommendationsResource} />
+        </div>
+      </section>
+    </div>
+  )
+}
+
+function AttendanceView({
+  date,
+  onDateChange,
+  profiles,
+  attendanceResource,
+  onChanged,
+  setFlash,
+}: {
+  date: string
+  onDateChange: (date: string) => void
+  profiles: CaddieProfile[]
+  attendanceResource: ResourceValue<AttendanceResponse>
+  onChanged: () => void
+  setFlash: (flash: Flash) => void
+}) {
+  return (
+    <div className="space-y-4">
+      <section className="app-section space-y-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 className="section-title">出勤ボード</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {date} の割当と出勤状態を照合します。スタッフ未連携のキャディは名簿で紐付けてください。
+            </p>
+          </div>
+          <Field label="運用日" className="w-full sm:w-44">
+            <Input
+              type="date"
+              aria-label="運用日"
+              value={date}
+              onChange={event => onDateChange(event.target.value)}
+              className="min-h-10"
+            />
+          </Field>
+        </div>
+      </section>
+      <AttendancePanel
+        resource={attendanceResource}
+        profiles={profiles}
+        onChanged={onChanged}
+        setFlash={setFlash}
+        showHeader={false}
+      />
     </div>
   )
 }
@@ -716,8 +788,8 @@ function DispatchView({
 function DailySupplyPanel({ date }: { date: string }) {
   const [safetyBuffer, setSafetyBuffer] = useState(0)
   const resource = useResource(
-    () => fieldApiJson<CaddieSupply>(
-      `${GOLF_API}/caddie-supply?date=${encodeURIComponent(date)}&safetyBuffer=${safetyBuffer}`,
+    () => courseboardApiJson<CaddieSupply>(
+      `${COURSE_API}/caddie-supply?date=${encodeURIComponent(date)}&safetyBuffer=${safetyBuffer}`,
     ),
     [date, safetyBuffer],
   )
@@ -788,8 +860,8 @@ function AutoAssignPanel({
     setBusy(dryRun ? 'preview' : 'execute')
     setError(null)
     try {
-      const result = await fieldApiJson<AutoAssignResult>(
-        `${GOLF_API}/caddie-auto-assignments`,
+      const result = await courseboardApiJson<AutoAssignResult>(
+      `${COURSE_API}/caddie-auto-assignments`,
         request('POST', { date, dryRun }),
       )
       setPlan(result)
@@ -935,11 +1007,13 @@ function AttendancePanel({
   profiles,
   onChanged,
   setFlash,
+  showHeader = true,
 }: {
   resource: ResourceValue<AttendanceResponse>
   profiles: CaddieProfile[]
   onChanged: () => void
   setFlash: (flash: Flash) => void
+  showHeader?: boolean
 }) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const profileMap = useMemo(
@@ -954,7 +1028,7 @@ function AttendancePanel({
       setFlash({
         tone: 'warning',
         title: 'スタッフが未紐付けです',
-        message: 'プロフィール画面でスタッフを紐付けてから勤怠を記録してください。',
+        message: '名簿でスタッフを紐付けてから勤怠を記録してください。',
       })
       return
     }
@@ -1035,16 +1109,8 @@ function AttendancePanel({
     },
   ]
 
-  return (
-    <Panel
-      title="出勤ボード"
-      description="本日の割当と出勤状態を照合し、その場で打刻します。"
-      actions={(
-        <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={resource.refresh}>
-          <RefreshCw /> 更新
-        </Button>
-      )}
-    >
+  const body = (
+    <>
       {resource.loading ? <LoadingState label="勤怠を読み込み中" /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {resource.data ? (
@@ -1055,6 +1121,22 @@ function AttendancePanel({
           empty={<EmptyState title="本日の勤怠対象はいません" description="割当またはプロフィールを確認してください。" />}
         />
       ) : null}
+    </>
+  )
+
+  if (!showHeader) return <div className="space-y-3">{body}</div>
+
+  return (
+    <Panel
+      title="出勤ボード"
+      description="本日の割当と出勤状態を照合し、その場で打刻します。"
+      actions={(
+        <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={resource.refresh}>
+          <RefreshCw /> 更新
+        </Button>
+      )}
+    >
+      {body}
     </Panel>
   )
 }
@@ -1083,8 +1165,8 @@ function AssignmentsTable({
   async function updateStatus(assignment: CaddieAssignment, status: 'completed' | 'cancelled') {
     setBusyId(assignment.id)
     try {
-      await fieldApiText(
-        `${GOLF_API}/caddie-assignments/${encodeURIComponent(assignment.id)}`,
+      await courseboardApiJson(
+        `${COURSE_API}/caddie-assignments/${encodeURIComponent(assignment.id)}`,
         request('PATCH', {
           caddieProfileId: assignment.caddieProfileId,
           reservationId: assignment.reservationId ?? null,
@@ -1297,7 +1379,9 @@ function ProfilesView({
 
           <Separator className="my-3" />
 
-          {profilesResource.loading ? <LoadingState label="名簿を読み込み中" /> : null}
+          {profilesResource.loading && !profilesResource.data ? (
+            <LoadingState label="名簿を読み込み中" />
+          ) : null}
           {profilesResource.error ? <ResourceError error={profilesResource.error} onRetry={profilesResource.refresh} /> : null}
           {!profilesResource.loading && !profilesResource.error && filtered.length === 0 ? (
             <EmptyState
@@ -1445,7 +1529,7 @@ function ProfileCreateDialog({
         }))
         resolvedStaffId = createdStaff.id
       }
-      const createdText = await fieldApiText(`${GOLF_API}/caddie-profiles`, request('POST', {
+      const created = await courseboardApiJson<{ id?: string }>(`${COURSE_API}/caddie-profiles`, request('POST', {
         displayName: name,
         skillLevel,
         rank,
@@ -1458,12 +1542,7 @@ function ProfileCreateDialog({
         employmentStatus: 'active',
         maxRoundsPerDay: 2,
       }))
-      let createdId: string | undefined
-      try {
-        createdId = (JSON.parse(createdText) as { id?: string }).id
-      } catch {
-        createdId = undefined
-      }
+      const createdId = created?.id
       setDisplayName('')
       setSkillLevel('regular')
       setRank('D')
@@ -1590,16 +1669,18 @@ function ProfileDetail({
   const [tab, setTab] = useState<DetailTab>('basic')
   const [editOpen, setEditOpen] = useState(false)
   const membershipResource = useResource(
-    () => fieldApiJson<ListResponse<CourseMembership>>(
-      `${GOLF_API}/caddie-profiles/${encodeURIComponent(profile.id)}/courses`,
+    () => courseboardApiJson<ListResponse<CourseMembership>>(
+      `${COURSE_API}/caddie-profiles/${encodeURIComponent(profile.id)}/courses`,
     ),
     [profile.id],
+    { cacheKey: `caddie-courses:${profile.id}` },
   )
   const ratingsResource = useResource(
-    () => fieldApiJson<ListResponse<CaddieRating>>(
-      `${GOLF_API}/caddie-ratings?caddieProfileId=${encodeURIComponent(profile.id)}`,
+    () => courseboardApiJson<ListResponse<CaddieRating>>(
+      `${COURSE_API}/caddie-ratings?caddieProfileId=${encodeURIComponent(profile.id)}`,
     ),
     [profile.id],
+    { cacheKey: `caddie-ratings:${profile.id}` },
   )
 
   return (
@@ -1746,8 +1827,8 @@ function ProfileEditDialog({
     setBusy(true)
     setError(null)
     try {
-      await fieldApiText(
-        `${GOLF_API}/caddie-profiles/${encodeURIComponent(profile.id)}`,
+      await courseboardApiJson(
+        `${COURSE_API}/caddie-profiles/${encodeURIComponent(profile.id)}`,
         request('PATCH', profilePatchPayload(profile, {
           displayName: displayName.trim(),
           skillLevel,
@@ -1974,8 +2055,8 @@ function StaffLinkDialog({
         }))
         resolved = created.id
       }
-      await fieldApiText(
-        `${GOLF_API}/caddie-profiles/${encodeURIComponent(profile.id)}`,
+      await courseboardApiJson(
+        `${COURSE_API}/caddie-profiles/${encodeURIComponent(profile.id)}`,
         request('PATCH', profilePatchPayload(profile, { staffId: resolved })),
       )
       onOpenChange(false)
@@ -2069,8 +2150,8 @@ function CourseMembershipPanel({
   async function save() {
     setBusy(true)
     try {
-      await fieldApiText(
-        `${GOLF_API}/caddie-profiles/${encodeURIComponent(profile.id)}/courses`,
+      await courseboardApiJson(
+        `${COURSE_API}/caddie-profiles/${encodeURIComponent(profile.id)}/courses`,
         request('PUT', { courseIds: [...selected], primaryCourseId: primary }),
       )
       resource.refresh()
@@ -2085,7 +2166,7 @@ function CourseMembershipPanel({
   return (
     <Panel title="対応コース" description="担当可能なコースとメイン拠点を設定します。" actions={<MapPin className="size-5 text-primary" aria-hidden="true" />}>
       {coursesError ? <ResourceError error={coursesError} /> : null}
-      {resource.loading ? <LoadingState label="対応コースを読み込み中" /> : null}
+      {resource.loading && !resource.data ? <LoadingState label="対応コースを読み込み中" /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {!resource.loading && !resource.error && courses.length === 0 ? (
         <EmptyState title="コースが登録されていません" description="先にコースマスタを設定してください。" />
@@ -2161,10 +2242,11 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
   const [busy, setBusy] = useState(false)
   const bounds = monthBounds(yearMonth)
   const resource = useResource(
-    () => fieldApiJson<ListResponse<AvailabilityRecord>>(
-      `${GOLF_API}/caddie-availabilities?caddieProfileId=${encodeURIComponent(profile.id)}&from=${bounds.from}&to=${bounds.to}`,
+    () => courseboardApiJson<ListResponse<AvailabilityRecord>>(
+      `${COURSE_API}/caddie-availabilities?caddieProfileId=${encodeURIComponent(profile.id)}&from=${bounds.from}&to=${bounds.to}`,
     ),
     [profile.id, bounds.from, bounds.to],
+    { cacheKey: `caddie-availability:${profile.id}:${bounds.from}:${bounds.to}` },
   )
   const records = useMemo(
     () => new Map((resource.data?.items ?? []).map(record => [record.date, record])),
@@ -2188,7 +2270,7 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
     if (!selectedDate) return
     setBusy(true)
     try {
-      await fieldApiText(`${GOLF_API}/caddie-availabilities`, request('POST', {
+      await courseboardApiJson(`${COURSE_API}/caddie-availabilities`, request('POST', {
         caddieProfileId: profile.id,
         date: selectedDate,
         status,
@@ -2208,8 +2290,8 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
     if (!selectedDate) return
     setBusy(true)
     try {
-      await fieldApiText(
-        `${GOLF_API}/caddie-availabilities/${encodeURIComponent(profile.id)}/${selectedDate}`,
+      await courseboardApiText(
+        `${COURSE_API}/caddie-availabilities/${encodeURIComponent(profile.id)}/${selectedDate}`,
         request('DELETE'),
       )
       setSelectedDate(null)
@@ -2236,7 +2318,7 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
         </div>
       )}
     >
-      {resource.loading ? <LoadingState label="勤務希望を読み込み中" /> : null}
+      {resource.loading && !resource.data ? <LoadingState label="勤務希望を読み込み中" /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {!resource.loading && !resource.error ? (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
@@ -2335,7 +2417,7 @@ function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<Caddi
       description="接客品質の評価とコメントを確認します。"
       actions={<Badge variant={average === null ? 'neutral' : 'warning'}><Star className="fill-current" /> {average?.toFixed(1) ?? '—'} / {ratings.length}件</Badge>}
     >
-      {resource.loading ? <LoadingState label="評価を読み込み中" /> : null}
+      {resource.loading && !resource.data ? <LoadingState label="評価を読み込み中" /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {resource.data ? (
         <DataTable rows={ratings} columns={columns} rowKey={row => row.id} empty={<EmptyState title="評価はまだありません" description="プレー後の顧客評価がここに表示されます。" />} />
@@ -2348,11 +2430,12 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
   const [yearMonth, setYearMonth] = useState(previousYearMonth)
   const [downloading, setDownloading] = useState(false)
   const resource = useResource(
-    () => fieldApiJson<PayrollResponse>(
-      `${GOLF_API}/caddie-payroll-summary?yearMonth=${encodeURIComponent(yearMonth)}`,
+    () => courseboardApiJson<PayrollResponse>(
+      `${COURSE_API}/caddie-payroll-summary?yearMonth=${encodeURIComponent(yearMonth)}`,
     ),
     [yearMonth],
   )
+  useRegisterPageReload(resource.refresh)
   const rows = resource.data?.items ?? []
   const totals = rows.reduce(
     (value, row) => ({
@@ -2367,8 +2450,8 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
   async function downloadCsv() {
     setDownloading(true)
     try {
-      const csv = await fieldApiText(
-        `${GOLF_API}/caddie-payroll-summary/export.csv?yearMonth=${encodeURIComponent(yearMonth)}`,
+      const csv = await courseboardApiText(
+        `${COURSE_API}/caddie-payroll-summary/export.csv?yearMonth=${encodeURIComponent(yearMonth)}`,
       )
       downloadText(`caddie-payroll-${yearMonth}.csv`, csv)
       setFlash({ tone: 'success', title: '給与CSVをダウンロードしました', message: `${yearMonth} の集計を出力しました。` })
@@ -2440,7 +2523,7 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
         title="キャディ別集計"
         description="未紐付け、退勤未記録、割当に対する未出勤をCSV出力前に確認してください。"
         actions={(
-          <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={resource.refresh}>
+          <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={resource.refresh} title="⌘R">
             <RefreshCw /> 更新
           </Button>
         )}

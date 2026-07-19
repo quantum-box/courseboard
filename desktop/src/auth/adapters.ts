@@ -69,6 +69,7 @@ type NativeTenantPayload = string | {
   id?: string
   name?: string
   slug?: string
+  alias?: string
   mode?: 'production' | 'sandbox'
   platformId?: string
   operatorId?: string
@@ -102,11 +103,38 @@ function runtimeMode(): AuthTenant['mode'] {
     : 'production'
 }
 
+/**
+ * Local mock/demo chrome only.
+ * Never overlay name/slug onto prod Field tenants (`MOCK_DATA=false`).
+ */
+function usesLocalDemoTenantChrome() {
+  const flag = import.meta.env.VITE_COURSEBOARD_MOCK_DATA
+  if (flag === 'false' || flag === '0') return false
+  return import.meta.env.VITE_COURSEBOARD_AUTH_MODE === 'development'
+    || flag === 'true'
+}
+
+function envTenantLabels(id: string): { name?: string; slug?: string } {
+  if (!usesLocalDemoTenantChrome()) return {}
+  const envId = import.meta.env.VITE_COURSEBOARD_TENANT_ID?.trim()
+  // Only attach local chrome labels to the configured default tenant.
+  if (envId && envId !== id) return {}
+  const name = import.meta.env.VITE_COURSEBOARD_TENANT_NAME?.trim()
+  const slug = import.meta.env.VITE_COURSEBOARD_TENANT_SLUG?.trim()
+  return {
+    ...(name ? { name } : {}),
+    ...(slug ? { slug } : {}),
+  }
+}
+
 function envTenant(id: string, name = id): AuthTenant {
   const mode = runtimeMode()
+  const labels = envTenantLabels(id)
+  const resolvedName = (name && name !== id ? name : undefined) || labels.name || name
   return {
     id,
-    name,
+    name: resolvedName,
+    ...(labels.slug ? { slug: labels.slug } : {}),
     mode,
     platformId: import.meta.env.VITE_COURSEBOARD_PLATFORM_ID ?? RUNTIME_CONTEXT[mode].platformId,
     operatorId: import.meta.env.VITE_COURSEBOARD_OPERATOR_ID ?? id,
@@ -259,11 +287,15 @@ function browserPkceConfiguration(): BrowserPkceConfiguration {
 function nativeTenant(payload: NativeTenantPayload) {
   if (typeof payload === 'string') return envTenant(payload)
   if (!payload.id) return undefined
-  const fallback = envTenant(payload.id, payload.name ?? payload.id)
+  const labels = envTenantLabels(payload.id)
+  const rawName = payload.name?.trim()
+  const rawSlug = payload.slug?.trim() || payload.alias?.trim() || undefined
+  const fallback = envTenant(payload.id, rawName || labels.name || payload.id)
+  const distinctName = rawName && rawName !== payload.id ? rawName : undefined
   return {
     ...fallback,
-    name: payload.name?.trim() || fallback.name,
-    slug: payload.slug,
+    name: distinctName || labels.name || rawName || fallback.name,
+    slug: rawSlug || labels.slug || fallback.slug,
     mode: payload.mode ?? fallback.mode,
     platformId: payload.platformId ?? fallback.platformId,
     operatorId: payload.operatorId ?? fallback.operatorId,
@@ -325,10 +357,18 @@ class WebSessionAdapter implements AuthAdapter {
 }
 
 class DevelopmentAdapter implements AuthAdapter {
-  private readonly token = import.meta.env.VITE_COURSEBOARD_API_BEARER as string
+  private readonly configuredToken = import.meta.env.VITE_COURSEBOARD_API_BEARER as string
+  private token: string | undefined = this.configuredToken
+  private lastSignOutReason?: AuthReason
 
   async bootstrap(): Promise<AuthBootstrapResult> {
-    const id = import.meta.env.VITE_COURSEBOARD_TENANT_ID ?? 'scc'
+    if (!this.token) {
+      return { kind: 'anonymous', reason: this.lastSignOutReason }
+    }
+    const id = import.meta.env.VITE_COURSEBOARD_TENANT_ID ?? 'courseboard_id'
+    const localName = usesLocalDemoTenantChrome()
+      ? (import.meta.env.VITE_COURSEBOARD_TENANT_NAME?.trim() || id)
+      : id
     return {
       kind: 'authenticated',
       user: {
@@ -336,13 +376,36 @@ class DevelopmentAdapter implements AuthAdapter {
         name: 'Local operator',
         role: 'DEVELOPMENT',
       },
-      tenants: [envTenant(id, import.meta.env.VITE_COURSEBOARD_TENANT_NAME ?? id)],
+      tenants: [envTenant(id, localName)],
     }
   }
 
-  async signIn() {}
+  async signIn() {
+    // Restore the configured bearer so operators can retry after updating JWT
+    // without a hard page reload.
+    this.token = this.configuredToken
+    this.lastSignOutReason = undefined
+  }
+
   async getAccessToken() { return this.token }
-  async signOut() { window.location.reload() }
+
+  async signOut(reason?: AuthReason) {
+    // Soft sign-out only. Hard reload re-bootstraps with the same invalid JWT,
+    // which retriggers 401 → onUnauthorized → reload in a loop.
+    this.token = undefined
+    this.lastSignOutReason = reason
+  }
+}
+
+/** platform-ui.session-style durable browser-pkce session (survives Vite HMR / hard refresh). */
+export const BROWSER_PKCE_SESSION_KEY = 'courseboard.auth.browser.session'
+/** Legacy refresh-only key (sessionStorage); migrated on read then removed. */
+const BROWSER_PKCE_REFRESH_KEY_LEGACY = 'courseboard.auth.browser.refresh'
+
+type BrowserPkceSession = {
+  accessToken: string
+  refreshToken?: string
+  accessTokenExpiresAt: number
 }
 
 class BrowserPkceAdapter implements AuthAdapter {
@@ -351,6 +414,10 @@ class BrowserPkceAdapter implements AuthAdapter {
   private accessTokenExpiresAt = 0
   private refreshToken?: string
   private tokenRequest?: Promise<string | undefined>
+
+  constructor() {
+    this.restoreSession()
+  }
 
   async bootstrap(): Promise<AuthBootstrapResult> {
     if (!this.accessToken || Date.now() >= this.accessTokenExpiresAt - 60_000) {
@@ -391,6 +458,8 @@ class BrowserPkceAdapter implements AuthAdapter {
       throw new NativeAuthorizationError('Tachyon Authからログインセッションを受信できませんでした。')
     }
 
+    // platform-ui / ADR-0022: JSON authorize returns the code (no browser redirect).
+    // redirect_uri is still required and must match the registered public client URI.
     const transaction = await createPkceTransaction(this.configuration.redirectUri)
     const authorizationResponse = await fetch(this.configuration.authorizationEndpoint, {
       method: 'POST',
@@ -431,6 +500,9 @@ class BrowserPkceAdapter implements AuthAdapter {
   }
 
   async getAccessToken(forceRefresh = false) {
+    if (!this.accessToken && !this.refreshToken) {
+      this.restoreSession()
+    }
     const hasFreshToken = this.accessToken && Date.now() < this.accessTokenExpiresAt - 60_000
     if (!forceRefresh && hasFreshToken) return this.accessToken
     if (!this.refreshToken) return undefined
@@ -443,19 +515,49 @@ class BrowserPkceAdapter implements AuthAdapter {
   }
 
   async signOut() {
+    this.clearSession()
+  }
+
+  private restoreSession() {
+    const session = readStoredBrowserSession()
+    if (!session) return
+    this.accessToken = session.accessToken || undefined
+    this.accessTokenExpiresAt = session.accessTokenExpiresAt
+    this.refreshToken = session.refreshToken
+  }
+
+  private persistSession() {
+    if (!this.accessToken) {
+      clearStoredBrowserSession()
+      return
+    }
+    writeStoredBrowserSession({
+      accessToken: this.accessToken,
+      refreshToken: this.refreshToken,
+      accessTokenExpiresAt: this.accessTokenExpiresAt,
+    })
+  }
+
+  private clearSession() {
     this.accessToken = undefined
     this.accessTokenExpiresAt = 0
     this.refreshToken = undefined
+    clearStoredBrowserSession()
   }
 
   private async refreshAccessToken() {
     if (!this.refreshToken) return undefined
-    await this.exchangeToken({
-      grant_type: 'refresh_token',
-      client_id: this.configuration.clientId,
-      refresh_token: this.refreshToken,
-    }, this.refreshToken)
-    return this.accessToken
+    try {
+      await this.exchangeToken({
+        grant_type: 'refresh_token',
+        client_id: this.configuration.clientId,
+        refresh_token: this.refreshToken,
+      }, this.refreshToken)
+      return this.accessToken
+    } catch {
+      this.clearSession()
+      return undefined
+    }
   }
 
   private async exchangeToken(
@@ -482,6 +584,7 @@ class BrowserPkceAdapter implements AuthAdapter {
     this.accessTokenExpiresAt = jwtExpiry(payload.access_token)
       ?? Date.now() + Math.max(60, Number(payload.expires_in) || 300) * 1000
     this.refreshToken = payload.refresh_token ?? existingRefreshToken
+    this.persistSession()
   }
 
   private async loadProfile(): Promise<AuthBootstrapResult> {
@@ -495,21 +598,98 @@ class BrowserPkceAdapter implements AuthAdapter {
       },
     })
     if (response.status === 401) {
-      this.accessToken = undefined
-      this.accessTokenExpiresAt = 0
-      this.refreshToken = undefined
-      throw new NativeAuthorizationError(
-        'ログインには成功しましたが、Tachyonのユーザー情報を確認できませんでした。',
-      )
+      // Access may be stale after restore; try one refresh before giving up.
+      const refreshed = await this.getAccessToken(true)
+      if (refreshed) {
+        const retry = await fetch(this.configuration.profileEndpoint, {
+          credentials: 'omit',
+          cache: 'no-store',
+          headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${refreshed}`,
+          },
+        })
+        if (retry.ok) {
+          return this.profileFromResponse(retry)
+        }
+        if (retry.status !== 401) throw new Error('ブラウザ認証profileを取得できませんでした。')
+      }
+      this.clearSession()
+      return { kind: 'anonymous', reason: 'expired' }
     }
     if (!response.ok) throw new Error('ブラウザ認証profileを取得できませんでした。')
+    return this.profileFromResponse(response)
+  }
 
+  private async profileFromResponse(response: Response): Promise<AuthBootstrapResult> {
     const payload = await response.json() as NativeProfilePayload
     const user = sessionUser(payload)
     if (!user) throw new Error('ブラウザ認証profileにユーザー情報がありません。')
     const tenantPayloads = payload.tenants ?? payload.user?.tenants ?? []
-    const tenants = tenantPayloads.map(nativeTenant).filter((tenant): tenant is AuthTenant => Boolean(tenant))
+    let tenants = tenantPayloads.map(nativeTenant).filter((tenant): tenant is AuthTenant => Boolean(tenant))
+    // Local course-api → prod Field still needs a tn_… operator id even when
+    // /v1/me returns an empty tenant list for the signed-in user.
+    if (tenants.length === 0) {
+      const fallbackId = import.meta.env.VITE_COURSEBOARD_TENANT_ID?.trim()
+      if (fallbackId) {
+        const fallbackName = usesLocalDemoTenantChrome()
+          ? (import.meta.env.VITE_COURSEBOARD_TENANT_NAME?.trim() || fallbackId)
+          : fallbackId
+        tenants = [envTenant(fallbackId, fallbackName)]
+      }
+    }
     return { kind: 'authenticated', user, tenants, partial: payload.partial }
+  }
+}
+
+function readStoredBrowserSession(): BrowserPkceSession | undefined {
+  try {
+    const raw = localStorage.getItem(BROWSER_PKCE_SESSION_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<BrowserPkceSession>
+      if (
+        typeof parsed.accessToken === 'string'
+        && typeof parsed.accessTokenExpiresAt === 'number'
+      ) {
+        return {
+          accessToken: parsed.accessToken,
+          refreshToken: typeof parsed.refreshToken === 'string' ? parsed.refreshToken : undefined,
+          accessTokenExpiresAt: parsed.accessTokenExpiresAt,
+        }
+      }
+      localStorage.removeItem(BROWSER_PKCE_SESSION_KEY)
+    }
+
+    // One-time migration from refresh-only sessionStorage (cleared after persist).
+    const legacyRefresh = sessionStorage.getItem(BROWSER_PKCE_REFRESH_KEY_LEGACY) ?? undefined
+    if (legacyRefresh) {
+      return {
+        accessToken: '',
+        refreshToken: legacyRefresh,
+        accessTokenExpiresAt: 0,
+      }
+    }
+    return undefined
+  } catch {
+    return undefined
+  }
+}
+
+function writeStoredBrowserSession(session: BrowserPkceSession) {
+  try {
+    localStorage.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify(session))
+    sessionStorage.removeItem(BROWSER_PKCE_REFRESH_KEY_LEGACY)
+  } catch {
+    // Ignore quota / private-mode failures; in-memory token still works for the tab.
+  }
+}
+
+function clearStoredBrowserSession() {
+  try {
+    localStorage.removeItem(BROWSER_PKCE_SESSION_KEY)
+    sessionStorage.removeItem(BROWSER_PKCE_REFRESH_KEY_LEGACY)
+  } catch {
+    // Ignore storage failures during sign-out.
   }
 }
 
@@ -714,8 +894,34 @@ function jwtExpiry(token: string) {
   }
 }
 
+function browserPkceClientConfigured() {
+  return Boolean(import.meta.env.VITE_COURSEBOARD_BROWSER_CLIENT_ID?.trim())
+}
+
+/**
+ * Pick the auth adapter from an explicit mode.
+ *
+ * Never silently fall back to DevelopmentAdapter ("Local operator") when a
+ * browser-pkce public client is also configured — that usually means a process
+ * env override stomped desktop/.env.local. Fail visibly instead.
+ */
 export function createAuthAdapter(): AuthAdapter {
-  if (import.meta.env.VITE_COURSEBOARD_AUTH_MODE === 'development') {
+  const authMode = import.meta.env.VITE_COURSEBOARD_AUTH_MODE
+  const browserClientConfigured = browserPkceClientConfigured()
+
+  if (authMode === 'browser-pkce') {
+    return new BrowserPkceAdapter()
+  }
+
+  if (authMode === 'development') {
+    if (browserClientConfigured) {
+      throw new AuthConfigurationError(
+        '認証モードが衝突しています',
+        'VITE_COURSEBOARD_AUTH_MODE=development と browser-pkce の client id が同時に設定されています。'
+          + ' ブラウザログインを使う場合は AUTH_MODE=browser-pkce にし、開発用 VITE_COURSEBOARD_API_BEARER を外してください。'
+          + ' CLI JWT ショートカットだけ使う場合は VITE_COURSEBOARD_BROWSER_* を削除してください（npm run field:env）。',
+      )
+    }
     if (!import.meta.env.VITE_COURSEBOARD_API_BEARER) {
       throw new AuthConfigurationError(
         '開発認証を開始できません',
@@ -724,8 +930,11 @@ export function createAuthAdapter(): AuthAdapter {
     }
     return new DevelopmentAdapter()
   }
-  if (import.meta.env.VITE_COURSEBOARD_AUTH_MODE === 'browser-pkce') {
+
+  // Do not treat a leftover browser client id + missing AUTH_MODE as Local operator.
+  if (browserClientConfigured) {
     return new BrowserPkceAdapter()
   }
+
   return platformKind() === 'web' ? new WebSessionAdapter() : new NativePkceAdapter()
 }

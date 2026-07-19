@@ -1,0 +1,1308 @@
+/**
+ * Development auth (`VITE_COURSEBOARD_AUTH_MODE=development`) only stubs the
+ * session. Feature screens still call Field API through the Vite proxy, which
+ * fails or returns an empty DB unless a local Rust API is running with seed.
+ *
+ * When mock data is enabled, `fieldApiJson` / `fieldApiText` and CourseBoard
+ * `courseboardApiJson` / `courseboardApiText` paths under `/v1/course/*`
+ * short-circuit to in-memory fixtures so the UI stays browsable with the mock user.
+ *
+ * Enable: default ON while AUTH_MODE=development
+ * Disable for a real local API: VITE_COURSEBOARD_MOCK_DATA=false
+ */
+export function isMockFieldDataEnabled() {
+  if (import.meta.env.VITE_COURSEBOARD_AUTH_MODE !== 'development') return false
+  const flag = import.meta.env.VITE_COURSEBOARD_MOCK_DATA
+  return flag !== 'false' && flag !== '0'
+}
+
+export type MockFieldResult<T> =
+  | { kind: 'disabled' }
+  | { kind: 'hit'; data: T }
+  | { kind: 'error'; status: number; message: string }
+
+type Json = Record<string, unknown> | unknown[] | string | number | boolean | null
+
+function hit<T>(data: T): MockFieldResult<T> {
+  return { kind: 'hit', data }
+}
+
+function error(status: number, message: string): MockFieldResult<never> {
+  return { kind: 'error', status, message }
+}
+
+const TENANT_ID = () =>
+  import.meta.env.VITE_COURSEBOARD_TENANT_ID
+  ?? (import.meta.env.DEV ? 'courseboard_id' : '')
+
+const NOW = '2026-07-18T09:00:00+09:00'
+const TODAY = '2026-07-18'
+
+let mockReservationPolicy: Record<string, unknown> = {
+  tenantId: 'courseboard_id',
+  reservationTypeId: 'golf_standard',
+  defaultHoles: 18,
+  maxPlayersPerTeeTime: 4,
+  cartPolicy: 'optional',
+  memberDepositBps: 2000,
+  guestDepositBps: 3000,
+  cutoffHours: 48,
+  policyHooksJson: {
+    selfLock: {
+      enabled: true,
+      windows: [{ weekdays: ['sat', 'sun'], start: '06:00', end: '10:00' }],
+    },
+    spendJudgment: {
+      enabled: true,
+      minPerPlayer: 12000,
+      action: 'review',
+    },
+  },
+  metadataJson: {},
+  updatedAt: NOW,
+}
+
+const mockCourses = [
+  {
+    id: 'course_east',
+    name: '東コース',
+    shortName: '東',
+    holeCount: 18,
+    timezone: 'Asia/Tokyo',
+    businessHoursJson: { open: '07:00', close: '17:00' },
+    startIntervalMinutes: 8,
+    isActive: true,
+    createdAt: NOW,
+    updatedAt: NOW,
+  },
+  {
+    id: 'course_west',
+    name: '西コース',
+    shortName: '西',
+    holeCount: 18,
+    timezone: 'Asia/Tokyo',
+    businessHoursJson: { open: '07:00', close: '17:00' },
+    startIntervalMinutes: 10,
+    isActive: true,
+    createdAt: NOW,
+    updatedAt: NOW,
+  },
+]
+
+const mockProducts = [
+  {
+    id: 'product_caddie_18',
+    tenantId: 'courseboard_id',
+    extensionKey: 'golf_course',
+    reservationServiceId: 'svc:caddie-18',
+    playType: 'caddie',
+    holeCount: 18,
+    expectedDurationMinutes: 270,
+    createdAt: NOW,
+    updatedAt: NOW,
+  },
+  {
+    id: 'product_self_18',
+    tenantId: 'courseboard_id',
+    extensionKey: 'golf_course',
+    reservationServiceId: 'svc:self-18',
+    playType: 'self',
+    holeCount: 18,
+    expectedDurationMinutes: 240,
+    createdAt: NOW,
+    updatedAt: NOW,
+  },
+]
+
+const mockSlotsByService: Record<string, Array<{
+  id: string
+  golfReservationProductId: string
+  weekday: number
+  startTime: string
+  endTime: string
+  maxGroups: number
+  maxPlayers: number
+}>> = {
+  'svc:caddie-18': [
+    {
+      id: 'slot_caddie_weekday',
+      golfReservationProductId: 'product_caddie_18',
+      weekday: 1,
+      startTime: '07:30',
+      endTime: '14:00',
+      maxGroups: 4,
+      maxPlayers: 16,
+    },
+  ],
+  'svc:self-18': [
+    {
+      id: 'slot_self_weekday',
+      golfReservationProductId: 'product_self_18',
+      weekday: 1,
+      startTime: '07:00',
+      endTime: '15:00',
+      maxGroups: 6,
+      maxPlayers: 24,
+    },
+  ],
+}
+
+const mockCaddies = [
+  {
+    id: 'caddie_aya',
+    displayName: '佐藤 彩',
+    staffId: 'staff_aya',
+    staffReferenceType: 'erp_staff',
+    staffReferenceId: 'staff_aya',
+    active: true,
+    skillLevel: 'veteran',
+    rank: 'A',
+    monthlyContractRounds: 20,
+    canTwoRounds: true,
+    desiredIncome: 280000,
+    employmentStatus: 'active',
+    baseFeeAmount: 12000,
+    currency: 'JPY',
+    maxRoundsPerDay: 2,
+    ratingAverage: 4.8,
+    ratingCount: 42,
+  },
+  {
+    id: 'caddie_ken',
+    displayName: '渡辺 健',
+    staffId: 'staff_ken',
+    staffReferenceType: 'erp_staff',
+    staffReferenceId: 'staff_ken',
+    active: true,
+    skillLevel: 'regular',
+    rank: 'B',
+    monthlyContractRounds: 16,
+    canTwoRounds: false,
+    desiredIncome: 220000,
+    employmentStatus: 'active',
+    baseFeeAmount: 10000,
+    currency: 'JPY',
+    maxRoundsPerDay: 1,
+    ratingAverage: 4.4,
+    ratingCount: 18,
+  },
+  {
+    id: 'caddie_mika',
+    displayName: '田中 美香',
+    staffId: 'staff_mika',
+    staffReferenceType: 'erp_staff',
+    staffReferenceId: 'staff_mika',
+    active: true,
+    skillLevel: 'veteran',
+    rank: 'A',
+    monthlyContractRounds: 18,
+    canTwoRounds: true,
+    desiredIncome: 260000,
+    employmentStatus: 'active',
+    baseFeeAmount: 11500,
+    currency: 'JPY',
+    maxRoundsPerDay: 2,
+    ratingAverage: 4.7,
+    ratingCount: 31,
+  },
+  {
+    id: 'caddie_hiro',
+    displayName: '中村 浩',
+    staffId: 'staff_hiro',
+    staffReferenceType: 'erp_staff',
+    staffReferenceId: 'staff_hiro',
+    active: true,
+    skillLevel: 'regular',
+    rank: 'B',
+    monthlyContractRounds: 14,
+    canTwoRounds: true,
+    desiredIncome: 210000,
+    employmentStatus: 'active',
+    baseFeeAmount: 10000,
+    currency: 'JPY',
+    maxRoundsPerDay: 2,
+    ratingAverage: 4.2,
+    ratingCount: 12,
+  },
+  {
+    id: 'caddie_yuki',
+    displayName: '伊藤 優希',
+    staffId: 'staff_yuki',
+    staffReferenceType: 'erp_staff',
+    staffReferenceId: 'staff_yuki',
+    active: true,
+    skillLevel: 'junior',
+    rank: 'C',
+    monthlyContractRounds: 12,
+    canTwoRounds: false,
+    desiredIncome: 180000,
+    employmentStatus: 'active',
+    baseFeeAmount: 9000,
+    currency: 'JPY',
+    maxRoundsPerDay: 1,
+    ratingAverage: 4.0,
+    ratingCount: 6,
+  },
+]
+
+const mockStaff = [
+  { id: 'staff_aya', name: '佐藤 彩', active: true },
+  { id: 'staff_ken', name: '渡辺 健', active: true },
+  { id: 'staff_mika', name: '田中 美香', active: true },
+  { id: 'staff_hiro', name: '中村 浩', active: true },
+  { id: 'staff_yuki', name: '伊藤 優希', active: true },
+]
+
+/** Day board fixtures for the operations timeline (tee sheet + caddy lanes). */
+const mockTeeReservations = [
+  {
+    id: 'res_mock_1',
+    reservationNumber: 'R-2026-0100',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${TODAY}T07:00:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 4,
+    partyName: '山田組',
+    status: 'on_course',
+    holes: 18,
+    notes: 'VIP会員',
+  },
+  {
+    id: 'res_mock_2',
+    reservationNumber: 'R-2026-0101',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${TODAY}T07:08:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 3,
+    partyName: '鈴木組',
+    status: 'checked_in',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_3',
+    reservationNumber: 'R-2026-0102',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${TODAY}T07:16:00+09:00`,
+    durationMinutes: 240,
+    playType: 'self',
+    partySize: 4,
+    partyName: '当日受付',
+    status: 'confirmed',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_4',
+    reservationNumber: 'R-2026-0103',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${TODAY}T08:00:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 4,
+    partyName: '高橋組',
+    status: 'confirmed',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_5',
+    reservationNumber: 'R-2026-0104',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${TODAY}T08:08:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 2,
+    partyName: '法人A',
+    status: 'confirmed',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_6',
+    reservationNumber: 'R-2026-0105',
+    golfCourseId: 'course_west',
+    courseName: '西コース',
+    teeTime: `${TODAY}T07:30:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 4,
+    partyName: '木村組',
+    status: 'on_course',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_7',
+    reservationNumber: 'R-2026-0106',
+    golfCourseId: 'course_west',
+    courseName: '西コース',
+    teeTime: `${TODAY}T08:30:00+09:00`,
+    durationMinutes: 240,
+    playType: 'self',
+    partySize: 3,
+    partyName: 'Web予約',
+    status: 'confirmed',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_8',
+    reservationNumber: 'R-2026-0107',
+    golfCourseId: 'course_west',
+    courseName: '西コース',
+    teeTime: `${TODAY}T09:30:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 4,
+    partyName: '中村組',
+    status: 'confirmed',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_9',
+    reservationNumber: 'R-2026-0108',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${TODAY}T10:00:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 4,
+    partyName: '午後クラブ',
+    status: 'confirmed',
+    holes: 18,
+    notes: 'ベテランキャディ希望',
+  },
+  {
+    id: 'res_mock_10',
+    reservationNumber: 'R-2026-0109',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${TODAY}T11:00:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 3,
+    partyName: 'レディース',
+    status: 'confirmed',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_11',
+    reservationNumber: 'R-2026-0110',
+    golfCourseId: 'course_west',
+    courseName: '西コース',
+    teeTime: `${TODAY}T13:00:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 4,
+    partyName: '午後会員',
+    status: 'confirmed',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_12',
+    reservationNumber: 'R-2026-0111',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${TODAY}T14:00:00+09:00`,
+    durationMinutes: 240,
+    playType: 'self',
+    partySize: 4,
+    partyName: 'トワイライト',
+    status: 'confirmed',
+    holes: 18,
+  },
+]
+
+const mockAssignments = [
+  {
+    id: 'assign_mock_1',
+    caddieProfileId: 'caddie_aya',
+    reservationId: 'res_mock_1',
+    roundReference: 'R-2026-0100',
+    scheduledAt: `${TODAY}T07:00:00+09:00`,
+    durationMinutes: 270,
+    status: 'in_progress',
+    assignmentRole: 'primary',
+    feeAmount: 12000,
+    feeCurrency: 'JPY',
+    recommendationScore: 0.94,
+    nominatedBy: 'mock',
+    notes: '午前主担当',
+  },
+  {
+    id: 'assign_mock_2',
+    caddieProfileId: 'caddie_ken',
+    reservationId: 'res_mock_2',
+    roundReference: 'R-2026-0101',
+    scheduledAt: `${TODAY}T07:08:00+09:00`,
+    durationMinutes: 270,
+    status: 'assigned',
+    assignmentRole: 'primary',
+    feeAmount: 10000,
+    feeCurrency: 'JPY',
+    recommendationScore: 0.88,
+    nominatedBy: 'mock',
+    notes: null,
+  },
+  {
+    id: 'assign_mock_3',
+    caddieProfileId: 'caddie_mika',
+    reservationId: 'res_mock_4',
+    roundReference: 'R-2026-0103',
+    scheduledAt: `${TODAY}T08:00:00+09:00`,
+    durationMinutes: 270,
+    status: 'assigned',
+    assignmentRole: 'primary',
+    feeAmount: 11500,
+    feeCurrency: 'JPY',
+    recommendationScore: 0.91,
+    nominatedBy: 'mock',
+    notes: null,
+  },
+  {
+    id: 'assign_mock_4',
+    caddieProfileId: 'caddie_hiro',
+    reservationId: 'res_mock_5',
+    roundReference: 'R-2026-0104',
+    scheduledAt: `${TODAY}T08:08:00+09:00`,
+    durationMinutes: 270,
+    status: 'assigned',
+    assignmentRole: 'primary',
+    feeAmount: 10000,
+    feeCurrency: 'JPY',
+    recommendationScore: 0.8,
+    nominatedBy: 'mock',
+    notes: null,
+  },
+  {
+    id: 'assign_mock_5',
+    caddieProfileId: 'caddie_yuki',
+    reservationId: 'res_mock_6',
+    roundReference: 'R-2026-0105',
+    scheduledAt: `${TODAY}T07:30:00+09:00`,
+    durationMinutes: 270,
+    status: 'in_progress',
+    assignmentRole: 'primary',
+    feeAmount: 9000,
+    feeCurrency: 'JPY',
+    recommendationScore: 0.76,
+    nominatedBy: 'mock',
+    notes: null,
+  },
+  {
+    id: 'assign_mock_6',
+    caddieProfileId: 'caddie_aya',
+    reservationId: 'res_mock_11',
+    roundReference: 'R-2026-0110',
+    scheduledAt: `${TODAY}T13:00:00+09:00`,
+    durationMinutes: 270,
+    status: 'assigned',
+    assignmentRole: 'primary',
+    feeAmount: 12000,
+    feeCurrency: 'JPY',
+    recommendationScore: 0.93,
+    nominatedBy: 'mock',
+    notes: '午後2ラウンド目',
+  },
+  {
+    id: 'assign_mock_7',
+    caddieProfileId: 'caddie_mika',
+    reservationId: 'res_mock_10',
+    roundReference: 'R-2026-0109',
+    scheduledAt: `${TODAY}T11:00:00+09:00`,
+    durationMinutes: 270,
+    status: 'assigned',
+    assignmentRole: 'primary',
+    feeAmount: 11500,
+    feeCurrency: 'JPY',
+    recommendationScore: 0.9,
+    nominatedBy: 'mock',
+    notes: null,
+  },
+  {
+    id: 'assign_mock_8',
+    caddieProfileId: 'caddie_hiro',
+    reservationId: 'res_mock_8',
+    roundReference: 'R-2026-0107',
+    scheduledAt: `${TODAY}T09:30:00+09:00`,
+    durationMinutes: 270,
+    status: 'assigned',
+    assignmentRole: 'primary',
+    feeAmount: 10000,
+    feeCurrency: 'JPY',
+    recommendationScore: 0.84,
+    nominatedBy: 'mock',
+    notes: 'デモ用: 直前ラウンドと時間帯が重複',
+  },
+]
+
+const mockInvoices = [
+  {
+    id: 'inv_mock_001',
+    tenantId: 'courseboard_id',
+    invoiceNumber: 'CF-2026-0001',
+    clientId: 'client_mock_1',
+    clientName: 'Taro Yamada',
+    clientEmail: 'taro@example.com',
+    clientPhone: '09012345678',
+    lineItems: [
+      {
+        description: 'キャンセル料 (東コース / 2026-07-10)',
+        quantity: 1,
+        unitPrice: 11000,
+        amount: 11000,
+      },
+    ],
+    dueDate: '2026-07-25',
+    status: 'Sent',
+    currency: 'JPY',
+    subtotalAmount: 11000,
+    taxAmount: 0,
+    totalAmount: 11000,
+    paymentLinkUrl: 'https://example.com/pay/mock',
+    paymentLinkStatus: 'Ready',
+    emailDeliveryStatus: 'Sent',
+    smsDeliveryStatus: 'Sent',
+    notes: '[courseboard:cancellation-fee] mock invoice',
+    sentAt: NOW,
+    createdAt: NOW,
+    updatedAt: NOW,
+  },
+]
+
+function items<T>(values: T[]) {
+  return { items: values }
+}
+
+function pathnameOf(path: string) {
+  const normalized = path.startsWith('/') ? path : `/${path}`
+  return normalized.split('?')[0] ?? normalized
+}
+
+function methodOf(init?: RequestInit) {
+  return (init?.method ?? 'GET').toUpperCase()
+}
+
+function parseBody(init?: RequestInit): unknown {
+  if (typeof init?.body !== 'string' || !init.body) return undefined
+  try {
+    return JSON.parse(init.body) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+function notSupported(action: string): MockFieldResult<never> {
+  return error(
+    501,
+    `Mock Field API does not support ${action}. Set VITE_COURSEBOARD_MOCK_DATA=false to use a real API.`,
+  )
+}
+
+function extensionStatus() {
+  return items([
+    {
+      extensionKey: 'golf_course',
+      name: 'Golf Course',
+      version: '0.1.0-mock',
+      registryStatus: 'published',
+      tenantStatus: 'enabled',
+      configVersion: 1,
+      configJson: {
+        defaultCurrency: 'JPY',
+        timezone: 'Asia/Tokyo',
+      },
+      validation: { valid: true, errors: [] },
+      updatedAt: NOW,
+    },
+  ])
+}
+
+function settlementReport(yearMonth: string) {
+  const [year, month] = yearMonth.split('-').map(Number)
+  const startDate = `${yearMonth}-01`
+  const endDate = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10)
+  return {
+    period: { yearMonth, startDate, endDate },
+    reservations: {
+      grossAmount: 1_280_000,
+      collectedAmount: 1_150_000,
+      refundedAmount: 40_000,
+      paymentPendingAmount: 90_000,
+      reservationCount: 86,
+    },
+    caddieFees: {
+      total: 420_000,
+      assignmentCount: 72,
+      currency: 'JPY',
+    },
+    cancellations: {
+      feeOutstandingAmount: 11_000,
+      count: 1,
+    },
+    square: {
+      paymentsTotal: 1_150_000,
+      refundsTotal: 40_000,
+      unreconciledLines: 0,
+      warning: null,
+    },
+    drilldown: {
+      reservationIds: ['res_mock_1', 'res_mock_2'],
+      unpaidCancellationReservationIds: ['res_mock_cancel_1'],
+      unpaidCancellationItems: [
+        {
+          reservationId: 'res_mock_cancel_1',
+          reservationNumber: 'R-2026-0101',
+          cancellationFeeAmount: 11_000,
+          checkoutUrl: 'https://example.com/pay/mock',
+          linkIssued: true,
+          paymentStatus: 'pending',
+          invoiceId: 'inv_mock_001',
+        },
+      ],
+    },
+  }
+}
+
+function dailyBudgets(from: string, to: string, golfCourseId?: string | null) {
+  const courseIds = golfCourseId
+    ? [golfCourseId]
+    : mockCourses.map(course => course.id)
+  const start = new Date(`${from}T00:00:00+09:00`)
+  const end = new Date(`${to}T00:00:00+09:00`)
+  const itemsOut = []
+  for (
+    let cursor = new Date(start);
+    cursor <= end;
+    cursor.setDate(cursor.getDate() + 1)
+  ) {
+    const date = cursor.toISOString().slice(0, 10)
+    for (const courseId of courseIds) {
+      itemsOut.push({
+        id: `budget_${courseId}_${date}`,
+        golfCourseId: courseId,
+        date,
+        targetRevenue: 180_000,
+        targetAverageSpend: 18_000,
+        targetCaddyAttachedRatio: 0.65,
+        updatedAt: NOW,
+      })
+    }
+  }
+  return items(itemsOut)
+}
+
+function achievements(from: string, to: string) {
+  const budgets = dailyBudgets(from, to).items as Array<{
+    id: string
+    golfCourseId: string
+    date: string
+    targetRevenue: number
+    targetAverageSpend: number
+    targetCaddyAttachedRatio: number
+  }>
+  return items(budgets.map(budget => ({
+    date: budget.date,
+    targetRevenue: budget.targetRevenue,
+    actualRevenue: Math.round(budget.targetRevenue * 0.86),
+    revenueAchievementRate: 0.86,
+    targetAverageSpend: budget.targetAverageSpend,
+    actualAverageSpend: Math.round(budget.targetAverageSpend * 0.9),
+    targetCaddyAttachedRatio: budget.targetCaddyAttachedRatio,
+    actualCaddyAttachedRatio: 0.58,
+    reservationCount: 12,
+    playerCount: 44,
+  })))
+}
+
+/**
+ * Map CourseBoard course-api paths onto the shared mock fixtures that originally
+ * lived under Field `/v1/erp/extensions/golf-course/*`.
+ */
+function normalizeMockPath(pathname: string): string {
+  if (!pathname.startsWith('/v1/course/')) return pathname
+
+  // CourseBoard-native paths with dedicated mock branches.
+  if (
+    pathname === '/v1/course/tee-sheet'
+    || pathname === '/v1/course/extension-status'
+    || pathname === '/v1/course/config'
+  ) {
+    return pathname
+  }
+
+  const direct: Record<string, string> = {
+    '/v1/course/courses': '/v1/erp/extensions/golf-course/courses',
+    '/v1/course/resources': '/v1/erp/extensions/golf-course/resources',
+    '/v1/course/reservation-products': '/v1/erp/extensions/golf-course/reservation-products',
+    '/v1/course/caddie-profiles': '/v1/erp/extensions/golf-course/caddie-profiles',
+    '/v1/course/caddie-assignments': '/v1/erp/extensions/golf-course/caddie-assignments',
+    '/v1/course/caddie-recommendations': '/v1/erp/extensions/golf-course/caddie-recommendations',
+    '/v1/course/caddie-availabilities': '/v1/erp/extensions/golf-course/caddie-availabilities',
+    '/v1/course/caddie-attendance-snapshot': '/v1/erp/extensions/golf-course/caddie-attendance-snapshot',
+    '/v1/course/caddie-supply': '/v1/erp/extensions/golf-course/caddie-supply',
+    '/v1/course/caddie-auto-assignments': '/v1/erp/extensions/golf-course/caddie-auto-assignments',
+    '/v1/course/caddie-payroll-summary': '/v1/erp/extensions/golf-course/caddie-payroll-summary',
+    '/v1/course/caddie-payroll-summary/export.csv':
+      '/v1/erp/extensions/golf-course/caddie-payroll-summary/export.csv',
+    '/v1/course/caddie-ratings': '/v1/erp/extensions/golf-course/caddie-ratings',
+    '/v1/course/reservation-policy': '/v1/erp/extensions/golf-course/reservation-policy',
+    '/v1/course/daily-budgets': '/v1/erp/extensions/golf-course/daily-budgets',
+    '/v1/course/daily-budgets/achievement':
+      '/v1/erp/extensions/golf-course/daily-budgets/achievement',
+    '/v1/course/daily-budgets/import': '/v1/erp/extensions/golf-course/daily-budgets/import',
+    '/v1/course/monthly-settlement': '/v1/erp/extensions/golf-course/monthly-settlement',
+    '/v1/course/monthly-settlement/export.csv':
+      '/v1/erp/extensions/golf-course/monthly-settlement/export.csv',
+  }
+  if (direct[pathname]) return direct[pathname]!
+
+  const patterns: Array<[RegExp, string]> = [
+    [/^\/v1\/course\/courses\/([^/]+)$/, '/v1/erp/extensions/golf-course/courses/$1'],
+    [
+      /^\/v1\/course\/reservation-products\/([^/]+)\/slots$/,
+      '/v1/erp/extensions/golf-course/reservation-products/$1/slots',
+    ],
+    [
+      /^\/v1\/course\/reservation-products\/([^/]+)$/,
+      '/v1/erp/extensions/golf-course/reservation-products/$1',
+    ],
+    [/^\/v1\/course\/caddie-profiles\/([^/]+)$/, '/v1/erp/extensions/golf-course/caddie-profiles/$1'],
+    [
+      /^\/v1\/course\/caddie-profiles\/([^/]+)\/courses$/,
+      '/v1/erp/extensions/golf-course/caddie-profiles/$1/courses',
+    ],
+    [
+      /^\/v1\/course\/caddie-assignments\/([^/]+)$/,
+      '/v1/erp/extensions/golf-course/caddie-assignments/$1',
+    ],
+    [
+      /^\/v1\/course\/caddie-availabilities\/([^/]+)\/([^/]+)$/,
+      '/v1/erp/extensions/golf-course/caddie-availabilities/$1/$2',
+    ],
+  ]
+  for (const [pattern, replacement] of patterns) {
+    if (pattern.test(pathname)) {
+      return pathname.replace(pattern, replacement)
+    }
+  }
+  return pathname
+}
+
+function resolveGet(path: string): Json | null | undefined {
+  const rawPathname = pathnameOf(path)
+  const pathname = normalizeMockPath(rawPathname)
+  const url = new URL(path, 'http://mock.local')
+
+  if (pathname === '/v1/erp/extensions/status') return extensionStatus()
+
+  if (rawPathname === '/v1/course/extension-status') {
+    const status = extensionStatus() as { items: Array<Record<string, unknown>> }
+    return status.items.find(item => item.extensionKey === 'golf_course') ?? null
+  }
+
+  if (
+    rawPathname === '/v1/course/config'
+    || pathname === `/v1/erp/extensions/golf_course/config`
+    || pathname === '/v1/erp/extensions/golf-course/config'
+  ) {
+    return {
+      extensionKey: 'golf_course',
+      configVersion: 1,
+      configJson: { defaultCurrency: 'JPY', timezone: 'Asia/Tokyo' },
+      validation: { valid: true, errors: [] },
+      updatedAt: NOW,
+    }
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/courses') {
+    return items(mockCourses.map(course => ({ ...course })))
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/resources') {
+    return items(mockCourses.map(course => ({
+      id: `resource_${course.id}`,
+      name: course.name,
+      reservationResourceId: `res_${course.id.replace(/^course_/, '')}`,
+      golfCourseId: course.id,
+      resourceKind: 'course',
+      active: course.isActive,
+    })))
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/reservation-products') {
+    return items(mockProducts.map(product => ({
+      ...product,
+      tenantId: TENANT_ID() || product.tenantId,
+    })))
+  }
+
+  const slotsMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/reservation-products\/([^/]+)\/slots$/,
+  )
+  if (slotsMatch) {
+    const serviceId = decodeURIComponent(slotsMatch[1] ?? '')
+    return items(mockSlotsByService[serviceId] ?? [])
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-profiles') {
+    return items(mockCaddies.map(profile => ({ ...profile })))
+  }
+
+  // CourseBoard course-api tee-sheet (not Field golf-course extension).
+  if (rawPathname === '/v1/course/tee-sheet') {
+    const date = url.searchParams.get('date') ?? TODAY
+    const courseId = url.searchParams.get('golfCourseId')
+    const filtered = mockTeeReservations.filter(item => {
+      if (!item.teeTime.startsWith(date)) return false
+      if (courseId && item.golfCourseId !== courseId) return false
+      return true
+    })
+    return {
+      date,
+      timezone: 'Asia/Tokyo',
+      dayStart: `${date}T06:00:00+09:00`,
+      dayEnd: `${date}T18:00:00+09:00`,
+      items: filtered.map(item => ({ ...item })),
+    }
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-assignments') {
+    return items(mockAssignments.map(item => ({ ...item })))
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-recommendations') {
+    return items([
+      {
+        caddieProfileId: 'caddie_aya',
+        displayName: '佐藤 彩',
+        skillLevel: 'veteran',
+        ratingAverage: 4.8,
+        ratingCount: 42,
+        roundsAssigned: 1,
+        recommendationScore: 0.94,
+        recommendedRole: 'primary',
+        pairingDisplayName: null,
+        rationale: ['評価が高い', '午前帯が空いている'],
+      },
+    ])
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-availabilities') {
+    return items(mockCaddies.map(profile => ({
+      id: `avail_${profile.id}_${TODAY}`,
+      caddieProfileId: profile.id,
+      date: url.searchParams.get('date') ?? TODAY,
+      status: 'available',
+      twoRoundRequest: Boolean(profile.canTwoRounds),
+      healthNote: null,
+      updatedAt: NOW,
+    })))
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-attendance-snapshot') {
+    const date = url.searchParams.get('date') ?? TODAY
+    const working = new Set(['caddie_aya', 'caddie_ken', 'caddie_yuki'])
+    const assignmentCounts = mockAssignments.reduce<Record<string, number>>((acc, item) => {
+      acc[item.caddieProfileId] = (acc[item.caddieProfileId] ?? 0) + 1
+      return acc
+    }, {})
+    return {
+      date,
+      items: mockCaddies.map(profile => ({
+        caddieProfileId: profile.id,
+        displayName: profile.displayName,
+        staffId: profile.staffId,
+        attendanceStatus: working.has(profile.id) ? 'working' : 'not_clocked',
+        todayAssignments: assignmentCounts[profile.id] ?? 0,
+        roundsWithoutClockInToday: 0,
+      })),
+    }
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-supply') {
+    const date = url.searchParams.get('date') ?? TODAY
+    const safetyBuffer = Number(url.searchParams.get('safetyBuffer') ?? 1)
+    return {
+      date,
+      availableCaddies: 5,
+      twoRoundCapable: 3,
+      caddieSupply: 8,
+      morningCapacity: 14,
+      afternoonCapacity: 10,
+      safetyBuffer,
+      caddieAttachedCap: 18,
+      currentCaddieAttached: 8,
+      remaining: 10,
+    }
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-payroll-summary') {
+    const yearMonth = url.searchParams.get('yearMonth') ?? TODAY.slice(0, 7)
+    const [year, month] = yearMonth.split('-').map(Number)
+    return {
+      period: {
+        yearMonth,
+        startDate: `${yearMonth}-01`,
+        endDate: new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10),
+      },
+      items: mockCaddies.map(profile => ({
+        caddieProfileId: profile.id,
+        displayName: profile.displayName,
+        staffId: profile.staffId,
+        workedMinutes: profile.id === 'caddie_aya' ? 2_400 : 1_600,
+        shiftedMinutes: profile.id === 'caddie_aya' ? 2_520 : 1_680,
+        assignedRounds: profile.id === 'caddie_aya' ? 12 : 8,
+        confirmedFeeTotal: profile.id === 'caddie_aya' ? 144_000 : 80_000,
+        roundsWithoutClockIn: 0,
+        openClockIn: false,
+        currency: 'JPY',
+      })),
+    }
+  }
+
+  const membershipMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/caddie-profiles\/([^/]+)\/courses$/,
+  )
+  if (membershipMatch) {
+    const profileId = decodeURIComponent(membershipMatch[1] ?? '')
+    return items([
+      {
+        id: `membership_${profileId}_east`,
+        caddieProfileId: profileId,
+        golfCourseId: 'course_east',
+        isPrimary: true,
+      },
+    ])
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-ratings') {
+    const profileId = url.searchParams.get('caddieProfileId')
+    return items(profileId
+      ? [{
+          id: `rating_${profileId}_1`,
+          caddieProfileId: profileId,
+          score: 5,
+          comment: 'デモ評価',
+          createdAt: NOW,
+        }]
+      : [])
+  }
+
+  if (pathname === '/v1/erp/staff') return items(mockStaff.map(member => ({ ...member })))
+
+  if (pathname === '/v1/erp/extensions/golf-course/reservation-policy') {
+    return { ...mockReservationPolicy, tenantId: TENANT_ID() || 'courseboard_id' }
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/daily-budgets') {
+    return dailyBudgets(
+      url.searchParams.get('from') ?? TODAY,
+      url.searchParams.get('to') ?? TODAY,
+      url.searchParams.get('golfCourseId'),
+    )
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/daily-budgets/achievement') {
+    return achievements(
+      url.searchParams.get('from') ?? TODAY,
+      url.searchParams.get('to') ?? TODAY,
+    )
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/monthly-settlement') {
+    return settlementReport(url.searchParams.get('yearMonth') ?? TODAY.slice(0, 7))
+  }
+
+  if (pathname === '/v1/invoices') {
+    const status = url.searchParams.get('status')
+    const filtered = status
+      ? mockInvoices.filter(invoice => invoice.status === status)
+      : mockInvoices
+    return items(filtered.map(invoice => ({
+      ...invoice,
+      tenantId: TENANT_ID() || invoice.tenantId,
+      lineItems: invoice.lineItems.map(item => ({ ...item })),
+    })))
+  }
+
+  const invoiceMatch = pathname.match(/^\/v1\/invoices\/([^/]+)$/)
+  if (invoiceMatch) {
+    const invoiceId = decodeURIComponent(invoiceMatch[1] ?? '')
+    const invoice = mockInvoices.find(item => item.id === invoiceId)
+    if (!invoice) return null
+    return {
+      ...invoice,
+      tenantId: TENANT_ID() || invoice.tenantId,
+      lineItems: invoice.lineItems.map(item => ({ ...item })),
+    }
+  }
+
+  return undefined
+}
+
+function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json> {
+  const pathname = normalizeMockPath(pathnameOf(path))
+  const method = methodOf(init)
+  const body = parseBody(init) as Record<string, unknown> | undefined
+
+  if (pathname === '/v1/erp/extensions/golf-course/courses' && method === 'POST') {
+    const created = {
+      id: `course_${Date.now()}`,
+      name: String(body?.name ?? 'New course'),
+      shortName: body?.shortName == null ? '' : String(body.shortName),
+      holeCount: Number(body?.holeCount ?? 18),
+      timezone: String(body?.timezone ?? 'Asia/Tokyo'),
+      businessHoursJson: (body?.businessHoursJson as { open: string; close: string } | undefined)
+        ?? { open: '07:00', close: '17:00' },
+      startIntervalMinutes: Number(body?.startIntervalMinutes ?? 8),
+      isActive: body?.isActive !== false,
+      createdAt: NOW,
+      updatedAt: NOW,
+    }
+    mockCourses.push(created)
+    return hit(created)
+  }
+
+  const courseMatch = pathname.match(/^\/v1\/erp\/extensions\/golf-course\/courses\/([^/]+)$/)
+  if (courseMatch) {
+    const courseId = decodeURIComponent(courseMatch[1] ?? '')
+    const index = mockCourses.findIndex(course => course.id === courseId)
+    if (index < 0) return error(404, `Mock course ${courseId} was not found`)
+    if (method === 'DELETE') {
+      mockCourses.splice(index, 1)
+      return hit(null)
+    }
+    if (method === 'PUT' || method === 'PATCH') {
+      const current = mockCourses[index]!
+      const updated = {
+        ...current,
+        ...body,
+        id: current.id,
+        updatedAt: NOW,
+      }
+      mockCourses[index] = updated as typeof current
+      return hit(updated)
+    }
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/reservation-policy'
+    && (method === 'PUT' || method === 'PATCH' || method === 'POST')) {
+    mockReservationPolicy = {
+      ...mockReservationPolicy,
+      ...(body && typeof body === 'object' ? body as typeof mockReservationPolicy : {}),
+      tenantId: TENANT_ID() || 'courseboard_id',
+      updatedAt: NOW,
+    }
+    return hit({ ...mockReservationPolicy })
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-profiles' && method === 'POST') {
+    const staffId = body?.staffId == null ? '' : String(body.staffId)
+    const created: (typeof mockCaddies)[number] = {
+      id: `caddie_${Date.now()}`,
+      displayName: String(body?.displayName ?? 'New caddie'),
+      skillLevel: String(body?.skillLevel ?? 'regular'),
+      rank: String(body?.rank ?? 'D'),
+      baseFeeAmount: Number(body?.baseFeeAmount ?? 12_000),
+      currency: String(body?.currency ?? 'JPY'),
+      staffId,
+      staffReferenceType: staffId ? 'erp_staff' : '',
+      staffReferenceId: staffId,
+      active: body?.active !== false,
+      employmentStatus: String(body?.employmentStatus ?? 'active'),
+      maxRoundsPerDay: Number(body?.maxRoundsPerDay ?? 2),
+      ratingCount: 0,
+      ratingAverage: 0,
+      canTwoRounds: Boolean(body?.canTwoRounds),
+      monthlyContractRounds: Number(body?.monthlyContractRounds ?? 14),
+      desiredIncome: Number(body?.desiredIncome ?? 0),
+    }
+    mockCaddies.push(created)
+    return hit(created)
+  }
+
+  const caddieMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/caddie-profiles\/([^/]+)$/,
+  )
+  if (caddieMatch && (method === 'PATCH' || method === 'PUT')) {
+    const caddieId = decodeURIComponent(caddieMatch[1] ?? '')
+    const index = mockCaddies.findIndex(item => item.id === caddieId)
+    if (index < 0) return error(404, `Mock caddie ${caddieId} was not found`)
+    const current = mockCaddies[index]!
+    const updated = { ...current, ...body, id: current.id }
+    mockCaddies[index] = updated as typeof current
+    return hit(updated)
+  }
+
+  const assignmentMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/caddie-assignments\/([^/]+)$/,
+  )
+  if (assignmentMatch && (method === 'PATCH' || method === 'PUT')) {
+    const assignmentId = decodeURIComponent(assignmentMatch[1] ?? '')
+    const index = mockAssignments.findIndex(item => item.id === assignmentId)
+    if (index < 0) return error(404, `Mock assignment ${assignmentId} was not found`)
+    const current = mockAssignments[index]!
+    const updated = { ...current, ...body, id: current.id }
+    mockAssignments[index] = updated as typeof current
+    return hit(updated)
+  }
+
+  const membershipMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/caddie-profiles\/([^/]+)\/courses$/,
+  )
+  if (membershipMatch && method === 'PUT') {
+    const profileId = decodeURIComponent(membershipMatch[1] ?? '')
+    const courseIds = Array.isArray(body?.courseIds) ? body.courseIds.map(String) : []
+    const primary = body?.primaryCourseId == null ? courseIds[0] : String(body.primaryCourseId)
+    return hit(items(courseIds.map((courseId, index) => ({
+      id: `membership_${profileId}_${courseId}`,
+      caddieProfileId: profileId,
+      golfCourseId: courseId,
+      isPrimary: courseId === primary || (index === 0 && !primary),
+    }))))
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-availabilities'
+    && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+    return hit({
+      id: `avail_${String(body?.caddieProfileId ?? 'caddie')}_${String(body?.date ?? TODAY)}`,
+      caddieProfileId: String(body?.caddieProfileId ?? ''),
+      date: String(body?.date ?? TODAY),
+      status: String(body?.status ?? 'available'),
+      twoRoundRequest: Boolean(body?.twoRoundRequest),
+      healthNote: body?.healthNote ?? null,
+      updatedAt: NOW,
+    })
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-auto-assignments' && method === 'POST') {
+    return hit({
+      dryRun: Boolean(body?.dryRun),
+      assigned: [],
+      skipped: [{ reservationId: 'res_mock', reason: 'Mock mode does not auto-assign' }],
+    })
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/daily-budgets' && method === 'POST') {
+    return hit({
+      id: `budget_${Date.now()}`,
+      golfCourseId: String(body?.golfCourseId ?? 'course_east'),
+      date: String(body?.date ?? TODAY),
+      targetRevenue: Number(body?.targetRevenue ?? 0),
+      targetAverageSpend: Number(body?.targetAverageSpend ?? 0),
+      targetCaddyAttachedRatio: Number(body?.targetCaddyAttachedRatio ?? 0),
+      updatedAt: NOW,
+    })
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/daily-budgets/import' && method === 'POST') {
+    return hit(items([]))
+  }
+
+  if (
+    (pathname === '/v1/course/config'
+      || pathname === '/v1/erp/extensions/golf_course/config'
+      || pathname === '/v1/erp/extensions/golf-course/config')
+    && (method === 'PATCH' || method === 'PUT' || method === 'POST')
+  ) {
+    return hit(null)
+  }
+
+  // Mutations beyond browse fixtures stay explicit so developers know to opt out.
+  if (method !== 'GET' && method !== 'HEAD') {
+    return notSupported(`${method} ${pathname}`)
+  }
+
+  return error(
+    404,
+    `Mock Field API has no fixture for ${method} ${pathname}. Set VITE_COURSEBOARD_MOCK_DATA=false to use a real API.`,
+  )
+}
+
+export function resolveMockFieldApiJson(path: string, init?: RequestInit): MockFieldResult<Json> {
+  if (!isMockFieldDataEnabled()) return { kind: 'disabled' }
+  const method = methodOf(init)
+  if (method === 'GET' || method === 'HEAD') {
+    const result = resolveGet(path)
+    if (result === undefined) {
+      return error(
+        404,
+        `Mock Field API has no fixture for GET ${pathnameOf(path)}. Set VITE_COURSEBOARD_MOCK_DATA=false to use a real API.`,
+      )
+    }
+    if (result === null) {
+      return error(404, `Mock Field API resource was not found: ${pathnameOf(path)}`)
+    }
+    return hit(result)
+  }
+  return resolveMutation(path, init)
+}
+
+export function resolveMockFieldApiText(path: string, init?: RequestInit): MockFieldResult<string> {
+  if (!isMockFieldDataEnabled()) return { kind: 'disabled' }
+  const pathname = pathnameOf(path)
+  const method = methodOf(init)
+
+  const normalized = normalizeMockPath(pathname)
+
+  if (
+    (pathname === '/v1/course/config'
+      || normalized === '/v1/erp/extensions/golf_course/config'
+      || normalized === '/v1/erp/extensions/golf-course/config'
+      || pathname === '/v1/erp/extensions/golf_course/config')
+    && (method === 'PATCH' || method === 'PUT' || method === 'POST')
+  ) {
+    return hit('')
+  }
+
+  if (
+    (normalized === '/v1/erp/extensions/golf-course/caddie-availabilities'
+      || pathname === '/v1/erp/extensions/golf-course/caddie-availabilities')
+    && (method === 'POST' || method === 'PUT' || method === 'PATCH')
+  ) {
+    return hit('')
+  }
+
+  const availabilityMatch = normalized.match(
+    /^\/v1\/erp\/extensions\/golf-course\/caddie-availabilities\/([^/]+)\/([^/]+)$/,
+  )
+  if (availabilityMatch && (method === 'PUT' || method === 'PATCH' || method === 'DELETE')) {
+    return hit('')
+  }
+
+  if (
+    normalized === '/v1/erp/extensions/golf-course/daily-budgets/import'
+    && method === 'POST'
+  ) {
+    return hit('{"items":[]}')
+  }
+
+  if (method !== 'GET') return notSupported(`${method} ${pathname}`)
+
+  if (
+    normalized === '/v1/erp/extensions/golf-course/monthly-settlement/export.csv'
+    || normalized === '/v1/erp/extensions/golf-course/caddie-payroll-summary/export.csv'
+    || pathname === '/v1/erp/extensions/golf-course/monthly-settlement/export.csv'
+    || pathname === '/v1/erp/extensions/golf-course/caddie-payroll-summary/export.csv'
+  ) {
+    return hit([
+      'metric,value',
+      'gross_amount,1280000',
+      'collected_amount,1150000',
+      'caddie_fees,420000',
+      'outstanding_cancellation_fees,11000',
+    ].join('\n'))
+  }
+
+  if (pathname.endsWith('.csv')) {
+    return hit('id,name\nmock,Mock CSV\n')
+  }
+
+  return error(
+    404,
+    `Mock Field API has no text fixture for GET ${pathname}. Set VITE_COURSEBOARD_MOCK_DATA=false to use a real API.`,
+  )
+}

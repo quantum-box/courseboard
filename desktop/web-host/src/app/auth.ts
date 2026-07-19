@@ -21,7 +21,11 @@ export const AUTH_SIGN_IN_PATH = '/courseboard-ui/index.html'
 const TOKEN_REFRESH_WINDOW_SECONDS = 5 * 60
 const PASSWORD_SESSION_COOKIE_CHUNK_SIZE = 3800
 const PASSWORD_SESSION_COOKIE_MAX_CHUNKS = 12
+// HTTPS uses the __Secure- prefix; local HTTP (Vite :5173) must not — browsers
+// refuse to store/send __Secure-* cookies on non-HTTPS origins, which surfaces
+// as Auth.js Configuration on /api/auth/callback/tachyon.
 export const AUTHJS_PKCE_COOKIE_NAME = '__Secure-authjs.pkce.code_verifier'
+export const AUTHJS_PKCE_COOKIE_NAME_INSECURE = 'authjs.pkce.code_verifier'
 
 const AUTHJS_SESSION_COOKIE_CHUNK_SIZE = PASSWORD_SESSION_COOKIE_MAX_CHUNKS
 const AUTHJS_SESSION_COOKIE_BASE_NAMES = [
@@ -49,7 +53,18 @@ export const AUTH_SESSION_COOKIE_NAMES = [
 	),
 	...authJsSessionCookieNames,
 	AUTHJS_PKCE_COOKIE_NAME,
+	AUTHJS_PKCE_COOKIE_NAME_INSECURE,
 ] as const
+
+export function resolveAuthUsesSecureCookies(authUrl?: string) {
+	return new URL(authUrl ?? resolveAuthUrl()).protocol === 'https:'
+}
+
+export function resolvePkceCookieName(authUrl?: string) {
+	return resolveAuthUsesSecureCookies(authUrl)
+		? AUTHJS_PKCE_COOKIE_NAME
+		: AUTHJS_PKCE_COOKIE_NAME_INSECURE
+}
 
 type VerifyResponse = {
 	user: {
@@ -162,7 +177,9 @@ function readCookieValue(request: Request, name: string) {
 }
 
 export async function getAuthPkceDiagnostics(request: Request) {
-	const token = readCookieValue(request, AUTHJS_PKCE_COOKIE_NAME)
+	const authUrl = resolveAuthUrl(request)
+	const cookieName = resolvePkceCookieName(authUrl)
+	const token = readCookieValue(request, cookieName)
 	const present = Boolean(token)
 	if (!token) {
 		return { decrypt: false, present }
@@ -170,8 +187,8 @@ export async function getAuthPkceDiagnostics(request: Request) {
 
 	try {
 		const decoded = await decode({
-			salt: AUTHJS_PKCE_COOKIE_NAME,
-			secret: getAuthSecret({ authUrl: resolveAuthUrl(request) }),
+			salt: cookieName,
+			secret: getAuthSecret({ authUrl }),
 			token,
 		})
 		return { decrypt: Boolean(decoded?.value), present }
@@ -402,16 +419,19 @@ export const createAuthConfig = (
 			maxAge: 30 * 24 * 60 * 60, // 30 days
 		},
 		cookies: {
-			pkceCodeVerifier: {
-				name: AUTHJS_PKCE_COOKIE_NAME,
-				options: {
-					httpOnly: true,
-					maxAge: 60 * 15,
-					path: '/',
-					sameSite: 'lax',
-					secure: true,
-				},
-			},
+			pkceCodeVerifier: (() => {
+				const secure = resolveAuthUsesSecureCookies(options.authUrl)
+				return {
+					name: resolvePkceCookieName(options.authUrl),
+					options: {
+						httpOnly: true,
+						maxAge: 60 * 15,
+						path: '/',
+						sameSite: 'lax' as const,
+						secure,
+					},
+				}
+			})(),
 		},
 		pages: {
 			signOut: '/auth/sign_out',

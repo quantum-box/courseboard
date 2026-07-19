@@ -1,0 +1,26 @@
+---
+description: Never kill or stop local CourseBoard API / Vite / bacon unless the user explicitly asks
+alwaysApply: true
+---
+
+# Do not stop local CourseBoard processes
+
+Agents must **not** stop, kill, restart, or "free the port" for local CourseBoard services unless the user **explicitly** asks to stop or restart them.
+
+## Never do (unless user explicitly asks)
+
+- `pkill` / `kill` / `kill -9` / `kill -TERM` on CourseBoard, bacon, Vite, or related process trees
+- `pkill -f courseboard` (or similar pattern kills)
+- Killing whatever listens on **8080** (API) or **5173** (Vite) as "orphan cleanup"
+- Proactive "free the port" / "clear stuck listener" cleanup
+- Stopping a process the user started (e.g. `mise run courseboard:api`, bacon watchers)
+
+## Do instead
+
+- Diagnose only: report PID, command, and port (e.g. `lsof -i :8080`, `lsof -i :5173`)
+- Tell the user what is listening and ask before any stop/restart
+- If a port conflict blocks your work, explain and wait for user direction
+
+## Explicit ask required
+
+Only stop/restart when the user clearly says so (e.g. "API を止めて", "restart the API", "8080 を空けて"). Ambiguous phrases like "fix the server" or "it's stuck" are **not** permission to kill.

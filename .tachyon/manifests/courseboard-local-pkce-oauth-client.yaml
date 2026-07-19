@@ -1,0 +1,19 @@
+apiVersion: apps.tachy.one/v1alpha
+kind: OAuth2Client
+metadata:
+  name: courseboard-local-pkce
+  tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
+spec:
+  # Public PKCE client for local Vite (platform-ui style JSON authorize).
+  # redirect URI is nominal — /oauth2/authorize returns the code as JSON.
+  clientType: public
+  redirectUris:
+    - http://127.0.0.1:5173/oauth/callback
+  allowedScopes:
+    - openid
+    - profile
+    - email
+  grantTypes:
+    - authorization_code
+    - refresh_token
+  useTachyonUserPool: true

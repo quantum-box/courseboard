@@ -1,0 +1,51 @@
+# Bacon jobs for CourseBoard Rust course-api.
+# Docs: https://dystroy.org/bacon/config/
+#
+# Local hot-reload (preferred):
+#   mise run courseboard:api
+# which loads .env.browser-pkce then runs: bacon api
+#
+# Plain `cargo run` does not rebuild on save — restart onto bacon once.
+
+default_job = "api"
+env.CARGO_TERM_COLOR = "always"
+
+# Long-running course-api: rebuild + restart on Rust source / env changes.
+# Wrapper re-sources COURSEBOARD_LOCAL_ENV_FILE each run (OIDC / Field URL).
+# mise "no exit status" = bacon/mise got a signal (agent pkill / Ctrl-C / shell teardown).
+# Compile failures do not exit this job; bacon stays watching. Prefer --headless via mise.
+[jobs.api]
+command = ["bash", "desktop/scripts/run-courseboard-with-env.sh"]
+need_stdout = true
+allow_warnings = true
+background = false
+on_change_strategy = "kill_then_restart"
+# Kill cargo's children so :8080 is released before restart.
+kill = ["pkill", "-TERM", "-P"]
+watch = [
+  "src",
+  "bin",
+  "migrations",
+  "Cargo.toml",
+  "Cargo.lock",
+  ".env.browser-pkce",
+  ".env.prod-field",
+  "desktop/scripts/run-courseboard-with-env.sh",
+]
+
+[jobs.check]
+command = ["cargo", "check"]
+need_stdout = false
+
+[jobs.clippy]
+command = ["cargo", "clippy"]
+need_stdout = false
+
+[jobs.test]
+command = ["cargo", "test"]
+need_stdout = true
+
+[keybindings]
+a = "job:api"
+c = "job:clippy"
+t = "job:test"

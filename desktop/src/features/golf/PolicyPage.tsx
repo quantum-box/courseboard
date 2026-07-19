@@ -1,10 +1,10 @@
-import { ApiError, fieldApiJson, fieldTenant } from '../../api'
+import { ApiError, courseboardApiJson, fieldTenant } from '../../api'
+import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   Field,
   FormGrid,
   LoadingState,
   NativeSelect,
-  NativeTextarea,
   Notice,
   PageHeader,
   PageRefreshButton,
@@ -13,6 +13,7 @@ import {
 } from '../../components/Page'
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import {
+  ArrowLeft,
   Clock3,
   Plus,
   Save,
@@ -28,6 +29,7 @@ import {
   useMemo,
   useState,
 } from 'react'
+import { navigate } from '../../lib/router'
 
 type SelfLockWindow = {
   weekdays: string[]
@@ -74,7 +76,6 @@ type PolicyDraft = {
   spendJudgmentEnabled: boolean
   minPerPlayer: string
   spendAction: 'reject' | 'review'
-  metadataJson: string
 }
 
 const WEEKDAYS = [
@@ -105,7 +106,6 @@ function emptyDraft(): PolicyDraft {
     spendJudgmentEnabled: false,
     minPerPlayer: '',
     spendAction: 'review',
-    metadataJson: '{}',
   }
 }
 
@@ -132,7 +132,6 @@ function policyToDraft(policy: GolfReservationPolicy | null): PolicyDraft {
       policy.policyHooksJson?.spendJudgment?.action === 'reject'
         ? 'reject'
         : 'review',
-    metadataJson: JSON.stringify(policy.metadataJson ?? {}, null, 2) ?? '{}',
   }
 }
 
@@ -183,18 +182,6 @@ function validateWindows(windows: SelfLockWindow[]) {
   return errors
 }
 
-function parseMetadata(value: string) {
-  try {
-    const parsed: unknown = value.trim() ? JSON.parse(value) : {}
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { value: null, error: '追加メタデータはJSONオブジェクトで入力してください。' }
-    }
-    return { value: parsed, error: null }
-  } catch {
-    return { value: null, error: '追加メタデータのJSON構文を確認してください。' }
-  }
-}
-
 function policyValidation(draft: PolicyDraft) {
   const errors: string[] = []
   const defaultHoles = Number(draft.defaultHoles)
@@ -240,10 +227,8 @@ function policyValidation(draft: PolicyDraft) {
     errors.push('客単価の基準額は0円以上の整数で入力してください。')
   }
   if (draft.selfLockEnabled) errors.push(...validateWindows(draft.windows))
-  const metadata = parseMetadata(draft.metadataJson)
-  if (metadata.error) errors.push(metadata.error)
 
-  return { errors, metadata: metadata.value }
+  return { errors }
 }
 
 export function PolicyPage() {
@@ -256,16 +241,18 @@ export function PolicyPage() {
   const [saved, setSaved] = useState(false)
   const [exists, setExists] = useState(false)
   const [preservedHooks, setPreservedHooks] = useState<GolfPolicyHooks>({})
+  const [preservedMetadata, setPreservedMetadata] = useState<unknown>({})
 
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError(null)
     try {
-      const policy = await fieldApiJson<GolfReservationPolicy>(
-        '/v1/erp/extensions/golf-course/reservation-policy',
+      const policy = await courseboardApiJson<GolfReservationPolicy>(
+        '/v1/course/reservation-policy',
       )
       setDraft(policyToDraft(policy))
       setPreservedHooks(policy.policyHooksJson ?? {})
+      setPreservedMetadata(policy.metadataJson ?? {})
       setExists(true)
       setSaved(false)
       setSaveError(null)
@@ -273,6 +260,7 @@ export function PolicyPage() {
       if (error instanceof ApiError && error.status === 404) {
         setDraft(emptyDraft())
         setPreservedHooks({})
+        setPreservedMetadata({})
         setExists(false)
         setSaved(false)
         setSaveError(null)
@@ -287,6 +275,8 @@ export function PolicyPage() {
   useEffect(() => {
     void load()
   }, [load])
+
+  useRegisterPageReload(load)
 
   function changeDraft(patch: Partial<PolicyDraft>) {
     setDraft(previous => ({ ...previous, ...patch }))
@@ -325,8 +315,8 @@ export function PolicyPage() {
     setSaving(true)
     setSaveError(null)
     try {
-      await fieldApiJson<unknown>(
-        '/v1/erp/extensions/golf-course/reservation-policy',
+      await courseboardApiJson<unknown>(
+        '/v1/course/reservation-policy',
         {
           method: 'PATCH',
           body: JSON.stringify({
@@ -350,7 +340,8 @@ export function PolicyPage() {
                 action: draft.spendAction,
               },
             } satisfies GolfPolicyHooks,
-            metadataJson: validation.metadata,
+            // Advanced integration JSON is edited under Settings, not here.
+            metadataJson: preservedMetadata ?? {},
           }),
         },
       )
@@ -371,11 +362,14 @@ export function PolicyPage() {
   return (
     <form className="page-stack" onSubmit={savePolicy}>
       <PageHeader
-        eyebrow={`Golf operations · ${tenant}`}
+        eyebrow={`Settings · ${tenant}`}
         title="予約ポリシー"
-        description="予約枠の基本条件、デポジット、優先時間帯、客単価判定をひとつのルールとして管理します。"
+        description="テナント導入時に整える受付ルールです。日常運用ではあまり開きません。予約枠の基本条件、デポジット、セルフロック、客単価判定をひとつのポリシーとして管理します。"
         actions={(
           <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
+              <ArrowLeft /> 設定へ戻る
+            </Button>
             <Badge variant={exists ? 'success' : 'warning'}>
               {exists ? '設定済み' : '未作成'}
             </Badge>
@@ -617,21 +611,6 @@ export function PolicyPage() {
             </Field>
           </FormGrid>
         </div>
-      </Panel>
-
-      <Panel
-        title="追加メタデータ"
-        description="他システム連携用の任意JSON。通常の運用では空のオブジェクトのままで構いません。"
-      >
-        <Field label="metadataJson" hint="JSONオブジェクトのみ">
-          <NativeTextarea
-            rows={7}
-            className="font-mono text-xs"
-            value={draft.metadataJson}
-            onChange={event => changeDraft({ metadataJson: event.target.value })}
-            spellCheck={false}
-          />
-        </Field>
       </Panel>
 
       {saveError ? (

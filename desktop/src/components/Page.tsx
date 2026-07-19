@@ -112,6 +112,26 @@ export function LoadingState({ label = '読み込み中' }: { label?: string }) 
   )
 }
 
+function humanizeResourceError(error: unknown) {
+  const raw = error instanceof Error ? error.message : 'データを読み込めませんでした'
+  const lower = raw.toLowerCase()
+  if (
+    lower.includes('verify_user')
+    || lower.includes('rejected the authenticated bearer')
+    || lower.includes('field_api_oauth_incompatible')
+    || (lower.includes('field api returned 401') && lower.includes('unauthorized'))
+  ) {
+    return 'Field APIがログイン中のトークンを受け付けませんでした。一度サインアウトして再ログインしてください。なお続く場合は Tachyon Auth の verify が Tachyon 発行 OAuth access token を受け付けるデプロイが必要です。'
+  }
+  if (lower.includes('provider_error') || lower.includes('external provider error')) {
+    return '外部Field APIへの接続に失敗しました。ネットワークと course-api / Field の設定を確認してください。'
+  }
+  if (raw === 'Request failed with 500' || raw === 'Request failed with 502') {
+    return 'course-api（:8080）への接続に失敗しました。ローカルでは `mise run courseboard:api`（`.env.browser-pkce`）が起動しているか確認してください。'
+  }
+  return raw
+}
+
 export function ResourceError({
   error,
   onRetry,
@@ -119,7 +139,7 @@ export function ResourceError({
   error: unknown
   onRetry?: () => void
 }) {
-  const message = error instanceof Error ? error.message : 'データを読み込めませんでした'
+  const message = humanizeResourceError(error)
   return (
     <Notice
       tone="danger"

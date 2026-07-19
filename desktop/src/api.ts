@@ -1,3 +1,9 @@
+import {
+  resolveMockFieldApiJson,
+  resolveMockFieldApiText,
+  type MockFieldResult,
+} from './dev/mockFieldApi'
+
 export type CancellationFeeCollection = {
   id: string
   tenant_id: string
@@ -91,7 +97,7 @@ export function publicApiBaseUrl() {
 export function fieldTenant() {
   return apiAuthContext?.tenantId
     ?? import.meta.env.VITE_COURSEBOARD_TENANT_ID
-    ?? (import.meta.env.DEV ? 'scc' : '')
+    ?? (import.meta.env.DEV ? 'courseboard_id' : '')
 }
 
 export function fieldPlatformId() {
@@ -231,7 +237,24 @@ async function protectedJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function courseboardApiJson<T>(path: string, init?: RequestInit) {
-  return protectedJson<T>(path, init)
+  const normalized = path.startsWith('/') ? path : `/${path}`
+  // Course-domain mocks share the development fixture gate with Field mocks.
+  if (normalized.startsWith('/v1/course/')) {
+    const mocked = unwrapMockResult(resolveMockFieldApiJson(normalized, init))
+    if (mocked !== undefined) return mocked as T
+  }
+  return protectedJson<T>(normalized, init)
+}
+
+export async function courseboardApiText(path: string, init?: RequestInit) {
+  const normalized = path.startsWith('/') ? path : `/${path}`
+  if (normalized.startsWith('/v1/course/')) {
+    const mocked = unwrapMockResult(resolveMockFieldApiText(normalized, init))
+    if (mocked !== undefined) return mocked
+  }
+  const response = await protectedFetch(normalized, init)
+  if (!response.ok) throw await parseError(response)
+  return response.text()
 }
 
 export async function courseboardApiBlob(path: string, init?: RequestInit) {
@@ -240,13 +263,23 @@ export async function courseboardApiBlob(path: string, init?: RequestInit) {
   return response.blob()
 }
 
+function unwrapMockResult<T>(result: MockFieldResult<T>): T | undefined {
+  if (result.kind === 'disabled') return undefined
+  if (result.kind === 'error') throw new ApiError(result.message, result.status)
+  return result.data
+}
+
 export async function fieldApiJson<T>(path: string, init?: RequestInit) {
   const normalized = path.startsWith('/') ? path : `/${path}`
+  const mocked = unwrapMockResult(resolveMockFieldApiJson(normalized, init))
+  if (mocked !== undefined) return mocked as T
   return protectedJson<T>(`/field-api${normalized}`, init)
 }
 
 export async function fieldApiText(path: string, init?: RequestInit) {
   const normalized = path.startsWith('/') ? path : `/${path}`
+  const mocked = unwrapMockResult(resolveMockFieldApiText(normalized, init))
+  if (mocked !== undefined) return mocked
   const response = await protectedFetch(`/field-api${normalized}`, init)
   if (!response.ok) throw await parseError(response)
   return response.text()

@@ -25,6 +25,7 @@ const LOCAL_BFF_ORIGIN = 'http://localhost:3001'
 const COGNITO_ISSUER = 'https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4'
 const COGNITO_DOMAIN = 'https://auth-pool.n1.tachy.one'
 const FIELD_API_URL = 'https://tachyon-field-api.txcloud.app'
+const LOCAL_COURSE_API_URL = 'http://127.0.0.1:8080'
 const REQUIRED_SCOPES = [
   'openid',
   'profile',
@@ -41,6 +42,15 @@ const BROWSER_PKCE_ENV_KEYS = [
   'VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT',
   'VITE_COURSEBOARD_BROWSER_SCOPES',
 ]
+// Static development bearer must not remain when switching to real Auth.js login.
+const DEVELOPMENT_UI_ENV_KEYS = [
+  'VITE_COURSEBOARD_API_BEARER',
+  'VITE_COURSEBOARD_TENANT_ID',
+  'VITE_COURSEBOARD_OPERATOR_ID',
+]
+const COURSE_API_STATIC_BEARER_KEYS = [
+  'COURSEBOARD_DEV_BEARER_TOKEN',
+]
 
 const defaults = {
   apiUrl: 'https://api.n1.tachy.one',
@@ -49,6 +59,8 @@ const defaults = {
   tenantId: 'tn_01ks18jhh1xvggktfzjx5jqsen',
   uiEnvFile: '.env.local',
   webHostEnvFile: 'web-host/.env.local',
+  // Course-api env for OIDC verification of Cognito user JWTs + prod Field.
+  apiEnvFile: '../.env.web-session',
 }
 
 function usage() {
@@ -60,6 +72,7 @@ Options:
   --client-name <name>        Local confidential OAuth client name
   --ui-env-file <path>        Vite env file (default: .env.local)
   --web-host-env-file <path>  Auth.js BFF env file (default: web-host/.env.local)
+  --api-env-file <path>       course-api env file (default: ../.env.web-session)
   --callback-url <url>        Auth.js callback URL
   --api-url <url>             Tachyon API base URL
   --rotate-secret             Rotate an existing client when its local secret is unavailable
@@ -80,6 +93,7 @@ export function parseArgs(argv, environment = process.env) {
     ['--client-name', 'clientName'],
     ['--ui-env-file', 'uiEnvFile'],
     ['--web-host-env-file', 'webHostEnvFile'],
+    ['--api-env-file', 'apiEnvFile'],
     ['--callback-url', 'callbackUrl'],
     ['--api-url', 'apiUrl'],
   ])
@@ -413,7 +427,9 @@ export async function main(argv = process.argv.slice(2)) {
   if (options.dryRun) {
     console.log(`Validated Tachyon profile '${profile}'.`)
     console.log(`Local Cognito client action: ${localClient.action}.`)
-    console.log(`Would configure ${options.uiEnvFile} and ${options.webHostEnvFile}.`)
+    console.log(
+      `Would configure ${options.uiEnvFile}, ${options.webHostEnvFile}, and ${options.apiEnvFile}.`,
+    )
     return
   }
 
@@ -425,8 +441,9 @@ export async function main(argv = process.argv.slice(2)) {
       VITE_AUTH_PROXY_TARGET: LOCAL_BFF_ORIGIN,
       VITE_DEV_API_PROXY_TARGET: LOCAL_BFF_ORIGIN,
       VITE_COURSEBOARD_MODE: 'production',
+      VITE_COURSEBOARD_MOCK_DATA: 'false',
     },
-    BROWSER_PKCE_ENV_KEYS,
+    [...BROWSER_PKCE_ENV_KEYS, ...DEVELOPMENT_UI_ENV_KEYS],
   )
   const webHostPath = writeEnvFile(options.webHostEnvFile, {
     AUTH_URL: LOCAL_AUTH_ORIGIN,
@@ -442,14 +459,40 @@ export async function main(argv = process.argv.slice(2)) {
     AUTH_BACKEND_API_URL: options.apiUrl,
     TACHYON_FIELD_API_URL: FIELD_API_URL,
     BACKEND_API_URL: FIELD_API_URL,
+    // Auth.js BFF proxies /v1/course/* to local Rust course-api.
+    COURSEBOARD_API_URL: LOCAL_COURSE_API_URL,
   })
+  // Real Cognito user JWTs from Auth.js must be verified via OIDC, not the
+  // static COURSEBOARD_DEV_BEARER_TOKEN bypass used by `npm run field:env`.
+  const apiPath = writeEnvFile(
+    options.apiEnvFile,
+    {
+      DATABASE_URL: 'sqlite:///tmp/courseboard-local.db',
+      COURSEBOARD_PUBLIC_UI_BASE_URL: 'http://127.0.0.1:8080/ui/index.html',
+      TACHYON_FIELD_API_URL: FIELD_API_URL,
+      OIDC_ISSUER_URL: COGNITO_ISSUER,
+      // Cognito access tokens use client_id as audience for this confidential client.
+      EXPECTED_AUDIENCE: localClient.clientId,
+    },
+    COURSE_API_STATIC_BEARER_KEYS,
+  )
 
   console.log(`Configured ${uiPath}`)
   console.log(`Configured ${webHostPath}`)
+  console.log(`Configured ${apiPath}`)
   console.log(`OAuth client: ${options.clientName} (${localClient.clientId})`)
   console.log(`OAuth client action: ${localClient.action}`)
   console.log('Auth mode: web-session through the local Auth.js BFF.')
   console.log('Client secret was not printed and is stored only in the ignored 0600 web-host env file.')
+  console.log(
+    'Start course-api with: set -a && source .env.web-session && set +a && export COURSEBOARD_DEV_BEARER_TOKEN= && cargo run',
+  )
+  console.log(
+    'If course-api still logs the static bearer verifier, comment out COURSEBOARD_DEV_BEARER_TOKEN in the repo-root .env (dotenvy loads it).',
+  )
+  console.log('Then: cd desktop/web-host && pnpm dev')
+  console.log('Then: cd desktop && npm run dev -- --host 127.0.0.1')
+  console.log('Open: http://127.0.0.1:5173 and sign in with a Tachyon Cognito test user.')
 }
 
 const entrypoint = process.argv[1]

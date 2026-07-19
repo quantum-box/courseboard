@@ -38,6 +38,7 @@ vi.mock('./cognito', () => ({
 
 import {
 	AUTHJS_PKCE_COOKIE_NAME,
+	AUTHJS_PKCE_COOKIE_NAME_INSECURE,
 	clearAuthSessionCookies,
 	createAuthConfig,
 	getAuthPkceDiagnostics,
@@ -169,6 +170,32 @@ describe('createAuthConfig', () => {
 			path: '/',
 			sameSite: 'lax',
 			secure: true,
+		})
+	})
+
+	it('uses a non-Secure PKCE cookie on local HTTP auth URLs', () => {
+		vi.stubEnv('AUTH_SECRET', 'test-auth-secret')
+		vi.stubEnv('COGNITO_CLIENT_ID', 'test-client-id')
+		vi.stubEnv('COGNITO_CLIENT_SECRET', 'test-client-secret')
+		vi.stubEnv(
+			'COGNITO_ISSUER',
+			'https://cognito-idp.ap-northeast-1.amazonaws.com/test_pool',
+		)
+
+		const config = createAuthConfig(
+			{},
+			{ authUrl: 'http://127.0.0.1:5173' },
+		)
+
+		expect(config.cookies?.pkceCodeVerifier?.name).toBe(
+			AUTHJS_PKCE_COOKIE_NAME_INSECURE,
+		)
+		expect(config.cookies?.pkceCodeVerifier?.options).toMatchObject({
+			httpOnly: true,
+			maxAge: 60 * 15,
+			path: '/',
+			sameSite: 'lax',
+			secure: false,
 		})
 	})
 
@@ -322,7 +349,8 @@ describe('clearAuthSessionCookies', () => {
 			'__Secure-next-auth.session-token.11',
 		)
 		expect(deleteCookie).toHaveBeenCalledWith(AUTHJS_PKCE_COOKIE_NAME)
-		expect(deleteCookie).toHaveBeenCalledTimes(65)
+		expect(deleteCookie).toHaveBeenCalledWith(AUTHJS_PKCE_COOKIE_NAME_INSECURE)
+		expect(deleteCookie).toHaveBeenCalledTimes(66)
 	})
 })
 

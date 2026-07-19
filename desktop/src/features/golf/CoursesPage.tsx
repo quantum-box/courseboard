@@ -1,5 +1,6 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import {
+  ArrowLeft,
   Flag,
   Pencil,
   Plus,
@@ -8,7 +9,8 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { fieldApiJson, fieldApiText, fieldTenant } from '../../api'
+import { courseboardApiJson, fieldTenant } from '../../api'
+import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   DataTable,
   EmptyState,
@@ -25,6 +27,7 @@ import {
   ResourceError,
   type DataTableColumn,
 } from '../../components/Page'
+import { navigate } from '../../lib/router'
 import {
   courseToDraft,
   emptyCourseDraft,
@@ -32,7 +35,7 @@ import {
   type GolfCourseDraft,
 } from './models'
 
-const coursesPath = '/v1/erp/extensions/golf-course/courses'
+const coursesPath = '/v1/course/courses'
 
 type EditorState =
   | { mode: 'create' }
@@ -84,7 +87,7 @@ export function CoursesPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const response = await fieldApiJson<{ items: GolfCourse[] }>(coursesPath)
+      const response = await courseboardApiJson<{ items: GolfCourse[] }>(coursesPath)
       setCourses(response.items)
     } catch (error) {
       setLoadError(error)
@@ -96,6 +99,8 @@ export function CoursesPage() {
   useEffect(() => {
     void loadCourses()
   }, [loadCourses])
+
+  useRegisterPageReload(loadCourses)
 
   function beginCreate() {
     setDraft(emptyCourseDraft())
@@ -139,13 +144,13 @@ export function CoursesPage() {
 
     try {
       if (editor.mode === 'create') {
-        await fieldApiText(coursesPath, {
+        await courseboardApiJson(coursesPath, {
           method: 'POST',
           body: JSON.stringify(body),
         })
         setSavedMessage(`「${body.name}」を追加しました。`)
       } else {
-        await fieldApiText(
+        await courseboardApiJson(
           `${coursesPath}/${encodeURIComponent(editor.courseId)}`,
           {
             method: 'PATCH',
@@ -169,7 +174,7 @@ export function CoursesPage() {
     setMutationError(null)
     setSavedMessage(null)
     try {
-      await fieldApiText(
+      await courseboardApiJson(
         `${coursesPath}/${encodeURIComponent(course.id)}`,
         { method: 'DELETE' },
       )
@@ -274,11 +279,14 @@ export function CoursesPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow={`Golf operations · ${tenant}`}
+        eyebrow={`Settings · ${tenant}`}
         title="コース管理"
-        description="ホール数とスタート間隔を含むコースマスタを、Web・デスクトップ・モバイルで共通管理します。"
+        description="テナント導入時に整えるコースマスタです。日常運用ではあまり開きません。ホール数とスタート間隔は予約商品・キャディ対応コースの前提になります。"
         actions={(
           <>
+            <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
+              <ArrowLeft /> 設定へ戻る
+            </Button>
             <PageRefreshButton onClick={() => void loadCourses()} loading={loading} label="更新" />
             <Button type="button" variant="primary" onClick={beginCreate}>
               <Plus /> コース追加

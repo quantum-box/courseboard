@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  isMockCartSimulatorEnabled,
+  startMockCartSimulator,
+} from '../dev/mockCartSimulator'
 import type { CartUpdate, CartsMessage } from '../types'
 
-export type ConnectionStatus = 'connecting' | 'online' | 'offline'
+export type ConnectionStatus = 'connecting' | 'online' | 'offline' | 'mock'
 
 interface UseCartUpdatesResult {
   carts: CartUpdate[]
@@ -10,15 +14,26 @@ interface UseCartUpdatesResult {
 
 export function useCartUpdates(url: string): UseCartUpdatesResult {
   const [carts, setCarts] = useState<CartUpdate[]>([])
-  const [status, setStatus] = useState<ConnectionStatus>('connecting')
+  const [status, setStatus] = useState<ConnectionStatus>(() =>
+    isMockCartSimulatorEnabled() ? 'mock' : 'connecting',
+  )
   const retryRef = useRef<number | null>(null)
 
   useEffect(() => {
+    // Browser Vite/dev: prefer the stable mock feed. Do not also hammer the
+    // Tauri cart WebSocket — failed reconnect loops flip connecting/offline/mock
+    // and make the map flicker.
+    if (isMockCartSimulatorEnabled()) {
+      setStatus('mock')
+      return startMockCartSimulator(setCarts)
+    }
+
     let closed = false
     let ws: WebSocket | null = null
     let retryDelay = 500
 
     function connect() {
+      if (closed) return
       setStatus('connecting')
       ws = new WebSocket(url)
 

@@ -23,3 +23,9 @@ data/
 *.tmp
 *.temp
 .DS_Store
+
+.env.browser-pkce
+
+# Local agent / QA artifacts
+.serena/
+desktop/.qa-screenshots/

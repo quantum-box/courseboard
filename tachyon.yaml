@@ -84,6 +84,10 @@ spec:
           valueFrom:
             internalService:
               appName: tachyon-field-api
+        - name: COURSEBOARD_API_URL
+          valueFrom:
+            internalService:
+              appName: courseboard-api
       environments:
         preview:
           envVars:
@@ -128,4 +132,69 @@ spec:
             - name: TACHYON_FIELD_API_URL
               value: https://tachyon-field-api.txcloud.app
             - name: BACKEND_API_URL
+              value: https://tachyon-field-api.txcloud.app
+            - name: COURSEBOARD_API_URL
+              value: https://courseboard-api.txcloud.app
+
+    # --- Rust course-api — AWS Lambda.
+    # The web host forwards authenticated /v1/course/* requests to this app.
+    - name: courseboard-api
+      repository:
+        url: https://github.com/quantum-box/courseboard
+        owner: quantum-box
+        name: courseboard
+        defaultBranch: main
+      rootDirectory: ""
+      framework: cargo_lambda
+      deploymentTarget: lambda
+      auth:
+        enabled: false
+      readinessProof:
+        path: /healthz
+        expectedStatus: 200
+        expectedBody: '"status":"ok"'
+      watchPaths:
+        - Cargo.toml
+        - Cargo.lock
+        - bin/**
+        - migrations/**
+        - src/**
+      build:
+        package: courseboard
+        binary: lambda-courseboard
+        release: true
+        arch: arm64
+      envVars:
+        # Lambda has writable ephemeral storage only under /tmp. Durable golf
+        # operational data continues to live in Tachyon Field.
+        - name: DATABASE_URL
+          value: sqlite:///tmp/courseboard-api.db
+        - name: COURSEBOARD_PUBLIC_UI_BASE_URL
+          value: https://courseboard.txcloud.app
+        - name: OIDC_ISSUER_URL
+          value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+        - name: EXPECTED_AUDIENCE
+          # OAuth client IDs are public identifiers. Keep this aligned with
+          # the existing courseboard-web / tachyonfield-golf audience.
+          value: 5002hok6cj8mjmt3gepdpdq98i
+        - name: EXPECTED_CLIENT_ID
+          value: 5002hok6cj8mjmt3gepdpdq98i
+        - name: TACHYON_FIELD_API_URL
+          valueFrom:
+            internalService:
+              appName: tachyon-field-api
+      environments:
+        preview:
+          envVars:
+            - name: DATABASE_URL
+              value: sqlite:///tmp/courseboard-api-preview.db
+            - name: COURSEBOARD_PUBLIC_UI_BASE_URL
+              value: https://courseboard.txcloud.app
+            - name: OIDC_ISSUER_URL
+              value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+            - name: EXPECTED_AUDIENCE
+              value: 5002hok6cj8mjmt3gepdpdq98i
+            - name: EXPECTED_CLIENT_ID
+              value: 5002hok6cj8mjmt3gepdpdq98i
+            - name: TACHYON_FIELD_API_URL
               value: https://tachyon-field-api.txcloud.app

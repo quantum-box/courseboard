@@ -4,20 +4,23 @@ import {
   Building2,
   ChevronRight,
   ExternalLink,
-  Flag,
   LoaderCircle,
   LogIn,
   RefreshCw,
   ShieldCheck,
 } from 'lucide-react'
 import { useState, type FormEvent, type ReactNode } from 'react'
+import { CourseBoardBrand } from '../components/CourseBoardBrand'
 import type { AuthReason, AuthTenant } from './types'
+
+// Google login is not verified yet; keep the auth adapter logic but hide the UI entry point.
+const GOOGLE_SIGN_IN_ENABLED = false
 
 function AuthFrame({ children }: { children: ReactNode }) {
   return (
     <main className="auth-shell">
       <section className="auth-brand-panel">
-        <div className="auth-brand"><span className="auth-brand-mark"><Flag /></span>Course Board</div>
+        <div className="auth-brand"><CourseBoardBrand variant="auth" /></div>
         <div className="auth-brand-copy">
           <h1>クラブ運営を、<br />ひとつの画面で。</h1>
           <p>予約、キャディ、コース、キャンセル料まで。現場と経営をつなぐゴルフ場オペレーション基盤。</p>
@@ -97,9 +100,11 @@ export function SignInScreen({ reason, passwordSignInAvailable, onSignIn, onPass
           </form>
         ) : (
           <div className="auth-actions">
-            <Button type="button" variant="secondary" onClick={() => onSignIn('Google')}>
-              <strong className="google-mark">G</strong> Googleでログイン
-            </Button>
+            {GOOGLE_SIGN_IN_ENABLED ? (
+              <Button type="button" variant="secondary" onClick={() => onSignIn('Google')}>
+                <strong className="google-mark">G</strong> Googleでログイン
+              </Button>
+            ) : null}
             <Button type="button" variant="primary" onClick={() => onSignIn()}>
               <LogIn /> ログイン
             </Button>
