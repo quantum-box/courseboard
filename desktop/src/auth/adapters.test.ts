@@ -324,6 +324,66 @@ describe('BrowserPkceAdapter', () => {
     expect(await adapter.getAccessToken()).toBeUndefined()
   })
 
+  it('keeps durable storage when token refresh fails transiently (network)', async () => {
+    const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
+    localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
+      accessToken: 'stale-access-token',
+      refreshToken: 'persisted-refresh-token',
+      accessTokenExpiresAt: Date.now() - 1_000,
+    }))
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/oauth2/token')) {
+        throw new TypeError('Failed to fetch')
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const adapter = createAuthAdapter()
+    // Force-refresh must still return the stored bearer so API 401 recovery does
+    // not soft-sign-out on a transient token-endpoint outage.
+    expect(await adapter.getAccessToken(true)).toBe('stale-access-token')
+    expect(JSON.parse(localStorageMock.getItem(BROWSER_PKCE_SESSION_KEY) ?? '{}')).toMatchObject({
+      accessToken: 'stale-access-token',
+      refreshToken: 'persisted-refresh-token',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not report session expiry when /v1/me keeps returning 401 after refresh', async () => {
+    const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
+    localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
+    }))
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/oauth2/token')) {
+        return new Response(JSON.stringify({
+          access_token: 'rotated-access-token',
+          token_type: 'Bearer',
+          expires_in: 3600,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/v1/me')) {
+        return new Response(JSON.stringify({ error: 'unauthorized' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const adapter = createAuthAdapter()
+    await expect(adapter.bootstrap()).rejects.toThrow(/profile/)
+    expect(localStorageMock.getItem(BROWSER_PKCE_SESSION_KEY)).toBeTruthy()
+  })
+
   it('migrates a legacy sessionStorage refresh token into localStorage after refresh', async () => {
     const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
     sessionStorageMock.setItem('courseboard.auth.browser.refresh', 'legacy-refresh-token')
@@ -443,5 +503,25 @@ describe('CognitoBrowserPkceAdapter', () => {
     })
     expect(result.kind === 'authenticated' && result.user.name).not.toBe('Local operator')
     expect(await adapter.getAccessToken()).toBe('cognito-access-token')
+  })
+
+  it('keeps a fresh Cognito access token when force-refresh has no refresh token', async () => {
+    // False-positive path: navigation 401 → getAccessToken(true) must not discard
+    // a usable access token just because Cognito omitted refresh_token.
+    const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
+    localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
+      accessToken: 'cognito-access-only',
+      accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
+    }))
+
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('token endpoint must not be called without a refresh token')
+    }))
+
+    const adapter = createAuthAdapter()
+    expect(await adapter.getAccessToken(true)).toBe('cognito-access-only')
+    expect(JSON.parse(localStorageMock.getItem(BROWSER_PKCE_SESSION_KEY) ?? '{}')).toMatchObject({
+      accessToken: 'cognito-access-only',
+    })
   })
 })

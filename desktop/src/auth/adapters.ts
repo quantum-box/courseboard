@@ -318,6 +318,23 @@ async function responseError(response: Response, fallback: string) {
   }
 }
 
+/** Token endpoint rejected the grant (invalid/expired refresh) — clear local session. */
+class DefinitiveTokenAuthError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'DefinitiveTokenAuthError'
+  }
+}
+
+function isDefinitiveOAuthTokenStatus(status: number) {
+  return status === 400 || status === 401 || status === 403
+}
+
+/** Access tokens within the refresh skew window are still usable for API calls. */
+function isFreshAccessToken(accessToken: string | undefined, expiresAt: number): accessToken is string {
+  return Boolean(accessToken && Date.now() < expiresAt - 60_000)
+}
+
 class WebSessionAdapter implements AuthAdapter {
   async bootstrap(): Promise<AuthBootstrapResult> {
     const response = await fetch('/api/auth/courseboard-context', {
@@ -425,7 +442,11 @@ class BrowserPkceAdapter implements AuthAdapter {
   async bootstrap(): Promise<AuthBootstrapResult> {
     if (!this.accessToken || Date.now() >= this.accessTokenExpiresAt - 60_000) {
       const refreshed = await this.getAccessToken()
-      if (!refreshed) return { kind: 'anonymous' }
+      if (!refreshed) {
+        // Still holding durable tokens after a failed refresh — try /v1/me (and let
+        // loadProfile distinguish transient errors from confirmed expiry).
+        if (!this.accessToken && !this.refreshToken) return { kind: 'anonymous' }
+      }
     }
     return this.loadProfile()
   }
@@ -506,9 +527,13 @@ class BrowserPkceAdapter implements AuthAdapter {
     if (!this.accessToken && !this.refreshToken) {
       this.restoreSession()
     }
-    const hasFreshToken = this.accessToken && Date.now() < this.accessTokenExpiresAt - 60_000
+    const hasFreshToken = isFreshAccessToken(this.accessToken, this.accessTokenExpiresAt)
     if (!forceRefresh && hasFreshToken) return this.accessToken
-    if (!this.refreshToken) return undefined
+    if (!this.refreshToken) {
+      // 401 recovery calls forceRefresh=true; keep a still-valid access token when
+      // the client has no refresh token (common for some Cognito public clients).
+      return hasFreshToken ? this.accessToken : undefined
+    }
     if (this.tokenRequest) return this.tokenRequest
 
     this.tokenRequest = this.refreshAccessToken().finally(() => {
@@ -557,9 +582,21 @@ class BrowserPkceAdapter implements AuthAdapter {
         refresh_token: this.refreshToken,
       }, this.refreshToken)
       return this.accessToken
-    } catch {
-      this.clearSession()
-      return undefined
+    } catch (error) {
+      if (error instanceof DefinitiveTokenAuthError) {
+        // Drop only the dead refresh grant; keep a still-fresh access token so a
+        // spurious API 401 does not soft-sign-out a valid session.
+        this.refreshToken = undefined
+        if (!isFreshAccessToken(this.accessToken, this.accessTokenExpiresAt)) {
+          this.clearSession()
+          return undefined
+        }
+        this.persistSession()
+        return this.accessToken
+      }
+      // Network / 5xx: keep durable tokens and fall back to the current access token
+      // (even if slightly stale) so navigation does not soft-sign-out on a blip.
+      return this.accessToken
     }
   }
 
@@ -567,21 +604,31 @@ class BrowserPkceAdapter implements AuthAdapter {
     body: Record<string, string>,
     existingRefreshToken?: string,
   ) {
-    const response = await fetch(this.configuration.tokenEndpoint, {
-      method: 'POST',
-      credentials: 'omit',
-      cache: 'no-store',
-      redirect: 'error',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    })
-    if (!response.ok) throw new NativeAuthorizationError('認証codeをtokenへ交換できませんでした。')
+    let response: Response
+    try {
+      response = await fetch(this.configuration.tokenEndpoint, {
+        method: 'POST',
+        credentials: 'omit',
+        cache: 'no-store',
+        redirect: 'error',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      })
+    } catch {
+      throw new Error('token endpointへ到達できませんでした。')
+    }
+    if (!response.ok) {
+      if (isDefinitiveOAuthTokenStatus(response.status)) {
+        throw new DefinitiveTokenAuthError('認証codeをtokenへ交換できませんでした。')
+      }
+      throw new Error('認証codeをtokenへ交換できませんでした。')
+    }
     const payload = await response.json() as NativeTokenPayload
     if (!payload.access_token || (payload.token_type && payload.token_type.toLowerCase() !== 'bearer')) {
-      throw new NativeAuthorizationError('token endpointから有効なBearer tokenが返りませんでした。')
+      throw new DefinitiveTokenAuthError('token endpointから有効なBearer tokenが返りませんでした。')
     }
     this.accessToken = payload.access_token
     this.accessTokenExpiresAt = jwtExpiry(payload.access_token)
@@ -602,6 +649,7 @@ class BrowserPkceAdapter implements AuthAdapter {
     })
     if (response.status === 401) {
       // Access may be stale after restore; try one refresh before giving up.
+      const hadRefreshToken = Boolean(this.refreshToken)
       const refreshed = await this.getAccessToken(true)
       if (refreshed) {
         const retry = await fetch(this.configuration.profileEndpoint, {
@@ -616,6 +664,12 @@ class BrowserPkceAdapter implements AuthAdapter {
           return this.profileFromResponse(retry)
         }
         if (retry.status !== 401) throw new Error('ブラウザ認証profileを取得できませんでした。')
+        // Fresh token still rejected — not a local session expiry.
+        throw new Error('ブラウザ認証profileを取得できませんでした。')
+      }
+      if (hadRefreshToken && this.refreshToken) {
+        // Refresh failed transiently; keep tokens and surface a recoverable error.
+        throw new Error('ブラウザ認証profileを取得できませんでした。')
       }
       this.clearSession()
       return { kind: 'anonymous', reason: 'expired' }
@@ -742,9 +796,11 @@ class NativePkceAdapter implements AuthAdapter {
   }
 
   async getAccessToken(forceRefresh = false) {
-    const hasFreshToken = this.accessToken && Date.now() < this.accessTokenExpiresAt - 60_000
+    const hasFreshToken = isFreshAccessToken(this.accessToken, this.accessTokenExpiresAt)
     if (!forceRefresh && hasFreshToken) return this.accessToken
-    if (!this.refreshToken) return undefined
+    if (!this.refreshToken) {
+      return hasFreshToken ? this.accessToken : undefined
+    }
     if (this.tokenRequest) return this.tokenRequest
 
     this.tokenRequest = this.refreshAccessToken().finally(() => {
@@ -1006,7 +1062,9 @@ class CognitoBrowserPkceAdapter implements AuthAdapter {
 
     if (!this.accessToken || Date.now() >= this.accessTokenExpiresAt - 60_000) {
       const refreshed = await this.getAccessToken()
-      if (!refreshed) return { kind: 'anonymous' }
+      if (!refreshed) {
+        if (!this.accessToken && !this.refreshToken) return { kind: 'anonymous' }
+      }
     }
     return this.loadProfile()
   }
@@ -1032,9 +1090,12 @@ class CognitoBrowserPkceAdapter implements AuthAdapter {
     if (!this.accessToken && !this.refreshToken) {
       this.restoreSession()
     }
-    const hasFreshToken = this.accessToken && Date.now() < this.accessTokenExpiresAt - 60_000
+    const hasFreshToken = isFreshAccessToken(this.accessToken, this.accessTokenExpiresAt)
     if (!forceRefresh && hasFreshToken) return this.accessToken
-    if (!this.refreshToken) return undefined
+    if (!this.refreshToken) {
+      // Same as BrowserPkceAdapter: force-refresh must not erase a usable access token.
+      return hasFreshToken ? this.accessToken : undefined
+    }
     if (this.tokenRequest) return this.tokenRequest
 
     this.tokenRequest = this.refreshAccessToken().finally(() => {
@@ -1112,28 +1173,48 @@ class CognitoBrowserPkceAdapter implements AuthAdapter {
       })
       await this.exchangeToken(body, this.refreshToken)
       return this.accessToken
-    } catch {
-      this.clearSession()
-      return undefined
+    } catch (error) {
+      if (error instanceof DefinitiveTokenAuthError) {
+        this.refreshToken = undefined
+        if (!isFreshAccessToken(this.accessToken, this.accessTokenExpiresAt)) {
+          this.clearSession()
+          return undefined
+        }
+        this.persistSession()
+        return this.accessToken
+      }
+      // Network / 5xx: keep durable tokens and fall back to the current access token
+      // (even if slightly stale) so navigation does not soft-sign-out on a blip.
+      return this.accessToken
     }
   }
 
   private async exchangeToken(body: URLSearchParams, existingRefreshToken?: string) {
-    const response = await fetch(this.configuration.tokenEndpoint, {
-      method: 'POST',
-      credentials: 'omit',
-      cache: 'no-store',
-      redirect: 'error',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body,
-    })
-    if (!response.ok) throw new NativeAuthorizationError('認証codeをtokenへ交換できませんでした。')
+    let response: Response
+    try {
+      response = await fetch(this.configuration.tokenEndpoint, {
+        method: 'POST',
+        credentials: 'omit',
+        cache: 'no-store',
+        redirect: 'error',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body,
+      })
+    } catch {
+      throw new Error('token endpointへ到達できませんでした。')
+    }
+    if (!response.ok) {
+      if (isDefinitiveOAuthTokenStatus(response.status)) {
+        throw new DefinitiveTokenAuthError('認証codeをtokenへ交換できませんでした。')
+      }
+      throw new Error('認証codeをtokenへ交換できませんでした。')
+    }
     const payload = await response.json() as NativeTokenPayload
     if (!payload.access_token || (payload.token_type && payload.token_type.toLowerCase() !== 'bearer')) {
-      throw new NativeAuthorizationError('token endpointから有効なBearer tokenが返りませんでした。')
+      throw new DefinitiveTokenAuthError('token endpointから有効なBearer tokenが返りませんでした。')
     }
     this.accessToken = payload.access_token
     this.accessTokenExpiresAt = jwtExpiry(payload.access_token)
@@ -1180,6 +1261,7 @@ class CognitoBrowserPkceAdapter implements AuthAdapter {
       },
     })
     if (response.status === 401) {
+      const hadRefreshToken = Boolean(this.refreshToken)
       const refreshed = await this.getAccessToken(true)
       if (refreshed) {
         const retry = await fetch(this.configuration.profileEndpoint, {
@@ -1192,6 +1274,11 @@ class CognitoBrowserPkceAdapter implements AuthAdapter {
         })
         if (retry.ok) return this.profileFromResponse(retry)
         if (retry.status !== 401) throw new Error('Cognito認証profileを取得できませんでした。')
+        // Fresh token still rejected — not a local session expiry.
+        throw new Error('Cognito認証profileを取得できませんでした。')
+      }
+      if (hadRefreshToken && this.refreshToken) {
+        throw new Error('Cognito認証profileを取得できませんでした。')
       }
       this.clearSession()
       return { kind: 'anonymous', reason: 'expired' }

@@ -192,6 +192,21 @@ export async function apiJson<T>(
   }
 }
 
+/**
+ * Soft-sign-out only when a 401 cannot be recovered by refreshing the access token.
+ * A 401 after a successful refresh is a request/authorization failure, not session
+ * expiry — navigation must not flash "Your session expired".
+ */
+export function shouldSoftSignOutOn401(input: {
+  hasAuthContext: boolean
+  alreadyRetried: boolean
+  refreshProducedToken: boolean
+}): boolean {
+  if (!input.hasAuthContext) return false
+  if (input.alreadyRetried) return false
+  return !input.refreshProducedToken
+}
+
 async function protectedFetch(path: string, init?: RequestInit, retried = false) {
   const token = await apiAuthContext?.getAccessToken(false)
   const requestUrl = join(operatorApiBaseUrl(), path)
@@ -211,8 +226,16 @@ async function protectedFetch(path: string, init?: RequestInit, retried = false)
     if (!retried && apiAuthContext) {
       const refreshed = await apiAuthContext.getAccessToken(true)
       if (refreshed) return protectedFetch(path, init, true)
+      if (shouldSoftSignOutOn401({
+        hasAuthContext: true,
+        alreadyRetried: false,
+        refreshProducedToken: false,
+      })) {
+        apiAuthContext.onUnauthorized()
+      }
     }
-    apiAuthContext?.onUnauthorized()
+    // Already retried with a refreshed token (or no auth context): surface the
+    // 401 to the caller without treating it as session expiry.
   }
   if (
     response.status === 403
