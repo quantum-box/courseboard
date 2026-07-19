@@ -95,6 +95,18 @@ describe('DevelopmentAdapter', () => {
     }
   })
 
+  it('treats blank or whitespace browser client id as unset under development mode', async () => {
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_CLIENT_ID', '   ')
+    const { createAuthAdapter } = await import('./adapters')
+    const adapter = createAuthAdapter()
+    const result = await adapter.bootstrap()
+
+    expect(result).toMatchObject({
+      kind: 'authenticated',
+      user: { id: 'local-operator', name: 'Local operator', role: 'DEVELOPMENT' },
+    })
+  })
+
   it('bootstraps as Local operator only for explicit development opt-in', async () => {
     const { createAuthAdapter } = await import('./adapters')
     const adapter = createAuthAdapter()
@@ -343,5 +355,93 @@ describe('BrowserPkceAdapter', () => {
       accessToken: 'migrated-access-token',
       refreshToken: 'migrated-refresh-token',
     })
+  })
+})
+
+describe('CognitoBrowserPkceAdapter', () => {
+  let localStorageMock: ReturnType<typeof memoryStorage>
+  let locationAssign: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    vi.resetModules()
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'cognito-pkce')
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_CLIENT_ID', 'local-prod-public')
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_REDIRECT_URI', 'http://127.0.0.1:5173/oauth/callback')
+    vi.stubEnv(
+      'VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT',
+      'https://auth-pool.n1.tachy.one/oauth2/authorize',
+    )
+    vi.stubEnv(
+      'VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT',
+      'https://auth-pool.n1.tachy.one/oauth2/token',
+    )
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT', 'https://api.n1.tachy.one/v1/me')
+    vi.stubEnv('VITE_COURSEBOARD_TENANT_ID', 'tn_01example')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'false')
+    vi.stubEnv('VITE_COURSEBOARD_API_BEARER', '')
+    localStorageMock = memoryStorage()
+    locationAssign = vi.fn()
+    vi.stubGlobal('window', {
+      location: {
+        search: '',
+        href: 'http://127.0.0.1:5173/',
+        origin: 'http://127.0.0.1:5173',
+        reload: vi.fn(),
+        assign: locationAssign,
+      },
+      history: { replaceState: vi.fn(), state: null },
+    })
+    vi.stubGlobal('localStorage', localStorageMock)
+    vi.stubGlobal('sessionStorage', memoryStorage())
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('selects cognito-pkce without password form or Local operator', async () => {
+    const { createAuthAdapter } = await import('./adapters')
+    const adapter = createAuthAdapter()
+
+    expect(adapter.signInWithPassword).toBeUndefined()
+    expect(await adapter.bootstrap()).toEqual({ kind: 'anonymous' })
+    await adapter.signIn()
+    expect(locationAssign).toHaveBeenCalledTimes(1)
+    const url = String(locationAssign.mock.calls[0]?.[0] ?? '')
+    expect(url).toContain('https://auth-pool.n1.tachy.one/oauth2/authorize')
+    expect(url).toContain('client_id=local-prod-public')
+    expect(url).toContain('code_challenge_method=S256')
+  })
+
+  it('restores a Cognito session and loads the real user profile', async () => {
+    const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
+    localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
+      accessToken: 'cognito-access-token',
+      refreshToken: 'cognito-refresh-token',
+      accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
+    }))
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/v1/me')) {
+        return new Response(JSON.stringify({
+          user: { id: 'user-42', username: 'real.operator', name: 'Real Operator' },
+          tenants: [{ id: 'tn_01example', name: 'Example Club' }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }))
+
+    const adapter = createAuthAdapter()
+    const result = await adapter.bootstrap()
+    expect(result).toMatchObject({
+      kind: 'authenticated',
+      user: { id: 'user-42', name: 'Real Operator' },
+      tenants: [{ id: 'tn_01example' }],
+    })
+    expect(result.kind === 'authenticated' && result.user.name).not.toBe('Local operator')
+    expect(await adapter.getAccessToken()).toBe('cognito-access-token')
   })
 })

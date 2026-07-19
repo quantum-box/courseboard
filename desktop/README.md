@@ -58,6 +58,11 @@ production（`https://tachyon-field-api.txcloud.app`）が使われます。
 
 推奨（mise）:
 
+ローカル補助スクリプトは `desktop/scripts/` に集約しています。
+
+- env 生成: `node scripts/configure.mjs <auth|pkce|field|prod-api|prod-api-pkce>`（npm alias: `pkce:env` / `prod-api:pkce-env` など）
+- 起動: `desktop/scripts/dev.sh <pkce|field|prod-api> [api|vite|both]`（mise task 名はそのまま）
+
 ```bash
 # 初回 / bacon 未導入時
 mise install
@@ -86,6 +91,68 @@ Vite は `/v1/course/*` と `/field-api/*` を `http://127.0.0.1:8080` へ proxy
 
 実データには有効な JWT と `tn_…` テナントが必要です。オフライン UI だけならモック
 （`VITE_COURSEBOARD_MOCK_DATA=true`）を使ってください。
+
+### Local Vite → production courseboard-api
+
+ローカルの Vite (:5173) だけを動かし、course-api をデプロイ済み本番
+(`https://courseboard-api.txcloud.app`) に向けます。**local :8080 は不要**です。
+`desktop/.env.local`（browser-pkce）は書き換えません。オーバーレイ
+`desktop/.env.prod-api.local` を使います。
+
+#### 推奨: Cognito Hosted UI（実ユーザー）
+
+Local operator ショートカットではなく、本番と同じ Cognito ユーザーでログインします。
+
+```bash
+# 1) Cognito Hosted UI PKCE overlay（.env.local は触らない）
+mise run courseboard:prod-api-pkce-env
+# 別 tenant: cd desktop && npm run configure -- prod-api-pkce --tenant-id tn_01…
+
+# 2) 表示された client id を courseboard-api の EXPECTED_CLIENT_ID に追記して redeploy
+#    （初回のみ。configure の出力を参照）
+
+# 3) 既存の Vite (:5173) を自分で止めてから再起動
+#    （エージェントは :5173 を kill しません）
+mise run courseboard:vite-prod-api
+```
+
+開く URL: `http://127.0.0.1:5173` → **ログイン** → Cognito Hosted UI
+(`auth-pool.n1.tachy.one`)。表示名は実ユーザー（**Local operator にはなりません**）。
+
+Redirect URI（クライアント登録必須）: `http://127.0.0.1:5173/oauth/callback`
+
+- Manifest: `.tachyon/manifests/courseboard-local-prod-pkce-oauth-client.yaml`
+- または Tachyon / Cognito コンソールで public client
+  `courseboard-local-prod-pkce` に上記 redirect を追加
+
+#### 代替: CLI JWT（Local operator）
+
+```bash
+mise run courseboard:prod-api-env
+mise run courseboard:vite-prod-api
+```
+
+`AUTH_MODE=development` + CLI Cognito JWT。UI は **Local operator** と表示されます。
+JWT は約1時間で切れるので `prod-api:env` を再実行してください。
+
+要点:
+
+- ブラウザは同一 origin のまま。`VITE_DEV_API_PROXY_TARGET` で Vite が
+  `/v1/course/*` と `/field-api/*` を本番 course-api へ転送します
+  （Web では `VITE_COURSEBOARD_API_BASE_URL` を外部ホストにしないでください）。
+- 本番 course-api の OIDC は **Cognito**
+  (`iss=cognito-idp…/ap-northeast-1_8Ga4bK5M4`)。
+  local browser-pkce の Tachyon token（`iss=api.n1.tachy.one`）は **401** になります。
+- Cognito Hosted UI 用 public client の `client_id` は、本番 Lambda の
+  `EXPECTED_CLIENT_ID`（CSV）へ追記 + redeploy が必要です
+  （`EXPECTED_AUDIENCE` の `5002hok6…` はそのまま）。
+- そのデプロイの Field upstream は本番 Field です（local Field ではありません）。
+- CORS はブラウザ→Vite では不要（同一 origin）。
+- `/healthz` が 200 でも `/v1/course/*` が Cloudflare 502、または
+  `/field-api/*` が `TACHYON_FIELD_API_URL is invalid` になる場合は、
+  **ローカル設定ではなく本番 courseboard-api デプロイ側**の問題です。
+
+テンプレート: `desktop/env.prod-api.local.example`
 
 ### Live local → production Field（推奨・browser-pkce）
 
@@ -117,7 +184,7 @@ tachyon auth login --profile admin
 
 # 1) gitignored env を生成（prod Field URL + OIDC audience。CLI Field bearer は書かない）
 mise run courseboard:pkce-env
-# 別 tenant: cd desktop && npm run pkce:env -- --tenant-id tn_01…
+# 別 tenant: cd desktop && npm run configure -- pkce --tenant-id tn_01…
 
 # 2) course-api :8080 — bacon hot-reload（OIDC inbound、prod Field outbound）
 mise run courseboard:api
