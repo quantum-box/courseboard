@@ -1,41 +1,48 @@
 import type { ReactNode } from 'react'
 import { useAuth } from './AuthProvider'
+import { resolveAuthGateView, sessionVerifyingNotice } from './authGateView'
 import {
+  AuthBootScreen,
   AuthLoadingScreen,
   AuthProblemScreen,
+  AuthSessionToast,
   SignInScreen,
   TenantSelectionScreen,
 } from './AuthScreens'
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const auth = useAuth()
-  const { state } = auth
+  const view = resolveAuthGateView(auth.state)
+  const verifyingNotice = sessionVerifyingNotice(auth.state)
+  const toastMessage = auth.sessionNotice ?? verifyingNotice
+  const toastSticky = Boolean(verifyingNotice) && !auth.sessionNotice
 
-  if (state.status === 'ready') return children
-  if (state.status === 'booting' || state.status === 'authorizing') {
-    return <AuthLoadingScreen authorizing={state.status === 'authorizing'} />
-  }
-  if (state.status === 'anonymous') {
-    return (
+  let content: ReactNode
+  if (view.kind === 'app' || view.kind === 'hold-app') {
+    content = children
+  } else if (view.kind === 'boot') {
+    content = <AuthBootScreen />
+  } else if (view.kind === 'loading') {
+    content = <AuthLoadingScreen authorizing={view.authorizing} />
+  } else if (view.kind === 'sign-in') {
+    content = (
       <SignInScreen
-        reason={state.reason}
+        reason={view.reason}
         passwordSignInAvailable={auth.passwordSignInAvailable}
         onSignIn={provider => { void auth.signIn(provider) }}
         onPasswordSignIn={(username, password) => { void auth.signInWithPassword(username, password) }}
       />
     )
-  }
-  if (state.status === 'selecting-tenant') {
-    return (
+  } else if (view.kind === 'select-tenant') {
+    content = (
       <TenantSelectionScreen
-        tenants={state.tenants}
+        tenants={auth.state.status === 'selecting-tenant' ? auth.state.tenants : []}
         onSelect={auth.selectTenant}
         onSignOut={() => { void auth.signOut() }}
       />
     )
-  }
-  if (state.status === 'forbidden') {
-    return (
+  } else if (view.kind === 'forbidden') {
+    content = (
       <AuthProblemScreen
         title="このテナントを表示する権限がありません"
         message="アクセス可能な施設へ切り替えるか、管理者に権限を確認してください。"
@@ -43,16 +50,29 @@ export function AuthGate({ children }: { children: ReactNode }) {
         onSignOut={() => { void auth.signOut() }}
       />
     )
+  } else if (view.kind === 'unavailable') {
+    content = <AuthProblemScreen title={view.title} message={view.message} configuration />
+  } else {
+    content = (
+      <AuthProblemScreen
+        title="認証状態を確認できませんでした"
+        message={view.message}
+        onRetry={auth.retry}
+        onSignOut={() => { void auth.signOut() }}
+      />
+    )
   }
-  if (state.status === 'unavailable') {
-    return <AuthProblemScreen title={state.title} message={state.message} configuration />
-  }
+
   return (
-    <AuthProblemScreen
-      title="認証状態を確認できませんでした"
-      message={state.message}
-      onRetry={auth.retry}
-      onSignOut={() => { void auth.signOut() }}
-    />
+    <>
+      {content}
+      {toastMessage ? (
+        <AuthSessionToast
+          message={toastMessage}
+          sticky={toastSticky}
+          onDismiss={auth.dismissSessionNotice}
+        />
+      ) : null}
+    </>
   )
 }

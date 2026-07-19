@@ -1690,6 +1690,83 @@ button,
   padding: 10px 12px;
 }
 
+.auth-neutral-loading {
+  display: grid;
+  min-height: 100dvh;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 32px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-muted-foreground));
+  text-align: center;
+}
+
+.auth-neutral-loading h2 {
+  margin: 0;
+  color: hsl(var(--nui-foreground));
+  font-size: 18px;
+  font-weight: 620;
+  letter-spacing: -.02em;
+}
+
+.auth-neutral-loading p {
+  margin: 0;
+  max-width: 320px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.auth-session-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 80;
+  display: flex;
+  max-width: min(360px, calc(100vw - 40px));
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 12px 12px 14px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 12px;
+  background: hsl(var(--nui-card));
+  box-shadow: 0 10px 30px rgb(15 23 42 / 12%);
+  color: hsl(var(--nui-foreground));
+}
+
+.auth-session-toast > svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  color: hsl(var(--nui-warning));
+}
+
+.auth-session-toast > p {
+  flex: 1;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.auth-session-toast-dismiss {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.auth-session-toast-dismiss:hover {
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-foreground));
+}
+
 .auth-shell {
   display: grid;
   min-height: 100dvh;

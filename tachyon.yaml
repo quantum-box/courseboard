@@ -160,6 +160,10 @@ spec:
         - migrations/**
         - src/**
       build:
+        # Runner sets CARGO_HOME/CARGO_TARGET_DIR to /workspace/cache/* which is
+        # intermittently non-writable for user `node`. Force writable /tmp homes
+        # via wrappers on /tmp/tachyon-build-bin (shared across install/build shells).
+        installCommand: "set -eux; mkdir -p /tmp/tachyon-build-bin /tmp/cargo-home /tmp/cargo-target; printf '%s\\n' '#!/bin/bash' 'set -euo pipefail' 'export RUSTUP_HOME=/usr/local/rustup' 'export CARGO_HOME=/tmp/cargo-home' 'export CARGO_TARGET_DIR=/tmp/cargo-target' 'mkdir -p \"$CARGO_HOME\" \"$CARGO_TARGET_DIR\"' 'exec /usr/local/cargo/bin/cargo \"$@\"' > /tmp/tachyon-build-bin/cargo; printf '%s\\n' '#!/bin/bash' 'set -euo pipefail' 'export RUSTUP_HOME=/usr/local/rustup' 'export CARGO_HOME=/tmp/cargo-home' 'export CARGO_TARGET_DIR=/tmp/cargo-target' 'export PATH=/tmp/tachyon-build-bin:/usr/local/cargo/bin:/usr/local/bin:$PATH' 'mkdir -p \"$CARGO_HOME\" \"$CARGO_TARGET_DIR\"' 'exec /usr/local/bin/cargo-lambda \"$@\"' > /tmp/tachyon-build-bin/cargo-lambda; chmod +x /tmp/tachyon-build-bin/cargo /tmp/tachyon-build-bin/cargo-lambda; ln -sfn /usr/local/cargo/bin/rustc /tmp/tachyon-build-bin/rustc; ln -sfn /usr/local/cargo/bin/rustup /tmp/tachyon-build-bin/rustup; export PATH=/tmp/tachyon-build-bin:/usr/local/cargo/bin:/usr/local/bin:$PATH; command -v cargo; cargo --version; command -v cargo-lambda; test -x /usr/local/bin/cargo-lambda"
         package: courseboard
         binary: lambda-courseboard
         release: true
@@ -174,15 +178,22 @@ spec:
         - name: OIDC_ISSUER_URL
           value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
         - name: EXPECTED_AUDIENCE
-          # OAuth client IDs are public identifiers. Keep this aligned with
-          # the existing courseboard-web / tachyonfield-golf audience.
+          # OAuth client IDs are public identifiers. Primary audience remains
+          # courseboard-web; local Cognito Hosted UI PKCE is allowlisted via
+          # EXPECTED_CLIENT_ID (CSV) because Cognito access tokens often omit aud.
           value: 5002hok6cj8mjmt3gepdpdq98i
         - name: EXPECTED_CLIENT_ID
-          value: 5002hok6cj8mjmt3gepdpdq98i
+          # CSV allowlist: courseboard-web + courseboard-local-prod-pkce
+          # (public client for local Vite → prod API Cognito Hosted UI).
+          # Cognito access tokens often omit `aud`; auth.rs accepts allowlisted
+          # client_id when `aud` is absent.
+          value: 5002hok6cj8mjmt3gepdpdq98i,5oafg9ptonbjumdh1pc7khirp1
+        # Lambda cannot resolve Cloudflare Worker service bindings. Store the
+        # public Field API URL so course gateways and /field-api proxy get a
+        # real https base (internalService leaves a literal
+        # $internal_service_ref:... placeholder that Url::parse rejects).
         - name: TACHYON_FIELD_API_URL
-          valueFrom:
-            internalService:
-              appName: tachyon-field-api
+          value: https://tachyon-field-api.txcloud.app
       environments:
         preview:
           envVars:
@@ -195,6 +206,6 @@ spec:
             - name: EXPECTED_AUDIENCE
               value: 5002hok6cj8mjmt3gepdpdq98i
             - name: EXPECTED_CLIENT_ID
-              value: 5002hok6cj8mjmt3gepdpdq98i
+              value: 5002hok6cj8mjmt3gepdpdq98i,5oafg9ptonbjumdh1pc7khirp1
             - name: TACHYON_FIELD_API_URL
               value: https://tachyon-field-api.txcloud.app

@@ -1,0 +1,21 @@
+apiVersion: apps.tachy.one/v1alpha
+kind: OAuth2Client
+metadata:
+  name: courseboard-local-prod-pkce
+  tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
+spec:
+  # Public PKCE client for local Vite → production courseboard-api via Cognito
+  # Hosted UI (auth-pool.n1.tachy.one). Not the Tachyon JSON /oauth2/login path.
+  # After apply, append the issued client id to courseboard-api EXPECTED_CLIENT_ID
+  # and redeploy (see desktop README "Local Vite → production courseboard-api").
+  clientType: public
+  redirectUris:
+    - http://127.0.0.1:5173/oauth/callback
+  allowedScopes:
+    - openid
+    - profile
+    - email
+  grantTypes:
+    - authorization_code
+    - refresh_token
+  useTachyonUserPool: true

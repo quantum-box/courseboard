@@ -58,6 +58,11 @@ production（`https://tachyon-field-api.txcloud.app`）が使われます。
 
 推奨（mise）:
 
+ローカル補助スクリプトは `desktop/scripts/` に集約しています。
+
+- env 生成: `node scripts/configure.mjs <auth|pkce|field|prod-api|prod-api-pkce>`（npm alias: `pkce:env` / `prod-api:pkce-env` など）
+- 起動: `desktop/scripts/dev.sh <pkce|field|prod-api> [api|vite|both]`（mise task 名はそのまま）
+
 ```bash
 # 初回 / bacon 未導入時
 mise install
@@ -86,6 +91,68 @@ Vite は `/v1/course/*` と `/field-api/*` を `http://127.0.0.1:8080` へ proxy
 
 実データには有効な JWT と `tn_…` テナントが必要です。オフライン UI だけならモック
 （`VITE_COURSEBOARD_MOCK_DATA=true`）を使ってください。
+
+### Local Vite → production courseboard-api
+
+ローカルの Vite (:5173) だけを動かし、course-api をデプロイ済み本番
+(`https://courseboard-api.txcloud.app`) に向けます。**local :8080 は不要**です。
+`desktop/.env.local`（browser-pkce）は書き換えません。オーバーレイ
+`desktop/.env.prod-api.local` を使います。
+
+#### 推奨: Cognito Hosted UI（実ユーザー）
+
+Local operator ショートカットではなく、本番と同じ Cognito ユーザーでログインします。
+
+```bash
+# 1) Cognito Hosted UI PKCE overlay（.env.local は触らない）
+mise run courseboard:prod-api-pkce-env
+# 別 tenant: cd desktop && npm run configure -- prod-api-pkce --tenant-id tn_01…
+
+# 2) 表示された client id を courseboard-api の EXPECTED_CLIENT_ID に追記して redeploy
+#    （初回のみ。configure の出力を参照）
+
+# 3) 既存の Vite (:5173) を自分で止めてから再起動
+#    （エージェントは :5173 を kill しません）
+mise run courseboard:vite-prod-api
+```
+
+開く URL: `http://127.0.0.1:5173` → **ログイン** → Cognito Hosted UI
+(`auth-pool.n1.tachy.one`)。表示名は実ユーザー（**Local operator にはなりません**）。
+
+Redirect URI（クライアント登録必須）: `http://127.0.0.1:5173/oauth/callback`
+
+- Manifest: `.tachyon/manifests/courseboard-local-prod-pkce-oauth-client.yaml`
+- または Tachyon / Cognito コンソールで public client
+  `courseboard-local-prod-pkce` に上記 redirect を追加
+
+#### 代替: CLI JWT（Local operator）
+
+```bash
+mise run courseboard:prod-api-env
+mise run courseboard:vite-prod-api
+```
+
+`AUTH_MODE=development` + CLI Cognito JWT。UI は **Local operator** と表示されます。
+JWT は約1時間で切れるので `prod-api:env` を再実行してください。
+
+要点:
+
+- ブラウザは同一 origin のまま。`VITE_DEV_API_PROXY_TARGET` で Vite が
+  `/v1/course/*` と `/field-api/*` を本番 course-api へ転送します
+  （Web では `VITE_COURSEBOARD_API_BASE_URL` を外部ホストにしないでください）。
+- 本番 course-api の OIDC は **Cognito**
+  (`iss=cognito-idp…/ap-northeast-1_8Ga4bK5M4`)。
+  local browser-pkce の Tachyon token（`iss=api.n1.tachy.one`）は **401** になります。
+- Cognito Hosted UI 用 public client の `client_id` は、本番 Lambda の
+  `EXPECTED_CLIENT_ID`（CSV）へ追記 + redeploy が必要です
+  （`EXPECTED_AUDIENCE` の `5002hok6…` はそのまま）。
+- そのデプロイの Field upstream は本番 Field です（local Field ではありません）。
+- CORS はブラウザ→Vite では不要（同一 origin）。
+- `/healthz` が 200 でも `/v1/course/*` が Cloudflare 502、または
+  `/field-api/*` が `TACHYON_FIELD_API_URL is invalid` になる場合は、
+  **ローカル設定ではなく本番 courseboard-api デプロイ側**の問題です。
+
+テンプレート: `desktop/env.prod-api.local.example`
 
 ### Live local → production Field（推奨・browser-pkce）
 
@@ -117,7 +184,7 @@ tachyon auth login --profile admin
 
 # 1) gitignored env を生成（prod Field URL + OIDC audience。CLI Field bearer は書かない）
 mise run courseboard:pkce-env
-# 別 tenant: cd desktop && npm run pkce:env -- --tenant-id tn_01…
+# 別 tenant: cd desktop && npm run configure -- pkce --tenant-id tn_01…
 
 # 2) course-api :8080 — bacon hot-reload（OIDC inbound、prod Field outbound）
 mise run courseboard:api
@@ -257,75 +324,3 @@ npm run tauri:build
 
 Android / iOS は、それぞれの toolchain を用意したうえで `tauri:android:build` /
 `tauri:ios:build` も実行します。
-
-## CI と配布
-
-`.github/workflows/ci.yml` は通常の push / pull request で次を検証します。
-
-- React UI の typecheck、unit test、Web build
-- Linux x64、macOS Apple Silicon、Windows x64 の Tauri bundle build
-- Android debug APK / AAB build
-- iOS Simulator app build
-
-生成したbundleは14日間GitHub Actions artifactとして保持します。これらは動作確認用の
-未署名artifactで、エンドユーザー向けには配布しません。
-
-`.github/workflows/desktop-release.yml` は `desktop-v0.2.0` 形式のtag、または手動実行で
-macOS Apple Silicon / Windows x64 installerを作ります。tag実行はartifact作成までです。
-R2への公開は、署名設定を確認したうえで手動実行の `publish=true` と保護された
-`desktop-release` environmentを通した場合だけ行います。
-
-配布先の標準構造は次のとおりです。
-
-```text
-releases/latest.json
-releases/latest/courseboard-macos-arm64.dmg
-releases/latest/courseboard-windows-x64.msi
-releases/<version>/courseboard-macos-arm64.dmg
-releases/<version>/courseboard-windows-x64.msi
-releases/<version>/latest.json
-```
-
-Web hostの `/download` は `COURSEBOARD_DESKTOP_RELEASE_BASE_URL` を基点にlatest installerを
-案内します。未指定時は `https://downloads.courseboard.txcloud.app` です。
-
-公開environmentには次のsecretが必要です。
-
-- `R2_ACCOUNT_ID`
-- `R2_ACCESS_KEY_ID`
-- `R2_SECRET_ACCESS_KEY`
-- `R2_BUCKET`
-
-macOS notarization用の `APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_PASSWORD`、
-`APPLE_TEAM_ID` と、Windows Authenticode証明書のimport/signing設定を接続し、両OSで
-署名検証を通すまでは `publish=true` を承認しないでください。
-
-### Mobile Store配布
-
-`.github/workflows/mobile-release.yml` は手動実行で署名済みiOS IPAとAndroid AABを作り、
-`upload=true` の場合だけApp Store Connect（TestFlight処理対象）とGoogle Playの
-internal testingへアップロードします。どちらも保護された `mobile-release` environmentを
-通します。Google Playの初回AAB登録とStore listing、App Store Connectのapp record・
-bundle ID・契約情報は各consoleで先に作成してください。
-
-`ios-v1.2.3` 形式のtagをpushすると、iOSだけをrelease buildし、GitHub Actionsのrun番号を
-Store build numberとして採番してApp Store Connectへ自動アップロードします。このtag経路は
-常にuploadを有効にします。手動実行は署名artifactの事前確認やAndroid internal testingに使います。
-
-必要なrepository/environment secretsは次のとおりです。
-
-- Apple signing: `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWORD`,
-  `APPLE_PROVISIONING_PROFILE_BASE64`, `APPLE_CI_KEYCHAIN_PASSWORD`, `APPLE_TEAM_ID`
-- App Store Connect upload: `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`,
-  `APPLE_API_PRIVATE_KEY_BASE64`
-- Android signing: `ANDROID_UPLOAD_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
-  `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
-- Google Play upload: `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`
-
-`mobile-release` environment variable `COURSEBOARD_NATIVE_CLIENT_ID` には、secretを持たない
-PKCE対応native public clientのIDを設定します。Native OAuth clientと
-`courseboard://oauth/callback`が本番Auth側に登録されるまではStoreへアップロードしません。
-
-最初は `upload=false` で署名artifactを検証し、その後 `upload=true` でTestFlight / internal
-testingへ送ります。App Store本番公開とGoogle Play production昇格は、このworkflowでは
-自動化せず、Storeの審査・公開操作として明示的に行います。

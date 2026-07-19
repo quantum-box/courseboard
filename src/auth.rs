@@ -193,9 +193,18 @@ impl TokenVerifier for OidcJwtVerifier {
             .client_id
             .clone()
             .or_else(|| token_data.claims.azp.clone());
-        let audience_matches =
+        // Cognito access tokens often omit `aud` and only carry `client_id`.
+        // When `aud` is present it must match EXPECTED_AUDIENCE or an allowlisted
+        // EXPECTED_CLIENT_ID. When `aud` is absent, `client_id` may match either.
+        let audience_matches = if audience_claim_present(&token_data.claims.aud) {
             audience_contains(&token_data.claims.aud, self.expected_audience.as_str())
-                || client_id.as_deref() == Some(self.expected_audience.as_str());
+                || audience_contains_any(&token_data.claims.aud, &self.expected_client_ids)
+        } else {
+            client_id.as_deref() == Some(self.expected_audience.as_str())
+                || client_id
+                    .as_ref()
+                    .is_some_and(|value| self.expected_client_ids.contains(value))
+        };
         if !audience_matches {
             return Err(AuthError::InvalidToken);
         }
@@ -216,6 +225,16 @@ impl TokenVerifier for OidcJwtVerifier {
             subject: token_data.claims.sub,
             client_id,
         })
+    }
+}
+
+fn audience_claim_present(audience: &serde_json::Value) -> bool {
+    match audience {
+        serde_json::Value::String(value) => !value.is_empty(),
+        serde_json::Value::Array(values) => values.iter().any(|value| {
+            value.as_str().is_some_and(|entry| !entry.is_empty())
+        }),
+        _ => false,
     }
 }
 

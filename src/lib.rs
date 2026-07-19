@@ -1469,6 +1469,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn allowlisted_client_id_is_accepted_without_primary_audience() {
+        let auth = TestAuth::new();
+        let app = test_app_with_verifier(
+            auth.verifier_with(
+                "courseboard-web",
+                HashSet::from([
+                    "courseboard-web".to_string(),
+                    "local-prod-pkce".to_string(),
+                ]),
+            ),
+        )
+        .await;
+        let response = app
+            .oneshot(calculate_request(
+                &format!(
+                    "Bearer {}",
+                    auth.token_with_claims(serde_json::json!({
+                        "iss": "test-issuer",
+                        "sub": "87f4fa48-b0d1-70ab-ae9f-cfa01ec164c3",
+                        "client_id": "local-prod-pkce"
+                    }))
+                ),
+                "scc",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn wrong_issuer_is_rejected() {
         let auth = TestAuth::new();
         let app = test_app(&auth).await;
