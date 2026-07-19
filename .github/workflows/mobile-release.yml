@@ -255,6 +255,7 @@ jobs:
         env:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_PROVISIONING_PROFILE_SPECIFIER: CourseBoard App Store 20260719
+          APPLE_BUNDLE_ID: com.quantumbox.courseboard
         run: node scripts/configure-ios-signing.mjs
 
       - name: Build signed App Store IPA

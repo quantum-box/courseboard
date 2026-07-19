@@ -4,10 +4,11 @@ import { resolve } from "node:path";
 
 const teamId = process.env.APPLE_DEVELOPMENT_TEAM;
 const profileName = process.env.APPLE_PROVISIONING_PROFILE_SPECIFIER;
+const bundleId = process.env.APPLE_BUNDLE_ID;
 
-if (!teamId || !profileName) {
+if (!teamId || !profileName || !bundleId) {
   throw new Error(
-    "APPLE_DEVELOPMENT_TEAM and APPLE_PROVISIONING_PROFILE_SPECIFIER are required",
+    "APPLE_DEVELOPMENT_TEAM, APPLE_PROVISIONING_PROFILE_SPECIFIER, and APPLE_BUNDLE_ID are required",
   );
 }
 
@@ -33,3 +34,18 @@ execFileSync("xcodegen", ["generate", "--spec", projectSpec], {
   cwd: projectDirectory,
   stdio: "inherit",
 });
+
+const exportOptions = resolve(projectDirectory, "ExportOptions.plist");
+const plistBuddy = "/usr/libexec/PlistBuddy";
+const plistCommands = [
+  "Set :method app-store-connect",
+  `Add :teamID string ${teamId}`,
+  "Add :signingStyle string manual",
+  'Add :signingCertificate string "Apple Distribution"',
+  "Add :provisioningProfiles dict",
+  `Add :provisioningProfiles:${bundleId} string "${profileName}"`,
+];
+
+for (const command of plistCommands) {
+  execFileSync(plistBuddy, ["-c", command, exportOptions], { stdio: "inherit" });
+}
