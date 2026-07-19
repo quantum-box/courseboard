@@ -26,6 +26,7 @@ concurrency:
 env:
   NODE_VERSION: "24"
   RELEASE_BASE_URL: https://downloads.courseboard.txcloud.app
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
   version:
@@ -60,7 +61,7 @@ jobs:
       matrix:
         include:
           - platform: macos-arm64
-            os: macos-14
+            os: macos-15
             bundle_glob: desktop/src-tauri/target/release/bundle/dmg/*.dmg
           - platform: windows-x64
             os: windows-latest

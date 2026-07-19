@@ -36,6 +36,7 @@ concurrency:
 env:
   NODE_VERSION: "24"
   ANDROID_NDK_VERSION: 27.0.12077973
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
 jobs:
   validate:
@@ -177,7 +178,7 @@ jobs:
     name: iOS release IPA
     needs: validate
     if: needs.validate.outputs.platform == 'both' || needs.validate.outputs.platform == 'ios'
-    runs-on: macos-14
+    runs-on: macos-15
     environment: mobile-release
     defaults:
       run:
