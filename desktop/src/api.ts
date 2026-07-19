@@ -127,6 +127,9 @@ function requestHeaders(init?: RequestInit, token?: string) {
   if (bearer && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${bearer}`)
   }
+  if (bearer && !headers.has('x-courseboard-authorization')) {
+    headers.set('x-courseboard-authorization', `Bearer ${bearer}`)
+  }
   return headers
 }
 

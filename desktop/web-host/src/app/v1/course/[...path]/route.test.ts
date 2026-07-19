@@ -149,6 +149,9 @@ describe('/v1/course/[...path] BFF', () => {
 		)
 		const headers = init.headers as Headers
 		expect(headers.get('authorization')).toBe('Bearer canonical-token')
+		expect(headers.get('x-courseboard-authorization')).toBe(
+			'Bearer canonical-token',
+		)
 		expect(headers.get('x-operator-id')).toBe('tn_allowed')
 		expect(headers.get('x-platform-id')).toBe(
 			'tn_01hjjn348rn3t49zz6hvmfq67p',

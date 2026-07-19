@@ -73,3 +73,4 @@
 - v0.1.2 production Deploymentはactiveになったが、実Bearerの直接送信でも`401`が継続した。
 - client allowlist拒否は`403`になるため、署名・claim検証側の拒否に限定できた。
 - tokenやclaim値を返さず、検証失敗分類だけを`x-courseboard-auth-error`へ追加してproduction runtimeの原因を確定する。
+- v0.1.3 active Deploymentでも分類ヘッダーが付かず、認証middlewareのJWT検証より前に拒否されていることを確認した。CloudflareからLambdaへの標準`Authorization`欠落に対応し、v0.1.4で専用ヘッダーを併送する。

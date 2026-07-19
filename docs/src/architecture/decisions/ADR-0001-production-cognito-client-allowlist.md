@@ -16,6 +16,7 @@ production Cognito issuerから発行され、署名と標準claim検証を通�
 
 認証失敗時はtokenやclaim値を記録せず、失敗分類だけをruntime logへ記録する。
 同じ安全な失敗分類を`x-courseboard-auth-error`レスポンスヘッダーにも返し、CloudWatchへ直接アクセスできない運用者が署名・claim・client拒否を区別できるようにする。
+txcloudのCloudflareからLambda Function URLへの転送で標準`Authorization`が予約ヘッダーとして失われる場合に備え、first-party clientとWeb BFFは同じBearerを`x-courseboard-authorization`にも設定する。APIはどちらのヘッダーでも同一のJWT検証を必須とする。
 
 ## Consequences
 

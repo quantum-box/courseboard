@@ -36,9 +36,11 @@ use tower_http::{
     cors::{AllowOrigin, CorsLayer},
     services::{ServeDir, ServeFile},
 };
+
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
+const COURSEBOARD_AUTHORIZATION_HEADER: &str = "x-courseboard-authorization";
 static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Clone)]
@@ -521,11 +523,16 @@ fn courseboard_cors_layer() -> CorsLayer {
         .allow_headers([
             AUTHORIZATION,
             CONTENT_TYPE,
+            HeaderName::from_static(COURSEBOARD_AUTHORIZATION_HEADER),
             HeaderName::from_static("x-operator-id"),
             HeaderName::from_static("x-platform-id"),
             HeaderName::from_static("idempotency-key"),
         ])
-        .expose_headers([CONTENT_DISPOSITION, CONTENT_TYPE])
+        .expose_headers([
+            CONTENT_DISPOSITION,
+            CONTENT_TYPE,
+            HeaderName::from_static("x-courseboard-auth-error"),
+        ])
 }
 
 pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
@@ -598,7 +605,10 @@ async fn require_valid_token(
     req: Request<Body>,
     next: Next,
 ) -> Result<Response, AppError> {
-    let Some(value) = req.headers().get(AUTHORIZATION) else {
+    let Some(value) = req.headers().get(AUTHORIZATION).or_else(|| {
+        req.headers()
+            .get(HeaderName::from_static(COURSEBOARD_AUTHORIZATION_HEADER))
+    }) else {
         return Err(AppError::Unauthorized);
     };
     let Ok(value) = value.to_str() else {
