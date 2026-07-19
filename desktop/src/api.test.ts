@@ -79,10 +79,11 @@ describe('protected API 401 handling', () => {
       onForbidden: vi.fn(),
     })
 
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ error: 'unauthorized' }), {
-      status: 401,
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    const fetchMock = vi.fn(async (..._args: [RequestInfo | URL, RequestInit?]) =>
+      new Response(JSON.stringify({ error: 'unauthorized' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }))
     vi.stubGlobal('fetch', fetchMock)
 
     // Use a non-course path so development Field mocks cannot short-circuit fetch.
