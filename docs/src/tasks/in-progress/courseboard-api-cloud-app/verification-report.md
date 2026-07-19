@@ -23,8 +23,11 @@
 ### 成功
 
 - Cloud App登録: `app_01kxwr0rmr0dt208z7spd2cfk4`。
-- 現行branch Build: `bld_01kxwr346xey1a2938fdb0sryk` succeeded。
-- Build JobRun: `jr_01kxwr34gjccbnm4ebj26nbja7` succeeded。
+- 修正後Build: `bld_01kxwtc1sexs37twe1hs5q7xvm` succeeded。
+- Build JobRun: `jr_01kxwtc1wz4tvhxzchc6he56gv` succeeded。
+- Preview Deployment: `dep_01kxwtf5s7per5s28b1j9z3g0w` active。
+- `GET https://pr65--courseboard-api.txcloud.app/healthz`: `200` / `{"status":"ok"}`。
+- 未認証の`GET /v1/course/extension-status`: `401` / `unauthorized`。
 
 ### 失敗と対応
 
@@ -41,11 +44,12 @@
    - `dep_01kxwsfjbj5yh4896vgqten1sb`
    - `dep_01kxwshtffkb00tgey2mgwbdq6`
 7. cancel後の再Build `bld_01kxwsr6bh54cdte2mj1fgvt4f` は成功したが、Lambda alias leaseのTTL内だったためauto-deployはlease heldで停止した。lease失効後に単一Buildで再検証する。
+8. TTL失効後の単一Buildは成功し、candidate smokeを通過してPreview Deploymentがactiveになった。旧Build由来で残った`dep_01kxwstnqnasy39y91kjh4bvjv`は、active Deployment確認後にcancelした。
 
 ## 未完了の確認
 
-- 修正後Buildのsuccessとactive Deployment。
-- `https://courseboard-api.txcloud.app/healthz`のlive HTTP 200。
+- main merge後のproduction Buildとactive Deployment。
+- `https://courseboard-api.txcloud.app/healthz`のproduction live HTTP 200。
 - `courseboard` Cloud Appの`COURSEBOARD_API_URL`反映と再Deployment。
 - 認証済みWeb host BFF経由の`/v1/course/*`応答。
 

@@ -50,4 +50,5 @@ CourseBoardのRust APIは現行リポジトリで`course-api`として拡張さ�
 - Lambdaの`/tmp` SQLiteは永続ストレージではない。現行のcourse運用データはField側に保持するが、税・キャンセル料の永続化は別タスクで扱う。
 - `main`へ未反映のcourse-api変更を先行デプロイする場合、Build対象branchとPRの状態を明示する。
 - OAuth client refは既存provider secret driftの検査でapplyが停止したため使わない。APIが必要とする公開client IDだけを既存`tachyonfield-golf`のaudienceと一致させる。
-- 初回Buildは成功したが、readiness未指定時は`/`をprobeして失敗した。`/healthz`を明示した後もHTTP 502が継続し、Preview環境に必須envが未反映だったことを切り分けた。Preview設定をapply済みで、競合Buildが保持したLambda alias leaseの失効後に再検証する。
+- 初回Buildは成功したが、readiness未指定時は`/`をprobeして失敗した。`/healthz`を明示した後もHTTP 502が継続し、Preview環境に必須envが未反映だったことを切り分けた。
+- Preview設定apply後は競合BuildがLambda alias leaseを保持したが、旧Deploymentをcancelし、TTL失効後の単一Buildでactive Deploymentとlive HTTPを確認した。
