@@ -305,7 +305,7 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         if let Some(scheduled_at) = query.scheduled_at {
             params.push(format!(
                 "scheduledAt={}",
-                urlencoding_query(&scheduled_at.to_rfc3339())
+                urlencoding_query(scheduled_at.to_rfc3339())
             ));
         }
         if let Some(player_count) = query.player_count {
