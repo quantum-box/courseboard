@@ -18,8 +18,9 @@ import {
 import {
   currentYearMonth,
   downloadText,
+  courseboardApiJson,
+  courseboardApiText,
   fieldApiJson,
-  fieldApiText,
   fieldTenant,
   yen,
 } from '../../api'
@@ -129,8 +130,8 @@ export function SettlementPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const payload = await fieldApiJson<GolfMonthlySettlementReport>(
-        `/v1/erp/extensions/golf-course/monthly-settlement?yearMonth=${encodeURIComponent(yearMonth)}`,
+      const payload = await courseboardApiJson<GolfMonthlySettlementReport>(
+        `/v1/course/monthly-settlement?yearMonth=${encodeURIComponent(yearMonth)}`,
       )
       setReport(payload)
     } catch (error) {
@@ -151,8 +152,8 @@ export function SettlementPage() {
     setExporting(true)
     setExportError(null)
     try {
-      const csv = await fieldApiText(
-        `/v1/erp/extensions/golf-course/monthly-settlement/export.csv?yearMonth=${encodeURIComponent(yearMonth)}`,
+      const csv = await courseboardApiText(
+        `/v1/course/monthly-settlement/export.csv?yearMonth=${encodeURIComponent(yearMonth)}`,
       )
       downloadText(`golf-monthly-settlement-${yearMonth}.csv`, csv)
     } catch (error) {

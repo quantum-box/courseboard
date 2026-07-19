@@ -23,7 +23,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react'
-import { fieldApiJson } from '../../../api'
+import { courseboardApiJson } from '../../../api'
 import {
   EmptyState,
   LoadingState,
@@ -66,7 +66,7 @@ import {
   zoomPercent,
 } from './timelineLayout'
 
-const GOLF_API = '/v1/erp/extensions/golf-course'
+const COURSE_API = '/v1/course'
 const MOCK_NOW = '2026-07-18T09:00:00+09:00'
 const LANE_WIDTH_PX = 168
 
@@ -228,20 +228,20 @@ export function TimelinePage() {
     () => {
       const params = new URLSearchParams({ date })
       if (courseFilter !== 'all') params.set('golfCourseId', courseFilter)
-      return fieldApiJson<TeeSheetResponse>(`${GOLF_API}/tee-sheet?${params}`)
+      return courseboardApiJson<TeeSheetResponse>(`/v1/course/tee-sheet?${params}`)
     },
     [date, courseFilter],
   )
   const assignmentsResource = useResource(
-    () => fieldApiJson<ListResponse<TimelineAssignment>>(`${GOLF_API}/caddie-assignments`),
+    () => courseboardApiJson<ListResponse<TimelineAssignment>>(`${COURSE_API}/caddie-assignments`),
     [],
   )
   const caddiesResource = useResource(
-    () => fieldApiJson<ListResponse<TimelineCaddie>>(`${GOLF_API}/caddie-profiles`),
+    () => courseboardApiJson<ListResponse<TimelineCaddie>>(`${COURSE_API}/caddie-profiles`),
     [],
   )
   const coursesResource = useResource(
-    () => fieldApiJson<ListResponse<{ id: string; name: string; isActive?: boolean }>>(`${GOLF_API}/courses`),
+    () => courseboardApiJson<ListResponse<{ id: string; name: string; isActive?: boolean }>>(`${COURSE_API}/courses`),
     [],
   )
 
@@ -258,13 +258,15 @@ export function TimelinePage() {
   }, [date, courseFilter])
 
   const loading = teeSheet.loading || assignmentsResource.loading || caddiesResource.loading || coursesResource.loading
+  // Prefer hard failures (especially tee-sheet 404) over a stuck loading screen
+  // while sibling requests are still in flight.
   const error = teeSheet.error || assignmentsResource.error || caddiesResource.error || coursesResource.error
 
-  if (loading && !teeSheet.data) {
-    return <LoadingState label="運用タイムラインを読み込み中…" />
-  }
   if (error) {
     return <ResourceError error={error} onRetry={refreshAll} />
+  }
+  if (loading && !teeSheet.data) {
+    return <LoadingState label="運用タイムラインを読み込み中…" />
   }
 
   const reservations = teeSheet.data?.items ?? []

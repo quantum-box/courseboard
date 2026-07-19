@@ -19,8 +19,8 @@ import {
 import {
   currentYearMonth,
   downloadText,
-  fieldApiJson,
-  fieldApiText,
+  courseboardApiJson,
+  courseboardApiText,
   fieldTenant,
   yen,
 } from '../../api'
@@ -165,21 +165,21 @@ export function BudgetsPage() {
 
     try {
       const [coursePayload, budgetPayload] = await Promise.all([
-        fieldApiJson<{ items: GolfCourse[] }>(
-          '/v1/erp/extensions/golf-course/courses',
+        courseboardApiJson<{ items: GolfCourse[] }>(
+          '/v1/course/courses',
         ),
-        fieldApiJson<{ items: DailyBudget[] }>(
-          `/v1/erp/extensions/golf-course/daily-budgets?${budgetParams.toString()}`,
+        courseboardApiJson<{ items: DailyBudget[] }>(
+          `/v1/course/daily-budgets?${budgetParams.toString()}`,
         ),
       ])
       setCourses(coursePayload.items)
       setBudgets(budgetPayload.items)
 
       try {
-        const achievementPayload = await fieldApiJson<{
+        const achievementPayload = await courseboardApiJson<{
           items: DailyBudgetAchievement[]
         }>(
-          `/v1/erp/extensions/golf-course/daily-budgets/achievement?${achievementParams.toString()}`,
+          `/v1/course/daily-budgets/achievement?${achievementParams.toString()}`,
         )
         setAchievements(achievementPayload.items)
       } catch (error) {
@@ -265,8 +265,8 @@ export function BudgetsPage() {
 
     setSaving(true)
     try {
-      await fieldApiJson<unknown>(
-        '/v1/erp/extensions/golf-course/daily-budgets',
+      await courseboardApiJson<unknown>(
+        '/v1/course/daily-budgets',
         {
           method: 'POST',
           body: JSON.stringify({
@@ -316,8 +316,8 @@ export function BudgetsPage() {
     if (!csvContents || csvError) return
     setImporting(true)
     try {
-      await fieldApiText(
-        '/v1/erp/extensions/golf-course/daily-budgets/import',
+      await courseboardApiText(
+        '/v1/course/daily-budgets/import',
         {
           method: 'POST',
           headers: { 'Content-Type': 'text/csv' },

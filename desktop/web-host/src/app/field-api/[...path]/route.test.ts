@@ -62,26 +62,8 @@ function request(
 }
 
 describe('Field API route allowlist', () => {
-	it('matches the Course Board golf, staff, reservation and invoice surfaces', () => {
+	it('matches the Course Board staff, reservation and invoice surfaces', () => {
 		expect(isAllowedFieldRoute('GET', '/v1/erp/extensions/status')).toBe(true)
-		expect(
-			isAllowedFieldRoute(
-				'PATCH',
-				'/v1/erp/extensions/golf-course/courses/course_1',
-			),
-		).toBe(true)
-		expect(
-			isAllowedFieldRoute(
-				'PATCH',
-				'/v1/erp/extensions/golf-course/reservation-products/svc:golf',
-			),
-		).toBe(true)
-		expect(
-			isAllowedFieldRoute(
-				'PATCH',
-				'/v1/erp/extensions/golf-course/reservation-products/_internal',
-			),
-		).toBe(true)
 		expect(isAllowedFieldRoute('POST', '/v1/erp/staff')).toBe(true)
 		expect(
 			isAllowedFieldRoute(
@@ -93,6 +75,24 @@ describe('Field API route allowlist', () => {
 		expect(isAllowedFieldRoute('POST', '/v1/invoices/inv_1/fulfill')).toBe(
 			true,
 		)
+	})
+
+	it('rejects Field golf-course paths (owned by course-api)', () => {
+		expect(
+			isAllowedFieldRoute(
+				'GET',
+				'/v1/erp/extensions/golf-course/courses',
+			),
+		).toBe(false)
+		expect(
+			isAllowedFieldRoute(
+				'PATCH',
+				'/v1/erp/extensions/golf-course/courses/course_1',
+			),
+		).toBe(false)
+		expect(
+			isAllowedFieldRoute('GET', '/v1/erp/extensions/golf_course/config'),
+		).toBe(false)
 	})
 
 	it('allows only a single order lookup and forbids order list access', () => {
@@ -195,17 +195,16 @@ describe('/field-api/[...path] BFF', () => {
 		})
 	})
 
-	it('accepts a URL-encoded colon in a decoded service id', async () => {
+	it('accepts a URL-encoded colon in a decoded resource id', async () => {
 		const fetchMock = vi
 			.fn()
-			.mockResolvedValue(new Response(JSON.stringify({ id: 'svc:golf' })))
+			.mockResolvedValue(new Response(JSON.stringify({ id: 'order:1' })))
 		vi.stubGlobal('fetch', fetchMock)
-		const decodedPath =
-			'/v1/erp/extensions/golf-course/reservation-products/svc:golf'
+		const decodedPath = '/v1/erp/orders/order:1'
 
 		const response = await GET(
 			new Request(
-				'https://courseboard.example/field-api/v1/erp/extensions/golf-course/reservation-products/svc%3Agolf',
+				'https://courseboard.example/field-api/v1/erp/orders/order%3A1',
 				{ headers: { 'x-operator-id': 'tn_allowed' } },
 			),
 			routeContext(decodedPath),

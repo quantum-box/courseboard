@@ -60,6 +60,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { useAuth } from '../auth/AuthProvider'
+import { formatTenantWorkspaceLabel, tenantWorkspaceLabel } from '../auth/tenant-label'
 import { PageReloadProvider, usePageReload } from '../lib/pageReload'
 import { navigate } from '../lib/router'
 import { platformKind } from '../lib/platform'
@@ -361,6 +362,8 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
     .slice(0, 2)
     .map(part => part[0]?.toUpperCase())
     .join('') || 'CB'
+  const tenantLabel = auth.tenant ? tenantWorkspaceLabel(auth.tenant) : undefined
+  const tenantDetail = auth.tenant ? formatTenantWorkspaceLabel(auth.tenant) : 'テナント未選択'
 
   const sidebar = (
     <Sidebar collapsed={visuallyCollapsed} className="courseboard-sidebar">
@@ -452,7 +455,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
               <SidebarAvatar>{accountInitials}</SidebarAvatar>
               <SidebarAccountInfo
                 name={accountName}
-                detail={`${auth.tenant?.name ?? auth.tenant?.id ?? 'テナント未選択'} · ${auth.user?.role ?? ''}`}
+                detail={`${tenantDetail} · ${auth.user?.role ?? ''}`}
               />
               <Badge variant={auth.tenant?.mode === 'sandbox' ? 'warning' : 'success'} className="runtime-dot">
                 {auth.tenant?.mode === 'sandbox' ? 'Sandbox' : '本番'}
@@ -532,7 +535,14 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
                 </TooltipTrigger>
                 <TooltipContent side="bottom">{helpOpen ? 'ガイドを閉じる' : 'ガイドを開く'}</TooltipContent>
               </Tooltip>
-              <span>{auth.tenant?.name ?? auth.tenant?.id}</span>
+              {tenantLabel && auth.tenant ? (
+                <span className="workspace-tenant" title={auth.tenant.id}>
+                  <span className="workspace-tenant-name">{tenantLabel.primary}</span>
+                  {tenantLabel.secondary ? (
+                    <span className="workspace-tenant-slug">{tenantLabel.secondary}</span>
+                  ) : null}
+                </span>
+              ) : null}
             </div>
           </header>
           <div className="workspace-body">

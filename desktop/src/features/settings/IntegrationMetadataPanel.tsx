@@ -1,7 +1,7 @@
 import { Badge, Button } from '@tachyon-sdk/native-ui'
 import { RefreshCw, Save } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
-import { ApiError, fieldApiJson } from '../../api'
+import { ApiError, courseboardApiJson } from '../../api'
 import {
   Field,
   LoadingState,
@@ -59,8 +59,8 @@ export function IntegrationMetadataPanel() {
     setSaved(false)
     setSaveError(null)
     try {
-      const policy = await fieldApiJson<ReservationPolicy>(
-        '/v1/erp/extensions/golf-course/reservation-policy',
+      const policy = await courseboardApiJson<ReservationPolicy>(
+        '/v1/course/reservation-policy',
       )
       const next = formatMetadata(policy.metadataJson)
       setDraft(next)
@@ -97,8 +97,8 @@ export function IntegrationMetadataPanel() {
     setSaving(true)
     setSaveError(null)
     try {
-      await fieldApiJson<unknown>(
-        '/v1/erp/extensions/golf-course/reservation-policy',
+      await courseboardApiJson<unknown>(
+        '/v1/course/reservation-policy',
         {
           method: 'PATCH',
           body: JSON.stringify({ metadataJson: parsed.value }),

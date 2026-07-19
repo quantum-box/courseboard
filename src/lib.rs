@@ -9,6 +9,7 @@ pub mod config;
 pub mod demo_seed;
 pub mod field_api;
 pub mod field_proxy;
+pub mod course;
 pub mod smart_assign;
 
 use auth::{AuthError, TokenVerifier};
@@ -21,7 +22,7 @@ use axum::{
     },
     middleware::{self, Next},
     response::{IntoResponse, Redirect, Response},
-    routing::{get, post},
+    routing::{delete, get, patch, post},
     Json, Router,
 };
 use cancellation_fees::{CancellationFeeConfig, SqliteCancellationFeeRepository};
@@ -269,6 +270,204 @@ pub fn build_router(state: AppState) -> Router {
             )),
         )
         .route(
+            "/v1/course/tee-sheet",
+            get(course::interfaces::http::get_tee_sheet).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/courses",
+            get(course::interfaces::http::list_courses)
+                .post(course::interfaces::http::create_course)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/courses/:id",
+            patch(course::interfaces::http::update_course)
+                .delete(course::interfaces::http::delete_course)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/resources",
+            get(course::interfaces::http::list_resources).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/reservation-products",
+            get(course::interfaces::http::list_reservation_products).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/reservation-products/:service_id",
+            post(course::interfaces::http::upsert_reservation_product).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/reservation-products/:service_id/slots",
+            get(course::interfaces::http::list_product_slots)
+                .put(course::interfaces::http::replace_product_slots)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/caddie-profiles",
+            get(course::interfaces::http::list_caddies)
+                .post(course::interfaces::http_ops::create_caddie)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/caddie-profiles/:id",
+            patch(course::interfaces::http_ops::update_caddie).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-profiles/:id/courses",
+            get(course::interfaces::http_ops::list_caddie_memberships)
+                .put(course::interfaces::http_ops::replace_caddie_memberships)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/caddie-assignments",
+            get(course::interfaces::http::list_caddie_assignments).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-assignments/:id",
+            patch(course::interfaces::http_ops::update_caddie_assignment).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-availabilities",
+            get(course::interfaces::http_ops::list_caddie_availabilities)
+                .post(course::interfaces::http_ops::upsert_caddie_availability)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/caddie-availabilities/:caddie_id/:date",
+            delete(course::interfaces::http_ops::delete_caddie_availability).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-recommendations",
+            get(course::interfaces::http_ops::list_caddie_recommendations).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-attendance-snapshot",
+            get(course::interfaces::http_ops::get_attendance_snapshot).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-supply",
+            get(course::interfaces::http_ops::get_caddie_supply).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-auto-assignments",
+            post(course::interfaces::http_ops::auto_assign_caddies).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-payroll-summary",
+            get(course::interfaces::http_ops::get_payroll_summary).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-payroll-summary/export.csv",
+            get(course::interfaces::http_ops::export_payroll_csv).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-ratings",
+            get(course::interfaces::http_ops::list_caddie_ratings).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/reservation-policy",
+            get(course::interfaces::http_commercial::get_reservation_policy)
+                .patch(course::interfaces::http_commercial::update_reservation_policy)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/daily-budgets/achievement",
+            get(course::interfaces::http_commercial::list_budget_achievements).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/daily-budgets/import",
+            post(course::interfaces::http_commercial::import_daily_budgets_csv).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/daily-budgets",
+            get(course::interfaces::http_commercial::list_daily_budgets)
+                .post(course::interfaces::http_commercial::upsert_daily_budget)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/monthly-settlement",
+            get(course::interfaces::http_commercial::get_monthly_settlement).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/monthly-settlement/export.csv",
+            get(course::interfaces::http_commercial::export_monthly_settlement_csv).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/extension-status",
+            get(course::interfaces::http_commercial::get_extension_status).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/config",
+            patch(course::interfaces::http_commercial::update_extension_config).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/field-api/*path",
             get(field_proxy::proxy_field_api)
                 .post(field_proxy::proxy_field_api)
@@ -338,6 +537,19 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
         .await?;
 
     run_migrations(&pool).await?;
+
+    let course_gateway_url = config.course_gateway_base_url();
+    if course_gateway_url == crate::config::EMPTY_COURSE_STORE_URL
+        || course_gateway_url.starts_with("empty://")
+    {
+        tracing::warn!(
+            %course_gateway_url,
+            "course gateway using empty store opt-out (list GETs return empty items). \
+             Normal local starts should use production Field or an explicit Field URL"
+        );
+    } else {
+        tracing::info!(%course_gateway_url, "course gateway Field URL");
+    }
 
     let token_verifier: Arc<dyn TokenVerifier> = if let Some(token) = config.dev_bearer_token() {
         tracing::warn!("using COURSEBOARD_DEV_BEARER_TOKEN static verifier for local development");
@@ -776,6 +988,7 @@ mod tests {
             public_ui_base_url: "http://courseboard.local/ui/index.html".to_string(),
             sms_sender_name: "Course Board".to_string(),
             field_api_url,
+            field_upstream_authorization: None,
             twilio_account_sid: None,
             twilio_auth_token: None,
             twilio_messaging_service_sid: None,

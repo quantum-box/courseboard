@@ -12,6 +12,10 @@ const DEFAULT_BIND_ADDR: &str = "0.0.0.0:8080";
 const DEFAULT_DATABASE_URL: &str = "sqlite://courseboard.db";
 const DEFAULT_PUBLIC_UI_BASE_URL: &str = "http://localhost:5173";
 const DEFAULT_SMS_SENDER_NAME: &str = "Course Board";
+/// Explicit opt-out marker for unit/integration tests.
+/// Set `TACHYON_FIELD_API_URL=empty://local` to skip remote Field calls.
+/// Normal local/`cargo run` / mise API starts never select this automatically.
+pub const EMPTY_COURSE_STORE_URL: &str = "empty://local";
 
 #[derive(Debug, Clone, Parser)]
 #[command(name = "courseboard", about = "Course Board API server")]
@@ -96,12 +100,28 @@ impl RuntimeConfig {
     }
 
     pub fn cancellation_fee_config(&self) -> CancellationFeeConfig {
+        let field_upstream_authorization = self.field_api_bearer_token().map(|token| {
+            if token.starts_with("Bearer ") {
+                token
+            } else {
+                format!("Bearer {token}")
+            }
+        });
+        if field_upstream_authorization.is_some() {
+            tracing::warn!(
+                "TACHYON_FIELD_API_BEARER_TOKEN overrides outbound Field Authorization; \
+                 normal browser-pkce forwards the inbound login bearer instead"
+            );
+        }
         CancellationFeeConfig {
             public_ui_base_url: non_empty(Some(&self.public_ui_base_url))
                 .unwrap_or_else(|| DEFAULT_PUBLIC_UI_BASE_URL.to_string()),
             sms_sender_name: non_empty(Some(&self.sms_sender_name))
                 .unwrap_or_else(|| DEFAULT_SMS_SENDER_NAME.to_string()),
-            field_api_url: Some(self.field_api_base_url()),
+            // Course `/v1/course/*` gateways always target Field (prod default
+            // when unset). Explicit `empty://local` is test-only opt-out.
+            field_api_url: Some(self.course_gateway_base_url()),
+            field_upstream_authorization,
             twilio_account_sid: non_empty(self.twilio_account_sid.as_deref()),
             twilio_auth_token: non_empty(self.twilio_auth_token.as_deref()),
             twilio_messaging_service_sid: non_empty(self.twilio_messaging_service_sid.as_deref()),
@@ -109,7 +129,22 @@ impl RuntimeConfig {
         }
     }
 
+    /// Base URL for the admin Field API client (staff / ERP helpers).
     pub fn field_api_base_url(&self) -> String {
+        first_non_empty([
+            self.tachyon_field_api_url.as_deref(),
+            self.field_api_url.as_deref(),
+            self.courseboard_field_api_url.as_deref(),
+        ])
+        .unwrap_or_else(|| DEFAULT_FIELD_API_URL.to_string())
+    }
+
+    /// Upstream used by course-api Field write-through gateways.
+    ///
+    /// Defaults to production Field ([`DEFAULT_FIELD_API_URL`]) when unset.
+    /// Local `COURSEBOARD_DEV_BEARER_TOKEN` no longer selects the empty store;
+    /// set `TACHYON_FIELD_API_URL=empty://local` only for intentional test opt-out.
+    pub fn course_gateway_base_url(&self) -> String {
         first_non_empty([
             self.tachyon_field_api_url.as_deref(),
             self.field_api_url.as_deref(),
@@ -214,6 +249,31 @@ mod tests {
     }
 
     #[test]
+    fn course_gateway_defaults_to_prod_field_even_with_dev_bearer() {
+        let config = RuntimeConfig {
+            dev_bearer_token: Some("local-dev-token".to_string()),
+            ..RuntimeConfig::default()
+        };
+        assert_eq!(config.course_gateway_base_url(), DEFAULT_FIELD_API_URL);
+        assert_eq!(config.field_api_base_url(), DEFAULT_FIELD_API_URL);
+
+        let config = RuntimeConfig {
+            dev_bearer_token: Some("local-dev-token".to_string()),
+            tachyon_field_api_url: Some("http://127.0.0.1:50056".to_string()),
+            ..RuntimeConfig::default()
+        };
+        assert_eq!(config.course_gateway_base_url(), "http://127.0.0.1:50056");
+
+        // Explicit empty://local remains available as intentional test opt-out.
+        let config = RuntimeConfig {
+            dev_bearer_token: Some("local-dev-token".to_string()),
+            tachyon_field_api_url: Some(EMPTY_COURSE_STORE_URL.to_string()),
+            ..RuntimeConfig::default()
+        };
+        assert_eq!(config.course_gateway_base_url(), EMPTY_COURSE_STORE_URL);
+    }
+
+    #[test]
     fn auth_config_uses_oidc_alias_and_parses_client_ids() {
         let config = RuntimeConfig {
             oidc_issuer_url: Some("https://issuer.example".to_string()),
@@ -228,6 +288,22 @@ mod tests {
         assert_eq!(auth.expected_audience, "courseboard");
         assert!(auth.expected_client_ids.contains("field-core"));
         assert!(auth.expected_client_ids.contains("field-admin"));
+    }
+
+    #[test]
+    fn cancellation_fee_config_omits_field_upstream_without_static_bearer() {
+        let config = RuntimeConfig::default().cancellation_fee_config();
+        assert!(config.field_upstream_authorization.is_none());
+
+        let config = RuntimeConfig {
+            field_api_bearer_token: Some("cli-override".to_string()),
+            ..RuntimeConfig::default()
+        }
+        .cancellation_fee_config();
+        assert_eq!(
+            config.field_upstream_authorization.as_deref(),
+            Some("Bearer cli-override")
+        );
     }
 
     #[test]

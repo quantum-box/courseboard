@@ -307,8 +307,9 @@ TACHYON_FIELD_API_URL=https://tachyon-field-api.txcloud.app
 TACHYON_FIELD_API_BEARER_TOKEN=<field-api-access-token>
 ```
 
-`TACHYON_FIELD_API_BEARER_TOKEN` は static bearer token provider 用の placeholder
-contract です。
+`TACHYON_FIELD_API_BEARER_TOKEN` は任意の static bearer override（admin UI / service
+account）用です。通常の browser-pkce では不要で、ログイン中の inbound bearer が
+Field へ転送されます。
 
 Course Board 自身が Tachyon Auth に OAuth2 client-credentials でログインしてトークンを
 取得することもできます。次の env がすべて揃っていると、static token の代わりに

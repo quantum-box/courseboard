@@ -3,8 +3,9 @@
  * session. Feature screens still call Field API through the Vite proxy, which
  * fails or returns an empty DB unless a local Rust API is running with seed.
  *
- * When mock data is enabled, `fieldApiJson` / `fieldApiText` short-circuit to
- * in-memory fixtures so the UI stays browsable with the mock user.
+ * When mock data is enabled, `fieldApiJson` / `fieldApiText` and CourseBoard
+ * `courseboardApiJson` / `courseboardApiText` paths under `/v1/course/*`
+ * short-circuit to in-memory fixtures so the UI stays browsable with the mock user.
  *
  * Enable: default ON while AUTH_MODE=development
  * Disable for a real local API: VITE_COURSEBOARD_MOCK_DATA=false
@@ -32,13 +33,13 @@ function error(status: number, message: string): MockFieldResult<never> {
 
 const TENANT_ID = () =>
   import.meta.env.VITE_COURSEBOARD_TENANT_ID
-  ?? (import.meta.env.DEV ? 'scc' : '')
+  ?? (import.meta.env.DEV ? 'courseboard_id' : '')
 
 const NOW = '2026-07-18T09:00:00+09:00'
 const TODAY = '2026-07-18'
 
 let mockReservationPolicy: Record<string, unknown> = {
-  tenantId: 'scc',
+  tenantId: 'courseboard_id',
   reservationTypeId: 'golf_standard',
   defaultHoles: 18,
   maxPlayersPerTeeTime: 4,
@@ -91,7 +92,7 @@ const mockCourses = [
 const mockProducts = [
   {
     id: 'product_caddie_18',
-    tenantId: 'scc',
+    tenantId: 'courseboard_id',
     extensionKey: 'golf_course',
     reservationServiceId: 'svc:caddie-18',
     playType: 'caddie',
@@ -102,7 +103,7 @@ const mockProducts = [
   },
   {
     id: 'product_self_18',
-    tenantId: 'scc',
+    tenantId: 'courseboard_id',
     extensionKey: 'golf_course',
     reservationServiceId: 'svc:self-18',
     playType: 'self',
@@ -540,7 +541,7 @@ const mockAssignments = [
 const mockInvoices = [
   {
     id: 'inv_mock_001',
-    tenantId: 'scc',
+    tenantId: 'courseboard_id',
     invoiceNumber: 'CF-2026-0001',
     clientId: 'client_mock_1',
     clientName: 'Taro Yamada',
@@ -716,14 +717,97 @@ function achievements(from: string, to: string) {
   })))
 }
 
+/**
+ * Map CourseBoard course-api paths onto the shared mock fixtures that originally
+ * lived under Field `/v1/erp/extensions/golf-course/*`.
+ */
+function normalizeMockPath(pathname: string): string {
+  if (!pathname.startsWith('/v1/course/')) return pathname
+
+  // CourseBoard-native paths with dedicated mock branches.
+  if (
+    pathname === '/v1/course/tee-sheet'
+    || pathname === '/v1/course/extension-status'
+    || pathname === '/v1/course/config'
+  ) {
+    return pathname
+  }
+
+  const direct: Record<string, string> = {
+    '/v1/course/courses': '/v1/erp/extensions/golf-course/courses',
+    '/v1/course/resources': '/v1/erp/extensions/golf-course/resources',
+    '/v1/course/reservation-products': '/v1/erp/extensions/golf-course/reservation-products',
+    '/v1/course/caddie-profiles': '/v1/erp/extensions/golf-course/caddie-profiles',
+    '/v1/course/caddie-assignments': '/v1/erp/extensions/golf-course/caddie-assignments',
+    '/v1/course/caddie-recommendations': '/v1/erp/extensions/golf-course/caddie-recommendations',
+    '/v1/course/caddie-availabilities': '/v1/erp/extensions/golf-course/caddie-availabilities',
+    '/v1/course/caddie-attendance-snapshot': '/v1/erp/extensions/golf-course/caddie-attendance-snapshot',
+    '/v1/course/caddie-supply': '/v1/erp/extensions/golf-course/caddie-supply',
+    '/v1/course/caddie-auto-assignments': '/v1/erp/extensions/golf-course/caddie-auto-assignments',
+    '/v1/course/caddie-payroll-summary': '/v1/erp/extensions/golf-course/caddie-payroll-summary',
+    '/v1/course/caddie-payroll-summary/export.csv':
+      '/v1/erp/extensions/golf-course/caddie-payroll-summary/export.csv',
+    '/v1/course/caddie-ratings': '/v1/erp/extensions/golf-course/caddie-ratings',
+    '/v1/course/reservation-policy': '/v1/erp/extensions/golf-course/reservation-policy',
+    '/v1/course/daily-budgets': '/v1/erp/extensions/golf-course/daily-budgets',
+    '/v1/course/daily-budgets/achievement':
+      '/v1/erp/extensions/golf-course/daily-budgets/achievement',
+    '/v1/course/daily-budgets/import': '/v1/erp/extensions/golf-course/daily-budgets/import',
+    '/v1/course/monthly-settlement': '/v1/erp/extensions/golf-course/monthly-settlement',
+    '/v1/course/monthly-settlement/export.csv':
+      '/v1/erp/extensions/golf-course/monthly-settlement/export.csv',
+  }
+  if (direct[pathname]) return direct[pathname]!
+
+  const patterns: Array<[RegExp, string]> = [
+    [/^\/v1\/course\/courses\/([^/]+)$/, '/v1/erp/extensions/golf-course/courses/$1'],
+    [
+      /^\/v1\/course\/reservation-products\/([^/]+)\/slots$/,
+      '/v1/erp/extensions/golf-course/reservation-products/$1/slots',
+    ],
+    [
+      /^\/v1\/course\/reservation-products\/([^/]+)$/,
+      '/v1/erp/extensions/golf-course/reservation-products/$1',
+    ],
+    [/^\/v1\/course\/caddie-profiles\/([^/]+)$/, '/v1/erp/extensions/golf-course/caddie-profiles/$1'],
+    [
+      /^\/v1\/course\/caddie-profiles\/([^/]+)\/courses$/,
+      '/v1/erp/extensions/golf-course/caddie-profiles/$1/courses',
+    ],
+    [
+      /^\/v1\/course\/caddie-assignments\/([^/]+)$/,
+      '/v1/erp/extensions/golf-course/caddie-assignments/$1',
+    ],
+    [
+      /^\/v1\/course\/caddie-availabilities\/([^/]+)\/([^/]+)$/,
+      '/v1/erp/extensions/golf-course/caddie-availabilities/$1/$2',
+    ],
+  ]
+  for (const [pattern, replacement] of patterns) {
+    if (pattern.test(pathname)) {
+      return pathname.replace(pattern, replacement)
+    }
+  }
+  return pathname
+}
+
 function resolveGet(path: string): Json | null | undefined {
-  const pathname = pathnameOf(path)
+  const rawPathname = pathnameOf(path)
+  const pathname = normalizeMockPath(rawPathname)
   const url = new URL(path, 'http://mock.local')
 
   if (pathname === '/v1/erp/extensions/status') return extensionStatus()
 
-  if (pathname === `/v1/erp/extensions/golf_course/config`
-    || pathname === '/v1/erp/extensions/golf-course/config') {
+  if (rawPathname === '/v1/course/extension-status') {
+    const status = extensionStatus() as { items: Array<Record<string, unknown>> }
+    return status.items.find(item => item.extensionKey === 'golf_course') ?? null
+  }
+
+  if (
+    rawPathname === '/v1/course/config'
+    || pathname === `/v1/erp/extensions/golf_course/config`
+    || pathname === '/v1/erp/extensions/golf-course/config'
+  ) {
     return {
       extensionKey: 'golf_course',
       configVersion: 1,
@@ -735,6 +819,17 @@ function resolveGet(path: string): Json | null | undefined {
 
   if (pathname === '/v1/erp/extensions/golf-course/courses') {
     return items(mockCourses.map(course => ({ ...course })))
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/resources') {
+    return items(mockCourses.map(course => ({
+      id: `resource_${course.id}`,
+      name: course.name,
+      reservationResourceId: `res_${course.id.replace(/^course_/, '')}`,
+      golfCourseId: course.id,
+      resourceKind: 'course',
+      active: course.isActive,
+    })))
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/reservation-products') {
@@ -756,7 +851,8 @@ function resolveGet(path: string): Json | null | undefined {
     return items(mockCaddies.map(profile => ({ ...profile })))
   }
 
-  if (pathname === '/v1/erp/extensions/golf-course/tee-sheet') {
+  // CourseBoard course-api tee-sheet (not Field golf-course extension).
+  if (rawPathname === '/v1/course/tee-sheet') {
     const date = url.searchParams.get('date') ?? TODAY
     const courseId = url.searchParams.get('golfCourseId')
     const filtered = mockTeeReservations.filter(item => {
@@ -898,7 +994,7 @@ function resolveGet(path: string): Json | null | undefined {
   if (pathname === '/v1/erp/staff') return items(mockStaff.map(member => ({ ...member })))
 
   if (pathname === '/v1/erp/extensions/golf-course/reservation-policy') {
-    return { ...mockReservationPolicy, tenantId: TENANT_ID() || 'scc' }
+    return { ...mockReservationPolicy, tenantId: TENANT_ID() || 'courseboard_id' }
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/daily-budgets') {
@@ -948,7 +1044,7 @@ function resolveGet(path: string): Json | null | undefined {
 }
 
 function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json> {
-  const pathname = pathnameOf(path)
+  const pathname = normalizeMockPath(pathnameOf(path))
   const method = methodOf(init)
   const body = parseBody(init) as Record<string, unknown> | undefined
 
@@ -997,10 +1093,119 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     mockReservationPolicy = {
       ...mockReservationPolicy,
       ...(body && typeof body === 'object' ? body as typeof mockReservationPolicy : {}),
-      tenantId: TENANT_ID() || 'scc',
+      tenantId: TENANT_ID() || 'courseboard_id',
       updatedAt: NOW,
     }
     return hit({ ...mockReservationPolicy })
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-profiles' && method === 'POST') {
+    const created = {
+      id: `caddie_${Date.now()}`,
+      displayName: String(body?.displayName ?? 'New caddie'),
+      skillLevel: String(body?.skillLevel ?? 'regular'),
+      rank: String(body?.rank ?? 'D'),
+      baseFeeAmount: Number(body?.baseFeeAmount ?? 12_000),
+      currency: String(body?.currency ?? 'JPY'),
+      staffId: body?.staffId == null ? null : String(body.staffId),
+      active: body?.active !== false,
+      employmentStatus: String(body?.employmentStatus ?? 'active'),
+      maxRoundsPerDay: Number(body?.maxRoundsPerDay ?? 2),
+      ratingCount: 0,
+      ratingAverage: null,
+      canTwoRounds: Boolean(body?.canTwoRounds),
+      monthlyContractRounds: Number(body?.monthlyContractRounds ?? 14),
+      desiredIncome: Number(body?.desiredIncome ?? 0),
+    }
+    mockCaddies.push(created as (typeof mockCaddies)[number])
+    return hit(created)
+  }
+
+  const caddieMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/caddie-profiles\/([^/]+)$/,
+  )
+  if (caddieMatch && (method === 'PATCH' || method === 'PUT')) {
+    const caddieId = decodeURIComponent(caddieMatch[1] ?? '')
+    const index = mockCaddies.findIndex(item => item.id === caddieId)
+    if (index < 0) return error(404, `Mock caddie ${caddieId} was not found`)
+    const current = mockCaddies[index]!
+    const updated = { ...current, ...body, id: current.id }
+    mockCaddies[index] = updated as typeof current
+    return hit(updated)
+  }
+
+  const assignmentMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/caddie-assignments\/([^/]+)$/,
+  )
+  if (assignmentMatch && (method === 'PATCH' || method === 'PUT')) {
+    const assignmentId = decodeURIComponent(assignmentMatch[1] ?? '')
+    const index = mockAssignments.findIndex(item => item.id === assignmentId)
+    if (index < 0) return error(404, `Mock assignment ${assignmentId} was not found`)
+    const current = mockAssignments[index]!
+    const updated = { ...current, ...body, id: current.id }
+    mockAssignments[index] = updated as typeof current
+    return hit(updated)
+  }
+
+  const membershipMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/caddie-profiles\/([^/]+)\/courses$/,
+  )
+  if (membershipMatch && method === 'PUT') {
+    const profileId = decodeURIComponent(membershipMatch[1] ?? '')
+    const courseIds = Array.isArray(body?.courseIds) ? body.courseIds.map(String) : []
+    const primary = body?.primaryCourseId == null ? courseIds[0] : String(body.primaryCourseId)
+    return hit(items(courseIds.map((courseId, index) => ({
+      id: `membership_${profileId}_${courseId}`,
+      caddieProfileId: profileId,
+      golfCourseId: courseId,
+      isPrimary: courseId === primary || (index === 0 && !primary),
+    }))))
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-availabilities'
+    && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+    return hit({
+      id: `avail_${String(body?.caddieProfileId ?? 'caddie')}_${String(body?.date ?? TODAY)}`,
+      caddieProfileId: String(body?.caddieProfileId ?? ''),
+      date: String(body?.date ?? TODAY),
+      status: String(body?.status ?? 'available'),
+      twoRoundRequest: Boolean(body?.twoRoundRequest),
+      healthNote: body?.healthNote ?? null,
+      updatedAt: NOW,
+    })
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/caddie-auto-assignments' && method === 'POST') {
+    return hit({
+      dryRun: Boolean(body?.dryRun),
+      assigned: [],
+      skipped: [{ reservationId: 'res_mock', reason: 'Mock mode does not auto-assign' }],
+    })
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/daily-budgets' && method === 'POST') {
+    return hit({
+      id: `budget_${Date.now()}`,
+      golfCourseId: String(body?.golfCourseId ?? 'course_east'),
+      date: String(body?.date ?? TODAY),
+      targetRevenue: Number(body?.targetRevenue ?? 0),
+      targetAverageSpend: Number(body?.targetAverageSpend ?? 0),
+      targetCaddyAttachedRatio: Number(body?.targetCaddyAttachedRatio ?? 0),
+      updatedAt: NOW,
+    })
+  }
+
+  if (pathname === '/v1/erp/extensions/golf-course/daily-budgets/import' && method === 'POST') {
+    return hit(items([]))
+  }
+
+  if (
+    (pathname === '/v1/course/config'
+      || pathname === '/v1/erp/extensions/golf_course/config'
+      || pathname === '/v1/erp/extensions/golf-course/config')
+    && (method === 'PATCH' || method === 'PUT' || method === 'POST')
+  ) {
+    return hit(null)
   }
 
   // Mutations beyond browse fixtures stay explicit so developers know to opt out.
@@ -1038,31 +1243,46 @@ export function resolveMockFieldApiText(path: string, init?: RequestInit): MockF
   const pathname = pathnameOf(path)
   const method = methodOf(init)
 
+  const normalized = normalizeMockPath(pathname)
+
   if (
-    pathname === '/v1/erp/extensions/golf_course/config'
+    (pathname === '/v1/course/config'
+      || normalized === '/v1/erp/extensions/golf_course/config'
+      || normalized === '/v1/erp/extensions/golf-course/config'
+      || pathname === '/v1/erp/extensions/golf_course/config')
     && (method === 'PATCH' || method === 'PUT' || method === 'POST')
   ) {
     return hit('')
   }
 
   if (
-    pathname === '/v1/erp/extensions/golf-course/caddie-availabilities'
+    (normalized === '/v1/erp/extensions/golf-course/caddie-availabilities'
+      || pathname === '/v1/erp/extensions/golf-course/caddie-availabilities')
     && (method === 'POST' || method === 'PUT' || method === 'PATCH')
   ) {
     return hit('')
   }
 
-  const availabilityMatch = pathname.match(
+  const availabilityMatch = normalized.match(
     /^\/v1\/erp\/extensions\/golf-course\/caddie-availabilities\/([^/]+)\/([^/]+)$/,
   )
   if (availabilityMatch && (method === 'PUT' || method === 'PATCH' || method === 'DELETE')) {
     return hit('')
   }
 
+  if (
+    normalized === '/v1/erp/extensions/golf-course/daily-budgets/import'
+    && method === 'POST'
+  ) {
+    return hit('{"items":[]}')
+  }
+
   if (method !== 'GET') return notSupported(`${method} ${pathname}`)
 
   if (
-    pathname === '/v1/erp/extensions/golf-course/monthly-settlement/export.csv'
+    normalized === '/v1/erp/extensions/golf-course/monthly-settlement/export.csv'
+    || normalized === '/v1/erp/extensions/golf-course/caddie-payroll-summary/export.csv'
+    || pathname === '/v1/erp/extensions/golf-course/monthly-settlement/export.csv'
     || pathname === '/v1/erp/extensions/golf-course/caddie-payroll-summary/export.csv'
   ) {
     return hit([

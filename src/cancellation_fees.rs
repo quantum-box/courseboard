@@ -17,6 +17,10 @@ pub struct CancellationFeeConfig {
     pub public_ui_base_url: String,
     pub sms_sender_name: String,
     pub field_api_url: Option<String>,
+    /// Optional outbound Authorization override for `/v1/course/*` and
+    /// `/field-api/*`. When unset (normal browser-pkce), the inbound login
+    /// bearer is forwarded. Keep only for admin/service-account callers.
+    pub field_upstream_authorization: Option<String>,
     pub twilio_account_sid: Option<String>,
     pub twilio_auth_token: Option<String>,
     pub twilio_messaging_service_sid: Option<String>,
@@ -46,6 +50,7 @@ impl Default for CancellationFeeConfig {
             public_ui_base_url: "http://localhost:5173".to_string(),
             sms_sender_name: "Course Board".to_string(),
             field_api_url: Some(DEFAULT_FIELD_API_URL.to_string()),
+            field_upstream_authorization: None,
             twilio_account_sid: None,
             twilio_auth_token: None,
             twilio_messaging_service_sid: None,

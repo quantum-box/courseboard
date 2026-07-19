@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { fieldApiJson, fieldApiText, fieldTenant } from '../../api'
+import { courseboardApiJson, fieldTenant } from '../../api'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   DataTable,
@@ -48,9 +48,9 @@ import {
   type PlayType,
 } from './models'
 
-const productsPath = '/v1/erp/extensions/golf-course/reservation-products'
-const caddieProfilesPath = '/v1/erp/extensions/golf-course/caddie-profiles'
-const caddieAvailabilitiesPath = '/v1/erp/extensions/golf-course/caddie-availabilities'
+const productsPath = '/v1/course/reservation-products'
+const caddieProfilesPath = '/v1/course/caddie-profiles'
+const caddieAvailabilitiesPath = '/v1/course/caddie-availabilities'
 
 type EditableSlot = GolfProductSlot & { clientKey: string }
 
@@ -151,11 +151,11 @@ export function ReservationProductsPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const productResponse = await fieldApiJson<{ items: GolfReservationProduct[] }>(productsPath)
+      const productResponse = await courseboardApiJson<{ items: GolfReservationProduct[] }>(productsPath)
       const nextProducts = productResponse.items
       const slotResults = await Promise.all(nextProducts.map(async product => {
         try {
-          const response = await fieldApiJson<{ items: GolfProductSlot[] }>(
+          const response = await courseboardApiJson<{ items: GolfProductSlot[] }>(
             slotsPath(product.reservationServiceId),
           )
           return {
@@ -271,7 +271,7 @@ export function ReservationProductsPage() {
     setProductError(null)
     setMessage(null)
     try {
-      await fieldApiText(`${productsPath}/${encodeURIComponent(serviceId)}`, {
+      await courseboardApiJson(`${productsPath}/${encodeURIComponent(serviceId)}`, {
         method: 'POST',
         body: JSON.stringify({
           playType: productDraft.playType,
@@ -350,7 +350,7 @@ export function ReservationProductsPage() {
         maxGroups: slot.maxGroups,
         maxPlayers: slot.maxPlayers,
       }))
-      await fieldApiText(slotsPath(serviceId), {
+      await courseboardApiJson(slotsPath(serviceId), {
         method: 'PUT',
         body: JSON.stringify({ slots }),
       })
@@ -380,8 +380,8 @@ export function ReservationProductsPage() {
     try {
       const query = `from=${encodeURIComponent(capacityDate)}&to=${encodeURIComponent(capacityDate)}`
       const [profilesResponse, availabilityResponse] = await Promise.all([
-        fieldApiJson<{ items: CapacityProfile[] }>(caddieProfilesPath),
-        fieldApiJson<{ items: CapacityAvailability[] }>(`${caddieAvailabilitiesPath}?${query}`),
+        courseboardApiJson<{ items: CapacityProfile[] }>(caddieProfilesPath),
+        courseboardApiJson<{ items: CapacityAvailability[] }>(`${caddieAvailabilitiesPath}?${query}`),
       ])
       setCapacity(calculateCaddieCapacity(
         profilesResponse.items,

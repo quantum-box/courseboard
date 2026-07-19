@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "auth:env": "node scripts/configure-local-auth.mjs",
+    "pkce:env": "node scripts/configure-local-browser-pkce.mjs",
+    "field:env": "node scripts/configure-local-prod-field.mjs",
     "type-check": "tsc -b --noEmit",
     "test": "vitest run",
     "tauri": "tauri",

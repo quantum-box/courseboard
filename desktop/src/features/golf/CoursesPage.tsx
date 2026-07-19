@@ -9,7 +9,7 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { fieldApiJson, fieldApiText, fieldTenant } from '../../api'
+import { courseboardApiJson, fieldTenant } from '../../api'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   DataTable,
@@ -35,7 +35,7 @@ import {
   type GolfCourseDraft,
 } from './models'
 
-const coursesPath = '/v1/erp/extensions/golf-course/courses'
+const coursesPath = '/v1/course/courses'
 
 type EditorState =
   | { mode: 'create' }
@@ -87,7 +87,7 @@ export function CoursesPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const response = await fieldApiJson<{ items: GolfCourse[] }>(coursesPath)
+      const response = await courseboardApiJson<{ items: GolfCourse[] }>(coursesPath)
       setCourses(response.items)
     } catch (error) {
       setLoadError(error)
@@ -144,13 +144,13 @@ export function CoursesPage() {
 
     try {
       if (editor.mode === 'create') {
-        await fieldApiText(coursesPath, {
+        await courseboardApiJson(coursesPath, {
           method: 'POST',
           body: JSON.stringify(body),
         })
         setSavedMessage(`「${body.name}」を追加しました。`)
       } else {
-        await fieldApiText(
+        await courseboardApiJson(
           `${coursesPath}/${encodeURIComponent(editor.courseId)}`,
           {
             method: 'PATCH',
@@ -174,7 +174,7 @@ export function CoursesPage() {
     setMutationError(null)
     setSavedMessage(null)
     try {
-      await fieldApiText(
+      await courseboardApiJson(
         `${coursesPath}/${encodeURIComponent(course.id)}`,
         { method: 'DELETE' },
       )

@@ -108,15 +108,7 @@ export function isAllowedFieldRoute(method: string, path: string) {
 	) {
 		return normalizedMethod === 'GET'
 	}
-	if (path === '/v1/erp/extensions/golf_course/config') {
-		return normalizedMethod === 'GET' || normalizedMethod === 'PATCH'
-	}
-	if (path === '/v1/erp/extensions/golf-course') {
-		return normalizedMethod === 'GET'
-	}
-	if (isNonEmptySubpath(path, '/v1/erp/extensions/golf-course')) {
-		return (ALLOWED_METHODS as readonly string[]).includes(normalizedMethod)
-	}
+	// Golf catalog/ops live on CourseBoard course-api (`/v1/course/*`), not Field.
 	if (path === '/v1/erp/staff') {
 		return normalizedMethod === 'GET' || normalizedMethod === 'POST'
 	}

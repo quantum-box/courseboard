@@ -1,6 +1,6 @@
 import { ChevronRight, FolderTree, Settings2 } from 'lucide-react'
 import { useCallback } from 'react'
-import { fieldApiJson } from '../../api'
+import { courseboardApiJson } from '../../api'
 import { LoadingState, Notice, PageHeader, Panel, ResourceError } from '../../components/Page'
 import { useResource } from '../../hooks/useResource'
 import { useRegisterPageReload } from '../../lib/pageReload'
@@ -11,8 +11,7 @@ import { IntegrationMetadataPanel } from './IntegrationMetadataPanel'
 
 export function SettingsPage() {
   const loader = useCallback(async () => {
-    const response = await fieldApiJson<{ items: ExtensionStatus[] }>('/v1/erp/extensions/status')
-    return response.items.find(item => item.extensionKey === 'golf_course') ?? null
+    return courseboardApiJson<ExtensionStatus | null>('/v1/course/extension-status')
   }, [])
   const resource = useResource(loader)
   useRegisterPageReload(resource.refresh)
@@ -59,7 +58,7 @@ export function SettingsPage() {
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {!resource.loading && !resource.error && !resource.data ? (
         <Notice tone="warning" title="golf_course extension が見つかりません">
-          Field API の extension registry とテナント設定を確認してください。
+          CourseBoard course-api（/v1/course/extension-status）経由で Field の拡張状態を確認できませんでした。テナント設定を確認してください。
         </Notice>
       ) : null}
       {resource.data ? <ExtensionSummary extension={resource.data} onRefresh={resource.refresh} /> : null}

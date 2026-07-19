@@ -29,6 +29,14 @@ pub async fn proxy_field_api(
             "TACHYON_FIELD_API_URL is not configured",
         );
     };
+    if base_url.trim().eq_ignore_ascii_case(crate::config::EMPTY_COURSE_STORE_URL)
+        || base_url.trim().starts_with("empty://")
+    {
+        return proxy_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "TACHYON_FIELD_API_URL is not configured (empty course store is active)",
+        );
+    }
     let Ok(mut url) = reqwest::Url::parse(base_url) else {
         return proxy_error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -49,12 +57,15 @@ pub async fn proxy_field_api(
     };
 
     let mut outbound = client.request(method, url);
-    for name in [
-        header::AUTHORIZATION,
-        header::CONTENT_TYPE,
-        header::ACCEPT,
-        header::IF_MATCH,
-    ] {
+    // Default: forward the caller's inbound bearer (browser-pkce login token).
+    // Optional TACHYON_FIELD_API_BEARER_TOKEN override remains for admin/service
+    // accounts only — not required for the normal browser-pkce path.
+    if let Some(authorization) =
+        outbound_authorization(config.field_upstream_authorization.as_deref(), &parts.headers)
+    {
+        outbound = outbound.header(header::AUTHORIZATION.as_str(), authorization);
+    }
+    for name in [header::CONTENT_TYPE, header::ACCEPT, header::IF_MATCH] {
         if let Some(value) = parts.headers.get(&name) {
             outbound = outbound.header(name.as_str(), value.as_bytes());
         }
@@ -75,8 +86,23 @@ pub async fn proxy_field_api(
             return proxy_error(StatusCode::BAD_GATEWAY, "Field API request failed");
         }
     };
+    let upstream_status = upstream.status();
+    // Inbound bearer was already validated by require_valid_token. A Field 401
+    // means Field rejected a token Course Board trusts (issuer/audience/client
+    // mismatch on the Field side) — do not pass 401 through, or the UI soft
+    // sign-out treats it as an expired Course Board session.
+    if upstream_status == reqwest::StatusCode::UNAUTHORIZED {
+        tracing::warn!(
+            %normalized_path,
+            "Field API rejected an already-authenticated bearer; mapping to 502"
+        );
+        return proxy_error(
+            StatusCode::BAD_GATEWAY,
+            "Field API rejected the authenticated bearer (Tachyon Auth verify_user must accept Tachyon-issued OAuth access tokens; re-login if the session expired)",
+        );
+    }
     let status =
-        StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+        StatusCode::from_u16(upstream_status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
     let content_disposition = upstream.headers().get(header::CONTENT_DISPOSITION).cloned();
     let response_body = match upstream.bytes().await {
@@ -97,6 +123,20 @@ pub async fn proxy_field_api(
     response
         .body(Body::from(response_body))
         .unwrap_or_else(|_| proxy_error(StatusCode::BAD_GATEWAY, "Field API response was invalid"))
+}
+
+/// Authorization forwarded to Field: optional static override, else inbound bearer.
+fn outbound_authorization<'a>(
+    upstream_override: Option<&'a str>,
+    inbound_headers: &'a axum::http::HeaderMap,
+) -> Option<&'a str> {
+    if let Some(value) = upstream_override.filter(|value| !value.trim().is_empty()) {
+        return Some(value);
+    }
+    inbound_headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| value.starts_with("Bearer ") && !value["Bearer ".len()..].trim().is_empty())
 }
 
 fn proxy_error(status: StatusCode, message: &'static str) -> Response<Body> {
@@ -227,9 +267,9 @@ fn is_invoice_path(path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::Method;
+    use axum::http::{header, HeaderMap, HeaderValue, Method};
 
-    use super::{is_allowed_path, is_allowed_route};
+    use super::{is_allowed_path, is_allowed_route, outbound_authorization};
 
     #[test]
     fn allows_only_courseboard_field_surfaces() {
@@ -287,5 +327,38 @@ mod tests {
             &Method::TRACE,
             "/v1/erp/extensions/golf-course/courses"
         ));
+    }
+
+    #[test]
+    fn forwards_inbound_bearer_when_no_static_override() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer login-access-token"),
+        );
+        assert_eq!(
+            outbound_authorization(None, &headers),
+            Some("Bearer login-access-token")
+        );
+    }
+
+    #[test]
+    fn prefers_static_field_bearer_override_when_configured() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer login-access-token"),
+        );
+        assert_eq!(
+            outbound_authorization(Some("Bearer cli-override"), &headers),
+            Some("Bearer cli-override")
+        );
+    }
+
+    #[test]
+    fn ignores_empty_inbound_authorization() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer "));
+        assert_eq!(outbound_authorization(None, &headers), None);
     }
 }

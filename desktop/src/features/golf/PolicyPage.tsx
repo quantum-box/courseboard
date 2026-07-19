@@ -1,4 +1,4 @@
-import { ApiError, fieldApiJson, fieldTenant } from '../../api'
+import { ApiError, courseboardApiJson, fieldTenant } from '../../api'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   Field,
@@ -247,8 +247,8 @@ export function PolicyPage() {
     setLoading(true)
     setLoadError(null)
     try {
-      const policy = await fieldApiJson<GolfReservationPolicy>(
-        '/v1/erp/extensions/golf-course/reservation-policy',
+      const policy = await courseboardApiJson<GolfReservationPolicy>(
+        '/v1/course/reservation-policy',
       )
       setDraft(policyToDraft(policy))
       setPreservedHooks(policy.policyHooksJson ?? {})
@@ -315,8 +315,8 @@ export function PolicyPage() {
     setSaving(true)
     setSaveError(null)
     try {
-      await fieldApiJson<unknown>(
-        '/v1/erp/extensions/golf-course/reservation-policy',
+      await courseboardApiJson<unknown>(
+        '/v1/course/reservation-policy',
         {
           method: 'PATCH',
           body: JSON.stringify({

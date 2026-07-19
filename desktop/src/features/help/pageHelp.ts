@@ -38,8 +38,8 @@ const fallbackHelp: PageHelp = {
       body: 'Field API 上の施設単位。ヘッダー表示と API リクエストのテナントコンテキストが一致している必要があります。',
     },
     {
-      heading: 'golf_course extension',
-      body: 'コース・予約商品・キャディ・予算・精算など、ゴルフ固有機能の多くは Field の golf_course extension 配下の API を使います。設定画面で有効化状態を確認できます。',
+      heading: 'CourseBoard course-api',
+      body: 'コース・予約商品・キャディ・予算・精算などゴルフ固有機能は CourseBoard course-api（/v1/course/*）が所有します。設定画面で golf_course 拡張の有効化状態を確認できます。',
     },
   ],
 }
@@ -78,7 +78,7 @@ const helpByRoute: Record<string, PageHelp> = {
     data: [
       {
         heading: 'ホームの役割',
-        body: 'ホーム自体はマスタや請求の一覧を保持しません。ナビゲーションと運用順序の案内だけを表示し、実データは各機能画面が Field API / golf_course extension 経由で読み書きします。',
+        body: 'ホーム自体はマスタや請求の一覧を保持しません。ナビゲーションと運用順序の案内だけを表示し、実データは各機能画面が CourseBoard course-api（/v1/course/*）経由で読み書きします。スタッフ勤怠など汎用 ERP のみ Field を直接呼びます。',
       },
       {
         heading: '関連ルート',
@@ -124,7 +124,7 @@ const helpByRoute: Record<string, PageHelp> = {
     data: [
       {
         heading: 'Course（コース）',
-        body: '施設内のコース実体。画面上のコース名・略称・ホール数・タイムゾーン・有効フラグに対応します。API: GET/POST /v1/erp/extensions/golf-course/courses、PATCH/DELETE …/courses/{id}',
+        body: '施設内のコース実体。画面上のコース名・略称・ホール数・タイムゾーン・有効フラグに対応します。API: CourseBoard course-api GET/POST /v1/course/courses、PATCH/DELETE /v1/course/courses/{id}',
       },
       {
         heading: 'startIntervalMinutes',
@@ -170,15 +170,15 @@ const helpByRoute: Record<string, PageHelp> = {
     data: [
       {
         heading: 'Reservation product',
-        body: '予約サービス（商品）。reservationServiceId・playType（caddie/self）·holeCount·expectedDurationMinutes。API: /v1/erp/extensions/golf-course/reservation-products',
+        body: '予約サービス（商品）。reservationServiceId・playType（caddie/self）·holeCount·expectedDurationMinutes。API: CourseBoard course-api /v1/course/reservation-products',
       },
       {
         heading: 'Product slot',
-        body: '曜日別受付枠。weekday / startTime / endTime / maxGroups / maxPlayers。PUT …/reservation-products/{serviceId}/slots で一括置き換えます。',
+        body: '曜日別受付枠。weekday / startTime / endTime / maxGroups / maxPlayers。PUT /v1/course/reservation-products/{serviceId}/slots で一括置き換えます。',
       },
       {
         heading: 'Caddie capacity',
-        body: '名簿の caddie-profiles と caddie-availabilities から算出する午前・午後の販売上限。枠への反映はローカル編集で、保存するまで API には書き込まれません。',
+        body: '名簿の course-api caddie-profiles と Field caddie-availabilities から算出する午前・午後の販売上限。枠への反映はローカル編集で、保存するまで API には書き込まれません。',
       },
     ],
   },
@@ -220,7 +220,7 @@ const helpByRoute: Record<string, PageHelp> = {
     data: [
       {
         heading: 'Reservation policy',
-        body: 'テナント1件の予約ポリシー。API: GET/PATCH /v1/erp/extensions/golf-course/reservation-policy。defaultHoles、maxPlayersPerTeeTime、cartPolicy、cutoffHours、member/guestDepositBps を持ちます。',
+        body: 'テナント1件の予約ポリシー。API: CourseBoard course-api GET/PATCH /v1/course/reservation-policy。defaultHoles、maxPlayersPerTeeTime、cartPolicy、cutoffHours、member/guestDepositBps を持ちます。',
       },
       {
         heading: 'policyHooksJson.selfLock',
@@ -278,11 +278,11 @@ const helpByRoute: Record<string, PageHelp> = {
     data: [
       {
         heading: '予約（ティー）',
-        body: 'その日その時刻にスタートする組の予約です。ティー時刻・組名・人数・コース・プレー区分（キャディ付き／セルフ）・想定所要時間が、タイムライン上の予約ブロックやタイルの元になります。',
+        body: 'その日その時刻にスタートする組の予約です。ティー時刻・組名・人数・コース・プレー区分（キャディ付き／セルフ）・想定所要時間が、タイムライン上の予約ブロックやタイルの元になります。読み取りは CourseBoard course-api（GET /v1/course/tee-sheet）です。',
       },
       {
         heading: 'キャディ割当',
-        body: 'どの予約にどのキャディが付くかの割り当てです。主担当・補助などの役割と、開始時刻・所要時間がキャディレーン上のバーとして並びます。',
+        body: 'どの予約にどのキャディが付くかの割り当てです。主担当・補助などの役割と、開始時刻・所要時間がキャディレーン上のバーとして並びます。読み取りは CourseBoard course-api（GET /v1/course/caddie-assignments / caddie-profiles / courses）です。',
       },
       {
         heading: '割当状況',
@@ -370,7 +370,7 @@ const helpByRoute: Record<string, PageHelp> = {
     data: [
       {
         heading: 'Caddie profile',
-        body: 'キャディ個人マスタ。displayName、skillLevel、rank、baseFeeAmount、maxRoundsPerDay、employmentStatus、staffId など。API: /v1/erp/extensions/golf-course/caddie-profiles',
+        body: 'キャディ個人マスタ。displayName、skillLevel、rank、baseFeeAmount、maxRoundsPerDay、employmentStatus、staffId など。API: CourseBoard course-api /v1/course/caddie-profiles',
       },
       {
         heading: 'Staff link',
@@ -420,15 +420,15 @@ const helpByRoute: Record<string, PageHelp> = {
     data: [
       {
         heading: 'Assignment',
-        body: '運用日 × 予約/ラウンド × キャディの割当。scheduledAt、status、assignmentRole、feeAmount など。API: /v1/erp/extensions/golf-course/caddie-assignments',
+        body: '運用日 × 予約/ラウンド × キャディの割当。scheduledAt、status、assignmentRole、feeAmount など。API: CourseBoard course-api /v1/course/caddie-assignments',
       },
       {
         heading: 'Caddie supply',
-        body: 'GET …/caddie-supply?date=&safetyBuffer=。availableCaddies、caddieAttachedCap、remaining など。販売上限の参考値です。',
+        body: 'GET /v1/course/caddie-supply?date=&safetyBuffer=。availableCaddies、caddieAttachedCap、remaining など。販売上限の参考値です。',
       },
       {
         heading: 'Auto-assignment',
-        body: 'POST …/caddie-auto-assignments（dryRun true/false）。未割当予約への提案と確定を行います。',
+        body: 'POST /v1/course/caddie-auto-assignments（dryRun true/false）。未割当予約への提案と確定を行います。',
       },
       {
         heading: 'Recommendation',
@@ -550,15 +550,15 @@ const helpByRoute: Record<string, PageHelp> = {
     data: [
       {
         heading: 'Daily budget',
-        body: 'コース×日付の予算。targetRevenue、targetAverageSpend、targetCaddyAttachedRatio（API 上は 0–1）。POST /v1/erp/extensions/golf-course/daily-budgets',
+        body: 'コース×日付の予算。targetRevenue、targetAverageSpend、targetCaddyAttachedRatio（API 上は 0–1）。POST /v1/course/daily-budgets',
       },
       {
         heading: 'Achievement',
-        body: 'GET …/daily-budgets/achievement。実績売上・客単価・キャディ比率・予約数・プレイヤー数と達成率を返します。',
+        body: 'GET /v1/course/daily-budgets/achievement。実績売上・客単価・キャディ比率・予約数・プレイヤー数と達成率を返します。',
       },
       {
         heading: 'CSV import',
-        body: 'POST …/daily-budgets/import（Content-Type: text/csv）。テンプレートの列順・列名と一致させる必要があります。',
+        body: 'POST /v1/course/daily-budgets/import（Content-Type: text/csv）。テンプレートの列順・列名と一致させる必要があります。',
       },
     ],
   },
@@ -600,7 +600,7 @@ const helpByRoute: Record<string, PageHelp> = {
     data: [
       {
         heading: 'Monthly settlement report',
-        body: 'GET …/monthly-settlement?yearMonth=。reservations / caddieFees / cancellations / square / drilldown をまとめた締め前レポートです。',
+        body: 'GET /v1/course/monthly-settlement?yearMonth=。reservations / caddieFees / cancellations / square / drilldown をまとめた締め前レポートです。',
       },
       {
         heading: 'Unpaid cancellation item',
@@ -608,7 +608,7 @@ const helpByRoute: Record<string, PageHelp> = {
       },
       {
         heading: 'Settlement CSV',
-        body: 'GET …/monthly-settlement/export.csv?yearMonth=。画面の CSV 出力がこの API を使います。',
+        body: 'GET /v1/course/monthly-settlement/export.csv?yearMonth=。画面の CSV 出力がこの API を使います。',
       },
     ],
   },
@@ -696,15 +696,15 @@ const helpByRoute: Record<string, PageHelp> = {
       },
       {
         heading: 'Extension config (tenant)',
-        body: '既定通貨・タイムゾーン。PATCH /v1/erp/extensions/golf_course/config（scopeType: tenant）。',
+        body: '既定通貨・タイムゾーン。PATCH /v1/course/config（scopeType: tenant）。',
       },
       {
         heading: 'Extension status',
-        body: 'GET /v1/erp/extensions/status の1行。extensionKey: golf_course、tenantStatus、registryStatus、version、configVersion、validation。',
+        body: 'GET /v1/course/extension-status。extensionKey: golf_course、tenantStatus、configVersion、validation。',
       },
       {
         heading: 'metadataJson',
-        body: '予約ポリシーに付く連携用 JSON。PATCH /v1/erp/extensions/golf-course/reservation-policy の metadataJson。',
+        body: '予約ポリシーに付く連携用 JSON。PATCH /v1/course/reservation-policy の metadataJson。',
       },
     ],
   },

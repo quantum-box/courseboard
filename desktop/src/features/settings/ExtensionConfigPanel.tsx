@@ -1,7 +1,7 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import { RefreshCw, Save } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { fieldApiJson, fieldApiText } from '../../api'
+import { courseboardApiJson, courseboardApiText } from '../../api'
 import {
   Field,
   FormGrid,
@@ -13,9 +13,8 @@ import {
 } from '../../components/Page'
 import { useRegisterPageReload } from '../../lib/pageReload'
 
-const extensionKey = 'golf_course'
-const extensionsStatusPath = '/v1/erp/extensions/status'
-const extensionConfigPath = `/v1/erp/extensions/${extensionKey}/config`
+const extensionStatusPath = '/v1/course/extension-status'
+const extensionConfigPath = '/v1/course/config'
 const currencyOptions = ['JPY', 'USD', 'EUR'] as const
 
 type ExtensionConfigDraft = {
@@ -105,8 +104,7 @@ export function ExtensionConfigPanel() {
     setLoadError(null)
     setSaved(false)
     try {
-      const response = await fieldApiJson<{ items: ExtensionStatus[] }>(extensionsStatusPath)
-      const next = response.items.find(item => item.extensionKey === extensionKey) ?? null
+      const next = await courseboardApiJson<ExtensionStatus | null>(extensionStatusPath)
       setExtension(next)
       setDraft(configDraftFromJson(next?.configJson))
     } catch (error) {
@@ -143,7 +141,7 @@ export function ExtensionConfigPanel() {
     setSaved(false)
     try {
       const configJson = buildConfigJson(draft, extension?.configJson)
-      await fieldApiText(extensionConfigPath, {
+      await courseboardApiText(extensionConfigPath, {
         method: 'PATCH',
         body: JSON.stringify({ scopeType: 'tenant', configJson }),
       })

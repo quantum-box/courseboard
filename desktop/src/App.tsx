@@ -56,16 +56,26 @@ function OperatorWebRedirect({ href }: { href: string }) {
 function RouteContent({ route }: { route: string }) {
   if (route === 'golf') return <GolfHomePage />
   if (route === 'golf/courses') return <CoursesPage />
-  if (route === 'golf/products') return <ReservationProductsPage />
+  if (route === 'golf/products' || route === 'golf/reservation-products') {
+    return <ReservationProductsPage />
+  }
   if (route === 'golf/timeline') return <TimelinePage />
   if (route === 'golf/caddies' || route.startsWith('golf/caddies/')) {
     const segment = route === 'golf/caddies'
       ? ''
       : decodeRouteSegment(route.slice('golf/caddies/'.length).split('/')[0] ?? '')
+    // Keep a stable key so selecting a caddie (or switching roster/dispatch tabs)
+    // updates props instead of remounting and flashing every useResource loader.
     if (segment === 'dispatch' || segment === 'attendance' || segment === 'payroll') {
-      return <CaddiesPage key={route} initialView={segment} />
+      return <CaddiesPage key="golf/caddies" initialView={segment} />
     }
-    return <CaddiesPage key={route} initialView="roster" initialProfileId={segment || undefined} />
+    return (
+      <CaddiesPage
+        key="golf/caddies"
+        initialView="roster"
+        initialProfileId={segment || undefined}
+      />
+    )
   }
   if (route === 'golf/budgets') return <BudgetsPage />
   if (route === 'golf/policy') return <PolicyPage />

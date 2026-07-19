@@ -30,80 +30,159 @@ npm install
 
 ## Web
 
-先に repository root の Rust API を起動します。
+### Happy path（モック UI）
 
-```bash
-cargo run -- \
-  --dev-bearer-token=local-dev-token \
-  --database-url=sqlite:///tmp/courseboard-local.db \
-  --public-ui-base-url=http://127.0.0.1:8080/ui/index.html
-```
-
-別 terminal で Vite を起動します。
+ゴルフ運用画面（タイムライン・コース・キャディ・予約商品・設定関連）をすぐ見るなら、
+クライアント fixture だけで十分です。Rust API は不要です。
 
 ```bash
 cd desktop
 VITE_COURSEBOARD_AUTH_MODE=development \
 VITE_COURSEBOARD_API_BEARER=local-dev-token \
-npm run dev
-```
-
-`VITE_COURSEBOARD_AUTH_MODE=development` ではユーザー / テナントに加え、Field API の
-参照データもクライアント側 fixture でモックします（設定・コース・キャディ・予算・
-精算・キャンセル料の一覧など）。コースマップも Tauri の `ws://127.0.0.1:9001`
-が無いときはブラウザ側モックでカートを動かします。ローカル Rust API / Tauri
-simulator の実データを使う場合は `VITE_COURSEBOARD_MOCK_DATA=false` を付けてください。
-
-Vite は `/field-api/*` を `http://127.0.0.1:8080` へ proxy します。別の API を使う場合は
-`VITE_DEV_API_PROXY_TARGET` を指定します。この Rust proxy はローカル開発専用です。
-
-production Web bundle は `desktop/web-host` の build 時に `/courseboard-ui/` へ組み込まれ、
-Auth.js と同一 origin で配信されます。既存サイドナビのゴルフ関連7画面とキャンセル料は
-`/courseboard-ui/index.html#/*` へ遷移します。
-
-Rust imageの`/ui/index.html#/pay/*`はSMSから開く公開支払い専用です。Docker buildでは
-operator routeをAuth.js hostへhard redirectするため、Rust static hostingを第二のoperator Web配布経路にはしません。
-
-ローカルViteも本番と同じAuth.js/Cognitoセッションを使います。ログイン済みTachyon CLI
-profileから、Tachyon共有User Pool上のローカル専用confidential client
-`courseboard-local-web`を作成または再利用し、ViteとBFFのignored envを自動設定します。
-
-```bash
-cd desktop
-npm run auth:env
-```
-
-既存clientのsecretをローカルで失った場合だけ、明示的にローテーションします。
-
-```bash
-npm run auth:env -- --rotate-secret
-```
-
-別profileを使う場合は`npm run auth:env -- --profile field`、外部状態やenvを書き換えず
-確認する場合は`npm run auth:env -- --dry-run`を使用します。client secretとAuth.js secretは
-Gitやbundleへ入れず、`desktop/web-host/.env.local`だけにmode `0600`で保存します。
-
-設定後は2つのterminalでBFFとViteを起動します。
-
-```bash
-cd desktop/web-host
-pnpm dev
-```
-
-```bash
-cd desktop
+VITE_COURSEBOARD_TENANT_ID=courseboard_id \
+VITE_COURSEBOARD_MOCK_DATA=true \
 npm run dev -- --host 127.0.0.1
 ```
 
-`http://127.0.0.1:5173`を開くと、`/api/auth/*`と`/field-api/*`は
-`http://localhost:3001`のBFFへproxyされます。Cognito callbackは
-`http://127.0.0.1:5173/api/auth/callback/tachyon`です。access tokenとrefresh tokenは
-本番同様にBFFのHttpOnly Auth.js cookie内で管理され、React bundleには渡りません。
+開く URL: `http://127.0.0.1:5173/#/golf/timeline`
 
+`VITE_COURSEBOARD_AUTH_MODE=development` では、Field / course-api 参照もデフォルトで
+クライアント側 fixture に短絡します（`VITE_COURSEBOARD_MOCK_DATA` 未指定時も ON）。
+コースマップは Tauri の `ws://127.0.0.1:9001` が無いときもブラウザ側モックで動きます。
+
+### Live local（Rust course-api）
+
+ローカルの course-api は **常に Field に接続**します。`TACHYON_FIELD_API_URL` 未設定時は
+production（`https://tachyon-field-api.txcloud.app`）が使われます。
+`empty://local`（空リストショートカット）は通常起動では使いません。
+
+推奨（mise）:
+
+```bash
+# 初回 / bacon 未導入時
+mise install
+
+# terminal 1 — env 生成（初回 / public client・OIDC audience 更新時）
+mise run courseboard:pkce-env
+
+# terminal 1 — course-api :8080（bacon job `api` で Rust 保存時に rebuild+restart）
+mise run courseboard:api
+
+# terminal 2 — Vite :5173（既存の Vite HMR）
+mise run courseboard:vite
+```
+
+`courseboard:api` は `.env.browser-pkce` を読み、`COURSEBOARD_DEV_BEARER_TOKEN` を空にしたうえで
+`bacon api` を起動します（設定はリポジトリ直下の `bacon.toml`）。
+すでに素の `cargo run` で API を動かしている場合は一度止めて、`mise run courseboard:api` に切り替えてください
+（旧プロセスには hot reload は効きません）。watch なしで一度だけ起動する場合は
+`mise run courseboard:api-once` です。
+
+CLI JWT shortcut（ログイン UI なし）: `mise run courseboard:field-env` のあと
+`mise run courseboard:field-api` / `mise run courseboard:field-vite`。
+
+Vite は `/v1/course/*` と `/field-api/*` を `http://127.0.0.1:8080` へ proxy します。
+別 upstream を使う場合は `VITE_DEV_API_PROXY_TARGET` を指定します。
+
+実データには有効な JWT と `tn_…` テナントが必要です。オフライン UI だけならモック
+（`VITE_COURSEBOARD_MOCK_DATA=true`）を使ってください。
+
+### Live local → production Field（推奨・browser-pkce）
+
+ローカルの course-api (:8080) と Vite (:5173) を本番 Field
+(`https://tachyon-field-api.txcloud.app`) に繋ぎ、**実ユーザーでログイン**する手順です。
+**Auth.js / Cognito Hosted UI / `web-host` (:3001) は使いません。**
+
+platform-ui と同じ Tachyon JSON PKCE です（ADR-0022）:
+
+```
+UI password form
+  → POST https://api.n1.tachy.one/oauth2/login          (session_token)
+  → POST https://api.n1.tachy.one/oauth2/authorize      (JSON + PKCE, no redirect)
+  → POST https://api.n1.tachy.one/oauth2/token          (access + refresh)
+  → GET  https://api.n1.tachy.one/v1/me
+  → Authorization: Bearer <Tachyon access> を local course-api へ
+  → course-api が OIDC (iss=https://api.n1.tachy.one) で検証
+  → 同じ inbound bearer を prod Field へ転送（CLI Cognito dual-token なし）
+```
+
+Field の `verify_user` は Tachyon Auth `POST /auth/v1beta/verify` に委譲します。
+Auth 側が Tachyon 発行 OAuth access token（`iss=api.n1.tachy.one`）を受け付ける必要が
+あります（`/v1/me` と同じ順序）。セッション切れは UI で再ログインしてください。
+`TACHYON_FIELD_API_BEARER_TOKEN` / 毎時の `api-refresh` は不要です。
+
+```bash
+# 0) Tachyon CLI にログイン済みであること（初回の public client 作成用のみ）
+tachyon auth login --profile admin
+
+# 1) gitignored env を生成（prod Field URL + OIDC audience。CLI Field bearer は書かない）
+mise run courseboard:pkce-env
+# 別 tenant: cd desktop && npm run pkce:env -- --tenant-id tn_01…
+
+# 2) course-api :8080 — bacon hot-reload（OIDC inbound、prod Field outbound）
+mise run courseboard:api
+
+# 3) Vite :5173（web-host は不要）
+mise run courseboard:vite
+```
+
+
+開く URL: `http://127.0.0.1:5173`
+
+ログイン画面で Tachyon User Pool の username / password を入力します。
+テナントは `/v1/me` の一覧から選びます（`tn_…`。ローカルデモ用 `courseboard_id` は不可）。
+
+登録必須の redirect URI（JSON authorize ではリダイレクトしませんが完全一致が必要）:
+
+`http://127.0.0.1:5173/oauth/callback`
+
+public client 名: `courseboard-local-pkce`（`npm run pkce:env` が作成/再利用）
+
+重要:
+
+- Vite は `/v1/course/*` と `/field-api/*` を **local course-api (:8080)** へ proxy します。
+- course-api は inbound の `Authorization`（ログイン token）+ `x-operator-id` を Field へ転送します。
+- `OIDC_ISSUER_URL=https://api.n1.tachy.one` + `EXPECTED_AUDIENCE=<public client id>` で
+  Tachyon `/oauth2/token` の access token（`iss`/`aud`）を検証します。Cognito issuer では検証できません。
+- Field / Tachyon Auth がログイン token を拒否すると、course-api は **502** を返します
+  （401 をそのまま返さないので UI はセッション失効でログアウトしません）。再ログインしてください。
+- `TACHYON_FIELD_API_BEARER_TOKEN` は任意の静的 override（admin/service）のみ。browser-pkce では不要です。
+- ルート `.env` に `COURSEBOARD_DEV_BEARER_TOKEN` が残っていると静的 verifier が優先されます。
+  `export COURSEBOARD_DEV_BEARER_TOKEN=` で空にしてください。
+- `VITE_AUTH_PROXY_TARGET` が残っていると Vite が誤って `:3001` へ proxy します。
+  `npm run pkce:env` はこれを削除します。
+
+#### CLI JWT shortcut（ログイン UI なし）
+
+パスワードログインなしで Field だけ見る場合:
+
+```bash
+mise run courseboard:field-env
+mise run courseboard:field-api
+mise run courseboard:field-vite
+```
+
+`VITE_COURSEBOARD_AUTH_MODE=development` + CLI access token で即 authenticated になります。
+
+#### Tauri native PKCE（将来 / 別経路）
+
+Desktop / Mobile の deep-link ログインは `NativePkceAdapter`（`courseboard://oauth/callback`）です。
+public client・profile BFF・deep link 配備後にだけ
+`VITE_COURSEBOARD_NATIVE_DEEP_LINK_READY=true` を付けます。
+
+#### Auth.js web-session（任意・ローカル検証では非推奨）
+
+production Web bundle は `desktop/web-host` 経由で Auth.js と同一 origin 配信されますが、
+**ローカルで prod Field を見る用途では使わないでください。**
+どうしても Auth.js を試す場合だけ `npm run auth:env`（`web-session` + `:3001`）を使います。
 ## Tauri desktop
 
 ```bash
 cd desktop
+# Prefer field:env first, then:
+npm run tauri:dev
+
+# Or explicit local-dev (empty Field / mock-friendly):
 VITE_COURSEBOARD_API_BASE_URL=http://127.0.0.1:8080 \
 VITE_COURSEBOARD_AUTH_MODE=development \
 VITE_COURSEBOARD_API_BEARER=local-dev-token \

@@ -40,6 +40,8 @@ import {
 } from 'react'
 import {
   downloadText,
+  courseboardApiJson,
+  courseboardApiText,
   fieldApiJson,
   fieldApiText,
   fieldTenant,
@@ -66,7 +68,7 @@ import {
 import { useResource } from '../../hooks/useResource'
 import { navigate } from '../../lib/router'
 
-const GOLF_API = '/v1/erp/extensions/golf-course'
+const COURSE_API = '/v1/course'
 
 type ListResponse<T> = { items: T[] }
 type View = 'roster' | 'dispatch' | 'attendance' | 'payroll'
@@ -430,16 +432,16 @@ export function CaddiesPage({
   const [flash, setFlash] = useState<Flash>(null)
 
   const profilesResource = useResource(
-    () => fieldApiJson<ListResponse<CaddieProfile>>(`${GOLF_API}/caddie-profiles`),
+    () => courseboardApiJson<ListResponse<CaddieProfile>>(`${COURSE_API}/caddie-profiles`),
     [],
   )
   const assignmentsResource = useResource(
-    () => fieldApiJson<ListResponse<CaddieAssignment>>(`${GOLF_API}/caddie-assignments`),
+    () => courseboardApiJson<ListResponse<CaddieAssignment>>(`${COURSE_API}/caddie-assignments`),
     [],
   )
   const recommendationsResource = useResource(
-    () => fieldApiJson<ListResponse<CaddieRecommendation>>(
-      `${GOLF_API}/caddie-recommendations?playerCount=4&includeRookiePairing=true&limit=5`,
+    () => courseboardApiJson<ListResponse<CaddieRecommendation>>(
+      `${COURSE_API}/caddie-recommendations?playerCount=4&includeRookiePairing=true&limit=5`,
     ),
     [],
   )
@@ -448,12 +450,12 @@ export function CaddiesPage({
     [],
   )
   const coursesResource = useResource(
-    () => fieldApiJson<ListResponse<GolfCourse>>(`${GOLF_API}/courses`),
+    () => courseboardApiJson<ListResponse<GolfCourse>>(`${COURSE_API}/courses`),
     [],
   )
   const attendanceResource = useResource(
-    () => fieldApiJson<AttendanceResponse>(
-      `${GOLF_API}/caddie-attendance-snapshot?date=${encodeURIComponent(operationDate)}`,
+    () => courseboardApiJson<AttendanceResponse>(
+      `${COURSE_API}/caddie-attendance-snapshot?date=${encodeURIComponent(operationDate)}`,
     ),
     [operationDate],
   )
@@ -786,8 +788,8 @@ function AttendanceView({
 function DailySupplyPanel({ date }: { date: string }) {
   const [safetyBuffer, setSafetyBuffer] = useState(0)
   const resource = useResource(
-    () => fieldApiJson<CaddieSupply>(
-      `${GOLF_API}/caddie-supply?date=${encodeURIComponent(date)}&safetyBuffer=${safetyBuffer}`,
+    () => courseboardApiJson<CaddieSupply>(
+      `${COURSE_API}/caddie-supply?date=${encodeURIComponent(date)}&safetyBuffer=${safetyBuffer}`,
     ),
     [date, safetyBuffer],
   )
@@ -858,8 +860,8 @@ function AutoAssignPanel({
     setBusy(dryRun ? 'preview' : 'execute')
     setError(null)
     try {
-      const result = await fieldApiJson<AutoAssignResult>(
-        `${GOLF_API}/caddie-auto-assignments`,
+      const result = await courseboardApiJson<AutoAssignResult>(
+      `${COURSE_API}/caddie-auto-assignments`,
         request('POST', { date, dryRun }),
       )
       setPlan(result)
@@ -1163,8 +1165,8 @@ function AssignmentsTable({
   async function updateStatus(assignment: CaddieAssignment, status: 'completed' | 'cancelled') {
     setBusyId(assignment.id)
     try {
-      await fieldApiText(
-        `${GOLF_API}/caddie-assignments/${encodeURIComponent(assignment.id)}`,
+      await courseboardApiJson(
+        `${COURSE_API}/caddie-assignments/${encodeURIComponent(assignment.id)}`,
         request('PATCH', {
           caddieProfileId: assignment.caddieProfileId,
           reservationId: assignment.reservationId ?? null,
@@ -1377,7 +1379,9 @@ function ProfilesView({
 
           <Separator className="my-3" />
 
-          {profilesResource.loading ? <LoadingState label="名簿を読み込み中" /> : null}
+          {profilesResource.loading && !profilesResource.data ? (
+            <LoadingState label="名簿を読み込み中" />
+          ) : null}
           {profilesResource.error ? <ResourceError error={profilesResource.error} onRetry={profilesResource.refresh} /> : null}
           {!profilesResource.loading && !profilesResource.error && filtered.length === 0 ? (
             <EmptyState
@@ -1525,7 +1529,7 @@ function ProfileCreateDialog({
         }))
         resolvedStaffId = createdStaff.id
       }
-      const createdText = await fieldApiText(`${GOLF_API}/caddie-profiles`, request('POST', {
+      const created = await courseboardApiJson<{ id?: string }>(`${COURSE_API}/caddie-profiles`, request('POST', {
         displayName: name,
         skillLevel,
         rank,
@@ -1538,12 +1542,7 @@ function ProfileCreateDialog({
         employmentStatus: 'active',
         maxRoundsPerDay: 2,
       }))
-      let createdId: string | undefined
-      try {
-        createdId = (JSON.parse(createdText) as { id?: string }).id
-      } catch {
-        createdId = undefined
-      }
+      const createdId = created?.id
       setDisplayName('')
       setSkillLevel('regular')
       setRank('D')
@@ -1670,16 +1669,18 @@ function ProfileDetail({
   const [tab, setTab] = useState<DetailTab>('basic')
   const [editOpen, setEditOpen] = useState(false)
   const membershipResource = useResource(
-    () => fieldApiJson<ListResponse<CourseMembership>>(
-      `${GOLF_API}/caddie-profiles/${encodeURIComponent(profile.id)}/courses`,
+    () => courseboardApiJson<ListResponse<CourseMembership>>(
+      `${COURSE_API}/caddie-profiles/${encodeURIComponent(profile.id)}/courses`,
     ),
     [profile.id],
+    { cacheKey: `caddie-courses:${profile.id}` },
   )
   const ratingsResource = useResource(
-    () => fieldApiJson<ListResponse<CaddieRating>>(
-      `${GOLF_API}/caddie-ratings?caddieProfileId=${encodeURIComponent(profile.id)}`,
+    () => courseboardApiJson<ListResponse<CaddieRating>>(
+      `${COURSE_API}/caddie-ratings?caddieProfileId=${encodeURIComponent(profile.id)}`,
     ),
     [profile.id],
+    { cacheKey: `caddie-ratings:${profile.id}` },
   )
 
   return (
@@ -1826,8 +1827,8 @@ function ProfileEditDialog({
     setBusy(true)
     setError(null)
     try {
-      await fieldApiText(
-        `${GOLF_API}/caddie-profiles/${encodeURIComponent(profile.id)}`,
+      await courseboardApiJson(
+        `${COURSE_API}/caddie-profiles/${encodeURIComponent(profile.id)}`,
         request('PATCH', profilePatchPayload(profile, {
           displayName: displayName.trim(),
           skillLevel,
@@ -2054,8 +2055,8 @@ function StaffLinkDialog({
         }))
         resolved = created.id
       }
-      await fieldApiText(
-        `${GOLF_API}/caddie-profiles/${encodeURIComponent(profile.id)}`,
+      await courseboardApiJson(
+        `${COURSE_API}/caddie-profiles/${encodeURIComponent(profile.id)}`,
         request('PATCH', profilePatchPayload(profile, { staffId: resolved })),
       )
       onOpenChange(false)
@@ -2149,8 +2150,8 @@ function CourseMembershipPanel({
   async function save() {
     setBusy(true)
     try {
-      await fieldApiText(
-        `${GOLF_API}/caddie-profiles/${encodeURIComponent(profile.id)}/courses`,
+      await courseboardApiJson(
+        `${COURSE_API}/caddie-profiles/${encodeURIComponent(profile.id)}/courses`,
         request('PUT', { courseIds: [...selected], primaryCourseId: primary }),
       )
       resource.refresh()
@@ -2165,7 +2166,7 @@ function CourseMembershipPanel({
   return (
     <Panel title="対応コース" description="担当可能なコースとメイン拠点を設定します。" actions={<MapPin className="size-5 text-primary" aria-hidden="true" />}>
       {coursesError ? <ResourceError error={coursesError} /> : null}
-      {resource.loading ? <LoadingState label="対応コースを読み込み中" /> : null}
+      {resource.loading && !resource.data ? <LoadingState label="対応コースを読み込み中" /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {!resource.loading && !resource.error && courses.length === 0 ? (
         <EmptyState title="コースが登録されていません" description="先にコースマスタを設定してください。" />
@@ -2241,10 +2242,11 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
   const [busy, setBusy] = useState(false)
   const bounds = monthBounds(yearMonth)
   const resource = useResource(
-    () => fieldApiJson<ListResponse<AvailabilityRecord>>(
-      `${GOLF_API}/caddie-availabilities?caddieProfileId=${encodeURIComponent(profile.id)}&from=${bounds.from}&to=${bounds.to}`,
+    () => courseboardApiJson<ListResponse<AvailabilityRecord>>(
+      `${COURSE_API}/caddie-availabilities?caddieProfileId=${encodeURIComponent(profile.id)}&from=${bounds.from}&to=${bounds.to}`,
     ),
     [profile.id, bounds.from, bounds.to],
+    { cacheKey: `caddie-availability:${profile.id}:${bounds.from}:${bounds.to}` },
   )
   const records = useMemo(
     () => new Map((resource.data?.items ?? []).map(record => [record.date, record])),
@@ -2268,7 +2270,7 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
     if (!selectedDate) return
     setBusy(true)
     try {
-      await fieldApiText(`${GOLF_API}/caddie-availabilities`, request('POST', {
+      await courseboardApiJson(`${COURSE_API}/caddie-availabilities`, request('POST', {
         caddieProfileId: profile.id,
         date: selectedDate,
         status,
@@ -2288,8 +2290,8 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
     if (!selectedDate) return
     setBusy(true)
     try {
-      await fieldApiText(
-        `${GOLF_API}/caddie-availabilities/${encodeURIComponent(profile.id)}/${selectedDate}`,
+      await courseboardApiText(
+        `${COURSE_API}/caddie-availabilities/${encodeURIComponent(profile.id)}/${selectedDate}`,
         request('DELETE'),
       )
       setSelectedDate(null)
@@ -2316,7 +2318,7 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
         </div>
       )}
     >
-      {resource.loading ? <LoadingState label="勤務希望を読み込み中" /> : null}
+      {resource.loading && !resource.data ? <LoadingState label="勤務希望を読み込み中" /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {!resource.loading && !resource.error ? (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
@@ -2415,7 +2417,7 @@ function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<Caddi
       description="接客品質の評価とコメントを確認します。"
       actions={<Badge variant={average === null ? 'neutral' : 'warning'}><Star className="fill-current" /> {average?.toFixed(1) ?? '—'} / {ratings.length}件</Badge>}
     >
-      {resource.loading ? <LoadingState label="評価を読み込み中" /> : null}
+      {resource.loading && !resource.data ? <LoadingState label="評価を読み込み中" /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {resource.data ? (
         <DataTable rows={ratings} columns={columns} rowKey={row => row.id} empty={<EmptyState title="評価はまだありません" description="プレー後の顧客評価がここに表示されます。" />} />
@@ -2428,8 +2430,8 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
   const [yearMonth, setYearMonth] = useState(previousYearMonth)
   const [downloading, setDownloading] = useState(false)
   const resource = useResource(
-    () => fieldApiJson<PayrollResponse>(
-      `${GOLF_API}/caddie-payroll-summary?yearMonth=${encodeURIComponent(yearMonth)}`,
+    () => courseboardApiJson<PayrollResponse>(
+      `${COURSE_API}/caddie-payroll-summary?yearMonth=${encodeURIComponent(yearMonth)}`,
     ),
     [yearMonth],
   )
@@ -2448,8 +2450,8 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
   async function downloadCsv() {
     setDownloading(true)
     try {
-      const csv = await fieldApiText(
-        `${GOLF_API}/caddie-payroll-summary/export.csv?yearMonth=${encodeURIComponent(yearMonth)}`,
+      const csv = await courseboardApiText(
+        `${COURSE_API}/caddie-payroll-summary/export.csv?yearMonth=${encodeURIComponent(yearMonth)}`,
       )
       downloadText(`caddie-payroll-${yearMonth}.csv`, csv)
       setFlash({ tone: 'success', title: '給与CSVをダウンロードしました', message: `${yearMonth} の集計を出力しました。` })
