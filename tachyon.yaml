@@ -160,10 +160,10 @@ spec:
         - migrations/**
         - src/**
       build:
-        # Runner still has rustup under /usr/local/rustup, but CARGO_HOME often points at
-        # a non-writable /workspace/cache/cargo (Permission denied → cargo missing from PATH).
-        # Repair env before the framework runs `cargo lambda build ...`.
-        installCommand: "set -eux; export RUSTUP_HOME=${RUSTUP_HOME:-/usr/local/rustup}; if [ ! -w \"${CARGO_HOME:-/workspace/cache/cargo}\" ] 2>/dev/null; then export CARGO_HOME=/tmp/cargo-home; mkdir -p \"$CARGO_HOME\"; fi; export PATH=\"/usr/local/cargo/bin:$CARGO_HOME/bin:$PATH\"; command -v cargo; cargo --version; command -v cargo-lambda || cargo install cargo-lambda --locked; command -v cargo-lambda; printf 'export RUSTUP_HOME=%q\\nexport CARGO_HOME=%q\\nexport PATH=%q\\n' \"$RUSTUP_HOME\" \"$CARGO_HOME\" \"$PATH\" > /tmp/courseboard-cargo-env.sh; grep -q courseboard-cargo-env \"$HOME/.bashrc\" 2>/dev/null || echo '. /tmp/courseboard-cargo-env.sh' >> \"$HOME/.bashrc\""
+        # Build phase uses a fresh shell without /usr/local/cargo/bin. Install can see
+        # cargo, but the framework then runs bare `cargo lambda build ...` and gets 127.
+        # Symlink toolchain into /tmp/tachyon-build-bin (kept on build PATH).
+        installCommand: "set -eux; mkdir -p /tmp/tachyon-build-bin /tmp/cargo-home; export RUSTUP_HOME=/usr/local/rustup; export CARGO_HOME=/tmp/cargo-home; for bin in cargo rustc rustup; do ln -sfn /usr/local/cargo/bin/$bin /tmp/tachyon-build-bin/$bin; done; ln -sfn /usr/local/bin/cargo-lambda /tmp/tachyon-build-bin/cargo-lambda; export PATH=/tmp/tachyon-build-bin:/usr/local/cargo/bin:/usr/local/bin:$PATH; command -v cargo; cargo --version; command -v cargo-lambda"
         package: courseboard
         binary: lambda-courseboard
         release: true
