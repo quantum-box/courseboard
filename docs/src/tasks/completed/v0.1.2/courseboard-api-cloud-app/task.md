@@ -28,15 +28,16 @@ CourseBoardのRust APIは現行リポジトリで`course-api`として拡張さ�
 
 - [設計](design.md)
 - Linear issue: 未作成
-- ADR: 既存のCargo Lambda運用を踏襲するため新規作成なし
+- [ADR-0001: production Cognito client allowlist](../../../architecture/decisions/ADR-0001-production-cognito-client-allowlist.md)
 
 ## 実装フェーズ
 
 1. [x] 現行Cloud App登録・Build・Deploymentを確認する。
 2. [x] `courseboard-api` manifestとWeb host接続設定を追加する。
 3. [x] manifest dry-runとRust/Web hostの対象チェックを通す。
-4. [ ] APIをBuild・Deployし、Web host設定を反映する。
-5. [ ] live HTTPと認証済みBFF経由の挙動を確認する。
+4. [x] APIをBuild・Deployし、Web host設定を反映する。
+5. [x] live HTTPと認証済みBFF経由の挙動を確認する。
+6. [x] production Lambdaの公開PKCE client許可をprovider env drift時も維持する。
 
 ## 完了条件
 
@@ -52,3 +53,5 @@ CourseBoardのRust APIは現行リポジトリで`course-api`として拡張さ�
 - OAuth client refは既存provider secret driftの検査でapplyが停止したため使わない。APIが必要とする公開client IDだけを既存`tachyonfield-golf`のaudienceと一致させる。
 - 初回Buildは成功したが、readiness未指定時は`/`をprobeして失敗した。`/healthz`を明示した後もHTTP 502が継続し、Preview環境に必須envが未反映だったことを切り分けた。
 - Preview設定apply後は競合BuildがLambda alias leaseを保持したが、旧Deploymentをcancelし、TTL失効後の単一Buildでactive Deploymentとlive HTTPを確認した。
+- production registryの`EXPECTED_CLIENT_ID`は正しい一方、同一トークンがローカル検証器では`200`、active Lambdaでは`401 authorization failed`となった。既知のfirst-party公開clientを同一Cognito issuerに限ってコード側でも許可し、provider env driftでログイン後APIが全面停止しないようにする。
+- v0.1.2のmain反映後にproduction Build、active Deployment、認証済みブラウザーの4 API `200`を再確認する。これはマージ後の運用確認として残す。

@@ -610,7 +610,10 @@ async fn require_valid_token(
     if token.trim().is_empty() {
         return Err(AppError::Unauthorized);
     }
-    verifier.verify(token).map_err(AppError::from)?;
+    if let Err(error) = verifier.verify(token) {
+        tracing::warn!(error = %error, "bearer token verification failed");
+        return Err(AppError::from(error));
+    }
 
     Ok(next.run(req).await)
 }
