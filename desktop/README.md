@@ -171,3 +171,75 @@ npm run tauri:build
 
 Android / iOS は、それぞれの toolchain を用意したうえで `tauri:android:build` /
 `tauri:ios:build` も実行します。
+
+## CI と配布
+
+`.github/workflows/ci.yml` は通常の push / pull request で次を検証します。
+
+- React UI の typecheck、unit test、Web build
+- Linux x64、macOS Apple Silicon、Windows x64 の Tauri bundle build
+- Android debug APK / AAB build
+- iOS Simulator app build
+
+生成したbundleは14日間GitHub Actions artifactとして保持します。これらは動作確認用の
+未署名artifactで、エンドユーザー向けには配布しません。
+
+`.github/workflows/desktop-release.yml` は `desktop-v0.2.0` 形式のtag、または手動実行で
+macOS Apple Silicon / Windows x64 installerを作ります。tag実行はartifact作成までです。
+R2への公開は、署名設定を確認したうえで手動実行の `publish=true` と保護された
+`desktop-release` environmentを通した場合だけ行います。
+
+配布先の標準構造は次のとおりです。
+
+```text
+releases/latest.json
+releases/latest/courseboard-macos-arm64.dmg
+releases/latest/courseboard-windows-x64.msi
+releases/<version>/courseboard-macos-arm64.dmg
+releases/<version>/courseboard-windows-x64.msi
+releases/<version>/latest.json
+```
+
+Web hostの `/download` は `COURSEBOARD_DESKTOP_RELEASE_BASE_URL` を基点にlatest installerを
+案内します。未指定時は `https://downloads.courseboard.txcloud.app` です。
+
+公開environmentには次のsecretが必要です。
+
+- `R2_ACCOUNT_ID`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `R2_BUCKET`
+
+macOS notarization用の `APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_PASSWORD`、
+`APPLE_TEAM_ID` と、Windows Authenticode証明書のimport/signing設定を接続し、両OSで
+署名検証を通すまでは `publish=true` を承認しないでください。
+
+### Mobile Store配布
+
+`.github/workflows/mobile-release.yml` は手動実行で署名済みiOS IPAとAndroid AABを作り、
+`upload=true` の場合だけApp Store Connect（TestFlight処理対象）とGoogle Playの
+internal testingへアップロードします。どちらも保護された `mobile-release` environmentを
+通します。Google Playの初回AAB登録とStore listing、App Store Connectのapp record・
+bundle ID・契約情報は各consoleで先に作成してください。
+
+`ios-v1.2.3` 形式のtagをpushすると、iOSだけをrelease buildし、GitHub Actionsのrun番号を
+Store build numberとして採番してApp Store Connectへ自動アップロードします。このtag経路は
+常にuploadを有効にします。手動実行は署名artifactの事前確認やAndroid internal testingに使います。
+
+必要なrepository/environment secretsは次のとおりです。
+
+- Apple signing: `APPLE_CERTIFICATE_BASE64`, `APPLE_CERTIFICATE_PASSWORD`,
+  `APPLE_PROVISIONING_PROFILE_BASE64`, `APPLE_CI_KEYCHAIN_PASSWORD`, `APPLE_TEAM_ID`
+- App Store Connect upload: `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`,
+  `APPLE_API_PRIVATE_KEY_BASE64`
+- Android signing: `ANDROID_UPLOAD_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+  `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
+- Google Play upload: `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON`
+
+`mobile-release` environment variable `COURSEBOARD_NATIVE_CLIENT_ID` には、secretを持たない
+PKCE対応native public clientのIDを設定します。Native OAuth clientと
+`courseboard://oauth/callback`が本番Auth側に登録されるまではStoreへアップロードしません。
+
+最初は `upload=false` で署名artifactを検証し、その後 `upload=true` でTestFlight / internal
+testingへ送ります。App Store本番公開とGoogle Play production昇格は、このworkflowでは
+自動化せず、Storeの審査・公開操作として明示的に行います。

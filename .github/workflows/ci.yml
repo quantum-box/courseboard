@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
 jobs:
   rust:
     name: Rust
@@ -71,3 +74,226 @@ jobs:
           NEXT_PUBLIC_PLATFORM_ID: tn_placeholder
           TACHYON_FIELD_API_URL: https://tachyon-field-api.txcloud.app
           BACKEND_API_URL: https://tachyon-field-api.txcloud.app
+
+  native_ui:
+    name: Native UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run type-check
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Build web assets
+        run: npm run build
+
+  desktop_bundle:
+    name: Desktop bundle (${{ matrix.platform }})
+    needs: native_ui
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            os: ubuntu-latest
+          - platform: macos-arm64
+            os: macos-15
+          - platform: windows-x64
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate private native dependencies
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.PHOTON_DEPLOY_KEY }}
+
+      - name: Use SSH for private GitHub dependencies
+        run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build unsigned bundle
+        run: npm run tauri:build
+        env:
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard.txcloud.app
+          VITE_COURSEBOARD_NATIVE_DEEP_LINK_READY: "false"
+
+      - name: Upload desktop bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: courseboard-${{ matrix.platform }}
+          path: |
+            desktop/src-tauri/target/release/bundle/**
+          if-no-files-found: error
+          retention-days: 14
+
+  android_bundle:
+    name: Android debug bundle
+    needs: native_ui
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate private native dependencies
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.PHOTON_DEPLOY_KEY }}
+
+      - name: Use SSH for private GitHub dependencies
+        run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - name: Install Rust Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Android project
+        run: npm run tauri:android:init
+
+      - name: Build Android debug bundle
+        run: NDK_HOME="${ANDROID_HOME}/ndk/27.0.12077973" npm run tauri:android:build -- --debug
+        env:
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard.txcloud.app
+          VITE_COURSEBOARD_NATIVE_DEEP_LINK_READY: "false"
+
+      - name: Upload Android bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: courseboard-android-debug
+          path: |
+            desktop/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            desktop/src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
+          if-no-files-found: error
+          retention-days: 14
+
+  ios_bundle:
+    name: iOS Simulator bundle
+    needs: native_ui
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate private native dependencies
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.PHOTON_DEPLOY_KEY }}
+
+      - name: Use SSH for private GitHub dependencies
+        run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Rust iOS targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate iOS project
+        run: npm run tauri:ios:init
+
+      - name: Build iOS Simulator app
+        run: npm run tauri:ios:build -- --debug --target aarch64-sim
+        env:
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard.txcloud.app
+          VITE_COURSEBOARD_NATIVE_DEEP_LINK_READY: "false"
+
+      - name: Upload iOS Simulator app
+        uses: actions/upload-artifact@v4
+        with:
+          name: courseboard-ios-simulator
+          path: desktop/src-tauri/gen/apple/build/**/*.app
+          if-no-files-found: error
+          retention-days: 14
