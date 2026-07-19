@@ -67,3 +67,9 @@
 
 - 実顧客データを使う書き込みAPI: 本番データ変更を避けるため未実施。
 - SMS送信: 実送信になるため未実施。
+
+## v0.1.3 認証診断
+
+- v0.1.2 production Deploymentはactiveになったが、実Bearerの直接送信でも`401`が継続した。
+- client allowlist拒否は`403`になるため、署名・claim検証側の拒否に限定できた。
+- tokenやclaim値を返さず、検証失敗分類だけを`x-courseboard-auth-error`へ追加してproduction runtimeの原因を確定する。

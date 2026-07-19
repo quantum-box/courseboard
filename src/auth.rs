@@ -93,6 +93,20 @@ pub enum AuthError {
     UnauthorizedClient,
 }
 
+impl AuthError {
+    pub fn category(&self) -> &'static str {
+        match self {
+            Self::MissingToken => "missing_token",
+            Self::MalformedToken => "malformed_token",
+            Self::MissingKeyId => "missing_key_id",
+            Self::UnknownKeyId => "unknown_key_id",
+            Self::InvalidToken => "invalid_token",
+            Self::InvalidIssuedAt => "invalid_issued_at",
+            Self::UnauthorizedClient => "unauthorized_client",
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct OidcJwtVerifier {
     issuer: String,

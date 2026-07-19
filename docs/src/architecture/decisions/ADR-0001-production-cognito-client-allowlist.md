@@ -15,6 +15,7 @@ OAuth public client IDは秘密ではない。一方、任意のclient IDを許�
 production Cognito issuerから発行され、署名と標準claim検証を通過したtokenに限り、既知のfirst-party local production PKCE client IDをコード側allowlistへ追加する。manifestの`EXPECTED_CLIENT_ID`もdesired stateとして維持する。
 
 認証失敗時はtokenやclaim値を記録せず、失敗分類だけをruntime logへ記録する。
+同じ安全な失敗分類を`x-courseboard-auth-error`レスポンスヘッダーにも返し、CloudWatchへ直接アクセスできない運用者が署名・claim・client拒否を区別できるようにする。
 
 ## Consequences
 
