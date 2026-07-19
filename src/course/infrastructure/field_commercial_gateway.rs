@@ -147,9 +147,8 @@ impl GolfCommercialGateway for FieldGolfCommercialGateway {
             csv.as_bytes(),
         )
         .await?;
-        let items: FieldItems<FieldBudgetDto> = serde_json::from_value(value).map_err(|error| {
-            CourseError::Provider(format!("Field API decode failed: {error}"))
-        })?;
+        let items: FieldItems<FieldBudgetDto> = serde_json::from_value(value)
+            .map_err(|error| CourseError::Provider(format!("Field API decode failed: {error}")))?;
         items.items.into_iter().map(map_budget).collect()
     }
 
@@ -210,13 +209,8 @@ impl GolfCommercialGateway for FieldGolfCommercialGateway {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<Option<ExtensionStatus>, CourseError> {
-        let items: Vec<FieldExtensionStatusDto> = field_get_items(
-            &self.client,
-            &self.base_url,
-            EXTENSIONS_STATUS,
-            credentials,
-        )
-        .await?;
+        let items: Vec<FieldExtensionStatusDto> =
+            field_get_items(&self.client, &self.base_url, EXTENSIONS_STATUS, credentials).await?;
         Ok(items
             .into_iter()
             .find(|item| item.extension_key == GOLF_EXTENSION_KEY)

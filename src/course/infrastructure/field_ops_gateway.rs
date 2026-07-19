@@ -18,9 +18,9 @@ use super::field_gateway::{
 use crate::course::domain::{
     AttendanceSnapshot, AttendanceSnapshotReport, AutoAssignPlanItem, AutoAssignResult,
     AutoAssignSkippedItem, AvailabilityQuery, AvailabilityStatus, Caddie, CaddieAssignment,
-    CaddieAvailability, CaddieCourseMembership, CaddieRating, CaddieRecommendation, CaddieSkillLevel,
-    CaddieSupply, CourseError, GatewayCredentials, GolfOpsGateway, PayrollPeriod, PayrollRow,
-    PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie,
+    CaddieAvailability, CaddieCourseMembership, CaddieRating, CaddieRecommendation,
+    CaddieSkillLevel, CaddieSupply, CourseError, GatewayCredentials, GolfOpsGateway, PayrollPeriod,
+    PayrollRow, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie,
     UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 
@@ -45,13 +45,8 @@ impl FieldGolfOpsGateway {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<HashMap<String, String>, CourseError> {
-        let items: Vec<FieldStaffMemberDto> = field_get_items(
-            &self.client,
-            &self.base_url,
-            "/v1/erp/staff",
-            credentials,
-        )
-        .await?;
+        let items: Vec<FieldStaffMemberDto> =
+            field_get_items(&self.client, &self.base_url, "/v1/erp/staff", credentials).await?;
         Ok(items
             .into_iter()
             .filter_map(|item| {
@@ -165,7 +160,10 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
             "recommendationScore": input.recommendation_score,
             "notes": input.notes,
         });
-        let path = format!("{GOLF}/caddie-assignments/{}", urlencoding_path(assignment_id));
+        let path = format!(
+            "{GOLF}/caddie-assignments/{}",
+            urlencoding_path(assignment_id)
+        );
         let dto: FieldGolfCaddieAssignmentDto = field_send_json(
             &self.client,
             &self.base_url,
@@ -183,7 +181,10 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         credentials: GatewayCredentials<'_>,
         caddie_id: &str,
     ) -> Result<Vec<CaddieCourseMembership>, CourseError> {
-        let path = format!("{GOLF}/caddie-profiles/{}/courses", urlencoding_path(caddie_id));
+        let path = format!(
+            "{GOLF}/caddie-profiles/{}/courses",
+            urlencoding_path(caddie_id)
+        );
         let items: Vec<FieldMembershipDto> =
             field_get_items(&self.client, &self.base_url, &path, credentials).await?;
         Ok(items.into_iter().map(map_membership).collect())
@@ -199,7 +200,10 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
             "courseIds": input.course_ids,
             "primaryCourseId": input.primary_course_id,
         });
-        let path = format!("{GOLF}/caddie-profiles/{}/courses", urlencoding_path(caddie_id));
+        let path = format!(
+            "{GOLF}/caddie-profiles/{}/courses",
+            urlencoding_path(caddie_id)
+        );
         let items: FieldItems<FieldMembershipDto> = field_send_json(
             &self.client,
             &self.base_url,
@@ -436,7 +440,11 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         )
         .await?;
         Ok(PayrollSummary::new(
-            PayrollPeriod::new(dto.period.year_month, dto.period.start_date, dto.period.end_date),
+            PayrollPeriod::new(
+                dto.period.year_month,
+                dto.period.start_date,
+                dto.period.end_date,
+            ),
             dto.items.into_iter().map(map_payroll_row).collect(),
         ))
     }

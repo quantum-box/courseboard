@@ -220,8 +220,7 @@ pub async fn import_daily_budgets_csv(
     body: Bytes,
 ) -> Result<Json<ItemsResponse<DailyBudgetDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let csv = std::str::from_utf8(&body)
-        .map_err(|_| AppError::BadRequest("CSV must be UTF-8"))?;
+    let csv = std::str::from_utf8(&body).map_err(|_| AppError::BadRequest("CSV must be UTF-8"))?;
     let use_case = ImportDailyBudgetsCsvUseCase::new(commercial_gateway(&state));
     let items = use_case
         .execute(credentials, csv)

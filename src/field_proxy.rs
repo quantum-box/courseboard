@@ -29,7 +29,9 @@ pub async fn proxy_field_api(
             "TACHYON_FIELD_API_URL is not configured",
         );
     };
-    if base_url.trim().eq_ignore_ascii_case(crate::config::EMPTY_COURSE_STORE_URL)
+    if base_url
+        .trim()
+        .eq_ignore_ascii_case(crate::config::EMPTY_COURSE_STORE_URL)
         || base_url.trim().starts_with("empty://")
     {
         return proxy_error(
@@ -60,9 +62,10 @@ pub async fn proxy_field_api(
     // Default: forward the caller's inbound bearer (browser-pkce login token).
     // Optional TACHYON_FIELD_API_BEARER_TOKEN override remains for admin/service
     // accounts only — not required for the normal browser-pkce path.
-    if let Some(authorization) =
-        outbound_authorization(config.field_upstream_authorization.as_deref(), &parts.headers)
-    {
+    if let Some(authorization) = outbound_authorization(
+        config.field_upstream_authorization.as_deref(),
+        &parts.headers,
+    ) {
         outbound = outbound.header(header::AUTHORIZATION.as_str(), authorization);
     }
     for name in [header::CONTENT_TYPE, header::ACCEPT, header::IF_MATCH] {
@@ -101,8 +104,7 @@ pub async fn proxy_field_api(
             "Field API rejected the authenticated bearer (Tachyon Auth verify_user must accept Tachyon-issued OAuth access tokens; re-login if the session expired)",
         );
     }
-    let status =
-        StatusCode::from_u16(upstream_status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
+    let status = StatusCode::from_u16(upstream_status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
     let content_disposition = upstream.headers().get(header::CONTENT_DISPOSITION).cloned();
     let response_body = match upstream.bytes().await {

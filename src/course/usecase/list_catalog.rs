@@ -160,7 +160,9 @@ impl ListProductSlotsUseCase {
                 "reservation service id is required",
             ));
         }
-        self.catalog.list_product_slots(credentials, service_id).await
+        self.catalog
+            .list_product_slots(credentials, service_id)
+            .await
     }
 }
 

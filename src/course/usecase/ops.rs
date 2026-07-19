@@ -118,7 +118,9 @@ impl UpsertCaddieAvailabilityUseCase {
         credentials: GatewayCredentials<'_>,
         input: UpsertCaddieAvailability,
     ) -> Result<CaddieAvailability, CourseError> {
-        self.ops.upsert_caddie_availability(credentials, input).await
+        self.ops
+            .upsert_caddie_availability(credentials, input)
+            .await
     }
 }
 

@@ -72,7 +72,9 @@ impl UpsertDailyBudgetUseCase {
         credentials: GatewayCredentials<'_>,
         input: UpsertDailyBudget,
     ) -> Result<DailyBudget, CourseError> {
-        self.commercial.upsert_daily_budget(credentials, input).await
+        self.commercial
+            .upsert_daily_budget(credentials, input)
+            .await
     }
 }
 

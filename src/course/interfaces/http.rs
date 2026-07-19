@@ -13,8 +13,9 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::course::domain::{
-    Caddie, CaddieAssignment, Course, CourseError, GatewayCredentials, ProductSlot, ReservationProduct,
-    Resource, TeeSheet, TeeSheetItem, TeeSheetQuery, UpsertCourse, UpsertReservationProduct,
+    Caddie, CaddieAssignment, Course, CourseError, GatewayCredentials, ProductSlot,
+    ReservationProduct, Resource, TeeSheet, TeeSheetItem, TeeSheetQuery, UpsertCourse,
+    UpsertReservationProduct,
 };
 use crate::course::infrastructure::{
     FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
@@ -60,13 +61,15 @@ pub(crate) fn credentials<'a>(
 ) -> Result<GatewayCredentials<'a>, AppError> {
     // Inbound Authorization was already verified by require_valid_token.
     // Forward the login bearer unless an optional static Field override is set.
-    let authorization =
-        if let Some(value) = state.cancellation_fee_config.field_upstream_authorization.as_deref()
-        {
-            value
-        } else {
-            bearer_authorization(headers)?
-        };
+    let authorization = if let Some(value) = state
+        .cancellation_fee_config
+        .field_upstream_authorization
+        .as_deref()
+    {
+        value
+    } else {
+        bearer_authorization(headers)?
+    };
     Ok(GatewayCredentials {
         authorization,
         operator_id: operator_id(headers)?,
@@ -251,7 +254,8 @@ fn default_true() -> bool {
 
 impl From<&Course> for CourseDto {
     fn from(value: &Course) -> Self {
-        let business_hours_json = match (value.business_hours_open(), value.business_hours_close()) {
+        let business_hours_json = match (value.business_hours_open(), value.business_hours_close())
+        {
             (Some(open), Some(close)) => Some(BusinessHoursDto {
                 open: open.to_string(),
                 close: close.to_string(),

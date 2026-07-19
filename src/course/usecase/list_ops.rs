@@ -168,9 +168,7 @@ mod tests {
             date: NaiveDate,
             _safety_buffer: Option<i64>,
         ) -> Result<CaddieSupply, CourseError> {
-            Ok(CaddieSupply::reconstitute(
-                date, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            ))
+            Ok(CaddieSupply::reconstitute(date, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         }
 
         async fn auto_assign_caddies(

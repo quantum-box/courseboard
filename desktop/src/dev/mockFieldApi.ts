@@ -1100,24 +1100,27 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-profiles' && method === 'POST') {
-    const created = {
+    const staffId = body?.staffId == null ? '' : String(body.staffId)
+    const created: (typeof mockCaddies)[number] = {
       id: `caddie_${Date.now()}`,
       displayName: String(body?.displayName ?? 'New caddie'),
       skillLevel: String(body?.skillLevel ?? 'regular'),
       rank: String(body?.rank ?? 'D'),
       baseFeeAmount: Number(body?.baseFeeAmount ?? 12_000),
       currency: String(body?.currency ?? 'JPY'),
-      staffId: body?.staffId == null ? null : String(body.staffId),
+      staffId,
+      staffReferenceType: staffId ? 'erp_staff' : '',
+      staffReferenceId: staffId,
       active: body?.active !== false,
       employmentStatus: String(body?.employmentStatus ?? 'active'),
       maxRoundsPerDay: Number(body?.maxRoundsPerDay ?? 2),
       ratingCount: 0,
-      ratingAverage: null,
+      ratingAverage: 0,
       canTwoRounds: Boolean(body?.canTwoRounds),
       monthlyContractRounds: Number(body?.monthlyContractRounds ?? 14),
       desiredIncome: Number(body?.desiredIncome ?? 0),
     }
-    mockCaddies.push(created as (typeof mockCaddies)[number])
+    mockCaddies.push(created)
     return hit(created)
   }
 

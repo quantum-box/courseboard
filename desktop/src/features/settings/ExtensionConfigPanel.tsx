@@ -190,7 +190,7 @@ export function ExtensionConfigPanel() {
         <div className="grid gap-3">
           {!extension ? (
             <Notice tone="warning" title="拡張状態を取得できません">
-              extension key「{extensionKey}」が status 応答にありません。保存前に有効化状態を確認してください。
+              extension key「golf_course」が status 応答にありません。保存前に有効化状態を確認してください。
             </Notice>
           ) : null}
           {extension?.validation?.errors?.length ? (

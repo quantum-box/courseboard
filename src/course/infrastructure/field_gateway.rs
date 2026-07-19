@@ -15,8 +15,8 @@ use serde_json::{json, Value};
 
 use crate::config::EMPTY_COURSE_STORE_URL;
 use crate::course::domain::{
-    Caddie, CaddieAssignment, CaddieRank, CaddieSkillLevel, Course, CourseError, GatewayCredentials,
-    GolfCatalogGateway, PlayType, ProductSlot, Reservation, ReservationGateway,
+    Caddie, CaddieAssignment, CaddieRank, CaddieSkillLevel, Course, CourseError,
+    GatewayCredentials, GolfCatalogGateway, PlayType, ProductSlot, Reservation, ReservationGateway,
     ReservationProduct, Resource, ResourceKind, UpsertCourse, UpsertReservationProduct,
 };
 use crate::field_api::DEFAULT_FIELD_API_URL;
@@ -327,15 +327,15 @@ fn map_course(value: FieldGolfCourseDto) -> Course {
 }
 
 fn map_resource(value: FieldGolfCourseResourceDto) -> Resource {
-    let golf_course_id = json_string_field(value.attributes_json.as_ref(), &[
-        "golfCourseId",
-        "golf_course_id",
-    ])
+    let golf_course_id = json_string_field(
+        value.attributes_json.as_ref(),
+        &["golfCourseId", "golf_course_id"],
+    )
     .or_else(|| {
-        json_string_field(value.metadata_json.as_ref(), &[
-            "golfCourseId",
-            "golf_course_id",
-        ])
+        json_string_field(
+            value.metadata_json.as_ref(),
+            &["golfCourseId", "golf_course_id"],
+        )
     });
     let kind = value
         .resource_kind
@@ -413,9 +413,7 @@ pub(crate) fn map_caddie(
         value.active.unwrap_or(true),
         CaddieSkillLevel::parse(value.skill_level.as_deref().unwrap_or("regular")),
         CaddieRank::parse(value.rank.as_deref().unwrap_or("C")),
-        value
-            .employment_status
-            .unwrap_or_else(|| "active".into()),
+        value.employment_status.unwrap_or_else(|| "active".into()),
         value.base_fee_amount.unwrap_or(0),
         value.currency.unwrap_or_else(|| "JPY".into()),
         value.max_rounds_per_day.unwrap_or(1),

@@ -132,9 +132,7 @@ impl UpdateReservationPolicy {
         }
         if let Some(bps) = self.guest_deposit_bps {
             if !(0..=10_000).contains(&bps) {
-                return Err(CourseError::BadRequest(
-                    "guest deposit bps must be 0-10000",
-                ));
+                return Err(CourseError::BadRequest("guest deposit bps must be 0-10000"));
             }
         }
         if let Some(hours) = self.cutoff_hours {
@@ -356,11 +354,7 @@ pub struct SettlementPeriod {
 }
 
 impl SettlementPeriod {
-    pub fn new(
-        year_month: impl Into<String>,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-    ) -> Self {
+    pub fn new(year_month: impl Into<String>, start_date: NaiveDate, end_date: NaiveDate) -> Self {
         Self {
             year_month: year_month.into(),
             start_date,
@@ -687,16 +681,7 @@ mod tests {
     #[test]
     fn reservation_policy_clamps_deposit_bps_and_exposes_percent() {
         let policy = ReservationPolicy::reconstitute(
-            "tn_1",
-            "golf",
-            18,
-            4,
-            "optional",
-            12_000,
-            -50,
-            24,
-            None,
-            None,
+            "tn_1", "golf", 18, 4, "optional", 12_000, -50, 24, None, None,
         );
         assert_eq!(policy.member_deposit_bps(), 10_000);
         assert_eq!(policy.guest_deposit_bps(), 0);

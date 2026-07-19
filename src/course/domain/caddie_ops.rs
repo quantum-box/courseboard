@@ -732,11 +732,7 @@ pub struct PayrollPeriod {
 }
 
 impl PayrollPeriod {
-    pub fn new(
-        year_month: impl Into<String>,
-        start_date: NaiveDate,
-        end_date: NaiveDate,
-    ) -> Self {
+    pub fn new(year_month: impl Into<String>, start_date: NaiveDate, end_date: NaiveDate) -> Self {
         Self {
             year_month: year_month.into(),
             start_date,

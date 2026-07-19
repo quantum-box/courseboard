@@ -6,10 +6,10 @@ mod admin_ui;
 pub mod auth;
 pub mod cancellation_fees;
 pub mod config;
+pub mod course;
 pub mod demo_seed;
 pub mod field_api;
 pub mod field_proxy;
-pub mod course;
 pub mod smart_assign;
 
 use auth::{AuthError, TokenVerifier};
