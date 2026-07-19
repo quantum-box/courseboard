@@ -11,6 +11,7 @@
 - candidate serving smokeは静的UIへredirectする`/`ではなく、API固有の`/healthz`と`"status":"ok"` markerで判定する。
 - Web hostからはproductionで`internalService.appName: courseboard-api`を解決し、previewのみ公開`txcloud.app` URLを使う。
 - APIのOIDC issuerは既存Cognito user pool、audience/client idは`courseboard-web`と同じ公開client IDとする。OAuth provider secretは参照・変更しない。
+- local Viteからproduction APIへ接続するfirst-party PKCE clientは公開識別子である。production Cognito issuerの署名検証を通過した場合に限り、manifest環境変数に加えてコード側のallowlistでも受け付ける。これによりCloud App registryとLambda versionの環境同期がずれた場合も認証経路を維持する。
 - Field APIはproductionで`tachyon-field-api` internal service、previewで公開URLを使う。
 
 ## 代替案
@@ -22,6 +23,8 @@
 ## データとセキュリティ
 
 保護APIは既存OIDC JWT検証を継続し、Cloud App login gatewayは有効化しない。OAuth client secretやprovider credentialはmanifestに直接記述しない。`/tmp` SQLiteはLambda instance内の一時領域であり、永続性が必要な税・キャンセル料データの保存先にはしない。
+
+コード側allowlistはissuer、署名、有効期限の検証を緩和しない。既知の公開client IDだけを追加し、別issuerのtokenや任意client IDは従来どおり拒否する。認証失敗時はtokenを記録せず、失敗分類だけをruntime logへ出力する。
 
 ## Rollout
 

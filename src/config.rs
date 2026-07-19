@@ -12,6 +12,9 @@ const DEFAULT_BIND_ADDR: &str = "0.0.0.0:8080";
 const DEFAULT_DATABASE_URL: &str = "sqlite://courseboard.db";
 const DEFAULT_PUBLIC_UI_BASE_URL: &str = "http://localhost:5173";
 const DEFAULT_SMS_SENDER_NAME: &str = "Course Board";
+const PRODUCTION_COGNITO_ISSUER_URL: &str =
+    "https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4";
+const LOCAL_PRODUCTION_PKCE_CLIENT_ID: &str = "5oafg9ptonbjumdh1pc7khirp1";
 /// Explicit opt-out marker for unit/integration tests.
 /// Set `TACHYON_FIELD_API_URL=empty://local` to skip remote Field calls.
 /// Normal local/`cargo run` / mise API starts never select this automatically.
@@ -92,10 +95,15 @@ impl RuntimeConfig {
         let expected_audience =
             non_empty(self.expected_audience.as_deref()).ok_or(AuthConfigError::MissingAudience)?;
 
+        let mut expected_client_ids = parse_csv_set(self.expected_client_id.as_deref());
+        if issuer_url.trim_end_matches('/') == PRODUCTION_COGNITO_ISSUER_URL {
+            expected_client_ids.insert(LOCAL_PRODUCTION_PKCE_CLIENT_ID.to_string());
+        }
+
         Ok(AuthConfig {
             issuer_url,
             expected_audience,
-            expected_client_ids: parse_csv_set(self.expected_client_id.as_deref()),
+            expected_client_ids,
         })
     }
 
@@ -288,6 +296,36 @@ mod tests {
         assert_eq!(auth.expected_audience, "courseboard");
         assert!(auth.expected_client_ids.contains("field-core"));
         assert!(auth.expected_client_ids.contains("field-admin"));
+    }
+
+    #[test]
+    fn auth_config_keeps_known_local_prod_client_when_provider_env_drifts() {
+        let config = RuntimeConfig {
+            oidc_issuer_url: Some(PRODUCTION_COGNITO_ISSUER_URL.to_string()),
+            expected_audience: Some("courseboard-web".to_string()),
+            expected_client_id: Some("courseboard-web".to_string()),
+            ..RuntimeConfig::default()
+        };
+
+        let auth = config.auth_config().expect("auth config");
+        assert!(auth
+            .expected_client_ids
+            .contains(LOCAL_PRODUCTION_PKCE_CLIENT_ID));
+    }
+
+    #[test]
+    fn auth_config_does_not_add_prod_client_for_other_issuers() {
+        let config = RuntimeConfig {
+            oidc_issuer_url: Some("https://issuer.example".to_string()),
+            expected_audience: Some("courseboard-web".to_string()),
+            expected_client_id: Some("courseboard-web".to_string()),
+            ..RuntimeConfig::default()
+        };
+
+        let auth = config.auth_config().expect("auth config");
+        assert!(!auth
+            .expected_client_ids
+            .contains(LOCAL_PRODUCTION_PKCE_CLIENT_ID));
     }
 
     #[test]

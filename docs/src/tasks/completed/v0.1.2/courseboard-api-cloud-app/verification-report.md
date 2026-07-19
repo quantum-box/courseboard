@@ -13,7 +13,7 @@
 - `tachyon compute apps apply ... --environment production --dry-run`: 成功。
 - `mise exec -- cargo fmt --all -- --check`: 成功。
 - `mise exec -- cargo check --locked --bin lambda-courseboard`: 成功。
-- `mise exec -- cargo test --locked`: 59 passed、0 failed。
+- `mise exec -- cargo test --locked`: 66 passed、0 failed。
 - Web host Vitest: 18 files / 112 tests passed。
 - `corepack pnpm --dir desktop/web-host run build`: 成功。
 - production相当envでローカルcold startし、`GET http://127.0.0.1:18081/healthz`: `200` / `{"status":"ok"}`。
@@ -52,6 +52,16 @@
 - `https://courseboard-api.txcloud.app/healthz`のproduction live HTTP 200。
 - `courseboard` Cloud Appの`COURSEBOARD_API_URL`反映と再Deployment。
 - 認証済みWeb host BFF経由の`/v1/course/*`応答。
+- local production PKCE clientでのproduction `courseboard-api`認証済み`200`。
+
+## 2026-07-19 production認証調査
+
+- Cognito Hosted UI loginとtoken refreshは成功した。
+- tokenのissuer、client ID、署名key ID、Bearer headerは期待値と一致した。
+- active Deployment `dep_01kxxb477qqw937na0wj0h9svm`でも`/v1/course/*`は`401 authorization failed`だった。
+- 同じtokenとOIDC設定をローカルの同一Rust検証器へ渡すと`200`となり、本番Fieldのコース2件を取得できた。
+- production manifest dry-runはOIDC環境変数の再適用を差分として報告した。変更承認を迂回せず、既知のfirst-party clientをproduction issuer限定でコード側allowlistにも保持する。
+- 修正後コードを`EXPECTED_CLIENT_ID=courseboard-web`だけのprovider drift相当設定で起動し、local production PKCE tokenから本番Fieldを参照した。`courses`、`tee-sheet`、`caddie-profiles`、`caddie-assignments`はすべて`200`で、IN／OUTコースとキャディ3名が画面に表示された。
 
 ## スキップした確認
 
