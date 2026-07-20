@@ -191,7 +191,10 @@ jobs:
         run: npm run tauri:android:init
 
       - name: Build Android debug bundle
-        run: NDK_HOME="${ANDROID_HOME}/ndk/27.0.12077973" npm run tauri:android:build -- --debug
+        # The debug CI smoke only needs an installable artifact. Building the
+        # universal AAB as well can fail in bundletool's signing finalizer after
+        # every Rust ABI has compiled successfully, so keep this path APK-only.
+        run: NDK_HOME="${ANDROID_HOME}/ndk/27.0.12077973" npm run tauri:android:build -- --debug --apk
         env:
           VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
           VITE_COURSEBOARD_AUTH_MODE: browser-pkce
