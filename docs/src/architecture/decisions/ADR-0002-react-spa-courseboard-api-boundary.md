@@ -35,6 +35,6 @@ Web成果物は既存`courseboard` Cloud AppのCloudflare Worker Static Assets�
 
 ## References
 
-- [移行taskdoc](../../tasks/in-progress/migrate-nextjs-to-react/task.md)
-- [設計](../../tasks/in-progress/migrate-nextjs-to-react/design.md)
+- [移行taskdoc](../../tasks/completed/v0.1.5/migrate-nextjs-to-react/task.md)
+- [設計](../../tasks/completed/v0.1.5/migrate-nextjs-to-react/design.md)
 - [ADR-0001: production Cognito client allowlist](ADR-0001-production-cognito-client-allowlist.md)

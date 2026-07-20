@@ -9,7 +9,9 @@
 # Tasks
 
 - [In Progress]()
-  - [Next.jsからReact/Viteへの移行](src/tasks/in-progress/migrate-nextjs-to-react/task.md)
 
 - [Completed]()
-  - [v0.1.2 courseboard-api Cloud App deployment](src/tasks/completed/v0.1.2/courseboard-api-cloud-app/task.md)
+  - [v0.1.2]()
+    - [courseboard-api Cloud App deployment](src/tasks/completed/v0.1.2/courseboard-api-cloud-app/task.md)
+  - [v0.1.5]()
+    - [Next.jsからReact/Viteへの移行](src/tasks/completed/v0.1.5/migrate-nextjs-to-react/task.md)

@@ -26,6 +26,7 @@
 | API manifest dry-run | `tachyon compute apps apply -f tachyon.yaml --app courseboard-api --environment preview --dry-run` | 成功 |
 | Diff whitespace | `git diff --check` | 成功 |
 | Browser QA | headed `agent-browser` CLI（Chromium/CDP） | 実ユーザーのReact内ログイン、施設選択、token claims、実API request、`/download`を確認 |
+| Worker dry-run | `npx --yes wrangler@4.100.0 deploy --dry-run` | 21 static assets、SPA設定を検証して成功 |
 
 Tachyon CLIの現在の接続先ではapp一覧が空だったため、両dry-runは既存app更新ではなく`CREATED <new app>`として評価された。manifestの解決確認のみで、applyやdeployは実施していない。
 
@@ -36,5 +37,6 @@ Tachyon CLIの現在の接続先ではapp一覧が空だったため、両dry-ru
 - 運用タイムラインは`courseboard-api`へ4本の実リクエストを送信したが、現在の本番APIは新issuer/client verifier設定が未反映のため`401 authorization failed`を返した。manifestとRust側の変更はこのissuer/clientへ更新済みであり、本番apply/deploy後に再確認が必要。
 - `/download`はmacOS/Windows配布リンクとrelease metadataリンクを表示し、`/oauth/callback`への直接アクセスもReactへ到達した。未認証画面とダウンロード画面はスクリーンショットでもレイアウトを確認した。
 - preview applyで既存Worker appをPagesへ変換するとPages projectが存在せずbuild preflightで404になったため、既存app identityを保つWorker Static Assetsへ修正した。
-- Worker Static Assets上のSPA fallbackと、本番`courseboard-api`の新verifierによる200応答はdeploy後に確認する。
-- 本番apply、build trigger、deployは実施していない。
+- `courseboard` preview manifest applyとbuild `bld_01ky00ns1zpyv5mt7p529wnh7c`が成功し、`https://feature-nextjs-to-react--courseboard.txcloud.app`でReactログイン画面をheaded確認した。`/oauth/callback`も200で同一SPA HTMLを返した。
+- `courseboard-api` preview build `bld_01ky00c8waa6bpfx24wt2968zm`と再build `bld_01ky00sz7eyjf8sb3bh6jmnnx7`は成功したが、同branch aliasのdeployment finalizationがlease競合した。PR番号付きpreview aliasで再実行する。
+- production dry-runは既存`courseboard`/`courseboard-api` appの更新として成功した。実applyは`TACHYON_CHANGE_CONTROL_APPROVAL_TOKEN`が未設定のためplatform gateで拒否され、production stateは変更していない。

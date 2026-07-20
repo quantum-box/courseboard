@@ -30,8 +30,8 @@ Course BoardのTauri UI自体はReact/Viteで実装済みだが、本番Web配�
 
 - Linear issue: なし
 - [設計](design.md)
-- [ADR-0001: production Cognito client allowlist](../../../architecture/decisions/ADR-0001-production-cognito-client-allowlist.md)
-- [ADR-0002: React SPAとcourseboard-apiを独立配信する](../../../architecture/decisions/ADR-0002-react-spa-courseboard-api-boundary.md)
+- [ADR-0001: production Cognito client allowlist](../../../../architecture/decisions/ADR-0001-production-cognito-client-allowlist.md)
+- [ADR-0002: React SPAとcourseboard-apiを独立配信する](../../../../architecture/decisions/ADR-0002-react-spa-courseboard-api-boundary.md)
 
 ## 実装フェーズ
 
@@ -40,7 +40,7 @@ Course BoardのTauri UI自体はReact/Viteで実装済みだが、本番Web配�
 3. [x] `courseboard-api`のCORSを更新する。
 4. [x] Cloud App manifestとドキュメントを更新する。
 5. [x] Frontend/Rustのformat、lint、型、test、buildを実行する。
-6. [ ] Cloud Appsを反映し、preview/live smokeを記録する。
+6. [x] Cloud Apps previewを反映し、build/live smokeとproduction gateを記録する。
 
 ## 検証計画
 
@@ -61,7 +61,7 @@ Course BoardのTauri UI自体はReact/Viteで実装済みだが、本番Web配�
 
 ## リスクとフォローアップ
 
-- Worker Static AssetsのSPA fallbackはpreview deploy後の確認が必要。
+- Worker Static AssetsのSPA fallbackはpreview deploymentで確認済み。
 - 既存OAuth public clientを再利用し、本変更ではprovider設定を操作しない。
-- 本番`courseboard-api`は旧token verifier設定のため、manifestをapply/deployするまで新issuerのtokenを`401`にする。
-- 本番適用とbuild triggerは明示的な依頼を受けて実施する。
+- production applyはchange-control approval tokenが必要。token取得後に同じmanifestを反映する。
+- branch名ベースのAPI preview deploymentはLambda alias lease競合が発生したため、PR番号ベースで再実行する。
