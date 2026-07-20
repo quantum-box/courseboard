@@ -15,6 +15,14 @@ const DEFAULT_SMS_SENDER_NAME: &str = "Course Board";
 const PRODUCTION_COGNITO_ISSUER_URL: &str =
     "https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4";
 const LOCAL_PRODUCTION_PKCE_CLIENT_ID: &str = "5oafg9ptonbjumdh1pc7khirp1";
+/// Production `courseboard-web` browser client. Real web sessions log in with
+/// this client, and the Auth.js BFF forwards its Cognito access token to
+/// `/v1/course/*`. Cognito access tokens omit `aud`, so the token only carries
+/// `client_id`; this id must be an accepted client or the audience check
+/// rejects every browser request with `401 authorization failed`. Kept in the
+/// production-issuer code allowlist alongside the PKCE client so the primary
+/// production auth path survives `EXPECTED_CLIENT_ID` env drift.
+const PRODUCTION_WEB_CLIENT_ID: &str = "7su0cbc8mr3dhji93gknu7pm19";
 /// Explicit opt-out marker for unit/integration tests.
 /// Set `TACHYON_FIELD_API_URL=empty://local` to skip remote Field calls.
 /// Normal local/`cargo run` / mise API starts never select this automatically.
@@ -98,6 +106,7 @@ impl RuntimeConfig {
         let mut expected_client_ids = parse_csv_set(self.expected_client_id.as_deref());
         if issuer_url.trim_end_matches('/') == PRODUCTION_COGNITO_ISSUER_URL {
             expected_client_ids.insert(LOCAL_PRODUCTION_PKCE_CLIENT_ID.to_string());
+            expected_client_ids.insert(PRODUCTION_WEB_CLIENT_ID.to_string());
         }
 
         Ok(AuthConfig {
@@ -311,6 +320,10 @@ mod tests {
         assert!(auth
             .expected_client_ids
             .contains(LOCAL_PRODUCTION_PKCE_CLIENT_ID));
+        // The production browser client (courseboard-web) is the primary
+        // production auth path: real web sessions forward its Cognito access
+        // token, so it must stay accepted even if EXPECTED_CLIENT_ID drifts.
+        assert!(auth.expected_client_ids.contains(PRODUCTION_WEB_CLIENT_ID));
     }
 
     #[test]
@@ -326,6 +339,7 @@ mod tests {
         assert!(!auth
             .expected_client_ids
             .contains(LOCAL_PRODUCTION_PKCE_CLIENT_ID));
+        assert!(!auth.expected_client_ids.contains(PRODUCTION_WEB_CLIENT_ID));
     }
 
     #[test]
