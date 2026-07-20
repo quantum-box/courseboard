@@ -511,6 +511,7 @@ fn courseboard_cors_layer() -> CorsLayer {
             HeaderValue::from_static("https://tauri.localhost"),
             HeaderValue::from_static("http://localhost:5173"),
             HeaderValue::from_static("http://127.0.0.1:5173"),
+            HeaderValue::from_static("https://courseboard.txcloud.app"),
         ]))
         .allow_methods([
             Method::GET,
@@ -532,6 +533,7 @@ fn courseboard_cors_layer() -> CorsLayer {
             CONTENT_DISPOSITION,
             CONTENT_TYPE,
             HeaderName::from_static("x-courseboard-auth-error"),
+            HeaderName::from_static("x-courseboard-auth-denial"),
         ])
 }
 
@@ -978,6 +980,35 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
     use std::collections::HashSet;
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn cors_allows_the_production_react_app() {
+        let app = Router::new()
+            .route("/health", get(|| async { StatusCode::OK }))
+            .layer(courseboard_cors_layer());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/health")
+                    .header("origin", "https://courseboard.txcloud.app")
+                    .header("access-control-request-method", "GET")
+                    .header(
+                        "access-control-request-headers",
+                        "authorization,x-operator-id,x-platform-id",
+                    )
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("access-control-allow-origin"),
+            Some(&HeaderValue::from_static("https://courseboard.txcloud.app"))
+        );
+    }
 
     async fn test_app(auth: &TestAuth) -> Router {
         test_app_with_verifier(auth.verifier()).await

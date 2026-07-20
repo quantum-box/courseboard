@@ -11,10 +11,10 @@ interface ImportMetaEnv {
   readonly VITE_COURSEBOARD_OPERATOR_ID?: string
   readonly VITE_COURSEBOARD_MODE?: string
   readonly VITE_COURSEBOARD_API_BASE_URL?: string
+  readonly VITE_COURSEBOARD_DESKTOP_RELEASE_BASE_URL?: string
   readonly VITE_COURSEBOARD_PUBLIC_API_BASE_URL?: string
   readonly VITE_COURSEBOARD_OPERATOR_WEB_URL?: string
   readonly VITE_DEV_API_PROXY_TARGET?: string
-  readonly VITE_AUTH_PROXY_TARGET?: string
   readonly VITE_COURSEBOARD_BROWSER_CLIENT_ID?: string
   readonly VITE_COURSEBOARD_BROWSER_CLIENT_SECRET?: string
   readonly VITE_COURSEBOARD_BROWSER_REDIRECT_URI?: string

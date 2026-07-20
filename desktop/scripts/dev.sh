@@ -8,7 +8,7 @@
 #   pkce      Preferred: browser-pkce OIDC + prod Field (.env.browser-pkce)
 #   field     CLI JWT shortcut (.env.prod-field)
 #   prod-api  Vite only → production courseboard-api (.env.prod-api.local)
-#             Overlay may be cognito-pkce (Hosted UI) or development (CLI JWT)
+#             Overlay may be browser-pkce (React login) or development (CLI JWT)
 #
 # mise aliases keep the old task names (courseboard:api, courseboard:field-vite, …).
 # Run in a dedicated interactive terminal — not an agent shell.
@@ -192,29 +192,29 @@ start_vite_field() {
 
 start_vite_prod_api() {
   local overlay="$ROOT/desktop/.env.prod-api.local"
-  local proxy_target
+  local api_target
   local auth_mode
   if [[ ! -f "$overlay" ]]; then
     echo "Missing $overlay — run: mise run courseboard:prod-api-pkce-env" >&2
-    echo "  (real user Cognito Hosted UI) or: mise run courseboard:prod-api-env (Local operator CLI JWT)" >&2
+    echo "  (real user React login) or: mise run courseboard:prod-api-env (Local operator CLI JWT)" >&2
     exit 1
   fi
-  proxy_target="$(rg -n '^VITE_DEV_API_PROXY_TARGET=' "$overlay" | head -1 | cut -d= -f2- || true)"
-  if [[ -z "$proxy_target" ]]; then
-    echo "WARNING: $overlay has no VITE_DEV_API_PROXY_TARGET — defaulting to $DEFAULT_COURSE_API_URL" >&2
+  api_target="$(rg -n '^VITE_COURSEBOARD_API_BASE_URL=' "$overlay" | head -1 | cut -d= -f2- || true)"
+  if [[ -z "$api_target" ]]; then
+    echo "WARNING: $overlay has no VITE_COURSEBOARD_API_BASE_URL" >&2
     echo "  Re-run: mise run courseboard:prod-api-pkce-env" >&2
-    proxy_target="$DEFAULT_COURSE_API_URL"
+    exit 1
   fi
   auth_mode="$(rg -n '^VITE_COURSEBOARD_AUTH_MODE=' "$overlay" | head -1 | cut -d= -f2- || true)"
   cd "$ROOT/desktop"
   unset VITE_AUTH_PROXY_TARGET || true
-  export VITE_DEV_API_PROXY_TARGET="$proxy_target"
+  unset VITE_DEV_API_PROXY_TARGET || true
   # Let overlay supply AUTH_MODE + tokens; do not leave process env blocking them.
   unset VITE_COURSEBOARD_AUTH_MODE || true
   unset VITE_COURSEBOARD_API_BEARER || true
-  export VITE_COURSEBOARD_API_BASE_URL=
-  if [[ "$auth_mode" == "cognito-pkce" ]]; then
-    # Overlay must win for browser Cognito client keys — do not blank them.
+  unset VITE_COURSEBOARD_API_BASE_URL || true
+  if [[ "$auth_mode" == "browser-pkce" ]]; then
+    # Overlay must win for JSON PKCE client keys — do not blank them.
     unset VITE_COURSEBOARD_BROWSER_CLIENT_ID || true
     unset VITE_COURSEBOARD_BROWSER_REDIRECT_URI || true
     unset VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT || true
@@ -234,10 +234,10 @@ start_vite_prod_api() {
   fi
   warn_if_vite_port_busy
   echo "Starting Vite on http://127.0.0.1:5173/ (--mode prod-api)"
-  echo "  proxy: /v1/course + /field-api → ${VITE_DEV_API_PROXY_TARGET}"
+  echo "  API: ${api_target} (direct CORS request)"
   echo "  overlay: $overlay (does not change desktop/.env.local)"
-  if [[ "$auth_mode" == "cognito-pkce" ]]; then
-    echo "  auth: cognito-pkce (Cognito Hosted UI; real user — not Local operator)"
+  if [[ "$auth_mode" == "browser-pkce" ]]; then
+    echo "  auth: browser-pkce (React password login; real user)"
   else
     echo "  auth: development + CLI Cognito JWT (Local operator)"
   fi

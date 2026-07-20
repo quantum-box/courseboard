@@ -11,7 +11,7 @@ import {
   Send,
 } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState, type FormEvent } from 'react'
-import { courseboardApiBlob, downloadBlob, fieldApiJson, yen } from '../../api'
+import { downloadBlob, fieldApiJson, yen } from '../../api'
 import {
   DataTable,
   EmptyState,
@@ -448,7 +448,9 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
 
   async function downloadPdf(invoice: InvoiceData) {
     try {
-      const blob = await courseboardApiBlob(`/api/courseboard/invoices/${encodeURIComponent(invoice.id)}/pdf`)
+      const { buildInvoicePdf } = await import('../../lib/invoice-pdf')
+      const bytes = await buildInvoicePdf(invoice)
+      const blob = new Blob([bytes], { type: 'application/pdf' })
       await downloadBlob(`invoice-${invoice.invoiceNumber}.pdf`, blob)
       setNotice({ tone: 'success', message: '請求書PDFを準備しました。' })
     } catch (reason) {

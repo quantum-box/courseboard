@@ -73,15 +73,9 @@ export function operatorApiBaseUrl() {
   const configured = trimTrailingSlash(import.meta.env.VITE_COURSEBOARD_API_BASE_URL ?? '')
   if (!configured) return ''
 
-  // A browser build must keep bearer-token requests on the authenticated
-  // origin. Native builds may use the explicitly configured HTTPS BFF.
   const target = new URL(configured, window.location.origin)
-  const isNative = '__TAURI_INTERNALS__' in window
-  if (!isNative && target.origin !== window.location.origin) {
-    throw new ApiError('Web版のAPIは同一originである必要があります', 500)
-  }
-  if (isNative && target.protocol !== 'https:' && !import.meta.env.DEV) {
-    throw new ApiError('Native版のAPIにはHTTPS URLが必要です', 500)
+  if (target.protocol !== 'https:' && !import.meta.env.DEV) {
+    throw new ApiError('本番APIにはHTTPS URLが必要です', 500)
   }
   return configured
 }
@@ -281,12 +275,6 @@ export async function courseboardApiText(path: string, init?: RequestInit) {
   const response = await protectedFetch(normalized, init)
   if (!response.ok) throw await parseError(response)
   return response.text()
-}
-
-export async function courseboardApiBlob(path: string, init?: RequestInit) {
-  const response = await protectedFetch(path, init)
-  if (!response.ok) throw await parseError(response)
-  return response.blob()
 }
 
 function unwrapMockResult<T>(result: MockFieldResult<T>): T | undefined {

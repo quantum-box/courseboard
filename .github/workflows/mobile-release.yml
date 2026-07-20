@@ -151,14 +151,14 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          VITE_COURSEBOARD_API_BASE_URL: https://courseboard.txcloud.app
-          VITE_COURSEBOARD_NATIVE_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
-          VITE_COURSEBOARD_NATIVE_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
-          VITE_COURSEBOARD_NATIVE_PROFILE_ENDPOINT: https://courseboard.txcloud.app/api/auth/native-profile
-          VITE_COURSEBOARD_NATIVE_CLIENT_ID: ${{ vars.COURSEBOARD_NATIVE_CLIENT_ID }}
-          VITE_COURSEBOARD_NATIVE_REDIRECT_URI: courseboard://oauth/callback
-          VITE_COURSEBOARD_NATIVE_SCOPES: openid profile email
-          VITE_COURSEBOARD_NATIVE_DEEP_LINK_READY: "true"
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
+          VITE_COURSEBOARD_AUTH_MODE: browser-pkce
+          VITE_COURSEBOARD_BROWSER_CLIENT_ID: 5oafg9ptonbjumdh1pc7khirp1
+          VITE_COURSEBOARD_BROWSER_REDIRECT_URI: https://courseboard.txcloud.app/oauth/callback
+          VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
+          VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
+          VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://api.n1.tachy.one/v1/me
         run: |
           NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" npm run tauri:android:build -- \
             --aab --ci --config '{"version":"${{ needs.validate.outputs.version }}","bundle":{"android":{"versionCode":${{ needs.validate.outputs.build_number }}}}}'
@@ -261,14 +261,14 @@ jobs:
       - name: Build signed App Store IPA
         env:
           APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
-          VITE_COURSEBOARD_API_BASE_URL: https://courseboard.txcloud.app
-          VITE_COURSEBOARD_NATIVE_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
-          VITE_COURSEBOARD_NATIVE_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
-          VITE_COURSEBOARD_NATIVE_PROFILE_ENDPOINT: https://courseboard.txcloud.app/api/auth/native-profile
-          VITE_COURSEBOARD_NATIVE_CLIENT_ID: ${{ vars.COURSEBOARD_NATIVE_CLIENT_ID }}
-          VITE_COURSEBOARD_NATIVE_REDIRECT_URI: courseboard://oauth/callback
-          VITE_COURSEBOARD_NATIVE_SCOPES: openid profile email
-          VITE_COURSEBOARD_NATIVE_DEEP_LINK_READY: "true"
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
+          VITE_COURSEBOARD_AUTH_MODE: browser-pkce
+          VITE_COURSEBOARD_BROWSER_CLIENT_ID: 5oafg9ptonbjumdh1pc7khirp1
+          VITE_COURSEBOARD_BROWSER_REDIRECT_URI: https://courseboard.txcloud.app/oauth/callback
+          VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
+          VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
+          VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://api.n1.tachy.one/v1/me
         run: npm run tauri:ios:build -- --ci --export-method app-store-connect --build-number "${{ needs.validate.outputs.build_number }}" --config '{"version":"${{ needs.validate.outputs.version }}"}'
 
       - name: Upload signed IPA artifact

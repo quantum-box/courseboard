@@ -21,12 +21,17 @@ import { TimelinePage } from './features/golf/timeline/TimelinePage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { useCartUpdates } from './hooks/useCartUpdates'
 import { navigate, useRoute } from './lib/router'
+import { DownloadPage } from './DownloadPage'
 import { PaymentPage } from './PaymentPage'
 
 const WS_URL = 'ws://127.0.0.1:9001/ws'
 
 export default function App() {
   const route = useRoute()
+
+  if (window.location.pathname.replace(/\/+$/, '') === '/download') {
+    return <DownloadPage />
+  }
 
   if (route.startsWith('pay/')) {
     return <PaymentPage token={route.slice('pay/'.length)} />

@@ -51,7 +51,7 @@ describe('shouldSoftSignOutOn401', () => {
 describe('protected API 401 handling', () => {
   beforeEach(() => {
     vi.stubEnv('VITE_COURSEBOARD_API_BASE_URL', '')
-    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'cognito-pkce')
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'browser-pkce')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'false')
     vi.stubGlobal('window', {
       location: {

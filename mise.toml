@@ -63,10 +63,10 @@ dir = "desktop"
 run = "npm run prod-api:env"
 
 [tasks."courseboard:prod-api-pkce-env"]
-description = "Write desktop/.env.prod-api.local with Cognito Hosted UI PKCE (real user; not Local operator). Leaves .env.local untouched"
+description = "Write desktop/.env.prod-api.local with React password login + JSON PKCE (real user). Leaves .env.local untouched"
 dir = "desktop"
 run = "npm run prod-api:pkce-env"
 
 [tasks."courseboard:vite-prod-api"]
-description = "Start Vite :5173 --mode prod-api proxying /v1/course + /field-api to production courseboard-api (no local :8080). Restart yourself if :5173 is busy"
+description = "Start Vite :5173 --mode prod-api using production courseboard-api directly (no local :8080). Restart yourself if :5173 is busy"
 run = "desktop/scripts/dev.sh prod-api vite"
