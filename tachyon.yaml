@@ -31,7 +31,11 @@ spec:
         # Keep pnpm's SQLite store index Pod-local. The runner cache PVC is shared
         # by concurrent builds for this app and a malformed index blocks all reruns.
         installCommand: corepack enable && pnpm_config_store_dir=/tmp/tachyon-pnpm-store corepack pnpm install --frozen-lockfile && cd .. && npm ci --no-audit --no-fund
-        command: cd .. && VITE_BASE_PATH=/courseboard-ui/ npm run build && rm -rf web-host/public/courseboard-ui && mkdir -p web-host/public/courseboard-ui && cp -R dist/. web-host/public/courseboard-ui/ && cd web-host && corepack pnpm run build
+        # React SPAはクライアントサイドCognito Hosted UI PKCEで認証する
+        # （Auth.jsサーバーセッション非依存。client IDは公開識別子）。
+        # redirect URIは実行時にlocation originから導出され、SPAは同一originの
+        # /v1/course BFFへbearerを送る。
+        command: cd .. && VITE_BASE_PATH=/courseboard-ui/ VITE_COURSEBOARD_AUTH_MODE=cognito-pkce VITE_COURSEBOARD_BROWSER_CLIENT_ID=5oafg9ptonbjumdh1pc7khirp1 npm run build && rm -rf web-host/public/courseboard-ui && mkdir -p web-host/public/courseboard-ui && cp -R dist/. web-host/public/courseboard-ui/ && cd web-host && corepack pnpm run build
         outputDirectory: desktop/web-host/dist/server/index.js
         nodeVersion: "24"
       envVars:

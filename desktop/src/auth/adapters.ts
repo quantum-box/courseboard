@@ -965,6 +965,20 @@ type CognitoPkceConfiguration = {
 }
 
 /**
+ * Web配信（https origin）ではそのoriginの/oauth/callbackを既定にする。
+ * OAuth clientのredirectUris登録が別途必要（.tachyon/manifests参照）。
+ */
+function cognitoPkceDefaultRedirectUri(): string {
+  if (
+    typeof window !== 'undefined'
+    && window.location?.protocol === 'https:'
+  ) {
+    return `${window.location.origin}/oauth/callback`
+  }
+  return 'http://127.0.0.1:5173/oauth/callback'
+}
+
+/**
  * Cognito Hosted UI + PKCE for local Vite → production courseboard-api.
  * Uses redirect (not Tachyon JSON /oauth2/login) so tokens have Cognito `iss`.
  */
@@ -985,17 +999,18 @@ function cognitoPkceConfiguration(): CognitoPkceConfiguration {
   }
 
   const redirectUri = import.meta.env.VITE_COURSEBOARD_BROWSER_REDIRECT_URI
-    ?? 'http://127.0.0.1:5173/oauth/callback'
+    ?? cognitoPkceDefaultRedirectUri()
   const redirect = new URL(redirectUri)
+  const isLocalViteRedirect = redirect.protocol === 'http:'
+    && redirect.hostname === '127.0.0.1'
+    && redirect.port === '5173'
   if (
-    redirect.protocol !== 'http:'
-    || redirect.hostname !== '127.0.0.1'
-    || redirect.port !== '5173'
-    || redirect.pathname !== '/oauth/callback'
+    redirect.pathname !== '/oauth/callback'
+    || !(isLocalViteRedirect || redirect.protocol === 'https:')
   ) {
     throw new AuthConfigurationError(
       'Cognitoブラウザ認証のredirect URIが不正です',
-      'ローカルViteではhttp://127.0.0.1:5173/oauth/callbackを使用してください。',
+      'https origin または http://127.0.0.1:5173 の /oauth/callback を使用してください。',
     )
   }
 

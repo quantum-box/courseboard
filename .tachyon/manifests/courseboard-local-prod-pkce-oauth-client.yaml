@@ -11,6 +11,9 @@ spec:
   clientType: public
   redirectUris:
     - http://127.0.0.1:5173/oauth/callback
+    # 本番web（courseboard.txcloud.app）のクライアントサイドCognito PKCE。
+    # SPAはlocation originから/oauth/callbackを導出する（adapters.ts）。
+    - https://courseboard.txcloud.app/oauth/callback
   allowedScopes:
     - openid
     - profile
