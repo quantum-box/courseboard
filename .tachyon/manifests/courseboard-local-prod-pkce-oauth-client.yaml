@@ -4,10 +4,9 @@ metadata:
   name: courseboard-local-prod-pkce
   tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
 spec:
-  # Public PKCE client for local Vite → production courseboard-api via Cognito
-  # Hosted UI (auth-pool.n1.tachy.one). Not the Tachyon JSON /oauth2/login path.
-  # After apply, append the issued client id to courseboard-api EXPECTED_CLIENT_ID
-  # and redeploy (see desktop README "Local Vite → production courseboard-api").
+  # Public client for the platform-ui style React password login + JSON PKCE.
+  # courseboard-api validates the resulting api.n1.tachy.one issuer and this
+  # client id as its expected audience.
   clientType: public
   redirectUris:
     - http://127.0.0.1:5173/oauth/callback

@@ -103,8 +103,14 @@ jobs:
       - name: Build desktop installer
         run: npm run tauri:build -- --config '{"version":"${{ needs.version.outputs.value }}"}'
         env:
-          VITE_COURSEBOARD_API_BASE_URL: https://courseboard.txcloud.app
-          VITE_COURSEBOARD_NATIVE_DEEP_LINK_READY: "false"
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
+          VITE_COURSEBOARD_AUTH_MODE: browser-pkce
+          VITE_COURSEBOARD_BROWSER_CLIENT_ID: 5oafg9ptonbjumdh1pc7khirp1
+          VITE_COURSEBOARD_BROWSER_REDIRECT_URI: https://courseboard.txcloud.app/oauth/callback
+          VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
+          VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
+          VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://api.n1.tachy.one/v1/me
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}

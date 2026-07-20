@@ -5,143 +5,58 @@ metadata:
   tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
 spec:
   apps:
-    # --- React/Tauri frontend web host — Cloudflare Workers.
-    # Golf ERP data stays in the existing tachyon-field-api CloudApp; this
-    # manifest only provisions the courseboard admin UI.
-    # Cognito/Auth.js and the Field API BFF live in desktop/web-host. The shared
-    # desktop React build is copied into that same-origin host at build time.
+    # --- Shared React/Tauri frontend — static Cloudflare Pages SPA.
+    # React owns the platform-ui style password login + JSON PKCE flow and sends
+    # the resulting bearer directly to courseboard-api. No Hosted UI or BFF is deployed.
     - name: courseboard
       repository:
         url: https://github.com/quantum-box/courseboard
         owner: quantum-box
         name: courseboard
         defaultBranch: main
-      rootDirectory: desktop/web-host
-      framework: worker
-      deploymentTarget: cloudflare_workers
-      # Do not put the Cloud App login gateway in front of Auth.js. The web host
-      # owns /api/auth/* and uses the explicit courseboard-web OAuth2 client.
+      rootDirectory: desktop
+      framework: vite
+      deploymentTarget: cloudflare_pages
+      # The React app performs the Tachyon User Pool JSON PKCE flow itself.
       auth:
         enabled: false
       watchPaths:
-        - desktop/web-host/**
         - desktop/**
       build:
-        # pnpm builds the web host; npm builds the shared React/Tauri frontend.
-        # Keep pnpm's SQLite store index Pod-local. The runner cache PVC is shared
-        # by concurrent builds for this app and a malformed index blocks all reruns.
-        installCommand: corepack enable && pnpm_config_store_dir=/tmp/tachyon-pnpm-store corepack pnpm install --frozen-lockfile && cd .. && npm ci --no-audit --no-fund
-        # React SPAはクライアントサイドCognito Hosted UI PKCEで認証する
-        # （Auth.jsサーバーセッション非依存。client IDは公開識別子）。
-        # redirect URIは実行時にlocation originから導出され、SPAは同一originの
-        # /v1/course BFFへbearerを送る。
-        command: cd .. && VITE_BASE_PATH=/courseboard-ui/ VITE_COURSEBOARD_AUTH_MODE=cognito-pkce VITE_COURSEBOARD_BROWSER_CLIENT_ID=5oafg9ptonbjumdh1pc7khirp1 npm run build && rm -rf web-host/public/courseboard-ui && mkdir -p web-host/public/courseboard-ui && cp -R dist/. web-host/public/courseboard-ui/ && cd web-host && corepack pnpm run build
-        outputDirectory: desktop/web-host/dist/server/index.js
+        installCommand: npm ci --no-audit --no-fund
+        command: npm run build
+        outputDirectory: dist
         nodeVersion: "24"
       envVars:
-        - name: ROOT_DIRECTORY
-          value: desktop/web-host
-        - name: PACKAGE_NAME
-          value: courseboard-web-host
-        - name: OUTPUT_DIR
-          value: desktop/web-host/dist/server/index.js
-        - name: TACHYON_DEPLOYMENT_TARGET
-          value: cloudflare_workers
-        - name: COURSEBOARD_REACT_ROOT
-          value: "true"
-        - name: NEXT_PUBLIC_SITE_NAME
-          value: Course Board
-        - name: NEXT_PUBLIC_SITE_URL
-          value: https://courseboard.txcloud.app
-        - name: AUTH_URL
-          value: https://courseboard.txcloud.app
-        - name: NEXTAUTH_URL
-          value: https://courseboard.txcloud.app
-        - name: NEXT_PUBLIC_PLATFORM_ID
+        - name: VITE_BASE_PATH
+          value: /
+        - name: VITE_COURSEBOARD_AUTH_MODE
+          value: browser-pkce
+        # OAuth client IDs are public identifiers. Never add a client secret to
+        # this browser build.
+        - name: VITE_COURSEBOARD_BROWSER_CLIENT_ID
+          value: 5oafg9ptonbjumdh1pc7khirp1
+        - name: VITE_COURSEBOARD_BROWSER_REDIRECT_URI
+          value: https://courseboard.txcloud.app/oauth/callback
+        - name: VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT
+          value: https://api.n1.tachy.one/oauth2/login
+        - name: VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT
+          value: https://api.n1.tachy.one/oauth2/authorize
+        - name: VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT
+          value: https://api.n1.tachy.one/oauth2/token
+        - name: VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT
+          value: https://api.n1.tachy.one/v1/me
+        - name: VITE_COURSEBOARD_BROWSER_SCOPES
+          value: openid profile email
+        - name: VITE_COURSEBOARD_API_BASE_URL
+          value: https://courseboard-api.txcloud.app
+        - name: VITE_COURSEBOARD_PUBLIC_API_BASE_URL
+          value: https://courseboard-api.txcloud.app
+        - name: VITE_COURSEBOARD_PLATFORM_ID
           value: tn_01ks18jhh1xvggktfzjx5jqsen
-        - name: AUTH_BACKEND_API_URL
-          value: https://api.n1.tachy.one
-        - name: TACHYON_API_URL
-          value: https://api.n1.tachy.one
-        - name: NEXT_PUBLIC_TACHYON_API_URL
-          value: https://api.n1.tachy.one
-        - name: COGNITO_ISSUER
-          value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
-        - name: COGNITO_DOMAIN
-          value: https://auth-pool.n1.tachy.one
-        - name: COGNITO_REGION
-          value: ap-northeast-1
-        # COGNITO_CLIENT_ID / COGNITO_CLIENT_SECRET / AUTH_SECRET /
-        # NEXTAUTH_SECRET remain direct encrypted Cloud App env values. Keeping
-        # them outside manifest reconciliation avoids rotating active sessions.
-        # Golf ERP endpoints currently live in tachyonfield's Field API; point the frontend there.
-        - name: NEXT_PUBLIC_BACKEND_API_URL
-          value: https://tachyon-field-api.txcloud.app
-        # Worker subrequests to the public Field API host are blocked by
-        # Cloudflare (PLT-2373); production must call the Field API through
-        # the platform-internal service binding, like the pre-v2 manifest.
-        - name: TACHYON_FIELD_API_URL
-          valueFrom:
-            internalService:
-              appName: tachyon-field-api
-        - name: BACKEND_API_URL
-          valueFrom:
-            internalService:
-              appName: tachyon-field-api
-        - name: COURSEBOARD_API_URL
-          valueFrom:
-            internalService:
-              appName: courseboard-api
-      environments:
-        preview:
-          envVars:
-            - name: ROOT_DIRECTORY
-              value: desktop/web-host
-            - name: PACKAGE_NAME
-              value: courseboard-web-host
-            - name: OUTPUT_DIR
-              value: desktop/web-host/dist/server/index.js
-            - name: TACHYON_DEPLOYMENT_TARGET
-              value: cloudflare_workers
-            - name: NEXT_PUBLIC_SITE_NAME
-              value: Course Board
-            - name: NEXT_PUBLIC_PLATFORM_ID
-              value: tn_01ks18jhh1xvggktfzjx5jqsen
-            - name: AUTH_BACKEND_API_URL
-              value: https://api.n1.tachy.one
-            - name: TACHYON_API_URL
-              value: https://api.n1.tachy.one
-            - name: NEXT_PUBLIC_TACHYON_API_URL
-              value: https://api.n1.tachy.one
-            - name: COGNITO_ISSUER
-              value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
-            - name: COGNITO_DOMAIN
-              value: https://auth-pool.n1.tachy.one
-            - name: COGNITO_REGION
-              value: ap-northeast-1
-            - name: COGNITO_CLIENT_ID
-              type: credential
-              valueFrom:
-                oauth2ClientRef:
-                  name: courseboard-web
-                  field: clientId
-            - name: COGNITO_CLIENT_SECRET
-              type: credential
-              valueFrom:
-                oauth2ClientRef:
-                  name: courseboard-web
-                  field: clientSecret
-            - name: NEXT_PUBLIC_BACKEND_API_URL
-              value: https://tachyon-field-api.txcloud.app
-            - name: TACHYON_FIELD_API_URL
-              value: https://tachyon-field-api.txcloud.app
-            - name: BACKEND_API_URL
-              value: https://tachyon-field-api.txcloud.app
-            - name: COURSEBOARD_API_URL
-              value: https://courseboard-api.txcloud.app
 
     # --- Rust course-api — AWS Lambda.
-    # The web host forwards authenticated /v1/course/* requests to this app.
+    # React/Tauri send Cognito bearer tokens directly to this app.
     - name: courseboard-api
       repository:
         url: https://github.com/quantum-box/courseboard
@@ -164,15 +79,6 @@ spec:
         - migrations/**
         - src/**
       build:
-        # Runner sets CARGO_HOME/CARGO_TARGET_DIR to /workspace/cache/* which is
-        # intermittently non-writable for user `node`. Force writable /tmp homes
-        # via wrappers on /tmp/tachyon-build-bin (shared across install/build shells).
-        # The wrappers build into /tmp/cargo-target (the runner cache PVC is
-        # intermittently non-writable), but the runner packages the Lambda
-        # artifact from its own CARGO_TARGET_DIR / workspace target. Without the
-        # copy-back below, packaging silently reuses a stale bootstrap from the
-        # shared cache and "successful" deploys keep serving an old binary.
-        installCommand: "set -eux; mkdir -p /tmp/tachyon-build-bin /tmp/cargo-home /tmp/cargo-target; printf '%s\\n' '#!/bin/bash' 'set -uo pipefail' 'orig_target=\"${CARGO_TARGET_DIR:-}\"' 'export RUSTUP_HOME=/usr/local/rustup' 'export CARGO_HOME=/tmp/cargo-home' 'export CARGO_TARGET_DIR=/tmp/cargo-target' 'mkdir -p \"$CARGO_HOME\" \"$CARGO_TARGET_DIR\"' '/usr/local/cargo/bin/cargo \"$@\"' 'status=$?' 'if [ -d /tmp/cargo-target/lambda ]; then' '  for dest in \"$orig_target\" \"$PWD/target\"; do' '    [ -n \"$dest\" ] || continue' '    [ \"$dest\" = /tmp/cargo-target ] && continue' '    rm -rf \"$dest/lambda\" 2>/dev/null || true' '    mkdir -p \"$dest/lambda\" 2>/dev/null || true' '    if cp -Rf /tmp/cargo-target/lambda/. \"$dest/lambda/\" 2>/dev/null; then' '      echo \"copy-back ok: $dest/lambda\"' '    else' '      echo \"copy-back FAILED: $dest/lambda\"' '      id 2>&1 || true' '      ls -la \"$dest\" \"$dest/lambda\" \"$dest/lambda\"/* 2>&1 | head -30 || true' '    fi' '  done' 'fi' 'exit $status' > /tmp/tachyon-build-bin/cargo; printf '%s\\n' '#!/bin/bash' 'set -uo pipefail' 'orig_target=\"${CARGO_TARGET_DIR:-}\"' 'export RUSTUP_HOME=/usr/local/rustup' 'export CARGO_HOME=/tmp/cargo-home' 'export CARGO_TARGET_DIR=/tmp/cargo-target' 'export PATH=/tmp/tachyon-build-bin:/usr/local/cargo/bin:/usr/local/bin:$PATH' 'mkdir -p \"$CARGO_HOME\" \"$CARGO_TARGET_DIR\"' '/usr/local/bin/cargo-lambda \"$@\"' 'status=$?' 'if [ -d /tmp/cargo-target/lambda ]; then' '  for dest in \"$orig_target\" \"$PWD/target\"; do' '    [ -n \"$dest\" ] || continue' '    [ \"$dest\" = /tmp/cargo-target ] && continue' '    rm -rf \"$dest/lambda\" 2>/dev/null || true' '    mkdir -p \"$dest/lambda\" 2>/dev/null || true' '    if cp -Rf /tmp/cargo-target/lambda/. \"$dest/lambda/\" 2>/dev/null; then' '      echo \"copy-back ok: $dest/lambda\"' '    else' '      echo \"copy-back FAILED: $dest/lambda\"' '      id 2>&1 || true' '      ls -la \"$dest\" \"$dest/lambda\" \"$dest/lambda\"/* 2>&1 | head -30 || true' '    fi' '  done' 'fi' 'exit $status' > /tmp/tachyon-build-bin/cargo-lambda; chmod +x /tmp/tachyon-build-bin/cargo /tmp/tachyon-build-bin/cargo-lambda; ln -sfn /usr/local/cargo/bin/rustc /tmp/tachyon-build-bin/rustc; ln -sfn /usr/local/cargo/bin/rustup /tmp/tachyon-build-bin/rustup; export PATH=/tmp/tachyon-build-bin:/usr/local/cargo/bin:/usr/local/bin:$PATH; command -v cargo; cargo --version; command -v cargo-lambda; test -x /usr/local/bin/cargo-lambda"
         package: courseboard
         binary: lambda-courseboard
         release: true
@@ -185,18 +91,12 @@ spec:
         - name: COURSEBOARD_PUBLIC_UI_BASE_URL
           value: https://courseboard.txcloud.app
         - name: OIDC_ISSUER_URL
-          value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+          value: https://api.n1.tachy.one
         - name: EXPECTED_AUDIENCE
-          # OAuth client IDs are public identifiers. Primary audience remains
-          # courseboard-web; local Cognito Hosted UI PKCE is allowlisted via
-          # EXPECTED_CLIENT_ID (CSV) because Cognito access tokens often omit aud.
-          value: 5002hok6cj8mjmt3gepdpdq98i
+          # Public client used by the platform-ui style JSON PKCE flow.
+          value: 5oafg9ptonbjumdh1pc7khirp1
         - name: EXPECTED_CLIENT_ID
-          # CSV allowlist: courseboard-web + courseboard-local-prod-pkce
-          # (public client for local Vite → prod API Cognito Hosted UI).
-          # Cognito access tokens often omit `aud`; auth.rs accepts allowlisted
-          # client_id when `aud` is absent.
-          value: 5002hok6cj8mjmt3gepdpdq98i,5oafg9ptonbjumdh1pc7khirp1
+          value: 5oafg9ptonbjumdh1pc7khirp1
         # Lambda cannot resolve Cloudflare Worker service bindings. Store the
         # public Field API URL so course gateways and /field-api proxy get a
         # real https base (internalService leaves a literal
@@ -211,10 +111,10 @@ spec:
             - name: COURSEBOARD_PUBLIC_UI_BASE_URL
               value: https://courseboard.txcloud.app
             - name: OIDC_ISSUER_URL
-              value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+              value: https://api.n1.tachy.one
             - name: EXPECTED_AUDIENCE
-              value: 5002hok6cj8mjmt3gepdpdq98i
+              value: 5oafg9ptonbjumdh1pc7khirp1
             - name: EXPECTED_CLIENT_ID
-              value: 5002hok6cj8mjmt3gepdpdq98i,5oafg9ptonbjumdh1pc7khirp1
+              value: 5oafg9ptonbjumdh1pc7khirp1
             - name: TACHYON_FIELD_API_URL
               value: https://tachyon-field-api.txcloud.app

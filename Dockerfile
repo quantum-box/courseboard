@@ -28,10 +28,10 @@ COPY desktop/postcss.config.cjs desktop/tailwind.config.ts ./
 COPY desktop/src ./src
 COPY desktop/public ./public
 
-# The Rust image keeps only the public payment route. Operator routes hard-
-# navigate to the Auth.js/vinext deployment, which owns session and tenant auth.
+# The Rust image keeps only the public payment route. Operator routes navigate
+# to the separately deployed React/Vite Cloud App.
 RUN VITE_BASE_PATH=/ui/ \
-    VITE_COURSEBOARD_OPERATOR_WEB_URL=https://courseboard.txcloud.app/courseboard-ui/index.html \
+    VITE_COURSEBOARD_OPERATOR_WEB_URL=https://courseboard.txcloud.app \
     npm run build
 
 FROM debian:bookworm-slim AS runtime
