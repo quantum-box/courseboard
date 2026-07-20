@@ -174,16 +174,16 @@ spec:
         - name: OIDC_ISSUER_URL
           value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
         - name: EXPECTED_AUDIENCE
-          # OAuth client IDs are public identifiers. Primary audience remains
-          # courseboard-web; local Cognito Hosted UI PKCE is allowlisted via
-          # EXPECTED_CLIENT_ID (CSV) because Cognito access tokens often omit aud.
-          value: 5002hok6cj8mjmt3gepdpdq98i
+          # OAuth client IDs are public identifiers. Primary audience is the
+          # courseboard-web browser client (7su0cbc8) whose Cognito access token
+          # the Auth.js BFF forwards to /v1/course/*.
+          value: 7su0cbc8mr3dhji93gknu7pm19
         - name: EXPECTED_CLIENT_ID
-          # CSV allowlist: courseboard-web + courseboard-local-prod-pkce
-          # (public client for local Vite → prod API Cognito Hosted UI).
-          # Cognito access tokens often omit `aud`; auth.rs accepts allowlisted
-          # client_id when `aud` is absent.
-          value: 5002hok6cj8mjmt3gepdpdq98i,5oafg9ptonbjumdh1pc7khirp1
+          # CSV allowlist (Cognito access tokens omit `aud`, so auth.rs matches
+          # client_id): courseboard-web (7su0cbc8, production browser) +
+          # tachyon CLI (5002hok6, service/ops) + courseboard-local-prod-pkce
+          # (5oafg9pt, local Vite -> prod API Hosted UI).
+          value: 7su0cbc8mr3dhji93gknu7pm19,5002hok6cj8mjmt3gepdpdq98i,5oafg9ptonbjumdh1pc7khirp1
         # Lambda cannot resolve Cloudflare Worker service bindings. Store the
         # public Field API URL so course gateways and /field-api proxy get a
         # real https base (internalService leaves a literal
@@ -200,8 +200,8 @@ spec:
             - name: OIDC_ISSUER_URL
               value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
             - name: EXPECTED_AUDIENCE
-              value: 5002hok6cj8mjmt3gepdpdq98i
+              value: 7su0cbc8mr3dhji93gknu7pm19
             - name: EXPECTED_CLIENT_ID
-              value: 5002hok6cj8mjmt3gepdpdq98i,5oafg9ptonbjumdh1pc7khirp1
+              value: 7su0cbc8mr3dhji93gknu7pm19,5002hok6cj8mjmt3gepdpdq98i,5oafg9ptonbjumdh1pc7khirp1
             - name: TACHYON_FIELD_API_URL
               value: https://tachyon-field-api.txcloud.app
