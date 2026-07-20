@@ -475,6 +475,53 @@ describe('CognitoBrowserPkceAdapter', () => {
     expect(url).toContain('code_challenge_method=S256')
   })
 
+  it('derives the redirect URI from the https origin when env is unset', async () => {
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_REDIRECT_URI', undefined)
+    vi.stubGlobal('window', {
+      location: {
+        search: '',
+        href: 'https://courseboard.txcloud.app/',
+        origin: 'https://courseboard.txcloud.app',
+        protocol: 'https:',
+        reload: vi.fn(),
+        assign: locationAssign,
+      },
+      history: { replaceState: vi.fn(), state: null },
+    })
+
+    const { createAuthAdapter } = await import('./adapters')
+    const adapter = createAuthAdapter()
+    await adapter.signIn()
+    const url = String(locationAssign.mock.calls[0]?.[0] ?? '')
+    expect(url).toContain(
+      `redirect_uri=${encodeURIComponent('https://courseboard.txcloud.app/oauth/callback')}`,
+    )
+  })
+
+  it('accepts an https redirect URI and rejects non-callback paths', async () => {
+    vi.stubEnv(
+      'VITE_COURSEBOARD_BROWSER_REDIRECT_URI',
+      'https://courseboard.txcloud.app/oauth/callback',
+    )
+    const { createAuthAdapter } = await import('./adapters')
+    const adapter = createAuthAdapter()
+    await adapter.signIn()
+    const url = String(locationAssign.mock.calls[0]?.[0] ?? '')
+    expect(url).toContain(
+      `redirect_uri=${encodeURIComponent('https://courseboard.txcloud.app/oauth/callback')}`,
+    )
+
+    vi.resetModules()
+    vi.stubEnv(
+      'VITE_COURSEBOARD_BROWSER_REDIRECT_URI',
+      'https://courseboard.txcloud.app/other-path',
+    )
+    const rejected = await import('./adapters')
+    expect(() => rejected.createAuthAdapter()).toThrow(
+      '/oauth/callback を使用してください',
+    )
+  })
+
   it('restores a Cognito session and loads the real user profile', async () => {
     const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
     localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({

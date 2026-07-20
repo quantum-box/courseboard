@@ -50,6 +50,12 @@ const nextConfig = {
 	async rewrites() {
 		return {
 			beforeFiles: [
+				// Cognito Hosted UI PKCEのコールバック。React SPAをこのパスのまま
+				// 配信し、SPA側がcode/stateクエリを処理する（Auth.js非依存）。
+				{
+					source: '/oauth/callback',
+					destination: '/courseboard-ui/index.html',
+				},
 				{ source: '/sandbox', destination: '/?_mode=sandbox' },
 				{
 					source: '/sandbox/:path*',
