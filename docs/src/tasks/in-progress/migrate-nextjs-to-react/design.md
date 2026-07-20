@@ -15,7 +15,7 @@ TauriとWebで共有するUIは`desktop/`のReact/Viteに実装済みである�
 
 ### 配信
 
-`courseboard` Cloud Appは`desktop/`をrootとするVite/Cloudflare Pages appへ変更する。production buildはbase path `/`、Tachyon JSON PKCE、公開client ID、`https://courseboard-api.txcloud.app`をbuild-time公開設定として受け取る。秘密値とOAuth client secretはフロントエンドへ渡さない。
+`courseboard` Cloud Appは`desktop/`をrootとするVite SPAへ変更し、既存Cloudflare WorkerのStatic Assetsで配信する。Workerは`dist/`とSPA fallbackだけを提供し、サーバー処理を持たない。production buildはbase path `/`、Tachyon JSON PKCE、公開client ID、`https://courseboard-api.txcloud.app`をbuild-time公開設定として受け取る。秘密値とOAuth client secretはフロントエンドへ渡さない。
 
 ### 認証
 
@@ -41,7 +41,7 @@ Reactの保護API base URLは`courseboard-api`のHTTPS originとする。`/v1/co
 
 1. Reactをcross-origin API接続対応にし、API CORSを先に検証する。
 2. PDFと`/download`をReactへ移す。
-3. `tachyon.yaml`の`courseboard` appをVite/Pagesへ変更する。
+3. `tachyon.yaml`の`courseboard` appをVite＋Worker Static Assetsへ変更する。
 4. Next.js/Vinext/Auth.js packageとserver routesを削除する。
 5. preview buildでReactフォームの実ユーザーログインとAPI bearer forwardingを確認してからproductionへ反映する。
 

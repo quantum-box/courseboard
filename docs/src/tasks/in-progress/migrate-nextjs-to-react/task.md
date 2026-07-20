@@ -61,7 +61,7 @@ Course BoardのTauri UI自体はReact/Viteで実装済みだが、本番Web配�
 
 ## リスクとフォローアップ
 
-- Cloudflare PagesのSPA fallbackはpreview deploy後の確認が必要。
+- Worker Static AssetsのSPA fallbackはpreview deploy後の確認が必要。
 - 既存OAuth public clientを再利用し、本変更ではprovider設定を操作しない。
 - 本番`courseboard-api`は旧token verifier設定のため、manifestをapply/deployするまで新issuerのtokenを`401`にする。
 - 本番適用とbuild triggerは明示的な依頼を受けて実施する。

@@ -5,7 +5,7 @@ metadata:
   tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
 spec:
   apps:
-    # --- Shared React/Tauri frontend — static Cloudflare Pages SPA.
+    # --- Shared React/Tauri frontend — Vite SPA on Worker Static Assets.
     # React owns the platform-ui style password login + JSON PKCE flow and sends
     # the resulting bearer directly to courseboard-api. No Hosted UI or BFF is deployed.
     - name: courseboard
@@ -16,7 +16,7 @@ spec:
         defaultBranch: main
       rootDirectory: desktop
       framework: vite
-      deploymentTarget: cloudflare_pages
+      deploymentTarget: cloudflare_workers
       # The React app performs the Tachyon User Pool JSON PKCE flow itself.
       auth:
         enabled: false
