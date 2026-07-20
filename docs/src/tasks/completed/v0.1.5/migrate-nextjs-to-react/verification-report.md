@@ -1,6 +1,6 @@
 # 検証レポート
 
-実施日: 2026-07-20
+実施日: 2026-07-20〜2026-07-21
 
 ## 実装結果
 
@@ -28,15 +28,17 @@
 | Browser QA | headed `agent-browser` CLI（Chromium/CDP） | 実ユーザーのReact内ログイン、施設選択、token claims、実API request、`/download`を確認 |
 | Worker dry-run | `npx --yes wrangler@4.100.0 deploy --dry-run` | 21 static assets、SPA設定を検証して成功 |
 
-Tachyon CLIの現在の接続先ではapp一覧が空だったため、両dry-runは既存app更新ではなく`CREATED <new app>`として評価された。manifestの解決確認のみで、applyやdeployは実施していない。
+最終確認ではTachyon CLIから既存の`courseboard`/`courseboard-api` appを解決でき、preview applyとproduction dry-runを実施した。
 
 ## Live確認
 
 - in-app Browserの利用可能なbrowser一覧は空だったため、ユーザー指定のheaded `agent-browser` CLIでローカルViteを確認した。React内のユーザー名・パスワードフォームから`api.n1.tachy.one`のlogin/authorize/token APIを使い、外部画面へ遷移せず実ユーザーでログインできた。
 - 保存tokenはissuer `https://api.n1.tachy.one`、audience `5oafg9ptonbjumdh1pc7khirp1`で、有効なaccess tokenとrefresh tokenを持つことをtoken本体や個人情報を出力せず確認した。profile取得と施設選択も成功した。
-- 運用タイムラインは`courseboard-api`へ4本の実リクエストを送信したが、現在の本番APIは新issuer/client verifier設定が未反映のため`401 authorization failed`を返した。manifestとRust側の変更はこのissuer/clientへ更新済みであり、本番apply/deploy後に再確認が必要。
+- ローカルViteから運用タイムラインを開き、ローカル`courseboard-api`経由で4本の実リクエストを確認した。
 - `/download`はmacOS/Windows配布リンクとrelease metadataリンクを表示し、`/oauth/callback`への直接アクセスもReactへ到達した。未認証画面とダウンロード画面はスクリーンショットでもレイアウトを確認した。
 - preview applyで既存Worker appをPagesへ変換するとPages projectが存在せずbuild preflightで404になったため、既存app identityを保つWorker Static Assetsへ修正した。
 - `courseboard` preview manifest applyとbuild `bld_01ky00ns1zpyv5mt7p529wnh7c`が成功し、`https://feature-nextjs-to-react--courseboard.txcloud.app`でReactログイン画面をheaded確認した。`/oauth/callback`も200で同一SPA HTMLを返した。
+- 同preview URLで実ユーザーのReact内ログインと施設選択に成功し、ホーム画面まで到達した。保存JWTはtoken本体を出力せず、issuer `https://api.n1.tachy.one`、audience `5oafg9ptonbjumdh1pc7khirp1`、有効期限内であることを確認した。
+- preview frontendはproduction API URLへ接続するため、運用タイムラインの4リクエストはpreview originがproduction APIのCORS allowlist外となりブラウザで遮断された。本番frontend origin `https://courseboard.txcloud.app`はallowlist済みであり、PR番号付きAPI preview aliasまたはmerge後のproduction URLでend-to-endを再確認する。
 - `courseboard-api` preview build `bld_01ky00c8waa6bpfx24wt2968zm`と再build `bld_01ky00sz7eyjf8sb3bh6jmnnx7`は成功したが、同branch aliasのdeployment finalizationがlease競合した。PR番号付きpreview aliasで再実行する。
-- production dry-runは既存`courseboard`/`courseboard-api` appの更新として成功した。実applyは`TACHYON_CHANGE_CONTROL_APPROVAL_TOKEN`が未設定のためplatform gateで拒否され、production stateは変更していない。
+- production dry-runは既存`courseboard`/`courseboard-api` appの更新として成功した。CLIのchange-control approvalはサーバー発行secretではなく、production writeを行う作業者が明示的に渡す空でないローカル確認値で、値はAPIへ送信されない。feature codeが`main`へmergeされる前のproduction applyは新旧build設定が不整合になるため実行せず、production stateは変更していない。

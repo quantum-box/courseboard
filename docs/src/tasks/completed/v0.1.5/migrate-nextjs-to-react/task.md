@@ -63,5 +63,5 @@ Course BoardのTauri UI自体はReact/Viteで実装済みだが、本番Web配�
 
 - Worker Static AssetsのSPA fallbackはpreview deploymentで確認済み。
 - 既存OAuth public clientを再利用し、本変更ではprovider設定を操作しない。
-- production applyはchange-control approval tokenが必要。token取得後に同じmanifestを反映する。
+- production applyでは作業者がchange-control approval値を明示する。サーバー発行secretではなくCLI内だけで確認されるため、merge後に承認済み作業として同じmanifestを反映する。
 - branch名ベースのAPI preview deploymentはLambda alias lease競合が発生したため、PR番号ベースで再実行する。
