@@ -31,11 +31,7 @@ spec:
         # Keep pnpm's SQLite store index Pod-local. The runner cache PVC is shared
         # by concurrent builds for this app and a malformed index blocks all reruns.
         installCommand: corepack enable && pnpm_config_store_dir=/tmp/tachyon-pnpm-store corepack pnpm install --frozen-lockfile && cd .. && npm ci --no-audit --no-fund
-        # React SPAはクライアントサイドCognito Hosted UI PKCEで認証する
-        # （Auth.jsサーバーセッション非依存。client IDは公開識別子）。
-        # redirect URIは実行時にlocation originから導出され、SPAは同一originの
-        # /v1/course BFFへbearerを送る。
-        command: cd .. && VITE_BASE_PATH=/courseboard-ui/ VITE_COURSEBOARD_AUTH_MODE=cognito-pkce VITE_COURSEBOARD_BROWSER_CLIENT_ID=5oafg9ptonbjumdh1pc7khirp1 npm run build && rm -rf web-host/public/courseboard-ui && mkdir -p web-host/public/courseboard-ui && cp -R dist/. web-host/public/courseboard-ui/ && cd web-host && corepack pnpm run build
+        command: cd .. && VITE_BASE_PATH=/courseboard-ui/ npm run build && rm -rf web-host/public/courseboard-ui && mkdir -p web-host/public/courseboard-ui && cp -R dist/. web-host/public/courseboard-ui/ && cd web-host && corepack pnpm run build
         outputDirectory: desktop/web-host/dist/server/index.js
         nodeVersion: "24"
       envVars:
@@ -164,15 +160,6 @@ spec:
         - migrations/**
         - src/**
       build:
-        # Runner sets CARGO_HOME/CARGO_TARGET_DIR to /workspace/cache/* which is
-        # intermittently non-writable for user `node`. Force writable /tmp homes
-        # via wrappers on /tmp/tachyon-build-bin (shared across install/build shells).
-        # The wrappers build into /tmp/cargo-target (the runner cache PVC is
-        # intermittently non-writable), but the runner packages the Lambda
-        # artifact from its own CARGO_TARGET_DIR / workspace target. Without the
-        # copy-back below, packaging silently reuses a stale bootstrap from the
-        # shared cache and "successful" deploys keep serving an old binary.
-        installCommand: "set -eux; mkdir -p /tmp/tachyon-build-bin /tmp/cargo-home /tmp/cargo-target; printf '%s\\n' '#!/bin/bash' 'set -uo pipefail' 'orig_target=\"${CARGO_TARGET_DIR:-}\"' 'export RUSTUP_HOME=/usr/local/rustup' 'export CARGO_HOME=/tmp/cargo-home' 'export CARGO_TARGET_DIR=/tmp/cargo-target' 'mkdir -p \"$CARGO_HOME\" \"$CARGO_TARGET_DIR\"' '/usr/local/cargo/bin/cargo \"$@\"' 'status=$?' 'if [ -d /tmp/cargo-target/lambda ]; then' '  for dest in \"$orig_target\" \"$PWD/target\"; do' '    [ -n \"$dest\" ] || continue' '    [ \"$dest\" = /tmp/cargo-target ] && continue' '    rm -rf \"$dest/lambda\" 2>/dev/null || true' '    mkdir -p \"$dest/lambda\" 2>/dev/null || true' '    if cp -Rf /tmp/cargo-target/lambda/. \"$dest/lambda/\" 2>/dev/null; then' '      echo \"copy-back ok: $dest/lambda\"' '    else' '      echo \"copy-back FAILED: $dest/lambda\"' '      id 2>&1 || true' '      ls -la \"$dest\" \"$dest/lambda\" \"$dest/lambda\"/* 2>&1 | head -30 || true' '    fi' '  done' 'fi' 'exit $status' > /tmp/tachyon-build-bin/cargo; printf '%s\\n' '#!/bin/bash' 'set -uo pipefail' 'orig_target=\"${CARGO_TARGET_DIR:-}\"' 'export RUSTUP_HOME=/usr/local/rustup' 'export CARGO_HOME=/tmp/cargo-home' 'export CARGO_TARGET_DIR=/tmp/cargo-target' 'export PATH=/tmp/tachyon-build-bin:/usr/local/cargo/bin:/usr/local/bin:$PATH' 'mkdir -p \"$CARGO_HOME\" \"$CARGO_TARGET_DIR\"' '/usr/local/bin/cargo-lambda \"$@\"' 'status=$?' 'if [ -d /tmp/cargo-target/lambda ]; then' '  for dest in \"$orig_target\" \"$PWD/target\"; do' '    [ -n \"$dest\" ] || continue' '    [ \"$dest\" = /tmp/cargo-target ] && continue' '    rm -rf \"$dest/lambda\" 2>/dev/null || true' '    mkdir -p \"$dest/lambda\" 2>/dev/null || true' '    if cp -Rf /tmp/cargo-target/lambda/. \"$dest/lambda/\" 2>/dev/null; then' '      echo \"copy-back ok: $dest/lambda\"' '    else' '      echo \"copy-back FAILED: $dest/lambda\"' '      id 2>&1 || true' '      ls -la \"$dest\" \"$dest/lambda\" \"$dest/lambda\"/* 2>&1 | head -30 || true' '    fi' '  done' 'fi' 'exit $status' > /tmp/tachyon-build-bin/cargo-lambda; chmod +x /tmp/tachyon-build-bin/cargo /tmp/tachyon-build-bin/cargo-lambda; ln -sfn /usr/local/cargo/bin/rustc /tmp/tachyon-build-bin/rustc; ln -sfn /usr/local/cargo/bin/rustup /tmp/tachyon-build-bin/rustup; export PATH=/tmp/tachyon-build-bin:/usr/local/cargo/bin:/usr/local/bin:$PATH; command -v cargo; cargo --version; command -v cargo-lambda; test -x /usr/local/bin/cargo-lambda"
         package: courseboard
         binary: lambda-courseboard
         release: true
