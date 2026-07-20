@@ -15,7 +15,9 @@ spec:
         name: courseboard
         defaultBranch: main
       rootDirectory: desktop
-      framework: vite
+      # Tachyon uses `worker` as the deployment runner classification. The UI
+      # itself is still the Vite-built React SPA served from static assets.
+      framework: worker
       deploymentTarget: cloudflare_workers
       # The React app performs the Tachyon User Pool JSON PKCE flow itself.
       auth:
