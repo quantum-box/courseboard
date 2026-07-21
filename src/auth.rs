@@ -197,6 +197,14 @@ impl TokenVerifier for OidcJwtVerifier {
         let token_data = decode::<JwtClaims>(token, &decoding_key, &validation)
             .map_err(|_| AuthError::InvalidToken)?;
 
+        // Cognito signs both ID tokens and access tokens with keys from the
+        // same user pool. API authorization must only accept access tokens.
+        if is_cognito_issuer(&self.issuer)
+            && token_data.claims.token_use.as_deref() != Some("access")
+        {
+            return Err(AuthError::InvalidToken);
+        }
+
         let now = unix_timestamp();
         if token_data.claims.iat > now + MAX_CLOCK_SKEW_SECONDS {
             return Err(AuthError::InvalidIssuedAt);
@@ -250,6 +258,10 @@ fn audience_claim_present(audience: &serde_json::Value) -> bool {
             .any(|value| value.as_str().is_some_and(|entry| !entry.is_empty())),
         _ => false,
     }
+}
+
+fn is_cognito_issuer(issuer: &str) -> bool {
+    issuer.starts_with("https://cognito-idp.") && issuer.contains(".amazonaws.com/")
 }
 
 fn audience_contains(audience: &serde_json::Value, expected: &str) -> bool {
@@ -311,4 +323,5 @@ struct JwtClaims {
     iat: u64,
     client_id: Option<String>,
     azp: Option<String>,
+    token_use: Option<String>,
 }

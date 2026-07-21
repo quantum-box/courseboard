@@ -1,5 +1,10 @@
 import { invoke } from '@tauri-apps/api/core'
 import {
+  CognitoRequestError,
+  authenticateWithCognito,
+  refreshCognitoTokens,
+} from './cognito'
+import {
   NATIVE_AUTH_PENDING_KEY,
   NativeAuthorizationError,
   createPkceTransaction,
@@ -38,13 +43,9 @@ type NativeAuthConfiguration = {
 }
 
 type BrowserPkceConfiguration = {
-  loginEndpoint: string
-  authorizationEndpoint: string
-  tokenEndpoint: string
+  cognitoEndpoint: string
   profileEndpoint: string
   clientId: string
-  redirectUri: string
-  scopes: string[]
 }
 
 type NativeAuthCapabilities = {
@@ -57,16 +58,6 @@ type NativeTokenPayload = {
   refresh_token?: string
   expires_in?: number
   token_type?: string
-}
-
-type BrowserLoginPayload = {
-  status?: 'authenticated' | 'new_password_required'
-  session_token?: string
-  session?: string
-}
-
-type BrowserAuthorizationPayload = {
-  authorization_code?: string
 }
 
 type NativeTenantPayload = string | {
@@ -222,7 +213,7 @@ function browserPkceConfiguration(): BrowserPkceConfiguration {
   if (import.meta.env.VITE_COURSEBOARD_BROWSER_CLIENT_SECRET) {
     throw new AuthConfigurationError(
       'client secretをブラウザへ埋め込めません',
-      'VITE_COURSEBOARD_BROWSER_CLIENT_SECRETを削除し、PKCE対応public clientを使用してください。',
+      'VITE_COURSEBOARD_BROWSER_CLIENT_SECRETを削除し、secretなしCognito public clientを使用してください。',
     )
   }
 
@@ -230,57 +221,20 @@ function browserPkceConfiguration(): BrowserPkceConfiguration {
   if (!clientId) {
     throw new AuthConfigurationError(
       'ブラウザ認証の設定が必要です',
-      'TachyonでPKCE対応public clientを発行し、VITE_COURSEBOARD_BROWSER_CLIENT_IDを設定してください。',
+      'TachyonでsecretなしCognito public clientを発行し、VITE_COURSEBOARD_BROWSER_CLIENT_IDを設定してください。',
     )
   }
-
-  const defaultRedirectUri = window.location.protocol === 'https:'
-    ? `${window.location.origin}/oauth/callback`
-    : 'http://127.0.0.1:5173/oauth/callback'
-  const redirectUri = import.meta.env.VITE_COURSEBOARD_BROWSER_REDIRECT_URI
-    ?? defaultRedirectUri
-  const redirect = new URL(redirectUri)
-  const isLocalViteRedirect = redirect.protocol === 'http:'
-    && redirect.hostname === '127.0.0.1'
-    && redirect.port === '5173'
-  if (redirect.pathname !== '/oauth/callback' || !(isLocalViteRedirect || redirect.protocol === 'https:')) {
-    throw new AuthConfigurationError(
-      'ブラウザ認証のredirect URIが不正です',
-      'https origin または http://127.0.0.1:5173 の /oauth/callback を使用してください。',
-    )
-  }
-
-  const scopes = (import.meta.env.VITE_COURSEBOARD_BROWSER_SCOPES ?? 'openid profile email')
-    .split(/\s+/)
-    .filter(Boolean)
-  if (!scopes.includes('openid')) {
-    throw new AuthConfigurationError(
-      'ブラウザ認証のscopeが不正です',
-      'VITE_COURSEBOARD_BROWSER_SCOPESにはopenidが必要です。',
-    )
-  }
+  const region = import.meta.env.VITE_COURSEBOARD_COGNITO_REGION?.trim()
+    || 'ap-northeast-1'
 
   return {
-    loginEndpoint: httpsEndpoint(
-      import.meta.env.VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT
-        ?? 'https://api.n1.tachy.one/oauth2/login',
-      'login endpoint',
-    ),
-    authorizationEndpoint: httpsEndpoint(
-      import.meta.env.VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT
-        ?? 'https://api.n1.tachy.one/oauth2/authorize',
-      'authorization endpoint',
-    ),
-    tokenEndpoint: httpsEndpoint(
-      import.meta.env.VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT
-        ?? 'https://api.n1.tachy.one/oauth2/token',
-      'token endpoint',
+    cognitoEndpoint: httpsEndpoint(
+      `https://cognito-idp.${region}.amazonaws.com/`,
+      'Cognito endpoint',
     ),
     profileEndpoint: import.meta.env.VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT
       ?? 'https://api.n1.tachy.one/v1/me',
     clientId,
-    redirectUri,
-    scopes,
   }
 }
 
@@ -304,27 +258,6 @@ function nativeTenant(payload: NativeTenantPayload) {
 
 function authErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
-}
-
-async function responseError(response: Response, fallback: string) {
-  try {
-    const payload = await response.json() as { error?: string; message?: string }
-    return payload.message?.trim() || payload.error?.trim() || fallback
-  } catch {
-    return fallback
-  }
-}
-
-/** Token endpoint rejected the grant (invalid/expired refresh) — clear local session. */
-class DefinitiveTokenAuthError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'DefinitiveTokenAuthError'
-  }
-}
-
-function isDefinitiveOAuthTokenStatus(status: number) {
-  return status === 400 || status === 401 || status === 403
 }
 
 /** Access tokens within the refresh skew window are still usable for API calls. */
@@ -373,7 +306,7 @@ class DevelopmentAdapter implements AuthAdapter {
   }
 }
 
-/** platform-ui.session-style durable browser-pkce session (survives Vite HMR / hard refresh). */
+/** Durable Cognito session; the legacy key is retained across the issuer migration. */
 export const BROWSER_PKCE_SESSION_KEY = 'courseboard.auth.browser.session'
 /** Legacy refresh-only key (sessionStorage); migrated on read then removed. */
 const BROWSER_PKCE_REFRESH_KEY_LEGACY = 'courseboard.auth.browser.refresh'
@@ -412,71 +345,18 @@ class BrowserPkceAdapter implements AuthAdapter {
   }
 
   async signInWithPassword(username: string, password: string) {
-    const loginResponse = await fetch(this.configuration.loginEndpoint, {
-      method: 'POST',
-      credentials: 'omit',
-      cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ username, password }),
-    })
-    if (!loginResponse.ok) {
-      throw new NativeAuthorizationError(await responseError(
-        loginResponse,
-        'ユーザー名またはパスワードを確認してください。',
-      ))
-    }
-    const login = await loginResponse.json() as BrowserLoginPayload
-    if (login.status === 'new_password_required' || login.session) {
+    const result = await authenticateWithCognito(
+      this.configuration.cognitoEndpoint,
+      this.configuration.clientId,
+      username.trim(),
+      password,
+    )
+    if (result.status === 'new_password_required') {
       throw new NativeAuthorizationError(
         '初回パスワード変更が必要です。Tachyon Account Centerで変更してから、もう一度ログインしてください。',
       )
     }
-    if (!login.session_token) {
-      throw new NativeAuthorizationError('Tachyon Authからログインセッションを受信できませんでした。')
-    }
-
-    // platform-ui / ADR-0022: JSON authorize returns the code (no browser redirect).
-    // redirect_uri is still required and must match the registered public client URI.
-    const transaction = await createPkceTransaction(this.configuration.redirectUri)
-    const authorizationResponse = await fetch(this.configuration.authorizationEndpoint, {
-      method: 'POST',
-      credentials: 'omit',
-      cache: 'no-store',
-      headers: {
-        Accept: 'application/json',
-        Authorization: `Bearer ${login.session_token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        client_id: this.configuration.clientId,
-        redirect_uri: this.configuration.redirectUri,
-        response_type: 'code',
-        scope: this.configuration.scopes.join(' '),
-        state: transaction.state,
-        code_challenge: transaction.challenge,
-        code_challenge_method: 'S256',
-      }),
-    })
-    if (!authorizationResponse.ok) {
-      throw new NativeAuthorizationError(await responseError(
-        authorizationResponse,
-        'ログインセッションを認可codeへ交換できませんでした。',
-      ))
-    }
-    const authorization = await authorizationResponse.json() as BrowserAuthorizationPayload
-    if (!authorization.authorization_code) {
-      throw new NativeAuthorizationError('Tachyon Authから認可codeを受信できませんでした。')
-    }
-    await this.exchangeToken({
-      grant_type: 'authorization_code',
-      client_id: this.configuration.clientId,
-      redirect_uri: this.configuration.redirectUri,
-      code: authorization.authorization_code,
-      code_verifier: transaction.verifier,
-    })
+    this.acceptCognitoTokens(result.tokens)
   }
 
   async getAccessToken(forceRefresh = false) {
@@ -533,14 +413,15 @@ class BrowserPkceAdapter implements AuthAdapter {
   private async refreshAccessToken() {
     if (!this.refreshToken) return undefined
     try {
-      await this.exchangeToken({
-        grant_type: 'refresh_token',
-        client_id: this.configuration.clientId,
-        refresh_token: this.refreshToken,
-      }, this.refreshToken)
+      const tokens = await refreshCognitoTokens(
+        this.configuration.cognitoEndpoint,
+        this.configuration.clientId,
+        this.refreshToken,
+      )
+      this.acceptCognitoTokens(tokens, this.refreshToken)
       return this.accessToken
     } catch (error) {
-      if (error instanceof DefinitiveTokenAuthError) {
+      if (error instanceof CognitoRequestError && error.definitive) {
         // Drop only the dead refresh grant; keep a still-fresh access token so a
         // spurious API 401 does not soft-sign-out a valid session.
         this.refreshToken = undefined
@@ -558,40 +439,18 @@ class BrowserPkceAdapter implements AuthAdapter {
     }
   }
 
-  private async exchangeToken(
-    body: Record<string, string>,
+  private acceptCognitoTokens(
+    tokens: {
+      accessToken: string
+      refreshToken?: string
+      expiresIn: number
+    },
     existingRefreshToken?: string,
   ) {
-    let response: Response
-    try {
-      response = await fetch(this.configuration.tokenEndpoint, {
-        method: 'POST',
-        credentials: 'omit',
-        cache: 'no-store',
-        redirect: 'error',
-        headers: {
-          Accept: 'application/json',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      })
-    } catch {
-      throw new Error('token endpointへ到達できませんでした。')
-    }
-    if (!response.ok) {
-      if (isDefinitiveOAuthTokenStatus(response.status)) {
-        throw new DefinitiveTokenAuthError('認証codeをtokenへ交換できませんでした。')
-      }
-      throw new Error('認証codeをtokenへ交換できませんでした。')
-    }
-    const payload = await response.json() as NativeTokenPayload
-    if (!payload.access_token || (payload.token_type && payload.token_type.toLowerCase() !== 'bearer')) {
-      throw new DefinitiveTokenAuthError('token endpointから有効なBearer tokenが返りませんでした。')
-    }
-    this.accessToken = payload.access_token
-    this.accessTokenExpiresAt = jwtExpiry(payload.access_token)
-      ?? Date.now() + Math.max(60, Number(payload.expires_in) || 300) * 1000
-    this.refreshToken = payload.refresh_token ?? existingRefreshToken
+    this.accessToken = tokens.accessToken
+    this.accessTokenExpiresAt = jwtExpiry(tokens.accessToken)
+      ?? Date.now() + Math.max(60, Number(tokens.expiresIn) || 300) * 1000
+    this.refreshToken = tokens.refreshToken ?? existingRefreshToken
     this.persistSession()
   }
 
@@ -918,7 +777,7 @@ function envTrimmed(value: string | undefined): string {
 
 function browserPkceClientConfigured() {
   // Blank / whitespace-only overlays (KEY=) must count as unset so mode-local
-  // empty overrides of `.env.local` do not look like a real browser-pkce client.
+  // empty overrides of `.env.local` do not look like a configured Cognito client.
   return Boolean(envTrimmed(import.meta.env.VITE_COURSEBOARD_BROWSER_CLIENT_ID))
 }
 
@@ -926,7 +785,7 @@ function browserPkceClientConfigured() {
  * Pick the auth adapter from an explicit mode.
  *
  * Never silently fall back to DevelopmentAdapter ("Local operator") when a
- * browser-pkce public client is also configured — that usually means a process
+ * Cognito public client is also configured — that usually means a process
  * env override stomped desktop/.env.local. Fail visibly instead.
  */
 export function createAuthAdapter(): AuthAdapter {
@@ -934,14 +793,7 @@ export function createAuthAdapter(): AuthAdapter {
   const browserClientConfigured = browserPkceClientConfigured()
   const developmentBearer = envTrimmed(import.meta.env.VITE_COURSEBOARD_API_BEARER)
 
-  if (authMode === 'cognito-pkce') {
-    throw new AuthConfigurationError(
-      'Hosted UI認証は使用できません',
-      'VITE_COURSEBOARD_AUTH_MODE=browser-pkceを使用してください。',
-    )
-  }
-
-  if (authMode === 'browser-pkce') {
+  if (authMode === 'cognito-direct' || authMode === 'browser-pkce') {
     return new BrowserPkceAdapter()
   }
 
@@ -950,8 +802,8 @@ export function createAuthAdapter(): AuthAdapter {
     if (browserClientConfigured) {
       throw new AuthConfigurationError(
         '認証モードが衝突しています',
-        'VITE_COURSEBOARD_AUTH_MODE=development と browser-pkce の client id が同時に設定されています。'
-          + ' Reactログインを使う場合は AUTH_MODE=browser-pkce にし、'
+        'VITE_COURSEBOARD_AUTH_MODE=development と Cognito client id が同時に設定されています。'
+          + ' Reactログインを使う場合は AUTH_MODE=cognito-direct にし、'
           + ' 開発用 VITE_COURSEBOARD_API_BEARER を外してください。'
           + ' CLI JWT / prod-api --login cli を使う場合は npm run prod-api:env または field:env で'
           + ' VITE_COURSEBOARD_BROWSER_*= の空上書きを書き直してください。',
@@ -966,8 +818,8 @@ export function createAuthAdapter(): AuthAdapter {
     return new DevelopmentAdapter()
   }
 
-  // Web and Tauri share the platform-ui JSON PKCE flow. Authentication stays
-  // inside the React login form and never redirects to Cognito Hosted UI.
+  // Web and Tauri authenticate directly with a secretless Cognito public
+  // client. Authentication stays inside React and never opens Hosted UI.
   if (browserClientConfigured) {
     return new BrowserPkceAdapter()
   }

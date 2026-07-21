@@ -1505,6 +1505,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn cognito_access_token_is_accepted() {
+        let auth = TestAuth::new();
+        let issuer = "https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_test";
+        let app = test_app_with_verifier(auth.verifier_with_issuer(
+            issuer,
+            "field-core",
+            HashSet::from(["field-core".to_string()]),
+        ))
+        .await;
+        let response = app
+            .oneshot(calculate_request(
+                &format!(
+                    "Bearer {}",
+                    auth.token_with_claims(serde_json::json!({
+                        "iss": issuer,
+                        "sub": "87f4fa48-b0d1-70ab-ae9f-cfa01ec164c3",
+                        "client_id": "field-core",
+                        "token_use": "access"
+                    }))
+                ),
+                "scc",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn cognito_id_token_is_rejected() {
+        let auth = TestAuth::new();
+        let issuer = "https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_test";
+        let app = test_app_with_verifier(auth.verifier_with_issuer(
+            issuer,
+            "field-core",
+            HashSet::from(["field-core".to_string()]),
+        ))
+        .await;
+        let response = app
+            .oneshot(calculate_request(
+                &format!(
+                    "Bearer {}",
+                    auth.token_with_claims(serde_json::json!({
+                        "iss": issuer,
+                        "sub": "87f4fa48-b0d1-70ab-ae9f-cfa01ec164c3",
+                        "aud": "field-core",
+                        "token_use": "id"
+                    }))
+                ),
+                "scc",
+            ))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
     async fn wrong_audience_is_rejected() {
         let auth = TestAuth::new();
         let app = test_app(&auth).await;
@@ -1629,10 +1687,19 @@ mod tests {
             expected_audience: &str,
             expected_client_ids: HashSet<String>,
         ) -> OidcJwtVerifier {
+            self.verifier_with_issuer("test-issuer", expected_audience, expected_client_ids)
+        }
+
+        fn verifier_with_issuer(
+            &self,
+            issuer: &str,
+            expected_audience: &str,
+            expected_client_ids: HashSet<String>,
+        ) -> OidcJwtVerifier {
             let public_key = self.private_key.to_public_key();
             OidcJwtVerifier::from_jwks(
                 AuthConfig {
-                    issuer_url: "test-issuer".to_string(),
+                    issuer_url: issuer.to_string(),
                     expected_audience: expected_audience.to_string(),
                     expected_client_ids,
                 },

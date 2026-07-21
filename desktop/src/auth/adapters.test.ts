@@ -77,7 +77,7 @@ describe('DevelopmentAdapter', () => {
     expect(result.kind === 'authenticated' && result.tenants[0]?.slug).toBeUndefined()
   })
 
-  it('fails visibly instead of falling back to Local operator when browser-pkce is also configured', async () => {
+  it('fails visibly instead of falling back to Local operator when Cognito direct auth is also configured', async () => {
     vi.stubEnv('VITE_COURSEBOARD_BROWSER_CLIENT_ID', 'local-public-client')
     const { createAuthAdapter } = await import('./adapters')
     const { AuthConfigurationError } = await import('./types')
@@ -90,7 +90,7 @@ describe('DevelopmentAdapter', () => {
       expect(error).toBeInstanceOf(AuthConfigurationError)
       expect(error).toMatchObject({
         title: '認証モードが衝突しています',
-        message: expect.stringContaining('browser-pkce'),
+        message: expect.stringContaining('Cognito client id'),
       })
     }
   })
@@ -242,17 +242,22 @@ describe('BrowserPkceAdapter', () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
-      if (url.includes('/oauth2/token')) {
-        const body = JSON.parse(String(init?.body ?? '{}')) as { grant_type?: string; refresh_token?: string }
+      if (url.includes('cognito-idp.ap-northeast-1.amazonaws.com')) {
+        const body = JSON.parse(String(init?.body ?? '{}')) as {
+          AuthFlow?: string
+          AuthParameters?: { REFRESH_TOKEN?: string }
+        }
         expect(body).toMatchObject({
-          grant_type: 'refresh_token',
-          refresh_token: 'persisted-refresh-token',
+          AuthFlow: 'REFRESH_TOKEN_AUTH',
+          AuthParameters: { REFRESH_TOKEN: 'persisted-refresh-token' },
         })
         return new Response(JSON.stringify({
-          access_token: 'rotated-access-token',
-          refresh_token: 'rotated-refresh-token',
-          token_type: 'Bearer',
-          expires_in: 3600,
+          AuthenticationResult: {
+            AccessToken: 'rotated-access-token',
+            IdToken: 'rotated-id-token',
+            RefreshToken: 'rotated-refresh-token',
+            ExpiresIn: 3600,
+          },
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       if (url.includes('/v1/me')) {
@@ -312,7 +317,7 @@ describe('BrowserPkceAdapter', () => {
 
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes('/oauth2/token')) {
+      if (url.includes('cognito-idp.ap-northeast-1.amazonaws.com')) {
         return new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })
       }
       throw new Error(`unexpected fetch: ${url}`)
@@ -334,7 +339,7 @@ describe('BrowserPkceAdapter', () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes('/oauth2/token')) {
+      if (url.includes('cognito-idp.ap-northeast-1.amazonaws.com')) {
         throw new TypeError('Failed to fetch')
       }
       throw new Error(`unexpected fetch: ${url}`)
@@ -362,11 +367,13 @@ describe('BrowserPkceAdapter', () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes('/oauth2/token')) {
+      if (url.includes('cognito-idp.ap-northeast-1.amazonaws.com')) {
         return new Response(JSON.stringify({
-          access_token: 'rotated-access-token',
-          token_type: 'Bearer',
-          expires_in: 3600,
+          AuthenticationResult: {
+            AccessToken: 'rotated-access-token',
+            IdToken: 'rotated-id-token',
+            ExpiresIn: 3600,
+          },
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       if (url.includes('/v1/me')) {
@@ -390,12 +397,14 @@ describe('BrowserPkceAdapter', () => {
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
-      if (url.includes('/oauth2/token')) {
+      if (url.includes('cognito-idp.ap-northeast-1.amazonaws.com')) {
         return new Response(JSON.stringify({
-          access_token: 'migrated-access-token',
-          refresh_token: 'migrated-refresh-token',
-          token_type: 'Bearer',
-          expires_in: 3600,
+          AuthenticationResult: {
+            AccessToken: 'migrated-access-token',
+            IdToken: 'migrated-id-token',
+            RefreshToken: 'migrated-refresh-token',
+            ExpiresIn: 3600,
+          },
         }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       if (url.includes('/v1/me')) {
@@ -423,21 +432,9 @@ describe('Production BrowserPkceAdapter', () => {
 
   beforeEach(() => {
     vi.resetModules()
-    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'browser-pkce')
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'cognito-direct')
     vi.stubEnv('VITE_COURSEBOARD_BROWSER_CLIENT_ID', 'local-prod-public')
-    vi.stubEnv('VITE_COURSEBOARD_BROWSER_REDIRECT_URI', 'http://127.0.0.1:5173/oauth/callback')
-    vi.stubEnv(
-      'VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT',
-      'https://api.n1.tachy.one/oauth2/login',
-    )
-    vi.stubEnv(
-      'VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT',
-      'https://api.n1.tachy.one/oauth2/authorize',
-    )
-    vi.stubEnv(
-      'VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT',
-      'https://api.n1.tachy.one/oauth2/token',
-    )
+    vi.stubEnv('VITE_COURSEBOARD_COGNITO_REGION', 'ap-northeast-1')
     vi.stubEnv('VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT', 'https://api.n1.tachy.one/v1/me')
     vi.stubEnv('VITE_COURSEBOARD_TENANT_ID', 'tn_01example')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'false')
@@ -462,7 +459,7 @@ describe('Production BrowserPkceAdapter', () => {
     vi.restoreAllMocks()
   })
 
-  it('selects browser-pkce with the React password form and no redirect', async () => {
+  it('selects Cognito direct auth with the React password form and no redirect', async () => {
     const { createAuthAdapter } = await import('./adapters')
     const adapter = createAuthAdapter()
 
@@ -470,17 +467,13 @@ describe('Production BrowserPkceAdapter', () => {
     expect(await adapter.bootstrap()).toEqual({ kind: 'anonymous' })
   })
 
-  it('rejects the removed Cognito Hosted UI mode', async () => {
-    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'cognito-pkce')
+  it('keeps browser-pkce as a migration alias for Cognito direct auth', async () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'browser-pkce')
     const { createAuthAdapter } = await import('./adapters')
-
-    expect(() => createAuthAdapter()).toThrow(
-      'VITE_COURSEBOARD_AUTH_MODE=browser-pkceを使用してください。',
-    )
+    expect(typeof createAuthAdapter().signInWithPassword).toBe('function')
   })
 
-  it('derives the redirect URI from the https origin when env is unset', async () => {
-    vi.stubEnv('VITE_COURSEBOARD_BROWSER_REDIRECT_URI', undefined)
+  it('uses Cognito direct auth on the production https origin', async () => {
     vi.stubGlobal('window', {
       location: {
         search: '',
@@ -497,31 +490,21 @@ describe('Production BrowserPkceAdapter', () => {
     expect(await adapter.bootstrap()).toEqual({ kind: 'anonymous' })
   })
 
-  it('accepts an https redirect URI and rejects non-callback paths', async () => {
-    vi.stubEnv(
-      'VITE_COURSEBOARD_BROWSER_REDIRECT_URI',
-      'https://courseboard.txcloud.app/oauth/callback',
-    )
+  it('does not require OAuth redirect or token endpoints', async () => {
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_REDIRECT_URI', undefined)
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT', undefined)
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT', undefined)
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT', undefined)
     const { createAuthAdapter } = await import('./adapters')
     const adapter = createAuthAdapter()
     expect(await adapter.bootstrap()).toEqual({ kind: 'anonymous' })
-
-    vi.resetModules()
-    vi.stubEnv(
-      'VITE_COURSEBOARD_BROWSER_REDIRECT_URI',
-      'https://courseboard.txcloud.app/other-path',
-    )
-    const rejected = await import('./adapters')
-    expect(() => rejected.createAuthAdapter()).toThrow(
-      '/oauth/callback を使用してください',
-    )
   })
 
-  it('restores a JSON PKCE session and loads the real user profile', async () => {
+  it('restores a Cognito session and loads the real user profile', async () => {
     const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
     localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
-      accessToken: 'tachyon-access-token',
-      refreshToken: 'tachyon-refresh-token',
+      accessToken: 'cognito-access-token',
+      refreshToken: 'cognito-refresh-token',
       accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
     }))
 
@@ -544,15 +527,15 @@ describe('Production BrowserPkceAdapter', () => {
       tenants: [{ id: 'tn_01example' }],
     })
     expect(result.kind === 'authenticated' && result.user.name).not.toBe('Local operator')
-    expect(await adapter.getAccessToken()).toBe('tachyon-access-token')
+    expect(await adapter.getAccessToken()).toBe('cognito-access-token')
   })
 
-  it('keeps a fresh JSON PKCE access token when force-refresh has no refresh token', async () => {
+  it('keeps a fresh Cognito access token when force-refresh has no refresh token', async () => {
     // False-positive path: navigation 401 → getAccessToken(true) must not discard
     // a usable access token just because Cognito omitted refresh_token.
     const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
     localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
-      accessToken: 'tachyon-access-only',
+      accessToken: 'cognito-access-only',
       accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
     }))
 
@@ -561,9 +544,9 @@ describe('Production BrowserPkceAdapter', () => {
     }))
 
     const adapter = createAuthAdapter()
-    expect(await adapter.getAccessToken(true)).toBe('tachyon-access-only')
+    expect(await adapter.getAccessToken(true)).toBe('cognito-access-only')
     expect(JSON.parse(localStorageMock.getItem(BROWSER_PKCE_SESSION_KEY) ?? '{}')).toMatchObject({
-      accessToken: 'tachyon-access-only',
+      accessToken: 'cognito-access-only',
     })
   })
 })
