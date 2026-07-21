@@ -39,6 +39,8 @@ ADR-0002のReact SPA、独立courseboard-api、非Hosted UIという判断は維
 - Tachyon独自issuerをFieldへ追加する変更は不要になる。
 - React/TauriはCognito AWS JSON protocolの小さなadapterを持つ。
 - public clientは`ALLOW_USER_PASSWORD_AUTH`と`ALLOW_REFRESH_TOKEN_AUTH`が必要になる。
+- redirect/scopesを持つclientのCognito provisioning互換のため`authorization_code`も
+  登録するが、Courseboard runtimeでは使用しない。
 - 既存localStorage session keyはsession移行を壊さないため名称を当面維持する。
 
 ## Alternatives Considered

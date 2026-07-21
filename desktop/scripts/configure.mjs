@@ -84,7 +84,9 @@ export function developmentUiClearValues(extraKeys = []) {
 const LOCAL_PKCE_REDIRECT_URI = 'http://127.0.0.1:5173/oauth/callback'
 const PKCE_FIELD_API_URL = 'https://tachyon-field-api.txcloud.app'
 const PKCE_REQUIRED_SCOPES = ['openid', 'profile', 'email']
-const PKCE_REQUIRED_GRANT_TYPES = ['password', 'refresh_token']
+// authorization_code is provisioning compatibility for clients that retain
+// redirect/scopes. The React/Tauri runtime uses only Cognito direct auth.
+const PKCE_REQUIRED_GRANT_TYPES = ['authorization_code', 'password', 'refresh_token']
 export const PRODUCTION_COGNITO_REGION = 'ap-northeast-1'
 export const PRODUCTION_COGNITO_ISSUER =
   'https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4'
