@@ -4,8 +4,8 @@ metadata:
   name: courseboard-local-pkce
   tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
 spec:
-  # Public PKCE client for local Vite (platform-ui style JSON authorize).
-  # redirect URI is nominal — /oauth2/authorize returns the code as JSON.
+  # Secretless public Cognito client used directly by the local React/Tauri form.
+  # The redirect URI is retained only because the provisioning schema requires one.
   clientType: public
   redirectUris:
     - http://127.0.0.1:5173/oauth/callback
@@ -15,5 +15,6 @@ spec:
     - email
   grantTypes:
     - authorization_code
+    - password
     - refresh_token
   useTachyonUserPool: true

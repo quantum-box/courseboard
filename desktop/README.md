@@ -101,14 +101,14 @@ Vite は `/v1/course/*` と `/field-api/*` を `http://127.0.0.1:8080` へ proxy
 
 #### 推奨: Reactパスワードログイン（実ユーザー）
 
-platform-uiのTauriアプリと同じReactフォームからTachyon User Poolへログインします。
+platform-uiのTauriアプリと同じReactフォームからCognito User Poolへ直接ログインします。
 
 ```bash
-# 1) JSON PKCE overlay（.env.local は触らない）
+# 1) Cognito direct overlay（.env.local は触らない）
 mise run courseboard:prod-api-pkce-env
 # 別 tenant: cd desktop && npm run configure -- prod-api-pkce --tenant-id tn_01…
 
-# 2) courseboard-apiをapi.n1.tachy.one issuerと表示されたclient idでredeploy
+# 2) courseboard-apiをCognito issuerと表示されたclient idでredeploy
 
 # 3) 既存の Vite (:5173) を自分で止めてから再起動
 #    （エージェントは :5173 を kill しません）
@@ -118,7 +118,8 @@ mise run courseboard:vite-prod-api
 開く URL: `http://127.0.0.1:5173`。React内のユーザー名・パスワード欄から
 ログインし、表示名が実ユーザー（**Local operatorではない**）になることを確認します。
 
-Redirect URI（クライアント登録必須）: `http://127.0.0.1:5173/oauth/callback`
+provisioning schema用redirect URI: `http://127.0.0.1:5173/oauth/callback`
+（direct auth自体はredirectやPKCEを使用しません）
 
 - Manifest: `.tachyon/manifests/courseboard-local-prod-pkce-oauth-client.yaml`
 - または Tachyonコンソールでpublic client
@@ -138,7 +139,7 @@ JWT は約1時間で切れるので `prod-api:env` を再実行してくださ�
 
 - Reactは`VITE_COURSEBOARD_API_BASE_URL`の本番`courseboard-api`を直接呼びます。
   Vite/Next.jsのBFFは使いません。
-- 本番course-apiのOIDCは`https://api.n1.tachy.one`、`EXPECTED_AUDIENCE`と
+- 本番course-apiのOIDCはCognito User Pool issuer、`EXPECTED_AUDIENCE`と
   `EXPECTED_CLIENT_ID`は`courseboard-local-prod-pkce`のpublic client IDです。
 - Cognito Hosted UI、Auth.js、外部browser redirectは使用しません。
 - そのデプロイの Field upstream は本番 Field です（local Field ではありません）。
@@ -149,32 +150,32 @@ JWT は約1時間で切れるので `prod-api:env` を再実行してくださ�
 
 テンプレート: `desktop/env.prod-api.local.example`
 
-### Live local → production Field（推奨・browser-pkce）
+### Live local → production Field（推奨・Cognito direct）
 
 ローカルの course-api (:8080) と Vite (:5173) を本番 Field
 (`https://tachyon-field-api.txcloud.app`) に繋ぎ、**実ユーザーでログイン**する手順です。
 **Auth.js / Cognito Hosted UI / 旧`web-host` (:3001) は削除済みです。**
 
-platform-ui と同じ Tachyon JSON PKCE です（ADR-0022）:
+platform-ui と同じ Cognito direct auth です（ADR-0003）。Hosted UI と Amplify は使いません:
 
 ```
 UI password form
-  → POST https://api.n1.tachy.one/oauth2/login          (session_token)
-  → POST https://api.n1.tachy.one/oauth2/authorize      (JSON + PKCE, no redirect)
-  → POST https://api.n1.tachy.one/oauth2/token          (access + refresh)
+  → Cognito InitiateAuth (USER_PASSWORD_AUTH)
+  → Cognito access / id / refresh token
   → GET  https://api.n1.tachy.one/v1/me
-  → Authorization: Bearer <Tachyon access> を local course-api へ
-  → course-api が OIDC (iss=https://api.n1.tachy.one) で検証
-  → 同じ inbound bearer を prod Field へ転送（CLI Cognito dual-token なし）
+  → Authorization: Bearer <Cognito access> を local course-api へ
+  → course-api が Cognito issuer / signature / token_use=access / client_id を検証
+  → 同じ Cognito access token を prod Field へ転送
 ```
 
 Field の `verify_user` は Tachyon Auth `POST /auth/v1beta/verify` に委譲します。
-Auth 側が Tachyon 発行 OAuth access token（`iss=api.n1.tachy.one`）を受け付ける必要が
-あります（`/v1/me` と同じ順序）。セッション切れは UI で再ログインしてください。
+Auth 側も同じ Cognito access token を検証します。Tachyon は人間ユーザー token を
+発行・再署名しません。セッション切れは Cognito refresh token で一度更新し、失敗時は
+UI で再ログインしてください。
 `TACHYON_FIELD_API_BEARER_TOKEN` / 毎時の `api-refresh` は不要です。
 
 ```bash
-# 0) Tachyon CLI にログイン済みであること（初回の public client 作成用のみ）
+# 0) Tachyon CLI にログイン済みであること（Cognito public client の作成・参照用のみ）
 tachyon auth login --profile admin
 
 # 1) gitignored env を生成（prod Field URL + OIDC audience。CLI Field bearer は書かない）
@@ -191,27 +192,25 @@ mise run courseboard:vite
 
 開く URL: `http://127.0.0.1:5173`
 
-ログイン画面で Tachyon User Pool の username / password を入力します。
+ログイン画面で Cognito User Pool の username / password を入力します。
 テナントは `/v1/me` の一覧から選びます（`tn_…`。ローカルデモ用 `courseboard_id` は不可）。
 
-登録必須の redirect URI（JSON authorize ではリダイレクトしませんが完全一致が必要）:
-
-`http://127.0.0.1:5173/oauth/callback`
-
-public client 名: `courseboard-local-pkce`（`npm run pkce:env` が作成/再利用）
+public client 名: `courseboard-local-pkce`（名前は互換性のため維持。`npm run pkce:env` が
+作成/再利用）。direct auth では redirect URI や PKCE verifier は使用しません。
 
 重要:
 
 - Vite は `/v1/course/*` と `/field-api/*` を **local course-api (:8080)** へ proxy します。
 - course-api は inbound の `Authorization`（ログイン token）+ `x-operator-id` を Field へ転送します。
-- `OIDC_ISSUER_URL=https://api.n1.tachy.one` + `EXPECTED_AUDIENCE=<public client id>` で
-  Tachyon `/oauth2/token` の access token（`iss`/`aud`）を検証します。Cognito issuer では検証できません。
+- `OIDC_ISSUER_URL=<Cognito User Pool issuer>` + `EXPECTED_AUDIENCE=<public client id>` で
+  Cognito access token の署名・`iss`・`token_use=access`・`client_id`を検証します。
 - Field / Tachyon Auth がログイン token を拒否すると、course-api は **502** を返します
   （401 をそのまま返さないので UI はセッション失効でログアウトしません）。再ログインしてください。
-- `TACHYON_FIELD_API_BEARER_TOKEN` は任意の静的 override（admin/service）のみ。browser-pkce では不要です。
+- `TACHYON_FIELD_API_BEARER_TOKEN` は任意の静的 override（admin/service）のみ。Cognito directでは不要です。
 - ルート `.env` に `COURSEBOARD_DEV_BEARER_TOKEN` が残っていると静的 verifier が優先されます。
   `export COURSEBOARD_DEV_BEARER_TOKEN=` で空にしてください。
-- 旧`VITE_AUTH_PROXY_TARGET`は使用しません。`npm run pkce:env`は残存値を空にします。
+- 旧`VITE_AUTH_PROXY_TARGET`とTachyon OAuth endpoint設定は使用しません。
+  `npm run pkce:env`は残存値を空にします。
 
 #### CLI JWT shortcut（ログイン UI なし）
 
@@ -272,9 +271,9 @@ iOS は Xcode toolchain、Android は JDK 17、Android SDK / NDK が必要です
 
 ## API と認証
 
-- Web/TauriはReact内でplatform-ui互換のパスワードログイン＋JSON PKCEを実行し、
+- Web/TauriはReact内でplatform-ui互換のCognito direct password authを実行し、
   `https://api.n1.tachy.one/v1/me`からユーザー・テナント情報を取得します。
-- ReactはTachyon Auth access tokenをBearerとして`courseboard-api`へ直接送り、
+- ReactはCognito access tokenをBearerとして`courseboard-api`へ直接送り、
   `/v1/course/*`、`/field-api/*`、Course Board固有endpointを呼びます。
 - Field API が 401 を返した場合は token refresh を1回だけ行い、再度失敗した場合は
   `expired` として logout します。403 は logout せず権限不足画面へ遷移します。
@@ -283,13 +282,12 @@ iOS は Xcode toolchain、Android は JDK 17、Android SDK / NDK が必要です
   制限付き`/field-api/*` proxyを呼びます。proxyは許可済みGolf ERP / invoice endpointだけを転送します。
 - `VITE_COURSEBOARD_AUTH_MODE=development` と `VITE_COURSEBOARD_API_BEARER` はローカル開発専用です。
   production bundle に token や client secret を埋め込まないでください。
-- Desktop / Mobile / Webは同じpublic clientを使います。Web CryptoでPKCE verifier / challenge / stateを生成し、
-  JSON authorizeが返したcodeをpublic clientのtoken endpointへ送ります。client secretは使用しません。
+- Desktop / Mobile / Webは同じCognito public clientを使い、`USER_PASSWORD_AUTH`と
+  `REFRESH_TOKEN_AUTH`を直接呼びます。client secretは使用しません。
 - Native productionも`VITE_COURSEBOARD_API_BASE_URL=https://courseboard-api.txcloud.app`を使います。
-  Tachyon Authのauthorization/token endpointは`https://api.n1.tachy.one/oauth2/*`、
-  profile endpointは`https://api.n1.tachy.one/v1/me`です。
+  Cognito tokenで呼ぶprofile endpointは`https://api.n1.tachy.one/v1/me`です。
 - 認証画面はReact内に留まり、Cognito Hosted UIやTauri opener/deep-link bridgeは使いません。
-- authorization / token / profile endpointを追加するときは、そのHTTPS originを`src-tauri/tauri.conf.json`のCSP
+- Cognito / profile endpointを追加するときは、そのHTTPS originを`src-tauri/tauri.conf.json`のCSP
   `connect-src`にも最小範囲で追加してください。
 
 ## Checks

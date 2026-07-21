@@ -6,8 +6,8 @@ metadata:
 spec:
   apps:
     # --- Shared React/Tauri frontend — Vite SPA on Worker Static Assets.
-    # React owns the platform-ui style password login + JSON PKCE flow and sends
-    # the resulting bearer directly to courseboard-api. No Hosted UI or BFF is deployed.
+    # React owns direct Cognito USER_PASSWORD_AUTH and sends the Cognito access
+    # token to courseboard-api. No Hosted UI, Amplify, or BFF is deployed.
     - name: courseboard
       repository:
         url: https://github.com/quantum-box/courseboard
@@ -19,7 +19,7 @@ spec:
       # itself is still the Vite-built React SPA served from static assets.
       framework: worker
       deploymentTarget: cloudflare_workers
-      # The React app performs the Tachyon User Pool JSON PKCE flow itself.
+      # The React app calls the secretless Cognito public client directly.
       auth:
         enabled: false
       watchPaths:
@@ -33,19 +33,13 @@ spec:
         - name: VITE_BASE_PATH
           value: /
         - name: VITE_COURSEBOARD_AUTH_MODE
-          value: browser-pkce
-        # OAuth client IDs are public identifiers. Never add a client secret to
+          value: cognito-direct
+        # Cognito client IDs are public identifiers. Never add a client secret to
         # this browser build.
         - name: VITE_COURSEBOARD_BROWSER_CLIENT_ID
           value: 5oafg9ptonbjumdh1pc7khirp1
-        - name: VITE_COURSEBOARD_BROWSER_REDIRECT_URI
-          value: https://courseboard.txcloud.app/oauth/callback
-        - name: VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT
-          value: https://api.n1.tachy.one/oauth2/login
-        - name: VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT
-          value: https://api.n1.tachy.one/oauth2/authorize
-        - name: VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT
-          value: https://api.n1.tachy.one/oauth2/token
+        - name: VITE_COURSEBOARD_COGNITO_REGION
+          value: ap-northeast-1
         - name: VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT
           value: https://api.n1.tachy.one/v1/me
         - name: VITE_COURSEBOARD_BROWSER_SCOPES
@@ -93,9 +87,9 @@ spec:
         - name: COURSEBOARD_PUBLIC_UI_BASE_URL
           value: https://courseboard.txcloud.app
         - name: OIDC_ISSUER_URL
-          value: https://api.n1.tachy.one
+          value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
         - name: EXPECTED_AUDIENCE
-          # Public client used by the platform-ui style JSON PKCE flow.
+          # Public Cognito client used directly by the React/Tauri form.
           value: 5oafg9ptonbjumdh1pc7khirp1
         - name: EXPECTED_CLIENT_ID
           value: 5oafg9ptonbjumdh1pc7khirp1
@@ -113,7 +107,7 @@ spec:
             - name: COURSEBOARD_PUBLIC_UI_BASE_URL
               value: https://courseboard.txcloud.app
             - name: OIDC_ISSUER_URL
-              value: https://api.n1.tachy.one
+              value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
             - name: EXPECTED_AUDIENCE
               value: 5oafg9ptonbjumdh1pc7khirp1
             - name: EXPECTED_CLIENT_ID

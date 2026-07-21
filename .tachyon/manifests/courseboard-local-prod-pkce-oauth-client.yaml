@@ -4,14 +4,12 @@ metadata:
   name: courseboard-local-prod-pkce
   tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
 spec:
-  # Public client for the platform-ui style React password login + JSON PKCE.
-  # courseboard-api validates the resulting api.n1.tachy.one issuer and this
-  # client id as its expected audience.
+  # Secretless public Cognito client used directly by the React/Tauri form.
+  # courseboard-api validates the Cognito issuer and this client id.
   clientType: public
   redirectUris:
     - http://127.0.0.1:5173/oauth/callback
-    # 本番web（courseboard.txcloud.app）のクライアントサイドCognito PKCE。
-    # SPAはlocation originから/oauth/callbackを導出する（adapters.ts）。
+    # Provisioning schema compatibility only; direct auth does not redirect.
     - https://courseboard.txcloud.app/oauth/callback
   allowedScopes:
     - openid
@@ -19,5 +17,6 @@ spec:
     - email
   grantTypes:
     - authorization_code
+    - password
     - refresh_token
   useTachyonUserPool: true

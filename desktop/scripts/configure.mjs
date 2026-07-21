@@ -36,7 +36,7 @@ function topUsage() {
   console.log(`Usage: node scripts/configure.mjs <command> [options]
 
 Commands:
-  pkce            Browser-pkce public client + .env.browser-pkce (preferred for local :8080)
+  pkce            Cognito public client + .env.browser-pkce (preferred for local :8080)
   field           CLI JWT shortcut → .env.prod-field + desktop/.env.local
   prod-api        Vite overlay → production courseboard-api (.env.prod-api.local)
                   --login password (real user) | --login cli (Local operator JWT)
@@ -52,6 +52,7 @@ Pass --help after a command for command-specific options.`)
 
 const BROWSER_PKCE_ENV_KEYS = [
   'VITE_COURSEBOARD_BROWSER_CLIENT_ID',
+  'VITE_COURSEBOARD_COGNITO_REGION',
   'VITE_COURSEBOARD_BROWSER_REDIRECT_URI',
   'VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT',
   'VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT',
@@ -64,7 +65,7 @@ const BROWSER_PKCE_ENV_KEYS = [
  *
  * Vite loads `.env.local` in every mode and only lets `.env.[mode].local`
  * win for keys that are present. Removing browser-pkce keys from an overlay
- * leaves stale values from `.env.local`; write `KEY=` so the overlay wins.
+ * leaves stale auth values from `.env.local`; write `KEY=` so the overlay wins.
  */
 export function developmentUiClearValues(extraKeys = []) {
   const cleared = {
@@ -83,7 +84,12 @@ export function developmentUiClearValues(extraKeys = []) {
 const LOCAL_PKCE_REDIRECT_URI = 'http://127.0.0.1:5173/oauth/callback'
 const PKCE_FIELD_API_URL = 'https://tachyon-field-api.txcloud.app'
 const PKCE_REQUIRED_SCOPES = ['openid', 'profile', 'email']
-const PKCE_REQUIRED_GRANT_TYPES = ['authorization_code', 'refresh_token']
+// authorization_code is provisioning compatibility for clients that retain
+// redirect/scopes. The React/Tauri runtime uses only Cognito direct auth.
+const PKCE_REQUIRED_GRANT_TYPES = ['authorization_code', 'password', 'refresh_token']
+export const PRODUCTION_COGNITO_REGION = 'ap-northeast-1'
+export const PRODUCTION_COGNITO_ISSUER =
+  'https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4'
 const AUTHJS_UI_ENV_KEYS = [
   'VITE_AUTH_PROXY_TARGET',
   'VITE_COURSEBOARD_API_BEARER',
@@ -106,8 +112,8 @@ function pkceUsage() {
   console.log(`Usage: npm run pkce:env -- [options]
        node scripts/configure.mjs pkce [options]
 
-Configure local Vite for browser-pkce (Tachyon /oauth2/login + JSON PKCE)
-and course-api OIDC verification against production Field (inbound login bearer).
+Configure local Vite for direct Cognito password/refresh auth and course-api
+OIDC verification against production Field (inbound login bearer).
 
 Options:
   --profile <name>        Tachyon CLI profile (default: active profile)
@@ -115,7 +121,7 @@ Options:
   --client-name <name>    Public OAuth client name (default: courseboard-local-pkce)
   --ui-env-file <path>    Vite env file (default: .env.local)
   --api-env-file <path>   course-api env file (default: ../.env.browser-pkce)
-  --callback-url <url>    Registered redirect URI (nominal; JSON authorize does not redirect)
+  --callback-url <url>    Provisioning-only redirect URI (direct auth does not redirect)
   --api-url <url>         Tachyon API base URL
   --dry-run               Validate and report without creating or writing
   --help                  Show this help`)
@@ -164,21 +170,22 @@ async function createPublicClient({ accessToken, apiUrl, callbackUrl, clientName
         clientType: 'public',
       }),
     },
-    'Create local PKCE public client',
+    'Create local Cognito public client',
   )
 }
 
 async function updatePkceClient({ accessToken, apiUrl, callbackUrl, client, tenantId }) {
   const redirectUris = [...new Set([...client.redirectUris, callbackUrl])]
   const allowedScopes = [...new Set([...client.allowedScopes, ...PKCE_REQUIRED_SCOPES])]
+  const grantTypes = [...new Set([...(client.grantTypes ?? []), ...PKCE_REQUIRED_GRANT_TYPES])]
   return requestJson(
     `${apiUrl.replace(/\/$/, '')}/v1/auth/oauth2-clients/${client.id}`,
     {
       method: 'PUT',
       headers: authHeaders(accessToken, tenantId, { 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ redirectUris, allowedScopes }),
+      body: JSON.stringify({ redirectUris, allowedScopes, grantTypes }),
     },
-    'Update local PKCE public client',
+    'Update local Cognito public client',
   )
 }
 
@@ -208,7 +215,7 @@ export async function ensurePublicClient(options, accessToken) {
       tenantId: options.ownerTenantId,
     })
     if (!created.clientId) {
-      throw new Error('Tachyon did not return a local PKCE public client id.')
+      throw new Error('Tachyon did not return a local Cognito public client id.')
     }
     if (created.clientSecret) {
       throw new Error('Public client unexpectedly returned a client secret. Check clientType=public.')
@@ -220,12 +227,9 @@ export async function ensurePublicClient(options, accessToken) {
   if (!client.useTachyonUserPool) {
     throw new Error(`OAuth client '${options.clientName}' does not use Tachyon User Pool.`)
   }
-  if (!hasRequiredValues(client.grantTypes ?? [], ['authorization_code'])) {
-    throw new Error(
-      `OAuth client '${options.clientName}' does not allow authorization_code grant.`,
-    )
-  }
-  if (!client.redirectUris?.includes(options.callbackUrl)) {
+  const needsUpdate = !client.redirectUris?.includes(options.callbackUrl)
+    || !hasRequiredValues(client.grantTypes ?? [], PKCE_REQUIRED_GRANT_TYPES)
+  if (needsUpdate) {
     if (options.dryRun) {
       return { action: 'update', clientId: client.clientId }
     }
@@ -273,7 +277,7 @@ export async function runPkce(argv = []) {
 
   if (options.dryRun) {
     console.log(`Validated Tachyon profile '${profile}'.`)
-    console.log(`Local PKCE public client action: ${localClient.action}.`)
+    console.log(`Local Cognito public client action: ${localClient.action}.`)
     console.log(`Would configure ${options.uiEnvFile} and ${options.apiEnvFile}.`)
     return
   }
@@ -282,14 +286,10 @@ export async function runPkce(argv = []) {
   const uiPath = writeEnvFile(
     options.uiEnvFile,
     {
-      VITE_COURSEBOARD_AUTH_MODE: 'browser-pkce',
+      VITE_COURSEBOARD_AUTH_MODE: 'cognito-direct',
       VITE_COURSEBOARD_BROWSER_CLIENT_ID: localClient.clientId,
-      VITE_COURSEBOARD_BROWSER_REDIRECT_URI: options.callbackUrl,
-      VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: `${apiBase}/oauth2/login`,
-      VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: `${apiBase}/oauth2/authorize`,
-      VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: `${apiBase}/oauth2/token`,
+      VITE_COURSEBOARD_COGNITO_REGION: PRODUCTION_COGNITO_REGION,
       VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: `${apiBase}/v1/me`,
-      VITE_COURSEBOARD_BROWSER_SCOPES: PKCE_REQUIRED_SCOPES.join(' '),
       VITE_COURSEBOARD_TENANT_ID: options.tenantId,
       VITE_COURSEBOARD_OPERATOR_ID: options.tenantId,
       VITE_COURSEBOARD_MOCK_DATA: 'false',
@@ -305,8 +305,9 @@ export async function runPkce(argv = []) {
       DATABASE_URL: 'sqlite:///tmp/courseboard-local.db',
       COURSEBOARD_PUBLIC_UI_BASE_URL: 'http://127.0.0.1:8080/ui/index.html',
       TACHYON_FIELD_API_URL: PKCE_FIELD_API_URL,
-      OIDC_ISSUER_URL: apiBase,
+      OIDC_ISSUER_URL: PRODUCTION_COGNITO_ISSUER,
       EXPECTED_AUDIENCE: localClient.clientId,
+      EXPECTED_CLIENT_ID: localClient.clientId,
     },
     PKCE_COURSE_API_STATIC_BEARER_KEYS,
   )
@@ -316,8 +317,7 @@ export async function runPkce(argv = []) {
   console.log(`OAuth public client: ${options.clientName} (${localClient.clientId})`)
   console.log(`OAuth client action: ${localClient.action}`)
   console.log(`Default tenant (x-operator-id): ${options.tenantId}`)
-  console.log('Auth mode: browser-pkce (Tachyon /oauth2/login + JSON PKCE). No Auth.js.')
-  console.log(`Nominal redirect URI (must match registration): ${options.callbackUrl}`)
+  console.log('Auth mode: cognito-direct (React USER_PASSWORD_AUTH). No Auth.js or Hosted UI.')
   console.log('')
   console.log('Start course-api (terminal 1):')
   console.log('  mise run courseboard:api')
@@ -331,7 +331,7 @@ export async function runPkce(argv = []) {
     'If course-api still logs the static bearer verifier, comment out COURSEBOARD_DEV_BEARER_TOKEN in the repo-root .env (dotenvy loads it).',
   )
   console.log(
-    'Outbound Field calls use the browser-pkce login bearer (same token as course-api OIDC). Re-login in the UI when the session expires — no hourly CLI token refresh.',
+    'Outbound Field calls use the Cognito login bearer (same token as course-api OIDC). Refresh is handled directly with Cognito.',
   )
 }
 
@@ -487,12 +487,11 @@ export async function runField(argv = []) {
 
 export const PROD_COURSEBOARD_API_URL = 'https://courseboard-api.txcloud.app'
 export const PROD_API_AUTH_BASE = 'https://api.n1.tachy.one'
-/** Deployed JSON PKCE client / prod Lambda EXPECTED_AUDIENCE (public identifier). */
+/** Deployed Cognito public client / prod Lambda EXPECTED_AUDIENCE. */
 export const PROD_API_EXPECTED_AUDIENCE = '5oafg9ptonbjumdh1pc7khirp1'
 export const PROD_API_PUBLIC_CLIENT_NAME = 'courseboard-local-prod-pkce'
 export const PROD_API_LOGIN_MODES = ['cli', 'password']
 const PROD_API_FIELD_URL = 'https://tachyon-field-api.txcloud.app'
-const PROD_API_PKCE_SCOPES = ['openid', 'profile', 'email']
 const PROD_API_OWNER_TENANT_ID = 'tn_01ks18jhh1xvggktfzjx5jqsen'
 
 const prodApiDefaults = {
@@ -515,10 +514,10 @@ Write gitignored desktop/.env.prod-api.local so Vite (--mode prod-api) calls
 production courseboard-api directly
 (${PROD_COURSEBOARD_API_URL}).
 
-Does NOT modify desktop/.env.local (browser-pkce / local :8080 stays intact).
+Does NOT modify desktop/.env.local (Cognito-direct / local :8080 stays intact).
 
 Login modes (--login):
-  password  React password form + Tachyon JSON PKCE (real user; AUTH_MODE=browser-pkce). Preferred.
+  password  React password form + direct Cognito auth (real user; AUTH_MODE=cognito-direct). Preferred.
             Alias: npm run prod-api:pkce-env / configure prod-api-pkce
   cli       DevelopmentAdapter + Tachyon CLI Cognito JWT (shows "Local operator").
 
@@ -527,7 +526,7 @@ Options:
   --profile <name>         Tachyon CLI profile (default: active profile)
   --tenant-id <id>         x-operator-id / tenant fallback (must be tn_…)
   --client-name <name>     Public OAuth client for password login (default: ${PROD_API_PUBLIC_CLIENT_NAME})
-  --callback-url <url>     Nominal JSON PKCE redirect URI (default: ${LOCAL_PKCE_REDIRECT_URI})
+  --callback-url <url>     Provisioning-only redirect URI (default: ${LOCAL_PKCE_REDIRECT_URI})
   --api-url <url>          Tachyon API base for OAuth client registration (default: api.n1)
   --course-api-url <url>   CourseBoard API base (default: production)
   --field-api-url <url>    Field smoke URL only (default: production Field; cli mode)
@@ -564,23 +563,18 @@ export function parseProdApiArgs(argv, environment = process.env) {
   return options
 }
 
-/** Overlay values for platform-ui style JSON PKCE → prod courseboard-api. */
+/** Overlay values for direct Cognito auth → prod courseboard-api. */
 export function browserPkceProdApiUiValues({
   clientId,
-  callbackUrl,
   courseApiUrl,
   tenantId,
 }) {
   const apiBase = courseApiUrl.replace(/\/$/, '')
   return {
-    VITE_COURSEBOARD_AUTH_MODE: 'browser-pkce',
+    VITE_COURSEBOARD_AUTH_MODE: 'cognito-direct',
     VITE_COURSEBOARD_BROWSER_CLIENT_ID: clientId,
-    VITE_COURSEBOARD_BROWSER_REDIRECT_URI: callbackUrl,
-    VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: `${PROD_API_AUTH_BASE}/oauth2/login`,
-    VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: `${PROD_API_AUTH_BASE}/oauth2/authorize`,
-    VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: `${PROD_API_AUTH_BASE}/oauth2/token`,
+    VITE_COURSEBOARD_COGNITO_REGION: PRODUCTION_COGNITO_REGION,
     VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: `${PROD_API_AUTH_BASE}/v1/me`,
-    VITE_COURSEBOARD_BROWSER_SCOPES: PROD_API_PKCE_SCOPES.join(' '),
     VITE_COURSEBOARD_API_BEARER: '',
     VITE_COURSEBOARD_API_BASE_URL: apiBase,
     VITE_COURSEBOARD_TENANT_ID: tenantId,
@@ -699,7 +693,7 @@ async function runProdApiCli(options, profile, credentials, tenantId) {
   }
   console.log(`Token expires in: ${expiresIn ?? 'unknown'}s`)
   console.log('')
-  console.log('desktop/.env.local was NOT modified (browser-pkce / :8080 config kept).')
+  console.log('desktop/.env.local was NOT modified (Cognito-direct / :8080 config kept).')
   console.log('')
   console.log('Restart Vite yourself (agents will not kill :5173):')
   console.log('  mise run courseboard:vite-prod-api')
@@ -735,7 +729,7 @@ async function runProdApiPassword(options, profile, credentials, tenantId) {
 
   if (options.dryRun) {
     console.log(`Validated Tachyon profile '${profile}'.`)
-    console.log(`Login mode: password (React form + JSON PKCE; not Local operator)`)
+    console.log(`Login mode: password (React form + direct Cognito; not Local operator)`)
     console.log(`Course API: ${options.courseApiUrl}`)
     console.log(`Public client action: ${localClient.action}`)
     console.log(`Tenant fallback (x-operator-id): ${tenantId}`)
@@ -757,12 +751,11 @@ async function runProdApiPassword(options, profile, credentials, tenantId) {
 
   console.log(`Configured ${uiPath}`)
   console.log(`Profile: ${profile}`)
-  console.log(`Login mode: browser-pkce (React password form; real user)`)
+  console.log(`Login mode: cognito-direct (React password form; real user)`)
   console.log(`Course API proxy target: ${options.courseApiUrl}`)
   console.log(`OAuth public client: ${options.clientName} (${localClient.clientId})`)
   console.log(`OAuth client action: ${localClient.action}`)
   console.log(`Tenant fallback (x-operator-id): ${tenantId}`)
-  console.log(`Nominal redirect URI: ${options.callbackUrl}`)
   console.log('')
   console.log('desktop/.env.local was NOT modified (browser-pkce / :8080 config kept).')
   console.log('')
@@ -775,18 +768,14 @@ async function runProdApiPassword(options, profile, credentials, tenantId) {
   console.log('You should see your real user name — not "Local operator".')
   console.log('')
   console.log('=== Required once: configure prod courseboard-api for this public client ===')
-  console.log('1. Set OIDC_ISSUER_URL=https://api.n1.tachy.one.')
+  console.log(`1. Set OIDC_ISSUER_URL=${PRODUCTION_COGNITO_ISSUER}.`)
   console.log(`2. Set EXPECTED_AUDIENCE and EXPECTED_CLIENT_ID to ${localClient.clientId}.`)
   console.log('3. Redeploy courseboard-api so Lambda picks up the verifier configuration.')
-  console.log('4. Ensure the Tachyon OAuth public client allows redirect:')
-  console.log(`     ${options.callbackUrl}`)
-  console.log(`   Manifest: .tachyon/manifests/courseboard-local-prod-pkce-oauth-client.yaml`)
-  console.log('   Or Tachyon console → OAuth2 clients → '
-    + `${options.clientName} → add the redirect URI.`)
+  console.log('4. Ensure the public Cognito client allows USER_PASSWORD_AUTH and REFRESH_TOKEN_AUTH.')
   console.log('')
   console.log('Auth notes:')
-  console.log('- AUTH_MODE=browser-pkce; VITE_COURSEBOARD_API_BEARER is cleared.')
-  console.log('- Tokens use the Tachyon Auth issuer (iss=https://api.n1.tachy.one).')
+  console.log('- AUTH_MODE=cognito-direct; VITE_COURSEBOARD_API_BEARER is cleared.')
+  console.log(`- Tokens use the Cognito issuer (${PRODUCTION_COGNITO_ISSUER}).`)
   console.log('- Cognito Hosted UI is not used.')
   console.log('- Browser requests courseboard-api directly; production/local origins must pass API CORS.')
 }

@@ -9,6 +9,8 @@ import {
   PROD_API_AUTH_BASE,
   PROD_API_PUBLIC_CLIENT_NAME,
   PROD_COURSEBOARD_API_URL,
+  PRODUCTION_COGNITO_ISSUER,
+  PRODUCTION_COGNITO_REGION,
   updateEnvContent,
 } from './configure.mjs'
 
@@ -60,16 +62,18 @@ describe('configure pkce', () => {
     const updated = updateEnvContent(
       'COURSEBOARD_DEV_BEARER_TOKEN=stale\nTACHYON_FIELD_API_URL=https://example.test\n',
       {
-        OIDC_ISSUER_URL: 'https://api.n1.tachy.one',
+        OIDC_ISSUER_URL: PRODUCTION_COGNITO_ISSUER,
         EXPECTED_AUDIENCE: 'local-pkce-client',
+        EXPECTED_CLIENT_ID: 'local-pkce-client',
         TACHYON_FIELD_API_URL: 'https://tachyon-field-api.txcloud.app',
       },
       ['COURSEBOARD_DEV_BEARER_TOKEN'],
     )
 
     expect(parseEnvFile(updated)).toEqual({
-      OIDC_ISSUER_URL: 'https://api.n1.tachy.one',
+      OIDC_ISSUER_URL: PRODUCTION_COGNITO_ISSUER,
       EXPECTED_AUDIENCE: 'local-pkce-client',
+      EXPECTED_CLIENT_ID: 'local-pkce-client',
       TACHYON_FIELD_API_URL: 'https://tachyon-field-api.txcloud.app',
     })
   })
@@ -78,21 +82,23 @@ describe('configure pkce', () => {
     const updated = updateEnvContent(
       [
         'TACHYON_FIELD_API_BEARER_TOKEN=stale-cli-cognito',
-        'OIDC_ISSUER_URL=https://api.n1.tachy.one',
+        `OIDC_ISSUER_URL=${PRODUCTION_COGNITO_ISSUER}`,
         'EXPECTED_AUDIENCE=old-client',
         '',
       ].join('\n'),
       {
-        OIDC_ISSUER_URL: 'https://api.n1.tachy.one',
+        OIDC_ISSUER_URL: PRODUCTION_COGNITO_ISSUER,
         EXPECTED_AUDIENCE: 'local-pkce-client',
+        EXPECTED_CLIENT_ID: 'local-pkce-client',
         TACHYON_FIELD_API_URL: 'https://tachyon-field-api.txcloud.app',
       },
       ['COURSEBOARD_DEV_BEARER_TOKEN', 'TACHYON_FIELD_API_BEARER_TOKEN'],
     )
 
     expect(parseEnvFile(updated)).toEqual({
-      OIDC_ISSUER_URL: 'https://api.n1.tachy.one',
+      OIDC_ISSUER_URL: PRODUCTION_COGNITO_ISSUER,
       EXPECTED_AUDIENCE: 'local-pkce-client',
+      EXPECTED_CLIENT_ID: 'local-pkce-client',
       TACHYON_FIELD_API_URL: 'https://tachyon-field-api.txcloud.app',
     })
   })
@@ -238,7 +244,7 @@ describe('configure prod-api', () => {
     expect(updated).toContain('VITE_COURSEBOARD_BROWSER_CLIENT_ID=\n')
   })
 
-  it('writes browser-pkce overlay without Local operator bearer', () => {
+  it('writes Cognito direct overlay without Local operator bearer', () => {
     const values = browserPkceProdApiUiValues({
       clientId: 'local-prod-public',
       callbackUrl: 'http://127.0.0.1:5173/oauth/callback',
@@ -246,13 +252,11 @@ describe('configure prod-api', () => {
       tenantId: 'tn_01example',
     })
     expect(values).toMatchObject({
-      VITE_COURSEBOARD_AUTH_MODE: 'browser-pkce',
+      VITE_COURSEBOARD_AUTH_MODE: 'cognito-direct',
       VITE_COURSEBOARD_BROWSER_CLIENT_ID: 'local-prod-public',
-      VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT:
-        `${PROD_API_AUTH_BASE}/oauth2/authorize`,
-      VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: `${PROD_API_AUTH_BASE}/oauth2/token`,
+      VITE_COURSEBOARD_COGNITO_REGION: PRODUCTION_COGNITO_REGION,
       VITE_COURSEBOARD_API_BEARER: '',
-      VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: `${PROD_API_AUTH_BASE}/oauth2/login`,
+      VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: `${PROD_API_AUTH_BASE}/v1/me`,
       VITE_DEV_API_PROXY_TARGET: '',
       VITE_COURSEBOARD_API_BASE_URL: PROD_COURSEBOARD_API_URL,
     })
@@ -268,7 +272,7 @@ describe('configure prod-api', () => {
       values,
     )
     const parsed = parseEnvFile(updated)
-    expect(parsed.VITE_COURSEBOARD_AUTH_MODE).toBe('browser-pkce')
+    expect(parsed.VITE_COURSEBOARD_AUTH_MODE).toBe('cognito-direct')
     expect(parsed.VITE_COURSEBOARD_API_BEARER).toBe('')
     expect(parsed.VITE_COURSEBOARD_BROWSER_CLIENT_ID).toBe('local-prod-public')
     expect(parsed.OTHER).toBe('keep')
