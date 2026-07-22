@@ -9,7 +9,6 @@ use crate::{
 };
 
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:8080";
-const DEFAULT_DATABASE_URL: &str = "sqlite://courseboard.db";
 const DEFAULT_PUBLIC_UI_BASE_URL: &str = "http://localhost:5173";
 const DEFAULT_SMS_SENDER_NAME: &str = "Course Board";
 const PRODUCTION_COGNITO_ISSUER_URL: &str =
@@ -33,7 +32,7 @@ pub const EMPTY_COURSE_STORE_URL: &str = "empty://local";
 pub struct RuntimeConfig {
     #[arg(long, env = "BIND_ADDR", default_value = DEFAULT_BIND_ADDR)]
     pub bind_addr: SocketAddr,
-    #[arg(long, env = "DATABASE_URL", default_value = DEFAULT_DATABASE_URL)]
+    #[arg(long, env = "DATABASE_URL")]
     pub database_url: String,
     #[arg(long, env = "COURSEBOARD_DEV_BEARER_TOKEN")]
     pub dev_bearer_token: Option<String>,
@@ -195,7 +194,7 @@ impl Default for RuntimeConfig {
             bind_addr: DEFAULT_BIND_ADDR
                 .parse()
                 .expect("default bind address must be valid"),
-            database_url: DEFAULT_DATABASE_URL.to_string(),
+            database_url: String::new(),
             dev_bearer_token: None,
             oidc_issuer_url: None,
             tachyon_auth_issuer_url: None,

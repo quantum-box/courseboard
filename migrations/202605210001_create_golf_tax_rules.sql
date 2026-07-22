@@ -1,27 +1,30 @@
 CREATE TABLE tenants (
-    id TEXT PRIMARY KEY,
-    display_name TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
+    id VARCHAR(64) PRIMARY KEY,
+    display_name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+) DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 CREATE TABLE golf_tax_rules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant_id TEXT NOT NULL,
-    prefecture TEXT NOT NULL,
-    course_grade TEXT NOT NULL,
-    fee INTEGER NOT NULL CHECK (fee >= 0),
-    minor_exempt_under_age INTEGER NOT NULL CHECK (minor_exempt_under_age > 0),
-    senior_exempt_min_age INTEGER NOT NULL CHECK (senior_exempt_min_age > 0),
-    disability_cert_exempt INTEGER NOT NULL DEFAULT 1 CHECK (disability_cert_exempt IN (0, 1)),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (tenant_id) REFERENCES tenants(id),
-    UNIQUE (tenant_id, prefecture, course_grade)
-);
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tenant_id VARCHAR(64) NOT NULL,
+    prefecture VARCHAR(64) NOT NULL,
+    course_grade VARCHAR(32) NOT NULL,
+    fee BIGINT NOT NULL,
+    minor_exempt_under_age BIGINT NOT NULL,
+    senior_exempt_min_age BIGINT NOT NULL,
+    disability_cert_exempt BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT chk_golf_tax_rules_fee CHECK (fee >= 0),
+    CONSTRAINT chk_golf_tax_rules_minor_age CHECK (minor_exempt_under_age > 0),
+    CONSTRAINT chk_golf_tax_rules_senior_age CHECK (senior_exempt_min_age > 0),
+    CONSTRAINT fk_golf_tax_rules_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+    UNIQUE KEY uq_golf_tax_rules_tenant_prefecture_grade (tenant_id, prefecture, course_grade)
+) DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 INSERT INTO tenants (id, display_name)
 VALUES ('scc', 'SCC')
-ON CONFLICT (id) DO UPDATE SET display_name = excluded.display_name;
+ON DUPLICATE KEY UPDATE display_name = VALUES(display_name);
 
 INSERT INTO golf_tax_rules (
     tenant_id,
@@ -33,9 +36,9 @@ INSERT INTO golf_tax_rules (
     disability_cert_exempt
 )
 VALUES ('scc', 'hokkaido', 'A', 400, 18, 70, 1)
-ON CONFLICT (tenant_id, prefecture, course_grade) DO UPDATE SET
-    fee = excluded.fee,
-    minor_exempt_under_age = excluded.minor_exempt_under_age,
-    senior_exempt_min_age = excluded.senior_exempt_min_age,
-    disability_cert_exempt = excluded.disability_cert_exempt,
-    updated_at = CURRENT_TIMESTAMP;
+ON DUPLICATE KEY UPDATE
+    fee = VALUES(fee),
+    minor_exempt_under_age = VALUES(minor_exempt_under_age),
+    senior_exempt_min_age = VALUES(senior_exempt_min_age),
+    disability_cert_exempt = VALUES(disability_cert_exempt),
+    updated_at = CURRENT_TIMESTAMP(6);

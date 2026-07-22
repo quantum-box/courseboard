@@ -8,7 +8,7 @@ use axum::{
 };
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, SqlitePool};
+use sqlx::{FromRow, MySqlPool};
 
 use crate::{field_api::DEFAULT_FIELD_API_URL, AppError};
 
@@ -60,12 +60,12 @@ impl Default for CancellationFeeConfig {
 }
 
 #[derive(Clone)]
-pub struct SqliteCancellationFeeRepository {
-    pool: SqlitePool,
+pub struct MySqlCancellationFeeRepository {
+    pool: MySqlPool,
 }
 
-impl SqliteCancellationFeeRepository {
-    pub fn new(pool: SqlitePool) -> Self {
+impl MySqlCancellationFeeRepository {
+    pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
     }
 
@@ -89,7 +89,7 @@ impl SqliteCancellationFeeRepository {
                 field_invoice_payment_url,
                 sms_message
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(input.id)
@@ -127,7 +127,7 @@ impl SqliteCancellationFeeRepository {
                 customer_phone,
                 amount,
                 currency,
-                due_date,
+                CAST(due_date AS CHAR) AS due_date,
                 reason,
                 notes,
                 public_token,
@@ -141,11 +141,11 @@ impl SqliteCancellationFeeRepository {
                 sms_error,
                 stripe_payment_intent_id,
                 stripe_client_secret,
-                paid_at,
-                created_at,
-                updated_at
+                CAST(paid_at AS CHAR) AS paid_at,
+                CAST(created_at AS CHAR) AS created_at,
+                CAST(updated_at AS CHAR) AS updated_at
             FROM cancellation_fee_collections
-            WHERE public_token = ?1
+            WHERE public_token = ?
             "#,
         )
         .bind(token)
@@ -165,17 +165,17 @@ impl SqliteCancellationFeeRepository {
         sqlx::query(
             r#"
             UPDATE cancellation_fee_collections
-            SET sms_status = ?2,
-                sms_provider_message_id = ?3,
-                sms_error = ?4,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?1
+            SET sms_status = ?,
+                sms_provider_message_id = ?,
+                sms_error = ?,
+                updated_at = CURRENT_TIMESTAMP(6)
+            WHERE id = ?
             "#,
         )
-        .bind(id)
         .bind(status)
         .bind(provider_message_id)
         .bind(error)
+        .bind(id)
         .execute(&self.pool)
         .await?;
 
@@ -191,15 +191,15 @@ impl SqliteCancellationFeeRepository {
         sqlx::query(
             r#"
             UPDATE cancellation_fee_collections
-            SET stripe_payment_intent_id = ?2,
-                stripe_client_secret = ?3,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?1
+            SET stripe_payment_intent_id = ?,
+                stripe_client_secret = ?,
+                updated_at = CURRENT_TIMESTAMP(6)
+            WHERE id = ?
             "#,
         )
-        .bind(id)
         .bind(payment_intent_id)
         .bind(client_secret)
+        .bind(id)
         .execute(&self.pool)
         .await?;
 
@@ -211,9 +211,9 @@ impl SqliteCancellationFeeRepository {
             r#"
             UPDATE cancellation_fee_collections
             SET status = 'paid',
-                paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP),
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?1
+                paid_at = COALESCE(paid_at, CURRENT_TIMESTAMP(6)),
+                updated_at = CURRENT_TIMESTAMP(6)
+            WHERE id = ?
             "#,
         )
         .bind(id)
@@ -347,7 +347,7 @@ pub struct ConfirmStripePaymentResponse {
 }
 
 pub async fn create_collection(
-    State(repository): State<std::sync::Arc<SqliteCancellationFeeRepository>>,
+    State(repository): State<std::sync::Arc<MySqlCancellationFeeRepository>>,
     State(config): State<CancellationFeeConfig>,
     State(http_client): State<reqwest::Client>,
     headers: HeaderMap,
@@ -456,7 +456,7 @@ pub async fn create_collection(
 }
 
 pub async fn get_public_collection(
-    State(repository): State<std::sync::Arc<SqliteCancellationFeeRepository>>,
+    State(repository): State<std::sync::Arc<MySqlCancellationFeeRepository>>,
     State(config): State<CancellationFeeConfig>,
     State(http_client): State<reqwest::Client>,
     Path(token): Path<String>,
@@ -472,7 +472,7 @@ pub async fn get_public_collection(
 }
 
 pub async fn create_stripe_payment_intent(
-    State(repository): State<std::sync::Arc<SqliteCancellationFeeRepository>>,
+    State(repository): State<std::sync::Arc<MySqlCancellationFeeRepository>>,
     State(config): State<CancellationFeeConfig>,
     State(http_client): State<reqwest::Client>,
     Path(token): Path<String>,
@@ -515,7 +515,7 @@ pub async fn create_stripe_payment_intent(
 }
 
 pub async fn confirm_stripe_payment(
-    State(repository): State<std::sync::Arc<SqliteCancellationFeeRepository>>,
+    State(repository): State<std::sync::Arc<MySqlCancellationFeeRepository>>,
     State(config): State<CancellationFeeConfig>,
     State(http_client): State<reqwest::Client>,
     Path(token): Path<String>,
@@ -763,7 +763,7 @@ async fn field_invoice_stripe_publishable_key(
 }
 
 async fn maybe_sync_paid_status_from_field(
-    repository: &SqliteCancellationFeeRepository,
+    repository: &MySqlCancellationFeeRepository,
     http_client: &reqwest::Client,
     config: &CancellationFeeConfig,
     collection: CancellationFeeCollection,

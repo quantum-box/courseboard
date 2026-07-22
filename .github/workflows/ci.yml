@@ -11,6 +11,11 @@ jobs:
   rust:
     name: Rust
     runs-on: ubuntu-latest
+    services:
+      tidb:
+        image: pingcap/tidb:v8.5.7
+        ports:
+          - 4000:4000
 
     steps:
       - name: Checkout

@@ -25,12 +25,12 @@ use axum::{
     routing::{delete, get, patch, post},
     Json, Router,
 };
-use cancellation_fees::{CancellationFeeConfig, SqliteCancellationFeeRepository};
+use cancellation_fees::{CancellationFeeConfig, MySqlCancellationFeeRepository};
 use config::RuntimeConfig;
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
-use sqlx::{migrate::Migrator, FromRow, SqlitePool};
+use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
+use sqlx::{migrate::Migrator, FromRow, MySqlPool};
 use thiserror::Error;
 use tower_http::{
     cors::{AllowOrigin, CorsLayer},
@@ -45,8 +45,8 @@ static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
 #[derive(Clone)]
 pub struct AppState {
-    rules: Arc<SqliteTaxRuleRepository>,
-    cancellation_fees: Arc<SqliteCancellationFeeRepository>,
+    rules: Arc<MySqlTaxRuleRepository>,
+    cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     cancellation_fee_config: CancellationFeeConfig,
     http_client: reqwest::Client,
     token_verifier: Arc<dyn TokenVerifier>,
@@ -55,7 +55,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(pool: SqlitePool, token_verifier: Arc<dyn TokenVerifier>) -> Self {
+    pub fn new(pool: MySqlPool, token_verifier: Arc<dyn TokenVerifier>) -> Self {
         Self::new_with_cancellation_fee_config(
             pool,
             token_verifier,
@@ -64,13 +64,13 @@ impl AppState {
     }
 
     pub fn new_with_cancellation_fee_config(
-        pool: SqlitePool,
+        pool: MySqlPool,
         token_verifier: Arc<dyn TokenVerifier>,
         cancellation_fee_config: CancellationFeeConfig,
     ) -> Self {
         Self {
-            rules: Arc::new(SqliteTaxRuleRepository::new(pool.clone())),
-            cancellation_fees: Arc::new(SqliteCancellationFeeRepository::new(pool)),
+            rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
+            cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool)),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
             token_verifier,
@@ -82,7 +82,7 @@ impl AppState {
     }
 
     pub fn with_field_api(
-        pool: SqlitePool,
+        pool: MySqlPool,
         token_verifier: Arc<dyn TokenVerifier>,
         field_api: DynFieldApi,
     ) -> Self {
@@ -95,14 +95,14 @@ impl AppState {
     }
 
     pub fn with_field_api_and_cancellation_fee_config(
-        pool: SqlitePool,
+        pool: MySqlPool,
         token_verifier: Arc<dyn TokenVerifier>,
         field_api: DynFieldApi,
         cancellation_fee_config: CancellationFeeConfig,
     ) -> Self {
         Self {
-            rules: Arc::new(SqliteTaxRuleRepository::new(pool.clone())),
-            cancellation_fees: Arc::new(SqliteCancellationFeeRepository::new(pool)),
+            rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
+            cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool)),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
             token_verifier,
@@ -112,15 +112,15 @@ impl AppState {
     }
 
     fn with_optional_field_api(
-        pool: SqlitePool,
+        pool: MySqlPool,
         token_verifier: Arc<dyn TokenVerifier>,
         field_api: Result<FieldApiClient, field_api::FieldApiConfigError>,
         cancellation_fee_config: CancellationFeeConfig,
     ) -> Self {
         match field_api {
             Ok(client) => Self {
-                rules: Arc::new(SqliteTaxRuleRepository::new(pool.clone())),
-                cancellation_fees: Arc::new(SqliteCancellationFeeRepository::new(pool)),
+                rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
+                cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool)),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
                 token_verifier,
@@ -128,8 +128,8 @@ impl AppState {
                 field_api_config_error: None,
             },
             Err(error) => Self {
-                rules: Arc::new(SqliteTaxRuleRepository::new(pool.clone())),
-                cancellation_fees: Arc::new(SqliteCancellationFeeRepository::new(pool)),
+                rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
+                cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool)),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
                 token_verifier,
@@ -140,7 +140,7 @@ impl AppState {
     }
 }
 
-impl FromRef<AppState> for Arc<SqliteTaxRuleRepository> {
+impl FromRef<AppState> for Arc<MySqlTaxRuleRepository> {
     fn from_ref(state: &AppState) -> Self {
         state.rules.clone()
     }
@@ -152,7 +152,7 @@ impl FromRef<AppState> for Arc<dyn TokenVerifier> {
     }
 }
 
-impl FromRef<AppState> for Arc<SqliteCancellationFeeRepository> {
+impl FromRef<AppState> for Arc<MySqlCancellationFeeRepository> {
     fn from_ref(state: &AppState) -> Self {
         state.cancellation_fees.clone()
     }
@@ -539,16 +539,12 @@ fn courseboard_cors_layer() -> CorsLayer {
 
 pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
     let database_url = config.database_url.clone();
-    let connect_options: SqliteConnectOptions = database_url
+    let connect_options: MySqlConnectOptions = database_url
         .parse()
-        .map_err(|error| anyhow::anyhow!("DATABASE_URL must be a valid SQLite URL: {error}"))?;
-    let pool = SqlitePoolOptions::new()
+        .map_err(|error| anyhow::anyhow!("DATABASE_URL must be a valid MySQL URL: {error}"))?;
+    let pool = MySqlPoolOptions::new()
         .max_connections(5)
-        .connect_with(
-            connect_options
-                .create_if_missing(true)
-                .journal_mode(SqliteJournalMode::Wal),
-        )
+        .connect_with(connect_options)
         .await?;
 
     run_migrations(&pool).await?;
@@ -589,7 +585,7 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
     Ok(build_router(state))
 }
 
-pub async fn run_migrations(pool: &SqlitePool) -> Result<(), AppError> {
+pub async fn run_migrations(pool: &MySqlPool) -> Result<(), AppError> {
     MIGRATOR.run(pool).await?;
     Ok(())
 }
@@ -637,7 +633,7 @@ async fn require_valid_token(
 }
 
 async fn calculate(
-    State(rules): State<Arc<SqliteTaxRuleRepository>>,
+    State(rules): State<Arc<MySqlTaxRuleRepository>>,
     Json(request): Json<CalculateRequest>,
 ) -> Result<Json<CalculateResponse>, AppError> {
     if request.players.is_empty() {
@@ -679,7 +675,7 @@ async fn calculate(
 }
 
 async fn simulate_range(
-    State(rules): State<Arc<SqliteTaxRuleRepository>>,
+    State(rules): State<Arc<MySqlTaxRuleRepository>>,
     Json(request): Json<SimulateRangeRequest>,
 ) -> Result<Json<SimulateRangeResponse>, AppError> {
     request.validate()?;
@@ -739,12 +735,12 @@ fn exemption_reason(player: &Player, rule: &TaxRule) -> Option<String> {
 }
 
 #[derive(Clone)]
-pub struct SqliteTaxRuleRepository {
-    pool: SqlitePool,
+pub struct MySqlTaxRuleRepository {
+    pool: MySqlPool,
 }
 
-impl SqliteTaxRuleRepository {
-    pub fn new(pool: SqlitePool) -> Self {
+impl MySqlTaxRuleRepository {
+    pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
     }
 
@@ -769,16 +765,17 @@ impl SqliteTaxRuleRepository {
               ON r.tenant_id = t.tenant_id
              AND r.prefecture = t.prefecture
              AND r.course_grade = t.course_grade
-            WHERE t.tenant_id = ?1
-              AND t.prefecture = ?2
-              AND t.min_green_fee <= ?3
-              AND (t.max_green_fee IS NULL OR ?3 < t.max_green_fee)
+            WHERE t.tenant_id = ?
+              AND t.prefecture = ?
+              AND t.min_green_fee <= ?
+              AND (t.max_green_fee IS NULL OR ? < t.max_green_fee)
             ORDER BY t.min_green_fee DESC
             LIMIT 1
             "#,
         )
         .bind(tenant_id)
         .bind(prefecture)
+        .bind(green_fee)
         .bind(green_fee)
         .fetch_optional(&self.pool)
         .await?;
@@ -977,8 +974,8 @@ mod tests {
     use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
     use rand::rngs::OsRng;
     use rsa::{pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts, RsaPrivateKey};
-    use sqlx::sqlite::SqlitePoolOptions;
-    use std::collections::HashSet;
+    use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
+    use std::{collections::HashSet, time::Duration};
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -1026,11 +1023,54 @@ mod tests {
         verifier: OidcJwtVerifier,
         config: CancellationFeeConfig,
     ) -> Router {
-        let pool = SqlitePoolOptions::new()
+        let host =
+            std::env::var("COURSEBOARD_TEST_DB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = std::env::var("COURSEBOARD_TEST_DB_PORT")
+            .map(|value| {
+                value
+                    .parse()
+                    .expect("COURSEBOARD_TEST_DB_PORT must be a u16")
+            })
+            .unwrap_or(4000);
+        let username =
+            std::env::var("COURSEBOARD_TEST_DB_USER").unwrap_or_else(|_| "root".to_string());
+        let database = std::env::var("COURSEBOARD_TEST_DB_NAME")
+            .unwrap_or_else(|_| "courseboard_test".to_string());
+        assert!(
+            database
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '_'),
+            "COURSEBOARD_TEST_DB_NAME must contain only ASCII letters, digits, and underscores"
+        );
+
+        let mut connect_options = MySqlConnectOptions::new()
+            .host(&host)
+            .port(port)
+            .username(&username);
+        if let Ok(password) = std::env::var("COURSEBOARD_TEST_DB_PASSWORD") {
+            connect_options = connect_options.password(&password);
+        }
+
+        let admin_pool = MySqlPoolOptions::new()
             .max_connections(1)
-            .connect("sqlite::memory:")
+            .acquire_timeout(Duration::from_secs(60))
+            .connect_with(connect_options.clone())
             .await
-            .expect("connect test sqlite");
+            .expect("connect test TiDB admin pool");
+        sqlx::query(&format!(
+            "CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+        ))
+        .execute(&admin_pool)
+        .await
+        .expect("create test TiDB database");
+        admin_pool.close().await;
+
+        let pool = MySqlPoolOptions::new()
+            .max_connections(5)
+            .acquire_timeout(Duration::from_secs(60))
+            .connect_with(connect_options.database(&database))
+            .await
+            .expect("connect test TiDB database");
         run_migrations(&pool).await.expect("run migrations");
         build_router(AppState::new_with_cancellation_fee_config(
             pool,
