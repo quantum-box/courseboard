@@ -102,6 +102,24 @@ spec:
         - name: TACHYON_FIELD_API_URL
           value: https://tachyon-field-api.txcloud.app
       environments:
+        production:
+          envVars:
+            - name: DATABASE_URL
+              type: credential
+              valueFrom:
+                databaseRef:
+                  name: tidb_courseboard_prod
+                  field: url
+            - name: COURSEBOARD_PUBLIC_UI_BASE_URL
+              value: https://courseboard.txcloud.app
+            - name: OIDC_ISSUER_URL
+              value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+            - name: EXPECTED_AUDIENCE
+              value: 5oafg9ptonbjumdh1pc7khirp1
+            - name: EXPECTED_CLIENT_ID
+              value: 5oafg9ptonbjumdh1pc7khirp1
+            - name: TACHYON_FIELD_API_URL
+              value: https://tachyon-field-api.txcloud.app
         preview:
           envVars:
             - name: DATABASE_URL
