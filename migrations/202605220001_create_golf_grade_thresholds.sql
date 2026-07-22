@@ -1,12 +1,21 @@
 CREATE TABLE golf_grade_thresholds (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tenant_id TEXT NOT NULL REFERENCES tenants(id),
-    prefecture TEXT NOT NULL,
-    course_grade TEXT NOT NULL,
-    min_green_fee INTEGER NOT NULL,
-    max_green_fee INTEGER,
-    UNIQUE (tenant_id, prefecture, min_green_fee)
-);
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    tenant_id VARCHAR(64) NOT NULL,
+    prefecture VARCHAR(64) NOT NULL,
+    course_grade VARCHAR(32) NOT NULL,
+    min_green_fee BIGINT NOT NULL,
+    max_green_fee BIGINT,
+    CONSTRAINT chk_golf_grade_thresholds_min_fee CHECK (min_green_fee >= 0),
+    CONSTRAINT chk_golf_grade_thresholds_max_fee CHECK (
+        max_green_fee IS NULL OR max_green_fee > min_green_fee
+    ),
+    CONSTRAINT fk_golf_grade_thresholds_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id),
+    UNIQUE KEY uq_golf_grade_thresholds_tenant_prefecture_min_fee (
+        tenant_id,
+        prefecture,
+        min_green_fee
+    )
+) DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;
 
 INSERT INTO golf_tax_rules (
     tenant_id,
@@ -22,12 +31,12 @@ VALUES
     ('scc', 'hokkaido', 'B', 350, 18, 70, 1),
     ('scc', 'hokkaido', 'C', 300, 18, 70, 1),
     ('scc', 'hokkaido', 'D', 200, 18, 70, 1)
-ON CONFLICT (tenant_id, prefecture, course_grade) DO UPDATE SET
-    fee = excluded.fee,
-    minor_exempt_under_age = excluded.minor_exempt_under_age,
-    senior_exempt_min_age = excluded.senior_exempt_min_age,
-    disability_cert_exempt = excluded.disability_cert_exempt,
-    updated_at = CURRENT_TIMESTAMP;
+ON DUPLICATE KEY UPDATE
+    fee = VALUES(fee),
+    minor_exempt_under_age = VALUES(minor_exempt_under_age),
+    senior_exempt_min_age = VALUES(senior_exempt_min_age),
+    disability_cert_exempt = VALUES(disability_cert_exempt),
+    updated_at = CURRENT_TIMESTAMP(6);
 
 INSERT INTO golf_grade_thresholds (
     tenant_id,
@@ -41,6 +50,6 @@ VALUES
     ('scc', 'hokkaido', 'C', 3500, 5000),
     ('scc', 'hokkaido', 'B', 5000, 7000),
     ('scc', 'hokkaido', 'A', 7000, NULL)
-ON CONFLICT (tenant_id, prefecture, min_green_fee) DO UPDATE SET
-    course_grade = excluded.course_grade,
-    max_green_fee = excluded.max_green_fee;
+ON DUPLICATE KEY UPDATE
+    course_grade = VALUES(course_grade),
+    max_green_fee = VALUES(max_green_fee);

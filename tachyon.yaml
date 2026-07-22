@@ -80,10 +80,12 @@ spec:
         release: true
         arch: arm64
       envVars:
-        # Lambda has writable ephemeral storage only under /tmp. Durable golf
-        # operational data continues to live in Tachyon Field.
         - name: DATABASE_URL
-          value: sqlite:///tmp/courseboard-api.db
+          type: credential
+          valueFrom:
+            databaseRef:
+              name: tidb_courseboard_prod
+              field: url
         - name: COURSEBOARD_PUBLIC_UI_BASE_URL
           value: https://courseboard.txcloud.app
         - name: OIDC_ISSUER_URL
@@ -103,7 +105,11 @@ spec:
         preview:
           envVars:
             - name: DATABASE_URL
-              value: sqlite:///tmp/courseboard-api-preview.db
+              type: credential
+              valueFrom:
+                databaseRef:
+                  name: tidb_courseboard_preview
+                  field: url
             - name: COURSEBOARD_PUBLIC_UI_BASE_URL
               value: https://courseboard.txcloud.app
             - name: OIDC_ISSUER_URL
