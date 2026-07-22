@@ -16,9 +16,9 @@ use utoipa::{IntoParams, ToSchema};
 use super::openapi::ErrorBody;
 
 use crate::course::domain::{
-    Caddie, CaddieAssignment, Course, CourseError, CourseId, GatewayCredentials, ProductSlot,
-    ReservationProduct, ReservationServiceId, Resource, TeeSheet, TeeSheetItem, TeeSheetQuery,
-    UpsertCourse, UpsertReservationProduct,
+    Caddie, CaddieAssignment, CaddieStaff, Course, CourseError, CourseId, GatewayCredentials,
+    ProductSlot, ReservationProduct, ReservationServiceId, Resource, TeeSheet, TeeSheetItem,
+    TeeSheetQuery, UpsertCourse, UpsertReservationProduct,
 };
 use crate::course::infrastructure::{
     FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
@@ -737,6 +737,31 @@ impl From<&Caddie> for CaddieDto {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct CaddieStaffDto {
+    pub id: String,
+    pub name: String,
+    pub active: bool,
+}
+
+impl From<&CaddieStaff> for CaddieStaffDto {
+    fn from(value: &CaddieStaff) -> Self {
+        Self {
+            id: value.id().to_string(),
+            name: value.name().to_string(),
+            active: value.is_active(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CaddieRosterResponse {
+    pub items: Vec<CaddieDto>,
+    pub staff: Vec<CaddieStaffDto>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CaddieAssignmentDto {
     pub id: String,
     /// Kept as `caddieProfileId` for Timeline / Caddies UI compatibility.
@@ -780,7 +805,7 @@ impl From<&CaddieAssignment> for CaddieAssignmentDto {
     path = "/v1/course/caddie-profiles",
     tag = "course-ops",
     responses(
-        (status = 200, description = "List caddie profiles", body = inline(ItemsResponse<CaddieDto>)),
+        (status = 200, description = "List caddie profiles and reusable staff index", body = CaddieRosterResponse),
         (status = 401, description = "Unauthorized", body = ErrorBody),
         (status = 502, description = "Upstream provider error", body = ErrorBody),
     ),
@@ -789,15 +814,16 @@ impl From<&CaddieAssignment> for CaddieAssignmentDto {
 pub async fn list_caddies(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<ItemsResponse<CaddieDto>>, AppError> {
+) -> Result<Json<CaddieRosterResponse>, AppError> {
     let credentials = credentials(&state, &headers)?;
     let use_case = ListCaddiesUseCase::new(ops_gateway(&state));
-    let items = use_case
+    let roster = use_case
         .execute(credentials)
         .await
         .map_err(AppError::from)?;
-    Ok(Json(ItemsResponse {
-        items: items.iter().map(CaddieDto::from).collect(),
+    Ok(Json(CaddieRosterResponse {
+        items: roster.caddies().iter().map(CaddieDto::from).collect(),
+        staff: roster.staff().iter().map(CaddieStaffDto::from).collect(),
     }))
 }
 

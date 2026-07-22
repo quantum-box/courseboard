@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::course::domain::{Caddie, CourseError, GatewayCredentials, GolfOpsGateway};
+use crate::course::domain::{CaddieRoster, CourseError, GatewayCredentials, GolfOpsGateway};
 
 pub struct ListCaddiesUseCase {
     ops: Arc<dyn GolfOpsGateway>,
@@ -16,8 +16,8 @@ impl ListCaddiesUseCase {
     pub async fn execute(
         &self,
         credentials: GatewayCredentials<'_>,
-    ) -> Result<Vec<Caddie>, CourseError> {
-        self.ops.list_caddies(credentials).await
+    ) -> Result<CaddieRoster, CourseError> {
+        self.ops.list_caddie_roster(credentials).await
     }
 }
 
@@ -29,11 +29,11 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery,
+        AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery, Caddie,
         CaddieAssignment, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRank,
-        CaddieRating, CaddieRecommendation, CaddieSkillLevel, CaddieSupply, PayrollSummary,
-        RecommendationQuery, ReplaceCaddieMemberships, ReservationId, UpsertCaddie,
-        UpsertCaddieAssignment, UpsertCaddieAvailability,
+        CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSkillLevel, CaddieStaff,
+        CaddieSupply, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, ReservationId,
+        UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
     use crate::course::usecase::ListCaddieAssignmentsUseCase;
 
@@ -44,11 +44,14 @@ mod tests {
 
     #[async_trait]
     impl GolfOpsGateway for FakeOps {
-        async fn list_caddies(
+        async fn list_caddie_roster(
             &self,
             _credentials: GatewayCredentials<'_>,
-        ) -> Result<Vec<Caddie>, CourseError> {
-            Ok(self.caddies.lock().expect("lock").clone())
+        ) -> Result<CaddieRoster, CourseError> {
+            Ok(CaddieRoster::new(
+                self.caddies.lock().expect("lock").clone(),
+                vec![CaddieStaff::new("staff_aya", "Sato", true)],
+            ))
         }
 
         async fn create_caddie(
@@ -240,8 +243,10 @@ mod tests {
             })
             .await
             .expect("list");
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].display_name(), "Sato");
+        assert_eq!(listed.caddies().len(), 1);
+        assert_eq!(listed.caddies()[0].display_name(), "Sato");
+        assert_eq!(listed.staff().len(), 1);
+        assert_eq!(listed.staff()[0].id(), "staff_aya");
 
         let assignments = ListCaddieAssignmentsUseCase::new(ops)
             .execute(GatewayCredentials {
