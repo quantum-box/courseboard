@@ -12,6 +12,8 @@
 - [In Progress]()
 
 - [Completed]()
+  - [v0.1.7]()
+    - [CourseboardからFieldへのテナント文脈伝播を修正する](src/tasks/completed/v0.1.7/fix-courseboard-field-tenant-context/task.md)
   - [v0.1.6]()
     - [Courseboard human token issuerのCognito統一](src/tasks/completed/v0.1.6/cognito-human-token-issuer/task.md)
   - [v0.1.2]()

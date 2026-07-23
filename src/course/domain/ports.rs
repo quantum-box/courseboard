@@ -4,7 +4,7 @@ use chrono::NaiveDate;
 use super::{
     AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery, BudgetAchievement,
     Caddie, CaddieAssignment, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating,
-    CaddieRecommendation, CaddieSupply, Course, CourseError, CourseId, DailyBudget,
+    CaddieRecommendation, CaddieRoster, CaddieSupply, Course, CourseError, CourseId, DailyBudget,
     DailyBudgetQuery, ExtensionStatus, MonthlySettlement, PayrollSummary, ProductSlot,
     RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationPolicy,
     ReservationProduct, ReservationServiceId, Resource, UpdateExtensionConfig,
@@ -19,6 +19,7 @@ use super::{
 pub struct GatewayCredentials<'a> {
     pub authorization: &'a str,
     pub operator_id: &'a str,
+    pub platform_id: Option<&'a str>,
 }
 
 #[derive(Debug, Clone)]
@@ -99,10 +100,10 @@ pub trait GolfCatalogGateway: Send + Sync {
 /// Port for caddie roster, assignments, and operational tooling.
 #[async_trait]
 pub trait GolfOpsGateway: Send + Sync {
-    async fn list_caddies(
+    async fn list_caddie_roster(
         &self,
         credentials: GatewayCredentials<'_>,
-    ) -> Result<Vec<Caddie>, CourseError>;
+    ) -> Result<CaddieRoster, CourseError>;
 
     async fn create_caddie(
         &self,

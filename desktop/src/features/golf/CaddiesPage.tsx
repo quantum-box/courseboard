@@ -67,10 +67,12 @@ import {
 } from '../../components/Page'
 import { useResource } from '../../hooks/useResource'
 import { navigate } from '../../lib/router'
+import { caddieLoadPlan } from './caddieLoadPlan'
 
 const COURSE_API = '/v1/course'
 
 type ListResponse<T> = { items: T[] }
+type CaddieRosterResponse = ListResponse<CaddieProfile> & { staff?: StaffMember[] }
 type View = 'roster' | 'dispatch' | 'attendance' | 'payroll'
 type SkillLevel = 'rookie' | 'regular' | 'veteran'
 type Rank = 'A' | 'B' | 'C' | 'D'
@@ -432,32 +434,46 @@ export function CaddiesPage({
   const [flash, setFlash] = useState<Flash>(null)
 
   const profilesResource = useResource(
-    () => courseboardApiJson<ListResponse<CaddieProfile>>(`${COURSE_API}/caddie-profiles`),
+    () => courseboardApiJson<CaddieRosterResponse>(`${COURSE_API}/caddie-profiles`),
     [],
+    { enabled: view !== 'payroll' },
+  )
+  const loadPlan = caddieLoadPlan(
+    view,
+    profilesResource.data !== null,
   )
   const assignmentsResource = useResource(
     () => courseboardApiJson<ListResponse<CaddieAssignment>>(`${COURSE_API}/caddie-assignments`),
     [],
+    { enabled: loadPlan.assignments },
   )
   const recommendationsResource = useResource(
     () => courseboardApiJson<ListResponse<CaddieRecommendation>>(
       `${COURSE_API}/caddie-recommendations?playerCount=4&includeRookiePairing=true&limit=5`,
     ),
     [],
-  )
-  const staffResource = useResource(
-    () => fieldApiJson<ListResponse<StaffMember>>('/v1/erp/staff'),
-    [],
+    { enabled: loadPlan.recommendations },
   )
   const coursesResource = useResource(
     () => courseboardApiJson<ListResponse<GolfCourse>>(`${COURSE_API}/courses`),
     [],
+    { enabled: loadPlan.courses },
   )
   const attendanceResource = useResource(
     () => courseboardApiJson<AttendanceResponse>(
       `${COURSE_API}/caddie-attendance-snapshot?date=${encodeURIComponent(operationDate)}`,
     ),
     [operationDate],
+    { enabled: loadPlan.attendance },
+  )
+  const staffResource = useMemo<ResourceValue<ListResponse<StaffMember>>>(
+    () => ({
+      data: profilesResource.data ? { items: profilesResource.data.staff ?? [] } : null,
+      error: profilesResource.error,
+      loading: profilesResource.loading,
+      refresh: profilesResource.refresh,
+    }),
+    [profilesResource.data, profilesResource.error, profilesResource.loading, profilesResource.refresh],
   )
 
   const profiles = useMemo(
@@ -488,7 +504,6 @@ export function CaddiesPage({
 
   function refreshPeople() {
     profilesResource.refresh()
-    staffResource.refresh()
     attendanceResource.refresh()
   }
 
@@ -507,7 +522,6 @@ export function CaddiesPage({
   const refreshCurrentView = useCallback(() => {
     if (view === 'roster') {
       profilesResource.refresh()
-      staffResource.refresh()
       coursesResource.refresh()
       assignmentsResource.refresh()
       attendanceResource.refresh()
@@ -527,7 +541,6 @@ export function CaddiesPage({
   }, [
     view,
     profilesResource.refresh,
-    staffResource.refresh,
     coursesResource.refresh,
     assignmentsResource.refresh,
     attendanceResource.refresh,

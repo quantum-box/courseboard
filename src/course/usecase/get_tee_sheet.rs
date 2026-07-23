@@ -482,6 +482,7 @@ mod tests {
                 GatewayCredentials {
                     authorization: "Bearer test",
                     operator_id: "scc",
+                    platform_id: None,
                 },
                 TeeSheetQuery {
                     date,

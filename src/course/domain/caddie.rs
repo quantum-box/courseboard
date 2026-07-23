@@ -236,6 +236,57 @@ impl Caddie {
     }
 }
 
+/// Minimal HRM staff data bundled with the caddie roster.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaddieStaff {
+    id: String,
+    name: String,
+    active: bool,
+}
+
+impl CaddieStaff {
+    pub fn new(id: impl Into<String>, name: impl Into<String>, active: bool) -> Self {
+        Self {
+            id: id.into(),
+            name: name.into(),
+            active,
+        }
+    }
+
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.active
+    }
+}
+
+/// Caddie profiles and the HRM staff index used to resolve their names.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CaddieRoster {
+    caddies: Vec<Caddie>,
+    staff: Vec<CaddieStaff>,
+}
+
+impl CaddieRoster {
+    pub fn new(caddies: Vec<Caddie>, staff: Vec<CaddieStaff>) -> Self {
+        Self { caddies, staff }
+    }
+
+    pub fn caddies(&self) -> &[Caddie] {
+        &self.caddies
+    }
+
+    pub fn staff(&self) -> &[CaddieStaff] {
+        &self.staff
+    }
+}
+
 /// Assignment of a caddie to a reservation / round.
 #[derive(Debug, Clone, PartialEq, Getters)]
 pub struct CaddieAssignment {

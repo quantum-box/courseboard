@@ -140,6 +140,7 @@ mod tests {
                 GatewayCredentials {
                     authorization: "Bearer t",
                     operator_id: "scc",
+                    platform_id: None,
                 },
                 input,
             )

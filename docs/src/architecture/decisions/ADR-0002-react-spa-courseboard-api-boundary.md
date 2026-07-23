@@ -21,6 +21,7 @@ Web成果物は既存`courseboard` Cloud AppのCloudflare Worker Static Assets�
 - WebとTauriのUI・認証adapter・API clientを共有できる。
 - Web APIはcross-originになるため、`courseboard-api`は明示的なCORS policyを持つ。
 - API側のJWT検証とclient allowlistはADR-0001を継続する。
+- `courseboard-api`がFieldへ委譲する場合、検証済みbearerに加えて受信した`x-operator-id`と任意の`x-platform-id`を保持し、Field/Tachyon Authがtenant policyを判定できる文脈を失わない。
 - WebとTauriが同じReactログイン画面とpublic client設定を共有する。
 - Auth.jsのHttpOnly cookieは使わず、access / refresh token storageのリスクはReact側で管理する。
 - フロント配信だけの変更でNode.js server runtimeをデプロイしない。

@@ -9,6 +9,8 @@ export type UseResourceOptions = {
    * while a background revalidate updates the entry.
    */
   cacheKey?: string | null
+  /** Skip loading until prerequisite data or the consuming view is ready. */
+  enabled?: boolean
 }
 
 export function clearResourceCache(prefix?: string) {
@@ -38,17 +40,23 @@ export function useResource<T>(
   const loaderRef = useRef(loader)
   loaderRef.current = loader
   const cacheKey = options.cacheKey ?? null
+  const enabled = options.enabled ?? true
   const initialCached = cacheKey
     ? resourceCache.get(cacheKey) as T | undefined
     : undefined
   const [data, setData] = useState<T | null>(initialCached ?? null)
   const [error, setError] = useState<unknown>(null)
-  const [loading, setLoading] = useState(initialCached === undefined)
+  const [loading, setLoading] = useState(enabled && initialCached === undefined)
   const [revision, setRevision] = useState(0)
 
   const refresh = useCallback(() => setRevision(value => value + 1), [])
 
   useEffect(() => {
+    if (!enabled) {
+      setLoading(false)
+      setError(null)
+      return
+    }
     let active = true
     const cached = cacheKey
       ? resourceCache.get(cacheKey) as T | undefined
@@ -76,7 +84,7 @@ export function useResource<T>(
     }
     // Consumers intentionally control reloads through the dependency list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...dependencies, revision, cacheKey])
+  }, [...dependencies, revision, cacheKey, enabled])
 
   return { data, setData, error, loading, refresh }
 }

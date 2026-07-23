@@ -5,7 +5,7 @@
 //!
 //! Caddie mapping: gateway owns Field staff → CourseBoard Caddie translation.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -23,6 +23,7 @@ use crate::course::domain::{
 use crate::field_api::DEFAULT_FIELD_API_URL;
 
 const RESERVATION_LIST_LIMIT: u32 = 2000;
+const FIELD_UPSTREAM_TIMEOUT: Duration = Duration::from_secs(15);
 
 fn is_empty_course_store(base_url: &str) -> bool {
     base_url.trim().eq_ignore_ascii_case(EMPTY_COURSE_STORE_URL)
@@ -662,17 +663,11 @@ pub(crate) async fn field_send_json<T: for<'de> Deserialize<'de>>(
         return Err(empty_course_store_error());
     }
     let url = format!("{base_url}{path_and_query}");
-    let mut request = client
-        .request(method, &url)
-        .header(AUTHORIZATION, credentials.authorization)
-        .header("x-operator-id", credentials.operator_id);
+    let mut request = field_request(client, method, &url, credentials);
     if let Some(body) = body {
         request = request.json(body);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| CourseError::Provider(format!("Field API request failed: {error}")))?;
+    let response = request.send().await.map_err(map_field_request_error)?;
     let status = response.status();
     if !status.is_success() {
         let message = response.text().await.unwrap_or_default();
@@ -698,17 +693,11 @@ pub(crate) async fn field_send_unit(
         return Err(empty_course_store_error());
     }
     let url = format!("{base_url}{path_and_query}");
-    let mut request = client
-        .request(method, &url)
-        .header(AUTHORIZATION, credentials.authorization)
-        .header("x-operator-id", credentials.operator_id);
+    let mut request = field_request(client, method, &url, credentials);
     if let Some(body) = body {
         request = request.json(body);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| CourseError::Provider(format!("Field API request failed: {error}")))?;
+    let response = request.send().await.map_err(map_field_request_error)?;
     let status = response.status();
     if !status.is_success() {
         let message = response.text().await.unwrap_or_default();
@@ -731,17 +720,11 @@ pub(crate) async fn field_send_text(
         return Err(empty_course_store_error());
     }
     let url = format!("{base_url}{path_and_query}");
-    let mut request = client
-        .request(method, &url)
-        .header(AUTHORIZATION, credentials.authorization)
-        .header("x-operator-id", credentials.operator_id);
+    let mut request = field_request(client, method, &url, credentials);
     if let Some(body) = body {
         request = request.json(body);
     }
-    let response = request
-        .send()
-        .await
-        .map_err(|error| CourseError::Provider(format!("Field API request failed: {error}")))?;
+    let response = request.send().await.map_err(map_field_request_error)?;
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
@@ -765,15 +748,12 @@ pub(crate) async fn field_send_raw(
         return Err(empty_course_store_error());
     }
     let url = format!("{base_url}{path_and_query}");
-    let response = client
-        .request(method, &url)
-        .header(AUTHORIZATION, credentials.authorization)
-        .header("x-operator-id", credentials.operator_id)
+    let response = field_request(client, method, &url, credentials)
         .header(reqwest::header::CONTENT_TYPE, content_type)
         .body(body.to_vec())
         .send()
         .await
-        .map_err(|error| CourseError::Provider(format!("Field API request failed: {error}")))?;
+        .map_err(map_field_request_error)?;
     let status = response.status();
     if !status.is_success() {
         let message = response.text().await.unwrap_or_default();
@@ -787,12 +767,85 @@ pub(crate) async fn field_send_raw(
         .map_err(|error| CourseError::Provider(format!("Field API decode failed: {error}")))
 }
 
+fn field_request(
+    client: &reqwest::Client,
+    method: reqwest::Method,
+    url: &str,
+    credentials: GatewayCredentials<'_>,
+) -> reqwest::RequestBuilder {
+    let request = client
+        .request(method, url)
+        .timeout(FIELD_UPSTREAM_TIMEOUT)
+        .header(AUTHORIZATION, credentials.authorization)
+        .header("x-operator-id", credentials.operator_id);
+    if let Some(platform_id) = credentials.platform_id {
+        request.header("x-platform-id", platform_id)
+    } else {
+        request
+    }
+}
+
+fn map_field_request_error(error: reqwest::Error) -> CourseError {
+    if error.is_timeout() {
+        return CourseError::Provider(format!(
+            "Field API request timed out after {} seconds",
+            FIELD_UPSTREAM_TIMEOUT.as_secs()
+        ));
+    }
+    CourseError::Provider(format!("Field API request failed: {error}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn profile_dto(value: Value) -> FieldGolfCaddieProfileDto {
         serde_json::from_value(value).expect("caddie profile dto")
+    }
+
+    #[test]
+    fn field_requests_have_a_bounded_timeout() {
+        let client = reqwest::Client::new();
+        let request = field_request(
+            &client,
+            reqwest::Method::GET,
+            "https://field.example/v1/erp/staff",
+            GatewayCredentials {
+                authorization: "Bearer test-token",
+                operator_id: "operator-test",
+                platform_id: Some("platform-test"),
+            },
+        )
+        .build()
+        .expect("build Field request");
+
+        assert_eq!(request.timeout(), Some(&FIELD_UPSTREAM_TIMEOUT));
+        assert_eq!(
+            request
+                .headers()
+                .get("x-platform-id")
+                .and_then(|value| value.to_str().ok()),
+            Some("platform-test")
+        );
+    }
+
+    #[test]
+    fn field_requests_keep_platform_optional_for_legacy_clients() {
+        let client = reqwest::Client::new();
+        let request = field_request(
+            &client,
+            reqwest::Method::GET,
+            "https://field.example/v1/erp/staff",
+            GatewayCredentials {
+                authorization: "Bearer test-token",
+                operator_id: "operator-test",
+                platform_id: None,
+            },
+        )
+        .build()
+        .expect("build Field request");
+
+        assert!(!request.headers().contains_key("x-platform-id"));
     }
 
     #[test]
