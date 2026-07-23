@@ -26,5 +26,8 @@
 
 ## Preview / production
 
-- Preview: Ready PR作成後に実施する。
+- Preview frontend: `https://pr100--courseboard.txcloud.app` のdeploy成功。
+- Preview API build: `bld_01ky6ad8mthbc8fvyv2vjht6x4`、commit `66a63120`、成功。
+- Preview API deploy: `dep_01ky6b0a21bbb38x5gyjeghqp0`、失敗。Lambda candidate serving smokeが8回すべてtimeoutした。#98/#99とmainのTiDB移行後deployでも同型の失敗が継続しており、`pr100--courseboard-api` routeは作成されなかった。
+- Browser: in-app browser sessionが利用できず、実ログイン検証は実施できなかった。
 - Production: merge/deploy後にCourseboard tenantとField Golf Sandboxで実施する。

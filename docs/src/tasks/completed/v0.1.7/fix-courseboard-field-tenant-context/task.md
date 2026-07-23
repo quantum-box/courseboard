@@ -41,7 +41,7 @@
 - [x] platform/operator/bearerのField伝播を実装し回帰テストを追加
 - [x] host側のRust/React検証
 - [x] version bumpとtaskdoc archive
-- [ ] Ready PRのpreviewで認証済みユーザー経路を検証
+- [ ] Ready PRのpreviewで認証済みユーザー経路を検証（既存TiDB起動timeoutでblocked）
 - [ ] merge後に本番の認証済みユーザー経路を検証
 
 ## 完了条件
@@ -57,3 +57,4 @@
 - 選択tenantに必要なField policy自体が存在しない場合、header伝播後も403になる。その場合はField側の別修正として切り分ける。
 - 本番検証には実ユーザーのCognito sessionが必要である。
 - 全Rust testはTiDB test admin poolへの接続timeoutで20件失敗した。変更面のtargeted test、clippy、fmtは成功しており、DB統合環境の復旧後に全件を再実行する。
+- API previewはLambda serving smokeが8回すべてtimeoutして失敗した。#98/#99とmainのTiDB移行後deployも同型であり、今回のField gateway変更より前から存在するdeploy blockerである。
