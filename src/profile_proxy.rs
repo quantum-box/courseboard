@@ -55,9 +55,12 @@ impl ProfileClient {
             return Err(ProfileClientConfigError::InvalidFieldApiUrl);
         }
 
-        let mut endpoint = base_url
-            .join(FIELD_PROFILE_PATH)
-            .map_err(|_| ProfileClientConfigError::InvalidFieldApiUrl)?;
+        let mut endpoint = base_url;
+        let endpoint_path = format!(
+            "{}{FIELD_PROFILE_PATH}",
+            endpoint.path().trim_end_matches('/')
+        );
+        endpoint.set_path(&endpoint_path);
         endpoint
             .query_pairs_mut()
             .clear()
@@ -737,5 +740,17 @@ mod tests {
         ] {
             assert!(ProfileClient::from_field_api_url(url).is_err());
         }
+    }
+
+    #[test]
+    fn profile_client_preserves_configured_field_base_path() {
+        let client =
+            ProfileClient::with_timeout("https://example.test/field/", Duration::from_secs(1))
+                .unwrap();
+
+        assert_eq!(
+            client.endpoint.as_str(),
+            "https://example.test/field/v1/erp/me?extensionKey=golf_course"
+        );
     }
 }
