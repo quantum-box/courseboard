@@ -43,6 +43,15 @@ export function resolveAuthGateView(state: AuthState): AuthGateView {
   return { kind: 'error', message: state.message }
 }
 
+/**
+ * Protected screens may stay visible during profile revalidation only after
+ * their API auth context has been bound. This prevents child loaders from
+ * issuing an unauthenticated request while the auth adapter is still booting.
+ */
+export function canRenderProtectedApp(view: AuthGateView, apiAuthReady: boolean) {
+  return apiAuthReady && (view.kind === 'app' || view.kind === 'hold-app')
+}
+
 /** Bottom-right toast while a known/restorable session is being revalidated. */
 export function sessionVerifyingNotice(state: AuthState): string | undefined {
   if (state.status !== 'booting') return undefined

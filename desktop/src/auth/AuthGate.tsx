@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react'
 import { useAuth } from './AuthProvider'
-import { resolveAuthGateView, sessionVerifyingNotice } from './authGateView'
+import {
+  canRenderProtectedApp,
+  resolveAuthGateView,
+  sessionVerifyingNotice,
+} from './authGateView'
 import {
   AuthBootScreen,
   AuthLoadingScreen,
@@ -18,9 +22,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const toastSticky = Boolean(verifyingNotice) && !auth.sessionNotice
 
   let content: ReactNode
-  if (view.kind === 'app' || view.kind === 'hold-app') {
+  if (canRenderProtectedApp(view, auth.apiAuthReady)) {
     content = children
-  } else if (view.kind === 'boot') {
+  } else if (view.kind === 'boot' || view.kind === 'app' || view.kind === 'hold-app') {
     content = <AuthBootScreen />
   } else if (view.kind === 'loading') {
     content = <AuthLoadingScreen authorizing={view.authorizing} />
