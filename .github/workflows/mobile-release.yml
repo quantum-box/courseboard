@@ -158,7 +158,7 @@ jobs:
           VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
           VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
           VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
-          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://api.n1.tachy.one/v1/me
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
         run: |
           NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" npm run tauri:android:build -- \
             --aab --ci --config '{"version":"${{ needs.validate.outputs.version }}","bundle":{"android":{"versionCode":${{ needs.validate.outputs.build_number }}}}}'
@@ -268,7 +268,7 @@ jobs:
           VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
           VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
           VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
-          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://api.n1.tachy.one/v1/me
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
         run: npm run tauri:ios:build -- --ci --export-method app-store-connect --build-number "${{ needs.validate.outputs.build_number }}" --config '{"version":"${{ needs.validate.outputs.version }}"}'
 
       - name: Upload signed IPA artifact

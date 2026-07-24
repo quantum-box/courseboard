@@ -62,6 +62,14 @@ export function sessionExpiredNotice(
   return 'Your session expired. Please sign in again.'
 }
 
+/** A profile/proxy failure cannot retain a tenant whose eligibility was not revalidated. */
+export function profileRevalidationError(error: unknown): AuthState {
+  return {
+    status: 'error',
+    message: error instanceof Error ? error.message : '認証状態を確認できませんでした。',
+  }
+}
+
 export type BeginBootOptions = {
   snapshot?: ReadySessionSnapshot
   restorable?: boolean

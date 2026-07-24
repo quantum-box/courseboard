@@ -5,6 +5,7 @@ import {
   beginBoot,
   clearLastReadySession,
   hasRestorableBrowserSession,
+  profileRevalidationError,
   readLastReadySession,
   sessionExpiredNotice,
   writeLastReadySession,
@@ -158,12 +159,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         if (result.kind === 'anonymous') {
           const hadAuthenticatedSession = holdingSession || Boolean(heldPrevious)
-          // Ambiguous anonymous while a prior session is held (e.g. transient
-          // token refresh) — keep the shell; do not flash session-expired.
-          if (result.reason !== 'expired' && hadAuthenticatedSession && heldPrevious) {
-            activateTenant(heldPrevious.user, heldPrevious.tenant)
-            return
-          }
           configureApiAuth(null)
           clearLastReadySession()
           setAvailableTenants([])
@@ -172,6 +167,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setState({ status: 'anonymous', reason: result.reason })
           return
         }
+        // Drop the held tenant before applying the freshly filtered profile.
+        // activateTenant writes back only a tenant confirmed by this response.
+        configureApiAuth(null)
+        clearLastReadySession()
         setAvailableTenants(result.tenants)
         const selection = selectedTenant(result.user, result.tenants)
         if (selection.requestedMissing) {
@@ -196,15 +195,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setState({ status: 'unavailable', title: error.title, message: error.message })
           return
         }
-        // Network / CORS / proxy failures during revalidation must not look like expiry.
-        if (holdingSession && heldPrevious) {
-          activateTenant(heldPrevious.user, heldPrevious.tenant)
-          return
-        }
-        setState({
-          status: 'error',
-          message: error instanceof Error ? error.message : '認証状態を確認できませんでした。',
-        })
+        // Extension eligibility is unknown when profile revalidation fails.
+        // Keep the Cognito session retryable, but never reactivate a stale tenant.
+        configureApiAuth(null)
+        clearLastReadySession()
+        setAvailableTenants([])
+        setState(profileRevalidationError(error))
       })
     return () => {
       cancelled = true
