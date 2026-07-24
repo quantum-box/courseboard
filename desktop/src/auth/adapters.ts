@@ -256,7 +256,9 @@ function nativeTenant(payload: NativeTenantPayload) {
     slug: rawSlug || labels.slug || fallback.slug,
     mode: payload.mode ?? fallback.mode,
     platformId: payload.platformId ?? fallback.platformId,
-    operatorId: payload.operatorId ?? fallback.operatorId,
+    // A profile tenant is selected independently; a global development
+    // operator override must never be reused for a different tenant.
+    operatorId: payload.operatorId ?? payload.id,
   } satisfies AuthTenant
 }
 

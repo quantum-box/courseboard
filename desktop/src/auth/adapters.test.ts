@@ -148,6 +148,7 @@ describe('BrowserPkceAdapter', () => {
     vi.stubEnv('VITE_COURSEBOARD_BROWSER_CLIENT_ID', 'local-public-client')
     vi.stubEnv('VITE_COURSEBOARD_BROWSER_REDIRECT_URI', 'http://127.0.0.1:5173/oauth/callback')
     vi.stubEnv('VITE_COURSEBOARD_TENANT_ID', 'tn_01example')
+    vi.stubEnv('VITE_COURSEBOARD_OPERATOR_ID', 'tn_default_operator')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'false')
     vi.stubEnv('VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT', '')
     vi.stubEnv('VITE_COURSEBOARD_API_BASE_URL', 'https://courseboard-api.example.test/')
@@ -220,7 +221,7 @@ describe('BrowserPkceAdapter', () => {
     expect(firstBootstrap).toMatchObject({
       kind: 'authenticated',
       user: { id: 'user-1' },
-      tenants: [{ id: 'tn_01example' }],
+      tenants: [{ id: 'tn_01example', operatorId: 'tn_01example' }],
     })
     expect(await first.getAccessToken()).toBe(accessToken)
     expect(fetchMock).toHaveBeenCalledTimes(1)
