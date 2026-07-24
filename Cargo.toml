@@ -20,7 +20,7 @@ serde_json = "1.0"
 serde_urlencoded = "0.7"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls-ring", "mysql", "macros", "migrate"] }
 thiserror = "2.0"
-tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "net"] }
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "signal", "net", "time"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "fs"] }
 tracing = "0.1"

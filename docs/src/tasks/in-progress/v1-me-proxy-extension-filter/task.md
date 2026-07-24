@@ -22,12 +22,17 @@ golf_course extension未有効テナントを選択でき、選択後にField依
 
 ## Plan
 
-- [ ] field-apiエンドポイント契約をtachyonfield側とすり合わせる。
-- [ ] courseboard-apiに `/v1/me` proxyとunit testを追加する。
+- [x] field-apiエンドポイント契約をtachyonfield側とすり合わせる。
+- [x] courseboard-apiに `/v1/me` proxyとunit testを追加する。
 - [ ] UIのprofileEndpoint設定を切り替える。
 - [ ] headed browserで実ログイン→テナント選択→Field依存画面を確認する。
 - [ ] tachyon-api直接参照の設定値を削除する。
 
 ## Verification results
 
-（実装後に記録する）
+- tachyonfield PR #797で `GET /v1/erp/me?extensionKey=golf_course` を先行追加。
+- courseboard-api `/v1/me` はlocal JWT検証後にinbound BearerをFieldへ委譲し、
+  `enabled=true` のtenantだけをTachyon互換contractへ写像する。
+- optional field省略、必須field欠落、重複/invalid tenant、異なるextension key、
+  oversize、timeout、Field 401/403/5xxのfail-closed testを追加。
+- `cargo test profile_proxy --lib`、OpenAPI path test、全target clippyを確認。
