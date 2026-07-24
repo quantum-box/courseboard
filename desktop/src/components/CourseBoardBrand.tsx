@@ -5,7 +5,7 @@ const BRAND_HORIZONTAL_REVERSED =
 const BRAND_ICON = '/brand/generated/2026-07/courseboard-icon-light.png'
 
 type CourseBoardBrandProps =
-  | { variant: 'sidebar'; collapsed: boolean }
+  | { variant: 'sidebar'; collapsed: boolean; dark: boolean }
   | { variant: 'auth' }
 
 export function CourseBoardBrand(props: CourseBoardBrandProps) {
@@ -30,7 +30,7 @@ export function CourseBoardBrand(props: CourseBoardBrandProps) {
     <span className="brand-lockup">
       <img
         className="brand-wordmark"
-        src={BRAND_HORIZONTAL_PRIMARY}
+        src={props.dark ? BRAND_HORIZONTAL_REVERSED : BRAND_HORIZONTAL_PRIMARY}
         alt="CourseBoard"
       />
     </span>

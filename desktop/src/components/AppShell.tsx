@@ -63,12 +63,7 @@ import { useAuth } from '../auth/AuthProvider'
 import { formatTenantWorkspaceLabel, tenantWorkspaceLabel } from '../auth/tenant-label'
 import { PageReloadProvider, usePageReload } from '../lib/pageReload'
 import { navigate } from '../lib/router'
-import { platformKind } from '../lib/platform'
-import {
-  isPageRefreshShortcut,
-  navigationShortcutDigit,
-  navigationShortcutLabel,
-} from '../lib/shortcuts'
+import { isPageRefreshShortcut } from '../lib/shortcuts'
 import { CourseBoardBrand } from './CourseBoardBrand'
 import { WorkspaceHelpPanel } from './WorkspaceHelp'
 
@@ -77,7 +72,6 @@ export type NavigationItem = {
   label: string
   description: string
   icon: LucideIcon
-  shortcut?: string
 }
 
 export type NavigationSection = {
@@ -91,15 +85,15 @@ export const navigationSections: NavigationSection[] = [
     id: 'home',
     label: null,
     items: [
-      { route: 'golf', label: 'ホーム', description: '運用状況と機能への入口', icon: Gauge, shortcut: '1' },
+      { route: 'golf', label: 'ホーム', description: '運用状況と機能への入口', icon: Gauge },
     ],
   },
   {
     id: 'course-booking',
     label: 'コース予約',
     items: [
-      { route: 'golf/timeline', label: '運用タイムライン', description: '予約とキャディ割当を時間軸で可視化', icon: CalendarRange, shortcut: '2' },
-      { route: 'golf/products', label: 'ゴルフ予約商品', description: 'プレープランと受付枠', icon: CalendarCheck, shortcut: '3' },
+      { route: 'golf/timeline', label: '運用タイムライン', description: '予約とキャディ割当を時間軸で可視化', icon: CalendarRange },
+      { route: 'golf/products', label: 'ゴルフ予約商品', description: 'プレープランと受付枠', icon: CalendarCheck },
       { route: 'course-map', label: 'コースマップ', description: 'カート位置をリアルタイム表示', icon: Map },
     ],
   },
@@ -107,7 +101,7 @@ export const navigationSections: NavigationSection[] = [
     id: 'caddie',
     label: 'キャディ管理',
     items: [
-      { route: 'golf/caddies', label: '名簿', description: 'プロフィール、スタッフ連携、希望休', icon: Users, shortcut: '4' },
+      { route: 'golf/caddies', label: '名簿', description: 'プロフィール、スタッフ連携、希望休', icon: Users },
       { route: 'golf/caddies/dispatch', label: '配置', description: '当日割当、供給、自動配置', icon: ClipboardCheck },
       { route: 'golf/caddies/attendance', label: '勤怠', description: '出勤打刻と割当照合', icon: Clock },
       { route: 'golf/caddies/payroll', label: '給与', description: '月次集計と給与CSV', icon: CircleDollarSign },
@@ -117,9 +111,9 @@ export const navigationSections: NavigationSection[] = [
     id: 'finance',
     label: '経理・精算',
     items: [
-      { route: 'golf/budgets', label: '予算マスタ', description: '日別予算と達成率', icon: BarChart3, shortcut: '5' },
-      { route: 'golf/settlement', label: '月次精算', description: '売上、費用、未収の照合', icon: ReceiptText, shortcut: '6' },
-      { route: 'cancellation-fees', label: 'キャンセル料', description: '請求、送信、入金確認', icon: CreditCard, shortcut: '7' },
+      { route: 'golf/budgets', label: '予算マスタ', description: '日別予算と達成率', icon: BarChart3 },
+      { route: 'golf/settlement', label: '月次精算', description: '売上、費用、未収の照合', icon: ReceiptText },
+      { route: 'cancellation-fees', label: 'キャンセル料', description: '請求、送信、入金確認', icon: CreditCard },
     ],
   },
 ]
@@ -306,14 +300,6 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
         event.preventDefault()
         setCommandOpen(value => !value)
       }
-      const shortcutDigit = navigationShortcutDigit(event, platformKind())
-      if (shortcutDigit) {
-        const item = allNavigation.find(entry => entry.shortcut === shortcutDigit)
-        if (item) {
-          event.preventDefault()
-          navigate(item.route)
-        }
-      }
     }
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
@@ -368,7 +354,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   const sidebar = (
     <Sidebar collapsed={visuallyCollapsed} className="courseboard-sidebar">
       <SidebarHeader className="brand-row">
-        <CourseBoardBrand variant="sidebar" collapsed={visuallyCollapsed} />
+        <CourseBoardBrand variant="sidebar" collapsed={visuallyCollapsed} dark={dark} />
         <Button
           type="button"
           variant="ghost"
@@ -572,7 +558,6 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
                   >
                     <Icon />
                     <span className="command-copy"><strong>{item.label}</strong><small>{item.description}</small></span>
-                    {item.shortcut ? <Kbd>{navigationShortcutLabel(item.shortcut, platformKind())}</Kbd> : null}
                   </CommandItem>
                 )
               })}
@@ -596,7 +581,6 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
                 >
                   <Icon />
                   <span className="command-copy"><strong>{item.label}</strong><small>{item.description}</small></span>
-                  {item.shortcut ? <Kbd>{navigationShortcutLabel(item.shortcut, platformKind())}</Kbd> : null}
                 </CommandItem>
               )
             })}
@@ -641,7 +625,6 @@ function NavigationRow({
           <SidebarItem type="button" active={active} onClick={() => navigate(item.route)}>
             <Icon />
             <SidebarItemLabel>{item.label}</SidebarItemLabel>
-            {item.shortcut ? <Kbd className="nav-shortcut">{navigationShortcutLabel(item.shortcut, platformKind())}</Kbd> : null}
           </SidebarItem>
         </TooltipTrigger>
         {collapsed ? <TooltipContent side="right">{item.label}</TooltipContent> : null}
