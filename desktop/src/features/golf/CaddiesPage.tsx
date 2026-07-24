@@ -622,6 +622,8 @@ export function CaddiesPage({
         onOpenChange={setCreateOpen}
         staff={staffResource.data?.items ?? []}
         staffLoading={staffResource.loading}
+        staffError={staffResource.error}
+        onRetryStaff={staffResource.refresh}
         onCreated={id => {
           setCreateOpen(false)
           setView('roster')
@@ -1321,6 +1323,9 @@ function ProfilesView({
 
   return (
     <div className="space-y-4">
+      {staffResource.error ? (
+        <ResourceError error={staffResource.error} onRetry={staffResource.refresh} />
+      ) : null}
       {unlinked > 0 ? (
         <Notice
           tone="warning"
@@ -1467,12 +1472,16 @@ function ProfileCreateDialog({
   onOpenChange,
   staff,
   staffLoading,
+  staffError,
+  onRetryStaff,
   onCreated,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   staff: StaffMember[]
   staffLoading: boolean
+  staffError: unknown
+  onRetryStaff: () => void
   onCreated: (id?: string) => void
 }) {
   const [displayName, setDisplayName] = useState('')
@@ -1498,6 +1507,10 @@ function ProfileCreateDialog({
 
   async function submit(event: FormEvent) {
     event.preventDefault()
+    if (staffError) {
+      setError('Fieldスタッフを読み込めないため、作成を続行できません。再試行してください。')
+      return
+    }
     const name = displayName.trim()
     const fee = Number.parseInt(baseFeeAmount, 10)
     if (!name) {
@@ -1596,7 +1609,11 @@ function ProfileCreateDialog({
           <Separator />
 
           <Field label="スタッフ登録方法" required>
-            <NativeSelect value={staffMode} onChange={event => setStaffMode(event.target.value as 'existing' | 'new')}>
+            <NativeSelect
+              value={staffMode}
+              onChange={event => setStaffMode(event.target.value as 'existing' | 'new')}
+              disabled={Boolean(staffError)}
+            >
               <option value="existing">既存スタッフに紐付ける</option>
               <option value="new">新しいスタッフを作成する</option>
             </NativeSelect>
@@ -1607,7 +1624,11 @@ function ProfileCreateDialog({
                 <Input value={staffQuery} onChange={event => setStaffQuery(event.target.value)} placeholder="名前またはスタッフID" className="min-h-10" />
               </Field>
               <Field label="スタッフ" required>
-                <NativeSelect value={staffId} onChange={event => setStaffId(event.target.value)} disabled={staffLoading}>
+                <NativeSelect
+                  value={staffId}
+                  onChange={event => setStaffId(event.target.value)}
+                  disabled={staffLoading || Boolean(staffError)}
+                >
                   <option value="">{staffLoading ? '読み込み中…' : 'スタッフを選択'}</option>
                   {availableStaff.map(item => (
                     <option key={item.id} value={item.id}>{item.name}（{item.id}）</option>
@@ -1621,13 +1642,19 @@ function ProfileCreateDialog({
             </Field>
           )}
 
+          {staffError ? <ResourceError error={staffError} onRetry={onRetryStaff} /> : null}
           {error ? <Notice tone="danger">{error}</Notice> : null}
 
           <DialogFooter>
             <Button type="button" variant="ghost" className="min-h-10" onClick={() => onOpenChange(false)} disabled={busy}>
               キャンセル
             </Button>
-            <Button type="submit" variant="primary" className="min-h-10" disabled={busy}>
+            <Button
+              type="submit"
+              variant="primary"
+              className="min-h-10"
+              disabled={busy || Boolean(staffError)}
+            >
               <UserPlus /> {busy ? '作成中…' : 'キャディを作成'}
             </Button>
           </DialogFooter>
@@ -1998,6 +2025,7 @@ function StaffManagementPanel({
         onOpenChange={setLinkOpen}
         profile={profile}
         staff={staff}
+        staffError={staffError}
         onChanged={onChanged}
         setFlash={setFlash}
       />
@@ -2010,6 +2038,7 @@ function StaffLinkDialog({
   onOpenChange,
   profile,
   staff,
+  staffError,
   onChanged,
   setFlash,
 }: {
@@ -2017,6 +2046,7 @@ function StaffLinkDialog({
   onOpenChange: (open: boolean) => void
   profile: CaddieProfile
   staff: StaffMember[]
+  staffError: unknown
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
@@ -2035,6 +2065,10 @@ function StaffLinkDialog({
 
   async function submit(event: FormEvent) {
     event.preventDefault()
+    if (staffError) {
+      setError('Fieldスタッフを読み込めないため、紐付けを続行できません。')
+      return
+    }
     if (mode === 'existing' && !staffId) {
       setError('スタッフを選択してください。')
       return
@@ -2077,8 +2111,13 @@ function StaffLinkDialog({
           <DialogDescription>既存スタッフを選ぶか、新しいスタッフを作成します。</DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={event => void submit(event)}>
+          {staffError ? <ResourceError error={staffError} /> : null}
           <Field label="登録方法" required>
-            <NativeSelect value={mode} onChange={event => setMode(event.target.value as 'existing' | 'new')}>
+            <NativeSelect
+              value={mode}
+              onChange={event => setMode(event.target.value as 'existing' | 'new')}
+              disabled={Boolean(staffError)}
+            >
               <option value="existing">既存スタッフ</option>
               <option value="new">新しいスタッフ</option>
             </NativeSelect>
@@ -2089,7 +2128,11 @@ function StaffLinkDialog({
                 <Input value={query} onChange={event => setQuery(event.target.value)} placeholder="名前またはスタッフID" className="min-h-10" />
               </Field>
               <Field label="スタッフ" required>
-                <NativeSelect value={staffId} onChange={event => setStaffId(event.target.value)}>
+                <NativeSelect
+                  value={staffId}
+                  onChange={event => setStaffId(event.target.value)}
+                  disabled={Boolean(staffError)}
+                >
                   <option value="">スタッフを選択</option>
                   {filtered.map(item => <option key={item.id} value={item.id}>{item.name}（{item.id}）</option>)}
                 </NativeSelect>
@@ -2103,7 +2146,7 @@ function StaffLinkDialog({
           {error ? <Notice tone="danger">{error}</Notice> : null}
           <DialogFooter>
             <Button type="button" variant="ghost" className="min-h-10" onClick={() => onOpenChange(false)} disabled={busy}>キャンセル</Button>
-            <Button type="submit" variant="primary" className="min-h-10" disabled={busy}><Link2 /> {busy ? '紐付け中…' : '紐付けを保存'}</Button>
+            <Button type="submit" variant="primary" className="min-h-10" disabled={busy || Boolean(staffError)}><Link2 /> {busy ? '紐付け中…' : '紐付けを保存'}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

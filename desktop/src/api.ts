@@ -204,8 +204,29 @@ export function shouldSoftSignOutOn401(input: {
   return !input.refreshProducedToken
 }
 
-async function protectedFetch(path: string, init?: RequestInit, retried = false) {
-  const token = await apiAuthContext?.getAccessToken(false)
+async function accessTokenForProtectedRequest() {
+  const context = apiAuthContext
+  if (!context) {
+    throw new ApiError('認証の準備が完了していません。再読み込みしてください。', 401)
+  }
+
+  const current = await context.getAccessToken(false)
+  if (current) return current
+
+  const refreshed = await context.getAccessToken(true)
+  if (refreshed) return refreshed
+
+  context.onUnauthorized()
+  throw new ApiError('ログインセッションの有効期限が切れました。', 401)
+}
+
+async function protectedFetch(
+  path: string,
+  init?: RequestInit,
+  retried = false,
+  tokenOverride?: string,
+) {
+  const token = tokenOverride ?? await accessTokenForProtectedRequest()
   const requestUrl = join(operatorApiBaseUrl(), path)
   const isNative = '__TAURI_INTERNALS__' in window
   const defaultCredentials = protectedRequestCredentials(
@@ -222,7 +243,7 @@ async function protectedFetch(path: string, init?: RequestInit, retried = false)
   if (response.status === 401) {
     if (!retried && apiAuthContext) {
       const refreshed = await apiAuthContext.getAccessToken(true)
-      if (refreshed) return protectedFetch(path, init, true)
+      if (refreshed) return protectedFetch(path, init, true, refreshed)
       if (shouldSoftSignOutOn401({
         hasAuthContext: true,
         alreadyRetried: false,

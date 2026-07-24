@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   beginBoot,
+  canRenderProtectedApp,
   clearLastReadySession,
   hasRestorableBrowserSession,
   profileRevalidationError,
@@ -104,6 +105,22 @@ describe('resolveAuthGateView', () => {
       kind: 'loading',
       authorizing: true,
     })
+  })
+})
+
+describe('canRenderProtectedApp', () => {
+  it('holds protected screens until the API auth context is bound', () => {
+    const held = resolveAuthGateView({
+      status: 'booting',
+      previous: { user, tenant },
+    })
+
+    expect(canRenderProtectedApp(held, false)).toBe(false)
+    expect(canRenderProtectedApp(held, true)).toBe(true)
+    expect(canRenderProtectedApp(
+      resolveAuthGateView({ status: 'ready', user, tenant }),
+      false,
+    )).toBe(false)
   })
 })
 

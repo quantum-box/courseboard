@@ -68,6 +68,43 @@ describe('protected API 401 handling', () => {
     vi.unstubAllEnvs()
   })
 
+  it('does not send a protected request before the auth context is bound', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(courseboardApiJson('/cancellation-fee-collections')).rejects.toMatchObject({
+      status: 401,
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('refreshes before the first request when the current token is unavailable', async () => {
+    const getAccessToken = vi.fn(async (force?: boolean) =>
+      force ? 'initial-refreshed-token' : undefined)
+    configureApiAuth({
+      tenantId: 'tn_1',
+      operatorId: 'tn_1',
+      platformId: 'plat_1',
+      getAccessToken,
+      onUnauthorized: vi.fn(),
+      onForbidden: vi.fn(),
+    })
+    const fetchMock = vi.fn(
+      async (..._args: [RequestInfo | URL, RequestInit?]) =>
+        Response.json({ items: [] }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(courseboardApiJson('/cancellation-fee-collections')).resolves.toEqual({
+      items: [],
+    })
+    expect(getAccessToken).toHaveBeenNthCalledWith(1, false)
+    expect(getAccessToken).toHaveBeenNthCalledWith(2, true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers)
+    expect(headers.get('authorization')).toBe('Bearer initial-refreshed-token')
+  })
+
   it('does not call onUnauthorized when a refreshed token still receives 401', async () => {
     const onUnauthorized = vi.fn()
     configureApiAuth({
@@ -93,8 +130,10 @@ describe('protected API 401 handling', () => {
     expect(onUnauthorized).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(2)
     const firstHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers)
+    const secondHeaders = new Headers(fetchMock.mock.calls[1]?.[1]?.headers)
     expect(firstHeaders.get('authorization')).toBe('Bearer stale-token')
     expect(firstHeaders.get('x-courseboard-authorization')).toBe('Bearer stale-token')
+    expect(secondHeaders.get('authorization')).toBe('Bearer refreshed-token')
   })
 
   it('calls onUnauthorized when refresh cannot produce a token', async () => {
