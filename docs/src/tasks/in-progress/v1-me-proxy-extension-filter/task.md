@@ -38,5 +38,6 @@ golf_course extension未有効テナントを選択でき、選択後にField依
 - `cargo test profile_proxy --lib`、OpenAPI path test、全target clippyを確認。
 - UI profile endpointをcourseboard-api `/v1/me`へ切り替え、空tenantのenv fallbackと
   profile再検証失敗時のstale tenant復活経路を削除した。
-- UIのtype-check、20 test files / 120 tests、production buildを確認し、生成bundleに
-  tachyon-api `/v1/me`の直参照がないことを確認した。
+- UIのtype-check、20 test files / 121 tests、production buildを確認した。
+- CI、desktop release、Android/iOS releaseのbuild-time profile endpointをproxyへ統一し、
+  workflow相当envの生成bundleにtachyon-api `/v1/me`の直参照がないことを確認した。

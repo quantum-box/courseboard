@@ -66,6 +66,20 @@ jobs:
 
       - name: Build web assets
         run: npm run build
+        env:
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
+          VITE_COURSEBOARD_AUTH_MODE: browser-pkce
+          VITE_COURSEBOARD_BROWSER_CLIENT_ID: 5oafg9ptonbjumdh1pc7khirp1
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
+
+      - name: Verify profile proxy endpoint
+        run: |
+          if grep -R -F -q "https://api.n1.tachy.one/v1/me" dist; then
+            echo "web bundle contains direct Tachyon profile endpoint" >&2
+            exit 1
+          fi
+          # Vite may deduplicate the profile URL with API_BASE_URL during minification.
+          grep -R -F -q "https://courseboard-api.txcloud.app" dist
 
   desktop_bundle:
     name: Desktop bundle (${{ matrix.platform }})
@@ -130,7 +144,7 @@ jobs:
           VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
           VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
           VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
-          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://api.n1.tachy.one/v1/me
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
 
       - name: Upload desktop bundle
         uses: actions/upload-artifact@v4
@@ -208,7 +222,7 @@ jobs:
           VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
           VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
           VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
-          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://api.n1.tachy.one/v1/me
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
 
       - name: Upload Android bundle
         uses: actions/upload-artifact@v4
@@ -272,7 +286,7 @@ jobs:
           VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
           VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
           VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
-          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://api.n1.tachy.one/v1/me
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
 
       - name: Upload iOS Simulator app
         uses: actions/upload-artifact@v4

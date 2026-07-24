@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   browserPkceProdApiUiValues,
@@ -12,6 +13,25 @@ import {
   PRODUCTION_COGNITO_REGION,
   updateEnvContent,
 } from './configure.mjs'
+
+describe('packaged app profile endpoints', () => {
+  it('keeps CI and release builds on the courseboard-api profile proxy', () => {
+    for (const workflow of ['ci.yml', 'desktop-release.yml', 'mobile-release.yml']) {
+      const source = readFileSync(
+        new URL(`../../.github/workflows/${workflow}`, import.meta.url),
+        'utf8',
+      )
+      const endpoints = [...source.matchAll(
+        /VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT:\s*(\S+)/g,
+      )].map(match => match[1])
+
+      expect(endpoints.length).toBeGreaterThan(0)
+      expect(new Set(endpoints)).toEqual(new Set([
+        `${PROD_COURSEBOARD_API_URL}/v1/me`,
+      ]))
+    }
+  })
+})
 
 describe('configure pkce', () => {
   it('configures browser-pkce defaults', () => {

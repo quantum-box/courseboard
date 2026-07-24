@@ -110,7 +110,7 @@ jobs:
           VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
           VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
           VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
-          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://api.n1.tachy.one/v1/me
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
