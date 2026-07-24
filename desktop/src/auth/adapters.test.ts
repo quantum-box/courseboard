@@ -149,6 +149,8 @@ describe('BrowserPkceAdapter', () => {
     vi.stubEnv('VITE_COURSEBOARD_BROWSER_REDIRECT_URI', 'http://127.0.0.1:5173/oauth/callback')
     vi.stubEnv('VITE_COURSEBOARD_TENANT_ID', 'tn_01example')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'false')
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT', '')
+    vi.stubEnv('VITE_COURSEBOARD_API_BASE_URL', 'https://courseboard-api.example.test/')
     localStorageMock = memoryStorage()
     sessionStorageMock = memoryStorage()
     vi.stubGlobal('window', {
@@ -229,7 +231,50 @@ describe('BrowserPkceAdapter', () => {
     expect(secondBootstrap).toMatchObject({ kind: 'authenticated', user: { id: 'user-1' } })
     expect(await second.getAccessToken()).toBe(accessToken)
     expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(fetchMock.mock.calls.every(([url]) => String(url).includes('/v1/me'))).toBe(true)
+    expect(fetchMock.mock.calls.every(([url]) =>
+      String(url) === 'https://courseboard-api.example.test/v1/me')).toBe(true)
+  })
+
+  it('keeps an empty proxy tenant list empty instead of restoring the configured tenant', async () => {
+    const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
+    localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
+      accessToken: 'persisted-access-token',
+      accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
+    }))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      user: { id: 'user-1', username: 'operator' },
+      tenants: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const result = await createAuthAdapter().bootstrap()
+
+    expect(result).toMatchObject({
+      kind: 'authenticated',
+      user: { id: 'user-1' },
+      tenants: [],
+    })
+  })
+
+  it('defaults to the same-origin courseboard proxy when profile and API URLs are unset', async () => {
+    vi.stubEnv('VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT', '')
+    vi.stubEnv('VITE_COURSEBOARD_API_BASE_URL', '')
+    const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
+    localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
+      accessToken: 'persisted-access-token',
+      accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
+    }))
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      user: { id: 'user-1', username: 'operator' },
+      tenants: [],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createAuthAdapter().bootstrap()
+
+    expect(fetchMock).toHaveBeenCalledWith('/v1/me', expect.objectContaining({
+      cache: 'no-store',
+      credentials: 'omit',
+    }))
   })
 
   it('refreshes an expired access token from the persisted refresh token on bootstrap', async () => {
@@ -435,7 +480,10 @@ describe('Production BrowserPkceAdapter', () => {
     vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'cognito-direct')
     vi.stubEnv('VITE_COURSEBOARD_BROWSER_CLIENT_ID', 'local-prod-public')
     vi.stubEnv('VITE_COURSEBOARD_COGNITO_REGION', 'ap-northeast-1')
-    vi.stubEnv('VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT', 'https://api.n1.tachy.one/v1/me')
+    vi.stubEnv(
+      'VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT',
+      'https://courseboard-api.txcloud.app/v1/me',
+    )
     vi.stubEnv('VITE_COURSEBOARD_TENANT_ID', 'tn_01example')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'false')
     vi.stubEnv('VITE_COURSEBOARD_API_BEARER', '')

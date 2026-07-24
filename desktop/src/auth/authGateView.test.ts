@@ -3,6 +3,7 @@ import {
   beginBoot,
   clearLastReadySession,
   hasRestorableBrowserSession,
+  profileRevalidationError,
   readLastReadySession,
   resolveAuthGateView,
   sessionExpiredNotice,
@@ -167,6 +168,16 @@ describe('sessionExpiredNotice', () => {
   it('does not toast expiry without a prior authenticated session (navigation / cold start)', () => {
     expect(sessionExpiredNotice('expired', false)).toBeUndefined()
     expect(sessionExpiredNotice('expired', true)).toBe('Your session expired. Please sign in again.')
+  })
+})
+
+describe('profileRevalidationError', () => {
+  it('fails closed without carrying the previously selected tenant forward', () => {
+    const state = profileRevalidationError(new Error('profile proxy unavailable'))
+
+    expect(state).toEqual({ status: 'error', message: 'profile proxy unavailable' })
+    expect(state).not.toHaveProperty('previous')
+    expect(state).not.toHaveProperty('tenant')
   })
 })
 

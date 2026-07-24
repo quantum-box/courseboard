@@ -162,7 +162,7 @@ platform-ui と同じ Cognito direct auth です（ADR-0003）。Hosted UI と A
 UI password form
   → Cognito InitiateAuth (USER_PASSWORD_AUTH)
   → Cognito access / id / refresh token
-  → GET  https://api.n1.tachy.one/v1/me
+  → GET  local course-api /v1/me proxy
   → Authorization: Bearer <Cognito access> を local course-api へ
   → course-api が Cognito issuer / signature / token_use=access / client_id を検証
   → 同じ Cognito access token を prod Field へ転送
@@ -272,7 +272,7 @@ iOS は Xcode toolchain、Android は JDK 17、Android SDK / NDK が必要です
 ## API と認証
 
 - Web/TauriはReact内でplatform-ui互換のCognito direct password authを実行し、
-  `https://api.n1.tachy.one/v1/me`からユーザー・テナント情報を取得します。
+  `courseboard-api`の`/v1/me`からextension有効テナントだけを取得します。
 - ReactはCognito access tokenをBearerとして`courseboard-api`へ直接送り、
   `/v1/course/*`、`/field-api/*`、Course Board固有endpointを呼びます。
 - Field API が 401 を返した場合は token refresh を1回だけ行い、再度失敗した場合は
@@ -285,7 +285,7 @@ iOS は Xcode toolchain、Android は JDK 17、Android SDK / NDK が必要です
 - Desktop / Mobile / Webは同じCognito public clientを使い、`USER_PASSWORD_AUTH`と
   `REFRESH_TOKEN_AUTH`を直接呼びます。client secretは使用しません。
 - Native productionも`VITE_COURSEBOARD_API_BASE_URL=https://courseboard-api.txcloud.app`を使います。
-  Cognito tokenで呼ぶprofile endpointは`https://api.n1.tachy.one/v1/me`です。
+  Cognito tokenで呼ぶprofile endpointも`https://courseboard-api.txcloud.app/v1/me`です。
 - 認証画面はReact内に留まり、Cognito Hosted UIやTauri opener/deep-link bridgeは使いません。
 - Cognito / profile endpointを追加するときは、そのHTTPS originを`src-tauri/tauri.conf.json`のCSP
   `connect-src`にも最小範囲で追加してください。

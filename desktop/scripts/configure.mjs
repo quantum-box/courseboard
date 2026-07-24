@@ -282,14 +282,13 @@ export async function runPkce(argv = []) {
     return
   }
 
-  const apiBase = options.apiUrl.replace(/\/$/, '')
   const uiPath = writeEnvFile(
     options.uiEnvFile,
     {
       VITE_COURSEBOARD_AUTH_MODE: 'cognito-direct',
       VITE_COURSEBOARD_BROWSER_CLIENT_ID: localClient.clientId,
       VITE_COURSEBOARD_COGNITO_REGION: PRODUCTION_COGNITO_REGION,
-      VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: `${apiBase}/v1/me`,
+      VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: '/v1/me',
       VITE_COURSEBOARD_TENANT_ID: options.tenantId,
       VITE_COURSEBOARD_OPERATOR_ID: options.tenantId,
       VITE_COURSEBOARD_MOCK_DATA: 'false',
@@ -486,7 +485,6 @@ export async function runField(argv = []) {
 // ---------------------------------------------------------------------------
 
 export const PROD_COURSEBOARD_API_URL = 'https://courseboard-api.txcloud.app'
-export const PROD_API_AUTH_BASE = 'https://api.n1.tachy.one'
 /** Deployed Cognito public client / prod Lambda EXPECTED_AUDIENCE. */
 export const PROD_API_EXPECTED_AUDIENCE = '5oafg9ptonbjumdh1pc7khirp1'
 export const PROD_API_PUBLIC_CLIENT_NAME = 'courseboard-local-prod-pkce'
@@ -574,7 +572,7 @@ export function browserPkceProdApiUiValues({
     VITE_COURSEBOARD_AUTH_MODE: 'cognito-direct',
     VITE_COURSEBOARD_BROWSER_CLIENT_ID: clientId,
     VITE_COURSEBOARD_COGNITO_REGION: PRODUCTION_COGNITO_REGION,
-    VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: `${PROD_API_AUTH_BASE}/v1/me`,
+    VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: `${apiBase}/v1/me`,
     VITE_COURSEBOARD_API_BEARER: '',
     VITE_COURSEBOARD_API_BASE_URL: apiBase,
     VITE_COURSEBOARD_TENANT_ID: tenantId,
