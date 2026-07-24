@@ -49,7 +49,7 @@ spec:
         - name: VITE_COURSEBOARD_PUBLIC_API_BASE_URL
           value: https://courseboard-api.txcloud.app
         - name: VITE_COURSEBOARD_PLATFORM_ID
-          value: tn_01ks18jhh1xvggktfzjx5jqsen
+          value: tn_01hjjn348rn3t49zz6hvmfq67p
 
     # --- Rust course-api — AWS Lambda.
     # React/Tauri send Cognito bearer tokens directly to this app.
