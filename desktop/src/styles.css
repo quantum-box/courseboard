@@ -198,15 +198,6 @@ button,
   pointer-events: auto;
 }
 
-.nav-row:hover .nav-shortcut,
-.nav-row:focus-within .nav-shortcut {
-  opacity: 0;
-}
-
-.nav-row[data-pinned] .nav-shortcut {
-  opacity: 0;
-}
-
 .nav-row .nav-pin:hover,
 .nav-row .nav-pin:focus-visible {
   background: hsl(var(--nui-muted));
