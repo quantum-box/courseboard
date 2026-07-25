@@ -1,0 +1,14 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://downloads.courseboard.txcloud.app/releases/updater/latest.json"
+      ],
+      "pubkey": "COURSEBOARD_UPDATER_PUBLIC_KEY"
+    }
+  }
+}

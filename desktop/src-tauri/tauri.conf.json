@@ -12,7 +12,10 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "Course Board",
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
         "width": 1280,
         "height": 800,
         "minWidth": 800,

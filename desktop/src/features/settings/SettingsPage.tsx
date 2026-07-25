@@ -4,7 +4,7 @@ import { courseboardApiJson } from '../../api'
 import { LoadingState, Notice, PageHeader, Panel, ResourceError } from '../../components/Page'
 import { useResource } from '../../hooks/useResource'
 import { useRegisterPageReload } from '../../lib/pageReload'
-import { navigate } from '../../lib/router'
+import { navigateFromClick } from '../../lib/router'
 import { ExtensionConfigPanel } from './ExtensionConfigPanel'
 import { ExtensionSummary, type ExtensionStatus } from './ExtensionSummary'
 import { IntegrationMetadataPanel } from './IntegrationMetadataPanel'
@@ -31,7 +31,7 @@ export function SettingsPage() {
         <button
           type="button"
           className="settings-master-link"
-          onClick={() => navigate('golf/courses')}
+          onClick={event => navigateFromClick(event, 'golf/courses')}
         >
           <span className="settings-master-icon"><FolderTree /></span>
           <span className="settings-master-copy">
@@ -43,7 +43,7 @@ export function SettingsPage() {
         <button
           type="button"
           className="settings-master-link"
-          onClick={() => navigate('golf/policy')}
+          onClick={event => navigateFromClick(event, 'golf/policy')}
         >
           <span className="settings-master-icon"><Settings2 /></span>
           <span className="settings-master-copy">

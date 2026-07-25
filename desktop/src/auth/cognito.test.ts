@@ -83,5 +83,21 @@ describe('Cognito direct authentication', () => {
     expect(error).toBeInstanceOf(CognitoRequestError)
     expect(error.definitive).toBe(true)
     expect(error.message).not.toContain('raw account state')
+    expect(error.message).toContain('NotAuthorizedException')
+    expect(error.code).toBe('NotAuthorizedException')
+  })
+
+  it('distinguishes public client configuration errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      __type: 'InvalidParameterException',
+      message: 'raw provider detail',
+    }, { status: 400 })))
+
+    const error = await authenticateWithCognito(endpoint, clientId, 'user', 'password')
+      .catch(reason => reason)
+
+    expect(error.message).toContain('public clientの認証設定が不正')
+    expect(error.message).toContain('InvalidParameterException')
+    expect(error.message).not.toContain('raw provider detail')
   })
 })

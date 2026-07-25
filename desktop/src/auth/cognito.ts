@@ -10,6 +10,7 @@ type CognitoAuthenticationResult = {
 type CognitoResponse = {
   AuthenticationResult?: CognitoAuthenticationResult
   ChallengeName?: string
+  __type?: string
 }
 
 export type CognitoTokens = {
@@ -24,7 +25,11 @@ export type CognitoPasswordResult =
   | { status: 'new_password_required' }
 
 export class CognitoRequestError extends Error {
-  constructor(message: string, readonly definitive: boolean) {
+  constructor(
+    message: string,
+    readonly definitive: boolean,
+    readonly code = 'unknown',
+  ) {
     super(message)
     this.name = 'CognitoRequestError'
   }
@@ -92,14 +97,36 @@ async function cognitoRequest(
   const payload = await response.json().catch(() => ({})) as CognitoResponse
   if (!response.ok) {
     const definitive = response.status >= 400 && response.status < 500
+    const code = payload.__type?.split('#').pop() ?? `HTTP_${response.status}`
+    const message = cognitoErrorMessage(code, definitive)
     throw new CognitoRequestError(
-      definitive
-        ? 'ユーザー名またはパスワードを確認してください。'
-        : '認証サービスで一時的な問題が発生しました。',
+      `${message} (${code})`,
       definitive,
+      code,
     )
   }
   return payload
+}
+
+function cognitoErrorMessage(code: string, definitive: boolean) {
+  if (code === 'NotAuthorizedException' || code === 'UserNotFoundException') {
+    return 'ユーザー名、パスワード、またはアカウント状態を確認してください。'
+  }
+  if (code === 'UserNotConfirmedException') {
+    return 'ユーザー確認が完了していません。'
+  }
+  if (code === 'PasswordResetRequiredException') {
+    return 'パスワードの再設定が必要です。'
+  }
+  if (code === 'InvalidParameterException') {
+    return 'Cognito public clientの認証設定が不正です。'
+  }
+  if (code === 'TooManyRequestsException') {
+    return 'ログイン試行が多すぎます。少し待ってから再試行してください。'
+  }
+  return definitive
+    ? 'Cognitoがログインを拒否しました。'
+    : '認証サービスで一時的な問題が発生しました。'
 }
 
 function normalizeTokens(
