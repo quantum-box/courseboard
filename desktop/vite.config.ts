@@ -24,6 +24,7 @@ export default defineConfig(({ mode }) => {
       },
       proxy: {
         '/field-api': { target: apiProxyTarget, changeOrigin: true },
+        '/v1/me': { target: apiProxyTarget, changeOrigin: true },
         '/v1/course': { target: apiProxyTarget, changeOrigin: true },
         '/cancellation-fee-collections': { target: apiProxyTarget, changeOrigin: true },
         '/public/cancellation-fees': { target: apiProxyTarget, changeOrigin: true },

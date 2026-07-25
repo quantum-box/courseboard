@@ -10,6 +10,7 @@ pub mod course;
 pub mod demo_seed;
 pub mod field_api;
 pub mod field_proxy;
+pub mod profile_proxy;
 pub mod smart_assign;
 
 use auth::{AuthError, TokenVerifier};
@@ -52,6 +53,7 @@ pub struct AppState {
     token_verifier: Arc<dyn TokenVerifier>,
     field_api: Option<DynFieldApi>,
     field_api_config_error: Option<String>,
+    profile_client: Option<Arc<profile_proxy::ProfileClient>>,
 }
 
 impl AppState {
@@ -78,6 +80,7 @@ impl AppState {
             field_api_config_error: Some(
                 "Field API client is not configured for the admin UI".to_string(),
             ),
+            profile_client: None,
         }
     }
 
@@ -108,6 +111,7 @@ impl AppState {
             token_verifier,
             field_api: Some(field_api),
             field_api_config_error: None,
+            profile_client: None,
         }
     }
 
@@ -126,6 +130,7 @@ impl AppState {
                 token_verifier,
                 field_api: Some(Arc::new(client)),
                 field_api_config_error: None,
+                profile_client: None,
             },
             Err(error) => Self {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
@@ -135,8 +140,14 @@ impl AppState {
                 token_verifier,
                 field_api: None,
                 field_api_config_error: Some(error.to_string()),
+                profile_client: None,
             },
         }
+    }
+
+    fn with_profile_client(mut self, profile_client: Option<profile_proxy::ProfileClient>) -> Self {
+        self.profile_client = profile_client.map(Arc::new);
+        self
     }
 }
 
@@ -170,11 +181,20 @@ impl FromRef<AppState> for reqwest::Client {
     }
 }
 
+impl FromRef<AppState> for Arc<profile_proxy::ProfileClient> {
+    fn from_ref(state: &AppState) -> Self {
+        state
+            .profile_client
+            .clone()
+            .expect("profile route must only be registered with a configured profile client")
+    }
+}
+
 pub fn build_router(state: AppState) -> Router {
     let auth_state = state.clone();
     let admin_auth_state = state.clone();
     let collection_auth_state = state.clone();
-    Router::new()
+    let mut router = Router::new()
         .route("/", get(redirect_ui))
         .nest_service(
             "/ui",
@@ -498,9 +518,17 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/public/cancellation-fees/:token/confirm",
             post(cancellation_fees::confirm_stripe_payment),
-        )
-        .with_state(state)
-        .layer(courseboard_cors_layer())
+        );
+    if state.profile_client.is_some() {
+        router = router.route(
+            "/v1/me",
+            get(profile_proxy::get_me).route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                require_valid_token,
+            )),
+        );
+    }
+    router.with_state(state).layer(courseboard_cors_layer())
 }
 
 fn courseboard_cors_layer() -> CorsLayer {
@@ -574,13 +602,16 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
         Arc::new(auth::OidcJwtVerifier::discover(auth_config).await?)
     };
     let cancellation_fee_config = config.cancellation_fee_config();
+    let profile_client = profile_proxy::ProfileClient::from_field_api_url(&course_gateway_url)
+        .context("courseboard profile proxy configuration is invalid")?;
     let field_api = FieldApiClient::from_config(
         config.field_api_base_url(),
         config.field_api_client_credentials_config(),
         config.field_api_bearer_token(),
     );
     let state =
-        AppState::with_optional_field_api(pool, token_verifier, field_api, cancellation_fee_config);
+        AppState::with_optional_field_api(pool, token_verifier, field_api, cancellation_fee_config)
+            .with_profile_client(profile_client);
 
     Ok(build_router(state))
 }

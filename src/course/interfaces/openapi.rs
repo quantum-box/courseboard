@@ -11,6 +11,7 @@ use utoipa::{
 use super::http;
 use super::http_commercial;
 use super::http_ops;
+use crate::profile_proxy;
 
 /// Standard API error body returned by [`crate::AppError`].
 #[derive(Debug, Serialize, ToSchema)]
@@ -32,7 +33,7 @@ impl Modify for SecurityAddon {
                     .scheme(HttpAuthScheme::Bearer)
                     .bearer_format("JWT")
                     .description(Some(
-                        "Bearer access token. Requests also require the `x-operator-id` header.",
+                        "Bearer access token. Tenant-scoped course requests also require the `x-operator-id` header.",
                     ))
                     .build(),
             ),
@@ -44,7 +45,7 @@ impl Modify for SecurityAddon {
 #[openapi(
     info(
         title = "CourseBoard Course API",
-        description = "HTTP surface for golf course operations (`/v1/course/*`).",
+        description = "HTTP surface for CourseBoard identity and golf course operations.",
         version = "0.1.1"
     ),
     paths(
@@ -85,6 +86,7 @@ impl Modify for SecurityAddon {
         http_commercial::export_monthly_settlement_csv,
         http_commercial::get_extension_status,
         http_commercial::update_extension_config,
+        profile_proxy::get_me,
     ),
     components(
         schemas(
@@ -145,6 +147,10 @@ impl Modify for SecurityAddon {
             http_commercial::ExtensionStatusDto,
             http_commercial::ExtensionValidationDto,
             http_commercial::UpdateExtensionConfigRequest,
+            profile_proxy::ProfileResponse,
+            profile_proxy::ProfileUser,
+            profile_proxy::ProfileTenant,
+            profile_proxy::ProfileErrorResponse,
         )
     ),
     modifiers(&SecurityAddon),
@@ -152,6 +158,7 @@ impl Modify for SecurityAddon {
         (name = "course", description = "Courses, tee sheet, resources, and reservation products"),
         (name = "course-ops", description = "Caddie operations, payroll, and assignments"),
         (name = "course-commercial", description = "Budgets, settlement, policy, and extension config"),
+        (name = "identity", description = "Authenticated CourseBoard profile"),
     ),
     security(
         ("bearer_auth" = [])
@@ -177,6 +184,7 @@ mod tests {
         assert!(paths.contains_key("/v1/course/caddie-profiles"));
         assert!(paths.contains_key("/v1/course/reservation-policy"));
         assert!(paths.contains_key("/v1/course/daily-budgets"));
+        assert!(paths.contains_key("/v1/me"));
         let components = json
             .pointer("/components/schemas")
             .and_then(|v| v.as_object())
@@ -184,5 +192,7 @@ mod tests {
         assert!(components.contains_key("TeeSheetResponse"));
         assert!(components.contains_key("CourseDto"));
         assert!(components.contains_key("ErrorBody"));
+        assert!(components.contains_key("ProfileResponse"));
+        assert!(components.contains_key("ProfileErrorResponse"));
     }
 }

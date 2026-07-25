@@ -5,6 +5,7 @@ import {
   beginBoot,
   clearLastReadySession,
   hasRestorableBrowserSession,
+  profileRevalidationError,
   readLastReadySession,
   sessionExpiredNotice,
   writeLastReadySession,
@@ -21,6 +22,7 @@ import { resolveTenantSelection } from './tenant-selection'
 
 type AuthContextValue = {
   state: AuthState
+  apiAuthReady: boolean
   user?: AuthUser
   tenant?: AuthTenant
   sessionNotice?: string
@@ -85,6 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [availableTenants, setAvailableTenants] = useState<AuthTenant[]>([])
   const [attempt, setAttempt] = useState(0)
   const [sessionNotice, setSessionNotice] = useState<string | undefined>()
+  const [apiAuthReady, setApiAuthReady] = useState(false)
 
   useEffect(() => {
     try {
@@ -102,21 +105,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSessionNotice(undefined)
   }, [])
 
-  const denyAccess = useCallback(() => {
+  const clearApiAuth = useCallback(() => {
     configureApiAuth(null)
+    setApiAuthReady(false)
+  }, [])
+
+  const denyAccess = useCallback(() => {
+    clearApiAuth()
     setState(current => current.status === 'ready'
       ? { status: 'forbidden', user: current.user, tenant: current.tenant }
       : current)
-  }, [])
+  }, [clearApiAuth])
 
   const signOut = useCallback(async (reason: AuthReason = 'logout') => {
-    configureApiAuth(null)
+    clearApiAuth()
     clearLastReadySession()
     const notice = sessionExpiredNotice(reason)
     if (notice) setSessionNotice(notice)
     setState({ status: 'anonymous', reason })
     await adapter?.signOut(reason)
-  }, [adapter])
+  }, [adapter, clearApiAuth])
 
   const bindTenant = useCallback((tenant: AuthTenant) => {
     if (!adapter) return false
@@ -128,6 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       onUnauthorized: () => { void signOut('expired') },
       onForbidden: denyAccess,
     })
+    setApiAuthReady(true)
     return true
   }, [adapter, denyAccess, signOut])
 
@@ -151,20 +160,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (holdingSession && heldPrevious) {
       bindTenant(heldPrevious.tenant)
     } else if (!holdingSession) {
-      configureApiAuth(null)
+      clearApiAuth()
     }
     adapter.bootstrap()
       .then(result => {
         if (cancelled) return
         if (result.kind === 'anonymous') {
           const hadAuthenticatedSession = holdingSession || Boolean(heldPrevious)
-          // Ambiguous anonymous while a prior session is held (e.g. transient
-          // token refresh) — keep the shell; do not flash session-expired.
-          if (result.reason !== 'expired' && hadAuthenticatedSession && heldPrevious) {
-            activateTenant(heldPrevious.user, heldPrevious.tenant)
-            return
-          }
-          configureApiAuth(null)
+          clearApiAuth()
           clearLastReadySession()
           setAvailableTenants([])
           const notice = sessionExpiredNotice(result.reason, hadAuthenticatedSession)
@@ -172,6 +175,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setState({ status: 'anonymous', reason: result.reason })
           return
         }
+        // Drop the held tenant before applying the freshly filtered profile.
+        // activateTenant writes back only a tenant confirmed by this response.
+        clearApiAuth()
+        clearLastReadySession()
         setAvailableTenants(result.tenants)
         const selection = selectedTenant(result.user, result.tenants)
         if (selection.requestedMissing) {
@@ -193,27 +200,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch(error => {
         if (cancelled) return
         if (error instanceof AuthConfigurationError) {
+          clearApiAuth()
           setState({ status: 'unavailable', title: error.title, message: error.message })
           return
         }
-        // Network / CORS / proxy failures during revalidation must not look like expiry.
-        if (holdingSession && heldPrevious) {
-          activateTenant(heldPrevious.user, heldPrevious.tenant)
-          return
-        }
-        setState({
-          status: 'error',
-          message: error instanceof Error ? error.message : '認証状態を確認できませんでした。',
-        })
+        // Extension eligibility is unknown when profile revalidation fails.
+        // Keep the Cognito session retryable, but never reactivate a stale tenant.
+        clearApiAuth()
+        clearLastReadySession()
+        setAvailableTenants([])
+        setState(profileRevalidationError(error))
       })
     return () => {
       cancelled = true
     }
-  }, [activateTenant, adapter, attempt, bindTenant])
+  }, [activateTenant, adapter, attempt, bindTenant, clearApiAuth])
 
   const signIn = useCallback(async (provider?: 'Google') => {
     if (!adapter) return
-    configureApiAuth(null)
+    clearApiAuth()
     setState({ status: 'authorizing' })
     try {
       await adapter.signIn(provider)
@@ -228,11 +233,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         message: error instanceof Error ? error.message : 'ログインを開始できませんでした。',
       })
     }
-  }, [adapter])
+  }, [adapter, clearApiAuth])
 
   const signInWithPassword = useCallback(async (username: string, password: string) => {
     if (!adapter?.signInWithPassword) return
-    configureApiAuth(null)
+    clearApiAuth()
     setState({ status: 'authorizing' })
     try {
       await adapter.signInWithPassword(username, password)
@@ -247,7 +252,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         message: error instanceof Error ? error.message : 'ログインできませんでした。',
       })
     }
-  }, [adapter])
+  }, [adapter, clearApiAuth])
 
   const selectTenant = useCallback((tenant: AuthTenant) => {
     if (state.status !== 'selecting-tenant' && state.status !== 'forbidden') return
@@ -262,14 +267,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ? state.user
       : undefined
     if (!currentUser || availableTenants.length === 0) return
-    configureApiAuth(null)
+    clearApiAuth()
     replaceRequestedTenant()
     setState({ status: 'selecting-tenant', user: currentUser, tenants: availableTenants })
-  }, [availableTenants, state])
+  }, [availableTenants, clearApiAuth, state])
 
   const identity = resolveIdentity(state)
   const value = useMemo<AuthContextValue>(() => ({
     state,
+    apiAuthReady,
     ...identity,
     sessionNotice,
     dismissSessionNotice,
@@ -283,6 +289,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     denyAccess,
   }), [
     adapter,
+    apiAuthReady,
     denyAccess,
     dismissSessionNotice,
     identity,

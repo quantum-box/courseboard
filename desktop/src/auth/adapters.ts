@@ -226,14 +226,18 @@ function browserPkceConfiguration(): BrowserPkceConfiguration {
   }
   const region = import.meta.env.VITE_COURSEBOARD_COGNITO_REGION?.trim()
     || 'ap-northeast-1'
+  const configuredProfileEndpoint =
+    import.meta.env.VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT?.trim()
+  const courseboardApiBase =
+    import.meta.env.VITE_COURSEBOARD_API_BASE_URL?.trim().replace(/\/+$/, '')
 
   return {
     cognitoEndpoint: httpsEndpoint(
       `https://cognito-idp.${region}.amazonaws.com/`,
       'Cognito endpoint',
     ),
-    profileEndpoint: import.meta.env.VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT
-      ?? 'https://api.n1.tachy.one/v1/me',
+    profileEndpoint: configuredProfileEndpoint
+      || (courseboardApiBase ? `${courseboardApiBase}/v1/me` : '/v1/me'),
     clientId,
   }
 }
@@ -252,7 +256,9 @@ function nativeTenant(payload: NativeTenantPayload) {
     slug: rawSlug || labels.slug || fallback.slug,
     mode: payload.mode ?? fallback.mode,
     platformId: payload.platformId ?? fallback.platformId,
-    operatorId: payload.operatorId ?? fallback.operatorId,
+    // A profile tenant is selected independently; a global development
+    // operator override must never be reused for a different tenant.
+    operatorId: payload.operatorId ?? payload.id,
   } satisfies AuthTenant
 }
 
@@ -500,18 +506,9 @@ class BrowserPkceAdapter implements AuthAdapter {
     const user = sessionUser(payload)
     if (!user) throw new Error('ブラウザ認証profileにユーザー情報がありません。')
     const tenantPayloads = payload.tenants ?? payload.user?.tenants ?? []
-    let tenants = tenantPayloads.map(nativeTenant).filter((tenant): tenant is AuthTenant => Boolean(tenant))
-    // Local course-api → prod Field still needs a tn_… operator id even when
-    // /v1/me returns an empty tenant list for the signed-in user.
-    if (tenants.length === 0) {
-      const fallbackId = import.meta.env.VITE_COURSEBOARD_TENANT_ID?.trim()
-      if (fallbackId) {
-        const fallbackName = usesLocalDemoTenantChrome()
-          ? (import.meta.env.VITE_COURSEBOARD_TENANT_NAME?.trim() || fallbackId)
-          : fallbackId
-        tenants = [envTenant(fallbackId, fallbackName)]
-      }
-    }
+    const tenants = tenantPayloads
+      .map(nativeTenant)
+      .filter((tenant): tenant is AuthTenant => Boolean(tenant))
     return { kind: 'authenticated', user, tenants, partial: payload.partial }
   }
 }

@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   beginBoot,
+  canRenderProtectedApp,
   clearLastReadySession,
   hasRestorableBrowserSession,
+  profileRevalidationError,
   readLastReadySession,
   resolveAuthGateView,
   sessionExpiredNotice,
@@ -106,6 +108,22 @@ describe('resolveAuthGateView', () => {
   })
 })
 
+describe('canRenderProtectedApp', () => {
+  it('holds protected screens until the API auth context is bound', () => {
+    const held = resolveAuthGateView({
+      status: 'booting',
+      previous: { user, tenant },
+    })
+
+    expect(canRenderProtectedApp(held, false)).toBe(false)
+    expect(canRenderProtectedApp(held, true)).toBe(true)
+    expect(canRenderProtectedApp(
+      resolveAuthGateView({ status: 'ready', user, tenant }),
+      false,
+    )).toBe(false)
+  })
+})
+
 describe('sessionVerifyingNotice', () => {
   it('returns a toast only while revalidating a known or restorable session', () => {
     expect(sessionVerifyingNotice({
@@ -167,6 +185,16 @@ describe('sessionExpiredNotice', () => {
   it('does not toast expiry without a prior authenticated session (navigation / cold start)', () => {
     expect(sessionExpiredNotice('expired', false)).toBeUndefined()
     expect(sessionExpiredNotice('expired', true)).toBe('Your session expired. Please sign in again.')
+  })
+})
+
+describe('profileRevalidationError', () => {
+  it('fails closed without carrying the previously selected tenant forward', () => {
+    const state = profileRevalidationError(new Error('profile proxy unavailable'))
+
+    expect(state).toEqual({ status: 'error', message: 'profile proxy unavailable' })
+    expect(state).not.toHaveProperty('previous')
+    expect(state).not.toHaveProperty('tenant')
   })
 })
 
