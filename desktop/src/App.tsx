@@ -23,10 +23,20 @@ import { useCartUpdates } from './hooks/useCartUpdates'
 import { navigate, useRoute } from './lib/router'
 import { DownloadPage } from './DownloadPage'
 import { PaymentPage } from './PaymentPage'
+import { MacOSTabStrip } from './components/MacOSTabStrip'
 
 const WS_URL = 'ws://127.0.0.1:9001/ws'
 
 export default function App() {
+  return (
+    <div className="desktop-root">
+      <MacOSTabStrip />
+      <AppContent />
+    </div>
+  )
+}
+
+function AppContent() {
   const route = useRoute()
 
   if (window.location.pathname.replace(/\/+$/, '') === '/download') {

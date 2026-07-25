@@ -245,6 +245,12 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
+macOSのweb配布版は`web-distribution` featureとupdater設定を使ってbuildします。
+`TAURI_UPDATER_PUBLIC_KEY`、`TAURI_UPDATER_PRIVATE_KEY`、
+`TAURI_UPDATER_PRIVATE_KEY_PASSWORD`はrelease environmentで管理し、通常buildには渡しません。
+配布版ではアプリメニューの「アップデートを確認…」から
+`/releases/updater/latest.json`を確認できます。
+
 desktop だけが `127.0.0.1:9001` のカート位置 simulator を起動します。iOS / Android では
 ローカル TCP listener を起動しません。
 

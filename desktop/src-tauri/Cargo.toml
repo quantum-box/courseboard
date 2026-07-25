@@ -1,10 +1,17 @@
 [package]
 name = "courseboard-desktop"
-version = "0.1.0"
+version = "0.1.1"
 description = "Course Board desktop wrapper"
 authors = ["Quantum Box"]
 edition = "2021"
 rust-version = "1.77.2"
+
+[features]
+default = []
+web-distribution = [
+    "dep:tauri-plugin-dialog",
+    "dep:tauri-plugin-updater",
+]
 
 [lib]
 name = "courseboard_desktop_lib"
@@ -14,10 +21,12 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["unstable"] }
 tauri-plugin-deep-link = "2"
+tauri-plugin-dialog = { version = "2", optional = true }
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-updater = { version = "2", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"

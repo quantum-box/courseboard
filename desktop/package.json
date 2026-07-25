@@ -1,7 +1,7 @@
 {
   "name": "courseboard-ui",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -29,7 +29,7 @@
     "@pdf-lib/fontkit": "^1.1.1",
     "@stripe/react-stripe-js": "^6.6.0",
     "@stripe/stripe-js": "^9.8.0",
-    "@tachyon-sdk/native-ui": "github:quantum-box/native-ui#ea116ba220fcb9b89b997cfe8bf44c3b009f477d",
+    "@tachyon-sdk/native-ui": "github:quantum-box/native-ui#f2c2d704e61c321c8b73d5e2e35d5de104bfd3be",
     "@tauri-apps/api": "^2.10.1",
     "lucide-react": "^0.474.0",
     "pdf-lib": "^1.17.1",
