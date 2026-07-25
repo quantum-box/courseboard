@@ -1,12 +1,21 @@
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod cart_simulator;
+#[cfg(any(target_os = "macos", windows))]
+mod macos_desktop;
 mod native_auth;
 mod photon_bridge;
+#[cfg(all(target_os = "macos", feature = "web-distribution"))]
+mod updater;
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 mod ws_server;
 
 use tauri::Manager;
 use tauri_plugin_deep_link::DeepLinkExt;
+
+#[tauri::command]
+fn app_target_os() -> String {
+    std::env::consts::OS.to_string()
+}
 
 fn collect_native_auth_callbacks(
     state: &native_auth::NativeAuthCallbackState,
@@ -34,6 +43,31 @@ pub fn run() {
 
     #[cfg(not(desktop))]
     let builder = tauri::Builder::default();
+
+    #[cfg(all(target_os = "macos", feature = "web-distribution"))]
+    let builder = builder
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+
+    #[cfg(any(target_os = "macos", windows))]
+    let builder = builder
+        .manage(macos_desktop::CourseboardTabsState::default())
+        .menu(macos_desktop::menu)
+        .on_menu_event(|app, event| {
+            macos_desktop::handle_menu_event(app, event.id().as_ref());
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let app = window.app_handle();
+                let label = app
+                    .state::<macos_desktop::CourseboardTabsState>()
+                    .selected_label();
+                if let Err(error) = macos_desktop::close_tab(app, &label) {
+                    log::error!("failed to close tab: {error}");
+                }
+            }
+        });
 
     builder
         .plugin(tauri_plugin_deep_link::init())
@@ -94,11 +128,24 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            app_target_os,
             native_auth::native_auth_capabilities,
             native_auth::native_auth_open_authorization_url,
             native_auth::native_auth_take_callback,
             native_auth::open_external_url,
             photon_bridge::photon_engine_apply_operation,
+            #[cfg(any(target_os = "macos", windows))]
+            macos_desktop::list_courseboard_tabs,
+            #[cfg(any(target_os = "macos", windows))]
+            macos_desktop::create_courseboard_tab,
+            #[cfg(any(target_os = "macos", windows))]
+            macos_desktop::mark_courseboard_tab_content_ready,
+            #[cfg(any(target_os = "macos", windows))]
+            macos_desktop::activate_courseboard_tab,
+            #[cfg(any(target_os = "macos", windows))]
+            macos_desktop::close_courseboard_tab,
+            #[cfg(any(target_os = "macos", windows))]
+            macos_desktop::update_courseboard_tab_title,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

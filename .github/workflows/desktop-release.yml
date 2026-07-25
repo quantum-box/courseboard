@@ -62,7 +62,10 @@ jobs:
         include:
           - platform: macos-arm64
             os: macos-15
-            bundle_glob: desktop/src-tauri/target/release/bundle/dmg/*.dmg
+            bundle_glob: |
+              desktop/src-tauri/target/release/bundle/dmg/*.dmg
+              desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz
+              desktop/src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
           - platform: windows-x64
             os: windows-latest
             bundle_glob: desktop/src-tauri/target/release/bundle/msi/*.msi
@@ -100,7 +103,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build desktop installer
+      - name: Create updater build config
+        if: matrix.platform == 'macos-arm64'
+        shell: bash
+        env:
+          UPDATER_PUBLIC_KEY: ${{ secrets.TAURI_UPDATER_PUBLIC_KEY }}
+        run: |
+          test -n "${UPDATER_PUBLIC_KEY}"
+          jq --arg key "${UPDATER_PUBLIC_KEY}" '.plugins.updater.pubkey = $key' \
+            src-tauri/tauri.updater.conf.json > "${RUNNER_TEMP}/tauri-updater.conf.json"
+
+      - name: Build macOS desktop installer and updater
+        if: matrix.platform == 'macos-arm64'
+        run: npm run tauri:build -- --features web-distribution --config "${RUNNER_TEMP}/tauri-updater.conf.json" --config '{"version":"${{ needs.version.outputs.value }}"}'
+        env:
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
+          VITE_COURSEBOARD_AUTH_MODE: browser-pkce
+          VITE_COURSEBOARD_BROWSER_CLIENT_ID: 5oafg9ptonbjumdh1pc7khirp1
+          VITE_COURSEBOARD_BROWSER_REDIRECT_URI: https://courseboard.txcloud.app/oauth/callback
+          VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
+          VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
+          VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
+
+      - name: Build Windows desktop installer
+        if: matrix.platform == 'windows-x64'
         run: npm run tauri:build -- --config '{"version":"${{ needs.version.outputs.value }}"}'
         env:
           VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
@@ -154,6 +187,12 @@ jobs:
           test -n "${windows_installer}"
           cp "${mac_installer}" release/courseboard-macos-arm64.dmg
           cp "${windows_installer}" release/courseboard-windows-x64.msi
+          updater_archive="$(find downloaded/installer-macos-arm64 -type f -name '*.app.tar.gz' -print -quit)"
+          updater_signature="$(find downloaded/installer-macos-arm64 -type f -name '*.app.tar.gz.sig' -print -quit)"
+          test -n "${updater_archive}"
+          test -n "${updater_signature}"
+          cp "${updater_archive}" release/courseboard-macos-arm64.app.tar.gz
+          cp "${updater_signature}" release/courseboard-macos-arm64.app.tar.gz.sig
 
       - name: Create release manifest
         run: |
@@ -162,6 +201,15 @@ jobs:
             release \
             release/latest.json \
             "${RELEASE_BASE_URL}"
+
+      - name: Create updater manifest
+        run: |
+          node desktop/scripts/create-updater-manifest.mjs \
+            "${{ needs.version.outputs.value }}" \
+            release/courseboard-macos-arm64.app.tar.gz \
+            release/courseboard-macos-arm64.app.tar.gz.sig \
+            release/updater-latest.json \
+            "${RELEASE_BASE_URL}/releases/${{ needs.version.outputs.value }}/courseboard-macos-arm64.app.tar.gz"
 
       - name: Configure R2 credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -181,3 +229,4 @@ jobs:
           aws s3 cp release/courseboard-macos-arm64.dmg "s3://${R2_BUCKET}/releases/latest/courseboard-macos-arm64.dmg" --endpoint-url "${endpoint}"
           aws s3 cp release/courseboard-windows-x64.msi "s3://${R2_BUCKET}/releases/latest/courseboard-windows-x64.msi" --endpoint-url "${endpoint}"
           aws s3 cp release/latest.json "s3://${R2_BUCKET}/releases/latest.json" --endpoint-url "${endpoint}" --content-type application/json --cache-control 'public,max-age=300'
+          aws s3 cp release/updater-latest.json "s3://${R2_BUCKET}/releases/updater/latest.json" --endpoint-url "${endpoint}" --content-type application/json --cache-control 'public,max-age=300'

@@ -3,7 +3,9 @@
   "identifier": "default",
   "description": "Default window capabilities",
   "windows": ["main"],
+  "webviews": ["main", "courseboard-tab-*"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-start-dragging"
   ]
 }

@@ -20,5 +20,6 @@
     - [Courseboard human token issuerのCognito統一](src/tasks/completed/v0.1.6/cognito-human-token-issuer/task.md)
   - [v0.1.2]()
     - [courseboard-api Cloud App deployment](src/tasks/completed/v0.1.2/courseboard-api-cloud-app/task.md)
+    - [Desktopタブとアプリ内更新](src/tasks/completed/v0.1.2/desktop-tabs-and-updater/task.md)
   - [v0.1.5]()
     - [Next.jsからReact/Viteへの移行](src/tasks/completed/v0.1.5/migrate-nextjs-to-react/task.md)

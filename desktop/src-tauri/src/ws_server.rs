@@ -56,7 +56,7 @@ async fn handle_connection(
     let (mut sink, _stream) = futures_util::StreamExt::split(ws_stream);
 
     while let Ok(msg) = rx.recv().await {
-        if sink.send(Message::Text(msg.into())).await.is_err() {
+        if sink.send(Message::Text(msg)).await.is_err() {
             break;
         }
     }

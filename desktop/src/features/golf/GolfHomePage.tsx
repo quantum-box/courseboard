@@ -2,7 +2,7 @@ import { Button } from '@tachyon-sdk/native-ui'
 import { ChevronRight } from 'lucide-react'
 import { golfNavigation } from '../../components/AppShell'
 import { PageHeader, Panel } from '../../components/Page'
-import { navigate } from '../../lib/router'
+import { navigate, navigateFromClick } from '../../lib/router'
 
 export function GolfHomePage() {
   return (
@@ -24,7 +24,12 @@ export function GolfHomePage() {
           {golfNavigation.map(item => {
             const Icon = item.icon
             return (
-              <button key={item.route} type="button" className="feature-tile" onClick={() => navigate(item.route)}>
+              <button
+                key={item.route}
+                type="button"
+                className="feature-tile"
+                onClick={event => navigateFromClick(event, item.route)}
+              >
                 <span className="feature-icon"><Icon /></span>
                 <span className="feature-copy">
                   <strong>{item.label}</strong>

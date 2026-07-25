@@ -62,7 +62,7 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode }
 import { useAuth } from '../auth/AuthProvider'
 import { formatTenantWorkspaceLabel, tenantWorkspaceLabel } from '../auth/tenant-label'
 import { PageReloadProvider, usePageReload } from '../lib/pageReload'
-import { navigate } from '../lib/router'
+import { navigate, navigateFromClick } from '../lib/router'
 import { isPageRefreshShortcut } from '../lib/shortcuts'
 import { CourseBoardBrand } from './CourseBoardBrand'
 import { WorkspaceHelpPanel } from './WorkspaceHelp'
@@ -622,7 +622,11 @@ function NavigationRow({
     <div className="nav-row" data-pinned={pinned || undefined}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <SidebarItem type="button" active={active} onClick={() => navigate(item.route)}>
+          <SidebarItem
+            type="button"
+            active={active}
+            onClick={event => navigateFromClick(event, item.route)}
+          >
             <Icon />
             <SidebarItemLabel>{item.label}</SidebarItemLabel>
           </SidebarItem>
