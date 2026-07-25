@@ -19,9 +19,10 @@ use crate::course::domain::{
     AssignmentId, AttendanceSnapshot, AttendanceSnapshotReport, AutoAssignPlanItem,
     AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery, AvailabilityStatus, Caddie,
     CaddieAssignment, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating,
-    CaddieRecommendation, CaddieSkillLevel, CaddieSupply, CourseError, GatewayCredentials,
-    GolfOpsGateway, PayrollPeriod, PayrollRow, PayrollSummary, RecommendationQuery,
-    ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    CaddieRecommendation, CaddieRoster, CaddieSkillLevel, CaddieStaff, CaddieSupply, CourseError,
+    GatewayCredentials, GolfOpsGateway, PayrollPeriod, PayrollRow, PayrollSummary,
+    RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment,
+    UpsertCaddieAvailability,
 };
 
 const GOLF: &str = "/v1/erp/extensions/golf-course";
@@ -40,11 +41,11 @@ impl FieldGolfOpsGateway {
         }
     }
 
-    /// Batch-load HRM staff names for caddie display_name resolution.
-    async fn load_staff_names_by_id(
+    /// Batch-load the HRM staff index once for name resolution and UI reuse.
+    async fn load_staff(
         &self,
         credentials: GatewayCredentials<'_>,
-    ) -> Result<HashMap<String, String>, CourseError> {
+    ) -> Result<Vec<CaddieStaff>, CourseError> {
         let items: Vec<FieldStaffMemberDto> =
             field_get_items(&self.client, &self.base_url, "/v1/erp/staff", credentials).await?;
         Ok(items
@@ -54,10 +55,17 @@ impl FieldGolfOpsGateway {
                 if name.is_empty() {
                     None
                 } else {
-                    Some((item.id, name))
+                    Some(CaddieStaff::new(item.id, name, item.active))
                 }
             })
             .collect())
+    }
+
+    fn staff_names_by_id(staff: &[CaddieStaff]) -> HashMap<String, String> {
+        staff
+            .iter()
+            .map(|item| (item.id().to_string(), item.name().to_string()))
+            .collect()
     }
 
     fn map_profiles(
@@ -73,10 +81,10 @@ impl FieldGolfOpsGateway {
 
 #[async_trait]
 impl GolfOpsGateway for FieldGolfOpsGateway {
-    async fn list_caddies(
+    async fn list_caddie_roster(
         &self,
         credentials: GatewayCredentials<'_>,
-    ) -> Result<Vec<Caddie>, CourseError> {
+    ) -> Result<CaddieRoster, CourseError> {
         let items: Vec<FieldGolfCaddieProfileDto> = field_get_items(
             &self.client,
             &self.base_url,
@@ -84,8 +92,12 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
             credentials,
         )
         .await?;
-        let staff_names = self.load_staff_names_by_id(credentials).await?;
-        Ok(Self::map_profiles(items, &staff_names))
+        let staff = self.load_staff(credentials).await?;
+        let staff_names = Self::staff_names_by_id(&staff);
+        Ok(CaddieRoster::new(
+            Self::map_profiles(items, &staff_names),
+            staff,
+        ))
     }
 
     async fn create_caddie(
@@ -103,7 +115,8 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
             Some(&body),
         )
         .await?;
-        let staff_names = self.load_staff_names_by_id(credentials).await?;
+        let staff = self.load_staff(credentials).await?;
+        let staff_names = Self::staff_names_by_id(&staff);
         Ok(map_caddie(dto, &staff_names))
     }
 
@@ -124,7 +137,8 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
             Some(&body),
         )
         .await?;
-        let staff_names = self.load_staff_names_by_id(credentials).await?;
+        let staff = self.load_staff(credentials).await?;
+        let staff_names = Self::staff_names_by_id(&staff);
         Ok(map_caddie(dto, &staff_names))
     }
 
@@ -607,6 +621,8 @@ struct FieldItems<T> {
 struct FieldStaffMemberDto {
     id: String,
     name: String,
+    #[serde(default)]
+    active: bool,
 }
 
 #[derive(Debug, Deserialize)]

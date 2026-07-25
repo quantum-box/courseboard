@@ -1038,6 +1038,51 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn provider_errors_keep_json_and_cors_headers() {
+        async fn provider_failure() -> Result<StatusCode, AppError> {
+            Err(AppError::Provider("upstream unavailable".to_string()))
+        }
+
+        let app = Router::new()
+            .route("/provider-failure", get(provider_failure))
+            .layer(courseboard_cors_layer());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/provider-failure")
+                    .header("origin", "https://courseboard.txcloud.app")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            response.headers().get("access-control-allow-origin"),
+            Some(&HeaderValue::from_static("https://courseboard.txcloud.app"))
+        );
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE),
+            Some(&HeaderValue::from_static("application/json"))
+        );
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect provider error body")
+            .to_bytes();
+        let body: serde_json::Value =
+            serde_json::from_slice(&body).expect("decode provider error body");
+        assert_eq!(body["error"], "provider_error");
+        assert_eq!(
+            body["message"],
+            "external provider error: upstream unavailable"
+        );
+    }
+
     async fn test_app(auth: &TestAuth) -> Router {
         test_app_with_verifier(auth.verifier()).await
     }

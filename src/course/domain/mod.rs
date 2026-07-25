@@ -16,7 +16,8 @@ mod resource;
 mod tee_sheet;
 
 pub use caddie::{
-    AssignmentRole, AssignmentStatus, Caddie, CaddieAssignment, CaddieRank, CaddieSkillLevel,
+    AssignmentRole, AssignmentStatus, Caddie, CaddieAssignment, CaddieRank, CaddieRoster,
+    CaddieSkillLevel, CaddieStaff,
 };
 pub use caddie_ops::{
     AttendanceSnapshot, AttendanceSnapshotReport, AutoAssignPlanItem, AutoAssignResult,
