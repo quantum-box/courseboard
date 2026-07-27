@@ -1421,7 +1421,6 @@ button,
   color: #ffffff;
 }
 
-.console-shell,
 .payment-shell {
   min-height: 100vh;
   background:
@@ -1430,35 +1429,12 @@ button,
   color: #20231f;
 }
 
-.console-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 28px;
-  padding: 32px;
-}
-
-.console-main,
-.console-side,
 .payment-summary,
 .payment-panel {
   min-width: 0;
   border: 1px solid #d9d2c2;
   background: rgba(255, 255, 255, 0.88);
   box-shadow: 0 18px 44px rgba(36, 43, 34, 0.08);
-}
-
-.console-main {
-  padding: 28px;
-}
-
-.console-side {
-  align-self: start;
-  padding: 20px;
-}
-
-.console-heading {
-  max-width: 680px;
-  margin-bottom: 24px;
 }
 
 .eyebrow {
@@ -1470,7 +1446,6 @@ button,
   text-transform: uppercase;
 }
 
-.console-heading h1,
 .payment-summary h1,
 .payment-panel h1 {
   margin: 0;
@@ -1479,64 +1454,22 @@ button,
   letter-spacing: 0;
 }
 
-.console-heading p,
-.payment-panel p,
-.side-note {
+.payment-panel p {
   color: #62675e;
   line-height: 1.7;
 }
 
-.collection-form {
-  display: grid;
-  gap: 16px;
-  max-width: 720px;
-}
-
-.field-pair {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-}
-
-.collection-form label,
 .stripe-form label {
   display: grid;
   gap: 7px;
 }
 
-.collection-form span,
-.form-total span,
-.amount-ticket span {
+.form-total span {
   color: #686d64;
   font-size: 12px;
   font-weight: 700;
 }
 
-.collection-form input,
-.collection-form textarea,
-.result-box textarea {
-  width: 100%;
-  border: 1px solid #cfc8b8;
-  border-radius: 6px;
-  background: #fff;
-  color: #20231f;
-  font: inherit;
-  letter-spacing: 0;
-}
-
-.collection-form input {
-  min-height: 42px;
-  padding: 0 12px;
-}
-
-.collection-form textarea,
-.result-box textarea {
-  min-height: 96px;
-  padding: 12px;
-  resize: vertical;
-}
-
-.collection-form button,
 .stripe-form button {
   min-height: 46px;
   border: 0;
@@ -1548,44 +1481,14 @@ button,
   cursor: pointer;
 }
 
-.collection-form button:disabled,
 .stripe-form button:disabled {
   cursor: not-allowed;
   opacity: 0.62;
 }
 
-.amount-ticket {
-  display: grid;
-  gap: 6px;
-  border-left: 4px solid #c9944a;
-  background: #fffaf0;
-  padding: 16px;
-}
-
-.amount-ticket strong,
 .payment-amount {
   font-size: 38px;
   line-height: 1;
-}
-
-.amount-ticket small {
-  color: #686d64;
-}
-
-.result-box {
-  display: grid;
-  gap: 12px;
-  margin-top: 18px;
-}
-
-.result-box a {
-  color: #1f624f;
-  font-weight: 700;
-}
-
-.result-label {
-  margin: 0;
-  font-weight: 700;
 }
 
 .error-box {
@@ -3186,17 +3089,11 @@ button,
     max-height: calc(100dvh - 48px);
   }
 
-  .console-shell,
   .payment-shell {
     grid-template-columns: minmax(0, 1fr);
     padding: 18px;
   }
 
-  .field-pair {
-    grid-template-columns: 1fr;
-  }
-
-  .console-heading h1,
   .payment-summary h1,
   .payment-panel h1 {
     font-size: 26px;
