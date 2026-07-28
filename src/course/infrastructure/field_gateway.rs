@@ -675,9 +675,7 @@ pub(crate) async fn field_send_json<T: for<'de> Deserialize<'de>>(
     let status = response.status();
     if !status.is_success() {
         let message = response.text().await.unwrap_or_default();
-        return Err(CourseError::Provider(format!(
-            "Field API returned {status}: {message}"
-        )));
+        return Err(map_field_status_error(status, &message));
     }
     response
         .json()
@@ -705,9 +703,7 @@ pub(crate) async fn field_send_unit(
     let status = response.status();
     if !status.is_success() {
         let message = response.text().await.unwrap_or_default();
-        return Err(CourseError::Provider(format!(
-            "Field API returned {status}: {message}"
-        )));
+        return Err(map_field_status_error(status, &message));
     }
     Ok(())
 }
@@ -732,9 +728,7 @@ pub(crate) async fn field_send_text(
     let status = response.status();
     let text = response.text().await.unwrap_or_default();
     if !status.is_success() {
-        return Err(CourseError::Provider(format!(
-            "Field API returned {status}: {text}"
-        )));
+        return Err(map_field_status_error(status, &text));
     }
     Ok(text)
 }
@@ -761,9 +755,7 @@ pub(crate) async fn field_send_raw(
     let status = response.status();
     if !status.is_success() {
         let message = response.text().await.unwrap_or_default();
-        return Err(CourseError::Provider(format!(
-            "Field API returned {status}: {message}"
-        )));
+        return Err(map_field_status_error(status, &message));
     }
     response
         .json()
@@ -799,6 +791,16 @@ fn map_field_request_error(error: reqwest::Error) -> CourseError {
     CourseError::Provider(format!("Field API request failed: {error}"))
 }
 
+/// Field 401/403 means the caller's tenant/permission was rejected upstream —
+/// forward that as a denial instead of a 502 so the browser sees the reason.
+pub(crate) fn map_field_status_error(status: reqwest::StatusCode, message: &str) -> CourseError {
+    let message = format!("Field API returned {status}: {message}");
+    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+        return CourseError::PermissionDenied(message);
+    }
+    CourseError::Provider(message)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -829,6 +831,22 @@ mod tests {
 
         assert_eq!(map_product(named).display_name(), Some("平日プラン"));
         assert_eq!(map_product(legacy).display_name(), None);
+    }
+
+    #[test]
+    fn upstream_denials_map_to_permission_denied_and_other_failures_to_provider() {
+        let denied = map_field_status_error(
+            reqwest::StatusCode::FORBIDDEN,
+            "{\"code\":\"FORBIDDEN\",\"message\":\"tenant policy check denied\"}",
+        );
+        assert!(matches!(denied, CourseError::PermissionDenied(message)
+            if message.contains("403") && message.contains("tenant policy check denied")));
+
+        let unauthorized = map_field_status_error(reqwest::StatusCode::UNAUTHORIZED, "expired");
+        assert!(matches!(unauthorized, CourseError::PermissionDenied(_)));
+
+        let outage = map_field_status_error(reqwest::StatusCode::BAD_GATEWAY, "upstream down");
+        assert!(matches!(outage, CourseError::Provider(_)));
     }
 
     #[test]

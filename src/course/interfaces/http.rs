@@ -114,6 +114,7 @@ impl From<CourseError> for AppError {
         match value {
             CourseError::Unauthorized => AppError::Unauthorized,
             CourseError::BadRequest(message) => AppError::BadRequest(message),
+            CourseError::PermissionDenied(message) => AppError::PermissionDenied(message),
             CourseError::Provider(message) => AppError::Provider(message),
         }
     }

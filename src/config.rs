@@ -59,6 +59,11 @@ pub struct RuntimeConfig {
     )]
     pub sms_sender_name: String,
 
+    /// Tachyon auth API used to resolve each tenant's platform id for /v1/me.
+    /// Set to `empty://local` to disable the lookup (unit/integration tests).
+    #[arg(long, env = "TACHYON_AUTH_API_URL")]
+    pub tachyon_auth_api_url: Option<String>,
+
     #[arg(long, env = "TACHYON_FIELD_API_URL")]
     pub tachyon_field_api_url: Option<String>,
     #[arg(long, env = "FIELD_API_URL")]
@@ -202,6 +207,7 @@ impl Default for RuntimeConfig {
             expected_client_id: None,
             public_ui_base_url: DEFAULT_PUBLIC_UI_BASE_URL.to_string(),
             sms_sender_name: DEFAULT_SMS_SENDER_NAME.to_string(),
+            tachyon_auth_api_url: None,
             tachyon_field_api_url: None,
             field_api_url: None,
             courseboard_field_api_url: None,
