@@ -141,6 +141,9 @@ impl ProfileClient {
             .timeout(OPERATOR_LOOKUP_TIMEOUT)
             .header(header::AUTHORIZATION.as_str(), authorization)
             .header(header::ACCEPT.as_str(), "application/json")
+            // Tachyon auth requires an operator scope; the looked-up tenant is
+            // the scope the caller is asking about.
+            .header("x-operator-id", tenant_id)
             .send()
             .await
             .ok()?;
@@ -778,6 +781,12 @@ mod tests {
                             .get(header::AUTHORIZATION)
                             .and_then(|value| value.to_str().ok()),
                         Some("Bearer accepted-fixture")
+                    );
+                    assert_eq!(
+                        headers
+                            .get("x-operator-id")
+                            .and_then(|value| value.to_str().ok()),
+                        Some(tenant_id.as_str())
                     );
                     match table.iter().find(|(id, _)| *id == tenant_id) {
                         Some((id, Some(platform_id))) => serde_json::json!({
