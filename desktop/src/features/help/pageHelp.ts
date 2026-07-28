@@ -170,7 +170,7 @@ const helpByRoute: Record<string, PageHelp> = {
     data: [
       {
         heading: 'Reservation product',
-        body: '予約サービス（商品）。reservationServiceId・playType（caddie/self）·holeCount·expectedDurationMinutes。API: CourseBoard course-api /v1/course/reservation-products',
+        body: '予約サービス（商品）。displayName・reservationServiceId・playType（caddie/self）·holeCount·expectedDurationMinutes。API: CourseBoard course-api /v1/course/reservation-products',
       },
       {
         heading: 'Product slot',

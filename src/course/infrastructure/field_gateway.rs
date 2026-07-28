@@ -194,6 +194,7 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         input: UpsertReservationProduct,
     ) -> Result<ReservationProduct, CourseError> {
         let body = json!({
+            "displayName": input.display_name.as_deref(),
             "playType": input.play_type.as_str(),
             "holeCount": input.hole_count.get(),
             "expectedDurationMinutes": input.expected_duration_minutes.get(),
@@ -364,6 +365,7 @@ fn map_product(value: FieldGolfReservationProductDto) -> ReservationProduct {
         id,
         value.tenant_id,
         value.reservation_service_id,
+        value.display_name,
         PlayType::parse(&value.play_type),
         value.hole_count,
         value.expected_duration_minutes,
@@ -551,6 +553,8 @@ struct FieldGolfReservationProductDto {
     #[serde(default)]
     tenant_id: Option<String>,
     reservation_service_id: String,
+    #[serde(default)]
+    display_name: Option<String>,
     play_type: String,
     #[serde(default)]
     hole_count: i32,
@@ -801,6 +805,30 @@ mod tests {
 
     fn profile_dto(value: Value) -> FieldGolfCaddieProfileDto {
         serde_json::from_value(value).expect("caddie profile dto")
+    }
+
+    #[test]
+    fn map_product_preserves_optional_display_name() {
+        let named: FieldGolfReservationProductDto = serde_json::from_value(json!({
+            "id": "product-1",
+            "tenantId": "tenant-1",
+            "reservationServiceId": "service-1",
+            "displayName": "平日プラン",
+            "playType": "caddie",
+            "holeCount": 18,
+            "expectedDurationMinutes": 240
+        }))
+        .expect("named product DTO");
+        let legacy: FieldGolfReservationProductDto = serde_json::from_value(json!({
+            "reservationServiceId": "service-2",
+            "playType": "self",
+            "holeCount": 18,
+            "expectedDurationMinutes": 180
+        }))
+        .expect("legacy product DTO");
+
+        assert_eq!(map_product(named).display_name(), Some("平日プラン"));
+        assert_eq!(map_product(legacy).display_name(), None);
     }
 
     #[test]

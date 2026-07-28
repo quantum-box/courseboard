@@ -140,6 +140,8 @@ pub struct TeeSheetQueryParams {
 pub struct TeeSheetItemDto {
     pub id: String,
     pub reservation_number: String,
+    pub reservation_service_id: Option<String>,
+    pub display_name: Option<String>,
     pub golf_course_id: String,
     pub course_name: String,
     pub tee_time: String,
@@ -168,6 +170,8 @@ impl From<&TeeSheetItem> for TeeSheetItemDto {
         Self {
             id: value.id().to_string(),
             reservation_number: value.reservation_number().to_string(),
+            reservation_service_id: value.reservation_service_id().map(str::to_string),
+            display_name: value.display_name().map(str::to_string),
             golf_course_id: value.golf_course_id().to_string(),
             course_name: value.course_name().to_string(),
             tee_time: value.tee_time().to_string(),
@@ -495,6 +499,7 @@ pub struct ReservationProductDto {
     pub tenant_id: String,
     pub extension_key: String,
     pub reservation_service_id: String,
+    pub display_name: Option<String>,
     pub play_type: String,
     pub hole_count: i32,
     pub expected_duration_minutes: i32,
@@ -510,6 +515,7 @@ impl From<&ReservationProduct> for ReservationProductDto {
                 .unwrap_or_default(),
             extension_key: "golf_course".to_string(),
             reservation_service_id: value.reservation_service_id().to_string(),
+            display_name: value.display_name().map(str::to_string),
             play_type: value.play_type().as_str().to_string(),
             hole_count: value.hole_count().get(),
             expected_duration_minutes: value.expected_duration_minutes().get(),
@@ -520,6 +526,7 @@ impl From<&ReservationProduct> for ReservationProductDto {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpsertReservationProductRequest {
+    pub display_name: Option<String>,
     pub play_type: String,
     pub hole_count: Option<i32>,
     pub expected_duration_minutes: Option<i32>,
@@ -607,6 +614,7 @@ pub async fn upsert_reservation_product(
     let credentials = credentials(&state, &headers)?;
     let input = UpsertReservationProduct::try_new(
         service_id,
+        body.display_name,
         body.play_type,
         body.hole_count.unwrap_or(18),
         body.expected_duration_minutes.unwrap_or(270),

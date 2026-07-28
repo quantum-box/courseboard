@@ -159,6 +159,16 @@ function playTypeLabel(playType: string) {
   }
 }
 
+function productDisplayName(reservation: TeeReservation) {
+  return reservation.displayName?.trim()
+    || reservation.reservationServiceId?.trim()
+    || 'プラン未設定'
+}
+
+function productManagementNumber(reservation: TeeReservation) {
+  return reservation.reservationServiceId?.trim() || '未設定'
+}
+
 function roleLabel(role: string) {
   switch (role) {
     case 'primary':
@@ -580,9 +590,9 @@ export function TimelinePage() {
                           block.widthPct < 9 ? 'is-compact' : '',
                           selected ? 'is-selected' : '',
                         ].join(' '),
-                        title: item.partyName,
-                        subtitle: `${item.partySize}名 · ${formatCoverageLabel(coverage)}`,
-                        tooltip: `${item.partyName} · ${item.reservationNumber} · ${item.partySize}名 · ${formatCoverageLabel(coverage)}`,
+                        title: productDisplayName(item),
+                        subtitle: `${item.partyName} · ${item.partySize}名 · ${formatCoverageLabel(coverage)}`,
+                        tooltip: `${productDisplayName(item)} · 管理番号: ${productManagementNumber(item)} · ${item.partyName} · ${item.reservationNumber} · ${item.partySize}名 · ${formatCoverageLabel(coverage)}`,
                         onSelect: () => setSelection({ kind: 'reservation', id: item.id }),
                         toneNote: linked?.caddieProfileId
                           ? caddies.find(profile => profile.id === linked.caddieProfileId)?.displayName
@@ -761,7 +771,10 @@ function TileBoard({
                       {conflicted ? '衝突' : formatCoverageLabel(coverage)}
                     </span>
                   </div>
-                  <strong>{item.partyName}</strong>
+                  <strong>{productDisplayName(item)}</strong>
+                  <small>
+                    管理番号: {productManagementNumber(item)} · {item.partyName}
+                  </small>
                   <small>
                     {item.partySize}名 · {playTypeLabel(item.playType)} · {item.holes}H
                   </small>
@@ -1015,8 +1028,12 @@ function DetailPanel({
       <div className="timeline-detail-header">
         <div>
           <div className="page-eyebrow">選択中</div>
-          <h2>{reservation?.partyName ?? assignment?.roundReference ?? '割当'}</h2>
-          <p>{reservation?.reservationNumber ?? assignment?.id}</p>
+          <h2>{reservation ? productDisplayName(reservation) : assignment?.roundReference ?? '割当'}</h2>
+          <p>
+            {reservation
+              ? `管理番号: ${productManagementNumber(reservation)} · ${reservation.partyName} · ${reservation.reservationNumber}`
+              : assignment?.id}
+          </p>
         </div>
         <Button type="button" variant="ghost" onClick={onClear}>クリア</Button>
       </div>
@@ -1033,6 +1050,10 @@ function DetailPanel({
         <div>
           <dt>プレー区分</dt>
           <dd>{reservation ? playTypeLabel(reservation.playType) : '—'}</dd>
+        </div>
+        <div>
+          <dt>予約者</dt>
+          <dd>{reservation?.partyName ?? '—'}</dd>
         </div>
         <div>
           <dt>組人数</dt>
