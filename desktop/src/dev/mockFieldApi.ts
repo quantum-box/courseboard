@@ -425,7 +425,39 @@ const mockTeeReservations = [
       : 'セルフ18ホール',
 }))
 
+function datesBetween(from: string, to: string): string[] {
+  const results: string[] = []
+  const cursor = new Date(`${from}T00:00:00Z`)
+  const end = new Date(`${to}T00:00:00Z`)
+  while (cursor <= end && results.length < 62) {
+    results.push(cursor.toISOString().slice(0, 10))
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+  return results
+}
+
+/**
+ * A long unbroken run for one caddie (2026-07-13..19) so the shift board's
+ * consecutive-days warning has something to point at in development.
+ */
+const mockStreakAssignments = ['13', '14', '15', '16', '17', '18', '19'].map(day => ({
+  id: `assign_streak_${day}`,
+  caddieProfileId: 'caddie_aya',
+  reservationId: `res_streak_${day}`,
+  roundReference: `R-2026-07${day}`,
+  scheduledAt: `2026-07-${day}T07:30:00+09:00`,
+  status: 'assigned',
+  assignmentRole: 'primary',
+  feeAmount: 12000,
+  feeCurrency: 'JPY',
+  recommendationScore: null,
+  nominatedBy: null,
+  notes: null,
+  metadataJson: null,
+}))
+
 const mockAssignments = [
+  ...mockStreakAssignments,
   {
     id: 'assign_mock_1',
     caddieProfileId: 'caddie_aya',
@@ -901,6 +933,31 @@ function resolveGet(path: string): Json | null | undefined {
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-availabilities') {
+    const from = url.searchParams.get('from')
+    const to = url.searchParams.get('to')
+    // Range queries feed the shift board: deterministic days off per caddie so
+    // the month view has some texture without Math.random().
+    if (from && to) {
+      const statuses = ['unavailable', 'morning_only', 'afternoon_only', 'light_duty'] as const
+      const results: Array<Record<string, unknown>> = []
+      for (const date of datesBetween(from, to)) {
+        const day = Number(date.slice(8, 10))
+        mockCaddies.forEach((profile, index) => {
+          // Two marked days per caddie per week, staggered by roster position.
+          if ((day + index) % 7 !== 0 && (day + index * 3) % 11 !== 0) return
+          results.push({
+            id: `avail_${profile.id}_${date}`,
+            caddieProfileId: profile.id,
+            date,
+            status: statuses[(day + index) % statuses.length],
+            twoRoundRequest: Boolean(profile.canTwoRounds),
+            healthNote: null,
+            updatedAt: NOW,
+          })
+        })
+      }
+      return items(results)
+    }
     return items(mockCaddies.map(profile => ({
       id: `avail_${profile.id}_${TODAY}`,
       caddieProfileId: profile.id,

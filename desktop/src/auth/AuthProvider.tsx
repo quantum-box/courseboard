@@ -9,6 +9,7 @@ import {
   readLastReadySession,
   sessionExpiredNotice,
   writeLastReadySession,
+  type AuthNoticeKey,
 } from './authGateView'
 import {
   AuthConfigurationError,
@@ -19,13 +20,14 @@ import {
   type AuthUser,
 } from './types'
 import { resolveTenantSelection } from './tenant-selection'
+import { i18next } from '../i18n'
 
 type AuthContextValue = {
   state: AuthState
   apiAuthReady: boolean
   user?: AuthUser
   tenant?: AuthTenant
-  sessionNotice?: string
+  sessionNotice?: AuthNoticeKey
   dismissSessionNotice(): void
   signIn(provider?: 'Google'): Promise<void>
   passwordSignInAvailable: boolean
@@ -86,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   })
   const [availableTenants, setAvailableTenants] = useState<AuthTenant[]>([])
   const [attempt, setAttempt] = useState(0)
-  const [sessionNotice, setSessionNotice] = useState<string | undefined>()
+  const [sessionNotice, setSessionNotice] = useState<AuthNoticeKey | undefined>()
   const [apiAuthReady, setApiAuthReady] = useState(false)
 
   useEffect(() => {
@@ -96,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (error instanceof AuthConfigurationError) {
         setState({ status: 'unavailable', title: error.title, message: error.message })
       } else {
-        setState({ status: 'error', message: '認証を初期化できませんでした。' })
+        setState({ status: 'error', message: i18next.t('auth:problem.initFailed') })
       }
     }
   }, [])
@@ -185,8 +187,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setState(result.partial
             ? {
                 status: 'unavailable',
-                title: 'テナント情報を確認できません',
-                message: '指定された施設の権限を完全に確認できませんでした。時間をおいて再試行してください。',
+                title: i18next.t('auth:problem.tenantUnverified.title'),
+                message: i18next.t('auth:problem.tenantUnverified.description'),
               }
             : { status: 'forbidden', user: result.user })
         } else if (selection.tenant) {
@@ -230,7 +232,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setState({
         status: 'error',
-        message: error instanceof Error ? error.message : 'ログインを開始できませんでした。',
+        message: error instanceof Error ? error.message : i18next.t('auth:problem.startFailed'),
       })
     }
   }, [adapter, clearApiAuth])
@@ -249,7 +251,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       setState({
         status: 'error',
-        message: error instanceof Error ? error.message : 'ログインできませんでした。',
+        message: error instanceof Error ? error.message : i18next.t('auth:problem.signInFailed'),
       })
     }
   }, [adapter, clearApiAuth])

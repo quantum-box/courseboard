@@ -1,0 +1,154 @@
+/**
+ * Pure layout logic for the shift board: one row per caddie, one cell per day,
+ * plus consecutive-working-day detection. Kept free of React so it can be
+ * tested directly.
+ */
+
+export type ShiftAvailability = {
+  caddieProfileId: string
+  date: string
+  status: string
+}
+
+export type ShiftAssignment = {
+  caddieProfileId: string
+  scheduledAt: string
+  status: string
+}
+
+export type ShiftCellKind =
+  | 'assigned'
+  | 'off'
+  | 'morning'
+  | 'afternoon'
+  | 'light'
+  | 'none'
+
+export type ShiftCell = {
+  date: string
+  kind: ShiftCellKind
+  assignments: number
+  /** Part of a run of working days at or above the warning threshold. */
+  inLongStreak: boolean
+}
+
+export type ShiftRow = {
+  caddieProfileId: string
+  cells: ShiftCell[]
+  maxStreak: number
+}
+
+/** One shift-free day per week means at most six working days in a row. */
+export const STREAK_WARNING_DAYS = 6
+
+const CANCELLED = new Set(['cancelled', 'canceled'])
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Calendar date in Asia/Tokyo. Production timestamps are UTC (`...Z`), so a
+ * 07:00 JST round arrives as 22:00Z on the previous date — slicing the string
+ * would file it under the wrong day.
+ */
+export function jstDateOf(isoTimestamp: string): string {
+  const ms = Date.parse(isoTimestamp)
+  if (Number.isNaN(ms)) return isoTimestamp.slice(0, 10)
+  return new Date(ms + JST_OFFSET_MS).toISOString().slice(0, 10)
+}
+
+/** Month range widened by the streak window, for fetching assignments. */
+export function paddedRange(dates: string[]): { from: string; to: string } {
+  const first = dates[0]
+  const last = dates[dates.length - 1]
+  if (first === undefined || last === undefined) return { from: '', to: '' }
+  return {
+    from: shiftDate(first, -STREAK_WARNING_DAYS),
+    to: shiftDate(last, STREAK_WARNING_DAYS),
+  }
+}
+
+function shiftDate(date: string, days: number): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10)
+}
+
+export function monthDates(yearMonth: string): string[] {
+  const match = /^(\d{4})-(\d{2})$/.exec(yearMonth)
+  if (!match) return []
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return Array.from({ length: days }, (_, index) => (
+    `${yearMonth}-${String(index + 1).padStart(2, '0')}`
+  ))
+}
+
+function availabilityKind(status: string): ShiftCellKind {
+  if (status === 'unavailable') return 'off'
+  if (status === 'morning_only') return 'morning'
+  if (status === 'afternoon_only') return 'afternoon'
+  if (status === 'light_duty') return 'light'
+  return 'none'
+}
+
+export function buildShiftRow(
+  caddieProfileId: string,
+  dates: string[],
+  availabilities: ShiftAvailability[],
+  assignments: ShiftAssignment[],
+): ShiftRow {
+  const availabilityByDate = new Map<string, string>()
+  for (const entry of availabilities) {
+    if (entry.caddieProfileId === caddieProfileId) {
+      availabilityByDate.set(entry.date, entry.status)
+    }
+  }
+  const assignmentCount = new Map<string, number>()
+  for (const assignment of assignments) {
+    if (assignment.caddieProfileId !== caddieProfileId) continue
+    if (CANCELLED.has(assignment.status)) continue
+    const date = jstDateOf(assignment.scheduledAt)
+    assignmentCount.set(date, (assignmentCount.get(date) ?? 0) + 1)
+  }
+
+  const cells: ShiftCell[] = dates.map(date => {
+    const assigned = assignmentCount.get(date) ?? 0
+    return {
+      date,
+      kind: assigned > 0 ? 'assigned' : availabilityKind(availabilityByDate.get(date) ?? ''),
+      assignments: assigned,
+      inLongStreak: false,
+    }
+  })
+
+  // Streaks are detected over a padded window so a run crossing the month
+  // boundary (e.g. Jun 28 – Jul 3) is still caught; only this month's cells
+  // are rendered and highlighted.
+  const cellByDate = new Map(cells.map(cell => [cell.date, cell]))
+  const first = dates[0]
+  const last = dates[dates.length - 1]
+  const paddedDates = first === undefined || last === undefined ? [] : [
+    ...Array.from({ length: STREAK_WARNING_DAYS }, (_, i) => shiftDate(first, i - STREAK_WARNING_DAYS)),
+    ...dates,
+    ...Array.from({ length: STREAK_WARNING_DAYS }, (_, i) => shiftDate(last, i + 1)),
+  ]
+
+  let maxStreak = 0
+  let runStart = 0
+  for (let index = 0; index <= paddedDates.length; index += 1) {
+    const date = paddedDates[index]
+    const working = date !== undefined && (assignmentCount.get(date) ?? 0) > 0
+    if (working) continue
+    const run = paddedDates.slice(runStart, index)
+    const overlapsMonth = run.some(day => cellByDate.has(day))
+    if (overlapsMonth && run.length > maxStreak) maxStreak = run.length
+    if (run.length >= STREAK_WARNING_DAYS) {
+      for (const day of run) {
+        const cell = cellByDate.get(day)
+        if (cell) cell.inLongStreak = true
+      }
+    }
+    runStart = index + 1
+  }
+
+  return { caddieProfileId, cells, maxStreak }
+}

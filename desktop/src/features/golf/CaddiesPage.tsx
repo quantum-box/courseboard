@@ -11,6 +11,7 @@ import {
   Separator,
 } from '@tachyon-sdk/native-ui'
 import {
+  ArrowLeft,
   CalendarDays,
   CheckCircle2,
   ChevronLeft,
@@ -38,14 +39,15 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   downloadText,
   courseboardApiJson,
   courseboardApiText,
   fieldApiJson,
   fieldApiText,
-  fieldTenant,
 } from '../../api'
+import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   DataTable,
@@ -65,6 +67,7 @@ import {
   SearchInput,
   type DataTableColumn,
 } from '../../components/Page'
+import { weekdayIndexes, weekdayLabel } from './models'
 import { useResource } from '../../hooks/useResource'
 import { navigate } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
@@ -304,11 +307,14 @@ function dateKey(value: string) {
 
 function formatMinutes(minutes: number) {
   const safe = Math.max(0, Math.trunc(minutes))
-  return `${Math.floor(safe / 60)}時間${safe % 60}分`
+  return i18next.t('caddies:duration', {
+    hours: String(Math.floor(safe / 60)),
+    minutes: String(safe % 60),
+  })
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '操作を完了できませんでした'
+  return error instanceof Error ? error.message : i18next.t('caddies:error.generic')
 }
 
 function resolveStaffId(profile: CaddieProfile) {
@@ -350,21 +356,35 @@ function profilePatchPayload(
   }
 }
 
+/** The API also returns the legacy `junior` code for rookies. */
+const SKILL_KEYS: Record<string, 'rookie' | 'regular' | 'veteran'> = {
+  rookie: 'rookie',
+  junior: 'rookie',
+  regular: 'regular',
+  veteran: 'veteran',
+}
+const EMPLOYMENT_STATUSES = ['active', 'inactive', 'suspended'] as const
+
 function skillLabel(skill: string) {
-  return ({ rookie: '新人', regular: 'レギュラー', veteran: 'ベテラン' } as Record<string, string>)[skill] ?? skill
+  const key = SKILL_KEYS[skill]
+  if (!key) return skill
+  return i18next.t(`caddies:skill.${key}` as 'caddies:skill.rookie')
 }
 
 function employmentLabel(status: string) {
-  return ({ active: '稼働中', inactive: '休止', suspended: '停止' } as Record<string, string>)[status] ?? status
+  if (!(EMPLOYMENT_STATUSES as readonly string[]).includes(status)) return status
+  return i18next.t(`caddies:employment.${status}` as 'caddies:employment.active')
+}
+
+/** The API returns raw role codes; anything unexpected is shown as-is. */
+function roleLabel(role: string) {
+  if (role === 'primary' || role === 'lead') return i18next.t('caddies:role.primary')
+  if (role === 'assistant' || role === 'support') return i18next.t('caddies:role.assistant')
+  return role
 }
 
 function attendanceLabel(status: AttendanceSnapshot['attendanceStatus']) {
-  return {
-    not_linked: '未紐付け',
-    not_clocked: '未出勤',
-    working: '勤務中',
-    clocked_out: '退勤済み',
-  }[status]
+  return i18next.t(`caddies:attendanceStatus.${status}` as 'caddies:attendanceStatus.working')
 }
 
 function attendanceVariant(status: AttendanceSnapshot['attendanceStatus']) {
@@ -391,7 +411,7 @@ function FlashNotice({ flash, onDismiss }: { flash: Flash; onDismiss: () => void
       title={flash.title}
       actions={(
         <Button type="button" variant="ghost" size="sm" onClick={onDismiss}>
-          閉じる
+          {i18next.t('common:action.close')}
         </Button>
       )}
     >
@@ -400,23 +420,11 @@ function FlashNotice({ flash, onDismiss }: { flash: Flash; onDismiss: () => void
   )
 }
 
-const VIEW_COPY: Record<View, { title: string; description: string }> = {
-  roster: {
-    title: 'キャディ名簿',
-    description: 'プロフィール、スタッフ連携、希望休、評価を管理します。',
-  },
-  dispatch: {
-    title: 'キャディ配置',
-    description: '当日の割当を主作業にし、供給判断と自動配置は補助ツールとして使います。',
-  },
-  attendance: {
-    title: 'キャディ勤怠',
-    description: '出勤状態と割当を照合し、その場で打刻します。',
-  },
-  payroll: {
-    title: 'キャディ給与',
-    description: '勤怠と確定費用を月次で照合し、給与CSVへ渡します。',
-  },
+function viewCopy(view: View) {
+  return {
+    title: i18next.t(`caddies:view.${view}.title` as 'caddies:view.roster.title'),
+    description: i18next.t(`caddies:view.${view}.description` as 'caddies:view.roster.description'),
+  }
 }
 
 export function CaddiesPage({
@@ -426,7 +434,7 @@ export function CaddiesPage({
   initialView?: View
   initialProfileId?: string
 } = {}) {
-  const tenant = fieldTenant()
+  const { t } = useTranslation(['caddies', 'common'])
   const [view, setView] = useState<View>(initialView)
   const [operationDate, setOperationDate] = useState(todayJst)
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(initialProfileId ?? null)
@@ -501,15 +509,20 @@ export function CaddiesPage({
     }
   }, [initialProfileId])
 
+  // Follow the route in both directions: `golf/caddies/{id}` opens that
+  // caddie, and going back to `golf/caddies` (history, sidebar, ⌘K) returns
+  // to the list. Unknown ids also fall back to the list once data is in.
   useEffect(() => {
-    if (view !== 'roster' || profiles.length === 0) return
-    if (selectedProfileId && profiles.some(profile => profile.id === selectedProfileId)) return
-    if (initialProfileId && profiles.some(profile => profile.id === initialProfileId)) {
-      setSelectedProfileId(initialProfileId)
+    if (view !== 'roster') return
+    if (!initialProfileId) {
+      setSelectedProfileId(null)
       return
     }
-    setSelectedProfileId(profiles[0]?.id ?? null)
-  }, [initialProfileId, profiles, selectedProfileId, view])
+    if (profiles.length === 0) return
+    setSelectedProfileId(
+      profiles.some(profile => profile.id === initialProfileId) ? initialProfileId : null,
+    )
+  }, [initialProfileId, profiles, view])
 
   function refreshPeople() {
     profilesResource.refresh()
@@ -526,6 +539,11 @@ export function CaddiesPage({
     setSelectedProfileId(profileId)
     setView('roster')
     navigate(`golf/caddies/${encodeURIComponent(profileId)}`)
+  }
+
+  function backToRoster() {
+    setSelectedProfileId(null)
+    navigate('golf/caddies')
   }
 
   const refreshCurrentView = useCallback(() => {
@@ -558,12 +576,13 @@ export function CaddiesPage({
 
   useRegisterPageReload(view === 'payroll' ? null : refreshCurrentView)
 
-  const copy = VIEW_COPY[view]
+  const copy = viewCopy(view)
+  const showingProfileDetail = view === 'roster' && Boolean(selectedProfileId)
 
   return (
     <div className="page-stack">
+      {showingProfileDetail ? null : (
       <PageHeader
-        eyebrow={`Golf operations · ${tenant}`}
         title={copy.title}
         description={copy.description}
         actions={(
@@ -572,7 +591,7 @@ export function CaddiesPage({
               <PageRefreshButton
                 variant="secondary"
                 className="min-h-10 flex-1 sm:flex-none"
-                label="更新"
+                label={t('common:action.refresh')}
                 onClick={refreshCurrentView}
               />
             ) : null}
@@ -583,12 +602,13 @@ export function CaddiesPage({
                 className="min-h-10 flex-1 sm:flex-none"
                 onClick={() => setCreateOpen(true)}
               >
-                <Plus /> キャディを追加
+                <Plus /> {t('caddies:add')}
               </Button>
             ) : null}
           </div>
         )}
       />
+      )}
 
       <FlashNotice flash={flash} onDismiss={() => setFlash(null)} />
 
@@ -601,6 +621,8 @@ export function CaddiesPage({
           attendanceResource={attendanceResource}
           selectedProfileId={selectedProfileId}
           onSelectProfile={selectProfile}
+          onBack={backToRoster}
+          onRefresh={refreshCurrentView}
           onCreate={() => setCreateOpen(true)}
           onPeopleChanged={refreshPeople}
           onAssignmentsChanged={refreshDispatch}
@@ -653,8 +675,8 @@ export function CaddiesPage({
           refreshPeople()
           setFlash({
             tone: 'success',
-            title: 'キャディを追加しました',
-            message: 'プロフィールとスタッフの紐付けを作成しました。',
+            title: t('caddies:added.title'),
+            message: t('caddies:added.message'),
           })
         }}
       />
@@ -681,6 +703,7 @@ function DispatchView({
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const profiles = profilesResource.data?.items ?? []
   const assignments = assignmentsResource.data?.items ?? []
   const attendance = attendanceResource.data?.items ?? []
@@ -696,15 +719,15 @@ function DispatchView({
       <section className="app-section space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="section-title">割当ボード</h2>
+            <h2 className="section-title">{t('caddies:dispatch.boardTitle')}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              {date} の担当を完了・キャンセルまで更新します。勤怠打刻はサイドバーの「勤怠」へ。
+              {t('caddies:dispatch.boardDescription', { date })}
             </p>
           </div>
-          <Field label="運用日" className="w-full sm:w-44">
+          <Field label={t('caddies:operationDate')} className="w-full sm:w-44">
             <Input
               type="date"
-              aria-label="運用日"
+              aria-label={t('caddies:operationDate')}
               value={date}
               onChange={event => onDateChange(event.target.value)}
               className="min-h-10"
@@ -712,22 +735,32 @@ function DispatchView({
           </Field>
         </div>
         <MetricGrid>
-          <Metric label="登録キャディ" value={`${profiles.length}人`} detail="全プロフィール" />
           <Metric
-            label="勤務中"
-            value={`${working}人`}
-            detail={`${attendance.length}人の勤怠を取得`}
+            label={t('caddies:dispatch.metrics.registered')}
+            value={t('caddies:people', { n: String(profiles.length) })}
+            detail={t('caddies:dispatch.metrics.registeredDetail')}
+          />
+          <Metric
+            label={t('caddies:dispatch.metrics.working')}
+            value={t('caddies:people', { n: String(working) })}
+            detail={t('caddies:dispatch.metrics.workingDetail', { n: String(attendance.length) })}
             tone={working > 0 ? 'success' : 'warning'}
           />
-          <Metric label="本日の割当" value={`${activeAssignments.length}組`} detail={`取消 ${dayAssignments.length - activeAssignments.length}件`} />
           <Metric
-            label="要確認"
-            value={`${waiting}件`}
-            detail="未確定の割当"
+            label={t('caddies:dispatch.metrics.todayAssignments')}
+            value={t('caddies:groups', { n: String(activeAssignments.length) })}
+            detail={t('caddies:dispatch.metrics.todayAssignmentsDetail', {
+              n: String(dayAssignments.length - activeAssignments.length),
+            })}
+          />
+          <Metric
+            label={t('caddies:dispatch.metrics.needsCheck')}
+            value={t('caddies:items', { n: String(waiting) })}
+            detail={t('caddies:dispatch.metrics.needsCheckDetail')}
             tone={waiting > 0 ? 'warning' : 'success'}
           />
         </MetricGrid>
-        {assignmentsResource.loading ? <LoadingState label="割当を読み込み中" /> : null}
+        {assignmentsResource.loading ? <LoadingState label={t('caddies:dispatch.loading')} /> : null}
         {assignmentsResource.error ? (
           <ResourceError error={assignmentsResource.error} onRetry={assignmentsResource.refresh} />
         ) : null}
@@ -743,9 +776,9 @@ function DispatchView({
 
       <section className="app-section space-y-4">
         <div>
-          <h2 className="section-title">供給と自動配置</h2>
+          <h2 className="section-title">{t('caddies:dispatch.supportTitle')}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            キャディ付枠の残量確認と、未割当予約への提案です。販売枠の変更はコース予約側で行います。
+            {t('caddies:dispatch.supportDescription')}
           </p>
         </div>
         <DailySupplyPanel date={date} />
@@ -777,20 +810,21 @@ function AttendanceView({
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   return (
     <div className="space-y-4">
       <section className="app-section space-y-3">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="section-title">出勤ボード</h2>
+            <h2 className="section-title">{t('caddies:attendance.boardTitle')}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              {date} の割当と出勤状態を照合します。スタッフ未連携のキャディは名簿で紐付けてください。
+              {t('caddies:attendance.boardDescription', { date })}
             </p>
           </div>
-          <Field label="運用日" className="w-full sm:w-44">
+          <Field label={t('caddies:operationDate')} className="w-full sm:w-44">
             <Input
               type="date"
-              aria-label="運用日"
+              aria-label={t('caddies:operationDate')}
               value={date}
               onChange={event => onDateChange(event.target.value)}
               className="min-h-10"
@@ -810,6 +844,7 @@ function AttendanceView({
 }
 
 function DailySupplyPanel({ date }: { date: string }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [safetyBuffer, setSafetyBuffer] = useState(0)
   const resource = useResource(
     () => courseboardApiJson<CaddieSupply>(
@@ -820,10 +855,10 @@ function DailySupplyPanel({ date }: { date: string }) {
 
   return (
     <Panel
-      title="キャディ付枠"
-      description="勤務希望と2ラウンド可否から、安全に販売できる上限を算出します。"
+      title={t('caddies:supply.title')}
+      description={t('caddies:supply.description')}
       actions={(
-        <Field label="安全予備（組）" className="w-full sm:w-36">
+        <Field label={t('caddies:supply.buffer')} className="w-full sm:w-36">
           <Input
             type="number"
             min={0}
@@ -834,27 +869,43 @@ function DailySupplyPanel({ date }: { date: string }) {
         </Field>
       )}
     >
-      {resource.loading ? <LoadingState label="供給力を算出中" /> : null}
+      {resource.loading ? <LoadingState label={t('caddies:supply.loading')} /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {resource.data ? (
         <div className="space-y-3">
           <MetricGrid>
             <Metric
-              label="供給力"
-              value={`${resource.data.caddieSupply}組`}
-              detail={`勤務可 ${resource.data.availableCaddies}人 · 2R可 ${resource.data.twoRoundCapable}人`}
+              label={t('caddies:supply.metrics.supply')}
+              value={t('caddies:groups', { n: String(resource.data.caddieSupply) })}
+              detail={t('caddies:supply.metrics.supplyDetail', {
+                available: String(resource.data.availableCaddies),
+                twoRounds: String(resource.data.twoRoundCapable),
+              })}
             />
-            <Metric label="安全上限" value={`${resource.data.caddieAttachedCap}組`} detail={`予備 ${resource.data.safetyBuffer}組`} />
-            <Metric label="予約済み" value={`${resource.data.currentCaddieAttached}組`} detail="キャディ付き予約" />
             <Metric
-              label="残枠"
-              value={`${resource.data.remaining}組`}
-              detail={resource.data.remaining < 0 ? '上限超過' : '受付可能'}
+              label={t('caddies:supply.metrics.cap')}
+              value={t('caddies:groups', { n: String(resource.data.caddieAttachedCap) })}
+              detail={t('caddies:supply.metrics.capDetail', { n: String(resource.data.safetyBuffer) })}
+            />
+            <Metric
+              label={t('caddies:supply.metrics.booked')}
+              value={t('caddies:groups', { n: String(resource.data.currentCaddieAttached) })}
+              detail={t('caddies:supply.metrics.bookedDetail')}
+            />
+            <Metric
+              label={t('caddies:supply.metrics.remaining')}
+              value={t('caddies:groups', { n: String(resource.data.remaining) })}
+              detail={resource.data.remaining < 0
+                ? t('caddies:supply.metrics.over')
+                : t('caddies:supply.metrics.ok')}
               tone={resource.data.remaining < 0 ? 'danger' : 'success'}
             />
           </MetricGrid>
           <p className="text-xs text-muted-foreground">
-            午前対応 {resource.data.morningCapacity}人 · 午後対応 {resource.data.afternoonCapacity}人
+            {t('caddies:supply.note', {
+              morning: String(resource.data.morningCapacity),
+              afternoon: String(resource.data.afternoonCapacity),
+            })}
           </p>
         </div>
       ) : null}
@@ -871,6 +922,7 @@ function AutoAssignPanel({
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [plan, setPlan] = useState<AutoAssignResult | null>(null)
   const [busy, setBusy] = useState<'preview' | 'execute' | null>(null)
   const [error, setError] = useState<unknown>(null)
@@ -893,8 +945,11 @@ function AutoAssignPanel({
         onChanged()
         setFlash({
           tone: 'success',
-          title: '自動配置を確定しました',
-          message: `${result.assigned.length}件を割り当て、${result.skipped.length}件をスキップしました。`,
+          title: t('caddies:autoAssign.done.title'),
+          message: t('caddies:autoAssign.done.message', {
+            assigned: String(result.assigned.length),
+            skipped: String(result.skipped.length),
+          }),
         })
       }
     } catch (reason) {
@@ -906,8 +961,8 @@ function AutoAssignPanel({
 
   return (
     <Panel
-      title="スマート自動配置"
-      description="未割当のキャディ付き予約を、勤務状況とスキルから組み合わせます。"
+      title={t('caddies:autoAssign.title')}
+      description={t('caddies:autoAssign.description')}
       actions={<Sparkles className="size-5 text-primary" aria-hidden="true" />}
     >
       <div className="flex flex-col gap-2 sm:flex-row">
@@ -918,7 +973,8 @@ function AutoAssignPanel({
           disabled={busy !== null || !date}
           onClick={() => void run(true)}
         >
-          <Sparkles /> {busy === 'preview' ? '算出中…' : '配置をプレビュー'}
+          <Sparkles />
+          {busy === 'preview' ? t('caddies:autoAssign.previewing') : t('caddies:autoAssign.preview')}
         </Button>
         <Button
           type="button"
@@ -927,13 +983,14 @@ function AutoAssignPanel({
           disabled={busy !== null || !plan || plan.assigned.length === 0}
           onClick={() => void run(false)}
         >
-          <CheckCircle2 /> {busy === 'execute' ? '確定中…' : 'この配置を確定'}
+          <CheckCircle2 />
+          {busy === 'execute' ? t('caddies:autoAssign.executing') : t('caddies:autoAssign.execute')}
         </Button>
       </div>
 
       {error ? (
         <div className="mt-3">
-          <Notice tone="danger" title="自動配置を実行できませんでした">
+          <Notice tone="danger" title={t('caddies:autoAssign.failed')}>
             {errorMessage(error)}
           </Notice>
         </div>
@@ -943,8 +1000,8 @@ function AutoAssignPanel({
         <div className="mt-4 space-y-3">
           {plan.assigned.length === 0 ? (
             <EmptyState
-              title="配置対象はありません"
-              description="未割当のキャディ付き予約がないか、勤務可能なキャディがいません。"
+              title={t('caddies:autoAssign.empty.title')}
+              description={t('caddies:autoAssign.empty.description')}
             />
           ) : (
             <div className="space-y-2">
@@ -957,7 +1014,7 @@ function AutoAssignPanel({
                         {formatDateTime(item.scheduledAt)} · {item.reservationId}
                       </p>
                     </div>
-                    <Badge variant="accent">候補</Badge>
+                    <Badge variant="accent">{t('caddies:autoAssign.candidate')}</Badge>
                   </div>
                   <p className="mt-2 text-xs text-muted-foreground">{item.rationale.join(' · ')}</p>
                 </div>
@@ -965,7 +1022,10 @@ function AutoAssignPanel({
             </div>
           )}
           {plan.skipped.length > 0 ? (
-            <Notice tone="warning" title={`${plan.skipped.length}件をスキップ`}>
+            <Notice
+              tone="warning"
+              title={t('caddies:autoAssign.skipped', { n: String(plan.skipped.length) })}
+            >
               <ul className="list-inside list-disc space-y-1">
                 {plan.skipped.map(item => (
                   <li key={item.reservationId}>{item.reservationId}: {item.reason}</li>
@@ -984,20 +1044,24 @@ function RecommendationsPanel({
 }: {
   resource: ResourceValue<ListResponse<CaddieRecommendation>>
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   return (
     <Panel
-      title="推薦候補"
-      description="4名プレー・新人ペアリングを考慮した候補です。"
+      title={t('caddies:recommendations.title')}
+      description={t('caddies:recommendations.description')}
       actions={(
         <Button type="button" variant="ghost" size="sm" className="min-h-9" onClick={resource.refresh}>
-          <RefreshCw /> 更新
+          <RefreshCw /> {t('common:action.refresh')}
         </Button>
       )}
     >
-      {resource.loading ? <LoadingState label="候補を計算中" /> : null}
+      {resource.loading ? <LoadingState label={t('caddies:recommendations.loading')} /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {!resource.loading && !resource.error && (resource.data?.items.length ?? 0) === 0 ? (
-        <EmptyState title="推薦候補はありません" description="勤務条件やプロフィールを確認してください。" />
+        <EmptyState
+          title={t('caddies:recommendations.empty.title')}
+          description={t('caddies:recommendations.empty.description')}
+        />
       ) : null}
       <div className="space-y-2">
         {resource.data?.items.map((item, index) => (
@@ -1009,13 +1073,21 @@ function RecommendationsPanel({
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-medium text-foreground">{item.displayName}</p>
                 <Badge variant="neutral">{skillLabel(item.skillLevel)}</Badge>
-                <Badge variant="accent">{item.recommendationScore}点</Badge>
+                <Badge variant="accent">
+                  {t('caddies:recommendations.score', { n: String(item.recommendationScore) })}
+                </Badge>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                役割 {item.recommendedRole} · 担当 {item.roundsAssigned}R · 評価 {item.ratingAverage?.toFixed(1) ?? '—'}
+                {t('caddies:recommendations.meta', {
+                  role: roleLabel(item.recommendedRole),
+                  rounds: String(item.roundsAssigned),
+                  rating: item.ratingAverage?.toFixed(1) ?? '—',
+                })}
               </p>
               {item.pairingDisplayName ? (
-                <p className="mt-1 text-xs text-foreground">ペア: {item.pairingDisplayName}</p>
+                <p className="mt-1 text-xs text-foreground">
+                  {t('caddies:recommendations.pair', { name: item.pairingDisplayName })}
+                </p>
               ) : null}
               <p className="mt-1 text-xs text-muted-foreground">{item.rationale.join(' · ')}</p>
             </div>
@@ -1039,6 +1111,7 @@ function AttendancePanel({
   setFlash: (flash: Flash) => void
   showHeader?: boolean
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [busyId, setBusyId] = useState<string | null>(null)
   const profileMap = useMemo(
     () => new Map(profiles.map(profile => [profile.id, profile])),
@@ -1051,8 +1124,8 @@ function AttendancePanel({
     if (!staffId) {
       setFlash({
         tone: 'warning',
-        title: 'スタッフが未紐付けです',
-        message: '名簿でスタッフを紐付けてから勤怠を記録してください。',
+        title: t('caddies:attendance.notLinked.title'),
+        message: t('caddies:attendance.notLinked.message'),
       })
       return
     }
@@ -1065,11 +1138,17 @@ function AttendancePanel({
       onChanged()
       setFlash({
         tone: 'success',
-        title: direction === 'in' ? '出勤を記録しました' : '退勤を記録しました',
-        message: `${snapshot.displayName}さんの勤怠を更新しました。`,
+        title: direction === 'in'
+          ? t('caddies:attendance.clockedIn')
+          : t('caddies:attendance.clockedOut'),
+        message: t('caddies:attendance.updated', { name: snapshot.displayName }),
       })
     } catch (error) {
-      setFlash({ tone: 'danger', title: '勤怠を更新できませんでした', message: errorMessage(error) })
+      setFlash({
+        tone: 'danger',
+        title: t('caddies:attendance.failed'),
+        message: errorMessage(error),
+      })
     } finally {
       setBusyId(null)
     }
@@ -1078,33 +1157,41 @@ function AttendancePanel({
   const columns: DataTableColumn<AttendanceSnapshot>[] = [
     {
       key: 'name',
-      header: 'キャディ',
-      mobileLabel: 'キャディ',
+      header: t('caddies:attendance.table.caddie'),
+      mobileLabel: t('caddies:attendance.table.caddie'),
       cell: row => (
         <div>
           <p className="font-medium">{row.displayName}</p>
-          <p className="text-xs text-muted-foreground">本日 {row.todayAssignments}組</p>
+          <p className="text-xs text-muted-foreground">
+            {t('caddies:attendance.table.todayGroups', { n: String(row.todayAssignments) })}
+          </p>
         </div>
       ),
     },
     {
       key: 'status',
-      header: '出勤状態',
-      mobileLabel: '出勤状態',
+      header: t('caddies:attendance.table.status'),
+      mobileLabel: t('caddies:attendance.table.status'),
       cell: row => <Badge variant={attendanceVariant(row.attendanceStatus)}>{attendanceLabel(row.attendanceStatus)}</Badge>,
     },
     {
       key: 'warning',
-      header: '要確認',
-      mobileLabel: '要確認',
+      header: t('caddies:attendance.table.needsCheck'),
+      mobileLabel: t('caddies:attendance.table.needsCheck'),
       cell: row => row.roundsWithoutClockInToday > 0
-        ? <span className="text-warning">未出勤の割当 {row.roundsWithoutClockInToday}件</span>
+        ? (
+          <span className="text-warning">
+            {t('caddies:attendance.table.missingClockIn', {
+              n: String(row.roundsWithoutClockInToday),
+            })}
+          </span>
+        )
         : <span className="text-muted-foreground">—</span>,
     },
     {
       key: 'action',
-      header: '操作',
-      mobileLabel: '操作',
+      header: t('caddies:attendance.table.actions'),
+      mobileLabel: t('caddies:attendance.table.actions'),
       align: 'right',
       cell: row => (
         <div className="flex justify-end gap-2">
@@ -1116,7 +1203,7 @@ function AttendancePanel({
             disabled={busyId === row.caddieProfileId || row.attendanceStatus === 'working' || row.attendanceStatus === 'not_linked'}
             onClick={() => void clock(row, 'in')}
           >
-            <Clock /> 出勤
+            <Clock /> {t('caddies:attendance.clockIn')}
           </Button>
           <Button
             type="button"
@@ -1126,7 +1213,7 @@ function AttendancePanel({
             disabled={busyId === row.caddieProfileId || row.attendanceStatus !== 'working'}
             onClick={() => void clock(row, 'out')}
           >
-            退勤
+            {t('caddies:attendance.clockOut')}
           </Button>
         </div>
       ),
@@ -1135,14 +1222,19 @@ function AttendancePanel({
 
   const body = (
     <>
-      {resource.loading ? <LoadingState label="勤怠を読み込み中" /> : null}
+      {resource.loading ? <LoadingState label={t('caddies:attendance.loading')} /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {resource.data ? (
         <DataTable
           rows={resource.data.items}
           columns={columns}
           rowKey={row => row.caddieProfileId}
-          empty={<EmptyState title="本日の勤怠対象はいません" description="割当またはプロフィールを確認してください。" />}
+          empty={(
+            <EmptyState
+              title={t('caddies:attendance.empty.title')}
+              description={t('caddies:attendance.empty.description')}
+            />
+          )}
         />
       ) : null}
     </>
@@ -1152,11 +1244,11 @@ function AttendancePanel({
 
   return (
     <Panel
-      title="出勤ボード"
-      description="本日の割当と出勤状態を照合し、その場で打刻します。"
+      title={t('caddies:attendance.panelTitle')}
+      description={t('caddies:attendance.panelDescription')}
       actions={(
         <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={resource.refresh}>
-          <RefreshCw /> 更新
+          <RefreshCw /> {t('common:action.refresh')}
         </Button>
       )}
     >
@@ -1176,6 +1268,7 @@ function AssignmentsTable({
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [busyId, setBusyId] = useState<string | null>(null)
   const profileNames = useMemo(
     () => new Map(profiles.map(profile => [profile.id, profile.displayName])),
@@ -1208,11 +1301,17 @@ function AssignmentsTable({
       onChanged()
       setFlash({
         tone: 'success',
-        title: status === 'completed' ? '割当を完了しました' : '割当をキャンセルしました',
+        title: status === 'completed'
+          ? t('caddies:assignments.completed')
+          : t('caddies:assignments.cancelled'),
         message: assignment.roundReference ?? assignment.reservationId ?? assignment.id,
       })
     } catch (error) {
-      setFlash({ tone: 'danger', title: '割当を更新できませんでした', message: errorMessage(error) })
+      setFlash({
+        tone: 'danger',
+        title: t('caddies:assignments.failed'),
+        message: errorMessage(error),
+      })
     } finally {
       setBusyId(null)
     }
@@ -1221,14 +1320,14 @@ function AssignmentsTable({
   const columns: DataTableColumn<CaddieAssignment>[] = [
     {
       key: 'time',
-      header: '予定',
-      mobileLabel: '予定',
+      header: t('caddies:assignments.table.schedule'),
+      mobileLabel: t('caddies:assignments.table.schedule'),
       cell: row => formatDateTime(row.scheduledAt),
     },
     {
       key: 'round',
-      header: '予約・ラウンド',
-      mobileLabel: '予約・ラウンド',
+      header: t('caddies:assignments.table.round'),
+      mobileLabel: t('caddies:assignments.table.round'),
       cell: row => (
         <div>
           <p className="font-medium">{row.roundReference ?? row.reservationId ?? row.id}</p>
@@ -1238,27 +1337,27 @@ function AssignmentsTable({
     },
     {
       key: 'caddie',
-      header: 'キャディ',
-      mobileLabel: 'キャディ',
+      header: t('caddies:assignments.table.caddie'),
+      mobileLabel: t('caddies:assignments.table.caddie'),
       cell: row => profileNames.get(row.caddieProfileId) ?? row.caddieProfileId,
     },
     {
       key: 'fee',
-      header: '費用',
-      mobileLabel: '費用',
+      header: t('caddies:assignments.table.fee'),
+      mobileLabel: t('caddies:assignments.table.fee'),
       align: 'right',
       cell: row => formatMoney(row.feeAmount, row.feeCurrency),
     },
     {
       key: 'status',
-      header: '状態',
-      mobileLabel: '状態',
+      header: t('caddies:assignments.table.status'),
+      mobileLabel: t('caddies:assignments.table.status'),
       cell: row => <Badge variant={assignmentVariant(row.status)}>{row.status}</Badge>,
     },
     {
       key: 'action',
-      header: '操作',
-      mobileLabel: '操作',
+      header: t('caddies:assignments.table.actions'),
+      mobileLabel: t('caddies:assignments.table.actions'),
       align: 'right',
       cell: row => row.status === 'assigned' ? (
         <div className="flex justify-end gap-2">
@@ -1270,7 +1369,7 @@ function AssignmentsTable({
             disabled={busyId === row.id}
             onClick={() => void updateStatus(row, 'completed')}
           >
-            <CheckCircle2 /> 完了
+            <CheckCircle2 /> {t('caddies:assignments.complete')}
           </Button>
           <Button
             type="button"
@@ -1280,7 +1379,7 @@ function AssignmentsTable({
             disabled={busyId === row.id}
             onClick={() => void updateStatus(row, 'cancelled')}
           >
-            <XCircle /> 取消
+            <XCircle /> {t('caddies:assignments.cancel')}
           </Button>
         </div>
       ) : <span className="text-muted-foreground">—</span>,
@@ -1292,7 +1391,12 @@ function AssignmentsTable({
       rows={sorted}
       columns={columns}
       rowKey={row => row.id}
-      empty={<EmptyState title="対象日の割当はありません" description="自動配置をプレビューするか、予約状況を確認してください。" />}
+      empty={(
+        <EmptyState
+          title={t('caddies:assignments.empty.title')}
+          description={t('caddies:assignments.empty.description')}
+        />
+      )}
     />
   )
 }
@@ -1305,6 +1409,8 @@ function ProfilesView({
   attendanceResource,
   selectedProfileId,
   onSelectProfile,
+  onBack,
+  onRefresh,
   onCreate,
   onPeopleChanged,
   onAssignmentsChanged,
@@ -1317,11 +1423,14 @@ function ProfilesView({
   attendanceResource: ResourceValue<AttendanceResponse>
   selectedProfileId: string | null
   onSelectProfile: (id: string) => void
+  onBack: () => void
+  onRefresh: () => void
   onCreate: () => void
   onPeopleChanged: () => void
   onAssignmentsChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [skill, setSkill] = useState('all')
@@ -1343,6 +1452,100 @@ function ProfilesView({
   const selected = profiles.find(profile => profile.id === selectedProfileId) ?? null
   const unlinked = profiles.filter(profile => !resolveStaffId(profile)).length
 
+  // The roster is a list *or* a detail, never both: the old split view squeezed
+  // the detail into a third of the width, which is what made it unreadable.
+  if (selected) {
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+            <ArrowLeft /> {t('caddies:roster.backToList')}
+          </Button>
+          <PageRefreshButton
+            variant="secondary"
+            size="sm"
+            label={t('common:action.refresh')}
+            onClick={onRefresh}
+          />
+        </div>
+        <ProfileDetail
+          key={selected.id}
+          profile={selected}
+          assignments={assignmentsResource.data?.items.filter(item => item.caddieProfileId === selected.id) ?? []}
+          assignmentsLoading={assignmentsResource.loading}
+          assignmentsError={assignmentsResource.error}
+          staff={staffResource.data?.items ?? []}
+          staffError={staffResource.error}
+          courses={coursesResource.data?.items.filter(course => course.isActive !== false) ?? []}
+          coursesError={coursesResource.error}
+          attendance={attendanceResource.data?.items.find(item => item.caddieProfileId === selected.id) ?? null}
+          onPeopleChanged={onPeopleChanged}
+          onAssignmentsChanged={onAssignmentsChanged}
+          setFlash={setFlash}
+        />
+      </div>
+    )
+  }
+
+  const columns: DataTableColumn<CaddieProfile>[] = [
+    {
+      key: 'name',
+      header: t('caddies:roster.table.name'),
+      mobileLabel: t('caddies:roster.table.name'),
+      cell: profile => (
+        <div className="grid gap-0.5">
+          <strong>{profile.displayName}</strong>
+          <span className="text-xs text-muted-foreground">{profile.id}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'employment',
+      header: t('caddies:roster.table.employment'),
+      mobileLabel: t('caddies:roster.table.employment'),
+      cell: profile => (
+        <Badge variant={profile.employmentStatus === 'active' ? 'success' : 'neutral'}>
+          {employmentLabel(profile.employmentStatus)}
+        </Badge>
+      ),
+    },
+    {
+      key: 'skill',
+      header: t('caddies:roster.table.skill'),
+      mobileLabel: t('caddies:roster.table.skill'),
+      cell: profile => (
+        <span>
+          {profile.rank ? t('caddies:roster.rank', { rank: profile.rank }) : ''}
+          {skillLabel(profile.skillLevel)}
+        </span>
+      ),
+    },
+    {
+      key: 'rating',
+      header: t('caddies:roster.table.rating'),
+      mobileLabel: t('caddies:roster.table.rating'),
+      align: 'right',
+      cell: profile => (
+        <span className="inline-flex items-center gap-1">
+          <Star className="size-3 fill-warning text-warning" aria-hidden="true" />
+          {profile.ratingAverage?.toFixed(1) ?? '—'} ({profile.ratingCount})
+        </span>
+      ),
+    },
+    {
+      key: 'link',
+      header: t('caddies:roster.table.link'),
+      mobileLabel: t('caddies:roster.table.link'),
+      cell: profile => (
+        <span className={resolveStaffId(profile) ? 'text-success' : 'text-warning'}>
+          {resolveStaffId(profile)
+            ? t('caddies:roster.linked')
+            : t('caddies:roster.notLinked')}
+        </span>
+      ),
+    },
+  ]
+
   return (
     <div className="space-y-4">
       {staffResource.error ? (
@@ -1351,140 +1554,100 @@ function ProfilesView({
       {unlinked > 0 ? (
         <Notice
           tone="warning"
-          title={`${unlinked}人のスタッフ紐付けが未完了です`}
+          title={t('caddies:roster.unlinkedWarning.title', { n: String(unlinked) })}
           actions={(
             <Button type="button" size="sm" variant="secondary" onClick={() => setLink('unlinked')}>
-              未紐付けだけ表示
+              {t('caddies:roster.unlinkedWarning.showOnly')}
             </Button>
           )}
         >
-          勤怠と給与CSVへ反映するには、Fieldスタッフとの紐付けが必要です。
+          {t('caddies:roster.unlinkedWarning.description')}
         </Notice>
       ) : null}
 
-      <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(270px,340px)_minmax(0,1fr)]">
-        <Panel
-          title="キャディ名簿"
-          description={`${filtered.length} / ${profiles.length}人`}
-          actions={(
-            <Button type="button" size="sm" variant="primary" className="min-h-9" onClick={onCreate}>
-              <UserPlus /> 追加
-            </Button>
-          )}
-        >
-          <div className="space-y-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-subtle-foreground" aria-hidden="true" />
-              <SearchInput
-                value={query}
-                onChange={event => setQuery(event.target.value)}
-                placeholder="名前・ID・スタッフID"
-                aria-label="キャディを検索"
-                className="min-h-10 pl-8"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <NativeSelect value={status} onChange={event => setStatus(event.target.value)} aria-label="雇用状態">
-                <option value="all">すべての状態</option>
-                <option value="active">稼働中</option>
-                <option value="inactive">休止</option>
-                <option value="suspended">停止</option>
-              </NativeSelect>
-              <NativeSelect value={skill} onChange={event => setSkill(event.target.value)} aria-label="スキル">
-                <option value="all">すべてのスキル</option>
-                <option value="rookie">新人</option>
-                <option value="regular">レギュラー</option>
-                <option value="veteran">ベテラン</option>
-              </NativeSelect>
-              <NativeSelect value={link} onChange={event => setLink(event.target.value)} aria-label="スタッフ紐付け" className="col-span-2">
-                <option value="all">すべての紐付け</option>
-                <option value="linked">紐付け済み</option>
-                <option value="unlinked">未紐付け</option>
-              </NativeSelect>
-            </div>
-          </div>
-
-          <Separator className="my-3" />
-
-          {profilesResource.loading && !profilesResource.data ? (
-            <LoadingState label="名簿を読み込み中" />
-          ) : null}
-          {profilesResource.error ? <ResourceError error={profilesResource.error} onRetry={profilesResource.refresh} /> : null}
-          {!profilesResource.loading && !profilesResource.error && filtered.length === 0 ? (
-            <EmptyState
-              title={profiles.length === 0 ? 'キャディが登録されていません' : '条件に一致するキャディはいません'}
-              description={profiles.length === 0 ? '最初のプロフィールとスタッフを作成してください。' : '検索または絞り込み条件を変更してください。'}
-              action={profiles.length === 0 ? (
-                <Button type="button" variant="primary" className="min-h-10" onClick={onCreate}>
-                  <Plus /> キャディを追加
-                </Button>
-              ) : undefined}
+      <Panel
+        description={t('caddies:roster.count', {
+          shown: String(filtered.length),
+          total: String(profiles.length),
+        })}
+      >
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="relative sm:max-w-72 sm:flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-subtle-foreground" aria-hidden="true" />
+            <SearchInput
+              value={query}
+              onChange={event => setQuery(event.target.value)}
+              placeholder={t('caddies:roster.search')}
+              aria-label={t('caddies:roster.searchLabel')}
+              className="min-h-10 pl-8"
             />
-          ) : null}
-          <div className="max-h-[56dvh] space-y-1 overflow-y-auto pr-1 lg:max-h-[calc(100dvh-19rem)]">
-            {filtered.map(profile => {
-              const active = profile.id === selectedProfileId
-              return (
-                <button
-                  key={profile.id}
-                  type="button"
-                  onClick={() => onSelectProfile(profile.id)}
-                  className={`w-full rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
-                    active
-                      ? 'border-primary/30 bg-selected text-foreground'
-                      : 'border-transparent hover:border-border hover:bg-muted/60'
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">{profile.displayName}</p>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                        {profile.rank ? `${profile.rank}ランク · ` : ''}{skillLabel(profile.skillLevel)}
-                      </p>
-                    </div>
-                    <Badge variant={profile.employmentStatus === 'active' ? 'success' : 'neutral'}>
-                      {employmentLabel(profile.employmentStatus)}
-                    </Badge>
-                  </div>
-                  <div className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1">
-                      <Star className="size-3 fill-warning text-warning" />
-                      {profile.ratingAverage?.toFixed(1) ?? '—'} ({profile.ratingCount})
-                    </span>
-                    <span className={resolveStaffId(profile) ? 'text-success' : 'text-warning'}>
-                      {resolveStaffId(profile) ? 'スタッフ連携済み' : '未連携'}
-                    </span>
-                  </div>
-                </button>
-              )
-            })}
           </div>
-        </Panel>
-
-        <div className="min-w-0">
-          {selected ? (
-            <ProfileDetail
-              key={selected.id}
-              profile={selected}
-              assignments={assignmentsResource.data?.items.filter(item => item.caddieProfileId === selected.id) ?? []}
-              assignmentsLoading={assignmentsResource.loading}
-              assignmentsError={assignmentsResource.error}
-              staff={staffResource.data?.items ?? []}
-              staffError={staffResource.error}
-              courses={coursesResource.data?.items.filter(course => course.isActive !== false) ?? []}
-              coursesError={coursesResource.error}
-              attendance={attendanceResource.data?.items.find(item => item.caddieProfileId === selected.id) ?? null}
-              onPeopleChanged={onPeopleChanged}
-              onAssignmentsChanged={onAssignmentsChanged}
-              setFlash={setFlash}
-            />
-          ) : (
-            <Panel>
-              <EmptyState title="プロフィールを選択してください" description="名簿からキャディを選ぶと詳細を表示します。" />
-            </Panel>
-          )}
+          <NativeSelect
+            value={status}
+            onChange={event => setStatus(event.target.value)}
+            aria-label={t('caddies:roster.filter.employment')}
+            className="sm:w-44"
+          >
+            <option value="all">{t('caddies:roster.filter.allEmployment')}</option>
+            <option value="active">{t('caddies:employment.active')}</option>
+            <option value="inactive">{t('caddies:employment.inactive')}</option>
+            <option value="suspended">{t('caddies:employment.suspended')}</option>
+          </NativeSelect>
+          <NativeSelect
+            value={skill}
+            onChange={event => setSkill(event.target.value)}
+            aria-label={t('caddies:roster.filter.skill')}
+            className="sm:w-44"
+          >
+            <option value="all">{t('caddies:roster.filter.allSkills')}</option>
+            <option value="rookie">{t('caddies:skill.rookie')}</option>
+            <option value="regular">{t('caddies:skill.regular')}</option>
+            <option value="veteran">{t('caddies:skill.veteran')}</option>
+          </NativeSelect>
+          <NativeSelect
+            value={link}
+            onChange={event => setLink(event.target.value)}
+            aria-label={t('caddies:roster.filter.link')}
+            className="sm:w-52"
+          >
+            <option value="all">{t('caddies:roster.filter.allLinks')}</option>
+            <option value="linked">{t('caddies:roster.filter.linked')}</option>
+            <option value="unlinked">{t('caddies:roster.filter.unlinked')}</option>
+          </NativeSelect>
         </div>
-      </div>
+
+        <Separator className="my-3" />
+
+        {profilesResource.loading && !profilesResource.data ? (
+          <LoadingState label={t('caddies:roster.loading')} />
+        ) : null}
+        {profilesResource.error ? (
+          <ResourceError error={profilesResource.error} onRetry={profilesResource.refresh} />
+        ) : null}
+        {!profilesResource.loading && !profilesResource.error ? (
+          <DataTable
+            rows={filtered}
+            columns={columns}
+            rowKey={profile => profile.id}
+            onRowClick={profile => onSelectProfile(profile.id)}
+            empty={(
+              <EmptyState
+                title={profiles.length === 0
+                  ? t('caddies:roster.empty.titleNoData')
+                  : t('caddies:roster.empty.titleNoMatch')}
+                description={profiles.length === 0
+                  ? t('caddies:roster.empty.descriptionNoData')
+                  : t('caddies:roster.empty.descriptionNoMatch')}
+                action={profiles.length === 0 ? (
+                  <Button type="button" variant="primary" className="min-h-10" onClick={onCreate}>
+                    <Plus /> {t('caddies:add')}
+                  </Button>
+                ) : undefined}
+              />
+            )}
+          />
+        ) : null}
+      </Panel>
     </div>
   )
 }
@@ -1506,6 +1669,7 @@ function ProfileCreateDialog({
   onRetryStaff: () => void
   onCreated: (id?: string) => void
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [displayName, setDisplayName] = useState('')
   const [skillLevel, setSkillLevel] = useState<SkillLevel>('regular')
   const [rank, setRank] = useState<Rank>('D')
@@ -1530,25 +1694,25 @@ function ProfileCreateDialog({
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (staffError) {
-      setError('Fieldスタッフを読み込めないため、作成を続行できません。再試行してください。')
+      setError(t('caddies:create.error.staffUnavailable'))
       return
     }
     const name = displayName.trim()
     const fee = Number.parseInt(baseFeeAmount, 10)
     if (!name) {
-      setError('表示名を入力してください。')
+      setError(t('caddies:create.error.displayName'))
       return
     }
     if (!Number.isFinite(fee) || fee < 0) {
-      setError('基本費用は0円以上で入力してください。')
+      setError(t('caddies:create.error.baseFee'))
       return
     }
     if (staffMode === 'existing' && !staffId) {
-      setError('紐付けるスタッフを選択してください。')
+      setError(t('caddies:create.error.staffRequired'))
       return
     }
     if (staffMode === 'new' && !newStaffName.trim()) {
-      setError('新しいスタッフ名を入力してください。')
+      setError(t('caddies:create.error.newStaffName'))
       return
     }
 
@@ -1598,60 +1762,67 @@ function ProfileCreateDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[calc(100dvh-1.5rem)] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>キャディを追加</DialogTitle>
+          <DialogTitle>{t('caddies:create.title')}</DialogTitle>
           <DialogDescription>
-            勤怠と給与連携のため、既存または新しいFieldスタッフと同時に紐付けます。
+            {t('caddies:create.description')}
           </DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={event => void submit(event)}>
           <FormGrid columns={2}>
-            <Field label="表示名" required>
+            <Field label={t('caddies:create.displayName')} required>
               <Input value={displayName} onChange={event => setDisplayName(event.target.value)} className="min-h-10" autoFocus />
             </Field>
-            <Field label="基本費用（円）" required>
+            <Field label={t('caddies:create.baseFee')} required>
               <Input type="number" min={0} value={baseFeeAmount} onChange={event => setBaseFeeAmount(event.target.value)} className="min-h-10" />
             </Field>
-            <Field label="スキル" required>
+            <Field label={t('caddies:create.skill')} required>
               <NativeSelect value={skillLevel} onChange={event => setSkillLevel(event.target.value as SkillLevel)}>
-                <option value="rookie">新人</option>
-                <option value="regular">レギュラー</option>
-                <option value="veteran">ベテラン</option>
+                <option value="rookie">{t('caddies:skill.rookie')}</option>
+                <option value="regular">{t('caddies:skill.regular')}</option>
+                <option value="veteran">{t('caddies:skill.veteran')}</option>
               </NativeSelect>
             </Field>
-            <Field label="ランク" required>
+            <Field label={t('caddies:create.rank')} required>
               <NativeSelect value={rank} onChange={event => setRank(event.target.value as Rank)}>
-                <option value="A">A（41R/月）</option>
-                <option value="B">B（33R/月）</option>
-                <option value="C">C（25R/月）</option>
-                <option value="D">D（14R/月）</option>
+                <option value="A">{t('caddies:create.rankOption', { rank: 'A', rounds: '41' })}</option>
+                <option value="B">{t('caddies:create.rankOption', { rank: 'B', rounds: '33' })}</option>
+                <option value="C">{t('caddies:create.rankOption', { rank: 'C', rounds: '25' })}</option>
+                <option value="D">{t('caddies:create.rankOption', { rank: 'D', rounds: '14' })}</option>
               </NativeSelect>
             </Field>
           </FormGrid>
 
           <Separator />
 
-          <Field label="スタッフ登録方法" required>
+          <Field label={t('caddies:create.staffMode')} required>
             <NativeSelect
               value={staffMode}
               onChange={event => setStaffMode(event.target.value as 'existing' | 'new')}
               disabled={Boolean(staffError)}
             >
-              <option value="existing">既存スタッフに紐付ける</option>
-              <option value="new">新しいスタッフを作成する</option>
+              <option value="existing">{t('caddies:create.staffExisting')}</option>
+              <option value="new">{t('caddies:create.staffNew')}</option>
             </NativeSelect>
           </Field>
           {staffMode === 'existing' ? (
             <div className="space-y-3">
-              <Field label="スタッフ検索">
-                <Input value={staffQuery} onChange={event => setStaffQuery(event.target.value)} placeholder="名前またはスタッフID" className="min-h-10" />
+              <Field label={t('caddies:create.staffSearch')}>
+                <Input
+                  value={staffQuery}
+                  onChange={event => setStaffQuery(event.target.value)}
+                  placeholder={t('caddies:create.staffSearchPlaceholder')}
+                  className="min-h-10"
+                />
               </Field>
-              <Field label="スタッフ" required>
+              <Field label={t('caddies:create.staff')} required>
                 <NativeSelect
                   value={staffId}
                   onChange={event => setStaffId(event.target.value)}
                   disabled={staffLoading || Boolean(staffError)}
                 >
-                  <option value="">{staffLoading ? '読み込み中…' : 'スタッフを選択'}</option>
+                  <option value="">
+                    {staffLoading ? t('caddies:create.staffLoading') : t('caddies:create.staffPlaceholder')}
+                  </option>
                   {availableStaff.map(item => (
                     <option key={item.id} value={item.id}>{item.name}（{item.id}）</option>
                   ))}
@@ -1659,7 +1830,7 @@ function ProfileCreateDialog({
               </Field>
             </div>
           ) : (
-            <Field label="新しいスタッフ名" required>
+            <Field label={t('caddies:create.newStaffName')} required>
               <Input value={newStaffName} onChange={event => setNewStaffName(event.target.value)} className="min-h-10" />
             </Field>
           )}
@@ -1669,7 +1840,7 @@ function ProfileCreateDialog({
 
           <DialogFooter>
             <Button type="button" variant="ghost" className="min-h-10" onClick={() => onOpenChange(false)} disabled={busy}>
-              キャンセル
+              {t('common:action.cancel')}
             </Button>
             <Button
               type="submit"
@@ -1677,7 +1848,7 @@ function ProfileCreateDialog({
               className="min-h-10"
               disabled={busy || Boolean(staffError)}
             >
-              <UserPlus /> {busy ? '作成中…' : 'キャディを作成'}
+              <UserPlus /> {busy ? t('caddies:create.submitting') : t('caddies:create.submit')}
             </Button>
           </DialogFooter>
         </form>
@@ -1715,6 +1886,7 @@ function ProfileDetail({
   onAssignmentsChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [tab, setTab] = useState<DetailTab>('basic')
   const [editOpen, setEditOpen] = useState(false)
   const membershipResource = useResource(
@@ -1743,32 +1915,60 @@ function ProfileDetail({
                 {employmentLabel(profile.employmentStatus)}
               </Badge>
               <Badge variant="outline">{skillLabel(profile.skillLevel)}</Badge>
-              {profile.rank ? <Badge variant="accent">{profile.rank}ランク</Badge> : null}
+              {profile.rank ? (
+                <Badge variant="accent">{t('caddies:detail.rankBadge', { rank: profile.rank })}</Badge>
+              ) : null}
             </div>
             <p className="mt-1 break-all text-xs text-muted-foreground">{profile.id}</p>
           </div>
           <Button type="button" variant="secondary" className="min-h-10 w-full sm:w-auto" onClick={() => setEditOpen(true)}>
-            <Pencil /> 基本情報を編集
+            <Pencil /> {t('caddies:detail.edit')}
           </Button>
         </div>
         <MetricGrid>
-          <Metric label="基本費用" value={formatMoney(profile.baseFeeAmount, profile.currency)} detail="1ラウンド基準" />
-          <Metric label="日次上限" value={`${profile.maxRoundsPerDay}R`} detail={profile.canTwoRounds ? '2ラウンド可' : '登録上限'} />
-          <Metric label="平均評価" value={profile.ratingAverage?.toFixed(1) ?? '—'} detail={`${profile.ratingCount}件`} />
           <Metric
-            label="勤怠"
-            value={attendance ? attendanceLabel(attendance.attendanceStatus) : '未取得'}
-            detail={attendance ? `本日 ${attendance.todayAssignments}組` : '運用日データなし'}
+            label={t('caddies:detail.metrics.baseFee')}
+            value={formatMoney(profile.baseFeeAmount, profile.currency)}
+            detail={t('caddies:detail.metrics.baseFeeDetail')}
+          />
+          <Metric
+            label={t('caddies:detail.metrics.dailyLimit')}
+            value={t('caddies:rounds', { n: String(profile.maxRoundsPerDay) })}
+            detail={profile.canTwoRounds
+              ? t('caddies:detail.metrics.twoRounds')
+              : t('caddies:detail.metrics.registeredLimit')}
+          />
+          <Metric
+            label={t('caddies:detail.metrics.rating')}
+            value={profile.ratingAverage?.toFixed(1) ?? '—'}
+            detail={t('caddies:detail.metrics.ratingDetail', { n: String(profile.ratingCount) })}
+          />
+          <Metric
+            label={t('caddies:detail.metrics.attendance')}
+            value={attendance
+              ? attendanceLabel(attendance.attendanceStatus)
+              : t('caddies:detail.metrics.attendanceUnknown')}
+            detail={attendance
+              ? t('caddies:detail.metrics.attendanceDetail', { n: String(attendance.todayAssignments) })
+              : t('caddies:detail.metrics.attendanceNoData')}
             tone={attendance?.attendanceStatus === 'working' ? 'success' : 'neutral'}
           />
         </MetricGrid>
       </Panel>
 
-      <div className="grid grid-cols-4 gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-1" role="tablist" aria-label="プロフィール詳細">
-        <DetailTabButton active={tab === 'basic'} onClick={() => setTab('basic')}><Users /> 基本・連携</DetailTabButton>
-        <DetailTabButton active={tab === 'availability'} onClick={() => setTab('availability')}><CalendarDays /> 希望休</DetailTabButton>
-        <DetailTabButton active={tab === 'assignments'} onClick={() => setTab('assignments')}><ClipboardCheck /> 割当</DetailTabButton>
-        <DetailTabButton active={tab === 'ratings'} onClick={() => setTab('ratings')}><Star /> 評価</DetailTabButton>
+      <div className="grid grid-cols-4 gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-1" role="tablist" aria-label={t('caddies:detail.tabs.label')}>
+        <DetailTabButton active={tab === 'basic'} onClick={() => setTab('basic')}>
+          <Users /> {t('caddies:detail.tabs.basic')}
+        </DetailTabButton>
+        <DetailTabButton active={tab === 'availability'} onClick={() => setTab('availability')}>
+          <CalendarDays /> {t('caddies:detail.tabs.availability')}
+        </DetailTabButton>
+        <DetailTabButton active={tab === 'assignments'} onClick={() => setTab('assignments')}>
+          <ClipboardCheck /> {t('caddies:detail.tabs.assignments')}
+        </DetailTabButton>
+        <DetailTabButton active={tab === 'ratings'} onClick={() => setTab('ratings')}>
+          <Star /> {t('caddies:detail.tabs.ratings')}
+        </DetailTabButton>
       </div>
 
       {tab === 'basic' ? (
@@ -1796,8 +1996,11 @@ function ProfileDetail({
       ) : null}
 
       {tab === 'assignments' ? (
-        <Panel title="割当履歴" description="日付順に表示し、進行中の割当を完了・キャンセルできます。">
-          {assignmentsLoading ? <LoadingState label="割当履歴を読み込み中" /> : null}
+        <Panel
+          title={t('caddies:assignments.historyTitle')}
+          description={t('caddies:assignments.historyDescription')}
+        >
+          {assignmentsLoading ? <LoadingState label={t('caddies:assignments.historyLoading')} /> : null}
           {assignmentsError ? <ResourceError error={assignmentsError} /> : null}
           {!assignmentsLoading && !assignmentsError ? (
             <AssignmentsTable
@@ -1852,6 +2055,7 @@ function ProfileEditDialog({
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [displayName, setDisplayName] = useState(profile.displayName)
   const [skillLevel, setSkillLevel] = useState<SkillLevel>(profile.skillLevel)
   const [employmentStatus, setEmploymentStatus] = useState(profile.employmentStatus)
@@ -1866,11 +2070,11 @@ function ProfileEditDialog({
     const fee = Number.parseInt(baseFeeAmount, 10)
     const rounds = Number.parseInt(maxRounds, 10)
     if (!displayName.trim()) {
-      setError('表示名を入力してください。')
+      setError(t('caddies:edit.error.displayName'))
       return
     }
     if (!Number.isFinite(fee) || fee < 0 || !Number.isFinite(rounds) || rounds < 1) {
-      setError('基本費用は0円以上、日次上限は1以上で入力してください。')
+      setError(t('caddies:edit.error.numbers'))
       return
     }
     setBusy(true)
@@ -1889,7 +2093,11 @@ function ProfileEditDialog({
       )
       onOpenChange(false)
       onChanged()
-      setFlash({ tone: 'success', title: 'プロフィールを保存しました', message: `${displayName.trim()}さんの基本情報を更新しました。` })
+      setFlash({
+        tone: 'success',
+        title: t('caddies:edit.saved.title'),
+        message: t('caddies:edit.saved.message', { name: displayName.trim() }),
+      })
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -1901,42 +2109,46 @@ function ProfileEditDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[calc(100dvh-1.5rem)] max-w-2xl overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>基本情報を編集</DialogTitle>
-          <DialogDescription>表示名、スキル、雇用状態、費用と担当上限を更新します。</DialogDescription>
+          <DialogTitle>{t('caddies:edit.title')}</DialogTitle>
+          <DialogDescription>{t('caddies:edit.description')}</DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={event => void submit(event)}>
           <FormGrid columns={2}>
-            <Field label="表示名" required>
+            <Field label={t('caddies:edit.displayName')} required>
               <Input value={displayName} onChange={event => setDisplayName(event.target.value)} className="min-h-10" />
             </Field>
-            <Field label="スキル" required>
+            <Field label={t('caddies:edit.skill')} required>
               <NativeSelect value={skillLevel} onChange={event => setSkillLevel(event.target.value as SkillLevel)}>
-                <option value="rookie">新人</option>
-                <option value="regular">レギュラー</option>
-                <option value="veteran">ベテラン</option>
+                <option value="rookie">{t('caddies:skill.rookie')}</option>
+                <option value="regular">{t('caddies:skill.regular')}</option>
+                <option value="veteran">{t('caddies:skill.veteran')}</option>
               </NativeSelect>
             </Field>
-            <Field label="雇用状態" required>
+            <Field label={t('caddies:edit.employment')} required>
               <NativeSelect value={employmentStatus} onChange={event => setEmploymentStatus(event.target.value)}>
-                <option value="active">稼働中</option>
-                <option value="inactive">休止</option>
-                <option value="suspended">停止</option>
+                <option value="active">{t('caddies:employment.active')}</option>
+                <option value="inactive">{t('caddies:employment.inactive')}</option>
+                <option value="suspended">{t('caddies:employment.suspended')}</option>
               </NativeSelect>
             </Field>
-            <Field label="基本費用" required>
+            <Field label={t('caddies:edit.baseFee')} required>
               <Input type="number" min={0} value={baseFeeAmount} onChange={event => setBaseFeeAmount(event.target.value)} className="min-h-10" />
             </Field>
-            <Field label="通貨" required>
+            <Field label={t('caddies:edit.currency')} required>
               <Input maxLength={3} value={currency} onChange={event => setCurrency(event.target.value.toUpperCase())} className="min-h-10" />
             </Field>
-            <Field label="日次上限" required>
+            <Field label={t('caddies:edit.dailyLimit')} required>
               <Input type="number" min={1} value={maxRounds} onChange={event => setMaxRounds(event.target.value)} className="min-h-10" />
             </Field>
           </FormGrid>
           {error ? <Notice tone="danger">{error}</Notice> : null}
           <DialogFooter>
-            <Button type="button" variant="ghost" className="min-h-10" onClick={() => onOpenChange(false)} disabled={busy}>キャンセル</Button>
-            <Button type="submit" variant="primary" className="min-h-10" disabled={busy}><CheckCircle2 /> {busy ? '保存中…' : '変更を保存'}</Button>
+            <Button type="button" variant="ghost" className="min-h-10" onClick={() => onOpenChange(false)} disabled={busy}>
+              {t('common:action.cancel')}
+            </Button>
+            <Button type="submit" variant="primary" className="min-h-10" disabled={busy}>
+              <CheckCircle2 /> {busy ? t('common:action.saving') : t('common:action.save')}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -1959,6 +2171,7 @@ function StaffManagementPanel({
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [linkOpen, setLinkOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   const staffId = resolveStaffId(profile)
@@ -1975,11 +2188,17 @@ function StaffManagementPanel({
       onChanged()
       setFlash({
         tone: 'success',
-        title: direction === 'in' ? '出勤を記録しました' : '退勤を記録しました',
-        message: `${profile.displayName}さんの勤怠を更新しました。`,
+        title: direction === 'in'
+          ? t('caddies:attendance.clockedIn')
+          : t('caddies:attendance.clockedOut'),
+        message: t('caddies:attendance.updated', { name: profile.displayName }),
       })
     } catch (reason) {
-      setFlash({ tone: 'danger', title: '勤怠を更新できませんでした', message: errorMessage(reason) })
+      setFlash({
+        tone: 'danger',
+        title: t('caddies:attendance.failed'),
+        message: errorMessage(reason),
+      })
     } finally {
       setBusy(false)
     }
@@ -1987,8 +2206,8 @@ function StaffManagementPanel({
 
   return (
     <Panel
-      title="スタッフ・勤怠"
-      description="Fieldスタッフとの紐付けと今日の打刻を管理します。"
+      title={t('caddies:staff.title')}
+      description={t('caddies:staff.description')}
       actions={<Link2 className="size-5 text-primary" aria-hidden="true" />}
     >
       {staffError ? <ResourceError error={staffError} /> : null}
@@ -2001,7 +2220,9 @@ function StaffManagementPanel({
                 <p className="mt-1 break-all text-xs text-muted-foreground">{staffId}</p>
               </div>
               <Badge variant={attendance ? attendanceVariant(attendance.attendanceStatus) : 'neutral'}>
-                {attendance ? attendanceLabel(attendance.attendanceStatus) : '勤怠未取得'}
+                {attendance
+                  ? attendanceLabel(attendance.attendanceStatus)
+                  : t('caddies:staff.attendanceUnknown')}
               </Badge>
             </div>
           </div>
@@ -2013,7 +2234,7 @@ function StaffManagementPanel({
               disabled={busy || attendance?.attendanceStatus === 'working'}
               onClick={() => void clock('in')}
             >
-              <Clock /> 出勤
+              <Clock /> {t('caddies:attendance.clockIn')}
             </Button>
             <Button
               type="button"
@@ -2022,24 +2243,24 @@ function StaffManagementPanel({
               disabled={busy || attendance?.attendanceStatus !== 'working'}
               onClick={() => void clock('out')}
             >
-              退勤
+              {t('caddies:attendance.clockOut')}
             </Button>
           </div>
           <Button type="button" variant="ghost" className="min-h-10 w-full" onClick={() => setLinkOpen(true)}>
-            <Link2 /> 紐付け先を変更
+            <Link2 /> {t('caddies:staff.changeLink')}
           </Button>
         </div>
       ) : (
         <Notice
           tone="warning"
-          title="スタッフが未紐付けです"
+          title={t('caddies:staff.notLinked.title')}
           actions={(
             <Button type="button" variant="primary" size="sm" className="min-h-9" onClick={() => setLinkOpen(true)}>
-              <Link2 /> 紐付ける
+              <Link2 /> {t('caddies:staff.linkAction')}
             </Button>
           )}
         >
-          勤怠と給与CSVを利用するにはスタッフを選択または新規作成してください。
+          {t('caddies:staff.notLinked.description')}
         </Notice>
       )}
       <StaffLinkDialog
@@ -2072,6 +2293,7 @@ function StaffLinkDialog({
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [mode, setMode] = useState<'existing' | 'new'>('existing')
   const [query, setQuery] = useState('')
   const [staffId, setStaffId] = useState(resolveStaffId(profile) ?? '')
@@ -2088,15 +2310,15 @@ function StaffLinkDialog({
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (staffError) {
-      setError('Fieldスタッフを読み込めないため、紐付けを続行できません。')
+      setError(t('caddies:staff.error.unavailable'))
       return
     }
     if (mode === 'existing' && !staffId) {
-      setError('スタッフを選択してください。')
+      setError(t('caddies:staff.error.required'))
       return
     }
     if (mode === 'new' && !newName.trim()) {
-      setError('スタッフ名を入力してください。')
+      setError(t('caddies:staff.error.name'))
       return
     }
     setBusy(true)
@@ -2117,7 +2339,14 @@ function StaffLinkDialog({
       )
       onOpenChange(false)
       onChanged()
-      setFlash({ tone: 'success', title: 'スタッフを紐付けました', message: `${profile.displayName}さんをスタッフ ${resolved} と連携しました。` })
+      setFlash({
+        tone: 'success',
+        title: t('caddies:staff.linked.title'),
+        message: t('caddies:staff.linked.message', {
+          name: profile.displayName,
+          staff: resolved,
+        }),
+      })
     } catch (reason) {
       setError(errorMessage(reason))
     } finally {
@@ -2129,46 +2358,61 @@ function StaffLinkDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>スタッフを紐付け</DialogTitle>
-          <DialogDescription>既存スタッフを選ぶか、新しいスタッフを作成します。</DialogDescription>
+          <DialogTitle>{t('caddies:staff.dialog.title')}</DialogTitle>
+          <DialogDescription>{t('caddies:staff.dialog.description')}</DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={event => void submit(event)}>
           {staffError ? <ResourceError error={staffError} /> : null}
-          <Field label="登録方法" required>
+          <Field label={t('caddies:staff.dialog.mode')} required>
             <NativeSelect
               value={mode}
               onChange={event => setMode(event.target.value as 'existing' | 'new')}
               disabled={Boolean(staffError)}
             >
-              <option value="existing">既存スタッフ</option>
-              <option value="new">新しいスタッフ</option>
+              <option value="existing">{t('caddies:staff.dialog.existing')}</option>
+              <option value="new">{t('caddies:staff.dialog.new')}</option>
             </NativeSelect>
           </Field>
           {mode === 'existing' ? (
             <>
-              <Field label="検索">
-                <Input value={query} onChange={event => setQuery(event.target.value)} placeholder="名前またはスタッフID" className="min-h-10" />
+              <Field label={t('caddies:staff.dialog.search')}>
+                <Input
+                  value={query}
+                  onChange={event => setQuery(event.target.value)}
+                  placeholder={t('caddies:staff.dialog.searchPlaceholder')}
+                  className="min-h-10"
+                />
               </Field>
-              <Field label="スタッフ" required>
+              <Field label={t('caddies:staff.dialog.staff')} required>
                 <NativeSelect
                   value={staffId}
                   onChange={event => setStaffId(event.target.value)}
                   disabled={Boolean(staffError)}
                 >
-                  <option value="">スタッフを選択</option>
+                  <option value="">{t('caddies:staff.dialog.staffPlaceholder')}</option>
                   {filtered.map(item => <option key={item.id} value={item.id}>{item.name}（{item.id}）</option>)}
                 </NativeSelect>
               </Field>
             </>
           ) : (
-            <Field label="新しいスタッフ名" required>
+            <Field label={t('caddies:staff.dialog.newName')} required>
               <Input value={newName} onChange={event => setNewName(event.target.value)} className="min-h-10" />
             </Field>
           )}
           {error ? <Notice tone="danger">{error}</Notice> : null}
           <DialogFooter>
-            <Button type="button" variant="ghost" className="min-h-10" onClick={() => onOpenChange(false)} disabled={busy}>キャンセル</Button>
-            <Button type="submit" variant="primary" className="min-h-10" disabled={busy || Boolean(staffError)}><Link2 /> {busy ? '紐付け中…' : '紐付けを保存'}</Button>
+            <Button type="button" variant="ghost" className="min-h-10" onClick={() => onOpenChange(false)} disabled={busy}>
+              {t('common:action.cancel')}
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              className="min-h-10"
+              disabled={busy || Boolean(staffError)}
+            >
+              <Link2 />
+              {busy ? t('caddies:staff.dialog.submitting') : t('caddies:staff.dialog.submit')}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -2189,6 +2433,7 @@ function CourseMembershipPanel({
   resource: ResourceValue<ListResponse<CourseMembership>>
   setFlash: (flash: Flash) => void
 }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [primary, setPrimary] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -2220,21 +2465,32 @@ function CourseMembershipPanel({
         request('PUT', { courseIds: [...selected], primaryCourseId: primary }),
       )
       resource.refresh()
-      setFlash({ tone: 'success', title: '対応コースを保存しました', message: `${selected.size}コースを担当可能として登録しました。` })
+      setFlash({
+        tone: 'success',
+        title: t('caddies:courses.saved.title'),
+        message: t('caddies:courses.saved.message', { n: String(selected.size) }),
+      })
     } catch (reason) {
-      setFlash({ tone: 'danger', title: '対応コースを保存できませんでした', message: errorMessage(reason) })
+      setFlash({ tone: 'danger', title: t('caddies:courses.failed'), message: errorMessage(reason) })
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <Panel title="対応コース" description="担当可能なコースとメイン拠点を設定します。" actions={<MapPin className="size-5 text-primary" aria-hidden="true" />}>
+    <Panel
+      title={t('caddies:courses.title')}
+      description={t('caddies:courses.description')}
+      actions={<MapPin className="size-5 text-primary" aria-hidden="true" />}
+    >
       {coursesError ? <ResourceError error={coursesError} /> : null}
-      {resource.loading && !resource.data ? <LoadingState label="対応コースを読み込み中" /> : null}
+      {resource.loading && !resource.data ? <LoadingState label={t('caddies:courses.loading')} /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {!resource.loading && !resource.error && courses.length === 0 ? (
-        <EmptyState title="コースが登録されていません" description="先にコースマスタを設定してください。" />
+        <EmptyState
+          title={t('caddies:courses.empty.title')}
+          description={t('caddies:courses.empty.description')}
+        />
       ) : null}
       <div className="space-y-2">
         {courses.map(course => {
@@ -2248,7 +2504,7 @@ function CourseMembershipPanel({
               {checked ? (
                 <label className="flex min-h-9 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
                   <input type="radio" name={`primary-${profile.id}`} checked={primary === course.id} onChange={() => setPrimary(course.id)} className="size-4 accent-primary" />
-                  メイン
+                  {t('caddies:courses.main')}
                 </label>
               ) : null}
             </div>
@@ -2257,19 +2513,23 @@ function CourseMembershipPanel({
       </div>
       {courses.length > 0 ? (
         <Button type="button" variant="primary" className="mt-3 min-h-10 w-full" onClick={() => void save()} disabled={busy}>
-          <CheckCircle2 /> {busy ? '保存中…' : '対応コースを保存'}
+          <CheckCircle2 /> {busy ? t('common:action.saving') : t('caddies:courses.save')}
         </Button>
       ) : null}
     </Panel>
   )
 }
 
-const availabilityLabels: Record<AvailabilityStatus, string> = {
-  available: '勤務可',
-  unavailable: '勤務不可',
-  morning_only: '午前のみ',
-  afternoon_only: '午後のみ',
-  light_duty: '軽勤務',
+const AVAILABILITY_STATUSES: AvailabilityStatus[] = [
+  'available',
+  'unavailable',
+  'morning_only',
+  'afternoon_only',
+  'light_duty',
+]
+
+function availabilityLabel(status: AvailabilityStatus) {
+  return i18next.t(`caddies:availability.${status}` as 'caddies:availability.available')
 }
 
 function monthBounds(yearMonth: string) {
@@ -2299,6 +2559,7 @@ function calendarCells(year: number, month: number) {
 }
 
 function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; setFlash: (flash: Flash) => void }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [yearMonth, setYearMonth] = useState(todayJst().slice(0, 7))
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [status, setStatus] = useState<AvailabilityStatus>('available')
@@ -2343,9 +2604,20 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
         healthNote: note.trim() || null,
       }))
       resource.refresh()
-      setFlash({ tone: 'success', title: '勤務希望を保存しました', message: `${selectedDate} の勤務状態を「${availabilityLabels[status]}」に更新しました。` })
+      setFlash({
+        tone: 'success',
+        title: t('caddies:calendar.saved.title'),
+        message: t('caddies:calendar.saved.message', {
+          date: selectedDate,
+          status: availabilityLabel(status),
+        }),
+      })
     } catch (reason) {
-      setFlash({ tone: 'danger', title: '勤務希望を保存できませんでした', message: errorMessage(reason) })
+      setFlash({
+        tone: 'danger',
+        title: t('caddies:calendar.saveFailed'),
+        message: errorMessage(reason),
+      })
     } finally {
       setBusy(false)
     }
@@ -2361,9 +2633,17 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
       )
       setSelectedDate(null)
       resource.refresh()
-      setFlash({ tone: 'success', title: '勤務希望を削除しました', message: `${selectedDate} を通常状態へ戻しました。` })
+      setFlash({
+        tone: 'success',
+        title: t('caddies:calendar.removed.title'),
+        message: t('caddies:calendar.removed.message', { date: selectedDate }),
+      })
     } catch (reason) {
-      setFlash({ tone: 'danger', title: '勤務希望を削除できませんでした', message: errorMessage(reason) })
+      setFlash({
+        tone: 'danger',
+        title: t('caddies:calendar.removeFailed'),
+        message: errorMessage(reason),
+      })
     } finally {
       setBusy(false)
     }
@@ -2373,24 +2653,31 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
 
   return (
     <Panel
-      title="希望休・体調カレンダー"
-      description="日別の勤務可否、2ラウンド希望、体調メモを管理します。"
+      title={t('caddies:calendar.title')}
+      description={t('caddies:calendar.description')}
       actions={(
         <div className="flex items-center gap-1 rounded-md border border-border bg-background p-1">
-          <Button type="button" variant="ghost" size="icon" className="min-h-9 min-w-9" aria-label="前月" onClick={() => setYearMonth(value => shiftMonth(value, -1))}><ChevronLeft /></Button>
-          <span className="min-w-24 text-center text-sm font-medium">{bounds.year}年{bounds.month}月</span>
-          <Button type="button" variant="ghost" size="icon" className="min-h-9 min-w-9" aria-label="翌月" onClick={() => setYearMonth(value => shiftMonth(value, 1))}><ChevronRight /></Button>
+          <Button type="button" variant="ghost" size="icon" className="min-h-9 min-w-9" aria-label={t('caddies:calendar.prevMonth')} onClick={() => setYearMonth(value => shiftMonth(value, -1))}><ChevronLeft /></Button>
+          <span className="min-w-24 text-center text-sm font-medium">
+            {t('caddies:calendar.monthLabel', {
+              year: String(bounds.year),
+              month: String(bounds.month),
+            })}
+          </span>
+          <Button type="button" variant="ghost" size="icon" className="min-h-9 min-w-9" aria-label={t('caddies:calendar.nextMonth')} onClick={() => setYearMonth(value => shiftMonth(value, 1))}><ChevronRight /></Button>
         </div>
       )}
     >
-      {resource.loading && !resource.data ? <LoadingState label="勤務希望を読み込み中" /> : null}
+      {resource.loading && !resource.data ? <LoadingState label={t('caddies:calendar.loading')} /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {!resource.loading && !resource.error ? (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
           <div className="overflow-x-auto rounded-lg border border-border bg-background">
             <div className="min-w-[320px]">
               <div className="grid grid-cols-7 border-b border-border bg-surface text-center text-xs font-medium text-muted-foreground">
-                {['日', '月', '火', '水', '木', '金', '土'].map(day => <div key={day} className="py-2">{day}</div>)}
+                {weekdayIndexes.map(day => (
+                  <div key={day} className="py-2">{weekdayLabel(day)}</div>
+                ))}
               </div>
               <div className="grid grid-cols-7">
                 {cells.map((day, index) => {
@@ -2410,7 +2697,7 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
                       <span className="font-medium">{day}</span>
                       {record ? (
                         <Badge variant={record.status === 'unavailable' ? 'destructive' : record.status === 'available' ? 'success' : 'warning'} className="max-w-full truncate px-1">
-                          {availabilityLabels[record.status]}
+                          {availabilityLabel(record.status)}
                         </Badge>
                       ) : null}
                       {record?.twoRoundRequest ? <span className="text-[10px] text-primary">2R</span> : null}
@@ -2426,27 +2713,42 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
               <div className="space-y-4">
                 <div>
                   <p className="font-semibold">{selectedDate}</p>
-                  <p className="text-xs text-muted-foreground">勤務希望を編集</p>
+                  <p className="text-xs text-muted-foreground">{t('caddies:calendar.editPrompt')}</p>
                 </div>
-                <Field label="勤務状態" required>
+                <Field label={t('caddies:calendar.status')} required>
                   <NativeSelect value={status} onChange={event => setStatus(event.target.value as AvailabilityStatus)}>
-                    {Object.entries(availabilityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    {AVAILABILITY_STATUSES.map(value => (
+                      <option key={value} value={value}>{availabilityLabel(value)}</option>
+                    ))}
                   </NativeSelect>
                 </Field>
                 <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border px-3">
                   <input type="checkbox" checked={twoRounds} onChange={event => setTwoRounds(event.target.checked)} className="size-5 accent-primary" />
-                  <span className="text-sm font-medium">2ラウンド希望</span>
+                  <span className="text-sm font-medium">{t('caddies:calendar.twoRounds')}</span>
                 </label>
-                <Field label="体調メモ">
-                  <NativeTextarea rows={4} maxLength={500} value={note} onChange={event => setNote(event.target.value)} placeholder="運用担当者向けのメモ" />
+                <Field label={t('caddies:calendar.note')}>
+                  <NativeTextarea
+                    rows={4}
+                    maxLength={500}
+                    value={note}
+                    onChange={event => setNote(event.target.value)}
+                    placeholder={t('caddies:calendar.notePlaceholder')}
+                  />
                 </Field>
-                <Button type="button" variant="primary" className="min-h-10 w-full" disabled={busy} onClick={() => void save()}><CheckCircle2 /> {busy ? '保存中…' : '保存'}</Button>
+                <Button type="button" variant="primary" className="min-h-10 w-full" disabled={busy} onClick={() => void save()}>
+                  <CheckCircle2 /> {busy ? t('caddies:calendar.saving') : t('caddies:calendar.save')}
+                </Button>
                 {selectedRecord ? (
-                  <Button type="button" variant="ghost" className="min-h-10 w-full text-destructive" disabled={busy} onClick={() => void remove()}><XCircle /> 登録を削除</Button>
+                  <Button type="button" variant="ghost" className="min-h-10 w-full text-destructive" disabled={busy} onClick={() => void remove()}>
+                    <XCircle /> {t('caddies:calendar.remove')}
+                  </Button>
                 ) : null}
               </div>
             ) : (
-              <EmptyState title="日付を選択" description="カレンダーの日付を選ぶと勤務希望を登録できます。" />
+              <EmptyState
+                title={t('caddies:calendar.empty.title')}
+                description={t('caddies:calendar.empty.description')}
+              />
             )}
           </div>
         </div>
@@ -2456,6 +2758,7 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
 }
 
 function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<CaddieRating>> }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const ratings = resource.data?.items ?? []
   const average = ratings.length
     ? ratings.reduce((total, rating) => total + rating.score, 0) / ratings.length
@@ -2463,8 +2766,8 @@ function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<Caddi
   const columns: DataTableColumn<CaddieRating>[] = [
     {
       key: 'score',
-      header: '評価',
-      mobileLabel: '評価',
+      header: t('caddies:ratings.table.rating'),
+      mobileLabel: t('caddies:ratings.table.rating'),
       cell: row => (
         <div className="flex items-center gap-1 text-warning">
           {Array.from({ length: 5 }, (_, index) => <Star key={index} className={`size-4 ${index < row.score ? 'fill-current' : ''}`} />)}
@@ -2472,26 +2775,60 @@ function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<Caddi
         </div>
       ),
     },
-    { key: 'comment', header: 'コメント', mobileLabel: 'コメント', cell: row => row.comment || '—' },
-    { key: 'customer', header: '顧客', mobileLabel: '顧客', cell: row => <span className="break-all">{row.customerId}</span> },
-    { key: 'created', header: '日時', mobileLabel: '日時', cell: row => formatDateTime(row.createdAt) },
+    {
+      key: 'comment',
+      header: t('caddies:ratings.table.comment'),
+      mobileLabel: t('caddies:ratings.table.comment'),
+      cell: row => row.comment || '—',
+    },
+    {
+      key: 'customer',
+      header: t('caddies:ratings.table.customer'),
+      mobileLabel: t('caddies:ratings.table.customer'),
+      cell: row => <span className="break-all">{row.customerId}</span>,
+    },
+    {
+      key: 'created',
+      header: t('caddies:ratings.table.created'),
+      mobileLabel: t('caddies:ratings.table.created'),
+      cell: row => formatDateTime(row.createdAt),
+    },
   ]
   return (
     <Panel
-      title="顧客評価"
-      description="接客品質の評価とコメントを確認します。"
-      actions={<Badge variant={average === null ? 'neutral' : 'warning'}><Star className="fill-current" /> {average?.toFixed(1) ?? '—'} / {ratings.length}件</Badge>}
+      title={t('caddies:ratings.title')}
+      description={t('caddies:ratings.description')}
+      actions={(
+        <Badge variant={average === null ? 'neutral' : 'warning'}>
+          <Star className="fill-current" />
+          {t('caddies:ratings.badge', {
+            average: average?.toFixed(1) ?? '—',
+            total: String(ratings.length),
+          })}
+        </Badge>
+      )}
     >
-      {resource.loading && !resource.data ? <LoadingState label="評価を読み込み中" /> : null}
+      {resource.loading && !resource.data ? <LoadingState label={t('caddies:ratings.loading')} /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {resource.data ? (
-        <DataTable rows={ratings} columns={columns} rowKey={row => row.id} empty={<EmptyState title="評価はまだありません" description="プレー後の顧客評価がここに表示されます。" />} />
+        <DataTable
+          rows={ratings}
+          columns={columns}
+          rowKey={row => row.id}
+          empty={(
+            <EmptyState
+              title={t('caddies:ratings.empty.title')}
+              description={t('caddies:ratings.empty.description')}
+            />
+          )}
+        />
       ) : null}
     </Panel>
   )
 }
 
 function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
+  const { t } = useTranslation(['caddies', 'common'])
   const [yearMonth, setYearMonth] = useState(previousYearMonth)
   const [downloading, setDownloading] = useState(false)
   const resource = useResource(
@@ -2519,9 +2856,13 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
         `${COURSE_API}/caddie-payroll-summary/export.csv?yearMonth=${encodeURIComponent(yearMonth)}`,
       )
       downloadText(`caddie-payroll-${yearMonth}.csv`, csv)
-      setFlash({ tone: 'success', title: '給与CSVをダウンロードしました', message: `${yearMonth} の集計を出力しました。` })
+      setFlash({
+        tone: 'success',
+        title: t('caddies:payroll.downloaded.title'),
+        message: t('caddies:payroll.downloaded.message', { month: yearMonth }),
+      })
     } catch (reason) {
-      setFlash({ tone: 'danger', title: '給与CSVを出力できませんでした', message: errorMessage(reason) })
+      setFlash({ tone: 'danger', title: t('caddies:payroll.failed'), message: errorMessage(reason) })
     } finally {
       setDownloading(false)
     }
@@ -2530,71 +2871,129 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
   const columns: DataTableColumn<PayrollRow>[] = [
     {
       key: 'caddie',
-      header: 'キャディ',
-      mobileLabel: 'キャディ',
+      header: t('caddies:payroll.table.caddie'),
+      mobileLabel: t('caddies:payroll.table.caddie'),
       cell: row => (
         <div>
           <p className="font-medium">{row.displayName}</p>
-          <p className="text-xs text-muted-foreground">{row.staffId ?? 'スタッフ未連携'}</p>
+          <p className="text-xs text-muted-foreground">
+            {row.staffId ?? t('caddies:payroll.table.noStaff')}
+          </p>
         </div>
       ),
     },
-    { key: 'worked', header: '実働', mobileLabel: '実働', cell: row => formatMinutes(row.workedMinutes) },
-    { key: 'shifted', header: 'シフト', mobileLabel: 'シフト', cell: row => formatMinutes(row.shiftedMinutes) },
-    { key: 'rounds', header: '担当', mobileLabel: '担当', align: 'right', cell: row => `${row.assignedRounds}R` },
-    { key: 'fees', header: '確定費用', mobileLabel: '確定費用', align: 'right', cell: row => formatMoney(row.confirmedFeeTotal, row.currency) },
+    {
+      key: 'worked',
+      header: t('caddies:payroll.table.worked'),
+      mobileLabel: t('caddies:payroll.table.worked'),
+      cell: row => formatMinutes(row.workedMinutes),
+    },
+    {
+      key: 'shifted',
+      header: t('caddies:payroll.table.shifted'),
+      mobileLabel: t('caddies:payroll.table.shifted'),
+      cell: row => formatMinutes(row.shiftedMinutes),
+    },
+    {
+      key: 'rounds',
+      header: t('caddies:payroll.table.rounds'),
+      mobileLabel: t('caddies:payroll.table.rounds'),
+      align: 'right',
+      cell: row => t('caddies:rounds', { n: String(row.assignedRounds) }),
+    },
+    {
+      key: 'fees',
+      header: t('caddies:payroll.table.fees'),
+      mobileLabel: t('caddies:payroll.table.fees'),
+      align: 'right',
+      cell: row => formatMoney(row.confirmedFeeTotal, row.currency),
+    },
     {
       key: 'warning',
-      header: '確認',
-      mobileLabel: '確認',
+      header: t('caddies:payroll.table.check'),
+      mobileLabel: t('caddies:payroll.table.check'),
       cell: row => row.openClockIn || row.roundsWithoutClockIn > 0 ? (
-        <Badge variant="warning">{row.openClockIn ? '退勤未記録' : `未出勤 ${row.roundsWithoutClockIn}R`}</Badge>
-      ) : <Badge variant="success">確認済み</Badge>,
+        <Badge variant="warning">
+          {row.openClockIn
+            ? t('caddies:payroll.table.openClockIn')
+            : t('caddies:payroll.table.missingClockIn', { n: String(row.roundsWithoutClockIn) })}
+        </Badge>
+      ) : <Badge variant="success">{t('caddies:payroll.table.ok')}</Badge>,
     },
   ]
 
   return (
     <div className="space-y-4">
       <Panel
-        title="給与連携"
-        description="勤怠と確定済みキャディ費用を月次で照合し、給与CSVへ渡します。"
+        title={t('caddies:payroll.title')}
+        description={t('caddies:payroll.description')}
         actions={(
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <Input type="month" value={yearMonth} onChange={event => setYearMonth(event.target.value)} className="min-h-10 sm:w-40" aria-label="給与対象月" />
+            <Input type="month" value={yearMonth} onChange={event => setYearMonth(event.target.value)} className="min-h-10 sm:w-40" aria-label={t('caddies:payroll.monthLabel')} />
             <Button type="button" variant="primary" className="min-h-10" disabled={downloading || !resource.data} onClick={() => void downloadCsv()}>
-              <Download /> {downloading ? '出力中…' : 'CSVを出力'}
+              <Download /> {downloading ? t('caddies:payroll.exporting') : t('caddies:payroll.exportCsv')}
             </Button>
           </div>
         )}
       >
-        {resource.loading ? <LoadingState label="給与集計を読み込み中" /> : null}
+        {resource.loading ? <LoadingState label={t('caddies:payroll.loading')} /> : null}
         {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
         {resource.data ? (
           <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              集計期間 {resource.data.period.startDate} 〜 {resource.data.period.endDate}
+              {t('caddies:payroll.period', {
+                from: resource.data.period.startDate,
+                to: resource.data.period.endDate,
+              })}
             </p>
             <MetricGrid>
-              <Metric label="実働合計" value={formatMinutes(totals.workedMinutes)} detail={`${rows.length}人`} />
-              <Metric label="担当ラウンド" value={`${totals.rounds}R`} detail="対象期間の割当" />
-              <Metric label="確定費用" value={formatMoney(totals.fees)} detail="給与連携対象" />
-              <Metric label="要確認" value={`${totals.warnings}件`} detail="退勤・出勤照合" tone={totals.warnings > 0 ? 'warning' : 'success'} />
+              <Metric
+                label={t('caddies:payroll.metrics.worked')}
+                value={formatMinutes(totals.workedMinutes)}
+                detail={t('caddies:payroll.metrics.workedDetail', { n: String(rows.length) })}
+              />
+              <Metric
+                label={t('caddies:payroll.metrics.rounds')}
+                value={t('caddies:rounds', { n: String(totals.rounds) })}
+                detail={t('caddies:payroll.metrics.roundsDetail')}
+              />
+              <Metric
+                label={t('caddies:payroll.metrics.fees')}
+                value={formatMoney(totals.fees)}
+                detail={t('caddies:payroll.metrics.feesDetail')}
+              />
+              <Metric
+                label={t('caddies:payroll.metrics.warnings')}
+                value={t('caddies:items', { n: String(totals.warnings) })}
+                detail={t('caddies:payroll.metrics.warningsDetail')}
+                tone={totals.warnings > 0 ? 'warning' : 'success'}
+              />
             </MetricGrid>
           </div>
         ) : null}
       </Panel>
 
       <Panel
-        title="キャディ別集計"
-        description="未紐付け、退勤未記録、割当に対する未出勤をCSV出力前に確認してください。"
+        title={t('caddies:payroll.listTitle')}
+        description={t('caddies:payroll.listDescription')}
         actions={(
           <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={resource.refresh} title="⌘R">
-            <RefreshCw /> 更新
+            <RefreshCw /> {t('common:action.refresh')}
           </Button>
         )}
       >
         {resource.data ? (
-          <DataTable rows={rows} columns={columns} rowKey={row => row.caddieProfileId} empty={<EmptyState title="この月の給与データはありません" description="勤務または割当が確定すると集計されます。" />} />
+          <DataTable
+            rows={rows}
+            columns={columns}
+            rowKey={row => row.caddieProfileId}
+            empty={(
+              <EmptyState
+                title={t('caddies:payroll.empty.title')}
+                description={t('caddies:payroll.empty.description')}
+              />
+            )}
+          />
         ) : null}
       </Panel>
     </div>

@@ -1,3 +1,5 @@
+import { i18next } from '../../i18n'
+
 export type GolfCourse = {
   id: string
   name: string
@@ -92,7 +94,15 @@ export type CaddieSlotCapacity = {
   assumedAvailable: number
 }
 
-export const weekdayLabels = ['日', '月', '火', '水', '木', '金', '土'] as const
+const WEEKDAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
+
+/** `weekday` is the JS day index (0 = Sunday); captions follow the active locale. */
+export function weekdayLabel(weekday: number) {
+  const key = WEEKDAY_KEYS[weekday] ?? 'sun'
+  return i18next.t(`common:weekday.${key}` as 'common:weekday.sun')
+}
+
+export const weekdayIndexes = WEEKDAY_KEYS.map((_, index) => index)
 
 export function emptyCourseDraft(): GolfCourseDraft {
   return {
@@ -170,23 +180,23 @@ export function validateSlots(slots: GolfProductSlot[]) {
   slots.forEach((slot, index) => {
     const row = index + 1
     if (!Number.isInteger(slot.weekday) || slot.weekday < 0 || slot.weekday > 6) {
-      errors.push(`${row}行目: 曜日を選択してください。`)
+      errors.push(i18next.t('products:slotValidation.weekday', { row: String(row) }))
     }
     if (!validTime(slot.startTime) || !validTime(slot.endTime)) {
-      errors.push(`${row}行目: 開始・終了時刻を入力してください。`)
+      errors.push(i18next.t('products:slotValidation.time', { row: String(row) }))
     } else if (slot.startTime >= slot.endTime) {
-      errors.push(`${row}行目: 終了時刻は開始時刻より後にしてください。`)
+      errors.push(i18next.t('products:slotValidation.order', { row: String(row) }))
     }
     if (!Number.isInteger(slot.maxGroups) || slot.maxGroups < 0) {
-      errors.push(`${row}行目: 最大組数は0以上の整数で入力してください。`)
+      errors.push(i18next.t('products:slotValidation.maxGroups', { row: String(row) }))
     }
     if (!Number.isInteger(slot.maxPlayers) || slot.maxPlayers < 0) {
-      errors.push(`${row}行目: 最大人数は0以上の整数で入力してください。`)
+      errors.push(i18next.t('products:slotValidation.maxPlayers', { row: String(row) }))
     }
 
     const key = `${slot.weekday}|${slot.startTime}|${slot.endTime}`
     if (keys.has(key)) {
-      errors.push(`${row}行目: 同じ曜日・時間帯の枠が重複しています。`)
+      errors.push(i18next.t('products:slotValidation.duplicate', { row: String(row) }))
     }
     keys.add(key)
   })

@@ -1,0 +1,39 @@
+export const shifts = {
+  title: 'シフト表',
+  description: 'キャディごとの出勤予定をひと月まとめて見ます。連続出勤が続く人を早めに見つけられます。',
+  loading: 'シフト表を読み込んでいます',
+  month: '対象の月',
+  legend: {
+    label: '記号の意味',
+    assigned: '割当あり',
+    off: '休みの希望',
+    morning: '午前だけ',
+    afternoon: '午後だけ',
+    light: '軽い仕事だけ',
+    none: '予定なし',
+  },
+  cell: {
+    assigned: '出',
+    off: '休',
+    morning: '前',
+    afternoon: '後',
+    light: '軽',
+    tooltip: '{{name}} · {{date}}',
+    assignments: '割当 {{n}}件',
+  },
+  streak: {
+    header: '連続',
+    days: '{{n}}日',
+    warningTitle: '連続出勤が長い人がいます',
+    warningBody: '{{names}} が{{n}}日以上続けて割当されています。休みを入れられないか確かめてください。',
+    threshold: '6日以上を強調しています',
+  },
+  table: {
+    caddie: 'キャディ',
+    aria: '{{month}} のシフト表',
+  },
+  empty: {
+    title: 'この月の予定はありません',
+    description: '割当や休みの希望が入ると、ここに表として出ます。',
+  },
+} as const

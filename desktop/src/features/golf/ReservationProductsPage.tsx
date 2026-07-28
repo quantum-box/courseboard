@@ -8,10 +8,11 @@ import {
   Sparkles,
   Trash2,
   Users,
-  X,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
-import { courseboardApiJson, fieldTenant } from '../../api'
+import { useTranslation } from 'react-i18next'
+import { courseboardApiJson } from '../../api'
+import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   DataTable,
@@ -29,6 +30,7 @@ import {
   ResourceError,
   type DataTableColumn,
 } from '../../components/Page'
+import { Sheet } from '../../components/Sheet'
 import {
   applyCapacityToSlots,
   calculateCaddieCapacity,
@@ -38,7 +40,8 @@ import {
   normalizeSlot,
   productToDraft,
   validateSlots,
-  weekdayLabels,
+  weekdayIndexes,
+  weekdayLabel,
   type CapacityAvailability,
   type CapacityProfile,
   type CaddieSlotCapacity,
@@ -84,7 +87,7 @@ function newEditableSlot(weekday = 1): EditableSlot {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '操作を完了できませんでした。'
+  return error instanceof Error ? error.message : i18next.t('products:error.generic')
 }
 
 function formatUpdatedAt(value?: string | null) {
@@ -109,21 +112,21 @@ function todayInTokyo() {
 }
 
 function validateProduct(draft: GolfReservationProductDraft) {
-  if (!draft.displayName.trim()) return 'プラン名を入力してください。'
+  if (!draft.displayName.trim()) return i18next.t('products:validation.displayNameRequired')
   if ([...draft.displayName.trim()].length > 255) {
-    return 'プラン名は255文字以内で入力してください。'
+    return i18next.t('products:validation.displayNameLength')
   }
-  if (!draft.serviceId.trim()) return '予約サービスIDを入力してください。'
+  if (!draft.serviceId.trim()) return i18next.t('products:validation.serviceIdRequired')
   if (!/^[A-Za-z0-9._:-]+$/.test(draft.serviceId.trim())) {
-    return '予約サービスIDには英数字、ピリオド、ハイフン、アンダースコア、コロンを使用できます。'
+    return i18next.t('products:validation.serviceIdFormat')
   }
-  if (![9, 18].includes(draft.holeCount)) return 'ホール数は9Hまたは18Hを選択してください。'
+  if (![9, 18].includes(draft.holeCount)) return i18next.t('products:validation.holeCount')
   if (
     !Number.isInteger(draft.expectedDurationMinutes)
     || draft.expectedDurationMinutes < 30
     || draft.expectedDurationMinutes > 720
   ) {
-    return '所要時間は30〜720分の整数で入力してください。'
+    return i18next.t('products:validation.duration')
   }
   return null
 }
@@ -133,7 +136,7 @@ function productDisplayName(product: GolfReservationProduct) {
 }
 
 export function ReservationProductsPage() {
-  const tenant = fieldTenant()
+  const { t } = useTranslation(['products', 'common', 'courses'])
   const [products, setProducts] = useState<GolfReservationProduct[]>([])
   const [slotsByService, setSlotsByService] = useState<Record<string, EditableSlot[]>>({})
   const [slotLoadErrors, setSlotLoadErrors] = useState<Record<string, string>>({})
@@ -214,13 +217,12 @@ export function ReservationProductsPage() {
     [products, selectedServiceId],
   )
   const selectedSlots = selectedServiceId ? slotsByService[selectedServiceId] ?? [] : []
-  const totalSlots = Object.values(slotsByService).reduce((sum, slots) => sum + slots.length, 0)
   const hasUnsavedChanges = dirtyServiceIds.length > 0
 
   const requestReload = useCallback(() => {
     if (
       hasUnsavedChanges
-      && !window.confirm('未保存の受付枠があります。破棄して再読み込みしますか？')
+      && !window.confirm(i18next.t('products:confirm.discardOnReload'))
     ) return
     void loadPage()
   }, [hasUnsavedChanges, loadPage])
@@ -271,7 +273,7 @@ export function ReservationProductsPage() {
     }
     if (
       hasUnsavedChanges
-      && !window.confirm('未保存の受付枠があります。先に保存せず、プレー設定を反映しますか？')
+      && !window.confirm(t('products:confirm.discardOnSave'))
     ) return
 
     const serviceId = productDraft.serviceId.trim()
@@ -292,8 +294,11 @@ export function ReservationProductsPage() {
       setSelectedServiceId(serviceId)
       setMessage({
         tone: 'success',
-        title: 'プレー設定を保存しました',
-        body: `${productDraft.displayName.trim()}（管理番号: ${serviceId}）の設定を反映しました。`,
+        title: t('products:editor.saved.title'),
+        body: t('products:editor.saved.body', {
+          name: productDraft.displayName.trim(),
+          serviceId,
+        }),
       })
       await loadPage(serviceId)
     } catch (error) {
@@ -371,8 +376,8 @@ export function ReservationProductsPage() {
       })
       setMessage({
         tone: 'success',
-        title: '受付枠を保存しました',
-        body: `${serviceId} の${slots.length}枠を置き換えました。`,
+        title: t('products:slots.saved.title'),
+        body: t('products:slots.saved.body', { serviceId, n: String(slots.length) }),
       })
     } catch (error) {
       setSlotError(errorMessage(error))
@@ -412,72 +417,74 @@ export function ReservationProductsPage() {
     markSlotsDirty(serviceId)
     setMessage({
       tone: 'info',
-      title: '枠数へ反映しました',
-      body: 'まだ保存されていません。時間帯を確認して「受付枠を保存」を実行してください。',
+      title: t('products:capacity.applied.title'),
+      body: t('products:capacity.applied.body'),
     })
   }
 
   const productColumns: DataTableColumn<GolfReservationProduct>[] = [
     {
       key: 'service',
-      header: '予約サービス',
-      mobileLabel: '予約サービス',
+      header: t('products:list.table.service'),
+      mobileLabel: t('products:list.table.service'),
       cell: product => (
         <div className="grid gap-0.5">
           <strong>{productDisplayName(product)}</strong>
           <span className="text-xs text-muted-foreground">
-            管理番号: {product.reservationServiceId}
+            {t('products:slots.subtitle', { serviceId: product.reservationServiceId })}
           </span>
         </div>
       ),
     },
     {
       key: 'playType',
-      header: 'プレー区分',
-      mobileLabel: 'プレー区分',
+      header: t('products:list.table.playType'),
+      mobileLabel: t('products:list.table.playType'),
       cell: product => (
         <Badge variant={product.playType === 'caddie' ? 'accent' : 'neutral'}>
-          {product.playType === 'caddie' ? 'キャディ付き' : 'セルフ'}
+          {product.playType === 'caddie' ? t('products:playType.caddie') : t('products:playType.self')}
         </Badge>
       ),
     },
     {
       key: 'holes',
-      header: 'ホール',
-      mobileLabel: 'ホール',
+      header: t('products:list.table.holes'),
+      mobileLabel: t('products:list.table.holes'),
       align: 'right',
       cell: product => `${product.holeCount}H`,
     },
     {
       key: 'duration',
-      header: '所要時間',
-      mobileLabel: '所要時間',
+      header: t('products:list.table.duration'),
+      mobileLabel: t('products:list.table.duration'),
       align: 'right',
-      cell: product => `${product.expectedDurationMinutes}分`,
+      cell: product => t('common:unit.minutes', { n: String(product.expectedDurationMinutes) }),
     },
     {
       key: 'slots',
-      header: '受付枠',
-      mobileLabel: '受付枠',
+      header: t('products:list.table.slots'),
+      mobileLabel: t('products:list.table.slots'),
       align: 'right',
       cell: product => (
         <span>
-          {slotsByService[product.reservationServiceId]?.length ?? 0}枠
+          {t('products:list.table.slotCount', {
+            n: String(slotsByService[product.reservationServiceId]?.length ?? 0),
+          })}
           {dirtyServiceIds.includes(product.reservationServiceId) ? (
-            <Badge className="ml-2" variant="warning">未保存</Badge>
+            <Badge className="ml-2" variant="warning">{t('products:list.table.unsaved')}</Badge>
           ) : null}
         </span>
       ),
     },
     {
       key: 'updated',
-      header: '更新',
-      mobileLabel: '更新',
+      header: t('products:list.table.updated'),
+      mobileLabel: t('products:list.table.updated'),
       cell: product => formatUpdatedAt(product.updatedAt),
     },
     {
       key: 'actions',
-      header: <span className="sr-only">操作</span>,
+      header: <span className="sr-only">{t('products:list.table.actions')}</span>,
       align: 'right',
       cell: product => (
         <Button
@@ -487,7 +494,9 @@ export function ReservationProductsPage() {
           onClick={() => beginEditProduct(product)}
         >
           {selectedServiceId === product.reservationServiceId ? <Check /> : <ClipboardCheck />}
-          {selectedServiceId === product.reservationServiceId ? '選択中' : '編集'}
+          {selectedServiceId === product.reservationServiceId
+            ? t('products:list.selected')
+            : t('common:action.edit')}
         </Button>
       ),
     },
@@ -496,27 +505,29 @@ export function ReservationProductsPage() {
   const slotColumns: DataTableColumn<EditableSlot>[] = [
     {
       key: 'weekday',
-      header: '曜日',
-      mobileLabel: '曜日',
+      header: t('products:slots.table.weekday'),
+      mobileLabel: t('products:slots.table.weekday'),
       cell: slot => (
         <NativeSelect
-          aria-label="曜日"
+          aria-label={t('products:slots.table.weekday')}
           value={slot.weekday}
           onChange={event => updateSlot(slot.clientKey, { weekday: Number(event.target.value) })}
         >
-          {weekdayLabels.map((label, weekday) => (
-            <option key={label} value={weekday}>{label}曜日</option>
+          {weekdayIndexes.map(weekday => (
+            <option key={weekday} value={weekday}>
+              {t('products:slots.table.weekdaySuffix', { day: weekdayLabel(weekday) })}
+            </option>
           ))}
         </NativeSelect>
       ),
     },
     {
       key: 'start',
-      header: '開始',
-      mobileLabel: '開始',
+      header: t('products:slots.table.start'),
+      mobileLabel: t('products:slots.table.start'),
       cell: slot => (
         <Input
-          aria-label="開始時刻"
+          aria-label={t('products:slots.table.start')}
           type="time"
           value={slot.startTime}
           onChange={event => updateSlot(slot.clientKey, { startTime: event.target.value })}
@@ -525,11 +536,11 @@ export function ReservationProductsPage() {
     },
     {
       key: 'end',
-      header: '終了',
-      mobileLabel: '終了',
+      header: t('products:slots.table.end'),
+      mobileLabel: t('products:slots.table.end'),
       cell: slot => (
         <Input
-          aria-label="終了時刻"
+          aria-label={t('products:slots.table.end')}
           type="time"
           value={slot.endTime}
           onChange={event => updateSlot(slot.clientKey, { endTime: event.target.value })}
@@ -538,12 +549,12 @@ export function ReservationProductsPage() {
     },
     {
       key: 'groups',
-      header: '最大組数',
-      mobileLabel: '最大組数',
+      header: t('products:slots.table.maxGroups'),
+      mobileLabel: t('products:slots.table.maxGroups'),
       align: 'right',
       cell: slot => (
         <Input
-          aria-label="最大組数"
+          aria-label={t('products:slots.table.maxGroups')}
           type="number"
           min={0}
           step={1}
@@ -554,12 +565,12 @@ export function ReservationProductsPage() {
     },
     {
       key: 'players',
-      header: '最大人数',
-      mobileLabel: '最大人数',
+      header: t('products:slots.table.maxPlayers'),
+      mobileLabel: t('products:slots.table.maxPlayers'),
       align: 'right',
       cell: slot => (
         <Input
-          aria-label="最大人数"
+          aria-label={t('products:slots.table.maxPlayers')}
           type="number"
           min={0}
           step={1}
@@ -570,17 +581,20 @@ export function ReservationProductsPage() {
     },
     {
       key: 'remove',
-      header: <span className="sr-only">削除</span>,
+      header: <span className="sr-only">{t('products:slots.table.delete')}</span>,
       align: 'right',
       cell: slot => (
         <Button
           type="button"
           size="sm"
           variant="ghost"
-          aria-label={`${weekdayLabels[slot.weekday]}曜日 ${slot.startTime}の枠を削除`}
+          aria-label={t('products:slots.table.deleteAria', {
+            day: weekdayLabel(slot.weekday),
+            time: slot.startTime,
+          })}
           onClick={() => removeSlot(slot.clientKey)}
         >
-          <Trash2 /> 削除
+          <Trash2 /> {t('common:action.delete')}
         </Button>
       ),
     },
@@ -589,8 +603,8 @@ export function ReservationProductsPage() {
   if (loading) {
     return (
       <div className="page-stack">
-        <PageHeader title="ゴルフ予約商品" description="プレー区分と受付枠を読み込んでいます。" />
-        <LoadingState label="予約商品を読み込んでいます" />
+        <PageHeader title={t('products:title')} description={t('products:loadingDescription')} />
+        <LoadingState label={t('products:loading')} />
       </div>
     )
   }
@@ -598,7 +612,7 @@ export function ReservationProductsPage() {
   if (loadError) {
     return (
       <div className="page-stack">
-        <PageHeader title="ゴルフ予約商品" description="プレー区分と受付枠を管理します。" />
+        <PageHeader title={t('products:title')} description={t('products:description')} />
         <ResourceError error={loadError} onRetry={() => void loadPage()} />
       </div>
     )
@@ -607,126 +621,124 @@ export function ReservationProductsPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow={`Golf inventory · ${tenant}`}
-        title="ゴルフ予約商品"
-        description="プレー区分、曜日別受付枠、キャディ供給量を管理します。既定通貨・タイムゾーンは設定画面で変更します。"
+        title={t('products:title')}
+        description={t('products:description')}
         actions={(
           <>
             <PageRefreshButton onClick={requestReload} />
             <Button type="button" variant="primary" onClick={beginCreateProduct}>
-              <Plus /> 予約サービスを追加
+              <Plus /> {t('products:addService')}
             </Button>
           </>
         )}
       />
 
-      <MetricGrid>
-        <Metric label="予約サービス" value={products.length} detail="プレー設定済み" />
-        <Metric label="受付枠" value={totalSlots} detail="全サービス合計" />
-        <Metric
-          label="キャディ付き"
-          value={products.filter(product => product.playType === 'caddie').length}
-          detail="供給量連携対象"
-        />
-      </MetricGrid>
-
       {message ? (
         <Notice tone={message.tone} title={message.title}>{message.body}</Notice>
       ) : null}
 
-      {productEditor ? (
-        <Panel
-          title={productEditor.mode === 'create' ? '予約サービスを追加' : 'プレー設定を編集'}
-          description="サービスIDにゴルフ固有のプレー区分、ホール数、想定所要時間を関連付けます。"
-          actions={(
-            <Button type="button" size="sm" variant="ghost" onClick={() => setProductEditor(null)}>
-              <X /> 閉じる
-            </Button>
-          )}
-        >
-          <form className="grid gap-4" onSubmit={saveProduct}>
-            <FormGrid columns={3}>
-              <Field label="プラン名" hint="予約画面や受付枠に表示する名称です。" required>
-                <Input
-                  value={productDraft.displayName}
-                  maxLength={255}
-                  onChange={event => setProductDraft(current => ({
-                    ...current,
-                    displayName: event.target.value,
-                  }))}
-                  placeholder="平日キャディ付きプラン"
-                  required
-                  autoFocus
-                />
-              </Field>
-              <Field
-                label="管理番号"
-                hint={productEditor.mode === 'edit' ? '既存IDは変更できません。' : 'Fieldの予約サービスIDを入力します。'}
+      <Sheet
+        open={Boolean(productEditor)}
+        onOpenChange={open => {
+          if (!open) setProductEditor(null)
+        }}
+        title={productEditor?.mode === 'edit'
+          ? t('products:editor.editTitle')
+          : t('products:editor.createTitle')}
+        description={t('products:editor.description')}
+      >
+        <form className="grid gap-4" onSubmit={saveProduct}>
+          <FormGrid columns={1}>
+            <Field
+              label={t('products:editor.displayName')}
+              hint={t('products:editor.displayNameHint')}
+              required
+            >
+              <Input
+                value={productDraft.displayName}
+                maxLength={255}
+                onChange={event => setProductDraft(current => ({
+                  ...current,
+                  displayName: event.target.value,
+                }))}
+                placeholder={t('products:editor.displayNamePlaceholder')}
                 required
+                autoFocus={productEditor?.mode === 'create'}
+              />
+            </Field>
+            <Field
+              label={t('products:editor.serviceId')}
+              hint={productEditor?.mode === 'edit'
+                ? t('products:editor.serviceIdHintEdit')
+                : t('products:editor.serviceIdHintNew')}
+              required
+            >
+              <Input
+                value={productDraft.serviceId}
+                disabled={productEditor?.mode === 'edit'}
+                onChange={event => setProductDraft(current => ({
+                  ...current,
+                  serviceId: event.target.value,
+                }))}
+                placeholder="golf-weekday-standard"
+                required
+              />
+            </Field>
+            <Field label={t('products:editor.playType')} required>
+              <NativeSelect
+                value={productDraft.playType}
+                onChange={event => changePlayType(event.target.value as PlayType)}
               >
-                <Input
-                  value={productDraft.serviceId}
-                  disabled={productEditor.mode === 'edit'}
-                  onChange={event => setProductDraft(current => ({
-                    ...current,
-                    serviceId: event.target.value,
-                  }))}
-                  placeholder="golf-weekday-standard"
-                  required
-                />
-              </Field>
-              <Field label="プレー区分" required>
-                <NativeSelect
-                  value={productDraft.playType}
-                  onChange={event => changePlayType(event.target.value as PlayType)}
-                >
-                  <option value="caddie">キャディ付き</option>
-                  <option value="self">セルフ</option>
-                </NativeSelect>
-              </Field>
-              <Field label="ホール数" required>
-                <NativeSelect
-                  value={productDraft.holeCount}
-                  onChange={event => changeHoleCount(Number(event.target.value))}
-                >
-                  <option value={18}>18ホール</option>
-                  <option value={9}>9ホール</option>
-                </NativeSelect>
-              </Field>
-              <Field label="想定所要時間" hint="30〜720分" required>
-                <Input
-                  type="number"
-                  min={30}
-                  max={720}
-                  step={1}
-                  value={productDraft.expectedDurationMinutes}
-                  onChange={event => setProductDraft(current => ({
-                    ...current,
-                    expectedDurationMinutes: Number(event.target.value),
-                  }))}
-                  required
-                />
-              </Field>
-            </FormGrid>
-            {productError ? (
-              <Notice tone="danger" title="プレー設定を保存できません">{productError}</Notice>
-            ) : null}
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button type="button" disabled={productSaving} onClick={() => setProductEditor(null)}>
-                キャンセル
-              </Button>
-              <Button type="submit" variant="primary" disabled={productSaving}>
-                <Save /> {productSaving ? '保存中' : 'プレー設定を保存'}
-              </Button>
-            </div>
-          </form>
-        </Panel>
-      ) : null}
+                <option value="caddie">{t('products:playType.caddie')}</option>
+                <option value="self">{t('products:playType.self')}</option>
+              </NativeSelect>
+            </Field>
+            <Field label={t('products:editor.holeCount')} required>
+              <NativeSelect
+                value={productDraft.holeCount}
+                onChange={event => changeHoleCount(Number(event.target.value))}
+              >
+                <option value={18}>{t('courses:option.holes18')}</option>
+                <option value={9}>{t('courses:option.holes9')}</option>
+              </NativeSelect>
+            </Field>
+            <Field
+              label={t('products:editor.duration')}
+              hint={t('products:editor.durationHint')}
+              required
+            >
+              <Input
+                type="number"
+                min={30}
+                max={720}
+                step={1}
+                value={productDraft.expectedDurationMinutes}
+                onChange={event => setProductDraft(current => ({
+                  ...current,
+                  expectedDurationMinutes: Number(event.target.value),
+                }))}
+                required
+              />
+            </Field>
+          </FormGrid>
+          {productError ? (
+            <Notice tone="danger" title={t('products:editor.saveFailed')}>{productError}</Notice>
+          ) : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" disabled={productSaving} onClick={() => setProductEditor(null)}>
+              {t('common:action.cancel')}
+            </Button>
+            <Button type="submit" variant="primary" disabled={productSaving}>
+              <Save /> {productSaving ? t('common:action.saving') : t('products:editor.save')}
+            </Button>
+          </div>
+        </form>
+      </Sheet>
 
       <Panel
-        title="予約サービス"
-        description="行を選ぶと、そのサービスの曜日別受付枠を下で編集できます。"
-        actions={<Badge variant="outline">{products.length}件</Badge>}
+        title={t('products:list.title')}
+        description={t('products:list.description')}
+        actions={<Badge variant="outline">{t('products:list.badge', { n: String(products.length) })}</Badge>}
       >
         <DataTable
           rows={products}
@@ -740,11 +752,11 @@ export function ReservationProductsPage() {
           }}
           empty={(
             <EmptyState
-              title="ゴルフ予約サービスがありません"
-              description="Fieldの予約サービスIDを登録して、プレー区分と受付枠を設定してください。"
+              title={t('products:list.empty.title')}
+              description={t('products:list.empty.description')}
               action={(
                 <Button type="button" variant="primary" onClick={beginCreateProduct}>
-                  <Plus /> 最初の予約サービスを追加
+                  <Plus /> {t('products:list.empty.action')}
                 </Button>
               )}
             />
@@ -754,24 +766,27 @@ export function ReservationProductsPage() {
 
       {selectedProduct ? (
         <Panel
-          title={`受付枠 · ${productDisplayName(selectedProduct)}`}
-          description={`管理番号: ${selectedProduct.reservationServiceId}。0は制限なしです。曜日、開始、終了が同じ行は重複登録できません。`}
+          title={t('products:slots.title', { name: productDisplayName(selectedProduct) })}
+          description={`${t('products:slots.subtitle', {
+            serviceId: selectedProduct.reservationServiceId,
+          })} · ${t('products:slots.description')}`}
           actions={(
             <div className="flex items-center gap-2">
-              <Badge variant="outline">{productDisplayName(selectedProduct)}</Badge>
               <Badge variant={selectedProduct.playType === 'caddie' ? 'accent' : 'neutral'}>
-                {selectedProduct.playType === 'caddie' ? 'キャディ付き' : 'セルフ'}
+                {selectedProduct.playType === 'caddie'
+                  ? t('products:playType.caddie')
+                  : t('products:playType.self')}
               </Badge>
               {dirtyServiceIds.includes(selectedProduct.reservationServiceId) ? (
-                <Badge variant="warning">未保存</Badge>
+                <Badge variant="warning">{t('products:list.table.unsaved')}</Badge>
               ) : null}
             </div>
           )}
         >
           {slotLoadErrors[selectedProduct.reservationServiceId] ? (
-            <Notice tone="warning" title="既存の受付枠を読み込めませんでした">
+            <Notice tone="warning" title={t('products:slots.loadFailed.title')}>
               {slotLoadErrors[selectedProduct.reservationServiceId]}
-              空のまま保存すると既存枠を置き換える可能性があります。再読み込みしてから編集してください。
+              {t('products:slots.loadFailed.description')}
             </Notice>
           ) : null}
 
@@ -781,11 +796,11 @@ export function ReservationProductsPage() {
             rowKey={slot => slot.clientKey}
             empty={(
               <EmptyState
-                title="受付枠がありません"
-                description="曜日と時間帯を追加するか、キャディ供給量から午前・午後枠を作成してください。"
+                title={t('products:slots.empty.title')}
+                description={t('products:slots.empty.description')}
                 action={(
                   <Button type="button" onClick={addSlot}>
-                    <Plus /> 受付枠を追加
+                    <Plus /> {t('products:slots.add')}
                   </Button>
                 )}
               />
@@ -793,14 +808,14 @@ export function ReservationProductsPage() {
           />
 
           {slotError ? (
-            <Notice tone="danger" title="受付枠を保存できません">
+            <Notice tone="danger" title={t('products:slots.saveFailed')}>
               <span className="whitespace-pre-line">{slotError}</span>
             </Notice>
           ) : null}
 
           <div className="flex flex-wrap justify-between gap-2 pt-3">
             <Button type="button" onClick={addSlot}>
-              <Plus /> 受付枠を追加
+              <Plus /> {t('products:slots.add')}
             </Button>
             <Button
               type="button"
@@ -808,7 +823,7 @@ export function ReservationProductsPage() {
               disabled={slotSaving || Boolean(slotLoadErrors[selectedProduct.reservationServiceId])}
               onClick={() => void saveSlots()}
             >
-              <Save /> {slotSaving ? '保存中' : '受付枠を保存'}
+              <Save /> {slotSaving ? t('common:action.saving') : t('products:slots.save')}
             </Button>
           </div>
         </Panel>
@@ -816,12 +831,12 @@ export function ReservationProductsPage() {
 
       {selectedProduct?.playType === 'caddie' ? (
         <Panel
-          title="キャディ供給量から枠数を算出"
-          description="希望休が未登録のアクティブキャディは稼働可能として計算します。結果は選択中サービスの同一曜日へ反映します。"
-          actions={<Badge variant="outline"><Users /> 稼働連携</Badge>}
+          title={t('products:capacity.title')}
+          description={t('products:capacity.description')}
+          actions={<Badge variant="outline"><Users /> {t('products:capacity.badge')}</Badge>}
         >
           <div className="flex flex-wrap items-end gap-3">
-            <Field label="対象日" required className="w-full sm:w-44">
+            <Field label={t('products:capacity.date')} required className="w-full sm:w-44">
               <Input
                 type="date"
                 value={capacityDate}
@@ -837,45 +852,63 @@ export function ReservationProductsPage() {
               disabled={capacityLoading || !capacityDate}
               onClick={() => void calculateCapacity()}
             >
-              <Sparkles /> {capacityLoading ? '算出中' : '供給量を算出'}
+              <Sparkles />
+              {capacityLoading ? t('products:capacity.calculating') : t('products:capacity.calculate')}
             </Button>
           </div>
 
           {capacityError ? (
-            <Notice tone="danger" title="供給量を算出できません">{capacityError}</Notice>
+            <Notice tone="danger" title={t('products:capacity.failed')}>{capacityError}</Notice>
           ) : null}
 
           {capacity ? (
             <div className="grid gap-3 pt-3">
               <MetricGrid>
-                <Metric label="午前" value={`${capacity.morningCapacity}組`} detail="販売上限" />
-                <Metric label="午後" value={`${capacity.afternoonCapacity}組`} detail="販売上限" />
-                <Metric label="担当可能" value={`${capacity.totalRounds}R`} detail="2R希望を含む" />
                 <Metric
-                  label="稼働キャディ"
-                  value={`${capacity.activeCaddies - capacity.unavailable}/${capacity.activeCaddies}名`}
+                  label={t('products:capacity.morning')}
+                  value={t('products:capacity.groups', { n: String(capacity.morningCapacity) })}
+                  detail={t('products:capacity.limit')}
+                />
+                <Metric
+                  label={t('products:capacity.afternoon')}
+                  value={t('products:capacity.groups', { n: String(capacity.afternoonCapacity) })}
+                  detail={t('products:capacity.limit')}
+                />
+                <Metric
+                  label={t('products:capacity.rounds')}
+                  value={t('products:capacity.roundsValue', { n: String(capacity.totalRounds) })}
+                  detail={t('products:capacity.roundsDetail')}
+                />
+                <Metric
+                  label={t('products:capacity.activeCaddies')}
+                  value={t('products:capacity.activeCaddiesValue', {
+                    available: String(capacity.activeCaddies - capacity.unavailable),
+                    total: String(capacity.activeCaddies),
+                  })}
                   detail={capacity.assumedAvailable > 0
-                    ? `${capacity.assumedAvailable}名は希望休未登録`
-                    : '全員の希望登録済み'}
+                    ? t('products:capacity.assumed', { n: String(capacity.assumedAvailable) })
+                    : t('products:capacity.allRegistered')}
                   tone={capacity.assumedAvailable > 0 ? 'warning' : 'success'}
                 />
               </MetricGrid>
               {capacity.assumedAvailable > 0 ? (
-                <Notice tone="warning" title="未登録の勤務希望を含みます">
-                  {capacity.assumedAvailable}名を稼働可能として計算しています。確定前にキャディ管理で希望休を確認してください。
+                <Notice tone="warning" title={t('products:capacity.warning.title')}>
+                  {t('products:capacity.warning.description', {
+                    n: String(capacity.assumedAvailable),
+                  })}
                 </Notice>
               ) : null}
               <div className="flex justify-end">
                 <Button type="button" variant="primary" onClick={applyCapacity}>
-                  <CalendarDays /> この曜日の枠数へ反映
+                  <CalendarDays /> {t('products:capacity.apply')}
                 </Button>
               </div>
             </div>
           ) : null}
         </Panel>
       ) : selectedProduct ? (
-        <Notice tone="info" title="セルフプレー商品です">
-          キャディ供給量の算出は不要です。曜日別の組数・人数を受付枠で直接設定してください。
+        <Notice tone="info" title={t('products:capacity.selfNotice.title')}>
+          {t('products:capacity.selfNotice.description')}
         </Notice>
       ) : null}
 

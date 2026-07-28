@@ -27,8 +27,8 @@ describe('validateSlots', () => {
     ]
 
     expect(validateSlots(slots)).toEqual(expect.arrayContaining([
-      '1行目: 終了時刻は開始時刻より後にしてください。',
-      '2行目: 同じ曜日・時間帯の枠が重複しています。',
+      '1行目: おわりは はじまりより後にしてください。',
+      '2行目: 同じ曜日・同じ時間の枠が重なっています。',
     ]))
   })
 

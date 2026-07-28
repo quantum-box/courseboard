@@ -1,4 +1,5 @@
-import { ApiError, courseboardApiJson, fieldTenant } from '../../api'
+import { ApiError, courseboardApiJson } from '../../api'
+import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   Field,
@@ -26,9 +27,9 @@ import {
   type FormEvent,
   useCallback,
   useEffect,
-  useMemo,
   useState,
 } from 'react'
+import { useTranslation } from 'react-i18next'
 import { navigate } from '../../lib/router'
 
 type SelfLockWindow = {
@@ -79,14 +80,19 @@ type PolicyDraft = {
 }
 
 const WEEKDAYS = [
-  { key: 'mon', label: '月' },
-  { key: 'tue', label: '火' },
-  { key: 'wed', label: '水' },
-  { key: 'thu', label: '木' },
-  { key: 'fri', label: '金' },
-  { key: 'sat', label: '土' },
-  { key: 'sun', label: '日' },
+  { key: 'mon' },
+  { key: 'tue' },
+  { key: 'wed' },
+  { key: 'thu' },
+  { key: 'fri' },
+  { key: 'sat' },
+  { key: 'sun' },
 ] as const
+
+/** Weekday captions come from the active locale, not the constant table. */
+function weekdayLabel(key: string) {
+  return i18next.t(`common:weekday.${key}` as 'common:weekday.mon')
+}
 
 const WEEKDAY_ORDER = new Map<string, number>(
   WEEKDAYS.map((day, index) => [day.key, index] as const),
@@ -150,9 +156,9 @@ function validateWindows(windows: SelfLockWindow[]) {
     const start = timeToMinutes(window.start)
     const end = timeToMinutes(window.end)
     if (start === null || end === null) {
-      errors.push(`時間帯 ${index + 1}: 開始と終了を入力してください。`)
+      errors.push(i18next.t('policy:validation.slotTimes', { n: String(index + 1) }))
     } else if (start >= end) {
-      errors.push(`時間帯 ${index + 1}: 終了時刻は開始時刻より後にしてください。`)
+      errors.push(i18next.t('policy:validation.slotOrder', { n: String(index + 1) }))
     }
     return { window, start, end, index }
   })
@@ -170,12 +176,13 @@ function validateWindows(windows: SelfLockWindow[]) {
           ? (a.window.weekdays[0] ?? 'all')
           : a.window.weekdays.find(day => b.window.weekdays.includes(day))
       if (sharedDay && a.start < b.end && b.start < a.end) {
-        const overlapLabel = sharedDay === 'all'
-          ? '全曜日で'
-          : `${WEEKDAYS.find(day => day.key === sharedDay)?.label ?? sharedDay}曜日に`
-        errors.push(
-          `時間帯 ${a.index + 1} と ${b.index + 1} が${overlapLabel}重複しています。`,
-        )
+        const positions = { a: String(a.index + 1), b: String(b.index + 1) }
+        errors.push(sharedDay === 'all'
+          ? i18next.t('policy:validation.overlapAllDays', positions)
+          : i18next.t('policy:validation.overlapOnDay', {
+              ...positions,
+              day: weekdayLabel(sharedDay),
+            }))
       }
     }
   }
@@ -191,9 +198,9 @@ function policyValidation(draft: PolicyDraft) {
   const cutoffHours = Number(draft.cutoffHours)
   const minPerPlayer = draft.minPerPlayer === '' ? null : Number(draft.minPerPlayer)
 
-  if (![9, 18].includes(defaultHoles)) errors.push('既定ホール数は9または18にしてください。')
+  if (![9, 18].includes(defaultHoles)) errors.push(i18next.t('policy:validation.holes'))
   if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > 4) {
-    errors.push('1枠の最大人数は1〜4人で入力してください。')
+    errors.push(i18next.t('policy:validation.maxPlayers'))
   }
   if (
     draft.memberDepositPercent.trim() === ''
@@ -201,7 +208,7 @@ function policyValidation(draft: PolicyDraft) {
     || memberDeposit < 0
     || memberDeposit > 100
   ) {
-    errors.push('会員デポジット率は0〜100%で入力してください。')
+    errors.push(i18next.t('policy:validation.memberDeposit'))
   }
   if (
     draft.guestDepositPercent.trim() === ''
@@ -209,7 +216,7 @@ function policyValidation(draft: PolicyDraft) {
     || guestDeposit < 0
     || guestDeposit > 100
   ) {
-    errors.push('ゲストデポジット率は0〜100%で入力してください。')
+    errors.push(i18next.t('policy:validation.guestDeposit'))
   }
   if (
     draft.cutoffHours.trim() === ''
@@ -217,14 +224,14 @@ function policyValidation(draft: PolicyDraft) {
     || cutoffHours < 0
     || cutoffHours > 2_147_483_647
   ) {
-    errors.push('予約締切は0以上の整数で入力してください。')
+    errors.push(i18next.t('policy:validation.cutoff'))
   }
   if (
     draft.spendJudgmentEnabled
     && minPerPlayer !== null
     && (!Number.isSafeInteger(minPerPlayer) || minPerPlayer < 0)
   ) {
-    errors.push('客単価の基準額は0円以上の整数で入力してください。')
+    errors.push(i18next.t('policy:validation.spendThreshold'))
   }
   if (draft.selfLockEnabled) errors.push(...validateWindows(draft.windows))
 
@@ -232,7 +239,7 @@ function policyValidation(draft: PolicyDraft) {
 }
 
 export function PolicyPage() {
-  const tenant = useMemo(() => fieldTenant(), [])
+  const { t } = useTranslation(['policy', 'common', 'nav', 'courses'])
   const [draft, setDraft] = useState<PolicyDraft>(emptyDraft)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -349,47 +356,47 @@ export function PolicyPage() {
       setExists(true)
     } catch (error) {
       setSaveError([
-        error instanceof Error ? error.message : '予約ポリシーを保存できませんでした。',
+        error instanceof Error ? error.message : t('policy:saveFailed'),
       ])
     } finally {
       setSaving(false)
     }
   }
 
-  if (loading) return <LoadingState label="予約ポリシーを読み込んでいます" />
+  if (loading) return <LoadingState label={t('policy:loading')} />
   if (loadError) return <ResourceError error={loadError} onRetry={() => void load()} />
 
   return (
     <form className="page-stack" onSubmit={savePolicy}>
       <PageHeader
-        eyebrow={`Settings · ${tenant}`}
-        title="予約ポリシー"
-        description="テナント導入時に整える受付ルールです。日常運用ではあまり開きません。予約枠の基本条件、デポジット、セルフロック、客単価判定をひとつのポリシーとして管理します。"
+        eyebrow={t('nav:sections.tenantMaster')}
+        title={t('policy:title')}
+        description={t('policy:description')}
         actions={(
           <div className="flex flex-wrap items-center gap-2">
             <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
-              <ArrowLeft /> 設定へ戻る
+              <ArrowLeft /> {t('common:action.backToSettings')}
             </Button>
             <Badge variant={exists ? 'success' : 'warning'}>
-              {exists ? '設定済み' : '未作成'}
+              {exists ? t('policy:status.configured') : t('policy:status.missing')}
             </Badge>
             <PageRefreshButton onClick={() => void load()} />
             <Button type="submit" variant="primary" disabled={saving}>
-              <Save /> {saving ? '保存中…' : '変更を保存'}
+              <Save /> {saving ? t('common:action.saving') : t('common:action.save')}
             </Button>
           </div>
         )}
       />
 
       <Panel
-        title="予約枠の基本条件"
-        description="新しいティータイムと予約商品に共通で使う既定値です。"
+        title={t('policy:basics.title')}
+        description={t('policy:basics.description')}
         actions={<ShieldCheck className="size-4 text-subtle-foreground" />}
       >
         <FormGrid columns={3}>
           <Field
-            label="予約種別ID"
-            hint="空欄の場合は既存設定またはバックエンド既定値を使用"
+            label={t('policy:basics.reservationTypeId')}
+            hint={t('policy:basics.reservationTypeIdHint')}
           >
             <Input
               value={draft.reservationTypeId}
@@ -397,17 +404,17 @@ export function PolicyPage() {
               placeholder="golf_standard"
             />
           </Field>
-          <Field label="既定ホール数" required>
+          <Field label={t('policy:basics.defaultHoles')} required>
             <NativeSelect
               required
               value={draft.defaultHoles}
               onChange={event => changeDraft({ defaultHoles: event.target.value })}
             >
-              <option value="9">9ホール</option>
-              <option value="18">18ホール</option>
+              <option value="9">{t('courses:option.holes9')}</option>
+              <option value="18">{t('courses:option.holes18')}</option>
             </NativeSelect>
           </Field>
-          <Field label="1枠の最大人数" required>
+          <Field label={t('policy:basics.maxPlayers')} required>
             <Input
               required
               type="number"
@@ -418,18 +425,18 @@ export function PolicyPage() {
               onChange={event => changeDraft({ maxPlayersPerTeeTime: event.target.value })}
             />
           </Field>
-          <Field label="カート利用" required>
+          <Field label={t('policy:basics.cart')} required>
             <NativeSelect
               required
               value={draft.cartPolicy}
               onChange={event => changeDraft({ cartPolicy: event.target.value })}
             >
-              <option value="optional">任意</option>
-              <option value="required">必須</option>
-              <option value="unavailable">利用不可</option>
+              <option value="optional">{t('policy:cartOption.optional')}</option>
+              <option value="required">{t('policy:cartOption.required')}</option>
+              <option value="unavailable">{t('policy:cartOption.unavailable')}</option>
             </NativeSelect>
           </Field>
-          <Field label="予約締切" required hint="ティータイム開始の何時間前まで受け付けるか">
+          <Field label={t('policy:basics.cutoff')} required hint={t('policy:basics.cutoffHint')}>
             <Input
               required
               type="number"
@@ -443,12 +450,12 @@ export function PolicyPage() {
       </Panel>
 
       <Panel
-        title="デポジット"
-        description="予約時に事前決済する割合を会員・ゲスト別に設定します。"
+        title={t('policy:deposit.title')}
+        description={t('policy:deposit.description')}
         actions={<WalletCards className="size-4 text-subtle-foreground" />}
       >
         <FormGrid columns={2}>
-          <Field label="会員デポジット率" required hint="0〜100%">
+          <Field label={t('policy:deposit.member')} required hint={t('policy:deposit.hint')}>
             <Input
               required
               type="number"
@@ -459,7 +466,7 @@ export function PolicyPage() {
               onChange={event => changeDraft({ memberDepositPercent: event.target.value })}
             />
           </Field>
-          <Field label="ゲストデポジット率" required hint="0〜100%">
+          <Field label={t('policy:deposit.guest')} required hint={t('policy:deposit.hint')}>
             <Input
               required
               type="number"
@@ -474,8 +481,8 @@ export function PolicyPage() {
       </Panel>
 
       <Panel
-        title="セルフロック"
-        description="需要の高い時間帯をキャディ付き優先枠にし、セルフプレー予約を止めます。"
+        title={t('policy:selfLock.title')}
+        description={t('policy:selfLock.description')}
         actions={(
           <label className="flex cursor-pointer items-center gap-2 text-xs font-medium">
             <input
@@ -484,7 +491,7 @@ export function PolicyPage() {
               checked={draft.selfLockEnabled}
               onChange={event => changeDraft({ selfLockEnabled: event.target.checked })}
             />
-            有効
+            {t('policy:selfLock.enabled')}
           </label>
         )}
       >
@@ -496,8 +503,8 @@ export function PolicyPage() {
             >
               <div className="field">
                 <span className="field-label">
-                  時間帯 {index + 1} の曜日
-                  <Badge variant="neutral">未選択 = 全曜日</Badge>
+                  {t('policy:selfLock.slotWeekdays', { n: String(index + 1) })}
+                  <Badge variant="neutral">{t('policy:selfLock.allDays')}</Badge>
                 </span>
                 <div className="flex flex-wrap gap-1">
                   {WEEKDAYS.map(day => {
@@ -509,17 +516,19 @@ export function PolicyPage() {
                         size="sm"
                         variant={active ? 'primary' : 'secondary'}
                         aria-pressed={active}
-                        aria-label={`${day.label}曜日${active ? 'を解除' : 'を選択'}`}
+                        aria-label={active
+                          ? t('policy:selfLock.unselectDay', { day: weekdayLabel(day.key) })
+                          : t('policy:selfLock.selectDay', { day: weekdayLabel(day.key) })}
                         onClick={() => toggleWeekday(index, day.key)}
                         disabled={!draft.selfLockEnabled}
                       >
-                        {day.label}
+                        {weekdayLabel(day.key)}
                       </Button>
                     )
                   })}
                 </div>
               </div>
-              <Field label="開始" required>
+              <Field label={t('policy:selfLock.start')} required>
                 <Input
                   type="time"
                   value={window.start}
@@ -528,7 +537,7 @@ export function PolicyPage() {
                 />
               </Field>
               <span className="hidden pb-2 text-center text-subtle-foreground lg:block">–</span>
-              <Field label="終了" required>
+              <Field label={t('policy:selfLock.end')} required>
                 <Input
                   type="time"
                   value={window.end}
@@ -545,7 +554,7 @@ export function PolicyPage() {
                 })}
                 disabled={!draft.selfLockEnabled}
               >
-                <Trash2 /> 削除
+                <Trash2 /> {t('common:action.delete')}
               </Button>
             </div>
           ))}
@@ -560,15 +569,15 @@ export function PolicyPage() {
               })}
               disabled={!draft.selfLockEnabled}
             >
-              <Plus /> 時間帯を追加
+              <Plus /> {t('policy:selfLock.addSlot')}
             </Button>
           </div>
         </div>
       </Panel>
 
       <Panel
-        title="客単価判定"
-        description="基準額を下回る予約を確認待ち、または受付不可にします。"
+        title={t('policy:spend.title')}
+        description={t('policy:spend.description')}
         actions={(
           <label className="flex cursor-pointer items-center gap-2 text-xs font-medium">
             <input
@@ -577,15 +586,15 @@ export function PolicyPage() {
               checked={draft.spendJudgmentEnabled}
               onChange={event => changeDraft({ spendJudgmentEnabled: event.target.checked })}
             />
-            有効
+            {t('policy:spend.enabled')}
           </label>
         )}
       >
         <div className={draft.spendJudgmentEnabled ? '' : 'opacity-60'}>
           <FormGrid columns={2}>
             <Field
-              label="1人あたり基準額"
-              hint="空欄なら当日予算の目標客単価に連動"
+              label={t('policy:spend.threshold')}
+              hint={t('policy:spend.thresholdHint')}
             >
               <Input
                 type="number"
@@ -593,11 +602,11 @@ export function PolicyPage() {
                 step="1"
                 value={draft.minPerPlayer}
                 onChange={event => changeDraft({ minPerPlayer: event.target.value })}
-                placeholder="予算マスタと連動"
+                placeholder={t('policy:spend.thresholdPlaceholder')}
                 disabled={!draft.spendJudgmentEnabled}
               />
             </Field>
-            <Field label="基準未満の扱い" required>
+            <Field label={t('policy:spend.belowAction')} required>
               <NativeSelect
                 value={draft.spendAction}
                 onChange={event => changeDraft({
@@ -605,8 +614,8 @@ export function PolicyPage() {
                 })}
                 disabled={!draft.spendJudgmentEnabled}
               >
-                <option value="review">管理者確認待ち</option>
-                <option value="reject">予約を拒否</option>
+                <option value="review">{t('policy:spend.review')}</option>
+                <option value="reject">{t('policy:spend.reject')}</option>
               </NativeSelect>
             </Field>
           </FormGrid>
@@ -614,25 +623,31 @@ export function PolicyPage() {
       </Panel>
 
       {saveError ? (
-        <Notice tone="danger" title="保存前に設定を確認してください">
+        <Notice tone="danger" title={t('policy:invalid.title')}>
           <ul className="list-disc space-y-1 pl-4">
             {saveError.map(error => <li key={error}>{error}</li>)}
           </ul>
         </Notice>
       ) : null}
       {saved ? (
-        <Notice tone="success" title="予約ポリシーを保存しました">
-          新しい予約判定には保存した設定が使用されます。
+        <Notice tone="success" title={t('policy:saved.title')}>
+          {t('policy:saved.description')}
         </Notice>
       ) : null}
 
       <div className="sticky bottom-3 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background/95 p-3 shadow-overlay backdrop-blur sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1"><Users className="size-3.5" /> 最大 {draft.maxPlayersPerTeeTime || '—'} 人</span>
-          <span className="inline-flex items-center gap-1"><Clock3 className="size-3.5" /> 締切 {draft.cutoffHours || '—'} 時間前</span>
+          <span className="inline-flex items-center gap-1">
+            <Users className="size-3.5" />
+            {t('policy:summary.maxPlayers', { n: draft.maxPlayersPerTeeTime || '—' })}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Clock3 className="size-3.5" />
+            {t('policy:summary.cutoff', { n: draft.cutoffHours || '—' })}
+          </span>
         </div>
         <Button type="submit" variant="primary" size="lg" disabled={saving}>
-          <Save /> {saving ? '保存中…' : '予約ポリシーを保存'}
+          <Save /> {saving ? t('common:action.saving') : t('policy:save')}
         </Button>
       </div>
     </form>

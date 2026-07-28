@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
 import * as THREE from 'three'
 import { peekMockCarts } from '../dev/mockCartSimulator'
 import type { CartColor, CartUpdate } from '../types'
@@ -53,6 +54,7 @@ interface CourseMapProps {
 const COURSE_IMAGE = '/sora-map.png'
 
 export function CourseMap({ carts }: CourseMapProps) {
+  const { t } = useTranslation('map')
   const mountRef = useRef<HTMLDivElement>(null)
   const cartMeshes = useRef<Map<string, THREE.Group>>(new Map())
   const cartsRef = useRef(carts)
@@ -212,12 +214,18 @@ export function CourseMap({ carts }: CourseMapProps) {
   return (
     <div className="map-container" ref={mountRef} style={{ width: '100%', height: '100%' }}>
       <div className="cart-legend">
-        <div className="row"><span className="swatch" style={{ background: '#f2c12e' }} /> 進行中</div>
-        <div className="row"><span className="swatch" style={{ background: '#e05c5c' }} /> 遅延</div>
-        <div className="row"><span className="swatch" style={{ background: '#4aa3e0' }} /> 待機</div>
+        <div className="row">
+          <span className="swatch" style={{ background: '#f2c12e' }} /> {t('legend.inProgress')}
+        </div>
+        <div className="row">
+          <span className="swatch" style={{ background: '#e05c5c' }} /> {t('legend.delayed')}
+        </div>
+        <div className="row">
+          <span className="swatch" style={{ background: '#4aa3e0' }} /> {t('legend.waiting')}
+        </div>
       </div>
       <div className="course-badge">
-        <div className="title">空沼コース</div>
+        <div className="title">{t('demoCourseName')}</div>
         <div className="sub">SAPPORO CC · Sora Course</div>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { i18next } from '../i18n'
 import type { AuthReason, AuthState, AuthTenant, AuthUser } from './types'
 
 /** Keep in sync with `BROWSER_PKCE_SESSION_KEY` in adapters.ts */
@@ -52,10 +53,16 @@ export function canRenderProtectedApp(view: AuthGateView, apiAuthReady: boolean)
   return apiAuthReady && (view.kind === 'app' || view.kind === 'hold-app')
 }
 
+/**
+ * Toast copy is returned as a translation key so this module stays pure and the
+ * gate can resolve it in the active language.
+ */
+export type AuthNoticeKey = 'session.verifying' | 'session.expired'
+
 /** Bottom-right toast while a known/restorable session is being revalidated. */
-export function sessionVerifyingNotice(state: AuthState): string | undefined {
+export function sessionVerifyingNotice(state: AuthState): AuthNoticeKey | undefined {
   if (state.status !== 'booting') return undefined
-  if (state.previous || state.restorable) return 'Verifying session…'
+  if (state.previous || state.restorable) return 'session.verifying'
   return undefined
 }
 
@@ -66,16 +73,16 @@ export function sessionVerifyingNotice(state: AuthState): string | undefined {
 export function sessionExpiredNotice(
   reason?: AuthReason,
   hadAuthenticatedSession = true,
-): string | undefined {
+): AuthNoticeKey | undefined {
   if (reason !== 'expired' || !hadAuthenticatedSession) return undefined
-  return 'Your session expired. Please sign in again.'
+  return 'session.expired'
 }
 
 /** A profile/proxy failure cannot retain a tenant whose eligibility was not revalidated. */
 export function profileRevalidationError(error: unknown): AuthState {
   return {
     status: 'error',
-    message: error instanceof Error ? error.message : '認証状態を確認できませんでした。',
+    message: error instanceof Error ? error.message : i18next.t('auth:problem.unknown.description'),
   }
 }
 

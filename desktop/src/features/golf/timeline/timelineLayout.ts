@@ -1,3 +1,5 @@
+import { i18next } from '../../../i18n'
+
 import type {
   AssignmentCoverage,
   TeeReservation,
@@ -161,6 +163,34 @@ export function toTimelineBlock(
   }
 }
 
+/**
+ * Splits a lane's blocks into stacked sub-rows so overlapping bookings sit
+ * below each other instead of on top of each other. Greedy interval
+ * partitioning: each block takes the first sub-row that is free at its start.
+ * Touch screens have no hover to peek under an overlap, so the layout itself
+ * must keep every block visible.
+ */
+export function assignStackLanes(
+  blocks: Array<Pick<TimelineBlock, 'id' | 'startMinutes' | 'endMinutes'>>,
+): { lanes: Map<string, number>; laneCount: number } {
+  const sorted = [...blocks].sort(
+    (a, b) => a.startMinutes - b.startMinutes || a.endMinutes - b.endMinutes,
+  )
+  const laneEnds: number[] = []
+  const lanes = new Map<string, number>()
+  for (const block of sorted) {
+    let lane = laneEnds.findIndex(end => end <= block.startMinutes)
+    if (lane === -1) {
+      lane = laneEnds.length
+      laneEnds.push(block.endMinutes)
+    } else {
+      laneEnds[lane] = block.endMinutes
+    }
+    lanes.set(block.id, lane)
+  }
+  return { lanes, laneCount: Math.max(laneEnds.length, 1) }
+}
+
 export function nowLinePercent(
   nowIso: string,
   date: string,
@@ -249,12 +279,12 @@ export function summarizeDay(
 export function formatCoverageLabel(coverage: AssignmentCoverage): string {
   switch (coverage) {
     case 'assigned':
-      return '割当済'
+      return i18next.t('timeline:coverage.assigned')
     case 'partial':
-      return '一部割当'
+      return i18next.t('timeline:coverage.partial')
     case 'unassigned':
-      return '未割当'
+      return i18next.t('timeline:coverage.unassigned')
     case 'not_required':
-      return 'セルフ'
+      return i18next.t('timeline:coverage.self')
   }
 }

@@ -10,6 +10,7 @@ import {
   ShieldCheck,
 } from 'lucide-react'
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { CourseBoardBrand } from '../components/CourseBoardBrand'
 import type { AuthReason, AuthTenant } from './types'
 
@@ -17,13 +18,14 @@ import type { AuthReason, AuthTenant } from './types'
 const GOOGLE_SIGN_IN_ENABLED = false
 
 function AuthFrame({ children }: { children: ReactNode }) {
+  const { t } = useTranslation('auth')
   return (
     <main className="auth-shell">
       <section className="auth-brand-panel">
         <div className="auth-brand"><CourseBoardBrand variant="auth" /></div>
         <div className="auth-brand-copy">
-          <h1>クラブ運営を、<br />ひとつの画面で。</h1>
-          <p>予約、キャディ、コース、キャンセル料まで。現場と経営をつなぐゴルフ場オペレーション基盤。</p>
+          <h1>{t('brand.title')}</h1>
+          <p>{t('brand.description')}</p>
         </div>
         <div className="auth-platforms"><span>Web</span><span>Desktop</span><span>iOS / Android</span></div>
       </section>
@@ -34,8 +36,9 @@ function AuthFrame({ children }: { children: ReactNode }) {
 
 /** Minimal cold-start placeholder when no prior session hint exists (not a verify takeover). */
 export function AuthBootScreen() {
+  const { t } = useTranslation('auth')
   return (
-    <main className="auth-neutral-loading" role="status" aria-label="Loading">
+    <main className="auth-neutral-loading" role="status" aria-label={t('loading.label')}>
       <LoaderCircle className="auth-spinner" />
     </main>
   )
@@ -43,13 +46,14 @@ export function AuthBootScreen() {
 
 /** Neutral full-page status while redirecting into an external sign-in flow. */
 export function AuthLoadingScreen({ authorizing = false }: { authorizing?: boolean }) {
+  const { t } = useTranslation('auth')
   return (
     <main className="auth-neutral-loading" role="status">
       <LoaderCircle className="auth-spinner" />
       {authorizing ? (
         <>
-          <h2>Redirecting to sign in…</h2>
-          <p>Please wait while we open the secure sign-in flow.</p>
+          <h2>{t('loading.redirecting')}</h2>
+          <p>{t('loading.wait')}</p>
         </>
       ) : null}
     </main>
@@ -62,6 +66,7 @@ export function AuthSessionToast({ message, onDismiss, sticky = false }: {
   /** When true, keep the toast until the parent clears it (e.g. verifying). */
   sticky?: boolean
 }) {
+  const { t } = useTranslation('auth')
   useEffect(() => {
     if (sticky) return
     const timer = window.setTimeout(onDismiss, 7000)
@@ -73,7 +78,12 @@ export function AuthSessionToast({ message, onDismiss, sticky = false }: {
       <ShieldCheck aria-hidden="true" />
       <p>{message}</p>
       {sticky ? null : (
-        <button type="button" className="auth-session-toast-dismiss" onClick={onDismiss} aria-label="Dismiss">
+        <button
+          type="button"
+          className="auth-session-toast-dismiss"
+          onClick={onDismiss}
+          aria-label={t('loading.dismiss')}
+        >
           ×
         </button>
       )}
@@ -87,6 +97,7 @@ export function SignInScreen({ reason, passwordSignInAvailable, onSignIn, onPass
   onSignIn(provider?: 'Google'): void
   onPasswordSignIn(username: string, password: string): void
 }) {
+  const { t } = useTranslation('auth')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -97,19 +108,22 @@ export function SignInScreen({ reason, passwordSignInAvailable, onSignIn, onPass
   return (
     <AuthFrame>
       <div className="auth-card">
-        <span className="auth-kicker">Secure access</span>
-        <h2>おかえりなさい</h2>
-        <p>TachyonアカウントでCourse Boardにログインします。</p>
+        <span className="auth-kicker">{t('signIn.kicker')}</span>
+        <h2>{t('signIn.title')}</h2>
+        <p>{t('signIn.description')}</p>
         {reason === 'expired' ? (
           <div className="auth-notice" role="status">
             <ShieldCheck />
-            <div><strong>セッションが失効しました</strong><span>安全のためログアウトしました。もう一度ログインしてください。</span></div>
+            <div>
+              <strong>{t('signIn.expired.title')}</strong>
+              <span>{t('signIn.expired.description')}</span>
+            </div>
           </div>
         ) : null}
         {passwordSignInAvailable ? (
           <form className="auth-login-form" onSubmit={submit}>
             <label>
-              <span>ユーザー名またはメールアドレス</span>
+              <span>{t('signIn.username')}</span>
               <input
                 name="username"
                 type="text"
@@ -121,7 +135,7 @@ export function SignInScreen({ reason, passwordSignInAvailable, onSignIn, onPass
               />
             </label>
             <label>
-              <span>パスワード</span>
+              <span>{t('signIn.password')}</span>
               <input
                 name="password"
                 type="password"
@@ -132,22 +146,22 @@ export function SignInScreen({ reason, passwordSignInAvailable, onSignIn, onPass
               />
             </label>
             <Button type="submit" variant="primary" disabled={!username.trim() || !password}>
-              <LogIn /> ログイン
+              <LogIn /> {t('signIn.submit')}
             </Button>
           </form>
         ) : (
           <div className="auth-actions">
             {GOOGLE_SIGN_IN_ENABLED ? (
               <Button type="button" variant="secondary" onClick={() => onSignIn('Google')}>
-                <strong className="google-mark">G</strong> Googleでログイン
+                <strong className="google-mark">G</strong> {t('signIn.google')}
               </Button>
             ) : null}
             <Button type="button" variant="primary" onClick={() => onSignIn()}>
-              <LogIn /> ログイン
+              <LogIn /> {t('signIn.submit')}
             </Button>
           </div>
         )}
-        <p className="auth-legal">続行すると、利用規約およびプライバシーポリシーに同意したものとみなされます。</p>
+        <p className="auth-legal">{t('signIn.legal')}</p>
       </div>
     </AuthFrame>
   )
@@ -158,25 +172,26 @@ export function TenantSelectionScreen({ tenants, onSelect, onSignOut }: {
   onSelect(tenant: AuthTenant): void
   onSignOut(): void
 }) {
+  const { t } = useTranslation('auth')
   return (
     <AuthFrame>
       <div className="auth-card auth-card-wide">
-        <span className="auth-kicker">Tenant</span>
-        <h2>利用する施設を選択</h2>
-        <p>このセッションで操作するテナントを選択してください。</p>
+        <span className="auth-kicker">{t('tenant.kicker')}</span>
+        <h2>{t('tenant.title')}</h2>
+        <p>{t('tenant.description')}</p>
         <div className="tenant-list">
           {tenants.map(tenant => (
             <button key={`${tenant.mode}:${tenant.id}`} type="button" className="tenant-option" onClick={() => onSelect(tenant)}>
               <span className="tenant-icon"><Building2 /></span>
               <span className="tenant-copy"><strong>{tenant.name}</strong><small>{tenant.slug ?? tenant.id}</small></span>
               <Badge variant={tenant.mode === 'production' ? 'success' : 'warning'}>
-                {tenant.mode === 'production' ? 'Production' : 'Sandbox'}
+                {tenant.mode === 'production' ? t('tenant.production') : t('tenant.sandbox')}
               </Badge>
               <ChevronRight />
             </button>
           ))}
         </div>
-        <Button type="button" variant="ghost" onClick={onSignOut}>別のアカウントでログイン</Button>
+        <Button type="button" variant="ghost" onClick={onSignOut}>{t('tenant.otherAccount')}</Button>
       </div>
     </AuthFrame>
   )
@@ -190,6 +205,7 @@ export function AuthProblemScreen({ title, message, configuration = false, onRet
   onSignOut?: () => void
   onSwitchTenant?: () => void
 }) {
+  const { t } = useTranslation(['auth', 'common', 'nav'])
   return (
     <AuthFrame>
       <div className="auth-card">
@@ -199,9 +215,21 @@ export function AuthProblemScreen({ title, message, configuration = false, onRet
         <h2>{title}</h2>
         <p>{message}</p>
         <div className="auth-actions">
-          {onSwitchTenant ? <Button type="button" variant="primary" onClick={onSwitchTenant}><Building2 /> 施設を選択</Button> : null}
-          {onRetry ? <Button type="button" variant="primary" onClick={onRetry}><RefreshCw /> 再試行</Button> : null}
-          {onSignOut ? <Button type="button" variant="secondary" onClick={onSignOut}><ExternalLink /> ログアウト</Button> : null}
+          {onSwitchTenant ? (
+            <Button type="button" variant="primary" onClick={onSwitchTenant}>
+              <Building2 /> {t('auth:tenant.select')}
+            </Button>
+          ) : null}
+          {onRetry ? (
+            <Button type="button" variant="primary" onClick={onRetry}>
+              <RefreshCw /> {t('common:action.retry')}
+            </Button>
+          ) : null}
+          {onSignOut ? (
+            <Button type="button" variant="secondary" onClick={onSignOut}>
+              <ExternalLink /> {t('nav:account.signOut')}
+            </Button>
+          ) : null}
         </div>
       </div>
     </AuthFrame>

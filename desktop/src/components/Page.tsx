@@ -8,6 +8,8 @@ import type {
   TextareaHTMLAttributes,
 } from 'react'
 import { AlertTriangle, Inbox, LoaderCircle, RefreshCw } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
+import { i18next } from '../i18n'
 import { pageRefreshShortcutLabel } from '../lib/shortcuts'
 
 export function PageHeader({
@@ -103,17 +105,22 @@ export function EmptyState({
   )
 }
 
-export function LoadingState({ label = '読み込み中' }: { label?: string }) {
+export function LoadingState({ label }: { label?: string }) {
+  const { t } = useTranslation('common')
   return (
     <div className="loading-state" role="status">
       <LoaderCircle className="spin" aria-hidden="true" />
-      {label}
+      {label ?? t('state.loading')}
     </div>
   )
 }
 
+/**
+ * Raw API failures name internal services the operator cannot act on, so map the
+ * known ones onto plain-language advice and keep the rest verbatim.
+ */
 function humanizeResourceError(error: unknown) {
-  const raw = error instanceof Error ? error.message : 'データを読み込めませんでした'
+  const raw = error instanceof Error ? error.message : i18next.t('common:error.unknown')
   const lower = raw.toLowerCase()
   if (
     lower.includes('verify_user')
@@ -121,13 +128,13 @@ function humanizeResourceError(error: unknown) {
     || lower.includes('field_api_oauth_incompatible')
     || (lower.includes('field api returned 401') && lower.includes('unauthorized'))
   ) {
-    return 'Field APIがログイン中のトークンを受け付けませんでした。一度サインアウトして再ログインしてください。なお続く場合は Tachyon Auth の verify が Tachyon 発行 OAuth access token を受け付けるデプロイが必要です。'
+    return i18next.t('common:error.authRejected')
   }
   if (lower.includes('provider_error') || lower.includes('external provider error')) {
-    return '外部Field APIへの接続に失敗しました。ネットワークと course-api / Field の設定を確認してください。'
+    return i18next.t('common:error.providerError')
   }
   if (raw === 'Request failed with 500' || raw === 'Request failed with 502') {
-    return 'course-api（:8080）への接続に失敗しました。ローカルでは `mise run courseboard:api`（`.env.browser-pkce`）が起動しているか確認してください。'
+    return i18next.t('common:error.apiUnreachable')
   }
   return raw
 }
@@ -139,13 +146,14 @@ export function ResourceError({
   error: unknown
   onRetry?: () => void
 }) {
+  const { t } = useTranslation('common')
   const message = humanizeResourceError(error)
   return (
     <Notice
       tone="danger"
-      title="読み込みに失敗しました"
+      title={t('error.loadFailed')}
       actions={onRetry ? (
-        <PageRefreshButton size="sm" onClick={onRetry} label="再試行" />
+        <PageRefreshButton size="sm" onClick={onRetry} label={t('action.retry')} />
       ) : undefined}
     >
       {message}
@@ -154,7 +162,7 @@ export function ResourceError({
 }
 
 export function PageRefreshButton({
-  label = '再読み込み',
+  label,
   loading = false,
   disabled,
   ...props
@@ -162,6 +170,7 @@ export function PageRefreshButton({
   label?: string
   loading?: boolean
 }) {
+  const { t } = useTranslation('common')
   return (
     <Button
       {...props}
@@ -171,7 +180,7 @@ export function PageRefreshButton({
       disabled={disabled || loading}
     >
       <RefreshCw className={loading ? 'spin' : ''} />
-      {label}
+      {label ?? t('action.reload')}
       <Kbd>{pageRefreshShortcutLabel()}</Kbd>
     </Button>
   )
@@ -190,11 +199,16 @@ export function Field({
   children: ReactNode
   className?: string
 }) {
+  const { t } = useTranslation('common')
   return (
     <label className={`field ${className}`}>
       <span className="field-label">
         {label}
-        {required ? <Badge variant="accent">必須</Badge> : <span className="optional">任意</span>}
+        {required ? (
+          <Badge variant="accent">{t('state.required')}</Badge>
+        ) : (
+          <span className="optional">{t('state.optional')}</span>
+        )}
       </span>
       {children}
       {hint ? <span className="field-hint">{hint}</span> : null}
@@ -260,7 +274,7 @@ export function DataTable<T>({
   empty?: ReactNode
   onRowClick?: (row: T) => void
 }) {
-  if (rows.length === 0) return <>{empty ?? <EmptyState title="該当するデータはありません" />}</>
+  if (rows.length === 0) return <>{empty ?? <EmptyState title={i18next.t('common:state.emptyRows')} />}</>
   return (
     <div className="data-table-scroll">
       <table className="data-table">

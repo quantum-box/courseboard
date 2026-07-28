@@ -1,6 +1,7 @@
 import { Button } from '@tachyon-sdk/native-ui'
 import { X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { getPageHelp, type PageHelpSection } from '../features/help/pageHelp'
 
 const WIDTH_STORAGE_KEY = 'courseboard.help.panelWidth'
@@ -52,7 +53,9 @@ export function WorkspaceHelpPanel({
   open: boolean
   onClose: () => void
 }) {
-  const help = getPageHelp(route)
+  const { t, i18n } = useTranslation('help')
+  // Help copy is keyed by locale, so re-read it whenever the language changes.
+  const help = getPageHelp(route, i18n.language)
   const [width, setWidth] = useState(() => readStoredWidth())
   const [resizing, setResizing] = useState(false)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
@@ -124,7 +127,7 @@ export function WorkspaceHelpPanel({
   return (
     <aside
       className="workspace-help-panel"
-      aria-label={`${help.title}のヘルプ`}
+      aria-label={t('panel.ariaLabel', { title: help.title })}
       data-resizing={resizing ? true : undefined}
       style={{ width, minWidth: width, maxWidth: width }}
     >
@@ -132,7 +135,7 @@ export function WorkspaceHelpPanel({
         className="workspace-help-resize"
         role="separator"
         aria-orientation="vertical"
-        aria-label="ガイドパネルの幅を変更"
+        aria-label={t('panel.resize')}
         aria-valuemin={MIN_WIDTH}
         aria-valuemax={MAX_WIDTH}
         aria-valuenow={width}
@@ -151,14 +154,14 @@ export function WorkspaceHelpPanel({
       />
       <div className="workspace-help-panel-header">
         <div>
-          <p className="workspace-help-kicker">Guide</p>
+          <p className="workspace-help-kicker">{t('panel.kicker')}</p>
           <h2>{help.title}</h2>
         </div>
         <Button
           type="button"
           variant="ghost"
           size="icon"
-          aria-label="ヘルプを閉じる"
+          aria-label={t('panel.close')}
           onClick={onClose}
         >
           <X />
@@ -166,8 +169,8 @@ export function WorkspaceHelpPanel({
       </div>
       <p className="workspace-help-summary">{help.summary}</p>
       <div className="workspace-help-body">
-        <HelpBlock title="使い方" sections={help.usage} />
-        <HelpBlock title="データ構造" sections={help.data} />
+        <HelpBlock title={t('panel.usage')} sections={help.usage} />
+        {help.data.length > 0 ? <HelpBlock title={t('panel.data')} sections={help.data} /> : null}
       </div>
     </aside>
   )

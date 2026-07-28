@@ -1,3 +1,5 @@
+import { i18next } from '../../i18n'
+
 export type GolfExtensionConfigDraft = {
   cartPolicy: 'optional' | 'required' | 'unavailable'
   defaultDurationMinutes: string
@@ -56,13 +58,13 @@ export function buildGolfExtensionConfig(
   const errors: string[] = []
 
   if (!Number.isInteger(defaultDurationMinutes) || defaultDurationMinutes < 30 || defaultDurationMinutes > 720) {
-    errors.push('既定の所要時間は30〜720分の整数で入力してください。')
+    errors.push(i18next.t('settings:validation.duration'))
   }
   if (![9, 18].includes(defaultHoles)) {
-    errors.push('既定ホール数は9または18を選択してください。')
+    errors.push(i18next.t('settings:validation.holes'))
   }
   if (!Number.isInteger(maxPlayersPerTeeTime) || maxPlayersPerTeeTime < 1 || maxPlayersPerTeeTime > 4) {
-    errors.push('1枠の最大人数は1〜4人で入力してください。')
+    errors.push(i18next.t('settings:validation.maxPlayers'))
   }
   if (
     draft.memberDepositPercent.trim() === ''
@@ -70,7 +72,7 @@ export function buildGolfExtensionConfig(
     || memberDepositPercent < 0
     || memberDepositPercent > 100
   ) {
-    errors.push('会員デポジット率は0〜100%で入力してください。')
+    errors.push(i18next.t('settings:validation.memberDeposit'))
   }
   if (
     draft.guestDepositPercent.trim() === ''
@@ -78,7 +80,7 @@ export function buildGolfExtensionConfig(
     || guestDepositPercent < 0
     || guestDepositPercent > 100
   ) {
-    errors.push('ゲストデポジット率は0〜100%で入力してください。')
+    errors.push(i18next.t('settings:validation.guestDeposit'))
   }
   if (errors.length > 0) throw new Error(errors.join(' / '))
 

@@ -129,9 +129,9 @@ describe('sessionVerifyingNotice', () => {
     expect(sessionVerifyingNotice({
       status: 'booting',
       previous: { user, tenant },
-    })).toBe('Verifying session…')
+    })).toBe('session.verifying')
     expect(sessionVerifyingNotice({ status: 'booting', restorable: true }))
-      .toBe('Verifying session…')
+      .toBe('session.verifying')
     expect(sessionVerifyingNotice({ status: 'booting' })).toBeUndefined()
     expect(sessionVerifyingNotice({ status: 'ready', user, tenant })).toBeUndefined()
     expect(sessionVerifyingNotice({ status: 'anonymous' })).toBeUndefined()
@@ -177,14 +177,14 @@ describe('beginBoot', () => {
 
 describe('sessionExpiredNotice', () => {
   it('returns a toast message only for expired sessions', () => {
-    expect(sessionExpiredNotice('expired')).toBe('Your session expired. Please sign in again.')
+    expect(sessionExpiredNotice('expired')).toBe('session.expired')
     expect(sessionExpiredNotice('logout')).toBeUndefined()
     expect(sessionExpiredNotice(undefined)).toBeUndefined()
   })
 
   it('does not toast expiry without a prior authenticated session (navigation / cold start)', () => {
     expect(sessionExpiredNotice('expired', false)).toBeUndefined()
-    expect(sessionExpiredNotice('expired', true)).toBe('Your session expired. Please sign in again.')
+    expect(sessionExpiredNotice('expired', true)).toBe('session.expired')
   })
 })
 

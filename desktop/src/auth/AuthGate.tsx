@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from './AuthProvider'
 import {
   canRenderProtectedApp,
@@ -15,10 +16,12 @@ import {
 } from './AuthScreens'
 
 export function AuthGate({ children }: { children: ReactNode }) {
+  const { t } = useTranslation('auth')
   const auth = useAuth()
   const view = resolveAuthGateView(auth.state)
   const verifyingNotice = sessionVerifyingNotice(auth.state)
-  const toastMessage = auth.sessionNotice ?? verifyingNotice
+  const noticeKey = auth.sessionNotice ?? verifyingNotice
+  const toastMessage = noticeKey ? t(noticeKey) : undefined
   const toastSticky = Boolean(verifyingNotice) && !auth.sessionNotice
 
   let content: ReactNode
@@ -48,8 +51,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   } else if (view.kind === 'forbidden') {
     content = (
       <AuthProblemScreen
-        title="このテナントを表示する権限がありません"
-        message="アクセス可能な施設へ切り替えるか、管理者に権限を確認してください。"
+        title={t('problem.forbidden.title')}
+        message={t('problem.forbidden.description')}
         onSwitchTenant={auth.switchTenant}
         onSignOut={() => { void auth.signOut() }}
       />
@@ -59,7 +62,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   } else {
     content = (
       <AuthProblemScreen
-        title="認証状態を確認できませんでした"
+        title={t('problem.unknown.title')}
         message={view.message}
         onRetry={auth.retry}
         onSignOut={() => { void auth.signOut() }}

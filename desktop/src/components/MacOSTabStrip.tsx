@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { routeTitle } from './AppShell'
 import {
   goBack,
@@ -28,6 +29,7 @@ export function supportsDesktopTabs(targetOs: string) {
 }
 
 export function MacOSTabStrip() {
+  const { t, i18n } = useTranslation('nav')
   const route = useRoute()
   const { canGoBack, canGoForward } = useNavigationAvailability()
   const [tabs, setTabs] = useState<CourseboardTab[]>([])
@@ -91,7 +93,8 @@ export function MacOSTabStrip() {
     invoke('update_courseboard_tab_title', { title: tabTitleForRoute(route) })
       .then(refreshTabs)
       .catch(console.error)
-  }, [enabled, refreshTabs, route])
+    // i18n.language: the native tab caption must follow locale switches too.
+  }, [enabled, refreshTabs, route, i18n.language])
 
   useEffect(() => {
     if (!enabled) return
@@ -124,18 +127,28 @@ export function MacOSTabStrip() {
         onTabSelect={label => invoke('activate_courseboard_tab', { label }).catch(console.error)}
         onTabClose={label => invoke('close_courseboard_tab', { label }).catch(console.error)}
         onNewTab={() => invoke('create_courseboard_tab', { path: null, activate: true }).catch(console.error)}
-        tabListLabel="Course Boardのタブ"
-        newTabLabel="新しいタブ"
-        closeTabLabel={tab => `${tab.title}を閉じる`}
+        tabListLabel={t('tabs.listLabel')}
+        newTabLabel={t('tabs.newTab')}
+        closeTabLabel={tab => t('tabs.closeTab', { title: tab.title })}
         windowControlsInset={controlsInset + 68}
       />
       <nav
-        aria-label="履歴ナビゲーション"
+        aria-label={t('tabs.history')}
         className="absolute top-0 z-10 flex h-[38px] w-[68px] items-center justify-center gap-0.5 border-r border-border"
         style={{ left: controlsInset }}
       >
-        <HistoryButton direction="back" disabled={!canGoBack} onClick={goBack} />
-        <HistoryButton direction="forward" disabled={!canGoForward} onClick={goForward} />
+        <HistoryButton
+          direction="back"
+          label={t('tabs.back')}
+          disabled={!canGoBack}
+          onClick={goBack}
+        />
+        <HistoryButton
+          direction="forward"
+          label={t('tabs.forward')}
+          disabled={!canGoForward}
+          onClick={goForward}
+        />
       </nav>
     </div>
   )
@@ -143,16 +156,17 @@ export function MacOSTabStrip() {
 
 function HistoryButton({
   direction,
+  label,
   disabled,
   onClick,
 }: {
   direction: 'back' | 'forward'
+  label: string
   disabled: boolean
   onClick: () => void
 }) {
   const back = direction === 'back'
   const Icon = back ? ChevronLeft : ChevronRight
-  const label = back ? '戻る' : '進む'
   return (
     <button
       type="button"

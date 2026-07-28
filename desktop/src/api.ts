@@ -1,3 +1,5 @@
+import { i18next } from './i18n'
+
 import {
   resolveMockFieldApiJson,
   resolveMockFieldApiText,
@@ -207,7 +209,7 @@ export function shouldSoftSignOutOn401(input: {
 async function accessTokenForProtectedRequest() {
   const context = apiAuthContext
   if (!context) {
-    throw new ApiError('認証の準備が完了していません。再読み込みしてください。', 401)
+    throw new ApiError(i18next.t('common:error.authNotReady'), 401)
   }
 
   const current = await context.getAccessToken(false)
@@ -217,7 +219,7 @@ async function accessTokenForProtectedRequest() {
   if (refreshed) return refreshed
 
   context.onUnauthorized()
-  throw new ApiError('ログインセッションの有効期限が切れました。', 401)
+  throw new ApiError(i18next.t('common:error.sessionExpired'), 401)
 }
 
 async function protectedFetch(

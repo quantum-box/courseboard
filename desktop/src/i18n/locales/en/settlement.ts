@@ -1,0 +1,103 @@
+import type { DeepPartial } from '../../types'
+import type { settlement as source } from '../ja/settlement'
+
+export const settlement: DeepPartial<typeof source> = {
+  title: 'Monthly close',
+  description:
+    'Check a month of bookings, caddie cost, cancellation fees, and payment matching before you close it.',
+  loading: 'Totalling up the month',
+  month: 'Month',
+  badge: 'Monthly settlement',
+  exportCsv: 'Export CSV',
+  exporting: 'Exporting…',
+  exportFailed: 'Could not export the CSV.',
+  squareUnmatchedNote:
+    'The payment matching table is not configured yet. Treat the paid, refunded, and unmatched counts as indicative.',
+  summary: {
+    title: 'Settlement summary',
+    description: '{{month}} · {{n}} bookings',
+    badge: 'Pre-close check',
+    metrics: {
+      revenue: 'Booking revenue',
+      revenueDetail: '{{n}} bookings',
+      paid: 'Paid',
+      paidDetail: 'Received against bookings',
+      unpaid: 'Outstanding',
+      unpaidDetail: 'Revenue minus payments',
+      refunded: 'Refunded',
+      refundedDetail: 'Refunds this month',
+      caddieCost: 'Caddie cost',
+      caddieCostDetail: '{{n}} assignments',
+      unpaidCancellation: 'Unpaid cancellation fees',
+      unpaidCancellationDetail: '{{n}} items',
+      squareIn: 'Payments in',
+      squareInDetail: 'Imported matching rows',
+      squareRefund: 'Payment refunds',
+      squareRefundDetail: 'Net {{amount}}',
+      squareUnmatched: 'Unmatched rows',
+      squareUnmatchedDetail: 'Imported rows not yet reconciled',
+    },
+    warning: 'There are notes on payment matching',
+  },
+  reservations: {
+    title: 'Bookings this month',
+    description: 'Booking IDs included in the total',
+    badge: '{{n}} bookings',
+    empty: 'No bookings in range',
+  },
+  unpaidCancellations: {
+    title: 'Unpaid cancellations',
+    description: 'Bookings that need billing or a payment check',
+    badge: '{{n}} bookings',
+    empty: {
+      title: 'No unpaid cancellations',
+      description: 'Every cancellation fee this month has been collected.',
+    },
+  },
+  billing: {
+    title: 'Unpaid cancellation fees',
+    description: 'Running this again for the same booking reuses the existing invoice.',
+    badge: '{{n}} items',
+    failed: 'Could not process the invoice',
+    reused: 'Reused the existing invoice',
+    issued: 'Invoice issued',
+    openPayment: 'Open the payment page',
+    paymentUrlNote: 'You can open the payment page for booking {{id}}.',
+    invalidUrl: 'The payment URL is not valid.',
+    openFailed: 'Could not open the payment page.',
+    issueFailed: 'Could not issue the invoice.',
+    empty: {
+      title: 'No unpaid cancellation fees',
+      description: 'Nothing more to bill for this period.',
+    },
+    table: {
+      reservation: 'Booking',
+      paymentStatus: 'Payment status',
+      fee: 'Cancellation fee',
+      invoice: 'Invoice',
+      issued: 'Issued',
+      notIssued: 'Not yet',
+      actions: 'Actions',
+      open: 'Open',
+      checking: 'Checking…',
+      checkExisting: 'View existing invoice',
+      issue: 'Issue invoice',
+    },
+  },
+  checklist: {
+    title: 'Before you close',
+    description: 'This screen settles golf operations. Keep it separate from the accounting close.',
+    reservation: {
+      title: 'Bookings',
+      detail: 'Check revenue, payments, and refunds line up',
+    },
+    caddie: {
+      title: 'Caddies',
+      detail: 'Check assignment counts and cost',
+    },
+    payment: {
+      title: 'Payments',
+      detail: 'Clear outstanding and unmatched rows',
+    },
+  },
+}

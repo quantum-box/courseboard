@@ -1,3 +1,5 @@
+import { i18next } from '../i18n'
+
 const PKCE_VERIFIER_BYTES = 64
 
 export const NATIVE_AUTH_PENDING_KEY = 'courseboard.auth.native.pending'
@@ -88,7 +90,7 @@ export function parseAuthorizationCallback(
     throw new NativeAuthorizationError('登録されていない認証callbackを拒否しました。')
   }
   if (now < transaction.createdAt || now - transaction.createdAt > NATIVE_AUTH_PENDING_MAX_AGE_MS) {
-    throw new NativeAuthorizationError('ログイン要求の有効期限が切れました。もう一度ログインしてください。')
+    throw new NativeAuthorizationError(i18next.t('auth:error.requestExpired'))
   }
 
   const returnedState = callback.searchParams.get('state')

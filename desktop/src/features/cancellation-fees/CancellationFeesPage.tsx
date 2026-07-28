@@ -11,7 +11,9 @@ import {
   Send,
 } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { downloadBlob, fieldApiJson, yen } from '../../api'
+import { i18next } from '../../i18n'
 import {
   DataTable,
   EmptyState,
@@ -80,12 +82,10 @@ type OrderData = {
   status: string
 }
 
-const statusLabels: Record<InvoiceStatus, string> = {
-  Draft: '下書き',
-  Sent: '送付済',
-  SendFailed: '送信失敗',
-  Paid: '入金済',
-  Overdue: '期限超過',
+const INVOICE_STATUSES: InvoiceStatus[] = ['Draft', 'Sent', 'SendFailed', 'Paid', 'Overdue']
+
+function statusLabel(status: InvoiceStatus) {
+  return i18next.t(`cancellationFees:status.${status}` as 'cancellationFees:status.Draft')
 }
 
 const statusVariants: Record<InvoiceStatus, 'neutral' | 'accent' | 'warning' | 'success' | 'destructive'> = {
@@ -96,12 +96,20 @@ const statusVariants: Record<InvoiceStatus, 'neutral' | 'accent' | 'warning' | '
   Overdue: 'warning',
 }
 
+/**
+ * Invoices created by Course Board carry the notes marker. The Japanese prefix
+ * stays hard-coded because it identifies rows already stored by earlier
+ * versions — translating it would hide them.
+ */
+const LEGACY_FEE_DESCRIPTION_PREFIX = 'キャンセル料'
+
 function isCancellationFee(invoice: InvoiceData) {
   return invoice.notes?.includes('[courseboard:cancellation-fee]')
-    || invoice.lineItems.some(item => item.description.startsWith('キャンセル料'))
+    || invoice.lineItems.some(item => item.description.startsWith(LEGACY_FEE_DESCRIPTION_PREFIX))
 }
 
 export function CancellationFeesPage() {
+  const { t } = useTranslation(['cancellationFees', 'common'])
   const [status, setStatus] = useState<'all' | InvoiceStatus>('all')
   const loader = useCallback(async () => {
     const suffix = status === 'all' ? '' : `?status=${encodeURIComponent(status)}`
@@ -115,54 +123,98 @@ export function CancellationFeesPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow="Collections"
-        title="キャンセル料"
-        description="キャンセル料だけを識別して、作成・送信・入金状態を一つの一覧で追跡します。"
+        title={t('cancellationFees:title')}
+        description={t('cancellationFees:description')}
         actions={(
           <Button type="button" variant="primary" onClick={() => navigate('cancellation-fees/new')}>
-            <Plus /> 新規請求
+            <Plus /> {t('cancellationFees:create')}
           </Button>
         )}
       />
 
       <MetricGrid>
-        <Metric label="表示" value={`${summary.count} 件`} />
-        <Metric label="未入金" value={yen(summary.unpaid)} tone={summary.unpaid > 0 ? 'warning' : 'neutral'} />
-        <Metric label="期限超過" value={`${summary.overdue} 件`} tone={summary.overdue > 0 ? 'danger' : 'neutral'} />
-        <Metric label="入金済" value={yen(summary.paid)} tone="success" />
+        <Metric
+          label={t('cancellationFees:metrics.shown')}
+          value={t('cancellationFees:metrics.shownValue', { n: String(summary.count) })}
+        />
+        <Metric
+          label={t('cancellationFees:metrics.unpaid')}
+          value={yen(summary.unpaid)}
+          tone={summary.unpaid > 0 ? 'warning' : 'neutral'}
+        />
+        <Metric
+          label={t('cancellationFees:metrics.overdue')}
+          value={t('cancellationFees:metrics.overdueValue', { n: String(summary.overdue) })}
+          tone={summary.overdue > 0 ? 'danger' : 'neutral'}
+        />
+        <Metric
+          label={t('cancellationFees:metrics.paid')}
+          value={yen(summary.paid)}
+          tone="success"
+        />
       </MetricGrid>
 
       <Panel
-        title="請求一覧"
-        description="Course Board の識別子、またはキャンセル料明細を持つ請求だけを表示します。"
+        title={t('cancellationFees:list.title')}
+        description={t('cancellationFees:list.description')}
         actions={(
           <div className="toolbar-row">
-            <NativeSelect aria-label="状態" value={status} onChange={event => setStatus(event.target.value as typeof status)}>
-              <option value="all">すべて</option>
-              {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            <NativeSelect
+              aria-label={t('cancellationFees:status.label')}
+              value={status}
+              onChange={event => setStatus(event.target.value as typeof status)}
+            >
+              <option value="all">{t('cancellationFees:status.all')}</option>
+              {INVOICE_STATUSES.map(value => (
+                <option key={value} value={value}>{statusLabel(value)}</option>
+              ))}
             </NativeSelect>
-            <PageRefreshButton size="sm" onClick={resource.refresh} label="更新" />
+            <PageRefreshButton size="sm" onClick={resource.refresh} label={t('common:action.refresh')} />
           </div>
         )}
       >
-        {resource.loading ? <LoadingState label="請求を読み込み中" /> : null}
+        {resource.loading ? <LoadingState label={t('cancellationFees:list.loading')} /> : null}
         {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
         {resource.data ? (
           <DataTable
             rows={resource.data}
             rowKey={invoice => invoice.id}
             onRowClick={invoice => navigate(`cancellation-fees/${invoice.id}`)}
-            empty={<EmptyState title="キャンセル料請求はありません" description="新規請求を作成するとここに表示されます。" />}
+            empty={(
+              <EmptyState
+                title={t('cancellationFees:list.empty.title')}
+                description={t('cancellationFees:list.empty.description')}
+              />
+            )}
             columns={[
               {
                 key: 'number',
-                header: '請求番号',
+                header: t('cancellationFees:list.table.number'),
                 cell: invoice => <div className="primary-cell"><strong>{invoice.invoiceNumber}</strong><small>{invoice.id}</small></div>,
               },
-              { key: 'client', header: '請求先', cell: invoice => invoice.clientName ?? invoice.clientId },
-              { key: 'status', header: '状態', cell: invoice => <Badge variant={statusVariants[invoice.status]}>{statusLabels[invoice.status]}</Badge> },
-              { key: 'due', header: '支払期限', cell: invoice => invoice.dueDate.slice(0, 10) },
-              { key: 'amount', header: '請求額', align: 'right', cell: invoice => yen(invoice.totalAmount, invoice.currency) },
+              {
+                key: 'client',
+                header: t('cancellationFees:list.table.client'),
+                cell: invoice => invoice.clientName ?? invoice.clientId,
+              },
+              {
+                key: 'status',
+                header: t('cancellationFees:list.table.status'),
+                cell: invoice => (
+                  <Badge variant={statusVariants[invoice.status]}>{statusLabel(invoice.status)}</Badge>
+                ),
+              },
+              {
+                key: 'due',
+                header: t('cancellationFees:list.table.due'),
+                cell: invoice => invoice.dueDate.slice(0, 10),
+              },
+              {
+                key: 'amount',
+                header: t('cancellationFees:list.table.amount'),
+                align: 'right',
+                cell: invoice => yen(invoice.totalAmount, invoice.currency),
+              },
             ]}
           />
         ) : null}
@@ -172,6 +224,7 @@ export function CancellationFeesPage() {
 }
 
 export function NewCancellationFeePage() {
+  const { t } = useTranslation(['cancellationFees', 'common'])
   const idempotencyKey = useRef(crypto.randomUUID())
   const orderId = currentRouteSearchParams().get('orderId')?.trim() ?? ''
   const orderLoader = useCallback(async () => {
@@ -195,11 +248,11 @@ export function NewCancellationFeePage() {
     setError(null)
     setDeliveryError(null)
     if (!sendEmail && !sendSms) {
-      setError('メールまたはSMSを少なくとも一つ選択してください。')
+      setError(t('cancellationFees:new.validation.channel'))
       return
     }
     if (sendSms && form.get('smsConsent') !== 'on') {
-      setError('SMS送信前に受信者の同意確認が必要です。')
+      setError(t('cancellationFees:new.validation.consent'))
       return
     }
     const reference = String(form.get('reference') ?? '').trim()
@@ -208,11 +261,11 @@ export function NewCancellationFeePage() {
     const notes = String(form.get('notes') ?? '').trim()
     const customerPhone = normalizePhone(String(form.get('clientPhone') ?? ''))
     if (!Number.isFinite(amount) || amount <= 0) {
-      setError('キャンセル料は1円以上で入力してください。')
+      setError(t('cancellationFees:new.validation.amount'))
       return
     }
     if (sendSms && !customerPhone) {
-      setError('SMS送付先を日本の携帯番号またはE.164形式で入力してください。')
+      setError(t('cancellationFees:new.validation.phone'))
       return
     }
 
@@ -231,13 +284,15 @@ export function NewCancellationFeePage() {
           taxAmount: Number(form.get('taxAmount') ?? 0),
           notes: [
             '[courseboard:cancellation-fee]',
-            'キャンセル料のご請求です。',
-            reference ? `対象: ${reference}` : null,
-            reason ? `理由: ${reason}` : null,
+            t('cancellationFees:new.message.intro'),
+            reference ? t('cancellationFees:new.message.reference', { reference }) : null,
+            reason ? t('cancellationFees:new.message.reason', { reason }) : null,
             notes || null,
           ].filter(Boolean).join('\n'),
           lineItems: [{
-            description: reference ? `キャンセル料 (${reference})` : 'キャンセル料',
+            description: reference
+              ? t('cancellationFees:new.message.lineItem', { reference })
+              : t('cancellationFees:lineItemLabel'),
             quantity: 1,
             unitPrice: amount,
           }],
@@ -262,10 +317,12 @@ export function NewCancellationFeePage() {
           navigate(`cancellation-fees/${fulfilled.id}`)
         }
       } catch (reason) {
-        setDeliveryError(reason instanceof Error ? reason.message : '通知処理に失敗しました')
+        setDeliveryError(reason instanceof Error
+          ? reason.message
+          : t('cancellationFees:new.error.delivery'))
       }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : '請求書を作成できませんでした')
+      setError(reason instanceof Error ? reason.message : t('cancellationFees:new.error.create'))
     } finally {
       setSubmitting(false)
     }
@@ -274,84 +331,139 @@ export function NewCancellationFeePage() {
   return (
     <div className="page-stack page-narrow">
       <PageHeader
-        eyebrow="New collection"
-        title="キャンセル料請求"
-        description="Stripe 支払いリンク付きの請求書を作成し、選択した送信方法で案内します。"
+        title={t('cancellationFees:new.title')}
+        description={t('cancellationFees:new.description')}
         actions={(
           <div className="flex flex-wrap gap-2">
-            {orderId ? <PageRefreshButton onClick={orderResource.refresh} label="受注を更新" /> : null}
-            <Button type="button" onClick={() => navigate('cancellation-fees')}><ArrowLeft /> 一覧へ</Button>
+            {orderId ? (
+              <PageRefreshButton
+                onClick={orderResource.refresh}
+                label={t('cancellationFees:new.refreshOrder')}
+              />
+            ) : null}
+            <Button type="button" onClick={() => navigate('cancellation-fees')}>
+              <ArrowLeft /> {t('cancellationFees:new.backToList')}
+            </Button>
           </div>
         )}
       />
 
-      {error ? <Notice tone="danger" title="作成できませんでした">{error}</Notice> : null}
+      {error ? (
+        <Notice tone="danger" title={t('cancellationFees:new.createFailed')}>{error}</Notice>
+      ) : null}
       {created && deliveryError ? (
-        <Notice tone="warning" title="請求書は作成済みです">
-          {deliveryError}。請求詳細から再送できます。
+        <Notice tone="warning" title={t('cancellationFees:new.partial.title')}>
+          {t('cancellationFees:new.partial.description', { message: deliveryError })}
           <div className="notice-inline-action">
-            <Button type="button" size="sm" onClick={() => navigate(`cancellation-fees/${created.id}`)}>請求詳細へ</Button>
+            <Button type="button" size="sm" onClick={() => navigate(`cancellation-fees/${created.id}`)}>
+              {t('cancellationFees:new.partial.openDetail')}
+            </Button>
           </div>
         </Notice>
       ) : null}
 
-      {orderId && orderResource.loading ? <LoadingState label="対象受注を読み込み中" /> : null}
+      {orderId && orderResource.loading ? (
+        <LoadingState label={t('cancellationFees:new.orderLoading')} />
+      ) : null}
       {orderId && orderResource.error ? (
-        <Notice tone="warning" title="対象受注を読み込めませんでした">
-          受注情報を自動入力できません。内容を手入力して続行できます。
+        <Notice tone="warning" title={t('cancellationFees:new.orderFailed.title')}>
+          {t('cancellationFees:new.orderFailed.description')}
         </Notice>
       ) : null}
 
       {order ? (
-        <Panel title="対象受注" description="受注から請求先と参照番号を自動入力しました。">
+        <Panel
+          title={t('cancellationFees:new.order.title')}
+          description={t('cancellationFees:new.order.description')}
+        >
           <dl className="detail-list">
-            <div><dt>受注番号</dt><dd>{order.orderNumber}</dd></div>
-            <div><dt>受注金額</dt><dd>{yen(order.totalAmount, order.currency)}</dd></div>
-            <div><dt>状態</dt><dd>{order.status}</dd></div>
+            <div><dt>{t('cancellationFees:new.order.number')}</dt><dd>{order.orderNumber}</dd></div>
+            <div>
+              <dt>{t('cancellationFees:new.order.amount')}</dt>
+              <dd>{yen(order.totalAmount, order.currency)}</dd>
+            </div>
+            <div><dt>{t('cancellationFees:new.order.status')}</dt><dd>{order.status}</dd></div>
           </dl>
         </Panel>
       ) : null}
 
       {orderId && orderResource.loading ? null : <form className="collection-editor" onSubmit={submit}>
-        <Panel title="キャンセル内容" description="対象、金額、理由を運用記録と一致させます。">
+        <Panel
+          title={t('cancellationFees:new.detail.title')}
+          description={t('cancellationFees:new.detail.description')}
+        >
           <FormGrid>
-            <Field label="対象予約・注文">
+            <Field label={t('cancellationFees:new.detail.reference')}>
               <Input
                 name="reference"
                 placeholder="RSV-1001 / ORD-1001"
                 defaultValue={order ? `${order.orderNumber} / ${order.id}` : ''}
               />
             </Field>
-            <Field label="キャンセル料" required>
+            <Field label={t('cancellationFees:new.detail.amount')} required>
               <Input name="amount" type="number" min={1} required value={amount} onChange={event => setAmount(Number(event.target.value))} />
             </Field>
-            <Field label="税額"><Input name="taxAmount" type="number" min={0} defaultValue={0} /></Field>
-            <Field label="理由"><Input name="reason" placeholder="当日キャンセル" /></Field>
+            <Field label={t('cancellationFees:new.detail.tax')}>
+              <Input name="taxAmount" type="number" min={0} defaultValue={0} />
+            </Field>
+            <Field label={t('cancellationFees:new.detail.reason')}>
+              <Input name="reason" placeholder={t('cancellationFees:new.detail.reasonPlaceholder')} />
+            </Field>
           </FormGrid>
-          <Field label="備考"><NativeTextarea name="notes" rows={4} placeholder="お客様に共有する補足" /></Field>
+          <Field label={t('cancellationFees:new.detail.notes')}>
+            <NativeTextarea
+              name="notes"
+              rows={4}
+              placeholder={t('cancellationFees:new.detail.notesPlaceholder')}
+            />
+          </Field>
         </Panel>
 
-        <Panel title="請求先" description="取引先IDがない場合は Course Board が重複しない参照IDを発行します。">
+        <Panel
+          title={t('cancellationFees:new.client.title')}
+          description={t('cancellationFees:new.client.description')}
+        >
           <FormGrid>
-            <Field label="請求先名" required><Input name="clientName" required defaultValue={order?.clientName ?? ''} /></Field>
-            <Field label="取引先ID"><Input name="clientId" placeholder="既存IDがある場合のみ" defaultValue={order?.clientId ?? ''} /></Field>
-            <Field label="支払期限" required><Input name="dueDate" type="date" required defaultValue={due} /></Field>
+            <Field label={t('cancellationFees:new.client.name')} required>
+              <Input name="clientName" required defaultValue={order?.clientName ?? ''} />
+            </Field>
+            <Field label={t('cancellationFees:new.client.id')}>
+              <Input
+                name="clientId"
+                placeholder={t('cancellationFees:new.client.idPlaceholder')}
+                defaultValue={order?.clientId ?? ''}
+              />
+            </Field>
+            <Field label={t('cancellationFees:new.client.due')} required>
+              <Input name="dueDate" type="date" required defaultValue={due} />
+            </Field>
           </FormGrid>
         </Panel>
 
-        <Panel title="送信" description="支払いURLは発行後に文面の {url} へ差し込まれます。">
+        <Panel
+          title={t('cancellationFees:new.delivery.title')}
+          description={t('cancellationFees:new.delivery.description')}
+        >
           <div className="delivery-choices">
             <label className={sendEmail ? 'delivery-choice selected' : 'delivery-choice'}>
               <input type="checkbox" checked={sendEmail} onChange={event => setSendEmail(event.target.checked)} />
-              <Mail /><span><strong>メール</strong><small>請求書と支払いリンク</small></span>
+              <Mail />
+              <span>
+                <strong>{t('cancellationFees:new.delivery.email')}</strong>
+                <small>{t('cancellationFees:new.delivery.emailDetail')}</small>
+              </span>
             </label>
             <label className={sendSms ? 'delivery-choice selected' : 'delivery-choice'}>
               <input type="checkbox" checked={sendSms} onChange={event => setSendSms(event.target.checked)} />
-              <MessageSquareText /><span><strong>SMS</strong><small>短い支払い案内</small></span>
+              <MessageSquareText />
+              <span>
+                <strong>{t('cancellationFees:new.delivery.sms')}</strong>
+                <small>{t('cancellationFees:new.delivery.smsDetail')}</small>
+              </span>
             </label>
           </div>
           <FormGrid>
-            <Field label="送付先メール" required={sendEmail}>
+            <Field label={t('cancellationFees:new.delivery.emailTo')} required={sendEmail}>
               <Input
                 name="clientEmail"
                 type="email"
@@ -361,7 +473,7 @@ export function NewCancellationFeePage() {
                 defaultValue={order?.clientEmail ?? ''}
               />
             </Field>
-            <Field label="SMS送付先" required={sendSms}>
+            <Field label={t('cancellationFees:new.delivery.smsTo')} required={sendSms}>
               <Input name="clientPhone" type="tel" required={sendSms} disabled={!sendSms} placeholder="09012345678" />
             </Field>
           </FormGrid>
@@ -369,13 +481,16 @@ export function NewCancellationFeePage() {
             <>
               <label className="consent-check">
                 <input name="smsConsent" type="checkbox" required />
-                <span><strong>SMS同意確認</strong><small>受信者が取引SMSを受け取ることに同意済みであることを確認しました。</small></span>
+                <span>
+                  <strong>{t('cancellationFees:new.delivery.consent')}</strong>
+                  <small>{t('cancellationFees:new.delivery.consentDetail')}</small>
+                </span>
               </label>
-              <Field label="SMS文面">
+              <Field label={t('cancellationFees:new.delivery.smsBody')}>
                 <NativeTextarea
                   name="smsMessage"
                   rows={4}
-                  defaultValue={'Course Boardです。\nキャンセル料 {amount}{currency} のお支払いをお願いします。\n支払期限: {dueDate}\n{url}'}
+                  defaultValue={t('cancellationFees:new.delivery.smsBodyDefault')}
                 />
               </Field>
             </>
@@ -383,9 +498,10 @@ export function NewCancellationFeePage() {
         </Panel>
 
         <div className="sticky-submit">
-          <div><span>請求金額</span><strong>{yen(amount)}</strong></div>
+          <div><span>{t('cancellationFees:new.total')}</span><strong>{yen(amount)}</strong></div>
           <Button type="submit" variant="primary" size="lg" disabled={submitting}>
-            <Send /> {submitting ? '作成・送信中…' : '請求を作成して送信'}
+            <Send />
+            {submitting ? t('cancellationFees:new.submitting') : t('cancellationFees:new.submit')}
           </Button>
         </div>
       </form>}
@@ -394,6 +510,7 @@ export function NewCancellationFeePage() {
 }
 
 export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) {
+  const { t } = useTranslation(['cancellationFees', 'common'])
   const loader = useCallback(() => fieldApiJson<InvoiceData>(`/v1/invoices/${encodeURIComponent(invoiceId)}`), [invoiceId])
   const resource = useResource(loader, [invoiceId])
   useRegisterPageReload(resource.refresh)
@@ -414,12 +531,14 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
       })
       setNotice(issue
         ? { tone: 'danger', message: issue }
-        : { tone: 'success', message: '支払いリンクと通知状態を更新しました。' })
+        : { tone: 'success', message: t('cancellationFees:detail.notice.resent') })
       resource.refresh()
     } catch (reason) {
       setNotice({
         tone: 'danger',
-        message: reason instanceof Error ? reason.message : '再送できませんでした',
+        message: reason instanceof Error
+          ? reason.message
+          : t('cancellationFees:detail.notice.resendFailed'),
       })
     } finally {
       setFulfilling(false)
@@ -432,7 +551,9 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
     } catch (reason) {
       setNotice({
         tone: 'danger',
-        message: reason instanceof Error ? reason.message : '支払いページを開けませんでした。',
+        message: reason instanceof Error
+          ? reason.message
+          : t('cancellationFees:detail.notice.openFailed'),
       })
     }
   }
@@ -440,9 +561,9 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
   async function copyPaymentLink(url: string) {
     try {
       await copyToClipboard(url)
-      setNotice({ tone: 'success', message: '支払いURLをコピーしました。' })
+      setNotice({ tone: 'success', message: t('cancellationFees:detail.notice.copied') })
     } catch {
-      setNotice({ tone: 'danger', message: '支払いURLをコピーできませんでした。' })
+      setNotice({ tone: 'danger', message: t('cancellationFees:detail.notice.copyFailed') })
     }
   }
 
@@ -452,62 +573,104 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
       const bytes = await buildInvoicePdf(invoice)
       const blob = new Blob([bytes], { type: 'application/pdf' })
       await downloadBlob(`invoice-${invoice.invoiceNumber}.pdf`, blob)
-      setNotice({ tone: 'success', message: '請求書PDFを準備しました。' })
+      setNotice({ tone: 'success', message: t('cancellationFees:detail.notice.pdfReady') })
     } catch (reason) {
       setNotice({
         tone: 'danger',
-        message: reason instanceof Error ? reason.message : '請求書PDFを取得できませんでした。',
+        message: reason instanceof Error
+          ? reason.message
+          : t('cancellationFees:detail.notice.pdfFailed'),
       })
     }
   }
 
-  if (resource.loading) return <LoadingState label="請求詳細を読み込み中" />
+  if (resource.loading) return <LoadingState label={t('cancellationFees:detail.loading')} />
   if (resource.error) return <ResourceError error={resource.error} onRetry={resource.refresh} />
   const invoice = resource.data
-  if (!invoice) return <EmptyState title="請求が見つかりません" />
+  if (!invoice) return <EmptyState title={t('cancellationFees:detail.notFound')} />
 
   return (
     <div className="page-stack page-narrow">
       <PageHeader
         eyebrow={invoice.invoiceNumber}
         title={invoice.clientName ?? invoice.clientId}
-        description={`作成日 ${invoice.createdAt.slice(0, 10)} · 支払期限 ${invoice.dueDate.slice(0, 10)}`}
+        description={t('cancellationFees:detail.subtitle', {
+          created: invoice.createdAt.slice(0, 10),
+          due: invoice.dueDate.slice(0, 10),
+        })}
         actions={(
           <div className="flex flex-wrap gap-2">
-            <PageRefreshButton onClick={resource.refresh} label="更新" />
-            <Button type="button" onClick={() => navigate('cancellation-fees')}><ArrowLeft /> 一覧へ</Button>
+            <PageRefreshButton onClick={resource.refresh} label={t('common:action.refresh')} />
+            <Button type="button" onClick={() => navigate('cancellation-fees')}>
+              <ArrowLeft /> {t('cancellationFees:new.backToList')}
+            </Button>
           </div>
         )}
       />
       {notice ? <Notice tone={notice.tone}>{notice.message}</Notice> : null}
       <MetricGrid>
-        <Metric label="請求額" value={yen(invoice.totalAmount, invoice.currency)} />
-        <Metric label="状態" value={statusLabels[invoice.status]} tone={invoice.status === 'Paid' ? 'success' : 'warning'} />
-        <Metric label="メール" value={invoice.emailDeliveryStatus ?? '未指定'} />
-        <Metric label="SMS" value={invoice.smsDeliveryStatus ?? '未指定'} />
+        <Metric
+          label={t('cancellationFees:detail.metrics.amount')}
+          value={yen(invoice.totalAmount, invoice.currency)}
+        />
+        <Metric
+          label={t('cancellationFees:detail.metrics.status')}
+          value={statusLabel(invoice.status)}
+          tone={invoice.status === 'Paid' ? 'success' : 'warning'}
+        />
+        <Metric
+          label={t('cancellationFees:detail.metrics.email')}
+          value={invoice.emailDeliveryStatus ?? t('cancellationFees:detail.metrics.unspecified')}
+        />
+        <Metric
+          label={t('cancellationFees:detail.metrics.sms')}
+          value={invoice.smsDeliveryStatus ?? t('cancellationFees:detail.metrics.unspecified')}
+        />
       </MetricGrid>
       <Panel
-        title="支払いと通知"
+        title={t('cancellationFees:detail.payment.title')}
         actions={(
           <div className="toolbar-row">
             {invoice.paymentLinkUrl ? (
               <>
-                <Button type="button" onClick={() => void openPaymentLink(invoice.paymentLinkUrl!)}><ExternalLink /> 支払いページ</Button>
-                <Button type="button" onClick={() => void copyPaymentLink(invoice.paymentLinkUrl!)}><ClipboardCopy /> URLコピー</Button>
+                <Button type="button" onClick={() => void openPaymentLink(invoice.paymentLinkUrl!)}>
+                  <ExternalLink /> {t('cancellationFees:detail.payment.openPage')}
+                </Button>
+                <Button type="button" onClick={() => void copyPaymentLink(invoice.paymentLinkUrl!)}>
+                  <ClipboardCopy /> {t('cancellationFees:detail.payment.copyUrl')}
+                </Button>
               </>
             ) : null}
             <Button type="button" onClick={() => void downloadPdf(invoice)}><Download /> PDF</Button>
             <Button type="button" variant="primary" disabled={fulfilling} onClick={() => void fulfill()}>
-              <Send /> {fulfilling ? '処理中…' : 'リンク発行・再送'}
+              <Send />
+              {fulfilling
+                ? t('cancellationFees:detail.payment.working')
+                : t('cancellationFees:detail.payment.resend')}
             </Button>
           </div>
         )}
       >
         <dl className="detail-list">
-          <div><dt>支払いリンク</dt><dd>{invoice.paymentLinkStatus ?? (invoice.paymentLinkUrl ? 'Ready' : '未発行')}</dd></div>
-          <div><dt>送付先メール</dt><dd>{invoice.clientEmail ?? '—'}</dd></div>
-          <div><dt>送付先電話</dt><dd>{invoice.clientPhone ?? '—'}</dd></div>
-          <div><dt>入金日時</dt><dd>{invoice.paidAt ?? '—'}</dd></div>
+          <div>
+            <dt>{t('cancellationFees:detail.payment.link')}</dt>
+            <dd>
+              {invoice.paymentLinkStatus
+                ?? (invoice.paymentLinkUrl ? 'Ready' : t('cancellationFees:detail.payment.notIssued'))}
+            </dd>
+          </div>
+          <div>
+            <dt>{t('cancellationFees:detail.payment.emailTo')}</dt>
+            <dd>{invoice.clientEmail ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>{t('cancellationFees:detail.payment.phoneTo')}</dt>
+            <dd>{invoice.clientPhone ?? '—'}</dd>
+          </div>
+          <div>
+            <dt>{t('cancellationFees:detail.payment.paidAt')}</dt>
+            <dd>{invoice.paidAt ?? '—'}</dd>
+          </div>
         </dl>
       </Panel>
       <InvoiceOperations
@@ -516,15 +679,34 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
         onRefresh={resource.refresh}
         onNotice={setNotice}
       />
-      <Panel title="請求明細">
+      <Panel title={t('cancellationFees:detail.items.title')}>
         <DataTable
           rows={invoice.lineItems}
           rowKey={item => `${item.description}-${item.unitPrice}`}
           columns={[
-            { key: 'description', header: '内容', cell: item => item.description },
-            { key: 'quantity', header: '数量', align: 'right', cell: item => item.quantity },
-            { key: 'unit', header: '単価', align: 'right', cell: item => yen(item.unitPrice, invoice.currency) },
-            { key: 'amount', header: '金額', align: 'right', cell: item => yen(item.amount, invoice.currency) },
+            {
+              key: 'description',
+              header: t('cancellationFees:detail.items.description'),
+              cell: item => item.description,
+            },
+            {
+              key: 'quantity',
+              header: t('cancellationFees:detail.items.quantity'),
+              align: 'right',
+              cell: item => item.quantity,
+            },
+            {
+              key: 'unit',
+              header: t('cancellationFees:detail.items.unitPrice'),
+              align: 'right',
+              cell: item => yen(item.unitPrice, invoice.currency),
+            },
+            {
+              key: 'amount',
+              header: t('cancellationFees:detail.items.amount'),
+              align: 'right',
+              cell: item => yen(item.amount, invoice.currency),
+            },
           ]}
         />
         {invoice.notes ? <pre className="notes-block">{invoice.notes}</pre> : null}
@@ -542,6 +724,7 @@ function InvoiceOperations({
   onRefresh(): void
   onNotice(notice: { tone: 'success' | 'danger'; message: string }): void
 }) {
+  const { t } = useTranslation(['cancellationFees', 'common'])
   const [status, setStatus] = useState<InvoiceStatus>(invoice.status)
   const [createPaymentLink, setCreatePaymentLink] = useState(false)
   const [sendEmail, setSendEmail] = useState(false)
@@ -559,14 +742,16 @@ function InvoiceOperations({
           sendEmail,
         }),
       })
-      onNotice({ tone: 'success', message: '請求状態を更新しました。' })
+      onNotice({ tone: 'success', message: t('cancellationFees:detail.notice.statusUpdated') })
       setCreatePaymentLink(false)
       setSendEmail(false)
       onRefresh()
     } catch (reason) {
       onNotice({
         tone: 'danger',
-        message: reason instanceof Error ? reason.message : '請求状態を更新できませんでした。',
+        message: reason instanceof Error
+          ? reason.message
+          : t('cancellationFees:detail.notice.statusFailed'),
       })
     } finally {
       setSaving(false)
@@ -574,12 +759,15 @@ function InvoiceOperations({
   }
 
   return (
-    <Panel title="請求状態の更新" description="状態変更、Payment Link再生成、メール再送を個別に指定します。">
+    <Panel
+      title={t('cancellationFees:detail.update.title')}
+      description={t('cancellationFees:detail.update.description')}
+    >
       <FormGrid>
-        <Field label="ステータス">
+        <Field label={t('cancellationFees:detail.update.status')}>
           <NativeSelect value={status} onChange={event => setStatus(event.target.value as InvoiceStatus)}>
-            {Object.entries(statusLabels).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
+            {INVOICE_STATUSES.map(value => (
+              <option key={value} value={value}>{statusLabel(value)}</option>
             ))}
           </NativeSelect>
         </Field>
@@ -590,17 +778,20 @@ function InvoiceOperations({
               checked={createPaymentLink}
               onChange={event => setCreatePaymentLink(event.target.checked)}
             />
-            <span><strong>Payment Linkを再生成</strong></span>
+            <span><strong>{t('cancellationFees:detail.update.regenerateLink')}</strong></span>
           </label>
           <label className="consent-check">
             <input type="checkbox" checked={sendEmail} onChange={event => setSendEmail(event.target.checked)} />
-            <span><strong>メール送信</strong></span>
+            <span><strong>{t('cancellationFees:detail.update.sendEmail')}</strong></span>
           </label>
         </div>
       </FormGrid>
       <div className="panel-footer-actions">
         <Button type="button" variant="primary" disabled={saving} onClick={() => void updateInvoice()}>
-          <Save /> {saving ? '更新中…' : '更新'}
+          <Save />
+          {saving
+            ? t('cancellationFees:detail.update.submitting')
+            : t('cancellationFees:detail.update.submit')}
         </Button>
       </div>
     </Panel>
@@ -623,13 +814,13 @@ export function fulfillmentIssue(
   delivery: { sendEmail: boolean; sendSms: boolean },
 ) {
   if (invoice.paymentLinkStatus !== 'Ready' || !invoice.paymentLinkUrl) {
-    return '支払いリンクが発行されていません。請求詳細から再試行してください。'
+    return i18next.t('cancellationFees:new.error.noPaymentLink')
   }
   const selectedDeliveriesSent =
     (!delivery.sendEmail || invoice.emailDeliveryStatus === 'Sent')
     && (!delivery.sendSms || invoice.smsDeliveryStatus === 'Sent')
   if (invoice.status !== 'Sent' || !selectedDeliveriesSent) {
-    return '支払いリンクは作成済みですが、選択したメールまたはSMSの送信が完了していません。請求詳細から再送できます。'
+    return i18next.t('cancellationFees:new.error.deliveryPartial')
   }
   return undefined
 }
