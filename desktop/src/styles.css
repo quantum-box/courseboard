@@ -433,6 +433,91 @@ button,
   overscroll-behavior: contain;
 }
 
+.member-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.member-status-invited {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.member-status-invited small {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.member-role-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.member-policy-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.member-invite-dialog-form {
+  display: grid;
+  gap: 14px;
+}
+
+.member-roles-checklist {
+  display: grid;
+  gap: 8px;
+}
+
+.member-roles-checklist label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.member-roles-checklist input[type='checkbox'] {
+  margin-top: 3px;
+  accent-color: hsl(var(--nui-primary));
+}
+
+.member-roles-checklist span {
+  display: flex;
+  flex-direction: column;
+}
+
+.member-roles-checklist small {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.member-roles-checklist label[data-disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.member-roles-divider {
+  margin: 2px 0;
+  border-top: 1px solid hsl(var(--nui-border));
+}
+
+.member-invite-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+}
+
+.member-invite-hint svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 .settings-master-link {
   display: flex;
   width: 100%;

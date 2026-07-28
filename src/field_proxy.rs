@@ -162,6 +162,7 @@ fn is_allowed_path(path: &str) -> bool {
         || path == "/v1/erp/staff"
         || is_non_empty_subpath(path, "/v1/erp/staff")
         || path == "/v1/erp/reservation-types"
+        || is_field_iam_path(path)
         || is_reservation_billing_invoice_path(path)
         || is_order_detail_path(path)
         || is_invoice_path(path)
@@ -190,6 +191,21 @@ fn is_allowed_route(method: &Method, path: &str) -> bool {
     }
     if path == "/v1/erp/staff" {
         return method == Method::GET || method == Method::POST;
+    }
+    // Tenant member management via the Field IAM surface (gated upstream by
+    // the ERP action `field:ManageUsers`). Raw /v1/auth/* stays blocked — the
+    // Field host does not serve it.
+    if path == "/v1/field/iam/users" {
+        return method == Method::GET;
+    }
+    if path == "/v1/field/iam/users/invite" {
+        return method == Method::POST;
+    }
+    if is_field_iam_user_policies_path(path) {
+        return method == Method::PUT;
+    }
+    if is_field_iam_user_path(path) {
+        return method == Method::DELETE;
     }
     if is_non_empty_subpath(path, "/v1/erp/staff") {
         return method == Method::POST;
@@ -228,6 +244,37 @@ fn is_non_empty_subpath(path: &str, prefix: &str) -> bool {
     path.strip_prefix(prefix)
         .and_then(|suffix| suffix.strip_prefix('/'))
         .is_some_and(|suffix| !suffix.is_empty())
+}
+
+fn is_field_iam_path(path: &str) -> bool {
+    path == "/v1/field/iam/users"
+        || path == "/v1/field/iam/users/invite"
+        || is_field_iam_user_policies_path(path)
+        || is_field_iam_user_path(path)
+}
+
+/// `/v1/field/iam/users/{user_id}` (excluding the static `invite` segment).
+fn is_field_iam_user_path(path: &str) -> bool {
+    let Some(suffix) = path.strip_prefix("/v1/field/iam/users/") else {
+        return false;
+    };
+    let mut segments = suffix.split('/');
+    matches!(
+        (segments.next(), segments.next()),
+        (Some(user_id), None) if !user_id.is_empty() && user_id != "invite"
+    )
+}
+
+/// `/v1/field/iam/users/{user_id}/policies`
+fn is_field_iam_user_policies_path(path: &str) -> bool {
+    let Some(suffix) = path.strip_prefix("/v1/field/iam/users/") else {
+        return false;
+    };
+    let mut segments = suffix.split('/');
+    matches!(
+        (segments.next(), segments.next(), segments.next()),
+        (Some(user_id), Some("policies"), None) if !user_id.is_empty() && user_id != "invite"
+    )
 }
 
 fn is_reservation_billing_invoice_path(path: &str) -> bool {
@@ -285,8 +332,17 @@ mod tests {
         assert!(is_allowed_path("/v1/invoices/inv_1"));
         assert!(is_allowed_path("/v1/invoices/inv_1/fulfill"));
         assert!(is_allowed_path("/v1/erp/orders/order_1"));
+        assert!(is_allowed_path("/v1/field/iam/users"));
+        assert!(is_allowed_path("/v1/field/iam/users/invite"));
+        assert!(is_allowed_path("/v1/field/iam/users/us_1"));
+        assert!(is_allowed_path("/v1/field/iam/users/us_1/policies"));
         assert!(!is_allowed_path("/v1/erp/vendors"));
         assert!(!is_allowed_path("/v1/auth/users"));
+        assert!(!is_allowed_path("/v1/auth/users/invite"));
+        assert!(!is_allowed_path("/v1/auth/user-policies"));
+        assert!(!is_allowed_path("/v1/field/iam/users/us_1/role"));
+        assert!(!is_allowed_path("/v1/field/iam/users/invite/policies"));
+        assert!(!is_allowed_path("/v1/field/iam"));
         assert!(!is_allowed_path("/https://example.com"));
         assert!(!is_allowed_path("/v1/erp/staff-secrets"));
         assert!(!is_allowed_path("/v1/invoices-private"));
@@ -315,6 +371,33 @@ mod tests {
             "/v1/erp/extensions/golf-course/courses/course_1"
         ));
         assert!(is_allowed_route(&Method::GET, "/v1/erp/orders/order_1"));
+        assert!(is_allowed_route(&Method::GET, "/v1/field/iam/users"));
+        assert!(is_allowed_route(
+            &Method::POST,
+            "/v1/field/iam/users/invite"
+        ));
+        assert!(is_allowed_route(
+            &Method::PUT,
+            "/v1/field/iam/users/us_1/policies"
+        ));
+        assert!(is_allowed_route(
+            &Method::DELETE,
+            "/v1/field/iam/users/us_1"
+        ));
+        assert!(!is_allowed_route(&Method::POST, "/v1/field/iam/users"));
+        assert!(!is_allowed_route(
+            &Method::GET,
+            "/v1/field/iam/users/invite"
+        ));
+        assert!(!is_allowed_route(
+            &Method::PUT,
+            "/v1/field/iam/users/us_1/role"
+        ));
+        assert!(!is_allowed_route(
+            &Method::DELETE,
+            "/v1/field/iam/users/us_1/policies"
+        ));
+        assert!(!is_allowed_route(&Method::PUT, "/v1/field/iam/users/us_1"));
         assert!(!is_allowed_route(&Method::GET, "/v1/erp/orders"));
         assert!(!is_allowed_route(&Method::DELETE, "/v1/invoices/inv_1"));
         assert!(!is_allowed_route(

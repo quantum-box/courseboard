@@ -88,6 +88,7 @@ export type NavigationRoute =
   | 'cancellation-fees'
   | 'golf/courses'
   | 'golf/policy'
+  | 'settings/members'
 
 export type NavigationItem = {
   route: NavigationRoute
@@ -145,6 +146,7 @@ export const settingsNavigation: NavigationItem[] = [
   { route: 'golf/courses', icon: FolderTree },
   { route: 'golf/policy', icon: Settings2 },
   { route: 'course-map', icon: Map },
+  { route: 'settings/members', icon: UserRound },
 ]
 
 /** Navigation copy is looked up at render time so it follows the active locale. */

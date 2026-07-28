@@ -66,6 +66,10 @@ export const nav = {
       label: '予約ルール',
       description: '予約を受ける条件を決める',
     },
+    'settings/members': {
+      label: 'メンバーと権限',
+      description: 'メンバーの招待とロールの管理',
+    },
     settings: {
       label: '設定',
       description: '連携と最初に決める設定',
