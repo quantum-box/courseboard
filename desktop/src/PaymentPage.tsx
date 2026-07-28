@@ -6,6 +6,8 @@ import {
 } from '@stripe/react-stripe-js'
 import { loadStripe, Stripe } from '@stripe/stripe-js'
 import { Component, FormEvent, ReactNode, useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { i18next } from './i18n'
 import {
   apiJson,
   CancellationFeeCollection,
@@ -19,6 +21,7 @@ type PaymentPageProps = {
 }
 
 export function PaymentPage({ token }: PaymentPageProps) {
+  const { t } = useTranslation(['payment'])
   const apiBase = useMemo(() => publicApiBaseUrl(), [])
   const [collection, setCollection] = useState<CancellationFeeCollection | null>(null)
   const [intent, setIntent] = useState<StripePaymentIntentResponse | null>(null)
@@ -39,7 +42,7 @@ export function PaymentPage({ token }: PaymentPageProps) {
         if (nextCollection.status === 'paid') return
         if (!nextCollection.field_invoice_id) {
           setPaymentError(
-            'この支払いリンクは現在利用できません。お手数ですが施設へお問い合わせください。',
+            t('payment:unavailable'),
           )
           return
         }
@@ -55,13 +58,13 @@ export function PaymentPage({ token }: PaymentPageProps) {
         } catch (err) {
           if (!cancelled) {
             setPaymentError(
-              err instanceof Error ? err.message : '支払いフォームを準備できませんでした',
+              err instanceof Error ? err.message : t('payment:formFailed'),
             )
           }
         }
       } catch (err) {
         if (!cancelled) {
-          setLoadError(err instanceof Error ? err.message : '支払い情報を読み込めませんでした')
+          setLoadError(err instanceof Error ? err.message : t('payment:loadFailed'))
         }
       }
     }
@@ -76,7 +79,7 @@ export function PaymentPage({ token }: PaymentPageProps) {
       <main className="payment-shell">
         <section className="payment-panel">
           <p className="eyebrow">Course Board</p>
-          <h1>支払いページを開けません</h1>
+          <h1>{t('payment:cannotOpen')}</h1>
           <pre className="error-box">{loadError}</pre>
         </section>
       </main>
@@ -88,7 +91,7 @@ export function PaymentPage({ token }: PaymentPageProps) {
       <main className="payment-shell">
         <section className="payment-panel">
           <p className="eyebrow">Course Board</p>
-          <h1>読み込み中...</h1>
+          <h1>{t('payment:loading')}</h1>
         </section>
       </main>
     )
@@ -99,8 +102,8 @@ export function PaymentPage({ token }: PaymentPageProps) {
       <main className="payment-shell">
         <section className="payment-panel success">
           <p className="eyebrow">Course Board</p>
-          <h1>お支払い済みです</h1>
-          <p>キャンセル料のお支払いを確認しました。</p>
+          <h1>{t('payment:paid.title')}</h1>
+          <p>{t('payment:paid.description')}</p>
         </section>
       </main>
     )
@@ -110,26 +113,26 @@ export function PaymentPage({ token }: PaymentPageProps) {
     <main className="payment-shell">
       <section className="payment-summary">
         <p className="eyebrow">Course Board</p>
-        <h1>キャンセル料のお支払い</h1>
+        <h1>{t('payment:title')}</h1>
         <div className="payment-amount">{yen(collection.amount)}</div>
         <dl>
           <div>
-            <dt>請求先</dt>
+            <dt>{t('payment:field.client')}</dt>
             <dd>{collection.customer_name}</dd>
           </div>
           {collection.reference ? (
             <div>
-              <dt>対象</dt>
+              <dt>{t('payment:field.reference')}</dt>
               <dd>{collection.reference}</dd>
             </div>
           ) : null}
           <div>
-            <dt>支払期限</dt>
+            <dt>{t('payment:field.due')}</dt>
             <dd>{collection.due_date}</dd>
           </div>
           {collection.reason ? (
             <div>
-              <dt>理由</dt>
+              <dt>{t('payment:field.reason')}</dt>
               <dd>{collection.reason}</dd>
             </div>
           ) : null}
@@ -139,7 +142,7 @@ export function PaymentPage({ token }: PaymentPageProps) {
       <section className="payment-panel">
         {paymentError ? (
           <div>
-            <h2>支払いフォームを準備できません</h2>
+            <h2>{t('payment:form.unavailableTitle')}</h2>
             <pre className="error-box">{paymentError}</pre>
           </div>
         ) : stripePromise && intent ? (
@@ -157,7 +160,7 @@ export function PaymentPage({ token }: PaymentPageProps) {
             </Elements>
           </PaymentElementBoundary>
         ) : (
-          <p>支払いフォームを準備しています...</p>
+          <p>{t('payment:form.preparing')}</p>
         )}
       </section>
     </main>
@@ -174,7 +177,7 @@ class PaymentElementBoundary extends Component<
     return {
       message: error instanceof Error
         ? error.message
-        : '支払いフォームを初期化できませんでした',
+        : i18next.t('payment:form.initFailed'),
     }
   }
 
@@ -182,7 +185,7 @@ class PaymentElementBoundary extends Component<
     if (this.state.message) {
       return (
         <div>
-          <h2>支払いフォームを初期化できません</h2>
+          <h2>{i18next.t('payment:form.initFailedTitle')}</h2>
           <pre className="error-box">{this.state.message}</pre>
         </div>
       )
@@ -212,6 +215,7 @@ function StripeCheckoutForm({
   collection: CancellationFeeCollection
   onPaid: (collection: CancellationFeeCollection) => void
 }) {
+  const { t } = useTranslation(['payment'])
   const stripe = useStripe()
   const elements = useElements()
   const [submitting, setSubmitting] = useState(false)
@@ -233,7 +237,7 @@ function StripeCheckoutForm({
       },
     })
     if (result.error) {
-      setMessage(result.error.message ?? '決済に失敗しました')
+      setMessage(result.error.message ?? t('payment:form.failed'))
       setSubmitting(false)
       return
     }
@@ -248,8 +252,8 @@ function StripeCheckoutForm({
       )
       onPaid(confirmed.collection)
       setMessage(confirmed.collection.status === 'paid'
-        ? 'お支払いを確認しました'
-        : 'お支払い処理を受け付けました。確認まで少しお待ちください。')
+        ? t('payment:form.succeeded')
+        : t('payment:form.processing'))
     }
     setSubmitting(false)
   }
@@ -257,12 +261,12 @@ function StripeCheckoutForm({
   return (
     <form className="stripe-form" onSubmit={submit}>
       <div className="form-total">
-        <span>お支払い金額</span>
+        <span>{t('payment:form.amount')}</span>
         <strong>{yen(collection.amount)}</strong>
       </div>
       <div className="payment-element-host">
         {!formReady && !formLoadError ? (
-          <p className="payment-element-loading">支払いフォームを読み込んでいます...</p>
+          <p className="payment-element-loading">{t('payment:form.loading')}</p>
         ) : null}
         <PaymentElement
           options={{ layout: 'tabs' }}
@@ -272,14 +276,14 @@ function StripeCheckoutForm({
           }}
           onLoadError={event => {
             setFormReady(false)
-            setFormLoadError(event.error.message ?? '支払いフォームを読み込めませんでした')
+            setFormLoadError(event.error.message ?? t('payment:form.loadFailed'))
           }}
         />
       </div>
       {formLoadError ? <pre className="error-box">{formLoadError}</pre> : null}
       {message ? <p className="form-message">{message}</p> : null}
       <button disabled={!stripe || !elements || !formReady || submitting} type="submit">
-        {submitting ? '処理中...' : '支払いを完了する'}
+        {submitting ? t('payment:form.submitting') : t('payment:form.submit')}
       </button>
     </form>
   )

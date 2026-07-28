@@ -1,0 +1,83 @@
+import type { DeepPartial } from '../../types'
+import type { policy as source } from '../ja/policy'
+
+export const policy: DeepPartial<typeof source> = {
+  title: 'Booking rules',
+  description: 'Set the conditions for accepting bookings. Used during setup, rarely opened day to day.',
+  loading: 'Loading booking rules',
+  save: 'Save booking rules',
+  status: {
+    configured: 'Configured',
+    missing: 'Not set up yet',
+  },
+  saved: {
+    title: 'Booking rules saved',
+    description: 'New bookings will be judged with these settings.',
+  },
+  invalid: {
+    title: 'Check the settings before saving',
+  },
+  saveFailed: 'Could not save the booking rules.',
+  basics: {
+    title: 'Slot basics',
+    description: 'Defaults shared by new tee times and play products.',
+    reservationTypeId: 'Reservation type ID',
+    reservationTypeIdHint: 'Leave empty to keep the current setting',
+    defaultHoles: 'Default holes',
+    maxPlayers: 'Players per slot',
+    cart: 'Cart',
+    cutoff: 'Booking cutoff',
+    cutoffHint: 'How many hours before the tee time bookings close',
+  },
+  cartOption: {
+    optional: 'Optional',
+    required: 'Required',
+    unavailable: 'Not available',
+  },
+  deposit: {
+    title: 'Deposit',
+    description: 'How much is paid up front at booking time, set separately for members and guests.',
+    member: 'Member deposit',
+    guest: 'Guest deposit',
+    hint: '0–100%',
+  },
+  selfLock: {
+    title: 'Caddie-only time bands',
+    description: 'Reserve busy time bands for caddie-accompanied play and stop self-play bookings.',
+    enabled: 'Use this setting',
+    slotWeekdays: 'Days for band {{n}}',
+    allDays: 'None selected = every day',
+    start: 'Start',
+    end: 'End',
+    addSlot: 'Add a time band',
+    selectDay: 'Select {{day}}',
+    unselectDay: 'Unselect {{day}}',
+  },
+  spend: {
+    title: 'Per-player spend check',
+    description: 'Send bookings below your threshold to review, or refuse them.',
+    enabled: 'Use this setting',
+    threshold: 'Minimum per player',
+    thresholdHint: 'Leave empty to follow the daily revenue target',
+    thresholdPlaceholder: 'Follow the revenue target',
+    belowAction: 'When below the threshold',
+    review: 'Hold for staff review',
+    reject: 'Refuse the booking',
+  },
+  summary: {
+    maxPlayers: 'Up to {{n}} players',
+    cutoff: 'Closes {{n}}h before',
+  },
+  validation: {
+    slotTimes: 'Band {{n}}: enter a start and an end.',
+    slotOrder: 'Band {{n}}: the end must be after the start.',
+    overlapAllDays: 'Bands {{a}} and {{b}} overlap every day.',
+    overlapOnDay: 'Bands {{a}} and {{b}} overlap on {{day}}.',
+    holes: 'Choose 9 or 18 holes.',
+    maxPlayers: 'Enter 1 to 4 players per slot.',
+    memberDeposit: 'Enter a member deposit between 0 and 100%.',
+    guestDeposit: 'Enter a guest deposit between 0 and 100%.',
+    cutoff: 'Enter a cutoff of 0 or more hours.',
+    spendThreshold: 'Enter a minimum per player of 0 or more.',
+  },
+}

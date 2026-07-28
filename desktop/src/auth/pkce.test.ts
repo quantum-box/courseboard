@@ -52,6 +52,6 @@ describe('native OAuth PKCE', () => {
       'courseboard://oauth/callback?code=code&state=expected-state',
       transaction,
       1_000 + NATIVE_AUTH_PENDING_MAX_AGE_MS + 1,
-    )).toThrow('有効期限')
+    )).toThrow('受付時間が過ぎました')
   })
 })

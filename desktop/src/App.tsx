@@ -1,6 +1,7 @@
 import { Button } from '@tachyon-sdk/native-ui'
 import { ArrowLeft, MapPin } from 'lucide-react'
 import { useEffect } from 'react'
+import { useTranslation } from 'react-i18next'
 import { AuthGate } from './auth/AuthGate'
 import { AuthProvider } from './auth/AuthProvider'
 import { AppShell } from './components/AppShell'
@@ -17,7 +18,9 @@ import { GolfHomePage } from './features/golf/GolfHomePage'
 import { PolicyPage } from './features/golf/PolicyPage'
 import { ReservationProductsPage } from './features/golf/ReservationProductsPage'
 import { SettlementPage } from './features/golf/SettlementPage'
+import { ShiftBoardPage } from './features/golf/ShiftBoardPage'
 import { TimelinePage } from './features/golf/timeline/TimelinePage'
+import { SettingsAdvancedPage } from './features/settings/SettingsAdvancedPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { useCartUpdates } from './hooks/useCartUpdates'
 import { navigate, useRoute } from './lib/router'
@@ -62,10 +65,11 @@ function AppContent() {
 }
 
 function OperatorWebRedirect({ href }: { href: string }) {
+  const { t } = useTranslation('nav')
   useEffect(() => {
     window.location.replace(href)
   }, [href])
-  return <div className="not-found-page"><p>認証済みのCourse Boardへ移動しています…</p></div>
+  return <div className="not-found-page"><p>{t('redirect.message')}</p></div>
 }
 
 function RouteContent({ route }: { route: string }) {
@@ -75,6 +79,7 @@ function RouteContent({ route }: { route: string }) {
     return <ReservationProductsPage />
   }
   if (route === 'golf/timeline') return <TimelinePage />
+  if (route === 'golf/caddies/shifts') return <ShiftBoardPage />
   if (route === 'golf/caddies' || route.startsWith('golf/caddies/')) {
     const segment = route === 'golf/caddies'
       ? ''
@@ -102,6 +107,7 @@ function RouteContent({ route }: { route: string }) {
   }
   if (route === 'course-map') return <CourseMapPage />
   if (route === 'settings') return <SettingsPage />
+  if (route === 'settings/advanced') return <SettingsAdvancedPage />
   return <NotFoundPage />
 }
 
@@ -114,6 +120,7 @@ function decodeRouteSegment(value: string) {
 }
 
 function CourseMapPage() {
+  const { t } = useTranslation('map')
   const { carts, status } = useCartUpdates(WS_URL)
   const live = status === 'online' || status === 'mock'
   return (
@@ -122,18 +129,14 @@ function CourseMapPage() {
         <div>
           <span className={`connection-dot ${live ? 'online' : ''}`} />
           {status === 'online'
-            ? `リアルタイム · ${carts.length}台`
+            ? t('status.live', { n: String(carts.length) })
             : status === 'mock'
-              ? `開発モック · ${carts.length}台`
+              ? t('status.mock', { n: String(carts.length) })
               : status === 'connecting'
-                ? 'シミュレーターへ接続中'
-                : 'シミュレーターはオフライン'}
+                ? t('status.connecting')
+                : t('status.offline')}
         </div>
-        <span>
-          {status === 'mock'
-            ? 'Browser mock · Tauri WS unavailable'
-            : 'Desktop simulator · ws://127.0.0.1:9001'}
-        </span>
+        <span>{status === 'mock' ? t('source.mock') : t('source.desktop')}</span>
       </div>
       <div className="course-map-stage"><CourseMap carts={carts} /></div>
     </div>
@@ -141,13 +144,14 @@ function CourseMapPage() {
 }
 
 function NotFoundPage() {
+  const { t } = useTranslation(['nav', 'common'])
   return (
     <div className="not-found-page">
       <MapPin />
-      <h1>画面が見つかりません</h1>
-      <p>指定された Course Board の画面は移動または削除されています。</p>
+      <h1>{t('nav:notFound.title')}</h1>
+      <p>{t('nav:notFound.description')}</p>
       <Button type="button" variant="primary" onClick={() => navigate('golf')}>
-        <ArrowLeft /> ホームへ戻る
+        <ArrowLeft /> {t('common:action.goHome')}
       </Button>
     </div>
   )

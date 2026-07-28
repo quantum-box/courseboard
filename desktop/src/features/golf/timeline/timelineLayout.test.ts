@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { TeeReservation, TimelineAssignment } from './models'
 import {
   DEFAULT_PX_PER_HOUR,
+  assignStackLanes,
   MAX_PX_PER_HOUR,
   MIN_PX_PER_HOUR,
   buildHourMarks,
@@ -144,5 +145,41 @@ describe('timelineLayout', () => {
       assigned: 1,
       unassigned: 1,
     })
+  })
+})
+
+describe('assignStackLanes', () => {
+  it('keeps non-overlapping blocks on one sub-row', () => {
+    const { lanes, laneCount } = assignStackLanes([
+      { id: 'a', startMinutes: 420, endMinutes: 480 },
+      { id: 'b', startMinutes: 480, endMinutes: 540 },
+    ])
+    expect(laneCount).toBe(1)
+    expect(lanes.get('a')).toBe(0)
+    expect(lanes.get('b')).toBe(0)
+  })
+
+  it('stacks overlapping blocks into separate sub-rows', () => {
+    const { lanes, laneCount } = assignStackLanes([
+      { id: 'a', startMinutes: 420, endMinutes: 700 },
+      { id: 'b', startMinutes: 428, endMinutes: 708 },
+      { id: 'c', startMinutes: 436, endMinutes: 716 },
+    ])
+    expect(laneCount).toBe(3)
+    expect(new Set([lanes.get('a'), lanes.get('b'), lanes.get('c')]).size).toBe(3)
+  })
+
+  it('reuses a sub-row once the earlier block has ended', () => {
+    const { lanes, laneCount } = assignStackLanes([
+      { id: 'a', startMinutes: 420, endMinutes: 480 },
+      { id: 'b', startMinutes: 440, endMinutes: 500 },
+      { id: 'c', startMinutes: 490, endMinutes: 550 },
+    ])
+    expect(laneCount).toBe(2)
+    expect(lanes.get('c')).toBe(0)
+  })
+
+  it('treats an empty lane as one sub-row', () => {
+    expect(assignStackLanes([]).laneCount).toBe(1)
   })
 })

@@ -9,7 +9,9 @@ import {
   X,
 } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { courseboardApiJson, fieldTenant } from '../../api'
+import { useTranslation } from 'react-i18next'
+import { courseboardApiJson } from '../../api'
+import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   DataTable,
@@ -17,8 +19,6 @@ import {
   Field,
   FormGrid,
   LoadingState,
-  Metric,
-  MetricGrid,
   NativeSelect,
   Notice,
   PageHeader,
@@ -43,7 +43,7 @@ type EditorState =
   | null
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '操作を完了できませんでした。'
+  return error instanceof Error ? error.message : i18next.t('courses:error.generic')
 }
 
 function formatUpdatedAt(value: string) {
@@ -58,21 +58,21 @@ function formatUpdatedAt(value: string) {
 }
 
 function validateCourse(draft: GolfCourseDraft) {
-  if (!draft.name.trim()) return 'コース名を入力してください。'
-  if (!draft.timezone.trim()) return 'タイムゾーンを入力してください。'
-  if (![9, 18].includes(draft.holeCount)) return 'ホール数は9Hまたは18Hを選択してください。'
+  if (!draft.name.trim()) return i18next.t('courses:validation.name')
+  if (!draft.timezone.trim()) return i18next.t('courses:validation.timezone')
+  if (![9, 18].includes(draft.holeCount)) return i18next.t('courses:validation.holeCount')
   if (
     !Number.isInteger(draft.startIntervalMinutes)
     || draft.startIntervalMinutes < 1
     || draft.startIntervalMinutes > 60
   ) {
-    return 'スタート間隔は1〜60分の整数で入力してください。'
+    return i18next.t('courses:validation.startInterval')
   }
   return null
 }
 
 export function CoursesPage() {
-  const tenant = fieldTenant()
+  const { t } = useTranslation(['courses', 'common', 'nav'])
   const [courses, setCourses] = useState<GolfCourse[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -148,7 +148,7 @@ export function CoursesPage() {
           method: 'POST',
           body: JSON.stringify(body),
         })
-        setSavedMessage(`「${body.name}」を追加しました。`)
+        setSavedMessage(t('courses:notice.added', { name: body.name }))
       } else {
         await courseboardApiJson(
           `${coursesPath}/${encodeURIComponent(editor.courseId)}`,
@@ -157,7 +157,7 @@ export function CoursesPage() {
             body: JSON.stringify(body),
           },
         )
-        setSavedMessage(`「${body.name}」を更新しました。`)
+        setSavedMessage(t('courses:notice.updated', { name: body.name }))
       }
       setEditor(null)
       await loadCourses()
@@ -169,7 +169,7 @@ export function CoursesPage() {
   }
 
   async function deleteCourse(course: GolfCourse) {
-    if (!window.confirm(`「${course.name}」を削除します。よろしいですか？`)) return
+    if (!window.confirm(t('courses:confirmDelete', { name: course.name }))) return
     setDeletingId(course.id)
     setMutationError(null)
     setSavedMessage(null)
@@ -179,7 +179,7 @@ export function CoursesPage() {
         { method: 'DELETE' },
       )
       if (editor?.mode === 'edit' && editor.courseId === course.id) setEditor(null)
-      setSavedMessage(`「${course.name}」を削除しました。`)
+      setSavedMessage(t('courses:notice.deleted', { name: course.name }))
       await loadCourses()
     } catch (error) {
       setMutationError(errorMessage(error))
@@ -191,8 +191,8 @@ export function CoursesPage() {
   const columns: DataTableColumn<GolfCourse>[] = [
     {
       key: 'name',
-      header: 'コース',
-      mobileLabel: 'コース',
+      header: t('courses:table.course'),
+      mobileLabel: t('courses:table.course'),
       cell: course => (
         <div className="grid gap-0.5">
           <strong>{course.name}</strong>
@@ -204,51 +204,51 @@ export function CoursesPage() {
     },
     {
       key: 'holes',
-      header: 'ホール',
-      mobileLabel: 'ホール',
+      header: t('courses:table.holes'),
+      mobileLabel: t('courses:table.holes'),
       align: 'right',
       cell: course => `${course.holeCount}H`,
     },
     {
       key: 'interval',
-      header: 'スタート間隔',
-      mobileLabel: 'スタート間隔',
+      header: t('courses:table.interval'),
+      mobileLabel: t('courses:table.interval'),
       align: 'right',
-      cell: course => `${course.startIntervalMinutes}分`,
+      cell: course => t('common:unit.minutes', { n: String(course.startIntervalMinutes) }),
     },
     {
       key: 'hours',
-      header: '営業時間',
-      mobileLabel: '営業時間',
+      header: t('courses:table.hours'),
+      mobileLabel: t('courses:table.hours'),
       cell: course => course.businessHoursJson
         ? `${course.businessHoursJson.open}–${course.businessHoursJson.close}`
-        : '未設定',
+        : t('common:state.unset'),
     },
     {
       key: 'timezone',
-      header: 'タイムゾーン',
-      mobileLabel: 'タイムゾーン',
+      header: t('courses:table.timezone'),
+      mobileLabel: t('courses:table.timezone'),
       cell: course => course.timezone,
     },
     {
       key: 'status',
-      header: '状態',
-      mobileLabel: '状態',
+      header: t('courses:table.status'),
+      mobileLabel: t('courses:table.status'),
       cell: course => (
         <Badge variant={course.isActive ? 'success' : 'neutral'}>
-          {course.isActive ? '有効' : '無効'}
+          {course.isActive ? t('common:state.enabled') : t('common:state.disabled')}
         </Badge>
       ),
     },
     {
       key: 'updated',
-      header: '更新',
-      mobileLabel: '更新',
+      header: t('courses:table.updated'),
+      mobileLabel: t('courses:table.updated'),
       cell: course => formatUpdatedAt(course.updatedAt),
     },
     {
       key: 'actions',
-      header: <span className="sr-only">操作</span>,
+      header: <span className="sr-only">{t('courses:table.actions')}</span>,
       align: 'right',
       cell: course => (
         <div className="flex justify-end gap-1">
@@ -256,20 +256,20 @@ export function CoursesPage() {
             type="button"
             size="sm"
             variant="ghost"
-            aria-label={`${course.name}を編集`}
+            aria-label={t('courses:table.editAria', { name: course.name })}
             onClick={() => beginEdit(course)}
           >
-            <Pencil /> 編集
+            <Pencil /> {t('common:action.edit')}
           </Button>
           <Button
             type="button"
             size="sm"
             variant="ghost"
-            aria-label={`${course.name}を削除`}
+            aria-label={t('courses:table.deleteAria', { name: course.name })}
             disabled={deletingId === course.id}
             onClick={() => void deleteCourse(course)}
           >
-            <Trash2 /> {deletingId === course.id ? '削除中' : '削除'}
+            <Trash2 /> {deletingId === course.id ? t('courses:table.deleting') : t('common:action.delete')}
           </Button>
         </div>
       ),
@@ -279,74 +279,63 @@ export function CoursesPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow={`Settings · ${tenant}`}
-        title="コース管理"
-        description="テナント導入時に整えるコースマスタです。日常運用ではあまり開きません。ホール数とスタート間隔は予約商品・キャディ対応コースの前提になります。"
+        eyebrow={t('nav:sections.tenantMaster')}
+        title={t('courses:title')}
+        description={t('courses:description')}
         actions={(
           <>
             <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
-              <ArrowLeft /> 設定へ戻る
+              <ArrowLeft /> {t('common:action.backToSettings')}
             </Button>
-            <PageRefreshButton onClick={() => void loadCourses()} loading={loading} label="更新" />
+            <PageRefreshButton
+              onClick={() => void loadCourses()}
+              loading={loading}
+              label={t('common:action.refresh')}
+            />
             <Button type="button" variant="primary" onClick={beginCreate}>
-              <Plus /> コース追加
+              <Plus /> {t('courses:add')}
             </Button>
           </>
         )}
       />
 
-      <MetricGrid>
-        <Metric label="登録コース" value={courses.length} detail="全コース" />
-        <Metric
-          label="営業中"
-          value={courses.filter(course => course.isActive).length}
-          detail="有効なコース"
-          tone="success"
-        />
-        <Metric
-          label="18ホール"
-          value={courses.filter(course => course.holeCount === 18).length}
-          detail="標準ラウンド"
-        />
-      </MetricGrid>
-
       {savedMessage ? (
-        <Notice tone="success" title="保存しました">{savedMessage}</Notice>
+        <Notice tone="success" title={t('common:state.saved')}>{savedMessage}</Notice>
       ) : null}
       {mutationError && !editor ? (
-        <Notice tone="danger" title="操作を完了できませんでした">{mutationError}</Notice>
+        <Notice tone="danger" title={t('courses:notice.failed')}>{mutationError}</Notice>
       ) : null}
 
       {editor ? (
         <Panel
-          title={editor.mode === 'create' ? 'コースを追加' : 'コースを編集'}
-          description="予約枠生成に使う基本条件です。"
+          title={editor.mode === 'create' ? t('courses:editor.createTitle') : t('courses:editor.editTitle')}
+          description={t('courses:editor.description')}
           actions={(
             <Button type="button" variant="ghost" size="sm" onClick={closeEditor}>
-              <X /> 閉じる
+              <X /> {t('common:action.close')}
             </Button>
           )}
         >
           <form className="grid gap-4" onSubmit={saveCourse}>
             <FormGrid columns={3}>
-              <Field label="コース名" required>
+              <Field label={t('courses:field.name')} required>
                 <Input
                   value={draft.name}
                   onChange={event => setDraft(current => ({ ...current, name: event.target.value }))}
-                  placeholder="真駒内カントリークラブ"
+                  placeholder={t('courses:field.namePlaceholder')}
                   autoFocus
                   required
                 />
               </Field>
-              <Field label="略称">
+              <Field label={t('courses:field.shortName')}>
                 <Input
                   value={draft.shortName}
                   onChange={event => setDraft(current => ({ ...current, shortName: event.target.value }))}
-                  placeholder="真駒内"
+                  placeholder={t('courses:field.shortNamePlaceholder')}
                 />
               </Field>
               {editor.mode === 'edit' ? (
-                <Field label="状態" required>
+                <Field label={t('courses:field.status')} required>
                   <NativeSelect
                     value={draft.isActive ? 'active' : 'inactive'}
                     onChange={event => setDraft(current => ({
@@ -354,12 +343,12 @@ export function CoursesPage() {
                       isActive: event.target.value === 'active',
                     }))}
                   >
-                    <option value="active">有効</option>
-                    <option value="inactive">無効</option>
+                    <option value="active">{t('common:state.enabled')}</option>
+                    <option value="inactive">{t('common:state.disabled')}</option>
                   </NativeSelect>
                 </Field>
               ) : null}
-              <Field label="ホール数" required>
+              <Field label={t('courses:field.holeCount')} required>
                 <NativeSelect
                   value={draft.holeCount}
                   onChange={event => setDraft(current => ({
@@ -367,11 +356,15 @@ export function CoursesPage() {
                     holeCount: Number(event.target.value),
                   }))}
                 >
-                  <option value={18}>18ホール</option>
-                  <option value={9}>9ホール</option>
+                  <option value={18}>{t('courses:option.holes18')}</option>
+                  <option value={9}>{t('courses:option.holes9')}</option>
                 </NativeSelect>
               </Field>
-              <Field label="スタート間隔" hint="1〜60分" required>
+              <Field
+                label={t('courses:field.startInterval')}
+                hint={t('courses:field.startIntervalHint')}
+                required
+              >
                 <Input
                   type="number"
                   min={1}
@@ -385,7 +378,7 @@ export function CoursesPage() {
                   required
                 />
               </Field>
-              <Field label="タイムゾーン" required>
+              <Field label={t('courses:field.timezone')} required>
                 <Input
                   value={draft.timezone}
                   onChange={event => setDraft(current => ({ ...current, timezone: event.target.value }))}
@@ -396,13 +389,15 @@ export function CoursesPage() {
             </FormGrid>
 
             {mutationError ? (
-              <Notice tone="danger" title="入力内容を確認してください">{mutationError}</Notice>
+              <Notice tone="danger" title={t('courses:notice.checkInput')}>{mutationError}</Notice>
             ) : null}
 
             <div className="flex flex-wrap justify-end gap-2">
-              <Button type="button" onClick={closeEditor} disabled={saving}>キャンセル</Button>
+              <Button type="button" onClick={closeEditor} disabled={saving}>
+                {t('common:action.cancel')}
+              </Button>
               <Button type="submit" variant="primary" disabled={saving}>
-                <Save /> {saving ? '保存中' : '変更を保存'}
+                <Save /> {saving ? t('common:action.saving') : t('common:action.save')}
               </Button>
             </div>
           </form>
@@ -410,11 +405,11 @@ export function CoursesPage() {
       ) : null}
 
       <Panel
-        title="コース一覧"
-        description="予約商品と枠設定が参照するコースマスタです。"
-        actions={<Badge variant="outline">{courses.length}件</Badge>}
+        title={t('courses:list.title')}
+        description={t('courses:list.description')}
+        actions={<Badge variant="outline">{t('common:unit.count', { n: String(courses.length) })}</Badge>}
       >
-        {loading ? <LoadingState label="コースを読み込んでいます" /> : null}
+        {loading ? <LoadingState label={t('courses:loading')} /> : null}
         {!loading && loadError ? <ResourceError error={loadError} onRetry={loadCourses} /> : null}
         {!loading && !loadError ? (
           <DataTable
@@ -423,11 +418,11 @@ export function CoursesPage() {
             rowKey={course => course.id}
             empty={(
               <EmptyState
-                title="コースが登録されていません"
-                description="最初のコースを追加すると、予約商品とスタート枠を設定できます。"
+                title={t('courses:empty.title')}
+                description={t('courses:empty.description')}
                 action={(
                   <Button type="button" variant="primary" onClick={beginCreate}>
-                    <Flag /> 最初のコースを追加
+                    <Flag /> {t('courses:empty.action')}
                   </Button>
                 )}
               />

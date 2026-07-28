@@ -1,3 +1,5 @@
+import { i18next } from '../i18n'
+
 import fontkit from '@pdf-lib/fontkit'
 import { PDFDocument, PageSizes, rgb } from 'pdf-lib'
 
@@ -47,7 +49,7 @@ function fitText(
 export async function buildInvoicePdf(data: InvoicePdfData): Promise<Uint8Array> {
   const fontResponse = await fetch(fontUrl)
   if (!fontResponse.ok) {
-    throw new Error('請求書PDF用フォントを読み込めませんでした。')
+    throw new Error(i18next.t('payment:pdf.fontFailed'))
   }
 
   const document = await PDFDocument.create()
@@ -66,7 +68,7 @@ export async function buildInvoicePdf(data: InvoicePdfData): Promise<Uint8Array>
   let y = pageHeight - margin
 
   const drawHeader = (continued = false) => {
-    page.drawText(continued ? '請求書（続き）' : '請求書', {
+    page.drawText(continued ? i18next.t('payment:pdf.titleContinued') : i18next.t('payment:pdf.title'), {
       x: margin,
       y,
       size: continued ? 15 : 24,
@@ -91,7 +93,7 @@ export async function buildInvoicePdf(data: InvoicePdfData): Promise<Uint8Array>
           color: black,
         })
       }
-      const due = `支払期限  ${data.dueDate}`
+      const due = i18next.t('payment:pdf.due', { date: data.dueDate })
       page.drawText(due, {
         x: pageWidth - margin - font.widthOfTextAtSize(due, 9),
         y: y - 24,
@@ -114,10 +116,10 @@ export async function buildInvoicePdf(data: InvoicePdfData): Promise<Uint8Array>
       color: header,
     })
     for (const [label, x] of [
-      ['品目', margin],
-      ['数量', 310],
-      ['単価', 372],
-      ['金額', 475],
+      [i18next.t('payment:pdf.columns.item'), margin],
+      [i18next.t('payment:pdf.columns.quantity'), 310],
+      [i18next.t('payment:pdf.columns.unitPrice'), 372],
+      [i18next.t('payment:pdf.columns.amount'), 475],
     ] as const) {
       page.drawText(label, { x, y, size: 9, font, color: muted })
     }
@@ -183,13 +185,13 @@ export async function buildInvoicePdf(data: InvoicePdfData): Promise<Uint8Array>
     y -= emphasized ? 24 : 18
   }
 
-  drawTotal('小計', data.subtotalAmount)
-  drawTotal('税', data.taxAmount)
-  drawTotal('合計', data.totalAmount, true)
+  drawTotal(i18next.t('payment:pdf.subtotal'), data.subtotalAmount)
+  drawTotal(i18next.t('payment:pdf.tax'), data.taxAmount)
+  drawTotal(i18next.t('payment:pdf.total'), data.totalAmount, true)
 
   if (data.notes) {
     y -= 8
-    page.drawText('備考', { x: margin, y, size: 9, font, color: muted })
+    page.drawText(i18next.t('payment:pdf.notes'), { x: margin, y, size: 9, font, color: muted })
     y -= 15
     for (const note of data.notes.split('\n').slice(0, 8)) {
       page.drawText(
@@ -202,7 +204,7 @@ export async function buildInvoicePdf(data: InvoicePdfData): Promise<Uint8Array>
 
   if (data.paymentLinkUrl && y > 50) {
     y -= 8
-    page.drawText('お支払いリンク', { x: margin, y, size: 9, font, color: muted })
+    page.drawText(i18next.t('payment:pdf.paymentLink'), { x: margin, y, size: 9, font, color: muted })
     y -= 14
     page.drawText(
       fitText(

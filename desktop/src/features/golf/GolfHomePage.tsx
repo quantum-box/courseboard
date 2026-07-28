@@ -1,26 +1,30 @@
 import { Button } from '@tachyon-sdk/native-ui'
 import { ChevronRight } from 'lucide-react'
-import { golfNavigation } from '../../components/AppShell'
+import { useTranslation } from 'react-i18next'
+import { golfNavigation, navDescription, navLabel } from '../../components/AppShell'
 import { PageHeader, Panel } from '../../components/Page'
 import { navigate, navigateFromClick } from '../../lib/router'
 
+const FLOW_STEPS = ['timeline', 'dispatch', 'revenue', 'settlement'] as const
+
 export function GolfHomePage() {
+  const { t } = useTranslation(['home', 'common'])
+
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow="Golf operations"
-        title="ホーム"
-        description="公開予約、コース、キャディ、予算、請求を同じ運用面から管理します。"
+        title={t('home:title')}
+        description={t('home:description')}
         actions={(
           <Button type="button" variant="primary" onClick={() => navigate('golf/timeline')}>
-            運用タイムラインを開く
+            {t('home:openTimeline')}
           </Button>
         )}
       />
 
       <section className="app-section">
-        <h2 className="section-title">運用機能</h2>
-        <div className="feature-grid" aria-label="運用機能">
+        <h2 className="section-title">{t('home:features.title')}</h2>
+        <div className="feature-grid" aria-label={t('home:features.title')}>
           {golfNavigation.map(item => {
             const Icon = item.icon
             return (
@@ -32,8 +36,8 @@ export function GolfHomePage() {
               >
                 <span className="feature-icon"><Icon /></span>
                 <span className="feature-copy">
-                  <strong>{item.label}</strong>
-                  <small>{item.description}</small>
+                  <strong>{navLabel(item.route)}</strong>
+                  <small>{navDescription(item.route)}</small>
                 </span>
                 <ChevronRight className="feature-arrow" aria-hidden="true" />
               </button>
@@ -42,18 +46,13 @@ export function GolfHomePage() {
         </div>
       </section>
 
-      <Panel title="今日の運用順序" description="マスタ更新から締め処理まで、同じデータを順に引き継ぎます。">
+      <Panel title={t('home:flow.title')} description={t('home:flow.description')}>
         <div className="operations-track">
-          {[
-            ['01', 'タイムライン', '当日の予約とキャディ割当を時間軸で確認'],
-            ['02', 'キャディ配置', '未割当・衝突を見て配置で担当を確定'],
-            ['03', '売上と請求', '予算進捗、キャンセル料、未収を確認'],
-            ['04', '月次精算', '予約・費用・Square明細を締める'],
-          ].map(([step, label, detail]) => (
+          {FLOW_STEPS.map((step, index) => (
             <div key={step} className="operations-step">
-              <span>{step}</span>
-              <strong>{label}</strong>
-              <small>{detail}</small>
+              <span>{String(index + 1).padStart(2, '0')}</span>
+              <strong>{t(`home:flow.steps.${step}.label`)}</strong>
+              <small>{t(`home:flow.steps.${step}.detail`)}</small>
             </div>
           ))}
         </div>

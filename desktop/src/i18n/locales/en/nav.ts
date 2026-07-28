@@ -1,0 +1,119 @@
+import type { DeepPartial } from '../../types'
+import type { nav as source } from '../ja/nav'
+
+export const nav: DeepPartial<typeof source> = {
+  sections: {
+    home: 'Home',
+    courseBooking: 'Bookings & courses',
+    caddie: 'Caddies',
+    finance: 'Revenue & billing',
+    settings: 'Settings',
+    account: 'Account',
+    tenantMaster: 'Initial setup',
+  },
+  items: {
+    golf: {
+      label: 'Home',
+      description: 'Where the day starts',
+    },
+    'golf/timeline': {
+      label: 'Timeline',
+      description: "Today's bookings and caddies in time order",
+    },
+    'golf/products': {
+      label: 'Play products',
+      description: 'Play plans and bookable slots',
+    },
+    'course-map': {
+      label: 'Course map',
+      description: 'See where each cart is now',
+    },
+    'golf/caddies': {
+      label: 'Caddie roster',
+      description: 'Caddie details and requested days off',
+    },
+    'golf/caddies/dispatch': {
+      label: "Today's assignments",
+      description: 'Decide who takes each group',
+    },
+    'golf/caddies/attendance': {
+      label: 'Attendance',
+      description: 'Clock-ins and what actually happened',
+    },
+    'golf/caddies/shifts': {
+      label: 'Shift board',
+      description: 'A month of schedules and working streaks',
+    },
+    'golf/caddies/payroll': {
+      label: 'Payroll',
+      description: 'Total up one month of pay',
+    },
+    'golf/budgets': {
+      label: 'Revenue targets',
+      description: 'Daily targets and how close you are',
+    },
+    'golf/settlement': {
+      label: 'Monthly close',
+      description: 'Close out a month of revenue and cost',
+    },
+    'cancellation-fees': {
+      label: 'Cancellation fees',
+      description: 'Send a bill and confirm payment',
+    },
+    'golf/courses': {
+      label: 'Course setup',
+      description: 'Course names and start intervals',
+    },
+    'golf/policy': {
+      label: 'Booking rules',
+      description: 'Conditions for accepting bookings',
+    },
+    settings: {
+      label: 'Settings',
+      description: 'Integrations and initial setup',
+    },
+  },
+  sidebar: {
+    search: 'Search',
+    pinned: 'Pinned',
+    expand: 'Expand sidebar',
+    collapse: 'Collapse sidebar',
+    openMenu: 'Open menu',
+    closeMenu: 'Close menu',
+    pin: 'Pin to sidebar',
+    unpin: 'Unpin from sidebar',
+  },
+  workspace: {
+    openHelp: 'How to use this page',
+    closeHelp: 'Close the guide',
+    tenantUnset: 'No course selected',
+    production: 'Live',
+    sandbox: 'Test',
+  },
+  command: {
+    placeholder: 'Find a page…',
+    empty: 'Nothing found',
+  },
+  tabs: {
+    listLabel: 'Course Board tabs',
+    newTab: 'New tab',
+    closeTab: 'Close {{title}}',
+    history: 'Go back or forward',
+    back: 'Back',
+    forward: 'Forward',
+  },
+  account: {
+    openMenu: 'Open account menu',
+    switchTenant: 'Switch course',
+    settings: 'Settings',
+    signOut: 'Sign out',
+    defaultUser: 'Course Board user',
+  },
+  notFound: {
+    title: 'Page not found',
+    description: 'This page has moved or no longer exists.',
+  },
+  redirect: {
+    message: 'Taking you to the signed-in Course Board…',
+  },
+}

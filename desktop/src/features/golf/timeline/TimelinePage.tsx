@@ -5,7 +5,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
-  Clock3,
   Columns2,
   GanttChart,
   LayoutGrid,
@@ -23,7 +22,9 @@ import {
   type CSSProperties,
   type ReactNode,
 } from 'react'
+import { useTranslation } from 'react-i18next'
 import { courseboardApiJson } from '../../../api'
+import { i18next } from '../../../i18n'
 import {
   EmptyState,
   LoadingState,
@@ -33,6 +34,7 @@ import {
   Panel,
   ResourceError,
 } from '../../../components/Page'
+import { Sheet } from '../../../components/Sheet'
 import { useRegisterPageReload } from '../../../lib/pageReload'
 import { navigate } from '../../../lib/router'
 import { useResource } from '../../../hooks/useResource'
@@ -45,6 +47,7 @@ import type {
 } from './models'
 import {
   DEFAULT_PX_PER_HOUR,
+  assignStackLanes,
   DEFAULT_TIMELINE_WINDOW,
   MAX_PX_PER_HOUR,
   MIN_PX_PER_HOUR,
@@ -125,73 +128,51 @@ function shiftDate(isoDate: string, deltaDays: number) {
   return next.toISOString().slice(0, 10)
 }
 
+/** API enum values map onto `timeline:status`; anything unknown is shown as-is. */
+const STATUS_KEYS: Record<string, string> = {
+  confirmed: 'confirmed',
+  checked_in: 'checkedIn',
+  on_course: 'playing',
+  completed: 'finished',
+  cancelled: 'cancelled',
+  no_show: 'noShow',
+  assigned: 'assigned',
+  in_progress: 'inProgress',
+}
+
 function statusLabel(status: string) {
-  switch (status) {
-    case 'confirmed':
-      return '確定'
-    case 'checked_in':
-      return 'チェックイン済'
-    case 'on_course':
-      return 'プレー中'
-    case 'completed':
-      return '終了'
-    case 'cancelled':
-      return 'キャンセル'
-    case 'no_show':
-      return 'ノーショー'
-    case 'assigned':
-      return '割当済'
-    case 'in_progress':
-      return '進行中'
-    default:
-      return status.replaceAll('_', ' ')
-  }
+  const key = STATUS_KEYS[status]
+  if (!key) return status.replaceAll('_', ' ')
+  return i18next.t(`timeline:status.${key}` as 'timeline:status.confirmed')
 }
 
 function playTypeLabel(playType: string) {
-  switch (playType) {
-    case 'caddie':
-      return 'キャディ付き'
-    case 'self':
-      return 'セルフ'
-    default:
-      return playType
-  }
+  if (playType === 'caddie') return i18next.t('timeline:playType.caddie')
+  if (playType === 'self') return i18next.t('timeline:playType.self')
+  return playType
 }
 
 function productDisplayName(reservation: TeeReservation) {
   return reservation.displayName?.trim()
     || reservation.reservationServiceId?.trim()
-    || 'プラン未設定'
+    || i18next.t('timeline:plan.unnamed')
 }
 
 function productManagementNumber(reservation: TeeReservation) {
-  return reservation.reservationServiceId?.trim() || '未設定'
+  return reservation.reservationServiceId?.trim() || i18next.t('timeline:plan.noId')
 }
 
 function roleLabel(role: string) {
-  switch (role) {
-    case 'primary':
-    case 'lead':
-      return '主担当'
-    case 'assistant':
-      return '補助'
-    default:
-      return role
-  }
+  if (role === 'primary' || role === 'lead') return i18next.t('timeline:role.primary')
+  if (role === 'assistant') return i18next.t('timeline:role.support')
+  return role
 }
 
 function skillLabel(skill: string) {
-  switch (skill) {
-    case 'veteran':
-      return 'ベテラン'
-    case 'regular':
-      return 'レギュラー'
-    case 'junior':
-      return '新人'
-    default:
-      return skill
-  }
+  if (skill === 'veteran') return i18next.t('timeline:skill.veteran')
+  if (skill === 'regular') return i18next.t('timeline:skill.regular')
+  if (skill === 'junior') return i18next.t('timeline:skill.rookie')
+  return skill
 }
 
 function coverageClass(coverage: AssignmentCoverage) {
@@ -199,6 +180,7 @@ function coverageClass(coverage: AssignmentCoverage) {
 }
 
 export function TimelinePage() {
+  const { t } = useTranslation(['timeline', 'common'])
   const [date, setDate] = useState(todayIsoDate)
   const [courseFilter, setCourseFilter] = useState('all')
   const [displayMode, setDisplayMode] = useState<DisplayMode>(readDisplayMode)
@@ -276,7 +258,7 @@ export function TimelinePage() {
     return <ResourceError error={error} onRetry={refreshAll} />
   }
   if (loading && !teeSheet.data) {
-    return <LoadingState label="運用タイムラインを読み込み中…" />
+    return <LoadingState label={t('timeline:loading')} />
   }
 
   const reservations = teeSheet.data?.items ?? []
@@ -325,27 +307,29 @@ export function TimelinePage() {
   const conflictCount = Math.ceil(summary.conflicts / 2)
   const needsAttention = summary.unassigned > 0 || conflictCount > 0
   const attentionParts = [
-    summary.unassigned > 0 ? `未割当 ${summary.unassigned}` : null,
-    conflictCount > 0 ? `衝突 ${conflictCount}` : null,
+    summary.unassigned > 0
+      ? t('timeline:summary.unassignedPart', { n: String(summary.unassigned) })
+      : null,
+    conflictCount > 0 ? t('timeline:summary.conflictPart', { n: String(conflictCount) }) : null,
   ].filter(Boolean)
 
   return (
     <div className="page-stack timeline-page">
       <div className="timeline-chrome">
         <PageHeader
-          title="運用タイムライン"
+          title={t('timeline:title')}
           description={displayMode === 'tiles'
-            ? '予約枠ごとのキャディ割当をタイルで確認'
-            : '予約とキャディ割当を同じ時間軸で確認'}
+            ? t('timeline:tileDescription')
+            : t('timeline:description')}
           actions={(
             <>
               <Button type="button" variant="ghost" size="sm" onClick={refreshAll}>
                 <RefreshCw />
-                再読込
+                {t('timeline:reload')}
               </Button>
               <Button type="button" variant="primary" size="sm" onClick={() => navigate('golf/caddies/dispatch')}>
                 <ClipboardCheck />
-                配置へ
+                {t('timeline:toDispatch')}
               </Button>
             </>
           )}
@@ -353,72 +337,93 @@ export function TimelinePage() {
 
         <div
           className={`timeline-summary${needsAttention ? ' has-attention' : ''}`}
-          aria-label="当日サマリー"
+          aria-label={t('timeline:summary.label')}
         >
           <div className="timeline-summary-item">
-            <span>ティー数</span>
+            <span>{t('timeline:summary.tees')}</span>
             <strong>{summary.total}</strong>
-            <small>セルフ {summary.selfPlay} · キャディ {summary.caddieRequired}</small>
+            <small>
+              {t('timeline:summary.teesDetail', {
+                self: String(summary.selfPlay),
+                caddie: String(summary.caddieRequired),
+              })}
+            </small>
           </div>
           <div className="timeline-summary-item">
-            <span>割当済</span>
+            <span>{t('timeline:summary.assigned')}</span>
             <strong>{summary.assigned}</strong>
-            <small>充足率 {Math.round(summary.coverageRate * 100)}%</small>
+            <small>
+              {t('timeline:summary.assignedDetail', {
+                rate: String(Math.round(summary.coverageRate * 100)),
+              })}
+            </small>
           </div>
           <div className={`timeline-summary-item${summary.unassigned > 0 ? ' is-warning' : ''}`}>
-            <span>未割当</span>
+            <span>{t('timeline:summary.unassigned')}</span>
             <strong>{summary.unassigned}</strong>
           </div>
           <div className={`timeline-summary-item${conflictCount > 0 ? ' is-danger' : ''}`}>
-            <span>衝突</span>
+            <span>{t('timeline:summary.conflict')}</span>
             <strong>{conflictCount}</strong>
           </div>
           {needsAttention ? (
             <div className="timeline-summary-attention" role="status">
               <AlertTriangle aria-hidden="true" />
-              <span>配置確認 · {attentionParts.join(' · ')}</span>
+              <span>{t('timeline:summary.attention', { parts: attentionParts.join(' · ') })}</span>
               <Button type="button" variant="ghost" size="sm" onClick={() => navigate('golf/caddies/dispatch')}>
-                配置へ
+                {t('timeline:toDispatch')}
               </Button>
             </div>
           ) : (
             <div className="timeline-summary-attention is-clear" role="status">
-              <span>割当に問題はありません</span>
+              <span>{t('timeline:summary.ok')}</span>
             </div>
           )}
         </div>
 
-        <section className="timeline-toolbar" aria-label="タイムライン絞り込み">
+        <section className="timeline-toolbar" aria-label={t('timeline:toolbar.label')}>
           <div className="timeline-date-controls">
-            <Button type="button" variant="ghost" size="sm" aria-label="前日" onClick={() => setDate(value => shiftDate(value, -1))}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={t('timeline:toolbar.prevDay')}
+              onClick={() => setDate(value => shiftDate(value, -1))}
+            >
               <ChevronLeft />
             </Button>
             <label className="timeline-inline-field">
-              <span>日付</span>
+              <span>{t('timeline:toolbar.date')}</span>
               <Input
                 type="date"
                 value={date}
                 onChange={event => setDate(event.target.value || todayIsoDate())}
               />
             </label>
-            <Button type="button" variant="ghost" size="sm" aria-label="翌日" onClick={() => setDate(value => shiftDate(value, 1))}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={t('timeline:toolbar.nextDay')}
+              onClick={() => setDate(value => shiftDate(value, 1))}
+            >
               <ChevronRight />
             </Button>
             <Button type="button" variant="ghost" size="sm" onClick={() => setDate(todayIsoDate())}>
               <CalendarRange />
-              今日
+              {t('timeline:toolbar.today')}
             </Button>
           </div>
           <label className="timeline-inline-field">
-            <span>コース</span>
+            <span>{t('timeline:toolbar.course')}</span>
             <NativeSelect value={courseFilter} onChange={event => setCourseFilter(event.target.value)}>
-              <option value="all">すべてのコース</option>
+              <option value="all">{t('timeline:toolbar.allCourses')}</option>
               {courseOptions.map(([id, name]) => (
                 <option key={id} value={id}>{name}</option>
               ))}
             </NativeSelect>
           </label>
-          <div className="timeline-view-toggle" role="group" aria-label="表示モード">
+          <div className="timeline-view-toggle" role="group" aria-label={t('timeline:toolbar.viewMode')}>
             <Button
               type="button"
               size="sm"
@@ -427,7 +432,7 @@ export function TimelinePage() {
               onClick={() => setDisplayMode('timeline')}
             >
               <GanttChart />
-              タイムライン
+              {t('timeline:toolbar.timeline')}
             </Button>
             <Button
               type="button"
@@ -437,12 +442,12 @@ export function TimelinePage() {
               onClick={() => setDisplayMode('tiles')}
             >
               <LayoutGrid />
-              タイル
+              {t('timeline:toolbar.tile')}
             </Button>
           </div>
           {displayMode === 'timeline' ? (
             <>
-              <div className="timeline-view-toggle" role="group" aria-label="レーン表示">
+              <div className="timeline-view-toggle" role="group" aria-label={t('timeline:toolbar.laneMode')}>
                 <Button
                   type="button"
                   size="sm"
@@ -451,7 +456,7 @@ export function TimelinePage() {
                   onClick={() => setBoardView('split')}
                 >
                   <Columns2 />
-                  両方
+                  {t('timeline:toolbar.both')}
                 </Button>
                 <Button
                   type="button"
@@ -461,7 +466,7 @@ export function TimelinePage() {
                   onClick={() => setBoardView('tee')}
                 >
                   <CalendarRange />
-                  ティーシート
+                  {t('timeline:toolbar.teeSheet')}
                 </Button>
                 <Button
                   type="button"
@@ -471,15 +476,15 @@ export function TimelinePage() {
                   onClick={() => setBoardView('caddie')}
                 >
                   <Users />
-                  キャディ
+                  {t('timeline:toolbar.caddie')}
                 </Button>
               </div>
-              <div className="timeline-zoom-controls" role="group" aria-label="時間軸ズーム">
+              <div className="timeline-zoom-controls" role="group" aria-label={t('timeline:toolbar.zoom')}>
                 <Button
                   type="button"
                   size="sm"
                   variant="ghost"
-                  aria-label="時間軸を縮小"
+                  aria-label={t('timeline:toolbar.zoomOut')}
                   disabled={pxPerHour <= MIN_PX_PER_HOUR}
                   onClick={() => nudgeZoom(-PX_PER_HOUR_STEP)}
                 >
@@ -488,7 +493,7 @@ export function TimelinePage() {
                 <button
                   type="button"
                   className="timeline-zoom-label"
-                  title="ピンチまたは ⌘/Ctrl + スクロールでも拡大縮小できます"
+                  title={t('timeline:toolbar.zoomHint')}
                   onClick={() => setPxPerHour(DEFAULT_PX_PER_HOUR)}
                 >
                   {zoomPercent(pxPerHour)}%
@@ -497,7 +502,7 @@ export function TimelinePage() {
                   type="button"
                   size="sm"
                   variant="ghost"
-                  aria-label="時間軸を拡大"
+                  aria-label={t('timeline:toolbar.zoomIn')}
                   disabled={pxPerHour >= MAX_PX_PER_HOUR}
                   onClick={() => nudgeZoom(PX_PER_HOUR_STEP)}
                 >
@@ -506,11 +511,11 @@ export function TimelinePage() {
               </div>
             </>
           ) : null}
-          <div className="timeline-legend" aria-label="凡例">
-            <span className="timeline-legend-item coverage-assigned">割当済</span>
-            <span className="timeline-legend-item coverage-unassigned">未割当</span>
-            <span className="timeline-legend-item coverage-self">セルフ</span>
-            <span className="timeline-legend-item coverage-conflict">衝突</span>
+          <div className="timeline-legend" aria-label={t('timeline:legend.label')}>
+            <span className="timeline-legend-item coverage-assigned">{t('timeline:legend.assigned')}</span>
+            <span className="timeline-legend-item coverage-unassigned">{t('timeline:legend.unassigned')}</span>
+            <span className="timeline-legend-item coverage-self">{t('timeline:legend.self')}</span>
+            <span className="timeline-legend-item coverage-conflict">{t('timeline:legend.conflict')}</span>
           </div>
         </section>
       </div>
@@ -526,7 +531,7 @@ export function TimelinePage() {
             onSelectReservation={id => setSelection({ kind: 'reservation', id })}
             emptyAction={(
               <Button type="button" variant="primary" onClick={() => setDate(todayIsoDate())}>
-                デモ日へ移動
+                {t('timeline:demo.goToDemoDate')}
               </Button>
             )}
           />
@@ -535,36 +540,36 @@ export function TimelinePage() {
           {boardView !== 'caddie' ? (
             <Panel
               className="timeline-panel"
-              title="ティーシート"
+              title={t('timeline:tee.title')}
               description={boardView === 'tee'
-                ? '拡大表示 · コース別レーン'
-                : 'コース別レーン · ブロックの長さは想定ラウンド時間'}
+                ? t('timeline:tee.zoomedDescription')
+                : t('timeline:tee.description')}
               actions={(
                 <Button
                   type="button"
                   size="sm"
                   variant="ghost"
-                  aria-label={boardView === 'tee' ? '分割表示に戻す' : 'ティーシートを拡大'}
+                  aria-label={boardView === 'tee' ? t('timeline:tee.collapse') : t('timeline:tee.expand')}
                   onClick={() => setBoardView(boardView === 'tee' ? 'split' : 'tee')}
                 >
                   {boardView === 'tee' ? <Minimize2 /> : <Maximize2 />}
-                  {boardView === 'tee' ? '分割' : '拡大'}
+                  {boardView === 'tee' ? t('timeline:tee.collapseLabel') : t('timeline:tee.expandLabel')}
                 </Button>
               )}
             >
               {reservations.length === 0 ? (
                 <EmptyState
-                  title="この日のティーはありません"
-                  description="デモ日 2026-07-18 を選ぶか、本番の Field API に接続してください。"
+                  title={t('timeline:tee.empty.title')}
+                  description={t('timeline:tee.empty.description')}
                   action={(
                     <Button type="button" variant="primary" onClick={() => setDate(todayIsoDate())}>
-                      デモ日へ移動
+                      {t('timeline:demo.goToDemoDate')}
                     </Button>
                   )}
                 />
               ) : (
                 <TimelineBoard
-                  laneLabel="コース"
+                  laneLabel={t('timeline:tee.lane')}
                   hourMarks={hourMarks}
                   nowPct={nowPct}
                   dense={boardView === 'tee'}
@@ -574,7 +579,7 @@ export function TimelinePage() {
                   rows={courseRows.map(row => ({
                     id: row.id,
                     label: row.name,
-                    meta: `${row.items.length} 組`,
+                    meta: t('timeline:tee.groups', { n: String(row.items.length) }),
                     blocks: row.items.map(item => {
                       const coverage = coverageForReservation(item, assignments)
                       const start = parseLocalDateParts(item.teeTime).minutes
@@ -591,13 +596,24 @@ export function TimelinePage() {
                           selected ? 'is-selected' : '',
                         ].join(' '),
                         title: productDisplayName(item),
-                        subtitle: `${item.partyName} · ${item.partySize}名 · ${formatCoverageLabel(coverage)}`,
-                        tooltip: `${productDisplayName(item)} · 管理番号: ${productManagementNumber(item)} · ${item.partyName} · ${item.reservationNumber} · ${item.partySize}名 · ${formatCoverageLabel(coverage)}`,
+                        subtitle: t('timeline:tee.subtitle', {
+                          party: item.partyName,
+                          size: String(item.partySize),
+                          coverage: formatCoverageLabel(coverage),
+                        }),
+                        tooltip: t('timeline:tee.tooltip', {
+                          plan: productDisplayName(item),
+                          id: productManagementNumber(item),
+                          party: item.partyName,
+                          number: item.reservationNumber,
+                          size: String(item.partySize),
+                          coverage: formatCoverageLabel(coverage),
+                        }),
                         onSelect: () => setSelection({ kind: 'reservation', id: item.id }),
                         toneNote: linked?.caddieProfileId
                           ? caddies.find(profile => profile.id === linked.caddieProfileId)?.displayName
                           : coverage === 'unassigned'
-                            ? '未割当'
+                            ? t('timeline:legend.unassigned')
                             : null,
                       }
                     }),
@@ -610,34 +626,41 @@ export function TimelinePage() {
           {boardView !== 'tee' ? (
             <Panel
               className="timeline-panel"
-              title="キャディレーン"
+              title={t('timeline:caddieLane.title')}
               description={boardView === 'caddie'
-                ? '拡大表示 · キャディ別の割当バー'
-                : 'キャディ別の割当バー · 赤枠は時間帯の重複'}
+                ? t('timeline:caddieLane.zoomedDescription')
+                : t('timeline:caddieLane.description')}
               actions={(
                 <div className="timeline-panel-actions">
                   <Badge variant="neutral">
                     <Users />
-                    名簿 {caddies.length} 名
+                    {t('timeline:caddieLane.rosterCount', { n: String(caddies.length) })}
                   </Badge>
                   <Button
                     type="button"
                     size="sm"
                     variant="ghost"
-                    aria-label={boardView === 'caddie' ? '分割表示に戻す' : 'キャディレーンを拡大'}
+                    aria-label={boardView === 'caddie'
+                      ? t('timeline:caddieLane.collapse')
+                      : t('timeline:caddieLane.expand')}
                     onClick={() => setBoardView(boardView === 'caddie' ? 'split' : 'caddie')}
                   >
                     {boardView === 'caddie' ? <Minimize2 /> : <Maximize2 />}
-                    {boardView === 'caddie' ? '分割' : '拡大'}
+                    {boardView === 'caddie'
+                      ? t('timeline:tee.collapseLabel')
+                      : t('timeline:tee.expandLabel')}
                   </Button>
                 </div>
               )}
             >
               {caddies.length === 0 ? (
-                <EmptyState title="稼働中のキャディがいません" description="先に名簿でプロフィールを登録してください。" />
+                <EmptyState
+                  title={t('timeline:caddieLane.empty.title')}
+                  description={t('timeline:caddieLane.empty.description')}
+                />
               ) : (
                 <TimelineBoard
-                  laneLabel="キャディ"
+                  laneLabel={t('timeline:caddieLane.lane')}
                   hourMarks={hourMarks}
                   nowPct={nowPct}
                   dense={boardView === 'caddie'}
@@ -651,7 +674,10 @@ export function TimelinePage() {
                     return {
                       id: profile.id,
                       label: profile.displayName,
-                      meta: `${profile.rank}ランク · ${skillLabel(profile.skillLevel)}`,
+                      meta: t('timeline:caddieLane.meta', {
+                        rank: profile.rank,
+                        skill: skillLabel(profile.skillLevel),
+                      }),
                       blocks: laneAssignments.map(item => {
                         const start = parseJstDateParts(item.scheduledAt).minutes
                         const block = toTimelineBlock(item.id, start, item.durationMinutes ?? 270)
@@ -672,7 +698,7 @@ export function TimelinePage() {
                           subtitle: `${roleLabel(item.assignmentRole)} · ${statusLabel(item.status)}`,
                           tooltip: `${partyLabel} · ${roleLabel(item.assignmentRole)} · ${statusLabel(item.status)}`,
                           onSelect: () => setSelection({ kind: 'assignment', id: item.id }),
-                          toneNote: conflicted ? '衝突' : reservation?.courseName ?? null,
+                          toneNote: conflicted ? t('timeline:legend.conflict') : reservation?.courseName ?? null,
                         }
                       }),
                     }
@@ -684,17 +710,16 @@ export function TimelinePage() {
         </div>
         )}
 
-        <aside className="timeline-detail" aria-live="polite">
-          <DetailPanel
-            reservation={selectedReservation}
-            assignment={selectedAssignment}
-            caddies={caddies}
-            assignments={assignments}
-            onOpenDispatch={() => navigate('golf/caddies/dispatch')}
-            onClear={() => setSelection(null)}
-          />
-        </aside>
       </div>
+
+      <DetailSheet
+        reservation={selectedReservation}
+        assignment={selectedAssignment}
+        caddies={caddies}
+        assignments={assignments}
+        onOpenDispatch={() => navigate('golf/caddies/dispatch')}
+        onClose={() => setSelection(null)}
+      />
     </div>
   )
 }
@@ -722,13 +747,18 @@ function TileBoard({
   onSelectReservation: (id: string) => void
   emptyAction: ReactNode
 }) {
+  const { t } = useTranslation(['timeline'])
   const total = courseRows.reduce((sum, row) => sum + row.items.length, 0)
   if (total === 0) {
     return (
-      <Panel className="timeline-tile-panel" title="予約タイル" description="予約枠ごとの割当状況">
+      <Panel
+        className="timeline-tile-panel"
+        title={t('timeline:tiles.title')}
+        description={t('timeline:tiles.description')}
+      >
         <EmptyState
-          title="この日のティーはありません"
-          description="デモ日 2026-07-18 を選ぶか、本番の Field API に接続してください。"
+          title={t('timeline:tee.empty.title')}
+          description={t('timeline:tee.empty.description')}
           action={emptyAction}
         />
       </Panel>
@@ -741,7 +771,7 @@ function TileBoard({
         <section key={course.id} className="timeline-tile-section" aria-label={course.name}>
           <header className="timeline-tile-section-head">
             <h2>{course.name}</h2>
-            <span>{course.items.length} 組</span>
+            <span>{t('timeline:tiles.groups', { n: String(course.items.length) })}</span>
           </header>
           <div className="timeline-tile-grid">
             {course.items.map(item => {
@@ -768,20 +798,27 @@ function TileBoard({
                   <div className="timeline-tile-top">
                     <time dateTime={item.teeTime}>{teeLabel}</time>
                     <span className={coverageClass(coverage)}>
-                      {conflicted ? '衝突' : formatCoverageLabel(coverage)}
+                      {conflicted ? t('timeline:legend.conflict') : formatCoverageLabel(coverage)}
                     </span>
                   </div>
                   <strong>{productDisplayName(item)}</strong>
                   <small>
-                    管理番号: {productManagementNumber(item)} · {item.partyName}
+                    {t('timeline:plan.meta', {
+                      id: productManagementNumber(item),
+                      party: item.partyName,
+                    })}
                   </small>
                   <small>
-                    {item.partySize}名 · {playTypeLabel(item.playType)} · {item.holes}H
+                    {t('timeline:tiles.meta', {
+                      size: String(item.partySize),
+                      playType: playTypeLabel(item.playType),
+                      holes: String(item.holes),
+                    })}
                   </small>
                   <em>
                     {coverage === 'not_required'
-                      ? 'キャディ不要'
-                      : caddie?.displayName ?? 'キャディ未割当'}
+                      ? t('timeline:tiles.caddieNotRequired')
+                      : caddie?.displayName ?? t('timeline:tiles.caddieUnassigned')}
                   </em>
                 </button>
               )
@@ -799,6 +836,8 @@ type BoardRow = {
   meta: string
   blocks: Array<{
     id: string
+    startMinutes: number
+    endMinutes: number
     leftPct: number
     widthPct: number
     className: string
@@ -829,6 +868,7 @@ function TimelineBoard({
   trackWidth: number
   onPxPerHourChange: (value: number) => void
 }) {
+  const { t } = useTranslation(['timeline'])
   const scrollRef = useRef<HTMLDivElement>(null)
   const pinchRef = useRef<{ distance: number; pxPerHour: number } | null>(null)
   const pxPerHourRef = useRef(pxPerHour)
@@ -933,11 +973,18 @@ function TimelineBoard({
         </div>
 
         <div className="timeline-board-body">
-          {rows.map((row, index) => (
+          {rows.map((row, index) => {
+            // Overlapping blocks stack into sub-rows so nothing hides behind
+            // anything else — tooltips are unavailable on touch screens.
+            const stacking = assignStackLanes(row.blocks)
+            return (
             <div
               key={row.id}
               className="timeline-row"
-              style={{ '--timeline-row-index': index } as CSSProperties}
+              style={{
+                '--timeline-row-index': index,
+                '--timeline-stack-count': stacking.laneCount,
+              } as CSSProperties}
             >
               <div className="timeline-lane-label" title={`${row.label} · ${row.meta}`}>
                 <strong>{row.label}</strong>
@@ -958,7 +1005,7 @@ function TimelineBoard({
                 </div>
                 {nowPct != null ? (
                   <div className="timeline-now" style={{ left: `${nowPct}%` }} aria-hidden="true">
-                    <span>現在</span>
+                    <span>{t('timeline:now')}</span>
                   </div>
                 ) : null}
                 {row.blocks.map(block => (
@@ -966,7 +1013,11 @@ function TimelineBoard({
                     key={block.id}
                     type="button"
                     className={block.className}
-                    style={{ left: `${block.leftPct}%`, width: `${block.widthPct}%` }}
+                    style={{
+                      left: `${block.leftPct}%`,
+                      width: `${block.widthPct}%`,
+                      '--timeline-stack-index': stacking.lanes.get(block.id) ?? 0,
+                    } as CSSProperties}
                     onClick={block.onSelect}
                     title={block.tooltip ?? `${block.title} · ${block.subtitle}`}
                   >
@@ -979,38 +1030,30 @@ function TimelineBoard({
                 ))}
               </div>
             </div>
-          ))}
+            )
+          })}
         </div>
       </div>
     </div>
   )
 }
 
-function DetailPanel({
+function DetailSheet({
   reservation,
   assignment,
   caddies,
   assignments,
   onOpenDispatch,
-  onClear,
+  onClose,
 }: {
   reservation: TeeReservation | null
   assignment: TimelineAssignment | null
   caddies: TimelineCaddie[]
   assignments: TimelineAssignment[]
   onOpenDispatch: () => void
-  onClear: () => void
+  onClose: () => void
 }) {
-  if (!reservation && !assignment) {
-    return (
-      <div className="timeline-detail-empty">
-        <Clock3 />
-        <strong>ブロックを選択</strong>
-        <p>ティーまたはキャディバーを押すと、割当状況・衝突・次の操作を確認できます。</p>
-      </div>
-    )
-  }
-
+  const { t } = useTranslation(['timeline'])
   const coverage = reservation
     ? coverageForReservation(reservation, assignments)
     : 'unassigned'
@@ -1024,74 +1067,84 @@ function DetailPanel({
       : '—'
 
   return (
-    <div className="timeline-detail-card">
-      <div className="timeline-detail-header">
-        <div>
-          <div className="page-eyebrow">選択中</div>
-          <h2>{reservation ? productDisplayName(reservation) : assignment?.roundReference ?? '割当'}</h2>
-          <p>
-            {reservation
-              ? `管理番号: ${productManagementNumber(reservation)} · ${reservation.partyName} · ${reservation.reservationNumber}`
-              : assignment?.id}
-          </p>
-        </div>
-        <Button type="button" variant="ghost" onClick={onClear}>クリア</Button>
-      </div>
-
+    <Sheet
+      open={Boolean(reservation || assignment)}
+      onOpenChange={open => { if (!open) onClose() }}
+      title={reservation
+        ? productDisplayName(reservation)
+        : assignment?.roundReference ?? t('timeline:detail.fallbackTitle')}
+      description={reservation
+        ? t('timeline:plan.reservationMeta', {
+            id: productManagementNumber(reservation),
+            party: reservation.partyName,
+            number: reservation.reservationNumber,
+          })
+        : assignment?.id}
+    >
+      <div className="timeline-detail-card">
       <dl className="timeline-detail-list">
         <div>
-          <dt>ティー時刻</dt>
+          <dt>{t('timeline:detail.teeTime')}</dt>
           <dd>{startLabel}</dd>
         </div>
         <div>
-          <dt>コース</dt>
+          <dt>{t('timeline:detail.course')}</dt>
           <dd>{reservation?.courseName ?? '—'}</dd>
         </div>
         <div>
-          <dt>プレー区分</dt>
+          <dt>{t('timeline:detail.playType')}</dt>
           <dd>{reservation ? playTypeLabel(reservation.playType) : '—'}</dd>
         </div>
         <div>
-          <dt>予約者</dt>
+          <dt>{t('timeline:detail.party')}</dt>
           <dd>{reservation?.partyName ?? '—'}</dd>
         </div>
         <div>
-          <dt>組人数</dt>
-          <dd>{reservation ? `${reservation.partySize} 名` : '—'}</dd>
+          <dt>{t('timeline:detail.partySize')}</dt>
+          <dd>
+            {reservation
+              ? t('timeline:detail.partySizeValue', { n: String(reservation.partySize) })
+              : '—'}
+          </dd>
         </div>
         <div>
-          <dt>割当状況</dt>
+          <dt>{t('timeline:detail.coverage')}</dt>
           <dd>
             <span className={coverageClass(coverage)}>{formatCoverageLabel(coverage)}</span>
           </dd>
         </div>
         <div>
-          <dt>キャディ</dt>
-          <dd>{caddie?.displayName ?? (coverage === 'not_required' ? '不要' : '未割当')}</dd>
+          <dt>{t('timeline:detail.caddie')}</dt>
+          <dd>
+            {caddie?.displayName
+              ?? (coverage === 'not_required'
+                ? t('timeline:detail.notRequired')
+                : t('timeline:detail.unassigned'))}
+          </dd>
         </div>
         <div>
-          <dt>ステータス</dt>
+          <dt>{t('timeline:detail.status')}</dt>
           <dd>{statusLabel(reservation?.status ?? assignment?.status ?? '—')}</dd>
         </div>
         {reservation?.notes ? (
           <div>
-            <dt>メモ</dt>
+            <dt>{t('timeline:detail.notes')}</dt>
             <dd>{reservation.notes}</dd>
           </div>
         ) : null}
       </dl>
 
       {coverage === 'unassigned' ? (
-        <Notice tone="warning" title="割当が必要です">
-          このキャディ付きティーはまだ空いています。配置画面で担当を確定してください。
+        <Notice tone="warning" title={t('timeline:detail.needsAssignment.title')}>
+          {t('timeline:detail.needsAssignment.description')}
         </Notice>
       ) : null}
 
       {assignment && findOverlappingAssignmentIds(assignments).has(assignment.id) ? (
-        <Notice tone="danger" title="スケジュール衝突">
+        <Notice tone="danger" title={t('timeline:detail.conflict.title')}>
           <span className="timeline-detail-conflict">
             <AlertTriangle />
-            このキャディの割当バーが別の割当と重なっています。
+            {t('timeline:detail.conflict.description')}
           </span>
         </Notice>
       ) : null}
@@ -1099,9 +1152,10 @@ function DetailPanel({
       <div className="timeline-detail-actions">
         <Button type="button" variant="primary" onClick={onOpenDispatch}>
           <ClipboardCheck />
-          配置を開く
+          {t('timeline:detail.openDispatch')}
         </Button>
       </div>
-    </div>
+      </div>
+    </Sheet>
   )
 }

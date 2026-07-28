@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
+import { i18next } from '../i18n'
 import {
   CognitoRequestError,
   authenticateWithCognito,
@@ -347,7 +348,7 @@ class BrowserPkceAdapter implements AuthAdapter {
   }
 
   async signIn() {
-    throw new NativeAuthorizationError('ユーザー名とパスワードを入力してください。')
+    throw new NativeAuthorizationError(i18next.t('auth:error.missingCredentials'))
   }
 
   async signInWithPassword(username: string, password: string) {
@@ -359,7 +360,7 @@ class BrowserPkceAdapter implements AuthAdapter {
     )
     if (result.status === 'new_password_required') {
       throw new NativeAuthorizationError(
-        '初回パスワード変更が必要です。Tachyon Account Centerで変更してから、もう一度ログインしてください。',
+        i18next.t('auth:error.passwordChangeRequired'),
       )
     }
     this.acceptCognitoTokens(result.tokens)
@@ -675,7 +676,7 @@ export class NativePkceAdapter implements AuthAdapter {
       if (callback) return callback
       await new Promise(resolve => window.setTimeout(resolve, 500))
     }
-    throw new NativeAuthorizationError('ログイン応答を受信できませんでした。もう一度ログインしてください。')
+    throw new NativeAuthorizationError(i18next.t('auth:error.responseMissing'))
   }
 
   private async completeAuthorization(callbackUrl: string) {

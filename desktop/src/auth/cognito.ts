@@ -1,3 +1,5 @@
+import { i18next } from '../i18n'
+
 const INITIATE_AUTH_TARGET = 'AWSCognitoIdentityProviderService.InitiateAuth'
 
 type CognitoAuthenticationResult = {
@@ -91,7 +93,7 @@ async function cognitoRequest(
       body: JSON.stringify(body),
     })
   } catch {
-    throw new CognitoRequestError('Cognitoへ接続できませんでした。', false)
+    throw new CognitoRequestError(i18next.t('auth:error.unreachable'), false)
   }
 
   const payload = await response.json().catch(() => ({})) as CognitoResponse
@@ -110,23 +112,23 @@ async function cognitoRequest(
 
 function cognitoErrorMessage(code: string, definitive: boolean) {
   if (code === 'NotAuthorizedException' || code === 'UserNotFoundException') {
-    return 'ユーザー名、パスワード、またはアカウント状態を確認してください。'
+    return i18next.t('auth:error.invalidCredentials')
   }
   if (code === 'UserNotConfirmedException') {
-    return 'ユーザー確認が完了していません。'
+    return i18next.t('auth:error.userUnconfirmed')
   }
   if (code === 'PasswordResetRequiredException') {
-    return 'パスワードの再設定が必要です。'
+    return i18next.t('auth:error.passwordResetRequired')
   }
   if (code === 'InvalidParameterException') {
     return 'Cognito public clientの認証設定が不正です。'
   }
   if (code === 'TooManyRequestsException') {
-    return 'ログイン試行が多すぎます。少し待ってから再試行してください。'
+    return i18next.t('auth:error.tooManyAttempts')
   }
   return definitive
-    ? 'Cognitoがログインを拒否しました。'
-    : '認証サービスで一時的な問題が発生しました。'
+    ? i18next.t('auth:error.rejected')
+    : i18next.t('auth:error.serviceUnavailable')
 }
 
 function normalizeTokens(

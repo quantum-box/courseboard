@@ -33,7 +33,9 @@ import {
   BarChart3,
   Building2,
   CalendarCheck,
+  CalendarDays,
   CalendarRange,
+  Check,
   ChevronsLeft,
   ChevronsRight,
   CircleDollarSign,
@@ -43,6 +45,7 @@ import {
   CreditCard,
   FolderTree,
   Gauge,
+  Languages,
   LogOut,
   Map,
   Menu,
@@ -59,61 +62,77 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from '../auth/AuthProvider'
 import { formatTenantWorkspaceLabel, tenantWorkspaceLabel } from '../auth/tenant-label'
+import { i18next, LOCALES, LOCALE_LABELS, currentLocale, setLocale } from '../i18n'
 import { PageReloadProvider, usePageReload } from '../lib/pageReload'
 import { navigate, navigateFromClick } from '../lib/router'
 import { isPageRefreshShortcut } from '../lib/shortcuts'
 import { CourseBoardBrand } from './CourseBoardBrand'
 import { WorkspaceHelpPanel } from './WorkspaceHelp'
 
+/** Routes that carry a translated label under the `nav:items` namespace. */
+export type NavigationRoute =
+  | 'golf'
+  | 'golf/timeline'
+  | 'golf/products'
+  | 'course-map'
+  | 'golf/caddies'
+  | 'golf/caddies/dispatch'
+  | 'golf/caddies/attendance'
+  | 'golf/caddies/shifts'
+  | 'golf/caddies/payroll'
+  | 'golf/budgets'
+  | 'golf/settlement'
+  | 'cancellation-fees'
+  | 'golf/courses'
+  | 'golf/policy'
+
 export type NavigationItem = {
-  route: string
-  label: string
-  description: string
+  route: NavigationRoute
   icon: LucideIcon
 }
 
 export type NavigationSection = {
-  id: string
-  label: string | null
+  /** Matches a key under `nav:sections`; `showLabel: false` renders the group unlabelled. */
+  id: 'home' | 'courseBooking' | 'caddie' | 'finance'
+  showLabel: boolean
   items: NavigationItem[]
 }
 
 export const navigationSections: NavigationSection[] = [
   {
     id: 'home',
-    label: null,
-    items: [
-      { route: 'golf', label: 'ホーム', description: '運用状況と機能への入口', icon: Gauge },
-    ],
+    showLabel: false,
+    items: [{ route: 'golf', icon: Gauge }],
   },
   {
-    id: 'course-booking',
-    label: 'コース予約',
+    id: 'courseBooking',
+    showLabel: true,
     items: [
-      { route: 'golf/timeline', label: '運用タイムライン', description: '予約とキャディ割当を時間軸で可視化', icon: CalendarRange },
-      { route: 'golf/products', label: 'ゴルフ予約商品', description: 'プレープランと受付枠', icon: CalendarCheck },
-      { route: 'course-map', label: 'コースマップ', description: 'カート位置をリアルタイム表示', icon: Map },
+      { route: 'golf/timeline', icon: CalendarRange },
+      { route: 'golf/products', icon: CalendarCheck },
     ],
   },
   {
     id: 'caddie',
-    label: 'キャディ管理',
+    showLabel: true,
     items: [
-      { route: 'golf/caddies', label: '名簿', description: 'プロフィール、スタッフ連携、希望休', icon: Users },
-      { route: 'golf/caddies/dispatch', label: '配置', description: '当日割当、供給、自動配置', icon: ClipboardCheck },
-      { route: 'golf/caddies/attendance', label: '勤怠', description: '出勤打刻と割当照合', icon: Clock },
-      { route: 'golf/caddies/payroll', label: '給与', description: '月次集計と給与CSV', icon: CircleDollarSign },
+      { route: 'golf/caddies', icon: Users },
+      { route: 'golf/caddies/dispatch', icon: ClipboardCheck },
+      { route: 'golf/caddies/attendance', icon: Clock },
+      { route: 'golf/caddies/shifts', icon: CalendarDays },
+      { route: 'golf/caddies/payroll', icon: CircleDollarSign },
     ],
   },
   {
     id: 'finance',
-    label: '経理・精算',
+    showLabel: true,
     items: [
-      { route: 'golf/budgets', label: '予算マスタ', description: '日別予算と達成率', icon: BarChart3 },
-      { route: 'golf/settlement', label: '月次精算', description: '売上、費用、未収の照合', icon: ReceiptText },
-      { route: 'cancellation-fees', label: 'キャンセル料', description: '請求、送信、入金確認', icon: CreditCard },
+      { route: 'golf/budgets', icon: BarChart3 },
+      { route: 'golf/settlement', icon: ReceiptText },
+      { route: 'cancellation-fees', icon: CreditCard },
     ],
   },
 ]
@@ -123,19 +142,19 @@ export const navigationSections: NavigationSection[] = [
  * Kept searchable via ⌘K and linked from the settings hub.
  */
 export const settingsNavigation: NavigationItem[] = [
-  {
-    route: 'golf/courses',
-    label: 'コース管理',
-    description: 'コースとスタート間隔（初期設定）',
-    icon: FolderTree,
-  },
-  {
-    route: 'golf/policy',
-    label: '予約ポリシー',
-    description: '受付制御と客単価判定（初期設定）',
-    icon: Settings2,
-  },
+  { route: 'golf/courses', icon: FolderTree },
+  { route: 'golf/policy', icon: Settings2 },
+  { route: 'course-map', icon: Map },
 ]
+
+/** Navigation copy is looked up at render time so it follows the active locale. */
+export function navLabel(route: NavigationRoute | 'settings') {
+  return i18next.t(`nav:items.${route}.label`)
+}
+
+export function navDescription(route: NavigationRoute | 'settings') {
+  return i18next.t(`nav:items.${route}.description`)
+}
 
 /** Flat list used by keyboard shortcuts, titles, and the home feature grid. */
 export const allNavigation = navigationSections.flatMap(section => section.items)
@@ -146,7 +165,7 @@ export const golfNavigation = allNavigation.filter(
 )
 
 const PINNED_STORAGE_KEY = 'courseboard.sidebar.pinned'
-const knownRoutes = new Set([
+const knownRoutes = new Set<string>([
   ...allNavigation.map(item => item.route),
   ...settingsNavigation.map(item => item.route),
 ])
@@ -170,7 +189,7 @@ function readPinnedRoutes(): string[] {
   }
 }
 
-const CADDIE_SUBVIEWS = new Set(['dispatch', 'attendance', 'payroll'])
+const CADDIE_SUBVIEWS = new Set(['dispatch', 'attendance', 'shifts', 'payroll'])
 
 function caddieRouteSegment(route: string) {
   if (!route.startsWith('golf/caddies/')) return null
@@ -190,13 +209,12 @@ function isActive(route: string, itemRoute: string) {
 }
 
 export function routeTitle(route: string) {
-  if (route === 'settings') return '設定'
-  if (isCaddieRosterRoute(route)) return '名簿'
-  return (
-    settingsNavigation.find(item => isActive(route, item.route))?.label
-    ?? allNavigation.find(item => isActive(route, item.route))?.label
-    ?? 'Course Board'
-  )
+  if (route === 'settings/advanced') return i18next.t('settings:advanced.title')
+  if (route === 'settings') return navLabel('settings')
+  if (isCaddieRosterRoute(route)) return navLabel('golf/caddies')
+  const match = settingsNavigation.find(item => isActive(route, item.route))
+    ?? allNavigation.find(item => isActive(route, item.route))
+  return match ? navLabel(match.route) : i18next.t('common:app.name')
 }
 
 export function AppShell({ route, children }: { route: string; children: ReactNode }) {
@@ -209,6 +227,7 @@ export function AppShell({ route, children }: { route: string; children: ReactNo
 
 function AppShellFrame({ route, children }: { route: string; children: ReactNode }) {
   const auth = useAuth()
+  const { t, i18n } = useTranslation(['nav', 'common'])
   const { triggerPageReload } = usePageReload()
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('courseboard.sidebar.collapsed') === 'true')
   const [hoverExpanded, setHoverExpanded] = useState(false)
@@ -224,6 +243,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   const pointerInsideSidebarRef = useRef(false)
   const hoverLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const accountMenuOpenRef = useRef(false)
+  const activeLocale = currentLocale()
 
   /** Permanent preference stays in `collapsed`; hover only changes the visual rail. */
   const visuallyCollapsed = collapsed && !hoverExpanded
@@ -340,8 +360,9 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
     })
   }
 
-  const title = useMemo(() => routeTitle(route), [route])
-  const accountName = auth.user?.name ?? auth.user?.email ?? 'Course Board user'
+  // `routeTitle` reads the global i18next instance, so re-resolve it per language.
+  const title = useMemo(() => routeTitle(route), [route, i18n.language])
+  const accountName = auth.user?.name ?? auth.user?.email ?? t('nav:account.defaultUser')
   const accountInitials = accountName
     .split(/[\s　]+/)
     .filter(Boolean)
@@ -349,7 +370,9 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
     .map(part => part[0]?.toUpperCase())
     .join('') || 'CB'
   const tenantLabel = auth.tenant ? tenantWorkspaceLabel(auth.tenant) : undefined
-  const tenantDetail = auth.tenant ? formatTenantWorkspaceLabel(auth.tenant) : 'テナント未選択'
+  const tenantDetail = auth.tenant
+    ? formatTenantWorkspaceLabel(auth.tenant)
+    : t('nav:workspace.tenantUnset')
 
   const sidebar = (
     <Sidebar collapsed={visuallyCollapsed} className="courseboard-sidebar">
@@ -360,7 +383,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
           variant="ghost"
           size="icon"
           className="desktop-collapse"
-          aria-label={collapsed ? 'サイドバーを開く' : 'サイドバーを閉じる'}
+          aria-label={collapsed ? t('nav:sidebar.expand') : t('nav:sidebar.collapse')}
           onClick={toggleCollapsed}
         >
           {collapsed ? <ChevronsRight /> : <ChevronsLeft />}
@@ -370,7 +393,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
           variant="ghost"
           size="icon"
           className="mobile-close"
-          aria-label="メニューを閉じる"
+          aria-label={t('nav:sidebar.closeMenu')}
           onClick={() => setMobileOpen(false)}
         >
           <X />
@@ -382,17 +405,19 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
           <TooltipTrigger asChild>
             <SidebarItem type="button" onClick={() => setCommandOpen(true)}>
               <Search />
-              <SidebarItemLabel>検索</SidebarItemLabel>
+              <SidebarItemLabel>{t('nav:sidebar.search')}</SidebarItemLabel>
               <span className="shortcut-pair"><Kbd>⌘</Kbd><Kbd>K</Kbd></span>
             </SidebarItem>
           </TooltipTrigger>
-          {visuallyCollapsed ? <TooltipContent side="right">検索</TooltipContent> : null}
+          {visuallyCollapsed ? (
+            <TooltipContent side="right">{t('nav:sidebar.search')}</TooltipContent>
+          ) : null}
         </Tooltip>
       </SidebarSection>
 
       {pinnedItems.length > 0 ? (
         <SidebarSection>
-          <SidebarSectionLabel>ピン留め</SidebarSectionLabel>
+          <SidebarSectionLabel>{t('nav:sidebar.pinned')}</SidebarSectionLabel>
           {pinnedItems.map(item => (
             <NavigationRow
               key={item.route}
@@ -408,7 +433,9 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
 
       {unpinnedSections.map(section => (
         <SidebarSection key={section.id}>
-          {section.label ? <SidebarSectionLabel>{section.label}</SidebarSectionLabel> : null}
+          {section.showLabel ? (
+            <SidebarSectionLabel>{t(`nav:sections.${section.id}`)}</SidebarSectionLabel>
+          ) : null}
           {section.items.map(item => (
             <NavigationRow
               key={item.route}
@@ -437,14 +464,16 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
           }}
         >
           <DropdownMenuTrigger asChild>
-            <SidebarAccount type="button" aria-label="アカウントメニューを開く">
+            <SidebarAccount type="button" aria-label={t('nav:account.openMenu')}>
               <SidebarAvatar>{accountInitials}</SidebarAvatar>
               <SidebarAccountInfo
                 name={accountName}
                 detail={`${tenantDetail} · ${auth.user?.role ?? ''}`}
               />
               <Badge variant={auth.tenant?.mode === 'sandbox' ? 'warning' : 'success'} className="runtime-dot">
-                {auth.tenant?.mode === 'sandbox' ? 'Sandbox' : '本番'}
+                {auth.tenant?.mode === 'sandbox'
+                  ? t('nav:workspace.sandbox')
+                  : t('nav:workspace.production')}
               </Badge>
             </SidebarAccount>
           </DropdownMenuTrigger>
@@ -455,14 +484,30 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem disabled><UserRound /> {auth.user?.role ?? 'GENERAL'}</DropdownMenuItem>
-            <DropdownMenuItem onSelect={auth.switchTenant}><Building2 /> テナントを切り替え</DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => navigate('settings')}><Settings /> 設定</DropdownMenuItem>
+            <DropdownMenuItem onSelect={auth.switchTenant}>
+              <Building2 /> {t('nav:account.switchTenant')}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => navigate('settings')}>
+              <Settings /> {t('nav:account.settings')}
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setDark(value => !value)}>
               {dark ? <Sun /> : <Moon />}
-              {dark ? 'ライト表示' : 'ダーク表示'}
+              {dark ? t('common:theme.toLight') : t('common:theme.toDark')}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => { void auth.signOut() }}><LogOut /> ログアウト</DropdownMenuItem>
+            <DropdownMenuLabel>{t('common:locale.label')}</DropdownMenuLabel>
+            {LOCALES.map(locale => (
+              <DropdownMenuItem key={locale} onSelect={() => setLocale(locale)}>
+                {locale === activeLocale
+                  ? <Check />
+                  : <span className="menu-check-spacer" aria-hidden="true" />}
+                {LOCALE_LABELS[locale]}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onSelect={() => { void auth.signOut() }}>
+              <LogOut /> {t('nav:account.signOut')}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </SidebarFooter>
@@ -494,7 +539,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
               variant="ghost"
               size="icon"
               className="mobile-menu"
-              aria-label="メニューを開く"
+              aria-label={t('nav:sidebar.openMenu')}
               onClick={() => {
                 setCollapsed(false)
                 setMobileOpen(true)
@@ -511,7 +556,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
                     variant="ghost"
                     size="icon"
                     className="workspace-help-trigger"
-                    aria-label={helpOpen ? 'ヘルプを閉じる' : 'このページのヘルプ'}
+                    aria-label={helpOpen ? t('nav:workspace.closeHelp') : t('nav:workspace.openHelp')}
                     aria-pressed={helpOpen}
                     data-active={helpOpen ? true : undefined}
                     onClick={() => setHelpOpen(value => !value)}
@@ -519,7 +564,9 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
                     <CircleHelp />
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">{helpOpen ? 'ガイドを閉じる' : 'ガイドを開く'}</TooltipContent>
+                <TooltipContent side="bottom">
+                  {helpOpen ? t('nav:workspace.closeHelp') : t('nav:workspace.openHelp')}
+                </TooltipContent>
               </Tooltip>
               {tenantLabel && auth.tenant ? (
                 <span className="workspace-tenant" title={auth.tenant.id}>
@@ -540,60 +587,90 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
 
 
       <CommandDialog open={commandOpen} onOpenChange={setCommandOpen}>
-        <CommandInput placeholder="画面を検索…" />
+        <CommandInput placeholder={t('nav:command.placeholder')} />
         <CommandList>
-          <CommandEmpty>一致する画面はありません。</CommandEmpty>
+          <CommandEmpty>{t('nav:command.empty')}</CommandEmpty>
           {navigationSections.map(section => (
-            <CommandGroup key={section.id} heading={section.label ?? 'ホーム'}>
-              {section.items.map(item => {
-                const Icon = item.icon
-                return (
-                  <CommandItem
-                    key={item.route}
-                    value={`${item.label} ${item.description}`}
-                    onSelect={() => {
-                      navigate(item.route)
-                      setCommandOpen(false)
-                    }}
-                  >
-                    <Icon />
-                    <span className="command-copy"><strong>{item.label}</strong><small>{item.description}</small></span>
-                  </CommandItem>
-                )
-              })}
+            <CommandGroup key={section.id} heading={t(`nav:sections.${section.id}`)}>
+              {section.items.map(item => (
+                <CommandNavigationItem
+                  key={item.route}
+                  item={item}
+                  onNavigate={() => setCommandOpen(false)}
+                />
+              ))}
             </CommandGroup>
           ))}
-          <CommandGroup heading="設定">
+          <CommandGroup heading={t('nav:sections.settings')}>
             <CommandItem onSelect={() => { navigate('settings'); setCommandOpen(false) }}>
               <Settings />
-              <span className="command-copy"><strong>設定</strong><small>Extension runtime とテナント連携</small></span>
+              <span className="command-copy">
+                <strong>{navLabel('settings')}</strong>
+                <small>{navDescription('settings')}</small>
+              </span>
             </CommandItem>
-            {settingsNavigation.map(item => {
-              const Icon = item.icon
-              return (
-                <CommandItem
-                  key={item.route}
-                  value={`${item.label} ${item.description}`}
-                  onSelect={() => {
-                    navigate(item.route)
-                    setCommandOpen(false)
-                  }}
-                >
-                  <Icon />
-                  <span className="command-copy"><strong>{item.label}</strong><small>{item.description}</small></span>
-                </CommandItem>
-              )
-            })}
+            {settingsNavigation.map(item => (
+              <CommandNavigationItem
+                key={item.route}
+                item={item}
+                onNavigate={() => setCommandOpen(false)}
+              />
+            ))}
           </CommandGroup>
-          <CommandGroup heading="アカウント">
+          <CommandGroup heading={t('common:locale.label')}>
+            {LOCALES.map(locale => (
+              <CommandItem
+                key={locale}
+                value={`${t('common:locale.label')} ${LOCALE_LABELS[locale]}`}
+                onSelect={() => {
+                  setLocale(locale)
+                  setCommandOpen(false)
+                }}
+              >
+                {locale === activeLocale ? <Check /> : <Languages />}
+                <span className="command-copy">
+                  <strong>{LOCALE_LABELS[locale]}</strong>
+                  <small>{t('common:locale.description')}</small>
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+          <CommandGroup heading={t('nav:sections.account')}>
             <CommandItem onSelect={() => setDark(value => !value)}>
               {dark ? <Sun /> : <Moon />}
-              <span className="command-copy"><strong>表示テーマを切り替え</strong><small>ライト / ダーク</small></span>
+              <span className="command-copy">
+                <strong>{dark ? t('common:theme.toLight') : t('common:theme.toDark')}</strong>
+                <small>{t('common:theme.description')}</small>
+              </span>
             </CommandItem>
           </CommandGroup>
         </CommandList>
       </CommandDialog>
     </TooltipProvider>
+  )
+}
+
+function CommandNavigationItem({
+  item,
+  onNavigate,
+}: {
+  item: NavigationItem
+  onNavigate: () => void
+}) {
+  const Icon = item.icon
+  const label = navLabel(item.route)
+  const description = navDescription(item.route)
+  return (
+    <CommandItem
+      value={`${label} ${description} ${item.route}`}
+      onSelect={() => {
+        navigate(item.route)
+        onNavigate()
+      }}
+    >
+      <Icon />
+      <span className="command-copy"><strong>{label}</strong><small>{description}</small></span>
+    </CommandItem>
   )
 }
 
@@ -610,7 +687,9 @@ function NavigationRow({
   pinned: boolean
   onTogglePin: () => void
 }) {
+  const { t } = useTranslation('nav')
   const Icon = item.icon
+  const label = navLabel(item.route)
 
   const handlePinClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault()
@@ -628,16 +707,16 @@ function NavigationRow({
             onClick={event => navigateFromClick(event, item.route)}
           >
             <Icon />
-            <SidebarItemLabel>{item.label}</SidebarItemLabel>
+            <SidebarItemLabel>{label}</SidebarItemLabel>
           </SidebarItem>
         </TooltipTrigger>
-        {collapsed ? <TooltipContent side="right">{item.label}</TooltipContent> : null}
+        {collapsed ? <TooltipContent side="right">{label}</TooltipContent> : null}
       </Tooltip>
       {!collapsed ? (
         <button
           type="button"
           className="nav-pin"
-          aria-label={pinned ? 'Unpin from sidebar' : 'Pin to top of sidebar'}
+          aria-label={pinned ? t('sidebar.unpin') : t('sidebar.pin')}
           aria-pressed={pinned}
           onClick={handlePinClick}
         >

@@ -1,3 +1,5 @@
+import { i18next } from '../i18n'
+
 import { invoke } from '@tauri-apps/api/core'
 
 export function isTauri() {
@@ -38,16 +40,16 @@ export function safeExternalUrl(value: string) {
   try {
     url = new URL(value)
   } catch {
-    throw new Error('外部URLが不正です。')
+    throw new Error(i18next.t('common:external.invalidUrl'))
   }
   if (url.protocol !== 'https:' || url.username || url.password) {
-    throw new Error('HTTPS以外の外部URLは開けません。')
+    throw new Error(i18next.t('common:external.httpsOnly'))
   }
   const hostname = url.hostname.toLowerCase()
   const allowed = [...trustedExternalHosts()].some(
     host => hostname === host || hostname.endsWith(`.${host}`),
   )
-  if (!allowed) throw new Error('許可されていない外部サイトは開けません。')
+  if (!allowed) throw new Error(i18next.t('common:external.notAllowed'))
   return url.toString()
 }
 
@@ -58,7 +60,7 @@ export async function openExternal(value: string) {
     return
   }
   const opened = window.open(url, '_blank', 'noopener,noreferrer')
-  if (!opened) throw new Error('外部サイトを開けませんでした。ポップアップ設定を確認してください。')
+  if (!opened) throw new Error(i18next.t('common:external.blocked'))
 }
 
 export function safeAreaInsetsSupported() {

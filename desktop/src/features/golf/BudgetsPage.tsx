@@ -16,12 +16,12 @@ import {
   useRef,
   useState,
 } from 'react'
+import { useTranslation } from 'react-i18next'
 import {
   currentYearMonth,
   downloadText,
   courseboardApiJson,
   courseboardApiText,
-  fieldTenant,
   yen,
 } from '../../api'
 import { useRegisterPageReload } from '../../lib/pageReload'
@@ -123,7 +123,7 @@ function normalizeCsvHeader(contents: string) {
 }
 
 export function BudgetsPage() {
-  const tenant = useMemo(() => fieldTenant(), [])
+  const { t } = useTranslation(['budgets', 'common'])
   const [yearMonth, setYearMonth] = useState(currentYearMonth)
   const [courseFilter, setCourseFilter] = useState('all')
   const [courses, setCourses] = useState<GolfCourse[]>([])
@@ -243,15 +243,15 @@ export function BudgetsPage() {
     const targetAverageSpend = Number(draft.targetAverageSpend)
     const targetCaddyAttachedRatio = Number(draft.targetCaddyAttachedRatio)
     if (!draft.golfCourseId || !draft.date) {
-      setSaveError('コースと日付を選択してください。')
+      setSaveError(t('budgets:validation.courseAndDate'))
       return
     }
     if (!Number.isSafeInteger(targetRevenue) || targetRevenue < 0) {
-      setSaveError('目標売上は0円以上の整数で入力してください。')
+      setSaveError(t('budgets:validation.targetRevenue'))
       return
     }
     if (!Number.isSafeInteger(targetAverageSpend) || targetAverageSpend < 0) {
-      setSaveError('目標客単価は0円以上の整数で入力してください。')
+      setSaveError(t('budgets:validation.targetPerPlayer'))
       return
     }
     if (
@@ -259,7 +259,7 @@ export function BudgetsPage() {
       || targetCaddyAttachedRatio < 0
       || targetCaddyAttachedRatio > 100
     ) {
-      setSaveError('キャディ付き比率は0〜100%で入力してください。')
+      setSaveError(t('budgets:validation.caddieRate'))
       return
     }
 
@@ -278,10 +278,10 @@ export function BudgetsPage() {
           }),
         },
       )
-      setSavedMessage(`${draft.date} の予算を保存しました。`)
+      setSavedMessage(t('budgets:editor.saved', { date: draft.date }))
       await load()
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : '予算を保存できませんでした。')
+      setSaveError(error instanceof Error ? error.message : t('budgets:saveFailed'))
     } finally {
       setSaving(false)
     }
@@ -301,12 +301,12 @@ export function BudgetsPage() {
       setCsvContents(contents)
       setCsvFilename(file.name)
       if (normalizeCsvHeader(contents) !== CSV_HEADER) {
-        setCsvError(`CSVヘッダーを確認してください。必要な列: ${CSV_HEADER}`)
+        setCsvError(t('budgets:csv.headerError', { header: CSV_HEADER }))
       }
     } catch {
       setCsvContents('')
       setCsvFilename('')
-      setCsvError('CSVファイルを読み込めませんでした。')
+      setCsvError(t('budgets:csv.readError'))
     }
   }
 
@@ -324,14 +324,14 @@ export function BudgetsPage() {
           body: csvContents,
         },
       )
-      setCsvMessage(`${csvFilename} をインポートしました。`)
+      setCsvMessage(t('budgets:csv.imported', { name: csvFilename }))
       setCsvContents('')
       setCsvFilename('')
       if (fileInputRef.current) fileInputRef.current.value = ''
       await load()
     } catch (error) {
       setCsvError(
-        error instanceof Error ? error.message : 'CSVをインポートできませんでした。',
+        error instanceof Error ? error.message : t('budgets:csv.importError'),
       )
     } finally {
       setImporting(false)
@@ -343,29 +343,32 @@ export function BudgetsPage() {
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow={`Golf operations · ${tenant}`}
-        title="日次予算"
-        description="対象月の売上・客単価・キャディ付き比率を、予約実績と並べて調整します。"
+        title={t('budgets:title')}
+        description={t('budgets:description')}
         actions={(
-          <PageRefreshButton onClick={() => void load()} loading={loading} label="更新" />
+          <PageRefreshButton
+            onClick={() => void load()}
+            loading={loading}
+            label={t('common:action.refresh')}
+          />
         )}
       />
 
       <Panel>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <Field label="対象月" required className="sm:w-48">
+          <Field label={t('budgets:filter.month')} required className="sm:w-48">
             <Input
               type="month"
               value={yearMonth}
               onChange={event => setYearMonth(event.target.value || currentYearMonth())}
             />
           </Field>
-          <Field label="コース" className="sm:min-w-64">
+          <Field label={t('budgets:filter.course')} className="sm:min-w-64">
             <NativeSelect
               value={courseFilter}
               onChange={event => setCourseFilter(event.target.value)}
             >
-              <option value="all">すべてのコース</option>
+              <option value="all">{t('budgets:filter.allCourses')}</option>
               {courses.map(course => (
                 <option key={course.id} value={course.id}>
                   {course.name}
@@ -376,44 +379,54 @@ export function BudgetsPage() {
           <div className="pb-1 text-xs text-muted-foreground">
             <CalendarRange className="mr-1 inline size-3.5" />
             {range.from} — {range.to}
-            <span className="ml-2">コース絞り込みは登録済み予算一覧に適用</span>
+            <span className="ml-2">{t('budgets:filter.courseNote')}</span>
           </div>
         </div>
       </Panel>
 
-      {loading ? <LoadingState label="予算と実績を読み込んでいます" /> : null}
+      {loading ? <LoadingState label={t('budgets:loading')} /> : null}
       {!loading && loadError ? <ResourceError error={loadError} onRetry={() => void load()} /> : null}
 
       {!loading && !loadError ? (
         <>
           <Panel
-            title="月間の進捗"
-            description="全コースの予約実績を日次予算に重ねた運用ビューです。"
-            actions={<Badge variant="outline">全コース · {achievements.length} 日分</Badge>}
+            title={t('budgets:progress.title')}
+            description={t('budgets:progress.description')}
+            actions={(
+              <Badge variant="outline">
+                {t('budgets:progress.badge', { n: String(achievements.length) })}
+              </Badge>
+            )}
           >
             {achievementError ? (
-              <Notice tone="warning" title="実績を表示できません">
-                予算の編集は利用できます。達成率APIが有効になった後に再度更新してください。
+              <Notice tone="warning" title={t('budgets:progress.unavailable.title')}>
+                {t('budgets:progress.unavailable.description')}
               </Notice>
             ) : achievements.length === 0 ? (
               <EmptyState
-                title="この月の予算実績はありません"
-                description="日次予算を登録すると、予約売上との達成率がここに表示されます。"
+                title={t('budgets:progress.empty.title')}
+                description={t('budgets:progress.empty.description')}
               />
             ) : (
               <div className="grid gap-4">
                 <MetricGrid>
-                  <Metric label="目標売上" value={yen(achievementSummary.target)} />
-                  <Metric label="実績売上" value={yen(achievementSummary.actual)} />
                   <Metric
-                    label="達成率"
+                    label={t('budgets:progress.metrics.target')}
+                    value={yen(achievementSummary.target)}
+                  />
+                  <Metric
+                    label={t('budgets:progress.metrics.actual')}
+                    value={yen(achievementSummary.actual)}
+                  />
+                  <Metric
+                    label={t('budgets:progress.metrics.rate')}
                     value={rateLabel(achievementSummary.rate)}
                     tone={rateTone(achievementSummary.rate)}
                   />
                   <Metric
-                    label="予約 / プレイヤー"
+                    label={t('budgets:progress.metrics.bookings')}
                     value={`${achievementSummary.reservations} / ${achievementSummary.players}`}
-                    detail="件 / 人"
+                    detail={t('budgets:progress.metrics.bookingsDetail')}
                   />
                 </MetricGrid>
                 <DataTable
@@ -422,12 +435,12 @@ export function BudgetsPage() {
                   columns={[
                     {
                       key: 'date',
-                      header: '日付',
+                      header: t('budgets:progress.table.date'),
                       cell: row => row.date,
                     },
                     {
                       key: 'revenue',
-                      header: '売上（実績 / 目標）',
+                      header: t('budgets:progress.table.revenue'),
                       align: 'right',
                       cell: row => (
                         <span>{yen(row.actualRevenue)} / {yen(row.targetRevenue)}</span>
@@ -435,7 +448,7 @@ export function BudgetsPage() {
                     },
                     {
                       key: 'rate',
-                      header: '達成率',
+                      header: t('budgets:progress.table.rate'),
                       align: 'right',
                       cell: row => (
                         <Badge variant={rateBadgeVariant(row.revenueAchievementRate)}>
@@ -445,7 +458,7 @@ export function BudgetsPage() {
                     },
                     {
                       key: 'average',
-                      header: '客単価（実績 / 目標）',
+                      header: t('budgets:progress.table.perPlayer'),
                       align: 'right',
                       cell: row => (
                         <span>
@@ -456,7 +469,7 @@ export function BudgetsPage() {
                     },
                     {
                       key: 'caddie',
-                      header: 'キャディ比率（実績 / 目標）',
+                      header: t('budgets:progress.table.caddieRate'),
                       align: 'right',
                       cell: row => (
                         <span>
@@ -475,18 +488,18 @@ export function BudgetsPage() {
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
             <Panel
-              title="1日分を追加・更新"
-              description="同じコース・日付を保存すると、その日の予算を更新します。"
+              title={t('budgets:editor.title')}
+              description={t('budgets:editor.description')}
             >
               {courses.length === 0 ? (
                 <EmptyState
-                  title="コースが登録されていません"
-                  description="設定 → コース管理 でコースを作成してください。"
+                  title={t('budgets:editor.noCourses.title')}
+                  description={t('budgets:editor.noCourses.description')}
                 />
               ) : (
                 <form className="grid gap-4" onSubmit={saveBudget}>
                   <FormGrid columns={2}>
-                    <Field label="コース" required>
+                    <Field label={t('budgets:editor.course')} required>
                       <NativeSelect
                         required
                         value={draft.golfCourseId}
@@ -497,7 +510,7 @@ export function BudgetsPage() {
                         ))}
                       </NativeSelect>
                     </Field>
-                    <Field label="日付" required>
+                    <Field label={t('budgets:editor.date')} required>
                       <Input
                         required
                         type="date"
@@ -507,7 +520,11 @@ export function BudgetsPage() {
                         onChange={event => setDraft({ ...draft, date: event.target.value })}
                       />
                     </Field>
-                    <Field label="目標売上" required hint="円・税込の運用目標">
+                    <Field
+                      label={t('budgets:editor.targetRevenue')}
+                      required
+                      hint={t('budgets:editor.targetRevenueHint')}
+                    >
                       <Input
                         required
                         type="number"
@@ -519,7 +536,11 @@ export function BudgetsPage() {
                         placeholder="1200000"
                       />
                     </Field>
-                    <Field label="目標客単価" required hint="1プレイヤーあたり・円">
+                    <Field
+                      label={t('budgets:editor.targetPerPlayer')}
+                      required
+                      hint={t('budgets:editor.targetPerPlayerHint')}
+                    >
                       <Input
                         required
                         type="number"
@@ -531,7 +552,11 @@ export function BudgetsPage() {
                         placeholder="12000"
                       />
                     </Field>
-                    <Field label="キャディ付き比率" required hint="0〜100%">
+                    <Field
+                      label={t('budgets:editor.caddieRate')}
+                      required
+                      hint={t('budgets:editor.caddieRateHint')}
+                    >
                       <Input
                         required
                         type="number"
@@ -552,7 +577,7 @@ export function BudgetsPage() {
                   {savedMessage ? <Notice tone="success">{savedMessage}</Notice> : null}
                   <div className="flex justify-end">
                     <Button variant="primary" size="lg" type="submit" disabled={saving}>
-                      <Save /> {saving ? '保存中…' : '予算を保存'}
+                      <Save /> {saving ? t('common:action.saving') : t('budgets:editor.save')}
                     </Button>
                   </div>
                 </form>
@@ -560,8 +585,8 @@ export function BudgetsPage() {
             </Panel>
 
             <Panel
-              title="CSVインポート"
-              description="読み込む内容をプレビューしてから一括反映します。"
+              title={t('budgets:csv.title')}
+              description={t('budgets:csv.description')}
               actions={(
                 <Button
                   type="button"
@@ -571,12 +596,16 @@ export function BudgetsPage() {
                     `${CSV_HEADER}\ncourse_001,${yearMonth}-01,1200000,12000,0.70\n`,
                   )}
                 >
-                  <Download /> テンプレート
+                  <Download /> {t('budgets:csv.template')}
                 </Button>
               )}
             >
               <form className="grid gap-3" onSubmit={importCsv}>
-                <Field label="CSVファイル" required hint={`ヘッダー: ${CSV_HEADER}`}>
+                <Field
+                  label={t('budgets:csv.file')}
+                  required
+                  hint={t('budgets:csv.fileHint', { header: CSV_HEADER })}
+                >
                   <Input
                     ref={fileInputRef}
                     type="file"
@@ -602,18 +631,18 @@ export function BudgetsPage() {
                   type="submit"
                   disabled={!csvContents || Boolean(csvError) || importing}
                 >
-                  <Upload /> {importing ? 'インポート中…' : 'プレビュー内容を反映'}
+                  <Upload /> {importing ? t('budgets:csv.importing') : t('budgets:csv.apply')}
                 </Button>
               </form>
             </Panel>
           </div>
 
           <Panel
-            title="登録済み予算"
-            description={`${range.from} から ${range.to} まで`}
+            title={t('budgets:list.title')}
+            description={t('budgets:list.description', { from: range.from, to: range.to })}
             actions={(
               <Badge variant="neutral">
-                <Target /> {budgets.length} 件
+                <Target /> {t('budgets:list.badge', { n: String(budgets.length) })}
               </Badge>
             )}
           >
@@ -622,14 +651,14 @@ export function BudgetsPage() {
               rowKey={row => row.id}
               empty={(
                 <EmptyState
-                  title="条件に合う予算はありません"
-                  description="上のフォームまたはCSVから予算を登録できます。"
+                  title={t('budgets:list.empty.title')}
+                  description={t('budgets:list.empty.description')}
                 />
               )}
               columns={[
                 {
                   key: 'course',
-                  header: 'コース',
+                  header: t('budgets:list.table.course'),
                   cell: row => (
                     <div>
                       <strong>{courseNames.get(row.golfCourseId) ?? row.golfCourseId}</strong>
@@ -637,22 +666,22 @@ export function BudgetsPage() {
                     </div>
                   ),
                 },
-                { key: 'date', header: '日付', cell: row => row.date },
+                { key: 'date', header: t('budgets:list.table.date'), cell: row => row.date },
                 {
                   key: 'revenue',
-                  header: '目標売上',
+                  header: t('budgets:list.table.targetRevenue'),
                   align: 'right',
                   cell: row => yen(row.targetRevenue),
                 },
                 {
                   key: 'average',
-                  header: '目標客単価',
+                  header: t('budgets:list.table.targetPerPlayer'),
                   align: 'right',
                   cell: row => yen(row.targetAverageSpend),
                 },
                 {
                   key: 'ratio',
-                  header: 'キャディ比率',
+                  header: t('budgets:list.table.caddieRate'),
                   align: 'right',
                   cell: row => `${Math.round(row.targetCaddyAttachedRatio * 100)}%`,
                 },

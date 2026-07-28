@@ -1,6 +1,8 @@
 import { Badge, Button } from '@tachyon-sdk/native-ui'
 import { RefreshCw, Save } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { i18next } from '../../i18n'
 import { ApiError, courseboardApiJson } from '../../api'
 import {
   Field,
@@ -27,11 +29,11 @@ function parseMetadata(value: string) {
   try {
     const parsed: unknown = value.trim() ? JSON.parse(value) : {}
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { value: null, error: 'metadataJson は JSON オブジェクトで入力してください。' }
+      return { value: null, error: i18next.t('settings:metadata.validation.object') }
     }
     return { value: parsed as Record<string, unknown>, error: null }
   } catch {
-    return { value: null, error: 'JSON の構文を確認してください。' }
+    return { value: null, error: i18next.t('settings:metadata.validation.syntax') }
   }
 }
 
@@ -44,6 +46,7 @@ function formatMetadata(value: unknown) {
 }
 
 export function IntegrationMetadataPanel() {
+  const { t } = useTranslation(['settings', 'common'])
   const [draft, setDraft] = useState('{}')
   const [baseline, setBaseline] = useState('{}')
   const [loading, setLoading] = useState(true)
@@ -113,7 +116,7 @@ export function IntegrationMetadataPanel() {
       setSaveError(
         error instanceof Error
           ? error.message
-          : '連携メタデータを保存できませんでした。',
+          : t('settings:metadata.validation.failed'),
       )
     } finally {
       setSaving(false)
@@ -122,39 +125,38 @@ export function IntegrationMetadataPanel() {
 
   return (
     <Panel
-      title="連携メタデータ"
-      description="予約ポリシーに付与する他システム連携用 JSON です。日常の受付運用では編集不要です。"
+      title={t('settings:metadata.title')}
+      description={t('settings:metadata.description')}
       actions={(
         <div className="flex items-center gap-2">
-          {dirty ? <Badge variant="outline">未保存</Badge> : null}
+          {dirty ? <Badge variant="outline">{t('settings:metadata.unsaved')}</Badge> : null}
           <Button type="button" size="sm" variant="ghost" onClick={() => void load()} disabled={loading || saving} title="⌘R">
-            <RefreshCw /> 再読み込み
+            <RefreshCw /> {t('settings:metadata.reload')}
           </Button>
           <Button type="button" size="sm" variant="primary" onClick={() => void save()} disabled={loading || saving || !dirty}>
-            <Save /> {saving ? '保存中…' : 'メタデータを保存'}
+            <Save /> {saving ? t('common:action.saving') : t('settings:metadata.save')}
           </Button>
         </div>
       )}
     >
-      {loading ? <LoadingState label="連携メタデータを読み込んでいます" /> : null}
+      {loading ? <LoadingState label={t('settings:metadata.loading')} /> : null}
       {loadError ? <ResourceError error={loadError} onRetry={() => void load()} /> : null}
 
       {!loading && !loadError ? (
         <div className="grid gap-3">
           {policyMissing ? (
-            <Notice tone="warning" title="予約ポリシーが未作成です">
-              先に設定の「テナントマスタ」→「予約ポリシー」で基本設定を保存してから、ここへ連携キーを追加してください。
+            <Notice tone="warning" title={t('settings:metadata.policyMissing.title')}>
+              {t('settings:metadata.policyMissing.description')}
             </Notice>
           ) : null}
 
-          <Notice tone="info" title="いつ使うか">
-            PMS・OTA・会員基盤などへ予約を同期するとき、施設コードやチャネル識別子を載せます。
-            現場スタッフの日常操作では触れません。空の {'{}'} のままで問題ありません。
+          <Notice tone="info" title={t('settings:metadata.when.title')}>
+            {t('settings:metadata.when.description')}
           </Notice>
 
           <Field
             label="metadataJson"
-            hint="JSON オブジェクトのみ · 例はプレースホルダを参照"
+            hint={t('settings:metadata.fieldHint')}
           >
             <NativeTextarea
               rows={12}
@@ -171,23 +173,23 @@ export function IntegrationMetadataPanel() {
           </Field>
 
           <div className="rounded-md bg-muted/45 px-3 py-2 text-xs text-muted-foreground">
-            <p className="mb-1 font-medium text-foreground">ユースケース例</p>
+            <p className="mb-1 font-medium text-foreground">{t('settings:metadata.examplesTitle')}</p>
             <ul className="list-disc space-y-1 pl-4">
-              <li><code>partnerFacilityCode</code> … 外部 PMS の施設コード紐付け</li>
-              <li><code>channelCodes</code> … 楽天・じゃらん等チャネル別同期フラグ</li>
-              <li><code>syncReservationCode</code> … 予約番号を外部へ返すかどうか</li>
+              <li><code>partnerFacilityCode</code> … {t('settings:metadata.example1')}</li>
+              <li><code>channelCodes</code> … {t('settings:metadata.example2')}</li>
+              <li><code>syncReservationCode</code> … {t('settings:metadata.example3')}</li>
             </ul>
           </div>
 
           {parsed.error ? (
-            <Notice tone="danger" title="JSON を確認してください">{parsed.error}</Notice>
+            <Notice tone="danger" title={t('settings:metadata.invalidJson')}>{parsed.error}</Notice>
           ) : null}
           {saveError ? (
-            <Notice tone="danger" title="保存できませんでした">{saveError}</Notice>
+            <Notice tone="danger" title={t('settings:metadata.saveFailed')}>{saveError}</Notice>
           ) : null}
           {saved ? (
-            <Notice tone="success" title="連携メタデータを保存しました">
-              予約ポリシーの metadataJson が更新されました。新規予約の連携処理から参照されます。
+            <Notice tone="success" title={t('settings:metadata.saved.title')}>
+              {t('settings:metadata.saved.description')}
             </Notice>
           ) : null}
         </div>

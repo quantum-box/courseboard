@@ -1,0 +1,109 @@
+import type { DeepPartial } from '../../types'
+import type { settings as source } from '../ja/settings'
+
+export const settings: DeepPartial<typeof source> = {
+  title: 'Settings',
+  description: 'Initial setup and integrations with other services.',
+  tenantMaster: {
+    title: 'Initial setup',
+    description: 'Set these up once; you will rarely open them day to day.',
+  },
+  extension: {
+    loading: 'Checking the extension',
+    missing: {
+      title: 'The golf extension was not found',
+      description: 'Check that the golf features are enabled for this course.',
+    },
+    title: 'Golf feature settings',
+    description: 'The currency and time zone used across this course. Set once during setup.',
+    enabled: 'Enabled',
+    disabled: 'Disabled',
+    invalid: 'Configuration problem',
+    valid: 'Validated',
+    unsaved: 'Unsaved',
+    reload: 'Reload',
+    save: 'Save settings',
+    loadingConfig: 'Loading the golf feature settings',
+    statusUnavailable: {
+      title: 'Extension status is unavailable',
+      description: 'No status came back for the golf features. Check that they are enabled before saving.',
+    },
+    invalidConfig: {
+      title: 'The current settings have a problem',
+    },
+    currency: 'Default currency',
+    currencyHint: 'Last updated {{updated}} · ISO 4217',
+    timezone: 'Time zone',
+    timezoneHint: 'e.g. Asia/Tokyo',
+    saveFailed: 'Could not save the settings',
+    saved: {
+      title: 'Golf feature settings saved',
+      description: 'The currency and time zone were applied.',
+    },
+    validation: {
+      currencyRequired: 'Choose a currency.',
+      currencyFormat: 'Enter the currency as a 3-letter ISO 4217 code.',
+      timezoneRequired: 'Enter a time zone.',
+    },
+    error: {
+      generic: 'Could not finish that.',
+    },
+  },
+  advanced: {
+    title: 'System integration details',
+    description: 'Runtime status of the golf features and settings for connecting other systems. Not needed day to day.',
+    linkLabel: 'System integration details',
+    linkDescription: 'Runtime status and integration settings',
+  },
+  summary: {
+    title: 'Golf feature status',
+    description: 'Current values for this course',
+    tenantStatus: 'Course status',
+    configVersion: 'Config version',
+    defaultVersion: 'Default',
+    invalid: {
+      title: 'Fix the settings',
+    },
+    valid: 'The settings pass validation.',
+  },
+  metadata: {
+    title: 'Integration metadata',
+    description: 'JSON attached to the booking rules for other systems. Not touched during day-to-day work.',
+    unsaved: 'Unsaved',
+    reload: 'Reload',
+    save: 'Save',
+    loading: 'Loading the integration metadata',
+    policyMissing: {
+      title: 'No booking rules yet',
+      description: 'Save the basics under Booking rules first, then add integration keys here.',
+    },
+    when: {
+      title: 'When to use this',
+      description:
+        'Carries facility codes and channel identifiers when bookings sync to other systems. Leave it empty if you do not need it.',
+    },
+    fieldHint: 'A JSON object only',
+    examplesTitle: 'Examples',
+    example1: 'Map to an external system’s facility code',
+    example2: 'Toggle syncing per booking channel',
+    example3: 'Whether to return the booking number externally',
+    invalidJson: 'Check the JSON',
+    saveFailed: 'Could not save',
+    saved: {
+      title: 'Integration metadata saved',
+      description: 'New bookings will use this when they sync.',
+    },
+    validation: {
+      object: 'Enter a JSON object.',
+      syntax: 'Check the JSON syntax.',
+      failed: 'Could not save the integration metadata.',
+    },
+  },
+  validation: {
+    duration: 'Enter a default duration between 30 and 720 minutes.',
+    holes: 'Choose 9 or 18 default holes.',
+    maxPlayers: 'Enter 1 to 4 players per slot.',
+    memberDeposit: 'Enter a member deposit between 0 and 100%.',
+    guestDeposit: 'Enter a guest deposit between 0 and 100%.',
+  },
+}
