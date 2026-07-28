@@ -407,6 +407,34 @@ export const helpEn: HelpCatalog = {
       ],
     },
 
+    'settings/members': {
+      title: 'Members & roles',
+      summary: 'List, invite, and manage the roles of everyone who can use this facility.',
+      usage: [
+        {
+          heading: 'Change roles',
+          body: 'Use Edit on a row to swap roles. Admin, staff and viewer are exclusive; per-domain roles can stack. Picking admin makes every other role unnecessary.',
+        },
+        {
+          heading: 'Invite a member',
+          body: 'Invite with an email address and roles. New addresses receive an invitation email; assign their roles here after they accept.',
+        },
+        {
+          heading: 'Remove a member',
+          body: 'Remove detaches every role. The owner cannot be changed.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Roles',
+          body: 'Admin: everything including member management. Staff: day-to-day edits. Viewer: read only. The owner always has full access.',
+        },
+        {
+          heading: 'Member data',
+          body: 'Managed by Field IAM (/v1/field/iam/*). Actions require the field:ManageUsers permission; owners always pass.',
+        },
+      ],
+    },
     settings: {
       title: 'Settings',
       summary: 'One-time setup and integrations with other services.',

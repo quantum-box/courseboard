@@ -255,6 +255,91 @@ const mockStaff = [
   { id: 'staff_yuki', name: '伊藤 優希', active: true },
 ]
 
+/** Tenant members mirroring the Field IAM surface `GET /v1/field/iam/users`. */
+const mockIamCustomPolicies = [
+  { id: 'pol_caddie_viewer', name: 'キャディ管理閲覧者', description: '名簿・配置・勤怠・給与の閲覧' },
+  { id: 'pol_caddie_admin', name: 'キャディ管理管理者', description: '名簿・配置・勤怠・給与の作成・更新' },
+  { id: 'pol_billing_viewer', name: '経理閲覧者', description: '予算・精算・キャンセル料の閲覧' },
+  { id: 'pol_billing_admin', name: '経理管理者', description: '予算・精算・キャンセル料の作成・更新' },
+]
+
+const mockIamMembers: Array<{
+  id: string
+  email: string | null
+  name: string | null
+  role: string | null
+  isOwner: boolean
+  customPolicyIds: string[]
+  tenants: string[]
+}> = [
+  {
+    id: 'local-operator',
+    name: 'Local operator',
+    email: 'operator@example.com',
+    role: null,
+    isOwner: true,
+    customPolicyIds: [],
+    tenants: ['courseboard_id'],
+  },
+  {
+    id: 'user_front_manager',
+    name: '高橋 誠',
+    email: 'makoto@example.com',
+    role: 'field:admin',
+    isOwner: false,
+    customPolicyIds: ['pol_billing_admin'],
+    tenants: ['courseboard_id'],
+  },
+  {
+    id: 'user_front_staff',
+    name: '鈴木 里奈',
+    email: 'rina@example.com',
+    role: 'field:staff',
+    isOwner: false,
+    customPolicyIds: ['pol_caddie_viewer', 'pol_billing_viewer'],
+    tenants: ['courseboard_id'],
+  },
+  {
+    id: 'user_viewer',
+    name: '木村 大地',
+    email: 'daichi@example.com',
+    role: 'field:viewer',
+    isOwner: false,
+    customPolicyIds: [],
+    tenants: ['courseboard_id'],
+  },
+]
+
+const IAM_ROLE_BY_REQUEST: Record<string, string> = {
+  admin: 'field:admin',
+  staff: 'field:staff',
+  viewer: 'field:viewer',
+}
+
+const IAM_ROLE_BY_POLICY_ID: Record<string, string> = {
+  pol_erp_admin: 'field:admin',
+  pol_erp_staff: 'field:staff',
+  pol_erp_viewer: 'field:viewer',
+}
+
+/** Split a flat policy list into (role, customPolicyIds) like the Field API. */
+function splitMockPolicyIds(policyIds: string[]): { role: string | null; customPolicyIds: string[] } | { error: string } {
+  let role: string | null = null
+  const customPolicyIds: string[] = []
+  for (const policyId of policyIds) {
+    const mapped = IAM_ROLE_BY_POLICY_ID[policyId]
+    if (mapped) {
+      if (role && role !== mapped) return { error: 'at most one role policy can be attached' }
+      role = mapped
+    } else if (mockIamCustomPolicies.some(policy => policy.id === policyId)) {
+      if (!customPolicyIds.includes(policyId)) customPolicyIds.push(policyId)
+    } else {
+      return { error: `custom policies are not available for this Field tenant: ${policyId}` }
+    }
+  }
+  return { role, customPolicyIds }
+}
+
 /** Day board fixtures for the operations timeline (tee sheet + caddy lanes). */
 const mockTeeReservations = [
   {
@@ -1060,6 +1145,13 @@ function resolveGet(path: string): Json | null | undefined {
 
   if (pathname === '/v1/erp/staff') return items(mockStaff.map(member => ({ ...member })))
 
+  if (pathname === '/v1/field/iam/users') {
+    return {
+      users: mockIamMembers.map(member => ({ ...member })),
+      customPolicies: mockIamCustomPolicies.map(policy => ({ ...policy })),
+    }
+  }
+
   if (pathname === '/v1/erp/extensions/golf-course/reservation-policy') {
     return { ...mockReservationPolicy, tenantId: TENANT_ID() || 'courseboard_id' }
   }
@@ -1114,6 +1206,72 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   const pathname = normalizeMockPath(pathnameOf(path))
   const method = methodOf(init)
   const body = parseBody(init) as Record<string, unknown> | undefined
+
+  if (pathname === '/v1/field/iam/users/invite' && method === 'POST') {
+    const email = body?.email == null ? '' : String(body.email).trim().toLowerCase()
+    if (!email) return error(400, 'email is required')
+    let role: string | null
+    let customPolicyIds: string[]
+    if (Array.isArray(body?.policyIds)) {
+      const split = splitMockPolicyIds(body.policyIds.map(String))
+      if ('error' in split) return error(400, split.error)
+      role = split.role
+      customPolicyIds = split.customPolicyIds
+    } else {
+      role = IAM_ROLE_BY_REQUEST[String(body?.role ?? '')] ?? null
+      if (!role) return error(400, 'either role or policyIds is required')
+      customPolicyIds = Array.isArray(body?.customPolicyIds)
+        ? body.customPolicyIds.map(String)
+        : []
+    }
+    const existing = mockIamMembers.find(member => member.email === email)
+    if (existing) {
+      existing.role = existing.isOwner ? null : role
+      if (!existing.isOwner) existing.customPolicyIds = customPolicyIds
+      return hit({
+        invitationSent: false,
+        email,
+        user: { ...existing },
+        customPolicyIds,
+      })
+    }
+    // New addresses only receive an invitation email; policies are assigned
+    // after the invitee accepts, so the roster does not change yet.
+    return hit({
+      invitationSent: true,
+      email,
+      user: null,
+      customPolicyIds,
+    })
+  }
+
+  const iamPoliciesMatch = pathname.match(/^\/v1\/field\/iam\/users\/([^/]+)\/policies$/)
+  if (iamPoliciesMatch && method === 'PUT') {
+    const userId = decodeURIComponent(iamPoliciesMatch[1] ?? '')
+    const member = mockIamMembers.find(entry => entry.id === userId)
+    if (!member) return error(404, `Mock IAM user ${userId} was not found`)
+    if (member.isOwner) {
+      return error(400, 'Tenant owner access is managed by AdministratorAccess')
+    }
+    if (!Array.isArray(body?.policyIds)) return error(400, 'policyIds is required')
+    const split = splitMockPolicyIds(body.policyIds.map(String))
+    if ('error' in split) return error(400, split.error)
+    member.role = split.role
+    member.customPolicyIds = split.customPolicyIds
+    return hit({ ...member })
+  }
+
+  const iamUserMatch = pathname.match(/^\/v1\/field\/iam\/users\/([^/]+)$/)
+  if (iamUserMatch && method === 'DELETE') {
+    const userId = decodeURIComponent(iamUserMatch[1] ?? '')
+    const index = mockIamMembers.findIndex(entry => entry.id === userId)
+    if (index < 0) return error(404, `Mock IAM user ${userId} was not found`)
+    if (mockIamMembers[index]!.isOwner) {
+      return error(400, 'Tenant owner access is managed by AdministratorAccess')
+    }
+    mockIamMembers.splice(index, 1)
+    return hit(null)
+  }
 
   if (pathname === '/v1/erp/extensions/golf-course/courses' && method === 'POST') {
     const created = {

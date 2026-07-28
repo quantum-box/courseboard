@@ -67,6 +67,10 @@ export const nav: DeepPartial<typeof source> = {
       label: '予約の決まりごと',
       description: 'どんな予約を受けるかを決めます',
     },
+    'settings/members': {
+      label: 'メンバーと権限',
+      description: 'メンバーを招待して、できることを決めます',
+    },
     settings: {
       label: '設定',
       description: '最初に決めておく設定と、他のサービスとのつなぎ',

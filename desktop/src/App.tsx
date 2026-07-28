@@ -15,6 +15,7 @@ import { BudgetsPage } from './features/golf/BudgetsPage'
 import { CaddiesPage } from './features/golf/CaddiesPage'
 import { CoursesPage } from './features/golf/CoursesPage'
 import { GolfHomePage } from './features/golf/GolfHomePage'
+import { MembersPage } from './features/members/MembersPage'
 import { PolicyPage } from './features/golf/PolicyPage'
 import { ReservationProductsPage } from './features/golf/ReservationProductsPage'
 import { SettlementPage } from './features/golf/SettlementPage'
@@ -108,6 +109,7 @@ function RouteContent({ route }: { route: string }) {
   if (route === 'course-map') return <CourseMapPage />
   if (route === 'settings') return <SettingsPage />
   if (route === 'settings/advanced') return <SettingsAdvancedPage />
+  if (route === 'settings/members') return <MembersPage />
   return <NotFoundPage />
 }
 

@@ -68,6 +68,10 @@ export const nav: DeepPartial<typeof source> = {
       label: 'Booking rules',
       description: 'Conditions for accepting bookings',
     },
+    'settings/members': {
+      label: 'Members & roles',
+      description: 'Invite members and manage roles',
+    },
     settings: {
       label: 'Settings',
       description: 'Integrations and initial setup',
