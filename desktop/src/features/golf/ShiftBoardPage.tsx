@@ -34,14 +34,19 @@ type CaddieProfile = {
 
 type ListResponse<T> = { items: T[] }
 
+// The date string is already the JST calendar date, so read it as a plain
+// UTC date; appending +09:00 would land on the previous UTC day.
+function weekdayIndex(date: string) {
+  return new Date(`${date}T00:00:00Z`).getUTCDay()
+}
+
 function weekdayLabel(date: string) {
-  const day = new Date(`${date}T00:00:00+09:00`).getUTCDay()
   const keys = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
-  return i18next.t(`common:weekday.${keys[day] ?? 'sun'}`)
+  return i18next.t(`common:weekday.${keys[weekdayIndex(date)] ?? 'sun'}`)
 }
 
 function isWeekend(date: string) {
-  const day = new Date(`${date}T00:00:00+09:00`).getUTCDay()
+  const day = weekdayIndex(date)
   return day === 0 || day === 6
 }
 

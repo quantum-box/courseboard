@@ -386,6 +386,27 @@ export const helpEn: HelpCatalog = {
       ],
     },
 
+    'settings/advanced': {
+      title: 'System integration details',
+      summary: 'Runtime status of the golf features and the settings for connecting other systems. Not needed day to day.',
+      usage: [
+        {
+          heading: 'Check the runtime status',
+          body: 'Confirm the golf features read as enabled and validation passes; any problems are listed on this page.',
+        },
+        {
+          heading: 'Edit the integration settings',
+          body: 'Edit and save the metadataJson used when bookings are sent to external systems. Daily reception never touches this.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Config version',
+          body: 'Increments on every save; “default” means nothing has been saved yet.',
+        },
+      ],
+    },
+
     settings: {
       title: 'Settings',
       summary: 'One-time setup and integrations with other services.',

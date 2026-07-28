@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildShiftRow, monthDates, STREAK_WARNING_DAYS } from './shiftBoard'
+import { buildShiftRow, jstDateOf, monthDates, STREAK_WARNING_DAYS } from './shiftBoard'
 
 const CADDIE = 'caddie_a'
 
@@ -65,6 +65,30 @@ describe('buildShiftRow', () => {
     expect(row.cells[5]!.inLongStreak).toBe(true)
     expect(row.cells[10]!.inLongStreak).toBe(true)
     expect(row.cells[13]!.inLongStreak).toBe(false)
+  })
+
+  it('files UTC timestamps under their JST calendar date', () => {
+    // 07:00 JST on July 1st arrives from the API as 22:00Z on June 30th.
+    expect(jstDateOf('2026-06-30T22:00:00Z')).toBe('2026-07-01')
+    expect(jstDateOf('2026-07-01T07:00:00+09:00')).toBe('2026-07-01')
+    const row = buildShiftRow(CADDIE, dates, [], [
+      { caddieProfileId: CADDIE, scheduledAt: '2026-06-30T22:00:00Z', status: 'assigned' },
+    ])
+    expect(row.cells[0]).toMatchObject({ date: '2026-07-01', kind: 'assigned' })
+  })
+
+  it('detects streaks that cross the month boundary', () => {
+    // Jun 28–30 + Jul 1–3 is a six-day run even though only July is displayed.
+    const row = buildShiftRow(CADDIE, dates, [], [
+      ...['2026-06-28', '2026-06-29', '2026-06-30'].map(date => assignment(date)),
+      ...['2026-07-01', '2026-07-02', '2026-07-03'].map(date => assignment(date)),
+    ])
+    expect(row.maxStreak).toBe(6)
+    expect(row.cells[0]!.inLongStreak).toBe(true)
+    expect(row.cells[2]!.inLongStreak).toBe(true)
+    expect(row.cells[3]!.inLongStreak).toBe(false)
+    // Only July's days are rendered.
+    expect(row.cells[0]!.date).toBe('2026-07-01')
   })
 
   it('leaves short runs unhighlighted', () => {

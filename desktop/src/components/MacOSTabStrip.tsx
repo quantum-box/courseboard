@@ -29,7 +29,7 @@ export function supportsDesktopTabs(targetOs: string) {
 }
 
 export function MacOSTabStrip() {
-  const { t } = useTranslation('nav')
+  const { t, i18n } = useTranslation('nav')
   const route = useRoute()
   const { canGoBack, canGoForward } = useNavigationAvailability()
   const [tabs, setTabs] = useState<CourseboardTab[]>([])
@@ -93,7 +93,8 @@ export function MacOSTabStrip() {
     invoke('update_courseboard_tab_title', { title: tabTitleForRoute(route) })
       .then(refreshTabs)
       .catch(console.error)
-  }, [enabled, refreshTabs, route])
+    // i18n.language: the native tab caption must follow locale switches too.
+  }, [enabled, refreshTabs, route, i18n.language])
 
   useEffect(() => {
     if (!enabled) return

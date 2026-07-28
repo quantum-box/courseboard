@@ -440,7 +440,7 @@ function datesBetween(from: string, to: string): string[] {
  * A long unbroken run for one caddie (2026-07-13..19) so the shift board's
  * consecutive-days warning has something to point at in development.
  */
-const mockStreakAssignments = ['13', '14', '15', '16', '17', '19'].map(day => ({
+const mockStreakAssignments = ['13', '14', '15', '16', '17', '18', '19'].map(day => ({
   id: `assign_streak_${day}`,
   caddieProfileId: 'caddie_aya',
   reservationId: `res_streak_${day}`,

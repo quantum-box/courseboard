@@ -509,15 +509,20 @@ export function CaddiesPage({
     }
   }, [initialProfileId])
 
+  // Follow the route in both directions: `golf/caddies/{id}` opens that
+  // caddie, and going back to `golf/caddies` (history, sidebar, ⌘K) returns
+  // to the list. Unknown ids also fall back to the list once data is in.
   useEffect(() => {
-    if (view !== 'roster' || profiles.length === 0) return
-    if (selectedProfileId && profiles.some(profile => profile.id === selectedProfileId)) return
-    // Only follow the route; landing on the roster must show the list, not the
-    // first caddie's detail.
-    if (initialProfileId && profiles.some(profile => profile.id === initialProfileId)) {
-      setSelectedProfileId(initialProfileId)
+    if (view !== 'roster') return
+    if (!initialProfileId) {
+      setSelectedProfileId(null)
+      return
     }
-  }, [initialProfileId, profiles, selectedProfileId, view])
+    if (profiles.length === 0) return
+    setSelectedProfileId(
+      profiles.some(profile => profile.id === initialProfileId) ? initialProfileId : null,
+    )
+  }, [initialProfileId, profiles, view])
 
   function refreshPeople() {
     profilesResource.refresh()

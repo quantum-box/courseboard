@@ -42,6 +42,23 @@ export type ShiftRow = {
 export const STREAK_WARNING_DAYS = 6
 
 const CANCELLED = new Set(['cancelled', 'canceled'])
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
+
+/**
+ * Calendar date in Asia/Tokyo. Production timestamps are UTC (`...Z`), so a
+ * 07:00 JST round arrives as 22:00Z on the previous date — slicing the string
+ * would file it under the wrong day.
+ */
+export function jstDateOf(isoTimestamp: string): string {
+  const ms = Date.parse(isoTimestamp)
+  if (Number.isNaN(ms)) return isoTimestamp.slice(0, 10)
+  return new Date(ms + JST_OFFSET_MS).toISOString().slice(0, 10)
+}
+
+function shiftDate(date: string, days: number): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10)
+}
 
 export function monthDates(yearMonth: string): string[] {
   const match = /^(\d{4})-(\d{2})$/.exec(yearMonth)
@@ -78,7 +95,7 @@ export function buildShiftRow(
   for (const assignment of assignments) {
     if (assignment.caddieProfileId !== caddieProfileId) continue
     if (CANCELLED.has(assignment.status)) continue
-    const date = assignment.scheduledAt.slice(0, 10)
+    const date = jstDateOf(assignment.scheduledAt)
     assignmentCount.set(date, (assignmentCount.get(date) ?? 0) + 1)
   }
 
@@ -92,16 +109,32 @@ export function buildShiftRow(
     }
   })
 
-  // Mark runs of assigned days that reach the warning threshold.
+  // Streaks are detected over a padded window so a run crossing the month
+  // boundary (e.g. Jun 28 – Jul 3) is still caught; only this month's cells
+  // are rendered and highlighted.
+  const cellByDate = new Map(cells.map(cell => [cell.date, cell]))
+  const first = dates[0]
+  const last = dates[dates.length - 1]
+  const paddedDates = first === undefined || last === undefined ? [] : [
+    ...Array.from({ length: STREAK_WARNING_DAYS }, (_, i) => shiftDate(first, i - STREAK_WARNING_DAYS)),
+    ...dates,
+    ...Array.from({ length: STREAK_WARNING_DAYS }, (_, i) => shiftDate(last, i + 1)),
+  ]
+
   let maxStreak = 0
   let runStart = 0
-  for (let index = 0; index <= cells.length; index += 1) {
-    const working = index < cells.length && cells[index]!.kind === 'assigned'
+  for (let index = 0; index <= paddedDates.length; index += 1) {
+    const date = paddedDates[index]
+    const working = date !== undefined && (assignmentCount.get(date) ?? 0) > 0
     if (working) continue
-    const runLength = index - runStart
-    if (runLength > maxStreak) maxStreak = runLength
-    if (runLength >= STREAK_WARNING_DAYS) {
-      for (let mark = runStart; mark < index; mark += 1) cells[mark]!.inLongStreak = true
+    const run = paddedDates.slice(runStart, index)
+    const overlapsMonth = run.some(day => cellByDate.has(day))
+    if (overlapsMonth && run.length > maxStreak) maxStreak = run.length
+    if (run.length >= STREAK_WARNING_DAYS) {
+      for (const day of run) {
+        const cell = cellByDate.get(day)
+        if (cell) cell.inLongStreak = true
+      }
     }
     runStart = index + 1
   }
