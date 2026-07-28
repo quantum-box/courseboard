@@ -18,6 +18,7 @@ import { useRegisterPageReload } from '../../lib/pageReload'
 import {
   buildShiftRow,
   monthDates,
+  paddedRange,
   STREAK_WARNING_DAYS,
   type ShiftAssignment,
   type ShiftAvailability,
@@ -75,10 +76,15 @@ export function ShiftBoardPage() {
       [range.from, range.to],
     ),
   )
+  // Assignments are fetched with a ±6-day pad so streaks that cross the month
+  // boundary are still detected (PLT-2827 range filter).
+  const assignmentRange = paddedRange(dates)
   const assignmentsResource = useResource(
     useCallback(
-      () => courseboardApiJson<ListResponse<ShiftAssignment>>(`${COURSE_API}/caddie-assignments`),
-      [],
+      () => courseboardApiJson<ListResponse<ShiftAssignment>>(
+        `${COURSE_API}/caddie-assignments?from=${assignmentRange.from}&to=${assignmentRange.to}`,
+      ),
+      [assignmentRange.from, assignmentRange.to],
     ),
   )
 

@@ -2,6 +2,7 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 env:
@@ -83,6 +84,8 @@ jobs:
 
   desktop_bundle:
     name: Desktop bundle (${{ matrix.platform }})
+    # macOS/Windows runners are expensive: bundle only after a merge to main.
+    if: github.event_name == 'push'
     needs: frontend
     strategy:
       fail-fast: false
@@ -157,6 +160,7 @@ jobs:
 
   android_bundle:
     name: Android debug bundle
+    if: github.event_name == 'push'
     needs: frontend
     runs-on: ubuntu-latest
     defaults:
@@ -239,6 +243,8 @@ jobs:
 
   ios_bundle:
     name: iOS Simulator bundle
+    # macOS runners are expensive: bundle only after a merge to main.
+    if: github.event_name == 'push'
     needs: frontend
     runs-on: macos-15
     defaults:

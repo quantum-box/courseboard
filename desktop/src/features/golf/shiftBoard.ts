@@ -56,6 +56,17 @@ export function jstDateOf(isoTimestamp: string): string {
   return new Date(ms + JST_OFFSET_MS).toISOString().slice(0, 10)
 }
 
+/** Month range widened by the streak window, for fetching assignments. */
+export function paddedRange(dates: string[]): { from: string; to: string } {
+  const first = dates[0]
+  const last = dates[dates.length - 1]
+  if (first === undefined || last === undefined) return { from: '', to: '' }
+  return {
+    from: shiftDate(first, -STREAK_WARNING_DAYS),
+    to: shiftDate(last, STREAK_WARNING_DAYS),
+  }
+}
+
 function shiftDate(date: string, days: number): string {
   return new Date(Date.parse(`${date}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10)
 }
