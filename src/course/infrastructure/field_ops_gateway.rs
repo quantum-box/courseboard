@@ -18,9 +18,9 @@ use super::field_gateway::{
 use crate::course::domain::{
     AssignmentId, AttendanceSnapshot, AttendanceSnapshotReport, AutoAssignPlanItem,
     AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery, AvailabilityStatus, Caddie,
-    CaddieAssignment, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating,
-    CaddieRecommendation, CaddieRoster, CaddieSkillLevel, CaddieStaff, CaddieSupply, CourseError,
-    GatewayCredentials, GolfOpsGateway, PayrollPeriod, PayrollRow, PayrollSummary,
+    CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
+    CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSkillLevel, CaddieStaff, CaddieSupply,
+    CourseError, GatewayCredentials, GolfOpsGateway, PayrollPeriod, PayrollRow, PayrollSummary,
     RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment,
     UpsertCaddieAvailability,
 };
@@ -145,14 +145,25 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
     async fn list_caddie_assignments(
         &self,
         credentials: GatewayCredentials<'_>,
+        query: CaddieAssignmentQuery,
     ) -> Result<Vec<CaddieAssignment>, CourseError> {
-        let items: Vec<FieldGolfCaddieAssignmentDto> = field_get_items(
-            &self.client,
-            &self.base_url,
-            &format!("{GOLF}/caddie-assignments"),
-            credentials,
-        )
-        .await?;
+        let mut params = Vec::new();
+        if let Some(caddie_id) = query.caddie_id.as_deref() {
+            params.push(format!("caddieProfileId={}", urlencoding_query(caddie_id)));
+        }
+        if let Some(from) = query.from {
+            params.push(format!("from={from}"));
+        }
+        if let Some(to) = query.to {
+            params.push(format!("to={to}"));
+        }
+        let path = if params.is_empty() {
+            format!("{GOLF}/caddie-assignments")
+        } else {
+            format!("{GOLF}/caddie-assignments?{}", params.join("&"))
+        };
+        let items: Vec<FieldGolfCaddieAssignmentDto> =
+            field_get_items(&self.client, &self.base_url, &path, credentials).await?;
         items.into_iter().map(map_caddie_assignment).collect()
     }
 

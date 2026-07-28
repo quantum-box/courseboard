@@ -30,10 +30,10 @@ mod tests {
 
     use crate::course::domain::{
         AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery, Caddie,
-        CaddieAssignment, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRank,
-        CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSkillLevel, CaddieStaff,
-        CaddieSupply, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, ReservationId,
-        UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+        CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
+        CaddieId, CaddieRank, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSkillLevel,
+        CaddieStaff, CaddieSupply, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships,
+        ReservationId, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
     use crate::course::usecase::ListCaddieAssignmentsUseCase;
 
@@ -74,6 +74,7 @@ mod tests {
         async fn list_caddie_assignments(
             &self,
             _credentials: GatewayCredentials<'_>,
+            _query: CaddieAssignmentQuery,
         ) -> Result<Vec<CaddieAssignment>, CourseError> {
             Ok(self.assignments.lock().expect("lock").clone())
         }
@@ -250,11 +251,14 @@ mod tests {
         assert_eq!(listed.staff()[0].id(), "staff_aya");
 
         let assignments = ListCaddieAssignmentsUseCase::new(ops)
-            .execute(GatewayCredentials {
-                authorization: "Bearer t",
-                operator_id: "scc",
-                platform_id: None,
-            })
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer t",
+                    operator_id: "scc",
+                    platform_id: None,
+                },
+                CaddieAssignmentQuery::default(),
+            )
             .await
             .expect("list assignments");
         assert_eq!(assignments.len(), 1);

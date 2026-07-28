@@ -202,8 +202,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop/src-tauri
-          # Android's four ABI targets nearly fill the hosted runner. Restore
-          # the cache, but avoid duplicating the build output during post-save.
+          # Android leaves too little disk for rust-cache's post-job save after
+          # the APK is uploaded. Restore the cache, but skip saving this job.
           save-if: false
 
       - name: Install dependencies
