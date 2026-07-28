@@ -602,8 +602,11 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
         Arc::new(auth::OidcJwtVerifier::discover(auth_config).await?)
     };
     let cancellation_fee_config = config.cancellation_fee_config();
-    let profile_client = profile_proxy::ProfileClient::from_field_api_url(&course_gateway_url)
-        .context("courseboard profile proxy configuration is invalid")?;
+    let profile_client = profile_proxy::ProfileClient::from_field_api_url(
+        &course_gateway_url,
+        config.tachyon_auth_api_url.as_deref(),
+    )
+    .context("courseboard profile proxy configuration is invalid")?;
     let field_api = FieldApiClient::from_config(
         config.field_api_base_url(),
         config.field_api_client_credentials_config(),
@@ -942,6 +945,10 @@ pub enum AppError {
     Unauthorized,
     #[error("authenticated client is not authorized")]
     Forbidden,
+    /// Upstream Field denied the request (401/403). Returned as 403 with the
+    /// upstream reason so operators see "権限がない" instead of a masked 502.
+    #[error("{0}")]
+    PermissionDenied(String),
     #[error("{0}")]
     BadRequest(&'static str),
     #[error("tax rule was not found for tenant, prefecture, and green fee")]
@@ -975,6 +982,7 @@ impl IntoResponse for AppError {
         let (status, error) = match self {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
+            AppError::PermissionDenied(_) => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),
             AppError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),

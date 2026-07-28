@@ -236,6 +236,33 @@ describe('BrowserPkceAdapter', () => {
       String(url) === 'https://courseboard-api.example.test/v1/me')).toBe(true)
   })
 
+  it('binds each tenant to its profile platformId and falls back to the runtime default', async () => {
+    const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
+    localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
+      accessToken: 'persisted-access-token',
+      accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
+    }))
+    // A demo tenant can live under the sandbox platform while its sibling is
+    // production-parented; each request must carry that tenant's platform id.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      user: { id: 'user-1', username: 'operator' },
+      tenants: [
+        { id: 'tn_01sandboxchild', name: 'デモ施設', platformId: 'tn_01sandboxplatform' },
+        { id: 'tn_01prodchild', name: '本番施設' },
+      ],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const result = await createAuthAdapter().bootstrap()
+
+    expect(result).toMatchObject({
+      kind: 'authenticated',
+      tenants: [
+        { id: 'tn_01sandboxchild', platformId: 'tn_01sandboxplatform' },
+        { id: 'tn_01prodchild', platformId: 'tn_01hjjn348rn3t49zz6hvmfq67p' },
+      ],
+    })
+  })
+
   it('keeps an empty proxy tenant list empty instead of restoring the configured tenant', async () => {
     const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
     localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({

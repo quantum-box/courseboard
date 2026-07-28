@@ -18,16 +18,24 @@ const FIELD_PROFILE_PATH: &str = "/v1/erp/me";
 const MAX_PROFILE_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_PROFILE_TENANTS: usize = 500;
 const PROFILE_REQUEST_TIMEOUT: Duration = Duration::from_secs(7);
+/// Tenants can live under different platforms (production vs sandbox). The
+/// operator lookup tells the client which `x-platform-id` each tenant needs;
+/// without it Field's tenant policy check denies platform-mismatched tenants.
+const DEFAULT_TACHYON_AUTH_API_URL: &str = "https://api.n1.tachy.one";
+const OPERATOR_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
+const MAX_OPERATOR_LOOKUPS: usize = 20;
 
 #[derive(Clone, Debug)]
 pub struct ProfileClient {
     client: reqwest::Client,
     endpoint: Url,
+    operators_base: Option<Url>,
 }
 
 impl ProfileClient {
     pub fn from_field_api_url(
         field_api_url: &str,
+        tachyon_auth_api_url: Option<&str>,
     ) -> Result<Option<Self>, ProfileClientConfigError> {
         if field_api_url
             .trim()
@@ -36,24 +44,22 @@ impl ProfileClient {
         {
             return Ok(None);
         }
-        Self::with_timeout(field_api_url, PROFILE_REQUEST_TIMEOUT).map(Some)
+        let auth_api_url = tachyon_auth_api_url
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(DEFAULT_TACHYON_AUTH_API_URL);
+        let client = Self::with_timeout(field_api_url, PROFILE_REQUEST_TIMEOUT)?;
+        if auth_api_url.starts_with("empty://") {
+            return Ok(Some(client));
+        }
+        Ok(Some(client.with_operators_base(auth_api_url)?))
     }
 
     fn with_timeout(
         field_api_url: &str,
         timeout: Duration,
     ) -> Result<Self, ProfileClientConfigError> {
-        let base_url =
-            Url::parse(field_api_url).map_err(|_| ProfileClientConfigError::InvalidFieldApiUrl)?;
-        if !matches!(base_url.scheme(), "http" | "https")
-            || base_url.host_str().is_none()
-            || !base_url.username().is_empty()
-            || base_url.password().is_some()
-            || base_url.query().is_some()
-            || base_url.fragment().is_some()
-        {
-            return Err(ProfileClientConfigError::InvalidFieldApiUrl);
-        }
+        let base_url = validated_base_url(field_api_url)?;
 
         let mut endpoint = base_url;
         let endpoint_path = format!(
@@ -69,7 +75,19 @@ impl ProfileClient {
             .timeout(timeout)
             .build()
             .map_err(|_| ProfileClientConfigError::HttpClient)?;
-        Ok(Self { client, endpoint })
+        Ok(Self {
+            client,
+            endpoint,
+            operators_base: None,
+        })
+    }
+
+    fn with_operators_base(
+        mut self,
+        tachyon_auth_api_url: &str,
+    ) -> Result<Self, ProfileClientConfigError> {
+        self.operators_base = Some(validated_base_url(tachyon_auth_api_url)?);
+        Ok(self)
     }
 
     async fn get_profile(&self, authorization: &str) -> Result<ProfileResponse, ProfileProxyError> {
@@ -87,8 +105,71 @@ impl ProfileClient {
         }
 
         let body = bounded_response_body(&mut response).await?;
-        decode_and_filter_profile(&body)
+        let mut profile = decode_and_filter_profile(&body)?;
+        self.attach_platform_ids(&mut profile, authorization).await;
+        Ok(profile)
     }
+
+    /// Best-effort per-tenant platform lookup: a failed lookup leaves the
+    /// tenant without `platformId` and the client falls back to its default.
+    async fn attach_platform_ids(&self, profile: &mut ProfileResponse, authorization: &str) {
+        let Some(operators_base) = &self.operators_base else {
+            return;
+        };
+        for tenant in profile.tenants.iter_mut().take(MAX_OPERATOR_LOOKUPS) {
+            tenant.platform_id = self
+                .fetch_operator_platform_id(operators_base, &tenant.id, authorization)
+                .await;
+        }
+    }
+
+    async fn fetch_operator_platform_id(
+        &self,
+        operators_base: &Url,
+        tenant_id: &str,
+        authorization: &str,
+    ) -> Option<String> {
+        let mut endpoint = operators_base.clone();
+        let path = format!(
+            "{}/v1/auth/operators/{tenant_id}",
+            endpoint.path().trim_end_matches('/')
+        );
+        endpoint.set_path(&path);
+        let response = self
+            .client
+            .get(endpoint)
+            .timeout(OPERATOR_LOOKUP_TIMEOUT)
+            .header(header::AUTHORIZATION.as_str(), authorization)
+            .header(header::ACCEPT.as_str(), "application/json")
+            .send()
+            .await
+            .ok()?;
+        if !response.status().is_success() {
+            tracing::warn!(
+                tenant_id,
+                status = response.status().as_u16(),
+                "tenant platform lookup was rejected; platformId omitted"
+            );
+            return None;
+        }
+        let wire: OperatorWire = response.json().await.ok()?;
+        wire.platform_id
+            .filter(|platform_id| is_valid_tenant_id(platform_id))
+    }
+}
+
+fn validated_base_url(value: &str) -> Result<Url, ProfileClientConfigError> {
+    let base_url = Url::parse(value).map_err(|_| ProfileClientConfigError::InvalidFieldApiUrl)?;
+    if !matches!(base_url.scheme(), "http" | "https")
+        || base_url.host_str().is_none()
+        || !base_url.username().is_empty()
+        || base_url.password().is_some()
+        || base_url.query().is_some()
+        || base_url.fragment().is_some()
+    {
+        return Err(ProfileClientConfigError::InvalidFieldApiUrl);
+    }
+    Ok(base_url)
 }
 
 #[derive(Debug, Error)]
@@ -180,6 +261,20 @@ pub struct ProfileUser {
 pub struct ProfileTenant {
     pub id: String,
     pub name: String,
+    /// Platform (parent tenant) this tenant belongs to. The client sends it as
+    /// `x-platform-id`; omitted when the operator lookup is unavailable.
+    #[serde(
+        rename = "platformId",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub platform_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OperatorWire {
+    #[serde(rename = "platformId")]
+    platform_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -318,7 +413,11 @@ fn decode_and_filter_profile(body: &[u8]) -> Result<ProfileResponse, ProfileProx
             .enabled
             .ok_or(ProfileProxyError::InvalidContract)?;
         if enabled {
-            enabled_tenants.push(ProfileTenant { id, name });
+            enabled_tenants.push(ProfileTenant {
+                id,
+                name,
+                platform_id: None,
+            });
         }
     }
 
@@ -433,7 +532,8 @@ mod tests {
             profile.tenants,
             vec![ProfileTenant {
                 id: enabled.clone(),
-                name: format!("Tenant {enabled}")
+                name: format!("Tenant {enabled}"),
+                platform_id: None,
             }]
         );
         assert_eq!(profile.default_tenant_id, Some(enabled));
@@ -665,6 +765,86 @@ mod tests {
         assert_eq!(profile.tenants[0].id, enabled);
     }
 
+    async fn spawn_fake_operators(platform_by_tenant: Vec<(String, Option<String>)>) -> String {
+        use axum::extract::Path;
+        let table = Arc::new(platform_by_tenant);
+        let app = Router::new().route(
+            "/v1/auth/operators/:tenant_id",
+            get(move |Path(tenant_id): Path<String>, headers: HeaderMap| {
+                let table = table.clone();
+                async move {
+                    assert_eq!(
+                        headers
+                            .get(header::AUTHORIZATION)
+                            .and_then(|value| value.to_str().ok()),
+                        Some("Bearer accepted-fixture")
+                    );
+                    match table.iter().find(|(id, _)| *id == tenant_id) {
+                        Some((id, Some(platform_id))) => serde_json::json!({
+                            "id": id,
+                            "name": format!("Tenant {id}"),
+                            "operatorName": "fixture",
+                            "platformId": platform_id,
+                        })
+                        .to_string()
+                        .into_response(),
+                        Some((_, None)) => StatusCode::FORBIDDEN.into_response(),
+                        None => StatusCode::NOT_FOUND.into_response(),
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{address}")
+    }
+
+    #[tokio::test]
+    async fn profile_tenants_carry_platform_id_and_lookup_failures_omit_it() {
+        let resolved = tenant_id('a');
+        let denied = tenant_id('b');
+        let sandbox_platform = tenant_id('s');
+        let body = field_profile(json!([
+            field_tenant(&resolved, true),
+            field_tenant(&denied, true)
+        ]))
+        .to_string()
+        .into_bytes();
+        let (field_origin, _) = spawn_fake_field(StatusCode::OK, body, Duration::ZERO).await;
+        let operators_origin = spawn_fake_operators(vec![
+            (resolved.clone(), Some(sandbox_platform.clone())),
+            (denied.clone(), None),
+        ])
+        .await;
+        let client = ProfileClient::with_timeout(&field_origin, Duration::from_secs(1))
+            .unwrap()
+            .with_operators_base(&operators_origin)
+            .unwrap();
+        let app = courseboard_app(Some(client));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/me")
+                    .header(header::AUTHORIZATION, "Bearer accepted-fixture")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            json["tenants"][0]["platformId"].as_str(),
+            Some(sandbox_platform.as_str())
+        );
+        assert!(json["tenants"][1].get("platformId").is_none());
+    }
+
     #[tokio::test]
     async fn empty_field_marker_leaves_profile_route_unregistered() {
         let response = courseboard_app(None)
@@ -728,7 +908,7 @@ mod tests {
 
     #[test]
     fn profile_client_rejects_unsafe_urls_and_disables_only_empty_marker() {
-        assert!(ProfileClient::from_field_api_url("empty://local")
+        assert!(ProfileClient::from_field_api_url("empty://local", None)
             .unwrap()
             .is_none());
         for url in [
@@ -738,8 +918,21 @@ mod tests {
             "https://example.test?redirect=other",
             "https://example.test#fragment",
         ] {
-            assert!(ProfileClient::from_field_api_url(url).is_err());
+            assert!(ProfileClient::from_field_api_url(url, None).is_err());
+            assert!(ProfileClient::from_field_api_url("https://example.test", Some(url)).is_err());
         }
+        let disabled_lookup =
+            ProfileClient::from_field_api_url("https://example.test", Some("empty://local"))
+                .unwrap()
+                .unwrap();
+        assert!(disabled_lookup.operators_base.is_none());
+        let default_lookup = ProfileClient::from_field_api_url("https://example.test", None)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            default_lookup.operators_base.as_ref().map(Url::as_str),
+            Some("https://api.n1.tachy.one/")
+        );
     }
 
     #[test]

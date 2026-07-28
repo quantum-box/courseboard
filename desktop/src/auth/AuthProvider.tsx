@@ -143,6 +143,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const activateTenant = useCallback((user: AuthUser, tenant: AuthTenant) => {
     if (!bindTenant(tenant)) return
     writeLastReadySession(user, tenant)
+    // Keep the active tenant visible in the URL so links can be shared and a
+    // reload always restores the same tenant, even when it was auto-selected.
+    replaceRequestedTenant(tenant.id)
     setState({ status: 'ready', user, tenant })
   }, [bindTenant])
 
