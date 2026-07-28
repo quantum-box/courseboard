@@ -442,10 +442,19 @@ export function CaddiesPage({
     view,
     profilesResource.data !== null,
   )
+  const assignmentMonth = view === 'dispatch'
+    ? operationDate.slice(0, 7)
+    : todayJst().slice(0, 7)
+  const assignmentBounds = monthBounds(assignmentMonth)
   const assignmentsResource = useResource(
-    () => courseboardApiJson<ListResponse<CaddieAssignment>>(`${COURSE_API}/caddie-assignments`),
-    [],
-    { enabled: loadPlan.assignments },
+    () => courseboardApiJson<ListResponse<CaddieAssignment>>(
+      `${COURSE_API}/caddie-assignments?from=${assignmentBounds.from}&to=${assignmentBounds.to}`,
+    ),
+    [assignmentBounds.from, assignmentBounds.to],
+    {
+      enabled: loadPlan.assignments,
+      cacheKey: `caddie-assignments:${assignmentBounds.from}:${assignmentBounds.to}`,
+    },
   )
   const recommendationsResource = useResource(
     () => courseboardApiJson<ListResponse<CaddieRecommendation>>(

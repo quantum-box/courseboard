@@ -104,6 +104,7 @@ impl Modify for SecurityAddon {
             http::ReplaceProductSlotsRequest,
             http::CaddieDto,
             http::CaddieAssignmentDto,
+            http::CaddieAssignmentQueryParams,
             http_ops::UpsertCaddieRequest,
             http_ops::UpsertCaddieAssignmentRequest,
             http_ops::MembershipDto,
