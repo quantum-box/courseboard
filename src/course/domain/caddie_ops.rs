@@ -337,6 +337,13 @@ pub struct AvailabilityQuery {
     pub date: Option<NaiveDate>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CaddieAssignmentQuery {
+    pub caddie_id: Option<CaddieId>,
+    pub from: Option<NaiveDate>,
+    pub to: Option<NaiveDate>,
+}
+
 /// Dispatch recommendation candidate.
 #[derive(Debug, Clone, PartialEq, Getters)]
 pub struct CaddieRecommendation {

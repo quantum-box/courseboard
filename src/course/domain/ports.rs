@@ -3,10 +3,10 @@ use chrono::NaiveDate;
 
 use super::{
     AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery, BudgetAchievement,
-    Caddie, CaddieAssignment, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating,
-    CaddieRecommendation, CaddieRoster, CaddieSupply, Course, CourseError, CourseId, DailyBudget,
-    DailyBudgetQuery, ExtensionStatus, MonthlySettlement, PayrollSummary, ProductSlot,
-    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationPolicy,
+    Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
+    CaddieId, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSupply, Course, CourseError,
+    CourseId, DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement, PayrollSummary,
+    ProductSlot, RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationPolicy,
     ReservationProduct, ReservationServiceId, Resource, UpdateExtensionConfig,
     UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
     UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
@@ -121,6 +121,7 @@ pub trait GolfOpsGateway: Send + Sync {
     async fn list_caddie_assignments(
         &self,
         credentials: GatewayCredentials<'_>,
+        query: CaddieAssignmentQuery,
     ) -> Result<Vec<CaddieAssignment>, CourseError>;
 
     async fn update_caddie_assignment(

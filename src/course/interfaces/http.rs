@@ -16,9 +16,9 @@ use utoipa::{IntoParams, ToSchema};
 use super::openapi::ErrorBody;
 
 use crate::course::domain::{
-    Caddie, CaddieAssignment, CaddieStaff, Course, CourseError, CourseId, GatewayCredentials,
-    ProductSlot, ReservationProduct, ReservationServiceId, Resource, TeeSheet, TeeSheetItem,
-    TeeSheetQuery, UpsertCourse, UpsertReservationProduct,
+    Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieId, CaddieStaff, Course, CourseError,
+    CourseId, GatewayCredentials, ProductSlot, ReservationProduct, ReservationServiceId, Resource,
+    TeeSheet, TeeSheetItem, TeeSheetQuery, UpsertCourse, UpsertReservationProduct,
 };
 use crate::course::infrastructure::{
     FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
@@ -836,11 +836,21 @@ pub async fn list_caddies(
     }))
 }
 
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct CaddieAssignmentQueryParams {
+    pub caddie_profile_id: Option<String>,
+    pub from: Option<NaiveDate>,
+    pub to: Option<NaiveDate>,
+}
+
 /// GET /v1/course/caddie-assignments
 #[utoipa::path(
     get,
     path = "/v1/course/caddie-assignments",
     tag = "course-ops",
+    params(CaddieAssignmentQueryParams),
     responses(
         (status = 200, description = "List caddie assignments", body = inline(ItemsResponse<CaddieAssignmentDto>)),
         (status = 401, description = "Unauthorized", body = ErrorBody),
@@ -851,11 +861,19 @@ pub async fn list_caddies(
 pub async fn list_caddie_assignments(
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(query): Query<CaddieAssignmentQueryParams>,
 ) -> Result<Json<ItemsResponse<CaddieAssignmentDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
     let use_case = ListCaddieAssignmentsUseCase::new(ops_gateway(&state));
     let items = use_case
-        .execute(credentials)
+        .execute(
+            credentials,
+            CaddieAssignmentQuery {
+                caddie_id: CaddieId::from_optional(query.caddie_profile_id),
+                from: query.from,
+                to: query.to,
+            },
+        )
         .await
         .map_err(AppError::from)?;
     Ok(Json(ItemsResponse {
