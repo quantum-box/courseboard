@@ -174,6 +174,10 @@ fn to_tee_sheet_item(
     TeeSheetItem::new(
         reservation.id(),
         reservation.reservation_number(),
+        reservation.service_id().map(ToString::to_string),
+        product
+            .and_then(ReservationProduct::display_name)
+            .map(str::to_string),
         golf_course_id,
         course_name,
         format_datetime_with_offset(reservation.starts_at(), jst),
@@ -345,6 +349,8 @@ mod tests {
         assert_eq!(item.play_type(), PlayType::SelfPlay);
         assert_eq!(item.status(), TeeSheetStatus::Confirmed);
         assert_eq!(item.party_size(), 4);
+        assert_eq!(item.reservation_service_id(), Some("svc:caddie-18"));
+        assert_eq!(item.display_name(), None);
     }
 
     #[test]
@@ -368,6 +374,7 @@ mod tests {
             "product_caddie_18",
             None,
             "svc:caddie-18",
+            Some("平日キャディ付き".into()),
             PlayType::Caddie,
             18,
             240,
@@ -383,6 +390,8 @@ mod tests {
         assert_eq!(item.play_type(), PlayType::Caddie);
         assert_eq!(item.duration_minutes(), 240);
         assert_eq!(item.holes(), 18);
+        assert_eq!(item.reservation_service_id(), Some("svc:caddie-18"));
+        assert_eq!(item.display_name(), Some("平日キャディ付き"));
         assert!(item.requires_caddie());
     }
 
@@ -415,6 +424,7 @@ mod tests {
             "product_caddie_18",
             None,
             "svc:caddie-18",
+            None,
             PlayType::Caddie,
             18,
             240,
@@ -471,6 +481,7 @@ mod tests {
                 "product_caddie_18",
                 None,
                 "svc:caddie-18",
+                None,
                 PlayType::Caddie,
                 18,
                 240,

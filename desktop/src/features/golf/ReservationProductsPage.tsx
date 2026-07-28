@@ -109,6 +109,10 @@ function todayInTokyo() {
 }
 
 function validateProduct(draft: GolfReservationProductDraft) {
+  if (!draft.displayName.trim()) return 'プラン名を入力してください。'
+  if ([...draft.displayName.trim()].length > 255) {
+    return 'プラン名は255文字以内で入力してください。'
+  }
   if (!draft.serviceId.trim()) return '予約サービスIDを入力してください。'
   if (!/^[A-Za-z0-9._:-]+$/.test(draft.serviceId.trim())) {
     return '予約サービスIDには英数字、ピリオド、ハイフン、アンダースコア、コロンを使用できます。'
@@ -122,6 +126,10 @@ function validateProduct(draft: GolfReservationProductDraft) {
     return '所要時間は30〜720分の整数で入力してください。'
   }
   return null
+}
+
+function productDisplayName(product: GolfReservationProduct) {
+  return product.displayName?.trim() || product.reservationServiceId
 }
 
 export function ReservationProductsPage() {
@@ -274,6 +282,7 @@ export function ReservationProductsPage() {
       await courseboardApiJson(`${productsPath}/${encodeURIComponent(serviceId)}`, {
         method: 'POST',
         body: JSON.stringify({
+          displayName: productDraft.displayName.trim(),
           playType: productDraft.playType,
           holeCount: productDraft.holeCount,
           expectedDurationMinutes: productDraft.expectedDurationMinutes,
@@ -284,7 +293,7 @@ export function ReservationProductsPage() {
       setMessage({
         tone: 'success',
         title: 'プレー設定を保存しました',
-        body: `${serviceId} のプレー区分と所要時間を反映しました。`,
+        body: `${productDraft.displayName.trim()}（管理番号: ${serviceId}）の設定を反映しました。`,
       })
       await loadPage(serviceId)
     } catch (error) {
@@ -415,8 +424,10 @@ export function ReservationProductsPage() {
       mobileLabel: '予約サービス',
       cell: product => (
         <div className="grid gap-0.5">
-          <strong>{product.reservationServiceId}</strong>
-          <span className="text-xs text-muted-foreground">{product.id}</span>
+          <strong>{productDisplayName(product)}</strong>
+          <span className="text-xs text-muted-foreground">
+            管理番号: {product.reservationServiceId}
+          </span>
         </div>
       ),
     },
@@ -635,8 +646,21 @@ export function ReservationProductsPage() {
         >
           <form className="grid gap-4" onSubmit={saveProduct}>
             <FormGrid columns={3}>
+              <Field label="プラン名" hint="予約画面や受付枠に表示する名称です。" required>
+                <Input
+                  value={productDraft.displayName}
+                  maxLength={255}
+                  onChange={event => setProductDraft(current => ({
+                    ...current,
+                    displayName: event.target.value,
+                  }))}
+                  placeholder="平日キャディ付きプラン"
+                  required
+                  autoFocus
+                />
+              </Field>
               <Field
-                label="予約サービスID"
+                label="管理番号"
                 hint={productEditor.mode === 'edit' ? '既存IDは変更できません。' : 'Fieldの予約サービスIDを入力します。'}
                 required
               >
@@ -649,7 +673,6 @@ export function ReservationProductsPage() {
                   }))}
                   placeholder="golf-weekday-standard"
                   required
-                  autoFocus={productEditor.mode === 'create'}
                 />
               </Field>
               <Field label="プレー区分" required>
@@ -731,10 +754,11 @@ export function ReservationProductsPage() {
 
       {selectedProduct ? (
         <Panel
-          title={`受付枠 · ${selectedProduct.reservationServiceId}`}
-          description="0は制限なしです。曜日、開始、終了が同じ行は重複登録できません。"
+          title={`受付枠 · ${productDisplayName(selectedProduct)}`}
+          description={`管理番号: ${selectedProduct.reservationServiceId}。0は制限なしです。曜日、開始、終了が同じ行は重複登録できません。`}
           actions={(
             <div className="flex items-center gap-2">
+              <Badge variant="outline">{productDisplayName(selectedProduct)}</Badge>
               <Badge variant={selectedProduct.playType === 'caddie' ? 'accent' : 'neutral'}>
                 {selectedProduct.playType === 'caddie' ? 'キャディ付き' : 'セルフ'}
               </Badge>

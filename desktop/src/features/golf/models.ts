@@ -40,6 +40,7 @@ export type GolfReservationProduct = {
   tenantId: string
   extensionKey: string
   reservationServiceId: string
+  displayName?: string | null
   playType: PlayType
   holeCount: number
   expectedDurationMinutes: number
@@ -49,6 +50,7 @@ export type GolfReservationProduct = {
 
 export type GolfReservationProductDraft = {
   serviceId: string
+  displayName: string
   playType: PlayType
   holeCount: number
   expectedDurationMinutes: number
@@ -122,6 +124,7 @@ export function defaultDuration(playType: PlayType, holeCount: number) {
 export function emptyProductDraft(): GolfReservationProductDraft {
   return {
     serviceId: '',
+    displayName: '',
     playType: 'caddie',
     holeCount: 18,
     expectedDurationMinutes: defaultDuration('caddie', 18),
@@ -131,6 +134,7 @@ export function emptyProductDraft(): GolfReservationProductDraft {
 export function productToDraft(product: GolfReservationProduct): GolfReservationProductDraft {
   return {
     serviceId: product.reservationServiceId,
+    displayName: product.displayName ?? '',
     playType: product.playType,
     holeCount: product.holeCount,
     expectedDurationMinutes: product.expectedDurationMinutes,

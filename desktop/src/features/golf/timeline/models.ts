@@ -13,6 +13,8 @@ export type AssignmentCoverage = 'assigned' | 'partial' | 'unassigned' | 'not_re
 export type TeeReservation = {
   id: string
   reservationNumber: string
+  reservationServiceId?: string | null
+  displayName?: string | null
   golfCourseId: string
   courseName: string
   teeTime: string

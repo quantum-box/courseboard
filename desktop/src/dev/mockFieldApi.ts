@@ -95,6 +95,7 @@ const mockProducts = [
     tenantId: 'courseboard_id',
     extensionKey: 'golf_course',
     reservationServiceId: 'svc:caddie-18',
+    displayName: 'キャディ付き18ホール',
     playType: 'caddie',
     holeCount: 18,
     expectedDurationMinutes: 270,
@@ -106,6 +107,7 @@ const mockProducts = [
     tenantId: 'courseboard_id',
     extensionKey: 'golf_course',
     reservationServiceId: 'svc:self-18',
+    displayName: null,
     playType: 'self',
     holeCount: 18,
     expectedDurationMinutes: 240,
@@ -413,7 +415,15 @@ const mockTeeReservations = [
     status: 'confirmed',
     holes: 18,
   },
-]
+].map(item => ({
+  ...item,
+  reservationServiceId: item.playType === 'caddie' ? 'svc:caddie-18' : 'svc:self-18',
+  displayName: item.id === 'res_mock_3'
+    ? null
+    : item.playType === 'caddie'
+      ? 'キャディ付き18ホール'
+      : 'セルフ18ホール',
+}))
 
 const mockAssignments = [
   {

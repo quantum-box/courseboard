@@ -48,6 +48,10 @@ pub struct TeeSheetItem {
     #[getter(skip)]
     reservation_number: String,
     #[getter(skip)]
+    reservation_service_id: Option<String>,
+    #[getter(skip)]
+    display_name: Option<String>,
+    #[getter(skip)]
     golf_course_id: CourseId,
     #[getter(skip)]
     course_name: String,
@@ -71,6 +75,8 @@ impl TeeSheetItem {
     pub fn new(
         id: impl Into<ReservationId>,
         reservation_number: impl Into<String>,
+        reservation_service_id: Option<String>,
+        display_name: Option<String>,
         golf_course_id: impl Into<CourseId>,
         course_name: impl Into<String>,
         tee_time: impl Into<String>,
@@ -85,6 +91,12 @@ impl TeeSheetItem {
         Self {
             id: id.into(),
             reservation_number: reservation_number.into(),
+            reservation_service_id: reservation_service_id
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
+            display_name: display_name
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
             golf_course_id: golf_course_id.into(),
             course_name: course_name.into(),
             tee_time: tee_time.into(),
@@ -104,6 +116,14 @@ impl TeeSheetItem {
 
     pub fn reservation_number(&self) -> &str {
         &self.reservation_number
+    }
+
+    pub fn reservation_service_id(&self) -> Option<&str> {
+        self.reservation_service_id.as_deref()
+    }
+
+    pub fn display_name(&self) -> Option<&str> {
+        self.display_name.as_deref()
     }
 
     pub fn golf_course_id(&self) -> &CourseId {

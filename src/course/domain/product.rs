@@ -4,6 +4,8 @@ use super::course::HoleCount;
 use super::{CourseError, ProductId, ProductSlotId, ReservationServiceId, TenantId};
 use derive_getters::Getters;
 
+const MAX_DISPLAY_NAME_LENGTH: usize = 255;
+
 /// Whether a product requires a caddie.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlayType {
@@ -68,6 +70,7 @@ impl DurationMinutes {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpsertReservationProduct {
     pub reservation_service_id: ReservationServiceId,
+    pub display_name: Option<String>,
     pub play_type: PlayType,
     pub hole_count: HoleCount,
     pub expected_duration_minutes: DurationMinutes,
@@ -76,12 +79,28 @@ pub struct UpsertReservationProduct {
 impl UpsertReservationProduct {
     pub fn try_new(
         reservation_service_id: impl Into<String>,
+        display_name: Option<String>,
         play_type: impl AsRef<str>,
         hole_count: i32,
         expected_duration_minutes: i32,
     ) -> Result<Self, CourseError> {
+        let display_name = display_name
+            .map(|value| value.trim().to_string())
+            .map(|value| {
+                if value.is_empty() {
+                    return Err(CourseError::BadRequest("display name must not be empty"));
+                }
+                if value.chars().count() > MAX_DISPLAY_NAME_LENGTH {
+                    return Err(CourseError::BadRequest(
+                        "display name must be at most 255 characters",
+                    ));
+                }
+                Ok(value)
+            })
+            .transpose()?;
         Ok(Self {
             reservation_service_id: ReservationServiceId::try_new(reservation_service_id)?,
+            display_name,
             play_type: PlayType::parse(play_type.as_ref()),
             hole_count: HoleCount::try_new(hole_count).or_else(|_| {
                 // Products historically allow non-9/18 in some tenants; accept positive.
@@ -105,6 +124,8 @@ pub struct ReservationProduct {
     tenant_id: Option<TenantId>,
     #[getter(skip)]
     reservation_service_id: ReservationServiceId,
+    #[getter(skip)]
+    display_name: Option<String>,
     #[getter(copy)]
     play_type: PlayType,
     #[getter(copy)]
@@ -118,6 +139,7 @@ impl ReservationProduct {
         id: impl Into<ProductId>,
         tenant_id: Option<String>,
         reservation_service_id: impl Into<ReservationServiceId>,
+        display_name: Option<String>,
         play_type: PlayType,
         hole_count: i32,
         expected_duration_minutes: i32,
@@ -126,6 +148,9 @@ impl ReservationProduct {
             id: id.into(),
             tenant_id: TenantId::from_optional(tenant_id),
             reservation_service_id: reservation_service_id.into(),
+            display_name: display_name
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
             play_type,
             hole_count: HoleCount::from_raw(hole_count),
             expected_duration_minutes: DurationMinutes::from_raw(expected_duration_minutes),
@@ -142,6 +167,10 @@ impl ReservationProduct {
 
     pub fn reservation_service_id(&self) -> &ReservationServiceId {
         &self.reservation_service_id
+    }
+
+    pub fn display_name(&self) -> Option<&str> {
+        self.display_name.as_deref()
     }
 
     pub fn requires_caddie(&self) -> bool {
@@ -200,5 +229,63 @@ impl ProductSlot {
 
     pub fn end_time(&self) -> &str {
         &self.end_time
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn upsert_product_normalizes_optional_display_name() {
+        let input = UpsertReservationProduct::try_new(
+            "service-1",
+            Some("  平日プラン  ".into()),
+            "caddie",
+            18,
+            240,
+        )
+        .expect("valid product");
+
+        assert_eq!(input.display_name.as_deref(), Some("平日プラン"));
+    }
+
+    #[test]
+    fn upsert_product_rejects_empty_or_too_long_display_name() {
+        let empty =
+            UpsertReservationProduct::try_new("service-1", Some("  ".into()), "self", 18, 240);
+        assert!(matches!(
+            empty,
+            Err(CourseError::BadRequest("display name must not be empty"))
+        ));
+
+        let too_long = UpsertReservationProduct::try_new(
+            "service-1",
+            Some("あ".repeat(MAX_DISPLAY_NAME_LENGTH + 1)),
+            "self",
+            18,
+            240,
+        );
+        assert!(matches!(
+            too_long,
+            Err(CourseError::BadRequest(
+                "display name must be at most 255 characters"
+            ))
+        ));
+    }
+
+    #[test]
+    fn reconstitute_treats_blank_display_name_as_missing() {
+        let product = ReservationProduct::reconstitute(
+            "product-1",
+            None,
+            "service-1",
+            Some(" ".into()),
+            PlayType::SelfPlay,
+            18,
+            240,
+        );
+
+        assert_eq!(product.display_name(), None);
     }
 }
