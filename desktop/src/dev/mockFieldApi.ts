@@ -1325,7 +1325,11 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-profiles' && method === 'POST') {
-    const staffId = body?.staffId == null ? '' : String(body.staffId)
+    const staffId = body?.staffId == null ? '' : String(body.staffId).trim()
+    const staffReferenceId = body?.staffReferenceId == null ? '' : String(body.staffReferenceId).trim()
+    if (!staffId && !staffReferenceId) {
+      return error(400, 'staff link is required to create a caddie')
+    }
     const created: (typeof mockCaddies)[number] = {
       id: `caddie_${Date.now()}`,
       displayName: String(body?.displayName ?? 'New caddie'),
@@ -1333,9 +1337,9 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       rank: String(body?.rank ?? 'D'),
       baseFeeAmount: Number(body?.baseFeeAmount ?? 12_000),
       currency: String(body?.currency ?? 'JPY'),
-      staffId,
-      staffReferenceType: staffId ? 'erp_staff' : '',
-      staffReferenceId: staffId,
+      staffId: staffId || staffReferenceId,
+      staffReferenceType: 'erp_staff',
+      staffReferenceId: staffReferenceId || staffId,
       active: body?.active !== false,
       employmentStatus: String(body?.employmentStatus ?? 'active'),
       maxRoundsPerDay: Number(body?.maxRoundsPerDay ?? 2),
