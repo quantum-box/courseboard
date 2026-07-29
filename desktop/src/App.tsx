@@ -19,6 +19,7 @@ import { MembersPage } from './features/members/MembersPage'
 import { PolicyPage } from './features/golf/PolicyPage'
 import { ReservationProductsPage } from './features/golf/ReservationProductsPage'
 import { SettlementPage } from './features/golf/SettlementPage'
+import { SimulatorPage } from './features/golf/SimulatorPage'
 import { ShiftBoardPage } from './features/golf/ShiftBoardPage'
 import { TimelinePage } from './features/golf/timeline/TimelinePage'
 import { SettingsAdvancedPage } from './features/settings/SettingsAdvancedPage'
@@ -101,6 +102,7 @@ function RouteContent({ route }: { route: string }) {
   if (route === 'golf/budgets') return <BudgetsPage />
   if (route === 'golf/policy') return <PolicyPage />
   if (route === 'golf/settlement') return <SettlementPage />
+  if (route === 'golf/simulator') return <SimulatorPage />
   if (route === 'cancellation-fees') return <CancellationFeesPage />
   if (route === 'cancellation-fees/new') return <NewCancellationFeePage />
   if (route.startsWith('cancellation-fees/')) {

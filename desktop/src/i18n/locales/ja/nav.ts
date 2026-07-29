@@ -50,6 +50,10 @@ export const nav = {
       label: '売上目標',
       description: '日ごとの目標と達成ぐあい',
     },
+    'golf/simulator': {
+      label: '料金計算',
+      description: 'プレー料金と利用税、売上のめやすを計算する',
+    },
     'golf/settlement': {
       label: '月次精算',
       description: '1か月の売上と費用をしめる',

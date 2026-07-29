@@ -28,6 +28,7 @@ use axum::{
 };
 use cancellation_fees::{CancellationFeeConfig, MySqlCancellationFeeRepository};
 use config::RuntimeConfig;
+use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
@@ -143,6 +144,11 @@ impl AppState {
                 profile_client: None,
             },
         }
+    }
+
+    /// CourseBoard-owned golf tax rules, for the simulator gateway.
+    pub fn tax_rules(&self) -> Arc<MySqlTaxRuleRepository> {
+        self.rules.clone()
     }
 
     fn with_profile_client(mut self, profile_client: Option<profile_proxy::ProfileClient>) -> Self {
@@ -484,6 +490,18 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/simulator/calculate",
+            post(course::interfaces::http_simulator::calculate_fee).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/simulator/simulate/range",
+            post(course::interfaces::http_simulator::simulate_range).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/extension-status",
             get(course::interfaces::http_commercial::get_extension_status).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
@@ -681,30 +699,29 @@ async fn calculate(
         .await?
         .ok_or(AppError::RuleNotFound)?;
 
-    let mut tax_amount = 0;
-    let breakdown = request
+    let players: Vec<SimulatedPlayer> = request
         .players
         .iter()
-        .enumerate()
-        .map(|(player_index, player)| {
-            let reason = exemption_reason(player, &rule);
-            let exempt = reason.is_some();
-            let fee = if exempt { 0 } else { rule.fee };
-            tax_amount += fee;
-
-            PlayerBreakdown {
-                player_index,
-                fee,
-                exempt,
-                reason,
-            }
+        .map(|player| SimulatedPlayer {
+            age: player.age,
+            has_disability_cert: player.has_disability_cert,
         })
         .collect();
+    let tax = party_tax(&rule, &players);
 
     Ok(Json(CalculateResponse {
-        course_grade: rule.course_grade,
-        tax_amount,
-        breakdown,
+        course_grade: tax.course_grade().to_string(),
+        tax_amount: tax.tax_amount(),
+        breakdown: tax
+            .lines()
+            .iter()
+            .map(|line| PlayerBreakdown {
+                player_index: line.player_index(),
+                fee: line.fee(),
+                exempt: line.exempt(),
+                reason: line.reason().map(str::to_string),
+            })
+            .collect(),
     }))
 }
 
@@ -721,51 +738,36 @@ async fn simulate_range(
             .find_rule_by_green_fee(&request.tenant_id, &request.prefecture, green_fee)
             .await?
             .ok_or(AppError::RuleNotFound)?;
-        let visitors = (request.base_visitors as f64
-            * ((green_fee as f64) / (request.base_green_fee as f64)).powf(request.price_elasticity))
-        .round() as i64;
-        let taxable_visitors = (visitors as f64 * request.taxable_ratio).round() as i64;
-        let revenue = green_fee * visitors;
-        let tax_total = taxable_visitors * rule.fee;
-        let variable_cost = request.variable_cost_per_visitor * visitors;
-        let profit = revenue - tax_total - variable_cost - request.fixed_cost;
-        let profit_margin_pct = if revenue == 0 {
-            0.0
-        } else {
-            ((profit as f64) / (revenue as f64)) * 100.0
-        };
+        let row = project_row(
+            &RangeRowInput {
+                green_fee,
+                base_visitors: request.base_visitors,
+                base_green_fee: request.base_green_fee,
+                price_elasticity: request.price_elasticity,
+                taxable_ratio: request.taxable_ratio,
+                fixed_cost: request.fixed_cost,
+                variable_cost_per_visitor: request.variable_cost_per_visitor,
+            },
+            &rule,
+        );
 
         rows.push(SimulateRangeRow {
-            green_fee,
-            course_grade: rule.course_grade,
-            visitors,
-            taxable_visitors,
-            revenue,
-            tax_total,
-            variable_cost,
-            fixed_cost: request.fixed_cost,
-            profit,
-            profit_margin_pct,
+            green_fee: row.green_fee(),
+            course_grade: row.course_grade().to_string(),
+            visitors: row.visitors(),
+            taxable_visitors: row.taxable_visitors(),
+            revenue: row.revenue(),
+            tax_total: row.tax_total(),
+            variable_cost: row.variable_cost(),
+            fixed_cost: row.fixed_cost(),
+            profit: row.profit(),
+            profit_margin_pct: row.profit_margin_pct(),
         });
 
         green_fee += request.green_fee_range.step;
     }
 
     Ok(Json(SimulateRangeResponse { rows }))
-}
-
-fn exemption_reason(player: &Player, rule: &TaxRule) -> Option<String> {
-    if player.age < rule.minor_exempt_under_age {
-        return Some("minor".to_string());
-    }
-    if player.age >= rule.senior_exempt_min_age {
-        return Some("senior".to_string());
-    }
-    if rule.disability_cert_exempt && player.has_disability_cert {
-        return Some("disability_cert".to_string());
-    }
-
-    None
 }
 
 #[derive(Clone)]
@@ -778,12 +780,16 @@ impl MySqlTaxRuleRepository {
         Self { pool }
     }
 
-    async fn find_rule_by_green_fee(
+    /// Resolve the tax rule whose green-fee bracket contains `green_fee`.
+    ///
+    /// Returns the domain snapshot: golf pricing rules are interpreted by
+    /// `course::domain::simulator`, not by this repository.
+    pub async fn find_rule_by_green_fee(
         &self,
         tenant_id: &str,
         prefecture: &str,
         green_fee: i64,
-    ) -> Result<Option<TaxRule>, AppError> {
+    ) -> Result<Option<TaxRuleSnapshot>, AppError> {
         let rule = sqlx::query_as::<_, TaxRule>(
             r#"
             SELECT
@@ -814,7 +820,7 @@ impl MySqlTaxRuleRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(rule)
+        Ok(rule.map(TaxRuleSnapshot::from))
     }
 }
 
@@ -825,6 +831,18 @@ struct TaxRule {
     minor_exempt_under_age: i64,
     senior_exempt_min_age: i64,
     disability_cert_exempt: bool,
+}
+
+impl From<TaxRule> for TaxRuleSnapshot {
+    fn from(row: TaxRule) -> Self {
+        Self {
+            course_grade: row.course_grade,
+            fee: row.fee,
+            minor_exempt_under_age: row.minor_exempt_under_age,
+            senior_exempt_min_age: row.senior_exempt_min_age,
+            disability_cert_exempt: row.disability_cert_exempt,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

@@ -13,7 +13,10 @@ use utoipa::{IntoParams, ToSchema};
 
 use super::openapi::ErrorBody;
 
-use super::http::{credentials, ops_gateway, CaddieAssignmentDto, CaddieDto, ItemsResponse};
+use super::http::{
+    catalog_gateway, credentials, ops_gateway, reservation_gateway, CaddieAssignmentDto, CaddieDto,
+    ItemsResponse,
+};
 use crate::course::domain::{
     AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery,
     CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation,
@@ -675,7 +678,11 @@ pub async fn get_caddie_supply(
     Query(query): Query<SupplyQueryParams>,
 ) -> Result<Json<CaddieSupplyDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = GetCaddieSupplyUseCase::new(ops_gateway(&state));
+    let use_case = GetCaddieSupplyUseCase::new(
+        ops_gateway(&state),
+        catalog_gateway(&state),
+        reservation_gateway(&state),
+    );
     let supply = use_case
         .execute(credentials, query.date, query.safety_buffer)
         .await

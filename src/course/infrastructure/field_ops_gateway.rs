@@ -19,8 +19,8 @@ use crate::course::domain::{
     AssignmentId, AttendanceSnapshot, AttendanceSnapshotReport, AutoAssignPlanItem,
     AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery, AvailabilityStatus, Caddie,
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
-    CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSkillLevel, CaddieStaff, CaddieSupply,
-    CourseError, GatewayCredentials, GolfOpsGateway, PayrollPeriod, PayrollRow, PayrollSummary,
+    CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSkillLevel, CaddieStaff, CourseError,
+    GatewayCredentials, GolfOpsGateway, PayrollPeriod, PayrollRow, PayrollSummary,
     RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment,
     UpsertCaddieAvailability,
 };
@@ -376,39 +376,6 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         ))
     }
 
-    async fn get_caddie_supply(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        date: NaiveDate,
-        safety_buffer: Option<i64>,
-    ) -> Result<CaddieSupply, CourseError> {
-        let mut path = format!("{GOLF}/caddie-supply?date={date}");
-        if let Some(buffer) = safety_buffer {
-            path.push_str(&format!("&safetyBuffer={buffer}"));
-        }
-        let dto: FieldSupplyDto = field_send_json(
-            &self.client,
-            &self.base_url,
-            reqwest::Method::GET,
-            &path,
-            credentials,
-            None,
-        )
-        .await?;
-        Ok(CaddieSupply::reconstitute(
-            dto.date,
-            dto.available_caddies,
-            dto.two_round_capable,
-            dto.caddie_supply,
-            dto.morning_capacity,
-            dto.afternoon_capacity,
-            dto.safety_buffer,
-            dto.caddie_attached_cap,
-            dto.current_caddie_attached,
-            dto.remaining,
-        ))
-    }
-
     async fn auto_assign_caddies(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -703,21 +670,6 @@ struct FieldAttendanceDto {
     today_assignments: Option<i64>,
     #[serde(default)]
     rounds_without_clock_in_today: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldSupplyDto {
-    date: NaiveDate,
-    available_caddies: i64,
-    two_round_capable: i64,
-    caddie_supply: i64,
-    morning_capacity: i64,
-    afternoon_capacity: i64,
-    safety_buffer: i64,
-    caddie_attached_cap: i64,
-    current_caddie_attached: i64,
-    remaining: i64,
 }
 
 #[derive(Debug, Deserialize)]

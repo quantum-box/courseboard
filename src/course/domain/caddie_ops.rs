@@ -557,6 +557,171 @@ impl CaddieSupply {
     }
 }
 
+/// One caddie's inputs to the daily supply calculation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CaddieDayCapacity {
+    pub active: bool,
+    /// Declared availability for the day. `None` means no declaration, which
+    /// counts as fully available.
+    pub status: Option<AvailabilityStatus>,
+    pub can_two_rounds: bool,
+    /// Whether the caddie asked for two rounds on this specific day.
+    pub two_round_request: bool,
+}
+
+/// `(works, morning, afternoon, light_duty)` for a declared availability.
+fn availability_flags(status: Option<AvailabilityStatus>) -> (bool, bool, bool, bool) {
+    match status {
+        Some(AvailabilityStatus::Unavailable) => (false, false, false, false),
+        Some(AvailabilityStatus::MorningOnly) => (true, true, false, false),
+        Some(AvailabilityStatus::AfternoonOnly) => (true, false, true, false),
+        Some(AvailabilityStatus::LightDuty) => (true, true, true, true),
+        // Available, or no declaration at all, which defaults to working.
+        _ => (true, true, true, false),
+    }
+}
+
+/// How many caddie-attached groups can safely be sold on `date`.
+///
+/// A caddie who can and wants to work two rounds counts as two groups. Light
+/// duty never counts as two rounds even when the caddie asked for it.
+pub fn compute_caddie_supply(
+    date: NaiveDate,
+    capacities: impl IntoIterator<Item = CaddieDayCapacity>,
+    safety_buffer: i64,
+    current_caddie_attached: i64,
+) -> CaddieSupply {
+    let safety_buffer = safety_buffer.max(0);
+    let mut available_caddies = 0;
+    let mut two_round_capable = 0;
+    let mut caddie_supply = 0;
+    let mut morning_capacity = 0;
+    let mut afternoon_capacity = 0;
+
+    for capacity in capacities {
+        if !capacity.active {
+            continue;
+        }
+        let (works, morning, afternoon, light_duty) = availability_flags(capacity.status);
+        if !works {
+            continue;
+        }
+        available_caddies += 1;
+        if morning {
+            morning_capacity += 1;
+        }
+        if afternoon {
+            afternoon_capacity += 1;
+        }
+        let two_rounds = capacity.can_two_rounds && capacity.two_round_request && !light_duty;
+        if two_rounds {
+            two_round_capable += 1;
+        }
+        caddie_supply += if two_rounds { 2 } else { 1 };
+    }
+
+    let caddie_attached_cap = (caddie_supply - safety_buffer).max(0);
+    CaddieSupply::reconstitute(
+        date,
+        available_caddies,
+        two_round_capable,
+        caddie_supply,
+        morning_capacity,
+        afternoon_capacity,
+        safety_buffer,
+        caddie_attached_cap,
+        current_caddie_attached,
+        caddie_attached_cap - current_caddie_attached,
+    )
+}
+
+#[cfg(test)]
+mod supply_tests {
+    use super::*;
+
+    fn capacity(
+        active: bool,
+        status: Option<AvailabilityStatus>,
+        can_two_rounds: bool,
+        two_round_request: bool,
+    ) -> CaddieDayCapacity {
+        CaddieDayCapacity {
+            active,
+            status,
+            can_two_rounds,
+            two_round_request,
+        }
+    }
+
+    fn date() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 7, 25).expect("valid date")
+    }
+
+    #[test]
+    fn counts_rounds_and_half_days() {
+        let supply = compute_caddie_supply(
+            date(),
+            [
+                capacity(true, Some(AvailabilityStatus::Available), true, true),
+                capacity(true, Some(AvailabilityStatus::Available), true, false),
+                capacity(true, Some(AvailabilityStatus::MorningOnly), false, false),
+                capacity(true, Some(AvailabilityStatus::Unavailable), true, true),
+                capacity(false, Some(AvailabilityStatus::Available), true, true),
+                capacity(true, None, false, false),
+            ],
+            0,
+            0,
+        );
+
+        assert_eq!(supply.available_caddies(), 4);
+        assert_eq!(supply.two_round_capable(), 1);
+        assert_eq!(supply.caddie_supply(), 5);
+        assert_eq!(supply.morning_capacity(), 4);
+        assert_eq!(supply.afternoon_capacity(), 3);
+    }
+
+    #[test]
+    fn light_duty_never_counts_two_rounds() {
+        let supply = compute_caddie_supply(
+            date(),
+            [capacity(
+                true,
+                Some(AvailabilityStatus::LightDuty),
+                true,
+                true,
+            )],
+            0,
+            0,
+        );
+        assert_eq!(supply.two_round_capable(), 0);
+        assert_eq!(supply.caddie_supply(), 1);
+    }
+
+    #[test]
+    fn safety_buffer_lowers_the_cap_but_never_below_zero() {
+        let supply = compute_caddie_supply(date(), [capacity(true, None, false, false)], 5, 0);
+        assert_eq!(supply.safety_buffer(), 5);
+        assert_eq!(supply.caddie_attached_cap(), 0);
+        assert_eq!(supply.remaining(), 0);
+    }
+
+    #[test]
+    fn remaining_goes_negative_when_bookings_exceed_the_cap() {
+        let supply = compute_caddie_supply(
+            date(),
+            [
+                capacity(true, None, false, false),
+                capacity(true, None, false, false),
+            ],
+            0,
+            3,
+        );
+        assert_eq!(supply.caddie_attached_cap(), 2);
+        assert_eq!(supply.remaining(), -1);
+        assert!(supply.is_over_capacity());
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct AutoAssignPlanItem {
     #[getter(skip)]
