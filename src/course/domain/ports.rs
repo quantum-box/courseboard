@@ -7,7 +7,7 @@ use super::{
     CaddieId, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSupply, Course, CourseError,
     CourseId, DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement, PayrollSummary,
     ProductSlot, RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationPolicy,
-    ReservationProduct, ReservationServiceId, Resource, UpdateExtensionConfig,
+    ReservationProduct, ReservationServiceId, Resource, TaxRuleSnapshot, UpdateExtensionConfig,
     UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
     UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
 };
@@ -20,6 +20,21 @@ pub struct GatewayCredentials<'a> {
     pub authorization: &'a str,
     pub operator_id: &'a str,
     pub platform_id: Option<&'a str>,
+}
+
+/// Port for tenant golf course tax rules.
+///
+/// CourseBoard owns this data (`golf_tax_rules` / `golf_grade_thresholds`);
+/// the port exists so simulation use cases stay free of storage concerns.
+#[async_trait]
+pub trait GolfTaxGateway: Send + Sync {
+    /// Resolve the tax rule whose green-fee bracket contains `green_fee`.
+    async fn find_rule_by_green_fee(
+        &self,
+        tenant_id: &str,
+        prefecture: &str,
+        green_fee: i64,
+    ) -> Result<Option<TaxRuleSnapshot>, CourseError>;
 }
 
 #[derive(Debug, Clone)]

@@ -14,6 +14,7 @@ import { policy } from './policy'
 import { products } from './products'
 import { settings } from './settings'
 import { settlement } from './settlement'
+import { simulator } from './simulator'
 import { shifts } from './shifts'
 import { timeline } from './timeline'
 
@@ -34,6 +35,7 @@ export const jaPlain = {
   products,
   settings,
   settlement,
+  simulator,
   shifts,
   timeline,
 }

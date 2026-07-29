@@ -35,6 +35,7 @@ import {
   CalendarCheck,
   CalendarDays,
   CalendarRange,
+  Calculator,
   Check,
   ChevronsLeft,
   ChevronsRight,
@@ -85,6 +86,7 @@ export type NavigationRoute =
   | 'golf/caddies/payroll'
   | 'golf/budgets'
   | 'golf/settlement'
+  | 'golf/simulator'
   | 'cancellation-fees'
   | 'golf/courses'
   | 'golf/policy'
@@ -133,6 +135,7 @@ export const navigationSections: NavigationSection[] = [
     items: [
       { route: 'golf/budgets', icon: BarChart3 },
       { route: 'golf/settlement', icon: ReceiptText },
+      { route: 'golf/simulator', icon: Calculator },
       { route: 'cancellation-fees', icon: CreditCard },
     ],
   },
