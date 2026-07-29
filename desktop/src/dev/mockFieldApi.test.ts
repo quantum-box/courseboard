@@ -45,6 +45,32 @@ describe('mockFieldApi', () => {
     expect(courseBody.items.length).toBeGreaterThanOrEqual(2)
   })
 
+  it('requires a staff link when creating a caddie profile', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const rejected = resolveMockFieldApiJson('/v1/course/caddie-profiles', {
+      method: 'POST',
+      body: JSON.stringify({ displayName: 'テスト キャディ', skillLevel: 'regular' }),
+    })
+    expect(rejected.kind).toBe('error')
+    if (rejected.kind !== 'error') return
+    expect(rejected.status).toBe(400)
+
+    const created = resolveMockFieldApiJson('/v1/course/caddie-profiles', {
+      method: 'POST',
+      body: JSON.stringify({
+        displayName: 'テスト キャディ',
+        skillLevel: 'regular',
+        staffId: 'staff_test_001',
+        staffReferenceType: 'staff_member',
+        staffReferenceId: 'staff_test_001',
+      }),
+    })
+    expect(created.kind).toBe('hit')
+    if (created.kind !== 'hit') return
+    expect((created.data as { staffId: string }).staffId).toBe('staff_test_001')
+  })
+
   it('returns settlement csv text via course-api path', () => {
     vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')

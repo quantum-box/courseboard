@@ -20,6 +20,7 @@ impl CreateCaddieUseCase {
         credentials: GatewayCredentials<'_>,
         input: UpsertCaddie,
     ) -> Result<Caddie, CourseError> {
+        input.require_staff_link()?;
         self.ops.create_caddie(credentials, input).await
     }
 }

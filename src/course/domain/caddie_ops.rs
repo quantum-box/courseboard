@@ -83,6 +83,17 @@ impl UpsertCaddie {
             desired_income,
         })
     }
+
+    /// Creation requires a staff link; updates stay lenient so legacy
+    /// unlinked profiles can still be edited.
+    pub fn require_staff_link(&self) -> Result<(), CourseError> {
+        if self.staff_id.is_none() && self.staff_reference_id.is_none() {
+            return Err(CourseError::BadRequest(
+                "staff link is required to create a caddie",
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Input for creating or updating a caddie assignment.
@@ -837,5 +848,59 @@ impl CaddieRating {
 
     pub fn comment(&self) -> Option<&str> {
         self.comment.as_deref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn upsert(staff_id: Option<&str>, staff_reference_id: Option<&str>) -> UpsertCaddie {
+        UpsertCaddie::try_new(
+            "山田 花子",
+            "regular",
+            "C",
+            12_000,
+            None,
+            staff_id.map(String::from),
+            staff_id.map(|_| "staff_member".to_string()),
+            staff_reference_id.map(String::from),
+            true,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect("valid upsert input")
+    }
+
+    #[test]
+    fn require_staff_link_accepts_staff_id() {
+        assert!(upsert(Some("staff_001"), Some("staff_001"))
+            .require_staff_link()
+            .is_ok());
+    }
+
+    #[test]
+    fn require_staff_link_accepts_reference_only() {
+        assert!(upsert(None, Some("staff_001")).require_staff_link().is_ok());
+    }
+
+    #[test]
+    fn require_staff_link_rejects_unlinked() {
+        assert!(matches!(
+            upsert(None, None).require_staff_link(),
+            Err(CourseError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn require_staff_link_rejects_blank_staff_id() {
+        // try_new normalizes whitespace-only ids to None.
+        assert!(matches!(
+            upsert(Some("  "), Some("  ")).require_staff_link(),
+            Err(CourseError::BadRequest(_))
+        ));
     }
 }
