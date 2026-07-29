@@ -32,8 +32,8 @@ mod tests {
         AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery, Caddie,
         CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
         CaddieId, CaddieRank, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSkillLevel,
-        CaddieStaff, CaddieSupply, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships,
-        ReservationId, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+        CaddieStaff, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, ReservationId,
+        UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
     use crate::course::usecase::ListCaddieAssignmentsUseCase;
 
@@ -147,15 +147,6 @@ mod tests {
                 date.unwrap_or_else(|| NaiveDate::from_ymd_opt(2026, 7, 18).unwrap()),
                 vec![],
             ))
-        }
-
-        async fn get_caddie_supply(
-            &self,
-            _credentials: GatewayCredentials<'_>,
-            date: NaiveDate,
-            _safety_buffer: Option<i64>,
-        ) -> Result<CaddieSupply, CourseError> {
-            Ok(CaddieSupply::reconstitute(date, 0, 0, 0, 0, 0, 0, 0, 0, 0))
         }
 
         async fn auto_assign_caddies(

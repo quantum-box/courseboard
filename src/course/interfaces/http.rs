@@ -50,6 +50,14 @@ pub(crate) fn ops_gateway(state: &AppState) -> Arc<FieldGolfOpsGateway> {
     ))
 }
 
+pub(crate) fn reservation_gateway(state: &AppState) -> Arc<FieldReservationGateway> {
+    let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
+    Arc::new(FieldReservationGateway::new(
+        state.http_client.clone(),
+        field_api_url,
+    ))
+}
+
 pub(crate) fn commercial_gateway(state: &AppState) -> Arc<FieldGolfCommercialGateway> {
     let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
     Arc::new(FieldGolfCommercialGateway::new(
@@ -219,11 +227,7 @@ pub async fn get_tee_sheet(
     Query(query): Query<TeeSheetQueryParams>,
 ) -> Result<Json<TeeSheetResponse>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
-    let reservations = Arc::new(FieldReservationGateway::new(
-        state.http_client.clone(),
-        field_api_url,
-    ));
+    let reservations = reservation_gateway(&state);
     let catalog = catalog_gateway(&state);
     let use_case = GetTeeSheetUseCase::new(reservations, catalog);
     let sheet = use_case

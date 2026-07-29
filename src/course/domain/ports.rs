@@ -4,9 +4,9 @@ use chrono::NaiveDate;
 use super::{
     AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery, BudgetAchievement,
     Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
-    CaddieId, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSupply, Course, CourseError,
-    CourseId, DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement, PayrollSummary,
-    ProductSlot, RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationPolicy,
+    CaddieId, CaddieRating, CaddieRecommendation, CaddieRoster, Course, CourseError, CourseId,
+    DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement, PayrollSummary, ProductSlot,
+    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationPolicy,
     ReservationProduct, ReservationServiceId, Resource, TaxRuleSnapshot, UpdateExtensionConfig,
     UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
     UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
@@ -189,13 +189,6 @@ pub trait GolfOpsGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         date: Option<NaiveDate>,
     ) -> Result<AttendanceSnapshotReport, CourseError>;
-
-    async fn get_caddie_supply(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        date: NaiveDate,
-        safety_buffer: Option<i64>,
-    ) -> Result<CaddieSupply, CourseError>;
 
     async fn auto_assign_caddies(
         &self,
