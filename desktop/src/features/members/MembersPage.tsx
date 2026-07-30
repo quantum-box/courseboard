@@ -12,6 +12,7 @@ import {
 } from '@tachyon-sdk/native-ui'
 import { MailPlus, ShieldCheck, SquarePen, Trash2 } from 'lucide-react'
 import { useCallback, useMemo, useState, type FormEvent } from 'react'
+import { useTranslation } from 'react-i18next'
 import { ApiError, fieldApiJson } from '../../api'
 import { useAuth } from '../../auth/AuthProvider'
 import {
@@ -53,6 +54,7 @@ function errorMessage(error: unknown, fallback: string) {
 }
 
 export function MembersPage() {
+  const { t, i18n } = useTranslation(['members', 'common'])
   const auth = useAuth()
   const loader = useCallback(async () => {
     return fieldApiJson<ErpUserListResponse>('/v1/field/iam/users')
@@ -71,9 +73,7 @@ export function MembersPage() {
   const customPolicies = resource.data?.customPolicies ?? []
 
   const removeMember = async (member: ErpMember) => {
-    if (!window.confirm(
-      `「${memberDisplayName(member)}」のロールをすべて外します。よろしいですか？`,
-    )) {
+    if (!window.confirm(t('members:remove.confirm', { name: memberDisplayName(member) }))) {
       return
     }
     setBusyMemberId(member.id)
@@ -84,13 +84,13 @@ export function MembersPage() {
       })
       setRowFeedback({
         tone: 'success',
-        message: `${memberDisplayName(member)} のアクセス権を外しました。`,
+        message: t('members:remove.success', { name: memberDisplayName(member) }),
       })
       resource.refresh()
     } catch (error) {
       setRowFeedback({
         tone: 'danger',
-        message: errorMessage(error, 'メンバーの削除に失敗しました。'),
+        message: errorMessage(error, t('members:remove.failed')),
       })
     } finally {
       setBusyMemberId(null)
@@ -100,22 +100,22 @@ export function MembersPage() {
   const columns = useMemo(() => [
     {
       key: 'name',
-      header: '名前',
+      header: t('members:table.name'),
       cell: (entry: ErpMember) => (
         <div className="member-name-cell">
           <strong>{memberDisplayName(entry)}</strong>
-          {entry.id === auth.user?.id ? <Badge variant="accent">自分</Badge> : null}
+          {entry.id === auth.user?.id ? <Badge variant="accent">{t('members:table.self')}</Badge> : null}
         </div>
       ),
     },
     {
       key: 'email',
-      header: 'メール',
+      header: t('members:table.email'),
       cell: (entry: ErpMember) => entry.email ?? '—',
     },
     {
       key: 'role',
-      header: 'ロール',
+      header: t('members:table.role'),
       cell: (entry: ErpMember) => {
         const policyNames = customPolicyNames(entry, customPolicies)
         return (
@@ -135,9 +135,9 @@ export function MembersPage() {
                   size="sm"
                   disabled={busyMemberId === entry.id}
                   onClick={() => setEditingMember(entry)}
-                  aria-label={`${memberDisplayName(entry)} のロールを編集`}
+                  aria-label={t('members:action.editRoleAria', { name: memberDisplayName(entry) })}
                 >
-                  <SquarePen /> 編集
+                  <SquarePen /> {t('members:action.editRole')}
                 </Button>
               ) : null}
             </span>
@@ -158,28 +158,29 @@ export function MembersPage() {
             size="sm"
             disabled={busyMemberId === entry.id}
             onClick={() => void removeMember(entry)}
-            aria-label={`${memberDisplayName(entry)} のアクセス権を外す`}
+            aria-label={t('members:action.removeAria', { name: memberDisplayName(entry) })}
           >
-            <Trash2 /> 外す
+            <Trash2 /> {t('members:action.remove')}
           </Button>
         )
       },
     },
-  ], [auth.user?.id, busyMemberId, customPolicies])
+    // `i18n.language` keeps the memoized header strings in step with a switch.
+  ], [auth.user?.id, busyMemberId, customPolicies, t, i18n.language])
 
   return (
     <div className="page-stack">
       <PageHeader
-        eyebrow="Course Board"
-        title="メンバーと権限"
-        description="このテナントを操作できるメンバーの一覧、招待、ロールの管理を行います。"
+        eyebrow={t('common:app.name')}
+        title={t('members:title')}
+        description={t('members:description')}
         actions={<PageRefreshButton onClick={resource.refresh} loading={resource.loading} />}
       />
 
-      {resource.loading && !resource.data ? <LoadingState label="メンバーを読み込み中" /> : null}
+      {resource.loading && !resource.data ? <LoadingState label={t('members:loading')} /> : null}
       {resource.error instanceof ApiError && resource.error.status === 403 ? (
-        <Notice tone="warning" title="メンバーを管理する権限がありません">
-          この画面の操作には field:ManageUsers を許可されている必要があります。テナントのオーナーは常に許可されます。管理者ロール（pol_erp_admin）の付与、またはプラットフォーム管理者への依頼を検討してください。
+        <Notice tone="warning" title={t('members:forbidden.title')}>
+          {t('members:forbidden.body')}
         </Notice>
       ) : resource.error ? (
         <ResourceError error={resource.error} onRetry={resource.refresh} />
@@ -191,8 +192,8 @@ export function MembersPage() {
 
       {resource.data ? (
         <Panel
-          title="メンバー一覧"
-          description="ロールは「編集」から付け替えます。管理者 / スタッフ / 閲覧者 はいずれかひとつ、業務領域のロールはあわせて複数付与できます。"
+          title={t('members:list.title')}
+          description={t('members:list.description')}
           actions={(
             <InviteDialog
               catalog={customPolicies}
@@ -209,8 +210,8 @@ export function MembersPage() {
             rowKey={(entry: ErpMember) => entry.id}
             empty={(
               <EmptyState
-                title="ロールを持つメンバーがいません"
-                description="「メンバーを招待」からメールアドレスとロールを指定して招待できます。"
+                title={t('members:list.empty.title')}
+                description={t('members:list.empty.description')}
               />
             )}
           />
@@ -235,9 +236,10 @@ export function MembersPage() {
 
 /**
  * Unified role picker over one flat policy list. The three exclusive roles
- * come first, then the tenant's domain roles. 管理者 covers everything, so
- * selecting it clears and grays out every other entry (the toggle helper in
- * models keeps the selection consistent).
+ * come first, then the tenant's domain roles. The administrator role covers
+ * everything, so selecting it clears and grays out every other entry (the
+ * toggle helper in models keeps the selection consistent). Custom policy names
+ * come from the tenant's own catalogue, so they are never translated here.
  */
 function RoleChecklist({
   catalog,
@@ -250,6 +252,7 @@ function RoleChecklist({
   disabled: boolean
   onToggle: (policyId: string, checked: boolean) => void
 }) {
+  const { t } = useTranslation(['members'])
   const adminSelected = isAdminSelected(selected)
   const renderItem = (policyId: string, label: string, description?: string | null) => {
     const checked = selected.includes(policyId)
@@ -271,7 +274,11 @@ function RoleChecklist({
   }
   return (
     <div className="member-roles-checklist">
-      {ROLE_OPTIONS.map(option => renderItem(option.policyId, option.label, option.summary))}
+      {ROLE_OPTIONS.map(option => renderItem(
+        option.policyId,
+        t(option.labelKey),
+        t(option.summaryKey),
+      ))}
       {catalog.length > 0 ? <div className="member-roles-divider" role="separator" /> : null}
       {catalog.map(policy => renderItem(policy.id, policy.name, policy.description))}
     </div>
@@ -289,6 +296,7 @@ function EditRolesDialog({
   onClose: () => void
   onSaved: (message: string) => void
 }) {
+  const { t } = useTranslation(['members', 'common'])
   const [selected, setSelected] = useState<string[]>(() => memberPolicyIds(member))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -305,9 +313,9 @@ function EditRolesDialog({
           body: JSON.stringify({ policyIds: selected }),
         },
       )
-      onSaved(`${memberDisplayName(member)} のロールを更新しました。`)
+      onSaved(t('members:edit.success', { name: memberDisplayName(member) }))
     } catch (cause) {
-      setError(errorMessage(cause, 'ロールの更新に失敗しました。'))
+      setError(errorMessage(cause, t('members:edit.saveFailed')))
       setSaving(false)
     }
   }
@@ -321,14 +329,12 @@ function EditRolesDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>{memberDisplayName(member)} のロールを編集</DialogTitle>
-          <DialogDescription>
-            管理者 / スタッフ / 閲覧者 はいずれかひとつ、業務領域のロールはあわせて複数付与できます。保存すると即時に反映されます。
-          </DialogDescription>
+          <DialogTitle>{t('members:edit.title', { name: memberDisplayName(member) })}</DialogTitle>
+          <DialogDescription>{t('members:edit.description')}</DialogDescription>
         </DialogHeader>
         <form className="member-invite-dialog-form" onSubmit={save}>
           <div className="field">
-            <span className="field-label">ロール</span>
+            <span className="field-label">{t('members:roleField')}</span>
             <RoleChecklist
               catalog={catalog}
               selected={selected}
@@ -339,14 +345,14 @@ function EditRolesDialog({
             />
           </div>
           {error ? (
-            <Notice tone="danger" title="保存できませんでした">{error}</Notice>
+            <Notice tone="danger" title={t('members:edit.saveFailedTitle')}>{error}</Notice>
           ) : null}
           <DialogFooter>
             <Button type="button" variant="ghost" disabled={saving} onClick={onClose}>
-              キャンセル
+              {t('common:action.cancel')}
             </Button>
             <Button type="submit" variant="primary" disabled={saving}>
-              {saving ? '保存中…' : '保存'}
+              {saving ? t('common:action.saving') : t('common:action.save')}
             </Button>
           </DialogFooter>
         </form>
@@ -364,6 +370,7 @@ function InviteDialog({
   catalog: ErpCustomPolicy[]
   onInvited: (message: string) => void
 }) {
+  const { t } = useTranslation(['members', 'common'])
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
   const [selected, setSelected] = useState<string[]>(DEFAULT_INVITE_POLICY_IDS)
@@ -378,7 +385,7 @@ function InviteDialog({
       return
     }
     if (selected.length === 0) {
-      setError('ロールをひとつ以上選択してください。')
+      setError(t('members:invite.validation.roleRequired'))
       return
     }
     setSubmitting(true)
@@ -397,7 +404,7 @@ function InviteDialog({
       setOpen(false)
       onInvited(inviteResultMessage(response))
     } catch (cause) {
-      setError(errorMessage(cause, '招待に失敗しました。時間をおいて再試行してください。'))
+      setError(errorMessage(cause, t('members:invite.failed')))
     } finally {
       setSubmitting(false)
     }
@@ -414,29 +421,27 @@ function InviteDialog({
     >
       <DialogTrigger asChild>
         <Button type="button" variant="primary">
-          <MailPlus /> メンバーを招待
+          <MailPlus /> {t('members:invite.trigger')}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>メンバーを招待</DialogTitle>
-          <DialogDescription>
-            既存の Tachyon ユーザーには即時にアクセスとロールを付与し、未登録のアドレスには招待メールを送信します。
-          </DialogDescription>
+          <DialogTitle>{t('members:invite.title')}</DialogTitle>
+          <DialogDescription>{t('members:invite.description')}</DialogDescription>
         </DialogHeader>
         <form className="member-invite-dialog-form" onSubmit={submit}>
-          <Field label="メールアドレス" required>
+          <Field label={t('members:invite.email')} required>
             <Input
               type="email"
               value={email}
               onChange={event => setEmail(event.currentTarget.value)}
-              placeholder="staff@example.com"
+              placeholder={t('members:invite.emailPlaceholder')}
               autoComplete="off"
               disabled={submitting}
             />
           </Field>
           <div className="field">
-            <span className="field-label">ロール</span>
+            <span className="field-label">{t('members:roleField')}</span>
             <RoleChecklist
               catalog={catalog}
               selected={selected}
@@ -447,10 +452,10 @@ function InviteDialog({
             />
           </div>
           {error ? (
-            <Notice tone="danger" title="招待できませんでした">{error}</Notice>
+            <Notice tone="danger" title={t('members:invite.failedTitle')}>{error}</Notice>
           ) : null}
           <p className="member-invite-hint">
-            <ShieldCheck aria-hidden="true" /> メンバー管理には field:ManageUsers の許可が必要です（オーナーは常に許可、管理者ロールにも含まれます）。
+            <ShieldCheck aria-hidden="true" /> {t('members:invite.hint')}
           </p>
           <DialogFooter>
             <Button
@@ -459,10 +464,10 @@ function InviteDialog({
               disabled={submitting}
               onClick={() => setOpen(false)}
             >
-              キャンセル
+              {t('common:action.cancel')}
             </Button>
             <Button type="submit" variant="primary" disabled={submitting}>
-              <MailPlus /> {submitting ? '招待を送信中…' : '招待を送信'}
+              <MailPlus /> {submitting ? t('members:invite.submitting') : t('members:invite.submit')}
             </Button>
           </DialogFooter>
         </form>
