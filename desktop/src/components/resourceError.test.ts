@@ -45,6 +45,16 @@ describe('resourceErrorCopy', () => {
       .toBe('error.providerError')
   })
 
+  it('keeps the upstream reason for a provider failure', () => {
+    // Observed on production: without the detail nobody can tell that Field is
+    // answering 500 because a column is missing from its database.
+    const raw = 'external provider error: Field API returned 500 Internal Server Error: '
+      + "Unknown column 'display_name' in 'field list'"
+    const result = resourceErrorCopy(new Error(raw))
+    expect(result.key).toBe('error.providerError')
+    expect(result.detail).toBe(raw)
+  })
+
   it('never surfaces an unmapped message as the primary copy', () => {
     const result = resourceErrorCopy(new Error('some server-authored English detail'))
     expect(result.key).toBe('error.unexpected')

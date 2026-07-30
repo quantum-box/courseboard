@@ -187,7 +187,10 @@ export function resourceErrorCopy(error: unknown): { key: ResourceErrorKey; deta
     return { key: 'error.authRejected' }
   }
   if (lower.includes('provider_error') || lower.includes('external provider error')) {
-    return { key: 'error.providerError' }
+    // Keep the upstream reason: it is the only place the failing service names
+    // what went wrong, and without it the screen says a service is unavailable
+    // while giving nobody a way to find out which one or why.
+    return { key: 'error.providerError', detail: raw }
   }
   // A failure that carries its status is answered by status even when the body
   // supplied wording of its own: server-authored copy is English, so it belongs
