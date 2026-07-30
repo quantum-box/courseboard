@@ -106,6 +106,7 @@ impl Modify for SecurityAddon {
             http::CaddieAssignmentDto,
             http::CaddieAssignmentQueryParams,
             http_ops::UpsertCaddieRequest,
+            http_ops::PatchCaddieRequest,
             http_ops::UpsertCaddieAssignmentRequest,
             http_ops::MembershipDto,
             http_ops::ReplaceMembershipsRequest,

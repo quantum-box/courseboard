@@ -16,9 +16,10 @@ use super::openapi::ErrorBody;
 use super::http::{credentials, ops_gateway, CaddieAssignmentDto, CaddieDto, ItemsResponse};
 use crate::course::domain::{
     AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery,
-    CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation,
-    CaddieSupply, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, ReservationId,
-    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    CaddieAvailability, CaddieCourseMembership, CaddieId, CaddiePatch, CaddieRating,
+    CaddieRecommendation, CaddieSupply, PayrollSummary, RecommendationQuery,
+    ReplaceCaddieMemberships, ReservationId, UpsertCaddie, UpsertCaddieAssignment,
+    UpsertCaddieAvailability,
 };
 use crate::course::usecase::{
     AutoAssignCaddiesUseCase, CreateCaddieUseCase, DeleteCaddieAvailabilityUseCase,
@@ -63,6 +64,61 @@ fn default_true() -> bool {
     true
 }
 
+/// PATCH body: every field is optional so an omitted field means "leave as is".
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PatchCaddieRequest {
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub skill_level: Option<String>,
+    #[serde(default)]
+    pub rank: Option<String>,
+    #[serde(default)]
+    pub base_fee_amount: Option<i64>,
+    #[serde(default)]
+    pub currency: Option<String>,
+    #[serde(default)]
+    pub staff_id: Option<String>,
+    #[serde(default)]
+    pub staff_reference_type: Option<String>,
+    #[serde(default)]
+    pub staff_reference_id: Option<String>,
+    #[serde(default)]
+    pub active: Option<bool>,
+    #[serde(default)]
+    pub employment_status: Option<String>,
+    #[serde(default)]
+    pub max_rounds_per_day: Option<i32>,
+    #[serde(default)]
+    pub monthly_contract_rounds: Option<i32>,
+    #[serde(default)]
+    pub can_two_rounds: Option<bool>,
+    #[serde(default)]
+    pub desired_income: Option<i32>,
+}
+
+impl From<PatchCaddieRequest> for CaddiePatch {
+    fn from(body: PatchCaddieRequest) -> Self {
+        Self {
+            display_name: body.display_name,
+            skill_level: body.skill_level,
+            rank: body.rank,
+            base_fee_amount: body.base_fee_amount,
+            currency: body.currency,
+            staff_id: body.staff_id,
+            staff_reference_type: body.staff_reference_type,
+            staff_reference_id: body.staff_reference_id,
+            active: body.active,
+            employment_status: body.employment_status,
+            max_rounds_per_day: body.max_rounds_per_day,
+            monthly_contract_rounds: body.monthly_contract_rounds,
+            can_two_rounds: body.can_two_rounds,
+            desired_income: body.desired_income,
+        }
+    }
+}
+
 fn parse_upsert_caddie(body: UpsertCaddieRequest) -> Result<UpsertCaddie, AppError> {
     UpsertCaddie::try_new(
         body.display_name,
@@ -93,7 +149,7 @@ fn parse_upsert_caddie(body: UpsertCaddieRequest) -> Result<UpsertCaddie, AppErr
         (status = 201, description = "Caddie created", body = CaddieDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -118,12 +174,13 @@ pub async fn create_caddie(
     path = "/v1/course/caddie-profiles/{id}",
     tag = "course-ops",
     params(("id" = String, Path, description = "Caddie profile ID")),
-    request_body = UpsertCaddieRequest,
+    request_body = PatchCaddieRequest,
     responses(
         (status = 200, description = "Caddie updated", body = CaddieDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 404, description = "Caddie not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -131,14 +188,13 @@ pub async fn update_caddie(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(caddie_id): Path<String>,
-    Json(body): Json<UpsertCaddieRequest>,
+    Json(body): Json<PatchCaddieRequest>,
 ) -> Result<Json<CaddieDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
     let caddie_id = CaddieId::try_new(caddie_id).map_err(AppError::from)?;
-    let input = parse_upsert_caddie(body)?;
     let use_case = UpdateCaddieUseCase::new(ops_gateway(&state));
     let caddie = use_case
-        .execute(credentials, &caddie_id, input)
+        .execute(credentials, &caddie_id, CaddiePatch::from(body))
         .await
         .map_err(AppError::from)?;
     Ok(Json(CaddieDto::from(&caddie)))
@@ -178,7 +234,7 @@ pub struct UpsertCaddieAssignmentRequest {
         (status = 200, description = "Assignment updated", body = CaddieAssignmentDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -248,7 +304,7 @@ pub struct ReplaceMembershipsRequest {
     responses(
         (status = 200, description = "List caddie course memberships", body = inline(ItemsResponse<MembershipDto>)),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -280,7 +336,7 @@ pub async fn list_caddie_memberships(
         (status = 200, description = "Memberships replaced", body = inline(ItemsResponse<MembershipDto>)),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -364,7 +420,7 @@ pub struct UpsertAvailabilityRequest {
     responses(
         (status = 200, description = "List caddie availabilities", body = inline(ItemsResponse<AvailabilityDto>)),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -402,7 +458,7 @@ pub async fn list_caddie_availabilities(
         (status = 201, description = "Availability upserted", body = AvailabilityDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -440,7 +496,7 @@ pub async fn upsert_caddie_availability(
     responses(
         (status = 204, description = "Availability deleted"),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -514,7 +570,7 @@ pub struct RecommendationQueryParams {
     responses(
         (status = 200, description = "List caddie recommendations", body = inline(ItemsResponse<RecommendationDto>)),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -598,7 +654,7 @@ pub struct AttendanceQueryParams {
     responses(
         (status = 200, description = "Attendance snapshot", body = AttendanceReportDto),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -665,7 +721,7 @@ pub struct SupplyQueryParams {
     responses(
         (status = 200, description = "Caddie supply summary", body = CaddieSupplyDto),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -753,7 +809,7 @@ impl From<AutoAssignResult> for AutoAssignResultDto {
         (status = 200, description = "Auto-assignment plan", body = AutoAssignResultDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -847,7 +903,7 @@ pub struct YearMonthQuery {
     responses(
         (status = 200, description = "Payroll summary", body = PayrollSummaryDto),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -874,7 +930,7 @@ pub async fn get_payroll_summary(
     responses(
         (status = 200, description = "Payroll CSV export", content_type = "text/csv"),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -940,7 +996,7 @@ pub struct RatingsQueryParams {
     responses(
         (status = 200, description = "List caddie ratings", body = inline(ItemsResponse<RatingDto>)),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]

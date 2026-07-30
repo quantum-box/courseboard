@@ -114,6 +114,7 @@ impl From<CourseError> for AppError {
         match value {
             CourseError::Unauthorized => AppError::Unauthorized,
             CourseError::BadRequest(message) => AppError::BadRequest(message),
+            CourseError::NotFound(message) => AppError::NotFound(message),
             CourseError::PermissionDenied(message) => AppError::PermissionDenied(message),
             CourseError::Provider(message) => AppError::Provider(message),
         }
@@ -209,7 +210,7 @@ impl From<TeeSheet> for TeeSheetResponse {
         (status = 200, description = "Tee sheet for the requested date", body = TeeSheetResponse),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -328,7 +329,7 @@ fn parse_upsert_course(body: UpsertCourseRequest) -> Result<UpsertCourse, AppErr
     responses(
         (status = 200, description = "List golf courses", body = inline(ItemsResponse<CourseDto>)),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -357,7 +358,7 @@ pub async fn list_courses(
         (status = 201, description = "Course created", body = CourseDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -387,7 +388,7 @@ pub async fn create_course(
         (status = 200, description = "Course updated", body = CourseDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -417,7 +418,7 @@ pub async fn update_course(
     responses(
         (status = 204, description = "Course deleted"),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -472,7 +473,7 @@ impl From<&Resource> for ResourceDto {
     responses(
         (status = 200, description = "List resources", body = inline(ItemsResponse<ResourceDto>)),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -572,7 +573,7 @@ pub struct ReplaceProductSlotsRequest {
     responses(
         (status = 200, description = "List reservation products", body = inline(ItemsResponse<ReservationProductDto>)),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -602,7 +603,7 @@ pub async fn list_reservation_products(
         (status = 200, description = "Reservation product upserted", body = ReservationProductDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -638,7 +639,7 @@ pub async fn upsert_reservation_product(
     responses(
         (status = 200, description = "List product slots", body = inline(ItemsResponse<ProductSlotDto>)),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -670,7 +671,7 @@ pub async fn list_product_slots(
         (status = 200, description = "Product slots replaced", body = inline(ItemsResponse<ProductSlotDto>)),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -825,7 +826,7 @@ impl From<&CaddieAssignment> for CaddieAssignmentDto {
     responses(
         (status = 200, description = "List caddie profiles and reusable staff index", body = CaddieRosterResponse),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -863,7 +864,7 @@ pub struct CaddieAssignmentQueryParams {
     responses(
         (status = 200, description = "List caddie assignments", body = inline(ItemsResponse<CaddieAssignmentDto>)),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
