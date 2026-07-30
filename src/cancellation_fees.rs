@@ -612,10 +612,7 @@ async fn send_sms(
 
     let account_sid = config.twilio_account_sid.as_deref().unwrap();
     let auth_token = config.twilio_auth_token.as_deref().unwrap();
-    let url = format!(
-        "https://api.twilio.com/2010-04-01/Accounts/{}/Messages.json",
-        account_sid
-    );
+    let url = format!("https://api.twilio.com/2010-04-01/Accounts/{account_sid}/Messages.json");
     let mut params = vec![
         ("To".to_string(), to.to_string()),
         ("Body".to_string(), body.to_string()),
