@@ -58,8 +58,10 @@ export const common = {
     unknown: 'データを読み込めませんでした',
     authRejected:
       'ログイン情報が受け付けられませんでした。一度ログアウトして、もう一度ログインしてください。',
+    // The connected service answered — with an error. Telling the operator to
+    // check their own network sends them after a problem they cannot fix.
     providerError:
-      '外部サービスにつながりませんでした。ネットワークと連携設定を確認してください。',
+      '連携している外部サービスがエラーを返しました。下の内容を管理者に伝えてください。この画面の操作では直せません。',
     apiUnreachable:
       'Course Board のサーバーにつながりませんでした。しばらく待ってから再読み込みしてください。',
     offline:

@@ -807,6 +807,12 @@ pub(crate) fn map_field_status_error(status: reqwest::StatusCode, message: &str)
     if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
         return CourseError::PermissionDenied(message);
     }
+    // A tenant that has not configured this resource yet is not a failure of the
+    // integration: reported as a provider error it reads as "the connected
+    // service is broken" and sends the operator off to check their network.
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return CourseError::NotFound("the connected service has no record for this tenant");
+    }
     CourseError::Provider(message)
 }
 
