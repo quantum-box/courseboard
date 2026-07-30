@@ -9,6 +9,12 @@ export const timeline: DeepPartial<typeof source> = {
   loading: '予定表を読み込んでいます…',
   reload: '読み直す',
   toDispatch: '担当決めの画面へ',
+  partial: {
+    title: 'プランの内容が取れていません',
+    description:
+      '予約の一覧は出ています。ただし、キャディが付くかどうか・ホールの数・かかる時間は、'
+      + 'かりの数字です。正しい内容は「プレーの料金プラン」の画面で確かめてください。',
+  },
   status: {
     confirmed: '予約が決まっています',
     checkedIn: '受付が済みました',

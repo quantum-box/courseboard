@@ -57,6 +57,9 @@ export type TeeSheetResponse = {
   dayStart: string
   dayEnd: string
   items: TeeReservation[]
+  /** Catalog lookups the API could not load; the rows are still usable but some
+   * of their detail fell back to a default. */
+  unavailable?: string[]
 }
 
 export type TimelineBlock = {

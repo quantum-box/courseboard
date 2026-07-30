@@ -262,6 +262,7 @@ export function TimelinePage() {
   }
 
   const reservations = teeSheet.data?.items ?? []
+  const unavailable = teeSheet.data?.unavailable ?? []
   const assignments = enrichAssignmentsForTimeline(
     (assignmentsResource.data?.items ?? []).filter(item =>
       parseJstDateParts(item.scheduledAt).date === date,
@@ -315,6 +316,11 @@ export function TimelinePage() {
 
   return (
     <div className="page-stack timeline-page">
+      {unavailable.length > 0 ? (
+        <Notice tone="warning" title={t('timeline:partial.title')}>
+          {t('timeline:partial.description')}
+        </Notice>
+      ) : null}
       <div className="timeline-chrome">
         <PageHeader
           title={t('timeline:title')}
