@@ -8,6 +8,7 @@ import { download } from './download'
 import { help } from './help'
 import { home } from './home'
 import { map } from './map'
+import { members } from './members'
 import { nav } from './nav'
 import { payment } from './payment'
 import { policy } from './policy'
@@ -29,6 +30,7 @@ export const en = {
   help,
   home,
   map,
+  members,
   nav,
   payment,
   policy,

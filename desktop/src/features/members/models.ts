@@ -7,6 +7,8 @@
  * attached custom policies — updating a role replaces those attachments.
  */
 
+import { i18next } from '../../i18n'
+
 /** Response role identifiers (`ErpRole::as_str` upstream). */
 export type ErpRole = 'field:admin' | 'field:staff' | 'field:viewer'
 
@@ -46,34 +48,41 @@ export type InviteMemberResponse = {
  * The three exclusive roles as policies (`pol_erp_*`), with display labels
  * shared with the fieldadmin UI. Roles and domain policies are managed as one
  * flat policy list via `PUT /v1/field/iam/users/{id}/policies`.
+ *
+ * Labels are translation keys, not strings: this array is built once at module
+ * load, so baking in the text would pin every role name to whatever language
+ * was active on first import and never follow a language switch. Callers
+ * translate `labelKey` / `summaryKey` at render time.
  */
+export type RoleTextKey = `members:roles.${ErpRoleRequest}.${'label' | 'summary'}`
+
 export const ROLE_OPTIONS: Array<{
   value: ErpRoleRequest
   responseValue: ErpRole
   policyId: string
-  label: string
-  summary: string
+  labelKey: RoleTextKey
+  summaryKey: RoleTextKey
 }> = [
   {
     value: 'admin',
     responseValue: 'field:admin',
     policyId: 'pol_erp_admin',
-    label: '管理者',
-    summary: '全機能の操作に加えて、メンバーと設定も管理できます。ほかのロールを付与する必要はありません。',
+    labelKey: 'members:roles.admin.label',
+    summaryKey: 'members:roles.admin.summary',
   },
   {
     value: 'staff',
     responseValue: 'field:staff',
     policyId: 'pol_erp_staff',
-    label: 'スタッフ',
-    summary: '日常の業務データを作成・更新できます。メンバー管理と設定変更はできません。',
+    labelKey: 'members:roles.staff.label',
+    summaryKey: 'members:roles.staff.summary',
   },
   {
     value: 'viewer',
     responseValue: 'field:viewer',
     policyId: 'pol_erp_viewer',
-    label: '閲覧者',
-    summary: '業務データの閲覧のみできます。作成・更新・削除はできません。',
+    labelKey: 'members:roles.viewer.label',
+    summaryKey: 'members:roles.viewer.summary',
   },
 ]
 
@@ -100,7 +109,8 @@ export function isAdminSelected(selected: string[]) {
  * Toggle one policy in a selection while keeping the invariants the API
  * enforces or that make selections meaningless:
  * - the three role policies are mutually exclusive
- * - 管理者 already covers everything, so selecting it clears the rest
+ * - the administrator role already covers everything, so selecting it clears
+ *   the rest
  */
 export function togglePolicySelection(
   selected: string[],
@@ -115,14 +125,16 @@ export function togglePolicySelection(
   return [...next, policyId]
 }
 
-const ROLE_LABELS = new Map<string, string>(
-  ROLE_OPTIONS.map(option => [option.responseValue, option.label]),
+const ROLE_LABEL_KEYS = new Map<string, RoleTextKey>(
+  ROLE_OPTIONS.map(option => [option.responseValue, option.labelKey]),
 )
 
+/** Resolved per call so the badge follows the active language. */
 export function roleLabel(member: Pick<ErpMember, 'role' | 'isOwner'>) {
-  if (member.isOwner) return 'オーナー'
-  if (!member.role) return '未割り当て'
-  return ROLE_LABELS.get(member.role) ?? member.role
+  if (member.isOwner) return i18next.t('members:roles.owner')
+  if (!member.role) return i18next.t('members:roles.unassigned')
+  const labelKey = ROLE_LABEL_KEYS.get(member.role)
+  return labelKey ? i18next.t(labelKey) : member.role
 }
 
 export function roleBadgeVariant(member: Pick<ErpMember, 'role' | 'isOwner'>) {
@@ -138,12 +150,10 @@ export function roleBadgeVariant(member: Pick<ErpMember, 'role' | 'isOwner'>) {
 }
 
 export function rolePermissionSummary(member: Pick<ErpMember, 'role' | 'isOwner'>) {
-  if (member.isOwner) {
-    return 'テナントのオーナー。AdministratorAccess により常にすべての操作ができます。'
-  }
+  if (member.isOwner) return i18next.t('members:roles.ownerSummary')
   const option = ROLE_OPTIONS.find(candidate => candidate.responseValue === member.role)
-  if (option) return option.summary
-  return 'ロール未割り当て。ロールを割り当てるまで Field の業務データは操作できません。'
+  if (option) return i18next.t(option.summaryKey)
+  return i18next.t('members:roles.unassignedSummary')
 }
 
 const ROLE_SORT_ORDER = new Map<string, number>([
@@ -183,9 +193,9 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 export function validateInviteEmail(raw: string): { email: string } | { error: string } {
   const email = raw.trim().toLowerCase()
-  if (!email) return { error: 'メールアドレスを入力してください。' }
+  if (!email) return { error: i18next.t('members:invite.validation.emailRequired') }
   if (!EMAIL_PATTERN.test(email)) {
-    return { error: 'メールアドレスの形式が正しくありません。' }
+    return { error: i18next.t('members:invite.validation.emailFormat') }
   }
   return { email }
 }
@@ -199,8 +209,11 @@ export function validateInviteEmail(raw: string): { email: string } | { error: s
 export function inviteResultMessage(response: InviteMemberResponse) {
   const email = response.email ?? response.user?.email ?? ''
   if (response.invitationSent) {
-    return `${email || '指定のアドレス'} 宛に招待メールを送信しました。承諾後にこの画面でロールを割り当ててください。`
+    return i18next.t('members:invite.result.sent', {
+      email: email || i18next.t('members:invite.result.sentFallback'),
+    })
   }
-  const who = response.user?.name || email || '既存ユーザー'
-  return `${who} は既存ユーザーのため、アクセス付与とロール割り当てを直ちに行いました。`
+  return i18next.t('members:invite.result.applied', {
+    name: response.user?.name || email || i18next.t('members:invite.result.appliedFallback'),
+  })
 }
