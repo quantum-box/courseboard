@@ -81,6 +81,30 @@ type BudgetDraft = {
 const CSV_HEADER =
   'golf_course_id,date,target_revenue,target_average_spend,target_caddy_attached_ratio'
 
+type CsvColumn = {
+  name: string
+  labelKey:
+    | 'golfCourseId'
+    | 'date'
+    | 'targetRevenue'
+    | 'targetAverageSpend'
+    | 'targetCaddyAttachedRatio'
+  example: string
+}
+
+/**
+ * The header names are the wire format the import endpoint forwards verbatim,
+ * so they stay in English. Each one is paired with a translated explanation so
+ * the people preparing the file can tell what belongs in the column.
+ */
+const CSV_COLUMNS: CsvColumn[] = [
+  { name: 'golf_course_id', labelKey: 'golfCourseId', example: 'course_001' },
+  { name: 'date', labelKey: 'date', example: '2026-04-01' },
+  { name: 'target_revenue', labelKey: 'targetRevenue', example: '1200000' },
+  { name: 'target_average_spend', labelKey: 'targetAverageSpend', example: '12000' },
+  { name: 'target_caddy_attached_ratio', labelKey: 'targetCaddyAttachedRatio', example: '0.70' },
+]
+
 function monthRange(yearMonth: string) {
   const match = /^(\d{4})-(\d{2})$/.exec(yearMonth)
   if (!match) {
@@ -356,14 +380,14 @@ export function BudgetsPage() {
 
       <Panel>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <Field label={t('budgets:filter.month')} required className="sm:w-48">
+          <Field requirement="none" label={t('budgets:filter.month')} className="sm:w-48">
             <Input
               type="month"
               value={yearMonth}
               onChange={event => setYearMonth(event.target.value || currentYearMonth())}
             />
           </Field>
-          <Field label={t('budgets:filter.course')} className="sm:min-w-64">
+          <Field requirement="none" label={t('budgets:filter.course')} className="sm:min-w-64">
             <NativeSelect
               value={courseFilter}
               onChange={event => setCourseFilter(event.target.value)}
@@ -600,6 +624,57 @@ export function BudgetsPage() {
                 </Button>
               )}
             >
+              <div className="grid gap-2 pb-3">
+                <div className="text-xs font-medium">{t('budgets:csv.columns.title')}</div>
+                <p className="text-2xs text-muted-foreground">
+                  {t('budgets:csv.columns.description')}
+                </p>
+                <DataTable
+                  rows={CSV_COLUMNS}
+                  rowKey={column => column.name}
+                  columns={[
+                    {
+                      key: 'name',
+                      header: t('budgets:csv.columns.header'),
+                      mobileLabel: t('budgets:csv.columns.header'),
+                      cell: column => <code className="text-2xs">{column.name}</code>,
+                    },
+                    {
+                      key: 'meaning',
+                      header: t('budgets:csv.columns.meaning'),
+                      mobileLabel: t('budgets:csv.columns.meaning'),
+                      cell: column => (
+                        <span className="text-xs">
+                          {t(`budgets:csv.columns.${column.labelKey}` as 'budgets:csv.columns.date')}
+                        </span>
+                      ),
+                    },
+                    {
+                      key: 'example',
+                      header: t('budgets:csv.columns.example'),
+                      mobileLabel: t('budgets:csv.columns.example'),
+                      cell: column => <code className="text-2xs">{column.example}</code>,
+                    },
+                  ]}
+                />
+                {courses.length > 0 ? (
+                  <div className="grid gap-1 rounded-md border border-border bg-muted/20 p-3">
+                    <div className="text-xs font-medium">
+                      {t('budgets:csv.columns.courseIdsTitle')}
+                    </div>
+                    <ul className="grid gap-0.5">
+                      {courses.map(course => (
+                        <li key={course.id} className="text-2xs text-muted-foreground">
+                          {course.name}
+                          {' = '}
+                          <code>{course.id}</code>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+
               <form className="grid gap-3" onSubmit={importCsv}>
                 <Field
                   label={t('budgets:csv.file')}

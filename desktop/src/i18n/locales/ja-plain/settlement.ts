@@ -39,13 +39,16 @@ export const settlement: DeepPartial<typeof source> = {
     warning: '入金の突き合わせで、気をつける点があります',
   },
   reservations: {
-    title: 'この月に入っている予約',
-    description: '集計に入っている予約の番号',
+    title: 'この月に入っている予約（管理用の番号）',
+    description:
+      'この集計に入っている予約の、システムの中で使う管理用の番号です。お客さまに伝える予約番号は、ここでは出せません。',
     empty: 'この月の予約はありません',
   },
   unpaidCancellations: {
     title: 'お金が入っていないキャンセル',
-    description: '請求を送るか、入金があったか確かめる必要のある予約',
+    description:
+      '請求を送るか、入金があったか確かめる必要のある予約です。予約番号・キャンセル料・支払いの状態を出します。',
+    numberUnknown: '予約番号が分かりませんでした',
     empty: {
       title: '未入金のキャンセルはありません',
       description: 'この月のキャンセル料は、すべて受け取りずみです。',
@@ -65,6 +68,19 @@ export const settlement: DeepPartial<typeof source> = {
     empty: {
       title: 'まだ入っていないキャンセル料はありません',
       description: 'この期間に、新しく送る請求はありません。',
+    },
+    paymentStatusValue: {
+      paid: 'お金が入りました',
+      pending: 'お金が入るのを待っています',
+      unpaid: 'まだお金が入っていません',
+      fee_paid: 'キャンセル料が入りました',
+      fee_pending: 'キャンセル料が入るのを待っています',
+      fee_unpaid: 'キャンセル料がまだ入っていません',
+      refunded: 'お金を返しました',
+      failed: '支払いがうまくいきませんでした',
+      canceled: '取り消しました',
+      cancelled: '取り消しました',
+      unknown: '分かりません（{{value}}）',
     },
     table: {
       paymentStatus: '支払いの状態',

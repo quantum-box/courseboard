@@ -28,6 +28,7 @@ export const courses: DeepPartial<typeof source> = {
     startInterval: 'Start interval',
     startIntervalHint: '1–60 minutes',
     timezone: 'Time zone',
+    timezoneHint: 'e.g. Asia/Tokyo',
   },
   option: {
     holes18: '18 holes',
@@ -60,6 +61,7 @@ export const courses: DeepPartial<typeof source> = {
   validation: {
     name: 'Enter a course name.',
     timezone: 'Enter a time zone.',
+    timezoneFormat: 'Enter an IANA time zone name such as Asia/Tokyo. Abbreviations like JST are not accepted.',
     holeCount: 'Choose 9 or 18 holes.',
     startInterval: 'Enter a start interval between 1 and 60 minutes.',
   },

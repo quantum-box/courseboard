@@ -65,11 +65,12 @@ import {
   Panel,
   ResourceError,
   SearchInput,
+  resourceErrorText,
   type DataTableColumn,
 } from '../../components/Page'
 import { weekdayIndexes, weekdayLabel } from './models'
 import { useResource } from '../../hooks/useResource'
-import { navigate } from '../../lib/router'
+import { navigate, useNavigationGuard } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
 
 const COURSE_API = '/v1/course'
@@ -313,8 +314,14 @@ function formatMinutes(minutes: number) {
   })
 }
 
+/**
+ * Save failures land in dialogs and flash messages, which used to print the
+ * server's own English (`caddie profile was not found`). Route them through the
+ * shared mapping so the sentence the operator reads first follows the locale
+ * and the original text survives as a support detail.
+ */
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : i18next.t('caddies:error.generic')
+  return error instanceof Error ? resourceErrorText(error) : i18next.t('caddies:error.generic')
 }
 
 function resolveStaffId(profile: CaddieProfile) {
@@ -325,11 +332,19 @@ function resolveStaffId(profile: CaddieProfile) {
   return null
 }
 
+/**
+ * The API merges a write into the stored profile, so a field left out of the
+ * body keeps its current value instead of falling back to a creation default.
+ * The untouched fields are still echoed back here so the payload describes the
+ * profile the operator was looking at, which keeps the request self-contained
+ * and readable in the logs.
+ */
 function profilePatchPayload(
   profile: CaddieProfile,
   overrides: Partial<{
     displayName: string
     skillLevel: SkillLevel
+    rank: Rank
     employmentStatus: string
     baseFeeAmount: number
     currency: string
@@ -340,7 +355,9 @@ function profilePatchPayload(
   const staffId = overrides.staffId === undefined
     ? resolveStaffId(profile)
     : overrides.staffId
-  const employmentStatus = overrides.employmentStatus ?? profile.employmentStatus
+  const employmentStatus = employmentStatusCode(
+    overrides.employmentStatus ?? profile.employmentStatus,
+  )
   return {
     staffId,
     caddieCode: null,
@@ -348,11 +365,15 @@ function profilePatchPayload(
     staffReferenceId: staffId,
     displayName: overrides.displayName ?? profile.displayName,
     skillLevel: overrides.skillLevel ?? profile.skillLevel,
-    active: employmentStatus === 'active',
+    rank: overrides.rank ?? profile.rank,
+    active: employmentStatus === ACTIVE_EMPLOYMENT,
     employmentStatus,
     baseFeeAmount: overrides.baseFeeAmount ?? profile.baseFeeAmount,
     currency: overrides.currency ?? profile.currency,
     maxRoundsPerDay: overrides.maxRoundsPerDay ?? profile.maxRoundsPerDay,
+    monthlyContractRounds: profile.monthlyContractRounds,
+    canTwoRounds: profile.canTwoRounds,
+    desiredIncome: profile.desiredIncome,
   }
 }
 
@@ -364,6 +385,29 @@ const SKILL_KEYS: Record<string, 'rookie' | 'regular' | 'veteran'> = {
   veteran: 'veteran',
 }
 const EMPLOYMENT_STATUSES = ['active', 'inactive', 'suspended'] as const
+const ACTIVE_EMPLOYMENT = 'active'
+
+/** Shared by the create and the edit form so both offer the same choices. */
+const RANK_OPTIONS: { rank: Rank; rounds: number }[] = [
+  { rank: 'A', rounds: 41 },
+  { rank: 'B', rounds: 33 },
+  { rank: 'C', rounds: 25 },
+  { rank: 'D', rounds: 14 },
+]
+/** Matches the server-side default for a caddie created without a rank. */
+const DEFAULT_RANK: Rank = 'C'
+
+/** The API returns raw status codes; anything unexpected is shown as-is. */
+const ASSIGNMENT_STATUSES = [
+  'draft',
+  'pending',
+  'requested',
+  'assigned',
+  'completed',
+  'cancelled',
+  'absent',
+  'no_show',
+] as const
 
 function skillLabel(skill: string) {
   const key = SKILL_KEYS[skill]
@@ -371,9 +415,26 @@ function skillLabel(skill: string) {
   return i18next.t(`caddies:skill.${key}` as 'caddies:skill.rookie')
 }
 
+/**
+ * The API is not consistent about the case of its status codes and the server
+ * compares them case-insensitively, so `"Active"` has to mean the same thing as
+ * `"active"` here too — otherwise a caddie is wrongly blocked from clocking in
+ * and the raw code leaks into the copy. Codes we do not know keep their
+ * original spelling so nothing is silently rewritten.
+ */
+function employmentStatusCode(status: string) {
+  const folded = status.trim().toLowerCase()
+  return (EMPLOYMENT_STATUSES as readonly string[]).includes(folded) ? folded : status.trim()
+}
+
+function isEmploymentActive(status: string) {
+  return employmentStatusCode(status) === ACTIVE_EMPLOYMENT
+}
+
 function employmentLabel(status: string) {
-  if (!(EMPLOYMENT_STATUSES as readonly string[]).includes(status)) return status
-  return i18next.t(`caddies:employment.${status}` as 'caddies:employment.active')
+  const code = employmentStatusCode(status)
+  if (!(EMPLOYMENT_STATUSES as readonly string[]).includes(code)) return status
+  return i18next.t(`caddies:employment.${code}` as 'caddies:employment.active')
 }
 
 /** The API returns raw role codes; anything unexpected is shown as-is. */
@@ -381,6 +442,84 @@ function roleLabel(role: string) {
   if (role === 'primary' || role === 'lead') return i18next.t('caddies:role.primary')
   if (role === 'assistant' || role === 'support') return i18next.t('caddies:role.assistant')
   return role
+}
+
+function rankOptionLabel(rank: Rank, rounds: number) {
+  return i18next.t('caddies:rankOption', { rank, rounds: String(rounds) })
+}
+
+function assignmentStatusLabel(status: string) {
+  if (!(ASSIGNMENT_STATUSES as readonly string[]).includes(status)) return status
+  return i18next.t(`caddies:assignments.status.${status}` as 'caddies:assignments.status.assigned')
+}
+
+/** True when a caddie may not be clocked in because they are off the roster. */
+function clockInBlocked(profile: CaddieProfile | undefined) {
+  return profile !== undefined && !isEmploymentActive(profile.employmentStatus)
+}
+
+/** The `key=value` debug pairs the upstream API mixes into its explanations. */
+const RATIONALE_TOKEN = /^([a-z][a-z0-9_]*)=(.*)$/
+
+function rationaleTokenLabel(key: string, rawValue: string) {
+  const value = Number(rawValue)
+  const numeric = rawValue.trim() !== '' && Number.isFinite(value)
+  if (!numeric) return null
+  if (key === 'rating_count') {
+    return value > 0
+      ? i18next.t('caddies:rationale.ratingCount', { n: String(value) })
+      : i18next.t('caddies:rationale.ratingCountNone')
+  }
+  if (key === 'rounds_assigned_today') {
+    return i18next.t('caddies:rationale.roundsAssignedToday', { n: String(value) })
+  }
+  if (key === 'rating_avg' || key === 'rating_average') {
+    return i18next.t('caddies:rationale.ratingAverage', { value: String(value) })
+  }
+  if (key === 'score' || key === 'match_score') {
+    return i18next.t('caddies:rationale.score', { value: String(value) })
+  }
+  return null
+}
+
+/**
+ * The upstream Field API explains itself with a mix of debug tokens
+ * (`rating_count=0`, `rating_avg=4.6`) and free prose (`veteran preferred for
+ * full foursome`). None of it can be translated here, so the tokens we know are
+ * rewritten into readable copy, an unknown token is unpacked into `key: value`,
+ * and prose is passed through untouched.
+ *
+ * Nothing is dropped on purpose. Hiding an explanation we cannot read leaves
+ * the caller with an empty list and a generic stand-in in its place, which
+ * states a reason that may not be the real one — worse than showing the real
+ * one in the wrong language.
+ */
+export function readableRationale(rationale: string[]) {
+  const readable = rationale
+    .map(entry => entry.trim())
+    .filter(Boolean)
+    .map(entry => {
+      const match = RATIONALE_TOKEN.exec(entry)
+      if (!match) return entry
+      const [, key, rawValue] = match
+      const value = rawValue.trim()
+      return rationaleTokenLabel(key, rawValue) ?? (value ? `${key}: ${value}` : key)
+    })
+  return Array.from(new Set(readable))
+}
+
+/** Says only that there is nothing to show, never why the caddie was picked. */
+function rationaleText(rationale: string[]) {
+  const reasons = readableRationale(rationale)
+  return reasons.length > 0 ? reasons.join(' · ') : i18next.t('caddies:rationale.unavailable')
+}
+
+function RationaleText({ rationale }: { rationale: string[] }) {
+  return (
+    <p className="mt-1 text-xs text-muted-foreground">
+      {rationaleText(rationale)}
+    </p>
+  )
 }
 
 function attendanceLabel(status: AttendanceSnapshot['attendanceStatus']) {
@@ -542,8 +681,10 @@ export function CaddiesPage({
   }
 
   function backToRoster() {
+    // Going back unmounts the detail screen and with it the day-off form, so ask
+    // `navigate` first: it runs the unsaved-changes guard the detail registers.
+    if (!navigate('golf/caddies')) return
     setSelectedProfileId(null)
-    navigate('golf/caddies')
   }
 
   const refreshCurrentView = useCallback(() => {
@@ -724,7 +865,7 @@ function DispatchView({
               {t('caddies:dispatch.boardDescription', { date })}
             </p>
           </div>
-          <Field label={t('caddies:operationDate')} className="w-full sm:w-44">
+          <Field label={t('caddies:operationDate')} requirement="none" className="w-full sm:w-44">
             <Input
               type="date"
               aria-label={t('caddies:operationDate')}
@@ -821,7 +962,7 @@ function AttendanceView({
               {t('caddies:attendance.boardDescription', { date })}
             </p>
           </div>
-          <Field label={t('caddies:operationDate')} className="w-full sm:w-44">
+          <Field label={t('caddies:operationDate')} requirement="none" className="w-full sm:w-44">
             <Input
               type="date"
               aria-label={t('caddies:operationDate')}
@@ -858,7 +999,7 @@ function DailySupplyPanel({ date }: { date: string }) {
       title={t('caddies:supply.title')}
       description={t('caddies:supply.description')}
       actions={(
-        <Field label={t('caddies:supply.buffer')} className="w-full sm:w-36">
+        <Field label={t('caddies:supply.buffer')} requirement="none" className="w-full sm:w-36">
           <Input
             type="number"
             min={0}
@@ -1016,7 +1157,7 @@ function AutoAssignPanel({
                     </div>
                     <Badge variant="accent">{t('caddies:autoAssign.candidate')}</Badge>
                   </div>
-                  <p className="mt-2 text-xs text-muted-foreground">{item.rationale.join(' · ')}</p>
+                  <RationaleText rationale={item.rationale} />
                 </div>
               ))}
             </div>
@@ -1028,7 +1169,9 @@ function AutoAssignPanel({
             >
               <ul className="list-inside list-disc space-y-1">
                 {plan.skipped.map(item => (
-                  <li key={item.reservationId}>{item.reservationId}: {item.reason}</li>
+                  <li key={item.reservationId}>
+                    {item.reservationId}: {rationaleText([item.reason])}
+                  </li>
                 ))}
               </ul>
             </Notice>
@@ -1089,7 +1232,7 @@ function RecommendationsPanel({
                   {t('caddies:recommendations.pair', { name: item.pairingDisplayName })}
                 </p>
               ) : null}
-              <p className="mt-1 text-xs text-muted-foreground">{item.rationale.join(' · ')}</p>
+              <RationaleText rationale={item.rationale} />
             </div>
           </div>
         ))}
@@ -1141,7 +1284,9 @@ function AttendancePanel({
         title: direction === 'in'
           ? t('caddies:attendance.clockedIn')
           : t('caddies:attendance.clockedOut'),
-        message: t('caddies:attendance.updated', { name: snapshot.displayName }),
+        message: direction === 'in'
+          ? t('caddies:attendance.updatedIn', { name: snapshot.displayName })
+          : t('caddies:attendance.updatedOut', { name: snapshot.displayName }),
       })
     } catch (error) {
       setFlash({
@@ -1193,30 +1338,46 @@ function AttendancePanel({
       header: t('caddies:attendance.table.actions'),
       mobileLabel: t('caddies:attendance.table.actions'),
       align: 'right',
-      cell: row => (
-        <div className="flex justify-end gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="min-h-9"
-            disabled={busyId === row.caddieProfileId || row.attendanceStatus === 'working' || row.attendanceStatus === 'not_linked'}
-            onClick={() => void clock(row, 'in')}
-          >
-            <Clock /> {t('caddies:attendance.clockIn')}
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="min-h-9"
-            disabled={busyId === row.caddieProfileId || row.attendanceStatus !== 'working'}
-            onClick={() => void clock(row, 'out')}
-          >
-            {t('caddies:attendance.clockOut')}
-          </Button>
-        </div>
-      ),
+      cell: row => {
+        const profile = profileMap.get(row.caddieProfileId)
+        // Somebody who is on leave or suspended must not be clocked in, but
+        // clocking out stays open so an ongoing shift can always be closed.
+        const blocked = clockInBlocked(profile)
+        const blockedReason = blocked && profile
+          ? t('caddies:attendance.clockInBlocked', { status: employmentLabel(profile.employmentStatus) })
+          : undefined
+        return (
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex justify-end gap-2">
+              <span title={blockedReason}>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="min-h-9"
+                  disabled={busyId === row.caddieProfileId || blocked || row.attendanceStatus === 'working' || row.attendanceStatus === 'not_linked'}
+                  onClick={() => void clock(row, 'in')}
+                >
+                  <Clock /> {t('caddies:attendance.clockIn')}
+                </Button>
+              </span>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="min-h-9"
+                disabled={busyId === row.caddieProfileId || row.attendanceStatus !== 'working'}
+                onClick={() => void clock(row, 'out')}
+              >
+                {t('caddies:attendance.clockOut')}
+              </Button>
+            </div>
+            {blockedReason ? (
+              <p className="text-right text-xs text-warning">{blockedReason}</p>
+            ) : null}
+          </div>
+        )
+      },
     },
   ]
 
@@ -1331,7 +1492,7 @@ function AssignmentsTable({
       cell: row => (
         <div>
           <p className="font-medium">{row.roundReference ?? row.reservationId ?? row.id}</p>
-          <p className="text-xs text-muted-foreground">{row.assignmentRole}</p>
+          <p className="text-xs text-muted-foreground">{roleLabel(row.assignmentRole)}</p>
         </div>
       ),
     },
@@ -1352,7 +1513,9 @@ function AssignmentsTable({
       key: 'status',
       header: t('caddies:assignments.table.status'),
       mobileLabel: t('caddies:assignments.table.status'),
-      cell: row => <Badge variant={assignmentVariant(row.status)}>{row.status}</Badge>,
+      cell: row => (
+        <Badge variant={assignmentVariant(row.status)}>{assignmentStatusLabel(row.status)}</Badge>
+      ),
     },
     {
       key: 'action',
@@ -1443,7 +1606,7 @@ function ProfilesView({
       || profile.displayName.toLocaleLowerCase('ja').includes(normalizedQuery)
       || profile.id.toLocaleLowerCase('ja').includes(normalizedQuery)
       || staffId?.toLocaleLowerCase('ja').includes(normalizedQuery)
-    const statusMatches = status === 'all' || profile.employmentStatus === status
+    const statusMatches = status === 'all' || employmentStatusCode(profile.employmentStatus) === status
     const skillMatches = skill === 'all' || profile.skillLevel === skill
     const linkMatches = link === 'all'
       || (link === 'linked' ? Boolean(staffId) : !staffId)
@@ -1504,7 +1667,7 @@ function ProfilesView({
       header: t('caddies:roster.table.employment'),
       mobileLabel: t('caddies:roster.table.employment'),
       cell: profile => (
-        <Badge variant={profile.employmentStatus === 'active' ? 'success' : 'neutral'}>
+        <Badge variant={isEmploymentActive(profile.employmentStatus) ? 'success' : 'neutral'}>
           {employmentLabel(profile.employmentStatus)}
         </Badge>
       ),
@@ -1784,10 +1947,11 @@ function ProfileCreateDialog({
             </Field>
             <Field label={t('caddies:create.rank')} required>
               <NativeSelect value={rank} onChange={event => setRank(event.target.value as Rank)}>
-                <option value="A">{t('caddies:create.rankOption', { rank: 'A', rounds: '41' })}</option>
-                <option value="B">{t('caddies:create.rankOption', { rank: 'B', rounds: '33' })}</option>
-                <option value="C">{t('caddies:create.rankOption', { rank: 'C', rounds: '25' })}</option>
-                <option value="D">{t('caddies:create.rankOption', { rank: 'D', rounds: '14' })}</option>
+                {RANK_OPTIONS.map(option => (
+                  <option key={option.rank} value={option.rank}>
+                    {rankOptionLabel(option.rank, option.rounds)}
+                  </option>
+                ))}
               </NativeSelect>
             </Field>
           </FormGrid>
@@ -1806,7 +1970,7 @@ function ProfileCreateDialog({
           </Field>
           {staffMode === 'existing' ? (
             <div className="space-y-3">
-              <Field label={t('caddies:create.staffSearch')}>
+              <Field label={t('caddies:create.staffSearch')} requirement="none">
                 <Input
                   value={staffQuery}
                   onChange={event => setStaffQuery(event.target.value)}
@@ -1889,6 +2053,25 @@ function ProfileDetail({
   const { t } = useTranslation(['caddies', 'common'])
   const [tab, setTab] = useState<DetailTab>('basic')
   const [editOpen, setEditOpen] = useState(false)
+  // The day-off form only lives while its tab is mounted, so leaving the tab
+  // would silently drop whatever the user typed. Ask first.
+  const [availabilityDirty, setAvailabilityDirty] = useState(false)
+  const guarded = tab === 'availability' && availabilityDirty
+
+  // Leaving the whole screen drops the form just as surely as leaving the tab:
+  // "back to the list", the sidebar, ⌘K and the back/forward buttons all route
+  // through `navigate`, so one guard covers them.
+  useNavigationGuard(
+    guarded ? () => window.confirm(t('caddies:calendar.confirmDiscard')) : null,
+  )
+
+  function changeTab(next: DetailTab) {
+    if (next === tab) return
+    if (guarded && !window.confirm(t('caddies:calendar.confirmDiscard'))) return
+    setAvailabilityDirty(false)
+    setTab(next)
+  }
+
   const membershipResource = useResource(
     () => courseboardApiJson<ListResponse<CourseMembership>>(
       `${COURSE_API}/caddie-profiles/${encodeURIComponent(profile.id)}/courses`,
@@ -1911,7 +2094,7 @@ function ProfileDetail({
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xl font-semibold text-foreground">{profile.displayName}</h2>
-              <Badge variant={profile.employmentStatus === 'active' ? 'success' : 'neutral'}>
+              <Badge variant={isEmploymentActive(profile.employmentStatus) ? 'success' : 'neutral'}>
                 {employmentLabel(profile.employmentStatus)}
               </Badge>
               <Badge variant="outline">{skillLabel(profile.skillLevel)}</Badge>
@@ -1957,16 +2140,19 @@ function ProfileDetail({
       </Panel>
 
       <div className="grid grid-cols-4 gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-1" role="tablist" aria-label={t('caddies:detail.tabs.label')}>
-        <DetailTabButton active={tab === 'basic'} onClick={() => setTab('basic')}>
+        <DetailTabButton active={tab === 'basic'} onClick={() => changeTab('basic')}>
           <Users /> {t('caddies:detail.tabs.basic')}
         </DetailTabButton>
-        <DetailTabButton active={tab === 'availability'} onClick={() => setTab('availability')}>
+        <DetailTabButton active={tab === 'availability'} onClick={() => changeTab('availability')}>
           <CalendarDays /> {t('caddies:detail.tabs.availability')}
+          {availabilityDirty ? (
+            <Badge variant="warning">{t('caddies:calendar.unsaved')}</Badge>
+          ) : null}
         </DetailTabButton>
-        <DetailTabButton active={tab === 'assignments'} onClick={() => setTab('assignments')}>
+        <DetailTabButton active={tab === 'assignments'} onClick={() => changeTab('assignments')}>
           <ClipboardCheck /> {t('caddies:detail.tabs.assignments')}
         </DetailTabButton>
-        <DetailTabButton active={tab === 'ratings'} onClick={() => setTab('ratings')}>
+        <DetailTabButton active={tab === 'ratings'} onClick={() => changeTab('ratings')}>
           <Star /> {t('caddies:detail.tabs.ratings')}
         </DetailTabButton>
       </div>
@@ -1992,7 +2178,11 @@ function ProfileDetail({
       ) : null}
 
       {tab === 'availability' ? (
-        <AvailabilityCalendar profile={profile} setFlash={setFlash} />
+        <AvailabilityCalendar
+          profile={profile}
+          setFlash={setFlash}
+          onDirtyChange={setAvailabilityDirty}
+        />
       ) : null}
 
       {tab === 'assignments' ? (
@@ -2058,7 +2248,12 @@ function ProfileEditDialog({
   const { t } = useTranslation(['caddies', 'common'])
   const [displayName, setDisplayName] = useState(profile.displayName)
   const [skillLevel, setSkillLevel] = useState<SkillLevel>(profile.skillLevel)
-  const [employmentStatus, setEmploymentStatus] = useState(profile.employmentStatus)
+  const [rank, setRank] = useState<Rank>(profile.rank ?? DEFAULT_RANK)
+  // Folded to the canonical code so the select actually preselects the current
+  // status when the API answers with `"Active"`.
+  const [employmentStatus, setEmploymentStatus] = useState(
+    () => employmentStatusCode(profile.employmentStatus),
+  )
   const [baseFeeAmount, setBaseFeeAmount] = useState(String(profile.baseFeeAmount))
   const [currency, setCurrency] = useState(profile.currency)
   const [maxRounds, setMaxRounds] = useState(String(profile.maxRoundsPerDay))
@@ -2069,12 +2264,19 @@ function ProfileEditDialog({
     event.preventDefault()
     const fee = Number.parseInt(baseFeeAmount, 10)
     const rounds = Number.parseInt(maxRounds, 10)
+    const currencyCode = currency.trim().toUpperCase()
     if (!displayName.trim()) {
       setError(t('caddies:edit.error.displayName'))
       return
     }
     if (!Number.isFinite(fee) || fee < 0 || !Number.isFinite(rounds) || rounds < 1) {
       setError(t('caddies:edit.error.numbers'))
+      return
+    }
+    // Same ISO 4217 shape the extension settings validate against, instead of
+    // quietly falling back to JPY and saving something the user never typed.
+    if (!/^[A-Z]{3}$/.test(currencyCode)) {
+      setError(t('caddies:edit.error.currency'))
       return
     }
     setBusy(true)
@@ -2085,9 +2287,10 @@ function ProfileEditDialog({
         request('PATCH', profilePatchPayload(profile, {
           displayName: displayName.trim(),
           skillLevel,
+          rank,
           employmentStatus,
           baseFeeAmount: fee,
-          currency: currency.trim() || 'JPY',
+          currency: currencyCode,
           maxRoundsPerDay: rounds,
         })),
       )
@@ -2124,6 +2327,15 @@ function ProfileEditDialog({
                 <option value="veteran">{t('caddies:skill.veteran')}</option>
               </NativeSelect>
             </Field>
+            <Field label={t('caddies:edit.rank')} required>
+              <NativeSelect value={rank} onChange={event => setRank(event.target.value as Rank)}>
+                {RANK_OPTIONS.map(option => (
+                  <option key={option.rank} value={option.rank}>
+                    {rankOptionLabel(option.rank, option.rounds)}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
             <Field label={t('caddies:edit.employment')} required>
               <NativeSelect value={employmentStatus} onChange={event => setEmploymentStatus(event.target.value)}>
                 <option value="active">{t('caddies:employment.active')}</option>
@@ -2134,7 +2346,7 @@ function ProfileEditDialog({
             <Field label={t('caddies:edit.baseFee')} required>
               <Input type="number" min={0} value={baseFeeAmount} onChange={event => setBaseFeeAmount(event.target.value)} className="min-h-10" />
             </Field>
-            <Field label={t('caddies:edit.currency')} required>
+            <Field label={t('caddies:edit.currency')} required hint={t('caddies:edit.currencyHint')}>
               <Input maxLength={3} value={currency} onChange={event => setCurrency(event.target.value.toUpperCase())} className="min-h-10" />
             </Field>
             <Field label={t('caddies:edit.dailyLimit')} required>
@@ -2176,6 +2388,11 @@ function StaffManagementPanel({
   const [busy, setBusy] = useState(false)
   const staffId = resolveStaffId(profile)
   const linkedStaff = staff.find(item => item.id === staffId)
+  // Clocking in is closed while the caddie is on leave or suspended; clocking
+  // out stays open so an ongoing shift can always be closed.
+  const clockInBlockedReason = clockInBlocked(profile)
+    ? t('caddies:attendance.clockInBlocked', { status: employmentLabel(profile.employmentStatus) })
+    : undefined
 
   async function clock(direction: 'in' | 'out') {
     if (!staffId) return
@@ -2191,7 +2408,9 @@ function StaffManagementPanel({
         title: direction === 'in'
           ? t('caddies:attendance.clockedIn')
           : t('caddies:attendance.clockedOut'),
-        message: t('caddies:attendance.updated', { name: profile.displayName }),
+        message: direction === 'in'
+          ? t('caddies:attendance.updatedIn', { name: profile.displayName })
+          : t('caddies:attendance.updatedOut', { name: profile.displayName }),
       })
     } catch (reason) {
       setFlash({
@@ -2226,25 +2445,32 @@ function StaffManagementPanel({
               </Badge>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              className="min-h-10"
-              disabled={busy || attendance?.attendanceStatus === 'working'}
-              onClick={() => void clock('in')}
-            >
-              <Clock /> {t('caddies:attendance.clockIn')}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              className="min-h-10"
-              disabled={busy || attendance?.attendanceStatus !== 'working'}
-              onClick={() => void clock('out')}
-            >
-              {t('caddies:attendance.clockOut')}
-            </Button>
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <span title={clockInBlockedReason}>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  className="min-h-10 w-full"
+                  disabled={busy || clockInBlocked(profile) || attendance?.attendanceStatus === 'working'}
+                  onClick={() => void clock('in')}
+                >
+                  <Clock /> {t('caddies:attendance.clockIn')}
+                </Button>
+              </span>
+              <Button
+                type="button"
+                variant="ghost"
+                className="min-h-10"
+                disabled={busy || attendance?.attendanceStatus !== 'working'}
+                onClick={() => void clock('out')}
+              >
+                {t('caddies:attendance.clockOut')}
+              </Button>
+            </div>
+            {clockInBlockedReason ? (
+              <p className="text-xs text-warning">{clockInBlockedReason}</p>
+            ) : null}
           </div>
           <Button type="button" variant="ghost" className="min-h-10 w-full" onClick={() => setLinkOpen(true)}>
             <Link2 /> {t('caddies:staff.changeLink')}
@@ -2375,7 +2601,7 @@ function StaffLinkDialog({
           </Field>
           {mode === 'existing' ? (
             <>
-              <Field label={t('caddies:staff.dialog.search')}>
+              <Field label={t('caddies:staff.dialog.search')} requirement="none">
                 <Input
                   value={query}
                   onChange={event => setQuery(event.target.value)}
@@ -2558,7 +2784,15 @@ function calendarCells(year: number, month: number) {
   return values
 }
 
-function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; setFlash: (flash: Flash) => void }) {
+function AvailabilityCalendar({
+  profile,
+  setFlash,
+  onDirtyChange,
+}: {
+  profile: CaddieProfile
+  setFlash: (flash: Flash) => void
+  onDirtyChange: (dirty: boolean) => void
+}) {
   const { t } = useTranslation(['caddies', 'common'])
   const [yearMonth, setYearMonth] = useState(todayJst().slice(0, 7))
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
@@ -2579,12 +2813,36 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
     [resource.data],
   )
   const selectedRecord = selectedDate ? records.get(selectedDate) : undefined
+  // The form is dirty whenever it no longer matches what is stored for the
+  // selected day (or the defaults, when that day has no entry yet).
+  const dirty = selectedDate !== null && (
+    status !== (selectedRecord?.status ?? 'available')
+    || twoRounds !== (selectedRecord?.twoRoundRequest ?? false)
+    || note.trim() !== (selectedRecord?.healthNote ?? '').trim()
+  )
+
+  useEffect(() => {
+    onDirtyChange(dirty)
+    return () => onDirtyChange(false)
+  }, [dirty, onDirtyChange])
+
+  /** Guards anything that would throw away the day-off form. */
+  function confirmDiscard() {
+    return !dirty || window.confirm(t('caddies:calendar.confirmDiscard'))
+  }
 
   useEffect(() => {
     setSelectedDate(null)
   }, [profile.id, yearMonth])
 
+  function changeMonth(amount: number) {
+    if (!confirmDiscard()) return
+    setYearMonth(value => shiftMonth(value, amount))
+  }
+
   function select(date: string) {
+    if (date === selectedDate) return
+    if (!confirmDiscard()) return
     const record = records.get(date)
     setSelectedDate(date)
     setStatus(record?.status ?? 'available')
@@ -2657,14 +2915,14 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
       description={t('caddies:calendar.description')}
       actions={(
         <div className="flex items-center gap-1 rounded-md border border-border bg-background p-1">
-          <Button type="button" variant="ghost" size="icon" className="min-h-9 min-w-9" aria-label={t('caddies:calendar.prevMonth')} onClick={() => setYearMonth(value => shiftMonth(value, -1))}><ChevronLeft /></Button>
+          <Button type="button" variant="ghost" size="icon" className="min-h-9 min-w-9" aria-label={t('caddies:calendar.prevMonth')} onClick={() => changeMonth(-1)}><ChevronLeft /></Button>
           <span className="min-w-24 text-center text-sm font-medium">
             {t('caddies:calendar.monthLabel', {
               year: String(bounds.year),
               month: String(bounds.month),
             })}
           </span>
-          <Button type="button" variant="ghost" size="icon" className="min-h-9 min-w-9" aria-label={t('caddies:calendar.nextMonth')} onClick={() => setYearMonth(value => shiftMonth(value, 1))}><ChevronRight /></Button>
+          <Button type="button" variant="ghost" size="icon" className="min-h-9 min-w-9" aria-label={t('caddies:calendar.nextMonth')} onClick={() => changeMonth(1)}><ChevronRight /></Button>
         </div>
       )}
     >
@@ -2712,8 +2970,15 @@ function AvailabilityCalendar({ profile, setFlash }: { profile: CaddieProfile; s
             {selectedDate ? (
               <div className="space-y-4">
                 <div>
-                  <p className="font-semibold">{selectedDate}</p>
-                  <p className="text-xs text-muted-foreground">{t('caddies:calendar.editPrompt')}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-semibold">{selectedDate}</p>
+                    {dirty ? (
+                      <Badge variant="warning">{t('caddies:calendar.unsaved')}</Badge>
+                    ) : null}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {dirty ? t('caddies:calendar.unsavedHint') : t('caddies:calendar.editPrompt')}
+                  </p>
                 </div>
                 <Field label={t('caddies:calendar.status')} required>
                   <NativeSelect value={status} onChange={event => setStatus(event.target.value as AvailabilityStatus)}>

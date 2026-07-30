@@ -767,6 +767,16 @@ button,
   margin-bottom: 1px;
 }
 
+/* Untranslated server wording kept as a support detail under the readable copy. */
+.notice-detail {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: .75;
+  overflow-wrap: anywhere;
+}
+
 .notice-info { border-left-color: hsl(var(--nui-primary)); background: hsl(var(--nui-selected)); }
 .notice-success { border-left-color: hsl(var(--nui-success)); background: hsl(var(--nui-success) / .08); }
 .notice-warning { border-left-color: hsl(var(--nui-warning)); background: hsl(var(--nui-warning) / .08); }

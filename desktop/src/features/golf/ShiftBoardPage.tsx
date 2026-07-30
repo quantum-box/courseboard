@@ -128,7 +128,7 @@ export function ShiftBoardPage() {
 
       <Panel>
         <div className="flex flex-wrap items-end gap-3">
-          <Field label={t('shifts:month')} className="sm:w-48">
+          <Field requirement="none" label={t('shifts:month')} className="sm:w-48">
             <Input
               type="month"
               value={yearMonth}

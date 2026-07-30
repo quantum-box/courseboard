@@ -64,6 +64,17 @@ export const common: DeepPartial<typeof source> = {
       'Could not reach the connected service. Check your network and the integration settings.',
     apiUnreachable:
       'Could not reach the Course Board server. Wait a moment and reload.',
+    offline:
+      'You appear to be offline. Check your connection and reload.',
+    badRequest:
+      'The server rejected the request. Check what you entered and try again.',
+    forbidden: 'You do not have permission for this. Ask an administrator.',
+    notFound: 'That data was not found. It may have been deleted already.',
+    conflict:
+      'Someone else updated this first. Reload and try again.',
+    unprocessable: 'Some values are not valid. Fix them and try again.',
+    serverError: 'The server hit an error. Wait a moment and try again.',
+    unexpected: 'Something unexpected went wrong. Wait a moment and try again.',
     authNotReady: 'Sign-in is not ready yet. Reload and try again.',
     sessionExpired: 'Your session expired.',
   },

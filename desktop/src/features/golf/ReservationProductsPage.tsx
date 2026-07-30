@@ -836,7 +836,7 @@ export function ReservationProductsPage() {
           actions={<Badge variant="outline"><Users /> {t('products:capacity.badge')}</Badge>}
         >
           <div className="flex flex-wrap items-end gap-3">
-            <Field label={t('products:capacity.date')} required className="w-full sm:w-44">
+            <Field requirement="none" label={t('products:capacity.date')} className="w-full sm:w-44">
               <Input
                 type="date"
                 value={capacityDate}

@@ -63,6 +63,22 @@ export const budgets: DeepPartial<typeof source> = {
     template: 'Template',
     file: 'CSV file',
     fileHint: 'Header row: {{header}}',
+    columns: {
+      title: 'What each column means',
+      description:
+        'The header row is part of the import format, so keep it exactly as it is. Add one row per day below it.',
+      header: 'Column (keep as is)',
+      meaning: 'What goes in it',
+      example: 'Example',
+      golfCourseId:
+        'The internal course ID. Find it under the course name in the registered targets list below, or under Settings → Course setup.',
+      date: 'The day this row targets, written as YYYY-MM-DD.',
+      targetRevenue: 'Target revenue for the day, in yen, as a whole number without separators.',
+      targetAverageSpend: 'Target spend per player, in yen, as a whole number without separators.',
+      targetCaddyAttachedRatio:
+        'Caddie share, as a decimal between 0 and 1 (0.70 means 70%). Do not write a percentage.',
+      courseIdsTitle: 'Course IDs you can use right now',
+    },
     importing: 'Importing…',
     apply: 'Apply the reviewed rows',
     imported: 'Imported {{name}}.',

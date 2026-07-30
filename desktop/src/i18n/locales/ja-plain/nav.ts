@@ -85,6 +85,7 @@ export const nav: DeepPartial<typeof source> = {
     pinned: 'よく使う画面',
     expand: '左のメニューを広げる',
     collapse: '左のメニューを細くする',
+    menuLabel: '画面を選ぶメニュー',
     pin: 'よく使う画面に入れる',
     unpin: 'よく使う画面から外す',
   },
@@ -96,6 +97,9 @@ export const nav: DeepPartial<typeof source> = {
     sandbox: '練習用',
   },
   command: {
+    title: '画面をさがす窓',
+    description: '行きたい画面の名前を入れると、その画面に移れます。',
+    inputLabel: '画面の名前を入れてさがす',
     placeholder: '画面の名前を入れてさがす…',
   },
   tabs: {

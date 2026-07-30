@@ -59,6 +59,22 @@ export const budgets = {
     template: 'ひな形',
     file: 'CSVファイル',
     fileHint: '見出し行: {{header}}',
+    columns: {
+      title: '列の意味',
+      description:
+        '1行目の見出しは取り込みの決まりごとなので、この英語のまま変えずに使ってください。2行目から下に1日分ずつ書きます。',
+      header: '列の名前（このまま使う）',
+      meaning: '入れる内容',
+      example: '書き方の例',
+      golfCourseId:
+        'コースの管理用ID。下の「登録ずみの目標」一覧でコース名の下に出ているIDか、設定 → コース設定 で確認できます。',
+      date: '対象の日付。2026-04-01 のように 年-月-日 で書きます。',
+      targetRevenue: 'その日の目標の売上。円（税込）の整数で、カンマは入れません。',
+      targetAverageSpend: '1人あたりの目標金額。円の整数で、カンマは入れません。',
+      targetCaddyAttachedRatio:
+        'キャディ付きの割合。0〜1 の小数で書きます（70% なら 0.70）。%では書きません。',
+      courseIdsTitle: 'いま使えるコースの管理用ID',
+    },
     importing: '取り込み中…',
     apply: '確認した内容を反映',
     imported: '{{name}} を取り込みました。',

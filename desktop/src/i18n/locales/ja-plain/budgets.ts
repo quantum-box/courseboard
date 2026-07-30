@@ -60,6 +60,22 @@ export const budgets: DeepPartial<typeof source> = {
     template: 'ひな形をもらう',
     file: '表のファイル（CSV）',
     fileHint: '1行目の見出し: {{header}}',
+    columns: {
+      title: 'それぞれの列に入れるもの',
+      description:
+        '1行目の見出しは、この英語のまま変えずに使ってください。変えると読み込めません。2行目から下に、1日分ずつ書きます。',
+      header: '列の名前（このまま使う）',
+      meaning: '入れるもの',
+      example: '書き方の見本',
+      golfCourseId:
+        'コースの管理用の番号です。下の「登録した目標」の一覧で、コースの名前の下に出ています。「設定」→「コースの登録」でも見られます。',
+      date: 'いつの分かを書きます。2026-04-01 のように、年-月-日 の順で書きます。',
+      targetRevenue: 'その日にいくら売りたいかを、円で書きます。数字だけで、カンマは入れません。',
+      targetAverageSpend: '1人あたりいくらにしたいかを、円で書きます。数字だけで、カンマは入れません。',
+      targetCaddyAttachedRatio:
+        'キャディが付く割合を、0 から 1 までの小数で書きます。70% にしたいときは 0.70 と書きます。',
+      courseIdsTitle: 'いま使えるコースの管理用の番号',
+    },
     importing: '読み込んでいます…',
     apply: '確かめた内容を登録する',
     imported: '{{name}} を読み込みました。',

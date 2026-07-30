@@ -88,6 +88,34 @@ function statusLabel(status: InvoiceStatus) {
   return i18next.t(`cancellationFees:status.${status}` as 'cancellationFees:status.Draft')
 }
 
+/**
+ * The ERP order status is a pass-through string rather than a closed enum, so
+ * anything outside this set falls back to a label that still shows the raw
+ * value instead of leaking bare English into the UI.
+ */
+const ORDER_STATUS_KEYS = new Set([
+  'draft',
+  'pending',
+  'confirmed',
+  'processing',
+  'completed',
+  'fulfilled',
+  'paid',
+  'unpaid',
+  'canceled',
+  'cancelled',
+  'refunded',
+  'failed',
+])
+
+function orderStatusLabel(status: string) {
+  const key = status.trim().toLowerCase()
+  if (ORDER_STATUS_KEYS.has(key)) {
+    return i18next.t(`cancellationFees:orderStatus.${key}` as 'cancellationFees:orderStatus.draft')
+  }
+  return i18next.t('cancellationFees:orderStatus.unknown', { value: status.trim() || '—' })
+}
+
 const statusVariants: Record<InvoiceStatus, 'neutral' | 'accent' | 'warning' | 'success' | 'destructive'> = {
   Draft: 'neutral',
   Sent: 'accent',
@@ -382,7 +410,10 @@ export function NewCancellationFeePage() {
               <dt>{t('cancellationFees:new.order.amount')}</dt>
               <dd>{yen(order.totalAmount, order.currency)}</dd>
             </div>
-            <div><dt>{t('cancellationFees:new.order.status')}</dt><dd>{order.status}</dd></div>
+            <div>
+              <dt>{t('cancellationFees:new.order.status')}</dt>
+              <dd>{orderStatusLabel(order.status)}</dd>
+            </div>
           </dl>
         </Panel>
       ) : null}
@@ -486,7 +517,10 @@ export function NewCancellationFeePage() {
                   <small>{t('cancellationFees:new.delivery.consentDetail')}</small>
                 </span>
               </label>
-              <Field label={t('cancellationFees:new.delivery.smsBody')}>
+              <Field
+                label={t('cancellationFees:new.delivery.smsBody')}
+                hint={t('cancellationFees:new.delivery.smsBodyHint')}
+              >
                 <NativeTextarea
                   name="smsMessage"
                   rows={4}
