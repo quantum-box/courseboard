@@ -11,6 +11,7 @@ use utoipa::{
 use super::http;
 use super::http_commercial;
 use super::http_ops;
+use super::http_simulator;
 use crate::profile_proxy;
 
 /// Standard API error body returned by [`crate::AppError`].
@@ -86,6 +87,8 @@ impl Modify for SecurityAddon {
         http_commercial::export_monthly_settlement_csv,
         http_commercial::get_extension_status,
         http_commercial::update_extension_config,
+        http_simulator::calculate_fee,
+        http_simulator::simulate_range,
         profile_proxy::get_me,
     ),
     components(
@@ -149,6 +152,12 @@ impl Modify for SecurityAddon {
             http_commercial::ExtensionStatusDto,
             http_commercial::ExtensionValidationDto,
             http_commercial::UpdateExtensionConfigRequest,
+            http_simulator::CalculateFeeRequest,
+            http_simulator::CalculateFeeResponse,
+            http_simulator::PlayerBreakdownDto,
+            http_simulator::SimulateRangeRequest,
+            http_simulator::SimulateRangeResponse,
+            http_simulator::SimulateRangeRowDto,
             profile_proxy::ProfileResponse,
             profile_proxy::ProfileUser,
             profile_proxy::ProfileTenant,

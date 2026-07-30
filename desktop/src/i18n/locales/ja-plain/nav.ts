@@ -51,6 +51,10 @@ export const nav: DeepPartial<typeof source> = {
       label: '売上の目標',
       description: '日ごとの目標と、今どこまで届いているか',
     },
+    'golf/simulator': {
+      label: 'ねだんの計算',
+      description: 'プレー料金と税、売上のめやすを計算します',
+    },
     'golf/settlement': {
       label: '1か月のしめ',
       description: '1か月の売上と費用を合わせて確かめます',

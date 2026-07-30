@@ -7,6 +7,7 @@
   - [ADR-0002: React SPAとcourseboard-apiを独立配信する](src/architecture/decisions/ADR-0002-react-spa-courseboard-api-boundary.md)
   - [ADR-0003: Courseboardの人間ユーザーtoken issuerをCognitoに統一する](src/architecture/decisions/ADR-0003-cognito-human-token-issuer.md)
   - [ADR-0004: UIのplatform APIアクセスはcourseboard-apiを経由する](src/architecture/decisions/ADR-0004-ui-platform-api-access-via-courseboard-api.md)
+  - [ADR-0005: ゴルフドメイン知識はCourseBoardが所有する](src/architecture/decisions/ADR-0005-golf-domain-ownership.md)
 
 # Tasks
 

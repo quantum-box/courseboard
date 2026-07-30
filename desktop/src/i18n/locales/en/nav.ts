@@ -52,6 +52,10 @@ export const nav: DeepPartial<typeof source> = {
       label: 'Revenue targets',
       description: 'Daily targets and how close you are',
     },
+    'golf/simulator': {
+      label: 'Pricing',
+      description: 'Work out fees, tax, and a revenue estimate',
+    },
     'golf/settlement': {
       label: 'Monthly close',
       description: 'Close out a month of revenue and cost',

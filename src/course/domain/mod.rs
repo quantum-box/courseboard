@@ -13,6 +13,7 @@ mod ports;
 mod product;
 mod reservation;
 mod resource;
+mod simulator;
 mod tee_sheet;
 
 pub use caddie::{
@@ -20,11 +21,12 @@ pub use caddie::{
     CaddieSkillLevel, CaddieStaff, CaddieUpstreamIdentity,
 };
 pub use caddie_ops::{
-    AttendanceSnapshot, AttendanceSnapshotReport, AutoAssignPlanItem, AutoAssignResult,
-    AutoAssignSkippedItem, AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery,
-    CaddieAvailability, CaddieCourseMembership, CaddiePatch, CaddieRating, CaddieRecommendation,
-    CaddieSupply, PayrollPeriod, PayrollRow, PayrollSummary, RecommendationQuery,
-    ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    compute_caddie_supply, AttendanceSnapshot, AttendanceSnapshotReport, AutoAssignPlanItem,
+    AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery, AvailabilityStatus,
+    CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieDayCapacity,
+    CaddiePatch, CaddieRating, CaddieRecommendation, CaddieSupply, PayrollPeriod, PayrollRow,
+    PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 pub use commercial::{
     BudgetAchievement, DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement,
@@ -38,7 +40,7 @@ pub use ids::{
     ProductSlotId, RatingId, ReservationId, ReservationServiceId, ResourceId, TenantId,
 };
 pub use ports::{
-    GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
+    GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway,
     ReservationGateway, TeeSheetQuery,
 };
 pub use product::{
@@ -46,6 +48,13 @@ pub use product::{
 };
 pub use reservation::Reservation;
 pub use resource::{Resource, ResourceKind};
+pub use simulator::{
+    party_tax, prepare_fee_quote, prepare_range_simulation, project_row, quote_fee,
+    summarize_range, FeeQuote, FeeQuoteInput, FeeQuoteRequest, PartyTax, PlayerTaxLine, RangeRow,
+    RangeRowInput, RangeSimulation, RangeSimulationInput, RangeSimulationRequest, SimulatedPlayer,
+    TaxRuleSnapshot, DEFAULT_FIXED_COST, DEFAULT_PLAYER_AGE, DEFAULT_PREFECTURE,
+    DEFAULT_PRICE_ELASTICITY, DEFAULT_TAXABLE_RATIO, DEFAULT_VARIABLE_COST_PER_VISITOR,
+};
 pub use tee_sheet::{
     format_datetime_with_offset, format_jst_wall_clock, jst_offset, TeeSheet, TeeSheetItem,
     TeeSheetStatus, DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR, DEFAULT_TIMEZONE,
