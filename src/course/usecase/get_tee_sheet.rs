@@ -36,21 +36,40 @@ impl GetTeeSheetUseCase {
         credentials: GatewayCredentials<'_>,
         query: TeeSheetQuery,
     ) -> Result<TeeSheet, CourseError> {
-        let (reservations, courses, resources, products) = tokio::try_join!(
+        // Reservations and courses are the board. Resources and products only
+        // decorate its rows, so one of them failing must not black out the
+        // operator's view of the day — ADR-0005 moved the board onto several
+        // independent Field endpoints, and any of them can be down alone.
+        let (reservations, courses, resources, products) = tokio::join!(
             self.reservations.list_reservations(credentials),
             self.catalog.list_courses(credentials),
             self.catalog.list_resources(credentials),
             self.catalog.list_reservation_products(credentials),
-        )?;
+        );
+        let reservations = reservations?;
+        let courses = courses?;
 
-        build_tee_sheet(
+        let mut unavailable = Vec::new();
+        let resources = resources.unwrap_or_else(|error| {
+            tracing::warn!(%error, "tee sheet built without resources");
+            unavailable.push("resources".to_string());
+            Vec::new()
+        });
+        let products = products.unwrap_or_else(|error| {
+            tracing::warn!(%error, "tee sheet built without reservation products");
+            unavailable.push("reservationProducts".to_string());
+            Vec::new()
+        });
+
+        let sheet = build_tee_sheet(
             query.date,
             query.golf_course_id.as_ref(),
             &reservations,
             &courses,
             &resources,
             &products,
-        )
+        )?;
+        Ok(sheet.with_unavailable(unavailable))
     }
 }
 
@@ -220,6 +239,7 @@ mod tests {
         courses: Mutex<Vec<Course>>,
         resources: Mutex<Vec<Resource>>,
         products: Mutex<Vec<ReservationProduct>>,
+        products_fail: bool,
     }
 
     #[async_trait]
@@ -267,6 +287,9 @@ mod tests {
             &self,
             _credentials: GatewayCredentials<'_>,
         ) -> Result<Vec<ReservationProduct>, CourseError> {
+            if self.products_fail {
+                return Err(CourseError::Provider("Field API returned 500".into()));
+            }
             Ok(self.products.lock().expect("lock").clone())
         }
 
@@ -486,6 +509,7 @@ mod tests {
                 18,
                 240,
             )]),
+            products_fail: false,
         });
         let use_case = GetTeeSheetUseCase::new(reservations, catalog);
         let sheet = use_case
@@ -507,5 +531,53 @@ mod tests {
         assert_eq!(sheet.items()[0].party_name(), "Yamada");
         assert_eq!(sheet.items()[0].play_type().as_str(), "caddie");
         assert_eq!(sheet.items()[0].status().as_str(), "confirmed");
+        assert!(sheet.unavailable().is_empty());
+    }
+
+    #[tokio::test]
+    async fn tee_sheet_still_lists_the_day_when_products_are_unavailable() {
+        let date = NaiveDate::from_ymd_opt(2026, 7, 18).expect("date");
+        let reservations = Arc::new(FakeReservationGateway {
+            items: Mutex::new(vec![sample_reservation()]),
+        });
+        let catalog = Arc::new(FakeGolfCatalogGateway {
+            courses: Mutex::new(vec![Course::reconstitute(
+                "course_east",
+                "East Course",
+                None,
+                18,
+                DEFAULT_TIMEZONE,
+                8,
+                true,
+                None,
+                None,
+                None,
+                None,
+            )]),
+            resources: Mutex::new(Vec::new()),
+            products: Mutex::new(Vec::new()),
+            products_fail: true,
+        });
+        let sheet = GetTeeSheetUseCase::new(reservations, catalog)
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer test",
+                    operator_id: "scc",
+                    platform_id: None,
+                },
+                TeeSheetQuery {
+                    date,
+                    golf_course_id: None,
+                },
+            )
+            .await
+            .expect("a failing catalog lookup must not black out the board");
+
+        // The row the operator needs is there.
+        assert_eq!(sheet.items().len(), 1);
+        assert_eq!(sheet.items()[0].party_name(), "Yamada");
+        // And the caller is told which detail is a fallback, so it can say so
+        // instead of presenting the defaults as fact.
+        assert_eq!(sheet.unavailable(), ["reservationProducts"]);
     }
 }

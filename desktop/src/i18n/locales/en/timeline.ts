@@ -8,6 +8,12 @@ export const timeline: DeepPartial<typeof source> = {
   loading: 'Loading the timeline…',
   reload: 'Reload',
   toDispatch: 'Go to assignments',
+  partial: {
+    title: 'Plan details are unavailable',
+    description:
+      'The bookings below are complete, but caddie attendance, hole count and duration '
+      + 'are defaults. Check the play products screen for the real values.',
+  },
   status: {
     confirmed: 'Confirmed',
     checkedIn: 'Checked in',

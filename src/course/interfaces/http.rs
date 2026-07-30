@@ -173,6 +173,10 @@ pub struct TeeSheetResponse {
     pub day_start: String,
     pub day_end: String,
     pub items: Vec<TeeSheetItemDto>,
+    /// Catalog lookups that failed while building this board. Non-empty means
+    /// the rows are present but some of their detail is a fallback.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unavailable: Vec<String>,
 }
 
 impl From<&TeeSheetItem> for TeeSheetItemDto {
@@ -204,6 +208,7 @@ impl From<TeeSheet> for TeeSheetResponse {
             day_start: value.day_start().to_string(),
             day_end: value.day_end().to_string(),
             items: value.items().iter().map(TeeSheetItemDto::from).collect(),
+            unavailable: value.unavailable().to_vec(),
         }
     }
 }

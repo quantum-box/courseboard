@@ -5,6 +5,13 @@ export const timeline = {
   loading: 'タイムラインを読み込んでいます…',
   reload: '読み直す',
   toDispatch: '配置へ',
+  /** Shown when the board was built without part of the golf catalog. */
+  partial: {
+    title: 'プランの情報が取れていません',
+    description:
+      '予約の一覧は出ていますが、キャディの有無・ホール数・所要時間は既定値です。'
+      + '正しい値はプレー商品の画面で確かめてください。',
+  },
   status: {
     confirmed: '確定',
     checkedIn: '受付ずみ',

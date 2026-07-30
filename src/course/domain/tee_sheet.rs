@@ -164,6 +164,11 @@ pub struct TeeSheet {
     day_end: String,
     #[getter(skip)]
     items: Vec<TeeSheetItem>,
+    /// Catalog lookups that failed. The board is still built, but anything those
+    /// lookups supply is a fallback — the caller has to say so rather than
+    /// present a guess as fact.
+    #[getter(skip)]
+    unavailable: Vec<String>,
 }
 
 impl TeeSheet {
@@ -186,7 +191,17 @@ impl TeeSheet {
             day_start: day_start.into(),
             day_end: day_end.into(),
             items,
+            unavailable: Vec::new(),
         }
+    }
+
+    pub fn with_unavailable(mut self, unavailable: Vec<String>) -> Self {
+        self.unavailable = unavailable;
+        self
+    }
+
+    pub fn unavailable(&self) -> &[String] {
+        &self.unavailable
     }
 
     pub fn empty_day(date: NaiveDate, timezone: impl Into<String>) -> Result<Self, CourseError> {
