@@ -6,8 +6,8 @@ use chrono::{DateTime, NaiveDate, Utc};
 use derive_getters::Getters;
 
 use super::{
-    AssignmentId, AvailabilityId, CaddieId, CaddieRank, CaddieSkillLevel, CourseError, CourseId,
-    MembershipId, RatingId, ReservationId,
+    AssignmentId, AvailabilityId, Caddie, CaddieId, CaddieRank, CaddieSkillLevel, CourseError,
+    CourseId, MembershipId, RatingId, ReservationId,
 };
 
 /// Input for creating or updating a caddie profile.
@@ -93,6 +93,128 @@ impl UpsertCaddie {
             ));
         }
         Ok(())
+    }
+}
+
+/// Partial update for an existing caddie profile.
+///
+/// The gateway always sends a full body upstream, so anything left unset here
+/// must be filled from the stored profile — otherwise fields the operator never
+/// touched (rank, contract rounds) silently fall back to creation defaults.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CaddiePatch {
+    pub display_name: Option<String>,
+    pub skill_level: Option<String>,
+    pub rank: Option<String>,
+    pub base_fee_amount: Option<i64>,
+    pub currency: Option<String>,
+    pub staff_id: Option<String>,
+    pub staff_reference_type: Option<String>,
+    pub staff_reference_id: Option<String>,
+    pub active: Option<bool>,
+    pub employment_status: Option<String>,
+    pub max_rounds_per_day: Option<i32>,
+    pub monthly_contract_rounds: Option<i32>,
+    pub can_two_rounds: Option<bool>,
+    pub desired_income: Option<i32>,
+}
+
+impl CaddiePatch {
+    /// Whether the body names every field, so no stored profile is needed to
+    /// merge against. Lets the caller skip the roster round trip — which also
+    /// keeps writes working when list GETs are opted out
+    /// (`TACHYON_FIELD_API_URL=empty://…`).
+    pub fn is_complete(&self) -> bool {
+        self.display_name.is_some()
+            && self.skill_level.is_some()
+            && self.rank.is_some()
+            && self.base_fee_amount.is_some()
+            && self.currency.is_some()
+            && self.active.is_some()
+            && self.employment_status.is_some()
+            && self.max_rounds_per_day.is_some()
+            && self.monthly_contract_rounds.is_some()
+            && self.can_two_rounds.is_some()
+            && self.desired_income.is_some()
+            && (self.staff_id.is_some() || self.staff_reference_id.is_some())
+    }
+
+    /// Only meaningful when [`Self::is_complete`] holds; anything still unset
+    /// falls back to creation defaults.
+    pub fn into_upsert(self) -> Result<UpsertCaddie, CourseError> {
+        UpsertCaddie::try_new(
+            self.display_name.unwrap_or_default(),
+            self.skill_level.unwrap_or_default(),
+            self.rank.unwrap_or_default(),
+            self.base_fee_amount.unwrap_or_default(),
+            self.currency,
+            self.staff_id,
+            self.staff_reference_type,
+            self.staff_reference_id,
+            self.active.unwrap_or_default(),
+            self.employment_status,
+            self.max_rounds_per_day,
+            self.monthly_contract_rounds,
+            self.can_two_rounds,
+            self.desired_income,
+        )
+    }
+
+    pub fn apply_to(self, current: &Caddie) -> Result<UpsertCaddie, CourseError> {
+        // Echo back what upstream actually holds. `Caddie::display_name` is the
+        // linked staff member's name and `Caddie::staff_id` merges staffId with
+        // staffReferenceId, so falling back to either would rewrite the stored
+        // profile — turning an untouched field into a silent overwrite.
+        let upstream = current.upstream_identity();
+        let staff_id = self.staff_id.or_else(|| upstream.staff_id.clone());
+        let staff_reference_id = self
+            .staff_reference_id
+            .or_else(|| upstream.staff_reference_id.clone());
+        let staff_reference_type = self
+            .staff_reference_type
+            .or_else(|| upstream.staff_reference_type.clone());
+
+        // Retiring someone by employment status alone must not leave them
+        // flagged active upstream.
+        let employment_status = self
+            .employment_status
+            .unwrap_or_else(|| current.employment_status().to_string());
+        let active = self
+            .active
+            .unwrap_or_else(|| employment_status.eq_ignore_ascii_case("active"));
+
+        UpsertCaddie::try_new(
+            self.display_name.unwrap_or_else(|| {
+                upstream
+                    .profile_display_name
+                    .clone()
+                    .unwrap_or_else(|| current.display_name().to_string())
+            }),
+            self.skill_level
+                .unwrap_or_else(|| current.skill_level().as_str().to_string()),
+            self.rank
+                .unwrap_or_else(|| current.rank().as_str().to_string()),
+            self.base_fee_amount.unwrap_or(current.base_fee_amount()),
+            Some(
+                self.currency
+                    .unwrap_or_else(|| current.currency().to_string()),
+            ),
+            staff_id,
+            staff_reference_type,
+            staff_reference_id,
+            active,
+            Some(employment_status),
+            Some(
+                self.max_rounds_per_day
+                    .unwrap_or(current.max_rounds_per_day()),
+            ),
+            Some(
+                self.monthly_contract_rounds
+                    .unwrap_or(current.monthly_contract_rounds()),
+            ),
+            Some(self.can_two_rounds.unwrap_or(current.can_two_rounds())),
+            Some(self.desired_income.unwrap_or(current.desired_income())),
+        )
     }
 }
 
@@ -1019,6 +1141,7 @@ impl CaddieRating {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::course::domain::CaddieUpstreamIdentity;
 
     fn upsert(staff_id: Option<&str>, staff_reference_id: Option<&str>) -> UpsertCaddie {
         UpsertCaddie::try_new(
@@ -1067,5 +1190,131 @@ mod tests {
             upsert(Some("  "), Some("  ")).require_staff_link(),
             Err(CourseError::BadRequest(_))
         ));
+    }
+
+    /// Mirrors what the gateway produces for a profile that Field stores with a
+    /// `staffReferenceId`-only link: the merged view differs from the raw one.
+    fn stored_caddie() -> Caddie {
+        stored_caddie_with(CaddieUpstreamIdentity {
+            profile_display_name: Some("プロフィール名".into()),
+            staff_id: None,
+            staff_reference_type: Some("erp_staff".into()),
+            staff_reference_id: Some("staff_001".into()),
+        })
+    }
+
+    fn stored_caddie_with(upstream: CaddieUpstreamIdentity) -> Caddie {
+        Caddie::reconstitute(
+            "golfcad_1",
+            // The gateway substitutes the linked staff member's name here.
+            "山田 花子",
+            Some("staff_001".into()),
+            true,
+            CaddieSkillLevel::Veteran,
+            CaddieRank::A,
+            "active",
+            12_000,
+            "JPY",
+            2,
+            true,
+            41,
+            500_000,
+            Some(4.8),
+            42,
+        )
+        .with_upstream_identity(upstream)
+    }
+
+    #[test]
+    fn patch_keeps_untouched_fields() {
+        let patched = CaddiePatch {
+            max_rounds_per_day: Some(1),
+            ..CaddiePatch::default()
+        }
+        .apply_to(&stored_caddie())
+        .expect("apply patch");
+
+        assert_eq!(patched.max_rounds_per_day, 1);
+        // Regression: these used to fall back to creation defaults, silently
+        // rewriting a caddie's rank on every unrelated edit.
+        assert_eq!(patched.rank, CaddieRank::A);
+        assert_eq!(patched.monthly_contract_rounds, Some(41));
+        assert_eq!(patched.can_two_rounds, Some(true));
+        assert_eq!(patched.desired_income, Some(500_000));
+        assert_eq!(patched.skill_level, CaddieSkillLevel::Veteran);
+        assert_eq!(patched.employment_status, "active");
+        assert_eq!(patched.base_fee_amount, 12_000);
+    }
+
+    #[test]
+    fn patch_keeps_the_stored_profile_name_not_the_staff_name() {
+        let patched = CaddiePatch::default()
+            .apply_to(&stored_caddie())
+            .expect("apply patch");
+
+        // Echoing the merged view back would overwrite the profile's own name
+        // with the linked staff member's name, permanently.
+        assert_eq!(patched.display_name, "プロフィール名");
+    }
+
+    #[test]
+    fn patch_preserves_the_upstream_staff_reference_shape() {
+        let patched = CaddiePatch::default()
+            .apply_to(&stored_caddie())
+            .expect("apply patch");
+
+        // `Caddie::staff_id` merges staffId with staffReferenceId, so echoing it
+        // would promote a reference into staffId and invent a reference type.
+        assert_eq!(patched.staff_id, None);
+        assert_eq!(patched.staff_reference_id.as_deref(), Some("staff_001"));
+        assert_eq!(patched.staff_reference_type.as_deref(), Some("erp_staff"));
+    }
+
+    #[test]
+    fn patch_keeps_a_direct_staff_link_direct() {
+        let caddie = stored_caddie_with(CaddieUpstreamIdentity {
+            profile_display_name: Some("プロフィール名".into()),
+            staff_id: Some("staff_001".into()),
+            staff_reference_type: Some("staff_member".into()),
+            staff_reference_id: Some("staff_001".into()),
+        });
+        let patched = CaddiePatch::default()
+            .apply_to(&caddie)
+            .expect("apply patch");
+
+        assert_eq!(patched.staff_id.as_deref(), Some("staff_001"));
+        assert_eq!(
+            patched.staff_reference_type.as_deref(),
+            Some("staff_member")
+        );
+    }
+
+    #[test]
+    fn patch_applies_provided_fields() {
+        let patched = CaddiePatch {
+            rank: Some("D".into()),
+            employment_status: Some("suspended".into()),
+            ..CaddiePatch::default()
+        }
+        .apply_to(&stored_caddie())
+        .expect("apply patch");
+
+        assert_eq!(patched.rank, CaddieRank::D);
+        assert_eq!(patched.employment_status, "suspended");
+        // Retiring by status alone must not leave the profile flagged active.
+        assert!(!patched.active);
+    }
+
+    #[test]
+    fn patch_respects_an_explicit_active_flag() {
+        let patched = CaddiePatch {
+            employment_status: Some("suspended".into()),
+            active: Some(true),
+            ..CaddiePatch::default()
+        }
+        .apply_to(&stored_caddie())
+        .expect("apply patch");
+
+        assert!(patched.active);
     }
 }

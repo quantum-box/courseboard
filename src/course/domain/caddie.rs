@@ -130,6 +130,19 @@ impl AssignmentStatus {
     }
 }
 
+/// Identity exactly as Field stores it, before the gateway folds staff data in.
+///
+/// `Caddie::display_name` is the linked staff member's name and `Caddie::staff_id`
+/// merges `staffId` with `staffReferenceId`, so neither can be echoed back on a
+/// partial update without rewriting what upstream holds.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CaddieUpstreamIdentity {
+    pub profile_display_name: Option<String>,
+    pub staff_id: Option<String>,
+    pub staff_reference_type: Option<String>,
+    pub staff_reference_id: Option<String>,
+}
+
 /// Caddie profile (roster) owned by course-api.
 #[derive(Debug, Clone, PartialEq, Getters)]
 pub struct Caddie {
@@ -139,6 +152,8 @@ pub struct Caddie {
     display_name: String,
     #[getter(skip)]
     staff_id: Option<String>,
+    #[getter(skip)]
+    upstream: CaddieUpstreamIdentity,
     #[getter(rename = "is_active")]
     active: bool,
     #[getter(copy)]
@@ -184,6 +199,7 @@ impl Caddie {
             staff_id: staff_id
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
+            upstream: CaddieUpstreamIdentity::default(),
             active,
             skill_level,
             rank,
@@ -216,6 +232,16 @@ impl Caddie {
 
     pub fn staff_id(&self) -> Option<&str> {
         self.staff_id.as_deref()
+    }
+
+    /// Only the gateway knows the pre-merge values; everything else reads them.
+    pub fn with_upstream_identity(mut self, upstream: CaddieUpstreamIdentity) -> Self {
+        self.upstream = upstream;
+        self
+    }
+
+    pub fn upstream_identity(&self) -> &CaddieUpstreamIdentity {
+        &self.upstream
     }
 
     pub fn employment_status(&self) -> &str {

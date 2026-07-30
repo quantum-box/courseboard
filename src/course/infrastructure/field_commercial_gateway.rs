@@ -348,6 +348,9 @@ fn map_extension_status(value: FieldExtensionStatusDto) -> ExtensionStatus {
     let validation = value.validation.unwrap_or_default();
     ExtensionStatus::reconstitute(
         value.extension_key,
+        value.name,
+        value.version,
+        value.registry_status,
         value.tenant_status,
         value.config_version,
         value.config_json,
@@ -502,6 +505,12 @@ struct FieldUnpaidCancellationDto {
 #[serde(rename_all = "camelCase")]
 struct FieldExtensionStatusDto {
     extension_key: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    registry_status: Option<String>,
     #[serde(default)]
     tenant_status: Option<String>,
     #[serde(default)]

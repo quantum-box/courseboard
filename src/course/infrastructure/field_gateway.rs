@@ -15,10 +15,10 @@ use serde_json::{json, Value};
 
 use crate::config::EMPTY_COURSE_STORE_URL;
 use crate::course::domain::{
-    Caddie, CaddieAssignment, CaddieRank, CaddieSkillLevel, Course, CourseError, CourseId,
-    GatewayCredentials, GolfCatalogGateway, PlayType, ProductSlot, Reservation, ReservationGateway,
-    ReservationProduct, ReservationServiceId, Resource, ResourceKind, UpsertCourse,
-    UpsertReservationProduct,
+    Caddie, CaddieAssignment, CaddieRank, CaddieSkillLevel, CaddieUpstreamIdentity, Course,
+    CourseError, CourseId, GatewayCredentials, GolfCatalogGateway, PlayType, ProductSlot,
+    Reservation, ReservationGateway, ReservationProduct, ReservationServiceId, Resource,
+    ResourceKind, UpsertCourse, UpsertReservationProduct,
 };
 use crate::field_api::DEFAULT_FIELD_API_URL;
 
@@ -411,6 +411,12 @@ pub(crate) fn map_caddie(
         .as_deref()
         .and_then(|id| staff_names_by_id.get(id).map(String::as_str));
     let display_name = resolve_caddie_display_name(&value.display_name, linked_staff_name);
+    let upstream = CaddieUpstreamIdentity {
+        profile_display_name: Some(value.display_name.clone()),
+        staff_id: value.staff_id.clone(),
+        staff_reference_type: value.staff_reference_type.clone(),
+        staff_reference_id: value.staff_reference_id.clone(),
+    };
     Caddie::reconstitute(
         value.id,
         display_name,
@@ -428,6 +434,7 @@ pub(crate) fn map_caddie(
         value.rating_average,
         value.rating_count.unwrap_or(0),
     )
+    .with_upstream_identity(upstream)
 }
 
 pub(crate) fn map_caddie_assignment(
@@ -585,6 +592,8 @@ pub(crate) struct FieldGolfCaddieProfileDto {
     staff_id: Option<String>,
     #[serde(default)]
     staff_reference_id: Option<String>,
+    #[serde(default)]
+    staff_reference_type: Option<String>,
     #[serde(default)]
     active: Option<bool>,
     #[serde(default)]

@@ -96,7 +96,7 @@ pub struct UpdateReservationPolicyRequest {
     responses(
         (status = 200, description = "Reservation policy", body = ReservationPolicyDto),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -123,7 +123,7 @@ pub async fn get_reservation_policy(
         (status = 200, description = "Reservation policy updated", body = ReservationPolicyDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -207,7 +207,7 @@ pub struct UpsertDailyBudgetRequest {
     responses(
         (status = 200, description = "List daily budgets", body = inline(ItemsResponse<DailyBudgetDto>)),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -244,7 +244,7 @@ pub async fn list_daily_budgets(
         (status = 200, description = "Daily budget upserted", body = DailyBudgetDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -280,7 +280,7 @@ pub async fn upsert_daily_budget(
         (status = 200, description = "Imported daily budgets", body = inline(ItemsResponse<DailyBudgetDto>)),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -353,7 +353,7 @@ pub struct AchievementQueryParams {
     responses(
         (status = 200, description = "Budget achievements", body = inline(ItemsResponse<BudgetAchievementDto>)),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -525,7 +525,7 @@ pub struct YearMonthQuery {
     responses(
         (status = 200, description = "Monthly settlement", body = MonthlySettlementDto),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -552,7 +552,7 @@ pub async fn get_monthly_settlement(
     responses(
         (status = 200, description = "Monthly settlement CSV export", content_type = "text/csv"),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -582,6 +582,12 @@ pub async fn export_monthly_settlement_csv(
 pub struct ExtensionStatusDto {
     pub extension_key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registry_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_version: Option<i64>,
@@ -603,6 +609,9 @@ impl From<&ExtensionStatus> for ExtensionStatusDto {
     fn from(value: &ExtensionStatus) -> Self {
         Self {
             extension_key: value.extension_key().to_string(),
+            name: value.name().map(str::to_string),
+            version: value.version().map(str::to_string),
+            registry_status: value.registry_status().map(str::to_string),
             tenant_status: value.tenant_status().map(str::to_string),
             config_version: value.config_version(),
             config_json: value.config_json().cloned(),
@@ -623,7 +632,7 @@ impl From<&ExtensionStatus> for ExtensionStatusDto {
     responses(
         (status = 200, description = "Extension status", body = Option<ExtensionStatusDto>),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]
@@ -657,7 +666,7 @@ pub struct UpdateExtensionConfigRequest {
         (status = 204, description = "Extension config updated"),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 502, description = "Upstream provider error", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]

@@ -18,15 +18,15 @@ mod tee_sheet;
 
 pub use caddie::{
     AssignmentRole, AssignmentStatus, Caddie, CaddieAssignment, CaddieRank, CaddieRoster,
-    CaddieSkillLevel, CaddieStaff,
+    CaddieSkillLevel, CaddieStaff, CaddieUpstreamIdentity,
 };
 pub use caddie_ops::{
     compute_caddie_supply, AttendanceSnapshot, AttendanceSnapshotReport, AutoAssignPlanItem,
     AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery, AvailabilityStatus,
     CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieDayCapacity,
-    CaddieRating, CaddieRecommendation, CaddieSupply, PayrollPeriod, PayrollRow, PayrollSummary,
-    RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability,
+    CaddiePatch, CaddieRating, CaddieRecommendation, CaddieSupply, PayrollPeriod, PayrollRow,
+    PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 pub use commercial::{
     BudgetAchievement, DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement,

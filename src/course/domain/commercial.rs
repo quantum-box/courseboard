@@ -462,6 +462,12 @@ pub struct ExtensionStatus {
     #[getter(skip)]
     extension_key: String,
     #[getter(skip)]
+    name: Option<String>,
+    #[getter(skip)]
+    version: Option<String>,
+    #[getter(skip)]
+    registry_status: Option<String>,
+    #[getter(skip)]
     tenant_status: Option<String>,
     #[getter(copy)]
     config_version: Option<i64>,
@@ -475,8 +481,12 @@ pub struct ExtensionStatus {
 }
 
 impl ExtensionStatus {
+    #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
         extension_key: impl Into<String>,
+        name: Option<String>,
+        version: Option<String>,
+        registry_status: Option<String>,
         tenant_status: Option<String>,
         config_version: Option<i64>,
         config_json: Option<Value>,
@@ -486,6 +496,9 @@ impl ExtensionStatus {
     ) -> Self {
         Self {
             extension_key: extension_key.into(),
+            name,
+            version,
+            registry_status,
             tenant_status,
             config_version,
             config_json,
@@ -497,6 +510,18 @@ impl ExtensionStatus {
 
     pub fn extension_key(&self) -> &str {
         &self.extension_key
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.name.as_deref()
+    }
+
+    pub fn version(&self) -> Option<&str> {
+        self.version.as_deref()
+    }
+
+    pub fn registry_status(&self) -> Option<&str> {
+        self.registry_status.as_deref()
     }
 
     pub fn tenant_status(&self) -> Option<&str> {
