@@ -1,6 +1,6 @@
 import { isDesktopWindowTabOpenClick } from '@tachyon-sdk/native-ui'
 import { invoke, isTauri } from '@tauri-apps/api/core'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 const NAVIGATE_EVENT = 'courseboard:navigate'
 const NAVIGATION_STATE_KEY = '__courseboardNavigation'
@@ -65,10 +65,53 @@ export function currentRouteSearchParams() {
   return params
 }
 
+type NavigationGuard = () => boolean
+
+const navigationGuards = new Set<NavigationGuard>()
+
+/**
+ * Registers a confirmation step for the screen that is mounted right now. The
+ * guard returns `false` to cancel the navigation, which is how a screen holding
+ * unsaved input stops the sidebar, ⌘K, the back/forward buttons and its own
+ * "back to the list" button from throwing that input away. Returns the
+ * unregister callback.
+ */
+export function registerNavigationGuard(guard: NavigationGuard) {
+  navigationGuards.add(guard)
+  return () => {
+    navigationGuards.delete(guard)
+  }
+}
+
+/** True when every registered screen agrees it is safe to leave. */
+export function confirmNavigation() {
+  for (const guard of [...navigationGuards]) {
+    if (!guard()) return false
+  }
+  return true
+}
+
+/**
+ * Keeps `guard` registered for as long as it is non-null. Pass `null` once the
+ * screen has nothing left to lose so navigation stops asking.
+ */
+export function useNavigationGuard(guard: NavigationGuard | null | undefined) {
+  const guardRef = useRef(guard)
+  guardRef.current = guard
+  const enabled = Boolean(guard)
+
+  useEffect(() => {
+    if (!enabled) return
+    return registerNavigationGuard(() => guardRef.current?.() ?? true)
+  }, [enabled])
+}
+
+/** False when a guard cancelled the navigation, so callers can stay put. */
 export function navigate(route: string) {
   const normalized = route.replace(/^#?\/?/, '')
   const nextHash = `#/${normalized}`
-  if (window.location.hash === nextHash) return
+  if (window.location.hash === nextHash) return true
+  if (!confirmNavigation()) return false
 
   const current = currentNavigationEntry()
   const nextIndex = current.index + 1
@@ -86,6 +129,7 @@ export function navigate(route: string) {
     nextHash,
   )
   window.dispatchEvent(new Event(NAVIGATE_EVENT))
+  return true
 }
 
 export function navigateFromClick(event: NavigationClickEvent, route: string) {
@@ -109,11 +153,15 @@ export function navigationAvailability(): NavigationAvailability {
 }
 
 export function goBack() {
-  if (navigationAvailability().canGoBack) window.history.back()
+  if (!navigationAvailability().canGoBack) return
+  if (!confirmNavigation()) return
+  window.history.back()
 }
 
 export function goForward() {
-  if (navigationAvailability().canGoForward) window.history.forward()
+  if (!navigationAvailability().canGoForward) return
+  if (!confirmNavigation()) return
+  window.history.forward()
 }
 
 export function useNavigationAvailability(): NavigationAvailability {

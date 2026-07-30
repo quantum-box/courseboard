@@ -57,9 +57,48 @@ function formatUpdatedAt(value: string) {
   }).format(date)
 }
 
+/**
+ * `Intl.DateTimeFormat` is not a validator here: ICU normalises abbreviations
+ * (`JST`), legacy links (`Japan`), the wrong case (`asia/tokyo`) and bare
+ * offsets (`+09:00`) into a real zone and accepts all of them, so only a typo
+ * like `Asia/Tokio` ever failed. Match the canonical zone list instead.
+ */
+const IANA_TIME_ZONES: ReadonlySet<string> | null = (() => {
+  const supportedValuesOf = (Intl as {
+    supportedValuesOf?: (key: string) => string[]
+  }).supportedValuesOf
+  if (typeof supportedValuesOf !== 'function') return null
+  try {
+    const zones = supportedValuesOf('timeZone')
+    // Not every engine lists `UTC` even though all of them accept it.
+    return new Set([...zones, 'UTC'])
+  } catch {
+    return null
+  }
+})()
+
+/** `Region/City`, optionally with one more segment (`America/Indiana/Knox`). */
+const IANA_NAME_SHAPE = /^[A-Z][A-Za-z]+(?:\/[A-Z][A-Za-z0-9+_-]*){1,2}$/
+
+/** The server only accepts canonical IANA zone names. */
+function isSupportedTimezone(value: string) {
+  if (IANA_TIME_ZONES) return IANA_TIME_ZONES.has(value)
+  // Without `Intl.supportedValuesOf`, fall back to the shape of a zone name so
+  // `JST` and `+09:00` are still rejected, then let ICU catch the typos.
+  if (value !== 'UTC' && !IANA_NAME_SHAPE.test(value)) return false
+  try {
+    return Boolean(new Intl.DateTimeFormat('en-US', { timeZone: value }).resolvedOptions().timeZone)
+  } catch {
+    return false
+  }
+}
+
 function validateCourse(draft: GolfCourseDraft) {
   if (!draft.name.trim()) return i18next.t('courses:validation.name')
   if (!draft.timezone.trim()) return i18next.t('courses:validation.timezone')
+  if (!isSupportedTimezone(draft.timezone.trim())) {
+    return i18next.t('courses:validation.timezoneFormat')
+  }
   if (![9, 18].includes(draft.holeCount)) return i18next.t('courses:validation.holeCount')
   if (
     !Number.isInteger(draft.startIntervalMinutes)
@@ -378,7 +417,11 @@ export function CoursesPage() {
                   required
                 />
               </Field>
-              <Field label={t('courses:field.timezone')} required>
+              <Field
+                label={t('courses:field.timezone')}
+                hint={t('courses:field.timezoneHint')}
+                required
+              >
                 <Input
                   value={draft.timezone}
                   onChange={event => setDraft(current => ({ ...current, timezone: event.target.value }))}

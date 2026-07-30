@@ -84,6 +84,7 @@ export const nav: DeepPartial<typeof source> = {
     collapse: 'Collapse sidebar',
     openMenu: 'Open menu',
     closeMenu: 'Close menu',
+    menuLabel: 'Navigation menu',
     pin: 'Pin to sidebar',
     unpin: 'Unpin from sidebar',
   },
@@ -95,6 +96,9 @@ export const nav: DeepPartial<typeof source> = {
     sandbox: 'Test',
   },
   command: {
+    title: 'Command palette',
+    description: 'Type a page name to jump straight to it.',
+    inputLabel: 'Search pages',
     placeholder: 'Find a page…',
     empty: 'Nothing found',
   },

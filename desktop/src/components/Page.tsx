@@ -9,6 +9,7 @@ import type {
 } from 'react'
 import { AlertTriangle, Inbox, LoaderCircle, RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { ApiError } from '../api'
 import { i18next } from '../i18n'
 import { pageRefreshShortcutLabel } from '../lib/shortcuts'
 
@@ -115,28 +116,106 @@ export function LoadingState({ label }: { label?: string }) {
   )
 }
 
+type ResourceErrorKey =
+  | 'error.unknown'
+  | 'error.offline'
+  | 'error.authRejected'
+  | 'error.providerError'
+  | 'error.badRequest'
+  | 'error.forbidden'
+  | 'error.notFound'
+  | 'error.conflict'
+  | 'error.unprocessable'
+  | 'error.serverError'
+  | 'error.apiUnreachable'
+  | 'error.unexpected'
+
+/**
+ * A fetch that never reaches the server rejects with a TypeError whose wording
+ * differs per engine — Chrome says "Failed to fetch", the Tauri/WebKit webview
+ * says "Load failed". Each pattern has to start on a word boundary: plain
+ * substring matching reads an unrelated "Download failed" or "Upload failed"
+ * — the shape a CSV export failure takes — as the app being offline.
+ */
+const NETWORK_FAILURE_PATTERNS = [
+  'failed to fetch',
+  'load failed',
+  'networkerror',
+  'network request failed',
+  'connection appears to be offline',
+  'err_internet_disconnected',
+  'err_connection',
+].map(pattern => new RegExp(`(?:^|[^a-z])${pattern}`))
+
+/** `message` must already be lower-cased. */
+function isNetworkFailureMessage(message: string) {
+  return NETWORK_FAILURE_PATTERNS.some(pattern => pattern.test(message))
+}
+
+/** `api.ts` falls back to `Request failed with <status>` for bodiless errors. */
+const STATUS_ERROR_KEYS: Record<string, ResourceErrorKey> = {
+  400: 'error.badRequest',
+  401: 'error.authRejected',
+  403: 'error.forbidden',
+  404: 'error.notFound',
+  409: 'error.conflict',
+  422: 'error.unprocessable',
+  500: 'error.serverError',
+  502: 'error.apiUnreachable',
+  503: 'error.apiUnreachable',
+  504: 'error.apiUnreachable',
+}
+
 /**
  * Raw API failures name internal services the operator cannot act on, so map the
- * known ones onto plain-language advice and keep the rest verbatim.
+ * known ones onto plain-language advice. Returns a key instead of a string so the
+ * caller resolves it through its own hook and the copy follows the active locale.
  */
-function humanizeResourceError(error: unknown) {
-  const raw = error instanceof Error ? error.message : i18next.t('common:error.unknown')
+export function resourceErrorCopy(error: unknown): { key: ResourceErrorKey; detail?: string } {
+  if (!(error instanceof Error)) return { key: 'error.unknown' }
+  const raw = error.message
   const lower = raw.toLowerCase()
+  if (error instanceof TypeError || isNetworkFailureMessage(lower)) {
+    return { key: 'error.offline' }
+  }
   if (
     lower.includes('verify_user')
     || lower.includes('rejected the authenticated bearer')
     || lower.includes('field_api_oauth_incompatible')
     || (lower.includes('field api returned 401') && lower.includes('unauthorized'))
   ) {
-    return i18next.t('common:error.authRejected')
+    return { key: 'error.authRejected' }
   }
   if (lower.includes('provider_error') || lower.includes('external provider error')) {
-    return i18next.t('common:error.providerError')
+    return { key: 'error.providerError' }
   }
-  if (raw === 'Request failed with 500' || raw === 'Request failed with 502') {
-    return i18next.t('common:error.apiUnreachable')
+  // A failure that carries its status is answered by status even when the body
+  // supplied wording of its own: server-authored copy is English, so it belongs
+  // in the detail line rather than as the sentence the operator reads first.
+  if (error instanceof ApiError) {
+    const byStatus = STATUS_ERROR_KEYS[String(error.status)]
+    if (byStatus) {
+      const bodiless = raw === `Request failed with ${error.status}`
+      return { key: byStatus, detail: bodiless ? undefined : raw }
+    }
   }
-  return raw
+  const status = /^request failed with (\d{3})$/.exec(lower)?.[1]
+  const mapped = status ? STATUS_ERROR_KEYS[status] : undefined
+  if (mapped) return { key: mapped }
+  // Anything left is a server-authored message, usually English: lead with copy
+  // the operator can act on and keep the original as a support detail.
+  return { key: 'error.unexpected', detail: raw }
+}
+
+/**
+ * The same mapping as `ResourceError`, flattened onto one line for the dialogs
+ * and flash messages that have no room for a detail block. Without this a save
+ * failure reaches the operator as whatever English the server wrote.
+ */
+export function resourceErrorText(error: unknown) {
+  const { key, detail } = resourceErrorCopy(error)
+  const copy = i18next.t(`common:${key}` as 'common:error.unknown')
+  return detail ? `${copy}（${detail}）` : copy
 }
 
 export function ResourceError({
@@ -147,7 +226,7 @@ export function ResourceError({
   onRetry?: () => void
 }) {
   const { t } = useTranslation('common')
-  const message = humanizeResourceError(error)
+  const { key, detail } = resourceErrorCopy(error)
   return (
     <Notice
       tone="danger"
@@ -156,7 +235,8 @@ export function ResourceError({
         <PageRefreshButton size="sm" onClick={onRetry} label={t('action.retry')} />
       ) : undefined}
     >
-      {message}
+      {t(key)}
+      {detail ? <small className="notice-detail">{detail}</small> : null}
     </Notice>
   )
 }
@@ -186,16 +266,22 @@ export function PageRefreshButton({
   )
 }
 
+/**
+ * `none` is for filters and other controls that are never submitted: neither
+ * "required" nor "optional" says anything true about them.
+ */
 export function Field({
   label,
   hint,
   required,
+  requirement = required ? 'required' : 'optional',
   children,
   className = '',
 }: {
   label: string
   hint?: string
   required?: boolean
+  requirement?: 'required' | 'optional' | 'none'
   children: ReactNode
   className?: string
 }) {
@@ -204,11 +290,8 @@ export function Field({
     <label className={`field ${className}`}>
       <span className="field-label">
         {label}
-        {required ? (
-          <Badge variant="accent">{t('state.required')}</Badge>
-        ) : (
-          <span className="optional">{t('state.optional')}</span>
-        )}
+        {requirement === 'required' ? <Badge variant="accent">{t('state.required')}</Badge> : null}
+        {requirement === 'optional' ? <span className="optional">{t('state.optional')}</span> : null}
       </span>
       {children}
       {hint ? <span className="field-hint">{hint}</span> : null}
@@ -274,7 +357,8 @@ export function DataTable<T>({
   empty?: ReactNode
   onRowClick?: (row: T) => void
 }) {
-  if (rows.length === 0) return <>{empty ?? <EmptyState title={i18next.t('common:state.emptyRows')} />}</>
+  const { t } = useTranslation('common')
+  if (rows.length === 0) return <>{empty ?? <EmptyState title={t('state.emptyRows')} />}</>
   return (
     <div className="data-table-scroll">
       <table className="data-table">

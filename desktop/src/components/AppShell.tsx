@@ -191,6 +191,20 @@ function readPinnedRoutes(): string[] {
   }
 }
 
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+function focusableWithin(root: HTMLElement) {
+  return Array.from(root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR))
+    .filter(element => element.getClientRects().length > 0)
+}
+
 const CADDIE_SUBVIEWS = new Set(['dispatch', 'attendance', 'shifts', 'payroll'])
 
 function caddieRouteSegment(route: string) {
@@ -245,6 +259,8 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   const pointerInsideSidebarRef = useRef(false)
   const hoverLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const accountMenuOpenRef = useRef(false)
+  const mobileNavRef = useRef<HTMLElement | null>(null)
+  const mobileTriggerRef = useRef<HTMLButtonElement | null>(null)
   const activeLocale = currentLocale()
 
   /** Permanent preference stays in `collapsed`; hover only changes the visual rail. */
@@ -326,6 +342,51 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [triggerPageReload])
+
+  // The mobile drawer is a modal: focus moves into it, returns to the hamburger
+  // on close, and the workspace behind it is inert while it is open.
+  useEffect(() => {
+    if (!mobileOpen) return
+    const panel = mobileNavRef.current
+    if (panel) (focusableWithin(panel)[0] ?? panel).focus()
+    return () => {
+      // Runs after the drawer unmounts and `inert` is gone, so the trigger takes focus.
+      mobileTriggerRef.current?.focus()
+    }
+  }, [mobileOpen])
+
+  useEffect(() => {
+    if (!mobileOpen) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setMobileOpen(false)
+        return
+      }
+      if (event.key !== 'Tab') return
+      const panel = mobileNavRef.current
+      if (!panel) return
+      const focusable = focusableWithin(panel)
+      if (focusable.length === 0) {
+        event.preventDefault()
+        panel.focus()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+      const outside = !(active instanceof Node) || !panel.contains(active)
+      if (event.shiftKey && (outside || active === first)) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && (outside || active === last)) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown, true)
+    return () => document.removeEventListener('keydown', onKeyDown, true)
+  }, [mobileOpen])
 
   const clearHoverLeaveTimer = () => {
     if (hoverLeaveTimerRef.current) {
@@ -523,6 +584,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
           className="desktop-sidebar"
           data-collapsed-rail={collapsed || undefined}
           data-hover-expanded={collapsed && hoverExpanded ? true : undefined}
+          inert={mobileOpen}
           onMouseEnter={handleSidebarPointerEnter}
           onMouseLeave={handleSidebarPointerLeave}
         >
@@ -530,18 +592,30 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
         </aside>
         {mobileOpen ? (
           <div className="mobile-nav-layer" role="presentation" onMouseDown={() => setMobileOpen(false)}>
-            <aside className="mobile-sidebar" onMouseDown={event => event.stopPropagation()}>{sidebar}</aside>
+            <aside
+              ref={mobileNavRef}
+              className="mobile-sidebar"
+              role="dialog"
+              aria-modal="true"
+              aria-label={t('nav:sidebar.menuLabel')}
+              tabIndex={-1}
+              onMouseDown={event => event.stopPropagation()}
+            >
+              {sidebar}
+            </aside>
           </div>
         ) : null}
 
-        <div className="app-workspace">
+        <div className="app-workspace" inert={mobileOpen}>
           <header className="workspace-bar" data-tauri-drag-region>
             <Button
+              ref={mobileTriggerRef}
               type="button"
               variant="ghost"
               size="icon"
               className="mobile-menu"
               aria-label={t('nav:sidebar.openMenu')}
+              aria-expanded={mobileOpen}
               onClick={() => {
                 setCollapsed(false)
                 setMobileOpen(true)
@@ -588,8 +662,18 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
       </div>
 
 
-      <CommandDialog open={commandOpen} onOpenChange={setCommandOpen}>
-        <CommandInput placeholder={t('nav:command.placeholder')} />
+      <CommandDialog
+        open={commandOpen}
+        onOpenChange={setCommandOpen}
+        title={t('nav:command.title')}
+        description={t('nav:command.description')}
+      >
+        {/* cmdk renders an empty <label> and points aria-labelledby at it, so the
+            combobox only gets an accessible name from an explicit aria-label. */}
+        <CommandInput
+          placeholder={t('nav:command.placeholder')}
+          aria-label={t('nav:command.inputLabel')}
+        />
         <CommandList>
           <CommandEmpty>{t('nav:command.empty')}</CommandEmpty>
           {navigationSections.map(section => (

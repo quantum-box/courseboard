@@ -40,15 +40,18 @@ export const settlement: DeepPartial<typeof source> = {
     warning: 'There are notes on payment matching',
   },
   reservations: {
-    title: 'Bookings this month',
-    description: 'Booking IDs included in the total',
+    title: 'Bookings this month (internal IDs)',
+    description:
+      'Internal booking IDs included in the total. This report cannot resolve booking numbers, so only IDs are listed.',
     badge: '{{n}} bookings',
     empty: 'No bookings in range',
   },
   unpaidCancellations: {
     title: 'Unpaid cancellations',
-    description: 'Bookings that need billing or a payment check',
+    description:
+      'Bookings that need billing or a payment check, with the booking number, fee, and payment status.',
     badge: '{{n}} bookings',
+    numberUnknown: 'Booking number unavailable',
     empty: {
       title: 'No unpaid cancellations',
       description: 'Every cancellation fee this month has been collected.',
@@ -69,6 +72,19 @@ export const settlement: DeepPartial<typeof source> = {
     empty: {
       title: 'No unpaid cancellation fees',
       description: 'Nothing more to bill for this period.',
+    },
+    paymentStatusValue: {
+      paid: 'Paid',
+      pending: 'Awaiting payment',
+      unpaid: 'Unpaid',
+      fee_paid: 'Fee paid',
+      fee_pending: 'Fee awaiting payment',
+      fee_unpaid: 'Fee unpaid',
+      refunded: 'Refunded',
+      failed: 'Payment failed',
+      canceled: 'Cancelled',
+      cancelled: 'Cancelled',
+      unknown: 'Unknown ({{value}})',
     },
     table: {
       reservation: 'Booking',

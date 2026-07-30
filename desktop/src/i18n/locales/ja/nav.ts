@@ -82,6 +82,7 @@ export const nav = {
     collapse: 'サイドバーを閉じる',
     openMenu: 'メニューを開く',
     closeMenu: 'メニューを閉じる',
+    menuLabel: 'ナビゲーションメニュー',
     pin: 'よく使う画面に入れる',
     unpin: 'よく使う画面から外す',
   },
@@ -93,6 +94,9 @@ export const nav = {
     sandbox: 'テスト',
   },
   command: {
+    title: 'コマンドパレット',
+    description: '画面の名前を入力すると、その画面へ移動できます。',
+    inputLabel: '画面をさがす',
     placeholder: '画面をさがす…',
     empty: '見つかりませんでした',
   },

@@ -59,6 +59,9 @@ export const settings: DeepPartial<typeof source> = {
     title: 'Golf feature status',
     description: 'Current values for this course',
     tenantStatus: 'Course status',
+    registry: 'Registry',
+    validation: 'Validation',
+    ready: 'Ready',
     configVersion: 'Config version',
     defaultVersion: 'Default',
     invalid: {
@@ -82,7 +85,8 @@ export const settings: DeepPartial<typeof source> = {
       description:
         'Carries facility codes and channel identifiers when bookings sync to other systems. Leave it empty if you do not need it.',
     },
-    fieldHint: 'A JSON object only',
+    fieldLabel: 'Integration metadata (JSON)',
+    fieldHint: 'Enter a JSON object (wrapped in { }). Leaving it empty is fine.',
     examplesTitle: 'Examples',
     example1: 'Map to an external system’s facility code',
     example2: 'Toggle syncing per booking channel',

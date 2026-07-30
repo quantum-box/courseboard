@@ -49,6 +49,20 @@ export const caddies = {
     afternoon_only: '午後だけ',
     light_duty: '軽い仕事だけ',
   },
+  rankOption: '{{rank}}（{{rounds}}R/月）',
+  /**
+   * Readable stand-ins for the debug tokens the upstream API puts in
+   * `rationale`. `unavailable` must never name a reason: it is shown exactly
+   * when the real reason could not be read.
+   */
+  rationale: {
+    ratingCount: '評価 {{n}}件',
+    ratingCountNone: '評価の記録なし',
+    roundsAssignedToday: '今日の担当 {{n}}R',
+    ratingAverage: '評価の平均 {{value}}',
+    score: '適合スコア {{value}}',
+    unavailable: 'くわしい理由は表示できません',
+  },
   duration: '{{hours}}時間{{minutes}}分',
   rounds: '{{n}}R',
   people: '{{n}}人',
@@ -135,8 +149,11 @@ export const caddies = {
     },
     clockedIn: '出勤を記録しました',
     clockedOut: '退勤を記録しました',
-    updated: '{{name}}さんの出勤を新しくしました。',
-    failed: '出勤を記録できませんでした',
+    updatedIn: '{{name}}さんの出勤を記録しました。',
+    updatedOut: '{{name}}さんの退勤を記録しました。',
+    clockInBlocked: '出勤の状態が「{{status}}」なので、出勤にできません。名簿で「出勤できる」に直してください。退勤は記録できます。',
+    // Shared by clock-in and clock-out, so it must not name either one.
+    failed: '打刻を記録できませんでした',
     table: {
       caddie: 'キャディ',
       todayGroups: '今日 {{n}}組',
@@ -156,6 +173,17 @@ export const caddies = {
     failed: '割当を直せませんでした',
     complete: '完了',
     cancel: '取り消し',
+    /** Labels for the raw status codes the API returns. */
+    status: {
+      draft: '下書き',
+      pending: 'まだ決まっていない',
+      requested: '依頼中',
+      assigned: '割当ずみ',
+      completed: '完了',
+      cancelled: '取り消し',
+      absent: '欠勤',
+      no_show: '来ませんでした',
+    },
     table: {
       schedule: '予定',
       round: '予約・ラウンド',
@@ -223,7 +251,6 @@ export const caddies = {
     baseFee: '1ラウンドの費用（円）',
     skill: 'スキル',
     rank: 'ランク',
-    rankOption: '{{rank}}（{{rounds}}R/月）',
     staffMode: 'スタッフの登録のしかた',
     staffExisting: 'いまいるスタッフに紐づける',
     staffNew: '新しいスタッフを作る',
@@ -269,12 +296,14 @@ export const caddies = {
   },
   edit: {
     title: '基本の情報を直す',
-    description: '名前、スキル、出勤の状態、費用と1日の上限を直します。',
+    description: '名前、スキル、ランク、出勤の状態、費用と1日の上限を直します。',
     displayName: '表示する名前',
     skill: 'スキル',
+    rank: 'ランク',
     employment: '出勤の状態',
     baseFee: '1ラウンドの費用',
     currency: '通貨',
+    currencyHint: 'JPY のように、大文字のアルファベット3文字で入力します。',
     dailyLimit: '1日の上限',
     saved: {
       title: 'キャディの情報を保存しました',
@@ -283,6 +312,7 @@ export const caddies = {
     error: {
       displayName: '表示する名前を入力してください。',
       numbers: '費用は 0 円以上、1日の上限は 1 以上で入力してください。',
+      currency: '通貨は JPY のように、大文字のアルファベット3文字で入力してください。',
     },
   },
   staff: {
@@ -343,6 +373,9 @@ export const caddies = {
     nextMonth: '次の月',
     monthLabel: '{{year}}年{{month}}月',
     editPrompt: '希望を直す',
+    unsaved: '未保存',
+    unsavedHint: 'まだ保存していません。「保存」を押すまで残りません。',
+    confirmDiscard: '保存していない休みの希望があります。捨てて移動しますか？',
     status: '出られるかどうか',
     twoRounds: '2ラウンドを希望する',
     note: '体調のメモ',

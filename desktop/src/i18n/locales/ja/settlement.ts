@@ -36,15 +36,16 @@ export const settlement = {
     warning: '決済の照合に気をつける点があります',
   },
   reservations: {
-    title: 'この月の予約',
-    description: '集計に入っている予約の番号',
+    title: 'この月の予約（管理用ID）',
+    description: '集計に入っている予約の管理用IDです。この集計では予約番号を取れないため、IDだけを並べています。',
     badge: '{{n}} 件',
     empty: '対象の予約はありません',
   },
   unpaidCancellations: {
     title: '未入金のキャンセル',
-    description: '請求か入金の確認が必要な予約',
+    description: '請求か入金の確認が必要な予約です。予約番号・キャンセル料・支払いの状態を表示します。',
     badge: '{{n}} 件',
+    numberUnknown: '予約番号は取れませんでした',
     empty: {
       title: '未入金のキャンセルはありません',
       description: 'この月のキャンセル料はすべて受け取りずみです。',
@@ -65,6 +66,19 @@ export const settlement = {
     empty: {
       title: '未入金のキャンセル料はありません',
       description: 'この期間に追加の請求はありません。',
+    },
+    paymentStatusValue: {
+      paid: '入金ずみ',
+      pending: '入金待ち',
+      unpaid: '未入金',
+      fee_paid: 'キャンセル料 入金ずみ',
+      fee_pending: 'キャンセル料 入金待ち',
+      fee_unpaid: 'キャンセル料 未入金',
+      refunded: '返金ずみ',
+      failed: '決済に失敗',
+      canceled: '取り消し',
+      cancelled: '取り消し',
+      unknown: '不明（{{value}}）',
     },
     table: {
       reservation: '予約',

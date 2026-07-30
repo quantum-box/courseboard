@@ -155,7 +155,7 @@ export function IntegrationMetadataPanel() {
           </Notice>
 
           <Field
-            label="metadataJson"
+            label={t('settings:metadata.fieldLabel')}
             hint={t('settings:metadata.fieldHint')}
           >
             <NativeTextarea

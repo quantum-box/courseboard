@@ -60,6 +60,9 @@ export const settings: DeepPartial<typeof source> = {
     title: 'ゴルフ機能が動いているか',
     description: 'このゴルフ場の今の設定',
     tenantStatus: 'ゴルフ場の状態',
+    registry: '機能の登録',
+    validation: '設定の確かめ',
+    ready: '使えます',
     configVersion: '設定の版',
     defaultVersion: '最初のまま',
     invalid: {
@@ -84,7 +87,8 @@ export const settings: DeepPartial<typeof source> = {
       description:
         '予約を別の予約システムや会員システムに送るとき、ゴルフ場のコードなどをここに入れます。ふだんの受付では使いません。空のままで問題ありません。',
     },
-    fieldHint: 'JSON という形式で書きます',
+    fieldLabel: 'ほかのシステムに渡す情報（JSON）',
+    fieldHint: 'JSON という形式で、{ } で囲んで書きます。空のままでもかまいません。',
     examplesTitle: '使いかたの例',
     example1: '別のシステムのゴルフ場コードと結びつける',
     example2: '予約サイトごとに、送る・送らないを切り替える',

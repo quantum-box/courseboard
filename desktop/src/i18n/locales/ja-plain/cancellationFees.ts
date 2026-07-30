@@ -12,6 +12,21 @@ export const cancellationFees: DeepPartial<typeof source> = {
     Overdue: '期限を過ぎています',
     label: '今の状態',
   },
+  orderStatus: {
+    draft: '下書き',
+    pending: '決まるのを待っています',
+    confirmed: '決まりました',
+    processing: '手続きをしています',
+    completed: '終わりました',
+    fulfilled: '提供が終わりました',
+    paid: 'お金が入りました',
+    unpaid: 'まだお金が入っていません',
+    canceled: '取り消しました',
+    cancelled: '取り消しました',
+    refunded: 'お金を返しました',
+    failed: 'うまくいきませんでした',
+    unknown: '分かりません（{{value}}）',
+  },
   metrics: {
     shown: '表示している件数',
     unpaid: 'まだ入っていない金額',
@@ -76,7 +91,8 @@ export const cancellationFees: DeepPartial<typeof source> = {
     },
     delivery: {
       title: '知らせる方法',
-      description: '支払い用のリンクは、請求書を作ったあとに、下の文章の {url} のところに入ります。',
+      description:
+        '請求書を作ると、支払い用のリンクができます。ここで選んだ方法で、お客さまにお知らせします。',
       sms: 'ショートメール（SMS）',
       emailDetail: '請求書と支払い用のリンクを送ります',
       smsDetail: '短い支払いの案内を送ります',
@@ -85,6 +101,8 @@ export const cancellationFees: DeepPartial<typeof source> = {
       consent: 'ショートメールを送ってよいか確かめました',
       consentDetail: '受け取る人が、お店からのショートメールを受け取ることに同意しています。',
       smsBody: 'ショートメールの文章',
+      smsBodyHint:
+        'この文章は、ショートメールだけに使います。メールの本文には使いません。{url} と書いたところに、支払い用のリンクが入ります。',
     },
     total: '請求する金額',
     submit: '請求書を作って送る',

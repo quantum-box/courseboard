@@ -14,6 +14,21 @@ export const cancellationFees: DeepPartial<typeof source> = {
     all: 'All',
     label: 'Status',
   },
+  orderStatus: {
+    draft: 'Draft',
+    pending: 'Pending',
+    confirmed: 'Confirmed',
+    processing: 'Processing',
+    completed: 'Completed',
+    fulfilled: 'Fulfilled',
+    paid: 'Paid',
+    unpaid: 'Unpaid',
+    canceled: 'Cancelled',
+    cancelled: 'Cancelled',
+    refunded: 'Refunded',
+    failed: 'Failed',
+    unknown: 'Unknown ({{value}})',
+  },
   lineItemLabel: 'Cancellation fee',
   metrics: {
     shown: 'Shown',
@@ -83,7 +98,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
     },
     delivery: {
       title: 'How to send it',
-      description: 'The payment URL replaces {url} in the message after the invoice is created.',
+      description: 'Creating the invoice issues a payment URL. It is sent through the channels you pick here.',
       email: 'Email',
       emailDetail: 'Invoice and payment link',
       sms: 'SMS',
@@ -93,6 +108,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
       consent: 'SMS consent check',
       consentDetail: 'The recipient has agreed to receive transactional SMS.',
       smsBody: 'SMS text',
+      smsBodyHint: 'This text is used for SMS only, never for the email body. {url} is replaced by the payment URL.',
       smsBodyDefault:
         'Course Board here.\nPlease pay the cancellation fee of {amount}{currency}.\nDue: {dueDate}\n{url}',
     },

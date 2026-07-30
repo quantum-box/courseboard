@@ -9,7 +9,7 @@ import {
   RotateCcw,
   Users,
 } from 'lucide-react'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   currentYearMonth,
@@ -110,6 +110,36 @@ function paymentStatusVariant(status: string) {
   return 'destructive' as const
 }
 
+/**
+ * The payment status is a pass-through string from the commercial gateway, so
+ * anything outside this set falls back to a label that still shows the raw
+ * value instead of leaking bare English into the UI.
+ */
+const PAYMENT_STATUS_KEYS = new Set([
+  'paid',
+  'pending',
+  'unpaid',
+  'fee_paid',
+  'fee_pending',
+  'fee_unpaid',
+  'refunded',
+  'failed',
+  'canceled',
+  'cancelled',
+])
+
+function paymentStatusLabel(status: string) {
+  const key = status.trim().toLowerCase()
+  if (PAYMENT_STATUS_KEYS.has(key)) {
+    return i18next.t(
+      `settlement:billing.paymentStatusValue.${key}` as 'settlement:billing.paymentStatusValue.paid',
+    )
+  }
+  return i18next.t('settlement:billing.paymentStatusValue.unknown', {
+    value: status.trim() || '—',
+  })
+}
+
 export function SettlementPage() {
   const { t } = useTranslation(['settlement', 'common'])
   const [yearMonth, setYearMonth] = useState(currentYearMonth)
@@ -204,6 +234,15 @@ export function SettlementPage() {
   const netSquare = report
     ? report.square.paymentsTotal - report.square.refundsTotal
     : 0
+  // The drilldown only carries IDs; the reservation number, fee and payment
+  // status live on the unpaid cancellation items, so join them by ID to show
+  // the same identifiers the billing table below uses.
+  const unpaidCancellationById = useMemo(
+    () => new Map(
+      (report?.drilldown.unpaidCancellationItems ?? []).map(item => [item.reservationId, item] as const),
+    ),
+    [report],
+  )
 
   return (
     <div className="page-stack">
@@ -226,7 +265,7 @@ export function SettlementPage() {
 
       <Panel>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <Field label={t('settlement:month')} required className="sm:w-48">
+          <Field requirement="none" label={t('settlement:month')} className="sm:w-48">
             <Input
               type="month"
               value={yearMonth}
@@ -335,7 +374,10 @@ export function SettlementPage() {
               ) : (
                 <div className="flex max-h-56 flex-wrap gap-1 overflow-auto rounded-md border border-border bg-muted/20 p-3">
                   {report.drilldown.reservationIds.map(id => (
-                    <code key={id} className="rounded-sm border border-border bg-background px-1.5 py-1 text-2xs">
+                    <code
+                      key={id}
+                      className="rounded-sm border border-border bg-background px-1.5 py-1 text-2xs text-subtle-foreground"
+                    >
                       {id}
                     </code>
                   ))}
@@ -359,12 +401,29 @@ export function SettlementPage() {
                   description={t('settlement:unpaidCancellations.empty.description')}
                 />
               ) : (
-                <div className="flex max-h-56 flex-wrap gap-1 overflow-auto rounded-md border border-border bg-muted/20 p-3">
-                  {report.drilldown.unpaidCancellationReservationIds.map(id => (
-                    <code key={id} className="rounded-sm border border-border bg-background px-1.5 py-1 text-2xs">
-                      {id}
-                    </code>
-                  ))}
+                <div className="grid max-h-56 gap-1 overflow-auto rounded-md border border-border bg-muted/20 p-3">
+                  {report.drilldown.unpaidCancellationReservationIds.map(id => {
+                    const item = unpaidCancellationById.get(id)
+                    return (
+                      <div
+                        key={id}
+                        className="rounded-sm border border-border bg-background px-2 py-1.5 text-sm"
+                      >
+                        <strong>
+                          {item?.reservationNumber
+                            || t('settlement:unpaidCancellations.numberUnknown')}
+                        </strong>
+                        <div className="text-2xs text-subtle-foreground">{id}</div>
+                        {item ? (
+                          <div className="text-2xs text-subtle-foreground">
+                            {yen(item.cancellationFeeAmount)}
+                            {' · '}
+                            {paymentStatusLabel(item.paymentStatus)}
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  })}
                 </div>
               )}
             </Panel>
@@ -431,7 +490,7 @@ export function SettlementPage() {
                   header: t('settlement:billing.table.paymentStatus'),
                   cell: row => (
                     <Badge variant={paymentStatusVariant(row.paymentStatus)}>
-                      {row.paymentStatus}
+                      {paymentStatusLabel(row.paymentStatus)}
                     </Badge>
                   ),
                 },

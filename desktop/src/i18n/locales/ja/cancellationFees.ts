@@ -11,6 +11,21 @@ export const cancellationFees = {
     all: 'すべて',
     label: '状態',
   },
+  orderStatus: {
+    draft: '下書き',
+    pending: '確定待ち',
+    confirmed: '確定ずみ',
+    processing: '処理中',
+    completed: '完了',
+    fulfilled: '提供ずみ',
+    paid: '入金ずみ',
+    unpaid: '未入金',
+    canceled: '取り消し',
+    cancelled: '取り消し',
+    refunded: '返金ずみ',
+    failed: '失敗',
+    unknown: '不明（{{value}}）',
+  },
   lineItemLabel: 'キャンセル料',
   metrics: {
     shown: '表示中',
@@ -80,7 +95,7 @@ export const cancellationFees = {
     },
     delivery: {
       title: '送る方法',
-      description: '支払いのURLは、作ったあとに文面の {url} に入ります。',
+      description: '請求書を作ると支払い用のURLができます。ここで選んだ方法でお客さまに知らせます。',
       email: 'メール',
       emailDetail: '請求書と支払いリンク',
       sms: 'SMS',
@@ -90,6 +105,7 @@ export const cancellationFees = {
       consent: 'SMSの同意の確認',
       consentDetail: '受け取る人が、取引のSMSを受け取ることに同意しています。',
       smsBody: 'SMSの文面',
+      smsBodyHint: 'この文面はSMSだけに使います（メール本文には使いません）。{url} のところに支払いのURLが入ります。',
       smsBodyDefault:
         'Course Boardです。\nキャンセル料 {amount}{currency} のお支払いをお願いします。\n支払期限: {dueDate}\n{url}',
     },
