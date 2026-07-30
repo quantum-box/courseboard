@@ -86,8 +86,9 @@ Response には公開 payment URL と SMS status が含まれます。
 ```
 
 Field invoice 作成に失敗した場合、または Field API token を取得できない場合、
-Course Board は collection と壊れた支払いリンクを作成せず、`502 provider_error`
-を返します。
+Course Board は collection と壊れた支払いリンクを作成せず、`424 provider_error`
+を返します（Cloudflare がオリジンの 5xx を CORS ヘッダの無いエラーページに
+差し替えるため、上流起因の失敗は 4xx で返します）。
 
 ### 公開 payment endpoint
 

@@ -144,7 +144,7 @@ JWT は約1時間で切れるので `prod-api:env` を再実行してくださ�
 - Cognito Hosted UI、Auth.js、外部browser redirectは使用しません。
 - そのデプロイの Field upstream は本番 Field です（local Field ではありません）。
 - `courseboard-api`は`http://127.0.0.1:5173`と本番Web originへCORSを許可します。
-- `/healthz` が 200 でも `/v1/course/*` が Cloudflare 502、または
+- `/healthz` が 200 でも `/v1/course/*` が Cloudflare 5xx、または
   `/field-api/*` が `TACHYON_FIELD_API_URL is invalid` になる場合は、
   **ローカル設定ではなく本番 courseboard-api デプロイ側**の問題です。
 
@@ -204,7 +204,7 @@ public client 名: `courseboard-local-pkce`（名前は互換性のため維持�
 - course-api は inbound の `Authorization`（ログイン token）+ `x-operator-id` を Field へ転送します。
 - `OIDC_ISSUER_URL=<Cognito User Pool issuer>` + `EXPECTED_AUDIENCE=<public client id>` で
   Cognito access token の署名・`iss`・`token_use=access`・`client_id`を検証します。
-- Field / Tachyon Auth がログイン token を拒否すると、course-api は **502** を返します
+- Field / Tachyon Auth がログイン token を拒否すると、course-api は **403** を返します
   （401 をそのまま返さないので UI はセッション失効でログアウトしません）。再ログインしてください。
 - `TACHYON_FIELD_API_BEARER_TOKEN` は任意の静的 override（admin/service）のみ。Cognito directでは不要です。
 - ルート `.env` に `COURSEBOARD_DEV_BEARER_TOKEN` が残っていると静的 verifier が優先されます。

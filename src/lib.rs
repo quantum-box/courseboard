@@ -34,6 +34,7 @@ use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
 use sqlx::{migrate::Migrator, FromRow, MySqlPool};
 use thiserror::Error;
 use tower_http::{
+    catch_panic::CatchPanicLayer,
     cors::{AllowOrigin, CorsLayer},
     services::{ServeDir, ServeFile},
 };
@@ -528,7 +529,33 @@ pub fn build_router(state: AppState) -> Router {
             )),
         );
     }
-    router.with_state(state).layer(courseboard_cors_layer())
+    router
+        .with_state(state)
+        // Inside the CORS layer on purpose: a panic response still needs the
+        // CORS headers, otherwise the browser reports an opaque network error
+        // ("Failed to fetch") instead of the 500 we just produced.
+        .layer(CatchPanicLayer::custom(panic_response))
+        .layer(courseboard_cors_layer())
+}
+
+/// Without this a panic drops the connection with no status and no CORS
+/// headers, which reaches the operator UI as an untranslatable network error.
+fn panic_response(panic: Box<dyn std::any::Any + Send + 'static>) -> Response {
+    let detail = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&'static str>().copied())
+        .unwrap_or("unknown panic");
+    tracing::error!(panic = detail, "request handler panicked");
+
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(ErrorResponse {
+            error: "internal_server_error",
+            message: "internal server error".to_string(),
+        }),
+    )
+        .into_response()
 }
 
 fn courseboard_cors_layer() -> CorsLayer {
@@ -986,7 +1013,11 @@ impl IntoResponse for AppError {
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),
             AppError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
-            AppError::Provider(_) => (StatusCode::BAD_GATEWAY, "provider_error"),
+            // 424 rather than 502 for the same reason PermissionDenied is 403:
+            // Cloudflare swaps origin 5xx bodies for its own CORS-less error
+            // page, so the operator UI only ever sees an opaque "Failed to
+            // fetch" instead of the upstream reason.
+            AppError::Provider(_) => (StatusCode::FAILED_DEPENDENCY, "provider_error"),
             AppError::Database(_) | AppError::Migration(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_server_error")
             }
@@ -1067,7 +1098,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        // 4xx, not 5xx: Cloudflare replaces origin 5xx bodies with a CORS-less
+        // error page, so a 502 here reaches the browser as "Failed to fetch".
+        assert_eq!(response.status(), StatusCode::FAILED_DEPENDENCY);
         assert_eq!(
             response.headers().get("access-control-allow-origin"),
             Some(&HeaderValue::from_static("https://courseboard.txcloud.app"))
@@ -1089,6 +1122,45 @@ mod tests {
             body["message"],
             "external provider error: upstream unavailable"
         );
+    }
+
+    #[tokio::test]
+    async fn panicking_handler_answers_with_json_and_cors_headers() {
+        async fn boom() -> StatusCode {
+            panic!("handler exploded")
+        }
+
+        let app = Router::new()
+            .route("/boom", get(boom))
+            .layer(CatchPanicLayer::custom(panic_response))
+            .layer(courseboard_cors_layer());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/boom")
+                    .header("origin", "https://courseboard.txcloud.app")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Without the layer the connection is dropped instead, which the
+        // operator UI can only report as an untranslatable network error.
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            response.headers().get("access-control-allow-origin"),
+            Some(&HeaderValue::from_static("https://courseboard.txcloud.app"))
+        );
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect panic body")
+            .to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).expect("decode panic body");
+        assert_eq!(body["error"], "internal_server_error");
     }
 
     async fn test_app(auth: &TestAuth) -> Router {
