@@ -150,13 +150,14 @@ jobs:
           VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
 
       - name: Upload desktop bundle
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: courseboard-${{ matrix.platform }}
           path: |
             desktop/src-tauri/target/release/bundle/**
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
 
   android_bundle:
     name: Android debug bundle
@@ -232,6 +233,7 @@ jobs:
           VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
 
       - name: Upload Android bundle
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: courseboard-android-debug
@@ -239,7 +241,7 @@ jobs:
             desktop/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
             desktop/src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
 
   ios_bundle:
     name: iOS Simulator bundle
@@ -298,9 +300,10 @@ jobs:
           VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
 
       - name: Upload iOS Simulator app
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: courseboard-ios-simulator
           path: desktop/src-tauri/gen/apple/build/**/*.app
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 3
