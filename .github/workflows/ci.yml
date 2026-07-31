@@ -149,6 +149,19 @@ jobs:
           VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
           VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
 
+      # Keep successful builds honest without storing every debug bundle:
+      # verify a concrete bundle exists independently of artifact upload.
+      - name: Verify desktop bundle exists
+        shell: bash
+        run: |
+          bundle_dir="src-tauri/target/release/bundle"
+          if [[ ! -d "${bundle_dir}" ]] || [[ -z "$(find "${bundle_dir}" -type f -print | sed -n '1p')" ]]; then
+            echo "Desktop build completed without producing a bundle in ${bundle_dir}" >&2
+            exit 1
+          fi
+
+      # Failed builds may legitimately leave no bundle. Warn so this diagnostic
+      # upload does not mask the original error with a second failure.
       - name: Upload desktop bundle
         if: failure()
         uses: actions/upload-artifact@v4
@@ -156,7 +169,7 @@ jobs:
           name: courseboard-${{ matrix.platform }}
           path: |
             desktop/src-tauri/target/release/bundle/**
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 3
 
   android_bundle:
@@ -232,6 +245,19 @@ jobs:
           VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
           VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
 
+      # Keep successful builds honest without storing every debug APK:
+      # verify a concrete APK exists independently of artifact upload.
+      - name: Verify Android APK exists
+        shell: bash
+        run: |
+          apk_dir="src-tauri/gen/android/app/build/outputs/apk"
+          if [[ ! -d "${apk_dir}" ]] || [[ -z "$(find "${apk_dir}" -type f -name '*.apk' -print | sed -n '1p')" ]]; then
+            echo "Android build completed without producing an APK in ${apk_dir}" >&2
+            exit 1
+          fi
+
+      # Failed builds may legitimately leave no bundle. Warn so this diagnostic
+      # upload does not mask the original error with a second failure.
       - name: Upload Android bundle
         if: failure()
         uses: actions/upload-artifact@v4
@@ -240,7 +266,7 @@ jobs:
           path: |
             desktop/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
             desktop/src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 3
 
   ios_bundle:
@@ -299,11 +325,24 @@ jobs:
           VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
           VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
 
+      # Keep successful builds honest without storing every simulator app:
+      # verify the app contains a concrete file independently of artifact upload.
+      - name: Verify iOS Simulator app exists
+        shell: bash
+        run: |
+          build_dir="src-tauri/gen/apple/build"
+          if [[ ! -d "${build_dir}" ]] || [[ -z "$(find "${build_dir}" -type f -path '*.app/*' -print | sed -n '1p')" ]]; then
+            echo "iOS build completed without producing an app in ${build_dir}" >&2
+            exit 1
+          fi
+
+      # Failed builds may legitimately leave no app. Warn so this diagnostic
+      # upload does not mask the original error with a second failure.
       - name: Upload iOS Simulator app
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: courseboard-ios-simulator
           path: desktop/src-tauri/gen/apple/build/**/*.app
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 3
