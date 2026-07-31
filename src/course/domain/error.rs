@@ -7,6 +7,10 @@ pub enum CourseError {
     Unauthorized,
     #[error("{0}")]
     BadRequest(&'static str),
+    /// Upstream Field rejected request parameters. Kept separate from provider
+    /// failures so the inbound adapter can preserve the upstream 400 response.
+    #[error("{0}")]
+    InvalidUpstreamRequest(String),
     #[error("{0}")]
     NotFound(&'static str),
     /// Upstream Field explicitly denied the caller (401/403). Surfaced as 403,

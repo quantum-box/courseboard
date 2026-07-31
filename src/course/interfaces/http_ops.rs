@@ -18,17 +18,18 @@ use super::http::{
     ItemsResponse,
 };
 use crate::course::domain::{
-    AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery,
-    CaddieAvailability, CaddieCourseMembership, CaddieId, CaddiePatch, CaddieRating,
-    CaddieRecommendation, CaddieSupply, PayrollSummary, RecommendationQuery,
+    AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
+    AvailabilityQuery, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddiePatch,
+    CaddieRating, CaddieRecommendation, CaddieSupply, PayrollSummary, RecommendationQuery,
     ReplaceCaddieMemberships, ReservationId, UpsertCaddie, UpsertCaddieAssignment,
     UpsertCaddieAvailability,
 };
 use crate::course::usecase::{
     AutoAssignCaddiesUseCase, CreateCaddieUseCase, DeleteCaddieAvailabilityUseCase,
     ExportPayrollCsvUseCase, GetAttendanceSnapshotUseCase, GetCaddieSupplyUseCase,
-    GetPayrollSummaryUseCase, ListCaddieAvailabilitiesUseCase, ListCaddieMembershipsUseCase,
-    ListCaddieRatingsUseCase, ListCaddieRecommendationsUseCase, ReplaceCaddieMembershipsUseCase,
+    GetPayrollSummaryUseCase, ListAttendancePeriodSnapshotsUseCase,
+    ListCaddieAvailabilitiesUseCase, ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase,
+    ListCaddieRecommendationsUseCase, ReplaceCaddieMembershipsUseCase,
     UpdateCaddieAssignmentUseCase, UpdateCaddieUseCase, UpsertCaddieAvailabilityUseCase,
 };
 use crate::{AppError, AppState};
@@ -673,6 +674,65 @@ pub async fn get_attendance_snapshot(
         .await
         .map_err(AppError::from)?;
     Ok(Json(AttendanceReportDto::from(report)))
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AttendancePeriodSnapshotDto {
+    pub caddie_profile_id: String,
+    pub date: NaiveDate,
+    pub attendance_status: String,
+}
+
+impl From<&AttendancePeriodSnapshot> for AttendancePeriodSnapshotDto {
+    fn from(value: &AttendancePeriodSnapshot) -> Self {
+        Self {
+            caddie_profile_id: value.caddie_id().to_string(),
+            date: value.date(),
+            attendance_status: value.attendance_status().to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct AttendancePeriodQueryParams {
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+}
+
+/// GET /v1/course/caddie-attendance-snapshots
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-attendance-snapshots",
+    tag = "course-ops",
+    params(AttendancePeriodQueryParams),
+    responses(
+        (status = 200, description = "Attendance snapshots for an inclusive period", body = inline(ItemsResponse<AttendancePeriodSnapshotDto>)),
+        (status = 400, description = "Invalid attendance period", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_attendance_period_snapshots(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<AttendancePeriodQueryParams>,
+) -> Result<Json<ItemsResponse<AttendancePeriodSnapshotDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let use_case = ListAttendancePeriodSnapshotsUseCase::new(ops_gateway(&state));
+    let items = use_case
+        .execute(credentials, query.from, query.to)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: items
+            .iter()
+            .map(AttendancePeriodSnapshotDto::from)
+            .collect(),
+    }))
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]

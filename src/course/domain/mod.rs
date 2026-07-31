@@ -21,12 +21,12 @@ pub use caddie::{
     CaddieSkillLevel, CaddieStaff, CaddieUpstreamIdentity,
 };
 pub use caddie_ops::{
-    compute_caddie_supply, AttendanceSnapshot, AttendanceSnapshotReport, AutoAssignPlanItem,
-    AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery, AvailabilityStatus,
-    CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieDayCapacity,
-    CaddiePatch, CaddieRating, CaddieRecommendation, CaddieSupply, PayrollPeriod, PayrollRow,
-    PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie,
-    UpsertCaddieAssignment, UpsertCaddieAvailability,
+    compute_caddie_supply, AttendancePeriodSnapshot, AttendanceSnapshot, AttendanceSnapshotReport,
+    AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery,
+    AvailabilityStatus, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
+    CaddieDayCapacity, CaddiePatch, CaddieRating, CaddieRecommendation, CaddieSupply,
+    PayrollPeriod, PayrollRow, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships,
+    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 pub use commercial::{
     BudgetAchievement, DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement,

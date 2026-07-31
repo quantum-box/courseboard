@@ -11,18 +11,18 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::field_gateway::{
-    field_get_items, field_send_json, field_send_text, field_send_unit, map_caddie,
-    map_caddie_assignment, normalize_base_url, urlencoding_path, FieldGolfCaddieAssignmentDto,
-    FieldGolfCaddieProfileDto,
+    field_get_items, field_get_items_forward_bad_request, field_send_json, field_send_text,
+    field_send_unit, map_caddie, map_caddie_assignment, normalize_base_url, urlencoding_path,
+    FieldGolfCaddieAssignmentDto, FieldGolfCaddieProfileDto,
 };
 use crate::course::domain::{
-    AssignmentId, AttendanceSnapshot, AttendanceSnapshotReport, AutoAssignPlanItem,
-    AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery, AvailabilityStatus, Caddie,
-    CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
-    CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSkillLevel, CaddieStaff, CourseError,
-    GatewayCredentials, GolfOpsGateway, PayrollPeriod, PayrollRow, PayrollSummary,
-    RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability,
+    AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshot, AttendanceSnapshotReport,
+    AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery,
+    AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
+    CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation, CaddieRoster,
+    CaddieSkillLevel, CaddieStaff, CourseError, GatewayCredentials, GolfOpsGateway, PayrollPeriod,
+    PayrollRow, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 
 const GOLF: &str = "/v1/erp/extensions/golf-course";
@@ -376,6 +376,22 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         ))
     }
 
+    async fn list_attendance_period_snapshots(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<AttendancePeriodSnapshot>, CourseError> {
+        let path = format!("{GOLF}/caddie-attendance-snapshots?from={from}&to={to}");
+        let items: Vec<FieldAttendancePeriodSnapshotDto> =
+            field_get_items_forward_bad_request(&self.client, &self.base_url, &path, credentials)
+                .await?;
+        Ok(items
+            .into_iter()
+            .map(map_attendance_period_snapshot)
+            .collect())
+    }
+
     async fn auto_assign_caddies(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -560,6 +576,16 @@ fn map_attendance(value: FieldAttendanceDto) -> AttendanceSnapshot {
     )
 }
 
+fn map_attendance_period_snapshot(
+    value: FieldAttendancePeriodSnapshotDto,
+) -> AttendancePeriodSnapshot {
+    AttendancePeriodSnapshot::reconstitute(
+        value.caddie_profile_id,
+        value.date,
+        value.attendance_status,
+    )
+}
+
 fn map_payroll_row(value: FieldPayrollRowDto) -> PayrollRow {
     PayrollRow::reconstitute(
         value.caddie_profile_id,
@@ -674,6 +700,14 @@ struct FieldAttendanceDto {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct FieldAttendancePeriodSnapshotDto {
+    caddie_profile_id: String,
+    date: NaiveDate,
+    attendance_status: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct FieldAutoAssignDto {
     dry_run: bool,
     assigned: Vec<FieldAutoAssignItemDto>,
@@ -752,4 +786,113 @@ struct FieldRatingDto {
     comment: Option<String>,
     #[serde(default)]
     created_at: Option<DateTime<Utc>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use axum::{extract::OriginalUri, http::StatusCode, routing::get, Json, Router};
+
+    use super::*;
+
+    const ATTENDANCE_PERIOD_PATH: &str =
+        "/v1/erp/extensions/golf-course/caddie-attendance-snapshots";
+
+    fn test_credentials() -> GatewayCredentials<'static> {
+        GatewayCredentials {
+            authorization: "Bearer test-token",
+            operator_id: "operator-test",
+            platform_id: Some("platform-test"),
+        }
+    }
+
+    async fn spawn_field_server(app: Router) -> String {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test Field API");
+        let addr = listener.local_addr().expect("test Field API address");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve test Field API");
+        });
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn attendance_period_forwards_plural_path_and_date_query() {
+        let seen_uri = Arc::new(Mutex::new(None));
+        let app = Router::new().route(
+            ATTENDANCE_PERIOD_PATH,
+            get({
+                let seen_uri = seen_uri.clone();
+                move |OriginalUri(uri): OriginalUri| {
+                    let seen_uri = seen_uri.clone();
+                    async move {
+                        *seen_uri.lock().expect("lock seen URI") = Some(uri.to_string());
+                        Json(json!({
+                            "items": [{
+                                "caddieProfileId": "caddie-1",
+                                "date": "2026-07-15",
+                                "attendanceStatus": "clocked_out"
+                            }]
+                        }))
+                    }
+                }
+            }),
+        );
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
+        let from = NaiveDate::from_ymd_opt(2026, 7, 1).expect("valid from date");
+        let to = NaiveDate::from_ymd_opt(2026, 7, 31).expect("valid to date");
+
+        let items = gateway
+            .list_attendance_period_snapshots(test_credentials(), from, to)
+            .await
+            .expect("attendance period response");
+
+        assert_eq!(
+            seen_uri.lock().expect("lock seen URI").as_deref(),
+            Some(
+                "/v1/erp/extensions/golf-course/caddie-attendance-snapshots?from=2026-07-01&to=2026-07-31"
+            )
+        );
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].caddie_id().as_str(), "caddie-1");
+        assert_eq!(
+            items[0].date(),
+            NaiveDate::from_ymd_opt(2026, 7, 15).unwrap()
+        );
+        assert_eq!(items[0].attendance_status(), "clocked_out");
+    }
+
+    #[tokio::test]
+    async fn attendance_period_preserves_upstream_bad_request() {
+        let app = Router::new().route(
+            ATTENDANCE_PERIOD_PATH,
+            get(|| async {
+                (
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({ "message": "from must be on or before to" })),
+                )
+            }),
+        );
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
+        let from = NaiveDate::from_ymd_opt(2026, 7, 31).expect("valid from date");
+        let to = NaiveDate::from_ymd_opt(2026, 7, 1).expect("valid to date");
+
+        let error = gateway
+            .list_attendance_period_snapshots(test_credentials(), from, to)
+            .await
+            .expect_err("upstream 400 must not become an empty result");
+
+        assert!(matches!(
+            error,
+            CourseError::InvalidUpstreamRequest(message)
+                if message.contains("400 Bad Request")
+                    && message.contains("from must be on or before to")
+        ));
+    }
 }

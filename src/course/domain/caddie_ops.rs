@@ -630,6 +630,39 @@ impl AttendanceSnapshotReport {
     }
 }
 
+/// Attendance status for one caddie on one date within an inclusive period.
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
+pub struct AttendancePeriodSnapshot {
+    #[getter(skip)]
+    caddie_id: CaddieId,
+    #[getter(copy)]
+    date: NaiveDate,
+    #[getter(skip)]
+    attendance_status: String,
+}
+
+impl AttendancePeriodSnapshot {
+    pub fn reconstitute(
+        caddie_id: impl Into<CaddieId>,
+        date: NaiveDate,
+        attendance_status: impl Into<String>,
+    ) -> Self {
+        Self {
+            caddie_id: caddie_id.into(),
+            date,
+            attendance_status: attendance_status.into(),
+        }
+    }
+
+    pub fn caddie_id(&self) -> &CaddieId {
+        &self.caddie_id
+    }
+
+    pub fn attendance_status(&self) -> &str {
+        &self.attendance_status
+    }
+}
+
 /// Caddie-attached tee capacity derived from supply.
 #[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct CaddieSupply {
