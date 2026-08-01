@@ -1665,7 +1665,23 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+        // Provider failures deliberately use 424 rather than a 5xx response:
+        // Cloudflare can replace origin 5xx bodies with a CORS-less error page,
+        // hiding the actionable configuration error from the operator UI.
+        assert_eq!(response.status(), StatusCode::FAILED_DEPENDENCY);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect missing Field API URL response")
+            .to_bytes();
+        let body: serde_json::Value =
+            serde_json::from_slice(&body).expect("decode missing Field API URL response");
+        assert_eq!(body["error"], "provider_error");
+        assert_eq!(
+            body["message"],
+            "external provider error: TACHYON_FIELD_API_URL is required to create cancellation fee payment links"
+        );
     }
 
     #[tokio::test]
