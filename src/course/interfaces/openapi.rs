@@ -72,6 +72,7 @@ impl Modify for SecurityAddon {
         http_ops::delete_caddie_availability,
         http_ops::list_caddie_recommendations,
         http_ops::get_attendance_snapshot,
+        http_ops::list_attendance_period_snapshots,
         http_ops::get_caddie_supply,
         http_ops::auto_assign_caddies,
         http_ops::get_payroll_summary,
@@ -193,6 +194,7 @@ mod tests {
         assert!(paths.contains_key("/v1/course/tee-sheet"));
         assert!(paths.contains_key("/v1/course/courses"));
         assert!(paths.contains_key("/v1/course/caddie-profiles"));
+        assert!(paths.contains_key("/v1/course/caddie-attendance-snapshots"));
         assert!(paths.contains_key("/v1/course/reservation-policy"));
         assert!(paths.contains_key("/v1/course/daily-budgets"));
         assert!(paths.contains_key("/v1/me"));

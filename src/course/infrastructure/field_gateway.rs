@@ -664,6 +664,32 @@ pub(crate) async fn field_get_items<T: for<'de> Deserialize<'de>>(
     Ok(body.items)
 }
 
+/// GET an `{ items: [...] }` response while preserving an upstream 400 as a
+/// client request error. Existing callers intentionally keep their prior error
+/// mapping through [`field_get_items`].
+pub(crate) async fn field_get_items_forward_bad_request<T: for<'de> Deserialize<'de>>(
+    client: &reqwest::Client,
+    base_url: &str,
+    path_and_query: &str,
+    credentials: GatewayCredentials<'_>,
+) -> Result<Vec<T>, CourseError> {
+    if is_empty_course_store(base_url) {
+        let _ = (client, path_and_query, credentials);
+        return Ok(Vec::new());
+    }
+    let body: FieldItems<T> = field_send_json_inner(
+        client,
+        base_url,
+        reqwest::Method::GET,
+        path_and_query,
+        credentials,
+        None,
+        true,
+    )
+    .await?;
+    Ok(body.items)
+}
+
 pub(crate) async fn field_send_json<T: for<'de> Deserialize<'de>>(
     client: &reqwest::Client,
     base_url: &str,
@@ -671,6 +697,27 @@ pub(crate) async fn field_send_json<T: for<'de> Deserialize<'de>>(
     path_and_query: &str,
     credentials: GatewayCredentials<'_>,
     body: Option<&Value>,
+) -> Result<T, CourseError> {
+    field_send_json_inner(
+        client,
+        base_url,
+        method,
+        path_and_query,
+        credentials,
+        body,
+        false,
+    )
+    .await
+}
+
+async fn field_send_json_inner<T: for<'de> Deserialize<'de>>(
+    client: &reqwest::Client,
+    base_url: &str,
+    method: reqwest::Method,
+    path_and_query: &str,
+    credentials: GatewayCredentials<'_>,
+    body: Option<&Value>,
+    forward_bad_request: bool,
 ) -> Result<T, CourseError> {
     if is_empty_course_store(base_url) {
         return Err(empty_course_store_error());
@@ -684,6 +731,11 @@ pub(crate) async fn field_send_json<T: for<'de> Deserialize<'de>>(
     let status = response.status();
     if !status.is_success() {
         let message = response.text().await.unwrap_or_default();
+        if forward_bad_request && status == reqwest::StatusCode::BAD_REQUEST {
+            return Err(CourseError::InvalidUpstreamRequest(format!(
+                "Field API returned {status}: {message}"
+            )));
+        }
         return Err(map_field_status_error(status, &message));
     }
     response

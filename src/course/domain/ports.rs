@@ -2,14 +2,15 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use super::{
-    AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery, BudgetAchievement,
-    Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
-    CaddieId, CaddieRating, CaddieRecommendation, CaddieRoster, Course, CourseError, CourseId,
-    DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement, PayrollSummary, ProductSlot,
-    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationPolicy,
-    ReservationProduct, ReservationServiceId, Resource, TaxRuleSnapshot, UpdateExtensionConfig,
-    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
-    UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
+    AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
+    AvailabilityQuery, BudgetAchievement, Caddie, CaddieAssignment, CaddieAssignmentQuery,
+    CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation,
+    CaddieRoster, Course, CourseError, CourseId, DailyBudget, DailyBudgetQuery, ExtensionStatus,
+    MonthlySettlement, PayrollSummary, ProductSlot, RecommendationQuery, ReplaceCaddieMemberships,
+    Reservation, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
+    TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
+    UpsertReservationProduct,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -189,6 +190,13 @@ pub trait GolfOpsGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         date: Option<NaiveDate>,
     ) -> Result<AttendanceSnapshotReport, CourseError>;
+
+    async fn list_attendance_period_snapshots(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<AttendancePeriodSnapshot>, CourseError>;
 
     async fn auto_assign_caddies(
         &self,

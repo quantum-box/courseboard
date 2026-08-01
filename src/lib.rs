@@ -419,6 +419,12 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/caddie-attendance-snapshots",
+            get(course::interfaces::http_ops::list_attendance_period_snapshots).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/caddie-supply",
             get(course::interfaces::http_ops::get_caddie_supply).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
@@ -996,6 +1002,8 @@ pub enum AppError {
     PermissionDenied(String),
     #[error("{0}")]
     BadRequest(&'static str),
+    #[error("{0}")]
+    InvalidUpstreamRequest(String),
     #[error("tax rule was not found for tenant, prefecture, and green fee")]
     RuleNotFound,
     #[error("{0}")]
@@ -1029,6 +1037,7 @@ impl IntoResponse for AppError {
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::PermissionDenied(_) => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
+            AppError::InvalidUpstreamRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),
             AppError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
             // 424 rather than 502 for the same reason PermissionDenied is 403:
@@ -1139,6 +1148,29 @@ mod tests {
         assert_eq!(
             body["message"],
             "external provider error: upstream unavailable"
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_upstream_requests_remain_bad_requests() {
+        let response = AppError::InvalidUpstreamRequest(
+            "Field API returned 400 Bad Request: invalid attendance period".to_string(),
+        )
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect bad request body")
+            .to_bytes();
+        let body: serde_json::Value =
+            serde_json::from_slice(&body).expect("decode bad request body");
+        assert_eq!(body["error"], "bad_request");
+        assert_eq!(
+            body["message"],
+            "Field API returned 400 Bad Request: invalid attendance period"
         );
     }
 

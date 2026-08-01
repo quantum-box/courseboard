@@ -29,11 +29,12 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        AssignmentId, AttendanceSnapshotReport, AutoAssignResult, AvailabilityQuery, Caddie,
-        CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
-        CaddieId, CaddieRank, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSkillLevel,
-        CaddieStaff, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, ReservationId,
-        UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
+        AvailabilityQuery, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
+        CaddieCourseMembership, CaddieId, CaddieRank, CaddieRating, CaddieRecommendation,
+        CaddieRoster, CaddieSkillLevel, CaddieStaff, PayrollSummary, RecommendationQuery,
+        ReplaceCaddieMemberships, ReservationId, UpsertCaddie, UpsertCaddieAssignment,
+        UpsertCaddieAvailability,
     };
     use crate::course::usecase::ListCaddieAssignmentsUseCase;
 
@@ -147,6 +148,15 @@ mod tests {
                 date.unwrap_or_else(|| NaiveDate::from_ymd_opt(2026, 7, 18).unwrap()),
                 vec![],
             ))
+        }
+
+        async fn list_attendance_period_snapshots(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _from: NaiveDate,
+            _to: NaiveDate,
+        ) -> Result<Vec<AttendancePeriodSnapshot>, CourseError> {
+            Ok(vec![])
         }
 
         async fn auto_assign_caddies(
