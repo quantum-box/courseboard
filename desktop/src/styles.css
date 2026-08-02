@@ -67,6 +67,29 @@ textarea {
   font: inherit;
 }
 
+/* Prevent iOS Safari from zooming the viewport when a text-entry control is focused. */
+@media (pointer: coarse), (max-width: 800px) {
+  :is(
+    input:not([type]),
+    input[type='text'],
+    input[type='search'],
+    input[type='email'],
+    input[type='url'],
+    input[type='tel'],
+    input[type='password'],
+    input[type='number'],
+    input[type='date'],
+    input[type='month'],
+    input[type='week'],
+    input[type='time'],
+    input[type='datetime-local'],
+    select,
+    textarea
+  ) {
+    font-size: 16px !important;
+  }
+}
+
 button,
 [role='button'] {
   -webkit-tap-highlight-color: transparent;
