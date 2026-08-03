@@ -25,6 +25,7 @@ import {
   PageRefreshButton,
   Panel,
   ResourceError,
+  resourceErrorText,
   type DataTableColumn,
 } from '../../components/Page'
 import { navigate } from '../../lib/router'
@@ -42,8 +43,13 @@ type EditorState =
   | { mode: 'edit'; courseId: string }
   | null
 
+/**
+ * Save failures land in the inline notice, which has no room for a detail block
+ * and used to print the server's own English. Route them through the shared
+ * mapping so the sentence the operator reads first follows the active locale.
+ */
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : i18next.t('courses:error.generic')
+  return error instanceof Error ? resourceErrorText(error) : i18next.t('courses:error.generic')
 }
 
 function formatUpdatedAt(value: string) {

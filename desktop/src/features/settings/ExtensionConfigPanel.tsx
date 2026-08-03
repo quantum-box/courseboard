@@ -12,6 +12,7 @@ import {
   Notice,
   Panel,
   ResourceError,
+  resourceErrorText,
 } from '../../components/Page'
 import { useRegisterPageReload } from '../../lib/pageReload'
 
@@ -88,8 +89,15 @@ function formatUpdatedAt(value?: string | null) {
   }).format(date)
 }
 
+/**
+ * The save notice has no room for a detail block and used to print the server's
+ * own English. Route the failure through the shared mapping so the sentence the
+ * operator reads first follows the active locale.
+ */
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : i18next.t('settings:extension.error.generic')
+  return error instanceof Error
+    ? resourceErrorText(error)
+    : i18next.t('settings:extension.error.generic')
 }
 
 export function ExtensionConfigPanel() {

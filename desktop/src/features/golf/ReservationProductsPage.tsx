@@ -28,6 +28,7 @@ import {
   PageRefreshButton,
   Panel,
   ResourceError,
+  resourceErrorText,
   type DataTableColumn,
 } from '../../components/Page'
 import { Sheet } from '../../components/Sheet'
@@ -86,8 +87,13 @@ function newEditableSlot(weekday = 1): EditableSlot {
   return toEditableSlot(emptySlot(weekday))
 }
 
+/**
+ * Save failures land in one-line notices, which used to print the server's own
+ * English. Route them through the shared mapping so the sentence the operator
+ * reads first follows the active locale.
+ */
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : i18next.t('products:error.generic')
+  return error instanceof Error ? resourceErrorText(error) : i18next.t('products:error.generic')
 }
 
 function formatUpdatedAt(value?: string | null) {

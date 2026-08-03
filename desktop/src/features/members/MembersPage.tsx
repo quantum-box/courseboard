@@ -25,6 +25,7 @@ import {
   PageRefreshButton,
   Panel,
   ResourceError,
+  resourceErrorText,
 } from '../../components/Page'
 import { useResource } from '../../hooks/useResource'
 import { useRegisterPageReload } from '../../lib/pageReload'
@@ -49,8 +50,14 @@ import {
 
 type Feedback = { tone: 'success' | 'danger'; message: string }
 
+/**
+ * Invite and role changes report failures in a flash message with no room for a
+ * detail block, and used to print the IAM API's own English. Route them through
+ * the shared mapping so the sentence follows the active locale; `fallback` still
+ * covers the throw that carries no message of its own.
+ */
 function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error && error.message ? error.message : fallback
+  return error instanceof Error && error.message ? resourceErrorText(error) : fallback
 }
 
 export function MembersPage() {
