@@ -349,7 +349,17 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         };
         let items: Vec<FieldRecommendationDto> =
             field_get_items(&self.client, &self.base_url, &path, credentials).await?;
-        Ok(items.into_iter().map(map_recommendation).collect())
+        let names_by_profile_id: HashMap<String, String> = self
+            .list_caddie_roster(credentials)
+            .await?
+            .caddies()
+            .iter()
+            .map(|caddie| (caddie.id().to_string(), caddie.display_name().to_string()))
+            .collect();
+        Ok(items
+            .into_iter()
+            .map(|item| map_recommendation(item, &names_by_profile_id))
+            .collect())
     }
 
     async fn get_attendance_snapshot(
@@ -370,9 +380,13 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
             None,
         )
         .await?;
+        let staff_names = Self::staff_names_by_id(&self.load_staff(credentials).await?);
         Ok(AttendanceSnapshotReport::new(
             dto.date,
-            dto.items.into_iter().map(map_attendance).collect(),
+            dto.items
+                .into_iter()
+                .map(|item| map_attendance(item, &staff_names))
+                .collect(),
         ))
     }
 
@@ -447,13 +461,17 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
             None,
         )
         .await?;
+        let staff_names = Self::staff_names_by_id(&self.load_staff(credentials).await?);
         Ok(PayrollSummary::new(
             PayrollPeriod::new(
                 dto.period.year_month,
                 dto.period.start_date,
                 dto.period.end_date,
             ),
-            dto.items.into_iter().map(map_payroll_row).collect(),
+            dto.items
+                .into_iter()
+                .map(|item| map_payroll_row(item, &staff_names))
+                .collect(),
         ))
     }
 
@@ -546,29 +564,66 @@ fn map_availability(value: FieldAvailabilityDto) -> CaddieAvailability {
     )
 }
 
-fn map_recommendation(value: FieldRecommendationDto) -> CaddieRecommendation {
+/// Same rule the roster uses (`resolve_caddie_display_name`): a linked staff
+/// member's name wins over the extension's stored copy.
+fn resolve_linked_staff_name(
+    profile_display_name: &str,
+    staff_id: Option<&str>,
+    staff_names_by_id: &HashMap<String, String>,
+) -> String {
+    staff_id
+        .and_then(|id| staff_names_by_id.get(id))
+        .map(|name| name.trim())
+        .filter(|name| !name.is_empty())
+        .unwrap_or(profile_display_name)
+        .to_string()
+}
+
+/// Recommendations carry no `staffId`, so the roster is the only bridge from a
+/// caddie profile to the linked staff member's name.
+fn map_recommendation(
+    value: FieldRecommendationDto,
+    names_by_profile_id: &HashMap<String, String>,
+) -> CaddieRecommendation {
     let skill = match value.skill_level {
         Value::String(raw) => CaddieSkillLevel::parse(&raw),
         _ => CaddieSkillLevel::Regular,
     };
+    let display_name = names_by_profile_id
+        .get(&value.caddie_profile_id)
+        .cloned()
+        .unwrap_or(value.display_name);
+    let pairing_display_name = value.pairing_display_name;
     CaddieRecommendation::reconstitute(
         value.caddie_profile_id,
-        value.display_name,
+        display_name,
         skill,
         value.rating_average,
         value.rating_count.unwrap_or(0),
         value.rounds_assigned.unwrap_or(0),
         value.recommendation_score.unwrap_or(0),
         value.recommended_role.unwrap_or_else(|| "primary".into()),
-        value.pairing_display_name,
+        pairing_display_name,
         value.rationale.unwrap_or_default(),
     )
 }
 
-fn map_attendance(value: FieldAttendanceDto) -> AttendanceSnapshot {
+/// Field answers with the golf extension's own `displayName`, which is a copy
+/// made before a staff master existed and drifts from it. The roster already
+/// resolves the linked staff name; do the same here so a caddie is not called
+/// one thing on the roster and another on the attendance board.
+fn map_attendance(
+    value: FieldAttendanceDto,
+    staff_names_by_id: &HashMap<String, String>,
+) -> AttendanceSnapshot {
+    let display_name = resolve_linked_staff_name(
+        &value.display_name,
+        value.staff_id.as_deref(),
+        staff_names_by_id,
+    );
     AttendanceSnapshot::reconstitute(
         value.caddie_profile_id,
-        value.display_name,
+        display_name,
         value.staff_id,
         value.attendance_status,
         value.today_assignments.unwrap_or(0),
@@ -586,10 +641,18 @@ fn map_attendance_period_snapshot(
     )
 }
 
-fn map_payroll_row(value: FieldPayrollRowDto) -> PayrollRow {
+fn map_payroll_row(
+    value: FieldPayrollRowDto,
+    staff_names_by_id: &HashMap<String, String>,
+) -> PayrollRow {
+    let display_name = resolve_linked_staff_name(
+        &value.display_name,
+        value.staff_id.as_deref(),
+        staff_names_by_id,
+    );
     PayrollRow::reconstitute(
         value.caddie_profile_id,
-        value.display_name,
+        display_name,
         value.staff_id,
         value.worked_minutes.unwrap_or(0),
         value.shifted_minutes.unwrap_or(0),
@@ -894,5 +957,46 @@ mod tests {
                 if message.contains("400 Bad Request")
                     && message.contains("from must be on or before to")
         ));
+    }
+
+    fn staff_names(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(id, name)| ((*id).to_string(), (*name).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn linked_staff_name_wins_over_the_extension_copy() {
+        // Field stores a `displayName` copied before a staff master existed; the
+        // roster already prefers the linked staff member, and every other screen
+        // has to agree or the same person is named two ways.
+        let names = staff_names(&[("staff_1", "髙田卓哉")]);
+        assert_eq!(
+            resolve_linked_staff_name("髙田テスト", Some("staff_1"), &names),
+            "髙田卓哉"
+        );
+    }
+
+    #[test]
+    fn unlinked_or_unknown_staff_keeps_the_profile_name() {
+        let names = staff_names(&[("staff_1", "髙田卓哉")]);
+        assert_eq!(
+            resolve_linked_staff_name("外部キャディ", None, &names),
+            "外部キャディ"
+        );
+        assert_eq!(
+            resolve_linked_staff_name("外部キャディ", Some("staff_missing"), &names),
+            "外部キャディ"
+        );
+    }
+
+    #[test]
+    fn blank_staff_name_does_not_erase_the_profile_name() {
+        let names = staff_names(&[("staff_1", "   ")]);
+        assert_eq!(
+            resolve_linked_staff_name("佐藤 彩", Some("staff_1"), &names),
+            "佐藤 彩"
+        );
     }
 }

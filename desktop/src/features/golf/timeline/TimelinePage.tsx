@@ -23,7 +23,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { courseboardApiJson } from '../../../api'
+import { courseboardApiJson, today } from '../../../api'
 import { i18next } from '../../../i18n'
 import {
   EmptyState,
@@ -117,9 +117,15 @@ function readPxPerHour(): number {
   }
 }
 
+/**
+ * The date the mock fixtures are written for. Only the demo affordance uses it;
+ * the board's own idea of "today" must be the real one, or an operator can
+ * never reach the day they are working.
+ */
+const DEMO_FIXTURE_DATE = '2026-07-18'
+
 function todayIsoDate() {
-  // Keep the demo board aligned with mock fixtures when present.
-  return '2026-07-18'
+  return today()
 }
 
 function shiftDate(isoDate: string, deltaDays: number) {
@@ -536,7 +542,7 @@ export function TimelinePage() {
             selectedReservationId={selectedReservation?.id ?? null}
             onSelectReservation={id => setSelection({ kind: 'reservation', id })}
             emptyAction={(
-              <Button type="button" variant="primary" onClick={() => setDate(todayIsoDate())}>
+              <Button type="button" variant="primary" onClick={() => setDate(DEMO_FIXTURE_DATE)}>
                 {t('timeline:demo.goToDemoDate')}
               </Button>
             )}
