@@ -16,12 +16,14 @@ use serde_json::{json, Value};
 use crate::config::EMPTY_COURSE_STORE_URL;
 use crate::course::domain::{
     Caddie, CaddieAssignment, CaddieRank, CaddieSkillLevel, CaddieUpstreamIdentity, Course,
-    CourseError, CourseId, GatewayCredentials, GolfCatalogGateway, PlayType, ProductSlot,
-    Reservation, ReservationGateway, ReservationProduct, ReservationServiceId, Resource,
-    ResourceKind, UpsertCourse, UpsertReservationProduct,
+    CourseError, CourseId, GatewayCredentials, GolfCatalogGateway, ProductSlot, Reservation,
+    ReservationGateway, ReservationProduct, ReservationServiceId, Resource, ResourceKind,
+    UpsertCourse, UpsertReservationProduct,
 };
+use crate::course::infrastructure::generic_product_config;
 use crate::field_api::DEFAULT_FIELD_API_URL;
 
+const GOLF_EXTENSION_KEY: &str = "golf_course";
 const RESERVATION_LIST_LIMIT: u32 = 2000;
 const FIELD_UPSTREAM_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -81,6 +83,49 @@ impl FieldGolfCatalogGateway {
             base_url: normalize_base_url(field_api_url),
         }
     }
+
+    /// Plans live in the extension's generic config, not in a golf-specific
+    /// table. Field owns the container; the golf meaning is applied in
+    /// `generic_product_config`.
+    async fn read_config(&self, credentials: GatewayCredentials<'_>) -> Result<Value, CourseError> {
+        let items: Vec<FieldExtensionConfigDto> = field_get_items(
+            &self.client,
+            &self.base_url,
+            "/v1/erp/extensions/status",
+            credentials,
+        )
+        .await?;
+        Ok(items
+            .into_iter()
+            .find(|item| item.extension_key == GOLF_EXTENSION_KEY)
+            .and_then(|item| item.config_json)
+            .unwrap_or_else(|| json!({})))
+    }
+
+    async fn write_config(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        config: &Value,
+    ) -> Result<(), CourseError> {
+        let body = json!({ "scopeType": "tenant", "configJson": config });
+        field_send_unit(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::PATCH,
+            "/v1/erp/extensions/golf_course/config",
+            credentials,
+            Some(&body),
+        )
+        .await
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldExtensionConfigDto {
+    extension_key: String,
+    #[serde(default)]
+    config_json: Option<Value>,
 }
 
 #[async_trait]
@@ -178,14 +223,9 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<ReservationProduct>, CourseError> {
-        let items: Vec<FieldGolfReservationProductDto> = field_get_items(
-            &self.client,
-            &self.base_url,
-            "/v1/erp/extensions/golf-course/reservation-products",
-            credentials,
-        )
-        .await?;
-        Ok(items.into_iter().map(map_product).collect())
+        Ok(generic_product_config::read_products(
+            &self.read_config(credentials).await?,
+        ))
     }
 
     async fn upsert_reservation_product(
@@ -193,26 +233,15 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         credentials: GatewayCredentials<'_>,
         input: UpsertReservationProduct,
     ) -> Result<ReservationProduct, CourseError> {
-        let body = json!({
-            "displayName": input.display_name.as_deref(),
-            "playType": input.play_type.as_str(),
-            "holeCount": input.hole_count.get(),
-            "expectedDurationMinutes": input.expected_duration_minutes.get(),
-        });
-        let path = format!(
-            "/v1/erp/extensions/golf-course/reservation-products/{}",
-            urlencoding_path(&input.reservation_service_id)
-        );
-        let dto: FieldGolfReservationProductDto = field_send_json(
-            &self.client,
-            &self.base_url,
-            reqwest::Method::POST,
-            &path,
-            credentials,
-            Some(&body),
-        )
-        .await?;
-        Ok(map_product(dto))
+        let config = self.read_config(credentials).await?;
+        let next = generic_product_config::upsert_product(&config, &input);
+        self.write_config(credentials, &next).await?;
+        generic_product_config::read_products(&next)
+            .into_iter()
+            .find(|product| product.reservation_service_id() == &input.reservation_service_id)
+            .ok_or(CourseError::Provider(
+                "the saved plan was not returned by the extension config".into(),
+            ))
     }
 
     async fn list_product_slots(
@@ -220,13 +249,7 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         credentials: GatewayCredentials<'_>,
         service_id: &ReservationServiceId,
     ) -> Result<Vec<ProductSlot>, CourseError> {
-        let path = format!(
-            "/v1/erp/extensions/golf-course/reservation-products/{}/slots",
-            urlencoding_path(service_id)
-        );
-        let items: Vec<FieldGolfProductSlotDto> =
-            field_get_items(&self.client, &self.base_url, &path, credentials).await?;
-        items.into_iter().map(map_product_slot).collect()
+        generic_product_config::read_slots(&self.read_config(credentials).await?, service_id)
     }
 
     async fn replace_product_slots(
@@ -235,29 +258,10 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         service_id: &ReservationServiceId,
         slots: Vec<ProductSlot>,
     ) -> Result<Vec<ProductSlot>, CourseError> {
-        let body = json!({
-            "slots": slots.iter().map(|slot| json!({
-                "weekday": slot.weekday(),
-                "startTime": slot.start_time(),
-                "endTime": slot.end_time(),
-                "maxGroups": slot.max_groups(),
-                "maxPlayers": slot.max_players(),
-            })).collect::<Vec<_>>()
-        });
-        let path = format!(
-            "/v1/erp/extensions/golf-course/reservation-products/{}/slots",
-            urlencoding_path(service_id)
-        );
-        let items: FieldItems<FieldGolfProductSlotDto> = field_send_json(
-            &self.client,
-            &self.base_url,
-            reqwest::Method::PUT,
-            &path,
-            credentials,
-            Some(&body),
-        )
-        .await?;
-        items.items.into_iter().map(map_product_slot).collect()
+        let config = self.read_config(credentials).await?;
+        let next = generic_product_config::replace_slots(&config, service_id, &slots);
+        self.write_config(credentials, &next).await?;
+        generic_product_config::read_slots(&next, service_id)
     }
 }
 
@@ -353,33 +357,6 @@ fn map_resource(value: FieldGolfCourseResourceDto) -> Resource {
         golf_course_id,
         kind,
         value.active.unwrap_or(true),
-    )
-}
-
-fn map_product(value: FieldGolfReservationProductDto) -> ReservationProduct {
-    let id = value
-        .id
-        .clone()
-        .unwrap_or_else(|| format!("product:{}", value.reservation_service_id));
-    ReservationProduct::reconstitute(
-        id,
-        value.tenant_id,
-        value.reservation_service_id,
-        value.display_name,
-        PlayType::parse(&value.play_type),
-        value.hole_count,
-        value.expected_duration_minutes,
-    )
-}
-
-fn map_product_slot(value: FieldGolfProductSlotDto) -> Result<ProductSlot, CourseError> {
-    ProductSlot::reconstitute(
-        value.id,
-        value.weekday as u8,
-        value.start_time,
-        value.end_time,
-        value.max_groups,
-        value.max_players,
     )
 }
 
@@ -550,37 +527,6 @@ struct FieldGolfCourseResourceDto {
     attributes_json: Option<Value>,
     #[serde(default)]
     metadata_json: Option<Value>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldGolfReservationProductDto {
-    #[serde(default)]
-    id: Option<String>,
-    #[serde(default)]
-    tenant_id: Option<String>,
-    reservation_service_id: String,
-    #[serde(default)]
-    display_name: Option<String>,
-    play_type: String,
-    #[serde(default)]
-    hole_count: i32,
-    #[serde(default)]
-    expected_duration_minutes: i32,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldGolfProductSlotDto {
-    #[serde(default)]
-    id: Option<String>,
-    weekday: i32,
-    start_time: String,
-    end_time: String,
-    #[serde(default)]
-    max_groups: i32,
-    #[serde(default)]
-    max_players: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -874,30 +820,6 @@ mod tests {
 
     fn profile_dto(value: Value) -> FieldGolfCaddieProfileDto {
         serde_json::from_value(value).expect("caddie profile dto")
-    }
-
-    #[test]
-    fn map_product_preserves_optional_display_name() {
-        let named: FieldGolfReservationProductDto = serde_json::from_value(json!({
-            "id": "product-1",
-            "tenantId": "tenant-1",
-            "reservationServiceId": "service-1",
-            "displayName": "平日プラン",
-            "playType": "caddie",
-            "holeCount": 18,
-            "expectedDurationMinutes": 240
-        }))
-        .expect("named product DTO");
-        let legacy: FieldGolfReservationProductDto = serde_json::from_value(json!({
-            "reservationServiceId": "service-2",
-            "playType": "self",
-            "holeCount": 18,
-            "expectedDurationMinutes": 180
-        }))
-        .expect("legacy product DTO");
-
-        assert_eq!(map_product(named).display_name(), Some("平日プラン"));
-        assert_eq!(map_product(legacy).display_name(), None);
     }
 
     #[test]

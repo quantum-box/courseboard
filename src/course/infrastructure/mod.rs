@@ -5,6 +5,7 @@
 mod field_commercial_gateway;
 mod field_gateway;
 mod field_ops_gateway;
+mod generic_product_config;
 mod tax_rule_gateway;
 
 pub use field_commercial_gateway::FieldGolfCommercialGateway;
