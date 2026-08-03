@@ -69,17 +69,112 @@ type NavigationGuard = () => boolean
 
 const navigationGuards = new Set<NavigationGuard>()
 
+interface TrackedLocation {
+  href: string
+  entry: NavigationEntryState
+}
+
+/**
+ * The entry the app believes it is showing. `popstate` cannot be cancelled, so
+ * the only way to keep unsaved input after the browser has already moved is to
+ * push the entry the operator was on back on top — which needs its URL.
+ */
+let trackedLocation: TrackedLocation | null = null
+let unsavedListenersAttached = false
+/** Set while `goBack`/`goForward` move the history themselves: they ask the
+ * guards first, so the `popstate` they cause must not ask a second time. */
+let expectingOwnPopState = false
+
+function rememberLocation() {
+  trackedLocation = { href: window.location.href, entry: currentNavigationEntry() }
+}
+
+function onBeforeUnload(event: BeforeUnloadEvent) {
+  if (navigationGuards.size === 0) return
+  // Closing the window or reloading never reaches a guard — the app is gone
+  // before it could ask. The browser's own prompt is the only thing left.
+  event.preventDefault()
+  event.returnValue = ''
+}
+
+/**
+ * The browser's own back button and WebKit's swipe-back fire `popstate`, which
+ * is not cancellable: by the time this runs the entry has already changed. So
+ * ask the guards afterwards and, when the operator chooses to stay, push the
+ * entry they were on back on top. That is a restore rather than an undo — the
+ * forward entries the browser dropped on the way here do not come back — but it
+ * keeps the unsaved screen on screen, which is the whole point.
+ */
+function onGuardedPopState() {
+  if (expectingOwnPopState) {
+    expectingOwnPopState = false
+    rememberLocation()
+    return
+  }
+
+  const previous = trackedLocation
+  // `pushState` fires no event of its own, so the restore below cannot come back
+  // through here; the only loop possible is the operator pressing back again.
+  if (!previous || previous.href === window.location.href) {
+    rememberLocation()
+    return
+  }
+  if (confirmNavigation()) {
+    rememberLocation()
+    return
+  }
+
+  // The pushed entry lands one step deeper than whatever the browser left us on,
+  // and it drops every entry that was ahead of it, so it is the newest entry
+  // there is: index and maxIndex agree.
+  const landed = currentNavigationEntry().index
+  const restored: NavigationEntryState = { index: landed + 1, maxIndex: landed + 1 }
+  window.history.pushState(
+    { [NAVIGATION_STATE_KEY]: restored },
+    '',
+    previous.href,
+  )
+  trackedLocation = { href: previous.href, entry: restored }
+  // `pushState` notifies nobody, so the screens listening for a route change
+  // would keep rendering the route the cancelled `popstate` moved them to.
+  window.dispatchEvent(new Event(NAVIGATE_EVENT))
+}
+
+function attachUnsavedListeners() {
+  if (unsavedListenersAttached) return
+  unsavedListenersAttached = true
+  expectingOwnPopState = false
+  rememberLocation()
+  window.addEventListener('beforeunload', onBeforeUnload)
+  window.addEventListener('popstate', onGuardedPopState)
+}
+
+function detachUnsavedListeners() {
+  if (!unsavedListenersAttached) return
+  unsavedListenersAttached = false
+  trackedLocation = null
+  expectingOwnPopState = false
+  window.removeEventListener('beforeunload', onBeforeUnload)
+  window.removeEventListener('popstate', onGuardedPopState)
+}
+
 /**
  * Registers a confirmation step for the screen that is mounted right now. The
  * guard returns `false` to cancel the navigation, which is how a screen holding
  * unsaved input stops the sidebar, ⌘K, the back/forward buttons and its own
  * "back to the list" button from throwing that input away. Returns the
  * unregister callback.
+ *
+ * While at least one guard is registered the browser's own exits are watched
+ * too: `beforeunload` for closing and reloading, `popstate` for the back button
+ * and WebKit's swipe-back.
  */
 export function registerNavigationGuard(guard: NavigationGuard) {
   navigationGuards.add(guard)
+  attachUnsavedListeners()
   return () => {
     navigationGuards.delete(guard)
+    if (navigationGuards.size === 0) detachUnsavedListeners()
   }
 }
 
@@ -128,6 +223,7 @@ export function navigate(route: string) {
     '',
     nextHash,
   )
+  if (unsavedListenersAttached) rememberLocation()
   window.dispatchEvent(new Event(NAVIGATE_EVENT))
   return true
 }
@@ -155,12 +251,14 @@ export function navigationAvailability(): NavigationAvailability {
 export function goBack() {
   if (!navigationAvailability().canGoBack) return
   if (!confirmNavigation()) return
+  expectingOwnPopState = unsavedListenersAttached
   window.history.back()
 }
 
 export function goForward() {
   if (!navigationAvailability().canGoForward) return
   if (!confirmNavigation()) return
+  expectingOwnPopState = unsavedListenersAttached
   window.history.forward()
 }
 
