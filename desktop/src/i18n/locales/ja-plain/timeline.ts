@@ -95,7 +95,8 @@ export const timeline: DeepPartial<typeof source> = {
     tooltip: '{{plan}} · 管理番号: {{id}} · {{party}} · {{number}} · {{size}}人 · {{coverage}}',
     empty: {
       title: 'この日の予約はありません',
-      description: 'お試し用の日（2026-07-18）を選ぶか、本番のデータにつないでください。',
+      description: 'ほかの日をえらんでください。予約が入ると、ここに出ます。',
+      goToToday: '今日にもどる',
     },
   },
   caddieLane: {
