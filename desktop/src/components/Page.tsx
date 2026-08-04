@@ -356,7 +356,7 @@ export function DataTable<T>({
 }: {
   rows: T[]
   columns: DataTableColumn<T>[]
-  rowKey: (row: T) => string
+  rowKey: (row: T, index: number) => string
   empty?: ReactNode
   onRowClick?: (row: T) => void
 }) {
@@ -375,9 +375,9 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody>
-          {rows.map(row => (
+          {rows.map((row, rowIndex) => (
             <tr
-              key={rowKey(row)}
+              key={rowKey(row, rowIndex)}
               tabIndex={onRowClick ? 0 : undefined}
               className={onRowClick ? 'clickable-row' : undefined}
               onClick={onRowClick ? () => onRowClick(row) : undefined}

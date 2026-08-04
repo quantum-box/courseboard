@@ -450,7 +450,9 @@ export function BudgetsPage() {
                 </MetricGrid>
                 <DataTable
                   rows={achievements}
-                  rowKey={row => row.date}
+                  // The API returns one row per course and date but names no
+                  // course, so the date alone collides on "all courses".
+                  rowKey={(row, index) => `${row.date}-${index}`}
                   columns={[
                     {
                       key: 'date',
