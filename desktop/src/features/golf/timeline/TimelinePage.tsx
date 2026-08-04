@@ -601,7 +601,7 @@ export function TimelinePage() {
                   description={t('timeline:tee.empty.description')}
                   action={(
                     <Button type="button" variant="primary" onClick={() => setDate(todayIsoDate())}>
-                      {t('timeline:demo.goToDemoDate')}
+                      {t('timeline:tee.empty.goToToday')}
                     </Button>
                   )}
                 />

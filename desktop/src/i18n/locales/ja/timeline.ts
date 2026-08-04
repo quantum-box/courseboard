@@ -99,7 +99,8 @@ export const timeline = {
     tooltip: '{{plan}} · 管理番号: {{id}} · {{party}} · {{number}} · {{size}}名 · {{coverage}}',
     empty: {
       title: 'この日のスタートはありません',
-      description: 'デモの日 2026-07-18 を選ぶか、本番のデータにつないでください。',
+      description: '別の日を選んでください。予約が入るとここに表示されます。',
+      goToToday: '今日にもどる',
     },
   },
   caddieLane: {

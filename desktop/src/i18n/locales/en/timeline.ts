@@ -101,7 +101,8 @@ export const timeline: DeepPartial<typeof source> = {
     tooltip: '{{plan}} · ID: {{id}} · {{party}} · {{number}} · {{size}} players · {{coverage}}',
     empty: {
       title: 'No tee times on this day',
-      description: 'Pick the demo date 2026-07-18, or connect to live data.',
+      description: 'Pick another day. Reservations appear here once they are made.',
+      goToToday: 'Go to today',
     },
   },
   caddieLane: {
