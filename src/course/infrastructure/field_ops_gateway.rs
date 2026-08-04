@@ -26,6 +26,9 @@ use crate::course::domain::{
 };
 
 const GOLF: &str = "/v1/erp/extensions/golf-course";
+/// Caddies are hired per round, so a staff member registered while creating one
+/// starts as part-time; HRM can change it afterwards.
+const DEFAULT_STAFF_EMPLOYMENT_TYPE: &str = "part_time";
 
 /// Loads / mutates caddie ops through Field golf-course extension endpoints.
 pub struct FieldGolfOpsGateway {
@@ -98,6 +101,32 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
             Self::map_profiles(items, &staff_names),
             staff,
         ))
+    }
+
+    async fn create_staff(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        name: &str,
+    ) -> Result<CaddieStaff, CourseError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(CourseError::BadRequest("staff name is required"));
+        }
+        let body = json!({
+            "name": name,
+            "employmentType": DEFAULT_STAFF_EMPLOYMENT_TYPE,
+            "active": true,
+        });
+        let dto: FieldStaffMemberDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            "/v1/erp/staff",
+            credentials,
+            Some(&body),
+        )
+        .await?;
+        Ok(CaddieStaff::new(dto.id, dto.name, dto.active))
     }
 
     async fn create_caddie(
@@ -855,7 +884,12 @@ struct FieldRatingDto {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use axum::{extract::OriginalUri, http::StatusCode, routing::get, Json, Router};
+    use axum::{
+        extract::OriginalUri,
+        http::StatusCode,
+        routing::{get, post},
+        Json, Router,
+    };
 
     use super::*;
 
@@ -957,6 +991,50 @@ mod tests {
                 if message.contains("400 Bad Request")
                     && message.contains("from must be on or before to")
         ));
+    }
+
+    #[tokio::test]
+    async fn create_staff_registers_the_named_hrm_member() {
+        let seen_body = Arc::new(Mutex::new(None));
+        let app = Router::new().route(
+            "/v1/erp/staff",
+            post({
+                let seen_body = seen_body.clone();
+                move |Json(body): Json<Value>| {
+                    let seen_body = seen_body.clone();
+                    async move {
+                        *seen_body.lock().expect("lock seen body") = Some(body);
+                        Json(json!({ "id": "staff_new", "name": "山田 花子", "active": true }))
+                    }
+                }
+            }),
+        );
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
+
+        let staff = gateway
+            .create_staff(test_credentials(), " 山田 花子 ")
+            .await
+            .expect("staff is registered");
+
+        assert_eq!(staff.id(), "staff_new");
+        let body = seen_body.lock().expect("lock seen body").clone();
+        let body = body.expect("staff endpoint was called");
+        assert_eq!(body["name"], "山田 花子");
+        assert_eq!(body["employmentType"], "part_time");
+        assert_eq!(body["active"], true);
+    }
+
+    #[tokio::test]
+    async fn create_staff_rejects_a_blank_name_before_calling_field() {
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some("http://127.0.0.1:1"));
+
+        let error = gateway
+            .create_staff(test_credentials(), "   ")
+            .await
+            .expect_err("a blank name cannot name a staff member");
+
+        assert!(matches!(error, CourseError::BadRequest(_)));
     }
 
     fn staff_names(pairs: &[(&str, &str)]) -> HashMap<String, String> {
