@@ -46,6 +46,8 @@ import {
   courseboardApiText,
   fieldApiJson,
   fieldApiText,
+  today,
+  COURSE_TIME_ZONE,
 } from '../../api'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
@@ -296,14 +298,30 @@ function request(method: string, payload?: unknown): RequestInit {
   }
 }
 
-function todayJst() {
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'Asia/Tokyo',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date())
+/**
+ * The body of a clock-in or clock-out.
+ *
+ * `businessDate` is the point of this: Field files attendance under the UTC
+ * calendar date unless it is told which working day the punch belongs to, and
+ * a course opens hours before midnight UTC has passed. Without it every
+ * morning punch lands on the previous day, where the day's own board cannot
+ * see it and the open shift can never be closed.
+ */
+export function clockRequestBody(direction: 'in' | 'out', businessDate: string) {
+  return direction === 'out'
+    ? { businessDate, breakMinutes: 0 }
+    : { businessDate }
 }
+
+function punchClock(staffId: string, direction: 'in' | 'out', businessDate: string) {
+  return fieldApiText(
+    `/v1/erp/staff/${encodeURIComponent(staffId)}/clock-${direction}`,
+    request('POST', clockRequestBody(direction, businessDate)),
+  )
+}
+
+/** Re-exported so the call sites below read the same as the rest of the app. */
+const todayJst = today
 
 function previousYearMonth() {
   const now = new Date()
@@ -323,7 +341,7 @@ function formatDateTime(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat('ja-JP', {
-    timeZone: 'Asia/Tokyo',
+    timeZone: COURSE_TIME_ZONE,
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -335,7 +353,7 @@ function dateKey(value: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value.slice(0, 10)
   return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'Asia/Tokyo',
+    timeZone: COURSE_TIME_ZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -1355,10 +1373,9 @@ function AttendancePanel({
     }
     setBusyId(snapshot.caddieProfileId)
     try {
-      await fieldApiText(
-        `/v1/erp/staff/${encodeURIComponent(staffId)}/clock-${direction}`,
-        request('POST', direction === 'out' ? { breakMinutes: 0 } : {}),
-      )
+      // The day this board is showing — the same day the punch has to be
+      // filed under for the row to come back on the next refresh.
+      await punchClock(staffId, direction, resource.data?.date ?? todayJst())
       onChanged()
       setFlash({
         tone: 'success',
@@ -1723,6 +1740,7 @@ function ProfilesView({
           courses={coursesResource.data?.items.filter(course => course.isActive !== false) ?? []}
           coursesError={coursesResource.error}
           attendance={attendanceResource.data?.items.find(item => item.caddieProfileId === selected.id) ?? null}
+          businessDate={attendanceResource.data?.date ?? todayJst()}
           onPeopleChanged={onPeopleChanged}
           onAssignmentsChanged={onAssignmentsChanged}
           setFlash={setFlash}
@@ -2114,6 +2132,7 @@ function ProfileDetail({
   courses,
   coursesError,
   attendance,
+  businessDate,
   onPeopleChanged,
   onAssignmentsChanged,
   setFlash,
@@ -2127,6 +2146,7 @@ function ProfileDetail({
   courses: GolfCourse[]
   coursesError: unknown
   attendance: AttendanceSnapshot | null
+  businessDate: string
   onPeopleChanged: () => void
   onAssignmentsChanged: () => void
   setFlash: (flash: Flash) => void
@@ -2243,6 +2263,7 @@ function ProfileDetail({
           <StaffManagementPanel
             profile={profile}
             attendance={attendance}
+            businessDate={businessDate}
             staff={staff}
             staffError={staffError}
             onChanged={onPeopleChanged}
@@ -2452,6 +2473,7 @@ function ProfileEditDialog({
 function StaffManagementPanel({
   profile,
   attendance,
+  businessDate,
   staff,
   staffError,
   onChanged,
@@ -2459,6 +2481,7 @@ function StaffManagementPanel({
 }: {
   profile: CaddieProfile
   attendance: AttendanceSnapshot | null
+  businessDate: string
   staff: StaffMember[]
   staffError: unknown
   onChanged: () => void
@@ -2479,10 +2502,7 @@ function StaffManagementPanel({
     if (!staffId) return
     setBusy(true)
     try {
-      await fieldApiText(
-        `/v1/erp/staff/${encodeURIComponent(staffId)}/clock-${direction}`,
-        request('POST', direction === 'out' ? { breakMinutes: 0 } : {}),
-      )
+      await punchClock(staffId, direction, businessDate)
       onChanged()
       setFlash({
         tone: 'success',

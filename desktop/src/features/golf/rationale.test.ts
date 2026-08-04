@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { attendanceLookup, offDutyCandidates, offDutyReason, readableRationale } from './CaddiesPage'
+import {
+  attendanceLookup,
+  clockRequestBody,
+  offDutyCandidates,
+  offDutyReason,
+  readableRationale,
+} from './CaddiesPage'
 
 describe('readableRationale', () => {
   it('rewrites the debug tokens the production API actually returns', () => {
@@ -73,5 +79,27 @@ describe('offDutyCandidates', () => {
     const candidates = [{ caddieProfileId: 'b' }]
     expect(offDutyCandidates(candidates, attendance)).toHaveLength(1)
     expect(candidates).toHaveLength(1)
+  })
+})
+
+describe('clockRequestBody', () => {
+  it('always names the working day the punch belongs to', () => {
+    // Field files attendance under the UTC calendar date unless told which
+    // working day it is, and a course opens before midnight UTC has passed.
+    expect(clockRequestBody('in', '2026-08-04')).toEqual({ businessDate: '2026-08-04' })
+  })
+
+  it('keeps the break minutes a clock-out has to send', () => {
+    expect(clockRequestBody('out', '2026-08-04')).toEqual({
+      businessDate: '2026-08-04',
+      breakMinutes: 0,
+    })
+  })
+
+  it('sends the same day for both halves of a punch pair', () => {
+    // Clock-out reads the record back by date; disagreeing halves lose the row.
+    const day = '2026-08-04'
+    expect(clockRequestBody('in', day).businessDate)
+      .toBe(clockRequestBody('out', day).businessDate)
   })
 })
