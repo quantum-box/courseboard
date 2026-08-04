@@ -23,7 +23,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { courseboardApiJson, today } from '../../../api'
+import { courseboardApiJson, nowIsoMinute, today } from '../../../api'
 import { i18next } from '../../../i18n'
 import {
   EmptyState,
@@ -70,8 +70,9 @@ import {
 } from './timelineLayout'
 
 const COURSE_API = '/v1/course'
-const MOCK_NOW = '2026-07-18T09:00:00+09:00'
 const LANE_WIDTH_PX = 168
+/** How often the "now" line catches up with the clock. */
+const NOW_TICK_MS = 30_000
 
 type ListResponse<T> = { items: T[] }
 
@@ -126,6 +127,22 @@ const DEMO_FIXTURE_DATE = '2026-07-18'
 
 function todayIsoDate() {
   return today()
+}
+
+/**
+ * The current course-local minute, kept live.
+ *
+ * The now line used to be pinned to the date the demo fixtures were written
+ * for, so on a real board it pointed at a moment that had nothing to do with
+ * the round in progress.
+ */
+function useCurrentMinute() {
+  const [now, setNow] = useState(nowIsoMinute)
+  useEffect(() => {
+    const timer = setInterval(() => setNow(nowIsoMinute()), NOW_TICK_MS)
+    return () => clearInterval(timer)
+  }, [])
+  return now
 }
 
 function shiftDate(isoDate: string, deltaDays: number) {
@@ -188,6 +205,7 @@ function coverageClass(coverage: AssignmentCoverage) {
 export function TimelinePage() {
   const { t } = useTranslation(['timeline', 'common'])
   const [date, setDate] = useState(todayIsoDate)
+  const currentMinute = useCurrentMinute()
   const [courseFilter, setCourseFilter] = useState('all')
   const [displayMode, setDisplayMode] = useState<DisplayMode>(readDisplayMode)
   const [boardView, setBoardView] = useState<BoardView>(readBoardView)
@@ -281,7 +299,7 @@ export function TimelinePage() {
   const summary = summarizeDay(reservations, assignments)
   const conflicts = findOverlappingAssignmentIds(assignments)
   const hourMarks = buildHourMarks(DEFAULT_TIMELINE_WINDOW, markStepMinutes(pxPerHour))
-  const nowPct = nowLinePercent(MOCK_NOW, date)
+  const nowPct = nowLinePercent(currentMinute, date)
   const trackWidth = trackWidthPx(pxPerHour)
   const courseOptions = (coursesResource.data?.items ?? [])
     .filter(course => course.isActive !== false)

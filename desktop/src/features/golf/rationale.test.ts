@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { readableRationale } from './CaddiesPage'
+import { attendanceLookup, offDutyCandidates, offDutyReason, readableRationale } from './CaddiesPage'
 
 describe('readableRationale', () => {
   it('rewrites the debug tokens the production API actually returns', () => {
@@ -32,5 +32,46 @@ describe('readableRationale', () => {
 
   it('drops blanks and duplicates', () => {
     expect(readableRationale(['  ', 'rating_count=0', 'rating_count=0'])).toEqual(['評価の記録なし'])
+  })
+})
+
+describe('offDutyReason', () => {
+  it('says nothing about a caddie who is on duty', () => {
+    expect(offDutyReason('working')).toBeNull()
+  })
+
+  it('names why a candidate is not on duty', () => {
+    expect(offDutyReason('not_clocked')).toBe('notClocked')
+    expect(offDutyReason('clocked_out')).toBe('clockedOut')
+    expect(offDutyReason('not_linked')).toBe('notLinked')
+  })
+
+  it('treats a caddie missing from the snapshot as not clocked in', () => {
+    // The snapshot is what a clock-in writes to, so absence is the safe read.
+    expect(offDutyReason(undefined)).toBe('notClocked')
+  })
+})
+
+describe('offDutyCandidates', () => {
+  const attendance = attendanceLookup([
+    { caddieProfileId: 'a', displayName: 'A', attendanceStatus: 'working', todayAssignments: 0, roundsWithoutClockInToday: 0 },
+    { caddieProfileId: 'b', displayName: 'B', attendanceStatus: 'not_clocked', todayAssignments: 0, roundsWithoutClockInToday: 0 },
+  ])
+
+  it('reports only the candidates who are not on duty', () => {
+    const flagged = offDutyCandidates(
+      [{ caddieProfileId: 'a' }, { caddieProfileId: 'b' }, { caddieProfileId: 'c' }],
+      attendance,
+    )
+    expect(flagged.map(entry => entry.candidate.caddieProfileId)).toEqual(['b', 'c'])
+    expect(flagged.map(entry => entry.reason)).toEqual(['notClocked', 'notClocked'])
+  })
+
+  it('keeps them in the plan rather than filtering them out', () => {
+    // The morning plan is drawn up before anyone has clocked in; filtering
+    // would leave the dispatch board empty every day.
+    const candidates = [{ caddieProfileId: 'b' }]
+    expect(offDutyCandidates(candidates, attendance)).toHaveLength(1)
+    expect(candidates).toHaveLength(1)
   })
 })

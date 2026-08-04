@@ -59,7 +59,13 @@ export const caddies: DeepPartial<typeof source> = {
     roundsAssignedToday: '{{n}}R assigned today',
     ratingAverage: 'Average rating {{value}}',
     score: 'Match score {{value}}',
+    neutralScore: 'Neutral score — no ratings on record yet',
     unavailable: 'No readable explanation was provided',
+  },
+  offDuty: {
+    notClocked: 'Not clocked in',
+    clockedOut: 'Clocked out',
+    notLinked: 'No staff link',
   },
   duration: '{{hours}}h {{minutes}}m',
   rounds: '{{n}}R',
@@ -119,6 +125,10 @@ export const caddies: DeepPartial<typeof source> = {
     empty: {
       title: 'Nothing to assign',
       description: 'There are no open caddie-required bookings, or no caddies available.',
+    },
+    offDuty: {
+      title: '{{n}} candidate(s) are not on duty',
+      description: 'You can still commit this plan. Nobody has clocked in when the morning plan is drawn up; check that they clock in during the day.',
     },
     candidate: 'Candidate',
     skipped: 'Skipped {{n}}',
