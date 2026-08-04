@@ -55,7 +55,13 @@ export const caddies: DeepPartial<typeof source> = {
     roundsAssignedToday: '今日の担当 {{n}}ラウンド',
     ratingAverage: 'お客さまの評価の平均 {{value}}',
     score: 'おすすめ度 {{value}}',
+    neutralScore: 'まだ評価がないので、ふつうの点にしています',
     unavailable: 'くわしい理由は表示できません',
+  },
+  offDuty: {
+    notClocked: 'まだ出勤していません',
+    clockedOut: 'もう退勤しました',
+    notLinked: 'スタッフとつながっていません',
   },
   rounds: '{{n}}ラウンド',
   operationDate: '見たい日',
@@ -112,6 +118,10 @@ export const caddies: DeepPartial<typeof source> = {
     empty: {
       title: '決める組がありません',
       description: '担当がまだの組がないか、出られるキャディがいません。',
+    },
+    offDuty: {
+      title: 'まだ出勤していない人が{{n}}人います',
+      description: 'このまま決めてもかまいません。朝はまだ出勤していないのがふつうです。あとで出勤の打刻がされているか見てください。',
     },
     candidate: 'この人が候補',
     skipped: '{{n}}件は決められませんでした',

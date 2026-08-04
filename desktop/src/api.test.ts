@@ -3,8 +3,11 @@ import {
   configureApiAuth,
   courseboardApiJson,
   protectedRequestCredentials,
+  nowIsoMinute,
   shouldSoftSignOutOn401,
+  today,
 } from './api'
+import { nowLinePercent } from './features/golf/timeline/timelineLayout'
 
 describe('protectedRequestCredentials', () => {
   it('includes the HttpOnly session only for same-origin Web requests', () => {
@@ -181,5 +184,38 @@ describe('protected API 401 handling', () => {
     })
     expect(onUnauthorized).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('nowIsoMinute', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('reports the course-local minute, not the machine-local one', () => {
+    // A laptop parked in UTC must still show the hour the course is working.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-04T21:30:00Z'))
+    expect(nowIsoMinute()).toBe('2026-08-05T06:30')
+  })
+
+  it('rolls the date over on the course clock, not UTC', () => {
+    // 06:00 JST is the previous day in UTC — the case that misfiled clock-ins.
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-03T22:00:00Z'))
+    expect(nowIsoMinute()).toBe('2026-08-04T07:00')
+    expect(today()).toBe('2026-08-04')
+  })
+
+  it('parses back into the timeline now line', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-04T01:00:00Z'))
+    expect(nowLinePercent(nowIsoMinute(), today())).toBeGreaterThan(0)
+  })
+
+  it('is not pinned to the retired demo fixture date', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-04T01:00:00Z'))
+    expect(nowIsoMinute().startsWith('2026-07-18')).toBe(false)
   })
 })

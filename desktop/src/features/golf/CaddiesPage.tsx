@@ -163,6 +163,42 @@ type AttendanceResponse = {
   items: AttendanceSnapshot[]
 }
 
+export type AttendanceLookup = Map<string, AttendanceSnapshot['attendanceStatus']>
+
+export function attendanceLookup(items: AttendanceSnapshot[]): AttendanceLookup {
+  return new Map(items.map(item => [item.caddieProfileId, item.attendanceStatus]))
+}
+
+/**
+ * Why a candidate is not on duty, or `null` when they are.
+ *
+ * Dispatch is planned before the course opens, so at 6am nobody has clocked in
+ * yet and hiding un-clocked caddies would leave the board empty every morning.
+ * They stay selectable; the screen says which ones are not on duty and warns
+ * again before the assignment is committed.
+ *
+ * A caddie missing from the day's snapshot is treated as not clocked in — the
+ * safe reading, since the snapshot is what the clock-in writes to.
+ */
+export function offDutyReason(
+  status: AttendanceSnapshot['attendanceStatus'] | undefined,
+): 'notClocked' | 'clockedOut' | 'notLinked' | null {
+  if (status === 'working') return null
+  if (status === 'clocked_out') return 'clockedOut'
+  if (status === 'not_linked') return 'notLinked'
+  return 'notClocked'
+}
+
+export function offDutyCandidates<T extends { caddieProfileId: string }>(
+  candidates: T[],
+  attendance: AttendanceLookup,
+): { candidate: T; reason: Exclude<ReturnType<typeof offDutyReason>, null> }[] {
+  return candidates.flatMap(candidate => {
+    const reason = offDutyReason(attendance.get(candidate.caddieProfileId))
+    return reason ? [{ candidate, reason }] : []
+  })
+}
+
 type CaddieSupply = {
   date: string
   availableCaddies: number
@@ -494,11 +530,22 @@ function rationaleTokenLabel(key: string, rawValue: string) {
  * states a reason that may not be the real one — worse than showing the real
  * one in the wrong language.
  */
+/**
+ * Free prose the Field API is known to return verbatim. Translated rather than
+ * dropped, so the reason still reads as a reason. Keyed on the exact upstream
+ * sentence, lowercased — anything not listed here still passes through.
+ */
+const RATIONALE_PROSE: Record<string, string> = {
+  'no historical ratings yet; neutral score applied': 'caddies:rationale.neutralScore',
+}
+
 export function readableRationale(rationale: string[]) {
   const readable = rationale
     .map(entry => entry.trim())
     .filter(Boolean)
     .map(entry => {
+      const prose = RATIONALE_PROSE[entry.toLowerCase()]
+      if (prose) return i18next.t(prose as 'caddies:rationale.neutralScore')
       const match = RATIONALE_TOKEN.exec(entry)
       if (!match) return entry
       const [, key, rawValue] = match
@@ -848,6 +895,7 @@ function DispatchView({
   const profiles = profilesResource.data?.items ?? []
   const assignments = assignmentsResource.data?.items ?? []
   const attendance = attendanceResource.data?.items ?? []
+  const attendanceById = attendanceLookup(attendance)
   const dayAssignments = assignments.filter(item => dateKey(item.scheduledAt) === date)
   const activeAssignments = dayAssignments.filter(item => item.status !== 'cancelled')
   const working = attendance.filter(item => item.attendanceStatus === 'working').length
@@ -926,10 +974,14 @@ function DispatchView({
         <div className="grid gap-4 xl:grid-cols-2">
           <AutoAssignPanel
             date={date}
+            attendance={attendanceById}
             onChanged={onChanged}
             setFlash={setFlash}
           />
-          <RecommendationsPanel resource={recommendationsResource} />
+          <RecommendationsPanel
+            resource={recommendationsResource}
+            attendance={attendanceById}
+          />
         </div>
       </section>
     </div>
@@ -1056,10 +1108,12 @@ function DailySupplyPanel({ date }: { date: string }) {
 
 function AutoAssignPanel({
   date,
+  attendance,
   onChanged,
   setFlash,
 }: {
   date: string
+  attendance: AttendanceLookup
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
@@ -1072,6 +1126,10 @@ function AutoAssignPanel({
     setPlan(null)
     setError(null)
   }, [date])
+
+  // Surfaced before the plan is committed, not used to filter it: the morning
+  // plan is drawn up before anyone has clocked in.
+  const offDuty = offDutyCandidates(plan?.assigned ?? [], attendance)
 
   async function run(dryRun: boolean) {
     setBusy(dryRun ? 'preview' : 'execute')
@@ -1162,6 +1220,21 @@ function AutoAssignPanel({
               ))}
             </div>
           )}
+          {offDuty.length > 0 ? (
+            <Notice
+              tone="warning"
+              title={t('caddies:autoAssign.offDuty.title', { n: String(offDuty.length) })}
+            >
+              <p>{t('caddies:autoAssign.offDuty.description')}</p>
+              <ul className="mt-1 list-inside list-disc space-y-1">
+                {offDuty.map(({ candidate, reason }) => (
+                  <li key={`${candidate.reservationId}-${candidate.caddieProfileId}`}>
+                    {candidate.caddieDisplayName}: {t(`caddies:offDuty.${reason}`)}
+                  </li>
+                ))}
+              </ul>
+            </Notice>
+          ) : null}
           {plan.skipped.length > 0 ? (
             <Notice
               tone="warning"
@@ -1184,8 +1257,10 @@ function AutoAssignPanel({
 
 function RecommendationsPanel({
   resource,
+  attendance,
 }: {
   resource: ResourceValue<ListResponse<CaddieRecommendation>>
+  attendance: AttendanceLookup
 }) {
   const { t } = useTranslation(['caddies', 'common'])
   return (
@@ -1219,6 +1294,12 @@ function RecommendationsPanel({
                 <Badge variant="accent">
                   {t('caddies:recommendations.score', { n: String(item.recommendationScore) })}
                 </Badge>
+                {(() => {
+                  const reason = offDutyReason(attendance.get(item.caddieProfileId))
+                  return reason ? (
+                    <Badge variant="warning">{t(`caddies:offDuty.${reason}`)}</Badge>
+                  ) : null
+                })()}
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
                 {t('caddies:recommendations.meta', {

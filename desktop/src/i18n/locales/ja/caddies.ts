@@ -61,7 +61,13 @@ export const caddies = {
     roundsAssignedToday: '今日の担当 {{n}}R',
     ratingAverage: '評価の平均 {{value}}',
     score: '適合スコア {{value}}',
+    neutralScore: '評価の記録がないため中立の点数',
     unavailable: 'くわしい理由は表示できません',
+  },
+  offDuty: {
+    notClocked: '未出勤',
+    clockedOut: '退勤済み',
+    notLinked: 'スタッフ未紐付け',
   },
   duration: '{{hours}}時間{{minutes}}分',
   rounds: '{{n}}R',
@@ -119,6 +125,10 @@ export const caddies = {
     empty: {
       title: '配置する予約がありません',
       description: 'まだ決まっていないキャディ付きの予約がないか、出られるキャディがいません。',
+    },
+    offDuty: {
+      title: '出勤していない候補が{{n}}人います',
+      description: 'このまま決めることもできます。朝の計画では通常のことですが、当日中に出勤の打刻がされているか確かめてください。',
     },
     candidate: '候補',
     skipped: '{{n}}件を飛ばしました',
