@@ -84,7 +84,7 @@ jobs:
 
   desktop_bundle:
     name: Desktop bundle (${{ matrix.platform }})
-    # macOS/Windows runners are expensive: bundle only after a merge to main.
+    # Windows runners are expensive: bundle only after a merge to main.
     if: github.event_name == 'push'
     needs: frontend
     strategy:
@@ -93,8 +93,6 @@ jobs:
         include:
           - platform: linux-x64
             os: ubuntu-latest
-          - platform: macos-arm64
-            os: macos-15
           - platform: windows-x64
             os: windows-latest
     runs-on: ${{ matrix.os }}
@@ -266,83 +264,5 @@ jobs:
           path: |
             desktop/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
             desktop/src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
-          if-no-files-found: warn
-          retention-days: 3
-
-  ios_bundle:
-    name: iOS Simulator bundle
-    # macOS runners are expensive: bundle only after a merge to main.
-    if: github.event_name == 'push'
-    needs: frontend
-    runs-on: macos-15
-    defaults:
-      run:
-        working-directory: desktop
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Authenticate private native dependencies
-        uses: webfactory/ssh-agent@v0.9.1
-        with:
-          ssh-private-key: ${{ secrets.PHOTON_DEPLOY_KEY }}
-
-      - name: Use SSH for private GitHub dependencies
-        run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: desktop/package-lock.json
-
-      - name: Install Rust iOS targets
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim
-
-      - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: desktop/src-tauri
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Generate iOS project
-        run: npm run tauri:ios:init
-
-      - name: Build iOS Simulator app
-        run: npm run tauri:ios:build -- --debug --target aarch64-sim
-        env:
-          VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
-          VITE_COURSEBOARD_AUTH_MODE: browser-pkce
-          VITE_COURSEBOARD_BROWSER_CLIENT_ID: 5oafg9ptonbjumdh1pc7khirp1
-          VITE_COURSEBOARD_BROWSER_REDIRECT_URI: https://courseboard.txcloud.app/oauth/callback
-          VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
-          VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
-          VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
-          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
-
-      # Keep successful builds honest without storing every simulator app:
-      # verify the app contains a concrete file independently of artifact upload.
-      - name: Verify iOS Simulator app exists
-        shell: bash
-        run: |
-          build_dir="src-tauri/gen/apple/build"
-          if [[ ! -d "${build_dir}" ]] || [[ -z "$(find "${build_dir}" -type f -path '*.app/*' -print | sed -n '1p')" ]]; then
-            echo "iOS build completed without producing an app in ${build_dir}" >&2
-            exit 1
-          fi
-
-      # Failed builds may legitimately leave no app. Warn so this diagnostic
-      # upload does not mask the original error with a second failure.
-      - name: Upload iOS Simulator app
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: courseboard-ios-simulator
-          path: desktop/src-tauri/gen/apple/build/**/*.app
           if-no-files-found: warn
           retention-days: 3
