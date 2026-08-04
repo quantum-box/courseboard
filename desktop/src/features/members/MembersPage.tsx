@@ -21,7 +21,6 @@ import {
   Field,
   LoadingState,
   Notice,
-  PageHeader,
   PageRefreshButton,
   Panel,
   ResourceError,
@@ -29,6 +28,7 @@ import {
 } from '../../components/Page'
 import { useResource } from '../../hooks/useResource'
 import { useRegisterPageReload } from '../../lib/pageReload'
+import { showToast } from '../../lib/toast'
 import {
   customPolicyNames,
   inviteResultMessage,
@@ -48,7 +48,8 @@ import {
   type InviteMemberResponse,
 } from './models'
 
-type Feedback = { tone: 'success' | 'danger'; message: string }
+/** Announcements are toasts, so the page itself never shifts under a message. */
+const setRowFeedback = showToast
 
 /**
  * Invite and role changes report failures in a flash message with no room for a
@@ -69,7 +70,6 @@ export function MembersPage() {
   const resource = useResource(loader, [], { cacheKey: 'members:list' })
   useRegisterPageReload(resource.refresh)
 
-  const [rowFeedback, setRowFeedback] = useState<Feedback | null>(null)
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null)
   const [editingMember, setEditingMember] = useState<ErpMember | null>(null)
 
@@ -84,7 +84,6 @@ export function MembersPage() {
       return
     }
     setBusyMemberId(member.id)
-    setRowFeedback(null)
     try {
       await fieldApiJson<void>(`/v1/field/iam/users/${encodeURIComponent(member.id)}`, {
         method: 'DELETE',
@@ -177,13 +176,6 @@ export function MembersPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        eyebrow={t('common:app.name')}
-        title={t('members:title')}
-        description={t('members:description')}
-        actions={<PageRefreshButton onClick={resource.refresh} loading={resource.loading} />}
-      />
-
       {resource.loading && !resource.data ? <LoadingState label={t('members:loading')} /> : null}
       {resource.error instanceof ApiError && resource.error.status === 403 ? (
         <Notice tone="warning" title={t('members:forbidden.title')}>
@@ -193,22 +185,21 @@ export function MembersPage() {
         <ResourceError error={resource.error} onRetry={resource.refresh} />
       ) : null}
 
-      {rowFeedback ? (
-        <Notice tone={rowFeedback.tone}>{rowFeedback.message}</Notice>
-      ) : null}
-
       {resource.data ? (
         <Panel
           title={t('members:list.title')}
           description={t('members:list.description')}
           actions={(
-            <InviteDialog
-              catalog={customPolicies}
-              onInvited={message => {
-                setRowFeedback({ tone: 'success', message })
-                resource.refresh()
-              }}
-            />
+            <>
+              <PageRefreshButton onClick={resource.refresh} loading={resource.loading} />
+              <InviteDialog
+                catalog={customPolicies}
+                onInvited={message => {
+                  setRowFeedback({ tone: 'success', message })
+                  resource.refresh()
+                }}
+              />
+            </>
           )}
         >
           <DataTable

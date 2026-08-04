@@ -6,6 +6,7 @@ export const nav: DeepPartial<typeof source> = {
     home: 'Home',
     courseBooking: 'Bookings & courses',
     caddie: 'Caddies',
+    company: 'Company',
     finance: 'Revenue & billing',
     settings: 'Settings',
     account: 'Account',
@@ -63,6 +64,10 @@ export const nav: DeepPartial<typeof source> = {
     'cancellation-fees': {
       label: 'Cancellation fees',
       description: 'Send a bill and confirm payment',
+    },
+    staff: {
+      label: 'Staff roster',
+      description: 'Everyone the club employs',
     },
     'golf/courses': {
       label: 'Course setup',

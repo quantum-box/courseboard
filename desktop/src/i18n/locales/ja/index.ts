@@ -16,6 +16,7 @@ import { products } from './products'
 import { settings } from './settings'
 import { settlement } from './settlement'
 import { simulator } from './simulator'
+import { staff } from './staff'
 import { shifts } from './shifts'
 import { timeline } from './timeline'
 
@@ -39,6 +40,7 @@ export const ja = {
   settings,
   settlement,
   simulator,
+  staff,
   shifts,
   timeline,
 } as const

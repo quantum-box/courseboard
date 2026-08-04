@@ -247,12 +247,17 @@ const mockCaddies = [
   },
 ]
 
+/** The whole payroll, not just the caddies: the roster screen shows both. */
 const mockStaff = [
-  { id: 'staff_aya', name: '佐藤 彩', active: true },
-  { id: 'staff_ken', name: '渡辺 健', active: true },
-  { id: 'staff_mika', name: '田中 美香', active: true },
-  { id: 'staff_hiro', name: '中村 浩', active: true },
-  { id: 'staff_yuki', name: '伊藤 優希', active: true },
+  { id: 'staff_aya', name: '佐藤 彩', active: true, employmentType: 'part_time' },
+  { id: 'staff_ken', name: '渡辺 健', active: true, employmentType: 'part_time' },
+  { id: 'staff_mika', name: '田中 美香', active: true, employmentType: 'part_time' },
+  { id: 'staff_hiro', name: '中村 浩', active: true, employmentType: 'part_time' },
+  { id: 'staff_yuki', name: '伊藤 優希', active: true, employmentType: 'part_time' },
+  { id: 'staff_kitchen', name: '小林 大輔', active: true, employmentType: 'full_time' },
+  { id: 'staff_front', name: '松本 里奈', active: true, employmentType: 'full_time' },
+  { id: 'staff_green', name: '吉田 誠', active: true, employmentType: 'full_time' },
+  { id: 'staff_retired', name: '高橋 一', active: false, employmentType: 'part_time' },
 ]
 
 /** Tenant members mirroring the Field IAM surface `GET /v1/field/iam/users`. */
@@ -975,7 +980,12 @@ function resolveGet(path: string): Json | null | undefined {
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-profiles') {
-    return items(mockCaddies.map(profile => ({ ...profile })))
+    // course-api answers the roster with the HRM staff index alongside the
+    // profiles, which is what the create dialog suggests existing people from.
+    return {
+      ...items(mockCaddies.map(profile => ({ ...profile }))),
+      staff: mockStaff.map(member => ({ ...member })),
+    }
   }
 
   // CourseBoard course-api tee-sheet (not Field golf-course extension).
@@ -1207,6 +1217,17 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   const method = methodOf(init)
   const body = parseBody(init) as Record<string, unknown> | undefined
 
+  if (pathname === '/v1/erp/staff' && method === 'POST') {
+    const registered = {
+      id: `staff_${Date.now()}`,
+      name: String(body?.name ?? 'New staff'),
+      active: body?.active !== false,
+      employmentType: String(body?.employmentType ?? 'part_time'),
+    }
+    mockStaff.push(registered)
+    return hit({ ...registered })
+  }
+
   if (pathname === '/v1/field/iam/users/invite' && method === 'POST') {
     const email = body?.email == null ? '' : String(body.email).trim().toLowerCase()
     if (!email) return error(400, 'email is required')
@@ -1325,14 +1346,25 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-profiles' && method === 'POST') {
-    const staffId = body?.staffId == null ? '' : String(body.staffId).trim()
-    const staffReferenceId = body?.staffReferenceId == null ? '' : String(body.staffReferenceId).trim()
+    const displayName = String(body?.displayName ?? 'New caddie')
+    let staffId = body?.staffId == null ? '' : String(body.staffId).trim()
+    let staffReferenceId = body?.staffReferenceId == null ? '' : String(body.staffReferenceId).trim()
     if (!staffId && !staffReferenceId) {
-      return error(400, 'staff link is required to create a caddie')
+      // Being a caddie is one staff role, so course-api registers the staff
+      // member a body without a link names, then links it.
+      const registered = {
+        id: `staff_${Date.now()}`,
+        name: displayName,
+        active: true,
+        employmentType: 'part_time',
+      }
+      mockStaff.push(registered)
+      staffId = registered.id
+      staffReferenceId = registered.id
     }
     const created: (typeof mockCaddies)[number] = {
       id: `caddie_${Date.now()}`,
-      displayName: String(body?.displayName ?? 'New caddie'),
+      displayName,
       skillLevel: String(body?.skillLevel ?? 'regular'),
       rank: String(body?.rank ?? 'D'),
       baseFeeAmount: Number(body?.baseFeeAmount ?? 12_000),

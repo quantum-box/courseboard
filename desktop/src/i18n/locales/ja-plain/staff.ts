@@ -1,0 +1,76 @@
+export const staff = {
+  loading: '社員を読み込んでいます…',
+  caddieUnavailable: 'キャディの情報を読み込めないので、キャディのらんは空になります。',
+  filter: {
+    search: 'さがす',
+    searchPlaceholder: '名前か社員番号',
+    employment: '働いているか',
+    employmentActive: '働いている人',
+    employmentRetired: 'やめた人',
+    role: '仕事',
+    roleCaddie: 'キャディをする人',
+    roleOther: 'キャディ以外の人',
+    all: 'すべて',
+  },
+  list: {
+    empty: {
+      title: 'あてはまる人がいません',
+      description: 'さがす言葉を変えるか、社員を登録してください。',
+    },
+  },
+  table: {
+    name: '名前',
+    employmentType: '働きかた',
+    caddie: 'キャディ',
+  },
+  retired: 'やめた人',
+  employmentType: {
+    full_time: 'ずっと働く人',
+    part_time: 'パート・アルバイト',
+  },
+  role: {
+    caddie: '{{rank}}ランク・{{skill}}',
+  },
+  action: {
+    makeCaddie: 'キャディにする',
+  },
+  detail: {
+    back: '名簿へ戻る',
+    basics: '基本の情報',
+    openCaddie: 'キャディの画面を開く',
+    noCaddie: 'キャディの仕事はしていません。',
+    notFound: {
+      title: 'この社員は見つかりません',
+      description: '消されたか、番号がちがいます。名簿へ戻って、さがし直してください。',
+    },
+  },
+  create: {
+    open: '社員を登録',
+    title: '社員を登録する',
+    description: '会社の名簿に人を足します。キャディにするかどうかは、あとで決められます。',
+    name: '名前',
+    employmentType: '働きかた',
+    submit: 'この内容で登録する',
+    submitting: '登録しています…',
+    success: '{{name}}さんを名簿に足しました。',
+    error: {
+      name: '名前を入れてください。',
+      failed: '社員を登録できませんでした。もう一度お試しください。',
+    },
+  },
+  makeCaddie: {
+    title: '{{name}}さんをキャディにする',
+    description: 'この人にキャディの仕事をつけます。出勤と給料は、社員のまま続きます。',
+    target: 'キャディの情報',
+    targetNew: '新しく作る',
+    targetExisting: '{{name}}（{{id}}）に結びつける',
+    linkNotice: 'すでにあるキャディの情報を、この人に結びつけます。今までの回数と評価は、そのまま残ります。',
+    submit: 'キャディにする',
+    submitting: '設定しています…',
+    success: '{{name}}さんをキャディにしました。',
+    error: {
+      baseFee: '費用は 0 円以上で入れてください。',
+      failed: 'キャディにできませんでした。もう一度お試しください。',
+    },
+  },
+} as const

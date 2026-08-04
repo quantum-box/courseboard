@@ -2,7 +2,7 @@ import { Button } from '@tachyon-sdk/native-ui'
 import { ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { golfNavigation, navDescription, navLabel } from '../../components/AppShell'
-import { PageHeader, Panel } from '../../components/Page'
+import { Panel } from '../../components/Page'
 import { navigate, navigateFromClick } from '../../lib/router'
 
 const FLOW_STEPS = ['timeline', 'dispatch', 'revenue', 'settlement'] as const
@@ -12,15 +12,11 @@ export function GolfHomePage() {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        title={t('home:title')}
-        description={t('home:description')}
-        actions={(
-          <Button type="button" variant="primary" onClick={() => navigate('golf/timeline')}>
-            {t('home:openTimeline')}
-          </Button>
-        )}
-      />
+      <div className="page-toolbar">
+        <Button type="button" variant="primary" onClick={() => navigate('golf/timeline')}>
+          {t('home:openTimeline')}
+        </Button>
+      </div>
 
       <section className="app-section">
         <h2 className="section-title">{t('home:features.title')}</h2>

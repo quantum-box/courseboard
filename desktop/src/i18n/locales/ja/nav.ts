@@ -4,6 +4,7 @@ export const nav = {
     home: 'ホーム',
     courseBooking: '予約とコース',
     caddie: 'キャディ',
+    company: '会社',
     finance: '売上と請求',
     settings: '設定',
     account: 'アカウント',
@@ -61,6 +62,10 @@ export const nav = {
     'cancellation-fees': {
       label: 'キャンセル料',
       description: '請求を送って入金を確認する',
+    },
+    staff: {
+      label: '社員名簿',
+      description: 'ゴルフ場で働く社員の名簿',
     },
     'golf/courses': {
       label: 'コース設定',

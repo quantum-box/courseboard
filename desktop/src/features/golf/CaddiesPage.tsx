@@ -62,7 +62,6 @@ import {
   NativeSelect,
   NativeTextarea,
   Notice,
-  PageHeader,
   PageRefreshButton,
   Panel,
   ResourceError,
@@ -74,6 +73,14 @@ import { weekdayIndexes, weekdayLabel } from './models'
 import { useResource } from '../../hooks/useResource'
 import { navigate, useNavigationGuard } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
+import { showToast } from '../../lib/toast'
+import {
+  caddieCreatePayload,
+  exactStaffMatch,
+  resolveStaffId,
+  skillLabelKey,
+  staffSuggestions,
+} from './caddieRegistration'
 
 const COURSE_API = '/v1/course'
 
@@ -284,6 +291,9 @@ type Flash = {
   message: string
 } | null
 
+/** Announcements are toasts now; the call sites still read `setFlash(...)`. */
+const setFlash = showToast
+
 type ResourceValue<T> = {
   data: T | null
   error: unknown
@@ -378,14 +388,6 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? resourceErrorText(error) : i18next.t('caddies:error.generic')
 }
 
-function resolveStaffId(profile: CaddieProfile) {
-  if (profile.staffId) return profile.staffId
-  if (profile.staffReferenceType === 'staff_member' && profile.staffReferenceId) {
-    return profile.staffReferenceId
-  }
-  return null
-}
-
 /**
  * The API merges a write into the stored profile, so a field left out of the
  * body keeps its current value instead of falling back to a creation default.
@@ -432,12 +434,6 @@ function profilePatchPayload(
 }
 
 /** The API also returns the legacy `junior` code for rookies. */
-const SKILL_KEYS: Record<string, 'rookie' | 'regular' | 'veteran'> = {
-  rookie: 'rookie',
-  junior: 'rookie',
-  regular: 'regular',
-  veteran: 'veteran',
-}
 const EMPLOYMENT_STATUSES = ['active', 'inactive', 'suspended'] as const
 const ACTIVE_EMPLOYMENT = 'active'
 
@@ -464,7 +460,7 @@ const ASSIGNMENT_STATUSES = [
 ] as const
 
 function skillLabel(skill: string) {
-  const key = SKILL_KEYS[skill]
+  const key = skillLabelKey(skill)
   if (!key) return skill
   return i18next.t(`caddies:skill.${key}` as 'caddies:skill.rookie')
 }
@@ -607,30 +603,6 @@ function assignmentVariant(status: string) {
   return 'warning' as const
 }
 
-function FlashNotice({ flash, onDismiss }: { flash: Flash; onDismiss: () => void }) {
-  if (!flash) return null
-  return (
-    <Notice
-      tone={flash.tone}
-      title={flash.title}
-      actions={(
-        <Button type="button" variant="ghost" size="sm" onClick={onDismiss}>
-          {i18next.t('common:action.close')}
-        </Button>
-      )}
-    >
-      {flash.message}
-    </Notice>
-  )
-}
-
-function viewCopy(view: View) {
-  return {
-    title: i18next.t(`caddies:view.${view}.title` as 'caddies:view.roster.title'),
-    description: i18next.t(`caddies:view.${view}.description` as 'caddies:view.roster.description'),
-  }
-}
-
 export function CaddiesPage({
   initialView = 'roster',
   initialProfileId,
@@ -643,7 +615,6 @@ export function CaddiesPage({
   const [operationDate, setOperationDate] = useState(todayJst)
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(initialProfileId ?? null)
   const [createOpen, setCreateOpen] = useState(false)
-  const [flash, setFlash] = useState<Flash>(null)
 
   const profilesResource = useResource(
     () => courseboardApiJson<CaddieRosterResponse>(`${COURSE_API}/caddie-profiles`),
@@ -782,41 +753,25 @@ export function CaddiesPage({
 
   useRegisterPageReload(view === 'payroll' ? null : refreshCurrentView)
 
-  const copy = viewCopy(view)
   const showingProfileDetail = view === 'roster' && Boolean(selectedProfileId)
 
   return (
     <div className="page-stack">
-      {showingProfileDetail ? null : (
-      <PageHeader
-        title={copy.title}
-        description={copy.description}
-        actions={(
-          <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-            {view !== 'payroll' ? (
-              <PageRefreshButton
-                variant="secondary"
-                className="min-h-10 flex-1 sm:flex-none"
-                label={t('common:action.refresh')}
-                onClick={refreshCurrentView}
-              />
-            ) : null}
-            {view === 'roster' ? (
-              <Button
-                type="button"
-                variant="primary"
-                className="min-h-10 flex-1 sm:flex-none"
-                onClick={() => setCreateOpen(true)}
-              >
-                <Plus /> {t('caddies:add')}
-              </Button>
-            ) : null}
-          </div>
-        )}
-      />
+      {showingProfileDetail || (view === 'payroll') ? null : (
+        <div className="page-toolbar">
+          <PageRefreshButton
+            variant="secondary"
+            label={t('common:action.refresh')}
+            onClick={refreshCurrentView}
+          />
+          {view === 'roster' ? (
+            <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
+              <Plus /> {t('caddies:add')}
+            </Button>
+          ) : null}
+        </div>
       )}
 
-      <FlashNotice flash={flash} onDismiss={() => setFlash(null)} />
 
       {view === 'roster' ? (
         <ProfilesView
@@ -937,8 +892,7 @@ function DispatchView({
               aria-label={t('caddies:operationDate')}
               value={date}
               onChange={event => onDateChange(event.target.value)}
-              className="min-h-10"
-            />
+              />
           </Field>
         </div>
         <MetricGrid>
@@ -1038,8 +992,7 @@ function AttendanceView({
               aria-label={t('caddies:operationDate')}
               value={date}
               onChange={event => onDateChange(event.target.value)}
-              className="min-h-10"
-            />
+              />
           </Field>
         </div>
       </section>
@@ -1075,8 +1028,7 @@ function DailySupplyPanel({ date }: { date: string }) {
             min={0}
             value={safetyBuffer}
             onChange={event => setSafetyBuffer(Math.max(0, Number.parseInt(event.target.value, 10) || 0))}
-            className="min-h-10"
-          />
+            />
         </Field>
       )}
     >
@@ -1186,7 +1138,7 @@ function AutoAssignPanel({
         <Button
           type="button"
           variant="secondary"
-          className="min-h-10 flex-1"
+          className="flex-1"
           disabled={busy !== null || !date}
           onClick={() => void run(true)}
         >
@@ -1196,7 +1148,7 @@ function AutoAssignPanel({
         <Button
           type="button"
           variant="primary"
-          className="min-h-10 flex-1"
+          className="flex-1"
           disabled={busy !== null || !plan || plan.assigned.length === 0}
           onClick={() => void run(false)}
         >
@@ -1841,7 +1793,7 @@ function ProfilesView({
               onChange={event => setQuery(event.target.value)}
               placeholder={t('caddies:roster.search')}
               aria-label={t('caddies:roster.searchLabel')}
-              className="min-h-10 pl-8"
+              className="pl-8"
             />
           </div>
           <NativeSelect
@@ -1901,7 +1853,7 @@ function ProfilesView({
                   ? t('caddies:roster.empty.descriptionNoData')
                   : t('caddies:roster.empty.descriptionNoMatch')}
                 action={profiles.length === 0 ? (
-                  <Button type="button" variant="primary" className="min-h-10" onClick={onCreate}>
+                  <Button type="button" variant="primary" onClick={onCreate}>
                     <Plus /> {t('caddies:add')}
                   </Button>
                 ) : undefined}
@@ -1936,22 +1888,25 @@ function ProfileCreateDialog({
   const [skillLevel, setSkillLevel] = useState<SkillLevel>('regular')
   const [rank, setRank] = useState<Rank>('D')
   const [baseFeeAmount, setBaseFeeAmount] = useState('12000')
-  const [staffMode, setStaffMode] = useState<'existing' | 'new'>('existing')
-  const [staffQuery, setStaffQuery] = useState('')
-  const [staffId, setStaffId] = useState('')
-  const [newStaffName, setNewStaffName] = useState('')
+  const [pickedStaffId, setPickedStaffId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const availableStaff = staff
-    .filter(item => item.active)
-    .filter(item => {
-      const normalized = staffQuery.trim().toLocaleLowerCase('ja')
-      return !normalized
-        || item.name.toLocaleLowerCase('ja').includes(normalized)
-        || item.id.toLocaleLowerCase('ja').includes(normalized)
-    })
-    .sort((left, right) => left.name.localeCompare(right.name, 'ja'))
+  const pickedStaff = pickedStaffId
+    ? staff.find(item => item.id === pickedStaffId) ?? null
+    : null
+  // A name that stands for exactly one staff member links to that person on its
+  // own; anything else is registered by the API under the name as typed.
+  const matchedStaff = pickedStaff ?? exactStaffMatch(staff, displayName)
+  const suggestions = matchedStaff ? [] : staffSuggestions(staff, displayName)
+
+  function reset() {
+    setDisplayName('')
+    setSkillLevel('regular')
+    setRank('D')
+    setBaseFeeAmount('12000')
+    setPickedStaffId(null)
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -1969,49 +1924,22 @@ function ProfileCreateDialog({
       setError(t('caddies:create.error.baseFee'))
       return
     }
-    if (staffMode === 'existing' && !staffId) {
-      setError(t('caddies:create.error.staffRequired'))
-      return
-    }
-    if (staffMode === 'new' && !newStaffName.trim()) {
-      setError(t('caddies:create.error.newStaffName'))
-      return
-    }
 
     setBusy(true)
     setError(null)
     try {
-      let resolvedStaffId = staffId
-      if (staffMode === 'new') {
-        const createdStaff = await fieldApiJson<StaffMember>('/v1/erp/staff', request('POST', {
-          name: newStaffName.trim(),
-          employmentType: 'part_time',
-          active: true,
-        }))
-        resolvedStaffId = createdStaff.id
-      }
-      const created = await courseboardApiJson<{ id?: string }>(`${COURSE_API}/caddie-profiles`, request('POST', {
-        displayName: name,
-        skillLevel,
-        rank,
-        baseFeeAmount: fee,
-        currency: 'JPY',
-        staffId: resolvedStaffId,
-        staffReferenceType: 'staff_member',
-        staffReferenceId: resolvedStaffId,
-        active: true,
-        employmentStatus: 'active',
-        maxRoundsPerDay: 2,
-      }))
+      const created = await courseboardApiJson<{ id?: string }>(
+        `${COURSE_API}/caddie-profiles`,
+        request('POST', caddieCreatePayload({
+          name,
+          skillLevel,
+          rank,
+          baseFeeAmount: fee,
+          staffId: matchedStaff?.id ?? null,
+        })),
+      )
       const createdId = created?.id
-      setDisplayName('')
-      setSkillLevel('regular')
-      setRank('D')
-      setBaseFeeAmount('12000')
-      setStaffMode('existing')
-      setStaffQuery('')
-      setStaffId('')
-      setNewStaffName('')
+      reset()
       onCreated(createdId)
     } catch (reason) {
       setError(errorMessage(reason))
@@ -2031,11 +1959,23 @@ function ProfileCreateDialog({
         </DialogHeader>
         <form className="space-y-4" onSubmit={event => void submit(event)}>
           <FormGrid columns={2}>
-            <Field label={t('caddies:create.displayName')} required>
-              <Input value={displayName} onChange={event => setDisplayName(event.target.value)} className="min-h-10" autoFocus />
+            <Field
+              label={t('caddies:create.displayName')}
+              hint={staffLoading ? t('caddies:create.staffLoading') : t('caddies:create.nameHint')}
+              required
+            >
+              <Input
+                value={displayName}
+                onChange={event => {
+                  setDisplayName(event.target.value)
+                  setPickedStaffId(null)
+                }}
+                placeholder={t('caddies:create.namePlaceholder')}
+                autoFocus
+              />
             </Field>
             <Field label={t('caddies:create.baseFee')} required>
-              <Input type="number" min={0} value={baseFeeAmount} onChange={event => setBaseFeeAmount(event.target.value)} className="min-h-10" />
+              <Input type="number" min={0} value={baseFeeAmount} onChange={event => setBaseFeeAmount(event.target.value)} />
             </Field>
             <Field label={t('caddies:create.skill')} required>
               <NativeSelect value={skillLevel} onChange={event => setSkillLevel(event.target.value as SkillLevel)}>
@@ -2057,58 +1997,43 @@ function ProfileCreateDialog({
 
           <Separator />
 
-          <Field label={t('caddies:create.staffMode')} required>
-            <NativeSelect
-              value={staffMode}
-              onChange={event => setStaffMode(event.target.value as 'existing' | 'new')}
-              disabled={Boolean(staffError)}
-            >
-              <option value="existing">{t('caddies:create.staffExisting')}</option>
-              <option value="new">{t('caddies:create.staffNew')}</option>
-            </NativeSelect>
-          </Field>
-          {staffMode === 'existing' ? (
-            <div className="space-y-3">
-              <Field label={t('caddies:create.staffSearch')} requirement="none">
-                <Input
-                  value={staffQuery}
-                  onChange={event => setStaffQuery(event.target.value)}
-                  placeholder={t('caddies:create.staffSearchPlaceholder')}
-                  className="min-h-10"
-                />
-              </Field>
-              <Field label={t('caddies:create.staff')} required>
-                <NativeSelect
-                  value={staffId}
-                  onChange={event => setStaffId(event.target.value)}
-                  disabled={staffLoading || Boolean(staffError)}
-                >
-                  <option value="">
-                    {staffLoading ? t('caddies:create.staffLoading') : t('caddies:create.staffPlaceholder')}
-                  </option>
-                  {availableStaff.map(item => (
-                    <option key={item.id} value={item.id}>{item.name}（{item.id}）</option>
-                  ))}
-                </NativeSelect>
-              </Field>
+          {matchedStaff ? (
+            <Notice tone="info">
+              {t('caddies:create.staffMatched', { name: matchedStaff.name, id: matchedStaff.id })}
+            </Notice>
+          ) : suggestions.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">{t('caddies:create.staffSuggestions')}</p>
+              <div className="flex flex-wrap gap-2">
+                {suggestions.map(item => (
+                  <Button
+                    key={item.id}
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setDisplayName(item.name)
+                      setPickedStaffId(item.id)
+                    }}
+                  >
+                    <Link2 /> {item.name}（{item.id}）
+                  </Button>
+                ))}
+              </div>
             </div>
-          ) : (
-            <Field label={t('caddies:create.newStaffName')} required>
-              <Input value={newStaffName} onChange={event => setNewStaffName(event.target.value)} className="min-h-10" />
-            </Field>
-          )}
+          ) : displayName.trim() ? (
+            <Notice tone="info">{t('caddies:create.staffWillBeRegistered')}</Notice>
+          ) : null}
 
           {staffError ? <ResourceError error={staffError} onRetry={onRetryStaff} /> : null}
           {error ? <Notice tone="danger">{error}</Notice> : null}
 
           <DialogFooter>
-            <Button type="button" variant="ghost" className="min-h-10" onClick={() => onOpenChange(false)} disabled={busy}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
               {t('common:action.cancel')}
             </Button>
             <Button
               type="submit"
               variant="primary"
-              className="min-h-10"
               disabled={busy || Boolean(staffError)}
             >
               <UserPlus /> {busy ? t('caddies:create.submitting') : t('caddies:create.submit')}
@@ -2205,7 +2130,7 @@ function ProfileDetail({
             </div>
             <p className="mt-1 break-all text-xs text-muted-foreground">{profile.id}</p>
           </div>
-          <Button type="button" variant="secondary" className="min-h-10 w-full sm:w-auto" onClick={() => setEditOpen(true)}>
+          <Button type="button" variant="secondary" className="w-full sm:w-auto" onClick={() => setEditOpen(true)}>
             <Pencil /> {t('caddies:detail.edit')}
           </Button>
         </div>
@@ -2325,7 +2250,7 @@ function DetailTabButton({ active, onClick, children }: { active: boolean; onCli
       role="tab"
       aria-selected={active}
       onClick={onClick}
-      className={`flex min-h-10 min-w-[6.5rem] items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
+      className={`flex min-w-[6.5rem] items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
         active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted'
       }`}
     >
@@ -2420,7 +2345,7 @@ function ProfileEditDialog({
         <form className="space-y-4" onSubmit={event => void submit(event)}>
           <FormGrid columns={2}>
             <Field label={t('caddies:edit.displayName')} required>
-              <Input value={displayName} onChange={event => setDisplayName(event.target.value)} className="min-h-10" />
+              <Input value={displayName} onChange={event => setDisplayName(event.target.value)} />
             </Field>
             <Field label={t('caddies:edit.skill')} required>
               <NativeSelect value={skillLevel} onChange={event => setSkillLevel(event.target.value as SkillLevel)}>
@@ -2446,21 +2371,21 @@ function ProfileEditDialog({
               </NativeSelect>
             </Field>
             <Field label={t('caddies:edit.baseFee')} required>
-              <Input type="number" min={0} value={baseFeeAmount} onChange={event => setBaseFeeAmount(event.target.value)} className="min-h-10" />
+              <Input type="number" min={0} value={baseFeeAmount} onChange={event => setBaseFeeAmount(event.target.value)} />
             </Field>
             <Field label={t('caddies:edit.currency')} required hint={t('caddies:edit.currencyHint')}>
-              <Input maxLength={3} value={currency} onChange={event => setCurrency(event.target.value.toUpperCase())} className="min-h-10" />
+              <Input maxLength={3} value={currency} onChange={event => setCurrency(event.target.value.toUpperCase())} />
             </Field>
             <Field label={t('caddies:edit.dailyLimit')} required>
-              <Input type="number" min={1} value={maxRounds} onChange={event => setMaxRounds(event.target.value)} className="min-h-10" />
+              <Input type="number" min={1} value={maxRounds} onChange={event => setMaxRounds(event.target.value)} />
             </Field>
           </FormGrid>
           {error ? <Notice tone="danger">{error}</Notice> : null}
           <DialogFooter>
-            <Button type="button" variant="ghost" className="min-h-10" onClick={() => onOpenChange(false)} disabled={busy}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
               {t('common:action.cancel')}
             </Button>
-            <Button type="submit" variant="primary" className="min-h-10" disabled={busy}>
+            <Button type="submit" variant="primary" disabled={busy}>
               <CheckCircle2 /> {busy ? t('common:action.saving') : t('common:action.save')}
             </Button>
           </DialogFooter>
@@ -2552,7 +2477,7 @@ function StaffManagementPanel({
                 <Button
                   type="button"
                   variant="secondary"
-                  className="min-h-10 w-full"
+                  className="w-full"
                   disabled={busy || clockInBlocked(profile) || attendance?.attendanceStatus === 'working'}
                   onClick={() => void clock('in')}
                 >
@@ -2562,7 +2487,6 @@ function StaffManagementPanel({
               <Button
                 type="button"
                 variant="ghost"
-                className="min-h-10"
                 disabled={busy || attendance?.attendanceStatus !== 'working'}
                 onClick={() => void clock('out')}
               >
@@ -2573,7 +2497,7 @@ function StaffManagementPanel({
               <p className="text-xs text-warning">{clockInBlockedReason}</p>
             ) : null}
           </div>
-          <Button type="button" variant="ghost" className="min-h-10 w-full" onClick={() => setLinkOpen(true)}>
+          <Button type="button" variant="ghost" className="w-full" onClick={() => setLinkOpen(true)}>
             <Link2 /> {t('caddies:staff.changeLink')}
           </Button>
         </div>
@@ -2707,8 +2631,7 @@ function StaffLinkDialog({
                   value={query}
                   onChange={event => setQuery(event.target.value)}
                   placeholder={t('caddies:staff.dialog.searchPlaceholder')}
-                  className="min-h-10"
-                />
+                  />
               </Field>
               <Field label={t('caddies:staff.dialog.staff')} required>
                 <NativeSelect
@@ -2723,18 +2646,17 @@ function StaffLinkDialog({
             </>
           ) : (
             <Field label={t('caddies:staff.dialog.newName')} required>
-              <Input value={newName} onChange={event => setNewName(event.target.value)} className="min-h-10" />
+              <Input value={newName} onChange={event => setNewName(event.target.value)} />
             </Field>
           )}
           {error ? <Notice tone="danger">{error}</Notice> : null}
           <DialogFooter>
-            <Button type="button" variant="ghost" className="min-h-10" onClick={() => onOpenChange(false)} disabled={busy}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
               {t('common:action.cancel')}
             </Button>
             <Button
               type="submit"
               variant="primary"
-              className="min-h-10"
               disabled={busy || Boolean(staffError)}
             >
               <Link2 />
@@ -2839,7 +2761,7 @@ function CourseMembershipPanel({
         })}
       </div>
       {courses.length > 0 ? (
-        <Button type="button" variant="primary" className="mt-3 min-h-10 w-full" onClick={() => void save()} disabled={busy}>
+        <Button type="button" variant="primary" className="mt-3 w-full" onClick={() => void save()} disabled={busy}>
           <CheckCircle2 /> {busy ? t('common:action.saving') : t('caddies:courses.save')}
         </Button>
       ) : null}
@@ -3101,11 +3023,11 @@ function AvailabilityCalendar({
                     placeholder={t('caddies:calendar.notePlaceholder')}
                   />
                 </Field>
-                <Button type="button" variant="primary" className="min-h-10 w-full" disabled={busy} onClick={() => void save()}>
+                <Button type="button" variant="primary" className="w-full" disabled={busy} onClick={() => void save()}>
                   <CheckCircle2 /> {busy ? t('caddies:calendar.saving') : t('caddies:calendar.save')}
                 </Button>
                 {selectedRecord ? (
-                  <Button type="button" variant="ghost" className="min-h-10 w-full text-destructive" disabled={busy} onClick={() => void remove()}>
+                  <Button type="button" variant="ghost" className="w-full text-destructive" disabled={busy} onClick={() => void remove()}>
                     <XCircle /> {t('caddies:calendar.remove')}
                   </Button>
                 ) : null}
@@ -3295,8 +3217,8 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
         description={t('caddies:payroll.description')}
         actions={(
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <Input type="month" value={yearMonth} onChange={event => setYearMonth(event.target.value)} className="min-h-10 sm:w-40" aria-label={t('caddies:payroll.monthLabel')} />
-            <Button type="button" variant="primary" className="min-h-10" disabled={downloading || !resource.data} onClick={() => void downloadCsv()}>
+            <Input type="month" value={yearMonth} onChange={event => setYearMonth(event.target.value)} className="sm:w-40" aria-label={t('caddies:payroll.monthLabel')} />
+            <Button type="button" variant="primary" disabled={downloading || !resource.data} onClick={() => void downloadCsv()}>
               <Download /> {downloading ? t('caddies:payroll.exporting') : t('caddies:payroll.exportCsv')}
             </Button>
           </div>

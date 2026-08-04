@@ -1,6 +1,6 @@
 import { ChevronRight, Plug } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { PageHeader, Panel } from '../../components/Page'
+import { Panel } from '../../components/Page'
 import { navDescription, navLabel, settingsNavigation } from '../../components/AppShell'
 import { navigateFromClick } from '../../lib/router'
 import { ExtensionConfigPanel } from './ExtensionConfigPanel'
@@ -10,11 +10,6 @@ export function SettingsPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        title={t('settings:title')}
-        description={t('settings:description')}
-      />
-
       <Panel
         title={t('settings:tenantMaster.title')}
         description={t('settings:tenantMaster.description')}

@@ -30,7 +30,6 @@ import {
   LoadingState,
   NativeSelect,
   Notice,
-  PageHeader,
   Panel,
   ResourceError,
 } from '../../../components/Page'
@@ -346,24 +345,16 @@ export function TimelinePage() {
         </Notice>
       ) : null}
       <div className="timeline-chrome">
-        <PageHeader
-          title={t('timeline:title')}
-          description={displayMode === 'tiles'
-            ? t('timeline:tileDescription')
-            : t('timeline:description')}
-          actions={(
-            <>
-              <Button type="button" variant="ghost" size="sm" onClick={refreshAll}>
-                <RefreshCw />
-                {t('timeline:reload')}
-              </Button>
-              <Button type="button" variant="primary" size="sm" onClick={() => navigate('golf/caddies/dispatch')}>
-                <ClipboardCheck />
-                {t('timeline:toDispatch')}
-              </Button>
-            </>
-          )}
-        />
+        <div className="page-toolbar">
+          <Button type="button" variant="ghost" size="sm" onClick={refreshAll}>
+            <RefreshCw />
+            {t('timeline:reload')}
+          </Button>
+          <Button type="button" variant="primary" size="sm" onClick={() => navigate('golf/caddies/dispatch')}>
+            <ClipboardCheck />
+            {t('timeline:toDispatch')}
+          </Button>
+        </div>
 
         <div
           className={`timeline-summary${needsAttention ? ' has-attention' : ''}`}

@@ -7,6 +7,7 @@ export const nav: DeepPartial<typeof source> = {
     home: '最初の画面',
     courseBooking: '予約とコース',
     caddie: 'キャディ',
+    company: '会社',
     finance: '売上とお金',
     tenantMaster: '最初に決めておく設定',
   },
@@ -62,6 +63,10 @@ export const nav: DeepPartial<typeof source> = {
     'cancellation-fees': {
       label: 'キャンセル料',
       description: '請求を送って、入金があったか確かめます',
+    },
+    staff: {
+      label: '社員の名簿',
+      description: 'ゴルフ場で働く人の名簿',
     },
     'golf/courses': {
       label: 'コースの登録',

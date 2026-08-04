@@ -7,7 +7,6 @@ import {
   LoadingState,
   NativeSelect,
   Notice,
-  PageHeader,
   PageRefreshButton,
   Panel,
   ResourceError,
@@ -368,25 +367,18 @@ export function PolicyPage() {
 
   return (
     <form className="page-stack" onSubmit={savePolicy}>
-      <PageHeader
-        eyebrow={t('nav:sections.tenantMaster')}
-        title={t('policy:title')}
-        description={t('policy:description')}
-        actions={(
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
-              <ArrowLeft /> {t('common:action.backToSettings')}
-            </Button>
-            <Badge variant={exists ? 'success' : 'warning'}>
-              {exists ? t('policy:status.configured') : t('policy:status.missing')}
-            </Badge>
-            <PageRefreshButton onClick={() => void load()} />
-            <Button type="submit" variant="primary" disabled={saving}>
-              <Save /> {saving ? t('common:action.saving') : t('common:action.save')}
-            </Button>
-          </div>
-        )}
-      />
+      <div className="page-toolbar">
+        <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
+          <ArrowLeft /> {t('common:action.backToSettings')}
+        </Button>
+        <Badge variant={exists ? 'success' : 'warning'}>
+          {exists ? t('policy:status.configured') : t('policy:status.missing')}
+        </Badge>
+        <PageRefreshButton onClick={() => void load()} />
+        <Button type="submit" variant="primary" disabled={saving}>
+          <Save /> {saving ? t('common:action.saving') : t('common:action.save')}
+        </Button>
+      </div>
 
       <Panel
         title={t('policy:basics.title')}

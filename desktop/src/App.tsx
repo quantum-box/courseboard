@@ -24,6 +24,7 @@ import { ShiftBoardPage } from './features/golf/ShiftBoardPage'
 import { TimelinePage } from './features/golf/timeline/TimelinePage'
 import { SettingsAdvancedPage } from './features/settings/SettingsAdvancedPage'
 import { SettingsPage } from './features/settings/SettingsPage'
+import { StaffPage } from './features/staff/StaffPage'
 import { useCartUpdates } from './hooks/useCartUpdates'
 import { navigate, useRoute } from './lib/router'
 import { DownloadPage } from './DownloadPage'
@@ -98,6 +99,13 @@ function RouteContent({ route }: { route: string }) {
         initialProfileId={segment || undefined}
       />
     )
+  }
+  if (route === 'staff' || route.startsWith('staff/')) {
+    const segment = route === 'staff'
+      ? ''
+      : decodeRouteSegment(route.slice('staff/'.length).split('/')[0] ?? '')
+    // Stable key: opening a person updates props instead of remounting the list.
+    return <StaffPage key="staff" staffId={segment || undefined} />
   }
   if (route === 'golf/budgets') return <BudgetsPage />
   if (route === 'golf/policy') return <PolicyPage />

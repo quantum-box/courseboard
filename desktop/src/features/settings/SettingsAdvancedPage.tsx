@@ -3,7 +3,7 @@ import { ArrowLeft } from 'lucide-react'
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson } from '../../api'
-import { LoadingState, Notice, PageHeader, ResourceError } from '../../components/Page'
+import { LoadingState, Notice, ResourceError } from '../../components/Page'
 import { useResource } from '../../hooks/useResource'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { navigate } from '../../lib/router'
@@ -24,15 +24,11 @@ export function SettingsAdvancedPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        title={t('settings:advanced.title')}
-        description={t('settings:advanced.description')}
-        actions={(
-          <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
-            <ArrowLeft /> {t('common:action.backToSettings')}
-          </Button>
-        )}
-      />
+      <div className="page-toolbar">
+        <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
+          <ArrowLeft /> {t('common:action.backToSettings')}
+        </Button>
+      </div>
 
       {resource.loading ? <LoadingState label={t('settings:extension.loading')} /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}

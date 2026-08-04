@@ -21,7 +21,6 @@ import {
   LoadingState,
   NativeSelect,
   Notice,
-  PageHeader,
   PageRefreshButton,
   Panel,
   ResourceError,
@@ -323,26 +322,19 @@ export function CoursesPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        eyebrow={t('nav:sections.tenantMaster')}
-        title={t('courses:title')}
-        description={t('courses:description')}
-        actions={(
-          <>
-            <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
-              <ArrowLeft /> {t('common:action.backToSettings')}
-            </Button>
-            <PageRefreshButton
-              onClick={() => void loadCourses()}
-              loading={loading}
-              label={t('common:action.refresh')}
-            />
-            <Button type="button" variant="primary" onClick={beginCreate}>
-              <Plus /> {t('courses:add')}
-            </Button>
-          </>
-        )}
-      />
+      <div className="page-toolbar">
+        <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
+          <ArrowLeft /> {t('common:action.backToSettings')}
+        </Button>
+        <PageRefreshButton
+          onClick={() => void loadCourses()}
+          loading={loading}
+          label={t('common:action.refresh')}
+        />
+        <Button type="button" variant="primary" onClick={beginCreate}>
+          <Plus /> {t('courses:add')}
+        </Button>
+      </div>
 
       {savedMessage ? (
         <Notice tone="success" title={t('common:state.saved')}>{savedMessage}</Notice>

@@ -28,7 +28,6 @@ import {
   Metric,
   MetricGrid,
   Notice,
-  PageHeader,
   PageRefreshButton,
   Panel,
   ResourceError,
@@ -246,22 +245,16 @@ export function SettlementPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        title={t('settlement:title')}
-        description={t('settlement:description')}
-        actions={(
-          <div className="flex flex-wrap items-center gap-2">
-            <PageRefreshButton
-              onClick={() => void load()}
-              loading={loading}
-              label={t('common:action.refresh')}
-            />
-            <Button type="button" onClick={() => void exportCsv()} disabled={exporting}>
-              <Download /> {exporting ? t('settlement:exporting') : t('settlement:exportCsv')}
-            </Button>
-          </div>
-        )}
-      />
+      <div className="page-toolbar">
+        <PageRefreshButton
+          onClick={() => void load()}
+          loading={loading}
+          label={t('common:action.refresh')}
+        />
+        <Button type="button" onClick={() => void exportCsv()} disabled={exporting}>
+          <Download /> {exporting ? t('settlement:exporting') : t('settlement:exportCsv')}
+        </Button>
+      </div>
 
       <Panel>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
