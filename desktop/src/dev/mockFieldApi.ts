@@ -35,8 +35,15 @@ const TENANT_ID = () =>
   import.meta.env.VITE_COURSEBOARD_TENANT_ID
   ?? (import.meta.env.DEV ? 'courseboard_id' : '')
 
-const NOW = '2026-07-18T09:00:00+09:00'
-const TODAY = '2026-07-18'
+/**
+ * The day the fixtures below are written for. Exported because the demo
+ * affordance in the timeline has to send the operator to this day; a second
+ * copy of the date in the page drifts the moment these fixtures move.
+ */
+export const MOCK_FIXTURE_DATE = '2026-07-18'
+
+const NOW = `${MOCK_FIXTURE_DATE}T09:00:00+09:00`
+const TODAY = MOCK_FIXTURE_DATE
 
 let mockReservationPolicy: Record<string, unknown> = {
   tenantId: 'courseboard_id',
