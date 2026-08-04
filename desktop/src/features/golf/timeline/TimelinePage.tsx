@@ -24,6 +24,7 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson, nowIsoMinute, today } from '../../../api'
+import { MOCK_FIXTURE_DATE, isMockFieldDataEnabled } from '../../../dev/mockFieldApi'
 import { i18next } from '../../../i18n'
 import {
   EmptyState,
@@ -118,15 +119,21 @@ function readPxPerHour(): number {
   }
 }
 
-/**
- * The date the mock fixtures are written for. Only the demo affordance uses it;
- * the board's own idea of "today" must be the real one, or an operator can
- * never reach the day they are working.
- */
-const DEMO_FIXTURE_DATE = '2026-07-18'
-
 function todayIsoDate() {
   return today()
+}
+
+/**
+ * The day the demo affordance sends the operator to, or `null` when there is
+ * no demo to show.
+ *
+ * The button used to be unconditional, so on a real tenant with an empty day
+ * it offered to move the operator off today and onto a date in the past that
+ * holds no data at all — the fixtures it was written for only exist while the
+ * mock API is serving.
+ */
+function demoDateOrNull() {
+  return isMockFieldDataEnabled() ? MOCK_FIXTURE_DATE : null
 }
 
 /**
@@ -206,6 +213,7 @@ export function TimelinePage() {
   const { t } = useTranslation(['timeline', 'common'])
   const [date, setDate] = useState(todayIsoDate)
   const currentMinute = useCurrentMinute()
+  const demoDate = demoDateOrNull()
   const [courseFilter, setCourseFilter] = useState('all')
   const [displayMode, setDisplayMode] = useState<DisplayMode>(readDisplayMode)
   const [boardView, setBoardView] = useState<BoardView>(readBoardView)
@@ -559,11 +567,11 @@ export function TimelinePage() {
             conflicts={conflicts}
             selectedReservationId={selectedReservation?.id ?? null}
             onSelectReservation={id => setSelection({ kind: 'reservation', id })}
-            emptyAction={(
-              <Button type="button" variant="primary" onClick={() => setDate(DEMO_FIXTURE_DATE)}>
+            emptyAction={demoDate ? (
+              <Button type="button" variant="primary" onClick={() => setDate(demoDate)}>
                 {t('timeline:demo.goToDemoDate')}
               </Button>
-            )}
+            ) : undefined}
           />
         ) : (
         <div className="timeline-boards" data-view={boardView}>
