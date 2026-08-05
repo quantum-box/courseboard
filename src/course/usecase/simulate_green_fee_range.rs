@@ -77,6 +77,8 @@ mod tests {
             minor_exempt_under_age: 18,
             senior_exempt_min_age: 70,
             disability_cert_exempt: true,
+            senior_reduced_min_age: None,
+            senior_reduced_percent: None,
         }
     }
 

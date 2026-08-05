@@ -808,6 +808,12 @@ pub struct MySqlTaxRuleRepository {
     pool: MySqlPool,
 }
 
+/// Tenant id the shared, prefecture-wide rate schedule is stored under.
+///
+/// A sentinel rather than NULL: MySQL treats NULLs in a UNIQUE key as distinct,
+/// so a nullable column would let duplicate shared rows in.
+pub const SHARED_TAX_SCOPE: &str = "*";
+
 impl MySqlTaxRuleRepository {
     pub fn new(pool: MySqlPool) -> Self {
         Self { pool }
@@ -823,33 +829,40 @@ impl MySqlTaxRuleRepository {
         prefecture: &str,
         green_fee: i64,
     ) -> Result<Option<TaxRuleSnapshot>, AppError> {
+        // The rate schedule is prefectural law, held once under the shared
+        // scope; a tenant row is an override for a course that genuinely
+        // differs. Both halves of the join resolve within the same scope, so a
+        // tenant's own thresholds never pick a grade out of the shared
+        // schedule, or the other way round.
         let rule = sqlx::query_as::<_, TaxRule>(
             r#"
             SELECT
-                r.tenant_id,
-                r.prefecture,
                 r.course_grade,
                 r.fee,
                 r.minor_exempt_under_age,
                 r.senior_exempt_min_age,
-                r.disability_cert_exempt
+                r.disability_cert_exempt,
+                r.senior_reduced_min_age,
+                r.senior_reduced_percent
             FROM golf_grade_thresholds t
             JOIN golf_tax_rules r
               ON r.tenant_id = t.tenant_id
              AND r.prefecture = t.prefecture
              AND r.course_grade = t.course_grade
-            WHERE t.tenant_id = ?
+            WHERE t.tenant_id IN (?, ?)
               AND t.prefecture = ?
               AND t.min_green_fee <= ?
               AND (t.max_green_fee IS NULL OR ? < t.max_green_fee)
-            ORDER BY t.min_green_fee DESC
+            ORDER BY t.tenant_id = ? DESC, t.min_green_fee DESC
             LIMIT 1
             "#,
         )
         .bind(tenant_id)
+        .bind(SHARED_TAX_SCOPE)
         .bind(prefecture)
         .bind(green_fee)
         .bind(green_fee)
+        .bind(tenant_id)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -864,6 +877,8 @@ struct TaxRule {
     minor_exempt_under_age: i64,
     senior_exempt_min_age: i64,
     disability_cert_exempt: bool,
+    senior_reduced_min_age: Option<i64>,
+    senior_reduced_percent: Option<i64>,
 }
 
 impl From<TaxRule> for TaxRuleSnapshot {
@@ -874,6 +889,8 @@ impl From<TaxRule> for TaxRuleSnapshot {
             minor_exempt_under_age: row.minor_exempt_under_age,
             senior_exempt_min_age: row.senior_exempt_min_age,
             disability_cert_exempt: row.disability_cert_exempt,
+            senior_reduced_min_age: row.senior_reduced_min_age,
+            senior_reduced_percent: row.senior_reduced_percent,
         }
     }
 }
@@ -1425,6 +1442,29 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn age_65_is_reduced_rather_than_exempt_or_full_price() {
+        // Hokkaido halves the tax from 65 until the exemption at 70. Before the
+        // reduced band existed these players were billed the full rate.
+        let full = calculate_with_players(
+            8000,
+            serde_json::json!([{ "age": 64, "has_disability_cert": false }]),
+        )
+        .await;
+        let reduced = calculate_with_players(
+            8000,
+            serde_json::json!([{ "age": 65, "has_disability_cert": false }]),
+        )
+        .await;
+
+        assert_eq!(reduced.tax_amount, full.tax_amount / 2);
+        assert_eq!(
+            reduced.breakdown[0].reason.as_deref(),
+            Some("senior_reduced")
+        );
+        assert!(!reduced.breakdown[0].exempt);
+    }
+
+    #[tokio::test]
     async fn age_70_is_exempt_in_hokkaido() {
         let response = calculate_with_players(
             8000,
@@ -1465,10 +1505,17 @@ mod tests {
         )
         .await;
 
-        assert_eq!(response.tax_amount, 800);
+        // The 69-year-old used to be billed the full 400 here, which is what
+        // this test locked in. Hokkaido halves the tax from 65 until the
+        // exemption at 70, so they owe 200 and the party owes 600.
+        assert_eq!(response.tax_amount, 600);
         assert_eq!(response.breakdown.len(), 5);
         assert_eq!(response.breakdown[0].fee, 400);
-        assert_eq!(response.breakdown[4].fee, 400);
+        assert_eq!(response.breakdown[4].fee, 200);
+        assert_eq!(
+            response.breakdown[4].reason.as_deref(),
+            Some("senior_reduced")
+        );
     }
 
     #[tokio::test]
