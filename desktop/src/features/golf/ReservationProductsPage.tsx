@@ -49,6 +49,7 @@ import {
   type GolfReservationProduct,
   type GolfReservationProductDraft,
   type PlayType,
+  validateProduct,
 } from './models'
 
 const productsPath = '/v1/course/reservation-products'
@@ -116,25 +117,6 @@ function todayInTokyo() {
   }).format(new Date())
 }
 
-function validateProduct(draft: GolfReservationProductDraft) {
-  if (!draft.displayName.trim()) return i18next.t('products:validation.displayNameRequired')
-  if ([...draft.displayName.trim()].length > 255) {
-    return i18next.t('products:validation.displayNameLength')
-  }
-  if (!draft.serviceId.trim()) return i18next.t('products:validation.serviceIdRequired')
-  if (!/^[A-Za-z0-9._:-]+$/.test(draft.serviceId.trim())) {
-    return i18next.t('products:validation.serviceIdFormat')
-  }
-  if (![9, 18].includes(draft.holeCount)) return i18next.t('products:validation.holeCount')
-  if (
-    !Number.isInteger(draft.expectedDurationMinutes)
-    || draft.expectedDurationMinutes < 30
-    || draft.expectedDurationMinutes > 720
-  ) {
-    return i18next.t('products:validation.duration')
-  }
-  return null
-}
 
 function productDisplayName(product: GolfReservationProduct) {
   return product.displayName?.trim() || product.reservationServiceId

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyCapacityToSlots,
   calculateCaddieCapacity,
+  validateProduct,
   validateSlots,
   type CaddieSlotCapacity,
   type GolfProductSlot,
@@ -107,5 +108,50 @@ describe('applyCapacityToSlots', () => {
         maxPlayers: 0,
       },
     ])
+  })
+})
+
+describe('validateProduct', () => {
+  const valid = {
+    serviceId: 'weekday-18h',
+    displayName: '平日18Hプレープラン',
+    playType: 'caddie' as const,
+    holeCount: 18,
+    expectedDurationMinutes: 240,
+  }
+
+  it('accepts a plan an operator would really enter', () => {
+    expect(validateProduct(valid)).toBeNull()
+  })
+
+  it('refuses the empty required fields the QA report reached the server with', () => {
+    expect(validateProduct({ ...valid, displayName: '   ' })).not.toBeNull()
+    expect(validateProduct({ ...valid, serviceId: '' })).not.toBeNull()
+  })
+
+  it('refuses a duration of zero or a negative one', () => {
+    expect(validateProduct({ ...valid, expectedDurationMinutes: 0 })).not.toBeNull()
+    expect(validateProduct({ ...valid, expectedDurationMinutes: -30 })).not.toBeNull()
+  })
+
+  it('holds the duration inside the range the plan can actually run', () => {
+    expect(validateProduct({ ...valid, expectedDurationMinutes: 29 })).not.toBeNull()
+    expect(validateProduct({ ...valid, expectedDurationMinutes: 30 })).toBeNull()
+    expect(validateProduct({ ...valid, expectedDurationMinutes: 720 })).toBeNull()
+    expect(validateProduct({ ...valid, expectedDurationMinutes: 721 })).not.toBeNull()
+    expect(validateProduct({ ...valid, expectedDurationMinutes: 240.5 })).not.toBeNull()
+  })
+
+  it('only knows 9 and 18 holes', () => {
+    expect(validateProduct({ ...valid, holeCount: 27 })).not.toBeNull()
+    expect(validateProduct({ ...valid, holeCount: 0 })).not.toBeNull()
+    expect(validateProduct({ ...valid, holeCount: 9 })).toBeNull()
+  })
+
+  it('keeps the service id to characters a URL path can carry', () => {
+    // It is sent as a path segment, so a space or a slash would change the route.
+    expect(validateProduct({ ...valid, serviceId: 'weekday 18h' })).not.toBeNull()
+    expect(validateProduct({ ...valid, serviceId: 'weekday/18h' })).not.toBeNull()
+    expect(validateProduct({ ...valid, serviceId: 'weekday_18h:a.b-c' })).toBeNull()
   })
 })
