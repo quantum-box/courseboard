@@ -38,6 +38,12 @@ pub struct TaxRuleSnapshot {
     pub minor_exempt_under_age: i64,
     pub senior_exempt_min_age: i64,
     pub disability_cert_exempt: bool,
+    /// Age from which the tax is charged at a reduced rate rather than in full.
+    /// Hokkaido halves it from 65 until the full exemption at 70.
+    pub senior_reduced_min_age: Option<i64>,
+    /// Percentage of `fee` a reduced player owes, 1-99. `None` alongside a set
+    /// `senior_reduced_min_age` is treated as no reduction.
+    pub senior_reduced_percent: Option<i64>,
 }
 
 /// One player in a fee quote.
@@ -110,6 +116,21 @@ fn exemption_reason(player: &SimulatedPlayer, rule: &TaxRuleSnapshot) -> Option<
     None
 }
 
+/// The reduced band sits between full price and full exemption: a player old
+/// enough to be reduced but not yet exempt owes a percentage of the rate.
+///
+/// Returns `None` when the player is outside the band or the rule does not
+/// define one. Rounding is down, so the player is never charged a yen the
+/// schedule does not name.
+fn reduced_fee(player: &SimulatedPlayer, rule: &TaxRuleSnapshot) -> Option<i64> {
+    let min_age = rule.senior_reduced_min_age?;
+    let percent = rule.senior_reduced_percent?;
+    if player.age < min_age || !(1..100).contains(&percent) {
+        return None;
+    }
+    Some(rule.fee * percent / 100)
+}
+
 /// Golf course tax for each player, plus the party total.
 pub fn party_tax(rule: &TaxRuleSnapshot, players: &[SimulatedPlayer]) -> PartyTax {
     let mut tax_amount = 0;
@@ -119,13 +140,19 @@ pub fn party_tax(rule: &TaxRuleSnapshot, players: &[SimulatedPlayer]) -> PartyTa
         .map(|(player_index, player)| {
             let reason = exemption_reason(player, rule);
             let exempt = reason.is_some();
-            let fee = if exempt { 0 } else { rule.fee };
+            // Exemption is checked first: past the exemption age the player
+            // owes nothing, not the reduced share.
+            let (fee, reason) = match (exempt, reduced_fee(player, rule)) {
+                (true, _) => (0, reason.map(str::to_string)),
+                (false, Some(reduced)) => (reduced, Some("senior_reduced".to_string())),
+                (false, None) => (rule.fee, None),
+            };
             tax_amount += fee;
             PlayerTaxLine {
                 player_index,
                 fee,
                 exempt,
-                reason: reason.map(str::to_string),
+                reason,
             }
         })
         .collect();
@@ -477,7 +504,89 @@ mod tests {
             minor_exempt_under_age: 18,
             senior_exempt_min_age: 70,
             disability_cert_exempt: true,
+            senior_reduced_min_age: None,
+            senior_reduced_percent: None,
         }
+    }
+
+    /// Hokkaido's schedule: exempt under 18 and from 70, halved from 65.
+    fn hokkaido_rule() -> TaxRuleSnapshot {
+        TaxRuleSnapshot {
+            senior_reduced_min_age: Some(65),
+            senior_reduced_percent: Some(50),
+            ..rule()
+        }
+    }
+
+    #[test]
+    fn a_player_in_the_reduced_band_owes_a_share_not_the_whole_rate() {
+        // Charging these players the full rate is what the table used to do,
+        // because it could only say exempt or not exempt.
+        let rule = hokkaido_rule();
+        let tax = party_tax(
+            &rule,
+            &[SimulatedPlayer {
+                age: 65,
+                has_disability_cert: false,
+            }],
+        );
+        assert_eq!(tax.tax_amount(), 400);
+        assert_eq!(tax.lines()[0].reason(), Some("senior_reduced"));
+        assert!(!tax.lines()[0].exempt());
+    }
+
+    #[test]
+    fn the_reduced_band_ends_where_the_exemption_begins() {
+        let rule = hokkaido_rule();
+        let party = [
+            SimulatedPlayer {
+                age: 64,
+                has_disability_cert: false,
+            },
+            SimulatedPlayer {
+                age: 69,
+                has_disability_cert: false,
+            },
+            SimulatedPlayer {
+                age: 70,
+                has_disability_cert: false,
+            },
+        ];
+        let lines = party_tax(&rule, &party);
+        assert_eq!(lines.lines()[0].fee(), 800, "64 is still full price");
+        assert_eq!(lines.lines()[1].fee(), 400, "69 is still reduced");
+        assert_eq!(lines.lines()[2].fee(), 0, "70 is exempt outright");
+        assert_eq!(lines.lines()[2].reason(), Some("senior"));
+    }
+
+    #[test]
+    fn a_rule_without_a_reduced_band_charges_as_before() {
+        let tax = party_tax(
+            &rule(),
+            &[SimulatedPlayer {
+                age: 66,
+                has_disability_cert: false,
+            }],
+        );
+        assert_eq!(tax.tax_amount(), 800);
+        assert_eq!(tax.lines()[0].reason(), None);
+    }
+
+    #[test]
+    fn the_reduced_share_rounds_down_to_a_rate_the_schedule_names() {
+        // 11 grades, 80-yen steps: halving an odd grade must not invent a yen.
+        let rule = TaxRuleSnapshot {
+            fee: 1120,
+            ..hokkaido_rule()
+        };
+        let tax = party_tax(
+            &rule,
+            &[SimulatedPlayer {
+                age: 68,
+                has_disability_cert: false,
+            }],
+        );
+        assert_eq!(tax.tax_amount(), 560);
     }
 
     #[test]
