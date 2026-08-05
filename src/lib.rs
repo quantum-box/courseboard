@@ -1505,10 +1505,17 @@ mod tests {
         )
         .await;
 
-        assert_eq!(response.tax_amount, 800);
+        // The 69-year-old used to be billed the full 400 here, which is what
+        // this test locked in. Hokkaido halves the tax from 65 until the
+        // exemption at 70, so they owe 200 and the party owes 600.
+        assert_eq!(response.tax_amount, 600);
         assert_eq!(response.breakdown.len(), 5);
         assert_eq!(response.breakdown[0].fee, 400);
-        assert_eq!(response.breakdown[4].fee, 400);
+        assert_eq!(response.breakdown[4].fee, 200);
+        assert_eq!(
+            response.breakdown[4].reason.as_deref(),
+            Some("senior_reduced")
+        );
     }
 
     #[tokio::test]

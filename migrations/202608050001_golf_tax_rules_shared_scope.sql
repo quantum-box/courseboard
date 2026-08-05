@@ -53,6 +53,12 @@ WHERE tenant_id = 'scc';
 -- Halved: 65 up to 70.
 -- Source: https://www.pref.hokkaido.lg.jp/sm/zim/tax/golf01.html
 --
+-- Grade 1 is the dearest and the numbers climb as the rate falls. That ordering
+-- is the convention every prefecture follows, and 1,200 yen is the ceiling the
+-- Local Tax Act sets, so grade 1 can only be the top of the ladder. The step
+-- values are the arithmetic the published "400-1,200 yen, 80-yen steps, 11
+-- grades" forces: 400 + 80 x 10 = 1,200 lands on exactly eleven rates.
+--
 -- Which grade a given course is assigned is not derivable from these numbers —
 -- the prefecture notifies each course — so no grade thresholds are seeded here.
 INSERT INTO golf_tax_rules (
