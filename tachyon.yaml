@@ -74,7 +74,14 @@ spec:
         - bin/**
         - migrations/**
         - src/**
+        - tooling/repair_cargo_registry_cache.sh
       build:
+        # The shared Cargo home restored from the build cache can carry a
+        # registry source directory whose files were pruned while `.cargo-ok`
+        # survived. Cargo trusts the marker, skips unpacking, and aborts with
+        # `failed to read .../Cargo.toml` before compiling. Drop those entries
+        # so Cargo downloads them again.
+        installCommand: sh tooling/repair_cargo_registry_cache.sh
         package: courseboard
         binary: lambda-courseboard
         release: true
