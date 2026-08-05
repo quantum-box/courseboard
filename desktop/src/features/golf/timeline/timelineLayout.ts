@@ -1,4 +1,5 @@
 import { i18next } from '../../../i18n'
+import { COURSE_TIME_ZONE } from '../../../lib/clock'
 
 import type {
   AssignmentCoverage,
@@ -73,7 +74,6 @@ export function parseLocalDateParts(iso: string): { date: string; minutes: numbe
   }
 }
 
-const JST_TIME_ZONE = 'Asia/Tokyo'
 const DEFAULT_ASSIGNMENT_DURATION_MINUTES = 270
 
 /** Convert any ISO timestamp to JST calendar date + wall-clock minutes. */
@@ -87,13 +87,13 @@ export function parseJstDateParts(iso: string): { date: string; minutes: number 
     return parseLocalDateParts(iso)
   }
   const date = new Intl.DateTimeFormat('sv-SE', {
-    timeZone: JST_TIME_ZONE,
+    timeZone: COURSE_TIME_ZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   }).format(parsed)
   const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: JST_TIME_ZONE,
+    timeZone: COURSE_TIME_ZONE,
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,

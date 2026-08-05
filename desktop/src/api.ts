@@ -354,37 +354,6 @@ export function yen(amount: number, currency = 'JPY') {
   }).format(amount)
 }
 
-/**
- * The wall clock the courses run on. Every "today" and "now" in the operator
- * screens is this clock, never the device's — a laptop left on a foreign
- * timezone must still show the day the course is actually working.
- */
-export const COURSE_TIME_ZONE = 'Asia/Tokyo'
-
-export function today() {
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: COURSE_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date())
-}
-
-/** Current course-local time as `YYYY-MM-DDTHH:mm`, recomputed on every call. */
-export function nowIsoMinute() {
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: COURSE_TIME_ZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  })
-    .format(new Date())
-    .replace(' ', 'T')
-}
-
-export function currentYearMonth() {
-  return today().slice(0, 7)
-}
+// The course clock lives in `lib/clock`; re-exported here so the many call
+// sites that already import it from the API module keep working.
+export { COURSE_TIME_ZONE, currentYearMonth, nowIsoMinute, today } from './lib/clock'

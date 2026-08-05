@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson } from '../../api'
+import { today } from '../../lib/clock'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import {
@@ -107,14 +108,6 @@ function formatUpdatedAt(value?: string | null) {
   }).format(date)
 }
 
-function todayInTokyo() {
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'Asia/Tokyo',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date())
-}
 
 function validateProduct(draft: GolfReservationProductDraft) {
   if (!draft.displayName.trim()) return i18next.t('products:validation.displayNameRequired')
@@ -158,7 +151,7 @@ export function ReservationProductsPage() {
   const [slotSaving, setSlotSaving] = useState(false)
   const [slotError, setSlotError] = useState<string | null>(null)
 
-  const [capacityDate, setCapacityDate] = useState(todayInTokyo)
+  const [capacityDate, setCapacityDate] = useState(today)
   const [capacity, setCapacity] = useState<CaddieSlotCapacity | null>(null)
   const [capacityLoading, setCapacityLoading] = useState(false)
   const [capacityError, setCapacityError] = useState<string | null>(null)

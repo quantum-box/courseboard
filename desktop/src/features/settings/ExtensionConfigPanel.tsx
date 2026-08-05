@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { i18next } from '../../i18n'
 import { courseboardApiJson, courseboardApiText } from '../../api'
+import { COURSE_TIME_ZONE } from '../../lib/clock'
 import {
   Field,
   FormGrid,
@@ -36,7 +37,7 @@ type ExtensionStatus = {
 
 const defaultExtensionConfig: ExtensionConfigDraft = {
   defaultCurrency: 'JPY',
-  timezone: 'Asia/Tokyo',
+  timezone: COURSE_TIME_ZONE,
 }
 
 function configDraftFromJson(configJson?: Record<string, unknown> | null): ExtensionConfigDraft {
