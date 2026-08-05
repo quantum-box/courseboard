@@ -14,6 +14,7 @@ calamine = { version = "0.36.0", default-features = false }
 clap = { version = "4.5", features = ["derive", "env"] }
 derive-getters = { version = "0.5", features = ["auto_copy_getters"] }
 dotenvy = "0.15"
+field-sdk = { git = "https://github.com/quantum-box/field-sdk", rev = "621b73020171943e6d52d2bfb427685204cbb2cd" }
 jsonwebtoken = "9.3"
 rand = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "rustls-tls"] }

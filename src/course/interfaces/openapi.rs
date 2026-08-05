@@ -11,6 +11,7 @@ use utoipa::{
 use super::http;
 use super::http_commercial;
 use super::http_customers;
+use super::http_field;
 use super::http_ops;
 use super::http_reservation_report;
 use super::http_reservation_summary;
@@ -37,7 +38,7 @@ impl Modify for SecurityAddon {
                     .scheme(HttpAuthScheme::Bearer)
                     .bearer_format("JWT")
                     .description(Some(
-                        "Bearer access token. Tenant-scoped course requests also require the `x-operator-id` header.",
+                        "Bearer access token. Tenant-scoped course requests also require `x-operator-id`; Field SDK requests additionally require `x-platform-id`.",
                     ))
                     .build(),
             ),
@@ -140,6 +141,7 @@ impl Modify for SecurityAddon {
         http_simulator::calculate_fee,
         http_simulator::simulate_range,
         feature_flags::evaluate_feature_flags,
+        http_field::get_client_capabilities,
         profile_proxy::get_me,
     ),
     components(
@@ -274,6 +276,9 @@ impl Modify for SecurityAddon {
             feature_flags::EvaluateFeatureFlagsRequest,
             feature_flags::EvaluateFeatureFlagsResponse,
             feature_flags::FeatureFlagValue,
+            http_field::ClientCapabilitiesResponse,
+            http_field::AgentDocumentCapabilitiesResponse,
+            http_field::DocumentQueueCapabilitiesResponse,
             profile_proxy::ProfileResponse,
             profile_proxy::ProfileUser,
             profile_proxy::ProfileTenant,
@@ -286,6 +291,7 @@ impl Modify for SecurityAddon {
         (name = "course-ops", description = "Caddie operations, payroll, and assignments"),
         (name = "course-commercial", description = "Budgets, settlement, policy, and extension config"),
         (name = "feature-flags", description = "CourseBoard-owned tenant feature evaluation"),
+        (name = "field", description = "SDK-backed TACHYON Field operations"),
         (name = "identity", description = "Authenticated CourseBoard profile"),
     ),
     security(
@@ -317,6 +323,7 @@ mod tests {
         assert!(paths.contains_key("/v1/course/reservation-summaries"));
         assert!(paths.contains_key("/v1/course/reservation-summaries/import"));
         assert!(paths.contains_key("/v1/course/reservation-summaries/course-links"));
+        assert!(paths.contains_key("/v1/field/client-capabilities"));
         assert!(paths.contains_key("/v1/me"));
         let components = json
             .pointer("/components/schemas")
