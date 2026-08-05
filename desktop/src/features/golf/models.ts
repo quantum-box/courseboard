@@ -1,3 +1,5 @@
+import { COURSE_TIME_ZONE } from '../../lib/clock'
+
 import { i18next } from '../../i18n'
 
 export type GolfCourse = {
@@ -109,7 +111,7 @@ export function emptyCourseDraft(): GolfCourseDraft {
     name: '',
     shortName: '',
     holeCount: 18,
-    timezone: 'Asia/Tokyo',
+    timezone: COURSE_TIME_ZONE,
     startIntervalMinutes: 10,
     isActive: true,
   }
