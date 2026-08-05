@@ -5,6 +5,7 @@
 
 mod caddie;
 mod caddie_ops;
+mod caddie_ranking;
 mod commercial;
 mod course;
 mod error;
@@ -27,6 +28,9 @@ pub use caddie_ops::{
     CaddieDayCapacity, CaddiePatch, CaddieRating, CaddieRecommendation, CaddieSupply,
     PayrollPeriod, PayrollRow, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships,
     UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+};
+pub use caddie_ranking::{
+    rank_caddies, AttendanceState, RankedCaddie, RankingCandidate, RankingOptions,
 };
 pub use commercial::{
     BudgetAchievement, DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement,

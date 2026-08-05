@@ -553,13 +553,29 @@ const RATIONALE_PROSE: Record<string, string> = {
   'no historical ratings yet; neutral score applied': 'caddies:rationale.neutralScore',
 }
 
+/**
+ * Stable keys the course API emits now that CourseBoard ranks caddies itself.
+ * Unlike the upstream debug tokens these were designed to be translated, so a
+ * miss here is a missing key rather than English reaching the operator.
+ */
+const RATIONALE_KEYS: Record<string, string> = {
+  on_duty: 'caddies:rationale.onDuty',
+  not_clocked_in: 'caddies:rationale.notClockedIn',
+  clocked_out: 'caddies:rationale.clockedOut',
+  no_staff_link: 'caddies:rationale.noStaffLink',
+  no_ratings: 'caddies:rationale.ratingCountNone',
+  at_daily_limit: 'caddies:rationale.atDailyLimit',
+  rookie_paired_with_veteran: 'caddies:rationale.rookiePaired',
+  veteran_for_foursome: 'caddies:rationale.veteranForFoursome',
+}
+
 export function readableRationale(rationale: string[]) {
   const readable = rationale
     .map(entry => entry.trim())
     .filter(Boolean)
     .map(entry => {
-      const prose = RATIONALE_PROSE[entry.toLowerCase()]
-      if (prose) return i18next.t(prose as 'caddies:rationale.neutralScore')
+      const known = RATIONALE_KEYS[entry] ?? RATIONALE_PROSE[entry.toLowerCase()]
+      if (known) return i18next.t(known as 'caddies:rationale.neutralScore')
       const match = RATIONALE_TOKEN.exec(entry)
       if (!match) return entry
       const [, key, rawValue] = match
