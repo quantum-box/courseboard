@@ -60,6 +60,13 @@ export const caddies: DeepPartial<typeof source> = {
     ratingAverage: 'Average rating {{value}}',
     score: 'Match score {{value}}',
     neutralScore: 'Neutral score — no ratings on record yet',
+    onDuty: 'Clocked in',
+    notClockedIn: 'Not clocked in',
+    clockedOut: 'Clocked out',
+    noStaffLink: 'No staff link',
+    atDailyLimit: 'At the daily round limit',
+    rookiePaired: 'Rookie paired with a veteran',
+    veteranForFoursome: 'A veteran suits a full foursome',
     unavailable: 'No readable explanation was provided',
   },
   offDuty: {

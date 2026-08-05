@@ -62,6 +62,13 @@ export const caddies = {
     ratingAverage: '評価の平均 {{value}}',
     score: '適合スコア {{value}}',
     neutralScore: '評価の記録がないため中立の点数',
+    onDuty: '出勤ずみ',
+    notClockedIn: '未出勤',
+    clockedOut: '退勤ずみ',
+    noStaffLink: 'スタッフ未紐付け',
+    atDailyLimit: '本日の上限に到達',
+    rookiePaired: '新人をベテランと組ませます',
+    veteranForFoursome: '4人組にはベテランが向きます',
     unavailable: 'くわしい理由は表示できません',
   },
   offDuty: {

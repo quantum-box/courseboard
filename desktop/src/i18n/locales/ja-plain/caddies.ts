@@ -56,6 +56,13 @@ export const caddies: DeepPartial<typeof source> = {
     ratingAverage: 'お客さまの評価の平均 {{value}}',
     score: 'おすすめ度 {{value}}',
     neutralScore: 'まだ評価がないので、ふつうの点にしています',
+    onDuty: 'もう出勤しています',
+    notClockedIn: 'まだ出勤していません',
+    clockedOut: 'もう退勤しました',
+    noStaffLink: 'スタッフとつながっていません',
+    atDailyLimit: '今日はもういっぱいです',
+    rookiePaired: '新しい人を、なれた人と組ませます',
+    veteranForFoursome: '4人の組なので、なれた人が向いています',
     unavailable: 'くわしい理由は表示できません',
   },
   offDuty: {
