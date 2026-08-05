@@ -7,7 +7,6 @@ import {
   Field,
   LoadingState,
   Notice,
-  PageHeader,
   PageRefreshButton,
   Panel,
   ResourceError,
@@ -120,14 +119,11 @@ export function ShiftBoardPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        title={t('shifts:title')}
-        description={t('shifts:description')}
-        actions={<PageRefreshButton onClick={refresh} label={t('common:action.refresh')} />}
-      />
-
       <Panel>
         <div className="flex flex-wrap items-end gap-3">
+          <div className="page-toolbar order-last ml-auto self-end">
+            <PageRefreshButton onClick={refresh} label={t('common:action.refresh')} />
+          </div>
           <Field requirement="none" label={t('shifts:month')} className="sm:w-48">
             <Input
               type="month"

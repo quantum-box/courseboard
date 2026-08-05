@@ -24,7 +24,6 @@ import {
   MetricGrid,
   NativeSelect,
   Notice,
-  PageHeader,
   PageRefreshButton,
   Panel,
   ResourceError,
@@ -609,7 +608,6 @@ export function ReservationProductsPage() {
   if (loading) {
     return (
       <div className="page-stack">
-        <PageHeader title={t('products:title')} description={t('products:loadingDescription')} />
         <LoadingState label={t('products:loading')} />
       </div>
     )
@@ -618,7 +616,6 @@ export function ReservationProductsPage() {
   if (loadError) {
     return (
       <div className="page-stack">
-        <PageHeader title={t('products:title')} description={t('products:description')} />
         <ResourceError error={loadError} onRetry={() => void loadPage()} />
       </div>
     )
@@ -626,18 +623,12 @@ export function ReservationProductsPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        title={t('products:title')}
-        description={t('products:description')}
-        actions={(
-          <>
-            <PageRefreshButton onClick={requestReload} />
-            <Button type="button" variant="primary" onClick={beginCreateProduct}>
-              <Plus /> {t('products:addService')}
-            </Button>
-          </>
-        )}
-      />
+      <div className="page-toolbar">
+        <PageRefreshButton onClick={requestReload} />
+        <Button type="button" variant="primary" onClick={beginCreateProduct}>
+          <Plus /> {t('products:addService')}
+        </Button>
+      </div>
 
       {message ? (
         <Notice tone={message.tone} title={message.title}>{message.body}</Notice>

@@ -150,15 +150,11 @@ export function CancellationFeesPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        title={t('cancellationFees:title')}
-        description={t('cancellationFees:description')}
-        actions={(
-          <Button type="button" variant="primary" onClick={() => navigate('cancellation-fees/new')}>
-            <Plus /> {t('cancellationFees:create')}
-          </Button>
-        )}
-      />
+      <div className="page-toolbar">
+        <Button type="button" variant="primary" onClick={() => navigate('cancellation-fees/new')}>
+          <Plus /> {t('cancellationFees:create')}
+        </Button>
+      </div>
 
       <MetricGrid>
         <Metric

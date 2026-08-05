@@ -13,7 +13,6 @@ import {
   Metric,
   MetricGrid,
   NativeSelect,
-  PageHeader,
   Panel,
   ResourceError,
 } from '../../components/Page'
@@ -217,12 +216,6 @@ export function SimulatorPage() {
 
   return (
     <>
-      <PageHeader
-        eyebrow={t('simulator:eyebrow')}
-        title={t('simulator:title')}
-        description={t('simulator:description')}
-      />
-
       <Panel title={t('simulator:quote.title')} description={t('simulator:quote.description')}>
         <form onSubmit={event => void submitQuote(event)}>
           <FormGrid>

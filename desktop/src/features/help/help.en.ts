@@ -135,7 +135,7 @@ export const helpEn: HelpCatalog = {
         },
         {
           heading: 'Link to staff',
-          body: 'Attendance and payroll only include caddies linked to a staff record. Unlinked ones are flagged at the top.',
+          body: 'Being a caddie is one staff role, so a newly added caddie is linked from their name automatically. Older unlinked profiles are flagged at the top; attendance and payroll only include linked caddies.',
         },
         {
           heading: 'Record day-off requests',
@@ -407,6 +407,34 @@ export const helpEn: HelpCatalog = {
       ],
     },
 
+    staff: {
+      title: 'Staff roster',
+      summary: 'Everyone the club employs. Caddies appear here as one of the roles staff hold.',
+      usage: [
+        {
+          heading: 'Register a staff member',
+          body: 'Use "Register staff" to enter a name and employment type. Whether they caddie is decided later.',
+        },
+        {
+          heading: 'Give the caddie role',
+          body: '"Make a caddie" gives that staff member the role. Any caddie profile still without a person can be picked up instead of starting fresh.',
+        },
+        {
+          heading: 'Search',
+          body: 'Search by name, staff ID, or caddie name, and filter by employment or role.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Staff records',
+          body: 'Held by Field HRM (/v1/erp/staff). Renaming someone or retiring them is not available on this screen yet.',
+        },
+        {
+          heading: 'Today’s attendance',
+          body: 'Read from caddie punches, so non-caddie staff stay as “—”.',
+        },
+      ],
+    },
     'settings/members': {
       title: 'Members & roles',
       summary: 'List, invite, and manage the roles of everyone who can use this facility.',

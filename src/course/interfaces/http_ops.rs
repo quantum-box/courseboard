@@ -44,6 +44,8 @@ pub struct UpsertCaddieRequest {
     pub base_fee_amount: i64,
     #[serde(default)]
     pub currency: Option<String>,
+    /// Staff member this caddie is a role of. Leave the staff fields unset to
+    /// register a staff member named `displayName` and link that one.
     #[serde(default)]
     pub staff_id: Option<String>,
     #[serde(default)]

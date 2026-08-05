@@ -35,7 +35,6 @@ import {
   MetricGrid,
   NativeSelect,
   Notice,
-  PageHeader,
   PageRefreshButton,
   Panel,
   ResourceError,
@@ -366,17 +365,13 @@ export function BudgetsPage() {
 
   return (
     <div className="page-stack">
-      <PageHeader
-        title={t('budgets:title')}
-        description={t('budgets:description')}
-        actions={(
-          <PageRefreshButton
-            onClick={() => void load()}
-            loading={loading}
-            label={t('common:action.refresh')}
-          />
-        )}
-      />
+      <div className="page-toolbar">
+        <PageRefreshButton
+          onClick={() => void load()}
+          loading={loading}
+          label={t('common:action.refresh')}
+        />
+      </div>
 
       <Panel>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
@@ -455,7 +450,9 @@ export function BudgetsPage() {
                 </MetricGrid>
                 <DataTable
                   rows={achievements}
-                  rowKey={row => row.date}
+                  // The API returns one row per course and date but names no
+                  // course, so the date alone collides on "all courses".
+                  rowKey={(row, index) => `${row.date}-${index}`}
                   columns={[
                     {
                       key: 'date',

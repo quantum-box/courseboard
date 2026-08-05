@@ -55,6 +55,14 @@ mod tests {
             ))
         }
 
+        async fn create_staff(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _name: &str,
+        ) -> Result<CaddieStaff, CourseError> {
+            Err(CourseError::BadRequest("not used in test"))
+        }
+
         async fn create_caddie(
             &self,
             _credentials: GatewayCredentials<'_>,

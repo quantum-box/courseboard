@@ -5,12 +5,12 @@ use super::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
     AvailabilityQuery, BudgetAchievement, Caddie, CaddieAssignment, CaddieAssignmentQuery,
     CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation,
-    CaddieRoster, Course, CourseError, CourseId, DailyBudget, DailyBudgetQuery, ExtensionStatus,
-    MonthlySettlement, PayrollSummary, ProductSlot, RecommendationQuery, ReplaceCaddieMemberships,
-    Reservation, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
-    TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
-    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
-    UpsertReservationProduct,
+    CaddieRoster, CaddieStaff, Course, CourseError, CourseId, DailyBudget, DailyBudgetQuery,
+    ExtensionStatus, MonthlySettlement, PayrollSummary, ProductSlot, RecommendationQuery,
+    ReplaceCaddieMemberships, Reservation, ReservationPolicy, ReservationProduct,
+    ReservationServiceId, Resource, TaxRuleSnapshot, UpdateExtensionConfig,
+    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -120,6 +120,16 @@ pub trait GolfOpsGateway: Send + Sync {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<CaddieRoster, CourseError>;
+
+    /// Register an HRM staff member.
+    ///
+    /// A caddie is one role a staff member holds, so creating a caddie for
+    /// someone the HRM master does not know yet has to register them first.
+    async fn create_staff(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        name: &str,
+    ) -> Result<CaddieStaff, CourseError>;
 
     async fn create_caddie(
         &self,

@@ -26,6 +26,7 @@ import {
   SidebarSectionLabel,
   Tooltip,
   TooltipContent,
+  Toaster,
   TooltipProvider,
   TooltipTrigger,
 } from '@tachyon-sdk/native-ui'
@@ -46,6 +47,7 @@ import {
   CreditCard,
   FolderTree,
   Gauge,
+  IdCard,
   Languages,
   LogOut,
   Map,
@@ -88,6 +90,7 @@ export type NavigationRoute =
   | 'golf/settlement'
   | 'golf/simulator'
   | 'cancellation-fees'
+  | 'staff'
   | 'golf/courses'
   | 'golf/policy'
   | 'settings/members'
@@ -99,7 +102,7 @@ export type NavigationItem = {
 
 export type NavigationSection = {
   /** Matches a key under `nav:sections`; `showLabel: false` renders the group unlabelled. */
-  id: 'home' | 'courseBooking' | 'caddie' | 'finance'
+  id: 'home' | 'courseBooking' | 'caddie' | 'finance' | 'company'
   showLabel: boolean
   items: NavigationItem[]
 }
@@ -128,6 +131,11 @@ export const navigationSections: NavigationSection[] = [
       { route: 'golf/caddies/shifts', icon: CalendarDays },
       { route: 'golf/caddies/payroll', icon: CircleDollarSign },
     ],
+  },
+  {
+    id: 'company',
+    showLabel: true,
+    items: [{ route: 'staff', icon: IdCard }],
   },
   {
     id: 'finance',
@@ -662,6 +670,8 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
             <WorkspaceHelpPanel route={route} open={helpOpen} onClose={() => setHelpOpen(false)} />
           </div>
         </div>
+        {/* One host for every "saved" / "failed" message in the app. */}
+        <Toaster position="bottom-right" closeButton />
       </div>
 
 

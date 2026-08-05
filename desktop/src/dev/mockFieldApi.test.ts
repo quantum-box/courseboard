@@ -45,16 +45,24 @@ describe('mockFieldApi', () => {
     expect(courseBody.items.length).toBeGreaterThanOrEqual(2)
   })
 
-  it('requires a staff link when creating a caddie profile', () => {
+  it('registers the staff member a caddie names when the body carries no link', () => {
     vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
-    const rejected = resolveMockFieldApiJson('/v1/course/caddie-profiles', {
+    const implicit = resolveMockFieldApiJson('/v1/course/caddie-profiles', {
       method: 'POST',
       body: JSON.stringify({ displayName: 'テスト キャディ', skillLevel: 'regular' }),
     })
-    expect(rejected.kind).toBe('error')
-    if (rejected.kind !== 'error') return
-    expect(rejected.status).toBe(400)
+    expect(implicit.kind).toBe('hit')
+    if (implicit.kind !== 'hit') return
+    const linkedStaffId = (implicit.data as { staffId: string }).staffId
+    expect(linkedStaffId).toMatch(/^staff_/)
+
+    const staff = resolveMockFieldApiJson('/v1/erp/staff')
+    expect(staff.kind).toBe('hit')
+    if (staff.kind !== 'hit') return
+    const roster = staff.data as { items: Array<{ id: string; name: string }> }
+    expect(roster.items.find(member => member.id === linkedStaffId)?.name)
+      .toBe('テスト キャディ')
 
     const created = resolveMockFieldApiJson('/v1/course/caddie-profiles', {
       method: 'POST',

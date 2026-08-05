@@ -15,6 +15,13 @@
   --course-sand: #b88942;
   --course-ink: #252b28;
   --course-danger: #b64740;
+  /*
+   * One height for every control that can sit in the same row. Desktop keeps
+   * the design system's 28px density (same as buttons); the narrow-screen
+   * media query raises the variable to 40px for touch. Kept as a variable so
+   * a toolbar cannot drift again — never hard-code a control height per page.
+   */
+  --control-height: 28px;
   font-family: var(--nui-font-sans);
   color-scheme: light;
   color: hsl(var(--nui-foreground));
@@ -608,13 +615,25 @@ button,
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 16px 20px 28px;
+  /* App density: the workspace bar already frames the page, so content
+     starts right below it instead of opening with website-like whitespace. */
+  padding: 10px 14px 20px;
   flex-direction: column;
-  gap: 22px;
+  gap: 12px;
 }
 
 .page-narrow {
   max-width: 1080px;
+}
+
+/* Actions-only strip that replaces PageHeader: the workspace bar names the
+   page, so screens open with their controls instead of a repeated title. */
+.page-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .page-header {
@@ -908,7 +927,7 @@ button,
 }
 
 .native-select {
-  height: 28px;
+  height: var(--control-height);
   padding: 0 28px 0 9px;
 }
 
@@ -1328,9 +1347,9 @@ button,
   .metric > strong { font-size: 17px; }
   .form-grid-2,
   .form-grid-3 { grid-template-columns: 1fr; }
-  .native-select,
+  :root { --control-height: 40px; }
   .field input,
-  .field button { min-height: 40px; }
+  .field button { min-height: var(--control-height); }
   .native-textarea { min-height: 96px; }
   .feature-tile { min-height: 44px; }
   .operations-step { padding: 8px 10px; }

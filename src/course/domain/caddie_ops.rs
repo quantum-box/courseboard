@@ -84,17 +84,28 @@ impl UpsertCaddie {
         })
     }
 
-    /// Creation requires a staff link; updates stay lenient so legacy
-    /// unlinked profiles can still be edited.
-    pub fn require_staff_link(&self) -> Result<(), CourseError> {
-        if self.staff_id.is_none() && self.staff_reference_id.is_none() {
-            return Err(CourseError::BadRequest(
-                "staff link is required to create a caddie",
-            ));
+    /// A caddie is a role a staff member holds, so a profile is only ever
+    /// meaningful while linked. Creation resolves the link instead of demanding
+    /// it up front; updates stay lenient so legacy unlinked profiles can still
+    /// be edited.
+    pub fn has_staff_link(&self) -> bool {
+        self.staff_id.is_some() || self.staff_reference_id.is_some()
+    }
+
+    /// Attach the staff member this caddie is a role of.
+    pub fn link_staff(&mut self, staff_id: impl Into<String>) {
+        let staff_id = staff_id.into().trim().to_string();
+        if staff_id.is_empty() {
+            return;
         }
-        Ok(())
+        self.staff_reference_type = Some(STAFF_MEMBER_REFERENCE_TYPE.to_string());
+        self.staff_reference_id = Some(staff_id.clone());
+        self.staff_id = Some(staff_id);
     }
 }
+
+/// Reference type Field uses for a caddie profile pointing at an HRM staff member.
+const STAFF_MEMBER_REFERENCE_TYPE: &str = "staff_member";
 
 /// Partial update for an existing caddie profile.
 ///
@@ -1197,32 +1208,44 @@ mod tests {
     }
 
     #[test]
-    fn require_staff_link_accepts_staff_id() {
-        assert!(upsert(Some("staff_001"), Some("staff_001"))
-            .require_staff_link()
-            .is_ok());
+    fn has_staff_link_accepts_staff_id() {
+        assert!(upsert(Some("staff_001"), Some("staff_001")).has_staff_link());
     }
 
     #[test]
-    fn require_staff_link_accepts_reference_only() {
-        assert!(upsert(None, Some("staff_001")).require_staff_link().is_ok());
+    fn has_staff_link_accepts_reference_only() {
+        assert!(upsert(None, Some("staff_001")).has_staff_link());
     }
 
     #[test]
-    fn require_staff_link_rejects_unlinked() {
-        assert!(matches!(
-            upsert(None, None).require_staff_link(),
-            Err(CourseError::BadRequest(_))
-        ));
+    fn has_staff_link_reports_an_unlinked_input() {
+        assert!(!upsert(None, None).has_staff_link());
     }
 
     #[test]
-    fn require_staff_link_rejects_blank_staff_id() {
+    fn has_staff_link_treats_a_blank_staff_id_as_unlinked() {
         // try_new normalizes whitespace-only ids to None.
-        assert!(matches!(
-            upsert(Some("  "), Some("  ")).require_staff_link(),
-            Err(CourseError::BadRequest(_))
-        ));
+        assert!(!upsert(Some("  "), Some("  ")).has_staff_link());
+    }
+
+    #[test]
+    fn link_staff_fills_both_the_id_and_the_reference() {
+        // Field reads `staffId` on some surfaces and the reference pair on
+        // others, so a half-filled link would show up as unlinked somewhere.
+        let mut input = upsert(None, None);
+        input.link_staff(" staff_001 ");
+
+        assert_eq!(input.staff_id.as_deref(), Some("staff_001"));
+        assert_eq!(input.staff_reference_type.as_deref(), Some("staff_member"));
+        assert_eq!(input.staff_reference_id.as_deref(), Some("staff_001"));
+    }
+
+    #[test]
+    fn link_staff_ignores_a_blank_id() {
+        let mut input = upsert(None, None);
+        input.link_staff("   ");
+
+        assert!(!input.has_staff_link());
     }
 
     /// Mirrors what the gateway produces for a profile that Field stores with a
