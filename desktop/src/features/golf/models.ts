@@ -175,6 +175,32 @@ function validTime(value: string) {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value)
 }
 
+/**
+ * Why the operator cannot save this plan yet, or `null` when it is fine.
+ *
+ * The save button stays enabled on purpose: telling the operator which field
+ * is wrong beats a button that is dead for a reason they have to guess.
+ */
+export function validateProduct(draft: GolfReservationProductDraft) {
+  if (!draft.displayName.trim()) return i18next.t('products:validation.displayNameRequired')
+  if ([...draft.displayName.trim()].length > 255) {
+    return i18next.t('products:validation.displayNameLength')
+  }
+  if (!draft.serviceId.trim()) return i18next.t('products:validation.serviceIdRequired')
+  if (!/^[A-Za-z0-9._:-]+$/.test(draft.serviceId.trim())) {
+    return i18next.t('products:validation.serviceIdFormat')
+  }
+  if (![9, 18].includes(draft.holeCount)) return i18next.t('products:validation.holeCount')
+  if (
+    !Number.isInteger(draft.expectedDurationMinutes)
+    || draft.expectedDurationMinutes < 30
+    || draft.expectedDurationMinutes > 720
+  ) {
+    return i18next.t('products:validation.duration')
+  }
+  return null
+}
+
 export function validateSlots(slots: GolfProductSlot[]) {
   const errors: string[] = []
   const keys = new Set<string>()
