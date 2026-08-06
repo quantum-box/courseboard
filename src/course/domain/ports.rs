@@ -6,11 +6,11 @@ use super::{
     AvailabilityQuery, BudgetAchievement, Caddie, CaddieAssignment, CaddieAssignmentQuery,
     CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation,
     CaddieRoster, CaddieStaff, Course, CourseError, CourseId, DailyBudget, DailyBudgetQuery,
-    ExtensionStatus, MonthlySettlement, PayrollSummary, ProductSlot, RecommendationQuery,
-    ReplaceCaddieMemberships, Reservation, ReservationPolicy, ReservationProduct,
-    ReservationServiceId, Resource, TaxRuleSnapshot, UpdateExtensionConfig,
-    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
-    UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
+    ExtensionStatus, MonthlySettlement, ProductSlot, RecommendationQuery, ReplaceCaddieMemberships,
+    Reservation, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
+    TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
+    UpsertReservationProduct, WorkedMinutes,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -219,18 +219,22 @@ pub trait GolfOpsGateway: Send + Sync {
         to: NaiveDate,
     ) -> Result<Vec<AttendancePeriodSnapshot>, CourseError>;
 
+    /// Worked and rostered minutes for every staff member in one calendar month.
+    ///
+    /// Keyed by staff id, since the minutes come from the staff record rather
+    /// than the caddie profile.
+    async fn list_worked_minutes(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        year_month: &str,
+    ) -> Result<std::collections::HashMap<String, WorkedMinutes>, CourseError>;
+
     async fn auto_assign_caddies(
         &self,
         credentials: GatewayCredentials<'_>,
         date: NaiveDate,
         dry_run: bool,
     ) -> Result<AutoAssignResult, CourseError>;
-
-    async fn get_payroll_summary(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        year_month: &str,
-    ) -> Result<PayrollSummary, CourseError>;
 
     async fn export_payroll_csv(
         &self,
