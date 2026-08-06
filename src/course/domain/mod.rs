@@ -10,7 +10,6 @@ mod commercial;
 mod course;
 mod error;
 mod ids;
-mod payroll;
 mod ports;
 mod pricing_settings;
 mod product;
@@ -45,7 +44,6 @@ pub use ids::{
     AssignmentId, AvailabilityId, BudgetId, CaddieId, CourseId, MembershipId, ProductId,
     ProductSlotId, RatingId, ReservationId, ReservationServiceId, ResourceId, TenantId,
 };
-pub use payroll::{summarize_payroll, AttendanceDay, PayrollCandidate, WorkedMinutes};
 pub use ports::{
     GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway,
     ReservationGateway, TeeSheetQuery,
