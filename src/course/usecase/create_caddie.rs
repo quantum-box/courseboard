@@ -45,8 +45,8 @@ mod tests {
         AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
         AvailabilityQuery, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
         CaddieCourseMembership, CaddieId, CaddieRank, CaddieRating, CaddieRecommendation,
-        CaddieRoster, CaddieSkillLevel, CaddieStaff, PayrollSummary, RecommendationQuery,
-        ReplaceCaddieMemberships, UpsertCaddieAssignment, UpsertCaddieAvailability,
+        CaddieRoster, CaddieSkillLevel, CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships,
+        UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
 
     #[derive(Default)]
@@ -204,14 +204,6 @@ mod tests {
             Err(CourseError::BadRequest("not used in test"))
         }
 
-        async fn get_payroll_summary(
-            &self,
-            _credentials: GatewayCredentials<'_>,
-            _year_month: &str,
-        ) -> Result<PayrollSummary, CourseError> {
-            Err(CourseError::BadRequest("not used in test"))
-        }
-
         async fn export_payroll_csv(
             &self,
             _credentials: GatewayCredentials<'_>,
@@ -226,6 +218,16 @@ mod tests {
             _caddie_id: Option<&CaddieId>,
         ) -> Result<Vec<CaddieRating>, CourseError> {
             Ok(vec![])
+        }
+        async fn list_worked_minutes(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _year_month: &str,
+        ) -> Result<
+            std::collections::HashMap<String, crate::course::domain::WorkedMinutes>,
+            CourseError,
+        > {
+            Ok(std::collections::HashMap::new())
         }
     }
 
