@@ -121,13 +121,13 @@ spec:
             - name: TACHYON_FIELD_API_URL
               value: https://tachyon-field-api.txcloud.app
         preview:
+          # Tachyon provisions an isolated database and scoped user for each PR.
+          # DATABASE_URL is injected from the matching PR-scoped secret.
+          provisionedDatabase:
+            provider: tidb
+            engine: mysql
+            envVar: DATABASE_URL
           envVars:
-            - name: DATABASE_URL
-              type: credential
-              valueFrom:
-                databaseRef:
-                  name: tidb_courseboard_preview
-                  field: url
             - name: COURSEBOARD_PUBLIC_UI_BASE_URL
               value: https://courseboard.txcloud.app
             - name: OIDC_ISSUER_URL
