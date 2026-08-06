@@ -582,16 +582,44 @@ fn panic_response(panic: Box<dyn std::any::Any + Send + 'static>) -> Response {
         .into_response()
 }
 
+/// The origins that are always allowed, whatever the deployment.
+const STATIC_ALLOWED_ORIGINS: [&str; 6] = [
+    "tauri://localhost",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://courseboard.txcloud.app",
+];
+
+/// A pull request's own preview front end, `https://pr123--courseboard.txcloud.app`.
+///
+/// Without this the preview environment cannot be used at all: the React app is
+/// served from the PR's own host, every call to the PR's own API is blocked by
+/// CORS, and the login screen answers "Failed to fetch" before anyone reaches a
+/// password. Verifying a change before it reaches production was impossible.
+///
+/// The match is deliberately exact rather than a suffix test. A suffix test
+/// would also admit `https://evil-courseboard.txcloud.app`.
+fn is_preview_origin(origin: &str) -> bool {
+    let Some(rest) = origin.strip_prefix("https://pr") else {
+        return false;
+    };
+    let Some((number, host)) = rest.split_once("--") else {
+        return false;
+    };
+    host == "courseboard.txcloud.app"
+        && !number.is_empty()
+        && number.chars().all(|character| character.is_ascii_digit())
+}
+
 fn courseboard_cors_layer() -> CorsLayer {
     CorsLayer::new()
-        .allow_origin(AllowOrigin::list([
-            HeaderValue::from_static("tauri://localhost"),
-            HeaderValue::from_static("http://tauri.localhost"),
-            HeaderValue::from_static("https://tauri.localhost"),
-            HeaderValue::from_static("http://localhost:5173"),
-            HeaderValue::from_static("http://127.0.0.1:5173"),
-            HeaderValue::from_static("https://courseboard.txcloud.app"),
-        ]))
+        .allow_origin(AllowOrigin::predicate(|origin, _request| {
+            origin.to_str().is_ok_and(|origin| {
+                STATIC_ALLOWED_ORIGINS.contains(&origin) || is_preview_origin(origin)
+            })
+        }))
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -1178,6 +1206,50 @@ mod tests {
             response.headers().get("access-control-allow-origin"),
             Some(&HeaderValue::from_static("https://courseboard.txcloud.app"))
         );
+    }
+
+    #[tokio::test]
+    async fn cors_allows_a_pull_requests_own_preview_front_end() {
+        let app = Router::new()
+            .route("/health", get(|| async { StatusCode::OK }))
+            .layer(courseboard_cors_layer());
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::OPTIONS)
+                    .uri("/health")
+                    .header("origin", "https://pr151--courseboard.txcloud.app")
+                    .header("access-control-request-method", "GET")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get("access-control-allow-origin"),
+            Some(&HeaderValue::from_static(
+                "https://pr151--courseboard.txcloud.app"
+            ))
+        );
+    }
+
+    #[test]
+    fn only_a_numbered_preview_of_this_app_counts_as_a_preview_origin() {
+        assert!(is_preview_origin("https://pr1--courseboard.txcloud.app"));
+        assert!(is_preview_origin("https://pr151--courseboard.txcloud.app"));
+
+        // A look-alike host must not be admitted by a loose suffix match.
+        assert!(!is_preview_origin("https://evil-courseboard.txcloud.app"));
+        assert!(!is_preview_origin(
+            "https://pr151--courseboard.txcloud.app.evil.example"
+        ));
+        assert!(!is_preview_origin("https://pr151--fieldadmin.txcloud.app"));
+        // Another app's preview, and a preview of ours over plain http.
+        assert!(!is_preview_origin("https://prod--courseboard.txcloud.app"));
+        assert!(!is_preview_origin("http://pr151--courseboard.txcloud.app"));
+        assert!(!is_preview_origin("https://pr--courseboard.txcloud.app"));
     }
 
     #[tokio::test]
