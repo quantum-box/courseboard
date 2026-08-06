@@ -30,6 +30,7 @@ import {
 } from '../../components/Page'
 import { Sheet } from '../../components/Sheet'
 import { useResource } from '../../hooks/useResource'
+import { holeCountLabel, holeCountOptions } from './holeCount'
 import {
   defaultDuration,
   emptyProductDraft,
@@ -606,7 +607,10 @@ function ProductEditorSheet({
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const validationError = validateProduct(draft, { requireCourse: !editing })
+    const validationError = validateProduct(draft, {
+      requireCourse: !editing,
+      existingHoleCount: product?.holeCount,
+    })
     if (validationError) {
       setError(validationError)
       return
@@ -723,10 +727,10 @@ function ProductEditorSheet({
             <NativeSelectField
               value={String(draft.holeCount)}
               onChange={value => changeHoleCount(Number(value))}
-              options={[
-                { value: '18', label: t('courses:option.holes18') },
-                { value: '9', label: t('courses:option.holes9') },
-              ]}
+              options={holeCountOptions(draft.holeCount).map(holes => ({
+                value: String(holes),
+                label: holeCountLabel(holes),
+              }))}
             />
           </Field>
           <Field

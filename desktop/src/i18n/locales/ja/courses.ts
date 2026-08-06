@@ -27,6 +27,7 @@ export const courses = {
   option: {
     holes18: '18ホール',
     holes9: '9ホール',
+    holesOther: '{{n}}ホール',
   },
   table: {
     course: 'コース',

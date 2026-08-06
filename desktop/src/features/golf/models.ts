@@ -182,10 +182,19 @@ function validTime(value: string) {
  * did, so demanding one from every edit would lock a tenant out of the plans
  * they already have; demanding it from every *new* plan still empties the
  * backlog, one plan at a time.
+ *
+ * `existingHoleCount` likewise lets an existing product preserve a catalog
+ * value such as 27 while new products remain restricted to 9 or 18 holes.
  */
 export function validateProduct(
   draft: GolfReservationProductDraft,
-  { requireCourse = false }: { requireCourse?: boolean } = {},
+  {
+    requireCourse = false,
+    existingHoleCount,
+  }: {
+    requireCourse?: boolean
+    existingHoleCount?: number | null
+  } = {},
 ) {
   if (!draft.displayName.trim()) return i18next.t('products:validation.displayNameRequired')
   if ([...draft.displayName.trim()].length > 255) {
@@ -204,7 +213,12 @@ export function validateProduct(
       return i18next.t('products:validation.maxPlayers')
     }
   }
-  if (![9, 18].includes(draft.holeCount)) return i18next.t('products:validation.holeCount')
+  if (
+    ![9, 18].includes(draft.holeCount)
+    && draft.holeCount !== existingHoleCount
+  ) {
+    return i18next.t('products:validation.holeCount')
+  }
   if (
     !Number.isInteger(draft.expectedDurationMinutes)
     || draft.expectedDurationMinutes < 30
