@@ -20,9 +20,9 @@ use crate::course::domain::{
     AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery,
     AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
     CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation, CaddieRoster,
-    CaddieSkillLevel, CaddieStaff, CourseError, GatewayCredentials, GolfOpsGateway,
-    RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, WorkedMinutes,
+    CaddieSkillLevel, CaddieStaff, CourseError, GatewayCredentials, GolfOpsGateway, PayrollPeriod,
+    PayrollRow, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 
 const GOLF: &str = "/v1/erp/extensions/golf-course";
@@ -435,34 +435,6 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
             .collect())
     }
 
-    async fn list_worked_minutes(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        year_month: &str,
-    ) -> Result<HashMap<String, WorkedMinutes>, CourseError> {
-        // One call for the whole roster. The per-staff endpoint would be a
-        // request each, which is what this replaces.
-        let path = format!(
-            "/v1/erp/hrm/staff-utilization?period={}",
-            urlencoding_query(year_month)
-        );
-        let items: Vec<FieldStaffWorkloadDto> =
-            field_get_items(&self.client, &self.base_url, &path, credentials).await?;
-        Ok(items
-            .into_iter()
-            .filter(|item| !item.staff_id.trim().is_empty())
-            .map(|item| {
-                (
-                    item.staff_id,
-                    WorkedMinutes {
-                        worked: item.worked_minutes.unwrap_or(0).max(0),
-                        shifted: item.shifted_minutes.unwrap_or(0).max(0),
-                    },
-                )
-            })
-            .collect())
-    }
-
     async fn auto_assign_caddies(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -496,6 +468,38 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
             dto.skipped
                 .into_iter()
                 .map(|item| AutoAssignSkippedItem::new(item.reservation_id, item.reason))
+                .collect(),
+        ))
+    }
+
+    async fn get_payroll_summary(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        year_month: &str,
+    ) -> Result<PayrollSummary, CourseError> {
+        let path = format!(
+            "{GOLF}/caddie-payroll-summary?yearMonth={}",
+            urlencoding_query(year_month)
+        );
+        let dto: FieldPayrollDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::GET,
+            &path,
+            credentials,
+            None,
+        )
+        .await?;
+        let staff_names = Self::staff_names_by_id(&self.load_staff(credentials).await?);
+        Ok(PayrollSummary::new(
+            PayrollPeriod::new(
+                dto.period.year_month,
+                dto.period.start_date,
+                dto.period.end_date,
+            ),
+            dto.items
+                .into_iter()
+                .map(|item| map_payroll_row(item, &staff_names))
                 .collect(),
         ))
     }
@@ -656,14 +660,6 @@ fn map_attendance(
     )
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldStaffWorkloadDto {
-    staff_id: String,
-    worked_minutes: Option<i64>,
-    shifted_minutes: Option<i64>,
-}
-
 fn map_attendance_period_snapshot(
     value: FieldAttendancePeriodSnapshotDto,
 ) -> AttendancePeriodSnapshot {
@@ -671,6 +667,29 @@ fn map_attendance_period_snapshot(
         value.caddie_profile_id,
         value.date,
         value.attendance_status,
+    )
+}
+
+fn map_payroll_row(
+    value: FieldPayrollRowDto,
+    staff_names_by_id: &HashMap<String, String>,
+) -> PayrollRow {
+    let display_name = resolve_linked_staff_name(
+        &value.display_name,
+        value.staff_id.as_deref(),
+        staff_names_by_id,
+    );
+    PayrollRow::reconstitute(
+        value.caddie_profile_id,
+        display_name,
+        value.staff_id,
+        value.worked_minutes.unwrap_or(0),
+        value.shifted_minutes.unwrap_or(0),
+        value.assigned_rounds.unwrap_or(0),
+        value.confirmed_fee_total.unwrap_or(0),
+        value.currency.unwrap_or_else(|| "JPY".into()),
+        value.open_clock_in.unwrap_or(false),
+        value.rounds_without_clock_in.unwrap_or(0),
     )
 }
 
@@ -803,6 +822,44 @@ struct FieldAutoAssignItemDto {
 struct FieldAutoAssignSkippedDto {
     reservation_id: String,
     reason: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldPayrollDto {
+    period: FieldPayrollPeriodDto,
+    items: Vec<FieldPayrollRowDto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldPayrollPeriodDto {
+    year_month: String,
+    start_date: NaiveDate,
+    end_date: NaiveDate,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldPayrollRowDto {
+    caddie_profile_id: String,
+    display_name: String,
+    #[serde(default)]
+    staff_id: Option<String>,
+    #[serde(default)]
+    worked_minutes: Option<i64>,
+    #[serde(default)]
+    shifted_minutes: Option<i64>,
+    #[serde(default)]
+    assigned_rounds: Option<i64>,
+    #[serde(default)]
+    confirmed_fee_total: Option<i64>,
+    #[serde(default)]
+    currency: Option<String>,
+    #[serde(default)]
+    open_clock_in: Option<bool>,
+    #[serde(default)]
+    rounds_without_clock_in: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
