@@ -3,6 +3,7 @@
 //! Field / ERP JSON never enters this module. Gateways reconstitute domain
 //! models; use cases depend on ports and domain types only.
 
+mod auto_assign;
 mod caddie;
 mod caddie_ops;
 mod caddie_ranking;
@@ -19,6 +20,10 @@ mod resource;
 mod simulator;
 mod tee_sheet;
 
+pub use auto_assign::{
+    plan_auto_assignments, AutoAssignCandidate, AutoAssignPlan, AutoAssignSlot, PlannedAssignment,
+    PlannedSkip,
+};
 pub use caddie::{
     AssignmentRole, AssignmentStatus, Caddie, CaddieAssignment, CaddieRank, CaddieRoster,
     CaddieSkillLevel, CaddieStaff, CaddieUpstreamIdentity,

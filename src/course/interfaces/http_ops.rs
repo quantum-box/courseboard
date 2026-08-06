@@ -888,7 +888,7 @@ pub async fn auto_assign_caddies(
     Json(body): Json<AutoAssignRequest>,
 ) -> Result<Json<AutoAssignResultDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = AutoAssignCaddiesUseCase::new(ops_gateway(&state));
+    let use_case = AutoAssignCaddiesUseCase::new(ops_gateway(&state), reservation_gateway(&state));
     let result = use_case
         .execute(credentials, body.date, body.dry_run)
         .await

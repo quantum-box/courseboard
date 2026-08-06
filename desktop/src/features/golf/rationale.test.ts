@@ -103,3 +103,19 @@ describe('clockRequestBody', () => {
       .toBe(clockRequestBody('out', day).businessDate)
   })
 })
+
+describe('readableRationale for the auto-assignment plan', () => {
+  it('translates the keys the planner now emits', () => {
+    // Field used to answer with Japanese sentences compiled into its binary,
+    // so an operator reading the app in English got Japanese.
+    expect(readableRationale(['on_duty', 'contract_remaining=12', 'second_round_today'])).toEqual([
+      '出勤ずみ',
+      '月間契約の残り12R',
+      '本日2ラウンド目',
+    ])
+  })
+
+  it('says plainly when a round could not be filled', () => {
+    expect(readableRationale(['no_caddie_available'])).toEqual(['配置できるキャディがいません'])
+  })
+})

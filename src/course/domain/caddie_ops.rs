@@ -1045,6 +1045,16 @@ impl PayrollPeriod {
             next.pred_opt().ok_or(MALFORMED)?,
         ))
     }
+
+    /// The calendar month a date falls in.
+    ///
+    /// Auto-assignment needs it: a caddie's contract balance is a monthly
+    /// figure, so planning one day means reading the month around it.
+    pub fn for_date(date: NaiveDate) -> Self {
+        let year_month = date.format("%Y-%m").to_string();
+        // The date is real, so its own month always parses.
+        Self::try_new(&year_month).unwrap_or_else(|_| Self::new(year_month, date, date))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Getters)]

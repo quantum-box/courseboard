@@ -17,10 +17,9 @@ use super::field_gateway::{
 };
 use crate::course::domain::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshot, AttendanceSnapshotReport,
-    AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery,
-    AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
-    CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation, CaddieRoster,
-    CaddieSkillLevel, CaddieStaff, CourseError, GatewayCredentials, GolfOpsGateway,
+    AvailabilityQuery, AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery,
+    CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation,
+    CaddieRoster, CaddieSkillLevel, CaddieStaff, CourseError, GatewayCredentials, GolfOpsGateway,
     RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment,
     UpsertCaddieAvailability, WorkedMinutes,
 };
@@ -194,6 +193,35 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         let items: Vec<FieldGolfCaddieAssignmentDto> =
             field_get_items(&self.client, &self.base_url, &path, credentials).await?;
         items.into_iter().map(map_caddie_assignment).collect()
+    }
+
+    async fn create_caddie_assignment(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: UpsertCaddieAssignment,
+    ) -> Result<CaddieAssignment, CourseError> {
+        let body = json!({
+            "caddieProfileId": input.caddie_id,
+            "reservationId": input.reservation_id,
+            "roundReference": input.round_reference,
+            "scheduledAt": input.scheduled_at,
+            "status": input.status,
+            "assignmentRole": input.assignment_role,
+            "feeAmount": input.fee_amount,
+            "feeCurrency": input.fee_currency,
+            "recommendationScore": input.recommendation_score,
+            "notes": input.notes,
+        });
+        let dto: FieldGolfCaddieAssignmentDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            &format!("{GOLF}/caddie-assignments"),
+            credentials,
+            Some(&body),
+        )
+        .await?;
+        map_caddie_assignment(dto)
     }
 
     async fn update_caddie_assignment(
@@ -461,43 +489,6 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
                 )
             })
             .collect())
-    }
-
-    async fn auto_assign_caddies(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        date: NaiveDate,
-        dry_run: bool,
-    ) -> Result<AutoAssignResult, CourseError> {
-        let body = json!({ "date": date, "dryRun": dry_run });
-        let dto: FieldAutoAssignDto = field_send_json(
-            &self.client,
-            &self.base_url,
-            reqwest::Method::POST,
-            &format!("{GOLF}/caddie-auto-assignments"),
-            credentials,
-            Some(&body),
-        )
-        .await?;
-        Ok(AutoAssignResult::new(
-            dto.dry_run,
-            dto.assigned
-                .into_iter()
-                .map(|item| {
-                    AutoAssignPlanItem::reconstitute(
-                        item.reservation_id,
-                        item.scheduled_at,
-                        item.caddie_profile_id,
-                        item.caddie_display_name,
-                        item.rationale,
-                    )
-                })
-                .collect(),
-            dto.skipped
-                .into_iter()
-                .map(|item| AutoAssignSkippedItem::new(item.reservation_id, item.reason))
-                .collect(),
-        ))
     }
 
     async fn export_payroll_csv(
@@ -777,32 +768,6 @@ struct FieldAttendancePeriodSnapshotDto {
     caddie_profile_id: String,
     date: NaiveDate,
     attendance_status: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldAutoAssignDto {
-    dry_run: bool,
-    assigned: Vec<FieldAutoAssignItemDto>,
-    skipped: Vec<FieldAutoAssignSkippedDto>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldAutoAssignItemDto {
-    reservation_id: String,
-    scheduled_at: DateTime<Utc>,
-    caddie_profile_id: String,
-    caddie_display_name: String,
-    #[serde(default)]
-    rationale: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldAutoAssignSkippedDto {
-    reservation_id: String,
-    reason: String,
 }
 
 #[derive(Debug, Deserialize)]

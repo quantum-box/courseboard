@@ -2,15 +2,15 @@ use async_trait::async_trait;
 use chrono::NaiveDate;
 
 use super::{
-    AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-    AvailabilityQuery, BudgetAchievement, Caddie, CaddieAssignment, CaddieAssignmentQuery,
-    CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation,
-    CaddieRoster, CaddieStaff, Course, CourseError, CourseId, DailyBudget, DailyBudgetQuery,
-    ExtensionStatus, MonthlySettlement, ProductSlot, RecommendationQuery, ReplaceCaddieMemberships,
-    Reservation, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
-    TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
-    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
-    UpsertReservationProduct, WorkedMinutes,
+    AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AvailabilityQuery,
+    BudgetAchievement, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
+    CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation, CaddieRoster,
+    CaddieStaff, Course, CourseError, CourseId, DailyBudget, DailyBudgetQuery, ExtensionStatus,
+    MonthlySettlement, ProductSlot, RecommendationQuery, ReplaceCaddieMemberships, Reservation,
+    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, TaxRuleSnapshot,
+    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
+    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
+    WorkedMinutes,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -161,6 +161,16 @@ pub trait GolfOpsGateway: Send + Sync {
         query: CaddieAssignmentQuery,
     ) -> Result<Vec<CaddieAssignment>, CourseError>;
 
+    /// Puts a caddie on a round that has nobody on it yet.
+    ///
+    /// Auto-assignment needs this: it plans a whole day at once, and every pick
+    /// it makes is a round that did not have an assignment to update.
+    async fn create_caddie_assignment(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: UpsertCaddieAssignment,
+    ) -> Result<CaddieAssignment, CourseError>;
+
     async fn update_caddie_assignment(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -228,13 +238,6 @@ pub trait GolfOpsGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         year_month: &str,
     ) -> Result<std::collections::HashMap<String, WorkedMinutes>, CourseError>;
-
-    async fn auto_assign_caddies(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        date: NaiveDate,
-        dry_run: bool,
-    ) -> Result<AutoAssignResult, CourseError>;
 
     async fn export_payroll_csv(
         &self,

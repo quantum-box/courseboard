@@ -67,6 +67,9 @@ export const caddies: DeepPartial<typeof source> = {
     atDailyLimit: 'At the daily round limit',
     rookiePaired: 'Rookie paired with a veteran',
     veteranForFoursome: 'A veteran suits a full foursome',
+    secondRoundToday: 'Second round today',
+    contractRemaining: '{{n}} rounds left on the monthly contract',
+    noCaddieAvailable: 'No caddie could take this round',
     unavailable: 'No readable explanation was provided',
   },
   offDuty: {

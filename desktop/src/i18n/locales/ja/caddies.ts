@@ -69,6 +69,9 @@ export const caddies = {
     atDailyLimit: '本日の上限に到達',
     rookiePaired: '新人をベテランと組ませます',
     veteranForFoursome: '4人組にはベテランが向きます',
+    secondRoundToday: '本日2ラウンド目',
+    contractRemaining: '月間契約の残り{{n}}R',
+    noCaddieAvailable: '配置できるキャディがいません',
     unavailable: 'くわしい理由は表示できません',
   },
   offDuty: {

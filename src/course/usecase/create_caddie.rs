@@ -42,11 +42,11 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-        AvailabilityQuery, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
-        CaddieCourseMembership, CaddieId, CaddieRank, CaddieRating, CaddieRecommendation,
-        CaddieRoster, CaddieSkillLevel, CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships,
-        UpsertCaddieAssignment, UpsertCaddieAvailability,
+        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AvailabilityQuery,
+        CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
+        CaddieId, CaddieRank, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSkillLevel,
+        CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddieAssignment,
+        UpsertCaddieAvailability,
     };
 
     #[derive(Default)]
@@ -117,6 +117,14 @@ mod tests {
             _query: CaddieAssignmentQuery,
         ) -> Result<Vec<CaddieAssignment>, CourseError> {
             Ok(vec![])
+        }
+
+        async fn create_caddie_assignment(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpsertCaddieAssignment,
+        ) -> Result<CaddieAssignment, CourseError> {
+            Err(CourseError::BadRequest("not used in test"))
         }
 
         async fn update_caddie_assignment(
@@ -193,15 +201,6 @@ mod tests {
             _to: NaiveDate,
         ) -> Result<Vec<AttendancePeriodSnapshot>, CourseError> {
             Ok(vec![])
-        }
-
-        async fn auto_assign_caddies(
-            &self,
-            _credentials: GatewayCredentials<'_>,
-            _date: NaiveDate,
-            _dry_run: bool,
-        ) -> Result<AutoAssignResult, CourseError> {
-            Err(CourseError::BadRequest("not used in test"))
         }
 
         async fn export_payroll_csv(

@@ -523,6 +523,9 @@ function rationaleTokenLabel(key: string, rawValue: string) {
   if (key === 'rounds_assigned_today') {
     return i18next.t('caddies:rationale.roundsAssignedToday', { n: String(value) })
   }
+  if (key === 'contract_remaining') {
+    return i18next.t('caddies:rationale.contractRemaining', { n: String(value) })
+  }
   if (key === 'rating_avg' || key === 'rating_average') {
     return i18next.t('caddies:rationale.ratingAverage', { value: String(value) })
   }
@@ -567,6 +570,8 @@ const RATIONALE_KEYS: Record<string, string> = {
   at_daily_limit: 'caddies:rationale.atDailyLimit',
   rookie_paired_with_veteran: 'caddies:rationale.rookiePaired',
   veteran_for_foursome: 'caddies:rationale.veteranForFoursome',
+  second_round_today: 'caddies:rationale.secondRoundToday',
+  no_caddie_available: 'caddies:rationale.noCaddieAvailable',
 }
 
 export function readableRationale(rationale: string[]) {
