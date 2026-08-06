@@ -727,10 +727,19 @@ async fn calculate(
         ));
     }
 
-    let rule = rules
-        .find_rule_by_green_fee(&request.tenant_id, &request.prefecture, request.green_fee)
-        .await?
-        .ok_or(AppError::RuleNotFound)?;
+    let rule = match request.course_grade.as_deref().map(str::trim) {
+        Some(grade) if !grade.is_empty() => {
+            rules
+                .find_rule_by_grade(&request.tenant_id, &request.prefecture, grade)
+                .await?
+        }
+        _ => {
+            rules
+                .find_rule_by_green_fee(&request.tenant_id, &request.prefecture, request.green_fee)
+                .await?
+        }
+    }
+    .ok_or(AppError::RuleNotFound)?;
 
     let players: Vec<SimulatedPlayer> = request
         .players
@@ -940,6 +949,16 @@ pub struct CalculateRequest {
     pub tenant_id: String,
     pub prefecture: String,
     pub green_fee: i64,
+    /// The grade the prefecture assigned this course. Given, it decides the
+    /// rate; omitted, the green fee's bracket stands in for it.
+    ///
+    /// Only the shared, prefecture-wide schedule is seeded, and it has no
+    /// brackets — which grade a course sits in is the prefecture's decision,
+    /// not something the fee implies. So without this the lookup finds nothing
+    /// and every age-aware quote answers 404, including the reduced band for
+    /// players between 65 and the exemption at 70.
+    #[serde(default)]
+    pub course_grade: Option<String>,
     pub players: Vec<Player>,
 }
 
@@ -1479,6 +1498,79 @@ mod tests {
 
         assert_eq!(response.tax_amount, 0);
         assert_eq!(response.breakdown[0].reason.as_deref(), Some("minor"));
+    }
+
+    /// The shared, prefecture-wide schedule as a real tenant reaches it: by the
+    /// grade the prefecture assigned, since no brackets are seeded for it.
+    async fn calculate_by_grade(grade: &str, players: serde_json::Value) -> Response {
+        let auth = TestAuth::new();
+        let app = test_app(&auth).await;
+        let body = serde_json::json!({
+            "tenant_id": "tn_not_a_seeded_tenant",
+            "prefecture": "hokkaido",
+            "green_fee": 12_000,
+            "course_grade": grade,
+            "players": players
+        });
+        app.oneshot(
+            Request::builder()
+                .method(Method::POST)
+                .uri("/calculate")
+                .header(AUTHORIZATION, format!("Bearer {}", auth.valid_token()))
+                .header(CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_real_tenant_prices_off_the_shared_schedule_by_its_grade() {
+        // Without the grade this answers 404: the shared schedule carries the
+        // rates but no brackets, so the green fee has nothing to match against.
+        let response = calculate_by_grade(
+            "6",
+            serde_json::json!([{ "age": 42, "has_disability_cert": false }]),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: CalculateResponse = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body.course_grade, "6");
+        assert_eq!(body.tax_amount, 800);
+    }
+
+    #[tokio::test]
+    async fn the_reduced_band_is_reachable_through_the_grade_lookup() {
+        // The whole point of the reduced band. Before the grade lookup existed
+        // no production request could reach it: the age-aware endpoint only
+        // knew the bracket path, and the shared schedule has no brackets.
+        let response = calculate_by_grade(
+            "6",
+            serde_json::json!([
+                { "age": 64, "has_disability_cert": false },
+                { "age": 65, "has_disability_cert": false },
+                { "age": 70, "has_disability_cert": false }
+            ]),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body: CalculateResponse = serde_json::from_slice(
+            &axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(body.breakdown[0].fee, 800, "64 pays the whole rate");
+        assert_eq!(body.breakdown[1].fee, 400, "65 pays half");
+        assert_eq!(body.breakdown[1].reason.as_deref(), Some("senior_reduced"));
+        assert_eq!(body.breakdown[2].fee, 0, "70 is exempt outright");
+        assert_eq!(body.tax_amount, 1_200);
     }
 
     #[tokio::test]
