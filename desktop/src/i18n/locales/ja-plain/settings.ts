@@ -111,5 +111,8 @@ export const settings: DeepPartial<typeof source> = {
     maxPlayers: '1つの枠の人数は 1〜4 人で入れてください。',
     memberDeposit: '会員が先に払う割合は 0〜100% で入れてください。',
     guestDeposit: '会員以外が先に払う割合は 0〜100% で入れてください。',
+    prefecture: '税の表を用意している都道府県から選んでください。',
+    taxGrade: '等級は、英数字とハイフンで32文字までです。',
+    gradeNeedsPrefecture: '先に都道府県を選んでください。',
   },
 }

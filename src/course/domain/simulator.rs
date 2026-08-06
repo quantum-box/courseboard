@@ -14,18 +14,8 @@ use derive_getters::Getters;
 
 use super::CourseError;
 
-/// Prefecture assumed when the operator UI does not choose one.
-pub const DEFAULT_PREFECTURE: &str = "hokkaido";
 /// Representative player age used for a single-player fee quote.
 pub const DEFAULT_PLAYER_AGE: i64 = 42;
-/// Share of visitors assumed to be subject to the golf course tax.
-pub const DEFAULT_TAXABLE_RATIO: f64 = 0.85;
-/// Green-fee price elasticity of visitor demand.
-pub const DEFAULT_PRICE_ELASTICITY: f64 = -1.2;
-/// Daily fixed operating cost in JPY.
-pub const DEFAULT_FIXED_COST: i64 = 300_000;
-/// Per-visitor variable operating cost in JPY.
-pub const DEFAULT_VARIABLE_COST_PER_VISITOR: i64 = 1_500;
 
 const MAX_FEE_AMOUNT: f64 = 100_000_000.0;
 const MAX_VISITORS: i64 = 1_000_000;
@@ -470,6 +460,7 @@ pub fn prepare_range_simulation(
 /// per-taxable-visitor tax applied to the taxable share of peak visitors.
 pub fn summarize_range(
     input: &RangeSimulationInput,
+    taxable_ratio: f64,
     rows: Vec<RangeRow>,
 ) -> Result<RangeSimulation, CourseError> {
     let tax_per_taxable_visitor = rows
@@ -477,7 +468,7 @@ pub fn summarize_range(
         .filter(|row| row.taxable_visitors > 0)
         .map(|row| row.tax_total as f64 / row.taxable_visitors as f64)
         .unwrap_or(0.0);
-    let tax_total = input.num_visitors_max as f64 * DEFAULT_TAXABLE_RATIO * tax_per_taxable_visitor;
+    let tax_total = input.num_visitors_max as f64 * taxable_ratio * tax_per_taxable_visitor;
     if !tax_total.is_finite() || tax_total > i64::MAX as f64 || tax_total < i64::MIN as f64 {
         return Err(CourseError::BadRequest(
             "projected tax total is outside the supported range",
@@ -496,6 +487,10 @@ pub fn summarize_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::course::domain::pricing_settings::{
+        DEFAULT_FIXED_COST, DEFAULT_PRICE_ELASTICITY, DEFAULT_TAXABLE_RATIO,
+        DEFAULT_VARIABLE_COST_PER_VISITOR,
+    };
 
     fn rule() -> TaxRuleSnapshot {
         TaxRuleSnapshot {
@@ -765,7 +760,7 @@ mod tests {
             &rule(),
         );
 
-        let summary = summarize_range(&input, vec![row]).expect("summary");
+        let summary = summarize_range(&input, DEFAULT_TAXABLE_RATIO, vec![row]).expect("summary");
         // 200 visitors * 0.85 taxable * 800 JPY per taxable visitor.
         assert_eq!(summary.tax_total(), 136_000);
         assert_eq!(summary.projected_revenue_max(), 2_400_000);
@@ -782,7 +777,7 @@ mod tests {
             avg_green_fee: 12_000.0,
         })
         .expect("valid request");
-        let summary = summarize_range(&input, Vec::new()).expect("summary");
+        let summary = summarize_range(&input, DEFAULT_TAXABLE_RATIO, Vec::new()).expect("summary");
         assert_eq!(summary.tax_total(), 0);
         assert!(summary.rows().is_empty());
     }

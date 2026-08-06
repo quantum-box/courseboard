@@ -105,5 +105,8 @@ export const settings = {
     maxPlayers: '1枠の人数は 1〜4 人で入力してください。',
     memberDeposit: '会員の前払い割合は 0〜100% で入力してください。',
     guestDeposit: 'ゲストの前払い割合は 0〜100% で入力してください。',
+    prefecture: '税額表を用意している都道府県から選んでください。',
+    taxGrade: '等級は英数字とハイフンで、32文字までで入力してください。',
+    gradeNeedsPrefecture: '等級を入れる前に、都道府県を選んでください。'
   },
 } as const

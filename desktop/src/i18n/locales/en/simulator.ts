@@ -2,6 +2,22 @@ import type { DeepPartial } from '../../types'
 import type { simulator as source } from '../ja/simulator'
 
 export const simulator: DeepPartial<typeof source> = {
+  tax: {
+    title: 'This course’s tax settings',
+    description: 'The golf course tax is set by prefectural ordinance. Nothing can be priced until the course says which prefecture it is under.',
+    field: {
+      prefecture: 'Prefecture',
+      prefectureUnset: 'Choose one',
+      grade: 'Course grade',
+      gradeHint: 'The grade the prefecture notified. Left blank, the green fee stands in for it.',
+    },
+    prefecture: {
+      hokkaido: 'Hokkaido',
+    },
+    saved: 'Tax settings saved',
+    savedBody: 'Pricing will use these settings.',
+    failed: 'Could not save the tax settings',
+  },
   eyebrow: 'Pricing',
   title: 'Golf pricing',
   description:

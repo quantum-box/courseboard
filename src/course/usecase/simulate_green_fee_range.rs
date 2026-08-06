@@ -3,9 +3,8 @@
 use std::sync::Arc;
 
 use crate::course::domain::{
-    prepare_range_simulation, project_row, summarize_range, CourseError, GolfTaxGateway, RangeRow,
-    RangeRowInput, RangeSimulation, RangeSimulationRequest, DEFAULT_FIXED_COST, DEFAULT_PREFECTURE,
-    DEFAULT_PRICE_ELASTICITY, DEFAULT_TAXABLE_RATIO, DEFAULT_VARIABLE_COST_PER_VISITOR,
+    prepare_range_simulation, project_row, summarize_range, CourseError, GolfPricingSettings,
+    GolfTaxGateway, RangeRow, RangeRowInput, RangeSimulation, RangeSimulationRequest,
 };
 
 /// Project revenue, tax, and profit for a booking period at the average green fee.
@@ -21,32 +20,33 @@ impl SimulateGreenFeeRangeUseCase {
     pub async fn execute(
         &self,
         tenant_id: &str,
+        settings: &GolfPricingSettings,
         request: RangeSimulationRequest,
     ) -> Result<RangeSimulation, CourseError> {
         let input = prepare_range_simulation(&request)?;
         let green_fee = input.avg_green_fee();
-        let rule = self
-            .tax
-            .find_rule_by_green_fee(tenant_id, DEFAULT_PREFECTURE, green_fee)
-            .await?
-            .ok_or(CourseError::BadRequest(
-                "no golf course tax rule matches this tenant, prefecture, and green fee",
-            ))?;
+        let rule = super::quote_golf_fee::resolve_tax_rule(
+            self.tax.as_ref(),
+            tenant_id,
+            settings,
+            green_fee,
+        )
+        .await?;
 
         let row: RangeRow = project_row(
             &RangeRowInput {
                 green_fee,
                 base_visitors: input.visitors_midpoint(),
                 base_green_fee: green_fee,
-                price_elasticity: DEFAULT_PRICE_ELASTICITY,
-                taxable_ratio: DEFAULT_TAXABLE_RATIO,
-                fixed_cost: DEFAULT_FIXED_COST,
-                variable_cost_per_visitor: DEFAULT_VARIABLE_COST_PER_VISITOR,
+                price_elasticity: settings.price_elasticity,
+                taxable_ratio: settings.taxable_ratio,
+                fixed_cost: settings.fixed_cost,
+                variable_cost_per_visitor: settings.variable_cost_per_visitor,
             },
             &rule,
         );
 
-        summarize_range(&input, vec![row])
+        summarize_range(&input, settings.taxable_ratio, vec![row])
     }
 }
 
@@ -67,6 +67,23 @@ mod tests {
             _green_fee: i64,
         ) -> Result<Option<TaxRuleSnapshot>, CourseError> {
             Ok(self.0.clone())
+        }
+
+        async fn find_rule_by_grade(
+            &self,
+            _tenant_id: &str,
+            _prefecture: &str,
+            _course_grade: &str,
+        ) -> Result<Option<TaxRuleSnapshot>, CourseError> {
+            Ok(self.0.clone())
+        }
+    }
+
+    /// A course that has told us where it is, so the lookup can happen.
+    fn settings() -> GolfPricingSettings {
+        GolfPricingSettings {
+            prefecture: Some("hokkaido".to_string()),
+            ..GolfPricingSettings::default()
         }
     }
 
@@ -96,7 +113,7 @@ mod tests {
     async fn projects_the_period_at_the_average_green_fee() {
         let usecase = SimulateGreenFeeRangeUseCase::new(Arc::new(StubTax(Some(rule()))));
         let simulation = usecase
-            .execute("tn_test", request())
+            .execute("tn_test", &settings(), request())
             .await
             .expect("simulation");
 
@@ -111,7 +128,10 @@ mod tests {
     #[tokio::test]
     async fn rejects_when_no_tax_rule_matches() {
         let usecase = SimulateGreenFeeRangeUseCase::new(Arc::new(StubTax(None)));
-        let error = usecase.execute("tn_test", request()).await.unwrap_err();
+        let error = usecase
+            .execute("tn_test", &settings(), request())
+            .await
+            .unwrap_err();
         assert!(matches!(error, CourseError::BadRequest(_)));
     }
 
@@ -121,6 +141,7 @@ mod tests {
         let error = usecase
             .execute(
                 "tn_test",
+                &settings(),
                 RangeSimulationRequest {
                     date_to: "2026-07-01".to_string(),
                     ..request()

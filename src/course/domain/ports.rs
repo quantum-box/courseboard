@@ -36,6 +36,17 @@ pub trait GolfTaxGateway: Send + Sync {
         prefecture: &str,
         green_fee: i64,
     ) -> Result<Option<TaxRuleSnapshot>, CourseError>;
+
+    /// The rule for the grade the prefecture assigned this course.
+    ///
+    /// Preferred over the green-fee lookup: which grade a course is put in is
+    /// the prefecture's decision, not something the fee implies.
+    async fn find_rule_by_grade(
+        &self,
+        tenant_id: &str,
+        prefecture: &str,
+        course_grade: &str,
+    ) -> Result<Option<TaxRuleSnapshot>, CourseError>;
 }
 
 #[derive(Debug, Clone)]

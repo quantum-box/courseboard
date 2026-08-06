@@ -3,6 +3,22 @@ import type { simulator as source } from '../ja/simulator'
 
 /** See `ja-plain/common.ts` for what this locale is for. */
 export const simulator: DeepPartial<typeof source> = {
+  tax: {
+    title: 'このコースの税の設定',
+    description: 'ゴルフ場利用税は、都道府県ごとに決まっています。どこの県かを選ばないと、ねだんを計算できません。',
+    field: {
+      prefecture: '都道府県',
+      prefectureUnset: 'えらんでください',
+      grade: '等級',
+      gradeHint: '都道府県から知らされた等級です。空のままなら、プレー料金から見当をつけます。',
+    },
+    prefecture: {
+      hokkaido: '北海道',
+    },
+    saved: '税の設定を保存しました',
+    savedBody: 'この設定でねだんを計算します。',
+    failed: '税の設定を保存できませんでした',
+  },
   title: 'プレー料金の計算',
   description: 'プレー料金から税を計算します。1か月の売上のめやすも出せます。',
   quote: {

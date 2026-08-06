@@ -10,13 +10,34 @@ use axum::{extract::State, http::HeaderMap, Json};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use super::http::operator_id;
+use super::http::{commercial_gateway, credentials, operator_id};
+
 use super::openapi::ErrorBody;
 use crate::course::domain::{
     FeeQuote, FeeQuoteRequest, PlayerTaxLine, RangeRow, RangeSimulation, RangeSimulationRequest,
 };
 use crate::course::infrastructure::CourseboardTaxGateway;
-use crate::course::usecase::{QuoteGolfFeeUseCase, SimulateGreenFeeRangeUseCase};
+use crate::course::usecase::{
+    GetExtensionStatusUseCase, QuoteGolfFeeUseCase, SimulateGreenFeeRangeUseCase,
+};
+
+/// The course's own pricing inputs, or the product defaults when it has not
+/// filled them in. A missing extension config must not stop a quote; the
+/// prefecture check inside the use case is what refuses.
+async fn pricing_settings(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<crate::course::domain::GolfPricingSettings, AppError> {
+    let status = GetExtensionStatusUseCase::new(commercial_gateway(state))
+        .execute(credentials(state, headers)?)
+        .await
+        .map_err(AppError::from)?;
+    Ok(status
+        .as_ref()
+        .and_then(|item| item.config_json())
+        .map(crate::course::domain::GolfPricingSettings::from_config)
+        .unwrap_or_default())
+}
 use crate::{AppError, AppState};
 
 fn tax_gateway(state: &AppState) -> Arc<CourseboardTaxGateway> {
@@ -102,10 +123,12 @@ pub async fn calculate_fee(
     Json(body): Json<CalculateFeeRequest>,
 ) -> Result<Json<CalculateFeeResponse>, AppError> {
     let tenant_id = operator_id(&headers)?.to_string();
+    let settings = pricing_settings(&state, &headers).await?;
     let use_case = QuoteGolfFeeUseCase::new(tax_gateway(&state));
     let quote = use_case
         .execute(
             &tenant_id,
+            &settings,
             FeeQuoteRequest {
                 green_fee: body.green_fee,
                 num_holes: body.num_holes,
@@ -203,10 +226,12 @@ pub async fn simulate_range(
     Json(body): Json<SimulateRangeRequest>,
 ) -> Result<Json<SimulateRangeResponse>, AppError> {
     let tenant_id = operator_id(&headers)?.to_string();
+    let settings = pricing_settings(&state, &headers).await?;
     let use_case = SimulateGreenFeeRangeUseCase::new(tax_gateway(&state));
     let simulation = use_case
         .execute(
             &tenant_id,
+            &settings,
             RangeSimulationRequest {
                 date_from: body.date_from,
                 date_to: body.date_to,
