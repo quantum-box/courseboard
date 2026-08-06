@@ -1018,6 +1018,33 @@ impl PayrollPeriod {
             end_date,
         }
     }
+
+    /// The whole calendar month named by `YYYY-MM`, first day to last.
+    ///
+    /// The end is found by stepping to the first of the next month and back a
+    /// day, so it does not depend on the month's length or on a leap year.
+    pub fn try_new(year_month: &str) -> Result<Self, CourseError> {
+        const MALFORMED: CourseError =
+            CourseError::BadRequest("yearMonth must be a calendar month written as YYYY-MM");
+        let (year, month) = year_month.split_once('-').ok_or(MALFORMED)?;
+        if year.len() != 4 || month.len() != 2 {
+            return Err(MALFORMED);
+        }
+        let year: i32 = year.parse().map_err(|_| MALFORMED)?;
+        let month: u32 = month.parse().map_err(|_| MALFORMED)?;
+        let start = NaiveDate::from_ymd_opt(year, month, 1).ok_or(MALFORMED)?;
+        let next = if month == 12 {
+            NaiveDate::from_ymd_opt(year + 1, 1, 1)
+        } else {
+            NaiveDate::from_ymd_opt(year, month + 1, 1)
+        }
+        .ok_or(MALFORMED)?;
+        Ok(Self::new(
+            year_month,
+            start,
+            next.pred_opt().ok_or(MALFORMED)?,
+        ))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Getters)]
@@ -1184,6 +1211,50 @@ impl CaddieRating {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_payroll_period_covers_the_month_it_names() {
+        let july = PayrollPeriod::try_new("2026-07").expect("period");
+        assert_eq!(july.start_date().to_string(), "2026-07-01");
+        assert_eq!(july.end_date().to_string(), "2026-07-31");
+    }
+
+    #[test]
+    fn a_short_month_ends_on_its_own_last_day() {
+        // Stepping back from the first of the next month, so neither the
+        // month's length nor a leap year has to be special-cased.
+        assert_eq!(
+            PayrollPeriod::try_new("2026-02")
+                .expect("period")
+                .end_date()
+                .to_string(),
+            "2026-02-28"
+        );
+        assert_eq!(
+            PayrollPeriod::try_new("2028-02")
+                .expect("period")
+                .end_date()
+                .to_string(),
+            "2028-02-29"
+        );
+        assert_eq!(
+            PayrollPeriod::try_new("2026-12")
+                .expect("period")
+                .end_date()
+                .to_string(),
+            "2026-12-31"
+        );
+    }
+
+    #[test]
+    fn something_that_is_not_a_month_is_refused_rather_than_guessed() {
+        for value in ["2026-13", "2026-00", "26-07", "2026-7", "2026", "", "july"] {
+            assert!(
+                PayrollPeriod::try_new(value).is_err(),
+                "{value} must not be read as a month"
+            );
+        }
+    }
+
     use super::*;
     use crate::course::domain::CaddieUpstreamIdentity;
 
