@@ -868,6 +868,46 @@ impl MySqlTaxRuleRepository {
 
         Ok(rule.map(TaxRuleSnapshot::from))
     }
+
+    /// Resolve the rule for a grade the prefecture assigned.
+    ///
+    /// A tenant row wins over the shared schedule, same as the green-fee
+    /// lookup. No grade thresholds are involved: the caller already knows which
+    /// grade the course is in.
+    pub async fn find_rule_by_grade(
+        &self,
+        tenant_id: &str,
+        prefecture: &str,
+        course_grade: &str,
+    ) -> Result<Option<TaxRuleSnapshot>, AppError> {
+        let rule = sqlx::query_as::<_, TaxRule>(
+            r#"
+            SELECT
+                course_grade,
+                fee,
+                minor_exempt_under_age,
+                senior_exempt_min_age,
+                disability_cert_exempt,
+                senior_reduced_min_age,
+                senior_reduced_percent
+            FROM golf_tax_rules
+            WHERE tenant_id IN (?, ?)
+              AND prefecture = ?
+              AND course_grade = ?
+            ORDER BY tenant_id = ? DESC, effective_from DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(SHARED_TAX_SCOPE)
+        .bind(prefecture)
+        .bind(course_grade)
+        .bind(tenant_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(rule.map(TaxRuleSnapshot::from))
+    }
 }
 
 #[derive(Debug, FromRow)]

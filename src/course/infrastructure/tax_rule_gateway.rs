@@ -35,4 +35,16 @@ impl GolfTaxGateway for CourseboardTaxGateway {
             .await
             .map_err(|error| CourseError::Provider(error.to_string()))
     }
+
+    async fn find_rule_by_grade(
+        &self,
+        tenant_id: &str,
+        prefecture: &str,
+        course_grade: &str,
+    ) -> Result<Option<TaxRuleSnapshot>, CourseError> {
+        self.rules
+            .find_rule_by_grade(tenant_id, prefecture, course_grade)
+            .await
+            .map_err(|error| CourseError::Provider(error.to_string()))
+    }
 }

@@ -1,8 +1,15 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
 import { Calculator, LineChart } from 'lucide-react'
-import { type FormEvent, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { courseboardApiJson, yen } from '../../api'
+import { courseboardApiJson, courseboardApiText, yen } from '../../api'
+import {
+  PREFECTURES,
+  buildGolfExtensionConfig,
+  golfExtensionConfigToDraft,
+  type GolfExtensionConfigDraft,
+} from './extension-config'
+import { Notice } from '../../components/Page'
 import {
   DataTable,
   type DataTableColumn,
@@ -16,6 +23,10 @@ import {
   Panel,
   ResourceError,
 } from '../../components/Page'
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
 
 const MAX_FEE_AMOUNT = 100_000_000
 const MAX_VISITORS = 1_000_000
@@ -78,6 +89,107 @@ function numberValue(value: FormDataEntryValue | null) {
 function optionalNumber(value: FormDataEntryValue | null) {
   if (value == null || String(value).trim() === '') return undefined
   return Number(value)
+}
+
+
+/**
+ * Where a course says which prefecture's tax schedule it is under.
+ *
+ * It sits on the pricing screen because that is where the operator finds out
+ * it is missing: without it every quote is refused, and the refusal is not
+ * something they can act on anywhere else.
+ */
+function TaxSettingsPanel() {
+  const { t } = useTranslation(['simulator', 'common'])
+  const [draft, setDraft] = useState<GolfExtensionConfigDraft | null>(null)
+  const [original, setOriginal] = useState<Record<string, unknown>>({})
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const status = await courseboardApiJson<{ configJson?: Record<string, unknown> | null }>(
+          '/v1/course/extension-status',
+        )
+        const config = status.configJson ?? {}
+        setOriginal(config)
+        setDraft(golfExtensionConfigToDraft(config))
+      } catch (reason) {
+        setError(errorMessage(reason))
+      }
+    })()
+  }, [])
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!draft) return
+    setSaving(true)
+    setError(null)
+    setSaved(false)
+    try {
+      const configJson = buildGolfExtensionConfig(draft, original)
+      await courseboardApiText('/v1/course/config', {
+        method: 'PATCH',
+        body: JSON.stringify({ scopeType: 'tenant', configJson }),
+      })
+      setOriginal(configJson)
+      setSaved(true)
+    } catch (reason) {
+      setError(errorMessage(reason))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!draft) return null
+
+  return (
+    <Panel title={t('simulator:tax.title')} description={t('simulator:tax.description')}>
+      <form onSubmit={event => void save(event)}>
+        <FormGrid>
+          <Field label={t('simulator:tax.field.prefecture')} required>
+            <NativeSelect
+              value={draft.prefecture}
+              onChange={event => setDraft({ ...draft, prefecture: event.target.value })}
+            >
+              <option value="">{t('simulator:tax.field.prefectureUnset')}</option>
+              {PREFECTURES.map(code => (
+                <option key={code} value={code}>{t(`simulator:tax.prefecture.${code}` as 'simulator:tax.prefecture.hokkaido')}</option>
+              ))}
+            </NativeSelect>
+          </Field>
+          <Field
+            label={t('simulator:tax.field.grade')}
+            requirement="optional"
+            hint={t('simulator:tax.field.gradeHint')}
+          >
+            <Input
+              value={draft.taxGrade}
+              onChange={event => setDraft({ ...draft, taxGrade: event.target.value })}
+              placeholder="7"
+            />
+          </Field>
+        </FormGrid>
+        {error ? (
+          <div className="mt-3">
+            <Notice tone="danger" title={t('simulator:tax.failed')}>{error}</Notice>
+          </div>
+        ) : null}
+        {saved ? (
+          <div className="mt-3">
+            <Notice tone="success" title={t('simulator:tax.saved')}>{t('simulator:tax.savedBody')}</Notice>
+          </div>
+        ) : null}
+        <div className="mt-3 flex justify-end">
+          <Button type="submit" variant="primary" disabled={saving}>
+            {saving ? t('common:action.saving') : t('common:action.save')}
+          </Button>
+        </div>
+      </form>
+    </Panel>
+  )
 }
 
 export function SimulatorPage() {
@@ -216,6 +328,7 @@ export function SimulatorPage() {
 
   return (
     <>
+      <TaxSettingsPanel />
       <Panel title={t('simulator:quote.title')} description={t('simulator:quote.description')}>
         <form onSubmit={event => void submitQuote(event)}>
           <FormGrid>

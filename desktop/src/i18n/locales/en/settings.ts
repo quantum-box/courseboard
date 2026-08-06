@@ -109,5 +109,8 @@ export const settings: DeepPartial<typeof source> = {
     maxPlayers: 'Enter 1 to 4 players per slot.',
     memberDeposit: 'Enter a member deposit between 0 and 100%.',
     guestDeposit: 'Enter a guest deposit between 0 and 100%.',
+    prefecture: 'Pick a prefecture whose tax schedule we hold.',
+    taxGrade: 'A grade is letters, digits and hyphens, up to 32 characters.',
+    gradeNeedsPrefecture: 'Choose the prefecture before entering a grade.',
   },
 }

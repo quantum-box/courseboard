@@ -1,5 +1,12 @@
 import { i18next } from '../../i18n'
 
+/**
+ * The prefectures whose golf course tax schedules we hold. Each sets its own
+ * rates by ordinance, so a course can only be priced once it says which one it
+ * is under — there is no sensible default to fall back on.
+ */
+export const PREFECTURES: readonly string[] = ['hokkaido']
+
 export type GolfExtensionConfigDraft = {
   cartPolicy: 'optional' | 'required' | 'unavailable'
   defaultDurationMinutes: string
@@ -9,6 +16,10 @@ export type GolfExtensionConfigDraft = {
   guestDepositPercent: string
   publicProductName: string
   publicProductDescription: string
+  /** Which prefecture's golf course tax schedule applies. */
+  prefecture: string
+  /** The grade the prefecture assigned this course. */
+  taxGrade: string
 }
 
 function numberValue(value: unknown, fallback: number) {
@@ -43,6 +54,8 @@ export function golfExtensionConfigToDraft(
     guestDepositPercent: String(numberValue(pricing.guestDepositRatio, 0.3) * 100),
     publicProductName: stringValue(config.publicProductName),
     publicProductDescription: stringValue(config.publicProductDescription),
+    prefecture: stringValue(config.prefecture),
+    taxGrade: stringValue(config.taxGrade),
   }
 }
 
@@ -82,6 +95,19 @@ export function buildGolfExtensionConfig(
   ) {
     errors.push(i18next.t('settings:validation.guestDeposit'))
   }
+  // The prefecture decides the tax schedule, so a typo here is a wrong tax
+  // rather than a failed lookup. Only known keys are accepted.
+  const prefecture = draft.prefecture.trim()
+  if (prefecture !== '' && !PREFECTURES.includes(prefecture)) {
+    errors.push(i18next.t('settings:validation.prefecture'))
+  }
+  const taxGrade = draft.taxGrade.trim()
+  if (taxGrade !== '' && !/^[A-Za-z0-9-]{1,32}$/.test(taxGrade)) {
+    errors.push(i18next.t('settings:validation.taxGrade'))
+  }
+  if (taxGrade !== '' && prefecture === '') {
+    errors.push(i18next.t('settings:validation.gradeNeedsPrefecture'))
+  }
   if (errors.length > 0) throw new Error(errors.join(' / '))
 
   return {
@@ -95,7 +121,9 @@ export function buildGolfExtensionConfig(
       guestDepositRatio: guestDepositPercent / 100,
       memberDepositRatio: memberDepositPercent / 100,
     },
+    prefecture,
     publicProductDescription: draft.publicProductDescription.trim(),
     publicProductName: draft.publicProductName.trim(),
+    taxGrade,
   }
 }

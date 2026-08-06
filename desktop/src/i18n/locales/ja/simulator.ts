@@ -1,4 +1,20 @@
 export const simulator = {
+  tax: {
+    title: 'このコースの税設定',
+    description: 'ゴルフ場利用税は都道府県が条例で定めます。どの都道府県かを選ばないと、料金を計算できません。',
+    field: {
+      prefecture: '都道府県',
+      prefectureUnset: '選んでください',
+      grade: '等級',
+      gradeHint: '都道府県から通知された等級です。空のままなら、グリーンフィーから推定します。',
+    },
+    prefecture: {
+      hokkaido: '北海道',
+    },
+    saved: '税設定を保存しました',
+    savedBody: 'この設定で料金を計算します。',
+    failed: '税設定を保存できませんでした',
+  },
   eyebrow: '料金',
   title: 'ゴルフ料金計算',
   description: 'グリーンフィーから等級と利用税を求め、期間の売上と損益も試算します。',
