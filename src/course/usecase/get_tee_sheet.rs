@@ -199,6 +199,7 @@ fn to_tee_sheet_item(
             .map(str::to_string),
         golf_course_id,
         course_name,
+        product.and_then(|item| item.golf_course_id().cloned()),
         format_datetime_with_offset(reservation.starts_at(), jst),
         duration_minutes,
         play_type,
@@ -401,6 +402,7 @@ mod tests {
             PlayType::Caddie,
             18,
             240,
+            None,
         );
         let jst = jst_offset().unwrap();
         let item = to_tee_sheet_item(
@@ -416,6 +418,49 @@ mod tests {
         assert_eq!(item.reservation_service_id(), Some("svc:caddie-18"));
         assert_eq!(item.display_name(), Some("平日キャディ付き"));
         assert!(item.requires_caddie());
+        // The plan named no course, so there is nothing to disagree with.
+        assert!(!item.course_mismatch());
+    }
+
+    #[test]
+    fn a_booking_on_a_course_its_plan_does_not_sell_is_flagged() {
+        // ERP decides the course through the resource; the plan only declares
+        // one. Where the two disagree the board has to say so rather than
+        // quietly trust either side.
+        let reservation = sample_reservation();
+        let east = ReservationProduct::reconstitute(
+            "product_caddie_18",
+            None,
+            "svc:caddie-18",
+            None,
+            PlayType::Caddie,
+            18,
+            240,
+            Some("course_east".into()),
+        );
+        let jst = jst_offset().unwrap();
+
+        let matching = to_tee_sheet_item(
+            &reservation,
+            Some(&east),
+            &CourseId::new("course_east"),
+            "East Course",
+            jst,
+        );
+        assert!(!matching.course_mismatch());
+
+        let booked_west = to_tee_sheet_item(
+            &reservation,
+            Some(&east),
+            &CourseId::new("course_west"),
+            "West Course",
+            jst,
+        );
+        assert!(booked_west.course_mismatch());
+        assert_eq!(
+            booked_west.expected_course_id().map(ToString::to_string),
+            Some("course_east".to_string()),
+        );
     }
 
     #[test]
@@ -451,6 +496,7 @@ mod tests {
             PlayType::Caddie,
             18,
             240,
+            None,
         )];
 
         let filter = CourseId::new("course_east");
@@ -508,6 +554,7 @@ mod tests {
                 PlayType::Caddie,
                 18,
                 240,
+                None,
             )]),
             products_fail: false,
         });

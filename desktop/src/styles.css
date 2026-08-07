@@ -1224,6 +1224,142 @@ button,
 .sticky-submit > div { display: flex; flex-direction: column; }
 .sticky-submit span { color: hsl(var(--nui-muted-foreground)); font-size: 10px; }
 .sticky-submit strong { font-size: 18px; font-weight: 600; }
+.sticky-submit > .sticky-submit-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Weekly slot editor: one card per weekday, closed days included, so the week
+   reads as a week instead of as a pile of rows sorted by when they were added. */
+.slot-week {
+  display: grid;
+  gap: 8px;
+}
+
+.slot-day {
+  overflow: hidden;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-lg);
+  background: hsl(var(--nui-card));
+}
+
+.slot-day.is-empty {
+  border-style: dashed;
+  background: transparent;
+}
+
+.slot-day-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 6px 10px;
+  background: hsl(var(--nui-surface));
+}
+
+.slot-day.is-empty .slot-day-header {
+  border-bottom: 0;
+  background: transparent;
+}
+
+.slot-day-name { font-size: 13px; font-weight: 600; }
+.slot-day-closed { color: hsl(var(--nui-muted-foreground)); font-size: 11px; }
+
+.slot-day-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.slot-copy-select {
+  width: auto;
+  min-width: 160px;
+  height: 30px;
+  padding-block: 0;
+  font-size: 12px;
+}
+
+.slot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+}
+
+.slot-row + .slot-row { border-top: 1px dashed hsl(var(--nui-border)); }
+.slot-row.has-issue { background: hsl(var(--nui-destructive) / .07); }
+.slot-row .slot-time { width: 8.5rem; }
+.slot-range-sep { color: hsl(var(--nui-muted-foreground)); }
+
+.slot-count { display: inline-flex; align-items: center; gap: 4px; }
+.slot-count .slot-number { width: 4.75rem; text-align: right; }
+.slot-unit { color: hsl(var(--nui-muted-foreground)); font-size: 12px; }
+
+.slot-unlimited {
+  border-radius: 999px;
+  padding: 1px 6px;
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+}
+
+.slot-row-remove { margin-left: auto; }
+
+.slot-row-issues {
+  flex-basis: 100%;
+  margin: 0;
+  color: hsl(var(--nui-destructive));
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* Distinct from an issue: the row still saves, it just cannot all tee off. */
+.slot-row-warning {
+  flex-basis: 100%;
+  margin: 0;
+  color: hsl(var(--nui-warning));
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* The plans still missing a course, listed so each one is one click away. */
+.course-backlog-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.capacity-weekday-note {
+  margin: 8px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.sticky-submit .slot-diff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.slot-diff-added { color: hsl(var(--nui-success)); }
+.slot-diff-removed { color: hsl(var(--nui-destructive)); }
+.slot-diff-changed { color: hsl(var(--nui-warning)); }
+
+/* Says the row opens something, rather than doing something in place. */
+.row-open {
+  display: inline-flex;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.row-open > svg { width: 16px; height: 16px; }
+.data-table tbody tr:hover .row-open { color: hsl(var(--nui-foreground)); }
 
 .detail-list {
   display: grid;
@@ -2822,6 +2958,19 @@ button,
   position: absolute;
   inset: 0;
   pointer-events: none;
+}
+
+/* The course's tee interval, drawn as a ruler behind the blocks: a gap between
+   two groups becomes a number of open tee times you can count off the track. */
+.timeline-gridlines.has-tee-ticks {
+  /* Keyed off the foreground, not the border: the border token is nearly the
+     track's own colour in dark mode, which left the ruler invisible there. */
+  background-image: repeating-linear-gradient(
+    to right,
+    hsl(var(--nui-muted-foreground) / 22%) 0 1px,
+    transparent 1px var(--timeline-tee-step)
+  );
+  background-position-x: var(--timeline-tee-offset, 0px);
 }
 
 .timeline-gridlines > span {

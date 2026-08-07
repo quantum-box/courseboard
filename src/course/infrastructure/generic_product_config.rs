@@ -26,6 +26,10 @@ pub(crate) const PRODUCTS_KEY: &str = "reservationProducts";
 /// `slots`.
 const PLAY_TYPE_KEY: &str = "playType";
 const HOLE_COUNT_KEY: &str = "holeCount";
+/// Which course this plan is sold on. Courses differ in opening hours and in
+/// what they sell, so a plan belongs to one of them; the storefront ignores
+/// this key, which keeps plans written before it readable.
+const GOLF_COURSE_ID_KEY: &str = "golfCourseId";
 
 fn as_products(config: &Value) -> Vec<Value> {
     config
@@ -65,6 +69,12 @@ fn to_domain(product: &Value) -> Option<ReservationProduct> {
         .get("name")
         .and_then(Value::as_str)
         .map(str::to_string);
+    let golf_course_id = product
+        .get(GOLF_COURSE_ID_KEY)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
 
     Some(ReservationProduct::reconstitute(
         service_id.to_string(),
@@ -74,6 +84,7 @@ fn to_domain(product: &Value) -> Option<ReservationProduct> {
         play_type,
         hole_count,
         duration,
+        golf_course_id,
     ))
 }
 
@@ -102,6 +113,16 @@ pub(crate) fn upsert_product(config: &Value, input: &UpsertReservationProduct) -
             "durationMinutes".into(),
             json!(input.expected_duration_minutes.get()),
         );
+        match input.golf_course_id.as_ref() {
+            Some(course_id) => {
+                object.insert(GOLF_COURSE_ID_KEY.into(), json!(course_id.as_str()));
+            }
+            // Clearing the course has to remove the key, not write null: a null
+            // would read back as a course whose id is empty.
+            None => {
+                object.remove(GOLF_COURSE_ID_KEY);
+            }
+        }
         object.entry("enabled").or_insert(json!(true));
         object.entry("bookingMode").or_insert(json!("slot"));
     }
@@ -201,14 +222,22 @@ fn with_products(config: &Value, products: Vec<Value>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::course::domain::CourseId;
 
     fn config_with(products: Value) -> Value {
         json!({ "defaultHoles": 18, PRODUCTS_KEY: products })
     }
 
     fn upsert_input(service_id: &str, name: Option<&str>) -> UpsertReservationProduct {
-        UpsertReservationProduct::try_new(service_id, name.map(str::to_string), "caddie", 18, 240)
-            .expect("valid input")
+        UpsertReservationProduct::try_new(
+            service_id,
+            name.map(str::to_string),
+            "caddie",
+            18,
+            240,
+            None,
+        )
+        .expect("valid input")
     }
 
     #[test]
@@ -243,6 +272,42 @@ mod tests {
         assert_eq!(product["formFields"][0], "partySize");
         assert_eq!(product["depositRatio"], 0.3);
         assert_eq!(product["name"], "新しい名前");
+    }
+
+    #[test]
+    fn the_course_a_plan_is_sold_on_round_trips() {
+        let config = config_with(json!([{ "id": "svc:caddie-18" }]));
+        let mut input = upsert_input("svc:caddie-18", Some("東キャディ付き"));
+        input.golf_course_id = Some(CourseId::new("course_east"));
+
+        let next = upsert_product(&config, &input);
+        assert_eq!(next[PRODUCTS_KEY][0]["golfCourseId"], "course_east");
+
+        let products = read_products(&next);
+        assert_eq!(
+            products[0].golf_course_id().map(ToString::to_string),
+            Some("course_east".to_string()),
+        );
+    }
+
+    #[test]
+    fn clearing_the_course_removes_the_key_rather_than_writing_null() {
+        // A null would read back as a course whose id is the empty string, and
+        // the editor would show a plan pinned to a course that does not exist.
+        let config = config_with(json!([{
+            "id": "svc:caddie-18",
+            "golfCourseId": "course_east",
+        }]));
+        let next = upsert_product(&config, &upsert_input("svc:caddie-18", None));
+
+        assert!(next[PRODUCTS_KEY][0].get("golfCourseId").is_none());
+        assert_eq!(read_products(&next)[0].golf_course_id(), None);
+    }
+
+    #[test]
+    fn a_plan_written_before_courses_reads_back_without_one() {
+        let config = config_with(json!([{ "id": "svc:caddie-18", "name": "旧プラン" }]));
+        assert_eq!(read_products(&config)[0].golf_course_id(), None);
     }
 
     #[test]

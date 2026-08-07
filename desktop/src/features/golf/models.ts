@@ -48,6 +48,8 @@ export type GolfReservationProduct = {
   playType: PlayType
   holeCount: number
   expectedDurationMinutes: number
+  /** Course this plan is sold on; absent on plans written before courses split. */
+  golfCourseId?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -58,6 +60,8 @@ export type GolfReservationProductDraft = {
   playType: PlayType
   holeCount: number
   expectedDurationMinutes: number
+  /** Empty string means "not tied to a course yet". */
+  golfCourseId: string
 }
 
 export type GolfProductSlot = {
@@ -140,6 +144,7 @@ export function emptyProductDraft(): GolfReservationProductDraft {
     playType: 'caddie',
     holeCount: 18,
     expectedDurationMinutes: defaultDuration('caddie', 18),
+    golfCourseId: '',
   }
 }
 
@@ -150,6 +155,7 @@ export function productToDraft(product: GolfReservationProduct): GolfReservation
     playType: product.playType,
     holeCount: product.holeCount,
     expectedDurationMinutes: product.expectedDurationMinutes,
+    golfCourseId: product.golfCourseId ?? '',
   }
 }
 
@@ -180,8 +186,16 @@ function validTime(value: string) {
  *
  * The save button stays enabled on purpose: telling the operator which field
  * is wrong beats a button that is dead for a reason they have to guess.
+ *
+ * `requireCourse` is on for new plans only. Courses arrived after the plans
+ * did, so demanding one from every edit would lock a tenant out of the plans
+ * they already have; demanding it from every *new* plan still empties the
+ * backlog, one plan at a time.
  */
-export function validateProduct(draft: GolfReservationProductDraft) {
+export function validateProduct(
+  draft: GolfReservationProductDraft,
+  { requireCourse = false }: { requireCourse?: boolean } = {},
+) {
   if (!draft.displayName.trim()) return i18next.t('products:validation.displayNameRequired')
   if ([...draft.displayName.trim()].length > 255) {
     return i18next.t('products:validation.displayNameLength')
@@ -189,6 +203,9 @@ export function validateProduct(draft: GolfReservationProductDraft) {
   if (!draft.serviceId.trim()) return i18next.t('products:validation.serviceIdRequired')
   if (!/^[A-Za-z0-9._:-]+$/.test(draft.serviceId.trim())) {
     return i18next.t('products:validation.serviceIdFormat')
+  }
+  if (requireCourse && !draft.golfCourseId.trim()) {
+    return i18next.t('products:validation.courseRequired')
   }
   if (![9, 18].includes(draft.holeCount)) return i18next.t('products:validation.holeCount')
   if (
@@ -201,35 +218,218 @@ export function validateProduct(draft: GolfReservationProductDraft) {
   return null
 }
 
-export function validateSlots(slots: GolfProductSlot[]) {
-  const errors: string[] = []
-  const keys = new Set<string>()
+export type SlotIssueCode =
+  | 'weekday'
+  | 'time'
+  | 'order'
+  | 'maxGroups'
+  | 'maxPlayers'
+  | 'duplicate'
 
-  slots.forEach((slot, index) => {
-    const row = index + 1
+function slotBandKey(slot: GolfProductSlot) {
+  return `${slot.weekday}|${slot.startTime}|${slot.endTime}`
+}
+
+/**
+ * What is wrong with each row, index-aligned with `slots`.
+ *
+ * Codes rather than sentences, and per row rather than per week: the editor
+ * prints them next to the offending row. The block of "3行目: …" lines this
+ * replaced named an array position, which stopped meaning anything once the
+ * week was drawn as seven weekday cards.
+ */
+export function collectSlotIssues(slots: GolfProductSlot[]): SlotIssueCode[][] {
+  const seen = new Set<string>()
+
+  return slots.map(slot => {
+    const codes: SlotIssueCode[] = []
     if (!Number.isInteger(slot.weekday) || slot.weekday < 0 || slot.weekday > 6) {
-      errors.push(i18next.t('products:slotValidation.weekday', { row: String(row) }))
+      codes.push('weekday')
     }
     if (!validTime(slot.startTime) || !validTime(slot.endTime)) {
-      errors.push(i18next.t('products:slotValidation.time', { row: String(row) }))
+      codes.push('time')
     } else if (slot.startTime >= slot.endTime) {
-      errors.push(i18next.t('products:slotValidation.order', { row: String(row) }))
+      codes.push('order')
     }
     if (!Number.isInteger(slot.maxGroups) || slot.maxGroups < 0) {
-      errors.push(i18next.t('products:slotValidation.maxGroups', { row: String(row) }))
+      codes.push('maxGroups')
     }
     if (!Number.isInteger(slot.maxPlayers) || slot.maxPlayers < 0) {
-      errors.push(i18next.t('products:slotValidation.maxPlayers', { row: String(row) }))
+      codes.push('maxPlayers')
     }
 
-    const key = `${slot.weekday}|${slot.startTime}|${slot.endTime}`
-    if (keys.has(key)) {
-      errors.push(i18next.t('products:slotValidation.duplicate', { row: String(row) }))
+    const key = slotBandKey(slot)
+    if (seen.has(key)) codes.push('duplicate')
+    seen.add(key)
+
+    return codes
+  })
+}
+
+/** The row-agnostic wording the editor shows underneath the offending row. */
+export function slotIssueText(code: SlotIssueCode) {
+  return i18next.t(`products:slotIssue.${code}` as 'products:slotIssue.time')
+}
+
+/** How many rows the operator has to fix before the week can be saved. */
+export function countSlotIssues(slots: GolfProductSlot[]) {
+  return collectSlotIssues(slots).filter(codes => codes.length > 0).length
+}
+
+function minutesOfDay(time: string) {
+  if (!validTime(time)) return null
+  const [hour, minute] = time.split(':').map(Number)
+  return hour * 60 + minute
+}
+
+/**
+ * How many groups the course can physically start inside a band.
+ *
+ * Tee times go out one interval apart, so a band is worth
+ * `(length / interval) + 1` starts — counting the one that leaves on the
+ * closing minute. Generous on purpose: this drives a warning, and a warning
+ * that fires on a plan that is actually fine teaches operators to ignore it.
+ *
+ * `null` when the course, its interval, or the band is unusable.
+ */
+export function bandGroupCapacity(
+  startTime: string,
+  endTime: string,
+  startIntervalMinutes: number | null | undefined,
+) {
+  if (!startIntervalMinutes || startIntervalMinutes <= 0) return null
+  const start = minutesOfDay(startTime)
+  const end = minutesOfDay(endTime)
+  if (start === null || end === null || end <= start) return null
+  return Math.floor((end - start) / startIntervalMinutes) + 1
+}
+
+/**
+ * Bands that promise more groups than the course can start, index-aligned with
+ * `slots`. `0` groups means "no limit", which nothing can contradict.
+ */
+export function collectSlotOvercommits(
+  slots: GolfProductSlot[],
+  startIntervalMinutes: number | null | undefined,
+): (number | null)[] {
+  return slots.map(slot => {
+    if (slot.maxGroups <= 0) return null
+    const capacity = bandGroupCapacity(slot.startTime, slot.endTime, startIntervalMinutes)
+    if (capacity === null || slot.maxGroups <= capacity) return null
+    return capacity
+  })
+}
+
+/** Weekday, then time of day: the order an operator reads a week in. */
+export function sortSlots<T extends GolfProductSlot>(slots: T[]): T[] {
+  return [...slots].sort((left, right) => (
+    left.weekday - right.weekday
+    || left.startTime.localeCompare(right.startTime)
+    || left.endTime.localeCompare(right.endTime)
+  ))
+}
+
+export type SlotChangeSummary = {
+  added: number
+  removed: number
+  changed: number
+}
+
+export function slotChangeCount(summary: SlotChangeSummary) {
+  return summary.added + summary.removed + summary.changed
+}
+
+/**
+ * What saving would do to the stored week.
+ *
+ * Saving is a whole-week replace, so a row the operator deleted is gone for
+ * good the moment they press save. Counting the removals up front is what lets
+ * the editor say so before that happens, instead of after.
+ *
+ * Rows are matched on weekday and time band — the band is what a booking screen
+ * offers, so a row that keeps its band but drops its limits reads as changed,
+ * and one that moves to another time reads as a removal plus an addition.
+ */
+export function summarizeSlotChanges(
+  baseline: GolfProductSlot[],
+  current: GolfProductSlot[],
+): SlotChangeSummary {
+  const before = new Map(baseline.map(slot => [slotBandKey(slot), slot]))
+  const after = new Map(current.map(slot => [slotBandKey(slot), slot]))
+
+  let added = 0
+  let changed = 0
+  after.forEach((slot, key) => {
+    const previous = before.get(key)
+    if (!previous) {
+      added += 1
+      return
     }
-    keys.add(key)
+    if (previous.maxGroups !== slot.maxGroups || previous.maxPlayers !== slot.maxPlayers) {
+      changed += 1
+    }
   })
 
-  return Array.from(new Set(errors))
+  let removed = 0
+  before.forEach((_, key) => {
+    if (!after.has(key)) removed += 1
+  })
+
+  return { added, removed, changed }
+}
+
+/**
+ * Put the source weekday's bands on every target weekday, replacing whatever
+ * those days held. Building Monday and stamping it onto the rest of the week is
+ * the bulk of setting a season up, and doing it a row at a time is where the
+ * old editor lost people.
+ */
+export function copyWeekdaySlots(
+  slots: GolfProductSlot[],
+  from: number,
+  targets: number[],
+): GolfProductSlot[] {
+  const days = targets.filter(target => target !== from)
+  if (days.length === 0) return slots
+
+  const source = slots.filter(slot => slot.weekday === from)
+  const kept = slots.filter(slot => !days.includes(slot.weekday))
+  const copies = days.flatMap(target => source.map(slot => ({
+    weekday: target,
+    startTime: slot.startTime,
+    endTime: slot.endTime,
+    maxGroups: slot.maxGroups,
+    maxPlayers: slot.maxPlayers,
+  })))
+
+  return [...kept, ...copies]
+}
+
+function addMinutes(time: string, minutes: number) {
+  const [hour, minute] = time.split(':').map(Number)
+  const total = Math.min(hour * 60 + minute + minutes, 23 * 60 + 59)
+  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+}
+
+/**
+ * The next band to offer on a weekday: one that starts where the day currently
+ * ends, so adding a second row does not open on top of the first one.
+ */
+export function nextSlotForWeekday(slots: GolfProductSlot[], weekday: number): GolfProductSlot {
+  const sameDay = slots.filter(slot => slot.weekday === weekday)
+  if (sameDay.length === 0) return emptySlot(weekday)
+
+  const latestEnd = sameDay.reduce(
+    (latest, slot) => (slot.endTime > latest ? slot.endTime : latest),
+    sameDay[0].endTime,
+  )
+  if (!validTime(latestEnd) || latestEnd >= '23:00') return emptySlot(weekday)
+
+  return {
+    ...emptySlot(weekday),
+    startTime: latestEnd,
+    endTime: addMinutes(latestEnd, 180),
+  }
 }
 
 export function calculateCaddieCapacity(
@@ -277,6 +477,58 @@ export function calculateCaddieCapacity(
     activeCaddies: profiles.length,
     unavailable,
     assumedAvailable,
+  }
+}
+
+/** Groups another plan already accepts on one weekday, split at midday. */
+export type WeekdayGroupLoad = {
+  morning: number
+  afternoon: number
+  /**
+   * A band on this weekday takes unlimited groups, so what is left over cannot
+   * be counted — only reported as uncountable.
+   */
+  unlimited: boolean
+}
+
+/** Morning and afternoon are split at midday, the same line `applyCapacityToSlots` uses. */
+export function weekdayGroupLoad(
+  slots: GolfProductSlot[],
+  weekday: number,
+): WeekdayGroupLoad {
+  return slots
+    .filter(slot => slot.weekday === weekday)
+    .reduce<WeekdayGroupLoad>((load, slot) => {
+      if (slot.maxGroups <= 0) return { ...load, unlimited: true }
+      const morning = slot.startTime < '12:00'
+      return {
+        ...load,
+        morning: load.morning + (morning ? slot.maxGroups : 0),
+        afternoon: load.afternoon + (morning ? 0 : slot.maxGroups),
+      }
+    }, { morning: 0, afternoon: 0, unlimited: false })
+}
+
+/**
+ * The caddies left for this plan once the other plans on the same course have
+ * taken theirs.
+ *
+ * Caddies belong to the course, not to a plan. Two caddie plans on one course
+ * draw on the same people, so offering each of them the full supply books the
+ * same caddie twice — the number this screen shows has to be what is left.
+ *
+ * An uncountable load (or none at all) returns the supply unchanged; the panel
+ * says so rather than pretending the subtraction happened.
+ */
+export function capacityAfterLoad(
+  capacity: CaddieSlotCapacity,
+  load: WeekdayGroupLoad | null,
+): CaddieSlotCapacity {
+  if (!load || load.unlimited) return capacity
+  return {
+    ...capacity,
+    morningCapacity: Math.max(0, capacity.morningCapacity - load.morning),
+    afternoonCapacity: Math.max(0, capacity.afternoonCapacity - load.afternoon),
   }
 }
 

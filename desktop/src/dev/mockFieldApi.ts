@@ -96,16 +96,42 @@ const mockCourses = [
   },
 ]
 
-const mockProducts = [
+const mockProducts: Array<{
+  id: string
+  tenantId: string
+  extensionKey: string
+  reservationServiceId: string
+  displayName: string | null
+  golfCourseId: string | null
+  playType: string
+  holeCount: number
+  expectedDurationMinutes: number
+  createdAt: string
+  updatedAt: string
+}> = [
   {
     id: 'product_caddie_18',
     tenantId: 'courseboard_id',
     extensionKey: 'golf_course',
     reservationServiceId: 'svc:caddie-18',
     displayName: 'キャディ付き18ホール',
+    golfCourseId: 'course_east',
     playType: 'caddie',
     holeCount: 18,
     expectedDurationMinutes: 270,
+    createdAt: NOW,
+    updatedAt: NOW,
+  },
+  {
+    id: 'product_caddie_east_pm',
+    tenantId: 'courseboard_id',
+    extensionKey: 'golf_course',
+    reservationServiceId: 'svc:caddie-18-pm',
+    displayName: '東 午後スループレー',
+    golfCourseId: 'course_east',
+    playType: 'caddie',
+    holeCount: 18,
+    expectedDurationMinutes: 240,
     createdAt: NOW,
     updatedAt: NOW,
   },
@@ -115,6 +141,7 @@ const mockProducts = [
     extensionKey: 'golf_course',
     reservationServiceId: 'svc:self-18',
     displayName: null,
+    golfCourseId: null,
     playType: 'self',
     holeCount: 18,
     expectedDurationMinutes: 240,
@@ -141,6 +168,17 @@ const mockSlotsByService: Record<string, Array<{
       endTime: '14:00',
       maxGroups: 4,
       maxPlayers: 16,
+    },
+  ],
+  'svc:caddie-18-pm': [
+    {
+      id: 'slot_caddie_east_pm',
+      golfReservationProductId: 'product_caddie_east_pm',
+      weekday: 4,
+      startTime: '12:00',
+      endTime: '15:00',
+      maxGroups: 2,
+      maxPlayers: 8,
     },
   ],
   'svc:self-18': [
@@ -1339,6 +1377,54 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       mockCourses[index] = updated as typeof current
       return hit(updated)
     }
+  }
+
+  const productWriteMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/reservation-products\/([^/]+)$/,
+  )
+  if (productWriteMatch && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
+    const serviceId = decodeURIComponent(productWriteMatch[1] ?? '')
+    const index = mockProducts.findIndex(item => item.reservationServiceId === serviceId)
+    const current = index < 0 ? null : mockProducts[index]!
+    const saved = {
+      id: current?.id ?? `product_${serviceId.replace(/[^A-Za-z0-9]+/g, '_')}`,
+      tenantId: TENANT_ID() || 'courseboard_id',
+      extensionKey: 'golf_course',
+      reservationServiceId: serviceId,
+      displayName: body?.displayName == null ? null : String(body.displayName),
+      golfCourseId: body?.golfCourseId == null ? null : String(body.golfCourseId),
+      playType: String(body?.playType ?? current?.playType ?? 'caddie'),
+      holeCount: Number(body?.holeCount ?? current?.holeCount ?? 18),
+      expectedDurationMinutes: Number(
+        body?.expectedDurationMinutes ?? current?.expectedDurationMinutes ?? 240,
+      ),
+      createdAt: current?.createdAt ?? NOW,
+      updatedAt: NOW,
+    }
+    if (index < 0) mockProducts.push(saved)
+    else mockProducts[index] = saved
+    return hit(saved)
+  }
+
+  const slotsWriteMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/reservation-products\/([^/]+)\/slots$/,
+  )
+  if (slotsWriteMatch && (method === 'PUT' || method === 'POST')) {
+    // The real endpoint replaces the whole week, which is exactly the behaviour
+    // the editor warns about — so the fixture has to replace it too.
+    const serviceId = decodeURIComponent(slotsWriteMatch[1] ?? '')
+    const product = mockProducts.find(item => item.reservationServiceId === serviceId)
+    const incoming = Array.isArray(body?.slots) ? body.slots as Array<Record<string, unknown>> : []
+    mockSlotsByService[serviceId] = incoming.map((slot, index) => ({
+      id: `slot_${serviceId}_${index}`,
+      golfReservationProductId: product?.id ?? `product_${serviceId}`,
+      weekday: Number(slot.weekday ?? 0),
+      startTime: String(slot.startTime ?? '07:00'),
+      endTime: String(slot.endTime ?? '12:00'),
+      maxGroups: Number(slot.maxGroups ?? 0),
+      maxPlayers: Number(slot.maxPlayers ?? 0),
+    }))
+    return hit(items(mockSlotsByService[serviceId]))
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/reservation-policy'
