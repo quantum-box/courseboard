@@ -403,6 +403,7 @@ mod tests {
             18,
             240,
             None,
+            None,
         );
         let jst = jst_offset().unwrap();
         let item = to_tee_sheet_item(
@@ -437,6 +438,7 @@ mod tests {
             18,
             240,
             Some("course_east".into()),
+            None,
         );
         let jst = jst_offset().unwrap();
 
@@ -497,6 +499,7 @@ mod tests {
             18,
             240,
             None,
+            None,
         )];
 
         let filter = CourseId::new("course_east");
@@ -554,6 +557,7 @@ mod tests {
                 PlayType::Caddie,
                 18,
                 240,
+                None,
                 None,
             )]),
             products_fail: false,

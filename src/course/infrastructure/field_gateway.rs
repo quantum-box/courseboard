@@ -8,17 +8,18 @@
 use std::{collections::HashMap, time::Duration};
 
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use reqwest::header::AUTHORIZATION;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::config::EMPTY_COURSE_STORE_URL;
 use crate::course::domain::{
-    Caddie, CaddieAssignment, CaddieRank, CaddieSkillLevel, CaddieUpstreamIdentity, Course,
-    CourseError, CourseId, GatewayCredentials, GolfCatalogGateway, ProductSlot, Reservation,
-    ReservationGateway, ReservationProduct, ReservationServiceId, Resource, ResourceKind,
-    UpsertCourse, UpsertReservationProduct,
+    field_day_of_week_to_courseboard, AvailabilityRule, Caddie, CaddieAssignment, CaddieRank,
+    CaddieSkillLevel, CaddieUpstreamIdentity, Course, CourseError, CourseId, GatewayCredentials,
+    GenerationSummary, GolfCatalogGateway, ProductSlot, Reservation, ReservationGateway,
+    ReservationProduct, ReservationScheduleGateway, ReservationServiceId, Resource, ResourceId,
+    ResourceKind, UpsertCourse, UpsertReservationProduct,
 };
 use crate::course::infrastructure::generic_product_config;
 use crate::field_api::DEFAULT_FIELD_API_URL;
@@ -263,6 +264,157 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         self.write_config(credentials, &next).await?;
         generic_product_config::read_slots(&next, service_id)
     }
+}
+
+/// Field keeps the schedule and its inventory on the generic reservation
+/// module, addressed by resource. Golf reaches them through the resource its
+/// course is mapped to; the golf-course extension has no schedule of its own.
+#[async_trait]
+impl ReservationScheduleGateway for FieldGolfCatalogGateway {
+    async fn get_resource_schedule(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        resource_id: &ResourceId,
+    ) -> Result<Vec<AvailabilityRule>, CourseError> {
+        if is_empty_course_store(&self.base_url) {
+            return Ok(Vec::new());
+        }
+        let response: FieldResourceScheduleDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::GET,
+            &format!(
+                "/v1/erp/reservation-resources/{}/schedule",
+                urlencoding_path(resource_id.as_str())
+            ),
+            credentials,
+            None,
+        )
+        .await?;
+        response.rules.iter().map(rule_to_domain).collect()
+    }
+
+    async fn replace_resource_schedule(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        resource_id: &ResourceId,
+        timezone: &str,
+        rules: &[AvailabilityRule],
+    ) -> Result<Vec<AvailabilityRule>, CourseError> {
+        let body = json!({
+            "rules": rules
+                .iter()
+                .map(|rule| rule_to_field(rule, timezone))
+                .collect::<Vec<_>>(),
+        });
+        let response: FieldResourceScheduleDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::PUT,
+            &format!(
+                "/v1/erp/reservation-resources/{}/schedule",
+                urlencoding_path(resource_id.as_str())
+            ),
+            credentials,
+            Some(&body),
+        )
+        .await?;
+        response.rules.iter().map(rule_to_domain).collect()
+    }
+
+    async fn generate_resource_time_slots(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        resource_id: &ResourceId,
+        from: NaiveDate,
+        to: NaiveDate,
+        dry_run: bool,
+    ) -> Result<GenerationSummary, CourseError> {
+        let body = json!({
+            "from": from.to_string(),
+            "to": to.to_string(),
+            "dryRun": dry_run,
+        });
+        let response: FieldGenerationResponseDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            &format!(
+                "/v1/erp/reservation-resources/{}/time-slots/generate",
+                urlencoding_path(resource_id.as_str())
+            ),
+            credentials,
+            Some(&body),
+        )
+        .await?;
+        Ok(GenerationSummary {
+            created: response.result.created,
+            updated: response.result.updated,
+            deactivated: response.result.deactivated,
+            unchanged: response.result.unchanged,
+        })
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldResourceScheduleDto {
+    #[serde(default)]
+    rules: Vec<FieldAvailabilityRuleDto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldAvailabilityRuleDto {
+    id: Option<String>,
+    day_of_week: i8,
+    start_time: String,
+    end_time: String,
+    capacity: i32,
+    slot_interval_minutes: i32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldGenerationResponseDto {
+    result: FieldGenerationResultDto,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldGenerationResultDto {
+    created: i64,
+    updated: i64,
+    deactivated: i64,
+    unchanged: i64,
+}
+
+fn rule_to_domain(rule: &FieldAvailabilityRuleDto) -> Result<AvailabilityRule, CourseError> {
+    AvailabilityRule::try_new(
+        rule.id.clone(),
+        field_day_of_week_to_courseboard(rule.day_of_week),
+        rule.start_time.clone(),
+        rule.end_time.clone(),
+        rule.capacity,
+        rule.slot_interval_minutes,
+    )
+}
+
+/// The request rejects unknown fields, so every key here has to be one Field
+/// declares — and `dayOfWeek` has to be rotated on the way out.
+fn rule_to_field(rule: &AvailabilityRule, timezone: &str) -> Value {
+    let mut body = json!({
+        "timezone": timezone,
+        "dayOfWeek": rule.field_day_of_week(),
+        "startTime": rule.start_time(),
+        "endTime": rule.end_time(),
+        "capacity": rule.capacity(),
+        "slotIntervalMinutes": rule.slot_interval_minutes(),
+    });
+    if let (Some(object), Some(id)) = (body.as_object_mut(), rule.id()) {
+        object.insert("id".into(), json!(id));
+    }
+    body
 }
 
 pub(crate) fn normalize_base_url(field_api_url: Option<&str>) -> String {

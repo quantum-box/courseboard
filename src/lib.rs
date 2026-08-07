@@ -329,6 +329,21 @@ pub fn build_router(state: AppState) -> Router {
                 )),
         )
         .route(
+            "/v1/course/courses/:id/schedule",
+            get(course::interfaces::http::get_course_schedule)
+                .put(course::interfaces::http::replace_course_schedule)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/courses/:id/time-slots/generate",
+            post(course::interfaces::http::generate_course_time_slots).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/resources",
             get(course::interfaces::http::list_resources).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),

@@ -16,6 +16,7 @@ mod pricing_settings;
 mod product;
 mod reservation;
 mod resource;
+mod schedule;
 mod simulator;
 mod tee_sheet;
 
@@ -48,7 +49,7 @@ pub use ids::{
 pub use payroll::{summarize_payroll, AttendanceDay, PayrollCandidate, WorkedMinutes};
 pub use ports::{
     GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway,
-    ReservationGateway, TeeSheetQuery,
+    ReservationGateway, ReservationScheduleGateway, TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{
@@ -56,6 +57,10 @@ pub use product::{
 };
 pub use reservation::Reservation;
 pub use resource::{Resource, ResourceKind};
+pub use schedule::{
+    courseboard_weekday_to_field, field_day_of_week_to_courseboard, AvailabilityRule,
+    CourseSchedule, GenerationSummary,
+};
 pub use simulator::{
     party_tax, prepare_fee_quote, prepare_range_simulation, project_row, quote_fee,
     summarize_range, FeeQuote, FeeQuoteInput, FeeQuoteRequest, PartyTax, PlayerTaxLine, RangeRow,
