@@ -3,14 +3,15 @@ use chrono::NaiveDate;
 
 use super::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-    AvailabilityQuery, BudgetAchievement, Caddie, CaddieAssignment, CaddieAssignmentQuery,
-    CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation,
-    CaddieRoster, CaddieStaff, Course, CourseError, CourseId, DailyBudget, DailyBudgetQuery,
-    ExtensionStatus, MonthlySettlement, ProductSlot, RecommendationQuery, ReplaceCaddieMemberships,
-    Reservation, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
-    TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
-    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
-    UpsertReservationProduct, WorkedMinutes,
+    AvailabilityQuery, AvailabilityRule, BudgetAchievement, Caddie, CaddieAssignment,
+    CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating,
+    CaddieRecommendation, CaddieRoster, CaddieStaff, Course, CourseError, CourseId, DailyBudget,
+    DailyBudgetQuery, ExtensionStatus, GenerationSummary, MonthlySettlement, ProductSlot,
+    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationPolicy,
+    ReservationProduct, ReservationServiceId, Resource, ResourceId, TaxRuleSnapshot,
+    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
+    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
+    WorkedMinutes,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -53,6 +54,38 @@ pub trait GolfTaxGateway: Send + Sync {
 pub struct TeeSheetQuery {
     pub date: NaiveDate,
     pub golf_course_id: Option<CourseId>,
+}
+
+/// Port for the generic reservation schedule and the inventory it generates.
+///
+/// Field owns these as resource-level APIs; a golf course reaches them through
+/// the resource it is mapped to. Keeping the port resource-shaped means the
+/// translation from "course" lives in one place, the use case.
+#[async_trait]
+pub trait ReservationScheduleGateway: Send + Sync {
+    async fn get_resource_schedule(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        resource_id: &ResourceId,
+    ) -> Result<Vec<AvailabilityRule>, CourseError>;
+
+    /// Replaces the whole week. Rules left out are retired by Field.
+    async fn replace_resource_schedule(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        resource_id: &ResourceId,
+        timezone: &str,
+        rules: &[AvailabilityRule],
+    ) -> Result<Vec<AvailabilityRule>, CourseError>;
+
+    async fn generate_resource_time_slots(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        resource_id: &ResourceId,
+        from: NaiveDate,
+        to: NaiveDate,
+        dry_run: bool,
+    ) -> Result<GenerationSummary, CourseError>;
 }
 
 /// Port for listing generic ERP reservations used by the tee-sheet.

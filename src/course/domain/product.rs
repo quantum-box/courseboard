@@ -74,6 +74,11 @@ pub struct UpsertReservationProduct {
     pub play_type: PlayType,
     pub hole_count: HoleCount,
     pub expected_duration_minutes: DurationMinutes,
+    /// Players allowed in one group.
+    ///
+    /// Inventory counts groups, so party size is a condition of the plan rather
+    /// than a quantity of stock. `None` falls back to the reservation policy.
+    pub max_players_per_group: Option<i32>,
     /// Course this plan is sold on.
     ///
     /// Optional because plans predate the field: a tenant that never split its
@@ -90,6 +95,7 @@ impl UpsertReservationProduct {
         hole_count: i32,
         expected_duration_minutes: i32,
         golf_course_id: Option<String>,
+        max_players_per_group: Option<i32>,
     ) -> Result<Self, CourseError> {
         let display_name = display_name
             .map(|value| value.trim().to_string())
@@ -119,7 +125,20 @@ impl UpsertReservationProduct {
             })?,
             expected_duration_minutes: DurationMinutes::try_new(expected_duration_minutes)?,
             golf_course_id: CourseId::from_optional(golf_course_id),
+            max_players_per_group: validate_group_size(max_players_per_group)?,
         })
+    }
+}
+
+/// A group that holds nobody cannot be sold, and one that holds a busload is a
+/// typo rather than a plan.
+fn validate_group_size(value: Option<i32>) -> Result<Option<i32>, CourseError> {
+    match value {
+        None => Ok(None),
+        Some(players) if (1..=99).contains(&players) => Ok(Some(players)),
+        Some(_) => Err(CourseError::BadRequest(
+            "players per group must be between 1 and 99",
+        )),
     }
 }
 
@@ -142,6 +161,8 @@ pub struct ReservationProduct {
     expected_duration_minutes: DurationMinutes,
     #[getter(skip)]
     golf_course_id: Option<CourseId>,
+    #[getter(skip)]
+    max_players_per_group: Option<i32>,
 }
 
 impl ReservationProduct {
@@ -157,6 +178,7 @@ impl ReservationProduct {
         hole_count: i32,
         expected_duration_minutes: i32,
         golf_course_id: Option<String>,
+        max_players_per_group: Option<i32>,
     ) -> Self {
         Self {
             id: id.into(),
@@ -169,6 +191,7 @@ impl ReservationProduct {
             hole_count: HoleCount::from_raw(hole_count),
             expected_duration_minutes: DurationMinutes::from_raw(expected_duration_minutes),
             golf_course_id: CourseId::from_optional(golf_course_id),
+            max_players_per_group: max_players_per_group.filter(|value| *value > 0),
         }
     }
 
@@ -190,6 +213,10 @@ impl ReservationProduct {
 
     pub fn golf_course_id(&self) -> Option<&CourseId> {
         self.golf_course_id.as_ref()
+    }
+
+    pub fn max_players_per_group(&self) -> Option<i32> {
+        self.max_players_per_group
     }
 
     pub fn requires_caddie(&self) -> bool {
@@ -264,6 +291,7 @@ mod tests {
             18,
             240,
             None,
+            None,
         )
         .expect("valid product");
 
@@ -279,6 +307,7 @@ mod tests {
             18,
             240,
             None,
+            None,
         );
         assert!(matches!(
             empty,
@@ -291,6 +320,7 @@ mod tests {
             "self",
             18,
             240,
+            None,
             None,
         );
         assert!(matches!(
@@ -311,6 +341,7 @@ mod tests {
             PlayType::SelfPlay,
             18,
             240,
+            None,
             None,
         );
 

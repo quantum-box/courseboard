@@ -13,6 +13,7 @@ import {
 } from './features/cancellation-fees/CancellationFeesPage'
 import { BudgetsPage } from './features/golf/BudgetsPage'
 import { CaddiesPage } from './features/golf/CaddiesPage'
+import { CourseSchedulePage } from './features/golf/CourseSchedulePage'
 import { CoursesPage } from './features/golf/CoursesPage'
 import { GolfHomePage } from './features/golf/GolfHomePage'
 import { MembersPage } from './features/members/MembersPage'
@@ -78,6 +79,10 @@ function OperatorWebRedirect({ href }: { href: string }) {
 function RouteContent({ route }: { route: string }) {
   if (route === 'golf') return <GolfHomePage />
   if (route === 'golf/courses') return <CoursesPage />
+  if (route.startsWith('golf/courses/')) {
+    const segment = decodeRouteSegment(route.slice('golf/courses/'.length).split('/')[0] ?? '')
+    if (segment) return <CourseSchedulePage courseId={segment} />
+  }
   // `golf/products/{serviceId}` opens that service's week; the bare route is the
   // list. `golf/reservation-products` is the older name for the same screens.
   const productsPrefix = ['golf/products', 'golf/reservation-products']

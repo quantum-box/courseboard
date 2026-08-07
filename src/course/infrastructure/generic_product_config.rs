@@ -30,6 +30,9 @@ const HOLE_COUNT_KEY: &str = "holeCount";
 /// what they sell, so a plan belongs to one of them; the storefront ignores
 /// this key, which keeps plans written before it readable.
 const GOLF_COURSE_ID_KEY: &str = "golfCourseId";
+/// Players allowed in one group. Inventory counts groups, so this is a
+/// condition of the plan rather than a quantity of stock.
+const MAX_PLAYERS_PER_GROUP_KEY: &str = "maxPlayersPerGroup";
 
 fn as_products(config: &Value) -> Vec<Value> {
     config
@@ -76,6 +79,11 @@ fn to_domain(product: &Value) -> Option<ReservationProduct> {
         .filter(|value| !value.is_empty())
         .map(str::to_string);
 
+    let max_players_per_group = product
+        .get(MAX_PLAYERS_PER_GROUP_KEY)
+        .and_then(Value::as_i64)
+        .map(|value| value as i32);
+
     Some(ReservationProduct::reconstitute(
         service_id.to_string(),
         None,
@@ -85,6 +93,7 @@ fn to_domain(product: &Value) -> Option<ReservationProduct> {
         hole_count,
         duration,
         golf_course_id,
+        max_players_per_group,
     ))
 }
 
@@ -121,6 +130,14 @@ pub(crate) fn upsert_product(config: &Value, input: &UpsertReservationProduct) -
             // would read back as a course whose id is empty.
             None => {
                 object.remove(GOLF_COURSE_ID_KEY);
+            }
+        }
+        match input.max_players_per_group {
+            Some(players) => {
+                object.insert(MAX_PLAYERS_PER_GROUP_KEY.into(), json!(players));
+            }
+            None => {
+                object.remove(MAX_PLAYERS_PER_GROUP_KEY);
             }
         }
         object.entry("enabled").or_insert(json!(true));
@@ -235,6 +252,7 @@ mod tests {
             "caddie",
             18,
             240,
+            None,
             None,
         )
         .expect("valid input")

@@ -21,6 +21,10 @@ export const products: DeepPartial<typeof source> = {
     course: 'Course',
     courseHint: 'The course this plan is sold on. Courses differ in opening hours and in what they sell, so plans are split per course.',
     courseUnset: 'Choose a course',
+    maxPlayers: 'Players per group',
+    maxPlayersHint: 'The cap on one group. Leave it empty to follow the reservation policy. How many groups you accept is set on the course.',
+    maxPlayersValue: '{{n}} players',
+    maxPlayersFromPolicy: 'Follow the reservation policy',
     displayNamePlaceholder: 'Weekday caddie plan',
     createTitle: 'Add a booking service',
     editTitle: 'Edit play settings',
@@ -82,6 +86,20 @@ export const products: DeepPartial<typeof source> = {
     required: {
       title: 'This plan has no course',
       description: 'Naming a course turns on the tee-interval ceiling check and the caddie split with the other plans on that course.',
+    },
+  },
+  inventory: {
+    title: 'Bookable hours',
+    description: 'Hours belong to the course. Plans sold on the same course share its tee times, so the hours are set there.',
+    open: 'Open the hours for {{course}}',
+    needsCourse: {
+      title: 'Name a course to open its hours',
+      description: 'This plan does not say which course it is sold on yet. Choose one in the plan settings.',
+    },
+    legacy: {
+      title: 'This plan still carries old slots',
+      description: 'They predate the move to course-level hours and cannot be edited here. They disappear once the booking screen reads course inventory.',
+      limits: '{{groups}} groups · {{players}} players',
     },
   },
   slots: {
@@ -187,6 +205,7 @@ export const products: DeepPartial<typeof source> = {
     serviceIdRequired: 'Enter a booking service ID.',
     serviceIdFormat: 'Booking service IDs may use letters, digits, period, hyphen, underscore, and colon.',
     courseRequired: 'Choose a course. Courses differ in opening hours and in what they sell.',
+    maxPlayers: 'Enter players per group between 1 and 99.',
     holeCount: 'Choose 9 or 18 holes.',
     duration: 'Enter a duration between 30 and 720 minutes.',
   },

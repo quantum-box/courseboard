@@ -39,6 +39,8 @@ export const courses = {
     status: '状態',
     updated: '更新',
     actions: '操作',
+    schedule: '受付枠',
+    scheduleAria: '{{name}} の受付枠を開く',
     editAria: '{{name}} を直す',
     deleteAria: '{{name}} を削除する',
     deleting: '削除中',

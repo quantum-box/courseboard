@@ -1,0 +1,81 @@
+import type { DeepPartial } from '../../types'
+import type { schedule as source } from '../ja/schedule'
+
+/** See `ja-plain/common.ts` for what this locale is for. */
+export const schedule: DeepPartial<typeof source> = {
+  title: '予約を受ける時間 · {{course}}',
+  description: 'このコースを開ける時間と、同じ時間に出せる組の数、組と組の間の時間を決めます。ここで決めた内容から、日ごとのスタート時刻が作られます。',
+  back: 'コースの一覧に戻る',
+  eyebrow: 'コース',
+  notLinked: {
+    title: 'このコースは、まだ予約のリソースとつながっていません',
+    description: '時間を決めるには、コースと予約のリソースのつながりが要ります。設定を確かめてください。',
+  },
+  loadFailed: {
+    title: '今の時間を読み込めませんでした',
+    description: '中身が空のまま保存すると、今ある時間が消えてしまうことがあります。読み込み直してから直してください。',
+  },
+  dayLabel: '{{day}}曜日',
+  bandCount: '{{n}}本',
+  closed: '受けつけません',
+  add: '時間を足す',
+  addAria: '{{day}}曜日に時間を足す',
+  copyAria: '{{day}}曜日の時間を、ほかの曜日にコピーする',
+  copyPlaceholder: 'ほかの曜日にコピーする…',
+  copyWeekdays: '平日（月〜金）へ',
+  copyWeekend: '土曜と日曜へ',
+  copyAll: '毎日へ',
+  copyDay: '{{day}}曜日へ',
+  capacity: '同じ時間に出せる組の数',
+  interval: '組と組の間の時間',
+  unitGroups: '組',
+  unitInterval: '分おき',
+  starts: '{{n}}スタート',
+  issue: {
+    time: '始まりと終わりの時刻を入れてください。',
+    order: '終わりは、始まりより後にしてください。',
+    capacity: '組の数は 1 以上で入れてください。',
+    interval: '組と組の間の時間は 1〜1440 分で入れてください。',
+    overlap: '同じ曜日で時間が重なっています。重なると、同じスタート時刻が2回作られます。',
+  },
+  save: '時間を保存する',
+  saveFailed: '時間を保存できません',
+  hasIssues: '{{n}} 本の時間に、まちがいがあります。赤い行を直してから保存してください。',
+  confirmRemove: 'この保存で {{n}} 本の時間がなくなります。これから作られるスタート時刻も止まります。進めますか。',
+  saved: {
+    title: '時間を保存しました',
+    body: '{{course}} の1週間ぶんを入れかえました。つづけてスタート時刻を作ってください。',
+  },
+  pending: {
+    title: '{{course}} · まだ保存していません',
+    added: 'ふやした時間 {{n}}',
+    removed: 'けした時間 {{n}}',
+    changed: 'なおした時間 {{n}}',
+    revert: 'もとにもどす',
+    weekly: '1週間で {{n}} スタート',
+  },
+  confirm: {
+    discardOnReload: '保存していない時間があります。捨てて読み込み直しますか。',
+    discardOnLeave: '保存していない時間があります。捨てて、この画面を出ますか。',
+  },
+  generate: {
+    title: 'スタート時刻を作る',
+    description: '決めた時間から、日ごとのスタート時刻を作ります。作った分だけ予約を受けられて、いっぱいになると止まります。',
+    badge: '在庫',
+    from: 'はじめの日',
+    to: 'おわりの日',
+    preview: 'どうなるか見る',
+    run: 'この内容で作る',
+    failed: 'スタート時刻を作れません',
+    unsavedFirst: '先に時間を保存してください。保存していない分は作られません。',
+    result: {
+      title: 'スタート時刻を作りました',
+      body: 'ふえた {{created}} · なおした {{updated}} · とめた {{deactivated}} · そのまま {{unchanged}}',
+    },
+    preview_result: {
+      title: 'この内容で作ると、こうなります',
+      body: 'ふえる {{created}} · なおす {{updated}} · とめる {{deactivated}} · そのまま {{unchanged}}',
+    },
+    keepsReserved: '予約が入っている枠は、数を減らす向きには変わりません。',
+  },
+}

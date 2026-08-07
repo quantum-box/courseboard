@@ -16,18 +16,20 @@ use utoipa::{IntoParams, ToSchema};
 use super::openapi::ErrorBody;
 
 use crate::course::domain::{
-    Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieId, CaddieStaff, Course, CourseError,
-    CourseId, GatewayCredentials, ProductSlot, ReservationProduct, ReservationServiceId, Resource,
-    TeeSheet, TeeSheetItem, TeeSheetQuery, UpsertCourse, UpsertReservationProduct,
+    AvailabilityRule, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieId, CaddieStaff,
+    Course, CourseError, CourseId, GatewayCredentials, GenerationSummary, ProductSlot,
+    ReservationProduct, ReservationServiceId, Resource, TeeSheet, TeeSheetItem, TeeSheetQuery,
+    UpsertCourse, UpsertReservationProduct,
 };
 use crate::course::infrastructure::{
     FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
     FieldReservationGateway,
 };
 use crate::course::usecase::{
-    CreateCourseUseCase, DeleteCourseUseCase, GetTeeSheetUseCase, ListCaddieAssignmentsUseCase,
-    ListCaddiesUseCase, ListCoursesUseCase, ListProductSlotsUseCase,
-    ListReservationProductsUseCase, ListResourcesUseCase, ReplaceProductSlotsUseCase,
+    CreateCourseUseCase, DeleteCourseUseCase, GenerateCourseTimeSlotsUseCase,
+    GetCourseScheduleUseCase, GetTeeSheetUseCase, ListCaddieAssignmentsUseCase, ListCaddiesUseCase,
+    ListCoursesUseCase, ListProductSlotsUseCase, ListReservationProductsUseCase,
+    ListResourcesUseCase, ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase,
     UpdateCourseUseCase, UpsertReservationProductUseCase,
 };
 use crate::{AppError, AppState};
@@ -512,6 +514,188 @@ pub async fn list_resources(
     }))
 }
 
+// ─── Course schedule and inventory ────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AvailabilityRuleDto {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    /// Sunday is 0, as everywhere else in CourseBoard.
+    pub weekday: u8,
+    pub start_time: String,
+    pub end_time: String,
+    /// Groups that may be out at once. Never a party size.
+    pub capacity: i32,
+    pub slot_interval_minutes: i32,
+}
+
+impl From<&AvailabilityRule> for AvailabilityRuleDto {
+    fn from(value: &AvailabilityRule) -> Self {
+        Self {
+            id: value.id().map(str::to_string),
+            weekday: value.weekday(),
+            start_time: value.start_time().to_string(),
+            end_time: value.end_time().to_string(),
+            capacity: value.capacity(),
+            slot_interval_minutes: value.slot_interval_minutes(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceCourseScheduleRequest {
+    pub rules: Vec<AvailabilityRuleDto>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateCourseTimeSlotsRequest {
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+    /// Work out the same plan without writing it.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerationSummaryDto {
+    pub created: i64,
+    pub updated: i64,
+    pub deactivated: i64,
+    pub unchanged: i64,
+}
+
+impl From<GenerationSummary> for GenerationSummaryDto {
+    fn from(value: GenerationSummary) -> Self {
+        Self {
+            created: value.created,
+            updated: value.updated,
+            deactivated: value.deactivated,
+            unchanged: value.unchanged,
+        }
+    }
+}
+
+/// GET /v1/course/courses/:id/schedule
+#[utoipa::path(
+    get,
+    path = "/v1/course/courses/{id}/schedule",
+    tag = "course",
+    params(("id" = String, Path, description = "Golf course ID")),
+    responses(
+        (status = 200, description = "Weekly opening schedule", body = inline(ItemsResponse<AvailabilityRuleDto>)),
+        (status = 400, description = "Course is not linked to a resource", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_course_schedule(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<ItemsResponse<AvailabilityRuleDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let gateway = catalog_gateway(&state);
+    let use_case = GetCourseScheduleUseCase::new(gateway.clone(), gateway);
+    let rules = use_case
+        .execute(credentials, &CourseId::new(id))
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: rules.iter().map(AvailabilityRuleDto::from).collect(),
+    }))
+}
+
+/// PUT /v1/course/courses/:id/schedule
+#[utoipa::path(
+    put,
+    path = "/v1/course/courses/{id}/schedule",
+    tag = "course",
+    params(("id" = String, Path, description = "Golf course ID")),
+    request_body = ReplaceCourseScheduleRequest,
+    responses(
+        (status = 200, description = "Schedule replaced", body = inline(ItemsResponse<AvailabilityRuleDto>)),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replace_course_schedule(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<ReplaceCourseScheduleRequest>,
+) -> Result<Json<ItemsResponse<AvailabilityRuleDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let rules = body
+        .rules
+        .into_iter()
+        .map(|rule| {
+            AvailabilityRule::try_new(
+                rule.id,
+                rule.weekday,
+                rule.start_time,
+                rule.end_time,
+                rule.capacity,
+                rule.slot_interval_minutes,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::from)?;
+
+    let gateway = catalog_gateway(&state);
+    let use_case = ReplaceCourseScheduleUseCase::new(gateway.clone(), gateway);
+    let saved = use_case
+        .execute(credentials, &CourseId::new(id), rules)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: saved.iter().map(AvailabilityRuleDto::from).collect(),
+    }))
+}
+
+/// POST /v1/course/courses/:id/time-slots/generate
+#[utoipa::path(
+    post,
+    path = "/v1/course/courses/{id}/time-slots/generate",
+    tag = "course",
+    params(("id" = String, Path, description = "Golf course ID")),
+    request_body = GenerateCourseTimeSlotsRequest,
+    responses(
+        (status = 200, description = "Inventory generated", body = GenerationSummaryDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn generate_course_time_slots(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(body): Json<GenerateCourseTimeSlotsRequest>,
+) -> Result<Json<GenerationSummaryDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let gateway = catalog_gateway(&state);
+    let use_case = GenerateCourseTimeSlotsUseCase::new(gateway.clone(), gateway);
+    let summary = use_case
+        .execute(
+            credentials,
+            &CourseId::new(id),
+            body.from,
+            body.to,
+            body.dry_run,
+        )
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(GenerationSummaryDto::from(summary)))
+}
+
 // ─── Reservation products ─────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -526,6 +710,8 @@ pub struct ReservationProductDto {
     pub hole_count: i32,
     pub expected_duration_minutes: i32,
     pub golf_course_id: Option<String>,
+    /// Players allowed in one group; falls back to the reservation policy.
+    pub max_players_per_group: Option<i32>,
 }
 
 impl From<&ReservationProduct> for ReservationProductDto {
@@ -543,6 +729,7 @@ impl From<&ReservationProduct> for ReservationProductDto {
             hole_count: value.hole_count().get(),
             expected_duration_minutes: value.expected_duration_minutes().get(),
             golf_course_id: value.golf_course_id().map(ToString::to_string),
+            max_players_per_group: value.max_players_per_group(),
         }
     }
 }
@@ -555,6 +742,7 @@ pub struct UpsertReservationProductRequest {
     pub hole_count: Option<i32>,
     pub expected_duration_minutes: Option<i32>,
     pub golf_course_id: Option<String>,
+    pub max_players_per_group: Option<i32>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -644,6 +832,7 @@ pub async fn upsert_reservation_product(
         body.hole_count.unwrap_or(18),
         body.expected_duration_minutes.unwrap_or(270),
         body.golf_course_id,
+        body.max_players_per_group,
     )
     .map_err(AppError::from)?;
     let use_case = UpsertReservationProductUseCase::new(catalog_gateway(&state));

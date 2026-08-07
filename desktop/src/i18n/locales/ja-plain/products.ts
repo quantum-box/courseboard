@@ -22,6 +22,10 @@ export const products: DeepPartial<typeof source> = {
     course: 'コース',
     courseHint: 'このプランを売るコースです。コースごとに開いている時間もプレーの中身も違うので、コースごとにプランを分けます。',
     courseUnset: 'コースを選んでください',
+    maxPlayers: '1組に入れる人数',
+    maxPlayersHint: '1つの組に入れる人数の上限です。空のままなら、予約の決まりに従います。受けられる組の数は、コースの側で決めます。',
+    maxPlayersValue: '{{n}}人',
+    maxPlayersFromPolicy: '予約の決まりに従う',
     createTitle: 'プランを登録する',
     editTitle: 'プランの内容を直す',
     description: 'プランごとに、キャディが付くかどうか、ホールの数、かかる時間を決めます。',
@@ -80,6 +84,20 @@ export const products: DeepPartial<typeof source> = {
     required: {
       title: 'このプランはコースが決まっていません',
       description: 'コースを決めると、組を出す間隔からの上限の確認と、同じコースのほかのプランとのキャディの分け合いが動きます。',
+    },
+  },
+  inventory: {
+    title: '予約を受ける時間',
+    description: '予約を受ける時間は、コースが持ちます。同じコースで売るプランは同じスタート時刻を分け合うので、コースの側で決めます。',
+    open: '{{course}} の時間を開く',
+    needsCourse: {
+      title: 'コースを決めると開けます',
+      description: 'このプランをどのコースで売るかが、まだ決まっていません。プランの設定でコースを選んでください。',
+    },
+    legacy: {
+      title: 'プランに古い枠が残っています',
+      description: 'コースの側に移す前の設定です。ここでは直せません。予約の画面がコースの在庫を見るようになると、なくなります。',
+      limits: '{{groups}}組 · {{players}}人',
     },
   },
   slots: {
@@ -183,6 +201,7 @@ export const products: DeepPartial<typeof source> = {
     serviceIdRequired: 'プランの管理番号を入れてください。',
     serviceIdFormat: '管理番号に使えるのは、英字・数字・ピリオド・ハイフン・アンダースコア・コロンです。',
     courseRequired: 'コースを選んでください。コースごとに開いている時間もプレーの中身も違います。',
+    maxPlayers: '1組に入れる人数は 1〜99 で入れてください。',
     holeCount: 'ホールの数は 9 か 18 を選んでください。',
     duration: 'かかる時間は 30〜720 分で入れてください。',
   },

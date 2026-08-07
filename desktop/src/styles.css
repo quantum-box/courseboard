@@ -3559,3 +3559,36 @@ button,
 .shift-board-legend i[data-kind='afternoon'],
 .shift-board-legend i[data-kind='light'] { background: hsl(var(--nui-warning) / .2); }
 .shift-board-legend i[data-long-streak] { background: hsl(var(--nui-destructive) / .25); }
+
+/* Slots a plan carried before inventory moved to the course. Read-only, so it
+   reads as a list rather than as a table of fields. */
+.legacy-slot-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legacy-slot-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-bottom: 1px dashed hsl(var(--nui-border));
+  padding: 5px 2px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+}
+
+.legacy-slot-list > li:last-child { border-bottom: 0; }
+.legacy-slot-list strong { min-width: 4.5rem; color: hsl(var(--nui-foreground)); font-weight: 600; }
+
+/* What a band actually puts on sale; the two numbers beside it decide it, but
+   neither says it alone. */
+.slot-starts {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sticky-submit .slot-diff-weekly { color: hsl(var(--nui-muted-foreground)); font-size: 12px; }
