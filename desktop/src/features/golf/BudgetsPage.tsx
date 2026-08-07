@@ -25,6 +25,7 @@ import {
   yen,
 } from '../../api'
 import { useRegisterPageReload } from '../../lib/pageReload'
+import { showToast } from '../../lib/toast'
 import {
   DataTable,
   EmptyState,
@@ -164,11 +165,9 @@ export function BudgetsPage() {
   }))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [savedMessage, setSavedMessage] = useState<string | null>(null)
   const [csvContents, setCsvContents] = useState('')
   const [csvFilename, setCsvFilename] = useState('')
   const [csvError, setCsvError] = useState<string | null>(null)
-  const [csvMessage, setCsvMessage] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -260,7 +259,6 @@ export function BudgetsPage() {
   async function saveBudget(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setSaveError(null)
-    setSavedMessage(null)
 
     const targetRevenue = Number(draft.targetRevenue)
     const targetAverageSpend = Number(draft.targetAverageSpend)
@@ -301,7 +299,11 @@ export function BudgetsPage() {
           }),
         },
       )
-      setSavedMessage(t('budgets:editor.saved', { date: draft.date }))
+      showToast({
+        tone: 'success',
+        title: t('common:state.saved'),
+        message: t('budgets:editor.saved', { date: draft.date }),
+      })
       await load()
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : t('budgets:saveFailed'))
@@ -313,7 +315,6 @@ export function BudgetsPage() {
   async function chooseCsv(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     setCsvError(null)
-    setCsvMessage(null)
     if (!file) {
       setCsvContents('')
       setCsvFilename('')
@@ -335,7 +336,6 @@ export function BudgetsPage() {
 
   async function importCsv(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setCsvMessage(null)
     if (!csvContents || csvError) return
     setImporting(true)
     try {
@@ -347,7 +347,11 @@ export function BudgetsPage() {
           body: csvContents,
         },
       )
-      setCsvMessage(t('budgets:csv.imported', { name: csvFilename }))
+      showToast({
+        tone: 'success',
+        title: t('common:state.saved'),
+        message: t('budgets:csv.imported', { name: csvFilename }),
+      })
       setCsvContents('')
       setCsvFilename('')
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -595,7 +599,6 @@ export function BudgetsPage() {
                     </Field>
                   </FormGrid>
                   {saveError ? <Notice tone="danger">{saveError}</Notice> : null}
-                  {savedMessage ? <Notice tone="success">{savedMessage}</Notice> : null}
                   <div className="flex justify-end">
                     <Button variant="primary" size="lg" type="submit" disabled={saving}>
                       <Save /> {saving ? t('common:action.saving') : t('budgets:editor.save')}
@@ -696,7 +699,6 @@ export function BudgetsPage() {
                   </div>
                 ) : null}
                 {csvError ? <Notice tone="danger">{csvError}</Notice> : null}
-                {csvMessage ? <Notice tone="success">{csvMessage}</Notice> : null}
                 <Button
                   variant="primary"
                   size="lg"

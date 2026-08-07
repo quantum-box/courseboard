@@ -78,8 +78,15 @@ function OperatorWebRedirect({ href }: { href: string }) {
 function RouteContent({ route }: { route: string }) {
   if (route === 'golf') return <GolfHomePage />
   if (route === 'golf/courses') return <CoursesPage />
-  if (route === 'golf/products' || route === 'golf/reservation-products') {
-    return <ReservationProductsPage />
+  // `golf/products/{serviceId}` opens that service's week; the bare route is the
+  // list. `golf/reservation-products` is the older name for the same screens.
+  const productsPrefix = ['golf/products', 'golf/reservation-products']
+    .find(prefix => route === prefix || route.startsWith(`${prefix}/`))
+  if (productsPrefix) {
+    const segment = route === productsPrefix
+      ? ''
+      : decodeRouteSegment(route.slice(productsPrefix.length + 1))
+    return <ReservationProductsPage serviceId={segment || undefined} />
   }
   if (route === 'golf/timeline') return <TimelinePage />
   if (route === 'golf/caddies/shifts') return <ShiftBoardPage />

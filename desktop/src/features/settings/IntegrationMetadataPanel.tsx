@@ -13,6 +13,7 @@ import {
   ResourceError,
 } from '../../components/Page'
 import { useRegisterPageReload } from '../../lib/pageReload'
+import { showToast } from '../../lib/toast'
 
 type ReservationPolicy = {
   metadataJson?: unknown
@@ -53,13 +54,11 @@ export function IntegrationMetadataPanel() {
   const [loadError, setLoadError] = useState<unknown>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
   const [policyMissing, setPolicyMissing] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError(null)
-    setSaved(false)
     setSaveError(null)
     try {
       const policy = await courseboardApiJson<ReservationPolicy>(
@@ -92,7 +91,6 @@ export function IntegrationMetadataPanel() {
   const parsed = parseMetadata(draft)
 
   async function save() {
-    setSaved(false)
     if (parsed.error) {
       setSaveError(parsed.error)
       return
@@ -111,7 +109,11 @@ export function IntegrationMetadataPanel() {
       setDraft(next)
       setBaseline(next)
       setPolicyMissing(false)
-      setSaved(true)
+      showToast({
+        tone: 'success',
+        title: t('settings:metadata.saved.title'),
+        message: t('settings:metadata.saved.description'),
+      })
     } catch (error) {
       setSaveError(
         error instanceof Error
@@ -164,7 +166,6 @@ export function IntegrationMetadataPanel() {
               value={draft}
               onChange={event => {
                 setDraft(event.target.value)
-                setSaved(false)
                 setSaveError(null)
               }}
               placeholder={METADATA_PLACEHOLDER}
@@ -186,11 +187,6 @@ export function IntegrationMetadataPanel() {
           ) : null}
           {saveError ? (
             <Notice tone="danger" title={t('settings:metadata.saveFailed')}>{saveError}</Notice>
-          ) : null}
-          {saved ? (
-            <Notice tone="success" title={t('settings:metadata.saved.title')}>
-              {t('settings:metadata.saved.description')}
-            </Notice>
           ) : null}
         </div>
       ) : null}

@@ -55,6 +55,13 @@ pub struct TeeSheetItem {
     golf_course_id: CourseId,
     #[getter(skip)]
     course_name: String,
+    /// Course the booked plan says it is sold on.
+    ///
+    /// ERP decides which course a reservation actually occupies, through the
+    /// resource it books; the plan only declares one. Keeping both lets the
+    /// board show where the two disagree instead of silently picking a winner.
+    #[getter(skip)]
+    expected_course_id: Option<CourseId>,
     #[getter(skip)]
     tee_time: String,
     duration_minutes: i32,
@@ -79,6 +86,7 @@ impl TeeSheetItem {
         display_name: Option<String>,
         golf_course_id: impl Into<CourseId>,
         course_name: impl Into<String>,
+        expected_course_id: Option<CourseId>,
         tee_time: impl Into<String>,
         duration_minutes: i32,
         play_type: PlayType,
@@ -99,6 +107,7 @@ impl TeeSheetItem {
                 .filter(|value| !value.is_empty()),
             golf_course_id: golf_course_id.into(),
             course_name: course_name.into(),
+            expected_course_id,
             tee_time: tee_time.into(),
             duration_minutes: duration_minutes.max(15),
             play_type,
@@ -132,6 +141,19 @@ impl TeeSheetItem {
 
     pub fn course_name(&self) -> &str {
         &self.course_name
+    }
+
+    pub fn expected_course_id(&self) -> Option<&CourseId> {
+        self.expected_course_id.as_ref()
+    }
+
+    /// The booking sits on a course its plan is not sold on.
+    ///
+    /// False when the plan names no course: nothing to disagree with.
+    pub fn course_mismatch(&self) -> bool {
+        self.expected_course_id
+            .as_ref()
+            .is_some_and(|expected| expected != &self.golf_course_id)
     }
 
     pub fn tee_time(&self) -> &str {

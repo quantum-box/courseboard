@@ -80,16 +80,16 @@ export const helpEn: HelpCatalog = {
       summary: 'The kinds of play you sell and the slots you can accept each weekday.',
       usage: [
         {
-          heading: 'Pick a service',
-          body: 'Select a row in the list to edit that service’s weekday slots below.',
+          heading: 'Open a service',
+          body: 'Select a row to open that service’s own screen. The weekly slots are edited there.',
         },
         {
           heading: 'Edit the slots',
-          body: 'Enter weekday, start, end, groups, and players, then save. 0 means no limit.',
+          body: 'Each weekday has its own card. Enter start, end, groups, and players; 0 means no limit. Build one day, then use “Copy to…” to stamp it onto Mon–Fri or the weekend.',
         },
         {
           heading: 'Build from caddie supply',
-          body: 'For caddie-required products, morning and afternoon slots can be derived from available caddies.',
+          body: 'For caddie-required products, morning and afternoon slots can be derived from available caddies and applied to that date’s weekday.',
         },
       ],
       data: [
@@ -99,7 +99,7 @@ export const helpEn: HelpCatalog = {
         },
         {
           heading: 'Slot',
-          body: 'The cap on groups and players for one weekday and time band.',
+          body: 'The cap on groups and players for one weekday and time band. Saving replaces the whole week, so check the added/dropped/changed counts in the bottom bar first.',
         },
       ],
     },

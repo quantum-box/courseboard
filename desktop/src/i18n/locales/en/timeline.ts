@@ -96,6 +96,7 @@ export const timeline: DeepPartial<typeof source> = {
     collapseLabel: 'Split',
     lane: 'Course',
     groups: '{{n}} groups',
+    groupsWithInterval: '{{n}} groups · {{interval}}-min interval',
     partySize: '{{n}} players',
     subtitle: '{{party}} · {{size}} players · {{coverage}}',
     tooltip: '{{plan}} · ID: {{id}} · {{party}} · {{number}} · {{size}} players · {{coverage}}',

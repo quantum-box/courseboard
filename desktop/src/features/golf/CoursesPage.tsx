@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next'
 import { courseboardApiJson } from '../../api'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
+import { showToast } from '../../lib/toast'
 import {
   DataTable,
   EmptyState,
@@ -125,7 +126,11 @@ export function CoursesPage() {
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [mutationError, setMutationError] = useState<string | null>(null)
-  const [savedMessage, setSavedMessage] = useState<string | null>(null)
+
+  /** Every finished mutation reports in the same place: bottom right. */
+  function saved(message: string) {
+    showToast({ tone: 'success', title: i18next.t('common:state.saved'), message })
+  }
 
   const loadCourses = useCallback(async () => {
     setLoading(true)
@@ -150,14 +155,12 @@ export function CoursesPage() {
     setDraft(emptyCourseDraft())
     setEditor({ mode: 'create' })
     setMutationError(null)
-    setSavedMessage(null)
   }
 
   function beginEdit(course: GolfCourse) {
     setDraft(courseToDraft(course))
     setEditor({ mode: 'edit', courseId: course.id })
     setMutationError(null)
-    setSavedMessage(null)
   }
 
   function closeEditor() {
@@ -176,7 +179,6 @@ export function CoursesPage() {
 
     setSaving(true)
     setMutationError(null)
-    setSavedMessage(null)
     const body = {
       name: draft.name.trim(),
       shortName: draft.shortName.trim() || null,
@@ -192,7 +194,7 @@ export function CoursesPage() {
           method: 'POST',
           body: JSON.stringify(body),
         })
-        setSavedMessage(t('courses:notice.added', { name: body.name }))
+        saved(t('courses:notice.added', { name: body.name }))
       } else {
         await courseboardApiJson(
           `${coursesPath}/${encodeURIComponent(editor.courseId)}`,
@@ -201,7 +203,7 @@ export function CoursesPage() {
             body: JSON.stringify(body),
           },
         )
-        setSavedMessage(t('courses:notice.updated', { name: body.name }))
+        saved(t('courses:notice.updated', { name: body.name }))
       }
       setEditor(null)
       await loadCourses()
@@ -215,18 +217,22 @@ export function CoursesPage() {
   async function deleteCourse(course: GolfCourse) {
     if (!window.confirm(t('courses:confirmDelete', { name: course.name }))) return
     setDeletingId(course.id)
-    setMutationError(null)
-    setSavedMessage(null)
     try {
       await courseboardApiJson(
         `${coursesPath}/${encodeURIComponent(course.id)}`,
         { method: 'DELETE' },
       )
       if (editor?.mode === 'edit' && editor.courseId === course.id) setEditor(null)
-      setSavedMessage(t('courses:notice.deleted', { name: course.name }))
+      saved(t('courses:notice.deleted', { name: course.name }))
       await loadCourses()
     } catch (error) {
-      setMutationError(errorMessage(error))
+      // The editor is closed during a delete, so there is no form to put this
+      // in; a toast is the only place it can be read without moving the table.
+      showToast({
+        tone: 'danger',
+        title: t('courses:notice.failed'),
+        message: errorMessage(error),
+      })
     } finally {
       setDeletingId(null)
     }
@@ -335,13 +341,6 @@ export function CoursesPage() {
           <Plus /> {t('courses:add')}
         </Button>
       </div>
-
-      {savedMessage ? (
-        <Notice tone="success" title={t('common:state.saved')}>{savedMessage}</Notice>
-      ) : null}
-      {mutationError && !editor ? (
-        <Notice tone="danger" title={t('courses:notice.failed')}>{mutationError}</Notice>
-      ) : null}
 
       {editor ? (
         <Panel

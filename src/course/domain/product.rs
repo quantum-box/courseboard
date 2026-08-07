@@ -1,7 +1,7 @@
 //! Reservation product (play package sold on the tee sheet).
 
 use super::course::HoleCount;
-use super::{CourseError, ProductId, ProductSlotId, ReservationServiceId, TenantId};
+use super::{CourseError, CourseId, ProductId, ProductSlotId, ReservationServiceId, TenantId};
 use derive_getters::Getters;
 
 const MAX_DISPLAY_NAME_LENGTH: usize = 255;
@@ -74,6 +74,12 @@ pub struct UpsertReservationProduct {
     pub play_type: PlayType,
     pub hole_count: HoleCount,
     pub expected_duration_minutes: DurationMinutes,
+    /// Course this plan is sold on.
+    ///
+    /// Optional because plans predate the field: a tenant that never split its
+    /// courses has products with nothing to point at, and refusing to save them
+    /// would lock those tenants out of their own editor.
+    pub golf_course_id: Option<CourseId>,
 }
 
 impl UpsertReservationProduct {
@@ -83,6 +89,7 @@ impl UpsertReservationProduct {
         play_type: impl AsRef<str>,
         hole_count: i32,
         expected_duration_minutes: i32,
+        golf_course_id: Option<String>,
     ) -> Result<Self, CourseError> {
         let display_name = display_name
             .map(|value| value.trim().to_string())
@@ -111,6 +118,7 @@ impl UpsertReservationProduct {
                 }
             })?,
             expected_duration_minutes: DurationMinutes::try_new(expected_duration_minutes)?,
+            golf_course_id: CourseId::from_optional(golf_course_id),
         })
     }
 }
@@ -132,9 +140,14 @@ pub struct ReservationProduct {
     hole_count: HoleCount,
     #[getter(copy)]
     expected_duration_minutes: DurationMinutes,
+    #[getter(skip)]
+    golf_course_id: Option<CourseId>,
 }
 
 impl ReservationProduct {
+    /// Rebuilds a stored product. One parameter per stored column is the point
+    /// of a reconstitutor, so the argument count follows the row, not a limit.
+    #[allow(clippy::too_many_arguments)]
     pub fn reconstitute(
         id: impl Into<ProductId>,
         tenant_id: Option<String>,
@@ -143,6 +156,7 @@ impl ReservationProduct {
         play_type: PlayType,
         hole_count: i32,
         expected_duration_minutes: i32,
+        golf_course_id: Option<String>,
     ) -> Self {
         Self {
             id: id.into(),
@@ -154,6 +168,7 @@ impl ReservationProduct {
             play_type,
             hole_count: HoleCount::from_raw(hole_count),
             expected_duration_minutes: DurationMinutes::from_raw(expected_duration_minutes),
+            golf_course_id: CourseId::from_optional(golf_course_id),
         }
     }
 
@@ -171,6 +186,10 @@ impl ReservationProduct {
 
     pub fn display_name(&self) -> Option<&str> {
         self.display_name.as_deref()
+    }
+
+    pub fn golf_course_id(&self) -> Option<&CourseId> {
+        self.golf_course_id.as_ref()
     }
 
     pub fn requires_caddie(&self) -> bool {
@@ -244,6 +263,7 @@ mod tests {
             "caddie",
             18,
             240,
+            None,
         )
         .expect("valid product");
 
@@ -252,8 +272,14 @@ mod tests {
 
     #[test]
     fn upsert_product_rejects_empty_or_too_long_display_name() {
-        let empty =
-            UpsertReservationProduct::try_new("service-1", Some("  ".into()), "self", 18, 240);
+        let empty = UpsertReservationProduct::try_new(
+            "service-1",
+            Some("  ".into()),
+            "self",
+            18,
+            240,
+            None,
+        );
         assert!(matches!(
             empty,
             Err(CourseError::BadRequest("display name must not be empty"))
@@ -265,6 +291,7 @@ mod tests {
             "self",
             18,
             240,
+            None,
         );
         assert!(matches!(
             too_long,
@@ -284,6 +311,7 @@ mod tests {
             PlayType::SelfPlay,
             18,
             240,
+            None,
         );
 
         assert_eq!(product.display_name(), None);

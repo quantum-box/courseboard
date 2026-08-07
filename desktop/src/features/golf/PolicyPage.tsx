@@ -1,6 +1,7 @@
 import { ApiError, courseboardApiJson } from '../../api'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
+import { showToast } from '../../lib/toast'
 import {
   Field,
   FormGrid,
@@ -244,7 +245,6 @@ export function PolicyPage() {
   const [loadError, setLoadError] = useState<unknown>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string[] | null>(null)
-  const [saved, setSaved] = useState(false)
   const [exists, setExists] = useState(false)
   const [preservedHooks, setPreservedHooks] = useState<GolfPolicyHooks>({})
   const [preservedMetadata, setPreservedMetadata] = useState<unknown>({})
@@ -260,7 +260,6 @@ export function PolicyPage() {
       setPreservedHooks(policy.policyHooksJson ?? {})
       setPreservedMetadata(policy.metadataJson ?? {})
       setExists(true)
-      setSaved(false)
       setSaveError(null)
     } catch (error) {
       if (error instanceof ApiError && error.status === 404) {
@@ -268,7 +267,6 @@ export function PolicyPage() {
         setPreservedHooks({})
         setPreservedMetadata({})
         setExists(false)
-        setSaved(false)
         setSaveError(null)
       } else {
         setLoadError(error)
@@ -286,7 +284,6 @@ export function PolicyPage() {
 
   function changeDraft(patch: Partial<PolicyDraft>) {
     setDraft(previous => ({ ...previous, ...patch }))
-    setSaved(false)
     setSaveError(null)
   }
 
@@ -311,7 +308,6 @@ export function PolicyPage() {
 
   async function savePolicy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    setSaved(false)
     const validation = policyValidation(draft)
     if (validation.errors.length > 0) {
       setSaveError(validation.errors)
@@ -351,12 +347,18 @@ export function PolicyPage() {
           }),
         },
       )
-      setSaved(true)
       setExists(true)
+      showToast({
+        tone: 'success',
+        title: t('policy:saved.title'),
+        message: t('policy:saved.description'),
+      })
     } catch (error) {
-      setSaveError([
-        error instanceof Error ? error.message : t('policy:saveFailed'),
-      ])
+      showToast({
+        tone: 'danger',
+        title: t('policy:saveFailed'),
+        message: error instanceof Error ? error.message : t('policy:saveFailed'),
+      })
     } finally {
       setSaving(false)
     }
@@ -619,11 +621,6 @@ export function PolicyPage() {
           <ul className="list-disc space-y-1 pl-4">
             {saveError.map(error => <li key={error}>{error}</li>)}
           </ul>
-        </Notice>
-      ) : null}
-      {saved ? (
-        <Notice tone="success" title={t('policy:saved.title')}>
-          {t('policy:saved.description')}
         </Notice>
       ) : null}
 

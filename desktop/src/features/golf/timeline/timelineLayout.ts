@@ -43,6 +43,52 @@ export function markStepMinutes(pxPerHour: number): number {
   return 60
 }
 
+/** Where a course's tee ticks sit on the track, in CSS pixels. */
+export type TeeTickGeometry = {
+  stepPx: number
+  offsetPx: number
+}
+
+/** Below this the ticks read as a smear rather than as countable slots. */
+const MIN_TEE_STEP_PX = 4
+
+/**
+ * The tee-interval ruler for one course lane.
+ *
+ * A gap between two blocks means nothing until you know the cadence behind it;
+ * with ticks, a gap is a number of open tee times you can count off the track.
+ *
+ * Ticks line up with the course's opening time, not with the window's, because
+ * a course that opens at 07:00 on an 8-minute interval never starts a group on
+ * the marks a 06:00 ruler would draw.
+ *
+ * `null` when the course has no usable interval or the ticks would be too dense
+ * to read at this zoom.
+ */
+export function teeTickGeometry(
+  intervalMinutes: number | null | undefined,
+  pxPerHour: number,
+  openMinutes: number | null | undefined,
+  window: TimelineWindow = DEFAULT_TIMELINE_WINDOW,
+): TeeTickGeometry | null {
+  if (!intervalMinutes || intervalMinutes <= 0) return null
+  const scale = clampPxPerHour(pxPerHour)
+  const stepPx = (intervalMinutes / 60) * scale
+  if (stepPx < MIN_TEE_STEP_PX) return null
+
+  const anchor = openMinutes ?? window.startMinutes
+  const shiftMinutes = (((anchor - window.startMinutes) % intervalMinutes) + intervalMinutes)
+    % intervalMinutes
+  return { stepPx, offsetPx: (shiftMinutes / 60) * scale }
+}
+
+/** `HH:MM` as minutes past midnight, or `null` when it is not a time. */
+export function parseClockMinutes(value: string | null | undefined): number | null {
+  if (!value || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null
+  const [hour, minute] = value.split(':').map(Number)
+  return hour * 60 + minute
+}
+
 export function zoomPercent(pxPerHour: number): number {
   return Math.round((clampPxPerHour(pxPerHour) / DEFAULT_PX_PER_HOUR) * 100)
 }

@@ -90,6 +90,7 @@ export const timeline: DeepPartial<typeof source> = {
     expandLabel: '大きく',
     collapseLabel: '2つ並べる',
     groups: '{{n}}組',
+    groupsWithInterval: '{{n}}組 · {{interval}}分おき',
     partySize: '{{n}}人',
     subtitle: '{{party}} · {{size}}人 · {{coverage}}',
     tooltip: '{{plan}} · 管理番号: {{id}} · {{party}} · {{number}} · {{size}}人 · {{coverage}}',

@@ -157,6 +157,12 @@ pub struct TeeSheetItemDto {
     pub display_name: Option<String>,
     pub golf_course_id: String,
     pub course_name: String,
+    /// Course the booked plan is sold on, when it names one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_course_id: Option<String>,
+    /// True when the booking sits on a course its plan is not sold on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub course_mismatch: bool,
     pub tee_time: String,
     pub duration_minutes: i32,
     pub play_type: String,
@@ -191,6 +197,8 @@ impl From<&TeeSheetItem> for TeeSheetItemDto {
             display_name: value.display_name().map(str::to_string),
             golf_course_id: value.golf_course_id().to_string(),
             course_name: value.course_name().to_string(),
+            expected_course_id: value.expected_course_id().map(ToString::to_string),
+            course_mismatch: value.course_mismatch(),
             tee_time: value.tee_time().to_string(),
             duration_minutes: value.duration_minutes(),
             play_type: value.play_type().as_str().to_string(),
@@ -517,6 +525,7 @@ pub struct ReservationProductDto {
     pub play_type: String,
     pub hole_count: i32,
     pub expected_duration_minutes: i32,
+    pub golf_course_id: Option<String>,
 }
 
 impl From<&ReservationProduct> for ReservationProductDto {
@@ -533,6 +542,7 @@ impl From<&ReservationProduct> for ReservationProductDto {
             play_type: value.play_type().as_str().to_string(),
             hole_count: value.hole_count().get(),
             expected_duration_minutes: value.expected_duration_minutes().get(),
+            golf_course_id: value.golf_course_id().map(ToString::to_string),
         }
     }
 }
@@ -544,6 +554,7 @@ pub struct UpsertReservationProductRequest {
     pub play_type: String,
     pub hole_count: Option<i32>,
     pub expected_duration_minutes: Option<i32>,
+    pub golf_course_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -632,6 +643,7 @@ pub async fn upsert_reservation_product(
         body.play_type,
         body.hole_count.unwrap_or(18),
         body.expected_duration_minutes.unwrap_or(270),
+        body.golf_course_id,
     )
     .map_err(AppError::from)?;
     let use_case = UpsertReservationProductUseCase::new(catalog_gateway(&state));
