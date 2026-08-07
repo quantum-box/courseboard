@@ -70,8 +70,8 @@ export const nav: DeepPartial<typeof source> = {
       description: 'Everyone the club employs',
     },
     'golf/courses': {
-      label: 'Course setup',
-      description: 'Course names and start intervals',
+      label: 'Courses',
+      description: 'Bookable hours and tee times per course',
     },
     'golf/policy': {
       label: 'Booking rules',
