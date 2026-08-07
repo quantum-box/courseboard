@@ -50,6 +50,8 @@ export type GolfReservationProduct = {
   expectedDurationMinutes: number
   /** Course this plan is sold on; absent on plans written before courses split. */
   golfCourseId?: string | null
+  /** Players allowed in one group; absent means the reservation policy decides. */
+  maxPlayersPerGroup?: number | null
   createdAt: string
   updatedAt: string
 }
@@ -62,6 +64,8 @@ export type GolfReservationProductDraft = {
   expectedDurationMinutes: number
   /** Empty string means "not tied to a course yet". */
   golfCourseId: string
+  /** Empty string means "use the reservation policy", not "zero players". */
+  maxPlayersPerGroup: string
 }
 
 export type GolfProductSlot = {
@@ -145,6 +149,7 @@ export function emptyProductDraft(): GolfReservationProductDraft {
     holeCount: 18,
     expectedDurationMinutes: defaultDuration('caddie', 18),
     golfCourseId: '',
+    maxPlayersPerGroup: '',
   }
 }
 
@@ -156,6 +161,7 @@ export function productToDraft(product: GolfReservationProduct): GolfReservation
     holeCount: product.holeCount,
     expectedDurationMinutes: product.expectedDurationMinutes,
     golfCourseId: product.golfCourseId ?? '',
+    maxPlayersPerGroup: product.maxPlayersPerGroup ? String(product.maxPlayersPerGroup) : '',
   }
 }
 
@@ -206,6 +212,12 @@ export function validateProduct(
   }
   if (requireCourse && !draft.golfCourseId.trim()) {
     return i18next.t('products:validation.courseRequired')
+  }
+  if (draft.maxPlayersPerGroup.trim()) {
+    const players = Number(draft.maxPlayersPerGroup)
+    if (!Number.isInteger(players) || players < 1 || players > 99) {
+      return i18next.t('products:validation.maxPlayers')
+    }
   }
   if (![9, 18].includes(draft.holeCount)) return i18next.t('products:validation.holeCount')
   if (
@@ -276,49 +288,8 @@ export function countSlotIssues(slots: GolfProductSlot[]) {
   return collectSlotIssues(slots).filter(codes => codes.length > 0).length
 }
 
-function minutesOfDay(time: string) {
-  if (!validTime(time)) return null
-  const [hour, minute] = time.split(':').map(Number)
-  return hour * 60 + minute
-}
 
-/**
- * How many groups the course can physically start inside a band.
- *
- * Tee times go out one interval apart, so a band is worth
- * `(length / interval) + 1` starts — counting the one that leaves on the
- * closing minute. Generous on purpose: this drives a warning, and a warning
- * that fires on a plan that is actually fine teaches operators to ignore it.
- *
- * `null` when the course, its interval, or the band is unusable.
- */
-export function bandGroupCapacity(
-  startTime: string,
-  endTime: string,
-  startIntervalMinutes: number | null | undefined,
-) {
-  if (!startIntervalMinutes || startIntervalMinutes <= 0) return null
-  const start = minutesOfDay(startTime)
-  const end = minutesOfDay(endTime)
-  if (start === null || end === null || end <= start) return null
-  return Math.floor((end - start) / startIntervalMinutes) + 1
-}
 
-/**
- * Bands that promise more groups than the course can start, index-aligned with
- * `slots`. `0` groups means "no limit", which nothing can contradict.
- */
-export function collectSlotOvercommits(
-  slots: GolfProductSlot[],
-  startIntervalMinutes: number | null | undefined,
-): (number | null)[] {
-  return slots.map(slot => {
-    if (slot.maxGroups <= 0) return null
-    const capacity = bandGroupCapacity(slot.startTime, slot.endTime, startIntervalMinutes)
-    if (capacity === null || slot.maxGroups <= capacity) return null
-    return capacity
-  })
-}
 
 /** Weekday, then time of day: the order an operator reads a week in. */
 export function sortSlots<T extends GolfProductSlot>(slots: T[]): T[] {
@@ -480,57 +451,8 @@ export function calculateCaddieCapacity(
   }
 }
 
-/** Groups another plan already accepts on one weekday, split at midday. */
-export type WeekdayGroupLoad = {
-  morning: number
-  afternoon: number
-  /**
-   * A band on this weekday takes unlimited groups, so what is left over cannot
-   * be counted — only reported as uncountable.
-   */
-  unlimited: boolean
-}
 
-/** Morning and afternoon are split at midday, the same line `applyCapacityToSlots` uses. */
-export function weekdayGroupLoad(
-  slots: GolfProductSlot[],
-  weekday: number,
-): WeekdayGroupLoad {
-  return slots
-    .filter(slot => slot.weekday === weekday)
-    .reduce<WeekdayGroupLoad>((load, slot) => {
-      if (slot.maxGroups <= 0) return { ...load, unlimited: true }
-      const morning = slot.startTime < '12:00'
-      return {
-        ...load,
-        morning: load.morning + (morning ? slot.maxGroups : 0),
-        afternoon: load.afternoon + (morning ? 0 : slot.maxGroups),
-      }
-    }, { morning: 0, afternoon: 0, unlimited: false })
-}
 
-/**
- * The caddies left for this plan once the other plans on the same course have
- * taken theirs.
- *
- * Caddies belong to the course, not to a plan. Two caddie plans on one course
- * draw on the same people, so offering each of them the full supply books the
- * same caddie twice — the number this screen shows has to be what is left.
- *
- * An uncountable load (or none at all) returns the supply unchanged; the panel
- * says so rather than pretending the subtraction happened.
- */
-export function capacityAfterLoad(
-  capacity: CaddieSlotCapacity,
-  load: WeekdayGroupLoad | null,
-): CaddieSlotCapacity {
-  if (!load || load.unlimited) return capacity
-  return {
-    ...capacity,
-    morningCapacity: Math.max(0, capacity.morningCapacity - load.morning),
-    afternoonCapacity: Math.max(0, capacity.afternoonCapacity - load.afternoon),
-  }
-}
 
 export function weekdayForIsoDate(date: string) {
   const [year, month, day] = date.split('-').map(Number)

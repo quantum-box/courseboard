@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyCapacityToSlots,
-  bandGroupCapacity,
   calculateCaddieCapacity,
-  capacityAfterLoad,
-  collectSlotOvercommits,
   collectSlotIssues,
   copyWeekdaySlots,
   countSlotIssues,
@@ -12,7 +9,6 @@ import {
   sortSlots,
   summarizeSlotChanges,
   validateProduct,
-  weekdayGroupLoad,
   type CaddieSlotCapacity,
   type GolfProductSlot,
 } from './models'
@@ -57,38 +53,7 @@ describe('collectSlotIssues', () => {
   })
 })
 
-describe('bandGroupCapacity', () => {
-  it('counts the starts a band fits, including the one on the closing minute', () => {
-    // 07:00–12:00 is 300 minutes; at 8 minutes apart that is 37 gaps, 38 starts.
-    expect(bandGroupCapacity('07:00', '12:00', 8)).toBe(38)
-    expect(bandGroupCapacity('07:00', '08:00', 10)).toBe(7)
-  })
 
-  it('has no answer without a usable course interval or band', () => {
-    expect(bandGroupCapacity('07:00', '12:00', null)).toBeNull()
-    expect(bandGroupCapacity('07:00', '12:00', 0)).toBeNull()
-    expect(bandGroupCapacity('12:00', '07:00', 8)).toBeNull()
-    expect(bandGroupCapacity('', '12:00', 8)).toBeNull()
-  })
-})
-
-describe('collectSlotOvercommits', () => {
-  it('names the real ceiling only for rows that promise more than it', () => {
-    const overcommits = collectSlotOvercommits([
-      // 60 minutes at 10 apart is 7 starts; 9 is more than the tee can send out.
-      slot({ startTime: '07:00', endTime: '08:00', maxGroups: 9 }),
-      slot({ startTime: '07:00', endTime: '08:00', maxGroups: 7 }),
-      // 0 means no limit, which no interval can contradict.
-      slot({ startTime: '07:00', endTime: '08:00', maxGroups: 0 }),
-    ], 10)
-
-    expect(overcommits).toEqual([7, null, null])
-  })
-
-  it('stays quiet when the plan names no course to measure against', () => {
-    expect(collectSlotOvercommits([slot({ maxGroups: 999 })], null)).toEqual([null])
-  })
-})
 
 describe('summarizeSlotChanges', () => {
   it('counts what a whole-week replace would add, drop, and rewrite', () => {
@@ -225,56 +190,7 @@ describe('calculateCaddieCapacity', () => {
   })
 })
 
-describe('weekdayGroupLoad', () => {
-  it('splits another plan\u2019s weekday at midday', () => {
-    const load = weekdayGroupLoad([
-      slot({ weekday: 1, startTime: '07:00', endTime: '11:00', maxGroups: 4 }),
-      slot({ weekday: 1, startTime: '11:00', endTime: '12:00', maxGroups: 2 }),
-      slot({ weekday: 1, startTime: '12:00', endTime: '15:00', maxGroups: 3 }),
-      // Another weekday entirely.
-      slot({ weekday: 2, startTime: '07:00', endTime: '11:00', maxGroups: 9 }),
-    ], 1)
 
-    expect(load).toEqual({ morning: 6, afternoon: 3, unlimited: false })
-  })
-
-  it('reports an uncapped band rather than counting it as zero', () => {
-    const load = weekdayGroupLoad([
-      slot({ weekday: 1, maxGroups: 4 }),
-      slot({ weekday: 1, startTime: '12:00', endTime: '15:00', maxGroups: 0 }),
-    ], 1)
-
-    expect(load.unlimited).toBe(true)
-  })
-})
-
-describe('capacityAfterLoad', () => {
-  const supply: CaddieSlotCapacity = {
-    morningCapacity: 5,
-    afternoonCapacity: 4,
-    totalRounds: 8,
-    activeCaddies: 5,
-    unavailable: 0,
-    assumedAvailable: 0,
-  }
-
-  it('leaves this plan only the caddies the other plans did not take', () => {
-    const left = capacityAfterLoad(supply, { morning: 2, afternoon: 1, unlimited: false })
-    expect(left.morningCapacity).toBe(3)
-    expect(left.afternoonCapacity).toBe(3)
-  })
-
-  it('never goes negative when the course is already oversold', () => {
-    const left = capacityAfterLoad(supply, { morning: 9, afternoon: 9, unlimited: false })
-    expect(left.morningCapacity).toBe(0)
-    expect(left.afternoonCapacity).toBe(0)
-  })
-
-  it('subtracts nothing it cannot count, rather than guessing', () => {
-    expect(capacityAfterLoad(supply, { morning: 2, afternoon: 1, unlimited: true })).toEqual(supply)
-    expect(capacityAfterLoad(supply, null)).toEqual(supply)
-  })
-})
 
 describe('applyCapacityToSlots', () => {
   it('creates morning and afternoon rows when the weekday is not configured', () => {
@@ -316,6 +232,7 @@ describe('validateProduct', () => {
     holeCount: 18,
     expectedDurationMinutes: 240,
     golfCourseId: 'course_east',
+    maxPlayersPerGroup: '',
   }
 
   it('accepts a plan an operator would really enter', () => {
@@ -324,6 +241,13 @@ describe('validateProduct', () => {
 
   it('still saves a plan that names no course, so existing plans stay editable', () => {
     expect(validateProduct({ ...valid, golfCourseId: '' })).toBeNull()
+  })
+
+  it('keeps players per group inside a sane range when it is given at all', () => {
+    expect(validateProduct({ ...valid, maxPlayersPerGroup: '4' })).toBeNull()
+    expect(validateProduct({ ...valid, maxPlayersPerGroup: '' })).toBeNull()
+    expect(validateProduct({ ...valid, maxPlayersPerGroup: '0' })).not.toBeNull()
+    expect(validateProduct({ ...valid, maxPlayersPerGroup: '100' })).not.toBeNull()
   })
 
   it('makes a new plan name its course, which is how the backlog empties', () => {

@@ -18,6 +18,10 @@ export const products = {
     course: 'コース',
     courseHint: 'このプランを売るコースです。コースごとに営業時間もプレー内容も違うため、コース単位でプランを分けます。',
     courseUnset: 'コースを選んでください',
+    maxPlayers: '1組の人数',
+    maxPlayersHint: '1組に入れる人数の上限です。空のままなら予約ルールの設定に従います。受付できる組数はコースの受付枠で決めます。',
+    maxPlayersValue: '{{n}}名',
+    maxPlayersFromPolicy: '予約ルールに従う',
     displayNamePlaceholder: '平日キャディ付きプラン',
     createTitle: '予約サービスを追加',
     editTitle: 'プレー設定を直す',
@@ -79,6 +83,20 @@ export const products = {
     required: {
       title: 'このプランはコースが決まっていません',
       description: 'コースを決めると、スタート間隔からの上限確認と、同じコースの他プランとのキャディの分け合いが働きます。',
+    },
+  },
+  inventory: {
+    title: '受付枠',
+    description: '受付枠はコースが持ちます。同じコースで売るプランは同じティータイムを分け合うため、コース側で決めます。',
+    open: '{{course}} の受付枠を開く',
+    needsCourse: {
+      title: 'コースを決めると受付枠を開けます',
+      description: 'このプランをどのコースで売るかが決まっていません。プラン設定でコースを選んでください。',
+    },
+    legacy: {
+      title: 'プランに残っている古い受付枠があります',
+      description: 'コース側に移す前の設定です。ここでは直せません。予約画面がコースの在庫を見るようになったら消えます。',
+      limits: '{{groups}}組 · {{players}}名',
     },
   },
   slots: {
@@ -183,6 +201,7 @@ export const products = {
     serviceIdRequired: '予約サービスIDを入力してください。',
     serviceIdFormat: '予約サービスIDには英数字、ピリオド、ハイフン、アンダースコア、コロンが使えます。',
     courseRequired: 'コースを選んでください。コースごとに営業時間もプレー内容も違います。',
+    maxPlayers: '1組の人数は 1〜99 で入力してください。',
     holeCount: 'ホール数は 9 か 18 を選んでください。',
     duration: 'かかる時間は 30〜720 分で入力してください。',
   },

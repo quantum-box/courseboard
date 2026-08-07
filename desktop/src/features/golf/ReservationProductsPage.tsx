@@ -6,17 +6,13 @@ import {
   Plus,
   Save,
   Settings2,
-  Sparkles,
-  Undo2,
-  Users,
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson } from '../../api'
-import { today } from '../../lib/clock'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
-import { navigate, useNavigationGuard } from '../../lib/router'
+import { navigate } from '../../lib/router'
 import { showToast } from '../../lib/toast'
 import {
   DataTable,
@@ -24,9 +20,6 @@ import {
   Field,
   FormGrid,
   LoadingState,
-  Metric,
-  MetricGrid,
-  NativeSelect,
   Notice,
   PageHeader,
   PageRefreshButton,
@@ -36,37 +29,22 @@ import {
   type DataTableColumn,
 } from '../../components/Page'
 import { Sheet } from '../../components/Sheet'
-import { WeekSlotEditor, toEditableSlot, type EditableSlot } from './WeekSlotEditor'
 import {
-  applyCapacityToSlots,
-  calculateCaddieCapacity,
-  capacityAfterLoad,
-  countSlotIssues,
   defaultDuration,
   emptyProductDraft,
   productToDraft,
-  slotChangeCount,
   sortSlots,
-  summarizeSlotChanges,
-  weekdayForIsoDate,
   weekdayLabel,
-  type CapacityAvailability,
-  type CapacityProfile,
-  type CaddieSlotCapacity,
   type GolfCourse,
   type GolfProductSlot,
   type GolfReservationProduct,
   type GolfReservationProductDraft,
   type PlayType,
-  type WeekdayGroupLoad,
   validateProduct,
-  weekdayGroupLoad,
 } from './models'
 
 const productsPath = '/v1/course/reservation-products'
 const coursesPath = '/v1/course/courses'
-const caddieProfilesPath = '/v1/course/caddie-profiles'
-const caddieAvailabilitiesPath = '/v1/course/caddie-availabilities'
 
 const listRoute = 'golf/products'
 
@@ -78,22 +56,10 @@ function detailRoute(serviceId: string) {
   return `${listRoute}/${encodeURIComponent(serviceId)}`
 }
 
-/** The shape the API stores, stripped of the keys the editor added. */
-function toStoredSlot(slot: EditableSlot): GolfProductSlot {
-  return {
-    weekday: slot.weekday,
-    startTime: slot.startTime,
-    endTime: slot.endTime,
-    maxGroups: slot.maxGroups,
-    maxPlayers: slot.maxPlayers,
-  }
+function scheduleRoute(courseId: string) {
+  return `golf/courses/${encodeURIComponent(courseId)}`
 }
 
-/**
- * Save failures reach the operator as a toast, which used to print the server's
- * own English. Route them through the shared mapping so the sentence they read
- * first follows the active locale.
- */
 function errorMessage(error: unknown) {
   return error instanceof Error ? resourceErrorText(error) : i18next.t('products:error.generic')
 }
@@ -118,13 +84,6 @@ function courseLabel(course: GolfCourse) {
   return course.shortName?.trim() || course.name
 }
 
-/**
- * The course a plan is sold on, or a warning that it has none.
- *
- * Courses differ in opening hours and in what they sell, so a plan that names
- * no course cannot be checked against either — saying so is more useful than
- * printing an empty cell.
- */
 function CourseCell({
   product,
   courses,
@@ -135,9 +94,7 @@ function CourseCell({
   const { t } = useTranslation('products')
   const course = courses.find(item => item.id === product.golfCourseId)
   if (course) return <>{courseLabel(course)}</>
-  if (product.golfCourseId) {
-    return <Badge variant="warning">{t('course.unknown')}</Badge>
-  }
+  if (product.golfCourseId) return <Badge variant="warning">{t('course.unknown')}</Badge>
   return <Badge variant="warning">{t('course.unset')}</Badge>
 }
 
@@ -151,12 +108,9 @@ function PlayTypeBadge({ playType }: { playType: PlayType }) {
 }
 
 /**
- * The list and the week editor are separate screens.
- *
- * Stacking them meant the page held two things at once — a table whose rows
- * selected, and an editor whose rows were edited — and the same click could
- * mean either. One service per screen removes the ambiguity, and the route now
- * says which service is open.
+ * Plans say how the course's tee times are sold; the course says how many there
+ * are. The week used to be edited here, per plan, which duplicated the stock
+ * every plan drew from — it now lives on the course.
  */
 export function ReservationProductsPage({ serviceId }: { serviceId?: string }) {
   if (serviceId) return <ReservationProductDetail key={serviceId} serviceId={serviceId} />
@@ -167,7 +121,6 @@ function ReservationProductList() {
   const { t } = useTranslation(['products', 'common'])
   const [products, setProducts] = useState<GolfReservationProduct[]>([])
   const [courses, setCourses] = useState<GolfCourse[]>([])
-  const [slotCounts, setSlotCounts] = useState<Record<string, number | null>>({})
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
   const [createOpen, setCreateOpen] = useState(false)
@@ -182,23 +135,9 @@ function ReservationProductList() {
       ])
       setProducts(response.items)
       setCourses(courseResponse.items)
-      setLoading(false)
-
-      // Counts decorate the list; a service whose slots fail to load still has
-      // to be reachable, so they resolve after the table is already on screen.
-      const counts = await Promise.all(response.items.map(async product => {
-        try {
-          const slots = await courseboardApiJson<{ items: GolfProductSlot[] }>(
-            slotsPath(product.reservationServiceId),
-          )
-          return [product.reservationServiceId, slots.items.length] as const
-        } catch {
-          return [product.reservationServiceId, null] as const
-        }
-      }))
-      setSlotCounts(Object.fromEntries(counts))
     } catch (error) {
       setLoadError(error)
+    } finally {
       setLoading(false)
     }
   }, [])
@@ -250,18 +189,6 @@ function ReservationProductList() {
       cell: product => t('common:unit.minutes', { n: String(product.expectedDurationMinutes) }),
     },
     {
-      key: 'slots',
-      header: t('products:list.table.slots'),
-      mobileLabel: t('products:list.table.slots'),
-      align: 'right',
-      cell: product => {
-        const count = slotCounts[product.reservationServiceId]
-        if (count === undefined) return '…'
-        if (count === null) return '—'
-        return t('products:list.table.slotCount', { n: String(count) })
-      },
-    },
-    {
       key: 'updated',
       header: t('products:list.table.updated'),
       mobileLabel: t('products:list.table.updated'),
@@ -297,9 +224,6 @@ function ReservationProductList() {
     )
   }
 
-  // Plans written before courses were split carry no course, and a plan with no
-  // course cannot be checked against opening hours, tee interval, or the caddies
-  // it shares. New plans are made to name one; these are the backlog.
   const withoutCourse = products.filter(product => !product.golfCourseId)
 
   return (
@@ -337,9 +261,9 @@ function ReservationProductList() {
         product={null}
         courses={courses}
         onOpenChange={setCreateOpen}
-        onSaved={serviceId => {
+        onSaved={savedServiceId => {
           setCreateOpen(false)
-          navigate(detailRoute(serviceId))
+          navigate(detailRoute(savedServiceId))
         }}
       />
 
@@ -373,33 +297,16 @@ function ReservationProductList() {
 function ReservationProductDetail({ serviceId }: { serviceId: string }) {
   const { t } = useTranslation(['products', 'common'])
   const [product, setProduct] = useState<GolfReservationProduct | null>(null)
-  /** Every plan, so the caddie panel can find the ones sharing this course. */
-  const [allProducts, setAllProducts] = useState<GolfReservationProduct[]>([])
   const [courses, setCourses] = useState<GolfCourse[]>([])
-  const [slots, setSlots] = useState<EditableSlot[]>([])
-  /** What the server holds, so the editor can name what a save would change. */
-  const [savedSlots, setSavedSlots] = useState<GolfProductSlot[]>([])
+  /**
+   * Slots the plan carried before inventory moved to the course. Read-only: the
+   * storefront may still be reading them, so they stay visible until it moves.
+   */
+  const [legacySlots, setLegacySlots] = useState<GolfProductSlot[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
-  const [slotLoadError, setSlotLoadError] = useState<string | null>(null)
-  const [slotSaving, setSlotSaving] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
 
-  const [capacityDate, setCapacityDate] = useState(today)
-  const [capacity, setCapacity] = useState<CaddieSlotCapacity | null>(null)
-  const [capacityLoading, setCapacityLoading] = useState(false)
-  const [capacityError, setCapacityError] = useState<string | null>(null)
-  /** What the other caddie plans on this course already take. */
-  const [sharedLoad, setSharedLoad] = useState<WeekdayGroupLoad | null>(null)
-  const [sharedLoadFailed, setSharedLoadFailed] = useState(false)
-
-  /**
-   * course-api answers products as a collection; the detail screen picks its
-   * own out rather than inventing a single-item endpoint that is not there.
-   *
-   * Kept apart from the week so saving the plan settings can refresh the header
-   * without replacing slots the operator has not saved yet.
-   */
   const loadProduct = useCallback(async () => {
     const [response, courseResponse] = await Promise.all([
       courseboardApiJson<{ items: GolfReservationProduct[] }>(productsPath),
@@ -407,7 +314,6 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
     ])
     const found = response.items.find(item => item.reservationServiceId === serviceId) ?? null
     setProduct(found)
-    setAllProducts(response.items)
     setCourses(courseResponse.items)
     return found
   }, [serviceId])
@@ -415,25 +321,18 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError(null)
-    setSlotLoadError(null)
     try {
       const found = await loadProduct()
       if (!found) {
-        setSlots([])
-        setSavedSlots([])
+        setLegacySlots([])
         return
       }
       try {
-        const slotResponse = await courseboardApiJson<{ items: GolfProductSlot[] }>(
-          slotsPath(serviceId),
-        )
-        const loaded = slotResponse.items.map(toEditableSlot)
-        setSlots(loaded)
-        setSavedSlots(loaded.map(toStoredSlot))
-      } catch (error) {
-        setSlots([])
-        setSavedSlots([])
-        setSlotLoadError(errorMessage(error))
+        const slots = await courseboardApiJson<{ items: GolfProductSlot[] }>(slotsPath(serviceId))
+        setLegacySlots(slots.items)
+      } catch {
+        // Their absence is not worth an error: they are leftovers either way.
+        setLegacySlots([])
       }
     } catch (error) {
       setLoadError(error)
@@ -446,147 +345,12 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
     void load()
   }, [load])
 
-  /**
-   * One summary rather than a dirty flag: an edit the operator undid by hand
-   * should stop counting as unsaved, and the save bar has to name how many
-   * bands a whole-week replace would drop.
-   */
-  const changes = useMemo(
-    () => summarizeSlotChanges(savedSlots, slots.map(toStoredSlot)),
-    [savedSlots, slots],
+  useRegisterPageReload(load)
+
+  const productCourse = useMemo(
+    () => courses.find(course => course.id === product?.golfCourseId) ?? null,
+    [courses, product],
   )
-  const changeCount = slotChangeCount(changes)
-
-  const requestReload = useCallback(() => {
-    if (
-      changeCount > 0
-      && !window.confirm(i18next.t('products:confirm.discardOnReload'))
-    ) return
-    void load()
-  }, [changeCount, load])
-
-  useRegisterPageReload(requestReload)
-
-  // Covers the sidebar, ⌘K, the browser's back button and the back link below,
-  // so unsaved slots cannot be lost by leaving through any of them.
-  useNavigationGuard(
-    changeCount > 0 ? () => window.confirm(t('products:confirm.discardOnLeave')) : null,
-  )
-
-  function revertSlots() {
-    setSlots(savedSlots.map(toEditableSlot))
-  }
-
-  async function saveSlots() {
-    const issueCount = countSlotIssues(slots)
-    if (issueCount > 0) {
-      showToast({
-        tone: 'danger',
-        title: t('products:slots.saveFailed'),
-        message: t('products:slots.hasIssues', { n: String(issueCount) }),
-      })
-      return
-    }
-    if (
-      changes.removed > 0
-      && !window.confirm(t('products:slots.confirmRemove', { n: String(changes.removed) }))
-    ) return
-
-    setSlotSaving(true)
-    try {
-      const payload = sortSlots(slots).map(toStoredSlot)
-      await courseboardApiJson(slotsPath(serviceId), {
-        method: 'PUT',
-        body: JSON.stringify({ slots: payload }),
-      })
-      setSavedSlots(payload)
-      setSlotLoadError(null)
-      showToast({
-        tone: 'success',
-        title: t('products:slots.saved.title'),
-        message: t('products:slots.saved.body', { serviceId, n: String(payload.length) }),
-      })
-    } catch (error) {
-      showToast({
-        tone: 'danger',
-        title: t('products:slots.saveFailed'),
-        message: errorMessage(error),
-      })
-    } finally {
-      setSlotSaving(false)
-    }
-  }
-
-  async function calculateCapacity() {
-    if (!capacityDate) return
-    setCapacityLoading(true)
-    setCapacityError(null)
-    setCapacity(null)
-    setSharedLoad(null)
-    setSharedLoadFailed(false)
-    try {
-      const query = `from=${encodeURIComponent(capacityDate)}&to=${encodeURIComponent(capacityDate)}`
-      const [profilesResponse, availabilityResponse] = await Promise.all([
-        courseboardApiJson<{ items: CapacityProfile[] }>(caddieProfilesPath),
-        courseboardApiJson<{ items: CapacityAvailability[] }>(`${caddieAvailabilitiesPath}?${query}`),
-      ])
-      setCapacity(calculateCaddieCapacity(
-        profilesResponse.items,
-        availabilityResponse.items,
-      ))
-
-      // The other caddie plans on this course draw on the same people, so their
-      // weekday comes off the supply before this plan is offered any of it.
-      if (sharedPlans.length > 0) {
-        try {
-          const weekday = weekdayForIsoDate(capacityDate)
-          const sibling = await Promise.all(sharedPlans.map(plan => (
-            courseboardApiJson<{ items: GolfProductSlot[] }>(
-              slotsPath(plan.reservationServiceId),
-            )
-          )))
-          setSharedLoad(weekdayGroupLoad(sibling.flatMap(one => one.items), weekday))
-        } catch {
-          // Subtracting a number we could not read would understate the load;
-          // saying the supply is un-netted is the honest fallback.
-          setSharedLoadFailed(true)
-        }
-      }
-    } catch (error) {
-      setCapacityError(errorMessage(error))
-    } finally {
-      setCapacityLoading(false)
-    }
-  }
-
-  /** Like the weekday copy, the change lands in the editor above and in the
-   *  unsaved bar, so it needs no message of its own. */
-  function applyCapacity() {
-    if (!capacity || !capacityDate) return
-    setSlots(applyCapacityToSlots(slots, capacityDate, capacityAfterLoad(capacity, sharedLoad))
-      .map(slot => 'clientKey' in slot ? slot as EditableSlot : toEditableSlot(slot)))
-  }
-
-  const capacityWeekday = capacityDate ? weekdayForIsoDate(capacityDate) : null
-  const productCourse = courses.find(course => course.id === product?.golfCourseId) ?? null
-
-  /**
-   * Caddies belong to the course, so every other caddie plan on it is drawing
-   * on the same roster as this one.
-   */
-  const sharedPlans = useMemo(() => (
-    product?.golfCourseId
-      ? allProducts.filter(item => (
-          item.reservationServiceId !== serviceId
-          && item.playType === 'caddie'
-          && item.golfCourseId === product.golfCourseId
-        ))
-      : []
-  ), [allProducts, product, serviceId])
-
-  const netCapacity = capacity ? capacityAfterLoad(capacity, sharedLoad) : null
-  const netted = Boolean(sharedLoad && !sharedLoad.unlimited
-    && (sharedLoad.morning > 0 || sharedLoad.afternoon > 0))
 
   if (loading) {
     return (
@@ -626,7 +390,7 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
     <div className="page-stack">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <BackToList />
-        <PageRefreshButton size="sm" variant="secondary" onClick={requestReload} />
+        <PageRefreshButton size="sm" variant="secondary" onClick={() => void load()} />
       </div>
 
       <PageHeader
@@ -675,14 +439,6 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
             <dd><CourseCell product={product} courses={courses} /></dd>
           </div>
           <div>
-            <dt>{t('products:detail.startInterval')}</dt>
-            <dd>
-              {productCourse
-                ? t('common:unit.minutes', { n: String(productCourse.startIntervalMinutes) })
-                : '—'}
-            </dd>
-          </div>
-          <div>
             <dt>{t('products:editor.playType')}</dt>
             <dd>
               {product.playType === 'caddie'
@@ -699,200 +455,63 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
             <dd>{t('common:unit.minutes', { n: String(product.expectedDurationMinutes) })}</dd>
           </div>
           <div>
+            <dt>{t('products:editor.maxPlayers')}</dt>
+            <dd>
+              {product.maxPlayersPerGroup
+                ? t('products:editor.maxPlayersValue', { n: String(product.maxPlayersPerGroup) })
+                : t('products:editor.maxPlayersFromPolicy')}
+            </dd>
+          </div>
+          <div>
             <dt>{t('products:list.table.updated')}</dt>
             <dd>{formatUpdatedAt(product.updatedAt)}</dd>
           </div>
         </dl>
       </Panel>
 
+      {/* The week is the course's now. Sending the operator there beats showing
+          a second, per-plan copy of the same stock. */}
       <Panel
-        title={t('products:slots.title', { name: productDisplayName(product) })}
-        description={t('products:slots.week.legend')}
-        actions={changeCount > 0 ? (
-          <Badge variant="warning">{t('products:list.table.unsaved')}</Badge>
-        ) : null}
+        title={t('products:inventory.title')}
+        description={t('products:inventory.description')}
       >
-        {slotLoadError ? (
-          <Notice tone="warning" title={t('products:slots.loadFailed.title')}>
-            {slotLoadError}
-            {t('products:slots.loadFailed.description')}
+        {productCourse ? (
+          <Button
+            type="button"
+            variant="primary"
+            onClick={() => navigate(scheduleRoute(productCourse.id))}
+          >
+            <CalendarDays />
+            {t('products:inventory.open', { course: courseLabel(productCourse) })}
+          </Button>
+        ) : (
+          <Notice tone="info" title={t('products:inventory.needsCourse.title')}>
+            {t('products:inventory.needsCourse.description')}
           </Notice>
+        )}
+
+        {legacySlots.length > 0 ? (
+          <div className="grid gap-2 pt-4">
+            <Notice tone="warning" title={t('products:inventory.legacy.title')}>
+              {t('products:inventory.legacy.description')}
+            </Notice>
+            <ul className="legacy-slot-list">
+              {sortSlots(legacySlots).map((slot, index) => (
+                <li key={`${slot.weekday}-${slot.startTime}-${index}`}>
+                  <strong>{t('products:slots.week.dayLabel', {
+                    day: weekdayLabel(slot.weekday),
+                  })}</strong>
+                  <span>{`${slot.startTime.slice(0, 5)}–${slot.endTime.slice(0, 5)}`}</span>
+                  <span>{t('products:inventory.legacy.limits', {
+                    groups: String(slot.maxGroups),
+                    players: String(slot.maxPlayers),
+                  })}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : null}
-
-        <WeekSlotEditor
-          slots={slots}
-          disabled={slotSaving}
-          startIntervalMinutes={productCourse?.startIntervalMinutes}
-          onChange={setSlots}
-        />
       </Panel>
-
-      {product.playType === 'caddie' ? (
-        <Panel
-          title={t('products:capacity.title')}
-          description={t('products:capacity.description')}
-          actions={<Badge variant="outline"><Users /> {t('products:capacity.badge')}</Badge>}
-        >
-          <div className="flex flex-wrap items-end gap-3">
-            <Field
-              requirement="none"
-              label={t('products:capacity.date')}
-              className="w-full sm:w-44"
-            >
-              <Input
-                type="date"
-                value={capacityDate}
-                onChange={event => {
-                  setCapacityDate(event.target.value)
-                  setCapacity(null)
-                  setCapacityError(null)
-                }}
-              />
-            </Field>
-            <Button
-              type="button"
-              disabled={capacityLoading || !capacityDate}
-              onClick={() => void calculateCapacity()}
-            >
-              <Sparkles />
-              {capacityLoading ? t('products:capacity.calculating') : t('products:capacity.calculate')}
-            </Button>
-          </div>
-
-          {/* Which weekday a date lands on is the step this panel used to leave
-              the operator to work out for themselves. */}
-          {capacityWeekday === null ? null : (
-            <p className="capacity-weekday-note">
-              {t('products:capacity.targetWeekday', { day: weekdayLabel(capacityWeekday) })}
-            </p>
-          )}
-
-          {capacityError ? (
-            <Notice tone="danger" title={t('products:capacity.failed')}>{capacityError}</Notice>
-          ) : null}
-
-          {capacity && netCapacity ? (
-            <div className="grid gap-3 pt-3">
-              {sharedLoadFailed ? (
-                <Notice tone="warning" title={t('products:capacity.shared.title')}>
-                  {t('products:capacity.shared.failed')}
-                </Notice>
-              ) : null}
-              {sharedLoad?.unlimited ? (
-                <Notice tone="warning" title={t('products:capacity.shared.title')}>
-                  {t('products:capacity.shared.unlimited')}
-                </Notice>
-              ) : null}
-              {netted && capacityWeekday !== null ? (
-                <Notice tone="info" title={t('products:capacity.shared.title')}>
-                  {t('products:capacity.shared.description', {
-                    n: String(sharedPlans.length),
-                    day: weekdayLabel(capacityWeekday),
-                    morning: String(sharedLoad?.morning ?? 0),
-                    afternoon: String(sharedLoad?.afternoon ?? 0),
-                  })}
-                </Notice>
-              ) : null}
-
-              <MetricGrid>
-                <Metric
-                  label={t('products:capacity.morning')}
-                  value={t('products:capacity.groups', { n: String(netCapacity.morningCapacity) })}
-                  detail={netted
-                    ? t('products:capacity.deduction', {
-                        total: String(capacity.morningCapacity),
-                        used: String(sharedLoad?.morning ?? 0),
-                      })
-                    : t('products:capacity.limit')}
-                  tone={netted && netCapacity.morningCapacity === 0 ? 'warning' : 'neutral'}
-                />
-                <Metric
-                  label={t('products:capacity.afternoon')}
-                  value={t('products:capacity.groups', { n: String(netCapacity.afternoonCapacity) })}
-                  detail={netted
-                    ? t('products:capacity.deduction', {
-                        total: String(capacity.afternoonCapacity),
-                        used: String(sharedLoad?.afternoon ?? 0),
-                      })
-                    : t('products:capacity.limit')}
-                  tone={netted && netCapacity.afternoonCapacity === 0 ? 'warning' : 'neutral'}
-                />
-                <Metric
-                  label={t('products:capacity.rounds')}
-                  value={t('products:capacity.roundsValue', { n: String(capacity.totalRounds) })}
-                  detail={t('products:capacity.roundsDetail')}
-                />
-                <Metric
-                  label={t('products:capacity.activeCaddies')}
-                  value={t('products:capacity.activeCaddiesValue', {
-                    available: String(capacity.activeCaddies - capacity.unavailable),
-                    total: String(capacity.activeCaddies),
-                  })}
-                  detail={capacity.assumedAvailable > 0
-                    ? t('products:capacity.assumed', { n: String(capacity.assumedAvailable) })
-                    : t('products:capacity.allRegistered')}
-                  tone={capacity.assumedAvailable > 0 ? 'warning' : 'success'}
-                />
-              </MetricGrid>
-              {capacity.assumedAvailable > 0 ? (
-                <Notice tone="warning" title={t('products:capacity.warning.title')}>
-                  {t('products:capacity.warning.description', {
-                    n: String(capacity.assumedAvailable),
-                  })}
-                </Notice>
-              ) : null}
-              <div className="flex justify-end">
-                <Button type="button" variant="primary" onClick={applyCapacity}>
-                  <CalendarDays />
-                  {t('products:capacity.applyTo', { day: weekdayLabel(capacityWeekday ?? 0) })}
-                </Button>
-              </div>
-            </div>
-          ) : null}
-        </Panel>
-      ) : (
-        <Notice tone="info" title={t('products:capacity.selfNotice.title')}>
-          {t('products:capacity.selfNotice.description')}
-        </Notice>
-      )}
-
-      {changeCount > 0 ? (
-        <div className="sticky-submit">
-          <div>
-            <span>{t('products:slots.pending.title', { name: productDisplayName(product) })}</span>
-            <strong className="slot-diff">
-              {changes.added > 0 ? (
-                <span className="slot-diff-added">
-                  {t('products:slots.pending.added', { n: String(changes.added) })}
-                </span>
-              ) : null}
-              {changes.removed > 0 ? (
-                <span className="slot-diff-removed">
-                  {t('products:slots.pending.removed', { n: String(changes.removed) })}
-                </span>
-              ) : null}
-              {changes.changed > 0 ? (
-                <span className="slot-diff-changed">
-                  {t('products:slots.pending.changed', { n: String(changes.changed) })}
-                </span>
-              ) : null}
-            </strong>
-          </div>
-          <div className="sticky-submit-actions">
-            <Button type="button" size="sm" disabled={slotSaving} onClick={revertSlots}>
-              <Undo2 /> {t('products:slots.pending.revert')}
-            </Button>
-            <Button
-              type="button"
-              variant="primary"
-              disabled={slotSaving || Boolean(slotLoadError)}
-              onClick={() => void saveSlots()}
-            >
-              <Save /> {slotSaving ? t('common:action.saving') : t('products:slots.save')}
-            </Button>
-          </div>
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -906,10 +525,6 @@ function BackToList() {
   )
 }
 
-/**
- * Creating a service and editing one are the same five fields, so they are the
- * same sheet; only the service id is fixed once it exists.
- */
 function ProductEditorSheet({
   open,
   product,
@@ -931,10 +546,9 @@ function ProductEditorSheet({
 
   useEffect(() => {
     if (!open) return
-    // A plan saved without a name is the same vintage as a plan saved without a
+    // A plan saved without a name is the same vintage as one saved without a
     // course, and the name is required — so opening the sheet to set the course
-    // would dead-end on an empty name field. Seed it with the service id, which
-    // is already what the list shows and what the API stores for these plans.
+    // would dead-end on an empty name field.
     setDraft(product
       ? {
           ...productToDraft(product),
@@ -968,11 +582,11 @@ function ProductEditorSheet({
       return
     }
 
-    const serviceId = draft.serviceId.trim()
+    const savedServiceId = draft.serviceId.trim()
     setSaving(true)
     setError(null)
     try {
-      await courseboardApiJson(`${productsPath}/${encodeURIComponent(serviceId)}`, {
+      await courseboardApiJson(`${productsPath}/${encodeURIComponent(savedServiceId)}`, {
         method: 'POST',
         body: JSON.stringify({
           displayName: draft.displayName.trim(),
@@ -980,14 +594,20 @@ function ProductEditorSheet({
           holeCount: draft.holeCount,
           expectedDurationMinutes: draft.expectedDurationMinutes,
           golfCourseId: draft.golfCourseId.trim() || null,
+          maxPlayersPerGroup: draft.maxPlayersPerGroup === ''
+            ? null
+            : Number(draft.maxPlayersPerGroup),
         }),
       })
       showToast({
         tone: 'success',
         title: t('products:editor.saved.title'),
-        message: t('products:editor.saved.body', { name: draft.displayName.trim(), serviceId }),
+        message: t('products:editor.saved.body', {
+          name: draft.displayName.trim(),
+          serviceId: savedServiceId,
+        }),
       })
-      onSaved(serviceId)
+      onSaved(savedServiceId)
     } catch (saveError) {
       setError(errorMessage(saveError))
     } finally {
@@ -1044,36 +664,32 @@ function ProductEditorSheet({
             hint={t('products:editor.courseHint')}
             requirement="none"
           >
-            <NativeSelect
+            <NativeSelectField
               value={draft.golfCourseId}
-              onChange={event => setDraft(current => ({
-                ...current,
-                golfCourseId: event.target.value,
-              }))}
-            >
-              <option value="">{t('products:editor.courseUnset')}</option>
-              {courses.map(course => (
-                <option key={course.id} value={course.id}>{courseLabel(course)}</option>
-              ))}
-            </NativeSelect>
+              onChange={value => setDraft(current => ({ ...current, golfCourseId: value }))}
+              placeholder={t('products:editor.courseUnset')}
+              options={courses.map(course => ({ value: course.id, label: courseLabel(course) }))}
+            />
           </Field>
           <Field label={t('products:editor.playType')} required>
-            <NativeSelect
+            <NativeSelectField
               value={draft.playType}
-              onChange={event => changePlayType(event.target.value as PlayType)}
-            >
-              <option value="caddie">{t('products:playType.caddie')}</option>
-              <option value="self">{t('products:playType.self')}</option>
-            </NativeSelect>
+              onChange={value => changePlayType(value as PlayType)}
+              options={[
+                { value: 'caddie', label: t('products:playType.caddie') },
+                { value: 'self', label: t('products:playType.self') },
+              ]}
+            />
           </Field>
           <Field label={t('products:editor.holeCount')} required>
-            <NativeSelect
-              value={draft.holeCount}
-              onChange={event => changeHoleCount(Number(event.target.value))}
-            >
-              <option value={18}>{t('courses:option.holes18')}</option>
-              <option value={9}>{t('courses:option.holes9')}</option>
-            </NativeSelect>
+            <NativeSelectField
+              value={String(draft.holeCount)}
+              onChange={value => changeHoleCount(Number(value))}
+              options={[
+                { value: '18', label: t('courses:option.holes18') },
+                { value: '9', label: t('courses:option.holes9') },
+              ]}
+            />
           </Field>
           <Field
             label={t('products:editor.duration')}
@@ -1093,6 +709,24 @@ function ProductEditorSheet({
               required
             />
           </Field>
+          <Field
+            label={t('products:editor.maxPlayers')}
+            hint={t('products:editor.maxPlayersHint')}
+            requirement="none"
+          >
+            <Input
+              type="number"
+              min={1}
+              max={99}
+              step={1}
+              value={draft.maxPlayersPerGroup}
+              placeholder={t('products:editor.maxPlayersFromPolicy')}
+              onChange={event => setDraft(current => ({
+                ...current,
+                maxPlayersPerGroup: event.target.value,
+              }))}
+            />
+          </Field>
         </FormGrid>
         {error ? (
           <Notice tone="danger" title={t('products:editor.saveFailed')}>{error}</Notice>
@@ -1107,6 +741,31 @@ function ProductEditorSheet({
         </div>
       </form>
     </Sheet>
+  )
+}
+
+function NativeSelectField({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string
+  onChange: (value: string) => void
+  options: Array<{ value: string; label: string }>
+  placeholder?: string
+}) {
+  return (
+    <select
+      className="native-select"
+      value={value}
+      onChange={event => onChange(event.target.value)}
+    >
+      {placeholder ? <option value="">{placeholder}</option> : null}
+      {options.map(option => (
+        <option key={option.value} value={option.value}>{option.label}</option>
+      ))}
+    </select>
   )
 }
 
