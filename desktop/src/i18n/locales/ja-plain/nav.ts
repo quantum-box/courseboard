@@ -69,8 +69,8 @@ export const nav: DeepPartial<typeof source> = {
       description: 'ゴルフ場で働く人の名簿',
     },
     'golf/courses': {
-      label: 'コースの登録',
-      description: 'コースの名前と、組と組の間の時間',
+      label: 'コース',
+      description: 'コースの予約を受ける時間と、スタート時刻',
     },
     'golf/policy': {
       label: '予約の決まりごと',

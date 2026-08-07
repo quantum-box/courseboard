@@ -68,8 +68,8 @@ export const nav = {
       description: 'ゴルフ場で働く社員の名簿',
     },
     'golf/courses': {
-      label: 'コース設定',
-      description: 'コースの名前とスタート間隔',
+      label: 'コース',
+      description: 'コースの受付枠とティータイム',
     },
     'golf/policy': {
       label: '予約ルール',

@@ -119,6 +119,9 @@ export const navigationSections: NavigationSection[] = [
     items: [
       { route: 'golf/timeline', icon: CalendarRange },
       { route: 'golf/products', icon: CalendarCheck },
+      // Courses stopped being a one-time master when the bookable week moved
+      // onto them: opening hours and tee-time generation are seasonal work.
+      { route: 'golf/courses', icon: FolderTree },
     ],
   },
   {
@@ -154,7 +157,6 @@ export const navigationSections: NavigationSection[] = [
  * Kept searchable via ⌘K and linked from the settings hub.
  */
 export const settingsNavigation: NavigationItem[] = [
-  { route: 'golf/courses', icon: FolderTree },
   { route: 'golf/policy', icon: Settings2 },
   { route: 'course-map', icon: Map },
   { route: 'settings/members', icon: UserRound },
