@@ -59,6 +59,9 @@ import {
   findOverlappingAssignmentIds,
   formatCoverageLabel,
   markStepMinutes,
+  parseClockMinutes,
+  teeTickGeometry,
+  type TeeTickGeometry,
   minutesToLabel,
   nowLinePercent,
   parseJstDateParts,
@@ -264,7 +267,13 @@ export function TimelinePage() {
     [],
   )
   const coursesResource = useResource(
-    () => courseboardApiJson<ListResponse<{ id: string; name: string; isActive?: boolean }>>(`${COURSE_API}/courses`),
+    () => courseboardApiJson<ListResponse<{
+      id: string
+      name: string
+      isActive?: boolean
+      startIntervalMinutes?: number
+      businessHoursJson?: { open: string; close: string } | null
+    }>>(`${COURSE_API}/courses`),
     [],
   )
 
@@ -326,15 +335,23 @@ export function TimelinePage() {
       ? assignments.find(item => item.reservationId === selectedReservation.id) ?? null
       : null
 
+  const courseSettings = new Map(
+    (coursesResource.data?.items ?? []).map(course => [course.id, course]),
+  )
   const courseRows = [...new Map(
     reservations.map(item => [item.golfCourseId, item.courseName]),
-  ).entries()].map(([id, name]) => ({
-    id,
-    name,
-    items: reservations
-      .filter(item => item.golfCourseId === id)
-      .sort((a, b) => a.teeTime.localeCompare(b.teeTime)),
-  }))
+  ).entries()].map(([id, name]) => {
+    const course = courseSettings.get(id)
+    return {
+      id,
+      name,
+      startIntervalMinutes: course?.startIntervalMinutes ?? null,
+      openMinutes: parseClockMinutes(course?.businessHoursJson?.open),
+      items: reservations
+        .filter(item => item.golfCourseId === id)
+        .sort((a, b) => a.teeTime.localeCompare(b.teeTime)),
+    }
+  })
 
   const conflictCount = Math.ceil(summary.conflicts / 2)
   const needsAttention = summary.unassigned > 0 || conflictCount > 0
@@ -608,7 +625,17 @@ export function TimelinePage() {
                   rows={courseRows.map(row => ({
                     id: row.id,
                     label: row.name,
-                    meta: t('timeline:tee.groups', { n: String(row.items.length) }),
+                    meta: row.startIntervalMinutes
+                      ? t('timeline:tee.groupsWithInterval', {
+                          n: String(row.items.length),
+                          interval: String(row.startIntervalMinutes),
+                        })
+                      : t('timeline:tee.groups', { n: String(row.items.length) }),
+                    teeTicks: teeTickGeometry(
+                      row.startIntervalMinutes,
+                      pxPerHour,
+                      row.openMinutes,
+                    ),
                     blocks: row.items.map(item => {
                       const coverage = coverageForReservation(item, assignments)
                       const start = parseLocalDateParts(item.teeTime).minutes
@@ -863,6 +890,8 @@ type BoardRow = {
   id: string
   label: string
   meta: string
+  /** Course lanes carry a tee ruler; caddie lanes have no interval of their own. */
+  teeTicks?: TeeTickGeometry | null
   blocks: Array<{
     id: string
     startMinutes: number
@@ -1020,7 +1049,14 @@ function TimelineBoard({
                 <small>{row.meta}</small>
               </div>
               <div className="timeline-track">
-                <div className="timeline-gridlines" aria-hidden="true">
+                <div
+                  className={`timeline-gridlines${row.teeTicks ? ' has-tee-ticks' : ''}`}
+                  aria-hidden="true"
+                  style={row.teeTicks ? {
+                    '--timeline-tee-step': `${row.teeTicks.stepPx}px`,
+                    '--timeline-tee-offset': `${row.teeTicks.offsetPx}px`,
+                  } as CSSProperties : undefined}
+                >
                   {hourMarks.map(mark => (
                     <span
                       key={mark}

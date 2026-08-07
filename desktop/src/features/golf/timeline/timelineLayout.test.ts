@@ -13,8 +13,10 @@ import {
   markStepMinutes,
   minutesToLabel,
   nowLinePercent,
+  parseClockMinutes,
   parseJstDateParts,
   parseLocalDateParts,
+  teeTickGeometry,
   summarizeDay,
   toTimelineBlock,
   trackWidthPx,
@@ -181,5 +183,43 @@ describe('assignStackLanes', () => {
 
   it('treats an empty lane as one sub-row', () => {
     expect(assignStackLanes([]).laneCount).toBe(1)
+  })
+})
+
+
+describe('parseClockMinutes', () => {
+  it('reads a clock time, and refuses anything that is not one', () => {
+    expect(parseClockMinutes('07:00')).toBe(420)
+    expect(parseClockMinutes('00:00')).toBe(0)
+    expect(parseClockMinutes('24:00')).toBeNull()
+    expect(parseClockMinutes('7:00')).toBeNull()
+    expect(parseClockMinutes(null)).toBeNull()
+  })
+})
+
+describe('teeTickGeometry', () => {
+  it('spaces the ruler by the course interval', () => {
+    // 8 minutes of a 140px hour.
+    const ticks = teeTickGeometry(8, DEFAULT_PX_PER_HOUR, 6 * 60)
+    expect(ticks?.stepPx).toBeCloseTo(140 * 8 / 60)
+    expect(ticks?.offsetPx).toBe(0)
+  })
+
+  it('lines the ruler up with when the course opens, not when the board starts', () => {
+    // The board opens at 06:00 and 60 is not a multiple of 8, so a ruler drawn
+    // from the board's edge would miss every real 07:00 tee time.
+    const ticks = teeTickGeometry(8, DEFAULT_PX_PER_HOUR, 7 * 60)
+    expect(ticks?.offsetPx).toBeCloseTo((4 / 60) * DEFAULT_PX_PER_HOUR)
+  })
+
+  it('falls back to the board edge when the course keeps no opening time', () => {
+    expect(teeTickGeometry(10, DEFAULT_PX_PER_HOUR, null)?.offsetPx).toBe(0)
+  })
+
+  it('draws nothing without an interval, or when the ticks would smear together', () => {
+    expect(teeTickGeometry(null, DEFAULT_PX_PER_HOUR, 420)).toBeNull()
+    expect(teeTickGeometry(0, DEFAULT_PX_PER_HOUR, 420)).toBeNull()
+    // 1 minute at the smallest zoom is about a pixel apart.
+    expect(teeTickGeometry(1, MIN_PX_PER_HOUR, 420)).toBeNull()
   })
 })

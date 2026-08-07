@@ -94,6 +94,7 @@ export const timeline = {
     collapseLabel: '分ける',
     lane: 'コース',
     groups: '{{n}} 組',
+    groupsWithInterval: '{{n}} 組 · {{interval}}分間隔',
     partySize: '{{n}}名',
     subtitle: '{{party}} · {{size}}名 · {{coverage}}',
     tooltip: '{{plan}} · 管理番号: {{id}} · {{party}} · {{number}} · {{size}}名 · {{coverage}}',
