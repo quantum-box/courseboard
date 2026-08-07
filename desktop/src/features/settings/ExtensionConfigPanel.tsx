@@ -16,6 +16,7 @@ import {
   resourceErrorText,
 } from '../../components/Page'
 import { useRegisterPageReload } from '../../lib/pageReload'
+import { showToast } from '../../lib/toast'
 
 const extensionStatusPath = '/v1/course/extension-status'
 const extensionConfigPath = '/v1/course/config'
@@ -109,12 +110,10 @@ export function ExtensionConfigPanel() {
   const [loadError, setLoadError] = useState<unknown>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [saved, setSaved] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError(null)
-    setSaved(false)
     try {
       const next = await courseboardApiJson<ExtensionStatus | null>(extensionStatusPath)
       setExtension(next)
@@ -150,7 +149,6 @@ export function ExtensionConfigPanel() {
     }
     setSaving(true)
     setSaveError(null)
-    setSaved(false)
     try {
       const configJson = buildConfigJson(draft, extension?.configJson)
       await courseboardApiText(extensionConfigPath, {
@@ -159,7 +157,11 @@ export function ExtensionConfigPanel() {
       })
       setExtension(current => current ? { ...current, configJson } : current)
       setDraft(configDraftFromJson(configJson))
-      setSaved(true)
+      showToast({
+        tone: 'success',
+        title: t('settings:extension.saved.title'),
+        message: t('settings:extension.saved.description'),
+      })
     } catch (error) {
       setSaveError(errorMessage(error))
     } finally {
@@ -233,7 +235,6 @@ export function ExtensionConfigPanel() {
                   onChange={event => {
                     setDraft(current => ({ ...current, defaultCurrency: event.target.value }))
                     setSaveError(null)
-                    setSaved(false)
                   }}
                 >
                   {currencyOptions.map(code => (
@@ -249,7 +250,6 @@ export function ExtensionConfigPanel() {
                       defaultCurrency: event.target.value.toUpperCase(),
                     }))
                     setSaveError(null)
-                    setSaved(false)
                   }}
                   placeholder="JPY"
                   maxLength={3}
@@ -267,7 +267,6 @@ export function ExtensionConfigPanel() {
                 onChange={event => {
                   setDraft(current => ({ ...current, timezone: event.target.value }))
                   setSaveError(null)
-                  setSaved(false)
                 }}
                 placeholder="Asia/Tokyo"
                 required
@@ -277,11 +276,6 @@ export function ExtensionConfigPanel() {
 
           {saveError ? (
             <Notice tone="danger" title={t('settings:extension.saveFailed')}>{saveError}</Notice>
-          ) : null}
-          {saved ? (
-            <Notice tone="success" title={t('settings:extension.saved.title')}>
-              {t('settings:extension.saved.description')}
-            </Notice>
           ) : null}
         </div>
       ) : null}

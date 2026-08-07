@@ -32,6 +32,7 @@ import {
 } from '../../components/Page'
 import { useResource } from '../../hooks/useResource'
 import { useRegisterPageReload } from '../../lib/pageReload'
+import { showToast } from '../../lib/toast'
 import { openExternal } from '../../lib/platform'
 import { currentRouteSearchParams, navigate } from '../../lib/router'
 
@@ -545,7 +546,8 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
   const resource = useResource(loader, [invoiceId])
   useRegisterPageReload(resource.refresh)
   const [fulfilling, setFulfilling] = useState(false)
-  const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; message: string } | null>(null)
+  /** Announcements are toasts; the call sites still read `setNotice(...)`. */
+  const setNotice = showToast
 
   async function fulfill() {
     setFulfilling(true)
@@ -637,7 +639,6 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
           </div>
         )}
       />
-      {notice ? <Notice tone={notice.tone}>{notice.message}</Notice> : null}
       <MetricGrid>
         <Metric
           label={t('cancellationFees:detail.metrics.amount')}
