@@ -1,6 +1,7 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import {
   ArrowLeft,
+  CalendarDays,
   Flag,
   Pencil,
   Plus,
@@ -302,6 +303,15 @@ export function CoursesPage() {
       align: 'right',
       cell: course => (
         <div className="flex justify-end gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            aria-label={t('courses:table.scheduleAria', { name: course.name })}
+            onClick={() => navigate(`golf/courses/${encodeURIComponent(course.id)}`)}
+          >
+            <CalendarDays /> {t('courses:table.schedule')}
+          </Button>
           <Button
             type="button"
             size="sm"

@@ -13,6 +13,7 @@ import { nav } from './nav'
 import { payment } from './payment'
 import { policy } from './policy'
 import { products } from './products'
+import { schedule } from './schedule'
 import { settings } from './settings'
 import { settlement } from './settlement'
 import { simulator } from './simulator'
@@ -36,6 +37,7 @@ export const en = {
   payment,
   policy,
   products,
+  schedule,
   settings,
   settlement,
   simulator,

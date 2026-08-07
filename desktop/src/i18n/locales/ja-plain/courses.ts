@@ -35,6 +35,8 @@ export const courses: DeepPartial<typeof source> = {
     status: '今の状態',
     updated: '最後に直した日',
     actions: '操作',
+    schedule: '予約を受ける時間',
+    scheduleAria: '{{name}} の予約を受ける時間を開く',
     editAria: '{{name}} を直す',
     deleteAria: '{{name}} を消す',
     deleting: '消しています',

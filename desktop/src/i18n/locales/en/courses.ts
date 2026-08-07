@@ -43,6 +43,8 @@ export const courses: DeepPartial<typeof source> = {
     status: 'Status',
     updated: 'Updated',
     actions: 'Actions',
+    schedule: 'Hours',
+    scheduleAria: 'Open the bookable hours for {{name}}',
     editAria: 'Edit {{name}}',
     deleteAria: 'Delete {{name}}',
     deleting: 'Deleting',

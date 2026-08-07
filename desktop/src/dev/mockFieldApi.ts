@@ -150,6 +150,21 @@ const mockProducts: Array<{
   },
 ]
 
+const mockSchedulesByCourse: Record<string, Array<{
+  id: string
+  weekday: number
+  startTime: string
+  endTime: string
+  capacity: number
+  slotIntervalMinutes: number
+}>> = {
+  course_east: [
+    { id: 'rule_east_mon_am', weekday: 1, startTime: '07:00', endTime: '12:00', capacity: 1, slotIntervalMinutes: 8 },
+    { id: 'rule_east_mon_pm', weekday: 1, startTime: '12:00', endTime: '15:00', capacity: 1, slotIntervalMinutes: 8 },
+  ],
+  course_west: [],
+}
+
 const mockSlotsByService: Record<string, Array<{
   id: string
   golfReservationProductId: string
@@ -939,6 +954,14 @@ function normalizeMockPath(pathname: string): string {
   const patterns: Array<[RegExp, string]> = [
     [/^\/v1\/course\/courses\/([^/]+)$/, '/v1/erp/extensions/golf-course/courses/$1'],
     [
+      /^\/v1\/course\/courses\/([^/]+)\/schedule$/,
+      '/v1/erp/extensions/golf-course/courses/$1/schedule',
+    ],
+    [
+      /^\/v1\/course\/courses\/([^/]+)\/time-slots\/generate$/,
+      '/v1/erp/extensions/golf-course/courses/$1/time-slots/generate',
+    ],
+    [
       /^\/v1\/course\/reservation-products\/([^/]+)\/slots$/,
       '/v1/erp/extensions/golf-course/reservation-products/$1/slots',
     ],
@@ -1022,6 +1045,14 @@ function resolveGet(path: string): Json | null | undefined {
   if (slotsMatch) {
     const serviceId = decodeURIComponent(slotsMatch[1] ?? '')
     return items(mockSlotsByService[serviceId] ?? [])
+  }
+
+  const scheduleMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/courses\/([^/]+)\/schedule$/,
+  )
+  if (scheduleMatch) {
+    const courseId = decodeURIComponent(scheduleMatch[1] ?? '')
+    return items(mockSchedulesByCourse[courseId] ?? [])
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-profiles') {
@@ -1377,6 +1408,53 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       mockCourses[index] = updated as typeof current
       return hit(updated)
     }
+  }
+
+  const scheduleWriteMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/courses\/([^/]+)\/schedule$/,
+  )
+  if (scheduleWriteMatch && method === 'PUT') {
+    // The real endpoint replaces the whole week, which is what the editor warns
+    // about — so the fixture has to replace it too.
+    const courseId = decodeURIComponent(scheduleWriteMatch[1] ?? '')
+    const incoming = Array.isArray(body?.rules) ? body.rules as Array<Record<string, unknown>> : []
+    mockSchedulesByCourse[courseId] = incoming.map((rule, index) => ({
+      id: `rule_${courseId}_${index}`,
+      weekday: Number(rule.weekday ?? 0),
+      startTime: String(rule.startTime ?? '07:00'),
+      endTime: String(rule.endTime ?? '12:00'),
+      capacity: Number(rule.capacity ?? 1),
+      slotIntervalMinutes: Number(rule.slotIntervalMinutes ?? 8),
+    }))
+    return hit(items(mockSchedulesByCourse[courseId]))
+  }
+
+  const generateMatch = pathname.match(
+    /^\/v1\/erp\/extensions\/golf-course\/courses\/([^/]+)\/time-slots\/generate$/,
+  )
+  if (generateMatch && method === 'POST') {
+    const courseId = decodeURIComponent(generateMatch[1] ?? '')
+    const rules = mockSchedulesByCourse[courseId] ?? []
+    const from = new Date(String(body?.from ?? TODAY))
+    const to = new Date(String(body?.to ?? TODAY))
+    const days = Math.max(0, Math.round((to.getTime() - from.getTime()) / 86_400_000)) + 1
+    // One start per interval across every band whose weekday falls in the range.
+    let created = 0
+    for (let offset = 0; offset < days; offset += 1) {
+      const day = new Date(from.getTime() + offset * 86_400_000)
+      const weekday = day.getUTCDay()
+      rules
+        .filter(rule => rule.weekday === weekday)
+        .forEach(rule => {
+          const [startHour, startMinute] = rule.startTime.split(':').map(Number)
+          const [endHour, endMinute] = rule.endTime.split(':').map(Number)
+          const span = (endHour * 60 + endMinute) - (startHour * 60 + startMinute)
+          if (span > 0 && rule.slotIntervalMinutes > 0) {
+            created += Math.floor(span / rule.slotIntervalMinutes) + 1
+          }
+        })
+    }
+    return hit({ created, updated: 0, deactivated: 0, unchanged: 0 })
   }
 
   const productWriteMatch = pathname.match(
