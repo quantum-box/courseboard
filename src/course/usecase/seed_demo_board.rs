@@ -15,9 +15,9 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::course::domain::{
     demo_board, seed_tee_time, BusinessHours, CourseError, CourseId, CourseOrder,
-    GatewayCredentials, GolfCatalogGateway, NewReservation, ReservationGateway, SeedCourse,
-    SeedGroup, SlotOverride, SlotOverrideGateway, UpsertCourse, UpsertSlotOverrides,
-    SEED_DURATION_MINUTES,
+    GatewayCredentials, GolfCatalogGateway, NewReservation, PlayType, ReservationGateway,
+    SeedCourse, SeedGroup, SlotOverride, SlotOverrideGateway, UpsertCourse,
+    UpsertReservationProduct, UpsertSlotOverrides, SEED_DURATION_MINUTES, SEED_PREFIX,
 };
 
 /// What a run created or changed, so the caller can say what happened rather
@@ -67,8 +67,12 @@ impl SeedDemoBoardUseCase {
         self.store_course_order(credentials, board.courses, &course_ids)
             .await?;
 
+        let service_ids = self
+            .ensure_products(credentials, board.groups, &course_ids)
+            .await?;
+
         let (created, updated) = self
-            .ensure_bookings(credentials, date, board.groups, &course_ids)
+            .ensure_bookings(credentials, date, board.groups, &course_ids, &service_ids)
             .await?;
         summary.bookings_created = created;
         summary.bookings_updated = updated;
@@ -128,12 +132,65 @@ impl SeedDemoBoardUseCase {
     }
 
     /// Put every group on the day, updating the ones a previous run wrote.
+    /// Create the plan each demo group is sold under, and hand back its id.
+    ///
+    /// The tee sheet reads the play type off the plan behind a booking, so a
+    /// seed that wrote no plan produced a board of nothing but self-play — and
+    /// caddie assignment, which is most of what the operator screens do, had
+    /// nothing to work on.
+    async fn ensure_products(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        groups: &[SeedGroup],
+        course_ids: &HashMap<&'static str, CourseId>,
+    ) -> Result<HashMap<(&'static str, PlayType), String>, CourseError> {
+        let mut wanted: Vec<(&'static str, PlayType)> = Vec::new();
+        for group in groups {
+            let key = (group.course_key, group.play_type);
+            if !wanted.contains(&key) {
+                wanted.push(key);
+            }
+        }
+
+        let mut ids = HashMap::new();
+        for (course_key, play_type) in wanted {
+            let Some(course_id) = course_ids.get(course_key) else {
+                continue;
+            };
+            let service_id = format!("{SEED_PREFIX}:{course_key}:{}", play_type.as_str());
+            let product = self
+                .catalog
+                .upsert_reservation_product(
+                    credentials,
+                    UpsertReservationProduct::try_new(
+                        service_id.clone(),
+                        Some(match play_type {
+                            PlayType::Caddie => "キャディ付き 18H".to_string(),
+                            PlayType::SelfPlay => "セルフプレー 18H".to_string(),
+                        }),
+                        play_type.as_str(),
+                        18,
+                        SEED_DURATION_MINUTES as i32,
+                        Some(course_id.as_str().to_string()),
+                        Some(4),
+                    )?,
+                )
+                .await?;
+            ids.insert(
+                (course_key, play_type),
+                product.reservation_service_id().as_str().to_string(),
+            );
+        }
+        Ok(ids)
+    }
+
     async fn ensure_bookings(
         &self,
         credentials: GatewayCredentials<'_>,
         date: NaiveDate,
         groups: &[SeedGroup],
         course_ids: &HashMap<&'static str, CourseId>,
+        service_ids: &HashMap<(&'static str, PlayType), String>,
     ) -> Result<(usize, usize), CourseError> {
         let reservation_type_id = self
             .reservations
@@ -160,8 +217,16 @@ impl SeedDemoBoardUseCase {
             let Some(course_id) = course_ids.get(group.course_key) else {
                 continue;
             };
-            let input = booking_for(group, date, course_id, &reservation_type_id)?;
-            match seeded.get(&group.seed_key()) {
+            let input = booking_for(
+                group,
+                date,
+                course_id,
+                &reservation_type_id,
+                service_ids
+                    .get(&(group.course_key, group.play_type))
+                    .cloned(),
+            )?;
+            match seeded.get(&group.seed_key(date)) {
                 Some(id) => {
                     self.reservations
                         .replace_reservation(credentials, id, &input)
@@ -230,17 +295,19 @@ fn booking_for(
     date: NaiveDate,
     course_id: &CourseId,
     reservation_type_id: &str,
+    reservation_service_id: Option<String>,
 ) -> Result<NewReservation, CourseError> {
     let starts_at = parse_tee_time(&seed_tee_time(date, group.tee_time)?)?;
     Ok(NewReservation {
         reservation_type_id: reservation_type_id.to_string(),
+        reservation_service_id,
         starts_at,
         ends_at: starts_at + Duration::minutes(SEED_DURATION_MINUTES),
         quantity: group.party_size,
         customer_name: group.customer_name.to_string(),
         golf_course_id: course_id.clone(),
         party: group.party()?,
-        seed_key: group.seed_key(),
+        seed_key: group.seed_key(date),
     })
 }
 
@@ -273,7 +340,7 @@ mod tests {
     fn a_booking_lands_on_the_requested_day_in_the_courses_own_clock() {
         let date = NaiveDate::from_ymd_opt(2026, 7, 20).unwrap();
         let group = &demo_board().groups[0];
-        let booking = booking_for(group, date, &CourseId::new("course-1"), "type-1").unwrap();
+        let booking = booking_for(group, date, &CourseId::new("course-1"), "type-1", None).unwrap();
         assert_eq!(booking.starts_at.to_rfc3339(), "2026-07-19T21:53:00+00:00");
         assert_eq!(
             (booking.ends_at - booking.starts_at).num_minutes(),
@@ -285,8 +352,20 @@ mod tests {
     fn a_booking_carries_the_key_a_re_run_will_match_it_by() {
         let date = NaiveDate::from_ymd_opt(2026, 7, 20).unwrap();
         let group = &demo_board().groups[0];
-        let booking = booking_for(group, date, &CourseId::new("course-1"), "type-1").unwrap();
-        assert_eq!(booking.seed_key, group.seed_key());
+        let booking = booking_for(
+            group,
+            date,
+            &CourseId::new("course-1"),
+            "type-1",
+            Some("cb-demo:karanuma-in:caddie".into()),
+        )
+        .unwrap();
+        assert_eq!(booking.seed_key, group.seed_key(date));
         assert!(booking.seed_key.starts_with("cb-demo:"));
+        // Without the plan the tee sheet reads every seeded round as self-play.
+        assert_eq!(
+            booking.reservation_service_id.as_deref(),
+            Some("cb-demo:karanuma-in:caddie")
+        );
     }
 }

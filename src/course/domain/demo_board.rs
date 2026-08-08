@@ -12,7 +12,7 @@
 
 use chrono::NaiveDate;
 
-use super::{CourseError, PartyDetails, PartyPlayer, SlotOverrideKind};
+use super::{CourseError, PartyDetails, PartyPlayer, PlayType, SlotOverrideKind};
 
 /// Marks a row as the seed's, and says which row it is.
 ///
@@ -47,6 +47,10 @@ pub struct SeedGroup {
     pub course_key: &'static str,
     /// Local wall clock `HH:MM`.
     pub tee_time: &'static str,
+    /// How the group plays. A demo board of nothing but self-play cannot
+    /// exercise caddie assignment at all, which is most of what the operator
+    /// screens are for.
+    pub play_type: PlayType,
     pub party_size: i32,
     pub customer_name: &'static str,
     pub competition: Option<&'static str>,
@@ -60,8 +64,12 @@ pub struct SeedGroup {
 
 impl SeedGroup {
     /// The key that identifies this group's booking across re-runs.
-    pub fn seed_key(&self) -> String {
-        format!("{SEED_PREFIX}:{}:{}", self.course_key, self.tee_time)
+    ///
+    /// The date is part of it: without it, seeding a second day matched the
+    /// first day's bookings and *moved* them instead of adding a day, so the
+    /// board the operator had just built quietly emptied.
+    pub fn seed_key(&self, date: NaiveDate) -> String {
+        format!("{SEED_PREFIX}:{date}:{}:{}", self.course_key, self.tee_time)
     }
 
     pub fn party(&self) -> Result<PartyDetails, CourseError> {
@@ -136,6 +144,7 @@ const GROUPS: &[SeedGroup] = &[
     SeedGroup {
         course_key: "karanuma-in",
         tee_time: "06:53",
+        play_type: PlayType::Caddie,
         party_size: 4,
         customer_name: "本田 康彦",
         competition: Some("本田会"),
@@ -151,6 +160,7 @@ const GROUPS: &[SeedGroup] = &[
     SeedGroup {
         course_key: "karanuma-in",
         tee_time: "07:00",
+        play_type: PlayType::SelfPlay,
         party_size: 4,
         customer_name: "中川 伸一",
         competition: Some("本田会"),
@@ -166,6 +176,7 @@ const GROUPS: &[SeedGroup] = &[
     SeedGroup {
         course_key: "karanuma-in",
         tee_time: "07:07",
+        play_type: PlayType::Caddie,
         party_size: 4,
         customer_name: "菊地 豊",
         competition: Some("本田会"),
@@ -178,6 +189,7 @@ const GROUPS: &[SeedGroup] = &[
     SeedGroup {
         course_key: "karanuma-in",
         tee_time: "07:28",
+        play_type: PlayType::SelfPlay,
         party_size: 4,
         customer_name: "中野 誠",
         competition: None,
@@ -193,6 +205,7 @@ const GROUPS: &[SeedGroup] = &[
     SeedGroup {
         course_key: "karanuma-in",
         tee_time: "08:03",
+        play_type: PlayType::Caddie,
         party_size: 4,
         customer_name: "藤原 秀光",
         competition: None,
@@ -208,6 +221,7 @@ const GROUPS: &[SeedGroup] = &[
     SeedGroup {
         course_key: "moiwa-out",
         tee_time: "07:21",
+        play_type: PlayType::SelfPlay,
         party_size: 4,
         customer_name: "大野 修",
         competition: Some("藻岩会"),
@@ -218,6 +232,7 @@ const GROUPS: &[SeedGroup] = &[
     SeedGroup {
         course_key: "moiwa-out",
         tee_time: "07:28",
+        play_type: PlayType::Caddie,
         party_size: 4,
         customer_name: "高橋 純一",
         competition: Some("藻岩会"),
@@ -232,6 +247,7 @@ const GROUPS: &[SeedGroup] = &[
     SeedGroup {
         course_key: "moiwa-out",
         tee_time: "07:35",
+        play_type: PlayType::SelfPlay,
         party_size: 4,
         customer_name: "石井 輝雄",
         competition: Some("藻岩会"),
@@ -247,6 +263,7 @@ const GROUPS: &[SeedGroup] = &[
     SeedGroup {
         course_key: "moiwa-out",
         tee_time: "08:24",
+        play_type: PlayType::Caddie,
         party_size: 4,
         customer_name: "塚田 正意",
         competition: None,
@@ -257,6 +274,7 @@ const GROUPS: &[SeedGroup] = &[
     SeedGroup {
         course_key: "moiwa-in",
         tee_time: "07:21",
+        play_type: PlayType::SelfPlay,
         party_size: 4,
         customer_name: "藤原 和彦",
         competition: Some("藻岩会"),
@@ -271,6 +289,7 @@ const GROUPS: &[SeedGroup] = &[
     SeedGroup {
         course_key: "moiwa-in",
         tee_time: "07:28",
+        play_type: PlayType::Caddie,
         party_size: 4,
         customer_name: "奈良 良",
         competition: Some("藻岩会"),
@@ -286,6 +305,7 @@ const GROUPS: &[SeedGroup] = &[
     SeedGroup {
         course_key: "moiwa-in",
         tee_time: "08:10",
+        play_type: PlayType::SelfPlay,
         party_size: 4,
         customer_name: "原田 明昌",
         competition: None,
@@ -383,9 +403,38 @@ mod tests {
     }
 
     #[test]
+    fn seeding_a_second_day_adds_a_day_rather_than_moving_the_first() {
+        // The key used to name only the course and tee time, so a second day
+        // matched the first day's bookings and moved them.
+        let group = &demo_board().groups[0];
+        let first = group.seed_key(NaiveDate::from_ymd_opt(2026, 7, 20).unwrap());
+        let second = group.seed_key(NaiveDate::from_ymd_opt(2026, 7, 21).unwrap());
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn the_board_offers_both_ways_of_playing() {
+        // A demo of nothing but self-play cannot exercise caddie assignment.
+        let board = demo_board();
+        assert!(board
+            .groups
+            .iter()
+            .any(|group| group.play_type == PlayType::Caddie));
+        assert!(board
+            .groups
+            .iter()
+            .any(|group| group.play_type == PlayType::SelfPlay));
+    }
+
+    #[test]
     fn no_two_groups_share_a_key_so_a_re_run_updates_rather_than_duplicates() {
         let board = demo_board();
-        let mut keys: Vec<String> = board.groups.iter().map(SeedGroup::seed_key).collect();
+        let date = NaiveDate::from_ymd_opt(2026, 7, 20).unwrap();
+        let mut keys: Vec<String> = board
+            .groups
+            .iter()
+            .map(|group| group.seed_key(date))
+            .collect();
         keys.sort();
         let count = keys.len();
         keys.dedup();

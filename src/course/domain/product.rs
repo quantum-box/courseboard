@@ -7,7 +7,7 @@ use derive_getters::Getters;
 const MAX_DISPLAY_NAME_LENGTH: usize = 255;
 
 /// Whether a product requires a caddie.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlayType {
     Caddie,
     SelfPlay,
