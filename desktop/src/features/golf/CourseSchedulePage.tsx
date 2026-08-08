@@ -25,10 +25,12 @@ import { WeekScheduleEditor, toEditableRule, type EditableRule } from './WeekSch
 import {
   applyCapacityToRules,
   countRuleIssues,
+  isCourseLinkedToResource,
   ruleChangeCount,
   sortRules,
   summarizeRuleChanges,
   weeklyStartCount,
+  type CourseResource,
   type GolfAvailabilityRule,
 } from './schedule'
 import {
@@ -59,24 +61,6 @@ const resourcesPath = '/v1/course/resources'
 
 function resourceLinkPath(courseId: string) {
   return `${coursesPath}/${encodeURIComponent(courseId)}/resource`
-}
-
-/**
- * The resource a course keeps its tee times on.
- *
- * Without one there is no schedule to read and no inventory to generate, and
- * every save on this page fails. Asking outright is clearer than reading it
- * back out of the error text.
- */
-type CourseResource = {
-  golfCourseId?: string
-  reservationResourceId?: string
-}
-
-function isLinked(resources: CourseResource[], courseId: string) {
-  return resources.some(
-    resource => resource.golfCourseId === courseId && Boolean(resource.reservationResourceId),
-  )
 }
 
 function toStoredRule(rule: EditableRule): GolfAvailabilityRule {
@@ -147,7 +131,7 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
 
       try {
         const resources = await courseboardApiJson<{ items: CourseResource[] }>(resourcesPath)
-        setLinked(isLinked(resources.items, courseId))
+        setLinked(isCourseLinkedToResource(resources.items, courseId))
       } catch {
         // A resource list this page could not read is not itself a reason to
         // claim the course is unlinked; the schedule below says so if it is.

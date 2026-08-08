@@ -18,6 +18,39 @@ export type GolfAvailabilityRule = {
   slotIntervalMinutes: number
 }
 
+/**
+ * The resource a course keeps its tee times on.
+ *
+ * Without one there is no schedule to read and no inventory to generate, and
+ * every save on the schedule screen fails. Only the `course`-kind row is that
+ * resource: a club with separate OUT and IN rows carries those as `other`, and
+ * retired rows stay in the list, so neither answers "where does this course
+ * keep its inventory".
+ */
+export type CourseResource = {
+  golfCourseId?: string
+  reservationResourceId?: string
+  resourceKind?: string
+  active?: boolean
+}
+
+/**
+ * The same test the API applies before it will read or write a schedule.
+ *
+ * Counting an `other` or retired row as a link left the schedule screen calling
+ * an endpoint that answers 400, and the operator reading "check what you sent"
+ * on a screen they had not typed into yet — instead of the one button that
+ * fixes it.
+ */
+export function isCourseLinkedToResource(resources: CourseResource[], courseId: string) {
+  return resources.some(
+    resource => resource.golfCourseId === courseId
+      && resource.resourceKind === 'course'
+      && resource.active !== false
+      && Boolean(resource.reservationResourceId),
+  )
+}
+
 const DEFAULT_INTERVAL_MINUTES = 8
 
 export function emptyRule(weekday = 1, slotIntervalMinutes = DEFAULT_INTERVAL_MINUTES): GolfAvailabilityRule {
