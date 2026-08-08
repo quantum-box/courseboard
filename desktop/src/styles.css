@@ -3500,6 +3500,19 @@ button,
   white-space: nowrap;
 }
 
+.shift-board-profile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.shift-board-profile-status {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  font-weight: 400;
+}
+
 .shift-board .shift-board-streak {
   min-width: 44px;
   padding: 3px 6px;
@@ -3517,11 +3530,13 @@ button,
   background: hsl(var(--nui-muted) / .35);
 }
 
-.shift-board td[data-kind='assigned'] { background: hsl(var(--nui-success) / .14); }
+.shift-board td[data-kind='assigned'],
+.shift-board td[data-kind='available'] { background: hsl(var(--nui-success) / .14); }
 .shift-board td[data-kind='off'] { background: hsl(var(--nui-muted) / .8); color: hsl(var(--nui-muted-foreground)); }
 .shift-board td[data-kind='morning'],
 .shift-board td[data-kind='afternoon'],
 .shift-board td[data-kind='light'] { background: hsl(var(--nui-warning) / .14); }
+.shift-board td[data-kind='unknown'] { background: hsl(var(--nui-warning) / .2); }
 .shift-board td[data-long-streak] {
   background: hsl(var(--nui-destructive) / .16);
   box-shadow: inset 0 -2px 0 hsl(var(--nui-destructive));
@@ -3553,11 +3568,13 @@ button,
   vertical-align: -2px;
 }
 
-.shift-board-legend i[data-kind='assigned'] { background: hsl(var(--nui-success) / .2); }
+.shift-board-legend i[data-kind='assigned'],
+.shift-board-legend i[data-kind='available'] { background: hsl(var(--nui-success) / .2); }
 .shift-board-legend i[data-kind='off'] { background: hsl(var(--nui-muted)); }
 .shift-board-legend i[data-kind='morning'],
 .shift-board-legend i[data-kind='afternoon'],
 .shift-board-legend i[data-kind='light'] { background: hsl(var(--nui-warning) / .2); }
+.shift-board-legend i[data-kind='unknown'] { background: hsl(var(--nui-warning) / .3); }
 .shift-board-legend i[data-long-streak] { background: hsl(var(--nui-destructive) / .25); }
 
 /* Slots a plan carried before inventory moved to the course. Read-only, so it

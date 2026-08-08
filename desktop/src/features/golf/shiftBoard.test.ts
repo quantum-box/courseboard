@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { ja } from '../../i18n/locales/ja'
+import { jaPlain } from '../../i18n/locales/ja-plain'
 import { buildShiftRow, jstDateOf, monthDates, STREAK_WARNING_DAYS } from './shiftBoard'
 
 const CADDIE = 'caddie_a'
+const PROFILE = { id: CADDIE, employmentStatus: 'active' }
 
 function assignment(date: string, status = 'assigned') {
   return { caddieProfileId: CADDIE, scheduledAt: `${date}T07:00:00+09:00`, status }
@@ -27,7 +30,7 @@ describe('buildShiftRow', () => {
 
   it('prefers assignments over availability and counts them', () => {
     const row = buildShiftRow(
-      CADDIE,
+      PROFILE,
       dates,
       [{ caddieProfileId: CADDIE, date: '2026-07-01', status: 'unavailable' }],
       [assignment('2026-07-01'), assignment('2026-07-01')],
@@ -35,33 +38,45 @@ describe('buildShiftRow', () => {
     expect(row.cells[0]).toMatchObject({ kind: 'assigned', assignments: 2 })
   })
 
-  it('maps availability statuses and ignores other caddies', () => {
+  it('preserves every availability status and ignores other caddies', () => {
     const row = buildShiftRow(
-      CADDIE,
+      PROFILE,
       dates,
       [
+        { caddieProfileId: CADDIE, date: '2026-07-01', status: 'available' },
         { caddieProfileId: CADDIE, date: '2026-07-02', status: 'unavailable' },
         { caddieProfileId: CADDIE, date: '2026-07-03', status: 'morning_only' },
+        { caddieProfileId: CADDIE, date: '2026-07-04', status: 'afternoon_only' },
+        { caddieProfileId: CADDIE, date: '2026-07-05', status: 'light_duty' },
         { caddieProfileId: 'someone_else', date: '2026-07-04', status: 'unavailable' },
       ],
-      [{ caddieProfileId: 'someone_else', scheduledAt: '2026-07-05T07:00:00+09:00', status: 'assigned' }],
+      [{ caddieProfileId: 'someone_else', scheduledAt: '2026-07-06T07:00:00+09:00', status: 'assigned' }],
     )
+    expect(row.cells[0]!.kind).toBe('available')
     expect(row.cells[1]!.kind).toBe('off')
     expect(row.cells[2]!.kind).toBe('morning')
-    expect(row.cells[3]!.kind).toBe('none')
-    expect(row.cells[4]!.kind).toBe('none')
+    expect(row.cells[3]!.kind).toBe('afternoon')
+    expect(row.cells[4]!.kind).toBe('light')
+    expect(row.cells[5]!.kind).toBe('none')
   })
 
   it('does not count cancelled assignments as working days', () => {
-    const row = buildShiftRow(CADDIE, dates, [], [assignment('2026-07-01', 'cancelled')])
+    const row = buildShiftRow(PROFILE, dates, [], [assignment('2026-07-01', 'cancelled')])
     expect(row.cells[0]!.kind).toBe('none')
     expect(row.maxStreak).toBe(0)
+  })
+
+  it('does not silently turn a new availability status into an empty cell', () => {
+    const row = buildShiftRow(PROFILE, dates, [
+      { caddieProfileId: CADDIE, date: '2026-07-01', status: 'new_field_status' },
+    ], [])
+    expect(row.cells[0]).toMatchObject({ kind: 'unknown', inLongStreak: false })
   })
 
   it('flags runs at the warning threshold and reports the longest streak', () => {
     const streak = ['2026-07-06', '2026-07-07', '2026-07-08', '2026-07-09', '2026-07-10', '2026-07-11']
     expect(streak).toHaveLength(STREAK_WARNING_DAYS)
-    const row = buildShiftRow(CADDIE, dates, [], [
+    const row = buildShiftRow(PROFILE, dates, [], [
       ...streak.map(date => assignment(date)),
       assignment('2026-07-14'),
     ])
@@ -76,7 +91,7 @@ describe('buildShiftRow', () => {
     // 07:00 JST on July 1st arrives from the API as 22:00Z on June 30th.
     expect(jstDateOf('2026-06-30T22:00:00Z')).toBe('2026-07-01')
     expect(jstDateOf('2026-07-01T07:00:00+09:00')).toBe('2026-07-01')
-    const row = buildShiftRow(CADDIE, dates, [], [
+    const row = buildShiftRow(PROFILE, dates, [], [
       { caddieProfileId: CADDIE, scheduledAt: '2026-06-30T22:00:00Z', status: 'assigned' },
     ])
     expect(row.cells[0]).toMatchObject({ date: '2026-07-01', kind: 'assigned' })
@@ -84,7 +99,7 @@ describe('buildShiftRow', () => {
 
   it('detects streaks that cross the month boundary', () => {
     // Jun 28–30 + Jul 1–3 is a six-day run even though only July is displayed.
-    const row = buildShiftRow(CADDIE, dates, [], [
+    const row = buildShiftRow(PROFILE, dates, [], [
       ...['2026-06-28', '2026-06-29', '2026-06-30'].map(date => assignment(date)),
       ...['2026-07-01', '2026-07-02', '2026-07-03'].map(date => assignment(date)),
     ])
@@ -97,11 +112,52 @@ describe('buildShiftRow', () => {
   })
 
   it('leaves short runs unhighlighted', () => {
-    const row = buildShiftRow(CADDIE, dates, [], [
+    const row = buildShiftRow(PROFILE, dates, [], [
       assignment('2026-07-01'),
       assignment('2026-07-02'),
     ])
     expect(row.maxStreak).toBe(2)
     expect(row.cells.every(cell => !cell.inLongStreak)).toBe(true)
+  })
+
+  it('keeps inactive and suspended profiles on the board with their status', () => {
+    expect(buildShiftRow({ id: CADDIE, employmentStatus: 'inactive' }, dates, [], []))
+      .toMatchObject({ caddieProfileId: CADDIE, employmentStatus: 'inactive' })
+    expect(buildShiftRow({ id: CADDIE, employmentStatus: 'Suspended' }, dates, [], []))
+      .toMatchObject({ caddieProfileId: CADDIE, employmentStatus: 'suspended' })
+  })
+
+  it('counts explicit workable availability in consecutive-work warnings', () => {
+    const workingDates = [
+      '2026-06-30',
+      '2026-07-01',
+      '2026-07-02',
+      '2026-07-03',
+      '2026-07-04',
+      '2026-07-05',
+    ]
+    const row = buildShiftRow(PROFILE, dates, workingDates.map((date, index) => ({
+      caddieProfileId: CADDIE,
+      date,
+      status: index === 2 ? 'morning_only' : 'available',
+    })), [])
+
+    expect(row.maxStreak).toBe(STREAK_WARNING_DAYS)
+    expect(row.cells[0]!.inLongStreak).toBe(true)
+    expect(row.cells[4]!.inLongStreak).toBe(true)
+  })
+})
+
+describe('unsaved availability copy', () => {
+  it('defines the visible labels for the states that used to disappear', () => {
+    expect(ja.shifts.cell.available).toBe('可')
+    expect(ja.shifts.employment.inactive).toBe('休んでいる')
+    expect(ja.shifts.employment.suspended).toBe('止めている')
+  })
+
+  it('explains that unsaved changes will be lost without using a literal Discard translation', () => {
+    expect(ja.caddies.calendar.confirmDiscard).toContain('失われます')
+    expect(ja.caddies.calendar.confirmDiscard).not.toContain('捨てて')
+    expect(jaPlain.caddies.calendar?.confirmDiscard).toContain('消えます')
   })
 })

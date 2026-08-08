@@ -373,7 +373,7 @@ export const caddies: DeepPartial<typeof source> = {
     editPrompt: 'この日の希望を入れる',
     unsaved: 'まだ保存していません',
     unsavedHint: 'まだ保存していません。「保存する」を押すまで残りません。',
-    confirmDiscard: 'まだ保存していない休みの希望があります。消して移りますか？',
+    confirmDiscard: 'このまま別の日や画面に移ると、まだ保存していない休みの希望は消えます。移りますか？',
     status: '出られるかどうか',
     twoRounds: '1日2ラウンドまわりたい',
     note: '体調などのメモ',
