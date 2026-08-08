@@ -69,6 +69,8 @@ import {
   resourceErrorText,
   type DataTableColumn,
 } from '../../components/Page'
+import { SectionErrorBoundary } from '../../components/SectionErrorBoundary'
+import { YearMonthPicker, useYearMonthValue } from '../../components/YearMonthPicker'
 import { weekdayIndexes, weekdayLabel } from './models'
 import { useResource } from '../../hooks/useResource'
 import { navigate, useNavigationGuard } from '../../lib/router'
@@ -835,7 +837,9 @@ export function CaddiesPage({
       ) : null}
 
       {view === 'payroll' ? (
-        <PayrollView setFlash={setFlash} />
+        <SectionErrorBoundary resetKey={view}>
+          <PayrollView setFlash={setFlash} />
+        </SectionErrorBoundary>
       ) : null}
 
       <ProfileCreateDialog
@@ -3133,7 +3137,11 @@ function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<Caddi
 
 function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
   const { t } = useTranslation(['caddies', 'common'])
-  const [yearMonth, setYearMonth] = useState(previousYearMonth)
+  const {
+    value: yearMonth,
+    error: yearMonthError,
+    setCandidate: setYearMonth,
+  } = useYearMonthValue(previousYearMonth())
   const [downloading, setDownloading] = useState(false)
   const resource = useResource(
     () => courseboardApiJson<PayrollResponse>(
@@ -3233,7 +3241,13 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
         description={t('caddies:payroll.description')}
         actions={(
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-            <Input type="month" value={yearMonth} onChange={event => setYearMonth(event.target.value)} className="sm:w-40" aria-label={t('caddies:payroll.monthLabel')} />
+            <YearMonthPicker
+              label={t('caddies:payroll.monthLabel')}
+              value={yearMonth}
+              error={yearMonthError}
+              onChange={setYearMonth}
+              className="sm:w-64"
+            />
             <Button type="button" variant="primary" disabled={downloading || !resource.data} onClick={() => void downloadCsv()}>
               <Download /> {downloading ? t('caddies:payroll.exporting') : t('caddies:payroll.exportCsv')}
             </Button>

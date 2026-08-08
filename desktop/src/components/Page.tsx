@@ -214,7 +214,10 @@ export function resourceErrorCopy(error: unknown): {
     const byStatus = STATUS_ERROR_KEYS[String(error.status)]
     if (byStatus) {
       const bodiless = raw === `Request failed with ${error.status}`
-      return { key: byStatus, detail: bodiless ? undefined : raw }
+      // 400/422 payloads often contain validator field names such as
+      // `yearMonth`. They are implementation vocabulary, not operator copy.
+      const hideValidatorDetail = error.status === 400 || error.status === 422
+      return { key: byStatus, detail: bodiless || hideValidatorDetail ? undefined : raw }
     }
   }
   const status = /^request failed with (\d{3})$/.exec(lower)?.[1]

@@ -40,6 +40,13 @@ describe('resourceErrorCopy', () => {
     expect(resourceErrorCopy(new ApiError('Request failed with 409', 409)).detail).toBeUndefined()
   })
 
+  it('does not expose validator field names in operator copy', () => {
+    const error = new ApiError('yearMonth must be in YYYY-MM format', 400)
+    expect(resourceErrorCopy(error).detail).toBeUndefined()
+    expect(resourceErrorText(error)).not.toContain('yearMonth')
+    expect(resourceErrorText(error)).toBe(ja.common.error.badRequest)
+  })
+
   it('keeps upstream provider failures distinct from an unreachable API', () => {
     expect(resourceErrorCopy(new Error('external provider error: upstream unavailable')).key)
       .toBe('error.providerError')

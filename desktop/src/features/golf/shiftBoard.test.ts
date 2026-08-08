@@ -13,7 +13,12 @@ describe('monthDates', () => {
     expect(monthDates('2026-02')).toHaveLength(28)
     expect(monthDates('2028-02')).toHaveLength(29)
     expect(monthDates('2026-07')[0]).toBe('2026-07-01')
+    expect(monthDates('2026-2')).toEqual(monthDates('2026-02'))
+    expect(monthDates('２０２６-２')).toEqual(monthDates('2026-02'))
     expect(monthDates('nonsense')).toEqual([])
+    expect(monthDates('')).toEqual([])
+    expect(monthDates('2026-00')).toEqual([])
+    expect(monthDates('2026-13')).toEqual([])
   })
 })
 
