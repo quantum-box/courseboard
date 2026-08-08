@@ -30,6 +30,18 @@ impl ResourceKind {
     }
 }
 
+/// The course ↔ reservation-resource mapping to write.
+///
+/// `resource_code` is the row's tenant-unique key on the Field side, so saving
+/// the same code twice updates the mapping instead of adding a second one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SaveCourseResource {
+    pub resource_code: String,
+    pub name: String,
+    pub golf_course_id: CourseId,
+    pub reservation_resource_id: ResourceId,
+}
+
 /// A bookable resource belonging to (or representing) a golf course.
 #[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct Resource {

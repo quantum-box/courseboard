@@ -56,6 +56,7 @@ impl Modify for SecurityAddon {
         http::update_course,
         http::delete_course,
         http::list_resources,
+        http::link_course_resource,
         http::list_reservation_products,
         http::upsert_reservation_product,
         http::get_course_schedule,

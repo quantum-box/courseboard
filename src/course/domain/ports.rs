@@ -8,10 +8,10 @@ use super::{
     CaddieRecommendation, CaddieRoster, CaddieStaff, Course, CourseError, CourseId, DailyBudget,
     DailyBudgetQuery, ExtensionStatus, GenerationSummary, MonthlySettlement, ProductSlot,
     RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationPolicy,
-    ReservationProduct, ReservationServiceId, Resource, ResourceId, TaxRuleSnapshot,
-    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
-    WorkedMinutes,
+    ReservationProduct, ReservationServiceId, Resource, ResourceId, SaveCourseResource,
+    TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
+    UpsertReservationProduct, WorkedMinutes,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -131,6 +131,24 @@ pub trait GolfCatalogGateway: Send + Sync {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<Resource>, CourseError>;
+
+    /// Create the generic reservation resource a course books against.
+    ///
+    /// Schedules and inventory live on the generic reservation module, so a
+    /// course with no resource has nowhere to keep its tee times. Returns the
+    /// new resource's id.
+    async fn create_reservation_resource(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        name: &str,
+    ) -> Result<ResourceId, CourseError>;
+
+    /// Write the course ↔ resource mapping, creating the row if it is new.
+    async fn save_course_resource(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: SaveCourseResource,
+    ) -> Result<Resource, CourseError>;
 
     async fn list_reservation_products(
         &self,

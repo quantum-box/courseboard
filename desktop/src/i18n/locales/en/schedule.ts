@@ -10,6 +10,17 @@ export const schedule: DeepPartial<typeof source> = {
     title: 'This course is not linked to a reservation resource yet',
     description: 'Bookable hours need a course-to-resource mapping. Check the setup first.',
   },
+  link: {
+    title: 'This course has nowhere to keep its bookable hours yet',
+    description: 'Hours, and the tee times built from them, live on a reservation resource. Setting one up creates a resource for this course alone and links it. A course that already has one is left as it is.',
+    action: 'Set up a resource',
+    working: 'Setting up…',
+    done: {
+      title: 'Resource set up',
+      body: 'You can now set the bookable hours for {{course}}.',
+    },
+    failed: 'Could not set up the resource',
+  },
   loadFailed: {
     title: 'Could not load the current hours',
     description: 'Saving while empty may wipe them. Reload before editing.',

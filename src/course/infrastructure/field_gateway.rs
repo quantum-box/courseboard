@@ -19,7 +19,7 @@ use crate::course::domain::{
     CaddieSkillLevel, CaddieUpstreamIdentity, Course, CourseError, CourseId, GatewayCredentials,
     GenerationSummary, GolfCatalogGateway, ProductSlot, Reservation, ReservationGateway,
     ReservationProduct, ReservationScheduleGateway, ReservationServiceId, Resource, ResourceId,
-    ResourceKind, UpsertCourse, UpsertReservationProduct,
+    ResourceKind, SaveCourseResource, UpsertCourse, UpsertReservationProduct,
 };
 use crate::course::infrastructure::generic_product_config;
 use crate::field_api::DEFAULT_FIELD_API_URL;
@@ -218,6 +218,60 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         )
         .await?;
         Ok(items.into_iter().map(map_resource).collect())
+    }
+
+    async fn create_reservation_resource(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        name: &str,
+    ) -> Result<ResourceId, CourseError> {
+        // `golf_course_holes` is the resource model the golf extension's
+        // reservation type declares; the generic module keys its schedule and
+        // inventory off the resource, not off the model.
+        let body = json!({
+            "name": name,
+            "resourceType": "other",
+            "resourceModel": "golf_course_holes",
+            "active": true,
+        });
+        let dto: FieldReservationResourceDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            "/v1/erp/reservation-resources",
+            credentials,
+            Some(&body),
+        )
+        .await?;
+        Ok(ResourceId::new(dto.id))
+    }
+
+    async fn save_course_resource(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: SaveCourseResource,
+    ) -> Result<Resource, CourseError> {
+        let body = json!({
+            "resourceCode": input.resource_code,
+            "name": input.name,
+            "resourceKind": "course",
+            "golfCourseId": input.golf_course_id.as_str(),
+            "reservationResourceId": input.reservation_resource_id.as_str(),
+            "capacity": 1,
+            "active": true,
+        });
+        // Field upserts on (tenant, resourceCode), so POST is how a mapping is
+        // both created and corrected.
+        let dto: FieldGolfCourseResourceDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            "/v1/erp/extensions/golf-course/resources",
+            credentials,
+            Some(&body),
+        )
+        .await?;
+        Ok(map_resource(dto))
     }
 
     async fn list_reservation_products(
@@ -487,16 +541,25 @@ fn map_course(value: FieldGolfCourseDto) -> Course {
 }
 
 fn map_resource(value: FieldGolfCourseResourceDto) -> Resource {
-    let golf_course_id = json_string_field(
-        value.attributes_json.as_ref(),
-        &["golfCourseId", "golf_course_id"],
-    )
-    .or_else(|| {
-        json_string_field(
-            value.metadata_json.as_ref(),
-            &["golfCourseId", "golf_course_id"],
-        )
-    });
+    // Field carries the course in its own field now. The JSON lookups behind it
+    // are the convention that stood in before the column existed, kept so a row
+    // an operator set by hand still names its course.
+    let golf_course_id = value
+        .golf_course_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            json_string_field(
+                value.attributes_json.as_ref(),
+                &["golfCourseId", "golf_course_id"],
+            )
+        })
+        .or_else(|| {
+            json_string_field(
+                value.metadata_json.as_ref(),
+                &["golfCourseId", "golf_course_id"],
+            )
+        });
     let kind = value
         .resource_kind
         .as_deref()
@@ -664,6 +727,14 @@ struct FieldGolfCourseDto {
     updated_at: Option<DateTime<Utc>>,
 }
 
+/// Only the id is read back: the mapping row is what CourseBoard keeps, and
+/// the generic resource's own fields are the reservation module's business.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldReservationResourceDto {
+    id: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FieldGolfCourseResourceDto {
@@ -671,6 +742,8 @@ struct FieldGolfCourseResourceDto {
     name: String,
     #[serde(default)]
     reservation_resource_id: Option<String>,
+    #[serde(default)]
+    golf_course_id: Option<String>,
     #[serde(default)]
     resource_kind: Option<String>,
     #[serde(default)]
