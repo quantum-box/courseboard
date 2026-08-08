@@ -387,7 +387,7 @@ export const caddies = {
     editPrompt: '希望を直す',
     unsaved: '未保存',
     unsavedHint: 'まだ保存していません。「保存」を押すまで残りません。',
-    confirmDiscard: '保存していない休みの希望があります。捨てて移動しますか？',
+    confirmDiscard: 'このまま移動すると、保存していない休みの希望は失われます。移動しますか？',
     status: '出られるかどうか',
     twoRounds: '2ラウンドを希望する',
     note: '体調のメモ',

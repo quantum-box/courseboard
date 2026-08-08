@@ -10,20 +10,29 @@ export const shifts: DeepPartial<typeof source> = {
   legend: {
     label: 'しるしの意味',
     assigned: '担当が入っている',
+    available: '仕事に出られる',
     off: '休みの希望',
     morning: '午前だけ出られる',
     afternoon: '午後だけ出られる',
     light: '軽い仕事なら出られる',
+    unknown: '状態を確かめる必要がある',
     none: '予定なし',
   },
   cell: {
+    available: '可',
+    unknown: '？',
     assignments: '担当 {{n}}件',
+  },
+  employment: {
+    inactive: 'しばらく休んでいる',
+    suspended: '登録を止めている',
+    unknown: '状態を確かめてください',
   },
   streak: {
     header: '連続',
     days: '{{n}}日',
     warningTitle: '休みなしが続いている人がいます',
-    warningBody: '{{names}} が {{n}}日以上つづけて担当に入っています。休みを入れられないか確かめてください。',
+    warningBody: '{{names}} は担当がある日や仕事に出られる日が {{n}}日以上つづいています。休みを入れられないか確かめてください。',
     threshold: '6日以上つづくと色がつきます',
   },
   empty: {

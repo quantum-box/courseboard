@@ -386,7 +386,7 @@ export const caddies: DeepPartial<typeof source> = {
     editPrompt: 'Edit the request',
     unsaved: 'Unsaved',
     unsavedHint: 'Not saved yet. Nothing is kept until you press Save.',
-    confirmDiscard: 'You have an unsaved day-off request. Discard it and move on?',
+    confirmDiscard: 'If you move on, your unsaved day-off request will be lost. Continue?',
     status: 'Availability',
     twoRounds: 'Wants two rounds',
     note: 'Condition note',

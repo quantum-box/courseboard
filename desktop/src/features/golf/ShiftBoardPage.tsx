@@ -56,6 +56,14 @@ function cellGlyph(cell: ShiftCell) {
   return i18next.t(`shifts:cell.${cell.kind}` as 'shifts:cell.assigned')
 }
 
+function employmentStatusLabel(status: string) {
+  if (status === 'active') return null
+  if (status === 'inactive' || status === 'suspended') {
+    return i18next.t(`shifts:employment.${status}` as 'shifts:employment.inactive')
+  }
+  return i18next.t('shifts:employment.unknown')
+}
+
 export function ShiftBoardPage() {
   const { t } = useTranslation(['shifts', 'common'])
   const {
@@ -64,7 +72,9 @@ export function ShiftBoardPage() {
     setCandidate: setYearMonth,
   } = useYearMonthValue(currentYearMonth())
   const dates = useMemo(() => monthDates(yearMonth), [yearMonth])
-  const range = { from: dates[0] ?? '', to: dates[dates.length - 1] ?? '' }
+  // Availability participates in consecutive-work warnings too, so both
+  // sources need the same padded range around the displayed month.
+  const range = paddedRange(dates)
 
   const profilesResource = useResource(
     useCallback(
@@ -80,15 +90,12 @@ export function ShiftBoardPage() {
       [range.from, range.to],
     ),
   )
-  // Assignments are fetched with a ±6-day pad so streaks that cross the month
-  // boundary are still detected (PLT-2827 range filter).
-  const assignmentRange = paddedRange(dates)
   const assignmentsResource = useResource(
     useCallback(
       () => courseboardApiJson<ListResponse<ShiftAssignment>>(
-        `${COURSE_API}/caddie-assignments?from=${assignmentRange.from}&to=${assignmentRange.to}`,
+        `${COURSE_API}/caddie-assignments?from=${range.from}&to=${range.to}`,
       ),
-      [assignmentRange.from, assignmentRange.to],
+      [range.from, range.to],
     ),
   )
 
@@ -140,7 +147,7 @@ export function ShiftBoardPage() {
 function ShiftBoardResults({
   yearMonth,
   dates,
-  profiles: allProfiles,
+  profiles,
   availabilities,
   assignments,
   loading,
@@ -157,13 +164,9 @@ function ShiftBoardResults({
   onRetry: () => void
 }) {
   const { t } = useTranslation(['shifts', 'common'])
-  const profiles = useMemo(
-    () => allProfiles.filter(profile => profile.employmentStatus !== 'suspended'),
-    [allProfiles],
-  )
   const rows = useMemo(() => profiles.map(profile => ({
     profile,
-    row: buildShiftRow(profile.id, dates, availabilities, assignments),
+    row: buildShiftRow(profile, dates, availabilities, assignments),
   })), [profiles, dates, availabilities, assignments])
   const longStreakNames = rows
     .filter(entry => entry.row.maxStreak >= STREAK_WARNING_DAYS)
@@ -207,48 +210,62 @@ function ShiftBoardResults({
                 </tr>
               </thead>
               <tbody>
-                {rows.map(({ profile, row }) => (
-                  <tr key={profile.id}>
-                    <th scope="row" className="shift-board-name">{profile.displayName}</th>
-                    <td
-                      className={`shift-board-streak ${
-                        row.maxStreak >= STREAK_WARNING_DAYS ? 'shift-board-streak-warning' : ''
-                      }`}
-                    >
-                      {row.maxStreak > 0 ? t('shifts:streak.days', { n: String(row.maxStreak) }) : '—'}
-                    </td>
-                    {row.cells.map(cell => (
+                {rows.map(({ profile, row }) => {
+                  const statusLabel = employmentStatusLabel(row.employmentStatus)
+                  return (
+                    <tr key={profile.id} data-employment-status={row.employmentStatus}>
+                      <th scope="row" className="shift-board-name">
+                        <span className="shift-board-profile">
+                          <span>{profile.displayName}</span>
+                          {statusLabel ? (
+                            <span className="shift-board-profile-status">
+                              {statusLabel}
+                            </span>
+                          ) : null}
+                        </span>
+                      </th>
                       <td
-                        key={cell.date}
-                        data-kind={cell.kind}
-                        data-long-streak={cell.inLongStreak || undefined}
-                        className={isWeekend(cell.date) ? 'shift-board-weekend' : undefined}
+                        className={`shift-board-streak ${
+                          row.maxStreak >= STREAK_WARNING_DAYS ? 'shift-board-streak-warning' : ''
+                        }`}
                       >
-                        {cell.assignments > 1 ? (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="shift-board-mark">{cellGlyph(cell)}</span>
-                            </TooltipTrigger>
-                            <TooltipContent side="top">
-                              {t('shifts:cell.assignments', { n: String(cell.assignments) })}
-                            </TooltipContent>
-                          </Tooltip>
-                        ) : (
-                          <span className="shift-board-mark">{cellGlyph(cell)}</span>
-                        )}
+                        {row.maxStreak > 0 ? t('shifts:streak.days', { n: String(row.maxStreak) }) : '—'}
                       </td>
-                    ))}
-                  </tr>
-                ))}
+                      {row.cells.map(cell => (
+                        <td
+                          key={cell.date}
+                          data-kind={cell.kind}
+                          data-long-streak={cell.inLongStreak || undefined}
+                          className={isWeekend(cell.date) ? 'shift-board-weekend' : undefined}
+                        >
+                          {cell.assignments > 1 ? (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="shift-board-mark">{cellGlyph(cell)}</span>
+                              </TooltipTrigger>
+                              <TooltipContent side="top">
+                                {t('shifts:cell.assignments', { n: String(cell.assignments) })}
+                              </TooltipContent>
+                            </Tooltip>
+                          ) : (
+                            <span className="shift-board-mark">{cellGlyph(cell)}</span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
           <div className="shift-board-legend" aria-label={t('shifts:legend.label')}>
             <span><i data-kind="assigned" /> {t('shifts:legend.assigned')}</span>
+            <span><i data-kind="available" /> {t('shifts:legend.available')}</span>
             <span><i data-kind="off" /> {t('shifts:legend.off')}</span>
             <span><i data-kind="morning" /> {t('shifts:legend.morning')}</span>
             <span><i data-kind="afternoon" /> {t('shifts:legend.afternoon')}</span>
             <span><i data-kind="light" /> {t('shifts:legend.light')}</span>
+            <span><i data-kind="unknown" /> {t('shifts:legend.unknown')}</span>
             <span><i data-long-streak="true" /> {t('shifts:streak.warningTitle')}</span>
           </div>
         </Panel>

@@ -12,6 +12,11 @@ export type ShiftAvailability = {
   status: string
 }
 
+export type ShiftProfile = {
+  id: string
+  employmentStatus: string
+}
+
 export type ShiftAssignment = {
   caddieProfileId: string
   scheduledAt: string
@@ -20,10 +25,12 @@ export type ShiftAssignment = {
 
 export type ShiftCellKind =
   | 'assigned'
+  | 'available'
   | 'off'
   | 'morning'
   | 'afternoon'
   | 'light'
+  | 'unknown'
   | 'none'
 
 export type ShiftCell = {
@@ -36,6 +43,7 @@ export type ShiftCell = {
 
 export type ShiftRow = {
   caddieProfileId: string
+  employmentStatus: string
   cells: ShiftCell[]
   maxStreak: number
 }
@@ -77,29 +85,49 @@ export function monthDates(yearMonth: string): string[] {
   return yearMonthDates(yearMonth)
 }
 
-function availabilityKind(status: string): ShiftCellKind {
-  if (status === 'unavailable') return 'off'
-  if (status === 'morning_only') return 'morning'
-  if (status === 'afternoon_only') return 'afternoon'
-  if (status === 'light_duty') return 'light'
-  return 'none'
+type AvailabilityProjection = {
+  kind: ShiftCellKind
+  working: boolean
+}
+
+const NO_AVAILABILITY: AvailabilityProjection = { kind: 'none', working: false }
+const UNKNOWN_AVAILABILITY: AvailabilityProjection = { kind: 'unknown', working: false }
+const AVAILABILITY_PROJECTION: Record<string, AvailabilityProjection> = {
+  available: { kind: 'available', working: true },
+  unavailable: { kind: 'off', working: false },
+  morning_only: { kind: 'morning', working: true },
+  afternoon_only: { kind: 'afternoon', working: true },
+  light_duty: { kind: 'light', working: true },
+}
+
+function availabilityProjection(status: string | undefined): AvailabilityProjection {
+  if (status === undefined) return NO_AVAILABILITY
+  return AVAILABILITY_PROJECTION[status.trim().toLowerCase()] ?? UNKNOWN_AVAILABILITY
+}
+
+function employmentStatus(status: string): string {
+  const normalized = status.trim().toLowerCase()
+  if (!normalized) return 'active'
+  return ['active', 'inactive', 'suspended'].includes(normalized)
+    ? normalized
+    : status.trim()
 }
 
 export function buildShiftRow(
-  caddieProfileId: string,
+  profile: ShiftProfile,
   dates: string[],
   availabilities: ShiftAvailability[],
   assignments: ShiftAssignment[],
 ): ShiftRow {
   const availabilityByDate = new Map<string, string>()
   for (const entry of availabilities) {
-    if (entry.caddieProfileId === caddieProfileId) {
+    if (entry.caddieProfileId === profile.id) {
       availabilityByDate.set(entry.date, entry.status)
     }
   }
   const assignmentCount = new Map<string, number>()
   for (const assignment of assignments) {
-    if (assignment.caddieProfileId !== caddieProfileId) continue
+    if (assignment.caddieProfileId !== profile.id) continue
     if (CANCELLED.has(assignment.status)) continue
     const date = jstDateOf(assignment.scheduledAt)
     assignmentCount.set(date, (assignmentCount.get(date) ?? 0) + 1)
@@ -107,9 +135,10 @@ export function buildShiftRow(
 
   const cells: ShiftCell[] = dates.map(date => {
     const assigned = assignmentCount.get(date) ?? 0
+    const availability = availabilityProjection(availabilityByDate.get(date))
     return {
       date,
-      kind: assigned > 0 ? 'assigned' : availabilityKind(availabilityByDate.get(date) ?? ''),
+      kind: assigned > 0 ? 'assigned' : availability.kind,
       assignments: assigned,
       inLongStreak: false,
     }
@@ -131,7 +160,10 @@ export function buildShiftRow(
   let runStart = 0
   for (let index = 0; index <= paddedDates.length; index += 1) {
     const date = paddedDates[index]
-    const working = date !== undefined && (assignmentCount.get(date) ?? 0) > 0
+    const working = date !== undefined && (
+      (assignmentCount.get(date) ?? 0) > 0
+      || availabilityProjection(availabilityByDate.get(date)).working
+    )
     if (working) continue
     const run = paddedDates.slice(runStart, index)
     const overlapsMonth = run.some(day => cellByDate.has(day))
@@ -145,5 +177,10 @@ export function buildShiftRow(
     runStart = index + 1
   }
 
-  return { caddieProfileId, cells, maxStreak }
+  return {
+    caddieProfileId: profile.id,
+    employmentStatus: employmentStatus(profile.employmentStatus),
+    cells,
+    maxStreak,
+  }
 }
