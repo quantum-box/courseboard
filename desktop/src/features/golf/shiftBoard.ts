@@ -4,6 +4,8 @@
  * tested directly.
  */
 
+import { yearMonthDates } from '../../lib/yearMonth'
+
 export type ShiftAvailability = {
   caddieProfileId: string
   date: string
@@ -72,14 +74,7 @@ function shiftDate(date: string, days: number): string {
 }
 
 export function monthDates(yearMonth: string): string[] {
-  const match = /^(\d{4})-(\d{2})$/.exec(yearMonth)
-  if (!match) return []
-  const year = Number(match[1])
-  const month = Number(match[2])
-  const days = new Date(Date.UTC(year, month, 0)).getUTCDate()
-  return Array.from({ length: days }, (_, index) => (
-    `${yearMonth}-${String(index + 1).padStart(2, '0')}`
-  ))
+  return yearMonthDates(yearMonth)
 }
 
 function availabilityKind(status: string): ShiftCellKind {

@@ -40,6 +40,8 @@ import {
   Panel,
   ResourceError,
 } from '../../components/Page'
+import { YearMonthPicker, useYearMonthValue } from '../../components/YearMonthPicker'
+import { yearMonthRange } from '../../lib/yearMonth'
 
 type GolfCourse = {
   id: string
@@ -106,18 +108,10 @@ const CSV_COLUMNS: CsvColumn[] = [
 ]
 
 function monthRange(yearMonth: string) {
-  const match = /^(\d{4})-(\d{2})$/.exec(yearMonth)
-  if (!match) {
-    const fallback = currentYearMonth()
-    return monthRange(fallback)
-  }
-  const year = Number(match[1])
-  const month = Number(match[2])
-  const endDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
-  return {
-    from: `${yearMonth}-01`,
-    to: `${yearMonth}-${String(endDay).padStart(2, '0')}`,
-  }
+  const range = yearMonthRange(yearMonth) ?? yearMonthRange(currentYearMonth())
+  return range
+    ? { from: range.from, to: range.to }
+    : { from: '', to: '' }
 }
 
 function rateTone(rate: number | null) {
@@ -148,7 +142,11 @@ function normalizeCsvHeader(contents: string) {
 
 export function BudgetsPage() {
   const { t } = useTranslation(['budgets', 'common'])
-  const [yearMonth, setYearMonth] = useState(currentYearMonth)
+  const {
+    value: yearMonth,
+    error: yearMonthError,
+    setCandidate: setYearMonth,
+  } = useYearMonthValue(currentYearMonth())
   const [courseFilter, setCourseFilter] = useState('all')
   const [courses, setCourses] = useState<GolfCourse[]>([])
   const [budgets, setBudgets] = useState<DailyBudget[]>([])
@@ -379,13 +377,13 @@ export function BudgetsPage() {
 
       <Panel>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <Field requirement="none" label={t('budgets:filter.month')} className="sm:w-48">
-            <Input
-              type="month"
-              value={yearMonth}
-              onChange={event => setYearMonth(event.target.value || currentYearMonth())}
-            />
-          </Field>
+          <YearMonthPicker
+            label={t('budgets:filter.month')}
+            value={yearMonth}
+            error={yearMonthError}
+            onChange={setYearMonth}
+            className="sm:w-64"
+          />
           <Field requirement="none" label={t('budgets:filter.course')} className="sm:min-w-64">
             <NativeSelect
               value={courseFilter}

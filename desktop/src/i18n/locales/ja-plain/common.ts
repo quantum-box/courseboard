@@ -67,6 +67,10 @@ export const common: DeepPartial<typeof source> = {
     unexpected: '思いがけない問題が起きました。少し待ってから、もう一度やってください。',
     authNotReady: 'ログインの準備が終わっていません。もう一度開いてください。',
     sessionExpired: 'ログインしてから時間がたちすぎました。もう一度ログインしてください。',
+    yearMonthInvalid: '正しい年と月を選んでください。',
+    sectionUnavailableTitle: 'この部分を表示できません',
+    sectionUnavailableDescription:
+      '選んだ内容を確かめて、もう一度やってください。ほかの部分はそのまま使えます。',
   },
   external: {
     notAllowed: 'このリンクは開けない決まりになっています。',

@@ -79,6 +79,10 @@ export const common = {
       '想定していないエラーが起きました。しばらく待ってから、もう一度お試しください。',
     authNotReady: 'ログインの準備ができていません。もう一度読み込んでください。',
     sessionExpired: 'ログインの有効期限が切れました。',
+    yearMonthInvalid: '年と月を正しく選んでください。',
+    sectionUnavailableTitle: 'この部分を表示できません',
+    sectionUnavailableDescription:
+      '入力内容を確認して、もう一度お試しください。ほかの部分は引き続き使えます。',
   },
   external: {
     invalidUrl: 'リンクの形が正しくありません。',
@@ -108,6 +112,7 @@ export const common = {
     yesterday: '昨日',
     tomorrow: '明日',
     date: '日付',
+    year: '年',
     month: '月',
     thisMonth: '今月',
     prevMonth: '前の月',

@@ -77,6 +77,10 @@ export const common: DeepPartial<typeof source> = {
     unexpected: 'Something unexpected went wrong. Wait a moment and try again.',
     authNotReady: 'Sign-in is not ready yet. Reload and try again.',
     sessionExpired: 'Your session expired.',
+    yearMonthInvalid: 'Choose a valid year and month.',
+    sectionUnavailableTitle: 'This section could not be displayed',
+    sectionUnavailableDescription:
+      'Check the input and try again. You can continue using the rest of the page.',
   },
   external: {
     invalidUrl: 'That link is not valid.',
@@ -106,6 +110,7 @@ export const common: DeepPartial<typeof source> = {
     yesterday: 'Yesterday',
     tomorrow: 'Tomorrow',
     date: 'Date',
+    year: 'Year',
     month: 'Month',
     thisMonth: 'This month',
     prevMonth: 'Previous month',

@@ -1,16 +1,17 @@
-import { Input, Tooltip, TooltipContent, TooltipTrigger } from '@tachyon-sdk/native-ui'
-import { useCallback, useMemo, useState } from 'react'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@tachyon-sdk/native-ui'
+import { useCallback, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson, currentYearMonth } from '../../api'
 import {
   EmptyState,
-  Field,
   LoadingState,
   Notice,
   PageRefreshButton,
   Panel,
   ResourceError,
 } from '../../components/Page'
+import { SectionErrorBoundary } from '../../components/SectionErrorBoundary'
+import { YearMonthPicker, useYearMonthValue } from '../../components/YearMonthPicker'
 import { useResource } from '../../hooks/useResource'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
@@ -57,7 +58,11 @@ function cellGlyph(cell: ShiftCell) {
 
 export function ShiftBoardPage() {
   const { t } = useTranslation(['shifts', 'common'])
-  const [yearMonth, setYearMonth] = useState(currentYearMonth)
+  const {
+    value: yearMonth,
+    error: yearMonthError,
+    setCandidate: setYearMonth,
+  } = useYearMonthValue(currentYearMonth())
   const dates = useMemo(() => monthDates(yearMonth), [yearMonth])
   const range = { from: dates[0] ?? '', to: dates[dates.length - 1] ?? '' }
 
@@ -94,29 +99,6 @@ export function ShiftBoardPage() {
   }, [profilesResource.refresh, availabilityResource.refresh, assignmentsResource.refresh])
   useRegisterPageReload(refresh)
 
-  const loading = profilesResource.loading || availabilityResource.loading || assignmentsResource.loading
-  const error = profilesResource.error ?? availabilityResource.error ?? assignmentsResource.error
-
-  const profiles = useMemo(
-    () => (profilesResource.data?.items ?? []).filter(profile => profile.employmentStatus !== 'suspended'),
-    [profilesResource.data],
-  )
-
-  const rows = useMemo(() => {
-    const availabilities = availabilityResource.data?.items ?? []
-    const assignments = assignmentsResource.data?.items ?? []
-    return profiles.map(profile => ({
-      profile,
-      row: buildShiftRow(profile.id, dates, availabilities, assignments),
-    }))
-  }, [profiles, dates, availabilityResource.data, assignmentsResource.data])
-
-  const longStreakNames = rows
-    .filter(entry => entry.row.maxStreak >= STREAK_WARNING_DAYS)
-    .map(entry => entry.profile.displayName)
-
-  const hasAnyPlan = rows.some(entry => entry.row.cells.some(cell => cell.kind !== 'none'))
-
   return (
     <div className="page-stack">
       <Panel>
@@ -124,19 +106,72 @@ export function ShiftBoardPage() {
           <div className="page-toolbar order-last ml-auto self-end">
             <PageRefreshButton onClick={refresh} label={t('common:action.refresh')} />
           </div>
-          <Field requirement="none" label={t('shifts:month')} className="sm:w-48">
-            <Input
-              type="month"
-              value={yearMonth}
-              onChange={event => setYearMonth(event.target.value || currentYearMonth())}
-            />
-          </Field>
+          <YearMonthPicker
+            label={t('shifts:month')}
+            value={yearMonth}
+            error={yearMonthError}
+            onChange={setYearMonth}
+            className="sm:w-64"
+          />
           <div className="pb-1 text-xs text-muted-foreground">
             {t('shifts:streak.threshold')}
           </div>
         </div>
       </Panel>
 
+      <SectionErrorBoundary resetKey={yearMonth}>
+        <ShiftBoardResults
+          yearMonth={yearMonth}
+          dates={dates}
+          profiles={profilesResource.data?.items ?? []}
+          availabilities={availabilityResource.data?.items ?? []}
+          assignments={assignmentsResource.data?.items ?? []}
+          loading={profilesResource.loading
+            || availabilityResource.loading
+            || assignmentsResource.loading}
+          error={profilesResource.error ?? availabilityResource.error ?? assignmentsResource.error}
+          onRetry={refresh}
+        />
+      </SectionErrorBoundary>
+    </div>
+  )
+}
+
+function ShiftBoardResults({
+  yearMonth,
+  dates,
+  profiles: allProfiles,
+  availabilities,
+  assignments,
+  loading,
+  error,
+  onRetry,
+}: {
+  yearMonth: string
+  dates: string[]
+  profiles: CaddieProfile[]
+  availabilities: ShiftAvailability[]
+  assignments: ShiftAssignment[]
+  loading: boolean
+  error: unknown
+  onRetry: () => void
+}) {
+  const { t } = useTranslation(['shifts', 'common'])
+  const profiles = useMemo(
+    () => allProfiles.filter(profile => profile.employmentStatus !== 'suspended'),
+    [allProfiles],
+  )
+  const rows = useMemo(() => profiles.map(profile => ({
+    profile,
+    row: buildShiftRow(profile.id, dates, availabilities, assignments),
+  })), [profiles, dates, availabilities, assignments])
+  const longStreakNames = rows
+    .filter(entry => entry.row.maxStreak >= STREAK_WARNING_DAYS)
+    .map(entry => entry.profile.displayName)
+  const hasAnyPlan = rows.some(entry => entry.row.cells.some(cell => cell.kind !== 'none'))
+
+  return (
+    <>
       {longStreakNames.length > 0 ? (
         <Notice tone="warning" title={t('shifts:streak.warningTitle')}>
           {t('shifts:streak.warningBody', {
@@ -147,7 +182,7 @@ export function ShiftBoardPage() {
       ) : null}
 
       {loading && rows.length === 0 ? <LoadingState label={t('shifts:loading')} /> : null}
-      {error ? <ResourceError error={error} onRetry={refresh} /> : null}
+      {error ? <ResourceError error={error} onRetry={onRetry} /> : null}
 
       {!error && rows.length > 0 ? (
         <Panel>
@@ -218,7 +253,7 @@ export function ShiftBoardPage() {
           </div>
         </Panel>
       ) : null}
-    </div>
+    </>
   )
 }
 

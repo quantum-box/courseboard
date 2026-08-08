@@ -1,4 +1,4 @@
-import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
+import { Badge, Button } from '@tachyon-sdk/native-ui'
 import {
   CalendarCheck,
   Download,
@@ -23,7 +23,6 @@ import { i18next } from '../../i18n'
 import {
   DataTable,
   EmptyState,
-  Field,
   LoadingState,
   Metric,
   MetricGrid,
@@ -32,6 +31,7 @@ import {
   Panel,
   ResourceError,
 } from '../../components/Page'
+import { YearMonthPicker, useYearMonthValue } from '../../components/YearMonthPicker'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { openExternal } from '../../lib/platform'
 
@@ -141,7 +141,11 @@ function paymentStatusLabel(status: string) {
 
 export function SettlementPage() {
   const { t } = useTranslation(['settlement', 'common'])
-  const [yearMonth, setYearMonth] = useState(currentYearMonth)
+  const {
+    value: yearMonth,
+    error: yearMonthError,
+    setCandidate: setYearMonth,
+  } = useYearMonthValue(currentYearMonth())
   const [report, setReport] = useState<GolfMonthlySettlementReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -258,13 +262,13 @@ export function SettlementPage() {
 
       <Panel>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <Field requirement="none" label={t('settlement:month')} className="sm:w-48">
-            <Input
-              type="month"
-              value={yearMonth}
-              onChange={event => setYearMonth(event.target.value || currentYearMonth())}
-            />
-          </Field>
+          <YearMonthPicker
+            label={t('settlement:month')}
+            value={yearMonth}
+            error={yearMonthError}
+            onChange={setYearMonth}
+            className="sm:w-64"
+          />
           <div className="flex flex-wrap items-center gap-2 pb-1 text-xs text-muted-foreground">
             <Badge variant="outline"><CalendarCheck /> {t('settlement:badge')}</Badge>
             {report ? <span>{report.period.startDate} — {report.period.endDate}</span> : null}
