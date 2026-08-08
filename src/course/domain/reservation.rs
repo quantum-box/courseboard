@@ -160,6 +160,12 @@ impl Reservation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewReservation {
     pub reservation_type_id: String,
+    /// The plan the booking is sold under.
+    ///
+    /// This is what decides whether the round is played with a caddie: the tee
+    /// sheet reads the play type off the product behind it. A booking without
+    /// one reads as self-play whatever the desk meant.
+    pub reservation_service_id: Option<String>,
     pub starts_at: DateTime<Utc>,
     pub ends_at: DateTime<Utc>,
     pub quantity: i32,

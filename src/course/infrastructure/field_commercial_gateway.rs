@@ -147,8 +147,11 @@ impl GolfCommercialGateway for FieldGolfCommercialGateway {
             csv.as_bytes(),
         )
         .await?;
-        let items: FieldItems<FieldBudgetDto> = serde_json::from_value(value)
-            .map_err(|error| CourseError::Provider(format!("Field API decode failed: {error}")))?;
+        let items: FieldItems<FieldBudgetDto> = serde_json::from_value(value).map_err(|error| {
+            CourseError::Provider(format!(
+                "Field API decode failed for POST {GOLF}/daily-budgets/import: {error}"
+            ))
+        })?;
         items.items.into_iter().map(map_budget).collect()
     }
 

@@ -75,6 +75,7 @@ import { weekdayIndexes, weekdayLabel } from './models'
 import { useResource } from '../../hooks/useResource'
 import { navigate, useNavigationGuard } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
+import { UnassignedRoundsPanel } from './UnassignedRounds'
 import { showToast } from '../../lib/toast'
 import {
   caddieCreatePayload,
@@ -569,6 +570,9 @@ const RATIONALE_KEYS: Record<string, string> = {
   at_daily_limit: 'caddies:rationale.atDailyLimit',
   rookie_paired_with_veteran: 'caddies:rationale.rookiePaired',
   veteran_for_foursome: 'caddies:rationale.veteranForFoursome',
+  // Why the planner left a round unstaffed.
+  no_caddie_available: 'caddies:rationale.noCaddieAvailable',
+  all_caddies_at_daily_limit: 'caddies:rationale.allAtDailyLimit',
 }
 
 export function readableRationale(rationale: string[]) {
@@ -954,6 +958,12 @@ function DispatchView({
           />
         ) : null}
       </section>
+
+      <UnassignedRoundsPanel
+        date={date}
+        assignments={dayAssignments}
+        onChanged={onChanged}
+      />
 
       <section className="app-section space-y-4">
         <div>

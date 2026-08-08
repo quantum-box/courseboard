@@ -450,9 +450,12 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/v1/course/caddie-assignments",
-            get(course::interfaces::http::list_caddie_assignments).route_layer(
-                middleware::from_fn_with_state(state.clone(), require_valid_token),
-            ),
+            get(course::interfaces::http::list_caddie_assignments)
+                .post(course::interfaces::http_ops::create_caddie_assignment)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
         )
         .route(
             "/v1/course/caddie-assignments/:id",

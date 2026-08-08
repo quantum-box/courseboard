@@ -1,6 +1,6 @@
 //! Tee sheet day board composed from reservations + golf catalog.
 
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, TimeZone};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc};
 use derive_getters::Getters;
 
 use super::party::PartyDetails;
@@ -291,6 +291,31 @@ pub fn jst_offset() -> Result<FixedOffset, CourseError> {
         .ok_or_else(|| CourseError::Provider("invalid JST offset".into()))
 }
 
+/// A span of operating days as the instants that bound it.
+///
+/// `from` opens at local midnight and `to` closes at local midnight the next
+/// day, so a whole day is `[start, end)`.
+pub fn course_day_bounds(from: NaiveDate, to: NaiveDate) -> (DateTime<Utc>, DateTime<Utc>) {
+    let offset = chrono::Duration::seconds(JST_OFFSET_SECS as i64);
+    let open = from.and_time(NaiveTime::MIN).and_utc() - offset;
+    let close = to.and_time(NaiveTime::MIN).and_utc() - offset + chrono::Duration::days(1);
+    (open, close)
+}
+
+/// Widen a date range before handing it to Field.
+///
+/// Field filters timestamped rows on their **UTC** date, and the course clock
+/// runs nine hours ahead: 07:00 on the 8th is 22:00 on the 7th in UTC. Asking
+/// for one local date therefore drops that day's whole morning — the busiest
+/// part of a golf day — so callers ask wide and narrow with
+/// [`course_day_bounds`].
+pub fn widen_for_utc_date_filter(from: NaiveDate, to: NaiveDate) -> (NaiveDate, NaiveDate) {
+    (
+        from - chrono::Duration::days(1),
+        to + chrono::Duration::days(1),
+    )
+}
+
 pub fn format_datetime_with_offset(value: DateTime<chrono::Utc>, offset: FixedOffset) -> String {
     value
         .with_timezone(&offset)
@@ -305,4 +330,42 @@ pub fn format_jst_wall_clock(date: NaiveDate, hour: u32, minute: u32, jst: Fixed
         .unwrap_or_else(|| jst.from_utc_datetime(&naive))
         .format("%Y-%m-%dT%H:%M:%S%:z")
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_course_day_is_bounded_by_local_midnight_not_utc_midnight() {
+        let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
+        let (open, close) = course_day_bounds(date, date);
+
+        assert_eq!(open.to_rfc3339(), "2026-08-07T15:00:00+00:00");
+        assert_eq!(close.to_rfc3339(), "2026-08-08T15:00:00+00:00");
+    }
+
+    #[test]
+    fn a_month_runs_from_the_first_local_morning_to_the_last_local_night() {
+        let (open, close) = course_day_bounds(
+            NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 8, 31).unwrap(),
+        );
+
+        assert_eq!(open.to_rfc3339(), "2026-07-31T15:00:00+00:00");
+        assert_eq!(close.to_rfc3339(), "2026-08-31T15:00:00+00:00");
+    }
+
+    #[test]
+    fn the_upstream_window_reaches_a_day_past_each_end() {
+        // Field's filter reads the UTC date, so the local day's morning sits on
+        // the date before. Asking narrow drops it entirely.
+        let (from, to) = widen_for_utc_date_filter(
+            NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
+        );
+
+        assert_eq!(from, NaiveDate::from_ymd_opt(2026, 8, 7).unwrap());
+        assert_eq!(to, NaiveDate::from_ymd_opt(2026, 8, 9).unwrap());
+    }
 }

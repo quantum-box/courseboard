@@ -11,9 +11,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::course::domain::{
-    rank_caddies, AttendanceState, CaddieAssignmentQuery, CaddieRecommendation, CourseError,
-    GatewayCredentials, GolfOpsGateway, RankingCandidate, RankingOptions, RecommendationQuery,
+    course_day_bounds, rank_caddies, shift_covers_tee_time, widen_for_utc_date_filter,
+    AttendanceState, AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery,
+    CaddieRecommendation, CourseError, GatewayCredentials, GolfOpsGateway, RankingCandidate,
+    RankingOptions, RecommendationQuery,
 };
+
+/// Minutes east of UTC for the course clock, as everywhere else in this product.
+const JST_OFFSET_MINUTES: i64 = 9 * 60;
 
 pub struct ListCaddieRecommendationsUseCase {
     ops: Arc<dyn GolfOpsGateway>,
@@ -35,18 +40,28 @@ impl ListCaddieRecommendationsUseCase {
             .map(|at| at.date_naive())
             .unwrap_or_else(|| chrono::Utc::now().date_naive());
 
-        let (roster, ratings, assignments, attendance) = tokio::try_join!(
+        let window = widen_for_utc_date_filter(date, date);
+        let (roster, ratings, assignments, attendance, availabilities) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
             self.ops.list_caddie_ratings(credentials, None),
             self.ops.list_caddie_assignments(
                 credentials,
                 CaddieAssignmentQuery {
                     caddie_id: None,
-                    from: Some(date),
-                    to: Some(date),
+                    from: Some(window.0),
+                    to: Some(window.1),
                 },
             ),
             self.ops.get_attendance_snapshot(credentials, Some(date)),
+            self.ops.list_caddie_availabilities(
+                credentials,
+                AvailabilityQuery {
+                    caddie_id: None,
+                    from: Some(date),
+                    to: Some(date),
+                    date: None,
+                },
+            ),
         )?;
 
         let mut rating_totals: HashMap<String, (f64, i64)> = HashMap::new();
@@ -58,8 +73,14 @@ impl ListCaddieRecommendationsUseCase {
             entry.1 += 1;
         }
 
+        // Field filters on the UTC date, so the day was fetched wide; count only
+        // what actually falls inside the course's own day.
+        let (day_start, day_end) = course_day_bounds(date, date);
         let mut rounds_today: HashMap<String, i64> = HashMap::new();
-        for assignment in &assignments {
+        for assignment in assignments.iter().filter(|assignment| {
+            let at = assignment.scheduled_at();
+            day_start <= at && at < day_end
+        }) {
             *rounds_today
                 .entry(assignment.caddie_id().to_string())
                 .or_insert(0) += 1;
@@ -76,9 +97,29 @@ impl ListCaddieRecommendationsUseCase {
             })
             .collect();
 
+        let availability_by_caddie: HashMap<String, AvailabilityStatus> = availabilities
+            .iter()
+            .map(|row| (row.caddie_id().to_string(), row.status()))
+            .collect();
+
         let candidates: Vec<RankingCandidate> = roster
             .caddies()
             .iter()
+            // A retired or suspended caddie cannot take the round at all, so
+            // offering them as a candidate is not a low-ranked suggestion but a
+            // wrong one. Attendance only orders the people who could work
+            // today; the roster decides who those are.
+            .filter(|caddie| caddie.is_assignable())
+            // Same for somebody who filed for the day off. Asked about a
+            // specific tee time, a half-day request is judged too; asked about
+            // the day as a whole, it cannot be, so it stays in.
+            .filter(|caddie| {
+                shift_covers_tee_time(
+                    availability_by_caddie.get(caddie.id().as_str()).copied(),
+                    query.scheduled_at,
+                    JST_OFFSET_MINUTES,
+                )
+            })
             .map(|caddie| {
                 let id = caddie.id().to_string();
                 let (total, count) = rating_totals.get(&id).copied().unwrap_or((0.0, 0));

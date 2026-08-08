@@ -194,3 +194,40 @@ export function currentSlotTeeTime(
   }
   return current
 }
+
+/**
+ * The gap between rows as the board actually draws them.
+ *
+ * The course record carries a start interval, but the rows come from the
+ * week's opening bands, which set their own. A course configured at 7 minutes
+ * whose bands generate every 8 was labelling its 8-minute rows "7分間隔".
+ * Measured from the times on screen, so the label cannot disagree with them.
+ *
+ * Returns `null` when the column has fewer than two rows, or when the gaps are
+ * uneven — a single number would be a lie about a board that changes pace.
+ */
+export function observedIntervalMinutes(column: LedgerColumn): number | null {
+  const minutes = column.slots
+    .map(slot => teeTimeMinutes(slot.teeTime))
+    .filter((value): value is number => value !== null)
+    .sort((left, right) => left - right)
+  if (minutes.length < 2) return null
+
+  const first = minutes[1]! - minutes[0]!
+  for (let index = 2; index < minutes.length; index += 1) {
+    if (minutes[index]! - minutes[index - 1]! !== first) return null
+  }
+  return first > 0 ? first : null
+}
+
+/**
+ * Whether this column can say how many groups are still sellable.
+ *
+ * Only generated inventory counts capacity. A derived column knows which rows
+ * carry no booking, which is not the same thing — showing that tally as
+ * "空き N 枠" beside the notice saying the count is unknown had the header
+ * contradicting the line under it.
+ */
+export function knowsRemainingCapacity(column: LedgerColumn): boolean {
+  return column.gridSource === 'inventory'
+}

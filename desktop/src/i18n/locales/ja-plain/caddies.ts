@@ -63,6 +63,8 @@ export const caddies: DeepPartial<typeof source> = {
     atDailyLimit: '今日はもういっぱいです',
     rookiePaired: '新しい人を、なれた人と組ませます',
     veteranForFoursome: '4人の組なので、なれた人が向いています',
+    noCaddieAvailable: 'この時間に出られる人がいません',
+    allAtDailyLimit: '出られる人は、今日はもういっぱいです',
     unavailable: 'くわしい理由は表示できません',
   },
   offDuty: {
@@ -456,5 +458,28 @@ export const caddies: DeepPartial<typeof source> = {
   },
   error: {
     generic: 'うまくいきませんでした',
+  },
+  unassigned: {
+    title: '担当がまだの組',
+    description: 'キャディ付きで受けた予約で、だれが担当するか決まっていない組です。ここで決められます。',
+    loading: '予約を読んでいます',
+    loadingCandidates: '候補を読んでいます',
+    name: 'だれにするか決める',
+    pick: 'この人にする',
+    naming: '決めています',
+    named: '{{name}} さんに決めました',
+    failed: '決められませんでした',
+    sheetTitle: 'だれにするか決める',
+    sheetDescription: '{{time}} スタート · {{course}}',
+    players: '{{n}}人',
+    candidateMeta: '点数 {{score}} · 今日の担当 {{rounds}}回',
+    empty: {
+      title: 'ぜんぶ決まっています',
+      description: 'この日のキャディ付きの予約は、すべて担当が決まっています。',
+    },
+    noCandidates: {
+      title: '出せる人がいません',
+      description: '休みの希望や、今日すでに担当している回数から、この時間に出せる人がいません。シフト表を見てください。',
+    },
   },
 }

@@ -12,6 +12,7 @@ mod auto_assign_caddies;
 mod course_order;
 mod course_schedule;
 mod create_caddie;
+mod create_caddie_assignment;
 mod create_course;
 mod delete_caddie_availability;
 mod delete_course;
@@ -62,6 +63,7 @@ pub use course_schedule::{
     GenerateCourseTimeSlotsUseCase, GetCourseScheduleUseCase, ReplaceCourseScheduleUseCase,
 };
 pub use create_caddie::CreateCaddieUseCase;
+pub use create_caddie_assignment::{CreateCaddieAssignmentUseCase, NameCaddieForRound};
 pub use create_course::CreateCourseUseCase;
 pub use delete_caddie_availability::DeleteCaddieAvailabilityUseCase;
 pub use delete_course::DeleteCourseUseCase;

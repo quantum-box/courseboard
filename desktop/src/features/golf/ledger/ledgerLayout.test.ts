@@ -7,6 +7,8 @@ import {
   DEFAULT_SEAT_COLUMNS,
   MAX_SEAT_COLUMNS,
   groupTitle,
+  knowsRemainingCapacity,
+  observedIntervalMinutes,
   remainingGroups,
   seatCells,
   seatColumnCount,
@@ -264,4 +266,61 @@ describe('summarizeLedger', () => {
       openSlots: 0,
     })
   })
+})
+
+describe('observedIntervalMinutes', () => {
+  function columnWith(teeTimes: string[], gridSource: LedgerColumn['gridSource'] = 'inventory') {
+    return {
+      golfCourseId: 'c1',
+      courseName: '羊ヶ丘',
+      gridSource,
+      startIntervalMinutes: 7,
+      groupCount: 0,
+      playerCount: 0,
+      selfGroupCount: 0,
+      caddieGroupCount: 0,
+      openSlotCount: teeTimes.length,
+      slots: teeTimes.map(teeTime => ({
+        teeTime,
+        bookedGroups: 0,
+        playerCount: 0,
+        isActive: true,
+        isSellable: true,
+        items: [],
+      })),
+    } as unknown as LedgerColumn
+  }
+
+  it('measures the gap the rows are actually drawn at', () => {
+    // The course record says 7; the opening bands generated every 8. The label
+    // has to match the rows, not the record.
+    expect(observedIntervalMinutes(columnWith(['07:00', '07:08', '07:16']))).toBe(8)
+  })
+
+  it('says nothing when the board changes pace', () => {
+    expect(observedIntervalMinutes(columnWith(['07:00', '07:08', '07:20']))).toBeNull()
+  })
+
+  it('says nothing when there is not enough board to measure', () => {
+    expect(observedIntervalMinutes(columnWith(['07:00']))).toBeNull()
+    expect(observedIntervalMinutes(columnWith([]))).toBeNull()
+  })
+})
+
+describe('knowsRemainingCapacity', () => {
+  it('only generated inventory counts groups left', () => {
+    const slots = ['07:00', '07:08']
+    expect(knowsRemainingCapacity(columnFor('inventory', slots))).toBe(true)
+    expect(knowsRemainingCapacity(columnFor('opening_hours', slots))).toBe(false)
+    expect(knowsRemainingCapacity(columnFor('bookings_only', slots))).toBe(false)
+  })
+
+  function columnFor(gridSource: LedgerColumn['gridSource'], teeTimes: string[]) {
+    return {
+      gridSource,
+      startIntervalMinutes: 7,
+      openSlotCount: teeTimes.length,
+      slots: teeTimes.map(teeTime => ({ teeTime, items: [] })),
+    } as unknown as LedgerColumn
+  }
 })

@@ -119,6 +119,14 @@ mod tests {
             Ok(vec![])
         }
 
+        async fn create_caddie_assignment(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpsertCaddieAssignment,
+        ) -> Result<CaddieAssignment, CourseError> {
+            Err(CourseError::BadRequest("not used in test"))
+        }
+
         async fn update_caddie_assignment(
             &self,
             _credentials: GatewayCredentials<'_>,

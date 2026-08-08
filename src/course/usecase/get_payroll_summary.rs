@@ -11,8 +11,9 @@
 use std::sync::Arc;
 
 use crate::course::domain::{
-    summarize_payroll, AttendanceDay, CaddieAssignmentQuery, CourseError, GatewayCredentials,
-    GolfOpsGateway, PayrollCandidate, PayrollPeriod, PayrollSummary,
+    course_day_bounds, summarize_payroll, widen_for_utc_date_filter, AttendanceDay,
+    CaddieAssignmentQuery, CourseError, GatewayCredentials, GolfOpsGateway, PayrollCandidate,
+    PayrollPeriod, PayrollSummary,
 };
 
 pub struct GetPayrollSummaryUseCase {
@@ -32,14 +33,18 @@ impl GetPayrollSummaryUseCase {
         let period = PayrollPeriod::try_new(year_month)?;
         let (from, to) = (period.start_date(), period.end_date());
 
+        // Field filters on the UTC date, and the course clock runs ahead of it:
+        // a 07:00 round on the 1st is 22:00 on the last of the month before.
+        // Fetched wide, then cut back to the month's own days below.
+        let window = widen_for_utc_date_filter(from, to);
         let (roster, assignments, attendance, worked) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
             self.ops.list_caddie_assignments(
                 credentials,
                 CaddieAssignmentQuery {
                     caddie_id: None,
-                    from: Some(from),
-                    to: Some(to),
+                    from: Some(window.0),
+                    to: Some(window.1),
                 },
             ),
             self.ops
@@ -63,6 +68,15 @@ impl GetPayrollSummaryUseCase {
                 caddie_id: row.caddie_id().to_string(),
                 date: row.date(),
                 status: row.attendance_status().to_string(),
+            })
+            .collect();
+
+        let (period_start, period_end) = course_day_bounds(from, to);
+        let assignments: Vec<_> = assignments
+            .into_iter()
+            .filter(|assignment| {
+                let at = assignment.scheduled_at();
+                period_start <= at && at < period_end
             })
             .collect();
 

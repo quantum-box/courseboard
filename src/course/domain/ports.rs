@@ -335,6 +335,17 @@ pub trait GolfOpsGateway: Send + Sync {
         query: CaddieAssignmentQuery,
     ) -> Result<Vec<CaddieAssignment>, CourseError>;
 
+    /// Put a caddie on a round.
+    ///
+    /// The plan behind a booking decides whether it is played with a caddie, and
+    /// that plan is CourseBoard's — so who takes which round is worked out here
+    /// and written through this, rather than asked of the upstream.
+    async fn create_caddie_assignment(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: UpsertCaddieAssignment,
+    ) -> Result<CaddieAssignment, CourseError>;
+
     async fn update_caddie_assignment(
         &self,
         credentials: GatewayCredentials<'_>,

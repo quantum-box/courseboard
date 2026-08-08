@@ -3812,30 +3812,19 @@ button,
   font-size: 11px;
 }
 
-.ledger-mark-panel {
+/* The mark controls live in a sheet; the board behind it must not move when a
+ * row is selected. */
+.ledger-mark-sheet {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 10px;
-  border: 1px solid color-mix(in srgb, hsl(var(--nui-primary)) 40%, hsl(var(--nui-border)));
-  border-radius: var(--nui-radius-md);
-  padding: 8px 10px;
-  background: hsl(var(--nui-primary) / 6%);
-}
-
-.ledger-mark-panel > strong {
-  font-size: 12px;
-}
-
-.ledger-mark-label {
-  min-width: 200px;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px 2px;
 }
 
 .ledger-mark-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-left: auto;
 }
 
 /* The board scrolls sideways as a whole so course columns stay side by side,

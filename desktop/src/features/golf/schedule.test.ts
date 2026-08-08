@@ -4,6 +4,7 @@ import {
   collectRuleIssues,
   copyWeekdayRules,
   countRuleIssues,
+  isCourseLinkedToResource,
   nextRuleForWeekday,
   sortRules,
   summarizeRuleChanges,
@@ -140,5 +141,45 @@ describe('sortRules', () => {
 
     expect(sorted.map(row => `${row.weekday}/${row.startTime}`))
       .toEqual(['1/07:00', '1/12:00', '3/12:00'])
+  })
+})
+
+describe('isCourseLinkedToResource', () => {
+  const courseId = 'golfcrs_1'
+
+  it('accepts the course-kind row the schedule endpoints resolve', () => {
+    expect(isCourseLinkedToResource([{
+      golfCourseId: courseId,
+      reservationResourceId: 'rsrc_1',
+      resourceKind: 'course',
+      active: true,
+    }], courseId)).toBe(true)
+  })
+
+  it('does not count the OUT/IN rows a club keeps beside its course row', () => {
+    // These carry `other`, and the API will not read a schedule off them — so
+    // treating them as a link hides the button that would create the real one.
+    expect(isCourseLinkedToResource([
+      { golfCourseId: courseId, reservationResourceId: 'rsrc_out', resourceKind: 'other', active: true },
+      { golfCourseId: courseId, reservationResourceId: 'rsrc_in', resourceKind: 'other', active: true },
+    ], courseId)).toBe(false)
+  })
+
+  it('does not count a retired course row', () => {
+    expect(isCourseLinkedToResource([{
+      golfCourseId: courseId,
+      reservationResourceId: 'rsrc_old',
+      resourceKind: 'course',
+      active: false,
+    }], courseId)).toBe(false)
+  })
+
+  it('does not count another course’s row', () => {
+    expect(isCourseLinkedToResource([{
+      golfCourseId: 'golfcrs_other',
+      reservationResourceId: 'rsrc_1',
+      resourceKind: 'course',
+      active: true,
+    }], courseId)).toBe(false)
   })
 })

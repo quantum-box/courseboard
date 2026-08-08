@@ -81,7 +81,6 @@ export const ledger = {
     title: '枠の設定',
     selectHint: '時刻をクリックすると選べます。Shift を押しながらで範囲。',
     selected: '{{n}} 枠を選択中',
-    clearSelection: '選択をやめる',
     close: '売り止めにする',
     special: '特別料金にする',
     clear: '設定を消す',

@@ -93,6 +93,33 @@ impl ResourceTimeSlot {
     }
 }
 
+/// How many groups a row can still take, from the two views of it that exist.
+///
+/// The upstream counts what it was told about; the board counts the bookings
+/// standing on the row. They disagree — observed on production Field, a row
+/// carrying a confirmed booking still reported `reservedQuantity: 0` and its
+/// full capacity as available (PLT-3233).
+///
+/// The smaller of the two wins, so the answer is right whichever way the
+/// upstream behaves: if it does decrement, its number already accounts for
+/// bookings this board cannot see (held, or on another course sharing the
+/// resource) and stays the smaller one; if it does not, `capacity - booked`
+/// is. Erring small can only ever refuse a sale the desk could have made,
+/// which the desk can see and override — the other direction sells one tee
+/// time twice.
+fn reconcile_remaining(
+    capacity: Option<i32>,
+    upstream_remaining: Option<i32>,
+    booked_groups: i32,
+) -> Option<i32> {
+    let from_board = capacity.map(|capacity| (capacity - booked_groups).max(0));
+    match (upstream_remaining, from_board) {
+        (Some(upstream), Some(board)) => Some(upstream.min(board)),
+        (Some(upstream), None) => Some(upstream.max(0)),
+        (None, board) => board,
+    }
+}
+
 /// One row of the ledger: a tee time on one course.
 #[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct LedgerSlot {
@@ -124,10 +151,11 @@ impl LedgerSlot {
         mark: Option<SlotOverride>,
         items: Vec<TeeSheetItem>,
     ) -> Self {
+        let items_on_row = items.len() as i32;
         Self {
             tee_time: tee_time.into(),
             capacity,
-            available_groups,
+            available_groups: reconcile_remaining(capacity, available_groups, items_on_row),
             active,
             mark,
             items,
@@ -595,5 +623,66 @@ mod tests {
         assert!(!SlotGridSource::Schedule.has_real_capacity());
         assert!(!SlotGridSource::OpeningHours.has_real_capacity());
         assert!(!SlotGridSource::BookingsOnly.has_real_capacity());
+    }
+
+    #[test]
+    fn a_row_carrying_a_booking_is_not_sold_twice() {
+        // Production Field reports `reservedQuantity: 0` and the full capacity
+        // as available on a row that already holds a confirmed booking
+        // (PLT-3233). Believing it offers the same tee time to a second group.
+        let full = LedgerSlot::new(
+            "07:00",
+            Some(1),
+            Some(1),
+            true,
+            None,
+            vec![item("07:00", 4, PlayType::Caddie)],
+        );
+
+        assert_eq!(full.available_groups(), Some(0));
+        assert!(!full.is_sellable());
+    }
+
+    #[test]
+    fn the_upstream_still_wins_when_it_knows_about_more_than_the_board_does() {
+        // Holds, and bookings on another course sharing the resource, are
+        // invisible to this board. A capacity of 3 with one group on it would
+        // read as 2 left, but the upstream says 0 — it can see them.
+        let contended = LedgerSlot::new(
+            "07:00",
+            Some(3),
+            Some(0),
+            true,
+            None,
+            vec![item("07:00", 4, PlayType::SelfPlay)],
+        );
+
+        assert_eq!(contended.available_groups(), Some(0));
+        assert!(!contended.is_sellable());
+    }
+
+    #[test]
+    fn an_empty_row_keeps_the_capacity_it_was_generated_with() {
+        let open = LedgerSlot::new("07:00", Some(2), Some(2), true, None, vec![]);
+
+        assert_eq!(open.available_groups(), Some(2));
+        assert!(open.is_sellable());
+    }
+
+    #[test]
+    fn a_derived_row_still_admits_it_cannot_count() {
+        // No capacity was ever generated, so there is no number to reconcile.
+        // Inventing one here would dress a guess up as stock.
+        let derived = LedgerSlot::new(
+            "07:00",
+            None,
+            None,
+            true,
+            None,
+            vec![item("07:00", 4, PlayType::SelfPlay)],
+        );
+
+        assert_eq!(derived.available_groups(), None);
+        assert!(!derived.is_sellable());
     }
 }
