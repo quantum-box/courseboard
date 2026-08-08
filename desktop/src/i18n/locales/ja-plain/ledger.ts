@@ -79,7 +79,6 @@ export const ledger = {
     title: '枠の せってい',
     selectHint: '時こくを クリックすると えらべます。Shift を おしながらで はんい。',
     selected: '{{n}} 枠を えらんでいます',
-    clearSelection: 'えらぶのを やめる',
     close: 'うりどめに する',
     special: 'とくべつな りょうきんに する',
     clear: 'せっていを けす',

@@ -79,7 +79,6 @@ export const ledger = {
     title: 'Slot marks',
     selectHint: 'Click a time to select it. Hold Shift for a range.',
     selected: '{{n}} slots selected',
-    clearSelection: 'Clear selection',
     close: 'Close for sale',
     special: 'Mark as special rate',
     clear: 'Remove the mark',

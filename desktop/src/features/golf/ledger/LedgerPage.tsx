@@ -1,21 +1,11 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
-import {
-  CalendarRange,
-  ChevronLeft,
-  ChevronRight,
-  GanttChart,
-  Lock,
-  RefreshCw,
-  Tag,
-  Trash2,
-} from 'lucide-react'
+import { CalendarRange, ChevronLeft, ChevronRight, GanttChart, RefreshCw } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { courseboardApiJson, nowIsoMinute, today } from '../../../api'
 import {
   EmptyState,
-  Field,
   LoadingState,
   Notice,
   Panel,
@@ -41,6 +31,7 @@ import {
 import { summarizeLedger, teeTimesBetween } from './ledgerLayout'
 import type { PartyDetails, SlotMarkKind, TeeLedgerResponse } from './models'
 import { PartyEditor } from './PartyEditor'
+import { SlotMarkEditor } from './SlotMarkEditor'
 
 const COURSE_API = '/v1/course'
 /** How often the "now" row catches up with the clock. */
@@ -369,16 +360,7 @@ export function LedgerPage() {
           </div>
         </section>
 
-        <MarkPanel
-          selection={selection}
-          label={markLabel}
-          saving={savingMarks}
-          onLabelChange={setMarkLabel}
-          onClose={() => applyMark('closed')}
-          onSpecial={() => applyMark('special_rate')}
-          onClear={clearMarks}
-          onCancel={() => setSelection(null)}
-        />
+        <p className="ledger-mark-hint">{t('ledger:marks.selectHint')}</p>
       </div>
 
       <div className="ledger-workspace">
@@ -407,6 +389,17 @@ export function LedgerPage() {
         )}
       </div>
 
+      <SlotMarkEditor
+        selection={selection}
+        label={markLabel}
+        saving={savingMarks}
+        onLabelChange={setMarkLabel}
+        onClose={() => applyMark('closed')}
+        onSpecial={() => applyMark('special_rate')}
+        onClear={clearMarks}
+        onCancel={() => setSelection(null)}
+      />
+
       <PartyEditor
         reservation={editingReservation}
         onClose={() => setEditingReservationId(null)}
@@ -415,65 +408,5 @@ export function LedgerPage() {
         }
       />
     </div>
-  )
-}
-
-/**
- * The mark controls, shown only once rows are selected.
- *
- * Keeping them hidden until then means the buttons never sit there inviting a
- * click that would silently apply to nothing.
- */
-function MarkPanel({
-  selection,
-  label,
-  saving,
-  onLabelChange,
-  onClose,
-  onSpecial,
-  onClear,
-  onCancel,
-}: {
-  selection: SlotSelection | null
-  label: string
-  saving: boolean
-  onLabelChange: (value: string) => void
-  onClose: () => void
-  onSpecial: () => void
-  onClear: () => void
-  onCancel: () => void
-}) {
-  const { t } = useTranslation(['ledger'])
-  if (!selection) {
-    return <p className="ledger-mark-hint">{t('ledger:marks.selectHint')}</p>
-  }
-  return (
-    <section className="ledger-mark-panel" aria-label={t('ledger:marks.title')}>
-      <strong>{t('ledger:marks.selected', { n: String(selection.teeTimes.length) })}</strong>
-      <Field label={t('ledger:marks.label')} className="ledger-mark-label">
-        <Input
-          value={label}
-          placeholder={t('ledger:marks.labelPlaceholder')}
-          onChange={event => onLabelChange(event.target.value)}
-        />
-      </Field>
-      <div className="ledger-mark-actions">
-        <Button type="button" size="sm" variant="primary" disabled={saving} onClick={onClose}>
-          <Lock />
-          {t('ledger:marks.close')}
-        </Button>
-        <Button type="button" size="sm" variant="secondary" disabled={saving} onClick={onSpecial}>
-          <Tag />
-          {t('ledger:marks.special')}
-        </Button>
-        <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={onClear}>
-          <Trash2 />
-          {t('ledger:marks.clear')}
-        </Button>
-        <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={onCancel}>
-          {t('ledger:marks.clearSelection')}
-        </Button>
-      </div>
-    </section>
   )
 }
