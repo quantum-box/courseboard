@@ -162,7 +162,7 @@ impl ReservationGateway for FieldReservationGateway {
         credentials: GatewayCredentials<'_>,
         input: &NewReservation,
     ) -> Result<ReservationId, CourseError> {
-        let created: FieldReservationDto = field_send_json(
+        let created: FieldCreatedReservationDto = field_send_json(
             &self.client,
             &self.base_url,
             reqwest::Method::POST,
@@ -171,7 +171,7 @@ impl ReservationGateway for FieldReservationGateway {
             Some(&new_reservation_body(input, true)),
         )
         .await?;
-        Ok(ReservationId::new(created.id))
+        Ok(ReservationId::new(created.into_reservation().id))
     }
 
     async fn replace_reservation(
@@ -217,10 +217,32 @@ fn new_reservation_body(input: &NewReservation, creating: bool) -> Value {
         "customerName": input.customer_name,
         "customFields": custom_fields,
     });
+    if let Some(service_id) = input.reservation_service_id.as_deref() {
+        body["serviceId"] = json!(service_id);
+    }
     if creating {
         body["reservationTypeId"] = json!(input.reservation_type_id);
     }
     body
+}
+
+/// Field's reservation create answers `{"reservation": {...}}` while its list
+/// and patch answer the booking itself. Only the create is wrapped, so this
+/// unwrapping stays here rather than spreading over every reservation read.
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum FieldCreatedReservationDto {
+    Wrapped { reservation: FieldReservationDto },
+    Flat(FieldReservationDto),
+}
+
+impl FieldCreatedReservationDto {
+    fn into_reservation(self) -> FieldReservationDto {
+        match self {
+            Self::Wrapped { reservation } => reservation,
+            Self::Flat(reservation) => reservation,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -637,11 +659,12 @@ impl ReservationScheduleGateway for FieldGolfCatalogGateway {
             Some(&body),
         )
         .await?;
+        let result = response.into_result();
         Ok(GenerationSummary {
-            created: response.result.created,
-            updated: response.result.updated,
-            deactivated: response.result.deactivated,
-            unchanged: response.result.unchanged,
+            created: result.created,
+            updated: result.updated,
+            deactivated: result.deactivated,
+            unchanged: result.unchanged,
         })
     }
 
@@ -740,10 +763,24 @@ struct FieldAvailabilityRuleDto {
     slot_interval_minutes: i32,
 }
 
+/// Field returns the generation counts at the top level; an older shape wrapped
+/// them in `result`. Accepting both means a Field that goes back to the wrapper
+/// does not take the "make tee times" button down again — the counts are all
+/// this side reads either way.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldGenerationResponseDto {
-    result: FieldGenerationResultDto,
+#[serde(untagged)]
+enum FieldGenerationResponseDto {
+    Wrapped { result: FieldGenerationResultDto },
+    Flat(FieldGenerationResultDto),
+}
+
+impl FieldGenerationResponseDto {
+    fn into_result(self) -> FieldGenerationResultDto {
+        match self {
+            Self::Wrapped { result } => result,
+            Self::Flat(result) => result,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1178,7 +1215,7 @@ async fn field_send_json_inner<T: for<'de> Deserialize<'de>>(
         return Err(empty_course_store_error());
     }
     let url = format!("{base_url}{path_and_query}");
-    let mut request = field_request(client, method, &url, credentials);
+    let mut request = field_request(client, method.clone(), &url, credentials);
     if let Some(body) = body {
         request = request.json(body);
     }
@@ -1191,7 +1228,41 @@ async fn field_send_json_inner<T: for<'de> Deserialize<'de>>(
     response
         .json()
         .await
-        .map_err(|error| CourseError::Provider(format!("Field API decode failed: {error}")))
+        .map_err(|error| map_field_body_error(&method, path_and_query, error))
+}
+
+/// Name the call that failed.
+///
+/// A bare "decode failed" says nothing about which of the dozen Field endpoints
+/// a request touched, and the shape mismatches that produce it are found by
+/// curling that one endpoint. A body read that times out arrives here too, as a
+/// decode error, so it is separated out rather than blamed on the payload.
+fn map_field_body_error(
+    method: &reqwest::Method,
+    path_and_query: &str,
+    error: reqwest::Error,
+) -> CourseError {
+    CourseError::Provider(field_body_error_message(
+        method,
+        path_and_query,
+        error.is_timeout(),
+        &error,
+    ))
+}
+
+fn field_body_error_message(
+    method: &reqwest::Method,
+    path_and_query: &str,
+    timed_out: bool,
+    detail: &dyn std::fmt::Display,
+) -> String {
+    if timed_out {
+        return format!(
+            "Field API request timed out after {} seconds: {method} {path_and_query}",
+            FIELD_UPSTREAM_TIMEOUT.as_secs()
+        );
+    }
+    format!("Field API decode failed for {method} {path_and_query}: {detail}")
 }
 
 pub(crate) async fn field_send_unit(
@@ -1257,7 +1328,7 @@ pub(crate) async fn field_send_raw(
         return Err(empty_course_store_error());
     }
     let url = format!("{base_url}{path_and_query}");
-    let response = field_request(client, method, &url, credentials)
+    let response = field_request(client, method.clone(), &url, credentials)
         .header(reqwest::header::CONTENT_TYPE, content_type)
         .body(body.to_vec())
         .send()
@@ -1271,7 +1342,7 @@ pub(crate) async fn field_send_raw(
     response
         .json()
         .await
-        .map_err(|error| CourseError::Provider(format!("Field API decode failed: {error}")))
+        .map_err(|error| map_field_body_error(&method, path_and_query, error))
 }
 
 fn field_request(
@@ -1384,6 +1455,77 @@ mod tests {
             matches!(conflict, CourseError::UpstreamClient { status: 409, message }
             if message == "このスタッフは田中さんに既に紐付いています")
         );
+    }
+
+    #[test]
+    fn a_created_booking_is_read_whether_or_not_field_wraps_it() {
+        // Field's create answers `{"reservation": {...}}` while its list and
+        // patch answer the booking itself. Reading only the wrapper cost the
+        // demo seed every booking after the first.
+        let booking = json!({
+            "id": "rsv_1",
+            "reservationNumber": "RSV-1",
+            "status": "requested",
+            "startsAt": "2026-08-08T00:00:00Z",
+            "endsAt": "2026-08-08T04:30:00Z",
+        });
+
+        let wrapped: FieldCreatedReservationDto =
+            serde_json::from_value(json!({ "reservation": booking })).expect("wrapped create");
+        assert_eq!(wrapped.into_reservation().id, "rsv_1");
+
+        let flat: FieldCreatedReservationDto =
+            serde_json::from_value(booking).expect("flat create");
+        assert_eq!(flat.into_reservation().id, "rsv_1");
+    }
+
+    #[test]
+    fn generation_counts_are_read_whether_or_not_field_wraps_them() {
+        let counts = json!({
+            "created": 266,
+            "updated": 0,
+            "deactivated": 0,
+            "unchanged": 0,
+        });
+
+        // What Field sends today: the counts beside `resourceId` / `dryRun`,
+        // which the DTO has to ignore rather than reject.
+        let flat: FieldGenerationResponseDto = serde_json::from_value(json!({
+            "resourceId": "rsrc_1",
+            "from": "2026-08-08",
+            "to": "2026-08-14",
+            "dryRun": false,
+            "created": 266,
+            "updated": 0,
+            "deactivated": 0,
+            "unchanged": 0,
+        }))
+        .expect("flat generation response");
+        assert_eq!(flat.into_result().created, 266);
+
+        let wrapped: FieldGenerationResponseDto =
+            serde_json::from_value(json!({ "result": counts }))
+                .expect("wrapped generation response");
+        assert_eq!(wrapped.into_result().created, 266);
+    }
+
+    #[test]
+    fn a_body_that_will_not_decode_names_the_call_that_produced_it() {
+        // "decode failed" alone leaves an operator with a 424 and no way to
+        // tell which of Field's endpoints changed shape.
+        let error = serde_json::from_str::<FieldGenerationResultDto>("{}")
+            .expect_err("missing counts must not decode");
+        let path = "/v1/erp/reservation-resources/rsrc_1/time-slots/generate";
+        let message = field_body_error_message(&reqwest::Method::POST, path, false, &error);
+        assert!(message.contains("POST"), "{message}");
+        assert!(message.contains(path), "{message}");
+
+        // A body read that runs out of time also surfaces as a decode error;
+        // reporting it as a bad payload sends the reader hunting a shape change
+        // that never happened.
+        let timed_out = field_body_error_message(&reqwest::Method::POST, path, true, &"unused");
+        assert!(timed_out.contains("timed out"), "{timed_out}");
+        assert!(timed_out.contains(path), "{timed_out}");
     }
 
     #[test]
