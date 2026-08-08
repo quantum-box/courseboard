@@ -187,6 +187,35 @@ describe('protected API 401 handling', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('does not refresh or sign out for a Field 401 normalized to 403', async () => {
+    const getAccessToken = vi.fn(async () => 'valid-courseboard-token')
+    const onUnauthorized = vi.fn()
+    const onForbidden = vi.fn()
+    configureApiAuth({
+      tenantId: 'tn_1',
+      operatorId: 'tn_1',
+      platformId: 'plat_1',
+      getAccessToken,
+      onUnauthorized,
+      onForbidden,
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: 'upstream_client_error',
+      message: 'Field bearer was rejected',
+    }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await expect(courseboardApiJson('/v1/course/caddie-profiles')).rejects.toMatchObject({
+      status: 403,
+      message: 'Field bearer was rejected',
+    })
+    expect(getAccessToken).toHaveBeenCalledTimes(1)
+    expect(onUnauthorized).not.toHaveBeenCalled()
+    expect(onForbidden).not.toHaveBeenCalled()
+  })
+
   it('shows the Field 409 message from the caddie staff-link operation', async () => {
     const message = 'このスタッフは田中さんに既に紐付いています'
     configureApiAuth({

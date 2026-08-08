@@ -985,6 +985,68 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn field_auth_denials_remain_403_through_the_caddie_gateway() {
+        let app = Router::new()
+            .route(
+                "/v1/erp/extensions/golf-course/caddie-profiles/unauthorized",
+                patch(|| async {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({ "message": "Field bearer was rejected" })),
+                    )
+                }),
+            )
+            .route(
+                "/v1/erp/extensions/golf-course/caddie-profiles/forbidden",
+                patch(|| async {
+                    (
+                        StatusCode::FORBIDDEN,
+                        Json(json!({ "message": "Field tenant policy denied this operation" })),
+                    )
+                }),
+            );
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
+
+        for (caddie_id, expected_message) in [
+            ("unauthorized", "Field bearer was rejected"),
+            ("forbidden", "Field tenant policy denied this operation"),
+        ] {
+            let input = UpsertCaddie::try_new(
+                "佐藤さん",
+                "regular",
+                "D",
+                12_000,
+                Some("JPY".to_string()),
+                Some("staff-1".to_string()),
+                Some("staff_member".to_string()),
+                Some("staff-1".to_string()),
+                true,
+                Some("active".to_string()),
+                Some(1),
+                None,
+                None,
+                None,
+            )
+            .expect("valid caddie update");
+            let error = gateway
+                .update_caddie(
+                    test_credentials(),
+                    &CaddieId::try_new(caddie_id).expect("valid caddie id"),
+                    input,
+                )
+                .await
+                .expect_err("Field auth denial must not become a success");
+
+            assert!(matches!(
+                error,
+                CourseError::UpstreamClient { status: 403, message }
+                    if message == expected_message
+            ));
+        }
+    }
+
+    #[tokio::test]
     async fn create_staff_registers_the_named_hrm_member() {
         let seen_body = Arc::new(Mutex::new(None));
         let app = Router::new().route(

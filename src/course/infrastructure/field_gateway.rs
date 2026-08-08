@@ -986,8 +986,18 @@ fn map_field_request_error(error: reqwest::Error) -> CourseError {
 /// transport failures and 5xx responses remain provider failures.
 pub(crate) fn map_field_status_error(status: reqwest::StatusCode, message: &str) -> CourseError {
     if status.is_client_error() {
+        // A Field 401 describes the forwarded bearer/tenant at the provider
+        // boundary, not the operator's CourseBoard session. Keep the historical
+        // 403 normalization so the browser does not refresh or sign out a valid
+        // CourseBoard login. Both statuses still stay below 500, avoiding
+        // Cloudflare's CORS-less origin 5xx replacement page.
+        let downstream_status = if status == reqwest::StatusCode::UNAUTHORIZED {
+            reqwest::StatusCode::FORBIDDEN
+        } else {
+            status
+        };
         return CourseError::UpstreamClient {
-            status: status.as_u16(),
+            status: downstream_status.as_u16(),
             message: field_error_message(message).unwrap_or_else(|| status.to_string()),
         };
     }
@@ -1042,7 +1052,7 @@ mod tests {
 
         let unauthorized = map_field_status_error(reqwest::StatusCode::UNAUTHORIZED, "expired");
         assert!(
-            matches!(unauthorized, CourseError::UpstreamClient { status: 401, message }
+            matches!(unauthorized, CourseError::UpstreamClient { status: 403, message }
             if message == "expired")
         );
 

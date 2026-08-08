@@ -1342,6 +1342,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn normalized_field_auth_denials_stay_below_500_at_the_http_boundary() {
+        let response = AppError::UpstreamClient {
+            status: StatusCode::FORBIDDEN,
+            message: "Field bearer was rejected".to_string(),
+        }
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert!(!response.status().is_server_error());
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect denial body")
+            .to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).expect("decode denial body");
+        assert_eq!(body["error"], "upstream_client_error");
+        assert_eq!(body["message"], "Field bearer was rejected");
+    }
+
+    #[tokio::test]
     async fn panicking_handler_answers_with_json_and_cors_headers() {
         async fn boom() -> StatusCode {
             panic!("handler exploded")
