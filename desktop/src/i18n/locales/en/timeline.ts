@@ -8,6 +8,7 @@ export const timeline: DeepPartial<typeof source> = {
   loading: 'Loading the timeline…',
   reload: 'Reload',
   toDispatch: 'Go to assignments',
+  toLedger: 'Start ledger',
   partial: {
     title: 'Plan details are unavailable',
     description:

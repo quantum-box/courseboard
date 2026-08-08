@@ -60,6 +60,7 @@ import {
   Settings,
   Settings2,
   Sun,
+  Table2,
   UserRound,
   Users,
   X,
@@ -89,6 +90,7 @@ import { WorkspaceHelpPanel } from './WorkspaceHelp'
 /** Routes that carry a translated label under the `nav:items` namespace. */
 export type NavigationRoute =
   | 'golf'
+  | 'golf/ledger'
   | 'golf/timeline'
   | 'golf/products'
   | 'course-map'
@@ -128,6 +130,9 @@ export const navigationSections: NavigationSection[] = [
     id: 'courseBooking',
     showLabel: true,
     items: [
+      // The ledger is the start desk's board; the timeline is the caddie view
+      // of the same day, so the ledger comes first.
+      { route: 'golf/ledger', icon: Table2 },
       { route: 'golf/timeline', icon: CalendarRange },
       { route: 'golf/products', icon: CalendarCheck },
       // Courses stopped being a one-time master when the bookable week moved

@@ -3,6 +3,7 @@
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, TimeZone};
 use derive_getters::Getters;
 
+use super::party::PartyDetails;
 use super::product::PlayType;
 use super::{CourseError, CourseId, ReservationId};
 
@@ -70,6 +71,12 @@ pub struct TeeSheetItem {
     party_size: i32,
     #[getter(skip)]
     party_name: String,
+    /// The competition, group number, and named players the desk keeps.
+    ///
+    /// Empty until someone enters them: a reservation arrives from Field with a
+    /// single customer name and a headcount, which is not the same thing.
+    #[getter(skip)]
+    party: PartyDetails,
     #[getter(copy)]
     status: TeeSheetStatus,
     holes: i32,
@@ -113,10 +120,31 @@ impl TeeSheetItem {
             play_type,
             party_size: party_size.max(1),
             party_name: party_name.into(),
+            party: PartyDetails::default(),
             status,
             holes: if holes > 0 { holes } else { 18 },
             notes,
         }
+    }
+
+    pub fn with_party(mut self, party: PartyDetails) -> Self {
+        self.party = party;
+        self
+    }
+
+    pub fn party(&self) -> &PartyDetails {
+        &self.party
+    }
+
+    /// Seats on the booking with nobody's name against them.
+    ///
+    /// Zero both when every seat is named and when none is: the desk reads
+    /// "4名 / 名前なし" from the party being empty, not from this number.
+    pub fn unnamed_seat_count(&self) -> i32 {
+        if self.party.players().is_empty() {
+            return 0;
+        }
+        (self.party_size - self.party.named_player_count()).max(0)
     }
 
     pub fn id(&self) -> &ReservationId {

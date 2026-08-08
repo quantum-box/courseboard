@@ -3666,3 +3666,617 @@ button,
 }
 
 .sticky-submit .slot-diff-weekly { color: hsl(var(--nui-muted-foreground)); font-size: 12px; }
+
+/* ─── Start ledger ───────────────────────────────────────────────────────────
+ *
+ * The start desk's board: a table per course, a row per tee time. Rows exist
+ * whether or not anything is booked into them, so the grid itself has to read
+ * as a countable list of open slots rather than as a background behind blocks.
+ */
+
+.ledger-page {
+  --ledger-time-width: 76px;
+  --ledger-group-width: 190px;
+  --ledger-seat-width: 108px;
+  gap: 8px;
+  padding-top: 6px;
+  padding-bottom: 16px;
+}
+
+.ledger-chrome {
+  display: grid;
+  gap: 8px;
+  flex: none;
+}
+
+.ledger-summary {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .35);
+}
+
+.ledger-summary-item {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+  border-right: 1px solid hsl(var(--nui-border));
+  padding: 5px 10px;
+}
+
+.ledger-summary-item:last-child {
+  border-right: none;
+}
+
+.ledger-summary-item > span {
+  flex: none;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.ledger-summary-item > strong {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+.ledger-summary-item > small {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.ledger-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ledger-date-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ledger-inline-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ledger-inline-field > span {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ledger-inline-field input[type='date'],
+.ledger-inline-field .native-select {
+  height: 28px;
+  font-size: 12px;
+}
+
+.ledger-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.ledger-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.ledger-legend-item::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 3px;
+  background: hsl(var(--nui-background));
+}
+
+.ledger-legend-item.tone-partial::before {
+  background: color-mix(in srgb, hsl(var(--nui-primary)) 22%, hsl(var(--nui-background)));
+}
+
+.ledger-legend-item.tone-full::before {
+  background: hsl(var(--nui-muted));
+}
+
+.ledger-legend-item.tone-closed::before {
+  background: repeating-linear-gradient(
+    -45deg,
+    hsl(var(--nui-muted-foreground) / 35%) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+.ledger-legend-item.tone-special::before {
+  background: color-mix(in srgb, hsl(var(--nui-warning)) 35%, hsl(var(--nui-background)));
+}
+
+.ledger-mark-hint {
+  margin: 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.ledger-mark-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  border: 1px solid color-mix(in srgb, hsl(var(--nui-primary)) 40%, hsl(var(--nui-border)));
+  border-radius: var(--nui-radius-md);
+  padding: 8px 10px;
+  background: hsl(var(--nui-primary) / 6%);
+}
+
+.ledger-mark-panel > strong {
+  font-size: 12px;
+}
+
+.ledger-mark-label {
+  min-width: 200px;
+}
+
+.ledger-mark-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/* The board scrolls sideways as a whole so course columns stay side by side,
+ * the way they sit on the paper sheet. */
+.ledger-workspace {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.ledger-board {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: min-content;
+}
+
+.ledger-column {
+  display: flex;
+  /* Never shrink: columns keep the width their seat count needs and the board
+   * scrolls sideways, the way the paper sheet is read. Letting flex squeeze
+   * them collapses every cell to a few characters. */
+  flex: none;
+  flex-direction: column;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+  overflow: hidden;
+}
+
+.ledger-column-head {
+  display: grid;
+  gap: 2px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 8px 10px;
+  background: hsl(var(--nui-muted) / .4);
+}
+
+.ledger-column-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ledger-column-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.ledger-column-move {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.ledger-column-move > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-sm, 4px);
+  padding: 0;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-muted-foreground));
+  cursor: pointer;
+}
+
+.ledger-column-move > button:hover:not(:disabled) {
+  border-color: hsl(var(--nui-primary));
+  color: hsl(var(--nui-primary));
+}
+
+/* Kept visible rather than hidden at the ends: a control that disappears makes
+ * the header jump as columns are rearranged. */
+.ledger-column-move > button:disabled {
+  opacity: .35;
+  cursor: default;
+}
+
+.ledger-column-move svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ledger-column-totals {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ledger-column-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.ledger-column-derived {
+  margin: 0;
+  color: hsl(var(--nui-warning-foreground, var(--nui-muted-foreground)));
+  font-size: 11px;
+}
+
+.ledger-column-scroll {
+  max-height: 68vh;
+  overflow: auto;
+}
+
+.ledger-table {
+  /* Fixed, so the declared column widths hold. Left to auto, the seat columns
+   * squeeze the group column until "山田会 1組" clamps to "山田会 …" — and the
+   * group number is the half the desk searches by. */
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.ledger-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 5px 8px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.ledger-col-time { width: var(--ledger-time-width); }
+.ledger-col-group { width: var(--ledger-group-width); }
+.ledger-col-seat { width: var(--ledger-seat-width); }
+
+.ledger-table td,
+.ledger-table tbody th {
+  border-bottom: 1px solid hsl(var(--nui-border) / 60%);
+  border-right: 1px solid hsl(var(--nui-border) / 40%);
+  padding: 0;
+  vertical-align: top;
+}
+
+.ledger-table td:last-child {
+  border-right: none;
+}
+
+/* The time column stays put while the seat columns scroll under it: the row a
+ * name belongs to is the whole point of the board. */
+.ledger-cell-time {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: hsl(var(--nui-background));
+  font-weight: 400;
+  text-align: left;
+}
+
+.ledger-time-button {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  border: none;
+  padding: 5px 8px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-time-button time {
+  font-family: var(--nui-font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+.ledger-time-button:hover,
+.ledger-time-button:focus-visible {
+  outline: none;
+  background: hsl(var(--nui-muted) / .6);
+}
+
+.ledger-slot-status {
+  display: block;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  line-height: 13px;
+}
+
+.ledger-now-flag {
+  display: block;
+  padding: 0 8px 4px;
+  color: hsl(var(--nui-primary));
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.ledger-row.is-now > .ledger-cell-time {
+  box-shadow: inset 2px 0 0 hsl(var(--nui-primary));
+}
+
+.ledger-row.is-selected > .ledger-cell-time,
+.ledger-row.is-selected > td {
+  background: hsl(var(--nui-primary) / 12%);
+}
+
+/* Tones. An open row is plain background so a full board reads as busy and an
+ * empty one reads as empty, without any row shouting. */
+.ledger-row-partial > td,
+.ledger-row-partial > .ledger-cell-time {
+  background: color-mix(in srgb, hsl(var(--nui-primary)) 6%, hsl(var(--nui-background)));
+}
+
+.ledger-row-full > td,
+.ledger-row-full > .ledger-cell-time {
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.ledger-row-special > td,
+.ledger-row-special > .ledger-cell-time {
+  background: color-mix(in srgb, hsl(var(--nui-warning)) 14%, hsl(var(--nui-background)));
+}
+
+.ledger-row-closed > td,
+.ledger-row-closed > .ledger-cell-time,
+.ledger-row-retired > td,
+.ledger-row-retired > .ledger-cell-time {
+  background: repeating-linear-gradient(
+    -45deg,
+    hsl(var(--nui-muted-foreground) / 12%) 0 4px,
+    transparent 4px 8px
+  );
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.ledger-cell-empty {
+  padding: 5px 8px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.ledger-group-button {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  padding: 5px 8px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-group-button:hover,
+.ledger-group-button:focus-visible {
+  outline: none;
+  background: hsl(var(--nui-muted) / .6);
+}
+
+.ledger-cell-group.is-selected {
+  box-shadow: inset 0 0 0 2px hsl(var(--nui-primary) / 45%);
+}
+
+.ledger-group-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* A competition name plus its group number rarely fits on one line, and the
+ * number is the half a desk searches by — so it wraps rather than ellipsising
+ * the number away. */
+.ledger-group-text strong {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 15px;
+}
+
+.ledger-group-text small {
+  overflow: hidden;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* C / S, the same one-letter mark the paper ledger puts at the head of a row. */
+.ledger-play-type {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ledger-play-type-caddie {
+  background: color-mix(in srgb, hsl(var(--nui-primary)) 22%, hsl(var(--nui-background)));
+  color: hsl(var(--nui-primary));
+}
+
+.ledger-play-type-self {
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.ledger-cell-seat {
+  padding: 5px 8px;
+}
+
+.ledger-seat-tag {
+  display: block;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  line-height: 12px;
+}
+
+.ledger-seat-name {
+  display: block;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An unfilled seat and a seat outside the group must not look the same: the
+ * first is work to do, the second is nothing at all. */
+.ledger-cell-seat.is-unnamed {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.ledger-cell-seat.is-outside {
+  background: hsl(var(--nui-muted) / .25);
+}
+
+.ledger-party-editor {
+  display: grid;
+  gap: 14px;
+  padding: 0 2px 12px;
+}
+
+.ledger-party-players {
+  display: grid;
+  gap: 10px;
+}
+
+.ledger-party-players h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ledger-party-player {
+  display: grid;
+  grid-template-columns: 1fr 96px 110px auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.ledger-party-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .ledger-party-player {
+    grid-template-columns: 1fr;
+  }
+
+  .ledger-legend {
+    margin-left: 0;
+  }
+}
+
+/* Which courses get a column. Chips rather than a select: the set is small, and
+ * seeing every course at once is how the desk notices one is missing from the
+ * board. */
+.ledger-course-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ledger-course-picker > legend {
+  float: left;
+  padding: 0 6px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  line-height: 24px;
+}
+
+.ledger-course-chip {
+  height: 24px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 999px;
+  padding: 0 10px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.ledger-course-chip:hover {
+  border-color: hsl(var(--nui-primary) / 50%);
+}
+
+.ledger-course-chip.is-on {
+  border-color: hsl(var(--nui-primary));
+  background: hsl(var(--nui-primary) / 12%);
+  color: hsl(var(--nui-primary));
+  font-weight: 600;
+}
+
+.ledger-course-chip:focus-visible {
+  outline: 2px solid hsl(var(--nui-primary));
+  outline-offset: 1px;
+}

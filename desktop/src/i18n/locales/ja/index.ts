@@ -7,6 +7,7 @@ import { courses } from './courses'
 import { download } from './download'
 import { help } from './help'
 import { home } from './home'
+import { ledger } from './ledger'
 import { map } from './map'
 import { members } from './members'
 import { nav } from './nav'
@@ -32,6 +33,7 @@ export const ja = {
   download,
   help,
   home,
+  ledger,
   map,
   members,
   nav,

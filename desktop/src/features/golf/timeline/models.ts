@@ -1,3 +1,5 @@
+import type { PartyDetails } from '../ledger/models'
+
 export type PlayType = 'caddie' | 'self'
 
 export type TeeReservationStatus =
@@ -25,6 +27,8 @@ export type TeeReservation = {
   status: TeeReservationStatus
   holes: number
   notes?: string | null
+  /** Competition, group number, and named players. Absent until entered. */
+  party?: PartyDetails | null
 }
 
 export type TimelineAssignment = {

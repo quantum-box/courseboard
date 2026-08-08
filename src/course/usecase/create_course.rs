@@ -41,6 +41,21 @@ mod tests {
 
     #[async_trait]
     impl GolfCatalogGateway for FakeCatalog {
+        async fn get_course_order(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<crate::course::domain::CourseOrder, CourseError> {
+            Ok(crate::course::domain::CourseOrder::default())
+        }
+
+        async fn replace_course_order(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            order: &crate::course::domain::CourseOrder,
+        ) -> Result<crate::course::domain::CourseOrder, CourseError> {
+            Ok(order.clone())
+        }
+
         async fn list_courses(
             &self,
             _credentials: GatewayCredentials<'_>,
@@ -149,8 +164,9 @@ mod tests {
             courses: Mutex::new(Vec::new()),
         });
         let use_case = CreateCourseUseCase::new(catalog.clone());
-        let input = UpsertCourse::try_new("East", Some("E".into()), 18, "Asia/Tokyo", 8, true)
-            .expect("valid");
+        let input =
+            UpsertCourse::try_new("East", Some("E".into()), 18, "Asia/Tokyo", 8, true, None)
+                .expect("valid");
         let course = use_case
             .execute(
                 GatewayCredentials {
@@ -169,7 +185,8 @@ mod tests {
 
     #[test]
     fn upsert_course_rejects_invalid_interval() {
-        let error = UpsertCourse::try_new("East", None, 18, "Asia/Tokyo", 0, true).unwrap_err();
+        let error =
+            UpsertCourse::try_new("East", None, 18, "Asia/Tokyo", 0, true, None).unwrap_err();
         assert!(matches!(error, CourseError::BadRequest(_)));
     }
 }

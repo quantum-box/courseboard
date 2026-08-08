@@ -73,6 +73,56 @@ pub struct UpsertCourse {
     pub timezone: String,
     pub start_interval_minutes: StartIntervalMinutes,
     pub is_active: bool,
+    /// When the course starts and stops sending groups out.
+    ///
+    /// Optional because it was not settable before this field existed, and a
+    /// course saved without it must not have its hours wiped. The ledger draws
+    /// its rows from these when no inventory has been generated, so a course
+    /// with none gets a board built only from its bookings.
+    pub business_hours: Option<BusinessHours>,
+}
+
+/// A course's opening and closing wall clock, `HH:MM`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BusinessHours {
+    open: String,
+    close: String,
+}
+
+impl BusinessHours {
+    pub fn try_new(open: impl Into<String>, close: impl Into<String>) -> Result<Self, CourseError> {
+        let open = normalize_clock(open.into())?;
+        let close = normalize_clock(close.into())?;
+        if open >= close {
+            return Err(CourseError::BadRequest(
+                "a course must close after it opens",
+            ));
+        }
+        Ok(Self { open, close })
+    }
+
+    pub fn open(&self) -> &str {
+        &self.open
+    }
+
+    pub fn close(&self) -> &str {
+        &self.close
+    }
+}
+
+/// `HH:MM`, accepting the `HH:MM:SS` Field may hand back.
+fn normalize_clock(value: String) -> Result<String, CourseError> {
+    let head: String = value.trim().chars().take(5).collect();
+    let valid = head.len() == 5
+        && head.as_bytes()[2] == b':'
+        && head[..2].parse::<u8>().is_ok_and(|hour| hour <= 23)
+        && head[3..].parse::<u8>().is_ok_and(|minute| minute <= 59);
+    if !valid {
+        return Err(CourseError::BadRequest(
+            "opening hours must look like HH:MM",
+        ));
+    }
+    Ok(head)
 }
 
 impl UpsertCourse {
@@ -83,6 +133,7 @@ impl UpsertCourse {
         timezone: impl Into<String>,
         start_interval_minutes: i32,
         is_active: bool,
+        business_hours: Option<BusinessHours>,
     ) -> Result<Self, CourseError> {
         let name = name.into();
         let trimmed = name.trim();
@@ -104,6 +155,7 @@ impl UpsertCourse {
             timezone: tz.to_string(),
             start_interval_minutes: StartIntervalMinutes::try_new(start_interval_minutes)?,
             is_active,
+            business_hours,
         })
     }
 }

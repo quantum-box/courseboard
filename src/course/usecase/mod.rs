@@ -9,6 +9,7 @@
 //!   contain private helpers; do not pack unrelated operations into the same file.
 
 mod auto_assign_caddies;
+mod course_order;
 mod course_schedule;
 mod create_caddie;
 mod create_course;
@@ -22,6 +23,7 @@ mod get_extension_status;
 mod get_monthly_settlement;
 mod get_payroll_summary;
 mod get_reservation_policy;
+mod get_tee_ledger;
 mod get_tee_sheet;
 mod import_daily_budgets_csv;
 mod link_course_resource;
@@ -41,17 +43,21 @@ mod list_resources;
 mod quote_golf_fee;
 mod replace_caddie_memberships;
 mod replace_product_slots;
+mod seed_demo_board;
 mod simulate_green_fee_range;
+mod slot_overrides;
 mod update_caddie;
 mod update_caddie_assignment;
 mod update_course;
 mod update_extension_config;
+mod update_reservation_party;
 mod update_reservation_policy;
 mod upsert_caddie_availability;
 mod upsert_daily_budget;
 mod upsert_reservation_product;
 
 pub use auto_assign_caddies::AutoAssignCaddiesUseCase;
+pub use course_order::{GetCourseOrderUseCase, ReplaceCourseOrderUseCase};
 pub use course_schedule::{
     GenerateCourseTimeSlotsUseCase, GetCourseScheduleUseCase, ReplaceCourseScheduleUseCase,
 };
@@ -67,6 +73,7 @@ pub use get_extension_status::GetExtensionStatusUseCase;
 pub use get_monthly_settlement::GetMonthlySettlementUseCase;
 pub use get_payroll_summary::GetPayrollSummaryUseCase;
 pub use get_reservation_policy::GetReservationPolicyUseCase;
+pub use get_tee_ledger::GetTeeLedgerUseCase;
 pub use get_tee_sheet::GetTeeSheetUseCase;
 pub use import_daily_budgets_csv::ImportDailyBudgetsCsvUseCase;
 pub use link_course_resource::LinkCourseResourceUseCase;
@@ -86,11 +93,16 @@ pub use list_resources::ListResourcesUseCase;
 pub use quote_golf_fee::QuoteGolfFeeUseCase;
 pub use replace_caddie_memberships::ReplaceCaddieMembershipsUseCase;
 pub use replace_product_slots::ReplaceProductSlotsUseCase;
+pub use seed_demo_board::{SeedDemoBoardUseCase, SeedSummary};
 pub use simulate_green_fee_range::SimulateGreenFeeRangeUseCase;
+pub use slot_overrides::{
+    DeleteSlotOverridesUseCase, ListSlotOverridesUseCase, UpsertSlotOverridesUseCase,
+};
 pub use update_caddie::UpdateCaddieUseCase;
 pub use update_caddie_assignment::UpdateCaddieAssignmentUseCase;
 pub use update_course::UpdateCourseUseCase;
 pub use update_extension_config::UpdateExtensionConfigUseCase;
+pub use update_reservation_party::UpdateReservationPartyUseCase;
 pub use update_reservation_policy::UpdateReservationPolicyUseCase;
 pub use upsert_caddie_availability::UpsertCaddieAvailabilityUseCase;
 pub use upsert_daily_budget::UpsertDailyBudgetUseCase;

@@ -5,6 +5,7 @@ export const timeline = {
   loading: 'タイムラインを読み込んでいます…',
   reload: '読み直す',
   toDispatch: '配置へ',
+  toLedger: '予約台帳へ',
   /** Shown when the board was built without part of the golf catalog. */
   partial: {
     title: 'プランの情報が取れていません',

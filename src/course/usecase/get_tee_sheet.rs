@@ -209,6 +209,7 @@ fn to_tee_sheet_item(
         holes,
         reservation.notes().map(str::to_string),
     )
+    .with_party(reservation.party().clone())
 }
 
 #[cfg(test)]
@@ -235,6 +236,46 @@ mod tests {
         ) -> Result<Vec<Reservation>, CourseError> {
             Ok(self.items.lock().expect("lock").clone())
         }
+
+        async fn update_reservation_party(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &crate::course::domain::ReservationId,
+            party: &crate::course::domain::PartyDetails,
+        ) -> Result<crate::course::domain::PartyDetails, CourseError> {
+            Ok(party.clone())
+        }
+
+        async fn list_reservation_type_ids(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<String>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn list_seeded_reservations(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<crate::course::domain::SeededReservation>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn create_reservation(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: &crate::course::domain::NewReservation,
+        ) -> Result<crate::course::domain::ReservationId, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn replace_reservation(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &crate::course::domain::ReservationId,
+            _input: &crate::course::domain::NewReservation,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
     }
 
     struct FakeGolfCatalogGateway {
@@ -246,6 +287,21 @@ mod tests {
 
     #[async_trait]
     impl GolfCatalogGateway for FakeGolfCatalogGateway {
+        async fn get_course_order(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<crate::course::domain::CourseOrder, CourseError> {
+            Ok(crate::course::domain::CourseOrder::default())
+        }
+
+        async fn replace_course_order(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            order: &crate::course::domain::CourseOrder,
+        ) -> Result<crate::course::domain::CourseOrder, CourseError> {
+            Ok(order.clone())
+        }
+
         async fn list_courses(
             &self,
             _credentials: GatewayCredentials<'_>,

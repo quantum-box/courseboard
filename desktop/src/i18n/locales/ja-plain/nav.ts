@@ -16,6 +16,10 @@ export const nav: DeepPartial<typeof source> = {
       label: '最初の画面',
       description: '今日の仕事はここから始めます',
     },
+    'golf/ledger': {
+      label: 'よやく台帳',
+      description: 'スタートの 時こくごとの あきと 組を 見る',
+    },
     'golf/timeline': {
       label: '今日の予定表',
       description: '今日の予約と担当を、時間の順に並べて見ます',

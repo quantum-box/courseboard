@@ -15,6 +15,10 @@ export const nav = {
       label: 'ホーム',
       description: '今日の仕事の入口',
     },
+    'golf/ledger': {
+      label: '予約台帳',
+      description: 'スタート時刻ごとの空きと組を見る',
+    },
     'golf/timeline': {
       label: 'タイムライン',
       description: '今日の予約とキャディを時間順に見る',
