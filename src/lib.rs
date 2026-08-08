@@ -29,6 +29,7 @@ use axum::{
 use cancellation_fees::{CancellationFeeConfig, MySqlCancellationFeeRepository};
 use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
+use course::infrastructure::MySqlSlotOverrideRepository;
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
@@ -50,6 +51,7 @@ static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 pub struct AppState {
     rules: Arc<MySqlTaxRuleRepository>,
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
+    slot_overrides: Arc<MySqlSlotOverrideRepository>,
     cancellation_fee_config: CancellationFeeConfig,
     http_client: reqwest::Client,
     token_verifier: Arc<dyn TokenVerifier>,
@@ -74,7 +76,8 @@ impl AppState {
     ) -> Self {
         Self {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
-            cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool)),
+            cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
+            slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool)),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
             token_verifier,
@@ -107,7 +110,8 @@ impl AppState {
     ) -> Self {
         Self {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
-            cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool)),
+            cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
+            slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool)),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
             token_verifier,
@@ -126,7 +130,8 @@ impl AppState {
         match field_api {
             Ok(client) => Self {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
-                cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool)),
+                cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
+                slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool)),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
                 token_verifier,
@@ -136,7 +141,8 @@ impl AppState {
             },
             Err(error) => Self {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
-                cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool)),
+                cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
+                slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool)),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
                 token_verifier,
@@ -150,6 +156,11 @@ impl AppState {
     /// CourseBoard-owned golf tax rules, for the simulator gateway.
     pub fn tax_rules(&self) -> Arc<MySqlTaxRuleRepository> {
         self.rules.clone()
+    }
+
+    /// CourseBoard-owned desk marks on individual tee times.
+    pub fn slot_overrides(&self) -> Arc<MySqlSlotOverrideRepository> {
+        self.slot_overrides.clone()
     }
 
     fn with_profile_client(mut self, profile_client: Option<profile_proxy::ProfileClient>) -> Self {
@@ -309,6 +320,43 @@ pub fn build_router(state: AppState) -> Router {
             get(course::interfaces::http::get_tee_sheet).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
+        )
+        .route(
+            "/v1/course/tee-ledger",
+            get(course::interfaces::http::get_tee_ledger).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/reservations/:reservation_id/party",
+            patch(course::interfaces::http::update_reservation_party).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/demo-seed",
+            post(course::interfaces::http::seed_demo_board).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/course-order",
+            get(course::interfaces::http::get_course_order)
+                .put(course::interfaces::http::replace_course_order)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/slot-overrides",
+            get(course::interfaces::http::list_slot_overrides)
+                .put(course::interfaces::http::upsert_slot_overrides)
+                .delete(course::interfaces::http::delete_slot_overrides)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
         )
         .route(
             "/v1/course/courses",
@@ -1177,6 +1225,107 @@ impl IntoResponse for AppError {
     }
 }
 
+/// Shared test database setup.
+///
+/// Both the router tests and the repository tests need the same migrated
+/// database; duplicating the connect-and-migrate dance would let the two drift
+/// onto different schemas.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
+    use sqlx::MySqlPool;
+    use std::time::Duration;
+    use tokio::sync::Mutex;
+
+    /// Whether this process has already brought the schema up to date.
+    ///
+    /// The migrator is idempotent but not contention-free: several dozen tests
+    /// running it at once against TiDB ends in "pessimistic lock retry limit
+    /// reached", and the test that happens to lose looks broken. A mutex is safe
+    /// to hold across tests in a way a connection pool is not — it owns no
+    /// runtime-bound resource, so a test runtime shutting down simply releases
+    /// it.
+    static MIGRATED: Mutex<bool> = Mutex::const_new(false);
+
+    /// A pool for one test.
+    ///
+    /// Deliberately per-test rather than shared: `#[tokio::test]` builds a
+    /// runtime per test and drops it at the end, so a pool cached across tests
+    /// ends up holding connections owned by a runtime that has shut down, and
+    /// every later test fails with "a Tokio 1.x context ... is being shutdown".
+    ///
+    /// Kept small for the same reason the tests are cheap to run: several dozen
+    /// of these exist at once, and a large pool each exhausts the database's
+    /// connection budget before the suite finishes.
+    pub(crate) async fn test_pool() -> MySqlPool {
+        let host =
+            std::env::var("COURSEBOARD_TEST_DB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
+        let port = std::env::var("COURSEBOARD_TEST_DB_PORT")
+            .map(|value| {
+                value
+                    .parse()
+                    .expect("COURSEBOARD_TEST_DB_PORT must be a u16")
+            })
+            .unwrap_or(4000);
+        let username =
+            std::env::var("COURSEBOARD_TEST_DB_USER").unwrap_or_else(|_| "root".to_string());
+        let database = std::env::var("COURSEBOARD_TEST_DB_NAME")
+            .unwrap_or_else(|_| "courseboard_test".to_string());
+        assert!(
+            database
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '_'),
+            "COURSEBOARD_TEST_DB_NAME must contain only ASCII letters, digits, and underscores"
+        );
+
+        let mut connect_options = MySqlConnectOptions::new()
+            .host(&host)
+            .port(port)
+            .username(&username);
+        if let Ok(password) = std::env::var("COURSEBOARD_TEST_DB_PASSWORD") {
+            connect_options = connect_options.password(&password);
+        }
+
+        let admin_pool = MySqlPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(Duration::from_secs(60))
+            .connect_with(connect_options.clone())
+            .await
+            .expect("connect test TiDB admin pool");
+        sqlx::query(&format!(
+            "CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+        ))
+        .execute(&admin_pool)
+        .await
+        .expect("create test TiDB database");
+        admin_pool.close().await;
+
+        let pool = MySqlPoolOptions::new()
+            .max_connections(2)
+            .acquire_timeout(Duration::from_secs(60))
+            .connect_with(connect_options.database(&database))
+            .await
+            .expect("connect test TiDB database");
+        let mut migrated = MIGRATED.lock().await;
+        if !*migrated {
+            super::run_migrations(&pool).await.expect("run migrations");
+            *migrated = true;
+        }
+        pool
+    }
+
+    /// A tenant id unique to this test process.
+    ///
+    /// The test database outlives any one run: CI reuses a service container, a
+    /// developer keeps one up for days, and a killed run can leave a binary
+    /// still writing to it. Rows keyed by a fixed tenant let two runs delete
+    /// each other's data, which surfaces as a test that fails only sometimes —
+    /// the worst kind to chase.
+    pub(crate) fn test_tenant(name: &str) -> String {
+        format!("t{}-{name}", std::process::id())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1190,8 +1339,7 @@ mod tests {
     use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
     use rand::rngs::OsRng;
     use rsa::{pkcs1::EncodeRsaPrivateKey, traits::PublicKeyParts, RsaPrivateKey};
-    use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
-    use std::{collections::HashSet, time::Duration};
+    use std::collections::HashSet;
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -1417,55 +1565,7 @@ mod tests {
         verifier: OidcJwtVerifier,
         config: CancellationFeeConfig,
     ) -> Router {
-        let host =
-            std::env::var("COURSEBOARD_TEST_DB_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-        let port = std::env::var("COURSEBOARD_TEST_DB_PORT")
-            .map(|value| {
-                value
-                    .parse()
-                    .expect("COURSEBOARD_TEST_DB_PORT must be a u16")
-            })
-            .unwrap_or(4000);
-        let username =
-            std::env::var("COURSEBOARD_TEST_DB_USER").unwrap_or_else(|_| "root".to_string());
-        let database = std::env::var("COURSEBOARD_TEST_DB_NAME")
-            .unwrap_or_else(|_| "courseboard_test".to_string());
-        assert!(
-            database
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric() || character == '_'),
-            "COURSEBOARD_TEST_DB_NAME must contain only ASCII letters, digits, and underscores"
-        );
-
-        let mut connect_options = MySqlConnectOptions::new()
-            .host(&host)
-            .port(port)
-            .username(&username);
-        if let Ok(password) = std::env::var("COURSEBOARD_TEST_DB_PASSWORD") {
-            connect_options = connect_options.password(&password);
-        }
-
-        let admin_pool = MySqlPoolOptions::new()
-            .max_connections(1)
-            .acquire_timeout(Duration::from_secs(60))
-            .connect_with(connect_options.clone())
-            .await
-            .expect("connect test TiDB admin pool");
-        sqlx::query(&format!(
-            "CREATE DATABASE IF NOT EXISTS `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
-        ))
-        .execute(&admin_pool)
-        .await
-        .expect("create test TiDB database");
-        admin_pool.close().await;
-
-        let pool = MySqlPoolOptions::new()
-            .max_connections(5)
-            .acquire_timeout(Duration::from_secs(60))
-            .connect_with(connect_options.database(&database))
-            .await
-            .expect("connect test TiDB database");
-        run_migrations(&pool).await.expect("run migrations");
+        let pool = crate::test_support::test_pool().await;
         build_router(AppState::new_with_cancellation_fee_config(
             pool,
             Arc::new(verifier),

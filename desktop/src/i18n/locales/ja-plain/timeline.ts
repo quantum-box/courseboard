@@ -9,6 +9,7 @@ export const timeline: DeepPartial<typeof source> = {
   loading: '予定表を読み込んでいます…',
   reload: '読み直す',
   toDispatch: '担当決めの画面へ',
+  toLedger: 'よやく台帳へ',
   partial: {
     title: 'プランの内容が取れていません',
     description:

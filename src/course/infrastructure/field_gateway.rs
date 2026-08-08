@@ -16,17 +16,27 @@ use serde_json::{json, Value};
 use crate::config::EMPTY_COURSE_STORE_URL;
 use crate::course::domain::{
     field_day_of_week_to_courseboard, AvailabilityRule, Caddie, CaddieAssignment, CaddieRank,
-    CaddieSkillLevel, CaddieUpstreamIdentity, Course, CourseError, CourseId, GatewayCredentials,
-    GenerationSummary, GolfCatalogGateway, ProductSlot, Reservation, ReservationGateway,
-    ReservationProduct, ReservationScheduleGateway, ReservationServiceId, Resource, ResourceId,
-    ResourceKind, SaveCourseResource, UpsertCourse, UpsertReservationProduct,
+    CaddieSkillLevel, CaddieUpstreamIdentity, Course, CourseError, CourseId, CourseOrder,
+    GatewayCredentials, GenerationSummary, GolfCatalogGateway, NewReservation, PartyDetails,
+    ProductSlot, Reservation, ReservationGateway, ReservationId, ReservationProduct,
+    ReservationScheduleGateway, ReservationServiceId, Resource, ResourceId, ResourceKind,
+    ResourceTimeSlot, SaveCourseResource, SeededReservation, UpsertCourse,
+    UpsertReservationProduct, SEED_KEY_FIELD,
 };
+use crate::course::infrastructure::course_order_config;
 use crate::course::infrastructure::generic_product_config;
+use crate::course::infrastructure::party_custom_fields;
 use crate::field_api::DEFAULT_FIELD_API_URL;
 
 const GOLF_EXTENSION_KEY: &str = "golf_course";
 const RESERVATION_LIST_LIMIT: u32 = 2000;
 const FIELD_UPSTREAM_TIMEOUT: Duration = Duration::from_secs(15);
+/// How many times a config write re-merges after losing to a concurrent writer.
+///
+/// Three: enough to ride out one collision and the retry of the writer that
+/// caused it, few enough that two screens saving in a loop fail loudly rather
+/// than hammering Field.
+const CONFIG_WRITE_ATTEMPTS: usize = 3;
 
 fn is_empty_course_store(base_url: &str) -> bool {
     base_url.trim().eq_ignore_ascii_case(EMPTY_COURSE_STORE_URL)
@@ -67,6 +77,156 @@ impl ReservationGateway for FieldReservationGateway {
             field_get_items(&self.client, &self.base_url, &path, credentials).await?;
         Ok(items.into_iter().map(map_reservation).collect())
     }
+
+    async fn update_reservation_party(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+        party: &PartyDetails,
+    ) -> Result<PartyDetails, CourseError> {
+        // Field's PATCH replaces `customFields` wholesale, so the current object
+        // has to be read first: `golfCourseId` lives in it, and sending only the
+        // group detail would move the booking off its course.
+        let path = format!(
+            "/v1/erp/reservations/{}",
+            urlencoding_path(reservation_id.as_str())
+        );
+        let current: FieldReservationDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::GET,
+            &path,
+            credentials,
+            None,
+        )
+        .await?;
+        let merged = party_custom_fields::merge_party(current.custom_fields_json.as_ref(), party);
+        let updated: FieldReservationDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::PATCH,
+            &path,
+            credentials,
+            Some(&json!({ "customFields": merged })),
+        )
+        .await?;
+        // Field answers with what it stored. If the group detail is not in it,
+        // the save did not happen however green the response was, and telling
+        // the operator otherwise loses names they typed.
+        let stored = party_custom_fields::read_party(updated.custom_fields_json.as_ref());
+        if &stored != party {
+            return Err(CourseError::Provider(
+                "the group detail was not stored as sent; the reservation was left unchanged"
+                    .into(),
+            ));
+        }
+        Ok(stored)
+    }
+
+    async fn list_reservation_type_ids(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<Vec<String>, CourseError> {
+        let items: Vec<FieldReservationTypeDto> = field_get_items(
+            &self.client,
+            &self.base_url,
+            "/v1/erp/reservation-types",
+            credentials,
+        )
+        .await?;
+        Ok(items.into_iter().map(|item| item.id).collect())
+    }
+
+    async fn list_seeded_reservations(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<Vec<SeededReservation>, CourseError> {
+        let path = format!("/v1/erp/reservations?limit={RESERVATION_LIST_LIMIT}");
+        let items: Vec<FieldReservationDto> =
+            field_get_items(&self.client, &self.base_url, &path, credentials).await?;
+        Ok(items
+            .into_iter()
+            .filter_map(|item| {
+                let seed_key =
+                    json_string_field(item.custom_fields_json.as_ref(), &[SEED_KEY_FIELD])?;
+                Some(SeededReservation {
+                    id: ReservationId::new(item.id),
+                    seed_key,
+                })
+            })
+            .collect())
+    }
+
+    async fn create_reservation(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &NewReservation,
+    ) -> Result<ReservationId, CourseError> {
+        let created: FieldReservationDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            "/v1/erp/reservations",
+            credentials,
+            Some(&new_reservation_body(input, true)),
+        )
+        .await?;
+        Ok(ReservationId::new(created.id))
+    }
+
+    async fn replace_reservation(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+        input: &NewReservation,
+    ) -> Result<(), CourseError> {
+        let path = format!(
+            "/v1/erp/reservations/{}",
+            urlencoding_path(reservation_id.as_str())
+        );
+        // The seed owns every custom field on a booking it wrote, so this one
+        // replaces rather than merges — unlike the operator-facing party write,
+        // which has to preserve whatever else is in there.
+        field_send_json::<FieldReservationDto>(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::PATCH,
+            &path,
+            credentials,
+            Some(&new_reservation_body(input, false)),
+        )
+        .await?;
+        Ok(())
+    }
+}
+
+/// The body Field takes for a seeded booking.
+///
+/// `reservationTypeId` only on create: Field's update request has no such field,
+/// and sending one would be rejected as unknown.
+fn new_reservation_body(input: &NewReservation, creating: bool) -> Value {
+    let mut custom_fields = party_custom_fields::merge_party(None, &input.party);
+    if let Some(object) = custom_fields.as_object_mut() {
+        object.insert("golfCourseId".into(), json!(input.golf_course_id.as_str()));
+        object.insert(SEED_KEY_FIELD.into(), json!(input.seed_key));
+    }
+    let mut body = json!({
+        "startsAt": input.starts_at,
+        "endsAt": input.ends_at,
+        "quantity": input.quantity,
+        "customerName": input.customer_name,
+        "customFields": custom_fields,
+    });
+    if creating {
+        body["reservationTypeId"] = json!(input.reservation_type_id);
+    }
+    body
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldReservationTypeDto {
+    id: String,
 }
 
 /// Loads / mutates golf catalog through Field golf-course extension endpoints.
@@ -118,6 +278,48 @@ impl FieldGolfCatalogGateway {
             Some(&body),
         )
         .await
+    }
+
+    /// Change one key of the extension config, and make sure the change stuck.
+    ///
+    /// Field replaces `configJson` wholesale and offers no version to compare
+    /// against, so two writers that read the same starting value lose one of the
+    /// two changes — and the loser is told the save worked. That is not a
+    /// theoretical race here: plans and the ledger's column order live in the
+    /// same object, and are edited from different screens.
+    ///
+    /// Without a compare-and-set the fix is to stay in the operation: write,
+    /// read back, and if the key is not what we wrote, merge again onto whatever
+    /// won and write again. It converges as long as writes are not continuous,
+    /// which turns a silently lost edit into one that is either applied or
+    /// reported.
+    async fn write_config_key(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        key: &str,
+        apply: impl Fn(&Value) -> Value,
+    ) -> Result<Value, CourseError> {
+        for attempt in 1..=CONFIG_WRITE_ATTEMPTS {
+            let current = self.read_config(credentials).await?;
+            let next = apply(&current);
+            self.write_config(credentials, &next).await?;
+
+            let stored = self.read_config(credentials).await?;
+            // Only our own key is compared. Another writer adding a key of its
+            // own is not a conflict, and retrying on it would never settle.
+            if stored.get(key) == next.get(key) {
+                return Ok(stored);
+            }
+            tracing::warn!(
+                key,
+                attempt,
+                "extension config write was overwritten by a concurrent writer; retrying"
+            );
+        }
+        Err(CourseError::Provider(format!(
+            "the extension config kept being overwritten while saving `{key}`; \
+             nothing was changed on the last attempt"
+        )))
     }
 }
 
@@ -274,6 +476,33 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         Ok(map_resource(dto))
     }
 
+    async fn get_course_order(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<CourseOrder, CourseError> {
+        Ok(course_order_config::read_course_order(
+            &self.read_config(credentials).await?,
+        ))
+    }
+
+    async fn replace_course_order(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        order: &CourseOrder,
+    ) -> Result<CourseOrder, CourseError> {
+        // Read-modify-write: the extension config is shared with the generic
+        // reservation products the storefront reads, and sending only the order
+        // would take the plans with it.
+        let stored = self
+            .write_config_key(
+                credentials,
+                course_order_config::COURSE_ORDER_KEY,
+                |config| course_order_config::with_course_order(config, order),
+            )
+            .await?;
+        Ok(course_order_config::read_course_order(&stored))
+    }
+
     async fn list_reservation_products(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -288,10 +517,17 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         credentials: GatewayCredentials<'_>,
         input: UpsertReservationProduct,
     ) -> Result<ReservationProduct, CourseError> {
-        let config = self.read_config(credentials).await?;
-        let next = generic_product_config::upsert_product(&config, &input);
-        self.write_config(credentials, &next).await?;
-        generic_product_config::read_products(&next)
+        // Same shared object as the column order, so the same write-and-verify:
+        // arranging the board must not silently drop a plan saved at the same
+        // moment, or the other way round.
+        let stored = self
+            .write_config_key(
+                credentials,
+                generic_product_config::PRODUCTS_KEY,
+                |config| generic_product_config::upsert_product(config, &input),
+            )
+            .await?;
+        generic_product_config::read_products(&stored)
             .into_iter()
             .find(|product| product.reservation_service_id() == &input.reservation_service_id)
             .ok_or(CourseError::Provider(
@@ -408,6 +644,82 @@ impl ReservationScheduleGateway for FieldGolfCatalogGateway {
             unchanged: response.result.unchanged,
         })
     }
+
+    async fn list_resource_time_slots(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        resource_id: &ResourceId,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<ResourceTimeSlot>, CourseError> {
+        // A list GET against the opt-out store answers "nothing generated", the
+        // same as `field_get_items` does; erroring here would take down the whole
+        // ledger instead of falling back to a derived grid.
+        if is_empty_course_store(&self.base_url) {
+            let _ = (resource_id, from, to, credentials);
+            return Ok(Vec::new());
+        }
+        // Retired rows are asked for on purpose. A slot Field deactivated still
+        // has to appear on the ledger — struck through rather than missing —
+        // because a row that silently disappears reads as a row that was never
+        // sold.
+        let path = format!(
+            "/v1/erp/reservation-resources/{}/time-slots?from={}&to={}&includeInactive=true",
+            urlencoding_path(resource_id.as_str()),
+            urlencoding_path(from.to_rfc3339()),
+            urlencoding_path(to.to_rfc3339()),
+        );
+        let response: FieldResourceTimeSlotListDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::GET,
+            &path,
+            credentials,
+            None,
+        )
+        .await?;
+        Ok(response.slots.into_iter().map(map_time_slot).collect())
+    }
+}
+
+fn map_time_slot(value: FieldResourceTimeSlotDto) -> ResourceTimeSlot {
+    // `availableQuantity` is Field's own arithmetic; recomputing it here would
+    // invent a second answer to the same question when the two disagree.
+    ResourceTimeSlot::reconstitute(
+        value.id,
+        value.starts_at,
+        value.ends_at,
+        value.capacity,
+        value.reserved_quantity,
+        value.held_quantity,
+        value.available_quantity,
+        value.active.unwrap_or(true),
+    )
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldResourceTimeSlotListDto {
+    #[serde(default)]
+    slots: Vec<FieldResourceTimeSlotDto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldResourceTimeSlotDto {
+    id: String,
+    starts_at: DateTime<Utc>,
+    ends_at: DateTime<Utc>,
+    #[serde(default)]
+    capacity: i32,
+    #[serde(default)]
+    reserved_quantity: i32,
+    #[serde(default)]
+    held_quantity: i32,
+    #[serde(default)]
+    available_quantity: i32,
+    #[serde(default)]
+    active: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -493,14 +805,20 @@ pub(crate) fn urlencoding_path(value: impl AsRef<str>) -> String {
 }
 
 fn upsert_course_body(input: &UpsertCourse) -> Value {
-    json!({
+    let mut body = json!({
         "name": input.name,
         "shortName": input.short_name,
         "holeCount": input.hole_count.get(),
         "timezone": input.timezone,
         "startIntervalMinutes": input.start_interval_minutes.get(),
         "isActive": input.is_active,
-    })
+    });
+    // Sent only when set: Field replaces the column with whatever arrives, so a
+    // save that omitted the hours would clear the ones a course already has.
+    if let Some(hours) = &input.business_hours {
+        body["businessHoursJson"] = json!({ "open": hours.open(), "close": hours.close() });
+    }
+    body
 }
 
 fn map_reservation(value: FieldReservationDto) -> Reservation {
@@ -508,6 +826,7 @@ fn map_reservation(value: FieldReservationDto) -> Reservation {
         value.custom_fields_json.as_ref(),
         &["golfCourseId", "golf_course_id"],
     );
+    let party = party_custom_fields::read_party(value.custom_fields_json.as_ref());
     Reservation::reconstitute(
         value.id,
         value.reservation_number,
@@ -521,6 +840,7 @@ fn map_reservation(value: FieldReservationDto) -> Reservation {
         golf_course_id,
         value.notes,
     )
+    .with_party(party)
 }
 
 fn map_course(value: FieldGolfCourseDto) -> Course {

@@ -1,17 +1,18 @@
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 
 use super::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
     AvailabilityQuery, AvailabilityRule, BudgetAchievement, Caddie, CaddieAssignment,
     CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating,
-    CaddieRecommendation, CaddieRoster, CaddieStaff, Course, CourseError, CourseId, DailyBudget,
-    DailyBudgetQuery, ExtensionStatus, GenerationSummary, MonthlySettlement, ProductSlot,
-    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationPolicy,
-    ReservationProduct, ReservationServiceId, Resource, ResourceId, SaveCourseResource,
-    TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
-    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
-    UpsertReservationProduct, WorkedMinutes,
+    CaddieRecommendation, CaddieRoster, CaddieStaff, Course, CourseError, CourseId, CourseOrder,
+    DailyBudget, DailyBudgetQuery, DeleteSlotOverrides, ExtensionStatus, GenerationSummary,
+    MonthlySettlement, NewReservation, PartyDetails, ProductSlot, RecommendationQuery,
+    ReplaceCaddieMemberships, Reservation, ReservationId, ReservationPolicy, ReservationProduct,
+    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
+    SeededReservation, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig,
+    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    UpsertCourse, UpsertDailyBudget, UpsertReservationProduct, WorkedMinutes,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -56,6 +57,51 @@ pub struct TeeSheetQuery {
     pub golf_course_id: Option<CourseId>,
 }
 
+#[derive(Debug, Clone)]
+pub struct TeeLedgerQuery {
+    pub date: NaiveDate,
+    /// Which courses get a column. Empty means every active course.
+    ///
+    /// A list rather than one id because the desk works several courses side by
+    /// side and picks which ones are on the board — a single filter can only
+    /// answer "this one" or "all of them", and neither is the usual case.
+    pub golf_course_ids: Vec<CourseId>,
+}
+
+impl TeeLedgerQuery {
+    pub fn includes(&self, course_id: &CourseId) -> bool {
+        self.golf_course_ids.is_empty() || self.golf_course_ids.contains(course_id)
+    }
+}
+
+/// Port for the desk's own marks on individual tee times.
+///
+/// Field generates tee-time inventory but exposes no write API for one slot, so
+/// "closed on this Saturday only" is CourseBoard's data to keep (ADR-0005).
+#[async_trait]
+pub trait SlotOverrideGateway: Send + Sync {
+    async fn list_slot_overrides(
+        &self,
+        tenant_id: &str,
+        query: &SlotOverrideQuery,
+    ) -> Result<Vec<SlotOverride>, CourseError>;
+
+    /// Replaces the mark on each named tee time, leaving the rest of the day
+    /// alone. Re-marking a slot that is already marked changes it rather than
+    /// adding a second mark.
+    async fn upsert_slot_overrides(
+        &self,
+        tenant_id: &str,
+        overrides: &[SlotOverride],
+    ) -> Result<Vec<SlotOverride>, CourseError>;
+
+    async fn delete_slot_overrides(
+        &self,
+        tenant_id: &str,
+        command: &DeleteSlotOverrides,
+    ) -> Result<u64, CourseError>;
+}
+
 /// Port for the generic reservation schedule and the inventory it generates.
 ///
 /// Field owns these as resource-level APIs; a golf course reaches them through
@@ -86,6 +132,22 @@ pub trait ReservationScheduleGateway: Send + Sync {
         to: NaiveDate,
         dry_run: bool,
     ) -> Result<GenerationSummary, CourseError>;
+
+    /// The generated tee-time rows for one resource inside a time window.
+    ///
+    /// This is the ledger's inventory: every row exists whether or not anything
+    /// is booked into it, which is exactly what an availability list cannot say.
+    ///
+    /// The window is instants rather than dates because a course's day is local
+    /// and Field's bound is UTC; `from` is inclusive and `to` exclusive, so one
+    /// JST day is midnight to the next midnight without an off-by-one slot.
+    async fn list_resource_time_slots(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        resource_id: &ResourceId,
+        from: DateTime<Utc>,
+        to: DateTime<Utc>,
+    ) -> Result<Vec<ResourceTimeSlot>, CourseError>;
 }
 
 /// Port for listing generic ERP reservations used by the tee-sheet.
@@ -95,6 +157,52 @@ pub trait ReservationGateway: Send + Sync {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<Reservation>, CourseError>;
+
+    /// Replaces the group detail CourseBoard keeps on one reservation.
+    ///
+    /// Field stores custom fields as one object and a write replaces all of it,
+    /// so implementations must read the current object and merge rather than
+    /// send only the golf keys — `golfCourseId` lives in the same object and a
+    /// naive write would move the booking off its course.
+    async fn update_reservation_party(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+        party: &PartyDetails,
+    ) -> Result<PartyDetails, CourseError>;
+
+    /// Reservation type ids the tenant has.
+    ///
+    /// Field requires one on every booking and offers no way to create one, so
+    /// the seed can only use what the tenant already has — and has to say so
+    /// plainly when there is nothing to use.
+    async fn list_reservation_type_ids(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<Vec<String>, CourseError>;
+
+    /// Bookings a previous seed run wrote, by their seed key.
+    async fn list_seeded_reservations(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<Vec<SeededReservation>, CourseError>;
+
+    async fn create_reservation(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &NewReservation,
+    ) -> Result<ReservationId, CourseError>;
+
+    /// Move an already-seeded booking back onto the demo day.
+    ///
+    /// Separate from create so a re-run updates in place: the demo is meant to
+    /// be re-runnable without the board filling up with yesterday's copies.
+    async fn replace_reservation(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+        input: &NewReservation,
+    ) -> Result<(), CourseError>;
 }
 
 /// Port for golf catalog (courses, resources, reservation products).
@@ -149,6 +257,21 @@ pub trait GolfCatalogGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         input: SaveCourseResource,
     ) -> Result<Resource, CourseError>;
+
+    /// Left-to-right column order for the ledger.
+    ///
+    /// Tenant-scoped: the order groups go out in is the club's, so every
+    /// operator's board reads the same way.
+    async fn get_course_order(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<CourseOrder, CourseError>;
+
+    async fn replace_course_order(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        order: &CourseOrder,
+    ) -> Result<CourseOrder, CourseError>;
 
     async fn list_reservation_products(
         &self,

@@ -6,7 +6,7 @@
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use derive_getters::Getters;
 
-use super::{CourseId, ReservationId, ReservationServiceId, ResourceId};
+use super::{CourseId, PartyDetails, ReservationId, ReservationServiceId, ResourceId};
 
 /// Party reservation that may appear on a tee sheet.
 #[derive(Debug, Clone, PartialEq, Eq, Getters)]
@@ -30,6 +30,9 @@ pub struct Reservation {
     quantity: i32,
     #[getter(skip)]
     golf_course_id: Option<CourseId>,
+    /// Group detail CourseBoard keeps in the reservation's custom fields.
+    #[getter(skip)]
+    party: PartyDetails,
     #[getter(skip)]
     notes: Option<String>,
 }
@@ -62,8 +65,18 @@ impl Reservation {
             ends_at,
             quantity: quantity.max(1),
             golf_course_id: CourseId::from_optional(golf_course_id),
+            party: PartyDetails::default(),
             notes,
         }
+    }
+
+    pub fn with_party(mut self, party: PartyDetails) -> Self {
+        self.party = party;
+        self
+    }
+
+    pub fn party(&self) -> &PartyDetails {
+        &self.party
     }
 
     pub fn id(&self) -> &ReservationId {
@@ -137,4 +150,28 @@ impl Reservation {
             None
         }
     }
+}
+
+/// A booking the seed writes into Field.
+///
+/// Not a general reservation-create command: it carries only what a demo day
+/// needs, and it carries `seed_key`, which is how a re-run finds the booking it
+/// wrote last time instead of adding a second one beside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewReservation {
+    pub reservation_type_id: String,
+    pub starts_at: DateTime<Utc>,
+    pub ends_at: DateTime<Utc>,
+    pub quantity: i32,
+    pub customer_name: String,
+    pub golf_course_id: CourseId,
+    pub party: PartyDetails,
+    pub seed_key: String,
+}
+
+/// A booking the seed already wrote, as found on a re-run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SeededReservation {
+    pub id: ReservationId,
+    pub seed_key: String,
 }

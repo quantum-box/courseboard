@@ -405,6 +405,82 @@ function splitMockPolicyIds(policyIds: string[]): { role: string | null; customP
   return { role, customPolicyIds }
 }
 
+
+/**
+ * Writes the ledger makes, kept across reloads.
+ *
+ * Fixtures are in-memory, which is right for read-only ones: the day always
+ * starts the same. Writes are different — a demo where arranging the board and
+ * reloading loses the arrangement teaches that the feature does not persist,
+ * which is the opposite of what the API does. sessionStorage, so a new tab is
+ * still a clean day.
+ */
+const MOCK_WRITE_STORAGE_KEY = 'courseboard.mock.ledgerWrites'
+
+function loadMockWrites<T>(key: string, fallback: T): T {
+  try {
+    const raw = sessionStorage.getItem(`${MOCK_WRITE_STORAGE_KEY}.${key}`)
+    return raw ? (JSON.parse(raw) as T) : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function saveMockWrites(key: string, value: unknown) {
+  try {
+    sessionStorage.setItem(`${MOCK_WRITE_STORAGE_KEY}.${key}`, JSON.stringify(value))
+  } catch {
+    // ignore storage failures
+  }
+}
+
+/** The club's column order, as arranged during the session. */
+const mockCourseOrder: string[] = loadMockWrites<string[]>('courseOrder', [])
+
+/** Desk marks the mock day starts with, and anything written during the session. */
+const mockSlotMarks: Array<{
+  golfCourseId: string
+  date: string
+  teeTime: string
+  kind: 'closed' | 'special_rate'
+  label?: string
+  note?: string
+}> = loadMockWrites('slotMarks', [
+  { golfCourseId: 'course_east', date: TODAY, teeTime: '07:24', kind: 'special_rate', label: '特別料金' },
+  { golfCourseId: 'course_east', date: TODAY, teeTime: '07:32', kind: 'closed', label: '売り止め' },
+])
+
+/** Group detail entered during the session, by reservation id. */
+const mockParties: Record<string, unknown> = loadMockWrites('parties', {})
+
+/**
+ * A booking with the group detail entered this session laid over its fixture.
+ *
+ * Applied at read time rather than mutated into the fixture, so a reload starts
+ * from the same day and still shows what was typed into it.
+ */
+function withStoredParty<T extends { id: string }>(booking: T): T {
+  const party = mockParties[booking.id]
+  return party ? { ...booking, party } : { ...booking }
+}
+
+/** The tee times a course's opening hours and interval imply. */
+function mockSlotTimes(course: { businessHoursJson: { open: string; close: string }; startIntervalMinutes: number }) {
+  const toMinutes = (value: string) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5))
+  const times: string[] = []
+  const end = toMinutes(course.businessHoursJson.close)
+  for (
+    let cursor = toMinutes(course.businessHoursJson.open);
+    cursor < end;
+    cursor += course.startIntervalMinutes
+  ) {
+    times.push(
+      `${String(Math.floor(cursor / 60)).padStart(2, '0')}:${String(cursor % 60).padStart(2, '0')}`,
+    )
+  }
+  return times
+}
+
 /** Day board fixtures for the operations timeline (tee sheet + caddy lanes). */
 const mockTeeReservations = [
   {
@@ -420,6 +496,17 @@ const mockTeeReservations = [
     status: 'on_course',
     holes: 18,
     notes: 'VIP会員',
+    party: {
+      competitionName: '山田会',
+      organizer: '山田 太郎',
+      groupNumber: 1,
+      players: [
+        { name: '山田 太郎', tag: '共通' },
+        { name: '增田 公陽', tag: '共通' },
+        { name: '木澤 岳志', tag: '優待' },
+        { name: '谷川 南海' },
+      ],
+    },
   },
   {
     id: 'res_mock_2',
@@ -433,6 +520,11 @@ const mockTeeReservations = [
     partyName: '鈴木組',
     status: 'checked_in',
     holes: 18,
+    party: {
+      competitionName: '山田会',
+      groupNumber: 2,
+      players: [{ name: '鈴木 一郎', tag: '共通' }],
+    },
   },
   {
     id: 'res_mock_3',
@@ -1078,8 +1170,91 @@ function resolveGet(path: string): Json | null | undefined {
       timezone: 'Asia/Tokyo',
       dayStart: `${date}T06:00:00+09:00`,
       dayEnd: `${date}T18:00:00+09:00`,
-      items: filtered.map(item => ({ ...item })),
+      items: filtered.map(withStoredParty),
     }
+  }
+
+  // CourseBoard start ledger. Built from the same fixtures as the tee sheet so
+  // the two boards never disagree about the day, with the slot grid derived
+  // from each course's opening hours and interval — the same fallback the API
+  // uses when Field has generated no inventory.
+  if (rawPathname === '/v1/course/tee-ledger') {
+    const date = url.searchParams.get('date') ?? TODAY
+    // Empty means every course, matching the API: a board with no columns
+    // answers nothing.
+    const courseIds = (url.searchParams.get('golfCourseIds') ?? url.searchParams.get('golfCourseId') ?? '')
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean)
+    const columns = [...mockCourses]
+      .sort((left, right) => {
+        const a = mockCourseOrder.indexOf(left.id)
+        const b = mockCourseOrder.indexOf(right.id)
+        if (a !== -1 && b !== -1) return a - b
+        if (a !== -1) return -1
+        if (b !== -1) return 1
+        return left.name.localeCompare(right.name)
+      })
+      .filter(course => courseIds.length === 0 || courseIds.includes(course.id))
+      .map(course => {
+        const bookings = mockTeeReservations.filter(
+          item => item.teeTime.startsWith(date) && item.golfCourseId === course.id,
+        )
+        const byTime = new Map<string, Array<(typeof mockTeeReservations)[number]>>()
+        for (const time of mockSlotTimes(course)) byTime.set(time, [])
+        for (const booking of bookings) {
+          const time = booking.teeTime.slice(11, 16)
+          if (!byTime.has(time)) byTime.set(time, [])
+          byTime.get(time)!.push(withStoredParty(booking))
+        }
+        const slots = [...byTime.entries()]
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([teeTime, slotItems]) => {
+            const mark = mockSlotMarks.find(
+              entry =>
+                entry.golfCourseId === course.id
+                && entry.date === date
+                && entry.teeTime === teeTime,
+            )
+            const capacity = 2
+            const available = Math.max(capacity - slotItems.length, 0)
+            return {
+              teeTime,
+              capacity,
+              availableGroups: available,
+              bookedGroups: slotItems.length,
+              playerCount: slotItems.reduce((sum, item) => sum + item.partySize, 0),
+              isActive: true,
+              isSellable: available > 0 && mark?.kind !== 'closed',
+              ...(mark ? { mark: { ...mark } } : {}),
+              items: slotItems,
+            }
+          })
+        const groupCount = bookings.length
+        const selfGroupCount = bookings.filter(item => item.playType === 'self').length
+        return {
+          golfCourseId: course.id,
+          courseName: course.name,
+          startIntervalMinutes: course.startIntervalMinutes,
+          gridSource: 'inventory',
+          groupCount,
+          playerCount: bookings.reduce((sum, item) => sum + item.partySize, 0),
+          selfGroupCount,
+          caddieGroupCount: groupCount - selfGroupCount,
+          openSlotCount: slots.filter(slot => slot.isSellable).length,
+          slots,
+        }
+      })
+    return { date, timezone: 'Asia/Tokyo', columns }
+  }
+
+  if (rawPathname === '/v1/course/course-order') {
+    return { golfCourseIds: [...mockCourseOrder] }
+  }
+
+  if (rawPathname === '/v1/course/slot-overrides') {
+    const date = url.searchParams.get('date') ?? TODAY
+    return items(mockSlotMarks.filter(mark => mark.date === date).map(mark => ({ ...mark })))
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-assignments') {
@@ -1292,6 +1467,76 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   const pathname = normalizeMockPath(pathnameOf(path))
   const method = methodOf(init)
   const body = parseBody(init) as Record<string, unknown> | undefined
+
+  // Desk marks and group detail are CourseBoard's own writes, so they never
+  // reach a Field path; keeping them in the fixture store lets the ledger's
+  // whole edit loop be walked through without a backend.
+  if (pathname === '/v1/course/course-order' && method === 'PUT') {
+    const ids = Array.isArray(body?.golfCourseIds) ? (body.golfCourseIds as string[]) : []
+    const known = mockCourses.map(course => course.id)
+    mockCourseOrder.splice(0, mockCourseOrder.length, ...ids.filter(id => known.includes(id)))
+    saveMockWrites('courseOrder', mockCourseOrder)
+    return hit({ golfCourseIds: [...mockCourseOrder] })
+  }
+
+  if (pathname === '/v1/course/slot-overrides' && method === 'PUT') {
+    const golfCourseId = String(body?.golfCourseId ?? '')
+    const date = String(body?.date ?? TODAY)
+    const teeTimes = Array.isArray(body?.teeTimes) ? (body.teeTimes as string[]) : []
+    const written = teeTimes.map(teeTime => {
+      const mark = {
+        golfCourseId,
+        date,
+        teeTime,
+        kind: (body?.kind === 'closed' ? 'closed' : 'special_rate') as 'closed' | 'special_rate',
+        ...(body?.label ? { label: String(body.label) } : {}),
+      }
+      const at = mockSlotMarks.findIndex(
+        entry =>
+          entry.golfCourseId === golfCourseId && entry.date === date && entry.teeTime === teeTime,
+      )
+      if (at === -1) mockSlotMarks.push(mark)
+      else mockSlotMarks[at] = mark
+      return mark
+    })
+    saveMockWrites('slotMarks', mockSlotMarks)
+    return hit(items(written.map(mark => ({ ...mark }))))
+  }
+
+  if (pathname === '/v1/course/slot-overrides' && method === 'DELETE') {
+    const golfCourseId = String(body?.golfCourseId ?? '')
+    const date = String(body?.date ?? TODAY)
+    const teeTimes = Array.isArray(body?.teeTimes) ? (body.teeTimes as string[]) : []
+    let deleted = 0
+    for (const teeTime of teeTimes) {
+      const at = mockSlotMarks.findIndex(
+        entry =>
+          entry.golfCourseId === golfCourseId && entry.date === date && entry.teeTime === teeTime,
+      )
+      if (at !== -1) {
+        mockSlotMarks.splice(at, 1)
+        deleted += 1
+      }
+    }
+    saveMockWrites('slotMarks', mockSlotMarks)
+    return hit({ deleted })
+  }
+
+  const partyMatch = /^\/v1\/course\/reservations\/([^/]+)\/party$/.exec(pathname)
+  if (partyMatch && method === 'PATCH') {
+    const reservation = mockTeeReservations.find(item => item.id === partyMatch[1])
+    if (!reservation) return error(404, 'Mock Field API has no such reservation')
+    const party = {
+      ...(body?.competitionName ? { competitionName: String(body.competitionName) } : {}),
+      ...(body?.organizer ? { organizer: String(body.organizer) } : {}),
+      ...(typeof body?.groupNumber === 'number' ? { groupNumber: body.groupNumber } : {}),
+      players: Array.isArray(body?.players) ? body.players : [],
+    }
+    ;(reservation as Record<string, unknown>).party = party
+    mockParties[reservation.id] = party
+    saveMockWrites('parties', mockParties)
+    return hit(party as Json)
+  }
 
   if (pathname === '/v1/erp/staff' && method === 'POST') {
     const registered = {

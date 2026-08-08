@@ -5,3 +5,6 @@ pub mod http_commercial;
 pub mod http_ops;
 pub mod http_simulator;
 pub mod openapi;
+
+#[cfg(test)]
+mod persistence_tests;

@@ -108,6 +108,21 @@ mod tests {
 
     #[async_trait]
     impl GolfCatalogGateway for FakeCatalog {
+        async fn get_course_order(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<crate::course::domain::CourseOrder, CourseError> {
+            Ok(crate::course::domain::CourseOrder::default())
+        }
+
+        async fn replace_course_order(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            order: &crate::course::domain::CourseOrder,
+        ) -> Result<crate::course::domain::CourseOrder, CourseError> {
+            Ok(order.clone())
+        }
+
         async fn list_courses(
             &self,
             _credentials: GatewayCredentials<'_>,

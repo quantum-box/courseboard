@@ -11,6 +11,7 @@ import {
   Maximize2,
   Minimize2,
   RefreshCw,
+  Table2,
   Users,
   ZoomIn,
   ZoomOut,
@@ -374,6 +375,10 @@ export function TimelinePage() {
           <Button type="button" variant="ghost" size="sm" onClick={refreshAll}>
             <RefreshCw />
             {t('timeline:reload')}
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => navigate('golf/ledger')}>
+            <Table2 />
+            {t('timeline:toLedger')}
           </Button>
           <Button type="button" variant="primary" size="sm" onClick={() => navigate('golf/caddies/dispatch')}>
             <ClipboardCheck />

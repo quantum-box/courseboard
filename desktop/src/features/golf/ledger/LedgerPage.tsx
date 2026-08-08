@@ -1,0 +1,479 @@
+import { Button, Input } from '@tachyon-sdk/native-ui'
+import {
+  CalendarRange,
+  ChevronLeft,
+  ChevronRight,
+  GanttChart,
+  Lock,
+  RefreshCw,
+  Tag,
+  Trash2,
+} from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+
+import { courseboardApiJson, nowIsoMinute, today } from '../../../api'
+import {
+  EmptyState,
+  Field,
+  LoadingState,
+  Notice,
+  Panel,
+  ResourceError,
+} from '../../../components/Page'
+import { useResource } from '../../../hooks/useResource'
+import { useRegisterPageReload } from '../../../lib/pageReload'
+import { navigate } from '../../../lib/router'
+import { showToast } from '../../../lib/toast'
+import { parseLocalDateParts } from '../timeline/timelineLayout'
+import type { TeeReservation } from '../timeline/models'
+import { LedgerBoard, type SlotSelection } from './LedgerBoard'
+import { arrangeCourses, moveCourse } from './courseOrder'
+import {
+  courseIdsParam,
+  isCourseShown,
+  readStoredCourseIds,
+  resolveSelection,
+  toggleCourse,
+  writeStoredCourseIds,
+  type CourseOption,
+} from './courseSelection'
+import { summarizeLedger, teeTimesBetween } from './ledgerLayout'
+import type { PartyDetails, SlotMarkKind, TeeLedgerResponse } from './models'
+import { PartyEditor } from './PartyEditor'
+
+const COURSE_API = '/v1/course'
+/** How often the "now" row catches up with the clock. */
+const NOW_TICK_MS = 30_000
+
+type ListResponse<T> = { items: T[] }
+
+function todayIsoDate() {
+  return today()
+}
+
+function shiftDate(isoDate: string, deltaDays: number) {
+  const [year, month, day] = isoDate.split('-').map(Number)
+  const next = new Date(Date.UTC(year!, month! - 1, day! + deltaDays))
+  return next.toISOString().slice(0, 10)
+}
+
+function useCurrentMinute() {
+  const [now, setNow] = useState(nowIsoMinute)
+  useEffect(() => {
+    const timer = setInterval(() => setNow(nowIsoMinute()), NOW_TICK_MS)
+    return () => clearInterval(timer)
+  }, [])
+  return now
+}
+
+export function LedgerPage() {
+  const { t } = useTranslation(['ledger', 'timeline', 'common'])
+  const [date, setDate] = useState(todayIsoDate)
+  /** Empty means every course. Remembered: the desk works the same columns daily. */
+  const [selectedCourseIds, setSelectedCourseIds] = useState(readStoredCourseIds)
+  const [selection, setSelection] = useState<SlotSelection | null>(null)
+  const [markLabel, setMarkLabel] = useState('')
+  const [savingMarks, setSavingMarks] = useState(false)
+  const [savingOrder, setSavingOrder] = useState(false)
+  const [editingReservationId, setEditingReservationId] = useState<string | null>(null)
+  /** Parties saved this session, so the board updates without a full reload. */
+  const [localParties, setLocalParties] = useState<Record<string, PartyDetails>>({})
+  const currentMinute = useCurrentMinute()
+
+  const courseIds = courseIdsParam(selectedCourseIds)
+  const ledger = useResource(() => {
+    const params = new URLSearchParams({ date })
+    if (courseIds) params.set('golfCourseIds', courseIds)
+    return courseboardApiJson<TeeLedgerResponse>(`${COURSE_API}/tee-ledger?${params}`)
+  }, [date, courseIds])
+
+  const coursesResource = useResource(
+    () =>
+      courseboardApiJson<ListResponse<{ id: string; name: string; isActive?: boolean }>>(
+        `${COURSE_API}/courses`,
+      ),
+    [],
+  )
+
+  const orderResource = useResource(
+    () => courseboardApiJson<{ golfCourseIds: string[] }>(`${COURSE_API}/course-order`),
+    [],
+  )
+
+  const refreshAll = () => {
+    ledger.refresh()
+    coursesResource.refresh()
+    orderResource.refresh()
+  }
+  useRegisterPageReload(refreshAll)
+
+  // A selection is a set of rows on one day's board; keeping it across a date
+  // change would apply the next mark to tee times the operator cannot see.
+  useEffect(() => {
+    setSelection(null)
+  }, [date, courseIds])
+
+  useEffect(() => {
+    writeStoredCourseIds(selectedCourseIds)
+  }, [selectedCourseIds])
+
+  if (ledger.error) return <ResourceError error={ledger.error} onRetry={refreshAll} />
+  if (ledger.loading && !ledger.data) return <LoadingState label={t('ledger:loading')} />
+
+  const rawColumns = ledger.data?.columns ?? []
+  // Parties saved this session are grafted onto the fetched board so a save
+  // shows up immediately without refetching the whole day.
+  const columns = rawColumns.map(column => ({
+    ...column,
+    slots: column.slots.map(slot => ({
+      ...slot,
+      items: slot.items.map(item =>
+        localParties[item.id] ? { ...item, party: localParties[item.id]! } : item,
+      ),
+    })),
+  }))
+  const unavailable = ledger.data?.unavailable ?? []
+  const totals = summarizeLedger(columns)
+  const courseOptions: CourseOption[] = (coursesResource.data?.items ?? [])
+    .filter(course => course.isActive !== false)
+    .map(course => ({ id: course.id, name: course.name }))
+  // A course that was retired since the pick was stored would otherwise keep
+  // narrowing the board to a column that no longer exists.
+  const livePicks = resolveSelection(selectedCourseIds, courseOptions)
+  // Moving a column is computed against the whole arrangement, not just the
+  // columns on screen, so filtering the board never rearranges it for others.
+  const storedOrder = orderResource.data?.golfCourseIds ?? []
+  const boardOrder = arrangeCourses(storedOrder, courseOptions).map(course => course.id)
+  const orderedCourseOptions = arrangeCourses(storedOrder, courseOptions)
+
+  const nowParts = parseLocalDateParts(currentMinute)
+  const nowMinutes = nowParts.date === date ? nowParts.minutes : null
+
+  const allItems: TeeReservation[] = columns.flatMap(column =>
+    column.slots.flatMap(slot => slot.items),
+  )
+  const editingReservation = allItems.find(item => item.id === editingReservationId) ?? null
+
+  const toggleSlot = (golfCourseId: string, teeTime: string, extend: boolean) => {
+    setSelection(current => {
+      // Selecting on a second course replaces the first: a mark is written per
+      // course, and a selection spanning two of them could not be applied.
+      if (!current || current.golfCourseId !== golfCourseId) {
+        return { golfCourseId, teeTimes: [teeTime] }
+      }
+      if (extend && current.teeTimes.length > 0) {
+        const column = columns.find(entry => entry.golfCourseId === golfCourseId)
+        const anchor = current.teeTimes[0]!
+        const range = column ? teeTimesBetween(column.slots, anchor, teeTime) : []
+        return range.length > 0 ? { golfCourseId, teeTimes: range } : current
+      }
+      const already = current.teeTimes.includes(teeTime)
+      const teeTimes = already
+        ? current.teeTimes.filter(entry => entry !== teeTime)
+        : [...current.teeTimes, teeTime].sort()
+      return teeTimes.length > 0 ? { golfCourseId, teeTimes } : null
+    })
+  }
+
+  const moveColumn = async (golfCourseId: string, delta: -1 | 1) => {
+    const visible = columns.map(column => column.golfCourseId)
+    const next = moveCourse(boardOrder, visible, golfCourseId, delta)
+    if (next === boardOrder) return
+    setSavingOrder(true)
+    try {
+      await courseboardApiJson(`${COURSE_API}/course-order`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ golfCourseIds: next }),
+      })
+      orderResource.refresh()
+      ledger.refresh()
+    } catch (error) {
+      showToast({
+        tone: 'danger',
+        title: t('ledger:order.failed'),
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setSavingOrder(false)
+    }
+  }
+
+  const applyMark = async (kind: SlotMarkKind) => {
+    if (!selection) return
+    setSavingMarks(true)
+    try {
+      await courseboardApiJson(`${COURSE_API}/slot-overrides`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          golfCourseId: selection.golfCourseId,
+          date,
+          teeTimes: selection.teeTimes,
+          kind,
+          label: markLabel.trim() || null,
+        }),
+      })
+      showToast({ tone: 'success', message: t('ledger:marks.saved') })
+      setSelection(null)
+      setMarkLabel('')
+      ledger.refresh()
+    } catch (error) {
+      showToast({
+        tone: 'danger',
+        title: t('ledger:marks.failed'),
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setSavingMarks(false)
+    }
+  }
+
+  const clearMarks = async () => {
+    if (!selection) return
+    setSavingMarks(true)
+    try {
+      await courseboardApiJson(`${COURSE_API}/slot-overrides`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          golfCourseId: selection.golfCourseId,
+          date,
+          teeTimes: selection.teeTimes,
+        }),
+      })
+      showToast({ tone: 'success', message: t('ledger:marks.cleared') })
+      setSelection(null)
+      ledger.refresh()
+    } catch (error) {
+      showToast({
+        tone: 'danger',
+        title: t('ledger:marks.failed'),
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setSavingMarks(false)
+    }
+  }
+
+  return (
+    <div className="page-stack ledger-page">
+      {unavailable.length > 0 ? (
+        <Notice tone="warning" title={t('ledger:partial.title')}>
+          {t('ledger:partial.description')}
+        </Notice>
+      ) : null}
+
+      <div className="ledger-chrome">
+        <div className="page-toolbar">
+          <Button type="button" variant="ghost" size="sm" onClick={refreshAll}>
+            <RefreshCw />
+            {t('timeline:reload')}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate('golf/timeline')}
+          >
+            <GanttChart />
+            {t('timeline:title')}
+          </Button>
+        </div>
+
+        <div className="ledger-summary" aria-label={t('ledger:summary.label')}>
+          <div className="ledger-summary-item">
+            <span>{t('ledger:summary.groups')}</span>
+            <strong>{t('ledger:summary.groupsValue', { n: String(totals.groups) })}</strong>
+            <small>
+              {t('ledger:summary.breakdown', {
+                self: String(totals.selfGroups),
+                caddie: String(totals.caddieGroups),
+              })}
+            </small>
+          </div>
+          <div className="ledger-summary-item">
+            <span>{t('ledger:summary.players')}</span>
+            <strong>{t('ledger:summary.playersValue', { n: String(totals.players) })}</strong>
+          </div>
+          <div className="ledger-summary-item">
+            <span>{t('ledger:summary.open')}</span>
+            <strong>{t('ledger:summary.openValue', { n: String(totals.openSlots) })}</strong>
+          </div>
+        </div>
+
+        <section className="ledger-toolbar" aria-label={t('timeline:toolbar.label')}>
+          <div className="ledger-date-controls">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={t('timeline:toolbar.prevDay')}
+              onClick={() => setDate(value => shiftDate(value, -1))}
+            >
+              <ChevronLeft />
+            </Button>
+            <label className="ledger-inline-field">
+              <span>{t('timeline:toolbar.date')}</span>
+              <Input
+                type="date"
+                value={date}
+                onChange={event => setDate(event.target.value || todayIsoDate())}
+              />
+            </label>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={t('timeline:toolbar.nextDay')}
+              onClick={() => setDate(value => shiftDate(value, 1))}
+            >
+              <ChevronRight />
+            </Button>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setDate(todayIsoDate())}>
+              <CalendarRange />
+              {t('timeline:toolbar.today')}
+            </Button>
+          </div>
+          <fieldset className="ledger-course-picker">
+            <legend>{t('ledger:courses.label')}</legend>
+            <button
+              type="button"
+              className={`ledger-course-chip${livePicks.length === 0 ? ' is-on' : ''}`}
+              aria-pressed={livePicks.length === 0}
+              onClick={() => setSelectedCourseIds([])}
+            >
+              {t('ledger:courses.all')}
+            </button>
+            {orderedCourseOptions.map(course => (
+              <button
+                key={course.id}
+                type="button"
+                className={`ledger-course-chip${
+                  livePicks.length > 0 && isCourseShown(livePicks, course.id) ? ' is-on' : ''
+                }`}
+                aria-pressed={livePicks.length > 0 && isCourseShown(livePicks, course.id)}
+                onClick={() => setSelectedCourseIds(toggleCourse(livePicks, course.id))}
+              >
+                {course.name}
+              </button>
+            ))}
+          </fieldset>
+          <div className="ledger-legend" aria-label={t('ledger:legend.label')}>
+            <span className="ledger-legend-item tone-open">{t('ledger:legend.open')}</span>
+            <span className="ledger-legend-item tone-partial">{t('ledger:legend.partial')}</span>
+            <span className="ledger-legend-item tone-full">{t('ledger:legend.full')}</span>
+            <span className="ledger-legend-item tone-closed">{t('ledger:legend.closed')}</span>
+            <span className="ledger-legend-item tone-special">{t('ledger:legend.special')}</span>
+          </div>
+        </section>
+
+        <MarkPanel
+          selection={selection}
+          label={markLabel}
+          saving={savingMarks}
+          onLabelChange={setMarkLabel}
+          onClose={() => applyMark('closed')}
+          onSpecial={() => applyMark('special_rate')}
+          onClear={clearMarks}
+          onCancel={() => setSelection(null)}
+        />
+      </div>
+
+      <div className="ledger-workspace">
+        {columns.length === 0 ? (
+          <Panel className="ledger-panel" title={t('ledger:title')} description={t('ledger:description')}>
+            <EmptyState
+              title={t('ledger:empty.title')}
+              description={t('ledger:empty.description')}
+              action={
+                <Button type="button" variant="primary" onClick={() => navigate('golf/courses')}>
+                  {t('ledger:empty.toSchedule')}
+                </Button>
+              }
+            />
+          </Panel>
+        ) : (
+          <LedgerBoard
+            columns={columns}
+            nowMinutes={nowMinutes}
+            selection={selection}
+            selectedReservationId={editingReservationId}
+            onToggleSlot={toggleSlot}
+            onSelectReservation={setEditingReservationId}
+            onMoveColumn={savingOrder ? () => {} : moveColumn}
+          />
+        )}
+      </div>
+
+      <PartyEditor
+        reservation={editingReservation}
+        onClose={() => setEditingReservationId(null)}
+        onSaved={(reservationId, party) =>
+          setLocalParties(current => ({ ...current, [reservationId]: party }))
+        }
+      />
+    </div>
+  )
+}
+
+/**
+ * The mark controls, shown only once rows are selected.
+ *
+ * Keeping them hidden until then means the buttons never sit there inviting a
+ * click that would silently apply to nothing.
+ */
+function MarkPanel({
+  selection,
+  label,
+  saving,
+  onLabelChange,
+  onClose,
+  onSpecial,
+  onClear,
+  onCancel,
+}: {
+  selection: SlotSelection | null
+  label: string
+  saving: boolean
+  onLabelChange: (value: string) => void
+  onClose: () => void
+  onSpecial: () => void
+  onClear: () => void
+  onCancel: () => void
+}) {
+  const { t } = useTranslation(['ledger'])
+  if (!selection) {
+    return <p className="ledger-mark-hint">{t('ledger:marks.selectHint')}</p>
+  }
+  return (
+    <section className="ledger-mark-panel" aria-label={t('ledger:marks.title')}>
+      <strong>{t('ledger:marks.selected', { n: String(selection.teeTimes.length) })}</strong>
+      <Field label={t('ledger:marks.label')} className="ledger-mark-label">
+        <Input
+          value={label}
+          placeholder={t('ledger:marks.labelPlaceholder')}
+          onChange={event => onLabelChange(event.target.value)}
+        />
+      </Field>
+      <div className="ledger-mark-actions">
+        <Button type="button" size="sm" variant="primary" disabled={saving} onClick={onClose}>
+          <Lock />
+          {t('ledger:marks.close')}
+        </Button>
+        <Button type="button" size="sm" variant="secondary" disabled={saving} onClick={onSpecial}>
+          <Tag />
+          {t('ledger:marks.special')}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={onClear}>
+          <Trash2 />
+          {t('ledger:marks.clear')}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" disabled={saving} onClick={onCancel}>
+          {t('ledger:marks.clearSelection')}
+        </Button>
+      </div>
+    </section>
+  )
+}

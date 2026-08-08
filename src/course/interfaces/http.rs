@@ -16,21 +16,26 @@ use utoipa::{IntoParams, ToSchema};
 use super::openapi::ErrorBody;
 
 use crate::course::domain::{
-    AvailabilityRule, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieId, CaddieStaff,
-    Course, CourseError, CourseId, GatewayCredentials, GenerationSummary, ProductSlot,
-    ReservationProduct, ReservationServiceId, Resource, TeeSheet, TeeSheetItem, TeeSheetQuery,
-    UpsertCourse, UpsertReservationProduct,
+    jst_offset, AvailabilityRule, BusinessHours, Caddie, CaddieAssignment, CaddieAssignmentQuery,
+    CaddieId, CaddieStaff, Course, CourseError, CourseId, CourseOrder, DeleteSlotOverrides,
+    GatewayCredentials, GenerationSummary, LedgerColumn, LedgerSlot, PartyDetails, ProductSlot,
+    ReservationId, ReservationProduct, ReservationServiceId, Resource, SlotOverride,
+    SlotOverrideKind, SlotOverrideQuery, TeeLedger, TeeLedgerQuery, TeeSheet, TeeSheetItem,
+    TeeSheetQuery, UpsertCourse, UpsertReservationProduct, UpsertSlotOverrides,
 };
 use crate::course::infrastructure::{
-    FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
-    FieldReservationGateway,
+    party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
+    FieldReservationGateway, MySqlSlotOverrideRepository,
 };
 use crate::course::usecase::{
-    CreateCourseUseCase, DeleteCourseUseCase, GenerateCourseTimeSlotsUseCase,
-    GetCourseScheduleUseCase, GetTeeSheetUseCase, LinkCourseResourceUseCase,
+    CreateCourseUseCase, DeleteCourseUseCase, DeleteSlotOverridesUseCase,
+    GenerateCourseTimeSlotsUseCase, GetCourseOrderUseCase, GetCourseScheduleUseCase,
+    GetTeeLedgerUseCase, GetTeeSheetUseCase, LinkCourseResourceUseCase,
     ListCaddieAssignmentsUseCase, ListCaddiesUseCase, ListCoursesUseCase, ListProductSlotsUseCase,
-    ListReservationProductsUseCase, ListResourcesUseCase, ReplaceCourseScheduleUseCase,
-    ReplaceProductSlotsUseCase, UpdateCourseUseCase, UpsertReservationProductUseCase,
+    ListReservationProductsUseCase, ListResourcesUseCase, ListSlotOverridesUseCase,
+    ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase,
+    SeedDemoBoardUseCase, UpdateCourseUseCase, UpdateReservationPartyUseCase,
+    UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -58,6 +63,11 @@ pub(crate) fn reservation_gateway(state: &AppState) -> Arc<FieldReservationGatew
         state.http_client.clone(),
         field_api_url,
     ))
+}
+
+/// Desk marks live in CourseBoard's own MySQL, not in Field.
+pub(crate) fn slot_override_gateway(state: &AppState) -> Arc<MySqlSlotOverrideRepository> {
+    state.slot_overrides()
 }
 
 pub(crate) fn commercial_gateway(state: &AppState) -> Arc<FieldGolfCommercialGateway> {
@@ -174,10 +184,59 @@ pub struct TeeSheetItemDto {
     pub play_type: String,
     pub party_size: i32,
     pub party_name: String,
+    /// Competition, group number, and named players the desk keeps.
+    ///
+    /// Absent until someone enters them: Field hands over one customer name and
+    /// a headcount, which the ledger cannot read four names out of.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub party: Option<PartyDto>,
     pub status: String,
     pub holes: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PartyPlayerDto {
+    pub name: String,
+    /// Booking channel or rate class shown above the name (`共通`, `優待`, …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_number: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PartyDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub competition_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organizer: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub group_number: Option<i32>,
+    #[serde(default)]
+    pub players: Vec<PartyPlayerDto>,
+}
+
+impl From<&PartyDetails> for PartyDto {
+    fn from(value: &PartyDetails) -> Self {
+        Self {
+            competition_name: value.competition_name().map(str::to_string),
+            organizer: value.organizer().map(str::to_string),
+            group_number: value.group_number(),
+            players: value
+                .players()
+                .iter()
+                .map(|player| PartyPlayerDto {
+                    name: player.name().to_string(),
+                    tag: player.tag().map(str::to_string),
+                    member_number: player.member_number().map(str::to_string),
+                })
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -210,6 +269,9 @@ impl From<&TeeSheetItem> for TeeSheetItemDto {
             play_type: value.play_type().as_str().to_string(),
             party_size: value.party_size(),
             party_name: value.party_name().to_string(),
+            party: Some(value.party())
+                .filter(|party| !party.is_empty())
+                .map(PartyDto::from),
             status: value.status().as_str().to_string(),
             holes: value.holes(),
             notes: value.notes().map(str::to_string),
@@ -266,6 +328,567 @@ pub async fn get_tee_sheet(
     Ok(Json(TeeSheetResponse::from(sheet)))
 }
 
+// ─── Tee ledger ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerSlotDto {
+    /// Local wall clock `HH:MM`.
+    pub tee_time: String,
+    /// Groups the course may start here, absent when the row was derived rather
+    /// than generated. Absent is not zero: it means nobody counted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capacity: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub available_groups: Option<i32>,
+    pub booked_groups: i32,
+    pub player_count: i32,
+    pub is_active: bool,
+    /// Whether the desk could still sell this row to a walk-in.
+    pub is_sellable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mark: Option<SlotOverrideDto>,
+    pub items: Vec<TeeSheetItemDto>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct LedgerColumnDto {
+    pub golf_course_id: String,
+    pub course_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_interval_minutes: Option<i32>,
+    /// `inventory`, `schedule`, `opening_hours`, or `bookings_only`.
+    ///
+    /// Only `inventory` knows how many groups are left; the rest say when a
+    /// group could start and nothing more.
+    pub grid_source: String,
+    pub group_count: i32,
+    pub player_count: i32,
+    pub self_group_count: i32,
+    pub caddie_group_count: i32,
+    pub open_slot_count: i32,
+    pub slots: Vec<LedgerSlotDto>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct TeeLedgerResponse {
+    pub date: NaiveDate,
+    pub timezone: String,
+    pub columns: Vec<LedgerColumnDto>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unavailable: Vec<String>,
+}
+
+impl From<&LedgerSlot> for LedgerSlotDto {
+    fn from(value: &LedgerSlot) -> Self {
+        Self {
+            tee_time: value.tee_time().to_string(),
+            capacity: value.capacity(),
+            available_groups: value.available_groups(),
+            booked_groups: value.booked_groups(),
+            player_count: value.player_count(),
+            is_active: value.is_active(),
+            is_sellable: value.is_sellable(),
+            mark: value.mark().map(SlotOverrideDto::from),
+            items: value.items().iter().map(TeeSheetItemDto::from).collect(),
+        }
+    }
+}
+
+impl From<&LedgerColumn> for LedgerColumnDto {
+    fn from(value: &LedgerColumn) -> Self {
+        Self {
+            golf_course_id: value.course_id().to_string(),
+            course_name: value.course_name().to_string(),
+            resource_id: value.resource_id().map(ToString::to_string),
+            start_interval_minutes: value.start_interval_minutes(),
+            grid_source: value.grid_source().as_str().to_string(),
+            group_count: value.group_count(),
+            player_count: value.player_count(),
+            self_group_count: value.self_group_count(),
+            caddie_group_count: value.caddie_group_count(),
+            open_slot_count: value.open_slot_count(),
+            slots: value.slots().iter().map(LedgerSlotDto::from).collect(),
+        }
+    }
+}
+
+impl From<TeeLedger> for TeeLedgerResponse {
+    fn from(value: TeeLedger) -> Self {
+        Self {
+            date: value.date(),
+            timezone: value.timezone().to_string(),
+            columns: value.columns().iter().map(LedgerColumnDto::from).collect(),
+            unavailable: value.unavailable().to_vec(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct TeeLedgerQueryParams {
+    pub date: NaiveDate,
+    /// Comma-separated course ids to draw columns for. Absent or empty means
+    /// every active course.
+    pub golf_course_ids: Option<String>,
+    /// One course id, kept because the tee sheet next to this board takes the
+    /// singular name and operators paste links between the two.
+    pub golf_course_id: Option<String>,
+}
+
+impl TeeLedgerQueryParams {
+    fn course_ids(&self) -> Vec<CourseId> {
+        self.golf_course_ids
+            .iter()
+            .flat_map(|value| value.split(','))
+            .chain(self.golf_course_id.iter().map(String::as_str))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(CourseId::new)
+            // A link that names the same course twice would otherwise draw it
+            // twice, side by side.
+            .fold(Vec::new(), |mut ids, id| {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+                ids
+            })
+    }
+}
+
+/// GET /v1/course/tee-ledger
+#[utoipa::path(
+    get,
+    path = "/v1/course/tee-ledger",
+    tag = "course",
+    params(TeeLedgerQueryParams),
+    responses(
+        (status = 200, description = "Start-time ledger for the requested date", body = TeeLedgerResponse),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_tee_ledger(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<TeeLedgerQueryParams>,
+) -> Result<Json<TeeLedgerResponse>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let tenant_id = operator_id(&headers)?.to_string();
+    let use_case = GetTeeLedgerUseCase::new(
+        reservation_gateway(&state),
+        catalog_gateway(&state),
+        catalog_gateway(&state),
+        slot_override_gateway(&state),
+    );
+    let ledger = use_case
+        .execute(
+            credentials,
+            &tenant_id,
+            TeeLedgerQuery {
+                date: query.date,
+                golf_course_ids: query.course_ids(),
+            },
+        )
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(TeeLedgerResponse::from(ledger)))
+}
+
+// ─── Demo seed ────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct SeedDemoBoardParams {
+    /// The day to put the demo board on. Defaults to today in the course's zone.
+    pub date: Option<NaiveDate>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SeedDemoBoardResponse {
+    pub date: NaiveDate,
+    pub courses: usize,
+    pub bookings_created: usize,
+    pub bookings_updated: usize,
+    pub marks: usize,
+}
+
+/// POST /v1/course/demo-seed
+///
+/// Writes a demo day into Field and into CourseBoard's own storage, then leaves
+/// it to be read back through the ordinary board. Safe to run twice: bookings
+/// carry a key the next run matches on, so a second run updates rather than
+/// stacking a second day beside the first.
+#[utoipa::path(
+    post,
+    path = "/v1/course/demo-seed",
+    tag = "course",
+    params(SeedDemoBoardParams),
+    responses(
+        (status = 200, description = "What the run created or changed", body = SeedDemoBoardResponse),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn seed_demo_board(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<SeedDemoBoardParams>,
+) -> Result<Json<SeedDemoBoardResponse>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let tenant_id = operator_id(&headers)?.to_string();
+    let date = params.date.unwrap_or_else(today_in_course_zone);
+    let use_case = SeedDemoBoardUseCase::new(
+        reservation_gateway(&state),
+        catalog_gateway(&state),
+        slot_override_gateway(&state),
+    );
+    let summary = use_case
+        .execute(credentials, &tenant_id, date)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(SeedDemoBoardResponse {
+        date,
+        courses: summary.courses,
+        bookings_created: summary.bookings_created,
+        bookings_updated: summary.bookings_updated,
+        marks: summary.marks,
+    }))
+}
+
+/// Today as the course sees it, not as the server's clock does.
+fn today_in_course_zone() -> NaiveDate {
+    match jst_offset() {
+        Ok(jst) => Utc::now().with_timezone(&jst).date_naive(),
+        Err(_) => Utc::now().date_naive(),
+    }
+}
+
+// ─── Course order ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CourseOrderResponse {
+    /// Course ids left to right. Courses left out fall in behind these by name,
+    /// so a course created after the board was arranged still reaches it.
+    pub golf_course_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceCourseOrderRequest {
+    /// The whole arrangement. An empty list clears it back to name order.
+    pub golf_course_ids: Vec<String>,
+}
+
+impl From<CourseOrder> for CourseOrderResponse {
+    fn from(value: CourseOrder) -> Self {
+        Self {
+            golf_course_ids: value.ids().iter().map(ToString::to_string).collect(),
+        }
+    }
+}
+
+/// GET /v1/course/course-order
+#[utoipa::path(
+    get,
+    path = "/v1/course/course-order",
+    tag = "course",
+    responses(
+        (status = 200, description = "Left-to-right column order", body = CourseOrderResponse),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_course_order(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<CourseOrderResponse>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let order = GetCourseOrderUseCase::new(catalog_gateway(&state))
+        .execute(credentials)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CourseOrderResponse::from(order)))
+}
+
+/// PUT /v1/course/course-order
+#[utoipa::path(
+    put,
+    path = "/v1/course/course-order",
+    tag = "course",
+    request_body = ReplaceCourseOrderRequest,
+    responses(
+        (status = 200, description = "Stored column order", body = CourseOrderResponse),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replace_course_order(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ReplaceCourseOrderRequest>,
+) -> Result<Json<CourseOrderResponse>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let ids = request
+        .golf_course_ids
+        .into_iter()
+        .filter_map(|id| CourseId::from_optional(Some(id)))
+        .collect();
+    let order = ReplaceCourseOrderUseCase::new(catalog_gateway(&state))
+        .execute(credentials, ids)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CourseOrderResponse::from(order)))
+}
+
+// ─── Reservation party ────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateReservationPartyRequest {
+    #[serde(default)]
+    pub competition_name: Option<String>,
+    #[serde(default)]
+    pub organizer: Option<String>,
+    #[serde(default)]
+    pub group_number: Option<i32>,
+    /// The whole roster, replacing whatever was there.
+    ///
+    /// A patch per player would need stable player ids, and the desk edits the
+    /// group as one thing — it retypes the cell, it does not amend seat three.
+    #[serde(default)]
+    pub players: Vec<PartyPlayerDto>,
+}
+
+/// PATCH /v1/course/reservations/{reservation_id}/party
+#[utoipa::path(
+    patch,
+    path = "/v1/course/reservations/{reservation_id}/party",
+    tag = "course",
+    params(("reservation_id" = String, Path, description = "Reservation id")),
+    request_body = UpdateReservationPartyRequest,
+    responses(
+        (status = 200, description = "Stored group detail", body = PartyDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn update_reservation_party(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(reservation_id): Path<String>,
+    Json(request): Json<UpdateReservationPartyRequest>,
+) -> Result<Json<PartyDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let party = party_from_request(
+        request.competition_name,
+        request.organizer,
+        request.group_number,
+        request
+            .players
+            .into_iter()
+            .map(|player| (player.name, player.tag, player.member_number))
+            .collect(),
+    )
+    .map_err(AppError::from)?;
+    let use_case = UpdateReservationPartyUseCase::new(reservation_gateway(&state));
+    let stored = use_case
+        .execute(credentials, &ReservationId::new(reservation_id), party)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(PartyDto::from(&stored)))
+}
+
+// ─── Slot marks ───────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotOverrideDto {
+    pub golf_course_id: String,
+    pub date: NaiveDate,
+    pub tee_time: String,
+    /// `closed` or `special_rate`.
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl From<&SlotOverride> for SlotOverrideDto {
+    fn from(value: &SlotOverride) -> Self {
+        Self {
+            golf_course_id: value.course_id().to_string(),
+            date: value.date(),
+            tee_time: value.tee_time().to_string(),
+            kind: value.kind().as_str().to_string(),
+            label: value.label().map(str::to_string),
+            note: value.note().map(str::to_string),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotOverrideQueryParams {
+    pub date: NaiveDate,
+    pub golf_course_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertSlotOverridesRequest {
+    pub golf_course_id: String,
+    pub date: NaiveDate,
+    /// The whole band the desk is marking, as `HH:MM`.
+    pub tee_times: Vec<String>,
+    pub kind: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteSlotOverridesRequest {
+    pub golf_course_id: String,
+    pub date: NaiveDate,
+    pub tee_times: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteSlotOverridesResponse {
+    pub deleted: u64,
+}
+
+/// GET /v1/course/slot-overrides
+#[utoipa::path(
+    get,
+    path = "/v1/course/slot-overrides",
+    tag = "course",
+    params(SlotOverrideQueryParams),
+    responses(
+        (status = 200, description = "Desk marks for the requested date", body = ItemsResponse<SlotOverrideDto>),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_slot_overrides(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<SlotOverrideQueryParams>,
+) -> Result<Json<ItemsResponse<SlotOverrideDto>>, AppError> {
+    let tenant_id = operator_id(&headers)?.to_string();
+    let use_case = ListSlotOverridesUseCase::new(slot_override_gateway(&state));
+    let items = use_case
+        .execute(
+            &tenant_id,
+            SlotOverrideQuery {
+                date: query.date,
+                course_ids: CourseId::from_optional(query.golf_course_id)
+                    .into_iter()
+                    .collect(),
+            },
+        )
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: items.iter().map(SlotOverrideDto::from).collect(),
+    }))
+}
+
+/// PUT /v1/course/slot-overrides
+#[utoipa::path(
+    put,
+    path = "/v1/course/slot-overrides",
+    tag = "course",
+    request_body = UpsertSlotOverridesRequest,
+    responses(
+        (status = 200, description = "Marks now on those tee times", body = ItemsResponse<SlotOverrideDto>),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn upsert_slot_overrides(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<UpsertSlotOverridesRequest>,
+) -> Result<Json<ItemsResponse<SlotOverrideDto>>, AppError> {
+    let tenant_id = operator_id(&headers)?.to_string();
+    let command = UpsertSlotOverrides {
+        course_id: CourseId::try_new(request.golf_course_id).map_err(AppError::from)?,
+        date: request.date,
+        tee_times: request.tee_times,
+        kind: SlotOverrideKind::parse(&request.kind).map_err(AppError::from)?,
+        label: request.label,
+        note: request.note,
+    };
+    let use_case = UpsertSlotOverridesUseCase::new(slot_override_gateway(&state));
+    let items = use_case
+        .execute(&tenant_id, command)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: items.iter().map(SlotOverrideDto::from).collect(),
+    }))
+}
+
+/// DELETE /v1/course/slot-overrides
+#[utoipa::path(
+    delete,
+    path = "/v1/course/slot-overrides",
+    tag = "course",
+    request_body = DeleteSlotOverridesRequest,
+    responses(
+        (status = 200, description = "How many marks were cleared", body = DeleteSlotOverridesResponse),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn delete_slot_overrides(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<DeleteSlotOverridesRequest>,
+) -> Result<Json<DeleteSlotOverridesResponse>, AppError> {
+    let tenant_id = operator_id(&headers)?.to_string();
+    let use_case = DeleteSlotOverridesUseCase::new(slot_override_gateway(&state));
+    let deleted = use_case
+        .execute(
+            &tenant_id,
+            DeleteSlotOverrides {
+                course_id: CourseId::try_new(request.golf_course_id).map_err(AppError::from)?,
+                date: request.date,
+                tee_times: request.tee_times,
+            },
+        )
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(DeleteSlotOverridesResponse { deleted }))
+}
+
 // ─── Courses ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
@@ -304,6 +927,12 @@ pub struct UpsertCourseRequest {
     pub start_interval_minutes: i32,
     #[serde(default = "default_true")]
     pub is_active: bool,
+    /// When the course starts and stops sending groups out.
+    ///
+    /// Omit to leave whatever the course already has: Field replaces the column
+    /// with what it is sent, so a save without this must not clear the hours.
+    #[serde(default)]
+    pub business_hours_json: Option<BusinessHoursDto>,
 }
 
 fn default_true() -> bool {
@@ -336,6 +965,11 @@ impl From<&Course> for CourseDto {
 }
 
 fn parse_upsert_course(body: UpsertCourseRequest) -> Result<UpsertCourse, AppError> {
+    let business_hours = body
+        .business_hours_json
+        .map(|hours| BusinessHours::try_new(hours.open, hours.close))
+        .transpose()
+        .map_err(AppError::from)?;
     UpsertCourse::try_new(
         body.name,
         body.short_name,
@@ -343,6 +977,7 @@ fn parse_upsert_course(body: UpsertCourseRequest) -> Result<UpsertCourse, AppErr
         body.timezone,
         body.start_interval_minutes,
         body.is_active,
+        business_hours,
     )
     .map_err(AppError::from)
 }
@@ -1134,4 +1769,52 @@ pub async fn list_caddie_assignments(
     Ok(Json(ItemsResponse {
         items: items.iter().map(CaddieAssignmentDto::from).collect(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn params(ids: Option<&str>, id: Option<&str>) -> TeeLedgerQueryParams {
+        TeeLedgerQueryParams {
+            date: NaiveDate::from_ymd_opt(2026, 7, 20).unwrap(),
+            golf_course_ids: ids.map(str::to_string),
+            golf_course_id: id.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn naming_no_course_draws_every_course() {
+        assert!(params(None, None).course_ids().is_empty());
+        assert!(params(Some(""), None).course_ids().is_empty());
+        // A trailing comma is what a UI building the list by joining produces
+        // when the last item is dropped; it must not mean "a course with no id".
+        assert!(params(Some(" , "), None).course_ids().is_empty());
+    }
+
+    #[test]
+    fn several_courses_arrive_as_a_comma_separated_list() {
+        assert_eq!(
+            params(Some("course-a, course-b"), None).course_ids(),
+            vec![CourseId::new("course-a"), CourseId::new("course-b")]
+        );
+    }
+
+    #[test]
+    fn the_tee_sheets_singular_parameter_still_selects_a_course() {
+        // The two boards sit next to each other and operators paste links
+        // between them; the tee sheet's name for this is `golfCourseId`.
+        assert_eq!(
+            params(None, Some("course-a")).course_ids(),
+            vec![CourseId::new("course-a")]
+        );
+    }
+
+    #[test]
+    fn a_course_named_twice_gets_one_column_rather_than_two() {
+        assert_eq!(
+            params(Some("course-a,course-a"), Some("course-a")).course_ids(),
+            vec![CourseId::new("course-a")]
+        );
+    }
 }

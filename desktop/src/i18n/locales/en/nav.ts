@@ -17,6 +17,10 @@ export const nav: DeepPartial<typeof source> = {
       label: 'Home',
       description: 'Where the day starts',
     },
+    'golf/ledger': {
+      label: 'Start ledger',
+      description: 'What is open and who is out, by tee time',
+    },
     'golf/timeline': {
       label: 'Timeline',
       description: "Today's bookings and caddies in time order",
