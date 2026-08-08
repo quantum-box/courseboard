@@ -94,6 +94,7 @@ export const nav = {
     menuLabel: 'ナビゲーションメニュー',
     pin: 'よく使う画面に入れる',
     unpin: 'よく使う画面から外す',
+    resize: 'サイドバーの幅を変える',
   },
   workspace: {
     openHelp: 'この画面の使い方',

@@ -53,6 +53,7 @@ import {
   Map,
   Menu,
   Moon,
+  PanelLeft,
   Pin,
   ReceiptText,
   Search,
@@ -64,7 +65,17 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../auth/AuthProvider'
 import { formatTenantWorkspaceLabel, tenantWorkspaceLabel } from '../auth/tenant-label'
@@ -180,6 +191,27 @@ export const golfNavigation = allNavigation.filter(
 )
 
 const PINNED_STORAGE_KEY = 'courseboard.sidebar.pinned'
+/** How close to the window edge the pointer must get to slide the sidebar back out. */
+const SIDEBAR_REVEAL_EDGE = 12
+
+const WIDTH_STORAGE_KEY = 'courseboard.sidebar.width'
+const SIDEBAR_MIN_WIDTH = 200
+const SIDEBAR_MAX_WIDTH = 400
+const SIDEBAR_DEFAULT_WIDTH = 240
+/** Pointer travel that separates a resize drag from a click on the edge. */
+const RESIZE_DRAG_THRESHOLD = 3
+/** Keyboard step for the resize handle. */
+const RESIZE_KEY_STEP = 16
+
+function clampSidebarWidth(value: number) {
+  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(value)))
+}
+
+function readSidebarWidth() {
+  const stored = Number(localStorage.getItem(WIDTH_STORAGE_KEY))
+  if (!Number.isFinite(stored) || stored <= 0) return SIDEBAR_DEFAULT_WIDTH
+  return clampSidebarWidth(stored)
+}
 const knownRoutes = new Set<string>([
   ...allNavigation.map(item => item.route),
   ...settingsNavigation.map(item => item.route),
@@ -262,6 +294,8 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   const [hoverExpanded, setHoverExpanded] = useState(false)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth)
+  const [resizing, setResizing] = useState(false)
   const [commandOpen, setCommandOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [pinnedRoutes, setPinnedRoutes] = useState<string[]>(() => readPinnedRoutes())
@@ -270,14 +304,13 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
     return stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
   })
   const pointerInsideSidebarRef = useRef(false)
-  const hoverLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const accountMenuOpenRef = useRef(false)
+  const desktopSidebarRef = useRef<HTMLElement | null>(null)
+  const sidebarOpenTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const resizeRef = useRef<{ pointerId: number; startX: number; startWidth: number; dragged: boolean } | null>(null)
   const mobileNavRef = useRef<HTMLElement | null>(null)
   const mobileTriggerRef = useRef<HTMLButtonElement | null>(null)
   const activeLocale = currentLocale()
-
-  /** Permanent preference stays in `collapsed`; hover only changes the visual rail. */
-  const visuallyCollapsed = collapsed && !hoverExpanded
 
   const pinnedItems = useMemo(
     () => pinnedRoutes
@@ -325,15 +358,41 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
     if (!collapsed) setHoverExpanded(false)
   }, [collapsed])
 
+  // Collapsing from the header button would otherwise leave focus on a control
+  // that is about to become invisible.
+  useEffect(() => {
+    if (!collapsed) return
+    const active = document.activeElement
+    if (active instanceof Node && desktopSidebarRef.current?.contains(active)) {
+      sidebarOpenTriggerRef.current?.focus()
+    }
+  }, [collapsed])
+
   useEffect(() => {
     setMobileOpen(false)
   }, [route])
 
+  /**
+   * Reveal is driven by the pointer position rather than by enter/leave on the
+   * sidebar itself: while hidden the sidebar has no hoverable box, and once it
+   * slides out it lands under a pointer that may never move again, so boundary
+   * events alone would strand it open.
+   */
   useEffect(() => {
-    return () => {
-      if (hoverLeaveTimerRef.current) clearTimeout(hoverLeaveTimerRef.current)
+    if (!collapsed || mobileOpen) return
+    const onMouseMove = (event: globalThis.MouseEvent) => {
+      if (event.clientX <= SIDEBAR_REVEAL_EDGE) {
+        setHoverExpanded(true)
+        return
+      }
+      if (accountMenuOpenRef.current) return
+      const panel = desktopSidebarRef.current?.querySelector('.courseboard-sidebar')
+      const right = panel?.getBoundingClientRect().right ?? 0
+      if (event.clientX > right) setHoverExpanded(false)
     }
-  }, [])
+    window.addEventListener('mousemove', onMouseMove)
+    return () => window.removeEventListener('mousemove', onMouseMove)
+  }, [collapsed, mobileOpen])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -401,27 +460,74 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
     return () => document.removeEventListener('keydown', onKeyDown, true)
   }, [mobileOpen])
 
-  const clearHoverLeaveTimer = () => {
-    if (hoverLeaveTimerRef.current) {
-      clearTimeout(hoverLeaveTimerRef.current)
-      hoverLeaveTimerRef.current = null
-    }
-  }
-
   const handleSidebarPointerEnter = () => {
     pointerInsideSidebarRef.current = true
-    clearHoverLeaveTimer()
     if (collapsed) setHoverExpanded(true)
   }
 
   const handleSidebarPointerLeave = () => {
     pointerInsideSidebarRef.current = false
-    clearHoverLeaveTimer()
-    hoverLeaveTimerRef.current = setTimeout(() => {
-      if (!pointerInsideSidebarRef.current && !accountMenuOpenRef.current) {
-        setHoverExpanded(false)
-      }
-    }, 180)
+  }
+
+  const collapseFromEdge = () => {
+    // The handle disappears with the sidebar, so no mouseleave follows it.
+    pointerInsideSidebarRef.current = false
+    setHoverExpanded(false)
+    setCollapsed(true)
+  }
+
+  const storeSidebarWidth = (width: number) => {
+    setSidebarWidth(width)
+    localStorage.setItem(WIDTH_STORAGE_KEY, String(width))
+  }
+
+  // The edge is one control with two gestures: drag resizes, a plain click closes.
+  const handleResizePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    resizeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: sidebarWidth,
+      dragged: false,
+    }
+    setResizing(true)
+  }
+
+  const handleResizePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const state = resizeRef.current
+    if (!state || state.pointerId !== event.pointerId) return
+    const delta = event.clientX - state.startX
+    if (!state.dragged && Math.abs(delta) <= RESIZE_DRAG_THRESHOLD) return
+    state.dragged = true
+    setSidebarWidth(clampSidebarWidth(state.startWidth + delta))
+  }
+
+  const endResize = (event: ReactPointerEvent<HTMLDivElement>, apply: boolean) => {
+    const state = resizeRef.current
+    if (!state || state.pointerId !== event.pointerId) return
+    resizeRef.current = null
+    setResizing(false)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    if (!apply) {
+      setSidebarWidth(state.startWidth)
+      return
+    }
+    if (state.dragged) {
+      storeSidebarWidth(clampSidebarWidth(state.startWidth + (event.clientX - state.startX)))
+    } else {
+      collapseFromEdge()
+    }
+  }
+
+  const handleResizeKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const step = event.key === 'ArrowLeft' ? -RESIZE_KEY_STEP : event.key === 'ArrowRight' ? RESIZE_KEY_STEP : 0
+    if (step === 0) return
+    event.preventDefault()
+    storeSidebarWidth(clampSidebarWidth(sidebarWidth + step))
   }
 
   const toggleCollapsed = () => {
@@ -451,9 +557,9 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
     : t('nav:workspace.tenantUnset')
 
   const sidebar = (
-    <Sidebar collapsed={visuallyCollapsed} className="courseboard-sidebar">
+    <Sidebar collapsed={false} className="courseboard-sidebar">
       <SidebarHeader className="brand-row">
-        <CourseBoardBrand variant="sidebar" collapsed={visuallyCollapsed} dark={dark} />
+        <CourseBoardBrand variant="sidebar" collapsed={false} dark={dark} />
         <Button
           type="button"
           variant="ghost"
@@ -477,18 +583,11 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
       </SidebarHeader>
 
       <SidebarSection>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <SidebarItem type="button" onClick={() => setCommandOpen(true)}>
-              <Search />
-              <SidebarItemLabel>{t('nav:sidebar.search')}</SidebarItemLabel>
-              <span className="shortcut-pair"><Kbd>⌘</Kbd><Kbd>K</Kbd></span>
-            </SidebarItem>
-          </TooltipTrigger>
-          {visuallyCollapsed ? (
-            <TooltipContent side="right">{t('nav:sidebar.search')}</TooltipContent>
-          ) : null}
-        </Tooltip>
+        <SidebarItem type="button" onClick={() => setCommandOpen(true)}>
+          <Search />
+          <SidebarItemLabel>{t('nav:sidebar.search')}</SidebarItemLabel>
+          <span className="shortcut-pair"><Kbd>⌘</Kbd><Kbd>K</Kbd></span>
+        </SidebarItem>
       </SidebarSection>
 
       {pinnedItems.length > 0 ? (
@@ -499,7 +598,6 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
               key={item.route}
               item={item}
               active={isActive(route, item.route)}
-              collapsed={visuallyCollapsed}
               pinned
               onTogglePin={() => togglePinned(item.route)}
             />
@@ -517,7 +615,6 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
               key={item.route}
               item={item}
               active={isActive(route, item.route)}
-              collapsed={visuallyCollapsed}
               pinned={false}
               onTogglePin={() => togglePinned(item.route)}
             />
@@ -532,7 +629,6 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
             accountMenuOpenRef.current = open
             setAccountMenuOpen(open)
             if (open) {
-              clearHoverLeaveTimer()
               if (collapsed) setHoverExpanded(true)
             } else if (!pointerInsideSidebarRef.current) {
               setHoverExpanded(false)
@@ -592,16 +688,38 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
 
   return (
     <TooltipProvider>
-      <div className="app-shell">
+      <div
+        className="app-shell"
+        data-sidebar-resizing={resizing || undefined}
+        style={{ '--courseboard-sidebar-width': `${sidebarWidth}px` } as CSSProperties}
+      >
+        {/* Collapsing hides the sidebar outright — no icon rail is left behind;
+            it comes back full-width as an overlay while the pointer hugs the edge. */}
         <aside
+          ref={desktopSidebarRef}
           className="desktop-sidebar"
-          data-collapsed-rail={collapsed || undefined}
+          data-collapsed-overlay={collapsed || undefined}
           data-hover-expanded={collapsed && hoverExpanded ? true : undefined}
           inert={mobileOpen}
           onMouseEnter={handleSidebarPointerEnter}
           onMouseLeave={handleSidebarPointerLeave}
         >
           {sidebar}
+          <div
+            className="sidebar-resize-handle"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t('nav:sidebar.resize')}
+            aria-valuenow={sidebarWidth}
+            aria-valuemin={SIDEBAR_MIN_WIDTH}
+            aria-valuemax={SIDEBAR_MAX_WIDTH}
+            tabIndex={0}
+            onPointerDown={handleResizePointerDown}
+            onPointerMove={handleResizePointerMove}
+            onPointerUp={event => endResize(event, true)}
+            onPointerCancel={event => endResize(event, false)}
+            onKeyDown={handleResizeKeyDown}
+          />
         </aside>
         {mobileOpen ? (
           <div className="mobile-nav-layer" role="presentation" onMouseDown={() => setMobileOpen(false)}>
@@ -636,6 +754,20 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
             >
               <Menu />
             </Button>
+            {/* Hovering the window edge is not discoverable on its own. */}
+            {collapsed ? (
+              <Button
+                ref={sidebarOpenTriggerRef}
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="desktop-sidebar-open"
+                aria-label={t('nav:sidebar.expand')}
+                onClick={() => setCollapsed(false)}
+              >
+                <PanelLeft />
+              </Button>
+            ) : null}
             <div className="workspace-title" data-tauri-drag-region>{title}</div>
             <div className="workspace-context">
               <Tooltip>
@@ -778,13 +910,11 @@ function CommandNavigationItem({
 function NavigationRow({
   item,
   active,
-  collapsed,
   pinned,
   onTogglePin,
 }: {
   item: NavigationItem
   active: boolean
-  collapsed: boolean
   pinned: boolean
   onTogglePin: () => void
 }) {
@@ -800,30 +930,23 @@ function NavigationRow({
 
   return (
     <div className="nav-row" data-pinned={pinned || undefined}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <SidebarItem
-            type="button"
-            active={active}
-            onClick={event => navigateFromClick(event, item.route)}
-          >
-            <Icon />
-            <SidebarItemLabel>{label}</SidebarItemLabel>
-          </SidebarItem>
-        </TooltipTrigger>
-        {collapsed ? <TooltipContent side="right">{label}</TooltipContent> : null}
-      </Tooltip>
-      {!collapsed ? (
-        <button
-          type="button"
-          className="nav-pin"
-          aria-label={pinned ? t('sidebar.unpin') : t('sidebar.pin')}
-          aria-pressed={pinned}
-          onClick={handlePinClick}
-        >
-          <Pin />
-        </button>
-      ) : null}
+      <SidebarItem
+        type="button"
+        active={active}
+        onClick={event => navigateFromClick(event, item.route)}
+      >
+        <Icon />
+        <SidebarItemLabel>{label}</SidebarItemLabel>
+      </SidebarItem>
+      <button
+        type="button"
+        className="nav-pin"
+        aria-label={pinned ? t('sidebar.unpin') : t('sidebar.pin')}
+        aria-pressed={pinned}
+        onClick={handlePinClick}
+      >
+        <Pin />
+      </button>
     </div>
   )
 }

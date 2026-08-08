@@ -96,6 +96,7 @@ export const nav: DeepPartial<typeof source> = {
     menuLabel: 'Navigation menu',
     pin: 'Pin to sidebar',
     unpin: 'Unpin from sidebar',
+    resize: 'Resize sidebar',
   },
   workspace: {
     openHelp: 'How to use this page',
