@@ -3,6 +3,11 @@
 desktop/dist/
 desktop/.vite/
 desktop/*.tsbuildinfo
+# Local build output only: the directory holds no package.json, no config and no
+# source — its `public/courseboard-ui` is a copy of `desktop/dist` — and nothing
+# in the repository refers to it. Untracked as it stands, so ignoring it only
+# stops it being swept into a commit by `git add -A`.
+desktop/web-host/
 .playwright-mcp/
 # Root-anchored so it doesn't swallow apps/admin-ui/src/components/ui (shadcn/Radix UI).
 /ui/
