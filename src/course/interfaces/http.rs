@@ -27,10 +27,10 @@ use crate::course::infrastructure::{
 };
 use crate::course::usecase::{
     CreateCourseUseCase, DeleteCourseUseCase, GenerateCourseTimeSlotsUseCase,
-    GetCourseScheduleUseCase, GetTeeSheetUseCase, ListCaddieAssignmentsUseCase, ListCaddiesUseCase,
-    ListCoursesUseCase, ListProductSlotsUseCase, ListReservationProductsUseCase,
-    ListResourcesUseCase, ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase,
-    UpdateCourseUseCase, UpsertReservationProductUseCase,
+    GetCourseScheduleUseCase, GetTeeSheetUseCase, LinkCourseResourceUseCase,
+    ListCaddieAssignmentsUseCase, ListCaddiesUseCase, ListCoursesUseCase, ListProductSlotsUseCase,
+    ListReservationProductsUseCase, ListResourcesUseCase, ReplaceCourseScheduleUseCase,
+    ReplaceProductSlotsUseCase, UpdateCourseUseCase, UpsertReservationProductUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -512,6 +512,34 @@ pub async fn list_resources(
     Ok(Json(ItemsResponse {
         items: items.iter().map(ResourceDto::from).collect(),
     }))
+}
+
+/// POST /v1/course/courses/:id/resource
+#[utoipa::path(
+    post,
+    path = "/v1/course/courses/{id}/resource",
+    tag = "course",
+    params(("id" = String, Path, description = "Golf course ID")),
+    responses(
+        (status = 200, description = "The course's reservation resource", body = ResourceDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Course not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn link_course_resource(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<ResourceDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let use_case = LinkCourseResourceUseCase::new(catalog_gateway(&state));
+    let resource = use_case
+        .execute(credentials, &CourseId::new(id))
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ResourceDto::from(&resource)))
 }
 
 // ─── Course schedule and inventory ────────────────────────────────────────────

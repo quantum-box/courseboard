@@ -338,6 +338,12 @@ pub fn build_router(state: AppState) -> Router {
                 )),
         )
         .route(
+            "/v1/course/courses/:id/resource",
+            post(course::interfaces::http::link_course_resource).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/courses/:id/time-slots/generate",
             post(course::interfaces::http::generate_course_time_slots).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),

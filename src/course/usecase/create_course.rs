@@ -31,8 +31,8 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        CourseId, ProductSlot, ReservationProduct, ReservationServiceId, Resource,
-        UpsertReservationProduct,
+        CourseId, ProductSlot, ReservationProduct, ReservationServiceId, Resource, ResourceId,
+        SaveCourseResource, UpsertReservationProduct,
     };
 
     struct FakeCatalog {
@@ -92,6 +92,22 @@ mod tests {
             _credentials: GatewayCredentials<'_>,
         ) -> Result<Vec<Resource>, CourseError> {
             Ok(Vec::new())
+        }
+
+        async fn create_reservation_resource(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _name: &str,
+        ) -> Result<ResourceId, CourseError> {
+            Err(CourseError::Provider("unused".into()))
+        }
+
+        async fn save_course_resource(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: SaveCourseResource,
+        ) -> Result<Resource, CourseError> {
+            Err(CourseError::Provider("unused".into()))
         }
 
         async fn list_reservation_products(

@@ -55,6 +55,30 @@ function generatePath(courseId: string) {
   return `${coursesPath}/${encodeURIComponent(courseId)}/time-slots/generate`
 }
 
+const resourcesPath = '/v1/course/resources'
+
+function resourceLinkPath(courseId: string) {
+  return `${coursesPath}/${encodeURIComponent(courseId)}/resource`
+}
+
+/**
+ * The resource a course keeps its tee times on.
+ *
+ * Without one there is no schedule to read and no inventory to generate, and
+ * every save on this page fails. Asking outright is clearer than reading it
+ * back out of the error text.
+ */
+type CourseResource = {
+  golfCourseId?: string
+  reservationResourceId?: string
+}
+
+function isLinked(resources: CourseResource[], courseId: string) {
+  return resources.some(
+    resource => resource.golfCourseId === courseId && Boolean(resource.reservationResourceId),
+  )
+}
+
 function toStoredRule(rule: EditableRule): GolfAvailabilityRule {
   return {
     weekday: rule.weekday,
@@ -97,6 +121,8 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
   const [loadError, setLoadError] = useState<unknown>(null)
   const [scheduleError, setScheduleError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [linked, setLinked] = useState(true)
+  const [linking, setLinking] = useState(false)
 
   const [from, setFrom] = useState(today)
   const [to, setTo] = useState(today)
@@ -118,6 +144,15 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
       const found = courseResponse.items.find(item => item.id === courseId) ?? null
       setCourse(found)
       if (!found) return
+
+      try {
+        const resources = await courseboardApiJson<{ items: CourseResource[] }>(resourcesPath)
+        setLinked(isLinked(resources.items, courseId))
+      } catch {
+        // A resource list this page could not read is not itself a reason to
+        // claim the course is unlinked; the schedule below says so if it is.
+        setLinked(true)
+      }
 
       try {
         const response = await courseboardApiJson<{ items: GolfAvailabilityRule[] }>(
@@ -162,6 +197,27 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
   function revert() {
     setRules(savedRules.map(toEditableRule))
     setScheduleError(null)
+  }
+
+  async function link() {
+    setLinking(true)
+    try {
+      await courseboardApiJson<CourseResource>(resourceLinkPath(courseId), { method: 'POST' })
+      showToast({
+        tone: 'success',
+        title: t('schedule:link.done.title'),
+        message: t('schedule:link.done.body', { course: course ? courseLabel(course) : courseId }),
+      })
+      await load()
+    } catch (error) {
+      showToast({
+        tone: 'danger',
+        title: t('schedule:link.failed'),
+        message: errorMessage(error),
+      })
+    } finally {
+      setLinking(false)
+    }
   }
 
   async function save() {
@@ -318,7 +374,18 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
         description={t('schedule:description')}
       />
 
-      {scheduleError ? (
+      {linked ? null : (
+        <Notice tone="warning" title={t('schedule:link.title')}>
+          {t('schedule:link.description')}
+          <div className="mt-2">
+            <Button type="button" variant="primary" disabled={linking} onClick={() => void link()}>
+              {linking ? t('schedule:link.working') : t('schedule:link.action')}
+            </Button>
+          </div>
+        </Notice>
+      )}
+
+      {scheduleError && linked ? (
         <Notice tone="warning" title={t('schedule:loadFailed.title')}>
           {scheduleError}
           {t('schedule:loadFailed.description')}
