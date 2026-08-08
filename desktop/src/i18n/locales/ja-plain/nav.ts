@@ -88,11 +88,12 @@ export const nav: DeepPartial<typeof source> = {
   sidebar: {
     search: '画面をさがす',
     pinned: 'よく使う画面',
-    expand: '左のメニューを広げる',
-    collapse: '左のメニューを細くする',
+    expand: '左のメニューを出す',
+    collapse: '左のメニューを隠す',
     menuLabel: '画面を選ぶメニュー',
     pin: 'よく使う画面に入れる',
     unpin: 'よく使う画面から外す',
+    resize: '左のメニューの幅を変える',
   },
   workspace: {
     openHelp: 'この画面の使い方を見る',

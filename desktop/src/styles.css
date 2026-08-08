@@ -120,21 +120,78 @@ button,
   flex: none;
 }
 
-/* Keep a 48px rail in flow; hover-expand overlays content instead of pushing it. */
-.desktop-sidebar[data-collapsed-rail] {
-  width: 3rem;
+/* Width is user-set on the shell; the panel is the only thing that carries it. */
+.desktop-sidebar .courseboard-sidebar {
+  width: var(--courseboard-sidebar-width, 240px);
 }
 
-.desktop-sidebar[data-collapsed-rail] .courseboard-sidebar {
+/* Same 5px strip serves both gestures: drag to resize, click to close. */
+.sidebar-resize-handle {
+  position: absolute;
+  inset: 0 -2px 0 auto;
+  z-index: 1;
+  width: 5px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.sidebar-resize-handle::after {
+  content: '';
+  position: absolute;
+  inset: 0 2px;
+  background: hsl(var(--nui-primary));
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle:focus-visible::after,
+.app-shell[data-sidebar-resizing] .sidebar-resize-handle::after {
+  opacity: 1;
+}
+
+.sidebar-resize-handle:focus-visible {
+  outline: none;
+}
+
+/* A hidden sidebar has no edge to grab, and the strip would sit on the reveal zone. */
+.desktop-sidebar[data-collapsed-overlay] .sidebar-resize-handle {
+  display: none;
+}
+
+.app-shell[data-sidebar-resizing] {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* Collapsed leaves no rail at all: the sidebar slides off-screen and comes back
+   as an overlay when the pointer reaches the window edge. */
+.desktop-sidebar[data-collapsed-overlay] {
+  width: 0;
+}
+
+.desktop-sidebar[data-collapsed-overlay] .courseboard-sidebar {
   position: absolute;
   inset: 0 auto 0 0;
   height: 100%;
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform 140ms ease, visibility 0s linear 140ms;
 }
 
-.desktop-sidebar[data-collapsed-rail][data-hover-expanded] .courseboard-sidebar {
+.desktop-sidebar[data-collapsed-overlay][data-hover-expanded] .courseboard-sidebar {
+  visibility: visible;
+  transform: translateX(0);
+  transition: transform 140ms ease;
   box-shadow:
     4px 0 24px rgb(0 0 0 / 8%),
     1px 0 0 hsl(var(--nui-border));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-sidebar[data-collapsed-overlay] .courseboard-sidebar {
+    transition: none;
+  }
 }
 
 .courseboard-sidebar {
@@ -177,11 +234,6 @@ button,
   object-fit: contain;
 }
 
-/* SidebarHeader hides non-svg children when collapsed; keep the mark visible. */
-.courseboard-sidebar[data-collapsed] .brand-row > .brand-mark {
-  display: block !important;
-}
-
 .brand-row .desktop-collapse,
 .brand-row .mobile-close {
   width: 24px;
@@ -193,6 +245,14 @@ button,
 .mobile-menu,
 .mobile-nav-layer {
   display: none;
+}
+
+/* Only affordance left once the sidebar is fully hidden. */
+.desktop-sidebar-open {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  flex: none;
 }
 
 .shortcut-pair {
@@ -250,10 +310,6 @@ button,
 
 .nav-row[data-pinned] .nav-pin svg {
   fill: currentColor;
-}
-
-.courseboard-sidebar[data-collapsed] .nav-pin {
-  display: none;
 }
 
 .runtime-dot {
@@ -1433,6 +1489,7 @@ button,
 
 @media (max-width: 800px) {
   .desktop-sidebar { display: none; }
+  .desktop-sidebar-open { display: none; }
   .mobile-menu { display: inline-flex; }
   .mobile-nav-layer {
     position: fixed;
