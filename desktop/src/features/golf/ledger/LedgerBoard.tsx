@@ -8,6 +8,8 @@ import {
   formatColumnTotals,
   formatGridSource,
   groupTitle,
+  knowsRemainingCapacity,
+  observedIntervalMinutes,
   remainingGroups,
   seatCells,
   seatColumnCount,
@@ -92,6 +94,9 @@ function LedgerColumnTable({
 }) {
   const { t } = useTranslation(['ledger'])
   const seatColumns = seatColumnCount(column)
+  // Measured from the rows on screen, falling back to what the course record
+  // says only when the board is too short to measure.
+  const interval = observedIntervalMinutes(column) ?? column.startIntervalMinutes
   const nowTeeTime = currentSlotTeeTime(column.slots, nowMinutes)
   const selected = new Set(selectedTeeTimes)
   const derived = column.gridSource !== 'inventory'
@@ -123,10 +128,12 @@ function LedgerColumnTable({
         <p className="ledger-column-totals">{formatColumnTotals(column)}</p>
         <p className="ledger-column-meta">
           <span>{formatGridSource(column.gridSource)}</span>
-          {column.startIntervalMinutes ? (
-            <span>{t('ledger:column.interval', { n: String(column.startIntervalMinutes) })}</span>
+          {interval ? (
+            <span>{t('ledger:column.interval', { n: String(interval) })}</span>
           ) : null}
-          <span>{t('ledger:column.open', { n: String(column.openSlotCount) })}</span>
+          {knowsRemainingCapacity(column) ? (
+            <span>{t('ledger:column.open', { n: String(column.openSlotCount) })}</span>
+          ) : null}
         </p>
         {derived ? (
           <p className="ledger-column-derived">{t('ledger:source.derivedNotice')}</p>
