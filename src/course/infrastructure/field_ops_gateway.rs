@@ -11,9 +11,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use super::field_gateway::{
-    field_get_items, field_get_items_forward_bad_request, field_send_json, field_send_text,
-    field_send_unit, map_caddie, map_caddie_assignment, normalize_base_url, urlencoding_path,
-    FieldGolfCaddieAssignmentDto, FieldGolfCaddieProfileDto,
+    field_get_items, field_send_json, field_send_text, field_send_unit, map_caddie,
+    map_caddie_assignment, normalize_base_url, urlencoding_path, FieldGolfCaddieAssignmentDto,
+    FieldGolfCaddieProfileDto,
 };
 use crate::course::domain::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshot, AttendanceSnapshotReport,
@@ -427,8 +427,7 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
     ) -> Result<Vec<AttendancePeriodSnapshot>, CourseError> {
         let path = format!("{GOLF}/caddie-attendance-snapshots?from={from}&to={to}");
         let items: Vec<FieldAttendancePeriodSnapshotDto> =
-            field_get_items_forward_bad_request(&self.client, &self.base_url, &path, credentials)
-                .await?;
+            field_get_items(&self.client, &self.base_url, &path, credentials).await?;
         Ok(items
             .into_iter()
             .map(map_attendance_period_snapshot)
@@ -830,7 +829,7 @@ mod tests {
     use axum::{
         extract::OriginalUri,
         http::StatusCode,
-        routing::{get, post},
+        routing::{get, patch, post},
         Json, Router,
     };
 
@@ -930,10 +929,121 @@ mod tests {
 
         assert!(matches!(
             error,
-            CourseError::InvalidUpstreamRequest(message)
-                if message.contains("400 Bad Request")
-                    && message.contains("from must be on or before to")
+            CourseError::UpstreamClient { status: 400, message }
+                if message == "from must be on or before to"
         ));
+    }
+
+    #[tokio::test]
+    async fn caddie_staff_link_preserves_field_conflict_message() {
+        let app = Router::new().route(
+            "/v1/erp/extensions/golf-course/caddie-profiles/caddie-1",
+            patch(|| async {
+                (
+                    StatusCode::CONFLICT,
+                    Json(json!({
+                        "error": "staff_already_linked",
+                        "message": "このスタッフは田中さんに既に紐付いています"
+                    })),
+                )
+            }),
+        );
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
+        let input = UpsertCaddie::try_new(
+            "佐藤さん",
+            "regular",
+            "D",
+            12_000,
+            Some("JPY".to_string()),
+            Some("staff-1".to_string()),
+            Some("staff_member".to_string()),
+            Some("staff-1".to_string()),
+            true,
+            Some("active".to_string()),
+            Some(1),
+            None,
+            None,
+            None,
+        )
+        .expect("valid caddie update");
+
+        let error = gateway
+            .update_caddie(
+                test_credentials(),
+                &CaddieId::try_new("caddie-1").expect("valid caddie id"),
+                input,
+            )
+            .await
+            .expect_err("a duplicate staff link must remain a conflict");
+
+        assert!(matches!(
+            error,
+            CourseError::UpstreamClient { status: 409, message }
+                if message == "このスタッフは田中さんに既に紐付いています"
+        ));
+    }
+
+    #[tokio::test]
+    async fn field_auth_denials_remain_403_through_the_caddie_gateway() {
+        let app = Router::new()
+            .route(
+                "/v1/erp/extensions/golf-course/caddie-profiles/unauthorized",
+                patch(|| async {
+                    (
+                        StatusCode::UNAUTHORIZED,
+                        Json(json!({ "message": "Field bearer was rejected" })),
+                    )
+                }),
+            )
+            .route(
+                "/v1/erp/extensions/golf-course/caddie-profiles/forbidden",
+                patch(|| async {
+                    (
+                        StatusCode::FORBIDDEN,
+                        Json(json!({ "message": "Field tenant policy denied this operation" })),
+                    )
+                }),
+            );
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
+
+        for (caddie_id, expected_message) in [
+            ("unauthorized", "Field bearer was rejected"),
+            ("forbidden", "Field tenant policy denied this operation"),
+        ] {
+            let input = UpsertCaddie::try_new(
+                "佐藤さん",
+                "regular",
+                "D",
+                12_000,
+                Some("JPY".to_string()),
+                Some("staff-1".to_string()),
+                Some("staff_member".to_string()),
+                Some("staff-1".to_string()),
+                true,
+                Some("active".to_string()),
+                Some(1),
+                None,
+                None,
+                None,
+            )
+            .expect("valid caddie update");
+            let error = gateway
+                .update_caddie(
+                    test_credentials(),
+                    &CaddieId::try_new(caddie_id).expect("valid caddie id"),
+                    input,
+                )
+                .await
+                .expect_err("Field auth denial must not become a success");
+
+            assert!(matches!(
+                error,
+                CourseError::UpstreamClient { status: 403, message }
+                    if message == expected_message
+            ));
+        }
     }
 
     #[tokio::test]

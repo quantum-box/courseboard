@@ -124,11 +124,15 @@ impl From<CourseError> for AppError {
         match value {
             CourseError::Unauthorized => AppError::Unauthorized,
             CourseError::BadRequest(message) => AppError::BadRequest(message),
-            CourseError::InvalidUpstreamRequest(message) => {
-                AppError::InvalidUpstreamRequest(message)
-            }
+            CourseError::UpstreamClient { status, message } => match StatusCode::from_u16(status) {
+                Ok(status) if status.is_client_error() => {
+                    AppError::UpstreamClient { status, message }
+                }
+                _ => AppError::Provider(format!(
+                    "Field API returned invalid client status {status}: {message}"
+                )),
+            },
             CourseError::NotFound(message) => AppError::NotFound(message),
-            CourseError::PermissionDenied(message) => AppError::PermissionDenied(message),
             CourseError::Provider(message) => AppError::Provider(message),
         }
     }

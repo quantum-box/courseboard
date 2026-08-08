@@ -51,7 +51,7 @@ export const common: DeepPartial<typeof source> = {
     authRejected:
       'ログインが受け付けられませんでした。一度ログアウトして、もう一度ログインしてください。',
     providerError:
-      'つながっている別のサービスで問題が起きています。下に出ている内容を、システムの担当の人に伝えてください。この画面では直せません。',
+      'システムの問題でできませんでした。システムの担当の人に連絡してください。',
     apiUnreachable:
       'Course Board につながりませんでした。少し待ってから、もう一度開いてください。',
     offline:
