@@ -5,6 +5,7 @@
 
 mod caddie;
 mod caddie_ops;
+mod caddie_plan;
 mod caddie_ranking;
 mod commercial;
 mod course;
@@ -36,6 +37,10 @@ pub use caddie_ops::{
     CaddieDayCapacity, CaddiePatch, CaddieRating, CaddieRecommendation, CaddieSupply,
     PayrollPeriod, PayrollRow, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships,
     UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+};
+pub use caddie_plan::{
+    plan_caddie_assignments, shift_covers_tee_time, skip_reason, PlanOptions, PlannableCaddie,
+    PlannableRound,
 };
 pub use caddie_ranking::{
     rank_caddies, AttendanceState, RankedCaddie, RankingCandidate, RankingOptions,
@@ -87,6 +92,7 @@ pub use tee_ledger::{
     LedgerSlot, ResourceTimeSlot, SlotGridSource, TeeLedger,
 };
 pub use tee_sheet::{
-    format_datetime_with_offset, format_jst_wall_clock, jst_offset, TeeSheet, TeeSheetItem,
-    TeeSheetStatus, DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR, DEFAULT_TIMEZONE,
+    course_day_bounds, format_datetime_with_offset, format_jst_wall_clock, jst_offset,
+    widen_for_utc_date_filter, TeeSheet, TeeSheetItem, TeeSheetStatus, DEFAULT_DAY_END_HOUR,
+    DEFAULT_DAY_START_HOUR, DEFAULT_TIMEZONE,
 };

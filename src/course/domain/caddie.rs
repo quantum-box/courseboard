@@ -93,6 +93,12 @@ impl AssignmentRole {
     }
 }
 
+/// How long an assignment keeps its caddie when the row does not say.
+///
+/// The same figure the tee-sheet falls back to, so a round with no stated
+/// duration blocks the same stretch wherever it is read.
+const DEFAULT_ASSIGNMENT_MINUTES: i64 = 270;
+
 /// Lifecycle status of a caddie assignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssignmentStatus {
@@ -431,5 +437,22 @@ impl CaddieAssignment {
 
     pub fn is_active(&self) -> bool {
         self.status.is_active()
+    }
+
+    /// Whether this row still means the round has somebody on it.
+    ///
+    /// Wider than [`Self::is_active`] on purpose: a completed round was staffed
+    /// and must not be planned again, while a cancelled one leaves the group
+    /// with nobody and has to come back into the planner.
+    pub fn holds_the_round(&self) -> bool {
+        !matches!(self.status, AssignmentStatus::Cancelled)
+    }
+
+    /// How long this assignment keeps the caddie, for overlap checks.
+    pub fn occupied_minutes(&self) -> i64 {
+        self.duration_minutes
+            .filter(|value| *value > 0)
+            .map(i64::from)
+            .unwrap_or(DEFAULT_ASSIGNMENT_MINUTES)
     }
 }

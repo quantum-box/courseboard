@@ -196,24 +196,30 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         items.into_iter().map(map_caddie_assignment).collect()
     }
 
+    async fn create_caddie_assignment(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: UpsertCaddieAssignment,
+    ) -> Result<CaddieAssignment, CourseError> {
+        let dto: FieldGolfCaddieAssignmentDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            &format!("{GOLF}/caddie-assignments"),
+            credentials,
+            Some(&caddie_assignment_body(&input)),
+        )
+        .await?;
+        map_caddie_assignment(dto)
+    }
+
     async fn update_caddie_assignment(
         &self,
         credentials: GatewayCredentials<'_>,
         assignment_id: &AssignmentId,
         input: UpsertCaddieAssignment,
     ) -> Result<CaddieAssignment, CourseError> {
-        let body = json!({
-            "caddieProfileId": input.caddie_id,
-            "reservationId": input.reservation_id,
-            "roundReference": input.round_reference,
-            "scheduledAt": input.scheduled_at,
-            "status": input.status,
-            "assignmentRole": input.assignment_role,
-            "feeAmount": input.fee_amount,
-            "feeCurrency": input.fee_currency,
-            "recommendationScore": input.recommendation_score,
-            "notes": input.notes,
-        });
+        let body = caddie_assignment_body(&input);
         let path = format!(
             "{GOLF}/caddie-assignments/{}",
             urlencoding_path(assignment_id)
@@ -535,6 +541,22 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
             field_get_items(&self.client, &self.base_url, &path, credentials).await?;
         items.into_iter().map(map_rating).collect()
     }
+}
+
+/// The body Field takes for a caddie assignment, on create and on update alike.
+fn caddie_assignment_body(input: &UpsertCaddieAssignment) -> Value {
+    json!({
+        "caddieProfileId": input.caddie_id,
+        "reservationId": input.reservation_id,
+        "roundReference": input.round_reference,
+        "scheduledAt": input.scheduled_at,
+        "status": input.status,
+        "assignmentRole": input.assignment_role,
+        "feeAmount": input.fee_amount,
+        "feeCurrency": input.fee_currency,
+        "recommendationScore": input.recommendation_score,
+        "notes": input.notes,
+    })
 }
 
 fn upsert_caddie_body(input: &UpsertCaddie) -> Value {

@@ -25,11 +25,11 @@ use crate::course::domain::{
     UpsertCaddieAvailability,
 };
 use crate::course::usecase::{
-    AutoAssignCaddiesUseCase, CreateCaddieUseCase, DeleteCaddieAvailabilityUseCase,
-    ExportPayrollCsvUseCase, GetAttendanceSnapshotUseCase, GetCaddieSupplyUseCase,
-    GetPayrollSummaryUseCase, ListAttendancePeriodSnapshotsUseCase,
+    AutoAssignCaddiesUseCase, CreateCaddieAssignmentUseCase, CreateCaddieUseCase,
+    DeleteCaddieAvailabilityUseCase, ExportPayrollCsvUseCase, GetAttendanceSnapshotUseCase,
+    GetCaddieSupplyUseCase, GetPayrollSummaryUseCase, ListAttendancePeriodSnapshotsUseCase,
     ListCaddieAvailabilitiesUseCase, ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase,
-    ListCaddieRecommendationsUseCase, ReplaceCaddieMembershipsUseCase,
+    ListCaddieRecommendationsUseCase, NameCaddieForRound, ReplaceCaddieMembershipsUseCase,
     UpdateCaddieAssignmentUseCase, UpdateCaddieUseCase, UpsertCaddieAvailabilityUseCase,
 };
 use crate::{AppError, AppState};
@@ -228,6 +228,64 @@ pub struct UpsertCaddieAssignmentRequest {
     pub recommendation_score: Option<i32>,
     #[serde(default)]
     pub notes: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NameCaddieForRoundRequest {
+    pub caddie_profile_id: String,
+    pub reservation_id: String,
+    pub scheduled_at: DateTime<Utc>,
+    /// How long the round holds the caddie. Falls back to a full round.
+    #[serde(default)]
+    pub duration_minutes: Option<i32>,
+    #[serde(default)]
+    pub assignment_role: Option<String>,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+/// POST /v1/course/caddie-assignments
+#[utoipa::path(
+    post,
+    path = "/v1/course/caddie-assignments",
+    tag = "course-ops",
+    request_body = NameCaddieForRoundRequest,
+    responses(
+        (status = 201, description = "Caddie named for the round", body = CaddieAssignmentDto),
+        (status = 400, description = "The round or the caddie cannot take it", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Caddie not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_caddie_assignment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<NameCaddieForRoundRequest>,
+) -> Result<(StatusCode, Json<CaddieAssignmentDto>), AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let use_case = CreateCaddieAssignmentUseCase::new(ops_gateway(&state));
+    let assignment = use_case
+        .execute(
+            credentials,
+            NameCaddieForRound {
+                caddie_id: CaddieId::try_new(body.caddie_profile_id).map_err(AppError::from)?,
+                reservation_id: ReservationId::try_new(body.reservation_id)
+                    .map_err(AppError::from)?,
+                scheduled_at: body.scheduled_at,
+                duration_minutes: body.duration_minutes,
+                assignment_role: body.assignment_role,
+                notes: body.notes,
+            },
+        )
+        .await
+        .map_err(AppError::from)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(CaddieAssignmentDto::from(&assignment)),
+    ))
 }
 
 /// PATCH /v1/course/caddie-assignments/:id
@@ -889,7 +947,11 @@ pub async fn auto_assign_caddies(
     Json(body): Json<AutoAssignRequest>,
 ) -> Result<Json<AutoAssignResultDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = AutoAssignCaddiesUseCase::new(ops_gateway(&state));
+    let use_case = AutoAssignCaddiesUseCase::new(
+        ops_gateway(&state),
+        reservation_gateway(&state),
+        catalog_gateway(&state),
+    );
     let result = use_case
         .execute(credentials, body.date, body.dry_run)
         .await
