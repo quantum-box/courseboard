@@ -186,6 +186,7 @@ pub async fn create_caddie(
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
         (status = 404, description = "Caddie not found", body = ErrorBody),
+        (status = 409, description = "Field resource conflict", body = ErrorBody),
         (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
     security(("bearer_auth" = []))

@@ -1121,14 +1121,10 @@ pub enum AppError {
     Unauthorized,
     #[error("authenticated client is not authorized")]
     Forbidden,
-    /// Upstream Field denied the request (401/403). Returned as 403 with the
-    /// upstream reason so operators see "権限がない" instead of a masked 502.
-    #[error("{0}")]
-    PermissionDenied(String),
     #[error("{0}")]
     BadRequest(&'static str),
-    #[error("{0}")]
-    InvalidUpstreamRequest(String),
+    #[error("{message}")]
+    UpstreamClient { status: StatusCode, message: String },
     #[error("tax rule was not found for tenant, prefecture, and green fee")]
     RuleNotFound,
     #[error("{0}")]
@@ -1160,15 +1156,13 @@ impl IntoResponse for AppError {
         let (status, error) = match self {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
-            AppError::PermissionDenied(_) => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
-            AppError::InvalidUpstreamRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
+            AppError::UpstreamClient { status, .. } => (status, "upstream_client_error"),
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),
             AppError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
-            // 424 rather than 502 for the same reason PermissionDenied is 403:
             // Cloudflare swaps origin 5xx bodies for its own CORS-less error
-            // page, so the operator UI only ever sees an opaque "Failed to
-            // fetch" instead of the upstream reason.
+            // page, so use 424 and keep the browser from seeing only an opaque
+            // "Failed to fetch".
             AppError::Provider(_) => (StatusCode::FAILED_DEPENDENCY, "provider_error"),
             AppError::Database(_) | AppError::Migration(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "internal_server_error")
@@ -1321,26 +1315,30 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn invalid_upstream_requests_remain_bad_requests() {
-        let response = AppError::InvalidUpstreamRequest(
-            "Field API returned 400 Bad Request: invalid attendance period".to_string(),
-        )
+    async fn upstream_conflicts_keep_the_status_and_operator_message() {
+        let response = AppError::UpstreamClient {
+            status: StatusCode::CONFLICT,
+            message: "このスタッフは田中さんに既に紐付いています".to_string(),
+        }
         .into_response();
 
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::CONFLICT);
         let body = response
             .into_body()
             .collect()
             .await
-            .expect("collect bad request body")
+            .expect("collect conflict body")
             .to_bytes();
-        let body: serde_json::Value =
-            serde_json::from_slice(&body).expect("decode bad request body");
-        assert_eq!(body["error"], "bad_request");
+        let body: serde_json::Value = serde_json::from_slice(&body).expect("decode conflict body");
+        assert_eq!(body["error"], "upstream_client_error");
         assert_eq!(
             body["message"],
-            "Field API returned 400 Bad Request: invalid attendance period"
+            "このスタッフは田中さんに既に紐付いています"
         );
+        assert!(!body["message"]
+            .as_str()
+            .expect("message string")
+            .contains("external provider error"));
     }
 
     #[tokio::test]

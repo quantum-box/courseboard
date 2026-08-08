@@ -171,7 +171,11 @@ const STATUS_ERROR_KEYS: Record<string, ResourceErrorKey> = {
  * known ones onto plain-language advice. Returns a key instead of a string so the
  * caller resolves it through its own hook and the copy follows the active locale.
  */
-export function resourceErrorCopy(error: unknown): { key: ResourceErrorKey; detail?: string } {
+export function resourceErrorCopy(error: unknown): {
+  key: ResourceErrorKey
+  detail?: string
+  operatorMessage?: string
+} {
   if (!(error instanceof Error)) return { key: 'error.unknown' }
   const raw = error.message
   const lower = raw.toLowerCase()
@@ -187,10 +191,21 @@ export function resourceErrorCopy(error: unknown): { key: ResourceErrorKey; deta
     return { key: 'error.authRejected' }
   }
   if (lower.includes('provider_error') || lower.includes('external provider error')) {
-    // Keep the upstream reason: it is the only place the failing service names
-    // what went wrong, and without it the screen says a service is unavailable
-    // while giving nobody a way to find out which one or why.
-    return { key: 'error.providerError', detail: raw }
+    // Provider failures can contain infrastructure details and are not
+    // operator-correctable. Only sanitized Field 4xx messages cross the
+    // explicit upstream_client_error boundary below.
+    return { key: 'error.providerError' }
+  }
+  if (
+    error instanceof ApiError
+    && error.status >= 400
+    && error.status < 500
+    && typeof error.details === 'object'
+    && error.details !== null
+    && 'error' in error.details
+    && error.details.error === 'upstream_client_error'
+  ) {
+    return { key: 'error.badRequest', operatorMessage: raw }
   }
   // A failure that carries its status is answered by status even when the body
   // supplied wording of its own: server-authored copy is English, so it belongs
@@ -216,7 +231,8 @@ export function resourceErrorCopy(error: unknown): { key: ResourceErrorKey; deta
  * failure reaches the operator as whatever English the server wrote.
  */
 export function resourceErrorText(error: unknown) {
-  const { key, detail } = resourceErrorCopy(error)
+  const { key, detail, operatorMessage } = resourceErrorCopy(error)
+  if (operatorMessage) return operatorMessage
   const copy = i18next.t(`common:${key}` as 'common:error.unknown')
   return detail ? `${copy}（${detail}）` : copy
 }
@@ -229,7 +245,7 @@ export function ResourceError({
   onRetry?: () => void
 }) {
   const { t } = useTranslation('common')
-  const { key, detail } = resourceErrorCopy(error)
+  const { key, detail, operatorMessage } = resourceErrorCopy(error)
   return (
     <Notice
       tone="danger"
@@ -238,7 +254,7 @@ export function ResourceError({
         <PageRefreshButton size="sm" onClick={onRetry} label={t('action.retry')} />
       ) : undefined}
     >
-      {t(key)}
+      {operatorMessage ?? t(key)}
       {detail ? <small className="notice-detail">{detail}</small> : null}
     </Notice>
   )

@@ -8,6 +8,7 @@ import {
   today,
 } from './api'
 import { nowLinePercent } from './features/golf/timeline/timelineLayout'
+import { resourceErrorText } from './components/Page'
 
 describe('protectedRequestCredentials', () => {
   it('includes the HttpOnly session only for same-origin Web requests', () => {
@@ -184,6 +185,33 @@ describe('protected API 401 handling', () => {
     })
     expect(onUnauthorized).not.toHaveBeenCalled()
     expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows the Field 409 message from the caddie staff-link operation', async () => {
+    const message = 'このスタッフは田中さんに既に紐付いています'
+    configureApiAuth({
+      tenantId: 'tn_1',
+      operatorId: 'tn_1',
+      platformId: 'plat_1',
+      getAccessToken: async () => 'test-token',
+      onUnauthorized: vi.fn(),
+      onForbidden: vi.fn(),
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: 'upstream_client_error',
+      message,
+    }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    const error = await courseboardApiJson(
+      '/v1/course/caddie-profiles/caddie_1',
+      { method: 'PATCH', body: JSON.stringify({ staffId: 'staff_1' }) },
+    ).catch(reason => reason as unknown)
+
+    expect(resourceErrorText(error)).toBe(message)
+    expect(resourceErrorText(error)).not.toContain('外部サービス')
   })
 })
 

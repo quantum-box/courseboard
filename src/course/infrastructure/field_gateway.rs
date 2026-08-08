@@ -835,32 +835,6 @@ pub(crate) async fn field_get_items<T: for<'de> Deserialize<'de>>(
     Ok(body.items)
 }
 
-/// GET an `{ items: [...] }` response while preserving an upstream 400 as a
-/// client request error. Existing callers intentionally keep their prior error
-/// mapping through [`field_get_items`].
-pub(crate) async fn field_get_items_forward_bad_request<T: for<'de> Deserialize<'de>>(
-    client: &reqwest::Client,
-    base_url: &str,
-    path_and_query: &str,
-    credentials: GatewayCredentials<'_>,
-) -> Result<Vec<T>, CourseError> {
-    if is_empty_course_store(base_url) {
-        let _ = (client, path_and_query, credentials);
-        return Ok(Vec::new());
-    }
-    let body: FieldItems<T> = field_send_json_inner(
-        client,
-        base_url,
-        reqwest::Method::GET,
-        path_and_query,
-        credentials,
-        None,
-        true,
-    )
-    .await?;
-    Ok(body.items)
-}
-
 pub(crate) async fn field_send_json<T: for<'de> Deserialize<'de>>(
     client: &reqwest::Client,
     base_url: &str,
@@ -869,16 +843,7 @@ pub(crate) async fn field_send_json<T: for<'de> Deserialize<'de>>(
     credentials: GatewayCredentials<'_>,
     body: Option<&Value>,
 ) -> Result<T, CourseError> {
-    field_send_json_inner(
-        client,
-        base_url,
-        method,
-        path_and_query,
-        credentials,
-        body,
-        false,
-    )
-    .await
+    field_send_json_inner(client, base_url, method, path_and_query, credentials, body).await
 }
 
 async fn field_send_json_inner<T: for<'de> Deserialize<'de>>(
@@ -888,7 +853,6 @@ async fn field_send_json_inner<T: for<'de> Deserialize<'de>>(
     path_and_query: &str,
     credentials: GatewayCredentials<'_>,
     body: Option<&Value>,
-    forward_bad_request: bool,
 ) -> Result<T, CourseError> {
     if is_empty_course_store(base_url) {
         return Err(empty_course_store_error());
@@ -902,11 +866,6 @@ async fn field_send_json_inner<T: for<'de> Deserialize<'de>>(
     let status = response.status();
     if !status.is_success() {
         let message = response.text().await.unwrap_or_default();
-        if forward_bad_request && status == reqwest::StatusCode::BAD_REQUEST {
-            return Err(CourseError::InvalidUpstreamRequest(format!(
-                "Field API returned {status}: {message}"
-            )));
-        }
         return Err(map_field_status_error(status, &message));
     }
     response
@@ -1023,20 +982,43 @@ fn map_field_request_error(error: reqwest::Error) -> CourseError {
     CourseError::Provider(format!("Field API request failed: {error}"))
 }
 
-/// Field 401/403 means the caller's tenant/permission was rejected upstream —
-/// forward that as a denial instead of a 502 so the browser sees the reason.
+/// Preserve every sanitized Field 4xx as an operator-correctable response;
+/// transport failures and 5xx responses remain provider failures.
 pub(crate) fn map_field_status_error(status: reqwest::StatusCode, message: &str) -> CourseError {
-    let message = format!("Field API returned {status}: {message}");
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-        return CourseError::PermissionDenied(message);
+    if status.is_client_error() {
+        return CourseError::UpstreamClient {
+            status: status.as_u16(),
+            message: field_error_message(message).unwrap_or_else(|| status.to_string()),
+        };
     }
-    // A tenant that has not configured this resource yet is not a failure of the
-    // integration: reported as a provider error it reads as "the connected
-    // service is broken" and sends the operator off to check their network.
-    if status == reqwest::StatusCode::NOT_FOUND {
-        return CourseError::NotFound("the connected service has no record for this tenant");
+    CourseError::Provider(format!("Field API returned {status}: {message}"))
+}
+
+/// Field's public 4xx payload is sanitized at its API boundary. Prefer its
+/// operator-facing message over the surrounding JSON/error code, while still
+/// supporting plain-text responses from older endpoints.
+fn field_error_message(body: &str) -> Option<String> {
+    let body = body.trim();
+    if body.is_empty() {
+        return None;
     }
-    CourseError::Provider(message)
+    if let Ok(value) = serde_json::from_str::<Value>(body) {
+        let message = value
+            .get("message")
+            .and_then(Value::as_str)
+            .or_else(|| {
+                value
+                    .get("error")
+                    .and_then(|error| error.get("message"))
+                    .and_then(Value::as_str)
+            })
+            .map(str::trim)
+            .filter(|message| !message.is_empty());
+        if let Some(message) = message {
+            return Some(message.to_string());
+        }
+    }
+    Some(body.to_string())
 }
 
 #[cfg(test)]
@@ -1048,19 +1030,37 @@ mod tests {
     }
 
     #[test]
-    fn upstream_denials_map_to_permission_denied_and_other_failures_to_provider() {
+    fn upstream_4xx_keeps_its_status_and_sanitized_message() {
         let denied = map_field_status_error(
             reqwest::StatusCode::FORBIDDEN,
             "{\"code\":\"FORBIDDEN\",\"message\":\"tenant policy check denied\"}",
         );
-        assert!(matches!(denied, CourseError::PermissionDenied(message)
-            if message.contains("403") && message.contains("tenant policy check denied")));
+        assert!(
+            matches!(denied, CourseError::UpstreamClient { status: 403, message }
+            if message == "tenant policy check denied")
+        );
 
         let unauthorized = map_field_status_error(reqwest::StatusCode::UNAUTHORIZED, "expired");
-        assert!(matches!(unauthorized, CourseError::PermissionDenied(_)));
+        assert!(
+            matches!(unauthorized, CourseError::UpstreamClient { status: 401, message }
+            if message == "expired")
+        );
 
+        let conflict = map_field_status_error(
+            reqwest::StatusCode::CONFLICT,
+            "{\"error\":\"staff_already_linked\",\"message\":\"このスタッフは田中さんに既に紐付いています\"}",
+        );
+        assert!(
+            matches!(conflict, CourseError::UpstreamClient { status: 409, message }
+            if message == "このスタッフは田中さんに既に紐付いています")
+        );
+    }
+
+    #[test]
+    fn upstream_5xx_remains_a_provider_failure() {
         let outage = map_field_status_error(reqwest::StatusCode::BAD_GATEWAY, "upstream down");
-        assert!(matches!(outage, CourseError::Provider(_)));
+        assert!(matches!(outage, CourseError::Provider(message)
+            if message.contains("502 Bad Gateway") && message.contains("upstream down")));
     }
 
     #[test]

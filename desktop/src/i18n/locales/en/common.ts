@@ -61,7 +61,7 @@ export const common: DeepPartial<typeof source> = {
     authRejected:
       'Your sign-in was not accepted. Please sign out and sign in again.',
     providerError:
-      'A connected service reported an error. Pass the detail below to an administrator — this is not something this screen can fix.',
+      'A system problem prevented this action. Contact an administrator.',
     apiUnreachable:
       'Could not reach the Course Board server. Wait a moment and reload.',
     offline:

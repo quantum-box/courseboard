@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resourceErrorCopy } from './Page'
+import { resourceErrorCopy, resourceErrorText } from './Page'
 import { ApiError } from '../api'
 import { ja } from '../i18n/locales/ja'
 
@@ -45,14 +45,28 @@ describe('resourceErrorCopy', () => {
       .toBe('error.providerError')
   })
 
-  it('keeps the upstream reason for a provider failure', () => {
-    // Observed on production: without the detail nobody can tell that Field is
-    // answering 500 because a column is missing from its database.
+  it('shows a Field 409 operator message without calling it an external service error', () => {
+    const message = 'このスタッフは田中さんに既に紐付いています'
+    const error = new ApiError(message, 409, {
+      error: 'upstream_client_error',
+      message,
+    })
+
+    const result = resourceErrorCopy(error)
+    expect(result.operatorMessage).toBe(message)
+    expect(resourceErrorText(error)).toBe(message)
+    expect(resourceErrorText(error)).not.toContain(ja.common.error.providerError)
+    expect(resourceErrorText(error)).not.toContain('external provider error')
+  })
+
+  it('does not expose a provider 5xx detail to the operator', () => {
     const raw = 'external provider error: Field API returned 500 Internal Server Error: '
       + "Unknown column 'display_name' in 'field list'"
     const result = resourceErrorCopy(new Error(raw))
     expect(result.key).toBe('error.providerError')
-    expect(result.detail).toBe(raw)
+    expect(result.detail).toBeUndefined()
+    expect(resourceErrorText(new Error(raw))).toBe(ja.common.error.providerError)
+    expect(resourceErrorText(new Error(raw))).not.toContain('display_name')
   })
 
   it('never surfaces an unmapped message as the primary copy', () => {
