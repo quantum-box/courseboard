@@ -69,6 +69,8 @@ export const caddies = {
     atDailyLimit: '本日の上限に到達',
     rookiePaired: '新人をベテランと組ませます',
     veteranForFoursome: '4人組にはベテランが向きます',
+    noCaddieAvailable: '空いているキャディがいません',
+    allAtDailyLimit: '出られるキャディが全員、本日の上限に到達',
     unavailable: 'くわしい理由は表示できません',
   },
   offDuty: {
@@ -470,5 +472,28 @@ export const caddies = {
   },
   error: {
     generic: '操作を完了できませんでした',
+  },
+  unassigned: {
+    title: 'キャディが決まっていない組',
+    description: 'キャディ付きで受けた予約のうち、まだ担当がいない組です。自動配置で埋まらなかった分はここから決めます。',
+    loading: '予約を読み込んでいます',
+    loadingCandidates: '候補を読み込んでいます',
+    players: '{{n}}名',
+    name: 'キャディを決める',
+    pick: 'この人にする',
+    naming: '決めています',
+    named: '{{name}} を担当にしました',
+    failed: '担当を決められませんでした',
+    sheetTitle: '担当を決める',
+    sheetDescription: '{{time}} · {{course}}',
+    candidateMeta: '適合スコア {{score}} · 今日の担当 {{rounds}}R',
+    empty: {
+      title: 'すべての組に担当がいます',
+      description: 'この日のキャディ付きの予約は、すべて担当が決まっています。',
+    },
+    noCandidates: {
+      title: '出せるキャディがいません',
+      description: '出勤の希望や本日の担当数から、この時間に出せる人がいません。シフト表を確認してください。',
+    },
   },
 } as const

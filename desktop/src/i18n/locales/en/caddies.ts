@@ -67,6 +67,8 @@ export const caddies: DeepPartial<typeof source> = {
     atDailyLimit: 'At the daily round limit',
     rookiePaired: 'Rookie paired with a veteran',
     veteranForFoursome: 'A veteran suits a full foursome',
+    noCaddieAvailable: 'No caddie is free for this round',
+    allAtDailyLimit: 'Every available caddie is at the daily limit',
     unavailable: 'No readable explanation was provided',
   },
   offDuty: {
@@ -469,5 +471,28 @@ export const caddies: DeepPartial<typeof source> = {
   },
   error: {
     generic: 'Could not finish that',
+  },
+  unassigned: {
+    title: 'Rounds without a caddie',
+    description: 'Caddie-attached bookings nobody is on yet. What the automatic run could not fill is named here.',
+    loading: 'Loading bookings',
+    loadingCandidates: 'Loading candidates',
+    players: '{{n}} players',
+    name: 'Name a caddie',
+    pick: 'Pick',
+    naming: 'Naming',
+    named: '{{name}} is on this round',
+    failed: 'Could not name a caddie',
+    sheetTitle: 'Name a caddie',
+    sheetDescription: '{{time}} · {{course}}',
+    candidateMeta: 'Score {{score}} · {{rounds}} rounds today',
+    empty: {
+      title: 'Every round has a caddie',
+      description: 'All caddie-attached bookings for this day are covered.',
+    },
+    noCandidates: {
+      title: 'Nobody is free',
+      description: 'Shift requests and today\u2019s load leave nobody who can take this tee time. Check the shift board.',
+    },
   },
 }
