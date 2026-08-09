@@ -19,18 +19,20 @@ use super::http::{
 };
 use crate::course::domain::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-    AvailabilityQuery, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddiePatch,
-    CaddieRating, CaddieRecommendation, CaddieSupply, PayrollSummary, RecommendationQuery,
-    ReplaceCaddieMemberships, ReservationId, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability,
+    AvailabilityDeadline, AvailabilityQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
+    CaddiePatch, CaddieRating, CaddieRecommendation, CaddieSupply, PayrollSummary,
+    RecommendationQuery, ReplaceCaddieMemberships, ReservationId, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, YearMonth,
 };
 use crate::course::usecase::{
     AutoAssignCaddiesUseCase, CreateCaddieAssignmentUseCase, CreateCaddieUseCase,
     DeleteCaddieAvailabilityUseCase, ExportPayrollCsvUseCase, GetAttendanceSnapshotUseCase,
-    GetCaddieSupplyUseCase, GetPayrollSummaryUseCase, ListAttendancePeriodSnapshotsUseCase,
-    ListCaddieAvailabilitiesUseCase, ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase,
-    ListCaddieRecommendationsUseCase, NameCaddieForRound, ReplaceCaddieMembershipsUseCase,
-    UpdateCaddieAssignmentUseCase, UpdateCaddieUseCase, UpsertCaddieAvailabilityUseCase,
+    GetAvailabilityDeadlineUseCase, GetCaddieSupplyUseCase, GetPayrollSummaryUseCase,
+    ListAttendancePeriodSnapshotsUseCase, ListCaddieAvailabilitiesUseCase,
+    ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase, ListCaddieRecommendationsUseCase,
+    ListUnsubmittedCaddiesUseCase, NameCaddieForRound, ReplaceCaddieMembershipsUseCase,
+    UpdateCaddieAssignmentUseCase, UpdateCaddieUseCase, UpsertAvailabilityDeadlineUseCase,
+    UpsertCaddieAvailabilityUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -898,12 +900,23 @@ pub struct AutoAssignSkippedDto {
     pub reason: String,
 }
 
+/// Carried when the month's filing deadline has passed and caddies remain
+/// who never filed a shift request for it. Does not block the run.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DeadlineWarningDto {
+    pub deadline_date: NaiveDate,
+    pub unsubmitted_caddie_names: Vec<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoAssignResultDto {
     pub dry_run: bool,
     pub assigned: Vec<AutoAssignPlanItemDto>,
     pub skipped: Vec<AutoAssignSkippedDto>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub deadline_warning: Option<DeadlineWarningDto>,
 }
 
 impl From<AutoAssignResult> for AutoAssignResultDto {
@@ -929,6 +942,10 @@ impl From<AutoAssignResult> for AutoAssignResultDto {
                     reason: item.reason().to_string(),
                 })
                 .collect(),
+            deadline_warning: value.deadline_warning().map(|warning| DeadlineWarningDto {
+                deadline_date: warning.deadline_date(),
+                unsubmitted_caddie_names: warning.unsubmitted_caddie_names().to_vec(),
+            }),
         }
     }
 }
@@ -957,12 +974,142 @@ pub async fn auto_assign_caddies(
         ops_gateway(&state),
         reservation_gateway(&state),
         catalog_gateway(&state),
+        state.availability_deadlines(),
     );
     let result = use_case
         .execute(credentials, body.date, body.dry_run)
         .await
         .map_err(AppError::from)?;
     Ok(Json(AutoAssignResultDto::from(result)))
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AvailabilityDeadlineDto {
+    pub year_month: String,
+    pub deadline_date: NaiveDate,
+}
+
+impl From<AvailabilityDeadline> for AvailabilityDeadlineDto {
+    fn from(value: AvailabilityDeadline) -> Self {
+        Self {
+            year_month: value.year_month().as_string(),
+            deadline_date: value.deadline_date(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpsertAvailabilityDeadlineRequest {
+    pub deadline_date: NaiveDate,
+}
+
+fn parse_year_month(raw: &str) -> Result<YearMonth, AppError> {
+    YearMonth::parse(raw).map_err(AppError::from)
+}
+
+/// GET /v1/course/caddie-availability-deadlines/:year_month
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-availability-deadlines/{year_month}",
+    tag = "course-ops",
+    params(("year_month" = String, Path, description = "YYYY-MM")),
+    responses(
+        (status = 200, description = "The month's filing deadline, or null if unset", body = Option<AvailabilityDeadlineDto>),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_availability_deadline(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(year_month): Path<String>,
+) -> Result<Json<Option<AvailabilityDeadlineDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let year_month = parse_year_month(&year_month)?;
+    let use_case = GetAvailabilityDeadlineUseCase::new(state.availability_deadlines());
+    let deadline = use_case
+        .execute(credentials.operator_id, year_month)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(deadline.map(AvailabilityDeadlineDto::from)))
+}
+
+/// PUT /v1/course/caddie-availability-deadlines/:year_month
+#[utoipa::path(
+    put,
+    path = "/v1/course/caddie-availability-deadlines/{year_month}",
+    tag = "course-ops",
+    params(("year_month" = String, Path, description = "YYYY-MM")),
+    request_body = UpsertAvailabilityDeadlineRequest,
+    responses(
+        (status = 200, description = "The saved deadline", body = AvailabilityDeadlineDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn upsert_availability_deadline(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(year_month): Path<String>,
+    Json(body): Json<UpsertAvailabilityDeadlineRequest>,
+) -> Result<Json<AvailabilityDeadlineDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let year_month = parse_year_month(&year_month)?;
+    let deadline = AvailabilityDeadline::try_new(year_month, body.deadline_date);
+    let use_case = UpsertAvailabilityDeadlineUseCase::new(state.availability_deadlines());
+    let saved = use_case
+        .execute(credentials.operator_id, deadline)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(AvailabilityDeadlineDto::from(saved)))
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UnsubmittedCaddieDto {
+    pub caddie_profile_id: String,
+    pub display_name: String,
+}
+
+/// GET /v1/course/caddie-availability-submissions/:year_month
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-availability-submissions/{year_month}",
+    tag = "course-ops",
+    params(("year_month" = String, Path, description = "YYYY-MM")),
+    responses(
+        (status = 200, description = "Active caddies who filed no shift request for the month", body = ItemsResponse<UnsubmittedCaddieDto>),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_unsubmitted_caddies(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(year_month): Path<String>,
+) -> Result<Json<ItemsResponse<UnsubmittedCaddieDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let year_month = parse_year_month(&year_month)?;
+    let use_case = ListUnsubmittedCaddiesUseCase::new(ops_gateway(&state));
+    let unsubmitted = use_case
+        .execute(credentials, year_month)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: unsubmitted
+            .into_iter()
+            .map(|caddie| UnsubmittedCaddieDto {
+                caddie_profile_id: caddie.id().as_str().to_string(),
+                display_name: caddie.display_name().to_string(),
+            })
+            .collect(),
+    }))
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]

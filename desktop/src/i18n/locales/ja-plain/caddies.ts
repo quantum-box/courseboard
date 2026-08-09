@@ -134,6 +134,11 @@ export const caddies: DeepPartial<typeof source> = {
     },
     candidate: 'この人が候補',
     skipped: '{{n}}件は決められませんでした',
+    deadlineWarning: {
+      title: '休みの希望を出す締め切り（{{deadline}}）を過ぎています',
+      body: '{{names}} は、この月の休みの希望がまだ届いていません。決める前に確かめてください。',
+      confirmExecute: '{{names}} の休みの希望がまだ届いていません。このまま決めますか？',
+    },
   },
   recommendations: {
     title: 'おすすめのキャディ',

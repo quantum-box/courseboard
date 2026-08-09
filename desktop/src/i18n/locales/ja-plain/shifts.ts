@@ -37,6 +37,14 @@ export const shifts: DeepPartial<typeof source> = {
     warningBody: '{{names}} は担当がある日や仕事に出られる日が {{n}}日以上つづいています。休みを入れられないか確かめてください。',
     threshold: '6日以上つづくと色がつきます',
   },
+  deadline: {
+    label: '休みの希望を出す締め切り',
+    save: '締め切りを決める',
+  },
+  unsubmitted: {
+    title: 'まだ休みの希望が届いていない人がいます',
+    body: '{{names}} は、この月の休みの希望がまだ届いていません。聞き漏れがないか確かめてください。',
+  },
   navigation: {
     label: '表に出す週を変える',
     previous: '前の週',

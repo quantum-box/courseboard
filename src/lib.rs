@@ -29,7 +29,7 @@ use axum::{
 use cancellation_fees::{CancellationFeeConfig, MySqlCancellationFeeRepository};
 use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
-use course::infrastructure::MySqlSlotOverrideRepository;
+use course::infrastructure::{MySqlAvailabilityDeadlineRepository, MySqlSlotOverrideRepository};
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
@@ -52,6 +52,7 @@ pub struct AppState {
     rules: Arc<MySqlTaxRuleRepository>,
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
+    availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     cancellation_fee_config: CancellationFeeConfig,
     http_client: reqwest::Client,
     token_verifier: Arc<dyn TokenVerifier>,
@@ -77,7 +78,8 @@ impl AppState {
         Self {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
-            slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool)),
+            slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+            availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(pool)),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
             token_verifier,
@@ -111,7 +113,8 @@ impl AppState {
         Self {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
-            slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool)),
+            slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+            availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(pool)),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
             token_verifier,
@@ -131,7 +134,8 @@ impl AppState {
             Ok(client) => Self {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
-                slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool)),
+                slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+                availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(pool)),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
                 token_verifier,
@@ -142,7 +146,8 @@ impl AppState {
             Err(error) => Self {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
-                slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool)),
+                slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+                availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(pool)),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
                 token_verifier,
@@ -161,6 +166,11 @@ impl AppState {
     /// CourseBoard-owned desk marks on individual tee times.
     pub fn slot_overrides(&self) -> Arc<MySqlSlotOverrideRepository> {
         self.slot_overrides.clone()
+    }
+
+    /// CourseBoard-owned shift-request filing deadlines.
+    pub fn availability_deadlines(&self) -> Arc<MySqlAvailabilityDeadlineRepository> {
+        self.availability_deadlines.clone()
     }
 
     fn with_profile_client(mut self, profile_client: Option<profile_proxy::ProfileClient>) -> Self {
@@ -505,6 +515,21 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/course/caddie-auto-assignments",
             post(course::interfaces::http_ops::auto_assign_caddies).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-availability-deadlines/:year_month",
+            get(course::interfaces::http_ops::get_availability_deadline)
+                .put(course::interfaces::http_ops::upsert_availability_deadline)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/caddie-availability-submissions/:year_month",
+            get(course::interfaces::http_ops::list_unsubmitted_caddies).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
         )

@@ -10,16 +10,18 @@
 //! tee-sheet, the roster, the shift requests and the standing assignments this
 //! side already reads, and only the resulting rows are written upstream.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::course::domain::{
     course_day_bounds, plan_caddie_assignments, widen_for_utc_date_filter, AttendanceState,
-    AutoAssignResult, AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery, CourseError,
+    AutoAssignResult, AvailabilityDeadline, AvailabilityDeadlineGateway, AvailabilityQuery,
+    AvailabilityStatus, CaddieAssignmentQuery, CaddieRoster, CourseError, DeadlineWarning,
     GatewayCredentials, GolfCatalogGateway, GolfOpsGateway, PlanOptions, PlannableCaddie,
     PlannableRound, ReservationGateway, TeeSheetItem, TeeSheetQuery, UpsertCaddieAssignment,
+    YearMonth,
 };
 use crate::course::usecase::GetTeeSheetUseCase;
 
@@ -43,6 +45,7 @@ pub struct AutoAssignCaddiesUseCase {
     ops: Arc<dyn GolfOpsGateway>,
     reservations: Arc<dyn ReservationGateway>,
     catalog: Arc<dyn GolfCatalogGateway>,
+    deadlines: Arc<dyn AvailabilityDeadlineGateway>,
 }
 
 impl AutoAssignCaddiesUseCase {
@@ -50,12 +53,66 @@ impl AutoAssignCaddiesUseCase {
         ops: Arc<dyn GolfOpsGateway>,
         reservations: Arc<dyn ReservationGateway>,
         catalog: Arc<dyn GolfCatalogGateway>,
+        deadlines: Arc<dyn AvailabilityDeadlineGateway>,
     ) -> Self {
         Self {
             ops,
             reservations,
             catalog,
+            deadlines,
         }
+    }
+
+    /// A filing-deadline warning for the month `date` falls in, if the
+    /// deadline has passed and assignable caddies remain who never filed a
+    /// request anywhere in that month.
+    ///
+    /// Not a block: the desk may already know why someone is missing from the
+    /// list. It only makes a gap that would otherwise default silently to
+    /// "available" visible before the day is staffed from it.
+    async fn deadline_warning(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        date: NaiveDate,
+        roster: &CaddieRoster,
+    ) -> Result<Option<DeadlineWarning>, CourseError> {
+        let year_month = YearMonth::from_date(date);
+        let deadline = self
+            .deadlines
+            .get_deadline(credentials.operator_id, year_month)
+            .await?;
+        let Some(deadline) = deadline else {
+            return Ok(None);
+        };
+        let today = Utc::now().date_naive();
+        if !deadline.has_passed(today) {
+            return Ok(None);
+        }
+        let (month_start, month_end) = year_month.bounds();
+        let availabilities = self
+            .ops
+            .list_caddie_availabilities(
+                credentials,
+                AvailabilityQuery {
+                    caddie_id: None,
+                    from: Some(month_start),
+                    to: Some(month_end),
+                    date: None,
+                },
+            )
+            .await?;
+        let submitted: HashSet<&str> = availabilities
+            .iter()
+            .map(|availability| availability.caddie_id().as_str())
+            .collect();
+        let unsubmitted_names: Vec<String> = roster
+            .caddies()
+            .iter()
+            .filter(|caddie| caddie.is_assignable())
+            .filter(|caddie| !submitted.contains(caddie.id().as_str()))
+            .map(|caddie| caddie.display_name().to_string())
+            .collect();
+        Ok(build_deadline_warning(&deadline, unsubmitted_names))
     }
 
     pub async fn execute(
@@ -192,6 +249,8 @@ impl AutoAssignCaddiesUseCase {
                 dry_run,
             },
         );
+        let deadline_warning = self.deadline_warning(credentials, date, &roster).await?;
+        let plan = plan.with_deadline_warning(deadline_warning);
 
         if dry_run {
             return Ok(plan);
@@ -239,10 +298,53 @@ impl AutoAssignCaddiesUseCase {
     }
 }
 
+/// Pure decision: whether a filing-deadline warning should attach to the
+/// plan, given who has not filed. Kept separate from `deadline_warning` so
+/// the "does this warning make sense" question can be tested without a
+/// gateway or the system clock.
+fn build_deadline_warning(
+    deadline: &AvailabilityDeadline,
+    unsubmitted_caddie_names: Vec<String>,
+) -> Option<DeadlineWarning> {
+    if unsubmitted_caddie_names.is_empty() {
+        return None;
+    }
+    Some(DeadlineWarning::new(
+        deadline.deadline_date(),
+        unsubmitted_caddie_names,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
+
+    fn a_deadline() -> AvailabilityDeadline {
+        AvailabilityDeadline::try_new(
+            YearMonth::parse("2026-08").unwrap(),
+            NaiveDate::from_ymd_opt(2026, 7, 20).unwrap(),
+        )
+    }
+
+    #[test]
+    fn nobody_left_unsubmitted_means_no_warning() {
+        assert!(build_deadline_warning(&a_deadline(), Vec::new()).is_none());
+    }
+
+    #[test]
+    fn unsubmitted_caddies_are_carried_by_name_with_the_deadline_date() {
+        let warning =
+            build_deadline_warning(&a_deadline(), vec!["Sato".into(), "Tanaka".into()]).unwrap();
+        assert_eq!(
+            warning.deadline_date(),
+            NaiveDate::from_ymd_opt(2026, 7, 20).unwrap()
+        );
+        assert_eq!(
+            warning.unsubmitted_caddie_names(),
+            &["Sato".to_string(), "Tanaka".to_string()]
+        );
+    }
 
     #[test]
     fn the_course_day_starts_the_evening_before_in_utc() {

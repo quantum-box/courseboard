@@ -9,6 +9,7 @@
 //!   contain private helpers; do not pack unrelated operations into the same file.
 
 mod auto_assign_caddies;
+mod availability_deadline;
 mod course_order;
 mod course_schedule;
 mod create_caddie;
@@ -58,6 +59,10 @@ mod upsert_daily_budget;
 mod upsert_reservation_product;
 
 pub use auto_assign_caddies::AutoAssignCaddiesUseCase;
+pub use availability_deadline::{
+    GetAvailabilityDeadlineUseCase, ListUnsubmittedCaddiesUseCase,
+    UpsertAvailabilityDeadlineUseCase,
+};
 pub use course_order::{GetCourseOrderUseCase, ReplaceCourseOrderUseCase};
 pub use course_schedule::{
     GenerateCourseTimeSlotsUseCase, GetCourseScheduleUseCase, ReplaceCourseScheduleUseCase,

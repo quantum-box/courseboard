@@ -39,6 +39,14 @@ export const shifts = {
     warningBody: '{{names}} は担当または出勤可能な日が{{n}}日以上続いています。休みを入れられないか確かめてください。',
     threshold: '6日以上を強調しています',
   },
+  deadline: {
+    label: '休み希望の締切',
+    save: '締切を設定',
+  },
+  unsubmitted: {
+    title: 'まだ休み希望が集まっていない人がいます',
+    body: '{{names}} はこの月の休み希望がまだ届いていません。集め漏れがないか確かめてください。',
+  },
   table: {
     caddie: 'キャディ',
     aria: '{{month}} のシフト表',

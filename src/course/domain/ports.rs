@@ -3,16 +3,17 @@ use chrono::{DateTime, NaiveDate, Utc};
 
 use super::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-    AvailabilityQuery, AvailabilityRule, BudgetAchievement, Caddie, CaddieAssignment,
-    CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRating,
-    CaddieRecommendation, CaddieRoster, CaddieStaff, Course, CourseError, CourseId, CourseOrder,
-    DailyBudget, DailyBudgetQuery, DeleteSlotOverrides, ExtensionStatus, GenerationSummary,
-    MonthlySettlement, NewReservation, PartyDetails, ProductSlot, RecommendationQuery,
-    ReplaceCaddieMemberships, Reservation, ReservationId, ReservationPolicy, ReservationProduct,
-    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
-    SeededReservation, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig,
-    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
-    UpsertCourse, UpsertDailyBudget, UpsertReservationProduct, WorkedMinutes,
+    AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BudgetAchievement, Caddie,
+    CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
+    CaddieRating, CaddieRecommendation, CaddieRoster, CaddieStaff, Course, CourseError, CourseId,
+    CourseOrder, DailyBudget, DailyBudgetQuery, DeleteSlotOverrides, ExtensionStatus,
+    GenerationSummary, MonthlySettlement, NewReservation, PartyDetails, ProductSlot,
+    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationId, ReservationPolicy,
+    ReservationProduct, ReservationServiceId, Resource, ResourceId, ResourceTimeSlot,
+    SaveCourseResource, SeededReservation, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot,
+    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
+    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
+    WorkedMinutes, YearMonth,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -100,6 +101,25 @@ pub trait SlotOverrideGateway: Send + Sync {
         tenant_id: &str,
         command: &DeleteSlotOverrides,
     ) -> Result<u64, CourseError>;
+}
+
+/// Port for each tenant's shift-request filing deadline, one per calendar
+/// month. Field's shift-request API carries no notion of a deadline, so this
+/// is CourseBoard's own data (ADR-0005), the same reasoning as
+/// [`SlotOverrideGateway`].
+#[async_trait]
+pub trait AvailabilityDeadlineGateway: Send + Sync {
+    async fn get_deadline(
+        &self,
+        tenant_id: &str,
+        year_month: YearMonth,
+    ) -> Result<Option<AvailabilityDeadline>, CourseError>;
+
+    async fn upsert_deadline(
+        &self,
+        tenant_id: &str,
+        deadline: AvailabilityDeadline,
+    ) -> Result<AvailabilityDeadline, CourseError>;
 }
 
 /// Port for the generic reservation schedule and the inventory it generates.
