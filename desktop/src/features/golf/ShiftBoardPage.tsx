@@ -1,5 +1,6 @@
 import { Button } from '@tachyon-sdk/native-ui'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson, currentYearMonth, today } from '../../api'
 import {
@@ -34,6 +35,10 @@ type CaddieProfile = {
 }
 
 type ListResponse<T> = { items: T[] }
+
+type AvailabilityDeadline = { yearMonth: string; deadlineDate: string }
+
+type UnsubmittedCaddie = { caddieProfileId: string; displayName: string }
 
 // The date string is already the JST calendar date, so read it as a plain
 // UTC date; appending +09:00 would land on the previous UTC day.
@@ -108,13 +113,45 @@ export function ShiftBoardPage() {
       [range.from, range.to],
     ),
   )
+  const deadlineResource = useResource(
+    useCallback(
+      () => courseboardApiJson<AvailabilityDeadline | null>(
+        `${COURSE_API}/caddie-availability-deadlines/${yearMonth}`,
+      ),
+      [yearMonth],
+    ),
+  )
+  const unsubmittedResource = useResource(
+    useCallback(
+      () => courseboardApiJson<ListResponse<UnsubmittedCaddie>>(
+        `${COURSE_API}/caddie-availability-submissions/${yearMonth}`,
+      ),
+      [yearMonth],
+    ),
+  )
 
   const refresh = useCallback(() => {
     profilesResource.refresh()
     availabilityResource.refresh()
     assignmentsResource.refresh()
-  }, [profilesResource.refresh, availabilityResource.refresh, assignmentsResource.refresh])
+    deadlineResource.refresh()
+    unsubmittedResource.refresh()
+  }, [
+    profilesResource.refresh,
+    availabilityResource.refresh,
+    assignmentsResource.refresh,
+    deadlineResource.refresh,
+    unsubmittedResource.refresh,
+  ])
   useRegisterPageReload(refresh)
+
+  const saveDeadline = useCallback(async (deadlineDate: string) => {
+    await courseboardApiJson<AvailabilityDeadline>(
+      `${COURSE_API}/caddie-availability-deadlines/${yearMonth}`,
+      { method: 'PUT', body: JSON.stringify({ deadlineDate }) },
+    )
+    deadlineResource.refresh()
+  }, [yearMonth, deadlineResource.refresh])
 
   const showCurrentWeek = useCallback(() => {
     setYearMonth(today().slice(0, 7))
@@ -138,6 +175,10 @@ export function ShiftBoardPage() {
           <div className="shift-board-threshold pb-1 text-muted-foreground">
             {t('shifts:streak.threshold')}
           </div>
+          <DeadlineEditor
+            deadline={deadlineResource.data ?? null}
+            onSave={saveDeadline}
+          />
         </div>
       </Panel>
 
@@ -148,6 +189,7 @@ export function ShiftBoardPage() {
           profiles={profilesResource.data?.items ?? []}
           availabilities={availabilityResource.data?.items ?? []}
           assignments={assignmentsResource.data?.items ?? []}
+          unsubmittedCaddies={unsubmittedResource.data?.items ?? []}
           loading={profilesResource.loading
             || availabilityResource.loading
             || assignmentsResource.loading}
@@ -161,12 +203,56 @@ export function ShiftBoardPage() {
   )
 }
 
+function DeadlineEditor({
+  deadline,
+  onSave,
+}: {
+  deadline: AvailabilityDeadline | null
+  onSave: (deadlineDate: string) => Promise<void>
+}) {
+  const { t } = useTranslation(['shifts', 'common'])
+  const [value, setValue] = useState(deadline?.deadlineDate ?? '')
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setValue(deadline?.deadlineDate ?? '')
+  }, [deadline?.deadlineDate])
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!value || saving) return
+    setSaving(true)
+    try {
+      await onSave(value)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <form className="shift-board-deadline flex items-end gap-2 pb-1" onSubmit={submit}>
+      <label className="shift-board-deadline-field flex flex-col gap-1">
+        <span className="text-muted-foreground">{t('shifts:deadline.label')}</span>
+        <input
+          type="date"
+          value={value}
+          onChange={event => setValue(event.target.value)}
+        />
+      </label>
+      <Button type="submit" variant="secondary" disabled={saving || !value}>
+        {t('shifts:deadline.save')}
+      </Button>
+    </form>
+  )
+}
+
 function ShiftBoardResults({
   yearMonth,
   dates,
   profiles,
   availabilities,
   assignments,
+  unsubmittedCaddies,
   loading,
   error,
   onRetry,
@@ -178,6 +264,7 @@ function ShiftBoardResults({
   profiles: CaddieProfile[]
   availabilities: ShiftAvailability[]
   assignments: ShiftAssignment[]
+  unsubmittedCaddies: UnsubmittedCaddie[]
   loading: boolean
   error: unknown
   onRetry: () => void
@@ -251,6 +338,14 @@ function ShiftBoardResults({
 
   return (
     <>
+      {unsubmittedCaddies.length > 0 ? (
+        <Notice tone="warning" title={t('shifts:unsubmitted.title')}>
+          {t('shifts:unsubmitted.body', {
+            names: unsubmittedCaddies.map(caddie => caddie.displayName).join('、'),
+          })}
+        </Notice>
+      ) : null}
+
       {longStreakNames.length > 0 ? (
         <Notice tone="warning" title={t('shifts:streak.warningTitle')}>
           {t('shifts:streak.warningBody', {

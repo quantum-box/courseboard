@@ -2,6 +2,7 @@
 //!
 //! Field API HTTP clients live here only.
 
+mod availability_deadline_repository;
 mod course_order_config;
 mod field_commercial_gateway;
 mod field_gateway;
@@ -11,6 +12,7 @@ mod party_custom_fields;
 mod slot_override_repository;
 mod tax_rule_gateway;
 
+pub use availability_deadline_repository::MySqlAvailabilityDeadlineRepository;
 pub use field_commercial_gateway::FieldGolfCommercialGateway;
 pub use field_gateway::{FieldGolfCatalogGateway, FieldReservationGateway};
 pub use field_ops_gateway::FieldGolfOpsGateway;

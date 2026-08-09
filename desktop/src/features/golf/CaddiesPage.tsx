@@ -230,10 +230,16 @@ type AutoAssignPlanItem = {
   rationale: string[]
 }
 
+type DeadlineWarning = {
+  deadlineDate: string
+  unsubmittedCaddieNames: string[]
+}
+
 type AutoAssignResult = {
   dryRun: boolean
   assigned: AutoAssignPlanItem[]
   skipped: { reservationId: string; reason: string }[]
+  deadlineWarning?: DeadlineWarning | null
 }
 
 type CourseMembership = {
@@ -1178,7 +1184,19 @@ function AutoAssignPanel({
           variant="primary"
           className="flex-1"
           disabled={busy !== null || !plan || plan.assigned.length === 0}
-          onClick={() => void run(false)}
+          onClick={() => {
+            if (
+              plan?.deadlineWarning
+              && !window.confirm(
+                t('caddies:autoAssign.deadlineWarning.confirmExecute', {
+                  names: plan.deadlineWarning.unsubmittedCaddieNames.join('、'),
+                }),
+              )
+            ) {
+              return
+            }
+            void run(false)
+          }}
         >
           <CheckCircle2 />
           {busy === 'execute' ? t('caddies:autoAssign.executing') : t('caddies:autoAssign.execute')}
@@ -1195,6 +1213,20 @@ function AutoAssignPanel({
 
       {plan ? (
         <div className="mt-4 space-y-3">
+          {plan.deadlineWarning ? (
+            <Notice
+              tone="warning"
+              title={t('caddies:autoAssign.deadlineWarning.title', {
+                deadline: plan.deadlineWarning.deadlineDate,
+              })}
+            >
+              <p>
+                {t('caddies:autoAssign.deadlineWarning.body', {
+                  names: plan.deadlineWarning.unsubmittedCaddieNames.join('、'),
+                })}
+              </p>
+            </Notice>
+          ) : null}
           {plan.assigned.length === 0 ? (
             <EmptyState
               title={t('caddies:autoAssign.empty.title')}

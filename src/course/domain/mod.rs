@@ -3,6 +3,7 @@
 //! Field / ERP JSON never enters this module. Gateways reconstitute domain
 //! models; use cases depend on ports and domain types only.
 
+mod availability_deadline;
 mod caddie;
 mod caddie_ops;
 mod caddie_plan;
@@ -26,6 +27,7 @@ mod slot_override;
 mod tee_ledger;
 mod tee_sheet;
 
+pub use availability_deadline::{AvailabilityDeadline, YearMonth};
 pub use caddie::{
     AssignmentRole, AssignmentStatus, Caddie, CaddieAssignment, CaddieRank, CaddieRoster,
     CaddieSkillLevel, CaddieStaff, CaddieUpstreamIdentity,
@@ -35,8 +37,8 @@ pub use caddie_ops::{
     AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery,
     AvailabilityStatus, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
     CaddieDayCapacity, CaddiePatch, CaddieRating, CaddieRecommendation, CaddieSupply,
-    PayrollPeriod, PayrollRow, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships,
-    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    DeadlineWarning, PayrollPeriod, PayrollRow, PayrollSummary, RecommendationQuery,
+    ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 pub use caddie_plan::{
     plan_caddie_assignments, shift_covers_tee_time, skip_reason, PlanOptions, PlannableCaddie,
@@ -64,9 +66,9 @@ pub use ids::{
 pub use party::{PartyDetails, PartyPlayer, MAX_PARTY_PLAYERS, PARTY_CUSTOM_FIELD_KEY};
 pub use payroll::{summarize_payroll, AttendanceDay, PayrollCandidate, WorkedMinutes};
 pub use ports::{
-    GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway,
-    ReservationGateway, ReservationScheduleGateway, SlotOverrideGateway, TeeLedgerQuery,
-    TeeSheetQuery,
+    AvailabilityDeadlineGateway, GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway,
+    GolfOpsGateway, GolfTaxGateway, ReservationGateway, ReservationScheduleGateway,
+    SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{

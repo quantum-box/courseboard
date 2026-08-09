@@ -141,6 +141,11 @@ export const caddies: DeepPartial<typeof source> = {
     },
     candidate: 'Candidate',
     skipped: 'Skipped {{n}}',
+    deadlineWarning: {
+      title: 'Past the shift-request deadline ({{deadline}})',
+      body: '{{names}} have not filed a shift request for this month. Check before assigning.',
+      confirmExecute: '{{names}} have not filed a shift request yet. Commit these assignments anyway?',
+    },
   },
   recommendations: {
     title: 'Suggested caddies',

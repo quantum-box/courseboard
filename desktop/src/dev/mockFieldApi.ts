@@ -450,6 +450,9 @@ const mockSlotMarks: Array<{
   { golfCourseId: 'course_east', date: TODAY, teeTime: '07:32', kind: 'closed', label: '売り止め' },
 ])
 
+/** Shift-request filing deadline per `YYYY-MM`, and anything set during the session. */
+const mockAvailabilityDeadlines: Record<string, string> = loadMockWrites('availabilityDeadlines', {})
+
 /** Group detail entered during the session, by reservation id. */
 const mockParties: Record<string, unknown> = loadMockWrites('parties', {})
 
@@ -1269,6 +1272,28 @@ function resolveGet(path: string): Json | null | undefined {
     return items(mockSlotMarks.filter(mark => mark.date === date).map(mark => ({ ...mark })))
   }
 
+  const deadlineGetMatch = rawPathname.match(
+    /^\/v1\/course\/caddie-availability-deadlines\/([^/]+)$/,
+  )
+  if (deadlineGetMatch) {
+    const yearMonth = deadlineGetMatch[1]
+    const deadlineDate = mockAvailabilityDeadlines[yearMonth]
+    return deadlineDate ? { yearMonth, deadlineDate } : null
+  }
+
+  const submissionsMatch = rawPathname.match(
+    /^\/v1\/course\/caddie-availability-submissions\/([^/]+)$/,
+  )
+  if (submissionsMatch) {
+    // The fixture generates some availability row for every caddie in almost
+    // every month; picking a fixed one to omit keeps the "who hasn't filed"
+    // notice demonstrable without depending on that generator's spread.
+    return items(mockCaddies.slice(0, 1).map(profile => ({
+      caddieProfileId: profile.id,
+      displayName: profile.displayName,
+    })))
+  }
+
   if (pathname === '/v1/erp/extensions/golf-course/caddie-assignments') {
     return items(mockAssignments.map(item => ({ ...item })))
   }
@@ -1515,6 +1540,17 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     })
     saveMockWrites('slotMarks', mockSlotMarks)
     return hit(items(written.map(mark => ({ ...mark }))))
+  }
+
+  const deadlinePutMatch = pathname.match(
+    /^\/v1\/course\/caddie-availability-deadlines\/([^/]+)$/,
+  )
+  if (deadlinePutMatch && method === 'PUT') {
+    const yearMonth = deadlinePutMatch[1]
+    const deadlineDate = String(body?.deadlineDate ?? '')
+    mockAvailabilityDeadlines[yearMonth] = deadlineDate
+    saveMockWrites('availabilityDeadlines', mockAvailabilityDeadlines)
+    return hit({ yearMonth, deadlineDate })
   }
 
   if (pathname === '/v1/course/slot-overrides' && method === 'DELETE') {

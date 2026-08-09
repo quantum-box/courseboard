@@ -42,6 +42,14 @@ export const shifts: DeepPartial<typeof source> = {
     warningBody: '{{names}} assigned or available for {{n}} or more days in a row. See whether a day off fits.',
     threshold: 'Streaks of 6+ days are highlighted',
   },
+  deadline: {
+    label: 'Shift request deadline',
+    save: 'Set deadline',
+  },
+  unsubmitted: {
+    title: 'Some caddies have not filed a shift request yet',
+    body: '{{names}} have not filed a shift request for this month. Check whether it was missed.',
+  },
   table: {
     caddie: 'Caddie',
     aria: 'Shift board for {{month}}',

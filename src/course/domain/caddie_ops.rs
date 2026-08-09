@@ -973,6 +973,33 @@ impl AutoAssignSkippedItem {
     }
 }
 
+/// Carried on an auto-assign result when the month's filing deadline has
+/// passed and caddies remain who never filed a shift request for it.
+///
+/// This does not block the run — the desk may have already handled the gap by
+/// phone — it only makes the gap visible instead of letting a silent
+/// `Available` default speak for someone who was never asked.
+#[derive(Debug, Clone, PartialEq, Eq, Getters)]
+pub struct DeadlineWarning {
+    #[getter(copy)]
+    deadline_date: NaiveDate,
+    #[getter(skip)]
+    unsubmitted_caddie_names: Vec<String>,
+}
+
+impl DeadlineWarning {
+    pub fn new(deadline_date: NaiveDate, unsubmitted_caddie_names: Vec<String>) -> Self {
+        Self {
+            deadline_date,
+            unsubmitted_caddie_names,
+        }
+    }
+
+    pub fn unsubmitted_caddie_names(&self) -> &[String] {
+        &self.unsubmitted_caddie_names
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct AutoAssignResult {
     dry_run: bool,
@@ -980,6 +1007,8 @@ pub struct AutoAssignResult {
     assigned: Vec<AutoAssignPlanItem>,
     #[getter(skip)]
     skipped: Vec<AutoAssignSkippedItem>,
+    #[getter(skip)]
+    deadline_warning: Option<DeadlineWarning>,
 }
 
 impl AutoAssignResult {
@@ -992,7 +1021,13 @@ impl AutoAssignResult {
             dry_run,
             assigned,
             skipped,
+            deadline_warning: None,
         }
+    }
+
+    pub fn with_deadline_warning(mut self, deadline_warning: Option<DeadlineWarning>) -> Self {
+        self.deadline_warning = deadline_warning;
+        self
     }
 
     pub fn assigned(&self) -> &[AutoAssignPlanItem] {
@@ -1005,6 +1040,10 @@ impl AutoAssignResult {
 
     pub fn assigned_count(&self) -> usize {
         self.assigned.len()
+    }
+
+    pub fn deadline_warning(&self) -> Option<&DeadlineWarning> {
+        self.deadline_warning.as_ref()
     }
 }
 
