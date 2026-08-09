@@ -534,6 +534,15 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/caddie-availability-submissions/:year_month/:caddie_id",
+            axum::routing::put(course::interfaces::http_ops::confirm_availability_submission)
+                .delete(course::interfaces::http_ops::remove_availability_submission_confirmation)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/v1/course/caddie-payroll-summary",
             get(course::interfaces::http_ops::get_payroll_summary).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),

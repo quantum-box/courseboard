@@ -17,11 +17,11 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::course::domain::{
     course_day_bounds, plan_caddie_assignments, widen_for_utc_date_filter, AttendanceState,
-    AutoAssignResult, AvailabilityDeadline, AvailabilityDeadlineGateway, AvailabilityQuery,
-    AvailabilityStatus, CaddieAssignmentQuery, CaddieRoster, CourseError, DeadlineWarning,
-    GatewayCredentials, GolfCatalogGateway, GolfOpsGateway, PlanOptions, PlannableCaddie,
-    PlannableRound, ReservationGateway, TeeSheetItem, TeeSheetQuery, UpsertCaddieAssignment,
-    YearMonth,
+    AutoAssignResult, AvailabilityConfirmationGateway, AvailabilityDeadline,
+    AvailabilityDeadlineGateway, AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery,
+    CaddieRoster, CourseError, DeadlineWarning, GatewayCredentials, GolfCatalogGateway,
+    GolfOpsGateway, PlanOptions, PlannableCaddie, PlannableRound, ReservationGateway, TeeSheetItem,
+    TeeSheetQuery, UpsertCaddieAssignment, YearMonth,
 };
 use crate::course::usecase::GetTeeSheetUseCase;
 
@@ -46,6 +46,7 @@ pub struct AutoAssignCaddiesUseCase {
     reservations: Arc<dyn ReservationGateway>,
     catalog: Arc<dyn GolfCatalogGateway>,
     deadlines: Arc<dyn AvailabilityDeadlineGateway>,
+    confirmations: Arc<dyn AvailabilityConfirmationGateway>,
 }
 
 impl AutoAssignCaddiesUseCase {
@@ -54,18 +55,20 @@ impl AutoAssignCaddiesUseCase {
         reservations: Arc<dyn ReservationGateway>,
         catalog: Arc<dyn GolfCatalogGateway>,
         deadlines: Arc<dyn AvailabilityDeadlineGateway>,
+        confirmations: Arc<dyn AvailabilityConfirmationGateway>,
     ) -> Self {
         Self {
             ops,
             reservations,
             catalog,
             deadlines,
+            confirmations,
         }
     }
 
     /// A filing-deadline warning for the month `date` falls in, if the
-    /// deadline has passed and assignable caddies remain who never filed a
-    /// request anywhere in that month.
+    /// deadline has passed and assignable caddies remain whose requests the
+    /// desk has not explicitly checked.
     ///
     /// Not a block: the desk may already know why someone is missing from the
     /// list. It only makes a gap that would otherwise default silently to
@@ -88,28 +91,19 @@ impl AutoAssignCaddiesUseCase {
         if !deadline.has_passed(today) {
             return Ok(None);
         }
-        let (month_start, month_end) = year_month.bounds();
-        let availabilities = self
-            .ops
-            .list_caddie_availabilities(
-                credentials,
-                AvailabilityQuery {
-                    caddie_id: None,
-                    from: Some(month_start),
-                    to: Some(month_end),
-                    date: None,
-                },
-            )
+        let confirmations = self
+            .confirmations
+            .list_confirmations(credentials.operator_id, year_month)
             .await?;
-        let submitted: HashSet<&str> = availabilities
+        let confirmed: HashSet<&str> = confirmations
             .iter()
-            .map(|availability| availability.caddie_id().as_str())
+            .map(|confirmation| confirmation.caddie_id().as_str())
             .collect();
         let unsubmitted_names: Vec<String> = roster
             .caddies()
             .iter()
             .filter(|caddie| caddie.is_assignable())
-            .filter(|caddie| !submitted.contains(caddie.id().as_str()))
+            .filter(|caddie| !confirmed.contains(caddie.id().as_str()))
             .map(|caddie| caddie.display_name().to_string())
             .collect();
         Ok(build_deadline_warning(&deadline, unsubmitted_names))

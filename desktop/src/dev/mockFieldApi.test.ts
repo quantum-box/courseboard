@@ -138,4 +138,26 @@ describe('mockFieldApi', () => {
     if (extensionStatus.kind !== 'hit') return
     expect((extensionStatus.data as { extensionKey: string }).extensionKey).toBe('golf_course')
   })
+
+  it('records and removes an explicit monthly availability confirmation', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const path = '/v1/course/caddie-availability-submissions/2099-01'
+    const before = resolveMockFieldApiJson(path)
+    expect(before.kind).toBe('hit')
+    if (before.kind !== 'hit') return
+    const beforeItems = (before.data as { items: unknown[] }).items
+
+    expect(resolveMockFieldApiJson(`${path}/caddie_aya`, { method: 'PUT' }).kind).toBe('hit')
+    const confirmed = resolveMockFieldApiJson(path)
+    expect(confirmed.kind).toBe('hit')
+    if (confirmed.kind !== 'hit') return
+    expect((confirmed.data as { items: unknown[] }).items).toHaveLength(beforeItems.length - 1)
+
+    expect(resolveMockFieldApiJson(`${path}/caddie_aya`, { method: 'DELETE' }).kind).toBe('hit')
+    const removed = resolveMockFieldApiJson(path)
+    expect(removed.kind).toBe('hit')
+    if (removed.kind !== 'hit') return
+    expect((removed.data as { items: unknown[] }).items).toHaveLength(beforeItems.length)
+  })
 })

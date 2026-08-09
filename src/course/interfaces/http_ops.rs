@@ -25,12 +25,13 @@ use crate::course::domain::{
     UpsertCaddieAssignment, UpsertCaddieAvailability, YearMonth,
 };
 use crate::course::usecase::{
-    AutoAssignCaddiesUseCase, CreateCaddieAssignmentUseCase, CreateCaddieUseCase,
-    DeleteCaddieAvailabilityUseCase, ExportPayrollCsvUseCase, GetAttendanceSnapshotUseCase,
-    GetAvailabilityDeadlineUseCase, GetCaddieSupplyUseCase, GetPayrollSummaryUseCase,
-    ListAttendancePeriodSnapshotsUseCase, ListCaddieAvailabilitiesUseCase,
-    ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase, ListCaddieRecommendationsUseCase,
-    ListUnsubmittedCaddiesUseCase, NameCaddieForRound, ReplaceCaddieMembershipsUseCase,
+    AutoAssignCaddiesUseCase, ConfirmAvailabilitySubmissionUseCase, CreateCaddieAssignmentUseCase,
+    CreateCaddieUseCase, DeleteCaddieAvailabilityUseCase, ExportPayrollCsvUseCase,
+    GetAttendanceSnapshotUseCase, GetAvailabilityDeadlineUseCase, GetCaddieSupplyUseCase,
+    GetPayrollSummaryUseCase, ListAttendancePeriodSnapshotsUseCase,
+    ListCaddieAvailabilitiesUseCase, ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase,
+    ListCaddieRecommendationsUseCase, ListUnsubmittedCaddiesUseCase, NameCaddieForRound,
+    RemoveAvailabilitySubmissionConfirmationUseCase, ReplaceCaddieMembershipsUseCase,
     UpdateCaddieAssignmentUseCase, UpdateCaddieUseCase, UpsertAvailabilityDeadlineUseCase,
     UpsertCaddieAvailabilityUseCase,
 };
@@ -975,6 +976,7 @@ pub async fn auto_assign_caddies(
         reservation_gateway(&state),
         catalog_gateway(&state),
         state.availability_deadlines(),
+        state.availability_deadlines(),
     );
     let result = use_case
         .execute(credentials, body.date, body.dry_run)
@@ -1082,7 +1084,7 @@ pub struct UnsubmittedCaddieDto {
     tag = "course-ops",
     params(("year_month" = String, Path, description = "YYYY-MM")),
     responses(
-        (status = 200, description = "Active caddies who filed no shift request for the month", body = ItemsResponse<UnsubmittedCaddieDto>),
+        (status = 200, description = "Active caddies whose monthly requests have not been explicitly checked", body = ItemsResponse<UnsubmittedCaddieDto>),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
         (status = 424, description = "Upstream provider error", body = ErrorBody),
@@ -1096,7 +1098,8 @@ pub async fn list_unsubmitted_caddies(
 ) -> Result<Json<ItemsResponse<UnsubmittedCaddieDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
     let year_month = parse_year_month(&year_month)?;
-    let use_case = ListUnsubmittedCaddiesUseCase::new(ops_gateway(&state));
+    let use_case =
+        ListUnsubmittedCaddiesUseCase::new(ops_gateway(&state), state.availability_deadlines());
     let unsubmitted = use_case
         .execute(credentials, year_month)
         .await
@@ -1110,6 +1113,73 @@ pub async fn list_unsubmitted_caddies(
             })
             .collect(),
     }))
+}
+
+/// PUT /v1/course/caddie-availability-submissions/:year_month/:caddie_id
+#[utoipa::path(
+    put,
+    path = "/v1/course/caddie-availability-submissions/{year_month}/{caddie_id}",
+    tag = "course-ops",
+    params(
+        ("year_month" = String, Path, description = "YYYY-MM"),
+        ("caddie_id" = String, Path, description = "Field-owned caddie profile ID"),
+    ),
+    responses(
+        (status = 204, description = "The desk check is recorded"),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Active caddie not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn confirm_availability_submission(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((year_month, caddie_id)): Path<(String, String)>,
+) -> Result<StatusCode, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let year_month = parse_year_month(&year_month)?;
+    ConfirmAvailabilitySubmissionUseCase::new(ops_gateway(&state), state.availability_deadlines())
+        .execute(credentials, year_month, &CaddieId::new(caddie_id))
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// DELETE /v1/course/caddie-availability-submissions/:year_month/:caddie_id
+#[utoipa::path(
+    delete,
+    path = "/v1/course/caddie-availability-submissions/{year_month}/{caddie_id}",
+    tag = "course-ops",
+    params(
+        ("year_month" = String, Path, description = "YYYY-MM"),
+        ("caddie_id" = String, Path, description = "Field-owned caddie profile ID"),
+    ),
+    responses(
+        (status = 204, description = "The desk check is removed"),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Storage provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn remove_availability_submission_confirmation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((year_month, caddie_id)): Path<(String, String)>,
+) -> Result<StatusCode, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let year_month = parse_year_month(&year_month)?;
+    RemoveAvailabilitySubmissionConfirmationUseCase::new(state.availability_deadlines())
+        .execute(
+            credentials.operator_id,
+            year_month,
+            &CaddieId::new(caddie_id),
+        )
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]

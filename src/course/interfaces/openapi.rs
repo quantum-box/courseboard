@@ -91,6 +91,8 @@ impl Modify for SecurityAddon {
         http_ops::get_availability_deadline,
         http_ops::upsert_availability_deadline,
         http_ops::list_unsubmitted_caddies,
+        http_ops::confirm_availability_submission,
+        http_ops::remove_availability_submission_confirmation,
         http_ops::get_payroll_summary,
         http_ops::export_payroll_csv,
         http_ops::list_caddie_ratings,

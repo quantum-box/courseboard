@@ -1125,10 +1125,12 @@ function AutoAssignPanel({
   const [plan, setPlan] = useState<AutoAssignResult | null>(null)
   const [busy, setBusy] = useState<'preview' | 'execute' | null>(null)
   const [error, setError] = useState<unknown>(null)
+  const [deadlineWarningOpen, setDeadlineWarningOpen] = useState(false)
 
   useEffect(() => {
     setPlan(null)
     setError(null)
+    setDeadlineWarningOpen(false)
   }, [date])
 
   // Surfaced before the plan is committed, not used to filter it: the morning
@@ -1185,14 +1187,8 @@ function AutoAssignPanel({
           className="flex-1"
           disabled={busy !== null || !plan || plan.assigned.length === 0}
           onClick={() => {
-            if (
-              plan?.deadlineWarning
-              && !window.confirm(
-                t('caddies:autoAssign.deadlineWarning.confirmExecute', {
-                  names: plan.deadlineWarning.unsubmittedCaddieNames.join('、'),
-                }),
-              )
-            ) {
+            if (plan?.deadlineWarning) {
+              setDeadlineWarningOpen(true)
               return
             }
             void run(false)
@@ -1202,6 +1198,62 @@ function AutoAssignPanel({
           {busy === 'execute' ? t('caddies:autoAssign.executing') : t('caddies:autoAssign.execute')}
         </Button>
       </div>
+
+      <Dialog
+        open={deadlineWarningOpen}
+        onOpenChange={open => {
+          if (!open && busy === null) setDeadlineWarningOpen(false)
+        }}
+      >
+        <DialogContent className="max-h-[calc(100dvh-1.5rem)] max-w-lg overflow-y-auto text-base">
+          <DialogHeader>
+            <DialogTitle>{t('caddies:autoAssign.deadlineWarning.dialogTitle')}</DialogTitle>
+            <DialogDescription className="text-base">
+              {t('caddies:autoAssign.deadlineWarning.dialogDescription', {
+                deadline: plan?.deadlineWarning?.deadlineDate ?? '',
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <div>
+            <p className="mb-2 font-medium text-foreground">
+              {t('caddies:autoAssign.deadlineWarning.names')}
+            </p>
+            <ul className="grid gap-2">
+              {(plan?.deadlineWarning?.unsubmittedCaddieNames ?? []).map(name => (
+                <li
+                  key={name}
+                  className="rounded-lg border border-warning/40 bg-warning/5 px-3 py-2 font-medium text-foreground"
+                >
+                  {name}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              type="button"
+              variant="secondary"
+              className="min-h-11 text-base"
+              disabled={busy !== null}
+              onClick={() => setDeadlineWarningOpen(false)}
+            >
+              {t('caddies:autoAssign.deadlineWarning.back')}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              className="min-h-11 text-base"
+              disabled={busy !== null}
+              onClick={() => {
+                setDeadlineWarningOpen(false)
+                void run(false)
+              }}
+            >
+              {t('caddies:autoAssign.deadlineWarning.proceed')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {error ? (
         <div className="mt-3">

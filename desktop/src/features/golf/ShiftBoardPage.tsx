@@ -31,6 +31,7 @@ const COURSE_API = '/v1/course'
 type CaddieProfile = {
   id: string
   displayName: string
+  active?: boolean
   employmentStatus: string
 }
 
@@ -182,6 +183,15 @@ export function ShiftBoardPage() {
         </div>
       </Panel>
 
+      <AvailabilityConfirmationPanel
+        yearMonth={yearMonth}
+        profiles={profilesResource.data?.items ?? []}
+        unsubmitted={unsubmittedResource.data?.items ?? null}
+        loading={profilesResource.loading || unsubmittedResource.loading}
+        error={profilesResource.error ?? unsubmittedResource.error}
+        onRefresh={refresh}
+      />
+
       <SectionErrorBoundary resetKey={yearMonth}>
         <ShiftBoardResults
           yearMonth={yearMonth}
@@ -189,7 +199,6 @@ export function ShiftBoardPage() {
           profiles={profilesResource.data?.items ?? []}
           availabilities={availabilityResource.data?.items ?? []}
           assignments={assignmentsResource.data?.items ?? []}
-          unsubmittedCaddies={unsubmittedResource.data?.items ?? []}
           loading={profilesResource.loading
             || availabilityResource.loading
             || assignmentsResource.loading}
@@ -200,6 +209,137 @@ export function ShiftBoardPage() {
         />
       </SectionErrorBoundary>
     </div>
+  )
+}
+
+function AvailabilityConfirmationPanel({
+  yearMonth,
+  profiles,
+  unsubmitted,
+  loading,
+  error,
+  onRefresh,
+}: {
+  yearMonth: string
+  profiles: CaddieProfile[]
+  unsubmitted: UnsubmittedCaddie[] | null
+  loading: boolean
+  error: unknown
+  onRefresh: () => void
+}) {
+  const { t } = useTranslation(['shifts', 'common'])
+  const [saving, setSaving] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<unknown>(null)
+  const unsubmittedIds = useMemo(
+    () => new Set((unsubmitted ?? []).map(caddie => caddie.caddieProfileId)),
+    [unsubmitted],
+  )
+  const confirmed = useMemo(
+    () => profiles
+      .filter(profile => profile.active !== false && profile.employmentStatus === 'active')
+      .filter(profile => !unsubmittedIds.has(profile.id))
+      .sort((left, right) => left.displayName.localeCompare(right.displayName, 'ja')),
+    [profiles, unsubmittedIds],
+  )
+
+  async function setConfirmed(caddieId: string, confirmed: boolean) {
+    setSaving(caddieId)
+    setSaveError(null)
+    try {
+      await courseboardApiJson<void>(
+        `${COURSE_API}/caddie-availability-submissions/${yearMonth}/${encodeURIComponent(caddieId)}`,
+        { method: confirmed ? 'PUT' : 'DELETE' },
+      )
+      onRefresh()
+    } catch (reason) {
+      setSaveError(reason)
+    } finally {
+      setSaving(null)
+    }
+  }
+
+  return (
+    <Panel
+      title={t('shifts:confirmation.title')}
+      description={t('shifts:confirmation.description')}
+    >
+      {loading && unsubmitted === null ? (
+        <LoadingState label={t('shifts:confirmation.loading')} />
+      ) : null}
+      {error && unsubmitted === null ? <ResourceError error={error} onRetry={onRefresh} /> : null}
+      {saveError ? (
+        <Notice tone="danger" title={t('shifts:confirmation.saveFailed')}>
+          {saveError instanceof Error ? saveError.message : String(saveError)}
+        </Notice>
+      ) : null}
+      {unsubmitted !== null ? (
+        <div className="space-y-4 text-base">
+          <Notice
+            tone={unsubmitted.length > 0 ? 'warning' : 'success'}
+            title={unsubmitted.length > 0
+              ? t('shifts:confirmation.uncheckedTitle', { n: String(unsubmitted.length) })
+              : t('shifts:confirmation.completeTitle')}
+          >
+            {unsubmitted.length > 0
+              ? t('shifts:confirmation.uncheckedDescription')
+              : t('shifts:confirmation.completeDescription')}
+          </Notice>
+
+          {unsubmitted.length > 0 ? (
+            <ul className="grid gap-2" aria-label={t('shifts:confirmation.uncheckedList')}>
+              {unsubmitted.map(caddie => (
+                <li
+                  key={caddie.caddieProfileId}
+                  className="flex min-h-14 flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/40 bg-warning/5 px-3 py-2"
+                >
+                  <span className="font-medium text-foreground">{caddie.displayName}</span>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="min-h-11 text-base"
+                    disabled={saving !== null}
+                    onClick={() => void setConfirmed(caddie.caddieProfileId, true)}
+                  >
+                    {saving === caddie.caddieProfileId
+                      ? t('shifts:confirmation.saving')
+                      : t('shifts:confirmation.markConfirmed')}
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+
+          {confirmed.length > 0 ? (
+            <details>
+              <summary className="min-h-11 cursor-pointer py-2 font-medium text-foreground">
+                {t('shifts:confirmation.confirmedTitle', { n: String(confirmed.length) })}
+              </summary>
+              <ul className="mt-2 grid gap-2">
+                {confirmed.map(caddie => (
+                  <li
+                    key={caddie.id}
+                    className="flex min-h-14 flex-wrap items-center justify-between gap-2 rounded-lg border border-border px-3 py-2"
+                  >
+                    <span>{caddie.displayName}</span>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="min-h-11 text-base"
+                      disabled={saving !== null}
+                      onClick={() => void setConfirmed(caddie.id, false)}
+                    >
+                      {saving === caddie.id
+                        ? t('shifts:confirmation.saving')
+                        : t('shifts:confirmation.undoConfirmed')}
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
+    </Panel>
   )
 }
 
@@ -252,7 +392,6 @@ function ShiftBoardResults({
   profiles,
   availabilities,
   assignments,
-  unsubmittedCaddies,
   loading,
   error,
   onRetry,
@@ -264,7 +403,6 @@ function ShiftBoardResults({
   profiles: CaddieProfile[]
   availabilities: ShiftAvailability[]
   assignments: ShiftAssignment[]
-  unsubmittedCaddies: UnsubmittedCaddie[]
   loading: boolean
   error: unknown
   onRetry: () => void
@@ -338,14 +476,6 @@ function ShiftBoardResults({
 
   return (
     <>
-      {unsubmittedCaddies.length > 0 ? (
-        <Notice tone="warning" title={t('shifts:unsubmitted.title')}>
-          {t('shifts:unsubmitted.body', {
-            names: unsubmittedCaddies.map(caddie => caddie.displayName).join('、'),
-          })}
-        </Notice>
-      ) : null}
-
       {longStreakNames.length > 0 ? (
         <Notice tone="warning" title={t('shifts:streak.warningTitle')}>
           {t('shifts:streak.warningBody', {

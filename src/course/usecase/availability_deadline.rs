@@ -1,5 +1,5 @@
-//! Getting/setting the shift-request filing deadline, and listing who has not
-//! filed for a given month.
+//! Getting/setting the shift-request filing deadline, explicitly recording
+//! whose requests were checked, and listing who is still unchecked.
 //!
 //! Kept in one file for the same reason as `slot_overrides`: the deadline and
 //! the list of who has missed it are one decision seen from two sides.
@@ -8,8 +8,9 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::course::domain::{
-    AvailabilityDeadline, AvailabilityDeadlineGateway, AvailabilityQuery, Caddie, CourseError,
-    GatewayCredentials, GolfOpsGateway, YearMonth,
+    AvailabilityConfirmation, AvailabilityConfirmationGateway, AvailabilityDeadline,
+    AvailabilityDeadlineGateway, Caddie, CaddieId, CourseError, GatewayCredentials, GolfOpsGateway,
+    YearMonth,
 };
 
 fn require_tenant(tenant_id: &str) -> Result<(), CourseError> {
@@ -57,20 +58,23 @@ impl UpsertAvailabilityDeadlineUseCase {
     }
 }
 
-/// Active, assignable caddies who have not filed a single shift-request row
-/// anywhere in the given month.
+/// Active, assignable caddies whose monthly requests the desk has not
+/// explicitly checked.
 ///
-/// "Filed" is read straight off whether a row exists, not off a separate
-/// flag: a day with no request already reads as `Available` for planning (see
-/// caddie_ops.rs), so the only way to tell "confirmed available" apart from
-/// "never asked" is whether the month holds any row for that caddie at all.
+/// Availability rows are deliberately not consulted. They are sparse and an
+/// absent row means "available", so zero requested days off is a valid,
+/// complete answer rather than evidence that nobody asked.
 pub struct ListUnsubmittedCaddiesUseCase {
     ops: Arc<dyn GolfOpsGateway>,
+    confirmations: Arc<dyn AvailabilityConfirmationGateway>,
 }
 
 impl ListUnsubmittedCaddiesUseCase {
-    pub fn new(ops: Arc<dyn GolfOpsGateway>) -> Self {
-        Self { ops }
+    pub fn new(
+        ops: Arc<dyn GolfOpsGateway>,
+        confirmations: Arc<dyn AvailabilityConfirmationGateway>,
+    ) -> Self {
+        Self { ops, confirmations }
     }
 
     pub async fn execute(
@@ -78,30 +82,80 @@ impl ListUnsubmittedCaddiesUseCase {
         credentials: GatewayCredentials<'_>,
         year_month: YearMonth,
     ) -> Result<Vec<Caddie>, CourseError> {
-        let (month_start, month_end) = year_month.bounds();
-        let (roster, availabilities) = tokio::try_join!(
+        let (roster, confirmations) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
-            self.ops.list_caddie_availabilities(
-                credentials,
-                AvailabilityQuery {
-                    caddie_id: None,
-                    from: Some(month_start),
-                    to: Some(month_end),
-                    date: None,
-                },
-            ),
+            self.confirmations
+                .list_confirmations(credentials.operator_id, year_month),
         )?;
-        let submitted: HashSet<&str> = availabilities
+        let confirmed: HashSet<&str> = confirmations
             .iter()
-            .map(|availability| availability.caddie_id().as_str())
+            .map(|confirmation| confirmation.caddie_id().as_str())
             .collect();
         Ok(roster
             .caddies()
             .iter()
             .filter(|caddie| caddie.is_assignable())
-            .filter(|caddie| !submitted.contains(caddie.id().as_str()))
+            .filter(|caddie| !confirmed.contains(caddie.id().as_str()))
             .cloned()
             .collect())
+    }
+}
+
+/// Mark one active caddie's request for a month as checked now.
+pub struct ConfirmAvailabilitySubmissionUseCase {
+    ops: Arc<dyn GolfOpsGateway>,
+    confirmations: Arc<dyn AvailabilityConfirmationGateway>,
+}
+
+impl ConfirmAvailabilitySubmissionUseCase {
+    pub fn new(
+        ops: Arc<dyn GolfOpsGateway>,
+        confirmations: Arc<dyn AvailabilityConfirmationGateway>,
+    ) -> Self {
+        Self { ops, confirmations }
+    }
+
+    pub async fn execute(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        year_month: YearMonth,
+        caddie_id: &CaddieId,
+    ) -> Result<AvailabilityConfirmation, CourseError> {
+        let roster = self.ops.list_caddie_roster(credentials).await?;
+        if !roster
+            .caddies()
+            .iter()
+            .any(|caddie| caddie.id() == caddie_id && caddie.is_assignable())
+        {
+            return Err(CourseError::NotFound("active caddie not found"));
+        }
+        self.confirmations
+            .confirm(credentials.operator_id, year_month, caddie_id)
+            .await
+    }
+}
+
+/// Undo a mistaken check. Removing a missing marker is intentionally
+/// idempotent so retrying the desk action is safe.
+pub struct RemoveAvailabilitySubmissionConfirmationUseCase {
+    confirmations: Arc<dyn AvailabilityConfirmationGateway>,
+}
+
+impl RemoveAvailabilitySubmissionConfirmationUseCase {
+    pub fn new(confirmations: Arc<dyn AvailabilityConfirmationGateway>) -> Self {
+        Self { confirmations }
+    }
+
+    pub async fn execute(
+        &self,
+        tenant_id: &str,
+        year_month: YearMonth,
+        caddie_id: &CaddieId,
+    ) -> Result<(), CourseError> {
+        require_tenant(tenant_id)?;
+        self.confirmations
+            .remove_confirmation(tenant_id, year_month, caddie_id)
+            .await
     }
 }
 
@@ -114,10 +168,10 @@ mod tests {
 
     use crate::course::domain::{
         AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-        CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
-        CaddieId, CaddieRank, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSkillLevel,
-        CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie,
-        UpsertCaddieAssignment, UpsertCaddieAvailability,
+        AvailabilityQuery, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
+        CaddieCourseMembership, CaddieId, CaddieRank, CaddieRating, CaddieRecommendation,
+        CaddieRoster, CaddieSkillLevel, CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships,
+        UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
 
     struct FakeDeadlines {
@@ -141,6 +195,71 @@ mod tests {
         ) -> Result<AvailabilityDeadline, CourseError> {
             *self.stored.lock().expect("lock") = Some(deadline);
             Ok(deadline)
+        }
+    }
+
+    struct FakeConfirmations {
+        caddie_ids: Mutex<HashSet<String>>,
+    }
+
+    impl FakeConfirmations {
+        fn with(caddie_ids: &[&str]) -> Self {
+            Self {
+                caddie_ids: Mutex::new(caddie_ids.iter().map(ToString::to_string).collect()),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl AvailabilityConfirmationGateway for FakeConfirmations {
+        async fn list_confirmations(
+            &self,
+            _tenant_id: &str,
+            year_month: YearMonth,
+        ) -> Result<Vec<AvailabilityConfirmation>, CourseError> {
+            Ok(self
+                .caddie_ids
+                .lock()
+                .expect("lock")
+                .iter()
+                .map(|caddie_id| {
+                    AvailabilityConfirmation::reconstitute(
+                        year_month,
+                        caddie_id.clone(),
+                        chrono::Utc::now(),
+                    )
+                })
+                .collect())
+        }
+
+        async fn confirm(
+            &self,
+            _tenant_id: &str,
+            year_month: YearMonth,
+            caddie_id: &CaddieId,
+        ) -> Result<AvailabilityConfirmation, CourseError> {
+            self.caddie_ids
+                .lock()
+                .expect("lock")
+                .insert(caddie_id.as_str().to_string());
+            Ok(AvailabilityConfirmation::reconstitute(
+                year_month,
+                caddie_id.clone(),
+                chrono::Utc::now(),
+            ))
+        }
+
+        async fn remove_confirmation(
+            &self,
+            _tenant_id: &str,
+            _year_month: YearMonth,
+            caddie_id: &CaddieId,
+        ) -> Result<(), CourseError> {
+            self.caddie_ids
+                .lock()
+                .expect("lock")
+                .remove(caddie_id.as_str());
+            Ok(())
         }
     }
 
@@ -377,21 +496,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_caddie_with_no_row_anywhere_in_the_month_is_unsubmitted() {
+    async fn zero_requested_days_off_can_still_be_explicitly_confirmed() {
         let ops = Arc::new(FakeOps {
             caddies: vec![caddie("cad_off", "Off", true)],
             availabilities: vec![],
         });
-        let unsubmitted = ListUnsubmittedCaddiesUseCase::new(ops)
-            .execute(credentials(), YearMonth::parse("2026-08").unwrap())
-            .await
-            .unwrap();
-        assert_eq!(unsubmitted.len(), 1);
-        assert_eq!(unsubmitted[0].display_name(), "Off");
+        let unsubmitted = ListUnsubmittedCaddiesUseCase::new(
+            ops,
+            Arc::new(FakeConfirmations::with(&["cad_off"])),
+        )
+        .execute(credentials(), YearMonth::parse("2026-08").unwrap())
+        .await
+        .unwrap();
+        assert!(unsubmitted.is_empty());
     }
 
     #[tokio::test]
-    async fn a_caddie_with_any_row_in_the_month_is_not_listed() {
+    async fn an_availability_row_does_not_count_as_an_explicit_confirmation() {
         let ops = Arc::new(FakeOps {
             caddies: vec![caddie("cad_on", "On", true)],
             availabilities: vec![CaddieAvailability::reconstitute(
@@ -404,11 +525,13 @@ mod tests {
                 None,
             )],
         });
-        let unsubmitted = ListUnsubmittedCaddiesUseCase::new(ops)
-            .execute(credentials(), YearMonth::parse("2026-08").unwrap())
-            .await
-            .unwrap();
-        assert!(unsubmitted.is_empty());
+        let unsubmitted =
+            ListUnsubmittedCaddiesUseCase::new(ops, Arc::new(FakeConfirmations::with(&[])))
+                .execute(credentials(), YearMonth::parse("2026-08").unwrap())
+                .await
+                .unwrap();
+        assert_eq!(unsubmitted.len(), 1);
+        assert_eq!(unsubmitted[0].display_name(), "On");
     }
 
     #[tokio::test]
@@ -417,10 +540,43 @@ mod tests {
             caddies: vec![caddie("cad_retired", "Retired", false)],
             availabilities: vec![],
         });
-        let unsubmitted = ListUnsubmittedCaddiesUseCase::new(ops)
-            .execute(credentials(), YearMonth::parse("2026-08").unwrap())
+        let unsubmitted =
+            ListUnsubmittedCaddiesUseCase::new(ops, Arc::new(FakeConfirmations::with(&[])))
+                .execute(credentials(), YearMonth::parse("2026-08").unwrap())
+                .await
+                .unwrap();
+        assert!(unsubmitted.is_empty());
+    }
+
+    #[tokio::test]
+    async fn confirming_requires_an_active_assignable_caddie() {
+        let ops = Arc::new(FakeOps {
+            caddies: vec![caddie("cad_suspended", "Suspended", false)],
+            availabilities: vec![],
+        });
+        let confirmations = Arc::new(FakeConfirmations::with(&[]));
+        let result = ConfirmAvailabilitySubmissionUseCase::new(ops, confirmations.clone())
+            .execute(
+                credentials(),
+                YearMonth::parse("2026-08").unwrap(),
+                &CaddieId::new("cad_suspended"),
+            )
+            .await;
+        assert!(matches!(result, Err(CourseError::NotFound(_))));
+        assert!(confirmations.caddie_ids.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn removing_a_confirmation_makes_the_caddie_unsubmitted_again() {
+        let confirmations = Arc::new(FakeConfirmations::with(&["cad_on"]));
+        RemoveAvailabilitySubmissionConfirmationUseCase::new(confirmations.clone())
+            .execute(
+                "scc",
+                YearMonth::parse("2026-08").unwrap(),
+                &CaddieId::new("cad_on"),
+            )
             .await
             .unwrap();
-        assert!(unsubmitted.is_empty());
+        assert!(confirmations.caddie_ids.lock().expect("lock").is_empty());
     }
 }

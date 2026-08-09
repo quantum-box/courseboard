@@ -1,4 +1,5 @@
-//! CourseBoard's own storage for the shift-request filing deadline.
+//! CourseBoard's own storage for the shift-request filing deadline and the
+//! desk's explicit monthly confirmation for each caddie.
 //!
 //! Unlike the Field gateways in this module, this one reads and writes
 //! CourseBoard's MySQL (`golf_availability_deadlines`). Field's shift-request
@@ -6,11 +7,12 @@
 //! live; see ADR-0005.
 
 use async_trait::async_trait;
-use chrono::NaiveDate;
+use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::{MySqlPool, Row};
 
 use crate::course::domain::{
-    AvailabilityDeadline, AvailabilityDeadlineGateway, CourseError, YearMonth,
+    AvailabilityConfirmation, AvailabilityConfirmationGateway, AvailabilityDeadline,
+    AvailabilityDeadlineGateway, CaddieId, CourseError, YearMonth,
 };
 
 pub struct MySqlAvailabilityDeadlineRepository {
@@ -81,6 +83,112 @@ impl AvailabilityDeadlineGateway for MySqlAvailabilityDeadlineRepository {
         .await
         .map_err(provider)?;
         Ok(deadline)
+    }
+}
+
+#[async_trait]
+impl AvailabilityConfirmationGateway for MySqlAvailabilityDeadlineRepository {
+    async fn list_confirmations(
+        &self,
+        tenant_id: &str,
+        year_month: YearMonth,
+    ) -> Result<Vec<AvailabilityConfirmation>, CourseError> {
+        let rows = sqlx::query(
+            r#"
+            SELECT caddie_profile_id, confirmed_at
+            FROM golf_availability_confirmations
+            WHERE tenant_id = ?
+              AND `year_month` = ?
+            ORDER BY caddie_profile_id
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(year_month.as_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(provider)?;
+
+        rows.into_iter()
+            .map(|row| {
+                let caddie_id: String = row.try_get("caddie_profile_id").map_err(provider)?;
+                let confirmed_at: DateTime<Utc> = row.try_get("confirmed_at").map_err(provider)?;
+                Ok(AvailabilityConfirmation::reconstitute(
+                    year_month,
+                    caddie_id,
+                    confirmed_at,
+                ))
+            })
+            .collect()
+    }
+
+    async fn confirm(
+        &self,
+        tenant_id: &str,
+        year_month: YearMonth,
+        caddie_id: &CaddieId,
+    ) -> Result<AvailabilityConfirmation, CourseError> {
+        sqlx::query(
+            r#"
+            INSERT INTO golf_availability_confirmations (
+                tenant_id, `year_month`, caddie_profile_id
+            )
+            VALUES (?, ?, ?)
+            ON DUPLICATE KEY UPDATE
+                confirmed_at = CURRENT_TIMESTAMP(6),
+                updated_at = CURRENT_TIMESTAMP(6)
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(year_month.as_string())
+        .bind(caddie_id.as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(provider)?;
+
+        let row = sqlx::query(
+            r#"
+            SELECT confirmed_at
+            FROM golf_availability_confirmations
+            WHERE tenant_id = ?
+              AND `year_month` = ?
+              AND caddie_profile_id = ?
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(year_month.as_string())
+        .bind(caddie_id.as_str())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(provider)?;
+        let confirmed_at: DateTime<Utc> = row.try_get("confirmed_at").map_err(provider)?;
+        Ok(AvailabilityConfirmation::reconstitute(
+            year_month,
+            caddie_id.clone(),
+            confirmed_at,
+        ))
+    }
+
+    async fn remove_confirmation(
+        &self,
+        tenant_id: &str,
+        year_month: YearMonth,
+        caddie_id: &CaddieId,
+    ) -> Result<(), CourseError> {
+        sqlx::query(
+            r#"
+            DELETE FROM golf_availability_confirmations
+            WHERE tenant_id = ?
+              AND `year_month` = ?
+              AND caddie_profile_id = ?
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(year_month.as_string())
+        .bind(caddie_id.as_str())
+        .execute(&self.pool)
+        .await
+        .map_err(provider)?;
+        Ok(())
     }
 }
 
@@ -170,5 +278,59 @@ mod tests {
             .await
             .unwrap();
         assert!(stored.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_confirmation_survives_storage_and_can_be_removed() {
+        let repository = MySqlAvailabilityDeadlineRepository::new(test_pool().await);
+        let tenant = test_tenant("confirmation-roundtrip");
+        let month = YearMonth::parse("2026-08").unwrap();
+        let caddie_id = CaddieId::new("golfcad_confirmed");
+
+        let saved = repository
+            .confirm(&tenant, month, &caddie_id)
+            .await
+            .unwrap();
+        assert_eq!(saved.caddie_id(), &caddie_id);
+        assert_eq!(saved.year_month(), month);
+
+        let stored = repository.list_confirmations(&tenant, month).await.unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].caddie_id(), &caddie_id);
+
+        repository
+            .remove_confirmation(&tenant, month, &caddie_id)
+            .await
+            .unwrap();
+        assert!(repository
+            .list_confirmations(&tenant, month)
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn confirmations_are_isolated_by_tenant_and_month() {
+        let repository = MySqlAvailabilityDeadlineRepository::new(test_pool().await);
+        let tenant = test_tenant("confirmation-isolation");
+        let other_tenant = test_tenant("confirmation-isolation-other");
+        let august = YearMonth::parse("2026-08").unwrap();
+        let september = YearMonth::parse("2026-09").unwrap();
+        let caddie_id = CaddieId::new("golfcad_confirmed");
+        repository
+            .confirm(&tenant, august, &caddie_id)
+            .await
+            .unwrap();
+
+        assert!(repository
+            .list_confirmations(&tenant, september)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(repository
+            .list_confirmations(&other_tenant, august)
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

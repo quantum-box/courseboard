@@ -8,9 +8,9 @@
 //! check submissions against; Field's shift-request API has no notion of a
 //! filing deadline, so it is CourseBoard's own data (ADR-0005).
 
-use chrono::{Datelike, NaiveDate};
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 
-use super::CourseError;
+use super::{CaddieId, CourseError};
 
 /// A calendar month, `YYYY-MM`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -104,6 +104,43 @@ impl AvailabilityDeadline {
     /// "missed the window".
     pub fn has_passed(&self, today: NaiveDate) -> bool {
         today > self.deadline_date
+    }
+}
+
+/// The desk explicitly checked one caddie's day-off requests for one month.
+///
+/// `confirmed_at` is the time the caddie master marked the check complete,
+/// not the time the request actually arrived.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvailabilityConfirmation {
+    year_month: YearMonth,
+    caddie_id: CaddieId,
+    confirmed_at: DateTime<Utc>,
+}
+
+impl AvailabilityConfirmation {
+    pub fn reconstitute(
+        year_month: YearMonth,
+        caddie_id: impl Into<CaddieId>,
+        confirmed_at: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            year_month,
+            caddie_id: caddie_id.into(),
+            confirmed_at,
+        }
+    }
+
+    pub fn year_month(&self) -> YearMonth {
+        self.year_month
+    }
+
+    pub fn caddie_id(&self) -> &CaddieId {
+        &self.caddie_id
+    }
+
+    pub fn confirmed_at(&self) -> DateTime<Utc> {
+        self.confirmed_at
     }
 }
 

@@ -27,7 +27,7 @@ mod slot_override;
 mod tee_ledger;
 mod tee_sheet;
 
-pub use availability_deadline::{AvailabilityDeadline, YearMonth};
+pub use availability_deadline::{AvailabilityConfirmation, AvailabilityDeadline, YearMonth};
 pub use caddie::{
     AssignmentRole, AssignmentStatus, Caddie, CaddieAssignment, CaddieRank, CaddieRoster,
     CaddieSkillLevel, CaddieStaff, CaddieUpstreamIdentity,
@@ -66,9 +66,9 @@ pub use ids::{
 pub use party::{PartyDetails, PartyPlayer, MAX_PARTY_PLAYERS, PARTY_CUSTOM_FIELD_KEY};
 pub use payroll::{summarize_payroll, AttendanceDay, PayrollCandidate, WorkedMinutes};
 pub use ports::{
-    AvailabilityDeadlineGateway, GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway,
-    GolfOpsGateway, GolfTaxGateway, ReservationGateway, ReservationScheduleGateway,
-    SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
+    AvailabilityConfirmationGateway, AvailabilityDeadlineGateway, GatewayCredentials,
+    GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, ReservationGateway,
+    ReservationScheduleGateway, SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{

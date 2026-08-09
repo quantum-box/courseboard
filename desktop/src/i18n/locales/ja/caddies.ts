@@ -143,8 +143,12 @@ export const caddies = {
     skipped: '{{n}}件を飛ばしました',
     deadlineWarning: {
       title: '休み希望の締切（{{deadline}}）を過ぎています',
-      body: '{{names}} はこの月の休み希望がまだ届いていません。割り当てる前に確かめてください。',
-      confirmExecute: '{{names}} の休み希望がまだ届いていません。このまま自動配置を決めますか？',
+      body: '{{names}} はこの月の休み希望をまだ確認できていません。割り当てる前に確かめてください。',
+      dialogTitle: '休み希望を確認できていない人がいます',
+      dialogDescription: '締切（{{deadline}}）を過ぎています。下の人は、休み希望の確認が終わっていません。',
+      names: 'まだ確認できていない人',
+      back: '確認にもどる',
+      proceed: '未確認の人がいるまま実行',
     },
   },
   recommendations: {

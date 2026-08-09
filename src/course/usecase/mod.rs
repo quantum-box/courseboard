@@ -60,7 +60,8 @@ mod upsert_reservation_product;
 
 pub use auto_assign_caddies::AutoAssignCaddiesUseCase;
 pub use availability_deadline::{
-    GetAvailabilityDeadlineUseCase, ListUnsubmittedCaddiesUseCase,
+    ConfirmAvailabilitySubmissionUseCase, GetAvailabilityDeadlineUseCase,
+    ListUnsubmittedCaddiesUseCase, RemoveAvailabilitySubmissionConfirmationUseCase,
     UpsertAvailabilityDeadlineUseCase,
 };
 pub use course_order::{GetCourseOrderUseCase, ReplaceCourseOrderUseCase};

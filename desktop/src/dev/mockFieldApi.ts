@@ -453,6 +453,14 @@ const mockSlotMarks: Array<{
 /** Shift-request filing deadline per `YYYY-MM`, and anything set during the session. */
 const mockAvailabilityDeadlines: Record<string, string> = loadMockWrites('availabilityDeadlines', {})
 
+/** Caddies whose monthly day-off requests the desk explicitly checked. */
+const mockAvailabilityConfirmations: Record<string, string[]> = loadMockWrites(
+  'availabilityConfirmations',
+  {
+    [TODAY.slice(0, 7)]: mockCaddies.slice(1).map(caddie => caddie.id),
+  },
+)
+
 /** Group detail entered during the session, by reservation id. */
 const mockParties: Record<string, unknown> = loadMockWrites('parties', {})
 
@@ -1285,13 +1293,14 @@ function resolveGet(path: string): Json | null | undefined {
     /^\/v1\/course\/caddie-availability-submissions\/([^/]+)$/,
   )
   if (submissionsMatch) {
-    // The fixture generates some availability row for every caddie in almost
-    // every month; picking a fixed one to omit keeps the "who hasn't filed"
-    // notice demonstrable without depending on that generator's spread.
-    return items(mockCaddies.slice(0, 1).map(profile => ({
+    const confirmed = new Set(mockAvailabilityConfirmations[submissionsMatch[1]] ?? [])
+    return items(mockCaddies
+      .filter(profile => profile.active && profile.employmentStatus === 'active')
+      .filter(profile => !confirmed.has(profile.id))
+      .map(profile => ({
       caddieProfileId: profile.id,
       displayName: profile.displayName,
-    })))
+      })))
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-assignments') {
@@ -1551,6 +1560,20 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     mockAvailabilityDeadlines[yearMonth] = deadlineDate
     saveMockWrites('availabilityDeadlines', mockAvailabilityDeadlines)
     return hit({ yearMonth, deadlineDate })
+  }
+
+  const confirmationMatch = pathname.match(
+    /^\/v1\/course\/caddie-availability-submissions\/([^/]+)\/([^/]+)$/,
+  )
+  if (confirmationMatch && (method === 'PUT' || method === 'DELETE')) {
+    const [, yearMonth, encodedCaddieId] = confirmationMatch
+    const caddieId = decodeURIComponent(encodedCaddieId)
+    const confirmed = new Set(mockAvailabilityConfirmations[yearMonth] ?? [])
+    if (method === 'PUT') confirmed.add(caddieId)
+    else confirmed.delete(caddieId)
+    mockAvailabilityConfirmations[yearMonth] = [...confirmed]
+    saveMockWrites('availabilityConfirmations', mockAvailabilityConfirmations)
+    return hit(null)
   }
 
   if (pathname === '/v1/course/slot-overrides' && method === 'DELETE') {

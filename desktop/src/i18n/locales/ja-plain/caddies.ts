@@ -136,8 +136,12 @@ export const caddies: DeepPartial<typeof source> = {
     skipped: '{{n}}件は決められませんでした',
     deadlineWarning: {
       title: '休みの希望を出す締め切り（{{deadline}}）を過ぎています',
-      body: '{{names}} は、この月の休みの希望がまだ届いていません。決める前に確かめてください。',
-      confirmExecute: '{{names}} の休みの希望がまだ届いていません。このまま決めますか？',
+      body: '{{names}} は、この月の休みの希望をまだ確かめられていません。決める前に確かめてください。',
+      dialogTitle: '休みたい日をまだ聞けていない人がいます',
+      dialogDescription: '締め切り（{{deadline}}）を過ぎています。下の人には、休みたい日があるかまだ確かめられていません。',
+      names: 'まだ確かめられていない人',
+      back: '確認する画面にもどる',
+      proceed: 'まだ聞けていない人がいるまま決める',
     },
   },
   recommendations: {
