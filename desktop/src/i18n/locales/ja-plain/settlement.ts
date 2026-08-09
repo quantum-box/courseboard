@@ -39,10 +39,26 @@ export const settlement: DeepPartial<typeof source> = {
     warning: '入金の突き合わせで、気をつける点があります',
   },
   reservations: {
-    title: 'この月に入っている予約（管理用の番号）',
-    description:
-      'この集計に入っている予約の、システムの中で使う管理用の番号です。お客さまに伝える予約番号は、ここでは出せません。',
+    title: 'この月に入っている予約',
+    description: 'お客さま、利用した日時、コースを並べて、売上や入ったお金と見比べます。',
     empty: 'この月の予約はありません',
+    systemNumber: '予約を調べるための番号: {{id}}',
+    table: {
+      dateTime: '利用した日時',
+      customer: 'お客さま',
+      course: 'コース',
+      number: '予約番号',
+    },
+    unknown: {
+      dateTime: '利用した日時が分かりません',
+      customer: 'お客さまの名前が分かりません',
+      course: 'コースが分かりません',
+      number: '予約番号が分かりません',
+    },
+    unavailable: {
+      title: '予約のくわしい情報を読み込めませんでした',
+      description: '月のまとめは見ることができます。もう一度読み込んでから、予約とお金を見比べてください。',
+    },
   },
   unpaidCancellations: {
     title: 'お金が入っていないキャンセル',
