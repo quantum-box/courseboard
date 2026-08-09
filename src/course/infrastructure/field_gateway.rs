@@ -17,8 +17,8 @@ use crate::config::EMPTY_COURSE_STORE_URL;
 use crate::course::domain::{
     field_day_of_week_to_courseboard, AvailabilityRule, Caddie, CaddieAssignment, CaddieRank,
     CaddieSkillLevel, CaddieUpstreamIdentity, Course, CourseError, CourseId, CourseOrder,
-    GatewayCredentials, GenerationSummary, GolfCatalogGateway, NewReservation, PartyDetails,
-    ProductSlot, Reservation, ReservationGateway, ReservationId, ReservationProduct,
+    GatewayCredentials, GenerationSummary, GolfCatalogGateway, NewDeskReservation, NewReservation,
+    PartyDetails, ProductSlot, Reservation, ReservationGateway, ReservationId, ReservationProduct,
     ReservationScheduleGateway, ReservationServiceId, Resource, ResourceId, ResourceKind,
     ResourceTimeSlot, SaveCourseResource, SeededReservation, UpsertCourse,
     UpsertReservationProduct, SEED_KEY_FIELD,
@@ -174,6 +174,23 @@ impl ReservationGateway for FieldReservationGateway {
         Ok(ReservationId::new(created.into_reservation().id))
     }
 
+    async fn create_desk_reservation(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &NewDeskReservation,
+    ) -> Result<ReservationId, CourseError> {
+        let created: FieldCreatedReservationDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            "/v1/erp/reservations",
+            credentials,
+            Some(&desk_reservation_body(input)),
+        )
+        .await?;
+        Ok(ReservationId::new(created.into_reservation().id))
+    }
+
     async fn replace_reservation(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -224,6 +241,31 @@ fn new_reservation_body(input: &NewReservation, creating: bool) -> Value {
         body["reservationTypeId"] = json!(input.reservation_type_id);
     }
     body
+}
+
+/// Field body for a phone booking accepted by the start desk.
+///
+/// `resourceId` is the inventory identity introduced by PLT-3233/3237. It must
+/// not be replaced with the golf course id. A desk booking is paid later at the
+/// course, so it bypasses online prepayment and Field converts its hold to
+/// reserved inventory in the create transaction.
+fn desk_reservation_body(input: &NewDeskReservation) -> Value {
+    let mut custom_fields = party_custom_fields::merge_party(None, &input.party);
+    if let Some(object) = custom_fields.as_object_mut() {
+        object.insert("golfCourseId".into(), json!(input.golf_course_id.as_str()));
+    }
+    json!({
+        "reservationTypeId": input.reservation_type_id,
+        "serviceId": input.reservation_service_id.as_str(),
+        "resourceId": input.reservation_resource_id.as_str(),
+        "startsAt": input.starts_at,
+        "endsAt": input.ends_at,
+        "timezone": "Asia/Tokyo",
+        "quantity": input.party.named_player_count(),
+        "customerName": input.customer_name,
+        "prepaymentPolicy": "none",
+        "customFields": custom_fields,
+    })
 }
 
 /// Field's reservation create answers `{"reservation": {...}}` while its list
@@ -1425,6 +1467,7 @@ fn field_error_message(body: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::course::domain::PartyPlayer;
 
     fn profile_dto(value: Value) -> FieldGolfCaddieProfileDto {
         serde_json::from_value(value).expect("caddie profile dto")
@@ -1477,6 +1520,43 @@ mod tests {
         let flat: FieldCreatedReservationDto =
             serde_json::from_value(booking).expect("flat create");
         assert_eq!(flat.into_reservation().id, "rsv_1");
+    }
+
+    #[test]
+    fn desk_booking_targets_generated_inventory_and_reserves_without_checkout() {
+        let party = PartyDetails::try_new(
+            None,
+            None,
+            None,
+            vec![
+                PartyPlayer::try_new("山田 太郎", Some("会員".into()), None).unwrap(),
+                PartyPlayer::try_new("山田 花子", None, Some("M-2".into())).unwrap(),
+            ],
+        )
+        .unwrap();
+        let input = NewDeskReservation {
+            reservation_type_id: "type-1".into(),
+            reservation_service_id: ReservationServiceId::new("service-1"),
+            reservation_resource_id: ResourceId::new("resource-1"),
+            starts_at: "2026-08-11T22:30:00Z".parse().unwrap(),
+            ends_at: "2026-08-12T03:00:00Z".parse().unwrap(),
+            customer_name: "山田 太郎".into(),
+            golf_course_id: CourseId::new("course-1"),
+            party,
+        };
+
+        let body = desk_reservation_body(&input);
+        assert_eq!(body["reservationTypeId"], "type-1");
+        assert_eq!(body["serviceId"], "service-1");
+        assert_eq!(body["resourceId"], "resource-1");
+        assert_eq!(body["quantity"], 2);
+        assert_eq!(body["customerName"], "山田 太郎");
+        assert_eq!(body["prepaymentPolicy"], "none");
+        assert_eq!(body["customFields"]["golfCourseId"], "course-1");
+        assert_eq!(
+            body["customFields"]["golfParty"]["players"][1]["memberNumber"],
+            "M-2"
+        );
     }
 
     #[test]

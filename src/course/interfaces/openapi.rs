@@ -52,6 +52,7 @@ impl Modify for SecurityAddon {
     paths(
         http::get_tee_sheet,
         http::get_tee_ledger,
+        http::create_desk_reservation,
         http::update_reservation_party,
         http::seed_demo_board,
         http::get_course_order,
@@ -116,6 +117,8 @@ impl Modify for SecurityAddon {
             http::TeeSheetResponse,
             http::PartyDto,
             http::PartyPlayerDto,
+            http::CreateDeskReservationRequest,
+            http::CreateDeskReservationResponse,
             http::UpdateReservationPartyRequest,
             http::LedgerSlotDto,
             http::LedgerColumnDto,
@@ -229,6 +232,7 @@ mod tests {
             .and_then(|v| v.as_object())
             .expect("paths object");
         assert!(paths.contains_key("/v1/course/tee-sheet"));
+        assert!(paths.contains_key("/v1/course/reservations"));
         assert!(paths.contains_key("/v1/course/courses"));
         assert!(paths.contains_key("/v1/course/caddie-profiles"));
         assert!(paths.contains_key("/v1/course/caddie-attendance-snapshots"));

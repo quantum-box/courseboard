@@ -17,6 +17,7 @@ import { navigate } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { parseLocalDateParts } from '../timeline/timelineLayout'
 import type { TeeReservation } from '../timeline/models'
+import type { GolfReservationProduct } from '../models'
 import { LedgerBoard, type SlotSelection } from './LedgerBoard'
 import { arrangeCourses, moveCourse } from './courseOrder'
 import {
@@ -30,7 +31,13 @@ import {
 } from './courseSelection'
 import { summarizeLedger, teeTimesBetween } from './ledgerLayout'
 import type { PartyDetails, SlotMarkKind, TeeLedgerResponse } from './models'
+import {
+  reservationBlockReason,
+  selectedReservationTarget,
+  type ReservationTarget,
+} from './newReservation'
 import { PartyEditor } from './PartyEditor'
+import { ReservationCreator } from './ReservationCreator'
 import { SlotMarkEditor } from './SlotMarkEditor'
 
 const COURSE_API = '/v1/course'
@@ -68,6 +75,7 @@ export function LedgerPage() {
   const [savingMarks, setSavingMarks] = useState(false)
   const [savingOrder, setSavingOrder] = useState(false)
   const [editingReservationId, setEditingReservationId] = useState<string | null>(null)
+  const [creatingTarget, setCreatingTarget] = useState<ReservationTarget | null>(null)
   /** Parties saved this session, so the board updates without a full reload. */
   const [localParties, setLocalParties] = useState<Record<string, PartyDetails>>({})
   const currentMinute = useCurrentMinute()
@@ -92,10 +100,18 @@ export function LedgerPage() {
     [],
   )
 
+  const productsResource = useResource(
+    () => courseboardApiJson<ListResponse<GolfReservationProduct>>(
+      `${COURSE_API}/reservation-products`,
+    ),
+    [],
+  )
+
   const refreshAll = () => {
     ledger.refresh()
     coursesResource.refresh()
     orderResource.refresh()
+    productsResource.refresh()
   }
   useRegisterPageReload(refreshAll)
 
@@ -103,6 +119,7 @@ export function LedgerPage() {
   // change would apply the next mark to tee times the operator cannot see.
   useEffect(() => {
     setSelection(null)
+    setCreatingTarget(null)
   }, [date, courseIds])
 
   useEffect(() => {
@@ -145,6 +162,11 @@ export function LedgerPage() {
     column.slots.flatMap(slot => slot.items),
   )
   const editingReservation = allItems.find(item => item.id === editingReservationId) ?? null
+  const selectedTarget = selectedReservationTarget(columns, selection)
+  const selectedReservationBlock = reservationBlockReason(selectedTarget)
+  const reservationBlockMessage = selectedReservationBlock
+    ? t(`ledger:reservation.block.${selectedReservationBlock}`)
+    : null
 
   const toggleSlot = (golfCourseId: string, teeTime: string, extend: boolean) => {
     setSelection(current => {
@@ -397,7 +419,23 @@ export function LedgerPage() {
         onClose={() => applyMark('closed')}
         onSpecial={() => applyMark('special_rate')}
         onClear={clearMarks}
+        onCreateReservation={() => {
+          if (!selectedTarget || selectedReservationBlock) return
+          setCreatingTarget(selectedTarget)
+          setSelection(null)
+        }}
+        reservationBlockMessage={reservationBlockMessage}
         onCancel={() => setSelection(null)}
+      />
+
+      <ReservationCreator
+        target={creatingTarget}
+        date={date}
+        products={productsResource.data?.items ?? []}
+        productsLoading={productsResource.loading}
+        productsUnavailable={Boolean(productsResource.error)}
+        onClose={() => setCreatingTarget(null)}
+        onCreated={() => ledger.refresh()}
       />
 
       <PartyEditor

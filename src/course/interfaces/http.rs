@@ -18,19 +18,19 @@ use super::openapi::ErrorBody;
 use crate::course::domain::{
     jst_offset, AvailabilityRule, BusinessHours, Caddie, CaddieAssignment, CaddieAssignmentQuery,
     CaddieId, CaddieStaff, Course, CourseError, CourseId, CourseOrder, DeleteSlotOverrides,
-    GatewayCredentials, GenerationSummary, LedgerColumn, LedgerSlot, PartyDetails, ProductSlot,
-    ReservationId, ReservationProduct, ReservationServiceId, Resource, SlotOverride,
-    SlotOverrideKind, SlotOverrideQuery, TeeLedger, TeeLedgerQuery, TeeSheet, TeeSheetItem,
-    TeeSheetQuery, UpsertCourse, UpsertReservationProduct, UpsertSlotOverrides,
+    GatewayCredentials, GenerationSummary, LedgerColumn, LedgerSlot, PartyDetails, PlayType,
+    ProductSlot, ReservationId, ReservationProduct, ReservationServiceId, Resource, ResourceId,
+    SlotOverride, SlotOverrideKind, SlotOverrideQuery, TeeLedger, TeeLedgerQuery, TeeSheet,
+    TeeSheetItem, TeeSheetQuery, UpsertCourse, UpsertReservationProduct, UpsertSlotOverrides,
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
     FieldReservationGateway, MySqlSlotOverrideRepository,
 };
 use crate::course::usecase::{
-    CreateCourseUseCase, DeleteCourseUseCase, DeleteSlotOverridesUseCase,
-    GenerateCourseTimeSlotsUseCase, GetCourseOrderUseCase, GetCourseScheduleUseCase,
-    GetTeeLedgerUseCase, GetTeeSheetUseCase, LinkCourseResourceUseCase,
+    CreateCourseUseCase, CreateDeskReservation, CreateDeskReservationUseCase, DeleteCourseUseCase,
+    DeleteSlotOverridesUseCase, GenerateCourseTimeSlotsUseCase, GetCourseOrderUseCase,
+    GetCourseScheduleUseCase, GetTeeLedgerUseCase, GetTeeSheetUseCase, LinkCourseResourceUseCase,
     ListCaddieAssignmentsUseCase, ListCaddiesUseCase, ListCoursesUseCase, ListProductSlotsUseCase,
     ListReservationProductsUseCase, ListResourcesUseCase, ListSlotOverridesUseCase,
     ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase,
@@ -654,6 +654,86 @@ pub async fn replace_course_order(
         .await
         .map_err(AppError::from)?;
     Ok(Json(CourseOrderResponse::from(order)))
+}
+
+// ─── Desk reservation creation ───────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDeskReservationRequest {
+    pub golf_course_id: String,
+    /// Generic Field reservation resource shown on the selected ledger column.
+    pub resource_id: String,
+    pub date: NaiveDate,
+    /// Local course time (`HH:MM`).
+    pub tee_time: String,
+    /// `caddie` or `self`.
+    pub play_type: String,
+    pub players: Vec<PartyPlayerDto>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDeskReservationResponse {
+    pub reservation_id: String,
+}
+
+/// POST /v1/course/reservations
+#[utoipa::path(
+    post,
+    path = "/v1/course/reservations",
+    tag = "course",
+    request_body = CreateDeskReservationRequest,
+    responses(
+        (status = 201, description = "Operator-entered reservation created", body = CreateDeskReservationResponse),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 409, description = "Inventory conflict", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_desk_reservation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateDeskReservationRequest>,
+) -> Result<(StatusCode, Json<CreateDeskReservationResponse>), AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let play_type = match request.play_type.as_str() {
+        "caddie" => PlayType::Caddie,
+        "self" => PlayType::SelfPlay,
+        _ => return Err(AppError::BadRequest("playType must be caddie or self")),
+    };
+    let party = party_from_request(
+        None,
+        None,
+        None,
+        request
+            .players
+            .into_iter()
+            .map(|player| (player.name, player.tag, player.member_number))
+            .collect(),
+    )
+    .map_err(AppError::from)?;
+    let command = CreateDeskReservation {
+        course_id: CourseId::try_new(request.golf_course_id).map_err(AppError::from)?,
+        resource_id: ResourceId::try_new(request.resource_id).map_err(AppError::from)?,
+        date: request.date,
+        tee_time: request.tee_time,
+        play_type,
+        party,
+    };
+    let reservation_id =
+        CreateDeskReservationUseCase::new(reservation_gateway(&state), catalog_gateway(&state))
+            .execute(credentials, command)
+            .await
+            .map_err(AppError::from)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(CreateDeskReservationResponse {
+            reservation_id: reservation_id.to_string(),
+        }),
+    ))
 }
 
 // ─── Reservation party ────────────────────────────────────────────────────────

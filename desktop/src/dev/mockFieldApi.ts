@@ -1250,6 +1250,7 @@ function resolveGet(path: string): Json | null | undefined {
         return {
           golfCourseId: course.id,
           courseName: course.name,
+          resourceId: `res_${course.id.replace(/^course_/, '')}`,
           startIntervalMinutes: course.startIntervalMinutes,
           gridSource: 'inventory',
           groupCount,
@@ -1570,6 +1571,59 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     }
     saveMockWrites('slotMarks', mockSlotMarks)
     return hit({ deleted })
+  }
+
+  if (pathname === '/v1/course/reservations' && method === 'POST') {
+    const golfCourseId = String(body?.golfCourseId ?? '')
+    const resourceId = String(body?.resourceId ?? '')
+    const date = String(body?.date ?? '')
+    const teeTime = String(body?.teeTime ?? '')
+    const playType = body?.playType === 'self' ? 'self' : 'caddie'
+    const players = Array.isArray(body?.players)
+      ? body.players.filter(player => (
+          player != null
+          && typeof player === 'object'
+          && String((player as Record<string, unknown>).name ?? '').trim().length > 0
+        ))
+      : []
+    const course = mockCourses.find(item => item.id === golfCourseId)
+    const product = mockProducts.find(item => (
+      item.playType === playType && item.golfCourseId === golfCourseId
+    )) ?? mockProducts.find(item => item.playType === playType && !item.golfCourseId)
+    if (!course || resourceId !== `res_${golfCourseId.replace(/^course_/, '')}`) {
+      return error(400, 'Mock Field API has no matching course resource')
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(teeTime)) {
+      return error(400, 'date and teeTime are required')
+    }
+    if (!product || players.length === 0) {
+      return error(400, 'playType and at least one player are required')
+    }
+    const alreadyBooked = mockTeeReservations.filter(item => (
+      item.golfCourseId === golfCourseId && item.teeTime.startsWith(`${date}T${teeTime}`)
+    )).length
+    if (alreadyBooked >= 2) return error(409, 'Mock inventory is full')
+
+    const firstPlayer = players[0] as Record<string, unknown>
+    const reservationId = `res_mock_${Date.now()}`
+    const created = {
+      id: reservationId,
+      reservationNumber: `R-${Date.now()}`,
+      golfCourseId,
+      courseName: course.name,
+      teeTime: `${date}T${teeTime}:00+09:00`,
+      durationMinutes: product.expectedDurationMinutes,
+      playType,
+      partySize: players.length,
+      partyName: String(firstPlayer.name),
+      status: 'confirmed',
+      holes: product.holeCount,
+      party: { players },
+      reservationServiceId: product.reservationServiceId,
+      displayName: product.displayName,
+    } as (typeof mockTeeReservations)[number]
+    mockTeeReservations.push(created)
+    return hit({ reservationId })
   }
 
   const partyMatch = /^\/v1\/course\/reservations\/([^/]+)\/party$/.exec(pathname)

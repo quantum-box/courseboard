@@ -175,6 +175,24 @@ pub struct NewReservation {
     pub seed_key: String,
 }
 
+/// A booking a golf-course operator enters from the start ledger.
+///
+/// Unlike [`NewReservation`], this is not seed-shaped: it carries the generic
+/// reservation resource that owns generated inventory and deliberately has no
+/// seed key. The use case resolves the internal reservation type and product;
+/// the desk only chooses golf concepts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewDeskReservation {
+    pub reservation_type_id: String,
+    pub reservation_service_id: ReservationServiceId,
+    pub reservation_resource_id: ResourceId,
+    pub starts_at: DateTime<Utc>,
+    pub ends_at: DateTime<Utc>,
+    pub customer_name: String,
+    pub golf_course_id: CourseId,
+    pub party: PartyDetails,
+}
+
 /// A booking the seed already wrote, as found on a re-run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeededReservation {

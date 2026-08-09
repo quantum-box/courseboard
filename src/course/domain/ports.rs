@@ -7,13 +7,13 @@ use super::{
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
     CaddieRating, CaddieRecommendation, CaddieRoster, CaddieStaff, Course, CourseError, CourseId,
     CourseOrder, DailyBudget, DailyBudgetQuery, DeleteSlotOverrides, ExtensionStatus,
-    GenerationSummary, MonthlySettlement, NewReservation, PartyDetails, ProductSlot,
-    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationId, ReservationPolicy,
-    ReservationProduct, ReservationServiceId, Resource, ResourceId, ResourceTimeSlot,
-    SaveCourseResource, SeededReservation, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot,
-    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
-    WorkedMinutes, YearMonth,
+    GenerationSummary, MonthlySettlement, NewDeskReservation, NewReservation, PartyDetails,
+    ProductSlot, RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationId,
+    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
+    ResourceTimeSlot, SaveCourseResource, SeededReservation, SlotOverride, SlotOverrideQuery,
+    TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
+    UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -211,6 +211,13 @@ pub trait ReservationGateway: Send + Sync {
         &self,
         credentials: GatewayCredentials<'_>,
         input: &NewReservation,
+    ) -> Result<ReservationId, CourseError>;
+
+    /// Create one operator-entered booking against generated course inventory.
+    async fn create_desk_reservation(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &NewDeskReservation,
     ) -> Result<ReservationId, CourseError>;
 
     /// Move an already-seeded booking back onto the demo day.

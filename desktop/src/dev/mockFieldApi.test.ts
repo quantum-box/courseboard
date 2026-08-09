@@ -138,4 +138,40 @@ describe('mockFieldApi', () => {
     if (extensionStatus.kind !== 'hit') return
     expect((extensionStatus.data as { extensionKey: string }).extensionKey).toBe('golf_course')
   })
+
+  it('creates a desk reservation on the selected inventory resource', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const date = '2026-07-19'
+    const before = resolveMockFieldApiJson(`/v1/course/tee-ledger?date=${date}`)
+    expect(before.kind).toBe('hit')
+    if (before.kind !== 'hit') return
+    const beforeColumns = (before.data as {
+      columns: Array<{ golfCourseId: string; resourceId: string; groupCount: number }>
+    }).columns
+    const eastBefore = beforeColumns.find(column => column.golfCourseId === 'course_east')
+    expect(eastBefore?.resourceId).toBe('res_east')
+
+    const created = resolveMockFieldApiJson('/v1/course/reservations', {
+      method: 'POST',
+      body: JSON.stringify({
+        golfCourseId: 'course_east',
+        resourceId: 'res_east',
+        date,
+        teeTime: '07:00',
+        playType: 'caddie',
+        players: [{ name: '新規 予約者' }],
+      }),
+    })
+    expect(created.kind).toBe('hit')
+
+    const after = resolveMockFieldApiJson(`/v1/course/tee-ledger?date=${date}`)
+    expect(after.kind).toBe('hit')
+    if (after.kind !== 'hit') return
+    const afterColumns = (after.data as {
+      columns: Array<{ golfCourseId: string; groupCount: number }>
+    }).columns
+    const eastAfter = afterColumns.find(column => column.golfCourseId === 'course_east')
+    expect(eastAfter?.groupCount).toBe((eastBefore?.groupCount ?? 0) + 1)
+  })
 })

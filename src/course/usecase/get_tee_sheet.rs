@@ -268,6 +268,14 @@ mod tests {
             unimplemented!("not used")
         }
 
+        async fn create_desk_reservation(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: &crate::course::domain::NewDeskReservation,
+        ) -> Result<crate::course::domain::ReservationId, CourseError> {
+            unimplemented!("not used")
+        }
+
         async fn replace_reservation(
             &self,
             _credentials: GatewayCredentials<'_>,

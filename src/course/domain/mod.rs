@@ -74,7 +74,7 @@ pub use pricing_settings::GolfPricingSettings;
 pub use product::{
     DurationMinutes, PlayType, ProductSlot, ReservationProduct, UpsertReservationProduct,
 };
-pub use reservation::{NewReservation, Reservation, SeededReservation};
+pub use reservation::{NewDeskReservation, NewReservation, Reservation, SeededReservation};
 pub use resource::{Resource, ResourceKind, SaveCourseResource};
 pub use schedule::{
     courseboard_weekday_to_field, field_day_of_week_to_courseboard, AvailabilityRule,

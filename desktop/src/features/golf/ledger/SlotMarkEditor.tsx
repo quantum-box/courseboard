@@ -1,8 +1,8 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
-import { Lock, Tag, Trash2 } from 'lucide-react'
+import { Lock, Tag, Trash2, UserPlus } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { Field } from '../../../components/Page'
+import { Field, Notice } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import type { SlotSelection } from './LedgerBoard'
 import type { SlotMarkKind } from './models'
@@ -24,6 +24,8 @@ export function SlotMarkEditor({
   onClose,
   onSpecial,
   onClear,
+  onCreateReservation,
+  reservationBlockMessage,
   onCancel,
 }: {
   selection: SlotSelection | null
@@ -33,6 +35,8 @@ export function SlotMarkEditor({
   onClose: () => void
   onSpecial: () => void
   onClear: () => void
+  onCreateReservation: () => void
+  reservationBlockMessage: string | null
   onCancel: () => void
 }) {
   const { t } = useTranslation(['ledger'])
@@ -46,8 +50,24 @@ export function SlotMarkEditor({
       description={t('ledger:marks.selected', {
         n: String(selection?.teeTimes.length ?? 0),
       })}
+      className="ledger-mark-editor-sheet"
     >
       <div className="ledger-mark-sheet">
+        {selection?.teeTimes.length === 1 ? (
+          <div className="ledger-mark-reservation">
+            {reservationBlockMessage ? (
+              <Notice tone="warning" title={t('ledger:reservation.blockedTitle')}>
+                {reservationBlockMessage}
+              </Notice>
+            ) : (
+              <Button type="button" variant="primary" onClick={onCreateReservation}>
+                <UserPlus />
+                {t('ledger:reservation.open')}
+              </Button>
+            )}
+          </div>
+        ) : null}
+
         <Field label={t('ledger:marks.label')} requirement="none">
           <Input
             value={label}

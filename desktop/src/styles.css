@@ -4055,6 +4055,43 @@ button,
   gap: 6px;
 }
 
+.ledger-mark-reservation {
+  display: grid;
+  gap: 8px;
+  font-size: 16px;
+}
+
+.ledger-mark-reservation button {
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.ledger-mark-editor-sheet,
+.ledger-reservation-sheet,
+.ledger-mark-editor-sheet .text-sm,
+.ledger-reservation-sheet .text-sm {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+/* Dialog's built-in close icon is an operation too. Keep the 24px glyph, but
+ * give its button the same target as every other control in these workflows. */
+.ledger-mark-editor-sheet > button,
+.ledger-reservation-sheet > button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.ledger-mark-sheet .field-label,
+.ledger-mark-sheet .field-label .optional,
+.ledger-mark-sheet .field-hint,
+.ledger-mark-sheet input,
+.ledger-mark-actions button {
+  min-height: 44px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
 /* The board scrolls sideways as a whole so course columns stay side by side,
  * the way they sit on the paper sheet. */
 .ledger-workspace {
@@ -4436,8 +4473,167 @@ button,
   gap: 8px;
 }
 
+.ledger-reservation-form {
+  display: grid;
+  gap: 18px;
+  padding: 0 2px 12px;
+  font-size: 16px;
+}
+
+.ledger-reservation-target {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.ledger-reservation-target > div {
+  display: grid;
+  gap: 4px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 12px;
+  background: hsl(var(--nui-muted) / .25);
+}
+
+.ledger-reservation-target dt {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+}
+
+.ledger-reservation-target dd {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.ledger-reservation-play-types {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.ledger-reservation-play-types legend {
+  grid-column: 1 / -1;
+  margin-bottom: 4px;
+  padding: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.ledger-reservation-play-types button {
+  min-height: 44px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 8px 12px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-foreground));
+  font: inherit;
+  cursor: pointer;
+}
+
+.ledger-reservation-play-types button[aria-pressed='true'] {
+  border-color: hsl(var(--nui-primary));
+  background: hsl(var(--nui-primary) / .12);
+  color: hsl(var(--nui-primary));
+  font-weight: 700;
+}
+
+.ledger-reservation-play-types button:disabled {
+  cursor: not-allowed;
+  opacity: .5;
+}
+
+.ledger-reservation-players {
+  display: grid;
+  gap: 12px;
+}
+
+.ledger-reservation-section-head,
+.ledger-reservation-player-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ledger-reservation-section-head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.ledger-reservation-section-head span {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.ledger-reservation-player {
+  display: grid;
+  gap: 12px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 14px;
+}
+
+.ledger-reservation-player-extra {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ledger-reservation-form input,
+.ledger-reservation-add,
+.ledger-reservation-remove,
+.ledger-reservation-actions button {
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.ledger-reservation-form .field-label,
+.ledger-reservation-form .field-label .optional,
+.ledger-reservation-form .field-hint {
+  min-height: 24px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.ledger-reservation-remove {
+  min-width: 44px;
+}
+
+.ledger-reservation-add {
+  justify-self: start;
+}
+
+.ledger-reservation-validation {
+  margin: 0;
+  color: hsl(var(--nui-destructive));
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.ledger-reservation-actions {
+  position: sticky;
+  z-index: 1;
+  bottom: -2px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  border-top: 1px solid hsl(var(--nui-border));
+  padding: 12px 0 2px;
+  background: hsl(var(--nui-background));
+}
+
 @media (max-width: 720px) {
   .ledger-party-player {
+    grid-template-columns: 1fr;
+  }
+
+  .ledger-reservation-target,
+  .ledger-reservation-player-extra {
     grid-template-columns: 1fr;
   }
 
