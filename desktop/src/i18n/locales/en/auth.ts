@@ -37,6 +37,7 @@ export const auth: DeepPartial<typeof source> = {
     description: 'Pick the course you will work on in this session.',
     production: 'Live',
     sandbox: 'Test',
+    unknown: 'Unknown',
     otherAccount: 'Sign in with another account',
     select: 'Choose a course',
   },

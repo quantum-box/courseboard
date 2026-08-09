@@ -263,20 +263,22 @@ describe('BrowserPkceAdapter', () => {
     })
   })
 
-  it('labels each tenant by its Tachyon platform instead of the bundle mode', async () => {
+  it('uses Field environment verbatim and keeps missing or unsupported values unknown', async () => {
     const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
     localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
       accessToken: 'persisted-access-token',
       accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
     }))
-    // A production bundle lists tenants from both Tachyon platforms; a
-    // `Tachyon dev` tenant must not be badged as production.
+    // A production bundle lists tenants from both Tachyon environments. The
+    // badge follows Field's hierarchy-derived value, never a platform-id map.
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       user: { id: 'user-1', username: 'operator' },
       tenants: [
-        { id: 'tn_01devchild', name: 'デモ用アカウント', platformId: 'tn_01hjryxysgey07h5jz5wagqj0m' },
-        { id: 'tn_01prodchild', name: '本番施設', platformId: 'tn_01hjjn348rn3t49zz6hvmfq67p' },
-        { id: 'tn_01unknownchild', name: '未解決施設' },
+        { id: 'tn_01devchild', name: 'デモ用アカウント', platformId: 'tn_01hjryxysgey07h5jz5wagqj0m', environment: 'sandbox' },
+        { id: 'tn_01prodchild', name: '本番施設', platformId: 'tn_01hjjn348rn3t49zz6hvmfq67p', environment: 'production' },
+        { id: 'tn_01missingenv', name: '未解決施設', platformId: 'tn_01hjjn348rn3t49zz6hvmfq67p' },
+        { id: 'tn_01unsupportedenv', name: '将来環境', environment: 'preview' },
+        'tn_01legacystring',
       ],
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
 
@@ -287,7 +289,9 @@ describe('BrowserPkceAdapter', () => {
       tenants: [
         { id: 'tn_01devchild', mode: 'sandbox' },
         { id: 'tn_01prodchild', mode: 'production' },
-        { id: 'tn_01unknownchild', mode: 'production' },
+        { id: 'tn_01missingenv', mode: 'unknown' },
+        { id: 'tn_01unsupportedenv', mode: 'unknown' },
+        { id: 'tn_01legacystring', mode: 'unknown' },
       ],
     })
   })

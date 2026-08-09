@@ -108,6 +108,7 @@ export const nav: DeepPartial<typeof source> = {
     tenantUnset: 'No course selected',
     production: 'Live',
     sandbox: 'Test',
+    unknown: 'Unknown',
   },
   command: {
     title: 'Command palette',

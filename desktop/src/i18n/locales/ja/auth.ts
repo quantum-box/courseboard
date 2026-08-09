@@ -38,6 +38,7 @@ export const auth = {
     description: 'このログインで操作する施設を選びます。',
     production: '本番',
     sandbox: 'テスト',
+    unknown: '不明',
     otherAccount: '別のアカウントでログイン',
     select: '施設を選ぶ',
   },

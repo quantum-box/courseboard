@@ -1,4 +1,8 @@
-use std::{collections::HashSet, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
 
 use axum::{
     extract::State,
@@ -15,21 +19,25 @@ use crate::config::EMPTY_COURSE_STORE_URL;
 
 const EXTENSION_KEY: &str = "golf_course";
 const FIELD_PROFILE_PATH: &str = "/v1/erp/me";
+const FIELD_TENANT_DIRECTORY_PATH: &str = "/get_tenants";
+const FIELD_TENANT_DIRECTORY_ACTION: &str = "field:ViewSalesAnalytics";
 const MAX_PROFILE_RESPONSE_BYTES: usize = 1024 * 1024;
 const MAX_PROFILE_TENANTS: usize = 500;
 const PROFILE_REQUEST_TIMEOUT: Duration = Duration::from_secs(7);
-/// Tenants can live under different platforms (production vs sandbox). The
-/// operator lookup tells the client which `x-platform-id` each tenant needs;
-/// without it Field's tenant policy check denies platform-mismatched tenants.
-const DEFAULT_TACHYON_AUTH_API_URL: &str = "https://api.n1.tachy.one";
-const OPERATOR_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
-const MAX_OPERATOR_LOOKUPS: usize = 20;
+const TENANT_DIRECTORY_REQUEST_TIMEOUT: Duration = Duration::from_secs(7);
+/// Field's tenant directory is platform-scoped. Query both current roots and
+/// trust each returned tenant's own `environment`; these IDs are request
+/// contexts, not a platform-to-environment mapping.
+const TENANT_DIRECTORY_PLATFORM_IDS: [&str; 2] = [
+    "tn_01hjjn348rn3t49zz6hvmfq67p",
+    "tn_01hjryxysgey07h5jz5wagqj0m",
+];
 
 #[derive(Clone, Debug)]
 pub struct ProfileClient {
     client: reqwest::Client,
     endpoint: Url,
-    operators_base: Option<Url>,
+    tenant_directory_endpoint: Option<Url>,
 }
 
 impl ProfileClient {
@@ -44,15 +52,20 @@ impl ProfileClient {
         {
             return Ok(None);
         }
-        let auth_api_url = tachyon_auth_api_url
+        let legacy_auth_api_url = tachyon_auth_api_url
             .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .unwrap_or(DEFAULT_TACHYON_AUTH_API_URL);
+            .filter(|value| !value.is_empty());
         let client = Self::with_timeout(field_api_url, PROFILE_REQUEST_TIMEOUT)?;
-        if auth_api_url.starts_with("empty://") {
+        if legacy_auth_api_url.is_some_and(|value| value.starts_with("empty://")) {
             return Ok(Some(client));
         }
-        Ok(Some(client.with_operators_base(auth_api_url)?))
+        // Preserve validation for existing deployments that still provide the
+        // retired auth lookup override, even though tenant context now comes
+        // from Field's directory endpoint.
+        if let Some(value) = legacy_auth_api_url {
+            validated_base_url(value)?;
+        }
+        Ok(Some(client.with_tenant_directory_base(field_api_url)?))
     }
 
     fn with_timeout(
@@ -78,15 +91,25 @@ impl ProfileClient {
         Ok(Self {
             client,
             endpoint,
-            operators_base: None,
+            tenant_directory_endpoint: None,
         })
     }
 
-    fn with_operators_base(
+    fn with_tenant_directory_base(
         mut self,
-        tachyon_auth_api_url: &str,
+        field_api_url: &str,
     ) -> Result<Self, ProfileClientConfigError> {
-        self.operators_base = Some(validated_base_url(tachyon_auth_api_url)?);
+        let mut endpoint = validated_base_url(field_api_url)?;
+        let endpoint_path = format!(
+            "{}{FIELD_TENANT_DIRECTORY_PATH}",
+            endpoint.path().trim_end_matches('/')
+        );
+        endpoint.set_path(&endpoint_path);
+        endpoint
+            .query_pairs_mut()
+            .clear()
+            .append_pair("required_action", FIELD_TENANT_DIRECTORY_ACTION);
+        self.tenant_directory_endpoint = Some(endpoint);
         Ok(self)
     }
 
@@ -106,59 +129,152 @@ impl ProfileClient {
 
         let body = bounded_response_body(&mut response).await?;
         let mut profile = decode_and_filter_profile(&body)?;
-        self.attach_platform_ids(&mut profile, authorization).await;
+        self.attach_tenant_context(&mut profile, authorization)
+            .await;
         Ok(profile)
     }
 
-    /// Best-effort per-tenant platform lookup: a failed lookup leaves the
-    /// tenant without `platformId` and the client falls back to its default.
-    async fn attach_platform_ids(&self, profile: &mut ProfileResponse, authorization: &str) {
-        let Some(operators_base) = &self.operators_base else {
+    /// Best-effort bulk lookup. A missing directory entry keeps the eligible
+    /// profile tenant, but omits both authoritative environment and platform.
+    async fn attach_tenant_context(&self, profile: &mut ProfileResponse, authorization: &str) {
+        let Some(endpoint) = &self.tenant_directory_endpoint else {
             return;
         };
-        for tenant in profile.tenants.iter_mut().take(MAX_OPERATOR_LOOKUPS) {
-            tenant.platform_id = self
-                .fetch_operator_platform_id(operators_base, &tenant.id, authorization)
-                .await;
+        if profile.tenants.is_empty() {
+            return;
+        }
+
+        let production =
+            self.fetch_tenant_directory(endpoint, TENANT_DIRECTORY_PLATFORM_IDS[0], authorization);
+        let sandbox =
+            self.fetch_tenant_directory(endpoint, TENANT_DIRECTORY_PLATFORM_IDS[1], authorization);
+        let (production, sandbox) = tokio::join!(production, sandbox);
+        let mut context_by_tenant = HashMap::new();
+        let mut conflicts = HashSet::new();
+
+        for (platform_id, result) in TENANT_DIRECTORY_PLATFORM_IDS
+            .into_iter()
+            .zip([production, sandbox])
+        {
+            let entries = match result {
+                Ok(entries) => entries,
+                Err(error) => {
+                    tracing::warn!(
+                        platform_id,
+                        error = %error,
+                        "tenant directory lookup failed; tenant context omitted"
+                    );
+                    continue;
+                }
+            };
+            for entry in entries {
+                let environment = tenant_environment(entry.environment.as_deref());
+                if entry.environment.is_some() && environment.is_none() {
+                    tracing::warn!(
+                        tenant_id = %entry.id,
+                        environment = entry.environment.as_deref().unwrap_or_default(),
+                        "tenant directory returned unsupported environment; environment omitted"
+                    );
+                }
+                let platform_id = entry.platform_id.filter(|platform_id| {
+                    let valid = is_valid_tenant_id(platform_id);
+                    if !valid {
+                        tracing::warn!(
+                            tenant_id = %entry.id,
+                            platform_id,
+                            "tenant directory returned invalid platform id; platform omitted"
+                        );
+                    }
+                    valid
+                });
+                let context = TenantContext {
+                    platform_id,
+                    environment,
+                };
+                match context_by_tenant.get(&entry.id) {
+                    Some(existing) if existing != &context => {
+                        conflicts.insert(entry.id.clone());
+                    }
+                    None => {
+                        context_by_tenant.insert(entry.id, context);
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+
+        for tenant_id in conflicts {
+            context_by_tenant.remove(&tenant_id);
+            tracing::warn!(
+                tenant_id,
+                "tenant directory returned conflicting context; tenant environment omitted"
+            );
+        }
+        for tenant in &mut profile.tenants {
+            if let Some(context) = context_by_tenant.remove(&tenant.id) {
+                tenant.platform_id = context.platform_id;
+                tenant.environment = context.environment;
+            }
         }
     }
 
-    async fn fetch_operator_platform_id(
+    async fn fetch_tenant_directory(
         &self,
-        operators_base: &Url,
-        tenant_id: &str,
+        endpoint: &Url,
+        platform_id: &str,
         authorization: &str,
-    ) -> Option<String> {
-        let mut endpoint = operators_base.clone();
-        let path = format!(
-            "{}/v1/auth/operators/{tenant_id}",
-            endpoint.path().trim_end_matches('/')
-        );
-        endpoint.set_path(&path);
-        let response = self
+    ) -> Result<Vec<TenantDirectoryWire>, TenantDirectoryError> {
+        let mut response = self
             .client
-            .get(endpoint)
-            .timeout(OPERATOR_LOOKUP_TIMEOUT)
+            .post(endpoint.clone())
+            .timeout(TENANT_DIRECTORY_REQUEST_TIMEOUT)
             .header(header::AUTHORIZATION.as_str(), authorization)
             .header(header::ACCEPT.as_str(), "application/json")
-            // Tachyon auth requires an operator scope; the looked-up tenant is
-            // the scope the caller is asking about.
-            .header("x-operator-id", tenant_id)
+            .header("x-platform-id", platform_id)
+            .header("x-operator-id", platform_id)
             .send()
             .await
-            .ok()?;
+            .map_err(|_| TenantDirectoryError::Request)?;
         if !response.status().is_success() {
             tracing::warn!(
-                tenant_id,
+                platform_id,
                 status = response.status().as_u16(),
-                "tenant platform lookup was rejected; platformId omitted"
+                "tenant directory lookup was rejected; tenant context omitted"
             );
-            return None;
+            return Err(TenantDirectoryError::Status);
         }
-        let wire: OperatorWire = response.json().await.ok()?;
-        wire.platform_id
-            .filter(|platform_id| is_valid_tenant_id(platform_id))
+        let body = bounded_response_body(&mut response)
+            .await
+            .map_err(|_| TenantDirectoryError::Body)?;
+        let entries: Vec<TenantDirectoryWire> =
+            serde_json::from_slice(&body).map_err(|_| TenantDirectoryError::Contract)?;
+        Ok(entries
+            .into_iter()
+            .filter(|entry| {
+                if is_valid_tenant_id(&entry.id) {
+                    true
+                } else {
+                    tracing::warn!(
+                        tenant_id = entry.id,
+                        "tenant directory returned invalid tenant id; entry ignored"
+                    );
+                    false
+                }
+            })
+            .collect())
     }
+}
+
+#[derive(Debug, Error)]
+enum TenantDirectoryError {
+    #[error("tenant directory request failed")]
+    Request,
+    #[error("tenant directory returned an unsuccessful status")]
+    Status,
+    #[error("tenant directory response body was unavailable")]
+    Body,
+    #[error("tenant directory response violated the expected contract")]
+    Contract,
 }
 
 fn validated_base_url(value: &str) -> Result<Url, ProfileClientConfigError> {
@@ -265,19 +381,40 @@ pub struct ProfileTenant {
     pub id: String,
     pub name: String,
     /// Platform (parent tenant) this tenant belongs to. The client sends it as
-    /// `x-platform-id`; omitted when the operator lookup is unavailable.
+    /// `x-platform-id`; omitted when the tenant directory lookup is unavailable.
     #[serde(
         rename = "platformId",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub platform_id: Option<String>,
+    /// Environment resolved by Field from Tachyon's platform hierarchy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<TenantEnvironment>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum TenantEnvironment {
+    Production,
+    Sandbox,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TenantContext {
+    platform_id: Option<String>,
+    environment: Option<TenantEnvironment>,
 }
 
 #[derive(Debug, Deserialize)]
-struct OperatorWire {
+#[serde(rename_all = "camelCase")]
+struct TenantDirectoryWire {
+    id: String,
+    #[serde(default)]
     #[serde(rename = "platformId")]
     platform_id: Option<String>,
+    #[serde(default)]
+    environment: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -420,6 +557,7 @@ fn decode_and_filter_profile(body: &[u8]) -> Result<ProfileResponse, ProfileProx
                 id,
                 name,
                 platform_id: None,
+                environment: None,
             });
         }
     }
@@ -454,6 +592,14 @@ fn optional_non_blank(value: Option<String>) -> Result<Option<String>, ProfilePr
     }
 }
 
+fn tenant_environment(value: Option<&str>) -> Option<TenantEnvironment> {
+    match value {
+        Some("production") => Some(TenantEnvironment::Production),
+        Some("sandbox") => Some(TenantEnvironment::Sandbox),
+        _ => None,
+    }
+}
+
 fn is_valid_tenant_id(value: &str) -> bool {
     value.strip_prefix("tn_").is_some_and(|suffix| {
         suffix.len() == 26
@@ -478,7 +624,7 @@ mod tests {
         extract::{OriginalUri, State},
         http::{header, HeaderMap, Request, StatusCode},
         response::{IntoResponse, Response},
-        routing::get,
+        routing::{get, post},
         Router,
     };
     use http_body_util::BodyExt;
@@ -537,6 +683,7 @@ mod tests {
                 id: enabled.clone(),
                 name: format!("Tenant {enabled}"),
                 platform_id: None,
+                environment: None,
             }]
         );
         assert_eq!(profile.default_tenant_id, Some(enabled));
@@ -768,37 +915,46 @@ mod tests {
         assert_eq!(profile.tenants[0].id, enabled);
     }
 
-    async fn spawn_fake_operators(platform_by_tenant: Vec<(String, Option<String>)>) -> String {
-        use axum::extract::Path;
-        let table = Arc::new(platform_by_tenant);
+    async fn spawn_fake_tenant_directory(
+        response_by_platform: Vec<(String, StatusCode, serde_json::Value)>,
+    ) -> (String, Arc<AtomicUsize>) {
+        let table = Arc::new(response_by_platform);
+        let calls = Arc::new(AtomicUsize::new(0));
         let app = Router::new().route(
-            "/v1/auth/operators/:tenant_id",
-            get(move |Path(tenant_id): Path<String>, headers: HeaderMap| {
-                let table = table.clone();
-                async move {
-                    assert_eq!(
-                        headers
-                            .get(header::AUTHORIZATION)
-                            .and_then(|value| value.to_str().ok()),
-                        Some("Bearer accepted-fixture")
-                    );
-                    assert_eq!(
-                        headers
-                            .get("x-operator-id")
-                            .and_then(|value| value.to_str().ok()),
-                        Some(tenant_id.as_str())
-                    );
-                    match table.iter().find(|(id, _)| *id == tenant_id) {
-                        Some((id, Some(platform_id))) => serde_json::json!({
-                            "id": id,
-                            "name": format!("Tenant {id}"),
-                            "operatorName": "fixture",
-                            "platformId": platform_id,
-                        })
-                        .to_string()
-                        .into_response(),
-                        Some((_, None)) => StatusCode::FORBIDDEN.into_response(),
-                        None => StatusCode::NOT_FOUND.into_response(),
+            FIELD_TENANT_DIRECTORY_PATH,
+            post({
+                let calls = calls.clone();
+                move |OriginalUri(uri): OriginalUri, headers: HeaderMap| {
+                    let table = table.clone();
+                    let calls = calls.clone();
+                    async move {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        assert_eq!(
+                            uri.query(),
+                            Some("required_action=field%3AViewSalesAnalytics")
+                        );
+                        assert_eq!(
+                            headers
+                                .get(header::AUTHORIZATION)
+                                .and_then(|value| value.to_str().ok()),
+                            Some("Bearer accepted-fixture")
+                        );
+                        let platform_id = headers
+                            .get("x-platform-id")
+                            .and_then(|value| value.to_str().ok())
+                            .unwrap();
+                        assert_eq!(
+                            headers
+                                .get("x-operator-id")
+                                .and_then(|value| value.to_str().ok()),
+                            Some(platform_id)
+                        );
+                        match table.iter().find(|(id, _, _)| id == platform_id) {
+                            Some((_, status, body)) => {
+                                (*status, Json(body.clone())).into_response()
+                            }
+                            None => StatusCode::NOT_FOUND.into_response(),
+                        }
                     }
                 }
             }),
@@ -808,29 +964,55 @@ mod tests {
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        format!("http://{address}")
+        (format!("http://{address}"), calls)
     }
 
     #[tokio::test]
-    async fn profile_tenants_carry_platform_id_and_lookup_failures_omit_it() {
-        let resolved = tenant_id('a');
-        let denied = tenant_id('b');
-        let sandbox_platform = tenant_id('s');
-        let body = field_profile(json!([
-            field_tenant(&resolved, true),
-            field_tenant(&denied, true)
-        ]))
+    async fn profile_tenants_use_two_bulk_lists_without_a_twenty_tenant_cap() {
+        let production_ids = ('a'..='m').map(tenant_id).collect::<Vec<_>>();
+        let sandbox_ids = ('n'..='z').map(tenant_id).collect::<Vec<_>>();
+        let all_ids = production_ids
+            .iter()
+            .chain(&sandbox_ids)
+            .cloned()
+            .collect::<Vec<_>>();
+        let body = field_profile(json!(all_ids
+            .iter()
+            .map(|id| field_tenant(id, true))
+            .collect::<Vec<_>>()))
         .to_string()
         .into_bytes();
         let (field_origin, _) = spawn_fake_field(StatusCode::OK, body, Duration::ZERO).await;
-        let operators_origin = spawn_fake_operators(vec![
-            (resolved.clone(), Some(sandbox_platform.clone())),
-            (denied.clone(), None),
+        let directory_entry = |id: &String, environment: &str, platform_id: &str| {
+            json!({
+                "id": id,
+                "name": format!("Tenant {id}"),
+                "platformId": platform_id,
+                "environment": environment,
+            })
+        };
+        let (directory_origin, directory_calls) = spawn_fake_tenant_directory(vec![
+            (
+                TENANT_DIRECTORY_PLATFORM_IDS[0].to_string(),
+                StatusCode::OK,
+                json!(production_ids
+                    .iter()
+                    .map(|id| directory_entry(id, "production", TENANT_DIRECTORY_PLATFORM_IDS[0]))
+                    .collect::<Vec<_>>()),
+            ),
+            (
+                TENANT_DIRECTORY_PLATFORM_IDS[1].to_string(),
+                StatusCode::OK,
+                json!(sandbox_ids
+                    .iter()
+                    .map(|id| directory_entry(id, "sandbox", TENANT_DIRECTORY_PLATFORM_IDS[1]))
+                    .collect::<Vec<_>>()),
+            ),
         ])
         .await;
         let client = ProfileClient::with_timeout(&field_origin, Duration::from_secs(1))
             .unwrap()
-            .with_operators_base(&operators_origin)
+            .with_tenant_directory_base(&directory_origin)
             .unwrap();
         let app = courseboard_app(Some(client));
 
@@ -846,12 +1028,79 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let profile: ProfileResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(directory_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(profile.tenants.len(), 26);
+        assert!(profile.tenants[..production_ids.len()]
+            .iter()
+            .all(|tenant| {
+                tenant.platform_id.as_deref() == Some(TENANT_DIRECTORY_PLATFORM_IDS[0])
+                    && tenant.environment == Some(TenantEnvironment::Production)
+            }));
+        assert!(profile.tenants[production_ids.len()..]
+            .iter()
+            .all(|tenant| {
+                tenant.platform_id.as_deref() == Some(TENANT_DIRECTORY_PLATFORM_IDS[1])
+                    && tenant.environment == Some(TenantEnvironment::Sandbox)
+            }));
+    }
+
+    #[tokio::test]
+    async fn failed_or_unsupported_directory_context_remains_explicitly_unknown() {
+        let resolved = tenant_id('a');
+        let unsupported = tenant_id('b');
+        let missing = tenant_id('c');
+        let body = field_profile(json!([
+            field_tenant(&resolved, true),
+            field_tenant(&unsupported, true),
+            field_tenant(&missing, true),
+        ]))
+        .to_string()
+        .into_bytes();
+        let (field_origin, _) = spawn_fake_field(StatusCode::OK, body, Duration::ZERO).await;
+        let (directory_origin, _) = spawn_fake_tenant_directory(vec![
+            (
+                TENANT_DIRECTORY_PLATFORM_IDS[0].to_string(),
+                StatusCode::OK,
+                json!([
+                    {
+                        "id": resolved,
+                        "platformId": TENANT_DIRECTORY_PLATFORM_IDS[0],
+                        "environment": "production"
+                    },
+                    {
+                        "id": unsupported,
+                        "platformId": TENANT_DIRECTORY_PLATFORM_IDS[0],
+                        "environment": "preview"
+                    }
+                ]),
+            ),
+            (
+                TENANT_DIRECTORY_PLATFORM_IDS[1].to_string(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+                json!({"error": "fixture"}),
+            ),
+        ])
+        .await;
+        let client = ProfileClient::with_timeout(&field_origin, Duration::from_secs(1))
+            .unwrap()
+            .with_tenant_directory_base(&directory_origin)
+            .unwrap();
+
+        let profile = client.get_profile("Bearer accepted-fixture").await.unwrap();
+
+        assert_eq!(profile.tenants.len(), 3);
         assert_eq!(
-            json["tenants"][0]["platformId"].as_str(),
-            Some(sandbox_platform.as_str())
+            profile.tenants[0].environment,
+            Some(TenantEnvironment::Production)
         );
-        assert!(json["tenants"][1].get("platformId").is_none());
+        assert_eq!(profile.tenants[1].environment, None);
+        assert_eq!(
+            profile.tenants[1].platform_id.as_deref(),
+            Some(TENANT_DIRECTORY_PLATFORM_IDS[0])
+        );
+        assert_eq!(profile.tenants[2].environment, None);
+        assert_eq!(profile.tenants[2].platform_id, None);
     }
 
     #[tokio::test]
@@ -934,13 +1183,16 @@ mod tests {
             ProfileClient::from_field_api_url("https://example.test", Some("empty://local"))
                 .unwrap()
                 .unwrap();
-        assert!(disabled_lookup.operators_base.is_none());
+        assert!(disabled_lookup.tenant_directory_endpoint.is_none());
         let default_lookup = ProfileClient::from_field_api_url("https://example.test", None)
             .unwrap()
             .unwrap();
         assert_eq!(
-            default_lookup.operators_base.as_ref().map(Url::as_str),
-            Some("https://api.n1.tachy.one/")
+            default_lookup
+                .tenant_directory_endpoint
+                .as_ref()
+                .map(Url::as_str),
+            Some("https://example.test/get_tenants?required_action=field%3AViewSalesAnalytics")
         );
     }
 

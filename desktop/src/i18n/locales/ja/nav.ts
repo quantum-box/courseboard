@@ -106,6 +106,7 @@ export const nav = {
     tenantUnset: '施設が選ばれていません',
     production: '本番',
     sandbox: 'テスト',
+    unknown: '不明',
   },
   command: {
     title: 'コマンドパレット',

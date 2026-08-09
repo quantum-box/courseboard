@@ -80,6 +80,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../auth/AuthProvider'
 import { formatTenantWorkspaceLabel, tenantWorkspaceLabel } from '../auth/tenant-label'
+import { tenantModeBadge } from '../auth/tenant-mode'
 import { i18next, LOCALES, LOCALE_LABELS, currentLocale, setLocale } from '../i18n'
 import { PageReloadProvider, usePageReload } from '../lib/pageReload'
 import { navigate, navigateFromClick } from '../lib/router'
@@ -560,6 +561,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   const tenantDetail = auth.tenant
     ? formatTenantWorkspaceLabel(auth.tenant)
     : t('nav:workspace.tenantUnset')
+  const environmentBadge = tenantModeBadge(auth.tenant?.mode ?? 'unknown')
 
   const sidebar = (
     <Sidebar collapsed={false} className="courseboard-sidebar">
@@ -647,10 +649,8 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
                 name={accountName}
                 detail={`${tenantDetail} · ${auth.user?.role ?? ''}`}
               />
-              <Badge variant={auth.tenant?.mode === 'sandbox' ? 'warning' : 'success'} className="runtime-dot">
-                {auth.tenant?.mode === 'sandbox'
-                  ? t('nav:workspace.sandbox')
-                  : t('nav:workspace.production')}
+              <Badge variant={environmentBadge.variant} className="runtime-dot">
+                {t(`nav:workspace.${environmentBadge.label}`)}
               </Badge>
             </SidebarAccount>
           </DropdownMenuTrigger>

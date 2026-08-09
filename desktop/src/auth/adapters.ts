@@ -66,7 +66,7 @@ type NativeTenantPayload = string | {
   name?: string
   slug?: string
   alias?: string
-  mode?: 'production' | 'sandbox'
+  environment?: string
   platformId?: string
   operatorId?: string
 }
@@ -85,7 +85,9 @@ const RUNTIME_CONTEXT = {
   },
 } as const
 
-function runtimeMode(): AuthTenant['mode'] {
+type RuntimeMode = keyof typeof RUNTIME_CONTEXT
+
+function runtimeMode(): RuntimeMode {
   const query = new URLSearchParams(window.location.search)
   return import.meta.env.VITE_COURSEBOARD_MODE === 'sandbox'
     || query.get('mode') === 'sandbox'
@@ -94,17 +96,10 @@ function runtimeMode(): AuthTenant['mode'] {
     : 'production'
 }
 
-/**
- * `/v1/me` resolves each tenant's platform from Tachyon (`Tachyon` = production,
- * `Tachyon dev` = sandbox). One production bundle lists tenants from both, so the
- * production / sandbox badge must follow that lookup instead of the bundle-wide
- * `runtimeMode()`. An unknown or unresolved platform keeps the runtime default.
- */
-function platformMode(platformId: string | undefined): AuthTenant['mode'] | undefined {
-  const id = platformId?.trim()
-  if (!id) return undefined
-  const modes = Object.keys(RUNTIME_CONTEXT) as AuthTenant['mode'][]
-  return modes.find(mode => RUNTIME_CONTEXT[mode].platformId === id)
+function tenantMode(environment: string | undefined): AuthTenant['mode'] {
+  return environment === 'production' || environment === 'sandbox'
+    ? environment
+    : 'unknown'
 }
 
 /**
@@ -256,8 +251,10 @@ function browserPkceConfiguration(): BrowserPkceConfiguration {
   }
 }
 
-function nativeTenant(payload: NativeTenantPayload) {
-  if (typeof payload === 'string') return envTenant(payload)
+function nativeTenant(payload: NativeTenantPayload): AuthTenant | undefined {
+  if (typeof payload === 'string') {
+    return { ...envTenant(payload), mode: 'unknown' } satisfies AuthTenant
+  }
   if (!payload.id) return undefined
   const labels = envTenantLabels(payload.id)
   const rawName = payload.name?.trim()
@@ -268,9 +265,9 @@ function nativeTenant(payload: NativeTenantPayload) {
     ...fallback,
     name: distinctName || labels.name || rawName || fallback.name,
     slug: rawSlug || labels.slug || fallback.slug,
-    // Only the Tachyon-resolved platform decides production vs sandbox; the
-    // bundle default applies when the operator lookup returned nothing.
-    mode: payload.mode ?? platformMode(payload.platformId) ?? fallback.mode,
+    // Field resolves this from Tachyon's hierarchy. Missing/unknown context
+    // must remain explicit instead of silently inheriting the bundle mode.
+    mode: tenantMode(payload.environment),
     platformId: payload.platformId ?? fallback.platformId,
     // A profile tenant is selected independently; a global development
     // operator override must never be reused for a different tenant.

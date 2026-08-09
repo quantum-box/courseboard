@@ -5,11 +5,13 @@ export type AuthUser = {
   role: string
 }
 
+export type AuthTenantMode = 'production' | 'sandbox' | 'unknown'
+
 export type AuthTenant = {
   id: string
   name: string
   slug?: string
-  mode: 'production' | 'sandbox'
+  mode: AuthTenantMode
   platformId: string
   operatorId: string
 }

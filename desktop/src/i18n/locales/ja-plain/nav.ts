@@ -105,6 +105,7 @@ export const nav: DeepPartial<typeof source> = {
     tenantUnset: 'ゴルフ場が選ばれていません',
     production: '本番',
     sandbox: '練習用',
+    unknown: '分かりません',
   },
   command: {
     title: '画面をさがす窓',

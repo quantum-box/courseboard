@@ -59,8 +59,8 @@ pub struct RuntimeConfig {
     )]
     pub sms_sender_name: String,
 
-    /// Tachyon auth API used to resolve each tenant's platform id for /v1/me.
-    /// Set to `empty://local` to disable the lookup (unit/integration tests).
+    /// Legacy compatibility and test opt-out. `/v1/me` now uses Field's bulk
+    /// tenant directory; `empty://local` still disables context enrichment.
     #[arg(long, env = "TACHYON_AUTH_API_URL")]
     pub tachyon_auth_api_url: Option<String>,
 

@@ -32,6 +32,7 @@ export const auth: DeepPartial<typeof source> = {
     title: '使うゴルフ場を選んでください',
     description: 'これから操作するゴルフ場を選びます。',
     sandbox: '練習用',
+    unknown: '分かりません',
     otherAccount: '別のアカウントでログインする',
     select: 'ゴルフ場を選ぶ',
   },

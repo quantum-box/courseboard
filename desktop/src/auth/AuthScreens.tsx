@@ -12,6 +12,7 @@ import {
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CourseBoardBrand } from '../components/CourseBoardBrand'
+import { tenantModeBadge } from './tenant-mode'
 import type { AuthReason, AuthTenant } from './types'
 
 // Google login is not verified yet; keep the auth adapter logic but hide the UI entry point.
@@ -180,16 +181,17 @@ export function TenantSelectionScreen({ tenants, onSelect, onSignOut }: {
         <h2>{t('tenant.title')}</h2>
         <p>{t('tenant.description')}</p>
         <div className="tenant-list">
-          {tenants.map(tenant => (
-            <button key={`${tenant.mode}:${tenant.id}`} type="button" className="tenant-option" onClick={() => onSelect(tenant)}>
-              <span className="tenant-icon"><Building2 /></span>
-              <span className="tenant-copy"><strong>{tenant.name}</strong><small>{tenant.slug ?? tenant.id}</small></span>
-              <Badge variant={tenant.mode === 'production' ? 'success' : 'warning'}>
-                {tenant.mode === 'production' ? t('tenant.production') : t('tenant.sandbox')}
-              </Badge>
-              <ChevronRight />
-            </button>
-          ))}
+          {tenants.map(tenant => {
+            const modeBadge = tenantModeBadge(tenant.mode)
+            return (
+              <button key={`${tenant.mode}:${tenant.id}`} type="button" className="tenant-option" onClick={() => onSelect(tenant)}>
+                <span className="tenant-icon"><Building2 /></span>
+                <span className="tenant-copy"><strong>{tenant.name}</strong><small>{tenant.slug ?? tenant.id}</small></span>
+                <Badge variant={modeBadge.variant}>{t(`tenant.${modeBadge.label}`)}</Badge>
+                <ChevronRight />
+              </button>
+            )
+          })}
         </div>
         <Button type="button" variant="ghost" onClick={onSignOut}>{t('tenant.otherAccount')}</Button>
       </div>
