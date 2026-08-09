@@ -15,6 +15,9 @@ use crate::course::domain::{
     NewReservation, PartyDetails, ReservationGateway, ReservationId,
 };
 
+/// A round is a day's work at most; anything longer is a typo or an attack.
+const MAX_DURATION_MINUTES: i64 = 24 * 60;
+
 pub struct CreateReservationInput {
     pub golf_course_id: CourseId,
     pub reservation_service_id: Option<String>,
@@ -54,8 +57,12 @@ impl CreateReservationUseCase {
         if input.quantity <= 0 {
             return Err(CourseError::BadRequest("quantity must be positive"));
         }
-        if input.duration_minutes <= 0 {
-            return Err(CourseError::BadRequest("duration must be positive"));
+        // Bounded, not just positive: chrono panics well before i64 runs out,
+        // so an absurd number would abort the request instead of answering 400.
+        if input.duration_minutes <= 0 || input.duration_minutes > MAX_DURATION_MINUTES {
+            return Err(CourseError::BadRequest(
+                "duration must be between 1 minute and 24 hours",
+            ));
         }
 
         let starts_at = parse_jst_tee_time(input.date, &input.tee_time)?;
@@ -90,11 +97,19 @@ impl CreateReservationUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<String, CourseError> {
-        if let Ok(policy) = self.commercial.get_reservation_policy(credentials).await {
-            let from_policy = policy.reservation_type_id().trim().to_string();
-            if !from_policy.is_empty() {
-                return Ok(from_policy);
+        match self.commercial.get_reservation_policy(credentials).await {
+            Ok(policy) => {
+                let from_policy = policy.reservation_type_id().trim().to_string();
+                if !from_policy.is_empty() {
+                    return Ok(from_policy);
+                }
             }
+            // Only "there is no policy" falls through — Field answers that as a
+            // 404. A timeout or a 5xx is a real upstream failure, and swallowing
+            // it would book the round under whichever type happened to be first.
+            Err(CourseError::NotFound(_)) => {}
+            Err(CourseError::UpstreamClient { status: 404, .. }) => {}
+            Err(error) => return Err(error),
         }
         self.reservations
             .list_reservation_type_ids(credentials)
@@ -102,8 +117,7 @@ impl CreateReservationUseCase {
             .into_iter()
             .next()
             .ok_or(CourseError::BadRequest(
-                "this tenant has no reservation type, and Field offers no way to create one; \
-                 add one in Field before booking",
+                "この施設ではまだ予約を受け付ける準備ができていません。導入担当にご連絡ください",
             ))
     }
 }

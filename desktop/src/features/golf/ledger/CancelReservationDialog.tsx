@@ -21,9 +21,13 @@ export function CancelReservationDialog({
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
 
+  // Keyed on the id, not the object: the board rebuilds its reservations on
+  // every clock tick, and depending on the object would wipe the reason the
+  // operator is halfway through typing.
+  const reservationId = reservation?.id ?? null
   useEffect(() => {
-    if (reservation) setReason('')
-  }, [reservation])
+    if (reservationId) setReason('')
+  }, [reservationId])
 
   if (!reservation) return null
 

@@ -15,6 +15,8 @@ export type BookablePlan = {
   label: string
   expectedDurationMinutes: number
   golfCourseId?: string | null
+  /** Players this plan sells in one group; absent means the general cap. */
+  maxPlayersPerGroup?: number | null
 }
 
 export type NewReservationTarget = {
@@ -56,9 +58,19 @@ export function NewReservationEditor({
     if (!target) return
     setCustomerName('')
     setQuantity('4')
-    setPlanId(coursePlans[0]?.reservationServiceId ?? '')
     setConfirmingDiscard(false)
   }, [target])
+
+  // The plans list loads on its own clock, so the sheet can open before it
+  // arrives. Picking the default once it does — and not overwriting a plan the
+  // desk already chose — keeps a caddie round from being sent as self-play.
+  const defaultPlanId = coursePlans[0]?.reservationServiceId ?? ''
+  useEffect(() => {
+    if (!target) return
+    setPlanId(current =>
+      coursePlans.some(plan => plan.reservationServiceId === current) ? current : defaultPlanId,
+    )
+  }, [target, defaultPlanId])
 
   if (!target) return null
 
@@ -74,13 +86,18 @@ export function NewReservationEditor({
     onClose()
   }
 
+  // A plan may sell a smaller group than a four-ball — a two-ball twilight
+  // round, say — and that limit is the club's rule, so it wins over the
+  // general cap rather than being checked only after Field accepts the booking.
+  const selectedPlan = coursePlans.find(entry => entry.reservationServiceId === planId)
+  const maxQuantity = Math.min(selectedPlan?.maxPlayersPerGroup ?? MAX_PARTY_PLAYERS, MAX_PARTY_PLAYERS)
   const parsedQuantity = Number.parseInt(quantity, 10)
   const validQuantity =
-    Number.isFinite(parsedQuantity) && parsedQuantity > 0 && parsedQuantity <= MAX_PARTY_PLAYERS
+    Number.isFinite(parsedQuantity) && parsedQuantity > 0 && parsedQuantity <= maxQuantity
   const canSave = customerName.trim().length > 0 && validQuantity && !saving
 
   const save = async () => {
-    const plan = coursePlans.find(entry => entry.reservationServiceId === planId)
+    const plan = selectedPlan
     setSaving(true)
     try {
       await courseboardApiJson('/v1/course/reservations', {
@@ -135,7 +152,7 @@ export function NewReservationEditor({
             <Input
               type="number"
               min={1}
-              max={MAX_PARTY_PLAYERS}
+              max={maxQuantity}
               value={quantity}
               onChange={event => setQuantity(event.target.value)}
             />

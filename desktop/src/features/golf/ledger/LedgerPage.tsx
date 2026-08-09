@@ -173,6 +173,7 @@ export function LedgerPage() {
           displayName?: string | null
           expectedDurationMinutes: number
           golfCourseId?: string | null
+          maxPlayersPerGroup?: number | null
         }>
       >(`${COURSE_API}/reservation-products`),
     [],
@@ -251,6 +252,7 @@ export function LedgerPage() {
     label: product.displayName?.trim() || product.reservationServiceId,
     expectedDurationMinutes: product.expectedDurationMinutes,
     golfCourseId: product.golfCourseId,
+    maxPlayersPerGroup: product.maxPlayersPerGroup,
   }))
 
   // Booking is offered on a single tee time that is not already closed or full:
@@ -260,7 +262,10 @@ export function LedgerPage() {
     const teeTime = selection.teeTimes[0]!
     const column = columns.find(entry => entry.golfCourseId === selection.golfCourseId)
     const slot = column?.slots.find(entry => entry.teeTime === teeTime)
-    if (!column || !slot || !slot.isActive || slot.mark?.kind === 'closed') return null
+    // Same gate as the open row and the context menu. Without isSellable a
+    // full row would still offer booking, and nothing downstream re-checks
+    // capacity — the create call takes whatever it is given.
+    if (!column || !slot || !slot.isSellable) return null
     return { golfCourseId: column.golfCourseId, courseName: column.courseName, teeTime }
   })()
 

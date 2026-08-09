@@ -192,7 +192,10 @@ impl ReservationGateway for FieldReservationGateway {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(|value| json!({ "reason": value }));
-        field_send_json::<serde::de::IgnoredAny>(
+        // Status only, no decode: a cancel that answers 204 has done the work,
+        // and failing to parse an empty body would report the booking as still
+        // live and invite the desk to cancel it a second time.
+        field_send_unit(
             &self.client,
             &self.base_url,
             reqwest::Method::POST,
@@ -200,8 +203,7 @@ impl ReservationGateway for FieldReservationGateway {
             credentials,
             body.as_ref(),
         )
-        .await?;
-        Ok(())
+        .await
     }
 
     async fn replace_reservation(

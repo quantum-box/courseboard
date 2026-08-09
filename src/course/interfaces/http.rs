@@ -708,7 +708,11 @@ pub async fn create_reservation(
         .execute(
             credentials,
             CreateReservationInput {
-                golf_course_id: CourseId::new(request.golf_course_id),
+                // try_new, not new: a blank id would be written into the
+                // booking's custom fields and read back as a course, leaving an
+                // orphan column on the board instead of a correctable 400.
+                golf_course_id: CourseId::try_new(request.golf_course_id)
+                    .map_err(AppError::from)?,
                 reservation_service_id: request.reservation_service_id,
                 date: request.date,
                 tee_time: request.tee_time,
