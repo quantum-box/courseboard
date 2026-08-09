@@ -590,6 +590,10 @@ pub struct RecommendationDto {
     pub rating_average: Option<f64>,
     pub rating_count: i64,
     pub rounds_assigned: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remaining_rounds: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attendance_status: Option<String>,
     pub recommendation_score: i32,
     pub recommended_role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -606,6 +610,8 @@ impl From<&CaddieRecommendation> for RecommendationDto {
             rating_average: value.rating_average(),
             rating_count: value.rating_count(),
             rounds_assigned: value.rounds_assigned(),
+            remaining_rounds: value.remaining_rounds(),
+            attendance_status: value.attendance_status().map(str::to_string),
             recommendation_score: value.recommendation_score(),
             recommended_role: value.recommended_role().to_string(),
             pairing_display_name: value.pairing_display_name().map(str::to_string),

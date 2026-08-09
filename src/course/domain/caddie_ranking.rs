@@ -38,6 +38,15 @@ impl AttendanceState {
             _ => Self::NotClocked,
         }
     }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Working => "working",
+            Self::NotClocked => "not_clocked",
+            Self::ClockedOut => "clocked_out",
+            Self::NotLinked => "not_linked",
+        }
+    }
 }
 
 /// Score given to a caddie nobody has rated yet, so a newcomer is neither
@@ -102,6 +111,8 @@ pub struct RankedCaddie {
     pub rating_average: Option<f64>,
     pub rating_count: i64,
     pub rounds_assigned: i64,
+    pub remaining_rounds: i64,
+    pub attendance: AttendanceState,
     pub score: i32,
     pub recommended_role: String,
     pub pairing_display_name: Option<String>,
@@ -154,11 +165,12 @@ pub fn rank_caddies(candidates: &[RankingCandidate], options: RankingOptions) ->
         .iter()
         .map(|candidate| {
             let (attendance_bonus, attendance_reason) = attendance_component(candidate.attendance);
+            let remaining_rounds = remaining_rounds(candidate);
             let mut reasons = vec![attendance_reason.to_string()];
             if candidate.rating_count == 0 {
                 reasons.push(reason::NO_RATINGS.to_string());
             }
-            if remaining_rounds(candidate) == 0 {
+            if remaining_rounds == 0 {
                 reasons.push(reason::AT_DAILY_LIMIT.to_string());
             }
 
@@ -190,6 +202,8 @@ pub fn rank_caddies(candidates: &[RankingCandidate], options: RankingOptions) ->
                 rating_average: candidate.rating_average,
                 rating_count: candidate.rating_count,
                 rounds_assigned: candidate.rounds_assigned_today.max(0),
+                remaining_rounds,
+                attendance: candidate.attendance,
                 score,
                 recommended_role: role,
                 pairing_display_name,
@@ -306,6 +320,8 @@ mod tests {
         let ranked = rank_caddies(&[c], RankingOptions::default());
         // rating 4.6*20=92, experience 10, remaining (3-1)*5=10
         assert_eq!(ranked[0].score, 112);
+        assert_eq!(ranked[0].remaining_rounds, 2);
+        assert_eq!(ranked[0].attendance, AttendanceState::NotClocked);
     }
 
     #[test]

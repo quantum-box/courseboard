@@ -1270,10 +1270,12 @@ function resolveGet(path: string): Json | null | undefined {
         ratingAverage: 4.8,
         ratingCount: 42,
         roundsAssigned: 1,
-        recommendationScore: 0.94,
+        remainingRounds: 1,
+        attendanceStatus: 'working',
+        recommendationScore: 161,
         recommendedRole: 'primary',
         pairingDisplayName: null,
-        rationale: ['評価が高い', '午前帯が空いている'],
+        rationale: ['on_duty', 'veteran_for_foursome'],
       },
     ])
   }

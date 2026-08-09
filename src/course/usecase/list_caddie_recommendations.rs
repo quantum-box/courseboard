@@ -37,8 +37,10 @@ impl ListCaddieRecommendationsUseCase {
         // The day being planned, which is also the day attendance is read for.
         let date = query
             .scheduled_at
-            .map(|at| at.date_naive())
-            .unwrap_or_else(|| chrono::Utc::now().date_naive());
+            .map(|at| (at + chrono::Duration::minutes(JST_OFFSET_MINUTES)).date_naive())
+            .unwrap_or_else(|| {
+                (chrono::Utc::now() + chrono::Duration::minutes(JST_OFFSET_MINUTES)).date_naive()
+            });
 
         let window = widen_for_utc_date_filter(date, date);
         let (roster, ratings, assignments, attendance, availabilities) = tokio::try_join!(
@@ -160,6 +162,8 @@ impl ListCaddieRecommendationsUseCase {
                     item.rating_average,
                     item.rating_count,
                     item.rounds_assigned,
+                    Some(item.remaining_rounds),
+                    Some(item.attendance.as_str().to_string()),
                     item.score,
                     item.recommended_role,
                     item.pairing_display_name,
