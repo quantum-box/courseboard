@@ -462,9 +462,11 @@ const mockParties: Record<string, unknown> = loadMockWrites('parties', {})
  * Applied at read time rather than mutated into the fixture, so a reload starts
  * from the same day and still shows what was typed into it.
  */
-function withStoredParty<T extends { id: string }>(booking: T): T {
+function withStoredParty(booking: MockTeeReservation): Omit<MockTeeReservation, 'prepaymentPolicy'> {
   const party = mockParties[booking.id]
-  return party ? { ...booking, party } : { ...booking }
+  // The real tee-sheet DTO does not expose Field's checkout policy.
+  const { prepaymentPolicy: _prepaymentPolicy, ...publicBooking } = booking
+  return party ? { ...publicBooking, party: party as Record<string, unknown> } : publicBooking
 }
 
 /** The tee times a course's opening hours and interval imply. */
@@ -484,8 +486,47 @@ function mockSlotTimes(course: { businessHoursJson: { open: string; close: strin
   return times
 }
 
+function isMockDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
+function isMockTeeTime(value: string) {
+  const match = /^(\d{2}):(\d{2})$/.exec(value)
+  return Boolean(match && Number(match[1]) < 24 && Number(match[2]) < 60)
+}
+
+/** Generated mock inventory counts groups, like Field's resource time slots. */
+const MOCK_SLOT_CAPACITY = 2
+
+/** Canonical Field inventory id exposed on a CourseBoard ledger column. */
+function mockReservationResourceId(golfCourseId: string) {
+  return `res_${golfCourseId.replace(/^course_/, '')}`
+}
+
+type MockTeeReservation = {
+  id: string
+  reservationNumber: string
+  reservationServiceId: string | null
+  displayName: string | null
+  golfCourseId: string
+  courseName: string
+  teeTime: string
+  durationMinutes: number
+  playType: 'caddie' | 'self'
+  partySize: number
+  partyName: string
+  status: string
+  holes: number
+  notes?: string
+  party?: Record<string, unknown>
+  /** CourseBoard sends this to Field for a desk booking; it is not a public tee-sheet field. */
+  prepaymentPolicy?: 'none'
+}
+
 /** Day board fixtures for the operations timeline (tee sheet + caddy lanes). */
-const mockTeeReservations = [
+const initialMockTeeReservations = [
   {
     id: 'res_mock_1',
     reservationNumber: 'R-2026-0100',
@@ -660,6 +701,19 @@ const mockTeeReservations = [
     status: 'confirmed',
     holes: 18,
   },
+  {
+    id: 'res_mock_13',
+    reservationNumber: 'R-2026-0112',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${TODAY}T08:00:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 3,
+    partyName: '佐藤組',
+    status: 'confirmed',
+    holes: 18,
+  },
 ].map(item => ({
   ...item,
   reservationServiceId: item.playType === 'caddie' ? 'svc:caddie-18' : 'svc:self-18',
@@ -668,7 +722,13 @@ const mockTeeReservations = [
     : item.playType === 'caddie'
       ? 'キャディ付き18ホール'
       : 'セルフ18ホール',
-}))
+})) as MockTeeReservation[]
+
+/** Reservations created or cancelled at the desk, kept across reloads in this tab. */
+const mockTeeReservations = loadMockWrites<MockTeeReservation[]>(
+  'teeReservations',
+  initialMockTeeReservations,
+)
 
 function datesBetween(from: string, to: string): string[] {
   const results: string[] = []
@@ -938,15 +998,15 @@ function settlementReport(yearMonth: string) {
     },
     drilldown: {
       reservationIds,
-      reservationItems: reservationIds.map(id => {
-        const reservation = mockTeeReservations.find(item => item.id === id)!
-        return {
+      reservationItems: reservationIds.flatMap(id => {
+        const reservation = mockTeeReservations.find(item => item.id === id)
+        return reservation ? [{
           reservationId: reservation.id,
           reservationNumber: reservation.reservationNumber,
           customerName: reservation.partyName,
           teeTime: `${yearMonth}${reservation.teeTime.slice(7)}`,
           courseName: reservation.courseName,
-        }
+        }] : []
       }),
       reservationDetailsUnavailable: false,
       unpaidCancellationReservationIds: ['res_mock_cancel_1'],
@@ -1132,7 +1192,7 @@ function resolveGet(path: string): Json | null | undefined {
     return items(mockCourses.map(course => ({
       id: `resource_${course.id}`,
       name: course.name,
-      reservationResourceId: `res_${course.id.replace(/^course_/, '')}`,
+      reservationResourceId: mockReservationResourceId(course.id),
       golfCourseId: course.id,
       resourceKind: 'course',
       active: course.isActive,
@@ -1215,7 +1275,7 @@ function resolveGet(path: string): Json | null | undefined {
         const bookings = mockTeeReservations.filter(
           item => item.teeTime.startsWith(date) && item.golfCourseId === course.id,
         )
-        const byTime = new Map<string, Array<(typeof mockTeeReservations)[number]>>()
+        const byTime = new Map<string, Array<Omit<MockTeeReservation, 'prepaymentPolicy'>>>()
         for (const time of mockSlotTimes(course)) byTime.set(time, [])
         for (const booking of bookings) {
           const time = booking.teeTime.slice(11, 16)
@@ -1231,7 +1291,7 @@ function resolveGet(path: string): Json | null | undefined {
                 && entry.date === date
                 && entry.teeTime === teeTime,
             )
-            const capacity = 2
+            const capacity = MOCK_SLOT_CAPACITY
             const available = Math.max(capacity - slotItems.length, 0)
             return {
               teeTime,
@@ -1250,6 +1310,7 @@ function resolveGet(path: string): Json | null | undefined {
         return {
           golfCourseId: course.id,
           courseName: course.name,
+          resourceId: mockReservationResourceId(course.id),
           startIntervalMinutes: course.startIntervalMinutes,
           gridSource: 'inventory',
           groupCount,
@@ -1510,6 +1571,101 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   // Desk marks and group detail are CourseBoard's own writes, so they never
   // reach a Field path; keeping them in the fixture store lets the ledger's
   // whole edit loop be walked through without a backend.
+  if (pathname === '/v1/course/reservations' && method === 'POST') {
+    const golfCourseId = typeof body?.golfCourseId === 'string' ? body.golfCourseId.trim() : ''
+    const resourceId = typeof body?.resourceId === 'string' ? body.resourceId.trim() : ''
+    const date = typeof body?.date === 'string' ? body.date : ''
+    const teeTime = typeof body?.teeTime === 'string' ? body.teeTime : ''
+    const customerName = typeof body?.customerName === 'string' ? body.customerName.trim() : ''
+    const durationMinutes = body?.durationMinutes
+    const quantity = body?.quantity
+
+    if (!golfCourseId) return error(400, 'golfCourseId is required')
+    if (!resourceId) return error(400, 'resourceId is required')
+    if (!customerName) return error(400, 'customerName is required')
+    if (typeof quantity !== 'number' || !Number.isInteger(quantity) || quantity <= 0) {
+      return error(400, 'quantity must be positive')
+    }
+    if (
+      typeof durationMinutes !== 'number'
+      || !Number.isInteger(durationMinutes)
+      || durationMinutes <= 0
+      || durationMinutes > 24 * 60
+    ) {
+      return error(400, 'durationMinutes must be between 1 minute and 24 hours')
+    }
+    if (!isMockDate(date) || !isMockTeeTime(teeTime)) {
+      return error(400, 'date and teeTime are required')
+    }
+    if (body?.reservationServiceId != null && typeof body.reservationServiceId !== 'string') {
+      return error(400, 'reservationServiceId must be a string')
+    }
+
+    const course = mockCourses.find(item => item.id === golfCourseId && item.isActive)
+    if (!course || resourceId !== mockReservationResourceId(course.id)) {
+      return error(400, '選択したコースと予約枠が一致しません。台帳を読み込み直してください')
+    }
+
+    // Match CreateReservationUseCase: a missing/inactive generated row and a
+    // row with no groups left are both the public 409 stale-ledger contract.
+    const generatedSlotExists = mockSlotTimes(course).includes(teeTime)
+    const bookedGroups = mockTeeReservations.filter(
+      reservation =>
+        reservation.golfCourseId === golfCourseId
+        && reservation.teeTime.startsWith(`${date}T${teeTime}:`),
+    ).length
+    if (!generatedSlotExists || bookedGroups >= MOCK_SLOT_CAPACITY) {
+      return error(409, 'この枠はちょうど埋まりました')
+    }
+
+    const reservationServiceId = typeof body?.reservationServiceId === 'string'
+      ? body.reservationServiceId
+      : null
+    const product = mockProducts.find(item => item.reservationServiceId === reservationServiceId)
+    const sequence = `${Date.now()}_${mockTeeReservations.length + 1}`
+    const created: MockTeeReservation = {
+      id: `res_mock_${sequence}`,
+      reservationNumber: `R-MOCK-${sequence}`,
+      reservationServiceId,
+      displayName: product?.displayName ?? null,
+      golfCourseId,
+      courseName: course.name,
+      teeTime: `${date}T${teeTime}:00+09:00`,
+      durationMinutes,
+      playType: product?.playType === 'self' ? 'self' : 'caddie',
+      partySize: quantity,
+      partyName: customerName,
+      status: 'confirmed',
+      holes: product?.holeCount ?? 18,
+      party: { players: [] },
+      // This is added by the real CourseBoard use case on its outbound Field
+      // request, rather than posted by NewReservationEditor.
+      prepaymentPolicy: 'none',
+    }
+    mockTeeReservations.push(created)
+    saveMockWrites('teeReservations', mockTeeReservations)
+    return hit({ id: created.id })
+  }
+
+  const cancelMatch = /^\/v1\/course\/reservations\/([^/]+)\/cancel$/.exec(pathname)
+  if (cancelMatch && method === 'POST') {
+    const reservationId = decodeURIComponent(cancelMatch[1] ?? '')
+    const reason = body?.reason
+    if (reason != null && typeof reason !== 'string') {
+      return error(400, 'reason must be a string')
+    }
+    if (typeof reason === 'string' && [...reason.trim()].length > 500) {
+      return error(400, 'the cancellation reason is too long')
+    }
+    const index = mockTeeReservations.findIndex(item => item.id === reservationId)
+    if (index < 0) return error(404, 'Mock Field API has no such reservation')
+    mockTeeReservations.splice(index, 1)
+    delete mockParties[reservationId]
+    saveMockWrites('teeReservations', mockTeeReservations)
+    saveMockWrites('parties', mockParties)
+    return hit(null)
+  }
+
   if (pathname === '/v1/course/course-order' && method === 'PUT') {
     const ids = Array.isArray(body?.golfCourseIds) ? (body.golfCourseIds as string[]) : []
     const known = mockCourses.map(course => course.id)

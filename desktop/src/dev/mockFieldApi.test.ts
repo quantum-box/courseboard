@@ -138,4 +138,114 @@ describe('mockFieldApi', () => {
     if (extensionStatus.kind !== 'hit') return
     expect((extensionStatus.data as { extensionKey: string }).extensionKey).toBe('golf_course')
   })
+
+  it('creates and cancels a reservation through the course-api contract', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+
+    const before = resolveMockFieldApiJson('/v1/course/tee-ledger?date=2026-07-18')
+    expect(before.kind).toBe('hit')
+    if (before.kind !== 'hit') return
+    const beforeBody = before.data as {
+      columns: Array<{
+        golfCourseId: string
+        resourceId: string
+        slots: Array<{ teeTime: string; bookedGroups: number }>
+      }>
+    }
+    const eastBefore = beforeBody.columns.find(column => column.golfCourseId === 'course_east')
+    expect(eastBefore?.resourceId).toBe('res_east')
+    expect(eastBefore?.slots.find(slot => slot.teeTime === '07:24')?.bookedGroups).toBe(0)
+
+    // prepaymentPolicy is deliberately absent here: the real CourseBoard
+    // usecase adds "none" to its outbound Field request.
+    const created = resolveMockFieldApiJson('/v1/course/reservations', {
+      method: 'POST',
+      body: JSON.stringify({
+        golfCourseId: 'course_east',
+        resourceId: 'res_east',
+        reservationServiceId: 'svc:caddie-18',
+        date: '2026-07-18',
+        teeTime: '07:24',
+        durationMinutes: 270,
+        quantity: 4,
+        customerName: '  オフライン予約  ',
+      }),
+    })
+    expect(created.kind).toBe('hit')
+    if (created.kind !== 'hit') return
+    const reservationId = (created.data as { id: string }).id
+
+    const afterCreate = resolveMockFieldApiJson('/v1/course/tee-ledger?date=2026-07-18')
+    expect(afterCreate.kind).toBe('hit')
+    if (afterCreate.kind !== 'hit') return
+    const createdSlot = (afterCreate.data as typeof beforeBody).columns
+      .find(column => column.golfCourseId === 'course_east')
+      ?.slots.find(slot => slot.teeTime === '07:24')
+    expect(createdSlot?.bookedGroups).toBe(1)
+
+    const sheet = resolveMockFieldApiJson('/v1/course/tee-sheet?date=2026-07-18')
+    expect(sheet.kind).toBe('hit')
+    if (sheet.kind !== 'hit') return
+    const createdReservation = (sheet.data as {
+      items: Array<{ id: string; partyName: string; prepaymentPolicy?: string }>
+    }).items.find(item => item.id === reservationId)
+    expect(createdReservation?.partyName).toBe('オフライン予約')
+    expect(createdReservation).not.toHaveProperty('prepaymentPolicy')
+
+    const cancelled = resolveMockFieldApiJson(
+      `/v1/course/reservations/${encodeURIComponent(reservationId)}/cancel`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ reason: '電話でキャンセル' }),
+      },
+    )
+    expect(cancelled).toEqual({ kind: 'hit', data: null })
+
+    const afterCancel = resolveMockFieldApiJson('/v1/course/tee-ledger?date=2026-07-18')
+    expect(afterCancel.kind).toBe('hit')
+    if (afterCancel.kind !== 'hit') return
+    const cancelledSlot = (afterCancel.data as typeof beforeBody).columns
+      .find(column => column.golfCourseId === 'course_east')
+      ?.slots.find(slot => slot.teeTime === '07:24')
+    expect(cancelledSlot?.bookedGroups).toBe(0)
+  })
+
+  it('requires the canonical resource and returns 409 for a full generated slot', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const request = {
+      golfCourseId: 'course_east',
+      reservationServiceId: 'svc:caddie-18',
+      date: '2026-07-18',
+      teeTime: '08:00',
+      durationMinutes: 270,
+      quantity: 4,
+      customerName: '満枠テスト',
+    }
+
+    expect(resolveMockFieldApiJson('/v1/course/reservations', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })).toEqual({ kind: 'error', status: 400, message: 'resourceId is required' })
+
+    expect(resolveMockFieldApiJson('/v1/course/reservations', {
+      method: 'POST',
+      body: JSON.stringify({ ...request, resourceId: 'res_west' }),
+    })).toMatchObject({ kind: 'error', status: 400 })
+
+    expect(resolveMockFieldApiJson('/v1/course/reservations', {
+      method: 'POST',
+      body: JSON.stringify({ ...request, resourceId: 'res_east' }),
+    })).toEqual({ kind: 'error', status: 409, message: 'この枠はちょうど埋まりました' })
+
+    expect(resolveMockFieldApiJson('/v1/course/reservations', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...request,
+        resourceId: 'res_east',
+        teeTime: '06:59',
+      }),
+    })).toEqual({ kind: 'error', status: 409, message: 'この枠はちょうど埋まりました' })
+  })
 })
