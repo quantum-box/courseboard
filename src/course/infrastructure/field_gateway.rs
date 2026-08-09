@@ -174,6 +174,38 @@ impl ReservationGateway for FieldReservationGateway {
         Ok(ReservationId::new(created.into_reservation().id))
     }
 
+    async fn cancel_reservation(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+        reason: Option<&str>,
+    ) -> Result<(), CourseError> {
+        let path = format!(
+            "/v1/erp/reservations/{}/cancel",
+            urlencoding_path(reservation_id.as_str())
+        );
+        // Field's cancel takes no body today. The reason is sent anyway so the
+        // desk's words land the moment Field can keep them (PLT-3297); an
+        // endpoint that ignores unknown fields drops it, which is the same
+        // outcome as not sending it.
+        let body = reason
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| json!({ "reason": value }));
+        // Status only, no decode: a cancel that answers 204 has done the work,
+        // and failing to parse an empty body would report the booking as still
+        // live and invite the desk to cancel it a second time.
+        field_send_unit(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            &path,
+            credentials,
+            body.as_ref(),
+        )
+        .await
+    }
+
     async fn replace_reservation(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -208,7 +240,9 @@ fn new_reservation_body(input: &NewReservation, creating: bool) -> Value {
     let mut custom_fields = party_custom_fields::merge_party(None, &input.party);
     if let Some(object) = custom_fields.as_object_mut() {
         object.insert("golfCourseId".into(), json!(input.golf_course_id.as_str()));
-        object.insert(SEED_KEY_FIELD.into(), json!(input.seed_key));
+        if let Some(seed_key) = input.seed_key.as_deref() {
+            object.insert(SEED_KEY_FIELD.into(), json!(seed_key));
+        }
     }
     let mut body = json!({
         "startsAt": input.starts_at,

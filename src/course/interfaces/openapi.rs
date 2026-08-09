@@ -52,6 +52,8 @@ impl Modify for SecurityAddon {
     paths(
         http::get_tee_sheet,
         http::get_tee_ledger,
+        http::create_reservation,
+        http::cancel_reservation,
         http::update_reservation_party,
         http::seed_demo_board,
         http::get_course_order,
@@ -117,6 +119,9 @@ impl Modify for SecurityAddon {
             http::PartyDto,
             http::PartyPlayerDto,
             http::UpdateReservationPartyRequest,
+            http::CreateReservationRequest,
+            http::CreatedReservationDto,
+            http::CancelReservationRequest,
             http::LedgerSlotDto,
             http::LedgerColumnDto,
             http::TeeLedgerResponse,

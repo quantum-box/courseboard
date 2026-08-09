@@ -1,8 +1,9 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { Fragment } from 'react'
+import { Fragment, type MouseEvent as ReactMouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { TeeReservation } from '../timeline/models'
+import type { SlotContextTarget } from './SlotContextMenu'
 import {
   currentSlotTeeTime,
   formatColumnTotals,
@@ -37,6 +38,8 @@ export function LedgerBoard({
   selection,
   selectedReservationId,
   onToggleSlot,
+  onBookSlot,
+  onOpenContextMenu,
   onSelectReservation,
   onMoveColumn,
 }: {
@@ -46,6 +49,8 @@ export function LedgerBoard({
   selection: SlotSelection | null
   selectedReservationId: string | null
   onToggleSlot: (golfCourseId: string, teeTime: string, extend: boolean) => void
+  onBookSlot: (golfCourseId: string, teeTime: string) => void
+  onOpenContextMenu: (target: SlotContextTarget) => void
   onSelectReservation: (id: string) => void
   onMoveColumn: (golfCourseId: string, delta: -1 | 1) => void
 }) {
@@ -63,6 +68,8 @@ export function LedgerBoard({
           }
           selectedReservationId={selectedReservationId}
           onToggleSlot={onToggleSlot}
+          onBookSlot={onBookSlot}
+          onOpenContextMenu={onOpenContextMenu}
           onSelectReservation={onSelectReservation}
           onMoveColumn={onMoveColumn}
         />
@@ -79,6 +86,8 @@ function LedgerColumnTable({
   selectedTeeTimes,
   selectedReservationId,
   onToggleSlot,
+  onBookSlot,
+  onOpenContextMenu,
   onSelectReservation,
   onMoveColumn,
 }: {
@@ -89,6 +98,8 @@ function LedgerColumnTable({
   selectedTeeTimes: string[]
   selectedReservationId: string | null
   onToggleSlot: (golfCourseId: string, teeTime: string, extend: boolean) => void
+  onBookSlot: (golfCourseId: string, teeTime: string) => void
+  onOpenContextMenu: (target: SlotContextTarget) => void
   onSelectReservation: (id: string) => void
   onMoveColumn: (golfCourseId: string, delta: -1 | 1) => void
 }) {
@@ -168,6 +179,8 @@ function LedgerColumnTable({
                 isSelected={selected.has(slot.teeTime)}
                 selectedReservationId={selectedReservationId}
                 onToggleSlot={onToggleSlot}
+                onBookSlot={onBookSlot}
+                onOpenContextMenu={onOpenContextMenu}
                 onSelectReservation={onSelectReservation}
               />
             ))}
@@ -186,6 +199,8 @@ function SlotRows({
   isSelected,
   selectedReservationId,
   onToggleSlot,
+  onBookSlot,
+  onOpenContextMenu,
   onSelectReservation,
 }: {
   column: LedgerColumn
@@ -195,6 +210,8 @@ function SlotRows({
   isSelected: boolean
   selectedReservationId: string | null
   onToggleSlot: (golfCourseId: string, teeTime: string, extend: boolean) => void
+  onBookSlot: (golfCourseId: string, teeTime: string) => void
+  onOpenContextMenu: (target: SlotContextTarget) => void
   onSelectReservation: (id: string) => void
 }) {
   const { t } = useTranslation(['ledger'])
@@ -231,12 +248,44 @@ function SlotRows({
     </th>
   )
 
+  /** Right-click is the way to everything a row can do, booked or not. */
+  const contextMenuHandler =
+    (item?: TeeReservation) => (event: ReactMouseEvent<HTMLTableRowElement>) => {
+      event.preventDefault()
+      onOpenContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        golfCourseId: column.golfCourseId,
+        courseName: column.courseName,
+        teeTime: slot.teeTime,
+        reservationId: item?.id,
+        reservationName: item?.partyName,
+        canBook: slot.items.length === 0 && slot.isSellable,
+      })
+    }
+
   if (slot.items.length === 0) {
     return (
-      <tr className={rowClass}>
+      <tr className={rowClass} onContextMenu={contextMenuHandler()}>
         {timeCell}
         <td className="ledger-cell-empty" colSpan={seatColumns + 1}>
-          <SlotEmptyLabel slot={slot} />
+          {/* Booking is what the desk does with an open row, and a phone
+              caller is waiting, so a plain click goes straight to the form.
+              Marking keeps the time column, and shift still extends a range. */}
+          <button
+            type="button"
+            className="ledger-empty-button"
+            onClick={event => {
+              if (event.shiftKey || !slot.isSellable) {
+                onToggleSlot(column.golfCourseId, slot.teeTime, event.shiftKey)
+                return
+              }
+              onBookSlot(column.golfCourseId, slot.teeTime)
+            }}
+            aria-pressed={isSelected}
+          >
+            <SlotEmptyLabel slot={slot} />
+          </button>
         </td>
       </tr>
     )
@@ -245,7 +294,7 @@ function SlotRows({
   return (
     <Fragment>
       {slot.items.map((item, index) => (
-        <tr key={item.id} className={rowClass}>
+        <tr key={item.id} className={rowClass} onContextMenu={contextMenuHandler(item)}>
           {index === 0 ? timeCell : null}
           <GroupCell
             item={item}

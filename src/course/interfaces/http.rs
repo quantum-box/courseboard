@@ -28,7 +28,8 @@ use crate::course::infrastructure::{
     FieldReservationGateway, MySqlSlotOverrideRepository,
 };
 use crate::course::usecase::{
-    CreateCourseUseCase, DeleteCourseUseCase, DeleteSlotOverridesUseCase,
+    CancelReservationUseCase, CreateCourseUseCase, CreateReservationInput,
+    CreateReservationUseCase, DeleteCourseUseCase, DeleteSlotOverridesUseCase,
     GenerateCourseTimeSlotsUseCase, GetCourseOrderUseCase, GetCourseScheduleUseCase,
     GetTeeLedgerUseCase, GetTeeSheetUseCase, LinkCourseResourceUseCase,
     ListCaddieAssignmentsUseCase, ListCaddiesUseCase, ListCoursesUseCase, ListProductSlotsUseCase,
@@ -654,6 +655,117 @@ pub async fn replace_course_order(
         .await
         .map_err(AppError::from)?;
     Ok(Json(CourseOrderResponse::from(order)))
+}
+
+// ─── Reservation create ─────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateReservationRequest {
+    pub golf_course_id: String,
+    #[serde(default)]
+    pub reservation_service_id: Option<String>,
+    pub date: NaiveDate,
+    /// Wall clock on the course's own day, e.g. `"07:14"`.
+    pub tee_time: String,
+    pub duration_minutes: i64,
+    pub quantity: i32,
+    pub customer_name: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedReservationDto {
+    pub id: String,
+}
+
+/// POST /v1/course/reservations
+///
+/// Books an empty tee time straight from the ledger — a walk-in or phone
+/// booking the desk takes without a customer-facing channel.
+#[utoipa::path(
+    post,
+    path = "/v1/course/reservations",
+    tag = "course",
+    request_body = CreateReservationRequest,
+    responses(
+        (status = 200, description = "Created reservation", body = CreatedReservationDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_reservation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateReservationRequest>,
+) -> Result<Json<CreatedReservationDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let use_case =
+        CreateReservationUseCase::new(reservation_gateway(&state), commercial_gateway(&state));
+    let id = use_case
+        .execute(
+            credentials,
+            CreateReservationInput {
+                // try_new, not new: a blank id would be written into the
+                // booking's custom fields and read back as a course, leaving an
+                // orphan column on the board instead of a correctable 400.
+                golf_course_id: CourseId::try_new(request.golf_course_id)
+                    .map_err(AppError::from)?,
+                reservation_service_id: request.reservation_service_id,
+                date: request.date,
+                tee_time: request.tee_time,
+                duration_minutes: request.duration_minutes,
+                quantity: request.quantity,
+                customer_name: request.customer_name,
+            },
+        )
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CreatedReservationDto { id: id.to_string() }))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelReservationRequest {
+    /// Why the desk cancelled, in their own words. Optional.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// POST /v1/course/reservations/{reservation_id}/cancel
+#[utoipa::path(
+    post,
+    path = "/v1/course/reservations/{reservation_id}/cancel",
+    tag = "course",
+    params(("reservation_id" = String, Path, description = "Reservation id")),
+    request_body = CancelReservationRequest,
+    responses(
+        (status = 204, description = "Reservation cancelled"),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn cancel_reservation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(reservation_id): Path<String>,
+    Json(request): Json<CancelReservationRequest>,
+) -> Result<StatusCode, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let use_case = CancelReservationUseCase::new(reservation_gateway(&state));
+    use_case
+        .execute(
+            credentials,
+            &ReservationId::new(reservation_id),
+            request.reason.as_deref(),
+        )
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ─── Reservation party ────────────────────────────────────────────────────────

@@ -19,6 +19,15 @@ export type SlotTone =
 export const DEFAULT_SEAT_COLUMNS = 4
 /** Matches the API's ceiling on a group. */
 export const MAX_SEAT_COLUMNS = 8
+/**
+ * How many players the desk may put in one group.
+ *
+ * A tee-off is four balls, so that is what the desk can type. Separate from
+ * [`MAX_SEAT_COLUMNS`] on purpose: a booking that already carries five players
+ * still has to draw all five, and truncating one that Field accepted would
+ * hide a player rather than prevent one.
+ */
+export const MAX_PARTY_PLAYERS = 4
 
 /**
  * How many seat columns this course needs today.

@@ -1,5 +1,13 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
-import { CalendarRange, ChevronLeft, ChevronRight, GanttChart, RefreshCw } from 'lucide-react'
+import {
+  CalendarRange,
+  ChevronLeft,
+  ChevronRight,
+  GanttChart,
+  Maximize2,
+  Minimize2,
+  RefreshCw,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -30,7 +38,14 @@ import {
 } from './courseSelection'
 import { summarizeLedger, teeTimesBetween } from './ledgerLayout'
 import type { PartyDetails, SlotMarkKind, TeeLedgerResponse } from './models'
+import {
+  NewReservationEditor,
+  type BookablePlan,
+  type NewReservationTarget,
+} from './NewReservationEditor'
+import { CancelReservationDialog } from './CancelReservationDialog'
 import { PartyEditor } from './PartyEditor'
+import { SlotContextMenu, type SlotContextTarget } from './SlotContextMenu'
 import { SlotMarkEditor } from './SlotMarkEditor'
 
 const COURSE_API = '/v1/course'
@@ -58,6 +73,59 @@ function useCurrentMinute() {
   return now
 }
 
+/**
+ * Previous day, the date itself, next day, and back to today.
+ *
+ * Shared so board-only mode keeps them: hiding the chrome is about the summary
+ * and the filters, not about pinning the desk to one day.
+ */
+function DateControls({
+  date,
+  onShift,
+  onSet,
+  labels,
+}: {
+  date: string
+  onShift: (delta: number) => void
+  onSet: (date: string) => void
+  labels: { prev: string; next: string; date: string; today: string }
+}) {
+  return (
+    <div className="ledger-date-controls">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label={labels.prev}
+        onClick={() => onShift(-1)}
+      >
+        <ChevronLeft />
+      </Button>
+      <label className="ledger-inline-field">
+        <span>{labels.date}</span>
+        <Input
+          type="date"
+          value={date}
+          onChange={event => onSet(event.target.value || todayIsoDate())}
+        />
+      </label>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label={labels.next}
+        onClick={() => onShift(1)}
+      >
+        <ChevronRight />
+      </Button>
+      <Button type="button" variant="ghost" size="sm" onClick={() => onSet(todayIsoDate())}>
+        <CalendarRange />
+        {labels.today}
+      </Button>
+    </div>
+  )
+}
+
 export function LedgerPage() {
   const { t } = useTranslation(['ledger', 'timeline', 'common'])
   const [date, setDate] = useState(todayIsoDate)
@@ -68,6 +136,11 @@ export function LedgerPage() {
   const [savingMarks, setSavingMarks] = useState(false)
   const [savingOrder, setSavingOrder] = useState(false)
   const [editingReservationId, setEditingReservationId] = useState<string | null>(null)
+  const [bookingTarget, setBookingTarget] = useState<NewReservationTarget | null>(null)
+  /** Hides the page chrome so the board itself fills the window. */
+  const [boardOnly, setBoardOnly] = useState(false)
+  const [contextTarget, setContextTarget] = useState<SlotContextTarget | null>(null)
+  const [cancellingReservationId, setCancellingReservationId] = useState<string | null>(null)
   /** Parties saved this session, so the board updates without a full reload. */
   const [localParties, setLocalParties] = useState<Record<string, PartyDetails>>({})
   const currentMinute = useCurrentMinute()
@@ -92,10 +165,25 @@ export function LedgerPage() {
     [],
   )
 
+  const productsResource = useResource(
+    () =>
+      courseboardApiJson<
+        ListResponse<{
+          reservationServiceId: string
+          displayName?: string | null
+          expectedDurationMinutes: number
+          golfCourseId?: string | null
+          maxPlayersPerGroup?: number | null
+        }>
+      >(`${COURSE_API}/reservation-products`),
+    [],
+  )
+
   const refreshAll = () => {
     ledger.refresh()
     coursesResource.refresh()
     orderResource.refresh()
+    productsResource.refresh()
   }
   useRegisterPageReload(refreshAll)
 
@@ -108,6 +196,17 @@ export function LedgerPage() {
   useEffect(() => {
     writeStoredCourseIds(selectedCourseIds)
   }, [selectedCourseIds])
+
+  // Escape is the way out of every other full-screen surface, and the toolbar
+  // that holds the exit button is exactly what this mode hides.
+  useEffect(() => {
+    if (!boardOnly) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setBoardOnly(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [boardOnly])
 
   if (ledger.error) return <ResourceError error={ledger.error} onRetry={refreshAll} />
   if (ledger.loading && !ledger.data) return <LoadingState label={t('ledger:loading')} />
@@ -145,6 +244,30 @@ export function LedgerPage() {
     column.slots.flatMap(slot => slot.items),
   )
   const editingReservation = allItems.find(item => item.id === editingReservationId) ?? null
+  const cancellingReservation =
+    allItems.find(item => item.id === cancellingReservationId) ?? null
+
+  const bookablePlans: BookablePlan[] = (productsResource.data?.items ?? []).map(product => ({
+    reservationServiceId: product.reservationServiceId,
+    label: product.displayName?.trim() || product.reservationServiceId,
+    expectedDurationMinutes: product.expectedDurationMinutes,
+    golfCourseId: product.golfCourseId,
+    maxPlayersPerGroup: product.maxPlayersPerGroup,
+  }))
+
+  // Booking is offered on a single tee time that is not already closed or full:
+  // a range selection is for marking, and a booked-out row has nothing to sell.
+  const bookableSelection = (() => {
+    if (!selection || selection.teeTimes.length !== 1) return null
+    const teeTime = selection.teeTimes[0]!
+    const column = columns.find(entry => entry.golfCourseId === selection.golfCourseId)
+    const slot = column?.slots.find(entry => entry.teeTime === teeTime)
+    // Same gate as the open row and the context menu. Without isSellable a
+    // full row would still offer booking, and nothing downstream re-checks
+    // capacity — the create call takes whatever it is given.
+    if (!column || !slot || !slot.isSellable) return null
+    return { golfCourseId: column.golfCourseId, courseName: column.courseName, teeTime }
+  })()
 
   const toggleSlot = (golfCourseId: string, teeTime: string, extend: boolean) => {
     setSelection(current => {
@@ -165,6 +288,14 @@ export function LedgerPage() {
         : [...current.teeTimes, teeTime].sort()
       return teeTimes.length > 0 ? { golfCourseId, teeTimes } : null
     })
+  }
+
+  /** Straight to the form: a caller is on the phone while this runs. */
+  const bookSlot = (golfCourseId: string, teeTime: string) => {
+    const column = columns.find(entry => entry.golfCourseId === golfCourseId)
+    if (!column) return
+    setSelection(null)
+    setBookingTarget({ golfCourseId, courseName: column.courseName, teeTime })
   }
 
   const moveColumn = async (golfCourseId: string, delta: -1 | 1) => {
@@ -249,13 +380,34 @@ export function LedgerPage() {
   }
 
   return (
-    <div className="page-stack ledger-page">
-      {unavailable.length > 0 ? (
+    <div className={`page-stack ledger-page${boardOnly ? ' is-board-only' : ''}`}>
+      {unavailable.length > 0 && !boardOnly ? (
         <Notice tone="warning" title={t('ledger:partial.title')}>
           {t('ledger:partial.description')}
         </Notice>
       ) : null}
 
+      {boardOnly ? (
+        <div className="ledger-board-only-bar">
+          {/* The day is what the desk changes most, so it stays reachable even
+              with the rest of the chrome out of the way. */}
+          <DateControls
+            date={date}
+            onShift={delta => setDate(value => shiftDate(value, delta))}
+            onSet={setDate}
+            labels={{
+              prev: t('timeline:toolbar.prevDay'),
+              next: t('timeline:toolbar.nextDay'),
+              date: t('timeline:toolbar.date'),
+              today: t('timeline:toolbar.today'),
+            }}
+          />
+          <Button type="button" variant="ghost" size="sm" onClick={() => setBoardOnly(false)}>
+            <Minimize2 />
+            {t('ledger:boardOnly.exit')}
+          </Button>
+        </div>
+      ) : (
       <div className="ledger-chrome">
         <div className="page-toolbar">
           <Button type="button" variant="ghost" size="sm" onClick={refreshAll}>
@@ -270,6 +422,10 @@ export function LedgerPage() {
           >
             <GanttChart />
             {t('timeline:title')}
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setBoardOnly(true)}>
+            <Maximize2 />
+            {t('ledger:boardOnly.enter')}
           </Button>
         </div>
 
@@ -295,38 +451,17 @@ export function LedgerPage() {
         </div>
 
         <section className="ledger-toolbar" aria-label={t('timeline:toolbar.label')}>
-          <div className="ledger-date-controls">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label={t('timeline:toolbar.prevDay')}
-              onClick={() => setDate(value => shiftDate(value, -1))}
-            >
-              <ChevronLeft />
-            </Button>
-            <label className="ledger-inline-field">
-              <span>{t('timeline:toolbar.date')}</span>
-              <Input
-                type="date"
-                value={date}
-                onChange={event => setDate(event.target.value || todayIsoDate())}
-              />
-            </label>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label={t('timeline:toolbar.nextDay')}
-              onClick={() => setDate(value => shiftDate(value, 1))}
-            >
-              <ChevronRight />
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setDate(todayIsoDate())}>
-              <CalendarRange />
-              {t('timeline:toolbar.today')}
-            </Button>
-          </div>
+          <DateControls
+            date={date}
+            onShift={delta => setDate(value => shiftDate(value, delta))}
+            onSet={setDate}
+            labels={{
+              prev: t('timeline:toolbar.prevDay'),
+              next: t('timeline:toolbar.nextDay'),
+              date: t('timeline:toolbar.date'),
+              today: t('timeline:toolbar.today'),
+            }}
+          />
           <fieldset className="ledger-course-picker">
             <legend>{t('ledger:courses.label')}</legend>
             <button
@@ -362,6 +497,7 @@ export function LedgerPage() {
 
         <p className="ledger-mark-hint">{t('ledger:marks.selectHint')}</p>
       </div>
+      )}
 
       <div className="ledger-workspace">
         {columns.length === 0 ? (
@@ -383,21 +519,53 @@ export function LedgerPage() {
             selection={selection}
             selectedReservationId={editingReservationId}
             onToggleSlot={toggleSlot}
+            onBookSlot={bookSlot}
+            onOpenContextMenu={setContextTarget}
             onSelectReservation={setEditingReservationId}
             onMoveColumn={savingOrder ? () => {} : moveColumn}
           />
         )}
       </div>
 
+      <SlotContextMenu
+        target={contextTarget}
+        onClose={() => setContextTarget(null)}
+        onBook={bookSlot}
+        onEditParty={setEditingReservationId}
+        onCancelReservation={setCancellingReservationId}
+        onSlotSettings={(golfCourseId, teeTime) =>
+          setSelection({ golfCourseId, teeTimes: [teeTime] })
+        }
+      />
+
+      <CancelReservationDialog
+        reservation={cancellingReservation}
+        onClose={() => setCancellingReservationId(null)}
+        onCancelled={() => ledger.refresh()}
+      />
+
       <SlotMarkEditor
         selection={selection}
         label={markLabel}
         saving={savingMarks}
+        canBook={bookableSelection !== null}
         onLabelChange={setMarkLabel}
         onClose={() => applyMark('closed')}
         onSpecial={() => applyMark('special_rate')}
         onClear={clearMarks}
         onCancel={() => setSelection(null)}
+        onBook={() => {
+          setBookingTarget(bookableSelection)
+          setSelection(null)
+        }}
+      />
+
+      <NewReservationEditor
+        target={bookingTarget}
+        date={date}
+        plans={bookablePlans}
+        onClose={() => setBookingTarget(null)}
+        onCreated={() => ledger.refresh()}
       />
 
       <PartyEditor

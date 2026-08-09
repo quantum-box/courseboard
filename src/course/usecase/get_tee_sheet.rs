@@ -276,6 +276,15 @@ mod tests {
         ) -> Result<(), CourseError> {
             unimplemented!("not used")
         }
+
+        async fn cancel_reservation(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &crate::course::domain::ReservationId,
+            _reason: Option<&str>,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
     }
 
     struct FakeGolfCatalogGateway {

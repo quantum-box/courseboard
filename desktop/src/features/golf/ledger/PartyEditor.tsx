@@ -8,7 +8,8 @@ import { Field, FormGrid, Notice } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import { showToast } from '../../../lib/toast'
 import type { TeeReservation } from '../timeline/models'
-import { MAX_SEAT_COLUMNS } from './ledgerLayout'
+import { DiscardGuard } from './DiscardGuard'
+import { MAX_PARTY_PLAYERS, MAX_SEAT_COLUMNS } from './ledgerLayout'
 import type { PartyDetails, PartyPlayer } from './models'
 
 /** A row being edited. Blank rows are dropped on save rather than refused. */
@@ -17,8 +18,10 @@ type DraftPlayer = { name: string; tag: string; memberNumber: string }
 function toDraft(party: PartyDetails | null | undefined, partySize: number): DraftPlayer[] {
   const players = party?.players ?? []
   // Start with one row per booked seat so the desk types into a shape that
-  // already matches the booking instead of clicking "add" four times.
-  const rows = Math.max(players.length, partySize, 1)
+  // already matches the booking instead of clicking "add" four times. A
+  // booking that already carries more than a four-ball still opens with every
+  // player it has: the cap is on what the desk adds, not on what it can read.
+  const rows = Math.max(players.length, Math.min(partySize, MAX_PARTY_PLAYERS), 1)
   return Array.from({ length: Math.min(rows, MAX_SEAT_COLUMNS) }, (_, index) => ({
     name: players[index]?.name ?? '',
     tag: players[index]?.tag ?? '',
@@ -58,25 +61,43 @@ export function PartyEditor({
   const [groupNumber, setGroupNumber] = useState('')
   const [players, setPlayers] = useState<DraftPlayer[]>([])
   const [saving, setSaving] = useState(false)
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  /** What the sheet opened with, so "changed" means changed by the desk. */
+  const [opened, setOpened] = useState('')
 
   // Reset from the booking whenever a different one is opened, so the sheet
   // never shows the previous group's names against this group's tee time.
   useEffect(() => {
     if (!reservation) return
-    setCompetitionName(reservation.party?.competitionName ?? '')
-    setOrganizer(reservation.party?.organizer ?? '')
-    setGroupNumber(
+    const competition = reservation.party?.competitionName ?? ''
+    const host = reservation.party?.organizer ?? ''
+    const number =
       typeof reservation.party?.groupNumber === 'number'
         ? String(reservation.party.groupNumber)
-        : '',
-    )
-    setPlayers(toDraft(reservation.party, reservation.partySize))
+        : ''
+    const draft = toDraft(reservation.party, reservation.partySize)
+    setCompetitionName(competition)
+    setOrganizer(host)
+    setGroupNumber(number)
+    setPlayers(draft)
+    setOpened(JSON.stringify([competition, host, number, draft]))
+    setConfirmingDiscard(false)
   }, [reservation])
 
   if (!reservation) return null
 
   const named = toPlayers(players)
   const parsedGroupNumber = Number.parseInt(groupNumber, 10)
+  const dirty =
+    JSON.stringify([competitionName, organizer, groupNumber, players]) !== opened
+  const requestClose = () => {
+    if (saving) return
+    if (dirty) {
+      setConfirmingDiscard(true)
+      return
+    }
+    onClose()
+  }
 
   const save = async () => {
     setSaving(true)
@@ -114,7 +135,7 @@ export function PartyEditor({
     <Sheet
       open
       onOpenChange={open => {
-        if (!open) onClose()
+        if (!open) requestClose()
       }}
       title={t('ledger:party.title')}
       description={t('ledger:party.description')}
@@ -214,7 +235,7 @@ export function PartyEditor({
             type="button"
             variant="ghost"
             size="sm"
-            disabled={players.length >= MAX_SEAT_COLUMNS}
+            disabled={players.length >= MAX_PARTY_PLAYERS}
             onClick={() =>
               setPlayers(rows => [...rows, { name: '', tag: '', memberNumber: '' }])
             }
@@ -225,13 +246,22 @@ export function PartyEditor({
         </section>
 
         <div className="ledger-party-actions">
-          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
+          <Button type="button" variant="ghost" onClick={requestClose} disabled={saving}>
             {t('ledger:party.cancel')}
           </Button>
           <Button type="button" variant="primary" onClick={save} disabled={saving}>
             {saving ? t('ledger:party.saving') : t('ledger:party.save')}
           </Button>
         </div>
+
+        <DiscardGuard
+          open={confirmingDiscard}
+          onKeepEditing={() => setConfirmingDiscard(false)}
+          onDiscard={() => {
+            setConfirmingDiscard(false)
+            onClose()
+          }}
+        />
       </div>
     </Sheet>
   )

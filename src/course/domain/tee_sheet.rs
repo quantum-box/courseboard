@@ -332,6 +332,25 @@ pub fn format_jst_wall_clock(date: NaiveDate, hour: u32, minute: u32, jst: Fixed
         .to_string()
 }
 
+/// Parse `HH:MM` on `date` as the instant that wall clock names in the
+/// course's own (JST) timezone — the inverse of [`format_jst_wall_clock`].
+pub fn parse_jst_tee_time(date: NaiveDate, tee_time: &str) -> Result<DateTime<Utc>, CourseError> {
+    let bad_format = || CourseError::BadRequest("tee time must look like HH:MM");
+    let (hour_str, minute_str) = tee_time.split_once(':').ok_or_else(bad_format)?;
+    if hour_str.len() != 2 || minute_str.len() != 2 {
+        return Err(bad_format());
+    }
+    let hour: u32 = hour_str.parse().map_err(|_| bad_format())?;
+    let minute: u32 = minute_str.parse().map_err(|_| bad_format())?;
+    let naive = date.and_time(NaiveTime::from_hms_opt(hour, minute, 0).ok_or_else(bad_format)?);
+    let jst = jst_offset()?;
+    Ok(jst
+        .from_local_datetime(&naive)
+        .single()
+        .unwrap_or_else(|| jst.from_utc_datetime(&naive))
+        .with_timezone(&Utc))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

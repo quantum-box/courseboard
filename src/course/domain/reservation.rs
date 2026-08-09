@@ -152,11 +152,11 @@ impl Reservation {
     }
 }
 
-/// A booking the seed writes into Field.
+/// A booking to write into Field, either from the demo seed or the desk.
 ///
-/// Not a general reservation-create command: it carries only what a demo day
-/// needs, and it carries `seed_key`, which is how a re-run finds the booking it
-/// wrote last time instead of adding a second one beside it.
+/// `seed_key` is how a seed re-run finds the booking it wrote last time
+/// instead of adding a second one beside it; `None` on a desk-created booking,
+/// which has no re-run to reconcile against.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewReservation {
     pub reservation_type_id: String,
@@ -172,7 +172,7 @@ pub struct NewReservation {
     pub customer_name: String,
     pub golf_course_id: CourseId,
     pub party: PartyDetails,
-    pub seed_key: String,
+    pub seed_key: Option<String>,
 }
 
 /// A booking the seed already wrote, as found on a re-run.

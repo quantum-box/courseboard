@@ -10,11 +10,13 @@
 
 mod auto_assign_caddies;
 mod availability_deadline;
+mod cancel_reservation;
 mod course_order;
 mod course_schedule;
 mod create_caddie;
 mod create_caddie_assignment;
 mod create_course;
+mod create_reservation;
 mod delete_caddie_availability;
 mod delete_course;
 mod export_monthly_settlement_csv;
@@ -63,6 +65,7 @@ pub use availability_deadline::{
     GetAvailabilityDeadlineUseCase, ListUnsubmittedCaddiesUseCase,
     UpsertAvailabilityDeadlineUseCase,
 };
+pub use cancel_reservation::CancelReservationUseCase;
 pub use course_order::{GetCourseOrderUseCase, ReplaceCourseOrderUseCase};
 pub use course_schedule::{
     GenerateCourseTimeSlotsUseCase, GetCourseScheduleUseCase, ReplaceCourseScheduleUseCase,
@@ -70,6 +73,7 @@ pub use course_schedule::{
 pub use create_caddie::CreateCaddieUseCase;
 pub use create_caddie_assignment::{CreateCaddieAssignmentUseCase, NameCaddieForRound};
 pub use create_course::CreateCourseUseCase;
+pub use create_reservation::{CreateReservationInput, CreateReservationUseCase};
 pub use delete_caddie_availability::DeleteCaddieAvailabilityUseCase;
 pub use delete_course::DeleteCourseUseCase;
 pub use export_monthly_settlement_csv::ExportMonthlySettlementCsvUseCase;
