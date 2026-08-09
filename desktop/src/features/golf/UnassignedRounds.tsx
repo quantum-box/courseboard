@@ -1,4 +1,4 @@
-import { Badge, Button } from '@tachyon-sdk/native-ui'
+import { Button } from '@tachyon-sdk/native-ui'
 import { UserPlus } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -8,6 +8,10 @@ import { EmptyState, LoadingState, Panel, ResourceError } from '../../components
 import { Sheet } from '../../components/Sheet'
 import { useResource } from '../../hooks/useResource'
 import { showToast } from '../../lib/toast'
+import {
+  RecommendationExplanation,
+  type RecommendationForExplanation,
+} from './RecommendationExplanation'
 
 const COURSE_API = '/v1/course'
 
@@ -30,13 +34,9 @@ type DayAssignment = {
   status: string
 }
 
-type Candidate = {
+type Candidate = RecommendationForExplanation & {
   caddieProfileId: string
   displayName: string
-  skillLevel: string
-  recommendationScore: number
-  roundsAssigned: number
-  rationale: string[]
 }
 
 /**
@@ -242,25 +242,20 @@ function NameCaddieSheet({
         {candidates.data?.items.map((candidate, index) => (
           <div
             key={candidate.caddieProfileId}
-            className="flex items-center gap-3 rounded-lg border border-border bg-background p-3"
+            className="flex items-start gap-3 rounded-lg border border-border bg-background p-3"
           >
-            <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-selected text-sm font-semibold text-primary">
-              {index + 1}
+            <div className="flex h-11 min-w-11 shrink-0 self-start items-center justify-center rounded-full bg-selected px-2 font-semibold text-primary">
+              {t('caddies:recommendations.rank', { n: String(index + 1) })}
             </div>
             <div className="min-w-0 flex-1">
               <p className="font-medium text-foreground">{candidate.displayName}</p>
-              <p className="text-xs text-muted-foreground">
-                {t('caddies:unassigned.candidateMeta', {
-                  score: String(candidate.recommendationScore),
-                  rounds: String(candidate.roundsAssigned),
-                })}
-              </p>
+              <RecommendationExplanation item={candidate} />
             </div>
-            <Badge variant="accent">{candidate.recommendationScore}</Badge>
             <Button
               type="button"
               variant="primary"
               size="sm"
+              className="min-h-11"
               disabled={saving !== null}
               onClick={() => void name(candidate)}
             >

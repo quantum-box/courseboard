@@ -647,6 +647,8 @@ fn map_recommendation(
         value.rating_average,
         value.rating_count.unwrap_or(0),
         value.rounds_assigned.unwrap_or(0),
+        None,
+        None,
         value.recommendation_score.unwrap_or(0),
         value.recommended_role.unwrap_or_else(|| "primary".into()),
         pairing_display_name,

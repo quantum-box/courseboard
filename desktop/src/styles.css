@@ -102,6 +102,66 @@ button,
   -webkit-tap-highlight-color: transparent;
 }
 
+/* A recommendation is a decision aid, not a grade. Keep the rank and its
+   factual reasons readable; the unbounded ordering value lives in disclosure. */
+.recommendation-explanation {
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.recommendation-explanation-summary {
+  margin-top: 4px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.recommendation-explanation details {
+  margin-top: 2px;
+}
+
+.recommendation-explanation summary {
+  min-height: 44px;
+  padding-block: 10px;
+  color: hsl(var(--nui-primary));
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.recommendation-explanation dl {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.recommendation-explanation dl > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr);
+  gap: 12px;
+}
+
+.recommendation-explanation dt {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.recommendation-explanation dd {
+  margin: 0;
+  color: hsl(var(--nui-foreground));
+  font-weight: 600;
+}
+
+.recommendation-order-value {
+  margin-top: 10px;
+  color: hsl(var(--nui-foreground));
+  font-weight: 600;
+}
+
+.recommendation-order-note {
+  color: hsl(var(--nui-muted-foreground));
+}
+
 .app-shell {
   display: flex;
   width: 100%;

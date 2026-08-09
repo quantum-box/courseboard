@@ -354,6 +354,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn recommendation_exposes_the_capacity_and_attendance_used_for_its_order() {
+        let ops = Arc::new(FakeOps::with(vec![caddie(
+            "cad_1",
+            "Sato",
+            true,
+            "active",
+            CaddieSkillLevel::Regular,
+        )]));
+        ops.assignments
+            .lock()
+            .expect("lock")
+            .push(standing_assignment("cad_1", "rsv_other"));
+
+        let ranked = ListCaddieRecommendationsUseCase::new(ops)
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer t",
+                    operator_id: "scc",
+                    platform_id: None,
+                },
+                RecommendationQuery {
+                    scheduled_at: Some(morning_tee_time()),
+                    ..RecommendationQuery::default()
+                },
+            )
+            .await
+            .expect("recommendations");
+
+        assert_eq!(ranked[0].remaining_rounds(), Some(1));
+        assert_eq!(ranked[0].attendance_status(), Some("not_clocked"));
+    }
+
+    #[tokio::test]
     async fn a_caddie_who_asked_for_the_day_off_is_not_offered() {
         // The shift board is where the day off was filed; offering that caddie
         // anyway makes the two screens contradict each other.

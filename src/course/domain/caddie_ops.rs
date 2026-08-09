@@ -501,6 +501,10 @@ pub struct CaddieRecommendation {
     rating_average: Option<f64>,
     rating_count: i64,
     rounds_assigned: i64,
+    #[getter(copy)]
+    remaining_rounds: Option<i64>,
+    #[getter(skip)]
+    attendance_status: Option<String>,
     recommendation_score: i32,
     #[getter(skip)]
     recommended_role: String,
@@ -519,6 +523,8 @@ impl CaddieRecommendation {
         rating_average: Option<f64>,
         rating_count: i64,
         rounds_assigned: i64,
+        remaining_rounds: Option<i64>,
+        attendance_status: Option<String>,
         recommendation_score: i32,
         recommended_role: impl Into<String>,
         pairing_display_name: Option<String>,
@@ -531,6 +537,8 @@ impl CaddieRecommendation {
             rating_average,
             rating_count: rating_count.max(0),
             rounds_assigned: rounds_assigned.max(0),
+            remaining_rounds: remaining_rounds.map(|value| value.max(0)),
+            attendance_status,
             recommendation_score,
             recommended_role: recommended_role.into(),
             pairing_display_name,
@@ -548,6 +556,10 @@ impl CaddieRecommendation {
 
     pub fn recommended_role(&self) -> &str {
         &self.recommended_role
+    }
+
+    pub fn attendance_status(&self) -> Option<&str> {
+        self.attendance_status.as_deref()
     }
 
     pub fn pairing_display_name(&self) -> Option<&str> {

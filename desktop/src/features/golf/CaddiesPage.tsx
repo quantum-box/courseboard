@@ -72,6 +72,11 @@ import {
 import { SectionErrorBoundary } from '../../components/SectionErrorBoundary'
 import { YearMonthPicker, useYearMonthValue } from '../../components/YearMonthPicker'
 import { weekdayIndexes, weekdayLabel } from './models'
+import {
+  RecommendationExplanation,
+  type RecommendationAttendanceStatus,
+  type RecommendationForExplanation,
+} from './RecommendationExplanation'
 import { useResource } from '../../hooks/useResource'
 import { navigate, useNavigationGuard } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
@@ -148,17 +153,10 @@ type CaddieAssignment = {
   metadataJson?: unknown
 }
 
-type CaddieRecommendation = {
+type CaddieRecommendation = RecommendationForExplanation & {
   caddieProfileId: string
   displayName: string
-  skillLevel: string
-  ratingAverage?: number | null
-  ratingCount: number
-  roundsAssigned: number
-  recommendationScore: number
   recommendedRole: string
-  pairingDisplayName?: string | null
-  rationale: string[]
 }
 
 type AttendanceSnapshot = {
@@ -1268,7 +1266,7 @@ function RecommendationsPanel({
       title={t('caddies:recommendations.title')}
       description={t('caddies:recommendations.description')}
       actions={(
-        <Button type="button" variant="ghost" size="sm" className="min-h-9" onClick={resource.refresh}>
+        <Button type="button" variant="ghost" size="sm" className="min-h-11" onClick={resource.refresh}>
           <RefreshCw /> {t('common:action.refresh')}
         </Button>
       )}
@@ -1284,36 +1282,26 @@ function RecommendationsPanel({
       <div className="space-y-2">
         {resource.data?.items.map((item, index) => (
           <div key={item.caddieProfileId} className="flex gap-3 rounded-lg border border-border bg-background p-3">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-selected font-semibold text-primary">
-              {index + 1}
+            <div className="flex h-11 min-w-11 shrink-0 self-start items-center justify-center rounded-full bg-selected px-2 font-semibold text-primary">
+              {t('caddies:recommendations.rank', { n: String(index + 1) })}
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <p className="font-medium text-foreground">{item.displayName}</p>
                 <Badge variant="neutral">{skillLabel(item.skillLevel)}</Badge>
-                <Badge variant="accent">
-                  {t('caddies:recommendations.score', { n: String(item.recommendationScore) })}
-                </Badge>
                 {(() => {
-                  const reason = offDutyReason(attendance.get(item.caddieProfileId))
+                  const status = item.attendanceStatus
+                    ?? attendance.get(item.caddieProfileId) as RecommendationAttendanceStatus | undefined
+                  const reason = offDutyReason(status)
                   return reason ? (
                     <Badge variant="warning">{t(`caddies:offDuty.${reason}`)}</Badge>
                   ) : null
                 })()}
               </div>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {t('caddies:recommendations.meta', {
-                  role: roleLabel(item.recommendedRole),
-                  rounds: String(item.roundsAssigned),
-                  rating: item.ratingAverage?.toFixed(1) ?? '—',
-                })}
-              </p>
-              {item.pairingDisplayName ? (
-                <p className="mt-1 text-xs text-foreground">
-                  {t('caddies:recommendations.pair', { name: item.pairingDisplayName })}
-                </p>
-              ) : null}
-              <RationaleText rationale={item.rationale} />
+              <RecommendationExplanation
+                item={item}
+                attendanceFallback={attendance.get(item.caddieProfileId) as RecommendationAttendanceStatus | undefined}
+              />
             </div>
           </div>
         ))}
