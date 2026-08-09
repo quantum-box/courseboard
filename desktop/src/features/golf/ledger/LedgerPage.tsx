@@ -73,6 +73,59 @@ function useCurrentMinute() {
   return now
 }
 
+/**
+ * Previous day, the date itself, next day, and back to today.
+ *
+ * Shared so board-only mode keeps them: hiding the chrome is about the summary
+ * and the filters, not about pinning the desk to one day.
+ */
+function DateControls({
+  date,
+  onShift,
+  onSet,
+  labels,
+}: {
+  date: string
+  onShift: (delta: number) => void
+  onSet: (date: string) => void
+  labels: { prev: string; next: string; date: string; today: string }
+}) {
+  return (
+    <div className="ledger-date-controls">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label={labels.prev}
+        onClick={() => onShift(-1)}
+      >
+        <ChevronLeft />
+      </Button>
+      <label className="ledger-inline-field">
+        <span>{labels.date}</span>
+        <Input
+          type="date"
+          value={date}
+          onChange={event => onSet(event.target.value || todayIsoDate())}
+        />
+      </label>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        aria-label={labels.next}
+        onClick={() => onShift(1)}
+      >
+        <ChevronRight />
+      </Button>
+      <Button type="button" variant="ghost" size="sm" onClick={() => onSet(todayIsoDate())}>
+        <CalendarRange />
+        {labels.today}
+      </Button>
+    </div>
+  )
+}
+
 export function LedgerPage() {
   const { t } = useTranslation(['ledger', 'timeline', 'common'])
   const [date, setDate] = useState(todayIsoDate)
@@ -331,7 +384,19 @@ export function LedgerPage() {
 
       {boardOnly ? (
         <div className="ledger-board-only-bar">
-          <span className="ledger-board-only-date">{date}</span>
+          {/* The day is what the desk changes most, so it stays reachable even
+              with the rest of the chrome out of the way. */}
+          <DateControls
+            date={date}
+            onShift={delta => setDate(value => shiftDate(value, delta))}
+            onSet={setDate}
+            labels={{
+              prev: t('timeline:toolbar.prevDay'),
+              next: t('timeline:toolbar.nextDay'),
+              date: t('timeline:toolbar.date'),
+              today: t('timeline:toolbar.today'),
+            }}
+          />
           <Button type="button" variant="ghost" size="sm" onClick={() => setBoardOnly(false)}>
             <Minimize2 />
             {t('ledger:boardOnly.exit')}
@@ -381,38 +446,17 @@ export function LedgerPage() {
         </div>
 
         <section className="ledger-toolbar" aria-label={t('timeline:toolbar.label')}>
-          <div className="ledger-date-controls">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label={t('timeline:toolbar.prevDay')}
-              onClick={() => setDate(value => shiftDate(value, -1))}
-            >
-              <ChevronLeft />
-            </Button>
-            <label className="ledger-inline-field">
-              <span>{t('timeline:toolbar.date')}</span>
-              <Input
-                type="date"
-                value={date}
-                onChange={event => setDate(event.target.value || todayIsoDate())}
-              />
-            </label>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label={t('timeline:toolbar.nextDay')}
-              onClick={() => setDate(value => shiftDate(value, 1))}
-            >
-              <ChevronRight />
-            </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setDate(todayIsoDate())}>
-              <CalendarRange />
-              {t('timeline:toolbar.today')}
-            </Button>
-          </div>
+          <DateControls
+            date={date}
+            onShift={delta => setDate(value => shiftDate(value, delta))}
+            onSet={setDate}
+            labels={{
+              prev: t('timeline:toolbar.prevDay'),
+              next: t('timeline:toolbar.nextDay'),
+              date: t('timeline:toolbar.date'),
+              today: t('timeline:toolbar.today'),
+            }}
+          />
           <fieldset className="ledger-course-picker">
             <legend>{t('ledger:courses.label')}</legend>
             <button

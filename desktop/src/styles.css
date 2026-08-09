@@ -4019,18 +4019,24 @@ button,
   flex: none;
 }
 
+/* The columns take the whole window, not the 68vh a page-embedded board is
+ * capped at: the point of this mode is to see more rows at once. */
+.ledger-page.is-board-only .ledger-board {
+  align-items: stretch;
+  min-height: 100%;
+}
+
+.ledger-page.is-board-only .ledger-column-scroll {
+  max-height: none;
+  flex: 1;
+}
+
 .ledger-board-only-bar {
   display: flex;
   flex: none;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-}
-
-.ledger-board-only-date {
-  font-family: var(--nui-font-mono);
-  font-size: 15px;
-  font-weight: 700;
 }
 
 .ledger-summary {
