@@ -129,4 +129,7 @@ export const common = {
     toLight: 'ライト表示にする',
     toDark: 'ダーク表示にする',
   },
+  notification: {
+    label: '操作結果のお知らせ',
+  },
 } as const

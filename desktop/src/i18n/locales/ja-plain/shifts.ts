@@ -22,6 +22,8 @@ export const shifts: DeepPartial<typeof source> = {
     available: '可',
     unknown: '？',
     assignments: '担当 {{n}}件',
+    aria: '{{name}}、{{date}}、{{state}}',
+    ariaWithAssignments: '{{name}}、{{date}}、{{state}}、担当{{n}}件',
   },
   employment: {
     inactive: 'しばらく休んでいる',
@@ -34,6 +36,12 @@ export const shifts: DeepPartial<typeof source> = {
     warningTitle: '休みなしが続いている人がいます',
     warningBody: '{{names}} は担当がある日や仕事に出られる日が {{n}}日以上つづいています。休みを入れられないか確かめてください。',
     threshold: '6日以上つづくと色がつきます',
+  },
+  navigation: {
+    label: '表に出す週を変える',
+    previous: '前の週',
+    current: '今週',
+    next: '次の週',
   },
   empty: {
     title: 'この月の予定はまだありません',

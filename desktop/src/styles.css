@@ -113,6 +113,17 @@ button,
   color: hsl(var(--nui-foreground));
 }
 
+/* Notifications are status text, not controls. They must never intercept the
+   next click even if a timer is paused while the page is in the background. */
+.courseboard-toaster,
+.courseboard-toaster [data-sonner-toast] {
+  pointer-events: none;
+}
+
+.courseboard-toaster [data-sonner-toast][data-styled='true'] {
+  font-size: 16px;
+}
+
 .desktop-sidebar {
   position: relative;
   z-index: 40;
@@ -3508,73 +3519,166 @@ button,
 
 /* ---------- Shift board ---------- */
 
+.shift-board-page {
+  --shift-board-name-width: 176px;
+  --shift-board-streak-width: 64px;
+}
+
+.shift-board-toolbar,
+.shift-board-toolbar .field-label,
+.shift-board-toolbar .text-sm,
+.shift-board-threshold {
+  font-size: 16px;
+}
+
+.shift-board-toolbar :is(button, input, select) {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.shift-board-month-picker {
+  width: min(100%, 300px);
+}
+
+.shift-board-toolbar [role='group'] .native-select:first-of-type {
+  width: 104px;
+  min-width: 104px;
+}
+
+.shift-board-toolbar [role='group'] .native-select:last-of-type {
+  width: 72px;
+  min-width: 72px;
+}
+
+.shift-board-tools {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.shift-board-navigation {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.shift-board-navigation button {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 16px;
+}
+
 .shift-board-scroll {
-  overflow-x: auto;
+  position: relative;
+  max-height: clamp(320px, calc(100dvh - 260px), 720px);
+  overflow: auto;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  outline: none;
+  scrollbar-gutter: stable;
+}
+
+.shift-board-scroll:focus-visible {
+  box-shadow: 0 0 0 2px hsl(var(--nui-ring) / .35);
 }
 
 .shift-board {
   border-collapse: collapse;
   min-width: 100%;
-  font-size: 12px;
+  width: max-content;
+  font-size: 16px;
+  line-height: 1.5;
 }
 
 .shift-board th,
 .shift-board td {
   border: 1px solid hsl(var(--nui-border));
-  padding: 0;
+  min-width: 32px;
+  height: 44px;
+  padding: 0 2px;
   text-align: center;
-  min-width: 26px;
-  height: 30px;
+  vertical-align: middle;
 }
 
 .shift-board thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 48px;
   background: hsl(var(--nui-muted) / .5);
   font-weight: 500;
   color: hsl(var(--nui-muted-foreground));
-  padding: 3px 2px;
+  padding: 2px;
 }
 
 .shift-board thead .shift-board-day {
   display: block;
-  font-size: 12px;
+  font-size: 16px;
+  line-height: 20px;
   color: hsl(var(--nui-foreground));
 }
 
 .shift-board thead .shift-board-dow {
   display: block;
-  font-size: 9px;
+  font-size: 16px;
+  line-height: 20px;
 }
 
 .shift-board .shift-board-name {
   position: sticky;
   left: 0;
-  z-index: 1;
+  z-index: 2;
+  width: var(--shift-board-name-width);
+  min-width: var(--shift-board-name-width);
+  max-width: var(--shift-board-name-width);
   background: hsl(var(--nui-background));
-  min-width: 108px;
-  padding: 3px 10px;
+  padding: 4px 10px;
   text-align: left;
   font-weight: 500;
-  white-space: nowrap;
+}
+
+.shift-board thead .shift-board-name {
+  z-index: 5;
+  background: hsl(var(--nui-muted));
 }
 
 .shift-board-profile {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
+  display: grid;
+  align-items: start;
+  gap: 2px;
+}
+
+.shift-board-profile-name {
+  overflow-wrap: anywhere;
 }
 
 .shift-board-profile-status {
   color: hsl(var(--nui-muted-foreground));
-  font-size: 10px;
+  font-size: 16px;
   font-weight: 400;
 }
 
 .shift-board .shift-board-streak {
-  min-width: 44px;
-  padding: 3px 6px;
+  position: sticky;
+  left: var(--shift-board-name-width);
+  z-index: 2;
+  width: var(--shift-board-streak-width);
+  min-width: var(--shift-board-streak-width);
+  max-width: var(--shift-board-streak-width);
+  padding: 4px 6px;
+  background: hsl(var(--nui-background));
   font-variant-numeric: tabular-nums;
   color: hsl(var(--nui-muted-foreground));
+}
+
+.shift-board thead .shift-board-streak {
+  z-index: 4;
+  background: hsl(var(--nui-muted));
 }
 
 .shift-board .shift-board-streak-warning {
@@ -3603,26 +3707,29 @@ button,
   display: inline-flex;
   width: 100%;
   justify-content: center;
-  font-size: 11px;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
 }
 
 .shift-board-legend {
   display: flex;
+  min-width: 0;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-top: 10px;
-  font-size: 11px;
+  gap: 8px 12px;
+  font-size: 16px;
+  line-height: 24px;
   color: hsl(var(--nui-muted-foreground));
 }
 
 .shift-board-legend i {
   display: inline-block;
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   margin-right: 4px;
   border: 1px solid hsl(var(--nui-border));
   border-radius: 3px;
-  vertical-align: -2px;
+  vertical-align: -3px;
 }
 
 .shift-board-legend i[data-kind='assigned'],
@@ -3633,6 +3740,22 @@ button,
 .shift-board-legend i[data-kind='light'] { background: hsl(var(--nui-warning) / .2); }
 .shift-board-legend i[data-kind='unknown'] { background: hsl(var(--nui-warning) / .3); }
 .shift-board-legend i[data-long-streak] { background: hsl(var(--nui-destructive) / .25); }
+
+@media (max-width: 800px) {
+  .shift-board-page {
+    --shift-board-name-width: 152px;
+    --shift-board-streak-width: 60px;
+  }
+
+  .shift-board-tools {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .shift-board-navigation {
+    justify-content: flex-start;
+  }
+}
 
 /* Slots a plan carried before inventory moved to the course. Read-only, so it
    reads as a list rather than as a table of fields. */

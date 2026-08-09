@@ -24,6 +24,8 @@ export const shifts = {
     unknown: '？',
     tooltip: '{{name}} · {{date}}',
     assignments: '割当 {{n}}件',
+    aria: '{{name}}、{{date}}、{{state}}',
+    ariaWithAssignments: '{{name}}、{{date}}、{{state}}、割当{{n}}件',
   },
   employment: {
     inactive: '休んでいる',
@@ -40,6 +42,12 @@ export const shifts = {
   table: {
     caddie: 'キャディ',
     aria: '{{month}} のシフト表',
+  },
+  navigation: {
+    label: '表示する週を移動',
+    previous: '前の週',
+    current: '今週',
+    next: '次の週',
   },
   empty: {
     title: 'この月の予定はありません',

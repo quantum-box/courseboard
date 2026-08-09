@@ -27,6 +27,8 @@ export const shifts: DeepPartial<typeof source> = {
     unknown: '?',
     tooltip: '{{name}} · {{date}}',
     assignments: '{{n}} assignments',
+    aria: '{{name}}, {{date}}, {{state}}',
+    ariaWithAssignments: '{{name}}, {{date}}, {{state}}, {{n}} assignments',
   },
   employment: {
     inactive: 'On leave',
@@ -43,6 +45,12 @@ export const shifts: DeepPartial<typeof source> = {
   table: {
     caddie: 'Caddie',
     aria: 'Shift board for {{month}}',
+  },
+  navigation: {
+    label: 'Move the visible week',
+    previous: 'Previous week',
+    current: 'This week',
+    next: 'Next week',
   },
   empty: {
     title: 'Nothing planned this month',
