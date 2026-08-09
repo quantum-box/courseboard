@@ -14,16 +14,18 @@ use utoipa::{IntoParams, ToSchema};
 use super::openapi::ErrorBody;
 use serde_json::Value;
 
-use super::http::{commercial_gateway, credentials, ItemsResponse};
+use super::http::{
+    catalog_gateway, commercial_gateway, credentials, reservation_gateway, ItemsResponse,
+};
 use crate::course::domain::{
-    BudgetAchievement, CourseId, DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement,
-    ReservationPolicy, UpdateExtensionConfig, UpdateReservationPolicy, UpsertDailyBudget,
+    BudgetAchievement, CourseId, DailyBudget, DailyBudgetQuery, ExtensionStatus, ReservationPolicy,
+    UpdateExtensionConfig, UpdateReservationPolicy, UpsertDailyBudget,
 };
 use crate::course::usecase::{
     ExportMonthlySettlementCsvUseCase, GetExtensionStatusUseCase, GetMonthlySettlementUseCase,
     GetReservationPolicyUseCase, ImportDailyBudgetsCsvUseCase, ListBudgetAchievementsUseCase,
-    ListDailyBudgetsUseCase, UpdateExtensionConfigUseCase, UpdateReservationPolicyUseCase,
-    UpsertDailyBudgetUseCase,
+    ListDailyBudgetsUseCase, MonthlySettlementView, UpdateExtensionConfigUseCase,
+    UpdateReservationPolicyUseCase, UpsertDailyBudgetUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -443,14 +445,31 @@ pub struct UnpaidCancellationDto {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct SettlementReservationDto {
+    pub reservation_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reservation_number: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub customer_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tee_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub course_name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct SettlementDrilldownDto {
     pub reservation_ids: Vec<String>,
+    pub reservation_items: Vec<SettlementReservationDto>,
+    pub reservation_details_unavailable: bool,
     pub unpaid_cancellation_reservation_ids: Vec<String>,
     pub unpaid_cancellation_items: Vec<UnpaidCancellationDto>,
 }
 
-impl From<&MonthlySettlement> for MonthlySettlementDto {
-    fn from(value: &MonthlySettlement) -> Self {
+impl From<&MonthlySettlementView> for MonthlySettlementDto {
+    fn from(view: &MonthlySettlementView) -> Self {
+        let value = view.report();
         Self {
             period: SettlementPeriodDto {
                 year_month: value.period().year_month().to_string(),
@@ -485,6 +504,18 @@ impl From<&MonthlySettlement> for MonthlySettlementDto {
                     .iter()
                     .map(ToString::to_string)
                     .collect(),
+                reservation_items: view
+                    .reservations()
+                    .iter()
+                    .map(|item| SettlementReservationDto {
+                        reservation_id: item.reservation_id().to_string(),
+                        reservation_number: item.reservation_number().map(str::to_string),
+                        customer_name: item.customer_name().map(str::to_string),
+                        tee_time: item.tee_time().map(str::to_string),
+                        course_name: item.course_name().map(str::to_string),
+                    })
+                    .collect(),
+                reservation_details_unavailable: view.reservation_details_unavailable(),
                 unpaid_cancellation_reservation_ids: value
                     .unpaid_cancellation_reservation_ids()
                     .iter()
@@ -535,7 +566,11 @@ pub async fn get_monthly_settlement(
     Query(query): Query<YearMonthQuery>,
 ) -> Result<Json<MonthlySettlementDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = GetMonthlySettlementUseCase::new(commercial_gateway(&state));
+    let use_case = GetMonthlySettlementUseCase::new(
+        commercial_gateway(&state),
+        reservation_gateway(&state),
+        catalog_gateway(&state),
+    );
     let report = use_case
         .execute(credentials, &query.year_month)
         .await

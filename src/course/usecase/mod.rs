@@ -72,7 +72,9 @@ pub use export_payroll_csv::ExportPayrollCsvUseCase;
 pub use get_attendance_snapshot::GetAttendanceSnapshotUseCase;
 pub use get_caddie_supply::GetCaddieSupplyUseCase;
 pub use get_extension_status::GetExtensionStatusUseCase;
-pub use get_monthly_settlement::GetMonthlySettlementUseCase;
+pub use get_monthly_settlement::{
+    GetMonthlySettlementUseCase, MonthlySettlementReservation, MonthlySettlementView,
+};
 pub use get_payroll_summary::GetPayrollSummaryUseCase;
 pub use get_reservation_policy::GetReservationPolicyUseCase;
 pub use get_tee_ledger::GetTeeLedgerUseCase;

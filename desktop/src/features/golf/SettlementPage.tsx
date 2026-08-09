@@ -51,6 +51,14 @@ type GolfUnpaidCancellationItem = {
   invoiceId?: string | null
 }
 
+export type GolfSettlementReservationItem = {
+  reservationId: string
+  reservationNumber?: string | null
+  customerName?: string | null
+  teeTime?: string | null
+  courseName?: string | null
+}
+
 type GolfMonthlySettlementReport = {
   period: GolfMonthlySettlementPeriod
   reservations: {
@@ -77,9 +85,44 @@ type GolfMonthlySettlementReport = {
   }
   drilldown: {
     reservationIds: string[]
+    reservationItems?: GolfSettlementReservationItem[]
+    reservationDetailsUnavailable?: boolean
     unpaidCancellationReservationIds: string[]
     unpaidCancellationItems: GolfUnpaidCancellationItem[]
   }
+}
+
+function nonBlank(value?: string | null) {
+  const normalized = value?.trim()
+  return normalized || null
+}
+
+/** Keep the monthly total's membership, then sort readable rows by tee time. */
+export function settlementReservationRows(
+  ids: string[],
+  items: GolfSettlementReservationItem[] = [],
+) {
+  const byId = new Map(items.map(item => [item.reservationId, item] as const))
+  return ids
+    .map(id => byId.get(id) ?? { reservationId: id })
+    .sort((left, right) => {
+      const leftTime = nonBlank(left.teeTime)
+      const rightTime = nonBlank(right.teeTime)
+      if (leftTime && rightTime) return leftTime.localeCompare(rightTime)
+      if (leftTime) return -1
+      if (rightTime) return 1
+      return left.reservationId.localeCompare(right.reservationId)
+    })
+}
+
+function settlementTeeTimeLabel(value?: string | null) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2})/.exec(value ?? '')
+  if (!match) return nonBlank(value)
+  return i18next.t('settlement:reservations.dateTime', {
+    month: String(Number(match[2])),
+    day: String(Number(match[3])),
+    time: match[4],
+  })
 }
 
 type IssueSquareInvoiceResponse = {
@@ -246,6 +289,18 @@ export function SettlementPage() {
     ),
     [report],
   )
+  const reservationRows = useMemo(
+    () => settlementReservationRows(
+      report?.drilldown.reservationIds ?? [],
+      report?.drilldown.reservationItems,
+    ),
+    [report],
+  )
+  const reservationDetailsUnavailable = Boolean(
+    report?.drilldown.reservationDetailsUnavailable
+      || (report?.drilldown.reservationIds.length
+        && report.drilldown.reservationItems === undefined),
+  )
 
   return (
     <div className="page-stack">
@@ -354,12 +409,13 @@ export function SettlementPage() {
             ) : null}
           </Panel>
 
-          <div className="grid gap-4 xl:grid-cols-2">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
             <Panel
+              className="settlement-reservations-panel"
               title={t('settlement:reservations.title')}
               description={t('settlement:reservations.description')}
               actions={(
-                <Badge variant="neutral">
+                <Badge variant="neutral" className="settlement-reservation-count">
                   {t('settlement:reservations.badge', {
                     n: String(report.drilldown.reservationIds.length),
                   })}
@@ -368,17 +424,49 @@ export function SettlementPage() {
             >
               {report.drilldown.reservationIds.length === 0 ? (
                 <EmptyState title={t('settlement:reservations.empty')} />
+              ) : reservationDetailsUnavailable ? (
+                <Notice tone="warning" title={t('settlement:reservations.unavailable.title')}>
+                  {t('settlement:reservations.unavailable.description')}
+                </Notice>
               ) : (
-                <div className="flex max-h-56 flex-wrap gap-1 overflow-auto rounded-md border border-border bg-muted/20 p-3">
-                  {report.drilldown.reservationIds.map(id => (
-                    <code
-                      key={id}
-                      className="rounded-sm border border-border bg-background px-1.5 py-1 text-2xs text-subtle-foreground"
-                    >
-                      {id}
-                    </code>
-                  ))}
-                </div>
+                <DataTable
+                  rows={reservationRows}
+                  rowKey={row => row.reservationId}
+                  columns={[
+                    {
+                      key: 'teeTime',
+                      header: t('settlement:reservations.table.dateTime'),
+                      cell: row => settlementTeeTimeLabel(row.teeTime)
+                        ?? t('settlement:reservations.unknown.dateTime'),
+                    },
+                    {
+                      key: 'customer',
+                      header: t('settlement:reservations.table.customer'),
+                      cell: row => nonBlank(row.customerName) ?? (
+                        <div className="settlement-reservation-unavailable">
+                          <strong>{t('settlement:reservations.unknown.customer')}</strong>
+                          <span>
+                            {t('settlement:reservations.systemNumber', {
+                              id: row.reservationId,
+                            })}
+                          </span>
+                        </div>
+                      ),
+                    },
+                    {
+                      key: 'course',
+                      header: t('settlement:reservations.table.course'),
+                      cell: row => nonBlank(row.courseName)
+                        ?? t('settlement:reservations.unknown.course'),
+                    },
+                    {
+                      key: 'reservationNumber',
+                      header: t('settlement:reservations.table.number'),
+                      cell: row => nonBlank(row.reservationNumber)
+                        ?? t('settlement:reservations.unknown.number'),
+                    },
+                  ]}
+                />
               )}
             </Panel>
             <Panel

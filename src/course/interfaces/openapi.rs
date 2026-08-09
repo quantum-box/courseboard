@@ -177,6 +177,7 @@ impl Modify for SecurityAddon {
             http_commercial::SettlementCancellationsDto,
             http_commercial::SettlementSquareDto,
             http_commercial::UnpaidCancellationDto,
+            http_commercial::SettlementReservationDto,
             http_commercial::SettlementDrilldownDto,
             http_commercial::YearMonthQuery,
             http_commercial::ExtensionStatusDto,

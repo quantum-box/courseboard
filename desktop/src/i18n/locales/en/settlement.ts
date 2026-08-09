@@ -40,11 +40,28 @@ export const settlement: DeepPartial<typeof source> = {
     warning: 'There are notes on payment matching',
   },
   reservations: {
-    title: 'Bookings this month (internal IDs)',
-    description:
-      'Internal booking IDs included in the total. This report cannot resolve booking numbers, so only IDs are listed.',
+    title: 'Bookings this month',
+    description: 'Compare customers, tee times, and courses with the revenue and payments in this close.',
     badge: '{{n}} bookings',
     empty: 'No bookings in range',
+    dateTime: '{{month}}/{{day}} {{time}}',
+    systemNumber: 'Lookup number: {{id}}',
+    table: {
+      dateTime: 'Tee time',
+      customer: 'Customer',
+      course: 'Course',
+      number: 'Booking number',
+    },
+    unknown: {
+      dateTime: 'Tee time unavailable',
+      customer: 'Customer name unavailable',
+      course: 'Course unavailable',
+      number: 'Booking number unavailable',
+    },
+    unavailable: {
+      title: 'Could not load booking details',
+      description: 'The monthly totals are still available. Reload before reconciling individual bookings.',
+    },
   },
   unpaidCancellations: {
     title: 'Unpaid cancellations',

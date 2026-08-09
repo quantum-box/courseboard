@@ -908,6 +908,7 @@ function settlementReport(yearMonth: string) {
   const [year, month] = yearMonth.split('-').map(Number)
   const startDate = `${yearMonth}-01`
   const endDate = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10)
+  const reservationIds = ['res_mock_1', 'res_mock_2']
   return {
     period: { yearMonth, startDate, endDate },
     reservations: {
@@ -933,7 +934,18 @@ function settlementReport(yearMonth: string) {
       warning: null,
     },
     drilldown: {
-      reservationIds: ['res_mock_1', 'res_mock_2'],
+      reservationIds,
+      reservationItems: reservationIds.map(id => {
+        const reservation = mockTeeReservations.find(item => item.id === id)!
+        return {
+          reservationId: reservation.id,
+          reservationNumber: reservation.reservationNumber,
+          customerName: reservation.partyName,
+          teeTime: `${yearMonth}${reservation.teeTime.slice(7)}`,
+          courseName: reservation.courseName,
+        }
+      }),
+      reservationDetailsUnavailable: false,
       unpaidCancellationReservationIds: ['res_mock_cancel_1'],
       unpaidCancellationItems: [
         {

@@ -1097,6 +1097,51 @@ button,
 .data-table tbody tr:hover { background: hsl(var(--nui-muted) / .55); }
 .data-table .clickable-row { cursor: pointer; outline: none; }
 .data-table .clickable-row:focus-visible { box-shadow: inset 2px 0 hsl(var(--nui-primary)), inset 0 0 0 1px hsl(var(--nui-ring) / .4); background: hsl(var(--nui-selected)); }
+
+/* Monthly close is a reconciliation screen: every booking row must remain
+   readable while the operator compares several entries at once. */
+.settlement-reservations-panel .panel-header h2,
+.settlement-reservations-panel .panel-header p,
+.settlement-reservation-count,
+.settlement-reservations-panel .data-table {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.settlement-reservations-panel .data-table-scroll {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.settlement-reservations-panel .data-table th {
+  height: 44px;
+  font-size: 16px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.settlement-reservations-panel .data-table td {
+  min-height: 44px;
+  padding-block: 10px;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.settlement-reservation-unavailable {
+  display: grid;
+  gap: 2px;
+}
+
+.settlement-reservation-unavailable span {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+}
+
+.settlement-reservations-panel .data-table td::before {
+  font-size: 16px;
+  line-height: 24px;
+}
+
 .align-left { text-align: left; }
 .align-center { text-align: center; }
 .align-right { text-align: right; }

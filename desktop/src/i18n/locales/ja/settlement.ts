@@ -36,10 +36,28 @@ export const settlement = {
     warning: '決済の照合に気をつける点があります',
   },
   reservations: {
-    title: 'この月の予約（管理用ID）',
-    description: '集計に入っている予約の管理用IDです。この集計では予約番号を取れないため、IDだけを並べています。',
+    title: 'この月の予約',
+    description: 'お客さま、利用日時、コースを並べて、売上や入金と突き合わせます。',
     badge: '{{n}} 件',
     empty: '対象の予約はありません',
+    dateTime: '{{month}}月{{day}}日 {{time}}',
+    systemNumber: '予約を調べるための番号: {{id}}',
+    table: {
+      dateTime: '利用日時',
+      customer: 'お客さま',
+      course: 'コース',
+      number: '予約番号',
+    },
+    unknown: {
+      dateTime: '利用日時を確認できません',
+      customer: 'お客さま名を確認できません',
+      course: 'コース名を確認できません',
+      number: '予約番号を確認できません',
+    },
+    unavailable: {
+      title: '予約の詳しい情報を読み込めませんでした',
+      description: '月の集計は表示できます。もう一度読み込んでから、予約との突き合わせを行ってください。',
+    },
   },
   unpaidCancellations: {
     title: '未入金のキャンセル',
