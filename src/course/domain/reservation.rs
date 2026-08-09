@@ -166,12 +166,21 @@ pub struct NewReservation {
     /// sheet reads the play type off the product behind it. A booking without
     /// one reads as self-play whatever the desk meant.
     pub reservation_service_id: Option<String>,
+    /// Generic Field inventory resource selected on the ledger.
+    ///
+    /// The demo seed predates generated inventory and may leave this absent;
+    /// operator-entered reservations must carry it so Field consumes the
+    /// generated row instead of creating a compatibility `manual:` slot.
+    pub reservation_resource_id: Option<ResourceId>,
     pub starts_at: DateTime<Utc>,
     pub ends_at: DateTime<Utc>,
     pub quantity: i32,
     pub customer_name: String,
     pub golf_course_id: CourseId,
     pub party: PartyDetails,
+    /// Explicit per-booking payment policy when the booking channel owns it.
+    /// Desk bookings use `none`; seeds leave it to the tenant policy.
+    pub prepayment_policy: Option<String>,
     pub seed_key: Option<String>,
 }
 

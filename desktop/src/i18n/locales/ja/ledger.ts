@@ -132,6 +132,7 @@ export const ledger = {
     save: '予約を入れる',
     saving: '登録しています…',
     saved: '予約を入れました',
+    justFilled: 'この枠はちょうど埋まりました。最新の台帳を読み込みました。',
     failed: '予約を入れられませんでした',
     cancel: 'やめる',
   },

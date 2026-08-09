@@ -2,7 +2,7 @@ import { Button, Input } from '@tachyon-sdk/native-ui'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { courseboardApiJson } from '../../../api'
+import { ApiError, courseboardApiJson } from '../../../api'
 import { Field, FormGrid } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import { showToast } from '../../../lib/toast'
@@ -23,6 +23,7 @@ export type NewReservationTarget = {
   golfCourseId: string
   courseName: string
   teeTime: string
+  resourceId: string | null
 }
 
 /** Falls back when the chosen plan carries no duration of its own. */
@@ -94,10 +95,14 @@ export function NewReservationEditor({
   const parsedQuantity = Number.parseInt(quantity, 10)
   const validQuantity =
     Number.isFinite(parsedQuantity) && parsedQuantity > 0 && parsedQuantity <= maxQuantity
-  const canSave = customerName.trim().length > 0 && validQuantity && !saving
+  const canSave = customerName.trim().length > 0
+    && validQuantity
+    && Boolean(target.resourceId)
+    && !saving
 
   const save = async () => {
     const plan = selectedPlan
+    if (!target.resourceId) return
     setSaving(true)
     try {
       await courseboardApiJson('/v1/course/reservations', {
@@ -105,6 +110,7 @@ export function NewReservationEditor({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           golfCourseId: target.golfCourseId,
+          resourceId: target.resourceId,
           reservationServiceId: plan?.reservationServiceId ?? null,
           date,
           teeTime: target.teeTime,
@@ -117,6 +123,12 @@ export function NewReservationEditor({
       onCreated()
       onClose()
     } catch (error) {
+      if (error instanceof ApiError && error.status === 409) {
+        showToast({ tone: 'warning', message: t('ledger:newReservation.justFilled') })
+        onCreated()
+        onClose()
+        return
+      }
       showToast({
         tone: 'danger',
         title: t('ledger:newReservation.failed'),

@@ -262,11 +262,16 @@ export function LedgerPage() {
     const teeTime = selection.teeTimes[0]!
     const column = columns.find(entry => entry.golfCourseId === selection.golfCourseId)
     const slot = column?.slots.find(entry => entry.teeTime === teeTime)
-    // Same gate as the open row and the context menu. Without isSellable a
-    // full row would still offer booking, and nothing downstream re-checks
-    // capacity — the create call takes whatever it is given.
+    // Same gate as the open row and the context menu. The server checks again
+    // because this snapshot can age, but the desk should not be invited to
+    // enter a booking that this board already knows it cannot accept.
     if (!column || !slot || !slot.isSellable) return null
-    return { golfCourseId: column.golfCourseId, courseName: column.courseName, teeTime }
+    return {
+      golfCourseId: column.golfCourseId,
+      courseName: column.courseName,
+      teeTime,
+      resourceId: column.resourceId ?? null,
+    }
   })()
 
   const toggleSlot = (golfCourseId: string, teeTime: string, extend: boolean) => {
@@ -295,7 +300,12 @@ export function LedgerPage() {
     const column = columns.find(entry => entry.golfCourseId === golfCourseId)
     if (!column) return
     setSelection(null)
-    setBookingTarget({ golfCourseId, courseName: column.courseName, teeTime })
+    setBookingTarget({
+      golfCourseId,
+      courseName: column.courseName,
+      teeTime,
+      resourceId: column.resourceId ?? null,
+    })
   }
 
   const moveColumn = async (golfCourseId: string, delta: -1 | 1) => {

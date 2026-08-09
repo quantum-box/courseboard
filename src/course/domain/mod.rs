@@ -89,6 +89,7 @@ pub use simulator::{
 pub use slot_override::{
     DeleteSlotOverrides, SlotOverride, SlotOverrideKind, SlotOverrideQuery, UpsertSlotOverrides,
 };
+pub(crate) use tee_ledger::reconcile_remaining;
 pub use tee_ledger::{
     courseboard_weekday, derive_slot_times_from_hours, derive_slot_times_from_rules, LedgerColumn,
     LedgerSlot, ResourceTimeSlot, SlotGridSource, TeeLedger,

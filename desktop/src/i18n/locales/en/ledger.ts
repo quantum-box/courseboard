@@ -131,6 +131,7 @@ export const ledger = {
     save: 'Book',
     saving: 'Booking…',
     saved: 'Booked',
+    justFilled: 'This tee time has just filled. The ledger is now up to date.',
     failed: 'Could not book this tee time',
     cancel: 'Cancel',
   },
