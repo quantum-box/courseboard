@@ -95,6 +95,19 @@ function runtimeMode(): AuthTenant['mode'] {
 }
 
 /**
+ * `/v1/me` resolves each tenant's platform from Tachyon (`Tachyon` = production,
+ * `Tachyon dev` = sandbox). One production bundle lists tenants from both, so the
+ * production / sandbox badge must follow that lookup instead of the bundle-wide
+ * `runtimeMode()`. An unknown or unresolved platform keeps the runtime default.
+ */
+function platformMode(platformId: string | undefined): AuthTenant['mode'] | undefined {
+  const id = platformId?.trim()
+  if (!id) return undefined
+  const modes = Object.keys(RUNTIME_CONTEXT) as AuthTenant['mode'][]
+  return modes.find(mode => RUNTIME_CONTEXT[mode].platformId === id)
+}
+
+/**
  * Local mock/demo chrome only.
  * Never overlay name/slug onto prod Field tenants (`MOCK_DATA=false`).
  */
@@ -255,7 +268,9 @@ function nativeTenant(payload: NativeTenantPayload) {
     ...fallback,
     name: distinctName || labels.name || rawName || fallback.name,
     slug: rawSlug || labels.slug || fallback.slug,
-    mode: payload.mode ?? fallback.mode,
+    // Only the Tachyon-resolved platform decides production vs sandbox; the
+    // bundle default applies when the operator lookup returned nothing.
+    mode: payload.mode ?? platformMode(payload.platformId) ?? fallback.mode,
     platformId: payload.platformId ?? fallback.platformId,
     // A profile tenant is selected independently; a global development
     // operator override must never be reused for a different tenant.

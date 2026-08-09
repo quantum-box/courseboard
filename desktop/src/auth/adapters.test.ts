@@ -263,6 +263,35 @@ describe('BrowserPkceAdapter', () => {
     })
   })
 
+  it('labels each tenant by its Tachyon platform instead of the bundle mode', async () => {
+    const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
+    localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
+      accessToken: 'persisted-access-token',
+      accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
+    }))
+    // A production bundle lists tenants from both Tachyon platforms; a
+    // `Tachyon dev` tenant must not be badged as production.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      user: { id: 'user-1', username: 'operator' },
+      tenants: [
+        { id: 'tn_01devchild', name: 'デモ用アカウント', platformId: 'tn_01hjryxysgey07h5jz5wagqj0m' },
+        { id: 'tn_01prodchild', name: '本番施設', platformId: 'tn_01hjjn348rn3t49zz6hvmfq67p' },
+        { id: 'tn_01unknownchild', name: '未解決施設' },
+      ],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+
+    const result = await createAuthAdapter().bootstrap()
+
+    expect(result).toMatchObject({
+      kind: 'authenticated',
+      tenants: [
+        { id: 'tn_01devchild', mode: 'sandbox' },
+        { id: 'tn_01prodchild', mode: 'production' },
+        { id: 'tn_01unknownchild', mode: 'production' },
+      ],
+    })
+  })
+
   it('keeps an empty proxy tenant list empty instead of restoring the configured tenant', async () => {
     const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
     localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
