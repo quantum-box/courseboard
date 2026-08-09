@@ -27,17 +27,19 @@ export function Sheet({
   onOpenChange,
   title,
   description,
+  className = '',
   children,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: string
   description?: string
+  className?: string
   children: ReactNode
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={SHEET_CLASSNAME}>
+      <DialogContent className={`${SHEET_CLASSNAME} ${className}`}>
         <DialogHeader className="pr-6">
           <DialogTitle>{title}</DialogTitle>
           {description ? <DialogDescription>{description}</DialogDescription> : null}

@@ -39,6 +39,12 @@ import {
 import { summarizeLedger, teeTimesBetween } from './ledgerLayout'
 import type { PartyDetails, SlotMarkKind, TeeLedgerResponse } from './models'
 import {
+  reservationBlockReason,
+  reservationTarget,
+  selectedReservationTarget,
+  type ReservationBlockReason,
+} from './newReservation'
+import {
   NewReservationEditor,
   type BookablePlan,
   type NewReservationTarget,
@@ -255,24 +261,28 @@ export function LedgerPage() {
     maxPlayersPerGroup: product.maxPlayersPerGroup,
   }))
 
-  // Booking is offered on a single tee time that is not already closed or full:
-  // a range selection is for marking, and a booked-out row has nothing to sell.
-  const bookableSelection = (() => {
-    if (!selection || selection.teeTimes.length !== 1) return null
-    const teeTime = selection.teeTimes[0]!
-    const column = columns.find(entry => entry.golfCourseId === selection.golfCourseId)
-    const slot = column?.slots.find(entry => entry.teeTime === teeTime)
-    // Same gate as the open row and the context menu. The server checks again
-    // because this snapshot can age, but the desk should not be invited to
-    // enter a booking that this board already knows it cannot accept.
-    if (!column || !slot || !slot.isSellable) return null
-    return {
-      golfCourseId: column.golfCourseId,
-      courseName: column.courseName,
-      teeTime,
-      resourceId: column.resourceId ?? null,
-    }
-  })()
+  const selectedBookingTarget = selectedReservationTarget(columns, selection)
+  const selectedBookingBlock = selectedBookingTarget
+    ? reservationBlockReason(selectedBookingTarget)
+    : null
+  const bookingBlockMessages: Record<ReservationBlockReason, string> = {
+    full: t('ledger:newReservation.block.full'),
+    stopped: t('ledger:newReservation.block.stopped'),
+    missingInventory: t('ledger:newReservation.block.missingInventory'),
+    missingResource: t('ledger:newReservation.block.missingResource'),
+    notSellable: t('ledger:newReservation.block.notSellable'),
+  }
+  const selectedBookingBlockMessage = selectedBookingBlock
+    ? bookingBlockMessages[selectedBookingBlock]
+    : null
+  const bookableSelection = selectedBookingTarget && !selectedBookingBlock
+    ? {
+        golfCourseId: selectedBookingTarget.column.golfCourseId,
+        courseName: selectedBookingTarget.column.courseName,
+        teeTime: selectedBookingTarget.slot.teeTime,
+        resourceId: selectedBookingTarget.column.resourceId ?? null,
+      }
+    : null
 
   const toggleSlot = (golfCourseId: string, teeTime: string, extend: boolean) => {
     setSelection(current => {
@@ -297,14 +307,20 @@ export function LedgerPage() {
 
   /** Straight to the form: a caller is on the phone while this runs. */
   const bookSlot = (golfCourseId: string, teeTime: string) => {
-    const column = columns.find(entry => entry.golfCourseId === golfCourseId)
-    if (!column) return
+    const target = reservationTarget(columns, golfCourseId, teeTime)
+    if (!target) return
+    if (reservationBlockReason(target)) {
+      // The row may have changed between drawing the board and this click.
+      // Keep the operator on the row and show the current reason in the sheet.
+      setSelection({ golfCourseId, teeTimes: [teeTime] })
+      return
+    }
     setSelection(null)
     setBookingTarget({
       golfCourseId,
-      courseName: column.courseName,
+      courseName: target.column.courseName,
       teeTime,
-      resourceId: column.resourceId ?? null,
+      resourceId: target.column.resourceId ?? null,
     })
   }
 
@@ -559,6 +575,7 @@ export function LedgerPage() {
         label={markLabel}
         saving={savingMarks}
         canBook={bookableSelection !== null}
+        reservationBlockMessage={selectedBookingBlockMessage}
         onLabelChange={setMarkLabel}
         onClose={() => applyMark('closed')}
         onSpecial={() => applyMark('special_rate')}

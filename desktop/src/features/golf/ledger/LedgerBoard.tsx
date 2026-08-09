@@ -18,6 +18,10 @@ import {
   type SeatCell,
 } from './ledgerLayout'
 import type { LedgerColumn, LedgerSlot } from './models'
+import {
+  reservationBlockReason,
+  type ReservationBlockReason,
+} from './newReservation'
 
 export type SlotSelection = {
   golfCourseId: string
@@ -216,6 +220,7 @@ function SlotRows({
 }) {
   const { t } = useTranslation(['ledger'])
   const tone = slotTone(slot)
+  const bookingBlock = reservationBlockReason({ column, slot })
   // An empty slot is still one row: the empty row is the answer to "what is
   // open at 07:14", so it can never be collapsed away.
   const rowCount = Math.max(slot.items.length, 1)
@@ -260,7 +265,7 @@ function SlotRows({
         teeTime: slot.teeTime,
         reservationId: item?.id,
         reservationName: item?.partyName,
-        canBook: slot.items.length === 0 && slot.isSellable,
+        canBook: slot.items.length === 0 && bookingBlock === null,
       })
     }
 
@@ -276,7 +281,7 @@ function SlotRows({
             type="button"
             className="ledger-empty-button"
             onClick={event => {
-              if (event.shiftKey || !slot.isSellable) {
+              if (event.shiftKey || bookingBlock !== null) {
                 onToggleSlot(column.golfCourseId, slot.teeTime, event.shiftKey)
                 return
               }
@@ -284,7 +289,7 @@ function SlotRows({
             }}
             aria-pressed={isSelected}
           >
-            <SlotEmptyLabel slot={slot} />
+            <SlotEmptyLabel slot={slot} bookingBlock={bookingBlock} />
           </button>
         </td>
       </tr>
@@ -327,12 +332,24 @@ function SlotStatus({ slot }: { slot: LedgerSlot }) {
   return null
 }
 
-function SlotEmptyLabel({ slot }: { slot: LedgerSlot }) {
+function SlotEmptyLabel({
+  slot,
+  bookingBlock,
+}: {
+  slot: LedgerSlot
+  bookingBlock: ReservationBlockReason | null
+}) {
   const { t } = useTranslation(['ledger'])
   const remaining = remainingGroups(slot)
-  if (!slot.isActive) return <span>{t('ledger:cell.retired')}</span>
-  if (slot.mark?.kind === 'closed') {
-    return <span>{slot.mark.label || t('ledger:cell.closed')}</span>
+  if (bookingBlock) {
+    const labels: Record<ReservationBlockReason, string> = {
+      full: t('ledger:newReservation.blockLabel.full'),
+      stopped: slot.mark?.label || t('ledger:newReservation.blockLabel.stopped'),
+      missingInventory: t('ledger:newReservation.blockLabel.missingInventory'),
+      missingResource: t('ledger:newReservation.blockLabel.missingResource'),
+      notSellable: t('ledger:newReservation.blockLabel.notSellable'),
+    }
+    return <span className="ledger-reservation-block-label">{labels[bookingBlock]}</span>
   }
   // The remaining count already says the row is open, so it stands alone; the
   // word is only needed where nothing counted the capacity. Most rows on a
