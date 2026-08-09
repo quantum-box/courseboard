@@ -3917,6 +3917,31 @@ button,
   flex: none;
 }
 
+/* Board-only: the table takes the window, so a busy day can be read from
+ * across the desk. Fixed rather than a tall page — the surrounding app chrome
+ * is exactly what this mode is getting out of the way. */
+.ledger-page.is-board-only {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  padding: 8px 12px 12px;
+  background: hsl(var(--nui-background));
+}
+
+.ledger-board-only-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ledger-board-only-date {
+  font-family: var(--nui-font-mono);
+  font-size: 15px;
+  font-weight: 700;
+}
+
 .ledger-summary {
   display: flex;
   min-width: 0;
@@ -4297,9 +4322,26 @@ button,
 }
 
 .ledger-cell-empty {
-  padding: 5px 8px;
   color: hsl(var(--nui-muted-foreground));
   font-size: 11px;
+}
+
+.ledger-empty-button {
+  display: block;
+  width: 100%;
+  border: none;
+  padding: 5px 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-empty-button:hover,
+.ledger-empty-button:focus-visible {
+  outline: none;
+  background: hsl(var(--nui-muted) / .6);
 }
 
 .ledger-group-button {

@@ -307,7 +307,7 @@ fn booking_for(
         customer_name: group.customer_name.to_string(),
         golf_course_id: course_id.clone(),
         party: group.party()?,
-        seed_key: group.seed_key(date),
+        seed_key: Some(group.seed_key(date)),
     })
 }
 
@@ -360,8 +360,8 @@ mod tests {
             Some("cb-demo:karanuma-in:caddie".into()),
         )
         .unwrap();
-        assert_eq!(booking.seed_key, group.seed_key(date));
-        assert!(booking.seed_key.starts_with("cb-demo:"));
+        assert_eq!(booking.seed_key, Some(group.seed_key(date)));
+        assert!(booking.seed_key.as_deref().unwrap().starts_with("cb-demo:"));
         // Without the plan the tee sheet reads every seeded round as self-play.
         assert_eq!(
             booking.reservation_service_id.as_deref(),

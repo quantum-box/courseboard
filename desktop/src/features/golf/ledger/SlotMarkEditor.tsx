@@ -1,5 +1,5 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
-import { Lock, Tag, Trash2 } from 'lucide-react'
+import { CalendarPlus, Lock, Tag, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { Field } from '../../../components/Page'
@@ -20,20 +20,25 @@ export function SlotMarkEditor({
   selection,
   label,
   saving,
+  canBook,
   onLabelChange,
   onClose,
   onSpecial,
   onClear,
   onCancel,
+  onBook,
 }: {
   selection: SlotSelection | null
   label: string
   saving: boolean
+  /** A booking goes on one tee time, so a range selection cannot offer it. */
+  canBook: boolean
   onLabelChange: (value: string) => void
   onClose: () => void
   onSpecial: () => void
   onClear: () => void
   onCancel: () => void
+  onBook: () => void
 }) {
   const { t } = useTranslation(['ledger'])
   return (
@@ -48,6 +53,15 @@ export function SlotMarkEditor({
       })}
     >
       <div className="ledger-mark-sheet">
+        {canBook ? (
+          <div className="ledger-mark-actions">
+            <Button type="button" variant="primary" disabled={saving} onClick={onBook}>
+              <CalendarPlus />
+              {t('ledger:newReservation.open')}
+            </Button>
+          </div>
+        ) : null}
+
         <Field label={t('ledger:marks.label')} requirement="none">
           <Input
             value={label}
@@ -57,7 +71,7 @@ export function SlotMarkEditor({
         </Field>
 
         <div className="ledger-mark-actions">
-          <Button type="button" variant="primary" disabled={saving} onClick={onClose}>
+          <Button type="button" variant="secondary" disabled={saving} onClick={onClose}>
             <Lock />
             {t('ledger:marks.close')}
           </Button>

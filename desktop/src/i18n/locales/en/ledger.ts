@@ -77,7 +77,8 @@ export const ledger = {
   },
   marks: {
     title: 'Slot marks',
-    selectHint: 'Click a time to select it. Hold Shift for a range.',
+    selectHint:
+      'Click an open row to book it. Click a time to mark the slot; hold Shift for a range.',
     selected: '{{n}} slots selected',
     close: 'Close for sale',
     special: 'Mark as special rate',
@@ -89,6 +90,24 @@ export const ledger = {
     saved: 'Slot marks saved',
     cleared: 'Slot marks removed',
     failed: 'Could not save the slot marks',
+  },
+  boardOnly: {
+    enter: 'Board only',
+    exit: 'Show controls',
+  },
+  newReservation: {
+    title: 'Book this tee time',
+    description: 'Booking {{course}} at {{time}}.',
+    open: 'Book this tee time',
+    customerName: 'Customer name',
+    customerNamePlaceholder: 'e.g. Yasuhiko Honda',
+    quantity: 'Players',
+    plan: 'Plan',
+    save: 'Book',
+    saving: 'Booking…',
+    saved: 'Booked',
+    failed: 'Could not book this tee time',
+    cancel: 'Cancel',
   },
   party: {
     title: 'Group detail',

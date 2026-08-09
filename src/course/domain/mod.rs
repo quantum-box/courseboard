@@ -95,6 +95,6 @@ pub use tee_ledger::{
 };
 pub use tee_sheet::{
     course_day_bounds, format_datetime_with_offset, format_jst_wall_clock, jst_offset,
-    widen_for_utc_date_filter, TeeSheet, TeeSheetItem, TeeSheetStatus, DEFAULT_DAY_END_HOUR,
-    DEFAULT_DAY_START_HOUR, DEFAULT_TIMEZONE,
+    parse_jst_tee_time, widen_for_utc_date_filter, TeeSheet, TeeSheetItem, TeeSheetStatus,
+    DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR, DEFAULT_TIMEZONE,
 };

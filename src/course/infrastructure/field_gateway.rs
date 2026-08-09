@@ -208,7 +208,9 @@ fn new_reservation_body(input: &NewReservation, creating: bool) -> Value {
     let mut custom_fields = party_custom_fields::merge_party(None, &input.party);
     if let Some(object) = custom_fields.as_object_mut() {
         object.insert("golfCourseId".into(), json!(input.golf_course_id.as_str()));
-        object.insert(SEED_KEY_FIELD.into(), json!(input.seed_key));
+        if let Some(seed_key) = input.seed_key.as_deref() {
+            object.insert(SEED_KEY_FIELD.into(), json!(seed_key));
+        }
     }
     let mut body = json!({
         "startsAt": input.starts_at,

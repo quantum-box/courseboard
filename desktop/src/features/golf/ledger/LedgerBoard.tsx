@@ -37,6 +37,7 @@ export function LedgerBoard({
   selection,
   selectedReservationId,
   onToggleSlot,
+  onBookSlot,
   onSelectReservation,
   onMoveColumn,
 }: {
@@ -46,6 +47,7 @@ export function LedgerBoard({
   selection: SlotSelection | null
   selectedReservationId: string | null
   onToggleSlot: (golfCourseId: string, teeTime: string, extend: boolean) => void
+  onBookSlot: (golfCourseId: string, teeTime: string) => void
   onSelectReservation: (id: string) => void
   onMoveColumn: (golfCourseId: string, delta: -1 | 1) => void
 }) {
@@ -63,6 +65,7 @@ export function LedgerBoard({
           }
           selectedReservationId={selectedReservationId}
           onToggleSlot={onToggleSlot}
+          onBookSlot={onBookSlot}
           onSelectReservation={onSelectReservation}
           onMoveColumn={onMoveColumn}
         />
@@ -79,6 +82,7 @@ function LedgerColumnTable({
   selectedTeeTimes,
   selectedReservationId,
   onToggleSlot,
+  onBookSlot,
   onSelectReservation,
   onMoveColumn,
 }: {
@@ -89,6 +93,7 @@ function LedgerColumnTable({
   selectedTeeTimes: string[]
   selectedReservationId: string | null
   onToggleSlot: (golfCourseId: string, teeTime: string, extend: boolean) => void
+  onBookSlot: (golfCourseId: string, teeTime: string) => void
   onSelectReservation: (id: string) => void
   onMoveColumn: (golfCourseId: string, delta: -1 | 1) => void
 }) {
@@ -168,6 +173,7 @@ function LedgerColumnTable({
                 isSelected={selected.has(slot.teeTime)}
                 selectedReservationId={selectedReservationId}
                 onToggleSlot={onToggleSlot}
+                onBookSlot={onBookSlot}
                 onSelectReservation={onSelectReservation}
               />
             ))}
@@ -186,6 +192,7 @@ function SlotRows({
   isSelected,
   selectedReservationId,
   onToggleSlot,
+  onBookSlot,
   onSelectReservation,
 }: {
   column: LedgerColumn
@@ -195,6 +202,7 @@ function SlotRows({
   isSelected: boolean
   selectedReservationId: string | null
   onToggleSlot: (golfCourseId: string, teeTime: string, extend: boolean) => void
+  onBookSlot: (golfCourseId: string, teeTime: string) => void
   onSelectReservation: (id: string) => void
 }) {
   const { t } = useTranslation(['ledger'])
@@ -236,7 +244,23 @@ function SlotRows({
       <tr className={rowClass}>
         {timeCell}
         <td className="ledger-cell-empty" colSpan={seatColumns + 1}>
-          <SlotEmptyLabel slot={slot} />
+          {/* Booking is what the desk does with an open row, and a phone
+              caller is waiting, so a plain click goes straight to the form.
+              Marking keeps the time column, and shift still extends a range. */}
+          <button
+            type="button"
+            className="ledger-empty-button"
+            onClick={event => {
+              if (event.shiftKey || !slot.isSellable) {
+                onToggleSlot(column.golfCourseId, slot.teeTime, event.shiftKey)
+                return
+              }
+              onBookSlot(column.golfCourseId, slot.teeTime)
+            }}
+            aria-pressed={isSelected}
+          >
+            <SlotEmptyLabel slot={slot} />
+          </button>
         </td>
       </tr>
     )

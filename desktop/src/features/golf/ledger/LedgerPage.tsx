@@ -1,5 +1,13 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
-import { CalendarRange, ChevronLeft, ChevronRight, GanttChart, RefreshCw } from 'lucide-react'
+import {
+  CalendarRange,
+  ChevronLeft,
+  ChevronRight,
+  GanttChart,
+  Maximize2,
+  Minimize2,
+  RefreshCw,
+} from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -30,6 +38,11 @@ import {
 } from './courseSelection'
 import { summarizeLedger, teeTimesBetween } from './ledgerLayout'
 import type { PartyDetails, SlotMarkKind, TeeLedgerResponse } from './models'
+import {
+  NewReservationEditor,
+  type BookablePlan,
+  type NewReservationTarget,
+} from './NewReservationEditor'
 import { PartyEditor } from './PartyEditor'
 import { SlotMarkEditor } from './SlotMarkEditor'
 
@@ -68,6 +81,9 @@ export function LedgerPage() {
   const [savingMarks, setSavingMarks] = useState(false)
   const [savingOrder, setSavingOrder] = useState(false)
   const [editingReservationId, setEditingReservationId] = useState<string | null>(null)
+  const [bookingTarget, setBookingTarget] = useState<NewReservationTarget | null>(null)
+  /** Hides the page chrome so the board itself fills the window. */
+  const [boardOnly, setBoardOnly] = useState(false)
   /** Parties saved this session, so the board updates without a full reload. */
   const [localParties, setLocalParties] = useState<Record<string, PartyDetails>>({})
   const currentMinute = useCurrentMinute()
@@ -92,10 +108,24 @@ export function LedgerPage() {
     [],
   )
 
+  const productsResource = useResource(
+    () =>
+      courseboardApiJson<
+        ListResponse<{
+          reservationServiceId: string
+          displayName?: string | null
+          expectedDurationMinutes: number
+          golfCourseId?: string | null
+        }>
+      >(`${COURSE_API}/reservation-products`),
+    [],
+  )
+
   const refreshAll = () => {
     ledger.refresh()
     coursesResource.refresh()
     orderResource.refresh()
+    productsResource.refresh()
   }
   useRegisterPageReload(refreshAll)
 
@@ -108,6 +138,17 @@ export function LedgerPage() {
   useEffect(() => {
     writeStoredCourseIds(selectedCourseIds)
   }, [selectedCourseIds])
+
+  // Escape is the way out of every other full-screen surface, and the toolbar
+  // that holds the exit button is exactly what this mode hides.
+  useEffect(() => {
+    if (!boardOnly) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setBoardOnly(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [boardOnly])
 
   if (ledger.error) return <ResourceError error={ledger.error} onRetry={refreshAll} />
   if (ledger.loading && !ledger.data) return <LoadingState label={t('ledger:loading')} />
@@ -146,6 +187,24 @@ export function LedgerPage() {
   )
   const editingReservation = allItems.find(item => item.id === editingReservationId) ?? null
 
+  const bookablePlans: BookablePlan[] = (productsResource.data?.items ?? []).map(product => ({
+    reservationServiceId: product.reservationServiceId,
+    label: product.displayName?.trim() || product.reservationServiceId,
+    expectedDurationMinutes: product.expectedDurationMinutes,
+    golfCourseId: product.golfCourseId,
+  }))
+
+  // Booking is offered on a single tee time that is not already closed or full:
+  // a range selection is for marking, and a booked-out row has nothing to sell.
+  const bookableSelection = (() => {
+    if (!selection || selection.teeTimes.length !== 1) return null
+    const teeTime = selection.teeTimes[0]!
+    const column = columns.find(entry => entry.golfCourseId === selection.golfCourseId)
+    const slot = column?.slots.find(entry => entry.teeTime === teeTime)
+    if (!column || !slot || !slot.isActive || slot.mark?.kind === 'closed') return null
+    return { golfCourseId: column.golfCourseId, courseName: column.courseName, teeTime }
+  })()
+
   const toggleSlot = (golfCourseId: string, teeTime: string, extend: boolean) => {
     setSelection(current => {
       // Selecting on a second course replaces the first: a mark is written per
@@ -165,6 +224,14 @@ export function LedgerPage() {
         : [...current.teeTimes, teeTime].sort()
       return teeTimes.length > 0 ? { golfCourseId, teeTimes } : null
     })
+  }
+
+  /** Straight to the form: a caller is on the phone while this runs. */
+  const bookSlot = (golfCourseId: string, teeTime: string) => {
+    const column = columns.find(entry => entry.golfCourseId === golfCourseId)
+    if (!column) return
+    setSelection(null)
+    setBookingTarget({ golfCourseId, courseName: column.courseName, teeTime })
   }
 
   const moveColumn = async (golfCourseId: string, delta: -1 | 1) => {
@@ -249,13 +316,22 @@ export function LedgerPage() {
   }
 
   return (
-    <div className="page-stack ledger-page">
-      {unavailable.length > 0 ? (
+    <div className={`page-stack ledger-page${boardOnly ? ' is-board-only' : ''}`}>
+      {unavailable.length > 0 && !boardOnly ? (
         <Notice tone="warning" title={t('ledger:partial.title')}>
           {t('ledger:partial.description')}
         </Notice>
       ) : null}
 
+      {boardOnly ? (
+        <div className="ledger-board-only-bar">
+          <span className="ledger-board-only-date">{date}</span>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setBoardOnly(false)}>
+            <Minimize2 />
+            {t('ledger:boardOnly.exit')}
+          </Button>
+        </div>
+      ) : (
       <div className="ledger-chrome">
         <div className="page-toolbar">
           <Button type="button" variant="ghost" size="sm" onClick={refreshAll}>
@@ -270,6 +346,10 @@ export function LedgerPage() {
           >
             <GanttChart />
             {t('timeline:title')}
+          </Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setBoardOnly(true)}>
+            <Maximize2 />
+            {t('ledger:boardOnly.enter')}
           </Button>
         </div>
 
@@ -362,6 +442,7 @@ export function LedgerPage() {
 
         <p className="ledger-mark-hint">{t('ledger:marks.selectHint')}</p>
       </div>
+      )}
 
       <div className="ledger-workspace">
         {columns.length === 0 ? (
@@ -383,6 +464,7 @@ export function LedgerPage() {
             selection={selection}
             selectedReservationId={editingReservationId}
             onToggleSlot={toggleSlot}
+            onBookSlot={bookSlot}
             onSelectReservation={setEditingReservationId}
             onMoveColumn={savingOrder ? () => {} : moveColumn}
           />
@@ -393,11 +475,24 @@ export function LedgerPage() {
         selection={selection}
         label={markLabel}
         saving={savingMarks}
+        canBook={bookableSelection !== null}
         onLabelChange={setMarkLabel}
         onClose={() => applyMark('closed')}
         onSpecial={() => applyMark('special_rate')}
         onClear={clearMarks}
         onCancel={() => setSelection(null)}
+        onBook={() => {
+          setBookingTarget(bookableSelection)
+          setSelection(null)
+        }}
+      />
+
+      <NewReservationEditor
+        target={bookingTarget}
+        date={date}
+        plans={bookablePlans}
+        onClose={() => setBookingTarget(null)}
+        onCreated={() => ledger.refresh()}
       />
 
       <PartyEditor

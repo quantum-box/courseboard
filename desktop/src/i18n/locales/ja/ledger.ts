@@ -79,7 +79,7 @@ export const ledger = {
   },
   marks: {
     title: '枠の設定',
-    selectHint: '時刻をクリックすると選べます。Shift を押しながらで範囲。',
+    selectHint: '空きをクリックするとすぐ予約を入れられます。時刻をクリックすると枠の設定、Shift を押しながらで範囲。',
     selected: '{{n}} 枠を選択中',
     close: '売り止めにする',
     special: '特別料金にする',
@@ -91,6 +91,24 @@ export const ledger = {
     saved: '枠の設定を保存しました',
     cleared: '枠の設定を消しました',
     failed: '枠の設定を保存できませんでした',
+  },
+  boardOnly: {
+    enter: '表だけ大きく',
+    exit: '元に戻す',
+  },
+  newReservation: {
+    title: '予約を入れる',
+    description: '{{course}} · {{time}} に予約を入れます。',
+    open: 'この枠に予約を入れる',
+    customerName: '予約者名',
+    customerNamePlaceholder: '例）本田 康彦',
+    quantity: '人数',
+    plan: 'プレー商品',
+    save: '予約を入れる',
+    saving: '登録しています…',
+    saved: '予約を入れました',
+    failed: '予約を入れられませんでした',
+    cancel: 'やめる',
   },
   party: {
     title: '組の中身',

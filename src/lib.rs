@@ -338,6 +338,12 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/reservations",
+            post(course::interfaces::http::create_reservation).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/reservations/:reservation_id/party",
             patch(course::interfaces::http::update_reservation_party).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),

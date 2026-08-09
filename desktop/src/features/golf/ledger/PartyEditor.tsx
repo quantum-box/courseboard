@@ -8,7 +8,7 @@ import { Field, FormGrid, Notice } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import { showToast } from '../../../lib/toast'
 import type { TeeReservation } from '../timeline/models'
-import { MAX_SEAT_COLUMNS } from './ledgerLayout'
+import { MAX_PARTY_PLAYERS, MAX_SEAT_COLUMNS } from './ledgerLayout'
 import type { PartyDetails, PartyPlayer } from './models'
 
 /** A row being edited. Blank rows are dropped on save rather than refused. */
@@ -17,8 +17,10 @@ type DraftPlayer = { name: string; tag: string; memberNumber: string }
 function toDraft(party: PartyDetails | null | undefined, partySize: number): DraftPlayer[] {
   const players = party?.players ?? []
   // Start with one row per booked seat so the desk types into a shape that
-  // already matches the booking instead of clicking "add" four times.
-  const rows = Math.max(players.length, partySize, 1)
+  // already matches the booking instead of clicking "add" four times. A
+  // booking that already carries more than a four-ball still opens with every
+  // player it has: the cap is on what the desk adds, not on what it can read.
+  const rows = Math.max(players.length, Math.min(partySize, MAX_PARTY_PLAYERS), 1)
   return Array.from({ length: Math.min(rows, MAX_SEAT_COLUMNS) }, (_, index) => ({
     name: players[index]?.name ?? '',
     tag: players[index]?.tag ?? '',
@@ -214,7 +216,7 @@ export function PartyEditor({
             type="button"
             variant="ghost"
             size="sm"
-            disabled={players.length >= MAX_SEAT_COLUMNS}
+            disabled={players.length >= MAX_PARTY_PLAYERS}
             onClick={() =>
               setPlayers(rows => [...rows, { name: '', tag: '', memberNumber: '' }])
             }

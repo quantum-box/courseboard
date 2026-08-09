@@ -77,7 +77,8 @@ export const ledger = {
   },
   marks: {
     title: '枠の せってい',
-    selectHint: '時こくを クリックすると えらべます。Shift を おしながらで はんい。',
+    selectHint:
+      '空きを クリックすると すぐ 予約を 入れられます。時こくを クリックすると 枠の せってい、Shift を おしながらで はんい。',
     selected: '{{n}} 枠を えらんでいます',
     close: 'うりどめに する',
     special: 'とくべつな りょうきんに する',
@@ -89,6 +90,24 @@ export const ledger = {
     saved: '枠の せっていを ほぞんしました',
     cleared: '枠の せっていを けしました',
     failed: '枠の せっていを ほぞんできませんでした',
+  },
+  boardOnly: {
+    enter: '表だけ 大きく',
+    exit: 'もとに もどす',
+  },
+  newReservation: {
+    title: '予約を 入れる',
+    description: '{{course}} の {{time}} に 予約を 入れます。',
+    open: 'この 枠に 予約を 入れる',
+    customerName: '予約する 人の 名前',
+    customerNamePlaceholder: 'れい）本田 康彦',
+    quantity: '人数',
+    plan: 'プレーの しょうひん',
+    save: '予約を 入れる',
+    saving: '入れて います…',
+    saved: '予約を 入れました',
+    failed: '予約を 入れられませんでした',
+    cancel: 'やめる',
   },
   party: {
     title: '組の なかみ',
