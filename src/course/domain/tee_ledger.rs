@@ -107,7 +107,7 @@ impl ResourceTimeSlot {
 /// is. Erring small can only ever refuse a sale the desk could have made,
 /// which the desk can see and override — the other direction sells one tee
 /// time twice.
-fn reconcile_remaining(
+pub(crate) fn reconcile_remaining(
     capacity: Option<i32>,
     upstream_remaining: Option<i32>,
     booked_groups: i32,

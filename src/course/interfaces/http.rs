@@ -19,7 +19,7 @@ use crate::course::domain::{
     jst_offset, AvailabilityRule, BusinessHours, Caddie, CaddieAssignment, CaddieAssignmentQuery,
     CaddieId, CaddieStaff, Course, CourseError, CourseId, CourseOrder, DeleteSlotOverrides,
     GatewayCredentials, GenerationSummary, LedgerColumn, LedgerSlot, PartyDetails, ProductSlot,
-    ReservationId, ReservationProduct, ReservationServiceId, Resource, SlotOverride,
+    ReservationId, ReservationProduct, ReservationServiceId, Resource, ResourceId, SlotOverride,
     SlotOverrideKind, SlotOverrideQuery, TeeLedger, TeeLedgerQuery, TeeSheet, TeeSheetItem,
     TeeSheetQuery, UpsertCourse, UpsertReservationProduct, UpsertSlotOverrides,
 };
@@ -135,6 +135,7 @@ impl From<CourseError> for AppError {
         match value {
             CourseError::Unauthorized => AppError::Unauthorized,
             CourseError::BadRequest(message) => AppError::BadRequest(message),
+            CourseError::Conflict(message) => AppError::Conflict(message),
             CourseError::UpstreamClient { status, message } => match StatusCode::from_u16(status) {
                 Ok(status) if status.is_client_error() => {
                     AppError::UpstreamClient { status, message }
@@ -663,6 +664,8 @@ pub async fn replace_course_order(
 #[serde(rename_all = "camelCase")]
 pub struct CreateReservationRequest {
     pub golf_course_id: String,
+    /// Generic reservation inventory resource from the selected ledger column.
+    pub resource_id: String,
     #[serde(default)]
     pub reservation_service_id: Option<String>,
     pub date: NaiveDate,
@@ -691,6 +694,7 @@ pub struct CreatedReservationDto {
     responses(
         (status = 200, description = "Created reservation", body = CreatedReservationDto),
         (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 409, description = "The selected tee time is no longer available", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
         (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
@@ -702,8 +706,13 @@ pub async fn create_reservation(
     Json(request): Json<CreateReservationRequest>,
 ) -> Result<Json<CreatedReservationDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case =
-        CreateReservationUseCase::new(reservation_gateway(&state), commercial_gateway(&state));
+    let catalog = catalog_gateway(&state);
+    let use_case = CreateReservationUseCase::new(
+        reservation_gateway(&state),
+        commercial_gateway(&state),
+        catalog.clone(),
+        catalog,
+    );
     let id = use_case
         .execute(
             credentials,
@@ -712,6 +721,8 @@ pub async fn create_reservation(
                 // booking's custom fields and read back as a course, leaving an
                 // orphan column on the board instead of a correctable 400.
                 golf_course_id: CourseId::try_new(request.golf_course_id)
+                    .map_err(AppError::from)?,
+                reservation_resource_id: ResourceId::try_new(request.resource_id)
                     .map_err(AppError::from)?,
                 reservation_service_id: request.reservation_service_id,
                 date: request.date,

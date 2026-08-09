@@ -1211,6 +1211,8 @@ pub enum AppError {
     Forbidden,
     #[error("{0}")]
     BadRequest(&'static str),
+    #[error("{0}")]
+    Conflict(&'static str),
     #[error("{message}")]
     UpstreamClient { status: StatusCode, message: String },
     #[error("tax rule was not found for tenant, prefecture, and green fee")]
@@ -1245,6 +1247,7 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
+            AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             AppError::UpstreamClient { status, .. } => (status, "upstream_client_error"),
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),
             AppError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
@@ -1527,6 +1530,22 @@ mod tests {
             .as_str()
             .expect("message string")
             .contains("external provider error"));
+    }
+
+    #[tokio::test]
+    async fn course_conflicts_are_returned_as_409_json() {
+        let response = AppError::Conflict("この枠はちょうど埋まりました").into_response();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect conflict body")
+            .to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).expect("decode conflict body");
+        assert_eq!(body["error"], "conflict");
+        assert_eq!(body["message"], "この枠はちょうど埋まりました");
     }
 
     #[tokio::test]

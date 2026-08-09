@@ -254,7 +254,13 @@ fn new_reservation_body(input: &NewReservation, creating: bool) -> Value {
     if let Some(service_id) = input.reservation_service_id.as_deref() {
         body["serviceId"] = json!(service_id);
     }
+    if let Some(resource_id) = input.reservation_resource_id.as_ref() {
+        body["resourceId"] = json!(resource_id.as_str());
+    }
     if creating {
+        if let Some(prepayment_policy) = input.prepayment_policy.as_deref() {
+            body["prepaymentPolicy"] = json!(prepayment_policy);
+        }
         body["reservationTypeId"] = json!(input.reservation_type_id);
     }
     body
@@ -1460,6 +1466,22 @@ fn field_error_message(body: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn desk_reservation() -> NewReservation {
+        NewReservation {
+            reservation_type_id: "type-1".into(),
+            reservation_service_id: Some("service-1".into()),
+            reservation_resource_id: Some(ResourceId::new("resource-1")),
+            starts_at: "2026-08-11T22:30:00Z".parse().unwrap(),
+            ends_at: "2026-08-12T03:00:00Z".parse().unwrap(),
+            quantity: 4,
+            customer_name: "山田 太郎".into(),
+            golf_course_id: CourseId::new("course-1"),
+            party: PartyDetails::default(),
+            prepayment_policy: Some("none".into()),
+            seed_key: None,
+        }
+    }
+
     fn profile_dto(value: Value) -> FieldGolfCaddieProfileDto {
         serde_json::from_value(value).expect("caddie profile dto")
     }
@@ -1511,6 +1533,17 @@ mod tests {
         let flat: FieldCreatedReservationDto =
             serde_json::from_value(booking).expect("flat create");
         assert_eq!(flat.into_reservation().id, "rsv_1");
+    }
+
+    #[test]
+    fn desk_booking_targets_generated_inventory_and_skips_online_prepayment() {
+        let body = new_reservation_body(&desk_reservation(), true);
+
+        assert_eq!(body["reservationTypeId"], "type-1");
+        assert_eq!(body["serviceId"], "service-1");
+        assert_eq!(body["resourceId"], "resource-1");
+        assert_eq!(body["prepaymentPolicy"], "none");
+        assert_eq!(body["quantity"], 4);
     }
 
     #[test]

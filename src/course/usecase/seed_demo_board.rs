@@ -301,12 +301,14 @@ fn booking_for(
     Ok(NewReservation {
         reservation_type_id: reservation_type_id.to_string(),
         reservation_service_id,
+        reservation_resource_id: None,
         starts_at,
         ends_at: starts_at + Duration::minutes(SEED_DURATION_MINUTES),
         quantity: group.party_size,
         customer_name: group.customer_name.to_string(),
         golf_course_id: course_id.clone(),
         party: group.party()?,
+        prepayment_policy: None,
         seed_key: Some(group.seed_key(date)),
     })
 }
