@@ -174,6 +174,36 @@ impl ReservationGateway for FieldReservationGateway {
         Ok(ReservationId::new(created.into_reservation().id))
     }
 
+    async fn cancel_reservation(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+        reason: Option<&str>,
+    ) -> Result<(), CourseError> {
+        let path = format!(
+            "/v1/erp/reservations/{}/cancel",
+            urlencoding_path(reservation_id.as_str())
+        );
+        // Field's cancel takes no body today. The reason is sent anyway so the
+        // desk's words land the moment Field can keep them (PLT-3297); an
+        // endpoint that ignores unknown fields drops it, which is the same
+        // outcome as not sending it.
+        let body = reason
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| json!({ "reason": value }));
+        field_send_json::<serde::de::IgnoredAny>(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            &path,
+            credentials,
+            body.as_ref(),
+        )
+        .await?;
+        Ok(())
+    }
+
     async fn replace_reservation(
         &self,
         credentials: GatewayCredentials<'_>,

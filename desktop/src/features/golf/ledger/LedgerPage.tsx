@@ -43,7 +43,9 @@ import {
   type BookablePlan,
   type NewReservationTarget,
 } from './NewReservationEditor'
+import { CancelReservationDialog } from './CancelReservationDialog'
 import { PartyEditor } from './PartyEditor'
+import { SlotContextMenu, type SlotContextTarget } from './SlotContextMenu'
 import { SlotMarkEditor } from './SlotMarkEditor'
 
 const COURSE_API = '/v1/course'
@@ -84,6 +86,8 @@ export function LedgerPage() {
   const [bookingTarget, setBookingTarget] = useState<NewReservationTarget | null>(null)
   /** Hides the page chrome so the board itself fills the window. */
   const [boardOnly, setBoardOnly] = useState(false)
+  const [contextTarget, setContextTarget] = useState<SlotContextTarget | null>(null)
+  const [cancellingReservationId, setCancellingReservationId] = useState<string | null>(null)
   /** Parties saved this session, so the board updates without a full reload. */
   const [localParties, setLocalParties] = useState<Record<string, PartyDetails>>({})
   const currentMinute = useCurrentMinute()
@@ -186,6 +190,8 @@ export function LedgerPage() {
     column.slots.flatMap(slot => slot.items),
   )
   const editingReservation = allItems.find(item => item.id === editingReservationId) ?? null
+  const cancellingReservation =
+    allItems.find(item => item.id === cancellingReservationId) ?? null
 
   const bookablePlans: BookablePlan[] = (productsResource.data?.items ?? []).map(product => ({
     reservationServiceId: product.reservationServiceId,
@@ -465,11 +471,29 @@ export function LedgerPage() {
             selectedReservationId={editingReservationId}
             onToggleSlot={toggleSlot}
             onBookSlot={bookSlot}
+            onOpenContextMenu={setContextTarget}
             onSelectReservation={setEditingReservationId}
             onMoveColumn={savingOrder ? () => {} : moveColumn}
           />
         )}
       </div>
+
+      <SlotContextMenu
+        target={contextTarget}
+        onClose={() => setContextTarget(null)}
+        onBook={bookSlot}
+        onEditParty={setEditingReservationId}
+        onCancelReservation={setCancellingReservationId}
+        onSlotSettings={(golfCourseId, teeTime) =>
+          setSelection({ golfCourseId, teeTimes: [teeTime] })
+        }
+      />
+
+      <CancelReservationDialog
+        reservation={cancellingReservation}
+        onClose={() => setCancellingReservationId(null)}
+        onCancelled={() => ledger.refresh()}
+      />
 
       <SlotMarkEditor
         selection={selection}

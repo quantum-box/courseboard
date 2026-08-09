@@ -3928,6 +3928,97 @@ button,
   background: hsl(var(--nui-background));
 }
 
+/* Sits over the sheet it guards rather than replacing it, so the desk can see
+ * the form it is about to lose while it decides. */
+.ledger-discard-guard {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  padding: 16px;
+  background: hsl(var(--nui-foreground) / 32%);
+  place-items: center;
+}
+
+.ledger-discard-guard-box {
+  display: grid;
+  width: min(360px, 100%);
+  padding: 16px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+  box-shadow: 0 16px 40px hsl(var(--nui-foreground) / 24%);
+  gap: 6px;
+}
+
+.ledger-discard-guard-box h2 {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ledger-discard-guard-box p {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 13px;
+}
+
+.ledger-discard-guard-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+  gap: 8px;
+}
+
+/* Right-click menu on a row. Fixed to the pointer, above the board. */
+.ledger-context-menu {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  min-width: 232px;
+  padding: 4px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-popover, var(--nui-background)));
+  box-shadow: 0 12px 32px hsl(var(--nui-foreground) / 18%);
+  gap: 1px;
+}
+
+.ledger-context-menu-head {
+  padding: 6px 10px 4px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ledger-context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-radius: var(--nui-radius-sm);
+  padding: 8px 10px;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-context-menu button:hover,
+.ledger-context-menu button:focus-visible {
+  outline: none;
+  background: hsl(var(--nui-muted) / .7);
+}
+
+.ledger-context-menu button.is-danger {
+  color: hsl(var(--nui-danger));
+}
+
+.ledger-context-menu button svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
 .ledger-board-only-bar {
   display: flex;
   flex: none;

@@ -28,9 +28,10 @@ use crate::course::infrastructure::{
     FieldReservationGateway, MySqlSlotOverrideRepository,
 };
 use crate::course::usecase::{
-    CreateCourseUseCase, CreateReservationInput, CreateReservationUseCase, DeleteCourseUseCase,
-    DeleteSlotOverridesUseCase, GenerateCourseTimeSlotsUseCase, GetCourseOrderUseCase,
-    GetCourseScheduleUseCase, GetTeeLedgerUseCase, GetTeeSheetUseCase, LinkCourseResourceUseCase,
+    CancelReservationUseCase, CreateCourseUseCase, CreateReservationInput,
+    CreateReservationUseCase, DeleteCourseUseCase, DeleteSlotOverridesUseCase,
+    GenerateCourseTimeSlotsUseCase, GetCourseOrderUseCase, GetCourseScheduleUseCase,
+    GetTeeLedgerUseCase, GetTeeSheetUseCase, LinkCourseResourceUseCase,
     ListCaddieAssignmentsUseCase, ListCaddiesUseCase, ListCoursesUseCase, ListProductSlotsUseCase,
     ListReservationProductsUseCase, ListResourcesUseCase, ListSlotOverridesUseCase,
     ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase,
@@ -719,6 +720,48 @@ pub async fn create_reservation(
         .await
         .map_err(AppError::from)?;
     Ok(Json(CreatedReservationDto { id: id.to_string() }))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelReservationRequest {
+    /// Why the desk cancelled, in their own words. Optional.
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// POST /v1/course/reservations/{reservation_id}/cancel
+#[utoipa::path(
+    post,
+    path = "/v1/course/reservations/{reservation_id}/cancel",
+    tag = "course",
+    params(("reservation_id" = String, Path, description = "Reservation id")),
+    request_body = CancelReservationRequest,
+    responses(
+        (status = 204, description = "Reservation cancelled"),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn cancel_reservation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(reservation_id): Path<String>,
+    Json(request): Json<CancelReservationRequest>,
+) -> Result<StatusCode, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let use_case = CancelReservationUseCase::new(reservation_gateway(&state));
+    use_case
+        .execute(
+            credentials,
+            &ReservationId::new(reservation_id),
+            request.reason.as_deref(),
+        )
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ─── Reservation party ────────────────────────────────────────────────────────

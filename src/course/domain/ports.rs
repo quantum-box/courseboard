@@ -213,6 +213,18 @@ pub trait ReservationGateway: Send + Sync {
         input: &NewReservation,
     ) -> Result<ReservationId, CourseError>;
 
+    /// Cancel a booking.
+    ///
+    /// `reason` is carried for the day Field can store one; today's cancel
+    /// endpoint takes no body, so it is recorded in the call and dropped
+    /// upstream rather than silently pretended to be saved (PLT-3297).
+    async fn cancel_reservation(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+        reason: Option<&str>,
+    ) -> Result<(), CourseError>;
+
     /// Move an already-seeded booking back onto the demo day.
     ///
     /// Separate from create so a re-run updates in place: the demo is meant to

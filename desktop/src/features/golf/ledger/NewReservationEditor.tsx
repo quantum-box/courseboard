@@ -6,6 +6,7 @@ import { courseboardApiJson } from '../../../api'
 import { Field, FormGrid } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import { showToast } from '../../../lib/toast'
+import { DiscardGuard } from './DiscardGuard'
 import { MAX_PARTY_PLAYERS } from './ledgerLayout'
 
 /** Plans the desk can book this tee time under. */
@@ -43,6 +44,7 @@ export function NewReservationEditor({
   const [quantity, setQuantity] = useState('4')
   const [planId, setPlanId] = useState('')
   const [saving, setSaving] = useState(false)
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
 
   // Plans are filtered to the course being booked; a plan sold on another
   // course would put the round on a tee sheet the desk is not looking at.
@@ -55,9 +57,22 @@ export function NewReservationEditor({
     setCustomerName('')
     setQuantity('4')
     setPlanId(coursePlans[0]?.reservationServiceId ?? '')
+    setConfirmingDiscard(false)
   }, [target])
 
   if (!target) return null
+
+  // Only what the desk typed counts as work worth guarding; the pre-filled
+  // party size and default plan are not something anyone would mourn.
+  const dirty = customerName.trim().length > 0
+  const requestClose = () => {
+    if (saving) return
+    if (dirty) {
+      setConfirmingDiscard(true)
+      return
+    }
+    onClose()
+  }
 
   const parsedQuantity = Number.parseInt(quantity, 10)
   const validQuantity =
@@ -99,7 +114,7 @@ export function NewReservationEditor({
     <Sheet
       open
       onOpenChange={open => {
-        if (!open) onClose()
+        if (!open) requestClose()
       }}
       title={t('ledger:newReservation.title')}
       description={t('ledger:newReservation.description', {
@@ -143,13 +158,22 @@ export function NewReservationEditor({
         </FormGrid>
 
         <div className="ledger-party-actions">
-          <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
+          <Button type="button" variant="ghost" onClick={requestClose} disabled={saving}>
             {t('ledger:newReservation.cancel')}
           </Button>
           <Button type="button" variant="primary" onClick={save} disabled={!canSave}>
             {saving ? t('ledger:newReservation.saving') : t('ledger:newReservation.save')}
           </Button>
         </div>
+
+        <DiscardGuard
+          open={confirmingDiscard}
+          onKeepEditing={() => setConfirmingDiscard(false)}
+          onDiscard={() => {
+            setConfirmingDiscard(false)
+            onClose()
+          }}
+        />
       </div>
     </Sheet>
   )
