@@ -1,5 +1,6 @@
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Fragment } from 'react'
+import type { MouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { TeeReservation } from '../timeline/models'
@@ -210,6 +211,11 @@ function SlotRows({
   ]
     .filter(Boolean)
     .join(' ')
+  // The time and the wide empty area are one slot action. Sharing this exact
+  // handler keeps Shift-range selection identical whichever part is pressed.
+  const selectSlot = (event: MouseEvent<HTMLButtonElement>) => {
+    onToggleSlot(column.golfCourseId, slot.teeTime, event.shiftKey)
+  }
 
   const timeCell = (
     <th
@@ -221,7 +227,7 @@ function SlotRows({
       <button
         type="button"
         className="ledger-time-button"
-        onClick={event => onToggleSlot(column.golfCourseId, slot.teeTime, event.shiftKey)}
+        onClick={selectSlot}
         aria-pressed={isSelected}
       >
         <time>{slot.teeTime}</time>
@@ -236,7 +242,14 @@ function SlotRows({
       <tr className={rowClass}>
         {timeCell}
         <td className="ledger-cell-empty" colSpan={seatColumns + 1}>
-          <SlotEmptyLabel slot={slot} />
+          <button
+            type="button"
+            className="ledger-empty-button"
+            onClick={selectSlot}
+            aria-pressed={isSelected}
+          >
+            <SlotEmptyLabel slot={slot} />
+          </button>
         </td>
       </tr>
     )

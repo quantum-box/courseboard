@@ -79,7 +79,7 @@ export const ledger = {
   },
   marks: {
     title: '枠の設定',
-    selectHint: '時刻をクリックすると選べます。Shift を押しながらで範囲。',
+    selectHint: '予約がない時刻の行は、どこを押しても選べます。Shift を押しながらで、まとめて選べます。',
     selected: '{{n}} 枠を選択中',
     close: '売り止めにする',
     special: '特別料金にする',

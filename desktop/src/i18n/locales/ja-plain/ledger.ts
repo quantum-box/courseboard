@@ -77,7 +77,7 @@ export const ledger = {
   },
   marks: {
     title: '枠の せってい',
-    selectHint: '時こくを クリックすると えらべます。Shift を おしながらで はんい。',
+    selectHint: 'よやくが ない 時こくの 行は、どこを おしても えらべます。Shift を おしながらで、まとめて えらべます。',
     selected: '{{n}} 枠を えらんでいます',
     close: 'うりどめに する',
     special: 'とくべつな りょうきんに する',
