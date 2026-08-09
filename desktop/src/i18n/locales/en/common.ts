@@ -128,4 +128,7 @@ export const common: DeepPartial<typeof source> = {
     toLight: 'Switch to light',
     toDark: 'Switch to dark',
   },
+  notification: {
+    label: 'Operation results',
+  },
 }

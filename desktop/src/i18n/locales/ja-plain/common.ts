@@ -86,4 +86,7 @@ export const common: DeepPartial<typeof source> = {
     toLight: '明るい色にする',
     toDark: '暗い色にする',
   },
+  notification: {
+    label: '操作の結果のお知らせ',
+  },
 }

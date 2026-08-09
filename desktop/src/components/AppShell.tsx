@@ -809,8 +809,19 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
             <WorkspaceHelpPanel route={route} open={helpOpen} onClose={() => setHelpOpen(false)} />
           </div>
         </div>
-        {/* One host for every "saved" / "failed" message in the app. */}
-        <Toaster position="bottom-right" closeButton />
+        {/* Transient messages never capture the pointer or cover bottom actions. */}
+        <Toaster
+          className="courseboard-toaster"
+          position="top-center"
+          offset={{ top: 52, right: 16, bottom: 16, left: 16 }}
+          mobileOffset={{
+            top: 'calc(52px + env(safe-area-inset-top))',
+            right: 16,
+            bottom: 16,
+            left: 16,
+          }}
+          containerAriaLabel={t('common:notification.label')}
+        />
       </div>
 
 

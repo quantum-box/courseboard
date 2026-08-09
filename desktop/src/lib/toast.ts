@@ -18,8 +18,9 @@ export type ToastMessage = {
   message: string
 }
 
-/** Errors stay up longer: they usually need reading twice, or acting on. */
-const ERROR_DURATION_MS = 8_000
+/** Every toast is finite; errors stay longer because they usually need rereading. */
+export const DEFAULT_TOAST_DURATION_MS = 4_000
+export const ERROR_TOAST_DURATION_MS = 8_000
 
 export function showToast(input: ToastMessage | null) {
   if (!input) return
@@ -27,7 +28,7 @@ export function showToast(input: ToastMessage | null) {
   const headline = title ?? message
   const options = {
     ...(title ? { description: message } : {}),
-    ...(tone === 'danger' ? { duration: ERROR_DURATION_MS } : {}),
+    duration: tone === 'danger' ? ERROR_TOAST_DURATION_MS : DEFAULT_TOAST_DURATION_MS,
   }
   if (tone === 'success') return toast.success(headline, options)
   if (tone === 'danger') return toast.error(headline, options)
