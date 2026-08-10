@@ -37,6 +37,14 @@ const FIELD_UPSTREAM_TIMEOUT: Duration = Duration::from_secs(15);
 /// caused it, few enough that two screens saving in a loop fail loudly rather
 /// than hammering Field.
 const CONFIG_WRITE_ATTEMPTS: usize = 3;
+/// Safety gate for the deploy order approved for SCC-3.
+///
+/// Keep false until PLT-3353 has been deployed to Field *and* the storefront is
+/// confirmed to interpret `eligibleResourceIds` as resource membership. Read
+/// compatibility and both CourseBoard request shapes are safe before then, but
+/// creating the new paired array shape would make the current storefront
+/// misread the product.
+const GENERIC_RESOURCE_ELIGIBILITY_WRITES_ENABLED: bool = false;
 
 fn is_empty_course_store(base_url: &str) -> bool {
     base_url.trim().eq_ignore_ascii_case(EMPTY_COURSE_STORE_URL)
@@ -315,7 +323,7 @@ impl FieldGolfCatalogGateway {
         &self,
         credentials: GatewayCredentials<'_>,
         key: &str,
-        apply: impl Fn(&Value) -> Value,
+        apply: impl Fn(&Value) -> Result<Value, CourseError>,
     ) -> Result<Value, CourseError> {
         write_extension_config_key(&self.client, &self.base_url, credentials, key, apply).await
     }
@@ -376,11 +384,14 @@ pub(super) async fn write_extension_config_key(
     base_url: &str,
     credentials: GatewayCredentials<'_>,
     key: &str,
-    apply: impl Fn(&Value) -> Value,
+    apply: impl Fn(&Value) -> Result<Value, CourseError>,
 ) -> Result<Value, CourseError> {
     for attempt in 1..=CONFIG_WRITE_ATTEMPTS {
         let current = read_extension_config(client, base_url, credentials).await?;
-        let next = apply(&current);
+        // Validation happens before PATCH. In particular, a missing course
+        // resource cannot leave only half of the paired product scope in
+        // Field's wholesale config object.
+        let next = apply(&current)?;
         write_extension_config(client, base_url, credentials, &next).await?;
 
         let stored = read_extension_config(client, base_url, credentials).await?;
@@ -575,7 +586,7 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
             .write_config_key(
                 credentials,
                 course_order_config::COURSE_ORDER_KEY,
-                |config| course_order_config::with_course_order(config, order),
+                |config| Ok(course_order_config::with_course_order(config, order)),
             )
             .await?;
         Ok(course_order_config::read_course_order(&stored))
@@ -595,6 +606,20 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         credentials: GatewayCredentials<'_>,
         input: UpsertReservationProduct,
     ) -> Result<ReservationProduct, CourseError> {
+        // Resolve every course before entering the config write. This branch is
+        // intentionally unreachable in production until PLT-3353 is deployed;
+        // the canonical codec is still compiled and unit-tested now.
+        let resources =
+            if GENERIC_RESOURCE_ELIGIBILITY_WRITES_ENABLED && !input.golf_course_ids().is_empty() {
+                Some(self.list_resources(credentials).await?)
+            } else {
+                None
+            };
+        let write_mode = resources
+            .as_deref()
+            .map(|resources| generic_product_config::ProductWriteMode::Canonical { resources })
+            .unwrap_or(generic_product_config::ProductWriteMode::LegacyScalar);
+
         // Same shared object as the column order, so the same write-and-verify:
         // arranging the board must not silently drop a plan saved at the same
         // moment, or the other way round.
@@ -602,7 +627,7 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
             .write_config_key(
                 credentials,
                 generic_product_config::PRODUCTS_KEY,
-                |config| generic_product_config::upsert_product(config, &input),
+                |config| generic_product_config::upsert_product(config, &input, write_mode),
             )
             .await?;
         generic_product_config::read_products(&stored)

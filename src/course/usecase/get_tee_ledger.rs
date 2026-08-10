@@ -508,7 +508,7 @@ mod tests {
             None,
             course,
             "空沼IN",
-            None,
+            Vec::new(),
             format!("2026-07-20T{tee_time}:00+09:00"),
             270,
             PlayType::Caddie,

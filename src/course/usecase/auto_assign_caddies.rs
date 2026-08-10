@@ -412,7 +412,7 @@ mod tests {
             None,
             "golfcrs_1",
             "Course",
-            None,
+            Vec::new(),
             "2026-08-08T07:00:00+09:00",
             270,
             crate::course::domain::PlayType::Caddie,

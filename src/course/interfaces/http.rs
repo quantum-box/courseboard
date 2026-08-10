@@ -175,7 +175,10 @@ pub struct TeeSheetItemDto {
     pub display_name: Option<String>,
     pub golf_course_id: String,
     pub course_name: String,
-    /// Course the booked plan is sold on, when it names one.
+    /// Courses the booked plan is sold on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expected_course_ids: Vec<String>,
+    /// Compatibility alias emitted only for singleton membership.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expected_course_id: Option<String>,
     /// True when the booking sits on a course its plan is not sold on.
@@ -264,6 +267,11 @@ impl From<&TeeSheetItem> for TeeSheetItemDto {
             display_name: value.display_name().map(str::to_string),
             golf_course_id: value.golf_course_id().to_string(),
             course_name: value.course_name().to_string(),
+            expected_course_ids: value
+                .expected_course_ids()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             expected_course_id: value.expected_course_id().map(ToString::to_string),
             course_mismatch: value.course_mismatch(),
             tee_time: value.tee_time().to_string(),
@@ -1521,6 +1529,10 @@ pub struct ReservationProductDto {
     pub play_type: String,
     pub hole_count: i32,
     pub expected_duration_minutes: i32,
+    /// Canonical CourseBoard-owned course membership.
+    #[serde(default)]
+    pub golf_course_ids: Vec<String>,
+    /// Compatibility alias emitted only for a singleton membership.
     pub golf_course_id: Option<String>,
     /// Players allowed in one group; falls back to the reservation policy.
     pub max_players_per_group: Option<i32>,
@@ -1540,6 +1552,11 @@ impl From<&ReservationProduct> for ReservationProductDto {
             play_type: value.play_type().as_str().to_string(),
             hole_count: value.hole_count().get(),
             expected_duration_minutes: value.expected_duration_minutes().get(),
+            golf_course_ids: value
+                .golf_course_ids()
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
             golf_course_id: value.golf_course_id().map(ToString::to_string),
             max_players_per_group: value.max_players_per_group(),
         }
@@ -1553,8 +1570,48 @@ pub struct UpsertReservationProductRequest {
     pub play_type: String,
     pub hole_count: Option<i32>,
     pub expected_duration_minutes: Option<i32>,
+    /// Canonical input. Presence takes precedence structurally; callers must
+    /// not send it together with the compatibility scalar.
+    pub golf_course_ids: Option<Vec<String>>,
     pub golf_course_id: Option<String>,
     pub max_players_per_group: Option<i32>,
+}
+
+impl UpsertReservationProductRequest {
+    fn into_domain(self, service_id: String) -> Result<UpsertReservationProduct, CourseError> {
+        let Self {
+            display_name,
+            play_type,
+            hole_count,
+            expected_duration_minutes,
+            golf_course_ids,
+            golf_course_id,
+            max_players_per_group,
+        } = self;
+        match (golf_course_ids, golf_course_id) {
+            (Some(_), Some(_)) => Err(CourseError::BadRequest(
+                "send golfCourseIds or golfCourseId, not both",
+            )),
+            (Some(course_ids), None) => UpsertReservationProduct::try_new_with_course_ids(
+                service_id,
+                display_name,
+                play_type,
+                hole_count.unwrap_or(18),
+                expected_duration_minutes.unwrap_or(270),
+                course_ids,
+                max_players_per_group,
+            ),
+            (None, course_id) => UpsertReservationProduct::try_new(
+                service_id,
+                display_name,
+                play_type,
+                hole_count.unwrap_or(18),
+                expected_duration_minutes.unwrap_or(270),
+                course_id,
+                max_players_per_group,
+            ),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -1637,16 +1694,7 @@ pub async fn upsert_reservation_product(
     Json(body): Json<UpsertReservationProductRequest>,
 ) -> Result<Json<ReservationProductDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let input = UpsertReservationProduct::try_new(
-        service_id,
-        body.display_name,
-        body.play_type,
-        body.hole_count.unwrap_or(18),
-        body.expected_duration_minutes.unwrap_or(270),
-        body.golf_course_id,
-        body.max_players_per_group,
-    )
-    .map_err(AppError::from)?;
+    let input = body.into_domain(service_id).map_err(AppError::from)?;
     let use_case = UpsertReservationProductUseCase::new(catalog_gateway(&state));
     let product = use_case
         .execute(credentials, input)
@@ -1919,6 +1967,23 @@ pub async fn list_caddie_assignments(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::course::domain::PlayType;
+
+    fn product_request(
+        golf_course_ids: Option<Vec<&str>>,
+        golf_course_id: Option<&str>,
+    ) -> UpsertReservationProductRequest {
+        UpsertReservationProductRequest {
+            display_name: Some("シーズンパス".to_string()),
+            play_type: "self".to_string(),
+            hole_count: Some(18),
+            expected_duration_minutes: Some(240),
+            golf_course_ids: golf_course_ids
+                .map(|ids| ids.into_iter().map(str::to_string).collect()),
+            golf_course_id: golf_course_id.map(str::to_string),
+            max_players_per_group: Some(4),
+        }
+    }
 
     #[test]
     fn create_reservation_request_accepts_player_details() {
@@ -1959,6 +2024,63 @@ mod tests {
         // A trailing comma is what a UI building the list by joining produces
         // when the last item is dropped; it must not mean "a course with no id".
         assert!(params(Some(" , "), None).course_ids().is_empty());
+    }
+
+    #[test]
+    fn reservation_product_input_accepts_canonical_array_and_legacy_scalar() {
+        let canonical = product_request(Some(vec![" course-east ", "course-west"]), None)
+            .into_domain("season-pass".to_string())
+            .expect("canonical request");
+        assert_eq!(
+            canonical
+                .golf_course_ids()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["course-east", "course-west"]
+        );
+        assert!(!canonical.uses_legacy_course_id_input());
+
+        let legacy = product_request(None, Some("course-east"))
+            .into_domain("single-course".to_string())
+            .expect("legacy request");
+        assert_eq!(legacy.golf_course_id(), Some(&CourseId::new("course-east")));
+        assert!(legacy.uses_legacy_course_id_input());
+    }
+
+    #[test]
+    fn reservation_product_input_rejects_ambiguous_or_empty_array_scope() {
+        assert!(matches!(
+            product_request(Some(vec!["course-east"]), Some("course-east"))
+                .into_domain("ambiguous".to_string()),
+            Err(CourseError::BadRequest(
+                "send golfCourseIds or golfCourseId, not both"
+            ))
+        ));
+        assert!(matches!(
+            product_request(Some(Vec::new()), None).into_domain("empty".to_string()),
+            Err(CourseError::BadRequest(
+                "golfCourseIds must contain at least one course"
+            ))
+        ));
+    }
+
+    #[test]
+    fn multi_course_product_dto_omits_the_scalar_alias() {
+        let product = ReservationProduct::reconstitute_with_course_ids(
+            "season-pass",
+            None,
+            "season-pass",
+            Some("シーズンパス".to_string()),
+            PlayType::SelfPlay,
+            18,
+            240,
+            vec!["course-east".to_string(), "course-west".to_string()],
+            Some(4),
+        );
+        let dto = ReservationProductDto::from(&product);
+        assert_eq!(dto.golf_course_ids, vec!["course-east", "course-west"]);
+        assert_eq!(dto.golf_course_id, None);
     }
 
     #[test]

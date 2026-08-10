@@ -15,21 +15,23 @@
 use serde_json::{json, Map, Value};
 
 use crate::course::domain::{
-    CourseError, PlayType, ProductSlot, ReservationProduct, ReservationServiceId,
-    UpsertReservationProduct,
+    CourseError, CourseId, PlayType, ProductSlot, ReservationProduct, ReservationServiceId,
+    Resource, ResourceId, ResourceKind, UpsertReservationProduct,
 };
 
 pub(crate) const PRODUCTS_KEY: &str = "reservationProducts";
 
 /// Golf keys CourseBoard adds to the generic product. Field neither reads nor
-/// validates them; the storefront only looks at `enabled`, `availability` and
-/// `slots`.
+/// validates them.
 const PLAY_TYPE_KEY: &str = "playType";
 const HOLE_COUNT_KEY: &str = "holeCount";
-/// Which course this plan is sold on. Courses differ in opening hours and in
-/// what they sell, so a plan belongs to one of them; the storefront ignores
-/// this key, which keeps plans written before it readable.
+/// Scalar compatibility key written before SCC-3.
 const GOLF_COURSE_ID_KEY: &str = "golfCourseId";
+/// CourseBoard-owned golf domain scope. Field must not attach golf meaning to
+/// this key.
+const GOLF_COURSE_IDS_KEY: &str = "golfCourseIds";
+/// Field-owned, business-agnostic allow-list introduced by PLT-3353.
+const ELIGIBLE_RESOURCE_IDS_KEY: &str = "eligibleResourceIds";
 /// Players allowed in one group. Inventory counts groups, so this is a
 /// condition of the plan rather than a quantity of stock.
 const MAX_PLAYERS_PER_GROUP_KEY: &str = "maxPlayersPerGroup";
@@ -47,6 +49,17 @@ fn service_id_of(product: &Value) -> Option<&str> {
         .get("id")
         .and_then(Value::as_str)
         .filter(|value| !value.trim().is_empty())
+}
+
+/// How a product write is encoded while Field and CourseBoard roll out in
+/// separate deploys.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ProductWriteMode<'a> {
+    /// PLT-3353 is not deployed: do not create either new array key.
+    LegacyScalar,
+    /// PLT-3353 is live: atomically write both the golf scope and generic
+    /// resource eligibility.
+    Canonical { resources: &'a [Resource] },
 }
 
 pub(crate) fn read_products(config: &Value) -> Vec<ReservationProduct> {
@@ -72,34 +85,78 @@ fn to_domain(product: &Value) -> Option<ReservationProduct> {
         .get("name")
         .and_then(Value::as_str)
         .map(str::to_string);
-    let golf_course_id = product
-        .get(GOLF_COURSE_ID_KEY)
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string);
-
     let max_players_per_group = product
         .get(MAX_PLAYERS_PER_GROUP_KEY)
         .and_then(Value::as_i64)
         .map(|value| value as i32);
 
-    Some(ReservationProduct::reconstitute(
-        service_id.to_string(),
-        None,
-        service_id.to_string(),
-        display_name,
-        play_type,
-        hole_count,
-        duration,
-        golf_course_id,
-        max_players_per_group,
-    ))
+    match read_course_ids(product) {
+        // Presence wins over the scalar even when the array is malformed or
+        // empty. The domain remembers that a scope was declared and therefore
+        // treats the empty result as "sold nowhere", not unrestricted.
+        Some(golf_course_ids) => Some(ReservationProduct::reconstitute_with_course_ids(
+            service_id.to_string(),
+            None,
+            service_id.to_string(),
+            display_name,
+            play_type,
+            hole_count,
+            duration,
+            golf_course_ids,
+            max_players_per_group,
+        )),
+        None => {
+            let golf_course_id = product
+                .get(GOLF_COURSE_ID_KEY)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string);
+            Some(ReservationProduct::reconstitute(
+                service_id.to_string(),
+                None,
+                service_id.to_string(),
+                display_name,
+                play_type,
+                hole_count,
+                duration,
+                golf_course_id,
+                max_players_per_group,
+            ))
+        }
+    }
+}
+
+/// `None` means the canonical key is absent and the scalar compatibility key
+/// may be read. `Some(empty)` means it was present but unusable and must fail
+/// closed.
+fn read_course_ids(product: &Value) -> Option<Vec<String>> {
+    let value = product.get(GOLF_COURSE_IDS_KEY)?;
+    let Some(values) = value.as_array() else {
+        return Some(Vec::new());
+    };
+    let mut course_ids = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(course_id) = value.as_str().map(str::trim) else {
+            return Some(Vec::new());
+        };
+        if course_id.is_empty() {
+            return Some(Vec::new());
+        }
+        if !course_ids.iter().any(|known| known == course_id) {
+            course_ids.push(course_id.to_string());
+        }
+    }
+    Some(course_ids)
 }
 
 /// Writes the plan into the products array, keeping every key Field or another
 /// surface put there. A plan the operator never edited must survive untouched.
-pub(crate) fn upsert_product(config: &Value, input: &UpsertReservationProduct) -> Value {
+pub(crate) fn upsert_product(
+    config: &Value,
+    input: &UpsertReservationProduct,
+    mode: ProductWriteMode<'_>,
+) -> Result<Value, CourseError> {
     let service_id = input.reservation_service_id.as_str();
     let mut products = as_products(config);
     let existing = products
@@ -109,6 +166,16 @@ pub(crate) fn upsert_product(config: &Value, input: &UpsertReservationProduct) -
     let mut product = existing
         .and_then(|index| products.get(index).cloned())
         .unwrap_or_else(|| json!({ "id": service_id, "enabled": true, "bookingMode": "slot" }));
+
+    let preserve_existing_canonical_scope = match mode {
+        ProductWriteMode::LegacyScalar => prepare_legacy_scope_write(&product, input)?,
+        ProductWriteMode::Canonical { resources } => {
+            refuse_legacy_scalar_shrink(&product, input)?;
+            let (course_ids, resource_ids) = resolve_canonical_scope(input, resources)?;
+            write_canonical_scope(&mut product, &course_ids, &resource_ids, resources)?;
+            false
+        }
+    };
 
     if let Some(object) = product.as_object_mut() {
         object.insert("id".into(), json!(service_id));
@@ -122,14 +189,16 @@ pub(crate) fn upsert_product(config: &Value, input: &UpsertReservationProduct) -
             "durationMinutes".into(),
             json!(input.expected_duration_minutes.get()),
         );
-        match input.golf_course_id.as_ref() {
-            Some(course_id) => {
-                object.insert(GOLF_COURSE_ID_KEY.into(), json!(course_id.as_str()));
-            }
-            // Clearing the course has to remove the key, not write null: a null
-            // would read back as a course whose id is empty.
-            None => {
-                object.remove(GOLF_COURSE_ID_KEY);
+        if matches!(mode, ProductWriteMode::LegacyScalar) && !preserve_existing_canonical_scope {
+            match input.golf_course_id() {
+                Some(course_id) => {
+                    object.insert(GOLF_COURSE_ID_KEY.into(), json!(course_id.as_str()));
+                }
+                // Clearing the legacy course removes the key rather than
+                // writing null. Canonical array input can never be empty.
+                None => {
+                    object.remove(GOLF_COURSE_ID_KEY);
+                }
             }
         }
         match input.max_players_per_group {
@@ -148,7 +217,183 @@ pub(crate) fn upsert_product(config: &Value, input: &UpsertReservationProduct) -
         Some(index) => products[index] = product,
         None => products.push(product),
     }
-    with_products(config, products)
+    Ok(with_products(config, products))
+}
+
+/// Checks whether a legacy-shape write can safely edit the product without
+/// changing canonical membership. Returns true when the existing array keys
+/// must be preserved verbatim.
+fn prepare_legacy_scope_write(
+    product: &Value,
+    input: &UpsertReservationProduct,
+) -> Result<bool, CourseError> {
+    let Some(existing_course_ids) = read_course_ids(product) else {
+        if input.golf_course_ids().len() > 1 {
+            return Err(CourseError::BadRequest(
+                "multi-course product writes are disabled until the PLT-3353 storefront rollout is verified",
+            ));
+        }
+        return Ok(false);
+    };
+
+    if input.uses_legacy_course_id_input() && existing_course_ids.len() > 1 {
+        return Err(CourseError::BadRequest(
+            "a multi-course product cannot be updated with legacy golfCourseId",
+        ));
+    }
+    let requested: Vec<&str> = input
+        .golf_course_ids()
+        .iter()
+        .map(CourseId::as_str)
+        .collect();
+    if existing_course_ids.is_empty()
+        || existing_course_ids
+            .iter()
+            .map(String::as_str)
+            .ne(requested.iter().copied())
+    {
+        return Err(CourseError::BadRequest(
+            "canonical course membership cannot change before PLT-3353 is deployed",
+        ));
+    }
+    Ok(true)
+}
+
+fn refuse_legacy_scalar_shrink(
+    product: &Value,
+    input: &UpsertReservationProduct,
+) -> Result<(), CourseError> {
+    if input.uses_legacy_course_id_input()
+        && read_course_ids(product).is_some_and(|course_ids| course_ids.len() > 1)
+    {
+        return Err(CourseError::BadRequest(
+            "a multi-course product cannot be updated with legacy golfCourseId",
+        ));
+    }
+    Ok(())
+}
+
+fn resolve_canonical_scope(
+    input: &UpsertReservationProduct,
+    resources: &[Resource],
+) -> Result<(Vec<String>, Vec<ResourceId>), CourseError> {
+    if input.golf_course_ids().is_empty() {
+        return Err(CourseError::BadRequest(
+            "a canonical product must have at least one course",
+        ));
+    }
+    let mut resource_ids = Vec::with_capacity(input.golf_course_ids().len());
+    for course_id in input.golf_course_ids() {
+        let mut matches = resources
+            .iter()
+            .filter(|resource| resource.is_active())
+            .filter(|resource| resource.kind() == ResourceKind::Course)
+            .filter(|resource| resource.golf_course_id() == Some(course_id));
+        let resource = matches.next().ok_or(CourseError::BadRequest(
+            "every selected course must have a canonical active reservation resource",
+        ))?;
+        if matches.next().is_some() {
+            return Err(CourseError::BadRequest(
+                "a selected course has more than one canonical active reservation resource",
+            ));
+        }
+        let resource_id = resource
+            .reservation_resource_id()
+            .unwrap_or_else(|| resource.id())
+            .clone();
+        if resource_ids.contains(&resource_id) {
+            return Err(CourseError::BadRequest(
+                "selected courses must resolve to distinct reservation resources",
+            ));
+        }
+        resource_ids.push(resource_id);
+    }
+    Ok((
+        input
+            .golf_course_ids()
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        resource_ids,
+    ))
+}
+
+fn write_canonical_scope(
+    product: &mut Value,
+    course_ids: &[String],
+    resource_ids: &[ResourceId],
+    resources: &[Resource],
+) -> Result<(), CourseError> {
+    let Some(object) = product.as_object_mut() else {
+        return Err(CourseError::Provider(
+            "the reservation product in extension config is not an object".into(),
+        ));
+    };
+    object.insert(GOLF_COURSE_IDS_KEY.into(), json!(course_ids));
+    object.insert(
+        ELIGIBLE_RESOURCE_IDS_KEY.into(),
+        json!(resource_ids
+            .iter()
+            .map(ResourceId::as_str)
+            .collect::<Vec<_>>()),
+    );
+    object.remove(GOLF_COURSE_ID_KEY);
+
+    match read_eligible_resource_ids(product, resources) {
+        ResourceEligibility::Allowed(stored) if stored == resource_ids => Ok(()),
+        _ => Err(CourseError::Provider(
+            "the generated resource eligibility did not validate".into(),
+        )),
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ResourceEligibility {
+    Allowed(Vec<ResourceId>),
+    Denied,
+}
+
+/// Decodes Field's generic allow-list. Every invalid state denies the whole
+/// product; accepting the known subset would silently widen or change what is
+/// sold.
+fn read_eligible_resource_ids(product: &Value, resources: &[Resource]) -> ResourceEligibility {
+    let Some(values) = product
+        .get(ELIGIBLE_RESOURCE_IDS_KEY)
+        .and_then(Value::as_array)
+    else {
+        return ResourceEligibility::Denied;
+    };
+    if values.is_empty() {
+        return ResourceEligibility::Denied;
+    }
+
+    let known: Vec<&ResourceId> = resources
+        .iter()
+        .filter(|resource| resource.is_active())
+        .filter(|resource| resource.kind() == ResourceKind::Course)
+        .map(|resource| {
+            resource
+                .reservation_resource_id()
+                .unwrap_or_else(|| resource.id())
+        })
+        .collect();
+    let mut decoded = Vec::with_capacity(values.len());
+    for value in values {
+        let Some(resource_id) = value.as_str().map(str::trim) else {
+            return ResourceEligibility::Denied;
+        };
+        if resource_id.is_empty() {
+            return ResourceEligibility::Denied;
+        }
+        let resource_id = ResourceId::new(resource_id);
+        if !known.contains(&&resource_id) {
+            return ResourceEligibility::Denied;
+        }
+        if !decoded.contains(&resource_id) {
+            decoded.push(resource_id);
+        }
+    }
+    ResourceEligibility::Allowed(decoded)
 }
 
 pub(crate) fn read_slots(
@@ -239,7 +484,6 @@ fn with_products(config: &Value, products: Vec<Value>) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::course::domain::CourseId;
 
     fn config_with(products: Value) -> Value {
         json!({ "defaultHoles": 18, PRODUCTS_KEY: products })
@@ -256,6 +500,34 @@ mod tests {
             None,
         )
         .expect("valid input")
+    }
+
+    fn scoped_input(service_id: &str, course_ids: &[&str]) -> UpsertReservationProduct {
+        UpsertReservationProduct::try_new_with_course_ids(
+            service_id,
+            Some("シーズンパス".to_string()),
+            "self",
+            18,
+            240,
+            course_ids.iter().map(|value| value.to_string()).collect(),
+            None,
+        )
+        .expect("valid scoped input")
+    }
+
+    fn legacy_upsert(config: &Value, input: &UpsertReservationProduct) -> Value {
+        upsert_product(config, input, ProductWriteMode::LegacyScalar).expect("legacy upsert")
+    }
+
+    fn resource(course_id: &str, resource_id: &str, active: bool) -> Resource {
+        Resource::reconstitute(
+            format!("link-{course_id}"),
+            course_id,
+            Some(resource_id.to_string()),
+            Some(course_id.to_string()),
+            ResourceKind::Course,
+            active,
+        )
     }
 
     #[test]
@@ -283,22 +555,35 @@ mod tests {
             "priceAmount": 18000,
             "formFields": ["partySize"],
             "depositRatio": 0.3,
+            "availability": { "startDate": "2026-04-01", "endDate": "2026-11-30" },
         }]));
-        let next = upsert_product(&config, &upsert_input("svc:caddie-18", Some("新しい名前")));
+        let next = legacy_upsert(&config, &upsert_input("svc:caddie-18", Some("新しい名前")));
         let product = &next[PRODUCTS_KEY][0];
         assert_eq!(product["priceAmount"], 18000);
         assert_eq!(product["formFields"][0], "partySize");
         assert_eq!(product["depositRatio"], 0.3);
+        assert_eq!(
+            product["availability"],
+            config[PRODUCTS_KEY][0]["availability"]
+        );
         assert_eq!(product["name"], "新しい名前");
     }
 
     #[test]
     fn the_course_a_plan_is_sold_on_round_trips() {
         let config = config_with(json!([{ "id": "svc:caddie-18" }]));
-        let mut input = upsert_input("svc:caddie-18", Some("東キャディ付き"));
-        input.golf_course_id = Some(CourseId::new("course_east"));
+        let input = UpsertReservationProduct::try_new(
+            "svc:caddie-18",
+            Some("東キャディ付き".to_string()),
+            "caddie",
+            18,
+            240,
+            Some("course_east".to_string()),
+            None,
+        )
+        .expect("input");
 
-        let next = upsert_product(&config, &input);
+        let next = legacy_upsert(&config, &input);
         assert_eq!(next[PRODUCTS_KEY][0]["golfCourseId"], "course_east");
 
         let products = read_products(&next);
@@ -316,7 +601,7 @@ mod tests {
             "id": "svc:caddie-18",
             "golfCourseId": "course_east",
         }]));
-        let next = upsert_product(&config, &upsert_input("svc:caddie-18", None));
+        let next = legacy_upsert(&config, &upsert_input("svc:caddie-18", None));
 
         assert!(next[PRODUCTS_KEY][0].get("golfCourseId").is_none());
         assert_eq!(read_products(&next)[0].golf_course_id(), None);
@@ -331,11 +616,235 @@ mod tests {
     #[test]
     fn upsert_leaves_other_products_and_config_keys_alone() {
         let config = config_with(json!([{ "id": "svc:self-18", "name": "セルフ" }]));
-        let next = upsert_product(&config, &upsert_input("svc:caddie-18", Some("キャディ")));
+        let next = legacy_upsert(&config, &upsert_input("svc:caddie-18", Some("キャディ")));
         assert_eq!(next["defaultHoles"], 18);
         let products = next[PRODUCTS_KEY].as_array().expect("array");
         assert_eq!(products.len(), 2);
         assert_eq!(products[0]["name"], "セルフ");
+    }
+
+    #[test]
+    fn canonical_course_array_takes_precedence_over_the_legacy_scalar() {
+        let config = config_with(json!([{
+            "id": "season-pass",
+            "golfCourseId": "course_legacy",
+            "golfCourseIds": [" course_east ", "course_west", "course_east"],
+        }]));
+
+        let product = &read_products(&config)[0];
+        assert_eq!(
+            product
+                .golf_course_ids()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["course_east", "course_west"]
+        );
+        assert!(product.is_sold_on(&CourseId::new("course_west")));
+        assert!(!product.is_sold_on(&CourseId::new("course_legacy")));
+        assert_eq!(product.golf_course_id(), None);
+    }
+
+    #[test]
+    fn empty_or_malformed_canonical_course_array_fails_closed() {
+        for golf_course_ids in [json!([]), json!("course_east"), json!(["course_east", 7])] {
+            let config = config_with(json!([{
+                "id": "season-pass",
+                "golfCourseId": "course_legacy",
+                "golfCourseIds": golf_course_ids,
+            }]));
+            let product = &read_products(&config)[0];
+            assert!(product.golf_course_ids().is_empty());
+            assert!(!product.is_sold_on(&CourseId::new("course_legacy")));
+            assert!(!product.is_sold_on(&CourseId::new("course_east")));
+        }
+    }
+
+    #[test]
+    fn generic_resource_eligibility_has_five_fail_closed_cases() {
+        let resources = vec![
+            resource("course_east", "resource_east", true),
+            resource("course_west", "resource_west", false),
+        ];
+        assert_eq!(
+            read_eligible_resource_ids(
+                &json!({ "eligibleResourceIds": ["resource_east"] }),
+                &resources,
+            ),
+            ResourceEligibility::Allowed(vec![ResourceId::new("resource_east")])
+        );
+        assert_eq!(
+            read_eligible_resource_ids(&json!({ "eligibleResourceIds": [] }), &resources),
+            ResourceEligibility::Denied
+        );
+        assert_eq!(
+            read_eligible_resource_ids(&json!({}), &resources),
+            ResourceEligibility::Denied
+        );
+        assert_eq!(
+            read_eligible_resource_ids(
+                &json!({ "eligibleResourceIds": "resource_east" }),
+                &resources,
+            ),
+            ResourceEligibility::Denied
+        );
+        assert_eq!(
+            read_eligible_resource_ids(
+                &json!({ "eligibleResourceIds": ["resource_unknown"] }),
+                &resources,
+            ),
+            ResourceEligibility::Denied
+        );
+    }
+
+    #[test]
+    fn canonical_write_resolves_every_course_and_preserves_availability() {
+        let config = config_with(json!([{
+            "id": "season-pass",
+            "golfCourseId": "course_east",
+            "availability": {
+                "startDate": "2026-04-01",
+                "endDate": "2026-11-30",
+                "weekdays": [1, 2, 3, 4, 5]
+            },
+        }]));
+        let resources = vec![
+            resource("course_east", "resource_east", true),
+            resource("course_west", "resource_west", true),
+        ];
+        let next = upsert_product(
+            &config,
+            &scoped_input("season-pass", &["course_east", "course_west"]),
+            ProductWriteMode::Canonical {
+                resources: &resources,
+            },
+        )
+        .expect("canonical write");
+        let product = &next[PRODUCTS_KEY][0];
+
+        assert_eq!(
+            product[GOLF_COURSE_IDS_KEY],
+            json!(["course_east", "course_west"])
+        );
+        assert_eq!(
+            product[ELIGIBLE_RESOURCE_IDS_KEY],
+            json!(["resource_east", "resource_west"])
+        );
+        assert!(product.get(GOLF_COURSE_ID_KEY).is_none());
+        assert_eq!(
+            product["availability"],
+            config[PRODUCTS_KEY][0]["availability"]
+        );
+    }
+
+    #[test]
+    fn legacy_scalar_cannot_shrink_an_existing_multi_course_product() {
+        let config = config_with(json!([{
+            "id": "season-pass",
+            "golfCourseIds": ["course_east", "course_west"],
+            "eligibleResourceIds": ["resource_east", "resource_west"],
+        }]));
+        let input = UpsertReservationProduct::try_new(
+            "season-pass",
+            Some("旧画面からの更新".to_string()),
+            "self",
+            18,
+            240,
+            Some("course_east".to_string()),
+            None,
+        )
+        .expect("legacy input");
+
+        let result = upsert_product(&config, &input, ProductWriteMode::LegacyScalar);
+        assert!(matches!(
+            result,
+            Err(CourseError::BadRequest(
+                "a multi-course product cannot be updated with legacy golfCourseId"
+            ))
+        ));
+        assert_eq!(
+            config[PRODUCTS_KEY][0][GOLF_COURSE_IDS_KEY],
+            json!(["course_east", "course_west"])
+        );
+        assert!(config[PRODUCTS_KEY][0].get(GOLF_COURSE_ID_KEY).is_none());
+    }
+
+    #[test]
+    fn canonical_input_can_edit_an_existing_multi_scope_without_rewriting_it() {
+        let config = config_with(json!([{
+            "id": "season-pass",
+            "name": "保存前",
+            "golfCourseIds": ["course_east", "course_west"],
+            "eligibleResourceIds": ["resource_east", "resource_west"],
+            "availability": { "startDate": "2026-04-01" },
+        }]));
+        let next = upsert_product(
+            &config,
+            &scoped_input("season-pass", &["course_east", "course_west"]),
+            ProductWriteMode::LegacyScalar,
+        )
+        .expect("membership-preserving edit");
+
+        assert_eq!(next[PRODUCTS_KEY][0]["name"], "シーズンパス");
+        assert_eq!(
+            next[PRODUCTS_KEY][0][GOLF_COURSE_IDS_KEY],
+            config[PRODUCTS_KEY][0][GOLF_COURSE_IDS_KEY]
+        );
+        assert_eq!(
+            next[PRODUCTS_KEY][0][ELIGIBLE_RESOURCE_IDS_KEY],
+            config[PRODUCTS_KEY][0][ELIGIBLE_RESOURCE_IDS_KEY]
+        );
+        assert_eq!(
+            next[PRODUCTS_KEY][0]["availability"],
+            config[PRODUCTS_KEY][0]["availability"]
+        );
+    }
+
+    #[test]
+    fn disabled_writer_gate_returns_an_explicit_error_for_a_new_multi_course_write() {
+        let config = config_with(json!([]));
+        let result = upsert_product(
+            &config,
+            &scoped_input("season-pass", &["course_east", "course_west"]),
+            ProductWriteMode::LegacyScalar,
+        );
+        assert!(matches!(
+            result,
+            Err(CourseError::BadRequest(
+                "multi-course product writes are disabled until the PLT-3353 storefront rollout is verified"
+            ))
+        ));
+        assert!(config[PRODUCTS_KEY]
+            .as_array()
+            .expect("products")
+            .is_empty());
+    }
+
+    #[test]
+    fn missing_canonical_resource_rejects_the_whole_product_write() {
+        let config = config_with(json!([{
+            "id": "season-pass",
+            "name": "保存前",
+            "availability": { "startDate": "2026-04-01" },
+        }]));
+        let resources = vec![
+            resource("course_east", "resource_east", true),
+            resource("course_west", "resource_west", false),
+        ];
+        let result = upsert_product(
+            &config,
+            &scoped_input("season-pass", &["course_east", "course_west"]),
+            ProductWriteMode::Canonical {
+                resources: &resources,
+            },
+        );
+
+        assert!(matches!(result, Err(CourseError::BadRequest(_))));
+        assert_eq!(config[PRODUCTS_KEY][0]["name"], "保存前");
+        assert!(config[PRODUCTS_KEY][0].get(GOLF_COURSE_IDS_KEY).is_none());
+        assert!(config[PRODUCTS_KEY][0]
+            .get(ELIGIBLE_RESOURCE_IDS_KEY)
+            .is_none());
     }
 
     #[test]

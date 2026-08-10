@@ -423,7 +423,7 @@ mod tests {
             None,
             "course-1",
             "空沼",
-            None,
+            Vec::new(),
             format!("2026-07-20T{tee_time}:00+09:00"),
             270,
             play_type,

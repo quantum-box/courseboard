@@ -199,7 +199,9 @@ fn to_tee_sheet_item(
             .map(str::to_string),
         golf_course_id,
         course_name,
-        product.and_then(|item| item.golf_course_id().cloned()),
+        product
+            .map(|item| item.golf_course_ids().to_vec())
+            .unwrap_or_default(),
         format_datetime_with_offset(reservation.starts_at(), jst),
         duration_minutes,
         play_type,
@@ -506,12 +508,12 @@ mod tests {
     }
 
     #[test]
-    fn a_booking_on_a_course_its_plan_does_not_sell_is_flagged() {
+    fn a_booking_is_checked_against_every_course_the_plan_sells_on() {
         // ERP decides the course through the resource; the plan only declares
-        // one. Where the two disagree the board has to say so rather than
-        // quietly trust either side.
+        // its membership. Where the two disagree the board has to say so
+        // rather than quietly trust either side.
         let reservation = sample_reservation();
-        let east = ReservationProduct::reconstitute(
+        let season_pass = ReservationProduct::reconstitute_with_course_ids(
             "product_caddie_18",
             None,
             "svc:caddie-18",
@@ -519,31 +521,36 @@ mod tests {
             PlayType::Caddie,
             18,
             240,
-            Some("course_east".into()),
+            vec!["course_east".into(), "course_west".into()],
             None,
         );
         let jst = jst_offset().unwrap();
 
         let matching = to_tee_sheet_item(
             &reservation,
-            Some(&east),
-            &CourseId::new("course_east"),
-            "East Course",
-            jst,
-        );
-        assert!(!matching.course_mismatch());
-
-        let booked_west = to_tee_sheet_item(
-            &reservation,
-            Some(&east),
+            Some(&season_pass),
             &CourseId::new("course_west"),
             "West Course",
             jst,
         );
-        assert!(booked_west.course_mismatch());
+        assert!(!matching.course_mismatch());
+        assert_eq!(matching.expected_course_id(), None);
+
+        let booked_elsewhere = to_tee_sheet_item(
+            &reservation,
+            Some(&season_pass),
+            &CourseId::new("course_north"),
+            "North Course",
+            jst,
+        );
+        assert!(booked_elsewhere.course_mismatch());
         assert_eq!(
-            booked_west.expected_course_id().map(ToString::to_string),
-            Some("course_east".to_string()),
+            booked_elsewhere
+                .expected_course_ids()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            vec!["course_east", "course_west"],
         );
     }
 
