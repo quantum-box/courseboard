@@ -29,6 +29,7 @@ mod simulator;
 mod slot_override;
 mod tee_ledger;
 mod tee_sheet;
+mod tenant_timezone;
 
 pub use availability_deadline::{AvailabilityDeadline, YearMonth};
 pub use caddie::{
@@ -111,5 +112,6 @@ pub use tee_ledger::{
 pub use tee_sheet::{
     course_day_bounds, format_datetime_with_offset, format_jst_wall_clock, jst_offset,
     parse_jst_tee_time, widen_for_utc_date_filter, TeeSheet, TeeSheetItem, TeeSheetStatus,
-    DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR, DEFAULT_TIMEZONE,
+    DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR,
 };
+pub use tenant_timezone::{tenant_timezone_from_config, DEFAULT_TIMEZONE};

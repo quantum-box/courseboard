@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { i18next } from '../../i18n'
 import { courseboardApiJson, courseboardApiText } from '../../api'
 import { COURSE_TIME_ZONE } from '../../lib/clock'
+import { isSupportedTimezone } from '../../lib/timezone'
 import {
   Field,
   FormGrid,
@@ -71,6 +72,9 @@ export function validateExtensionConfig(draft: ExtensionConfigDraft) {
     return i18next.t('settings:extension.validation.currencyFormat')
   }
   if (!draft.timezone.trim()) return i18next.t('settings:extension.validation.timezoneRequired')
+  if (!isSupportedTimezone(draft.timezone.trim())) {
+    return i18next.t('settings:extension.validation.timezoneFormat')
+  }
   const playerTagError = validatePlayerTagOptions(draft.playerTagOptions)
   if (playerTagError === 'tooMany') {
     return i18next.t('settings:extension.validation.playerTagsTooMany', {

@@ -47,6 +47,7 @@ export const settings = {
       currencyRequired: '通貨を選んでください。',
       currencyFormat: '通貨は ISO 4217 の3文字コードで入力してください。',
       timezoneRequired: 'タイムゾーンを入力してください。',
+      timezoneFormat: 'タイムゾーンは「Asia/Tokyo」のような地域名の形で入力してください。「JST」などの略称は使えません。',
       playerTagsTooMany: 'プレイヤー区分は {{max}} 件までです。',
       playerTagTooLong: 'プレイヤー区分は1件 {{max}} 文字までです。',
       playerTagsDuplicate: '同じプレイヤー区分が重複しています。',

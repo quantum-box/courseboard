@@ -8,7 +8,6 @@ use super::product::PlayType;
 use super::{CourseError, CourseId, ReservationId};
 
 const JST_OFFSET_SECS: i32 = 9 * 3600;
-pub const DEFAULT_TIMEZONE: &str = "Asia/Tokyo";
 pub const DEFAULT_DAY_START_HOUR: u32 = 6;
 pub const DEFAULT_DAY_END_HOUR: u32 = 18;
 

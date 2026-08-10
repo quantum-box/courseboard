@@ -79,15 +79,17 @@ impl GetTeeLedgerUseCase {
         // ADR-0005 put the board on several independent Field endpoints and any
         // of them can be down alone, so one failure must degrade the ledger
         // rather than black out the operator's day.
-        let (reservations, courses, resources, products, order) = tokio::join!(
+        let (reservations, courses, timezone, resources, products, order) = tokio::join!(
             self.reservations.list_reservations(credentials),
             self.catalog.list_courses(credentials),
+            self.catalog.get_tenant_timezone(credentials),
             self.catalog.list_resources(credentials),
             self.catalog.list_reservation_products(credentials),
             self.catalog.get_course_order(credentials),
         );
         let reservations = reservations?;
         let courses = courses?;
+        let timezone = timezone?;
 
         let mut unavailable = Vec::new();
         let resources = resources.unwrap_or_else(|error| {
@@ -119,8 +121,8 @@ impl GetTeeLedgerUseCase {
             &courses,
             &resources,
             &products,
+            &timezone,
         )?;
-        let timezone = sheet.timezone().to_string();
         let items = sheet.into_items();
 
         let marks = self

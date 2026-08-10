@@ -422,6 +422,15 @@ struct FieldExtensionConfigDto {
 
 #[async_trait]
 impl GolfCatalogGateway for FieldGolfCatalogGateway {
+    async fn get_tenant_timezone(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<String, CourseError> {
+        Ok(crate::course::domain::tenant_timezone_from_config(
+            &self.read_config(credentials).await?,
+        ))
+    }
+
     async fn list_courses(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -441,7 +450,8 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         credentials: GatewayCredentials<'_>,
         input: UpsertCourse,
     ) -> Result<Course, CourseError> {
-        let body = upsert_course_body(&input);
+        let timezone = self.get_tenant_timezone(credentials).await?;
+        let body = upsert_course_body(&input, &timezone);
         let dto: FieldGolfCourseDto = field_send_json(
             &self.client,
             &self.base_url,
@@ -460,7 +470,8 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         course_id: &CourseId,
         input: UpsertCourse,
     ) -> Result<Course, CourseError> {
-        let body = upsert_course_body(&input);
+        let timezone = self.get_tenant_timezone(credentials).await?;
+        let body = upsert_course_body(&input, &timezone);
         let path = format!(
             "/v1/erp/extensions/golf-course/courses/{}",
             urlencoding_path(course_id)
@@ -922,12 +933,14 @@ pub(crate) fn urlencoding_path(value: impl AsRef<str>) -> String {
         .collect()
 }
 
-fn upsert_course_body(input: &UpsertCourse) -> Value {
+fn upsert_course_body(input: &UpsertCourse, tenant_timezone: &str) -> Value {
     let mut body = json!({
         "name": input.name,
         "shortName": input.short_name,
         "holeCount": input.hole_count.get(),
-        "timezone": input.timezone,
+        // Field still requires the legacy column. Mirror the tenant setting so
+        // rollback stays possible without restoring a per-course editor.
+        "timezone": tenant_timezone,
         "startIntervalMinutes": input.start_interval_minutes.get(),
         "isActive": input.is_active,
     });
@@ -1532,6 +1545,16 @@ mod tests {
             prepayment_policy: Some("none".into()),
             seed_key: None,
         }
+    }
+
+    #[test]
+    fn legacy_course_column_mirrors_the_tenant_timezone() {
+        let input = UpsertCourse::try_new("East", Some("E".into()), 18, 8, true, None)
+            .expect("course input");
+
+        let body = upsert_course_body(&input, "Europe/Berlin");
+
+        assert_eq!(body["timezone"], "Europe/Berlin");
     }
 
     fn profile_dto(value: Value) -> FieldGolfCaddieProfileDto {

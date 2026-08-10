@@ -34,4 +34,12 @@ describe('golf extension player categories', () => {
     }
     expect(validateExtensionConfig(draft)).toContain('重複')
   })
+
+  it('rejects a non-IANA tenant timezone before saving the source of truth', () => {
+    const draft = {
+      ...configDraftFromJson(null),
+      timezone: 'JST',
+    }
+    expect(validateExtensionConfig(draft)).toContain('地域名')
+  })
 })

@@ -70,7 +70,6 @@ pub struct UpsertCourse {
     pub name: String,
     pub short_name: Option<String>,
     pub hole_count: HoleCount,
-    pub timezone: String,
     pub start_interval_minutes: StartIntervalMinutes,
     pub is_active: bool,
     /// When the course starts and stops sending groups out.
@@ -130,7 +129,6 @@ impl UpsertCourse {
         name: impl Into<String>,
         short_name: Option<String>,
         hole_count: i32,
-        timezone: impl Into<String>,
         start_interval_minutes: i32,
         is_active: bool,
         business_hours: Option<BusinessHours>,
@@ -140,11 +138,6 @@ impl UpsertCourse {
         if trimmed.is_empty() {
             return Err(CourseError::BadRequest("course name is required"));
         }
-        let timezone = timezone.into();
-        let tz = timezone.trim();
-        if tz.is_empty() {
-            return Err(CourseError::BadRequest("timezone is required"));
-        }
         let short = short_name
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
@@ -152,7 +145,6 @@ impl UpsertCourse {
             name: trimmed.to_string(),
             short_name: short,
             hole_count: HoleCount::try_new(hole_count)?,
-            timezone: tz.to_string(),
             start_interval_minutes: StartIntervalMinutes::try_new(start_interval_minutes)?,
             is_active,
             business_hours,
@@ -171,6 +163,10 @@ pub struct Course {
     short_name: Option<String>,
     #[getter(copy)]
     hole_count: HoleCount,
+    /// Legacy Field master value retained for rollback compatibility.
+    ///
+    /// SCC-6 makes tenant extension config the source of truth. This value may
+    /// still be returned by Field, but business calculations must not read it.
     #[getter(skip)]
     timezone: String,
     #[getter(copy)]

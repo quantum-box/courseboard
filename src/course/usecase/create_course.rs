@@ -63,6 +63,13 @@ mod tests {
             Ok(self.courses.lock().expect("lock").clone())
         }
 
+        async fn get_tenant_timezone(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<String, CourseError> {
+            Ok(crate::course::domain::DEFAULT_TIMEZONE.to_string())
+        }
+
         async fn create_course(
             &self,
             _credentials: GatewayCredentials<'_>,
@@ -73,7 +80,7 @@ mod tests {
                 input.name,
                 input.short_name,
                 input.hole_count.get(),
-                input.timezone,
+                crate::course::domain::DEFAULT_TIMEZONE,
                 input.start_interval_minutes.get(),
                 input.is_active,
                 None,
@@ -165,8 +172,7 @@ mod tests {
         });
         let use_case = CreateCourseUseCase::new(catalog.clone());
         let input =
-            UpsertCourse::try_new("East", Some("E".into()), 18, "Asia/Tokyo", 8, true, None)
-                .expect("valid");
+            UpsertCourse::try_new("East", Some("E".into()), 18, 8, true, None).expect("valid");
         let course = use_case
             .execute(
                 GatewayCredentials {
@@ -185,8 +191,7 @@ mod tests {
 
     #[test]
     fn upsert_course_rejects_invalid_interval() {
-        let error =
-            UpsertCourse::try_new("East", None, 18, "Asia/Tokyo", 0, true, None).unwrap_err();
+        let error = UpsertCourse::try_new("East", None, 18, 0, true, None).unwrap_err();
         assert!(matches!(error, CourseError::BadRequest(_)));
     }
 }

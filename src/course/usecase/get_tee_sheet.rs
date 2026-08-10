@@ -9,7 +9,7 @@ use crate::course::domain::{
     format_datetime_with_offset, format_jst_wall_clock, jst_offset, Course, CourseError, CourseId,
     GatewayCredentials, GolfCatalogGateway, PlayType, Reservation, ReservationGateway,
     ReservationProduct, ReservationServiceId, Resource, TeeSheet, TeeSheetItem, TeeSheetQuery,
-    TeeSheetStatus, DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR, DEFAULT_TIMEZONE,
+    TeeSheetStatus, DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR,
 };
 
 const DEFAULT_DURATION_MINUTES: i32 = 270;
@@ -40,14 +40,16 @@ impl GetTeeSheetUseCase {
         // decorate its rows, so one of them failing must not black out the
         // operator's view of the day — ADR-0005 moved the board onto several
         // independent Field endpoints, and any of them can be down alone.
-        let (reservations, courses, resources, products) = tokio::join!(
+        let (reservations, courses, timezone, resources, products) = tokio::join!(
             self.reservations.list_reservations(credentials),
             self.catalog.list_courses(credentials),
+            self.catalog.get_tenant_timezone(credentials),
             self.catalog.list_resources(credentials),
             self.catalog.list_reservation_products(credentials),
         );
         let reservations = reservations?;
         let courses = courses?;
+        let timezone = timezone?;
 
         let mut unavailable = Vec::new();
         let resources = resources.unwrap_or_else(|error| {
@@ -68,6 +70,7 @@ impl GetTeeSheetUseCase {
             &courses,
             &resources,
             &products,
+            &timezone,
         )?;
         Ok(sheet.with_unavailable(unavailable))
     }
@@ -80,19 +83,13 @@ pub(crate) fn build_tee_sheet(
     courses: &[Course],
     resources: &[Resource],
     products: &[ReservationProduct],
+    tenant_timezone: &str,
 ) -> Result<TeeSheet, CourseError> {
     let jst = jst_offset()?;
     let product_by_service: HashMap<&ReservationServiceId, &ReservationProduct> = products
         .iter()
         .map(|product| (product.reservation_service_id(), product))
         .collect();
-    let timezone = courses
-        .iter()
-        .map(Course::timezone)
-        .find(|value| !value.trim().is_empty())
-        .unwrap_or(DEFAULT_TIMEZONE)
-        .to_string();
-
     let items: Vec<TeeSheetItem> = reservations
         .iter()
         .filter(|reservation| reservation.is_tee_sheet_candidate())
@@ -119,7 +116,7 @@ pub(crate) fn build_tee_sheet(
 
     Ok(TeeSheet::new(
         date,
-        timezone,
+        tenant_timezone,
         format_jst_wall_clock(date, DEFAULT_DAY_START_HOUR, 0, jst),
         format_jst_wall_clock(date, DEFAULT_DAY_END_HOUR, 0, jst),
         items,
@@ -223,7 +220,7 @@ mod tests {
 
     use crate::course::domain::{
         ProductSlot, ResourceId, ResourceKind, SaveCourseResource, UpsertCourse,
-        UpsertReservationProduct,
+        UpsertReservationProduct, DEFAULT_TIMEZONE,
     };
 
     struct FakeReservationGateway {
@@ -290,6 +287,7 @@ mod tests {
     }
 
     struct FakeGolfCatalogGateway {
+        tenant_timezone: String,
         courses: Mutex<Vec<Course>>,
         resources: Mutex<Vec<Resource>>,
         products: Mutex<Vec<ReservationProduct>>,
@@ -298,6 +296,13 @@ mod tests {
 
     #[async_trait]
     impl GolfCatalogGateway for FakeGolfCatalogGateway {
+        async fn get_tenant_timezone(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<String, CourseError> {
+            Ok(self.tenant_timezone.clone())
+        }
+
         async fn get_course_order(
             &self,
             _credentials: GatewayCredentials<'_>,
@@ -599,6 +604,7 @@ mod tests {
             &courses,
             &resources,
             &products,
+            DEFAULT_TIMEZONE,
         )
         .expect("build tee sheet");
         assert_eq!(sheet.date(), date);
@@ -617,12 +623,13 @@ mod tests {
             items: Mutex::new(vec![sample_reservation()]),
         });
         let catalog = Arc::new(FakeGolfCatalogGateway {
+            tenant_timezone: "Europe/Berlin".into(),
             courses: Mutex::new(vec![Course::reconstitute(
                 "course_east",
                 "East Course",
                 None,
                 18,
-                DEFAULT_TIMEZONE,
+                "America/New_York",
                 8,
                 true,
                 None,
@@ -671,6 +678,7 @@ mod tests {
         assert_eq!(sheet.items()[0].party_name(), "Yamada");
         assert_eq!(sheet.items()[0].play_type().as_str(), "caddie");
         assert_eq!(sheet.items()[0].status().as_str(), "confirmed");
+        assert_eq!(sheet.timezone(), "Europe/Berlin");
         assert!(sheet.unavailable().is_empty());
     }
 
@@ -681,6 +689,7 @@ mod tests {
             items: Mutex::new(vec![sample_reservation()]),
         });
         let catalog = Arc::new(FakeGolfCatalogGateway {
+            tenant_timezone: DEFAULT_TIMEZONE.into(),
             courses: Mutex::new(vec![Course::reconstitute(
                 "course_east",
                 "East Course",
