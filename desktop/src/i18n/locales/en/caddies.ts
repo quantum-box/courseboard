@@ -8,8 +8,8 @@ export const caddies: DeepPartial<typeof source> = {
       description: 'Caddie details, staff links, day-off requests, and ratings in one place.',
     },
     dispatch: {
-      title: 'Today’s assignments',
-      description: 'Decide who takes each group. Supply figures and auto-assign are there to help you decide.',
+      title: 'Caddie assignments',
+      description: 'Pick a day and decide who takes each group — today or weeks ahead, the same way. Supply figures and auto-assign are there to help you decide.',
     },
     attendance: {
       title: 'Attendance',
@@ -56,7 +56,7 @@ export const caddies: DeepPartial<typeof source> = {
   rationale: {
     ratingCount: '{{n}} ratings',
     ratingCountNone: 'No ratings recorded',
-    roundsAssignedToday: '{{n}}R assigned today',
+    roundsAssignedToday: '{{n}}R assigned that day',
     ratingAverage: 'Average rating {{value}}',
     score: 'Ordering value {{value}}',
     neutralScore: 'Neutral score — no ratings on record yet',
@@ -84,27 +84,13 @@ export const caddies: DeepPartial<typeof source> = {
   items: '{{n}} items',
   operationDate: 'Date',
   dispatch: {
-    boardTitle: 'Assignment board',
-    boardDescription:
-      'Update who works {{date}}, through completion or cancellation. Clock-ins happen on the Attendance screen.',
-    metrics: {
-      registered: 'Registered caddies',
-      registeredDetail: 'All profiles',
-      working: 'Working',
-      workingDetail: 'Attendance for {{n}}',
-      todayAssignments: 'Assignments today',
-      todayAssignmentsDetail: '{{n}} cancelled',
-      needsCheck: 'Needs a look',
-      needsCheckDetail: 'Assignments not yet settled',
-    },
+    boardTitle: 'Assignments that day',
     loading: 'Loading assignments',
-    supportTitle: 'Supply and auto-assign',
-    supportDescription:
-      'Remaining caddie-required capacity and suggestions for open bookings. Change what you sell on the Play products screen.',
+    supportTitle: 'Capacity, per-course balance, and suggested caddies',
   },
   supply: {
     title: 'Caddie-required capacity',
-    description: 'Derives a safe sellable ceiling from availability and who can play two rounds.',
+    description: 'Derives a safe sellable ceiling from availability and who can play two rounds. Change what you sell on the Play products screen.',
     buffer: 'Safety buffer (groups)',
     loading: 'Calculating supply',
     metrics: {
@@ -151,7 +137,7 @@ export const caddies: DeepPartial<typeof source> = {
   recommendations: {
     title: 'Suggested caddies',
     rank: '#{{n}}',
-    description: 'Ordered by customer ratings, experience, remaining rounds today, attendance, and group pairing.',
+    description: 'Ordered by customer ratings, experience, remaining rounds that day, attendance, and group pairing.',
     loading: 'Calculating candidates',
     empty: {
       title: 'No candidates',
@@ -162,8 +148,8 @@ export const caddies: DeepPartial<typeof source> = {
       unknown: 'No record',
       ratingShort: 'Average rating {{value}}',
       ratingNoneShort: 'No ratings yet',
-      remainingShort: '{{n}} round(s) still available today',
-      remainingNoneShort: 'No rounds remaining today',
+      remainingShort: '{{n}} round(s) still available that day',
+      remainingNoneShort: 'No rounds remaining that day',
       experienceShort: 'Experience: {{level}}',
       rookiePair: 'Pair the rookie with {{name}}',
       rookiePairUnknown: 'Pair the rookie with a veteran',
@@ -173,7 +159,7 @@ export const caddies: DeepPartial<typeof source> = {
       ratingValue: 'Average {{value}} ({{n}} ratings)',
       ratingNone: 'No ratings yet; the standard ordering value is used',
       experienceLabel: 'Experience',
-      remainingLabel: 'Remaining rounds today',
+      remainingLabel: 'Remaining rounds that day',
       remainingValue: '{{n}} remaining',
       attendanceLabel: 'Attendance',
       compositionLabel: 'Group pairing',

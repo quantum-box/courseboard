@@ -9,8 +9,8 @@ export const caddies: DeepPartial<typeof source> = {
       description: 'キャディ一人ひとりの情報、勤怠との結びつけ、休みの希望、お客さまからの評価をまとめます。',
     },
     dispatch: {
-      title: '今日の担当決め',
-      description: 'その日、だれがどの組につくかを決めます。人数の目安と自動割り当ては、決めるときの手助けです。',
+      title: 'キャディの担当決め',
+      description: '日を選んで、だれがどの組につくかを決めます。当日でも、先の日でも同じです。人数の目安と自動割り当ては、決めるときの手助けです。',
     },
     attendance: {
       title: '出勤の記録',
@@ -52,7 +52,7 @@ export const caddies: DeepPartial<typeof source> = {
   rationale: {
     ratingCount: 'お客さまの評価 {{n}}件',
     ratingCountNone: 'まだ評価がありません',
-    roundsAssignedToday: '今日の担当 {{n}}ラウンド',
+    roundsAssignedToday: 'この日の担当 {{n}}ラウンド',
     ratingAverage: 'お客さまの評価の平均 {{value}}',
     score: '並べるための数 {{value}}',
     neutralScore: 'まだ評価がないので、ふつうの点にしています',
@@ -60,11 +60,11 @@ export const caddies: DeepPartial<typeof source> = {
     notClockedIn: 'まだ出勤していません',
     clockedOut: 'もう退勤しました',
     noStaffLink: 'スタッフとつながっていません',
-    atDailyLimit: '今日はもういっぱいです',
+    atDailyLimit: 'この日はもういっぱいです',
     rookiePaired: '新しい人を、なれた人と組ませます',
     veteranForFoursome: '4人の組なので、なれた人が向いています',
     noCaddieAvailable: 'この時間に出られる人がいません',
-    allAtDailyLimit: '出られる人は、今日はもういっぱいです',
+    allAtDailyLimit: '出られる人は、この日はもういっぱいです',
     noCaddieOnCourse: 'このコースに入っている人がいません',
     unavailable: 'くわしい理由は表示できません',
   },
@@ -76,28 +76,14 @@ export const caddies: DeepPartial<typeof source> = {
   rounds: '{{n}}ラウンド',
   operationDate: '見たい日',
   dispatch: {
-    boardTitle: '担当の一覧',
-    boardDescription:
-      '{{date}} の担当です。終わったことにしたり、取り消したりできます。出勤の記録は「出勤の記録」の画面で行います。',
-    metrics: {
-      registered: '登録したキャディ',
-      registeredDetail: 'すべて',
-      working: '今日出勤している人',
-      workingDetail: '{{n}}人分の記録を読み込みました',
-      todayAssignments: '今日の担当',
-      todayAssignmentsDetail: '取り消し {{n}}件',
-      needsCheck: '確認が必要',
-      needsCheckDetail: 'まだ決まっていない担当',
-    },
+    boardTitle: 'この日の担当',
     loading: '担当を読み込んでいます',
-    supportTitle: '人数の目安と、自動での割り当て',
-    supportDescription:
-      'キャディが付く枠が、あとどれだけ受けられるかの目安です。売る枠そのものを変えるときは「プレーの料金プラン」の画面で行います。',
+    supportTitle: '人数の目安・コースごとの過不足・おすすめの人',
   },
   supply: {
     title: 'キャディが付く枠の目安',
     description:
-      '出勤の希望と、1日2ラウンドまわれるかどうかから、無理なく受けられる組数を計算します。',
+      '出勤の希望と、1日2ラウンドまわれるかどうかから、無理なく受けられる組数を計算します。売る枠そのものを変えるときは「プレーの料金プラン」の画面で行います。',
     buffer: '予備に残しておく組数',
     loading: '人数を計算しています',
     metrics: {
@@ -144,7 +130,7 @@ export const caddies: DeepPartial<typeof source> = {
   recommendations: {
     title: 'おすすめのキャディ',
     rank: '{{n}}番',
-    description: 'お客さまの評価、経験、今日あと何回担当できるか、出勤、組み合わせから順番を決めています。',
+    description: 'お客さまの評価、経験、この日あと何回担当できるか、出勤、組み合わせから順番を決めています。',
     loading: '候補を計算しています',
     empty: {
       title: 'おすすめできる人がいません',
@@ -155,8 +141,8 @@ export const caddies: DeepPartial<typeof source> = {
       unknown: '記録がありません',
       ratingShort: 'お客さまの評価 {{value}}',
       ratingNoneShort: 'まだ評価がありません',
-      remainingShort: '今日はあと{{n}}回担当できます',
-      remainingNoneShort: '今日はもう担当できません',
+      remainingShort: 'この日はあと{{n}}回担当できます',
+      remainingNoneShort: 'この日はもう担当できません',
       experienceShort: '経験: {{level}}',
       rookiePair: '新しい人を {{name}} さんと組ませます',
       rookiePairUnknown: '新しい人を、なれた人と組ませます',
@@ -166,7 +152,7 @@ export const caddies: DeepPartial<typeof source> = {
       ratingValue: '平均 {{value}}（{{n}}件）',
       ratingNone: 'まだ評価がないので、ふつうの数で並べています',
       experienceLabel: '経験',
-      remainingLabel: '今日あと担当できる回数',
+      remainingLabel: 'この日あと担当できる回数',
       remainingValue: 'あと{{n}}回',
       attendanceLabel: '出勤しているか',
       compositionLabel: 'この組との組み合わせ',

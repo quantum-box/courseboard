@@ -4,7 +4,7 @@ import { supportsDesktopTabs, tabTitleForRoute } from './MacOSTabStrip'
 describe('tabTitleForRoute', () => {
   it('maps known routes to concise tab titles', () => {
     expect(tabTitleForRoute('golf')).toBe('ホーム')
-    expect(tabTitleForRoute('golf/caddies/dispatch')).toBe('今日の配置')
+    expect(tabTitleForRoute('golf/caddies/dispatch')).toBe('キャディの配置')
     expect(tabTitleForRoute('settings')).toBe('設定')
   })
 

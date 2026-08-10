@@ -155,12 +155,12 @@ export const helpEn: HelpCatalog = {
     },
 
     'golf/caddies/dispatch': {
-      title: 'Today’s assignments',
-      summary: 'Decide who takes each group on a given day.',
+      title: 'Caddie assignments',
+      summary: 'Decide who takes each group on a given day — today or weeks ahead.',
       usage: [
         {
           heading: 'Pick the day',
-          body: 'Set the date at the top of the board.',
+          body: 'Set the date at the top of the board. Pick a future date to staff it in advance; caddies do not need to have clocked in.',
         },
         {
           heading: 'Adjust assignments',

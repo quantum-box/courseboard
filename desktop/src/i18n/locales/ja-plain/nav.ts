@@ -37,7 +37,7 @@ export const nav: DeepPartial<typeof source> = {
       description: 'キャディ一人ひとりの情報と、休みの希望',
     },
     'golf/caddies/dispatch': {
-      label: '今日の担当決め',
+      label: 'キャディの担当決め',
       description: 'だれがどの組につくかを決めます',
     },
     'golf/caddies/attendance': {

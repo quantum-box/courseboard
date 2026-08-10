@@ -5182,3 +5182,54 @@ button,
   outline: 2px solid hsl(var(--nui-primary));
   outline-offset: 1px;
 }
+
+/* Supporting figures the operator opens when they want them. Newly introduced
+   control, so it follows the current readability and target-size rules (16px
+   text, 44px hit area) rather than the denser older screens around it. */
+.collapsible-section {
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+}
+
+.collapsible-summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.collapsible-summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-summary svg {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  color: hsl(var(--nui-muted-foreground));
+  transition: transform 120ms ease;
+}
+
+.collapsible-section[open] .collapsible-summary svg {
+  transform: rotate(90deg);
+}
+
+.collapsible-summary:focus-visible {
+  outline: 2px solid hsl(var(--nui-primary));
+  outline-offset: 1px;
+}
+
+.collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-top: 1px solid hsl(var(--nui-border));
+  padding: 16px 14px;
+}

@@ -83,6 +83,34 @@ export function Panel({
   )
 }
 
+/**
+ * A section the operator opens when they want it.
+ *
+ * Screens that carry supporting figures next to the day's work grow past one
+ * screenful, and the work then starts below the fold. What is read while
+ * deciding stays open; what is consulted now and then goes in here, named on
+ * the button so nothing is hidden behind an icon.
+ */
+export function CollapsibleSection({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string
+  defaultOpen?: boolean
+  children: ReactNode
+}) {
+  return (
+    <details className="collapsible-section" open={defaultOpen}>
+      <summary className="collapsible-summary">
+        <ChevronRight aria-hidden="true" />
+        <span>{title}</span>
+      </summary>
+      <div className="collapsible-body">{children}</div>
+    </details>
+  )
+}
+
 export function Notice({
   tone = 'info',
   title,

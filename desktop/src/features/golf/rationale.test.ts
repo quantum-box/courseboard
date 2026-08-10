@@ -17,7 +17,7 @@ describe('readableRationale', () => {
     ])
 
     expect(reasons).toContain('評価の記録なし')
-    expect(reasons).toContain('今日の担当 0R')
+    expect(reasons).toContain('この日の担当 0R')
     expect(reasons.some(reason => reason.includes('rating_count'))).toBe(false)
     expect(reasons.some(reason => reason.includes('rounds_assigned_today'))).toBe(false)
   })

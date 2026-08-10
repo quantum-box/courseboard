@@ -38,7 +38,7 @@ export const nav: DeepPartial<typeof source> = {
       description: 'Caddie details and requested days off',
     },
     'golf/caddies/dispatch': {
-      label: "Today's assignments",
+      label: 'Caddie assignments',
       description: 'Decide who takes each group',
     },
     'golf/caddies/attendance': {
