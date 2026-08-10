@@ -81,7 +81,11 @@ import { useResource } from '../../hooks/useResource'
 import { navigate, useNavigationGuard } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
 import { Sheet } from '../../components/Sheet'
-import { UnassignedRoundsPanel } from './UnassignedRounds'
+import {
+  assignmentsOnCancelledRounds,
+  UnassignedRoundsPanel,
+  type TeeSheetRow,
+} from './UnassignedRounds'
 import { showToast } from '../../lib/toast'
 import {
   caddieCreatePayload,
@@ -860,6 +864,27 @@ function DispatchView({
   const dayAssignments = assignments.filter(
     item => dateKey(item.scheduledAt, timezone) === date,
   )
+  // The day's groups answer two questions on this screen: which ones still
+  // need somebody, and which assignments are standing on a group that is no
+  // longer being played. One fetch serves both.
+  const teeSheet = useResource(
+    useCallback(
+      () =>
+        courseboardApiJson<ListResponse<TeeSheetRow>>(
+          `${COURSE_API}/tee-sheet?date=${encodeURIComponent(date)}`,
+        ),
+      [date],
+    ),
+    [date],
+  )
+  const orphaned = useMemo(
+    () => assignmentsOnCancelledRounds(teeSheet.data?.items ?? [], dayAssignments),
+    [teeSheet.data, dayAssignments],
+  )
+  const orphanedIds = useMemo(
+    () => new Set(orphaned.map(assignment => assignment.id)),
+    [orphaned],
+  )
 
   // Deciding who walks each group is the whole job of this screen, so the day
   // picker, the groups still missing somebody and the automatic run come first
@@ -879,7 +904,7 @@ function DispatchView({
       </div>
 
       <UnassignedRoundsPanel
-        date={date}
+        sheet={teeSheet}
         assignments={dayAssignments}
         onChanged={onChanged}
       />
@@ -893,6 +918,11 @@ function DispatchView({
 
       <section className="app-section space-y-3">
         <h2 className="section-title">{t('caddies:dispatch.boardTitle')}</h2>
+        {orphaned.length > 0 ? (
+          <Notice tone="warning" title={t('caddies:orphaned.title', { n: String(orphaned.length) })}>
+            {t('caddies:orphaned.body')}
+          </Notice>
+        ) : null}
         {assignmentsResource.loading ? <LoadingState label={t('caddies:dispatch.loading')} /> : null}
         {assignmentsResource.error ? (
           <ResourceError error={assignmentsResource.error} onRetry={assignmentsResource.refresh} />
@@ -901,6 +931,7 @@ function DispatchView({
           <AssignmentsTable
             assignments={dayAssignments}
             profiles={profiles}
+            orphanedIds={orphanedIds}
             onChanged={onChanged}
             setFlash={setFlash}
           />
@@ -1717,14 +1748,23 @@ function AttendancePanel({
   )
 }
 
+const EMPTY_ORPHANS: Set<string> = new Set()
+
 function AssignmentsTable({
   assignments,
   profiles,
+  orphanedIds = EMPTY_ORPHANS,
   onChanged,
   setFlash,
 }: {
   assignments: CaddieAssignment[]
   profiles: CaddieProfile[]
+  /**
+   * Assignments whose group is no longer on the tee sheet. Only the day board
+   * knows this — a caddie's own history spans months of tee sheets nobody
+   * fetched, so it says nothing rather than guessing.
+   */
+  orphanedIds?: Set<string>
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
@@ -1793,6 +1833,9 @@ function AssignmentsTable({
         <div>
           <p className="font-medium">{row.roundReference ?? row.reservationId ?? row.id}</p>
           <p className="text-xs text-muted-foreground">{roleLabel(row.assignmentRole)}</p>
+          {orphanedIds.has(row.id) ? (
+            <Badge variant="warning">{t('caddies:orphaned.badge')}</Badge>
+          ) : null}
         </div>
       ),
     },
@@ -1822,18 +1865,8 @@ function AssignmentsTable({
       header: t('caddies:assignments.table.actions'),
       mobileLabel: t('caddies:assignments.table.actions'),
       align: 'right',
-      cell: row => row.status === 'assigned' ? (
-        <div className="flex justify-end gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="min-h-9"
-            disabled={busyId === row.id}
-            onClick={() => void updateStatus(row, 'completed')}
-          >
-            <CheckCircle2 /> {t('caddies:assignments.complete')}
-          </Button>
+      cell: row => {
+        const cancel = (
           <Button
             type="button"
             size="sm"
@@ -1844,8 +1877,31 @@ function AssignmentsTable({
           >
             <XCircle /> {t('caddies:assignments.cancel')}
           </Button>
-        </div>
-      ) : <span className="text-muted-foreground">—</span>,
+        )
+        if (row.status === 'assigned') {
+          return (
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="min-h-9"
+                disabled={busyId === row.id}
+                onClick={() => void updateStatus(row, 'completed')}
+              >
+                <CheckCircle2 /> {t('caddies:assignments.complete')}
+              </Button>
+              {cancel}
+            </div>
+          )
+        }
+        // A round that is gone cannot be walked or completed, whatever state
+        // the row was left in — so releasing the caddie stays available.
+        if (orphanedIds.has(row.id)) {
+          return <div className="flex justify-end gap-2">{cancel}</div>
+        }
+        return <span className="text-muted-foreground">—</span>
+      },
     },
   ]
 
