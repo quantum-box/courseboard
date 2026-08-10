@@ -138,3 +138,16 @@ spec:
               value: 5oafg9ptonbjumdh1pc7khirp1
             - name: TACHYON_FIELD_API_URL
               value: https://tachyon-field-api.txcloud.app
+---
+apiVersion: apps.tachy.one/v1alpha
+kind: FeatureFlags
+metadata:
+  name: courseboard-flags
+  tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
+spec:
+  flags:
+    - key: feature.courseboard.flag-evaluation-smoke
+      name: CourseBoard feature flag evaluation smoke test
+      description: Non-functional canary for validating the CourseBoard evaluation path
+      enabled: true
+      defaultValue: false

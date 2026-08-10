@@ -11,6 +11,7 @@ use crate::{
 const DEFAULT_BIND_ADDR: &str = "0.0.0.0:8080";
 const DEFAULT_PUBLIC_UI_BASE_URL: &str = "http://localhost:5173";
 const DEFAULT_SMS_SENDER_NAME: &str = "Course Board";
+pub const DEFAULT_TACHYON_API_URL: &str = "https://api.n1.tachy.one";
 const PRODUCTION_COGNITO_ISSUER_URL: &str =
     "https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4";
 const LOCAL_PRODUCTION_PKCE_CLIENT_ID: &str = "5oafg9ptonbjumdh1pc7khirp1";
@@ -178,6 +179,12 @@ impl RuntimeConfig {
         non_empty(self.field_api_bearer_token.as_deref())
     }
 
+    /// Shared Tachyon API base for identity lookups and feature evaluation.
+    pub fn tachyon_api_base_url(&self) -> String {
+        non_empty(self.tachyon_auth_api_url.as_deref())
+            .unwrap_or_else(|| DEFAULT_TACHYON_API_URL.to_string())
+    }
+
     pub fn field_api_client_credentials_config(&self) -> Option<ClientCredentialsConfig> {
         Some(ClientCredentialsConfig {
             token_url: non_empty(self.field_api_token_url.as_deref())?,
@@ -268,6 +275,23 @@ mod tests {
             ..RuntimeConfig::default()
         };
         assert_eq!(config.field_api_base_url(), "https://tachyon-field.example");
+    }
+
+    #[test]
+    fn tachyon_api_url_is_shared_by_identity_and_feature_evaluation() {
+        assert_eq!(
+            RuntimeConfig::default().tachyon_api_base_url(),
+            DEFAULT_TACHYON_API_URL
+        );
+
+        let config = RuntimeConfig {
+            tachyon_auth_api_url: Some("https://tachyon.example/base".to_string()),
+            ..RuntimeConfig::default()
+        };
+        assert_eq!(
+            config.tachyon_api_base_url(),
+            "https://tachyon.example/base"
+        );
     }
 
     #[test]
