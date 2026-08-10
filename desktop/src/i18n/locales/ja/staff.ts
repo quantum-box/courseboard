@@ -45,6 +45,21 @@ export const staff = {
       description: '削除されたか、IDが違います。名簿へ戻ってさがし直してください。',
     },
   },
+  editName: {
+    action: '名前を直す',
+    title: '{{name}}さんの名前を直す',
+    description: '社員名簿の名前を変更します。キャディ名簿など、この社員を使う画面にも反映されます。',
+    name: '名前',
+    submit: '名前を保存',
+    submitting: '保存しています…',
+    success: '{{name}}さんの名前を社員名簿に保存しました。',
+    error: {
+      name: '名前を入力してください。',
+      forbidden: '社員名を変更する権限がありません。管理者に field:ManageHrm 権限を確認してください。',
+      notFound: '社員が見つかりませんでした。名簿を読み込み直してください。',
+      failed: '社員名を保存できませんでした。もう一度お試しください。',
+    },
+  },
   create: {
     open: '社員を登録',
     title: '社員を登録',

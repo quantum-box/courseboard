@@ -339,8 +339,14 @@ export const caddies: DeepPartial<typeof source> = {
   },
   edit: {
     title: 'Edit the basics',
-    description: 'Update the name, skill, rank, availability, fee, and daily limit.',
+    descriptionLinked: 'Update skill, rank, availability, fee, and daily limit. Edit the name in the staff basics.',
+    descriptionUnlinked: 'Update the display name, skill, rank, availability, fee, and daily limit.',
     displayName: 'Display name',
+    staffName: {
+      title: 'Displayed name: {{name}}',
+      description: 'This caddie is linked to the staff roster. Editing the staff name updates both staff and caddie screens.',
+      action: 'Edit name in staff basics',
+    },
     skill: 'Skill',
     rank: 'Rank',
     employment: 'Availability',

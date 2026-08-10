@@ -329,8 +329,14 @@ export const caddies: DeepPartial<typeof source> = {
   },
   edit: {
     title: '基本の内容を直す',
-    description: '名前、経験、ランク、出勤できるかどうか、費用、1日にまわれる回数を直します。',
+    descriptionLinked: '経験、ランク、出勤できるかどうか、費用、1日にまわれる回数を直します。名前は社員の基本情報で直します。',
+    descriptionUnlinked: '画面に出す名前、経験、ランク、出勤できるかどうか、費用、1日にまわれる回数を直します。',
     displayName: '画面に出す名前',
+    staffName: {
+      title: '画面に出す名前：{{name}}',
+      description: 'このキャディは社員名簿の人と結びついています。名前を直すと、社員名簿とキャディの画面の両方が変わります。',
+      action: '社員の基本情報で名前を直す',
+    },
     skill: '経験',
     rank: 'ランク',
     employment: '出勤できるか',

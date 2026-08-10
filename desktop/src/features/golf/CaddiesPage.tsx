@@ -98,6 +98,7 @@ import {
   type PayrollRow,
   type Rank,
 } from './caddieRankFees'
+import { profilePatchPayload } from './caddieProfileEdit'
 
 const COURSE_API = '/v1/course'
 
@@ -391,51 +392,6 @@ function formatMinutes(minutes: number) {
  */
 function errorMessage(error: unknown) {
   return error instanceof Error ? resourceErrorText(error) : i18next.t('caddies:error.generic')
-}
-
-/**
- * The API merges a write into the stored profile, so a field left out of the
- * body keeps its current value instead of falling back to a creation default.
- * The untouched fields are still echoed back here so the payload describes the
- * profile the operator was looking at, which keeps the request self-contained
- * and readable in the logs.
- */
-function profilePatchPayload(
-  profile: CaddieProfile,
-  overrides: Partial<{
-    displayName: string
-    skillLevel: SkillLevel
-    rank: Rank
-    employmentStatus: string
-    baseFeeAmount: number
-    currency: string
-    maxRoundsPerDay: number
-    staffId: string | null
-  }> = {},
-) {
-  const staffId = overrides.staffId === undefined
-    ? resolveStaffId(profile)
-    : overrides.staffId
-  const employmentStatus = employmentStatusCode(
-    overrides.employmentStatus ?? profile.employmentStatus,
-  )
-  return {
-    staffId,
-    caddieCode: null,
-    staffReferenceType: staffId ? 'staff_member' : (profile.staffReferenceType ?? 'external'),
-    staffReferenceId: staffId,
-    displayName: overrides.displayName ?? profile.displayName,
-    skillLevel: overrides.skillLevel ?? profile.skillLevel,
-    rank: overrides.rank ?? profile.rank,
-    active: employmentStatus === ACTIVE_EMPLOYMENT,
-    employmentStatus,
-    baseFeeAmount: overrides.baseFeeAmount ?? profile.baseFeeAmount,
-    currency: overrides.currency ?? profile.currency,
-    maxRoundsPerDay: overrides.maxRoundsPerDay ?? profile.maxRoundsPerDay,
-    monthlyContractRounds: profile.monthlyContractRounds,
-    canTwoRounds: profile.canTwoRounds,
-    desiredIncome: profile.desiredIncome,
-  }
 }
 
 /** The API also returns the legacy `junior` code for rookies. */
@@ -2590,6 +2546,7 @@ function ProfileEditDialog({
   setFlash: (flash: Flash) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const staffId = resolveStaffId(profile)
   const [displayName, setDisplayName] = useState(profile.displayName)
   const [skillLevel, setSkillLevel] = useState<SkillLevel>(profile.skillLevel)
   const [rank, setRank] = useState<Rank>(profile.rank ?? DEFAULT_RANK)
@@ -2609,7 +2566,7 @@ function ProfileEditDialog({
     const fee = Number.parseInt(baseFeeAmount, 10)
     const rounds = Number.parseInt(maxRounds, 10)
     const currencyCode = currency.trim().toUpperCase()
-    if (!displayName.trim()) {
+    if (!staffId && !displayName.trim()) {
       setError(t('caddies:edit.error.displayName'))
       return
     }
@@ -2626,10 +2583,10 @@ function ProfileEditDialog({
     setBusy(true)
     setError(null)
     try {
-      await courseboardApiJson(
+      const saved = await courseboardApiJson<CaddieProfile>(
         `${COURSE_API}/caddie-profiles/${encodeURIComponent(profile.id)}`,
         request('PATCH', profilePatchPayload(profile, {
-          displayName: displayName.trim(),
+          ...(!staffId ? { displayName: displayName.trim() } : {}),
           skillLevel,
           rank,
           employmentStatus,
@@ -2643,7 +2600,7 @@ function ProfileEditDialog({
       setFlash({
         tone: 'success',
         title: t('caddies:edit.saved.title'),
-        message: t('caddies:edit.saved.message', { name: displayName.trim() }),
+        message: t('caddies:edit.saved.message', { name: saved.displayName }),
       })
     } catch (reason) {
       setError(errorMessage(reason))
@@ -2657,13 +2614,38 @@ function ProfileEditDialog({
       <DialogContent className="max-h-[calc(100dvh-1.5rem)] max-w-2xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{t('caddies:edit.title')}</DialogTitle>
-          <DialogDescription>{t('caddies:edit.description')}</DialogDescription>
+          <DialogDescription>
+            {t(staffId ? 'caddies:edit.descriptionLinked' : 'caddies:edit.descriptionUnlinked')}
+          </DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={event => void submit(event)}>
+          {staffId ? (
+            <Notice
+              tone="info"
+              title={t('caddies:edit.staffName.title', { name: profile.displayName })}
+              actions={(
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    onOpenChange(false)
+                    navigate(`staff/${encodeURIComponent(staffId)}`)
+                  }}
+                >
+                  <Pencil /> {t('caddies:edit.staffName.action')}
+                </Button>
+              )}
+            >
+              {t('caddies:edit.staffName.description')}
+            </Notice>
+          ) : null}
           <FormGrid columns={2}>
-            <Field label={t('caddies:edit.displayName')} required>
-              <Input value={displayName} onChange={event => setDisplayName(event.target.value)} />
-            </Field>
+            {!staffId ? (
+              <Field label={t('caddies:edit.displayName')} required>
+                <Input value={displayName} onChange={event => setDisplayName(event.target.value)} />
+              </Field>
+            ) : null}
             <Field label={t('caddies:edit.skill')} required>
               <NativeSelect value={skillLevel} onChange={event => setSkillLevel(event.target.value as SkillLevel)}>
                 <option value="rookie">{t('caddies:skill.rookie')}</option>

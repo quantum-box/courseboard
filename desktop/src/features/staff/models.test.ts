@@ -13,10 +13,24 @@ import {
   type StaffMember,
 } from './models'
 
+function staff(id: string, name: string, active: boolean): StaffMember {
+  return {
+    id,
+    name,
+    active,
+    employmentType: 'part_time',
+    hiredAt: null,
+    contractEndDate: null,
+    phone: null,
+    email: null,
+    attributesJson: null,
+  }
+}
+
 const STAFF: StaffMember[] = [
-  { id: 'staff_aya', name: '佐藤 彩', active: true },
-  { id: 'staff_kitchen', name: '厨房 太郎', active: true },
-  { id: 'staff_old', name: '退職 花子', active: false },
+  staff('staff_aya', '佐藤 彩', true),
+  staff('staff_kitchen', '厨房 太郎', true),
+  staff('staff_old', '退職 花子', false),
 ]
 
 const PROFILES: StaffCaddieProfile[] = [
