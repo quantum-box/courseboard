@@ -345,6 +345,11 @@ impl SheetLayout {
         let mut days: Vec<DayColumns> = Vec::new();
         let mut current: Option<(u32, u32)> = None;
         let mut previous_month: Option<u32> = None;
+        // Carried across columns, not recomputed from `year` each time: once an
+        // export has crossed into January every later column is in the new year
+        // too, and re-deriving would send the 2nd back eleven months behind the
+        // 1st.
+        let mut current_year = year;
 
         for column in 0..width {
             let heading = grid.cell(self.header_row, column);
@@ -365,12 +370,11 @@ impl SheetLayout {
             // A month that goes backwards means the export crossed a new year:
             // a December file carrying a `1/4` column is January's 4th, not the
             // one eleven months behind it.
-            let year = match previous_month {
-                Some(previous) if month < previous => year + 1,
-                _ => year,
-            };
+            if previous_month.is_some_and(|previous| month < previous) {
+                current_year += 1;
+            }
             previous_month = Some(month);
-            let Some(date) = NaiveDate::from_ymd_opt(year, month, day) else {
+            let Some(date) = NaiveDate::from_ymd_opt(current_year, month, day) else {
                 return Err(CourseError::BadRequest(
                     "the sheet has a column headed with a date that does not exist",
                 ));
@@ -547,10 +551,23 @@ mod tests {
 
     #[test]
     fn a_december_export_that_runs_into_january_does_not_land_eleven_months_early() {
+        // Every column after the turn is in the new year, not just the first:
+        // deriving each one from the file's own year would send the 2nd back
+        // to the January eleven months behind the 1st, out of order with it.
         let sheet = grid(vec![
-            vec!["ゴルフ場", "項目", "時間帯", "12/31(木)", "", "1/1(金)", ""],
-            vec!["", "", "", "組数", "ｷｬ付", "組数", "ｷｬ付"],
-            vec!["真駒内", "本年", "午前", "3", "1", "4", "2"],
+            vec![
+                "ゴルフ場",
+                "項目",
+                "時間帯",
+                "12/31(木)",
+                "",
+                "1/1(金)",
+                "",
+                "1/2(土)",
+                "",
+            ],
+            vec!["", "", "", "組数", "ｷｬ付", "組数", "ｷｬ付", "組数", "ｷｬ付"],
+            vec!["真駒内", "本年", "午前", "3", "1", "4", "2", "5", "3"],
         ]);
         let sheet = parse_reservation_sheet(&sheet, 2026).unwrap();
         assert_eq!(
@@ -558,8 +575,12 @@ mod tests {
             vec![
                 NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
                 NaiveDate::from_ymd_opt(2027, 1, 1).unwrap(),
+                NaiveDate::from_ymd_opt(2027, 1, 2).unwrap(),
             ]
         );
+        // The window an import replaces runs from the first date to the last,
+        // so a date out of order would make it run backwards.
+        assert!(sheet.dates.windows(2).all(|pair| pair[0] < pair[1]));
     }
 
     #[test]

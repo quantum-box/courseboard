@@ -9,7 +9,7 @@ use axum::{
     http::HeaderMap,
     Json,
 };
-use chrono::NaiveDate;
+use chrono::{Datelike, NaiveDate};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
@@ -190,7 +190,13 @@ impl From<&ImportedCourse> for ImportedCourseDto {
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReservationImportResultDto {
-    /// `YYYY-MM`, the month the file covers.
+    /// `YYYY-MM`, the month the file turned out to cover.
+    ///
+    /// Read off the rows that were imported, not off the month the caller
+    /// named. Only the year of that answer reaches the rows — the days come
+    /// from the sheet's own `M/D` columns — so a caller who names July for an
+    /// August sheet writes August. Reporting July back would send the screen to
+    /// a month with nothing in it and read as a failed import.
     pub year_month: String,
     /// Half-days written. Zero on a preview, which writes nothing.
     pub imported: u64,
@@ -204,7 +210,12 @@ pub struct ReservationImportResultDto {
 }
 
 impl ReservationImportResultDto {
-    fn new(outcome: &ReservationImportOutcome, year: i32, month: u32) -> Self {
+    fn new(outcome: &ReservationImportOutcome, requested: (i32, u32)) -> Self {
+        let (year, month) = outcome
+            .dates
+            .first()
+            .map(|date| (date.year(), date.month()))
+            .unwrap_or(requested);
         Self {
             year_month: format!("{year:04}-{month:02}"),
             imported: outcome.imported,
@@ -294,6 +305,9 @@ async fn run_import(
     if body.is_empty() {
         return Err(AppError::BadRequest("no file was uploaded"));
     }
+    // Only the year of this reaches the rows: the days come from the sheet's
+    // own columns. The month is carried along so a file with no dated column at
+    // all still has something to report, which the parser makes unreachable.
     let (year, month) = params.year_month()?;
     let grid = read_reservation_sheet(&body).map_err(AppError::from)?;
 
@@ -314,7 +328,10 @@ async fn run_import(
         )
         .await
         .map_err(AppError::from)?;
-    Ok(Json(ReservationImportResultDto::new(&outcome, year, month)))
+    Ok(Json(ReservationImportResultDto::new(
+        &outcome,
+        (year, month),
+    )))
 }
 
 /// POST /v1/course/reservation-summaries/preview
@@ -494,6 +511,44 @@ mod tests {
                 "{raw} should be refused"
             );
         }
+    }
+
+    fn outcome(dates: Vec<NaiveDate>) -> ReservationImportOutcome {
+        ReservationImportOutcome {
+            summaries: Vec::new(),
+            courses: Vec::new(),
+            warnings: Vec::new(),
+            imported: 0,
+            skipped: 0,
+            dates,
+        }
+    }
+
+    #[test]
+    fn the_month_reported_back_is_the_one_the_rows_landed_in() {
+        // Only the year of the caller's answer reaches the rows; the days come
+        // from the sheet's own columns. Somebody who picks July for an August
+        // sheet writes August, and hearing "July" back would send the screen to
+        // an empty month and read as an import that did nothing.
+        let august = outcome(vec![
+            NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 8, 31).unwrap(),
+        ]);
+        let result = ReservationImportResultDto::new(&august, (2026, 7));
+        assert_eq!(result.year_month, "2026-08");
+        assert_eq!(result.from, NaiveDate::from_ymd_opt(2026, 8, 1).unwrap());
+        assert_eq!(result.to, NaiveDate::from_ymd_opt(2026, 8, 31).unwrap());
+    }
+
+    #[test]
+    fn an_export_running_into_the_new_year_is_reported_by_the_month_it_starts_in() {
+        let turn_of_year = outcome(vec![
+            NaiveDate::from_ymd_opt(2026, 12, 31).unwrap(),
+            NaiveDate::from_ymd_opt(2027, 1, 2).unwrap(),
+        ]);
+        let result = ReservationImportResultDto::new(&turn_of_year, (2026, 12));
+        assert_eq!(result.year_month, "2026-12");
+        assert_eq!(result.to, NaiveDate::from_ymd_opt(2027, 1, 2).unwrap());
     }
 
     #[test]
