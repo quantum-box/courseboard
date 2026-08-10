@@ -290,13 +290,20 @@ impl AutoAssignCaddiesUseCase {
             return Ok(plan);
         }
 
+        // What each round pays, so Field's own record of it agrees with the
+        // payroll sheet rather than reading 0 for every caddie who is simply
+        // paid by their rank.
+        let rank_fees = self.ops.get_caddie_rank_fees(credentials).await?;
         let fees: HashMap<&str, (i64, String)> = roster
             .caddies()
             .iter()
             .map(|caddie| {
                 (
                     caddie.id().as_str(),
-                    (caddie.base_fee_amount(), caddie.currency().to_string()),
+                    (
+                        rank_fees.round_fee_for(caddie.rank(), caddie.base_fee_amount()),
+                        caddie.currency().to_string(),
+                    ),
                 )
             })
             .collect();

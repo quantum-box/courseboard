@@ -618,6 +618,15 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/caddie-rank-fees",
+            get(course::interfaces::http_ops::get_caddie_rank_fees)
+                .put(course::interfaces::http_ops::replace_caddie_rank_fees)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/v1/course/caddie-payroll-summary",
             get(course::interfaces::http_ops::get_payroll_summary).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),

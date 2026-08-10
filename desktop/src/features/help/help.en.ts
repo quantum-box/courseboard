@@ -139,7 +139,7 @@ export const helpEn: HelpCatalog = {
         },
         {
           heading: 'Record day-off requests',
-          body: 'Use the day-off tab to set availability and condition notes per day. Assignments and capacity use them.',
+          body: 'On the day-off tab, click a date to open it in a panel on the right. Set availability and a condition note, then save — assignments and capacity use them.',
         },
       ],
       data: [
@@ -226,11 +226,15 @@ export const helpEn: HelpCatalog = {
     },
     'golf/caddies/payroll': {
       title: 'Payroll',
-      summary: 'A month of attendance and confirmed fees, ready to hand to payroll as CSV.',
+      summary: 'A month priced off the rank fees, reconciled against attendance and ready to hand to payroll as CSV.',
       usage: [
         {
-          heading: 'Pick the month',
-          body: 'Choose the month at the top to see per-caddie totals.',
+          heading: 'Pick the month, then narrow it',
+          body: 'Choose the month at the top to list the caddies. Search by name, staff id, or rank, and click a header to sort.',
+        },
+        {
+          heading: 'Set the rank fees',
+          body: 'Press "Set the fees" to enter what one round pays at each rank, A through D. Every amount on the screen is priced off that table.',
         },
         {
           heading: 'Check before exporting',
@@ -239,8 +243,12 @@ export const helpEn: HelpCatalog = {
       ],
       data: [
         {
-          heading: 'Confirmed fees',
-          body: 'The total for completed assignments. Cancelled ones are excluded.',
+          heading: 'Pay',
+          body: 'The rounds worked that month times the per-round fee. Cancelled assignments are excluded.',
+        },
+        {
+          heading: 'Per round',
+          body: "Normally the caddie's rank fee. A caddie with a fee of their own is paid that instead, and the row says so. Correcting a fee re-prices months that are already closed.",
         },
       ],
     },

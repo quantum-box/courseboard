@@ -20,23 +20,24 @@ use super::http::{
 use crate::course::domain::{
     parse_weekday, weekday_key, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
     AutoAssignResult, AvailabilityDeadline, AvailabilityQuery, CaddieAvailability,
-    CaddieCourseMembership, CaddieId, CaddiePatch, CaddieRating, CaddieRecommendation, CaddieShift,
-    CaddieSupply, CourseError, CourseId, DayCaddieSupply, PayrollSummary, RecommendationQuery,
-    ReplaceCaddieMemberships, ReservationId, ShiftEdit, ShiftPolicy, ShiftSpan, UnfiledRequest,
-    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, YearMonth,
-    MAX_CONSECUTIVE_WORK_DAYS, MAX_ROUNDS_PER_SHIFT,
+    CaddieCourseMembership, CaddieId, CaddiePatch, CaddieRank, CaddieRankFees, CaddieRating,
+    CaddieRecommendation, CaddieShift, CaddieSupply, CourseError, CourseId, DayCaddieSupply,
+    PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, ReservationId, ShiftEdit,
+    ShiftPolicy, ShiftSpan, UnfiledRequest, UpsertCaddie, UpsertCaddieAssignment,
+    UpsertCaddieAvailability, YearMonth, MAX_CONSECUTIVE_WORK_DAYS, MAX_ROUNDS_PER_SHIFT,
 };
 use crate::course::usecase::{
     AutoAssignCaddiesUseCase, CreateCaddieAssignmentUseCase, CreateCaddieUseCase,
     DeleteCaddieAvailabilityUseCase, ExportPayrollCsvUseCase, GenerateCaddieShiftsUseCase,
     GeneratedMonth, GetAttendanceSnapshotUseCase, GetAvailabilityDeadlineUseCase,
-    GetCaddieSupplyUseCase, GetCourseCaddieSupplyUseCase, GetPayrollSummaryUseCase,
-    GetShiftRulesUseCase, ListAttendancePeriodSnapshotsUseCase, ListCaddieAvailabilitiesUseCase,
-    ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase, ListCaddieRecommendationsUseCase,
-    ListCaddieShiftsUseCase, ListCourseReinforcementsUseCase, ListUnsubmittedCaddiesUseCase,
-    NameCaddieForRound, ReinforcementCandidate, ReplaceCaddieMembershipsUseCase,
-    UpdateCaddieAssignmentUseCase, UpdateCaddieShiftUseCase, UpdateCaddieUseCase,
-    UpdateShiftRulesUseCase, UpsertAvailabilityDeadlineUseCase, UpsertCaddieAvailabilityUseCase,
+    GetCaddieRankFeesUseCase, GetCaddieSupplyUseCase, GetCourseCaddieSupplyUseCase,
+    GetPayrollSummaryUseCase, GetShiftRulesUseCase, ListAttendancePeriodSnapshotsUseCase,
+    ListCaddieAvailabilitiesUseCase, ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase,
+    ListCaddieRecommendationsUseCase, ListCaddieShiftsUseCase, ListCourseReinforcementsUseCase,
+    ListUnsubmittedCaddiesUseCase, NameCaddieForRound, ReinforcementCandidate,
+    ReplaceCaddieMembershipsUseCase, ReplaceCaddieRankFeesUseCase, UpdateCaddieAssignmentUseCase,
+    UpdateCaddieShiftUseCase, UpdateCaddieUseCase, UpdateShiftRulesUseCase,
+    UpsertAvailabilityDeadlineUseCase, UpsertCaddieAvailabilityUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -1140,7 +1141,14 @@ pub struct PayrollRowDto {
     pub worked_minutes: i64,
     pub shifted_minutes: i64,
     pub assigned_rounds: i64,
-    pub confirmed_fee_total: i64,
+    /// The rank the round fee was read off.
+    pub rank: String,
+    /// What one round pays this caddie.
+    pub round_fee: i64,
+    /// True when `roundFee` is the caddie's own rather than their rank's.
+    pub fee_overridden: bool,
+    /// `roundFee` × `assignedRounds`.
+    pub fee_total: i64,
     pub currency: String,
     pub open_clock_in: bool,
     pub rounds_without_clock_in: i64,
@@ -1171,7 +1179,10 @@ impl From<&PayrollSummary> for PayrollSummaryDto {
                     worked_minutes: row.worked_minutes(),
                     shifted_minutes: row.shifted_minutes(),
                     assigned_rounds: row.assigned_rounds(),
-                    confirmed_fee_total: row.confirmed_fee_total(),
+                    rank: row.rank().as_str().to_string(),
+                    round_fee: row.round_fee(),
+                    fee_overridden: row.fee_overridden(),
+                    fee_total: row.fee_total(),
                     currency: row.currency().to_string(),
                     open_clock_in: row.open_clock_in(),
                     rounds_without_clock_in: row.rounds_without_clock_in(),
@@ -1179,6 +1190,83 @@ impl From<&PayrollSummary> for PayrollSummaryDto {
                 .collect(),
         }
     }
+}
+
+/// What one round pays at each rank.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CaddieRankFeesDto {
+    pub a: i64,
+    pub b: i64,
+    pub c: i64,
+    pub d: i64,
+    pub currency: String,
+}
+
+impl From<CaddieRankFees> for CaddieRankFeesDto {
+    fn from(value: CaddieRankFees) -> Self {
+        Self {
+            a: value.fee_for(CaddieRank::A),
+            b: value.fee_for(CaddieRank::B),
+            c: value.fee_for(CaddieRank::C),
+            d: value.fee_for(CaddieRank::D),
+            currency: value.currency().to_string(),
+        }
+    }
+}
+
+/// GET /v1/course/caddie-rank-fees
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-rank-fees",
+    tag = "course-ops",
+    responses(
+        (status = 200, description = "Per-round fee by rank", body = CaddieRankFeesDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_caddie_rank_fees(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<CaddieRankFeesDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let fees = GetCaddieRankFeesUseCase::new(ops_gateway(&state))
+        .execute(credentials)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CaddieRankFeesDto::from(fees)))
+}
+
+/// PUT /v1/course/caddie-rank-fees
+#[utoipa::path(
+    put,
+    path = "/v1/course/caddie-rank-fees",
+    tag = "course-ops",
+    request_body = CaddieRankFeesDto,
+    responses(
+        (status = 200, description = "Stored per-round fee by rank", body = CaddieRankFeesDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replace_caddie_rank_fees(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CaddieRankFeesDto>,
+) -> Result<Json<CaddieRankFeesDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let fees =
+        CaddieRankFees::try_new(request.a, request.b, request.c, request.d, request.currency)
+            .map_err(AppError::from)?;
+    let stored = ReplaceCaddieRankFeesUseCase::new(ops_gateway(&state))
+        .execute(credentials, fees)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CaddieRankFeesDto::from(stored)))
 }
 
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]

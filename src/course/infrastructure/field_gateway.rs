@@ -307,82 +307,98 @@ impl FieldGolfCatalogGateway {
         }
     }
 
-    /// Plans live in the extension's generic config, not in a golf-specific
-    /// table. Field owns the container; the golf meaning is applied in
-    /// `generic_product_config`.
     async fn read_config(&self, credentials: GatewayCredentials<'_>) -> Result<Value, CourseError> {
-        let items: Vec<FieldExtensionConfigDto> = field_get_items(
-            &self.client,
-            &self.base_url,
-            "/v1/erp/extensions/status",
-            credentials,
-        )
-        .await?;
-        Ok(items
-            .into_iter()
-            .find(|item| item.extension_key == GOLF_EXTENSION_KEY)
-            .and_then(|item| item.config_json)
-            .unwrap_or_else(|| json!({})))
+        read_extension_config(&self.client, &self.base_url, credentials).await
     }
 
-    async fn write_config(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        config: &Value,
-    ) -> Result<(), CourseError> {
-        let body = json!({ "scopeType": "tenant", "configJson": config });
-        field_send_unit(
-            &self.client,
-            &self.base_url,
-            reqwest::Method::PATCH,
-            "/v1/erp/extensions/golf_course/config",
-            credentials,
-            Some(&body),
-        )
-        .await
-    }
-
-    /// Change one key of the extension config, and make sure the change stuck.
-    ///
-    /// Field replaces `configJson` wholesale and offers no version to compare
-    /// against, so two writers that read the same starting value lose one of the
-    /// two changes — and the loser is told the save worked. That is not a
-    /// theoretical race here: plans and the ledger's column order live in the
-    /// same object, and are edited from different screens.
-    ///
-    /// Without a compare-and-set the fix is to stay in the operation: write,
-    /// read back, and if the key is not what we wrote, merge again onto whatever
-    /// won and write again. It converges as long as writes are not continuous,
-    /// which turns a silently lost edit into one that is either applied or
-    /// reported.
     async fn write_config_key(
         &self,
         credentials: GatewayCredentials<'_>,
         key: &str,
         apply: impl Fn(&Value) -> Value,
     ) -> Result<Value, CourseError> {
-        for attempt in 1..=CONFIG_WRITE_ATTEMPTS {
-            let current = self.read_config(credentials).await?;
-            let next = apply(&current);
-            self.write_config(credentials, &next).await?;
-
-            let stored = self.read_config(credentials).await?;
-            // Only our own key is compared. Another writer adding a key of its
-            // own is not a conflict, and retrying on it would never settle.
-            if stored.get(key) == next.get(key) {
-                return Ok(stored);
-            }
-            tracing::warn!(
-                key,
-                attempt,
-                "extension config write was overwritten by a concurrent writer; retrying"
-            );
-        }
-        Err(CourseError::Provider(format!(
-            "the extension config kept being overwritten while saving `{key}`; \
-             nothing was changed on the last attempt"
-        )))
+        write_extension_config_key(&self.client, &self.base_url, credentials, key, apply).await
     }
+}
+
+/// The golf extension's tenant config.
+///
+/// Plans live in the extension's generic config, not in a golf-specific table.
+/// Field owns the container; the golf meaning is applied by the callers —
+/// `generic_product_config`, the ledger's column order, the caddie rank fees.
+pub(super) async fn read_extension_config(
+    client: &reqwest::Client,
+    base_url: &str,
+    credentials: GatewayCredentials<'_>,
+) -> Result<Value, CourseError> {
+    let items: Vec<FieldExtensionConfigDto> =
+        field_get_items(client, base_url, "/v1/erp/extensions/status", credentials).await?;
+    Ok(items
+        .into_iter()
+        .find(|item| item.extension_key == GOLF_EXTENSION_KEY)
+        .and_then(|item| item.config_json)
+        .unwrap_or_else(|| json!({})))
+}
+
+async fn write_extension_config(
+    client: &reqwest::Client,
+    base_url: &str,
+    credentials: GatewayCredentials<'_>,
+    config: &Value,
+) -> Result<(), CourseError> {
+    let body = json!({ "scopeType": "tenant", "configJson": config });
+    field_send_unit(
+        client,
+        base_url,
+        reqwest::Method::PATCH,
+        "/v1/erp/extensions/golf_course/config",
+        credentials,
+        Some(&body),
+    )
+    .await
+}
+
+/// Change one key of the extension config, and make sure the change stuck.
+///
+/// Field replaces `configJson` wholesale and offers no version to compare
+/// against, so two writers that read the same starting value lose one of the
+/// two changes — and the loser is told the save worked. That is not a
+/// theoretical race here: plans, the ledger's column order, and the caddie rank
+/// fees live in the same object, and are edited from different screens.
+///
+/// Without a compare-and-set the fix is to stay in the operation: write,
+/// read back, and if the key is not what we wrote, merge again onto whatever
+/// won and write again. It converges as long as writes are not continuous,
+/// which turns a silently lost edit into one that is either applied or
+/// reported.
+pub(super) async fn write_extension_config_key(
+    client: &reqwest::Client,
+    base_url: &str,
+    credentials: GatewayCredentials<'_>,
+    key: &str,
+    apply: impl Fn(&Value) -> Value,
+) -> Result<Value, CourseError> {
+    for attempt in 1..=CONFIG_WRITE_ATTEMPTS {
+        let current = read_extension_config(client, base_url, credentials).await?;
+        let next = apply(&current);
+        write_extension_config(client, base_url, credentials, &next).await?;
+
+        let stored = read_extension_config(client, base_url, credentials).await?;
+        // Only our own key is compared. Another writer adding a key of its
+        // own is not a conflict, and retrying on it would never settle.
+        if stored.get(key) == next.get(key) {
+            return Ok(stored);
+        }
+        tracing::warn!(
+            key,
+            attempt,
+            "extension config write was overwritten by a concurrent writer; retrying"
+        );
+    }
+    Err(CourseError::Provider(format!(
+        "the extension config kept being overwritten while saving `{key}`; \
+         nothing was changed on the last attempt"
+    )))
 }
 
 #[derive(Debug, Deserialize)]
@@ -613,7 +629,7 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
     ) -> Result<Vec<ProductSlot>, CourseError> {
         let config = self.read_config(credentials).await?;
         let next = generic_product_config::replace_slots(&config, service_id, &slots);
-        self.write_config(credentials, &next).await?;
+        write_extension_config(&self.client, &self.base_url, credentials, &next).await?;
         generic_product_config::read_slots(&next, service_id)
     }
 }

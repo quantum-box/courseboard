@@ -115,8 +115,8 @@ mod tests {
     use crate::course::domain::{
         AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
         CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
-        CaddieId, CaddieRank, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieSkillLevel,
-        CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie,
+        CaddieId, CaddieRank, CaddieRankFees, CaddieRating, CaddieRecommendation, CaddieRoster,
+        CaddieSkillLevel, CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie,
         UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
 
@@ -329,12 +329,19 @@ mod tests {
             Ok(AutoAssignResult::new(dry_run, vec![], vec![]))
         }
 
-        async fn export_payroll_csv(
+        async fn get_caddie_rank_fees(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _year_month: &str,
-        ) -> Result<String, CourseError> {
-            Ok(String::new())
+        ) -> Result<CaddieRankFees, CourseError> {
+            Ok(CaddieRankFees::default())
+        }
+
+        async fn replace_caddie_rank_fees(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            fees: &CaddieRankFees,
+        ) -> Result<CaddieRankFees, CourseError> {
+            Ok(fees.clone())
         }
 
         async fn list_caddie_ratings(

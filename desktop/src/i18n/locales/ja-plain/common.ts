@@ -44,6 +44,19 @@ export const common: DeepPartial<typeof source> = {
     inactive: '動いていない',
     unset: 'まだ決めていない',
   },
+  table: {
+    sortBy: '並べかえる',
+    matches: '{{shown}} / {{total}}件',
+    range: '{{from}}〜{{to}}件目 / ぜんぶで{{total}}件',
+    page: '{{page}} / {{pages}}ページ',
+    prev: '前へ',
+    next: '次へ',
+    clearSearch: '検索を消す',
+    noMatches: {
+      title: '見つかりませんでした',
+      description: 'ことばを変えてさがすか、検索を消してください。',
+    },
+  },
   error: {
     loadFailed: '開けませんでした',
     generic: 'うまくいきませんでした',

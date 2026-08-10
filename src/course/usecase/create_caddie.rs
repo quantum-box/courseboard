@@ -44,9 +44,9 @@ mod tests {
     use crate::course::domain::{
         AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
         AvailabilityQuery, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
-        CaddieCourseMembership, CaddieId, CaddieRank, CaddieRating, CaddieRecommendation,
-        CaddieRoster, CaddieSkillLevel, CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships,
-        UpsertCaddieAssignment, UpsertCaddieAvailability,
+        CaddieCourseMembership, CaddieId, CaddieRank, CaddieRankFees, CaddieRating,
+        CaddieRecommendation, CaddieRoster, CaddieSkillLevel, CaddieStaff, RecommendationQuery,
+        ReplaceCaddieMemberships, UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
 
     #[derive(Default)]
@@ -221,12 +221,19 @@ mod tests {
             Err(CourseError::BadRequest("not used in test"))
         }
 
-        async fn export_payroll_csv(
+        async fn get_caddie_rank_fees(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _year_month: &str,
-        ) -> Result<String, CourseError> {
-            Err(CourseError::BadRequest("not used in test"))
+        ) -> Result<CaddieRankFees, CourseError> {
+            Ok(CaddieRankFees::default())
+        }
+
+        async fn replace_caddie_rank_fees(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            fees: &CaddieRankFees,
+        ) -> Result<CaddieRankFees, CourseError> {
+            Ok(fees.clone())
         }
 
         async fn list_caddie_ratings(

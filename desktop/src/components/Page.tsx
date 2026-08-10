@@ -1,4 +1,5 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
+import { useMemo, useState } from 'react'
 import type {
   ComponentProps,
   FormEvent,
@@ -7,10 +8,29 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from 'react'
-import { AlertTriangle, Inbox, LoaderCircle } from 'lucide-react'
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsUpDown,
+  Inbox,
+  LoaderCircle,
+} from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { ApiError } from '../api'
 import { i18next } from '../i18n'
+import {
+  filterRows,
+  nextSort,
+  pageCountOf,
+  pageSlice,
+  sortRows,
+  type DataTableSort,
+} from './dataTable'
+
+export type { DataTableSort } from './dataTable'
 
 export function PageHeader({
   eyebrow,
@@ -340,6 +360,15 @@ export type DataTableColumn<T> = {
   align?: 'left' | 'center' | 'right'
   className?: string
   mobileLabel?: string
+  /**
+   * Makes the column sortable, by saying what it sorts on. A cell renders to a
+   * ReactNode, which cannot be compared — the column has to name the value
+   * behind it. `null` sorts last in both directions, so "not set" never looks
+   * like the smallest amount.
+   */
+  sortValue?: (row: T) => string | number | null
+  /** What this column contributes to the search box, if anything. */
+  searchValue?: (row: T) => string
 }
 
 export function DataTable<T>({
@@ -348,54 +377,183 @@ export function DataTable<T>({
   rowKey,
   empty,
   onRowClick,
+  defaultSort,
+  pageSize,
+  searchable = false,
+  searchPlaceholder,
 }: {
   rows: T[]
   columns: DataTableColumn<T>[]
   rowKey: (row: T, index: number) => string
   empty?: ReactNode
   onRowClick?: (row: T) => void
+  /** Which column the table opens sorted by. */
+  defaultSort?: DataTableSort
+  /** Rows per page. Omitted, the whole set is rendered. */
+  pageSize?: number
+  /** Shows a search box filtering on the columns that define `searchValue`. */
+  searchable?: boolean
+  searchPlaceholder?: string
 }) {
   const { t } = useTranslation('common')
-  if (rows.length === 0) return <>{empty ?? <EmptyState title={t('state.emptyRows')} />}</>
+  const [sort, setSort] = useState<DataTableSort | null>(defaultSort ?? null)
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(0)
+
+  const searchColumns = useMemo(
+    () => columns.filter(column => column.searchValue),
+    [columns],
+  )
+  const sortColumn = sort ? columns.find(column => column.key === sort.key) : undefined
+
+  const visible = useMemo(
+    () => sortRows(filterRows(rows, columns, query), sortColumn, sort?.direction ?? 'asc'),
+    [rows, columns, query, sortColumn, sort?.direction],
+  )
+
+  const pageCount = pageSize ? pageCountOf(visible.length, pageSize) : 1
+  const paged = pageSize ? pageSlice(visible, page, pageSize) : { page: 0, rows: visible }
+  const currentPage = paged.page
+  const pageRows = paged.rows
+
+  function toggleSort(column: DataTableColumn<T>) {
+    if (!column.sortValue) return
+    setPage(0)
+    setSort(current => nextSort(current, column.key))
+  }
+
+  const search = searchable && searchColumns.length > 0 ? (
+    <div className="data-table-toolbar">
+      <SearchInput
+        value={query}
+        onChange={event => {
+          setQuery(event.target.value)
+          setPage(0)
+        }}
+        placeholder={searchPlaceholder ?? t('action.search')}
+        aria-label={searchPlaceholder ?? t('action.search')}
+      />
+      {query.trim() !== '' ? (
+        <span className="data-table-count">
+          {t('table.matches', { shown: String(visible.length), total: String(rows.length) })}
+        </span>
+      ) : null}
+    </div>
+  ) : null
+
+  if (rows.length === 0) {
+    return <>{empty ?? <EmptyState title={t('state.emptyRows')} />}</>
+  }
+
   return (
-    <div className="data-table-scroll">
-      <table className="data-table">
-        <thead>
-          <tr>
-            {columns.map(column => (
-              <th key={column.key} className={`${column.className ?? ''} align-${column.align ?? 'left'}`}>
-                {column.header}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, rowIndex) => (
-            <tr
-              key={rowKey(row, rowIndex)}
-              tabIndex={onRowClick ? 0 : undefined}
-              className={onRowClick ? 'clickable-row' : undefined}
-              onClick={onRowClick ? () => onRowClick(row) : undefined}
-              onKeyDown={onRowClick ? event => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  onRowClick(row)
-                }
-              } : undefined}
-            >
-              {columns.map(column => (
-                <td
-                  key={column.key}
-                  data-label={column.mobileLabel ?? (typeof column.header === 'string' ? column.header : '')}
-                  className={`${column.className ?? ''} align-${column.align ?? 'left'}`}
+    <div className="data-table-frame">
+      {search}
+      {visible.length === 0 ? (
+        <EmptyState
+          title={t('table.noMatches.title')}
+          description={t('table.noMatches.description')}
+          action={(
+            <Button type="button" variant="secondary" size="sm" onClick={() => setQuery('')}>
+              {t('table.clearSearch')}
+            </Button>
+          )}
+        />
+      ) : (
+        <div className="data-table-scroll">
+          <table className="data-table">
+            <thead>
+              <tr>
+                {columns.map(column => {
+                  const sorted = sort?.key === column.key ? sort.direction : null
+                  const className = `${column.className ?? ''} align-${column.align ?? 'left'}`
+                  if (!column.sortValue) {
+                    return <th key={column.key} className={className}>{column.header}</th>
+                  }
+                  return (
+                    <th
+                      key={column.key}
+                      className={className}
+                      aria-sort={sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : 'none'}
+                    >
+                      <button
+                        type="button"
+                        className="data-table-sort"
+                        onClick={() => toggleSort(column)}
+                        title={t('table.sortBy')}
+                      >
+                        {column.header}
+                        {sorted === 'asc' ? <ArrowUp aria-hidden="true" /> : null}
+                        {sorted === 'desc' ? <ArrowDown aria-hidden="true" /> : null}
+                        {sorted === null ? <ChevronsUpDown aria-hidden="true" className="data-table-sort-idle" /> : null}
+                      </button>
+                    </th>
+                  )
+                })}
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.map((row, rowIndex) => (
+                <tr
+                  key={rowKey(row, rowIndex)}
+                  tabIndex={onRowClick ? 0 : undefined}
+                  className={onRowClick ? 'clickable-row' : undefined}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                  onKeyDown={onRowClick ? event => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      onRowClick(row)
+                    }
+                  } : undefined}
                 >
-                  {column.cell(row)}
-                </td>
+                  {columns.map(column => (
+                    <td
+                      key={column.key}
+                      data-label={column.mobileLabel ?? (typeof column.header === 'string' ? column.header : '')}
+                      className={`${column.className ?? ''} align-${column.align ?? 'left'}`}
+                    >
+                      {column.cell(row)}
+                    </td>
+                  ))}
+                </tr>
               ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+            </tbody>
+          </table>
+        </div>
+      )}
+      {pageSize && visible.length > 0 ? (
+        <div className="data-table-pager">
+          <span className="data-table-count">
+            {t('table.range', {
+              from: String(currentPage * pageSize + 1),
+              to: String(currentPage * pageSize + pageRows.length),
+              total: String(visible.length),
+            })}
+          </span>
+          <div className="data-table-pager-buttons">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={currentPage === 0}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              <ChevronLeft /> {t('table.prev')}
+            </Button>
+            <span className="data-table-count">
+              {t('table.page', { page: String(currentPage + 1), pages: String(pageCount) })}
+            </span>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={currentPage >= pageCount - 1}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              {t('table.next')} <ChevronRight />
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

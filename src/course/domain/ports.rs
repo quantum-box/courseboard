@@ -7,8 +7,8 @@ use super::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
     AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BudgetAchievement, Caddie,
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
-    CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift, CaddieStaff, Course,
-    CourseError, CourseId, CourseOrder, DailyBudget, DailyBudgetQuery, DeleteSlotOverrides,
+    CaddieRankFees, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift, CaddieStaff,
+    Course, CourseError, CourseId, CourseOrder, DailyBudget, DailyBudgetQuery, DeleteSlotOverrides,
     ExtensionStatus, GenerationSummary, MonthlySettlement, NewReservation, PartyDetails,
     ProductSlot, RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationId,
     ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
@@ -518,11 +518,21 @@ pub trait GolfOpsGateway: Send + Sync {
         dry_run: bool,
     ) -> Result<AutoAssignResult, CourseError>;
 
-    async fn export_payroll_csv(
+    /// What one round pays at each rank.
+    ///
+    /// Tenant-scoped and CourseBoard's own: Field grades no one and pays by no
+    /// grade, so the table is kept in the golf extension config rather than in
+    /// a shared ERP column (ADR-0005).
+    async fn get_caddie_rank_fees(
         &self,
         credentials: GatewayCredentials<'_>,
-        year_month: &str,
-    ) -> Result<String, CourseError>;
+    ) -> Result<CaddieRankFees, CourseError>;
+
+    async fn replace_caddie_rank_fees(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        fees: &CaddieRankFees,
+    ) -> Result<CaddieRankFees, CourseError>;
 
     async fn list_caddie_ratings(
         &self,

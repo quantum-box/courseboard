@@ -1112,7 +1112,16 @@ pub struct PayrollRow {
     worked_minutes: i64,
     shifted_minutes: i64,
     assigned_rounds: i64,
-    confirmed_fee_total: i64,
+    /// The rank the fee was read off, so the sheet can be checked by hand.
+    #[getter(copy)]
+    rank: CaddieRank,
+    /// What one round pays this caddie.
+    round_fee: i64,
+    /// True when the amount came from the caddie's own fee rather than the
+    /// rank table — the one case where two caddies of the same rank differ.
+    fee_overridden: bool,
+    /// `round_fee` × the rounds that were worked.
+    fee_total: i64,
     #[getter(skip)]
     currency: String,
     open_clock_in: bool,
@@ -1128,19 +1137,26 @@ impl PayrollRow {
         worked_minutes: i64,
         shifted_minutes: i64,
         assigned_rounds: i64,
-        confirmed_fee_total: i64,
+        rank: CaddieRank,
+        round_fee: i64,
+        fee_overridden: bool,
         currency: impl Into<String>,
         open_clock_in: bool,
         rounds_without_clock_in: i64,
     ) -> Self {
+        let assigned_rounds = assigned_rounds.max(0);
+        let round_fee = round_fee.max(0);
         Self {
             caddie_id: caddie_id.into(),
             display_name: display_name.into(),
             staff_id,
             worked_minutes: worked_minutes.max(0),
             shifted_minutes: shifted_minutes.max(0),
-            assigned_rounds: assigned_rounds.max(0),
-            confirmed_fee_total: confirmed_fee_total.max(0),
+            assigned_rounds,
+            rank,
+            round_fee,
+            fee_overridden,
+            fee_total: round_fee * assigned_rounds,
             currency: {
                 let value = currency.into();
                 if value.trim().is_empty() {
@@ -1188,7 +1204,7 @@ impl PayrollSummary {
     }
 
     pub fn total_confirmed_fees(&self) -> i64 {
-        self.items.iter().map(PayrollRow::confirmed_fee_total).sum()
+        self.items.iter().map(PayrollRow::fee_total).sum()
     }
 }
 

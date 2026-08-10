@@ -56,7 +56,7 @@ impl CreateCaddieAssignmentUseCase {
         let date = (input.scheduled_at + Duration::minutes(JST_OFFSET_MINUTES)).date_naive();
         let window = widen_for_utc_date_filter(date, date);
 
-        let (roster, assignments, availabilities) = tokio::try_join!(
+        let (roster, assignments, availabilities, rank_fees) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
             self.ops.list_caddie_assignments(
                 credentials,
@@ -75,6 +75,7 @@ impl CreateCaddieAssignmentUseCase {
                     date: None,
                 },
             ),
+            self.ops.get_caddie_rank_fees(credentials),
         )?;
 
         let caddie = roster
@@ -156,7 +157,12 @@ impl CreateCaddieAssignmentUseCase {
                             .assignment_role
                             .unwrap_or_else(|| PRIMARY_ROLE.to_string()),
                     ),
-                    fee_amount: Some(caddie.base_fee_amount()),
+                    // What the round pays, so Field's own record of it agrees
+                    // with the payroll sheet rather than reading 0 for every
+                    // caddie who is simply paid by their rank.
+                    fee_amount: Some(
+                        rank_fees.round_fee_for(caddie.rank(), caddie.base_fee_amount()),
+                    ),
                     fee_currency: Some(caddie.currency().to_string()),
                     recommendation_score: None,
                     notes: input.notes,

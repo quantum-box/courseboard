@@ -5,7 +5,7 @@
 //! roster, the month's assignments, the attendance the operator recorded, and
 //! the worked minutes the staff records hold.
 //!
-//! Four calls, whatever the headcount — the roster is not walked one caddie at
+//! Five calls, whatever the headcount — the roster is not walked one caddie at
 //! a time.
 
 use std::sync::Arc;
@@ -37,7 +37,7 @@ impl GetPayrollSummaryUseCase {
         // a 07:00 round on the 1st is 22:00 on the last of the month before.
         // Fetched wide, then cut back to the month's own days below.
         let window = widen_for_utc_date_filter(from, to);
-        let (roster, assignments, attendance, worked) = tokio::try_join!(
+        let (roster, assignments, attendance, worked, rank_fees) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
             self.ops.list_caddie_assignments(
                 credentials,
@@ -50,6 +50,7 @@ impl GetPayrollSummaryUseCase {
             self.ops
                 .list_attendance_period_snapshots(credentials, from, to),
             self.ops.list_worked_minutes(credentials, year_month),
+            self.ops.get_caddie_rank_fees(credentials),
         )?;
 
         let candidates: Vec<PayrollCandidate> = roster
@@ -59,6 +60,8 @@ impl GetPayrollSummaryUseCase {
                 caddie_id: caddie.id().to_string(),
                 display_name: caddie.display_name().to_string(),
                 staff_id: caddie.staff_id().map(str::to_string),
+                rank: caddie.rank(),
+                base_fee_amount: caddie.base_fee_amount(),
             })
             .collect();
 
@@ -82,7 +85,7 @@ impl GetPayrollSummaryUseCase {
 
         Ok(PayrollSummary::new(
             period,
-            summarize_payroll(&candidates, &assignments, &days, &worked),
+            summarize_payroll(&candidates, &assignments, &days, &worked, &rank_fees),
         ))
     }
 }

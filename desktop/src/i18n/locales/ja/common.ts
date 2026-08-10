@@ -51,6 +51,19 @@ export const common = {
     all: 'すべて',
     total: '合計',
   },
+  table: {
+    sortBy: '並び替える',
+    matches: '{{shown}} / {{total}}件',
+    range: '{{from}}〜{{to}}件目 / 全{{total}}件',
+    page: '{{page}} / {{pages}}ページ',
+    prev: '前へ',
+    next: '次へ',
+    clearSearch: '検索を消す',
+    noMatches: {
+      title: '当てはまるものがありません',
+      description: '検索の言葉を変えるか、検索を消してください。',
+    },
+  },
   error: {
     loadFailed: '読み込めませんでした',
     saveFailed: '保存できませんでした',

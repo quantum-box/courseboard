@@ -53,6 +53,19 @@ export const common: DeepPartial<typeof source> = {
     all: 'All',
     total: 'Total',
   },
+  table: {
+    sortBy: 'Sort by this column',
+    matches: '{{shown}} of {{total}}',
+    range: '{{from}}–{{to}} of {{total}}',
+    page: 'Page {{page}} of {{pages}}',
+    prev: 'Previous',
+    next: 'Next',
+    clearSearch: 'Clear the search',
+    noMatches: {
+      title: 'Nothing matches',
+      description: 'Try different words, or clear the search.',
+    },
+  },
   error: {
     loadFailed: 'Could not load',
     saveFailed: 'Could not save',
