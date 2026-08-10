@@ -81,6 +81,7 @@ import { useResource } from '../../hooks/useResource'
 import { navigate, useNavigationGuard } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
 import { Sheet } from '../../components/Sheet'
+import { CaddieLink } from './CaddieLink'
 import {
   assignmentsOnCancelledRounds,
   horizonEnd,
@@ -1333,7 +1334,10 @@ function ReinforcementSheet({
             className="flex items-center gap-3 rounded-lg border border-border bg-background p-3"
           >
             <div className="min-w-0 flex-1">
-              <p className="font-medium text-foreground">{candidate.displayName}</p>
+              <CaddieLink
+                caddieId={candidate.caddieProfileId}
+                displayName={candidate.displayName}
+              />
               <p className="text-xs text-muted-foreground">
                 {candidate.returnsHome
                   ? t('caddies:balance.returnsHome')
@@ -1568,7 +1572,7 @@ function RecommendationsPanel({
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="font-medium text-foreground">{item.displayName}</p>
+                <CaddieLink caddieId={item.caddieProfileId} displayName={item.displayName} />
                 <Badge variant="neutral">{skillLabel(item.skillLevel)}</Badge>
                 {(() => {
                   const status = item.attendanceStatus
@@ -1656,7 +1660,7 @@ function AttendancePanel({
       mobileLabel: t('caddies:attendance.table.caddie'),
       cell: row => (
         <div>
-          <p className="font-medium">{row.displayName}</p>
+          <CaddieLink caddieId={row.caddieProfileId} displayName={row.displayName} />
           <p className="text-xs text-muted-foreground">
             {t('caddies:attendance.table.todayGroups', { n: String(row.todayAssignments) })}
           </p>
@@ -1858,7 +1862,12 @@ function AssignmentsTable({
       key: 'caddie',
       header: t('caddies:assignments.table.caddie'),
       mobileLabel: t('caddies:assignments.table.caddie'),
-      cell: row => profileNames.get(row.caddieProfileId) ?? row.caddieProfileId,
+      cell: row => (
+        <CaddieLink
+          caddieId={row.caddieProfileId}
+          displayName={profileNames.get(row.caddieProfileId)}
+        />
+      ),
     },
     {
       key: 'fee',

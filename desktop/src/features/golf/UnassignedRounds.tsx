@@ -13,6 +13,7 @@ import {
   ResourceError,
 } from '../../components/Page'
 import { Sheet } from '../../components/Sheet'
+import { CaddieLink } from './CaddieLink'
 import { useResource } from '../../hooks/useResource'
 import { showToast } from '../../lib/toast'
 import {
@@ -404,7 +405,10 @@ function NameCaddieSheet({
               {t('caddies:recommendations.rank', { n: String(index + 1) })}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-medium text-foreground">{candidate.displayName}</p>
+              <CaddieLink
+                caddieId={candidate.caddieProfileId}
+                displayName={candidate.displayName}
+              />
               <RecommendationExplanation item={candidate} />
             </div>
             <Button

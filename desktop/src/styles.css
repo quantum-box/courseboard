@@ -5353,3 +5353,55 @@ button,
   font-size: 16px;
   font-weight: 400;
 }
+
+/* A caddie's name, wherever one is shown. Newly introduced control, so it
+   follows the current readability and target-size rules: the row is the target,
+   and the name is never smaller than body text. */
+.caddie-link,
+.caddie-link-plain {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  line-height: 24px;
+  text-align: left;
+}
+
+.caddie-link {
+  border: 0;
+  border-radius: var(--nui-radius-md);
+  padding: 0 6px 0 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.caddie-link-initial {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: hsl(var(--nui-primary) / 12%);
+  color: hsl(var(--nui-primary));
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.caddie-link-name {
+  text-decoration: underline;
+  text-decoration-color: hsl(var(--nui-border));
+  text-underline-offset: 3px;
+}
+
+.caddie-link:hover .caddie-link-name {
+  text-decoration-color: hsl(var(--nui-primary));
+}
+
+.caddie-link:focus-visible {
+  outline: 2px solid hsl(var(--nui-primary));
+  outline-offset: 1px;
+}
