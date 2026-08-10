@@ -63,7 +63,6 @@ type DailyBudgetAchievement = {
   date: string
   targetRevenue: number
   actualRevenue: number
-  revenueAchievementRate: number | null
   targetAverageSpend: number
   actualAverageSpend: number | null
   targetCaddyAttachedRatio: number
@@ -130,6 +129,10 @@ function rateBadgeVariant(rate: number | null) {
 
 function rateLabel(rate: number | null) {
   return rate === null ? '—' : `${Math.round(rate * 100)}%`
+}
+
+function revenueAchievementRate(actualRevenue: number, targetRevenue: number) {
+  return targetRevenue > 0 ? actualRevenue / targetRevenue : null
 }
 
 function normalizeCsvHeader(contents: string) {
@@ -255,7 +258,7 @@ export function BudgetsPage() {
       actual,
       reservations,
       players,
-      rate: target > 0 ? actual / target : null,
+      rate: revenueAchievementRate(actual, target),
     }
   }, [achievements])
 
@@ -470,11 +473,17 @@ export function BudgetsPage() {
                       key: 'rate',
                       header: t('budgets:progress.table.rate'),
                       align: 'right',
-                      cell: row => (
-                        <Badge variant={rateBadgeVariant(row.revenueAchievementRate)}>
-                          {rateLabel(row.revenueAchievementRate)}
-                        </Badge>
-                      ),
+                      cell: row => {
+                        const rate = revenueAchievementRate(
+                          row.actualRevenue,
+                          row.targetRevenue,
+                        )
+                        return (
+                          <Badge variant={rateBadgeVariant(rate)}>
+                            {rateLabel(rate)}
+                          </Badge>
+                        )
+                      },
                     },
                     {
                       key: 'average',
