@@ -22,6 +22,7 @@ import { useResource } from '../../hooks/useResource'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
+import { CaddieLink } from './CaddieLink'
 import {
   buildShiftRow,
   monthDates,
@@ -859,7 +860,9 @@ function ShiftBoardResults({
                     <tr key={profile.id} data-employment-status={row.employmentStatus}>
                       <th scope="row" className="shift-board-name">
                         <span className="shift-board-profile">
-                          <span className="shift-board-profile-name">{profile.displayName}</span>
+                          <span className="shift-board-profile-name">
+                            <CaddieLink caddieId={profile.id} displayName={profile.displayName} />
+                          </span>
                           {statusLabel ? (
                             <span className="shift-board-profile-status">
                               {statusLabel}

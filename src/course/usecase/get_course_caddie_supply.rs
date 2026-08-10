@@ -46,6 +46,7 @@ impl GetCourseCaddieSupplyUseCase {
                 credentials,
                 TeeSheetQuery {
                     date,
+                    to: None,
                     golf_course_id: None,
                 },
             ),

@@ -5276,3 +5276,179 @@ button,
   border-top: 1px solid hsl(var(--nui-border));
   padding: 16px 14px;
 }
+
+/* How far ahead the unassigned list looks. Newly introduced control, so it
+   follows the current readability and target-size rules. */
+.horizon-switch {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.horizon-chip {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 0 14px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 24px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.horizon-chip:hover {
+  border-color: hsl(var(--nui-primary) / 50%);
+}
+
+.horizon-chip.is-on {
+  border-color: hsl(var(--nui-primary));
+  background: hsl(var(--nui-primary) / 12%);
+  color: hsl(var(--nui-primary));
+  font-weight: 600;
+}
+
+.horizon-chip:focus-visible {
+  outline: 2px solid hsl(var(--nui-primary));
+  outline-offset: 1px;
+}
+
+/* A fortnight of a club-sized board is a couple of hundred groups. The list
+   scrolls inside its panel so the rest of the screen stays put; the rules on
+   text size and target size are unchanged, which is why this scrolls rather
+   than shrinking anything. */
+.unassigned-scroll {
+  display: flex;
+  max-height: 60vh;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.unassigned-day-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  background: hsl(var(--nui-background));
+  padding: 6px 2px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.unassigned-day-count {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  font-weight: 400;
+}
+
+/* A caddie's name, wherever one is shown. Newly introduced control, so it
+   follows the current readability and target-size rules: the row is the target,
+   and the name is never smaller than body text. */
+.caddie-link,
+.caddie-link-plain {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  line-height: 24px;
+  text-align: left;
+}
+
+.caddie-link {
+  border: 0;
+  border-radius: var(--nui-radius-md);
+  padding: 0 6px 0 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.caddie-link-initial {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: hsl(var(--nui-primary) / 12%);
+  color: hsl(var(--nui-primary));
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.caddie-link-name {
+  text-decoration: underline;
+  text-decoration-color: hsl(var(--nui-border));
+  text-underline-offset: 3px;
+}
+
+.caddie-link:hover .caddie-link-name {
+  text-decoration-color: hsl(var(--nui-primary));
+}
+
+.caddie-link:focus-visible {
+  outline: 2px solid hsl(var(--nui-primary));
+  outline-offset: 1px;
+}
+
+/* The name preview. Hover and focus both open it; nothing in it is only here,
+   so a device that cannot hover loses no information — the same control opens
+   the caddie's screen, where all of it is shown. */
+.caddie-link-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.caddie-preview {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% - 4px);
+  left: 0;
+  display: flex;
+  width: max-content;
+  max-width: 260px;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  box-shadow: 0 8px 24px hsl(0deg 0% 0% / 12%);
+  background: hsl(var(--nui-background));
+  padding: 10px 12px;
+  font-size: 16px;
+  line-height: 24px;
+  pointer-events: none;
+}
+
+.caddie-preview-name {
+  font-weight: 600;
+}
+
+.caddie-preview-line {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.caddie-preview-warning {
+  color: hsl(var(--nui-destructive));
+}
+
+.caddie-preview-hint {
+  margin-top: 4px;
+  border-top: 1px solid hsl(var(--nui-border));
+  padding-top: 4px;
+  color: hsl(var(--nui-muted-foreground));
+}

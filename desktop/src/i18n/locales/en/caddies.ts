@@ -514,6 +514,16 @@ export const caddies: DeepPartial<typeof source> = {
   error: {
     generic: 'Could not finish that',
   },
+  preview: {
+    rank: 'Rank {{rank}}',
+    perDay: 'Up to {{n}}R a day',
+    ratings: 'Rated {{value}} ({{n}})',
+    ratingsNone: 'No ratings recorded',
+    noStaffLink: 'No staff link',
+    loading: 'Loading',
+    failed: 'Could not load this caddie',
+    open: 'Opens this caddie’s screen',
+  },
   orphaned: {
     title: '{{n}} assignment(s) are left on a cancelled booking',
     body: 'These groups are no longer on the tee sheet. Until the assignment is cancelled, the caddie still counts against their rounds for the day and against the month’s payroll.',
@@ -521,7 +531,14 @@ export const caddies: DeepPartial<typeof source> = {
   },
   unassigned: {
     courseFilter: 'Course',
+    horizonLabel: 'How far ahead',
+    horizon: {
+      '1': 'This day',
+      '7': '7 days',
+      '14': '14 days',
+    },
     allCourses: 'All courses',
+    dayCount: '{{n}} groups',
     title: 'Rounds without a caddie',
     description: 'Caddie-attached bookings nobody is on yet. What the automatic run could not fill is named here.',
     loading: 'Loading bookings',
@@ -533,7 +550,7 @@ export const caddies: DeepPartial<typeof source> = {
     named: '{{name}} is on this round',
     failed: 'Could not name a caddie',
     sheetTitle: 'Name a caddie',
-    sheetDescription: '{{time}} · {{course}}',
+    sheetDescription: '{{date}} {{time}} · {{course}}',
     empty: {
       title: 'Every round has a caddie',
       description: 'All caddie-attached bookings for this day are covered.',

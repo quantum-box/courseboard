@@ -63,7 +63,11 @@ impl GetTeeSheetUseCase {
             Vec::new()
         });
 
-        let sheet = build_tee_sheet(
+        // A range is several days of the same board, built from the one set of
+        // reservations already in hand. The sheet keeps the first day as its
+        // own: the day markers describe that day, and every row carries its own
+        // start, which is what a caller reading more than one day goes by.
+        let mut sheet = build_tee_sheet(
             query.date,
             query.golf_course_id.as_ref(),
             &reservations,
@@ -72,6 +76,18 @@ impl GetTeeSheetUseCase {
             &products,
             &timezone,
         )?;
+        for date in query.dates().into_iter().skip(1) {
+            let next = build_tee_sheet(
+                date,
+                query.golf_course_id.as_ref(),
+                &reservations,
+                &courses,
+                &resources,
+                &products,
+                &timezone,
+            )?;
+            sheet = sheet.extended_with(next);
+        }
         Ok(sheet.with_unavailable(unavailable))
     }
 }
@@ -692,6 +708,7 @@ mod tests {
                 },
                 TeeSheetQuery {
                     date,
+                    to: None,
                     golf_course_id: Some(CourseId::new("course_east")),
                 },
             )
@@ -704,6 +721,79 @@ mod tests {
         assert_eq!(sheet.items()[0].status().as_str(), "confirmed");
         assert_eq!(sheet.timezone(), "Europe/Berlin");
         assert!(sheet.unavailable().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_range_answers_every_day_it_covers_on_one_board() {
+        // Staffing is planned a fortnight out, so the groups still missing a
+        // caddie are asked for once rather than a day at a time.
+        let first = NaiveDate::from_ymd_opt(2026, 7, 18).expect("date");
+        let second_day_start = Utc.with_ymd_and_hms(2026, 7, 18, 22, 0, 0).unwrap();
+        let reservations = Arc::new(FakeReservationGateway {
+            items: Mutex::new(vec![
+                sample_reservation(),
+                Reservation::reconstitute(
+                    "res_2",
+                    "R-2",
+                    Some("svc:caddie-18".into()),
+                    Some("res_east".into()),
+                    Some("Suzuki".into()),
+                    "confirmed",
+                    second_day_start,
+                    second_day_start + Duration::minutes(270),
+                    4,
+                    None,
+                    None,
+                ),
+            ]),
+        });
+        let catalog = Arc::new(FakeGolfCatalogGateway {
+            tenant_timezone: DEFAULT_TIMEZONE.into(),
+            courses: Mutex::new(vec![Course::reconstitute(
+                "course_east",
+                "East Course",
+                Some("East".into()),
+                18,
+                DEFAULT_TIMEZONE,
+                8,
+                true,
+                None,
+                None,
+                None,
+                None,
+            )]),
+            resources: Mutex::new(vec![Resource::reconstitute(
+                "golfres_east",
+                "East Course",
+                Some("res_east".into()),
+                Some("course_east".into()),
+                ResourceKind::Course,
+                true,
+            )]),
+            products: Mutex::new(Vec::new()),
+            products_fail: false,
+        });
+
+        let sheet = GetTeeSheetUseCase::new(reservations, catalog)
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer test",
+                    operator_id: "scc",
+                    platform_id: None,
+                },
+                TeeSheetQuery {
+                    date: first,
+                    to: NaiveDate::from_ymd_opt(2026, 7, 19),
+                    golf_course_id: None,
+                },
+            )
+            .await
+            .expect("execute use case");
+
+        let names: Vec<&str> = sheet.items().iter().map(|item| item.party_name()).collect();
+        assert_eq!(names, vec!["Yamada", "Suzuki"]);
+        // The board still describes its first day; the rows carry their own.
+        assert_eq!(sheet.date(), first);
     }
 
     #[tokio::test]
@@ -740,6 +830,7 @@ mod tests {
                 },
                 TeeSheetQuery {
                     date,
+                    to: None,
                     golf_course_id: None,
                 },
             )

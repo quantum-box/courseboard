@@ -57,8 +57,35 @@ pub trait GolfTaxGateway: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct TeeSheetQuery {
     pub date: NaiveDate,
+    /// Last day to include, when the caller wants more than `date`.
+    ///
+    /// Staffing is planned ahead, and the groups still missing a caddie are
+    /// asked for a fortnight at a time rather than one day at a time. Absent —
+    /// or before `date` — means the single day the board has always answered.
+    pub to: Option<NaiveDate>,
     pub golf_course_id: Option<CourseId>,
 }
+
+impl TeeSheetQuery {
+    /// The days this query covers, in order.
+    pub fn dates(&self) -> Vec<NaiveDate> {
+        let last = self.to.filter(|to| *to > self.date).unwrap_or(self.date);
+        let mut dates = Vec::new();
+        let mut day = self.date;
+        while day <= last && dates.len() < MAX_TEE_SHEET_DAYS {
+            dates.push(day);
+            let Some(next) = day.succ_opt() else { break };
+            day = next;
+        }
+        dates
+    }
+}
+
+/// How many days one tee-sheet request may cover.
+///
+/// Long enough for the fortnight the desk staffs ahead, short enough that a
+/// mistyped range cannot ask for a year of boards in one call.
+const MAX_TEE_SHEET_DAYS: usize = 31;
 
 #[derive(Debug, Clone)]
 pub struct TeeLedgerQuery {
@@ -677,4 +704,52 @@ pub trait GolfCommercialGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         horizon: &BookingHorizon,
     ) -> Result<BookingHorizon, CourseError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn day(day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 7, day).expect("date")
+    }
+
+    fn query(to: Option<NaiveDate>) -> TeeSheetQuery {
+        TeeSheetQuery {
+            date: day(18),
+            to,
+            golf_course_id: None,
+        }
+    }
+
+    #[test]
+    fn no_end_asks_for_the_one_day() {
+        assert_eq!(query(None).dates(), vec![day(18)]);
+    }
+
+    #[test]
+    fn an_end_asks_for_every_day_up_to_it() {
+        assert_eq!(
+            query(Some(day(20))).dates(),
+            vec![day(18), day(19), day(20)]
+        );
+    }
+
+    #[test]
+    fn an_end_before_the_start_is_the_one_day() {
+        // A backwards range is a typo, not a request for nothing.
+        assert_eq!(query(Some(day(10))).dates(), vec![day(18)]);
+    }
+
+    #[test]
+    fn a_long_range_stops_at_a_month() {
+        let dates = TeeSheetQuery {
+            date: day(1),
+            to: NaiveDate::from_ymd_opt(2027, 7, 1),
+            golf_course_id: None,
+        }
+        .dates();
+        assert_eq!(dates.len(), MAX_TEE_SHEET_DAYS);
+        assert_eq!(dates[0], day(1));
+    }
 }

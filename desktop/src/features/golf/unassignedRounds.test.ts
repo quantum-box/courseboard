@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   assignmentsOnCancelledRounds,
+  dayLabel,
+  horizonEnd,
   unassignedCaddieRounds,
   wallClock,
 } from './UnassignedRounds'
@@ -117,5 +119,30 @@ describe('wallClock', () => {
 
   it('leaves something it cannot read alone', () => {
     expect(wallClock('unknown')).toBe('unknown')
+  })
+})
+
+describe('horizonEnd', () => {
+  it('keeps a one-day horizon on its own day', () => {
+    expect(horizonEnd('2026-08-08', 1)).toBe('2026-08-08')
+  })
+
+  it('counts the chosen day as the first of the horizon', () => {
+    // A week from the 8th ends on the 14th, not the 15th.
+    expect(horizonEnd('2026-08-08', 7)).toBe('2026-08-14')
+  })
+
+  it('crosses a month end', () => {
+    expect(horizonEnd('2026-08-25', 14)).toBe('2026-09-07')
+  })
+})
+
+describe('dayLabel', () => {
+  it('names the day on the course clock', () => {
+    expect(dayLabel('2026-08-08T07:00:00+09:00')).toBe('8/8(土)')
+  })
+
+  it('leaves something it cannot read alone', () => {
+    expect(dayLabel('unknown')).toBe('unknown')
   })
 })

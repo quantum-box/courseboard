@@ -500,6 +500,16 @@ export const caddies: DeepPartial<typeof source> = {
   error: {
     generic: 'うまくいきませんでした',
   },
+  preview: {
+    rank: '{{rank}}ランク',
+    perDay: '1日 {{n}}ラウンドまで',
+    ratings: 'お客さまの評価 {{value}}（{{n}}件）',
+    ratingsNone: 'まだ評価がありません',
+    noStaffLink: '社員情報と結びついていません',
+    loading: '読み込んでいます',
+    failed: '情報を読み込めませんでした',
+    open: '押すと、この人の画面が開きます',
+  },
   orphaned: {
     title: '取り消された予約に、担当が{{n}}件のこっています',
     body: 'この組は、もう予約の表にありません。担当を取り消すまで、そのキャディはこの日の担当の数に入り、給料の集計にも入ります。',
@@ -507,7 +517,14 @@ export const caddies: DeepPartial<typeof source> = {
   },
   unassigned: {
     courseFilter: 'コースをえらぶ',
+    horizonLabel: '何日先まで見るか',
+    horizon: {
+      '1': 'この日',
+      '7': '7日先まで',
+      '14': '14日先まで',
+    },
     allCourses: 'ぜんぶのコース',
+    dayCount: '{{n}}組',
     title: '担当がまだの組',
     description: 'キャディ付きで受けた予約で、だれが担当するか決まっていない組です。ここで決められます。',
     loading: '予約を読んでいます',
@@ -518,7 +535,7 @@ export const caddies: DeepPartial<typeof source> = {
     named: '{{name}} さんに決めました',
     failed: '決められませんでした',
     sheetTitle: 'だれにするか決める',
-    sheetDescription: '{{time}} スタート · {{course}}',
+    sheetDescription: '{{date}} {{time}} スタート · {{course}}',
     players: '{{n}}人',
     empty: {
       title: 'ぜんぶ決まっています',
