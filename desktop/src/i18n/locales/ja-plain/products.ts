@@ -3,18 +3,11 @@ import type { products as source } from '../ja/products'
 
 /** See `ja-plain/common.ts` for what this locale is for. */
 export const products: DeepPartial<typeof source> = {
-  title: 'プレーの料金プラン',
-  description: '売るプランの種類と、曜日ごとに予約を受けられる時間の枠を決めます。',
-  loadingDescription: 'プランと予約の枠を読み込んでいます。',
   loading: '料金プランを読み込んでいます',
   addService: 'プランを登録する',
   playType: {
     caddie: 'キャディが付く',
     self: 'キャディが付かない',
-  },
-  confirm: {
-    discardOnReload: '保存していない枠があります。捨てて読み込み直しますか。',
-    discardOnLeave: '保存していない枠があります。捨てて、この画面を出ますか。',
   },
   editor: {
     displayName: 'プランの名前',
@@ -58,9 +51,6 @@ export const products: DeepPartial<typeof source> = {
       course: 'コース',
       playType: 'キャディ',
       duration: 'かかる時間',
-      slots: '予約の枠',
-      slotCount: '{{n}}枠',
-      unsaved: 'まだ保存していません',
       updated: '最後に直した日',
       actions: '操作',
     },
@@ -68,7 +58,6 @@ export const products: DeepPartial<typeof source> = {
   detail: {
     back: 'プランの一覧に戻る',
     summary: 'プランの中身',
-    startInterval: '組を出す間隔',
     notFound: {
       title: 'このプランは見つかりません',
       description: '管理番号 {{serviceId}} のプランがありません。消したか、住所（URL）がちがうのかもしれません。',
@@ -100,55 +89,11 @@ export const products: DeepPartial<typeof source> = {
       limits: '{{groups}}組 · {{players}}人',
     },
   },
+  /** 残っているのは管理番号の行と、直せない古い枠の一覧だけ。 */
   slots: {
-    title: '予約の枠 · {{name}}',
     subtitle: '管理番号: {{serviceId}}',
-    save: '枠を保存する',
-    saveFailed: '枠を保存できません',
-    hasIssues: '{{n}} 件の枠に、まちがいがあります。赤い枠を直してから保存してください。',
-    confirmRemove: 'この保存で、枠が {{n}} 件なくなります。進めますか。',
-    saved: {
-      title: '枠を保存しました',
-      body: '{{serviceId}} の枠を {{n}} 件に入れかえました。',
-    },
-    pending: {
-      title: '{{name}} · まだ保存していません',
-      added: 'ふやした枠 {{n}}',
-      removed: 'けした枠 {{n}}',
-      changed: 'なおした枠 {{n}}',
-      revert: 'もとにもどす',
-    },
     week: {
-      legend: '「組」は受けられる組の数、「人」は人の数です。0 を入れると「制限なし」になります。',
       dayLabel: '{{day}}曜日',
-      slotCount: '{{n}}枠',
-      closed: '受けつけません',
-      add: '枠をふやす',
-      addAria: '{{day}}曜日に枠をふやす',
-      copyAria: '{{day}}曜日の枠を、ほかの曜日にコピーする',
-      copyPlaceholder: 'ほかの曜日にコピーする…',
-      copyWeekdays: '平日（月〜金）へ',
-      copyWeekend: '土曜と日曜へ',
-      copyAll: '毎日へ',
-      copyDay: '{{day}}曜日へ',
-      unitGroups: '組',
-      unitPlayers: '人',
-      unlimited: '制限なし',
-      overCapacity: 'この時間に出せるのは、{{interval}}分おきで多くて {{n}} 組です。',
-      startAria: '{{day}}曜日 {{band}} の枠の始まり',
-      endAria: '{{day}}曜日 {{band}} の枠の終わり',
-      groupsAria: '{{day}}曜日 {{band}} の枠の、受けられる組数',
-      playersAria: '{{day}}曜日 {{band}} の枠の、受けられる人数',
-    },
-    loadFailed: {
-      title: '今の枠を読み込めませんでした',
-      description:
-        '中身が空のまま保存すると、今ある枠が消えてしまうことがあります。読み込み直してから直してください。',
-    },
-    table: {
-      maxGroups: '受けられる組数',
-      maxPlayers: '受けられる人数',
-      deleteAria: '{{day}}曜日 {{time}} の枠を消す',
     },
   },
   capacity: {
@@ -163,9 +108,6 @@ export const products: DeepPartial<typeof source> = {
     failed: '人数を数えられません',
     groups: '{{n}}組',
     limit: '受けられる上限',
-    deduction: '出られる人 {{total}}組 − ほかのプラン {{used}}組',
-    rounds: '回れる回数',
-    roundsDetail: '1日2回まわる希望も入れています',
     activeCaddies: '出られるキャディ',
     activeCaddiesValue: '{{available}}人 / {{total}}人',
     assumed: '{{n}}人は休みの希望を出していません',
@@ -175,25 +117,7 @@ export const products: DeepPartial<typeof source> = {
       description:
         '{{n}}人を、出られるものとして数えています。決める前にキャディの名簿で、休みの希望を確かめてください。',
     },
-    shared: {
-      title: '同じコースのほかのプランと、キャディを分け合います',
-      description: 'このコースには、ほかにキャディが付くプランが {{n}} つあります。{{day}}曜日は、午前 {{morning}}組・午後 {{afternoon}}組を受けています。下の数は、その分を引いた残りです。',
-      unlimited: '同じコースのほかのプランに「制限なし」の枠があるので、残りを数えられません。下の数は、引き算をしていない数です。',
-      failed: '同じコースのほかのプランの枠を読めませんでした。下の数は引き算をしていないので、そのまま入れると同じキャディを二重に売るおそれがあります。',
-    },
     applyTo: '{{day}}曜日の枠に入れる',
-    selfNotice: {
-      title: 'キャディが付かないプランです',
-      description: 'キャディの人数を数える必要はありません。曜日ごとの組数と人数を、直接入れてください。',
-    },
-  },
-  slotIssue: {
-    weekday: '曜日が正しくありません。',
-    time: '始まりと終わりの時刻を入れてください。',
-    order: '終わりは、始まりより後にしてください。',
-    maxGroups: '組数は 0 以上で入れてください。',
-    maxPlayers: '人数は 0 以上で入れてください。',
-    duplicate: '同じ曜日・同じ時間の枠が、もうあります。',
   },
   validation: {
     displayNameRequired: 'プランの名前を入れてください。',
