@@ -5150,9 +5150,13 @@ button,
  * the flow rather than in a floating menu: the sheet is already a scrolling
  * form, and an overlay would be clipped by it on the row that needs it most —
  * the last player in the group. */
+/* Positioned so the candidate list can hang off it without taking part in the
+ * layout. The list used to sit in the flow and push the plan select and the
+ * whole player roster down the sheet every time the desk typed a name. */
 .ledger-customer-picker {
   display: grid;
   gap: 6px;
+  position: relative;
 }
 
 .ledger-customer-picker__linked {
@@ -5171,6 +5175,17 @@ button,
 }
 
 .ledger-customer-picker__candidates {
+  /* Floats over what follows: an autocomplete that reflows the form moves the
+   * next field out from under the cursor mid-typing. */
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin-top: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px hsl(0 0% 0% / .16);
   display: grid;
   gap: 2px;
   padding: 6px;
@@ -5243,15 +5258,20 @@ button,
   opacity: .7;
 }
 
-/* Asked after the booking is saved, so it covers the sheet rather than the
- * whole app: the booking behind it is already done, and the desk is answering
- * an optional follow-up. */
+/* Asked once the booking sheet has closed and the booking is drawn on the
+ * board behind it. Fixed rather than scoped to the sheet: the sheet is gone by
+ * the time this appears, which is the point — the booking is finished, and
+ * this is an optional follow-up rather than a step it is waiting on. */
 .ledger-register-dialog {
-  position: absolute;
+  position: fixed;
   inset: 0;
   display: grid;
-  place-items: center;
-  background: hsl(var(--nui-background) / .75);
+  /* Sits low and leaves the board visible above it. The desk has just been
+   * told the booking is in; covering the row it landed on would undo that. */
+  place-items: end center;
+  padding: 24px;
+  /* Barely tinted: this dims nothing the desk still needs to read. */
+  background: hsl(var(--nui-background) / .35);
   z-index: 20;
 }
 

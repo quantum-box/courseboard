@@ -8,7 +8,6 @@ import { Sheet } from '../../../components/Sheet'
 import { showToast } from '../../../lib/toast'
 import { CustomerPicker } from '../customers/CustomerPicker'
 import { plansForCourse, type BookablePlan } from './bookablePlan'
-import { RegisterNamesDialog } from './RegisterNamesDialog'
 import { unregisteredNames, type UnregisteredName } from './unregisteredNames'
 import { DiscardGuard } from './DiscardGuard'
 import { MAX_PARTY_PLAYERS } from './ledgerLayout'
@@ -35,6 +34,13 @@ export type NewReservationTarget = {
 /** Falls back when the chosen plan carries no duration of its own. */
 const DEFAULT_DURATION_MINUTES = 270
 
+/** What a completed booking hands back so the ledger question can follow it. */
+export type CreatedBooking = {
+  reservationId: string
+  names: UnregisteredName[]
+  players: DraftReservationPlayer[]
+}
+
 export function NewReservationEditor({
   target,
   date,
@@ -51,7 +57,11 @@ export function NewReservationEditor({
   plansLoading?: boolean
   playerTagOptions: string[]
   onClose: () => void
-  onCreated: () => void
+  /**
+   * Reports the saved booking so the page can refresh and, if any names went
+   * in without an identity, ask about them once this sheet has closed.
+   */
+  onCreated: (booking?: CreatedBooking) => void
 }) {
   const { t } = useTranslation(['ledger'])
   const [customerName, setCustomerName] = useState('')
@@ -61,17 +71,6 @@ export function NewReservationEditor({
   const [players, setPlayers] = useState<DraftReservationPlayer[]>(() => reservationPlayerRows(4))
   const [saving, setSaving] = useState(false)
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
-  /**
-   * The booking is saved; these names are not in the ledger yet.
-   *
-   * Held after the save rather than checked before it, because the desk must
-   * never be stopped mid-booking to look somebody up.
-   */
-  const [pendingRegistration, setPendingRegistration] = useState<{
-    reservationId: string
-    names: UnregisteredName[]
-    players: DraftReservationPlayer[]
-  } | null>(null)
 
   // Plans are filtered to the course being booked; a plan sold on another
   // course would put the round on a tee sheet the desk is not looking at.
@@ -165,15 +164,18 @@ export function NewReservationEditor({
         }),
       })
       showToast({ tone: 'success', message: t('ledger:newReservation.saved') })
-      onCreated()
-      const unregistered = unregisteredNames({ name: customerName, customerId }, players)
-      if (unregistered.length > 0 && created?.id) {
-        // The sheet stays open behind the prompt so closing it is one decision,
-        // taken once the ledger question is answered either way.
-        setPendingRegistration({ reservationId: created.id, names: unregistered, players })
-        return
-      }
+      // Close first, and report the unregistered names to the page rather than
+      // holding them here. The booking is done, and it has to *look* done —
+      // a prompt over a still-open booking form reads as "the booking is not
+      // finished until you answer this", which is the opposite of true.
       onClose()
+      onCreated(created?.id
+        ? {
+          reservationId: created.id,
+          names: unregisteredNames({ name: customerName, customerId }, players),
+          players,
+        }
+        : undefined)
     } catch (error) {
       if (error instanceof ApiError && error.status === 409) {
         showToast({ tone: 'warning', message: t('ledger:newReservation.justFilled') })
@@ -318,18 +320,6 @@ export function NewReservationEditor({
             {saving ? t('ledger:newReservation.saving') : t('ledger:newReservation.save')}
           </Button>
         </div>
-
-        {pendingRegistration ? (
-          <RegisterNamesDialog
-            reservationId={pendingRegistration.reservationId}
-            names={pendingRegistration.names}
-            players={pendingRegistration.players}
-            onDone={() => {
-              setPendingRegistration(null)
-              onClose()
-            }}
-          />
-        ) : null}
 
         <DiscardGuard
           open={confirmingDiscard}

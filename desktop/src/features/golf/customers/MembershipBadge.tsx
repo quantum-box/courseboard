@@ -23,8 +23,19 @@ import {
  * `isMember` comes from the server rather than being inferred from whether a
  * plan came back. What counts as a member is a golf judgement, and two places
  * deciding it is how they come to disagree.
+ *
+ * Granting a membership is off by default. Taking a booking and admitting
+ * somebody to the club are different jobs done at different moments, and a
+ * control that changes what a person *is* does not belong in a form about one
+ * afternoon's tee time. The customer's own page turns it on.
  */
-export function MembershipBadge({ customerId }: { customerId: string }) {
+export function MembershipBadge({
+  customerId,
+  editable = false,
+}: {
+  customerId: string
+  editable?: boolean
+}) {
   const { t } = useTranslation(['ledger'])
   const [membership, setMembership] = useState<CustomerMembership | null>(null)
   const [loading, setLoading] = useState(false)
@@ -101,7 +112,7 @@ export function MembershipBadge({ customerId }: { customerId: string }) {
         <Badge variant="neutral">{t('ledger:customer.visitor')}</Badge>
       )}
 
-      {granting ? (
+      {!editable ? null : granting ? (
         <NativeSelect
           defaultValue=""
           onChange={event => void grant(event.target.value)}

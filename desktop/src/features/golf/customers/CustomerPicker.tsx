@@ -68,7 +68,26 @@ export function CustomerPicker({
   }
 
   return (
-    <div className="ledger-customer-picker">
+    <div
+      className="ledger-customer-picker"
+      // The list floats over the fields below it, so leaving this control has
+      // to dismiss it — otherwise it hangs over whatever the desk moved on to.
+      // `relatedTarget` is what keeps clicking a candidate from counting as
+      // leaving: focus is still inside this container when it lands there.
+      onBlur={event => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          setShowCandidates(false)
+        }
+      }}
+      onKeyDown={event => {
+        if (event.key === 'Escape' && showCandidates) {
+          // Stops here so Escape dismisses the list rather than the sheet the
+          // desk is still filling in.
+          event.stopPropagation()
+          setShowCandidates(false)
+        }
+      }}
+    >
       <Input
         value={name}
         placeholder={placeholder}

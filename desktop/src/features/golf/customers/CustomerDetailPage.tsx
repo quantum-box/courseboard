@@ -67,7 +67,9 @@ export function CustomerDetailPage({ customerId }: { customerId: string }) {
             title={t('customers:detail.membershipTitle')}
             description={t('customers:detail.membershipDescription')}
           >
-            <MembershipBadge customerId={customer.id} />
+            {/* The one place a membership is granted or changed: this page is
+                about who somebody is, not about a booking they are making. */}
+            <MembershipBadge customerId={customer.id} editable />
           </Panel>
 
           {/* Visits belong here — this is the page the desk opens to ask how
