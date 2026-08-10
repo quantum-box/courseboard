@@ -51,6 +51,7 @@ export const settings: DeepPartial<typeof source> = {
       currencyRequired: 'お金の単位を選んでください。',
       currencyFormat: 'お金の単位は、JPY のような3文字で入れてください。',
       timezoneRequired: '時刻の基準を入れてください。',
+      timezoneFormat: '時刻の基準は「Asia/Tokyo」のように、地域の名前で入れてください。「JST」のような短い書き方は使えません。',
       playerTagsTooMany: 'プレイヤーの くぶんは {{max}} こまでです。',
       playerTagTooLong: 'プレイヤーの くぶんは 1こ {{max}} 文字までです。',
       playerTagsDuplicate: '同じ プレイヤーの くぶんが 2つ あります。',

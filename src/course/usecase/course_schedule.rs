@@ -89,11 +89,11 @@ impl ReplaceCourseScheduleUseCase {
     ) -> Result<Vec<AvailabilityRule>, CourseError> {
         reject_overlaps(&rules)?;
         let courses = self.catalog.list_courses(credentials).await?;
-        let course = courses
+        courses
             .iter()
             .find(|course| course.id() == course_id)
             .ok_or(CourseError::NotFound("course"))?;
-        let timezone = course.timezone().to_string();
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         let resource_id = resolve_resource(&self.catalog, credentials, course_id).await?;
         self.schedules
             .replace_resource_schedule(credentials, &resource_id, &timezone, &rules)
@@ -163,6 +163,14 @@ impl GenerateCourseTimeSlotsUseCase {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
+    use chrono::{DateTime, Utc};
+    use std::sync::Mutex;
+
+    use crate::course::domain::{
+        Course, CourseOrder, ProductSlot, ReservationProduct, ReservationServiceId, Resource,
+        ResourceTimeSlot, SaveCourseResource, UpsertCourse, UpsertReservationProduct,
+    };
 
     fn rule(weekday: u8, start: &str, end: &str) -> AvailabilityRule {
         AvailabilityRule::try_new(None, weekday, start, end, 4, 8).expect("valid rule")
@@ -192,5 +200,220 @@ mod tests {
     fn overlaps_are_found_regardless_of_the_order_they_arrive_in() {
         let rules = vec![rule(1, "11:00", "15:00"), rule(1, "07:00", "12:00")];
         assert!(reject_overlaps(&rules).is_err());
+    }
+
+    struct FakeCatalog {
+        tenant_timezone: String,
+        courses: Vec<Course>,
+        resources: Vec<Resource>,
+    }
+
+    #[async_trait]
+    impl GolfCatalogGateway for FakeCatalog {
+        async fn get_tenant_timezone(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<String, CourseError> {
+            Ok(self.tenant_timezone.clone())
+        }
+
+        async fn list_courses(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<Course>, CourseError> {
+            Ok(self.courses.clone())
+        }
+
+        async fn create_course(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpsertCourse,
+        ) -> Result<Course, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn update_course(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _course_id: &CourseId,
+            _input: UpsertCourse,
+        ) -> Result<Course, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn delete_course(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _course_id: &CourseId,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn list_resources(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<Resource>, CourseError> {
+            Ok(self.resources.clone())
+        }
+
+        async fn create_reservation_resource(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _name: &str,
+        ) -> Result<ResourceId, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn save_course_resource(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: SaveCourseResource,
+        ) -> Result<Resource, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn get_course_order(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<CourseOrder, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn replace_course_order(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _order: &CourseOrder,
+        ) -> Result<CourseOrder, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn list_reservation_products(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<ReservationProduct>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn upsert_reservation_product(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpsertReservationProduct,
+        ) -> Result<ReservationProduct, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn list_product_slots(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _service_id: &ReservationServiceId,
+        ) -> Result<Vec<ProductSlot>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn replace_product_slots(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _service_id: &ReservationServiceId,
+            _slots: Vec<ProductSlot>,
+        ) -> Result<Vec<ProductSlot>, CourseError> {
+            unimplemented!("not used")
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeSchedules {
+        timezone_used: Mutex<Option<String>>,
+    }
+
+    #[async_trait]
+    impl ReservationScheduleGateway for FakeSchedules {
+        async fn get_resource_schedule(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _resource_id: &ResourceId,
+        ) -> Result<Vec<AvailabilityRule>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn replace_resource_schedule(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _resource_id: &ResourceId,
+            timezone: &str,
+            rules: &[AvailabilityRule],
+        ) -> Result<Vec<AvailabilityRule>, CourseError> {
+            *self.timezone_used.lock().expect("lock") = Some(timezone.to_string());
+            Ok(rules.to_vec())
+        }
+
+        async fn generate_resource_time_slots(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _resource_id: &ResourceId,
+            _from: NaiveDate,
+            _to: NaiveDate,
+            _dry_run: bool,
+        ) -> Result<GenerationSummary, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn list_resource_time_slots(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _resource_id: &ResourceId,
+            _from: DateTime<Utc>,
+            _to: DateTime<Utc>,
+        ) -> Result<Vec<ResourceTimeSlot>, CourseError> {
+            unimplemented!("not used")
+        }
+    }
+
+    #[tokio::test]
+    async fn replace_schedule_uses_tenant_timezone_even_when_course_value_differs() {
+        let course_id = CourseId::new("course-east");
+        let catalog = Arc::new(FakeCatalog {
+            tenant_timezone: "Europe/Berlin".into(),
+            courses: vec![Course::reconstitute(
+                course_id.clone(),
+                "East",
+                None,
+                18,
+                "America/New_York",
+                8,
+                true,
+                None,
+                None,
+                None,
+                None,
+            )],
+            resources: vec![Resource::reconstitute(
+                "golf-resource-east",
+                "East",
+                Some("reservation-resource-east".into()),
+                Some(course_id.to_string()),
+                ResourceKind::Course,
+                true,
+            )],
+        });
+        let schedules = Arc::new(FakeSchedules::default());
+        let use_case = ReplaceCourseScheduleUseCase::new(catalog, schedules.clone());
+
+        use_case
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer test",
+                    operator_id: "tenant-test",
+                    platform_id: None,
+                },
+                &course_id,
+                vec![rule(1, "07:00", "12:00")],
+            )
+            .await
+            .expect("replace schedule");
+
+        assert_eq!(
+            schedules.timezone_used.lock().expect("lock").as_deref(),
+            Some("Europe/Berlin")
+        );
     }
 }

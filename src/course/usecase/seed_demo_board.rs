@@ -283,7 +283,6 @@ fn upsert_for(seed: &SeedCourse) -> Result<UpsertCourse, CourseError> {
         seed.name,
         Some(seed.short_name.to_string()),
         18,
-        "Asia/Tokyo",
         seed.start_interval_minutes,
         true,
         Some(BusinessHours::try_new(seed.open_time, seed.close_time)?),

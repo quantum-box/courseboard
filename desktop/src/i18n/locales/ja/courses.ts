@@ -23,8 +23,6 @@ export const courses = {
     holeCount: 'ホール数',
     startInterval: 'スタート間隔',
     startIntervalHint: '1〜60分',
-    timezone: 'タイムゾーン',
-    timezoneHint: '例: Asia/Tokyo',
   },
   option: {
     holes18: '18ホール',
@@ -35,7 +33,6 @@ export const courses = {
     holes: 'ホール',
     interval: 'スタート間隔',
     hours: '営業時間',
-    timezone: 'タイムゾーン',
     status: '状態',
     updated: '更新',
     actions: '操作',
@@ -58,8 +55,6 @@ export const courses = {
   },
   validation: {
     name: 'コース名を入力してください。',
-    timezone: 'タイムゾーンを入力してください。',
-    timezoneFormat: 'タイムゾーンは「Asia/Tokyo」のような地域名の形で入力してください。「JST」などの略称は使えません。',
     holeCount: 'ホール数は 9 か 18 を選んでください。',
     startInterval: 'スタート間隔は 1〜60 分で入力してください。',
   },

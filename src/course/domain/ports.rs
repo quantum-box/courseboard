@@ -296,6 +296,15 @@ pub trait ReservationGateway: Send + Sync {
 /// stay inside the infrastructure gateway only.
 #[async_trait]
 pub trait GolfCatalogGateway: Send + Sync {
+    /// Tenant-wide timezone from the golf extension config.
+    ///
+    /// Course master timezone remains in the upstream schema for rollback, but
+    /// must not be used as an operational setting after SCC-6.
+    async fn get_tenant_timezone(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<String, CourseError>;
+
     async fn list_courses(
         &self,
         credentials: GatewayCredentials<'_>,

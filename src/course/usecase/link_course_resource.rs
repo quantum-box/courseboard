@@ -108,6 +108,13 @@ mod tests {
 
     #[async_trait]
     impl GolfCatalogGateway for FakeCatalog {
+        async fn get_tenant_timezone(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<String, CourseError> {
+            Ok(crate::course::domain::DEFAULT_TIMEZONE.to_string())
+        }
+
         async fn get_course_order(
             &self,
             _credentials: GatewayCredentials<'_>,

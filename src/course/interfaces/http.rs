@@ -1052,6 +1052,8 @@ pub struct CourseDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub short_name: Option<String>,
     pub hole_count: i32,
+    /// Legacy Field value retained for API and rollback compatibility.
+    /// Tenant extension config is the operational source of truth.
     pub timezone: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub business_hours_json: Option<BusinessHoursDto>,
@@ -1076,7 +1078,6 @@ pub struct UpsertCourseRequest {
     pub name: String,
     pub short_name: Option<String>,
     pub hole_count: i32,
-    pub timezone: String,
     pub start_interval_minutes: i32,
     #[serde(default = "default_true")]
     pub is_active: bool,
@@ -1127,7 +1128,6 @@ fn parse_upsert_course(body: UpsertCourseRequest) -> Result<UpsertCourse, AppErr
         body.name,
         body.short_name,
         body.hole_count,
-        body.timezone,
         body.start_interval_minutes,
         body.is_active,
         business_hours,

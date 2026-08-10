@@ -86,6 +86,13 @@ mod tests {
 
     #[async_trait]
     impl GolfCatalogGateway for FakeCatalog {
+        async fn get_tenant_timezone(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<String, CourseError> {
+            Ok(DEFAULT_TIMEZONE.to_string())
+        }
+
         async fn create_reservation_resource(
             &self,
             _credentials: GatewayCredentials<'_>,

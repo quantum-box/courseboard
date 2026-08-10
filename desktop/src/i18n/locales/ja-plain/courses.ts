@@ -25,13 +25,10 @@ export const courses: DeepPartial<typeof source> = {
     holeCount: 'ホールの数',
     startInterval: '組と組の間の時間',
     startIntervalHint: '1〜60分の間で入れてください',
-    timezone: '時刻の基準（タイムゾーン）',
-    timezoneHint: '「Asia/Tokyo」のように入れてください',
   },
   table: {
     interval: '組と組の間',
     hours: '営業している時間',
-    timezone: '時刻の基準',
     status: '今の状態',
     updated: '最後に直した日',
     actions: '操作',
@@ -54,8 +51,6 @@ export const courses: DeepPartial<typeof source> = {
   },
   validation: {
     name: 'コースの名前を入れてください。',
-    timezone: '時刻の基準を入れてください。',
-    timezoneFormat: '時刻の基準は「Asia/Tokyo」のように、地域の名前で入れてください。「JST」のような短い書き方は使えません。',
     holeCount: 'ホールの数は 9 か 18 を選んでください。',
     startInterval: '組と組の間の時間は 1〜60 分で入れてください。',
   },

@@ -1,5 +1,3 @@
-import { COURSE_TIME_ZONE } from '../../lib/clock'
-
 import { i18next } from '../../i18n'
 
 export type GolfCourse = {
@@ -7,6 +5,7 @@ export type GolfCourse = {
   name: string
   shortName?: string | null
   holeCount: number
+  /** Legacy response field; tenant extension config owns the setting. */
   timezone: string
   businessHoursJson?: { open: string; close: string } | null
   startIntervalMinutes: number
@@ -19,7 +18,6 @@ export type GolfCourseDraft = {
   name: string
   shortName: string
   holeCount: number
-  timezone: string
   startIntervalMinutes: number
   isActive: boolean
 }
@@ -119,7 +117,6 @@ export function emptyCourseDraft(): GolfCourseDraft {
     name: '',
     shortName: '',
     holeCount: 18,
-    timezone: COURSE_TIME_ZONE,
     startIntervalMinutes: 10,
     isActive: true,
   }
@@ -130,7 +127,6 @@ export function courseToDraft(course: GolfCourse): GolfCourseDraft {
     name: course.name,
     shortName: course.shortName ?? '',
     holeCount: course.holeCount,
-    timezone: course.timezone,
     startIntervalMinutes: course.startIntervalMinutes,
     isActive: course.isActive,
   }
