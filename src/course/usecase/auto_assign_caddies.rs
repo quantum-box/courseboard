@@ -422,6 +422,25 @@ mod tests {
     }
 
     #[test]
+    fn deadline_today_changes_when_the_tenant_timezone_changes() {
+        let instant = Utc.with_ymd_and_hms(2026, 8, 10, 15, 30, 0).unwrap();
+        let deadline = AvailabilityDeadline::try_new(
+            YearMonth::parse("2026-09").unwrap(),
+            NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(),
+        );
+
+        let tokyo_today = tenant_date_at(instant, "Asia/Tokyo").unwrap();
+        let honolulu_today = tenant_date_at(instant, "Pacific/Honolulu").unwrap();
+        assert_eq!(tokyo_today, NaiveDate::from_ymd_opt(2026, 8, 11).unwrap());
+        assert_eq!(
+            honolulu_today,
+            NaiveDate::from_ymd_opt(2026, 8, 10).unwrap()
+        );
+        assert!(deadline.has_passed(tokyo_today));
+        assert!(!deadline.has_passed(honolulu_today));
+    }
+
+    #[test]
     fn a_tee_time_is_read_back_from_the_sheets_own_offset_string() {
         let item = TeeSheetItem::new(
             "rsv_1",
