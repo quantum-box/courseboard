@@ -2,18 +2,11 @@ import type { DeepPartial } from '../../types'
 import type { products as source } from '../ja/products'
 
 export const products: DeepPartial<typeof source> = {
-  title: 'Play products',
-  description: 'Define the kinds of play you sell and the bookable slots for each weekday.',
-  loadingDescription: 'Loading play types and slots.',
   loading: 'Loading play products',
   addService: 'Add a booking service',
   playType: {
     caddie: 'With caddie',
     self: 'Self play',
-  },
-  confirm: {
-    discardOnReload: 'You have unsaved slots. Discard them and reload?',
-    discardOnLeave: 'You have unsaved slots. Discard them and leave this screen?',
   },
   editor: {
     displayName: 'Plan name',
@@ -60,9 +53,6 @@ export const products: DeepPartial<typeof source> = {
       playType: 'Play type',
       holes: 'Holes',
       duration: 'Duration',
-      slots: 'Slots',
-      slotCount: '{{n}} slots',
-      unsaved: 'Unsaved',
       updated: 'Updated',
       actions: 'Actions',
     },
@@ -70,7 +60,6 @@ export const products: DeepPartial<typeof source> = {
   detail: {
     back: 'Back to booking services',
     summary: 'Plan settings',
-    startInterval: 'Tee interval',
     notFound: {
       title: 'No such booking service',
       description: 'Nothing is registered under {{serviceId}}. It may have been removed, or the URL may be wrong.',
@@ -102,54 +91,11 @@ export const products: DeepPartial<typeof source> = {
       limits: '{{groups}} groups · {{players}} players',
     },
   },
+  /** What is left of the per-plan week: the id line, and the legacy read-only list. */
   slots: {
-    title: 'Slots · {{name}}',
     subtitle: 'ID: {{serviceId}}',
-    save: 'Save slots',
-    saveFailed: 'Could not save the slots',
-    hasIssues: '{{n}} slots need fixing. Correct the rows marked in red, then save.',
-    confirmRemove: 'Saving drops {{n}} slots. Continue?',
-    saved: {
-      title: 'Slots saved',
-      body: 'Replaced {{n}} slots for {{serviceId}}.',
-    },
-    pending: {
-      title: '{{name}} · unsaved changes',
-      added: '{{n}} added',
-      removed: '{{n}} removed',
-      changed: '{{n}} changed',
-      revert: 'Revert',
-    },
     week: {
-      legend: '“G” is the group limit, “P” the player limit. 0 means no limit.',
       dayLabel: '{{day}}',
-      slotCount: '{{n}} slots',
-      closed: 'No bookings',
-      add: 'Add slot',
-      addAria: 'Add a slot on {{day}}',
-      copyAria: 'Copy the {{day}} slots to other weekdays',
-      copyPlaceholder: 'Copy to…',
-      copyWeekdays: 'Mon–Fri',
-      copyWeekend: 'Sat and Sun',
-      copyAll: 'Every day',
-      copyDay: '{{day}}',
-      unitGroups: 'G',
-      unitPlayers: 'P',
-      unlimited: 'no limit',
-      overCapacity: 'At {{interval}}-minute intervals this band can start {{n}} groups at most.',
-      startAria: '{{day}} {{band}} start',
-      endAria: '{{day}} {{band}} end',
-      groupsAria: '{{day}} {{band}} max groups',
-      playersAria: '{{day}} {{band}} max players',
-    },
-    loadFailed: {
-      title: 'Could not load the current slots',
-      description: 'Saving while empty may wipe the existing slots. Reload before editing.',
-    },
-    table: {
-      maxGroups: 'Max groups',
-      maxPlayers: 'Max players',
-      deleteAria: 'Delete the {{day}} {{time}} slot',
     },
   },
   capacity: {
@@ -166,10 +112,6 @@ export const products: DeepPartial<typeof source> = {
     afternoon: 'Afternoon',
     groups: '{{n}} groups',
     limit: 'Sellable limit',
-    deduction: '{{total}} supplied − {{used}} taken by other plans',
-    rounds: 'Rounds available',
-    roundsValue: '{{n}}R',
-    roundsDetail: 'Includes double-round requests',
     activeCaddies: 'Available caddies',
     activeCaddiesValue: '{{available}}/{{total}}',
     assumed: '{{n}} have no day-off request on file',
@@ -179,25 +121,7 @@ export const products: DeepPartial<typeof source> = {
       description:
         '{{n}} caddies are counted as available. Check day-off requests in the caddie roster before you commit.',
     },
-    shared: {
-      title: 'Caddies are shared with the other plans on this course',
-      description: 'This course has {{n}} other caddie plan(s), already accepting {{morning}} groups in the morning and {{afternoon}} in the afternoon on {{day}}. The figures below are what is left.',
-      unlimited: 'Another plan on this course has a band with no group cap, so the remainder cannot be worked out. The figures below are the raw supply, with nothing subtracted.',
-      failed: 'The other plans on this course could not be read. Nothing has been subtracted below, so applying it as-is risks selling the same caddies twice.',
-    },
     applyTo: 'Apply to {{day}}',
-    selfNotice: {
-      title: 'This is a self-play product',
-      description: 'No caddie supply calculation needed. Set the groups and players per weekday directly.',
-    },
-  },
-  slotIssue: {
-    weekday: 'That weekday is not valid.',
-    time: 'Enter a start and an end time.',
-    order: 'The end must be after the start.',
-    maxGroups: 'Enter max groups as 0 or more.',
-    maxPlayers: 'Enter max players as 0 or more.',
-    duplicate: 'Another slot already covers this time band.',
   },
   validation: {
     displayNameRequired: 'Enter a plan name.',

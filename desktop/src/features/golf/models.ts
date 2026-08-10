@@ -274,11 +274,6 @@ export function collectSlotIssues(slots: GolfProductSlot[]): SlotIssueCode[][] {
   })
 }
 
-/** The row-agnostic wording the editor shows underneath the offending row. */
-export function slotIssueText(code: SlotIssueCode) {
-  return i18next.t(`products:slotIssue.${code}` as 'products:slotIssue.time')
-}
-
 /** How many rows the operator has to fix before the week can be saved. */
 export function countSlotIssues(slots: GolfProductSlot[]) {
   return collectSlotIssues(slots).filter(codes => codes.length > 0).length
