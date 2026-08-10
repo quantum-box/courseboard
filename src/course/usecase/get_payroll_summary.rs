@@ -45,6 +45,7 @@ impl GetPayrollSummaryUseCase {
                     caddie_id: None,
                     from: Some(window.0),
                     to: Some(window.1),
+                    reservation_id: None,
                 },
             ),
             self.ops

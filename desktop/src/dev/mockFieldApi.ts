@@ -2062,6 +2062,13 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     if (index < 0) return error(404, 'Mock Field API has no such reservation')
     mockTeeReservations.splice(index, 1)
     delete mockParties[reservationId]
+    // The API takes the caddies off a group it cancels; a mock that left them
+    // assigned would show a caddie booked for a round that no longer exists.
+    for (const assignment of mockAssignments) {
+      if (assignment.reservationId === reservationId && assignment.status !== 'cancelled') {
+        assignment.status = 'cancelled'
+      }
+    }
     saveMockWrites('teeReservations', mockTeeReservations)
     saveMockWrites('parties', mockParties)
     return hit(null)
