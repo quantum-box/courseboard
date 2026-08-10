@@ -23,7 +23,6 @@ import {
   MapPin,
   Pencil,
   Plus,
-  RefreshCw,
   Search,
   Sparkles,
   Star,
@@ -62,7 +61,6 @@ import {
   NativeSelect,
   NativeTextarea,
   Notice,
-  PageRefreshButton,
   Panel,
   ResourceError,
   SearchInput,
@@ -785,20 +783,13 @@ export function CaddiesPage({
 
   return (
     <div className="page-stack">
-      {showingProfileDetail || (view === 'payroll') ? null : (
+      {view === 'roster' && !showingProfileDetail ? (
         <div className="page-toolbar">
-          <PageRefreshButton
-            variant="secondary"
-            label={t('common:action.refresh')}
-            onClick={refreshCurrentView}
-          />
-          {view === 'roster' ? (
-            <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
-              <Plus /> {t('caddies:add')}
-            </Button>
-          ) : null}
+          <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
+            <Plus /> {t('caddies:add')}
+          </Button>
         </div>
-      )}
+      ) : null}
 
 
       {view === 'roster' ? (
@@ -811,7 +802,6 @@ export function CaddiesPage({
           selectedProfileId={selectedProfileId}
           onSelectProfile={selectProfile}
           onBack={backToRoster}
-          onRefresh={refreshCurrentView}
           onCreate={() => setCreateOpen(true)}
           onPeopleChanged={refreshPeople}
           onAssignmentsChanged={refreshDispatch}
@@ -1582,11 +1572,6 @@ function RecommendationsPanel({
     <Panel
       title={t('caddies:recommendations.title')}
       description={t('caddies:recommendations.description')}
-      actions={(
-        <Button type="button" variant="ghost" size="sm" className="min-h-11" onClick={resource.refresh}>
-          <RefreshCw /> {t('common:action.refresh')}
-        </Button>
-      )}
     >
       {resource.loading ? <LoadingState label={t('caddies:recommendations.loading')} /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
@@ -1792,11 +1777,6 @@ function AttendancePanel({
     <Panel
       title={t('caddies:attendance.panelTitle')}
       description={t('caddies:attendance.panelDescription')}
-      actions={(
-        <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={resource.refresh}>
-          <RefreshCw /> {t('common:action.refresh')}
-        </Button>
-      )}
     >
       {body}
     </Panel>
@@ -1958,7 +1938,6 @@ function ProfilesView({
   selectedProfileId,
   onSelectProfile,
   onBack,
-  onRefresh,
   onCreate,
   onPeopleChanged,
   onAssignmentsChanged,
@@ -1972,7 +1951,6 @@ function ProfilesView({
   selectedProfileId: string | null
   onSelectProfile: (id: string) => void
   onBack: () => void
-  onRefresh: () => void
   onCreate: () => void
   onPeopleChanged: () => void
   onAssignmentsChanged: () => void
@@ -2009,12 +1987,6 @@ function ProfilesView({
           <Button type="button" variant="ghost" size="sm" onClick={onBack}>
             <ArrowLeft /> {t('caddies:roster.backToList')}
           </Button>
-          <PageRefreshButton
-            variant="secondary"
-            size="sm"
-            label={t('common:action.refresh')}
-            onClick={onRefresh}
-          />
         </div>
         <ProfileDetail
           key={selected.id}
@@ -3609,11 +3581,6 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
       <Panel
         title={t('caddies:payroll.listTitle')}
         description={t('caddies:payroll.listDescription')}
-        actions={(
-          <Button type="button" variant="secondary" size="sm" className="min-h-9" onClick={resource.refresh} title="⌘R">
-            <RefreshCw /> {t('common:action.refresh')}
-          </Button>
-        )}
       >
         {resource.data ? (
           <DataTable

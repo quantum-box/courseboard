@@ -402,12 +402,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isPageRefreshShortcut(event)) {
-        const refreshButton = document.querySelector<HTMLButtonElement>('[data-page-refresh]')
-        if (refreshButton) {
-          event.preventDefault()
-          if (!refreshButton.disabled) refreshButton.click()
-        } else if (triggerPageReload()) {
-          // Prefer in-app data reload when no PageRefreshButton is mounted.
+        if (triggerPageReload()) {
           event.preventDefault()
         }
       }

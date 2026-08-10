@@ -23,7 +23,6 @@ import {
   LoadingState,
   NativeSelect,
   Notice,
-  PageRefreshButton,
   Panel,
   ResourceError,
   resourceErrorText,
@@ -342,11 +341,6 @@ export function CoursesPage() {
         <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
           <ArrowLeft /> {t('common:action.backToSettings')}
         </Button>
-        <PageRefreshButton
-          onClick={() => void loadCourses()}
-          loading={loading}
-          label={t('common:action.refresh')}
-        />
         <Button type="button" variant="primary" onClick={beginCreate}>
           <Plus /> {t('courses:add')}
         </Button>

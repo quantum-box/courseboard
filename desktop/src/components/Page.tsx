@@ -1,4 +1,4 @@
-import { Badge, Button, Input, Kbd } from '@tachyon-sdk/native-ui'
+import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import type {
   ComponentProps,
   FormEvent,
@@ -7,11 +7,10 @@ import type {
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from 'react'
-import { AlertTriangle, Inbox, LoaderCircle, RefreshCw } from 'lucide-react'
+import { AlertTriangle, Inbox, LoaderCircle } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { ApiError } from '../api'
 import { i18next } from '../i18n'
-import { pageRefreshShortcutLabel } from '../lib/shortcuts'
 
 export function PageHeader({
   eyebrow,
@@ -254,37 +253,14 @@ export function ResourceError({
       tone="danger"
       title={t('error.loadFailed')}
       actions={onRetry ? (
-        <PageRefreshButton size="sm" onClick={onRetry} label={t('action.retry')} />
+        <Button type="button" size="sm" onClick={onRetry}>
+          {t('action.retry')}
+        </Button>
       ) : undefined}
     >
       {operatorMessage ?? t(key)}
       {detail ? <small className="notice-detail">{detail}</small> : null}
     </Notice>
-  )
-}
-
-export function PageRefreshButton({
-  label,
-  loading = false,
-  disabled,
-  ...props
-}: Omit<ComponentProps<typeof Button>, 'children'> & {
-  label?: string
-  loading?: boolean
-}) {
-  const { t } = useTranslation('common')
-  return (
-    <Button
-      {...props}
-      type="button"
-      data-page-refresh=""
-      aria-keyshortcuts="Meta+R Control+R"
-      disabled={disabled || loading}
-    >
-      <RefreshCw className={loading ? 'spin' : ''} />
-      {label ?? t('action.reload')}
-      <Kbd>{pageRefreshShortcutLabel()}</Kbd>
-    </Button>
   )
 }
 

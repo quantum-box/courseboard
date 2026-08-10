@@ -6,7 +6,6 @@ import {
   GanttChart,
   Maximize2,
   Minimize2,
-  RefreshCw,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -420,10 +419,6 @@ export function LedgerPage() {
       ) : (
       <div className="ledger-chrome">
         <div className="page-toolbar">
-          <Button type="button" variant="ghost" size="sm" onClick={refreshAll}>
-            <RefreshCw />
-            {t('timeline:reload')}
-          </Button>
           <Button
             type="button"
             variant="ghost"

@@ -36,7 +36,6 @@ import {
   MetricGrid,
   NativeSelect,
   Notice,
-  PageRefreshButton,
   Panel,
   ResourceError,
 } from '../../components/Page'
@@ -367,14 +366,6 @@ export function BudgetsPage() {
 
   return (
     <div className="page-stack">
-      <div className="page-toolbar">
-        <PageRefreshButton
-          onClick={() => void load()}
-          loading={loading}
-          label={t('common:action.refresh')}
-        />
-      </div>
-
       <Panel>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <YearMonthPicker

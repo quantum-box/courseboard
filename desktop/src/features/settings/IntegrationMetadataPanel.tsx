@@ -1,5 +1,5 @@
 import { Badge, Button } from '@tachyon-sdk/native-ui'
-import { RefreshCw, Save } from 'lucide-react'
+import { Save } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { i18next } from '../../i18n'
@@ -132,9 +132,6 @@ export function IntegrationMetadataPanel() {
       actions={(
         <div className="flex items-center gap-2">
           {dirty ? <Badge variant="outline">{t('settings:metadata.unsaved')}</Badge> : null}
-          <Button type="button" size="sm" variant="ghost" onClick={() => void load()} disabled={loading || saving} title="⌘R">
-            <RefreshCw /> {t('settings:metadata.reload')}
-          </Button>
           <Button type="button" size="sm" variant="primary" onClick={() => void save()} disabled={loading || saving || !dirty}>
             <Save /> {saving ? t('common:action.saving') : t('settings:metadata.save')}
           </Button>

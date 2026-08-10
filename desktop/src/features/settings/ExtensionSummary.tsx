@@ -1,5 +1,5 @@
-import { Badge, Button } from '@tachyon-sdk/native-ui'
-import { CheckCircle2, CircleOff, RefreshCw, ShieldAlert } from 'lucide-react'
+import { Badge } from '@tachyon-sdk/native-ui'
+import { CheckCircle2, CircleOff, ShieldAlert } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { Metric, MetricGrid, Notice, Panel } from '../../components/Page'
 
@@ -21,7 +21,7 @@ export type ExtensionStatus = {
   updatedAt?: string | null
 }
 
-export function ExtensionSummary({ extension, onRefresh }: { extension: ExtensionStatus; onRefresh: () => void }) {
+export function ExtensionSummary({ extension }: { extension: ExtensionStatus }) {
   const { t } = useTranslation(['settings', 'common'])
   const enabled = extension.tenantStatus === 'enabled'
   return (
@@ -29,11 +29,6 @@ export function ExtensionSummary({ extension, onRefresh }: { extension: Extensio
       className="extension-summary"
       title={t('settings:summary.title')}
       description={t('settings:summary.description')}
-      actions={(
-        <Button type="button" size="sm" onClick={onRefresh} title="⌘R">
-          <RefreshCw /> {t('common:action.refresh')}
-        </Button>
-      )}
     >
       <MetricGrid>
         <Metric

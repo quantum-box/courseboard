@@ -22,7 +22,6 @@ import {
   LoadingState,
   Notice,
   PageHeader,
-  PageRefreshButton,
   Panel,
   ResourceError,
   resourceErrorText,
@@ -229,7 +228,6 @@ function ReservationProductList() {
   return (
     <div className="page-stack">
       <div className="page-toolbar">
-        <PageRefreshButton onClick={() => void load()} />
         <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
           <Plus /> {t('products:addService')}
         </Button>
@@ -390,7 +388,6 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
     <div className="page-stack">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <BackToList />
-        <PageRefreshButton size="sm" variant="secondary" onClick={() => void load()} />
       </div>
 
       <PageHeader
