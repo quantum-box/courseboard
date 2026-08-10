@@ -25,6 +25,8 @@ import { ShiftBoardPage } from './features/golf/ShiftBoardPage'
 import { LedgerPage } from './features/golf/ledger/LedgerPage'
 import { TimelinePage } from './features/golf/timeline/TimelinePage'
 import { SettingsAdvancedPage } from './features/settings/SettingsAdvancedPage'
+import { CustomerDetailPage } from './features/golf/customers/CustomerDetailPage'
+import { CustomersPage } from './features/golf/customers/CustomersPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { StaffPage } from './features/staff/StaffPage'
 import { useCartUpdates } from './hooks/useCartUpdates'
@@ -134,6 +136,11 @@ function RouteContent({ route }: { route: string }) {
     return <CancellationFeeDetailPage invoiceId={decodeRouteSegment(route.slice('cancellation-fees/'.length))} />
   }
   if (route === 'course-map') return <CourseMapPage />
+  if (route === 'golf/customers') return <CustomersPage />
+  if (route.startsWith('golf/customers/')) {
+    const segment = decodeRouteSegment(route.slice('golf/customers/'.length).split('/')[0] ?? '')
+    if (segment) return <CustomerDetailPage key={segment} customerId={segment} />
+  }
   if (route === 'settings') return <SettingsPage />
   if (route === 'settings/advanced') return <SettingsAdvancedPage />
   if (route === 'settings/members') return <MembersPage />

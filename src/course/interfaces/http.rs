@@ -18,15 +18,16 @@ use super::openapi::ErrorBody;
 use crate::course::domain::{
     tenant_date_at, AvailabilityRule, BookingHorizon, BusinessHours, Caddie, CaddieAssignment,
     CaddieAssignmentQuery, CaddieId, CaddieStaff, Course, CourseError, CourseId, CourseOrder,
-    DeleteSlotOverrides, GatewayCredentials, GenerationSummary, GolfCatalogGateway, LedgerColumn,
-    LedgerSlot, PartyDetails, ProductSlot, ReservationId, ReservationProduct, ReservationServiceId,
-    Resource, ResourceId, SavedSchedule, SlotOverride, SlotOverrideKind, SlotOverrideQuery,
-    TeeLedger, TeeLedgerQuery, TeeSheet, TeeSheetItem, TeeSheetQuery, UpsertCourse,
-    UpsertReservationProduct, UpsertSlotOverrides,
+    CustomerId, DeleteSlotOverrides, GatewayCredentials, GenerationSummary, GolfCatalogGateway,
+    LedgerColumn, LedgerSlot, PartyDetails, ProductSlot, ReservationId, ReservationProduct,
+    ReservationServiceId, Resource, ResourceId, SavedSchedule, SlotOverride, SlotOverrideKind,
+    SlotOverrideQuery, TeeLedger, TeeLedgerQuery, TeeSheet, TeeSheetItem, TeeSheetQuery,
+    UpsertCourse, UpsertReservationProduct, UpsertSlotOverrides,
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
     FieldReservationGateway, MySqlGeneratedThroughRepository, MySqlSlotOverrideRepository,
+    PartyPlayerInput,
 };
 use crate::course::usecase::{
     CancelReservationUseCase, ChangeReservationPlanUseCase, CreateCourseUseCase,
@@ -221,6 +222,24 @@ pub struct PartyPlayerDto {
     pub tag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub member_number: Option<String>,
+    /// Who this player is in the customer ledger, once the desk has said so.
+    ///
+    /// Absent on every group entered before the ledger existed and on anyone
+    /// the desk has not identified yet, so a client must treat it as optional
+    /// rather than as a field that will fill itself in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub customer_id: Option<String>,
+}
+
+impl From<PartyPlayerDto> for PartyPlayerInput {
+    fn from(value: PartyPlayerDto) -> Self {
+        Self {
+            name: value.name,
+            tag: value.tag,
+            member_number: value.member_number,
+            customer_id: value.customer_id,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -249,6 +268,7 @@ impl From<&PartyDetails> for PartyDto {
                     name: player.name().to_string(),
                     tag: player.tag().map(str::to_string),
                     member_number: player.member_number().map(str::to_string),
+                    customer_id: player.customer_id().map(ToString::to_string),
                 })
                 .collect(),
         }
@@ -712,6 +732,13 @@ pub struct CreateReservationRequest {
     pub duration_minutes: i64,
     pub quantity: i32,
     pub customer_name: String,
+    /// The ledger entry the desk picked for whoever is booking.
+    ///
+    /// Optional: a call the desk cannot place a name to still has to become a
+    /// booking. The name is always recorded; the identity is recorded when it
+    /// is known.
+    #[serde(default)]
+    pub customer_id: Option<String>,
     #[serde(default)]
     pub competition_name: Option<String>,
     #[serde(default)]
@@ -765,11 +792,7 @@ pub async fn create_reservation(
         request.competition_name,
         request.organizer,
         request.group_number,
-        request
-            .players
-            .into_iter()
-            .map(|player| (player.name, player.tag, player.member_number))
-            .collect(),
+        request.players.into_iter().map(Into::into).collect(),
     )
     .map_err(AppError::from)?;
     let id = use_case
@@ -789,6 +812,7 @@ pub async fn create_reservation(
                 duration_minutes: request.duration_minutes,
                 quantity: request.quantity,
                 customer_name: request.customer_name,
+                customer_id: CustomerId::from_optional(request.customer_id),
                 party,
             },
         )
@@ -884,11 +908,7 @@ pub async fn update_reservation_party(
         request.competition_name,
         request.organizer,
         request.group_number,
-        request
-            .players
-            .into_iter()
-            .map(|player| (player.name, player.tag, player.member_number))
-            .collect(),
+        request.players.into_iter().map(Into::into).collect(),
     )
     .map_err(AppError::from)?;
     let use_case = UpdateReservationPartyUseCase::new(reservation_gateway(&state));

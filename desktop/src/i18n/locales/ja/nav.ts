@@ -19,6 +19,10 @@ export const nav = {
       label: '予約台帳',
       description: 'スタート時刻ごとの空きと組を見る',
     },
+    'golf/customers': {
+      label: '顧客台帳',
+      description: '会員とビジターの記録',
+    },
     'golf/timeline': {
       label: 'タイムライン',
       description: '今日の予約とキャディを時間順に見る',

@@ -4,6 +4,7 @@ import { caddies } from './caddies'
 import { cancellationFees } from './cancellationFees'
 import { common } from './common'
 import { courses } from './courses'
+import { customers } from './customers'
 import { download } from './download'
 import { help } from './help'
 import { home } from './home'
@@ -30,6 +31,7 @@ export const ja = {
   cancellationFees,
   common,
   courses,
+  customers,
   download,
   help,
   home,

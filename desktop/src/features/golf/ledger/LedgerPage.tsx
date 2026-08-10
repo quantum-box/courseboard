@@ -41,10 +41,12 @@ import { summarizeLedger, teeTimesBetween } from './ledgerLayout'
 import type { PartyDetails, SlotMarkKind, TeeLedgerResponse } from './models'
 import {
   NewReservationEditor,
+  type CreatedBooking,
   type BookablePlan,
   type NewReservationTarget,
 } from './NewReservationEditor'
 import { CancelReservationDialog } from './CancelReservationDialog'
+import { RegisterNamesDialog } from './RegisterNamesDialog'
 import { PartyEditor } from './PartyEditor'
 import { SlotContextMenu, type SlotContextTarget } from './SlotContextMenu'
 import { SlotMarkEditor } from './SlotMarkEditor'
@@ -143,6 +145,13 @@ export function LedgerPage() {
   const [savingOrder, setSavingOrder] = useState(false)
   const [editingReservationId, setEditingReservationId] = useState<string | null>(null)
   const [bookingTarget, setBookingTarget] = useState<NewReservationTarget | null>(null)
+  /**
+   * A saved booking whose names are not in the customer ledger yet.
+   *
+   * Kept on the page rather than in the booking sheet so the sheet can close
+   * first: the booking is finished, and the question that follows is optional.
+   */
+  const [ledgerPrompt, setLedgerPrompt] = useState<CreatedBooking | null>(null)
   /** Hides the page chrome so the board itself fills the window. */
   const [boardOnly, setBoardOnly] = useState(false)
   const [contextTarget, setContextTarget] = useState<SlotContextTarget | null>(null)
@@ -601,8 +610,23 @@ export function LedgerPage() {
         plansLoading={productsResource.loading}
         playerTagOptions={playerTagOptions}
         onClose={() => setBookingTarget(null)}
-        onCreated={() => ledger.refresh()}
+        onCreated={booking => {
+          void ledger.refresh()
+          // Only after the sheet is gone and the booking is drawn on the board.
+          // Asked over a still-open form, this reads as a step the booking is
+          // waiting on rather than an optional follow-up.
+          if (booking && booking.names.length > 0) setLedgerPrompt(booking)
+        }}
       />
+
+      {ledgerPrompt ? (
+        <RegisterNamesDialog
+          reservationId={ledgerPrompt.reservationId}
+          names={ledgerPrompt.names}
+          players={ledgerPrompt.players}
+          onDone={() => setLedgerPrompt(null)}
+        />
+      ) : null}
 
       <PartyEditor
         reservation={editingReservation}

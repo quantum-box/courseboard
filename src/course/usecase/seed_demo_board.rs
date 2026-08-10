@@ -309,6 +309,7 @@ fn booking_for(
         timezone: timezone.to_string(),
         quantity: group.party_size,
         customer_name: group.customer_name.to_string(),
+        customer_id: None,
         golf_course_id: course_id.clone(),
         party: group.party()?,
         prepayment_policy: None,

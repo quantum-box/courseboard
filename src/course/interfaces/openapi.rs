@@ -10,6 +10,7 @@ use utoipa::{
 
 use super::http;
 use super::http_commercial;
+use super::http_customers;
 use super::http_ops;
 use super::http_simulator;
 use crate::profile_proxy;
@@ -79,6 +80,14 @@ impl Modify for SecurityAddon {
         http::replace_product_slots,
         http::list_caddies,
         http::list_caddie_assignments,
+        http_customers::search_customers,
+        http_customers::create_customer,
+        http_customers::get_customer,
+        http_customers::list_membership_plans,
+        http_customers::create_membership_plan,
+        http_customers::update_membership_plan,
+        http_customers::get_customer_membership,
+        http_customers::assign_membership_plan,
         http_ops::create_caddie,
         http_ops::update_caddie,
         http_ops::create_caddie_assignment,
@@ -134,6 +143,14 @@ impl Modify for SecurityAddon {
             http::ChangeReservationPlanRequest,
             http::CreateReservationRequest,
             http::CreatedReservationDto,
+            http_customers::CustomerDto,
+            http_customers::CustomerSearchParams,
+            http_customers::CreateCustomerRequest,
+            http_customers::MembershipPlanDto,
+            http_customers::MembershipPlanListParams,
+            http_customers::UpsertMembershipPlanRequest,
+            http_customers::CustomerMembershipDto,
+            http_customers::AssignMembershipPlanRequest,
             http::CancelReservationRequest,
             http::LedgerSlotDto,
             http::LedgerColumnDto,

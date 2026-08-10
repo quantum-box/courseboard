@@ -5,10 +5,12 @@ export type DraftReservationPlayer = {
   name: string
   tag: string
   memberNumber: string
+  /** Ledger identity the desk picked for this seat, if any. */
+  customerId: string | null
 }
 
 export function emptyReservationPlayer(): DraftReservationPlayer {
-  return { name: '', tag: '', memberNumber: '' }
+  return { name: '', tag: '', memberNumber: '', customerId: null }
 }
 
 export function reservationPlayerRows(count: number): DraftReservationPlayer[] {
@@ -53,5 +55,11 @@ export function toReservationPlayers(players: DraftReservationPlayer[]): PartyPl
       name: player.name.trim(),
       ...(player.tag.trim() ? { tag: player.tag.trim() } : {}),
       ...(player.memberNumber.trim() ? { memberNumber: player.memberNumber.trim() } : {}),
+      ...(player.customerId ? { customerId: player.customerId } : {}),
     }))
+}
+
+/** Seats the desk has identified, out of the ones it has named. */
+export function linkedReservationPlayerCount(players: DraftReservationPlayer[]): number {
+  return players.filter(player => player.name.trim().length > 0 && player.customerId).length
 }

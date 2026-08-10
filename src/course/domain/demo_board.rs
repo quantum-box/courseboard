@@ -81,6 +81,9 @@ impl SeedGroup {
                     *name,
                     Some((*tag).to_string()).filter(|value| !value.is_empty()),
                     None,
+                    // The demo board invents people; inventing ledger entries
+                    // for them would put fictional customers in a real tenant.
+                    None,
                 )
             })
             .collect::<Result<Vec<_>, _>>()?;

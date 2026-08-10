@@ -11,7 +11,7 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::course::domain::{
     has_room_for_one_more_caddie_round, parse_tenant_tee_time, reconcile_remaining,
-    tenant_day_bounds, CaddieShiftGateway, CourseError, CourseId, GatewayCredentials,
+    tenant_day_bounds, CaddieShiftGateway, CourseError, CourseId, CustomerId, GatewayCredentials,
     GolfCatalogGateway, GolfCommercialGateway, NewReservation, PartyDetails, Reservation,
     ReservationGateway, ReservationId, ReservationProduct, ReservationScheduleGateway, Resource,
     ResourceId, ResourceKind, ResourceTimeSlot,
@@ -33,6 +33,12 @@ pub struct CreateReservationInput {
     pub duration_minutes: i64,
     pub quantity: i32,
     pub customer_name: String,
+    /// The ledger entry the desk picked for the person booking, if any.
+    ///
+    /// Never required. A booking must be writable from a name alone — the desk
+    /// takes calls faster than it can identify people, and a booking refused
+    /// for want of a ledger entry is a tee time nobody sold.
+    pub customer_id: Option<CustomerId>,
     pub party: PartyDetails,
 }
 
@@ -131,6 +137,7 @@ impl CreateReservationUseCase {
             timezone,
             quantity: input.quantity,
             customer_name: customer_name.to_string(),
+            customer_id: input.customer_id,
             golf_course_id: input.golf_course_id,
             party: input.party,
             // A phone booking is paid at the course. Field therefore converts
