@@ -397,12 +397,13 @@ export const caddies: DeepPartial<typeof source> = {
     loading: '希望を読み込んでいます',
     guide: {
       title: '日にちを押すと、その日の希望を入れられます',
-      body: '押した日の入力欄が、画面の右側に開きます。「保存する」を押すまでは、カレンダーに残りません。',
+      body: '続く日にまとめて入れるときは、最初の日を押し、Shift キーを押しながら最後の日を押します。「保存する」を押すまでは、カレンダーに残りません。',
       legendRegistered: '希望を入れた日',
       legendTwoRounds: '2ラウンドまわりたい日',
       legendBlank: '何も出ていない日は、希望なし（ふつうに出られる扱い）です',
     },
     dayAction: '{{date}} の希望を入れる',
+    dateRange: '{{from}}から{{to}}まで（{{n}}日）',
     sheetTitle: '{{date}} の希望',
     sheetDescription: '出られるかどうか、1日2ラウンドまわれるか、体調のメモを入れて保存します。',
     unsaved: 'まだ保存していません',
@@ -420,6 +421,7 @@ export const caddies: DeepPartial<typeof source> = {
       message: '{{date}} を「{{status}}」にしました。',
     },
     saveFailed: '希望を保存できませんでした',
+    timezoneInvalid: 'このゴルフ場の時刻の基準を確認できないため、今日の日にちを表示できません。設定を確認してください。',
     removed: {
       title: '希望を消しました',
       message: '{{date}} を、希望なしの状態に戻しました。',

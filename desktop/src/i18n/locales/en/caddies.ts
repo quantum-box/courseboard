@@ -410,12 +410,13 @@ export const caddies: DeepPartial<typeof source> = {
     monthLabel: '{{month}}/{{year}}',
     guide: {
       title: 'Pick a day to record what they want',
-      body: 'The day opens in a panel on the right. Nothing reaches the calendar until you press Save.',
+      body: 'For consecutive days, pick the first day, then hold Shift and pick the last. Nothing reaches the calendar until you press Save.',
       legendRegistered: 'Has an entry',
       legendTwoRounds: 'Wants two rounds',
       legendBlank: 'A blank day means no request — treated as available',
     },
     dayAction: 'Record the request for {{date}}',
+    dateRange: '{{from}}–{{to}} ({{n}} days)',
     sheetTitle: 'Request for {{date}}',
     sheetDescription: 'Set availability, the two-round request, and the condition note, then save.',
     unsaved: 'Unsaved',
@@ -433,6 +434,7 @@ export const caddies: DeepPartial<typeof source> = {
       message: 'Set {{date}} to “{{status}}”.',
     },
     saveFailed: 'Could not save the request',
+    timezoneInvalid: 'Today cannot be shown because the tenant timezone is unavailable. Check the settings.',
     removed: {
       title: 'Request deleted',
       message: 'Reset {{date}} to the normal state.',
