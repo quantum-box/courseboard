@@ -810,6 +810,36 @@ button,
   gap: 8px;
 }
 
+/* Adding a course is an occasional action, so its form lives in the shared
+   sheet while the list stays put. These are newly introduced controls on this
+   screen and therefore use the current readability and target-size rules even
+   while older controls are still being migrated. */
+.course-add-button {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.course-editor-sheet {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.course-editor-sheet > :first-child {
+  padding-right: 40px;
+}
+
+.course-editor-sheet :is(p, .field-label, .field-label *, .field-hint, .notice) {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.course-editor-sheet :is(button, [role='button'], input, select, textarea) {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 16px;
+}
+
 .page-header {
   display: flex;
   min-height: 0;
