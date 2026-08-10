@@ -141,6 +141,7 @@ impl AutoAssignCaddiesUseCase {
                 credentials,
                 TeeSheetQuery {
                     date,
+                    to: None,
                     golf_course_id: None,
                 },
             )

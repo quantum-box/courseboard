@@ -251,6 +251,16 @@ impl TeeSheet {
         self
     }
 
+    /// Append a later day's rows, keeping this sheet's own day markers.
+    ///
+    /// Used when the caller asked for a range: the answer stays one board, and
+    /// its `date`, `day_start` and `day_end` go on describing the first day.
+    /// Rows carry their own start, so a reader of several days is not misled.
+    pub fn extended_with(mut self, later: Self) -> Self {
+        self.items.extend(later.items);
+        self
+    }
+
     pub fn unavailable(&self) -> &[String] {
         &self.unavailable
     }

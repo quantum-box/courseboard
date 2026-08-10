@@ -507,7 +507,14 @@ export const caddies: DeepPartial<typeof source> = {
   },
   unassigned: {
     courseFilter: 'コースをえらぶ',
+    horizonLabel: '何日先まで見るか',
+    horizon: {
+      '1': 'この日',
+      '7': '7日先まで',
+      '14': '14日先まで',
+    },
     allCourses: 'ぜんぶのコース',
+    dayCount: '{{n}}組',
     title: '担当がまだの組',
     description: 'キャディ付きで受けた予約で、だれが担当するか決まっていない組です。ここで決められます。',
     loading: '予約を読んでいます',
@@ -518,7 +525,7 @@ export const caddies: DeepPartial<typeof source> = {
     named: '{{name}} さんに決めました',
     failed: '決められませんでした',
     sheetTitle: 'だれにするか決める',
-    sheetDescription: '{{time}} スタート · {{course}}',
+    sheetDescription: '{{date}} {{time}} スタート · {{course}}',
     players: '{{n}}人',
     empty: {
       title: 'ぜんぶ決まっています',

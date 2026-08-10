@@ -83,7 +83,9 @@ import { caddieLoadPlan } from './caddieLoadPlan'
 import { Sheet } from '../../components/Sheet'
 import {
   assignmentsOnCancelledRounds,
+  horizonEnd,
   UnassignedRoundsPanel,
+  type Horizon,
   type TeeSheetRow,
 } from './UnassignedRounds'
 import { showToast } from '../../lib/toast'
@@ -864,18 +866,29 @@ function DispatchView({
   const dayAssignments = assignments.filter(
     item => dateKey(item.scheduledAt, timezone) === date,
   )
-  // The day's groups answer two questions on this screen: which ones still
-  // need somebody, and which assignments are standing on a group that is no
-  // longer being played. One fetch serves both.
+  // Staffing is decided ahead of the day, so the groups still missing somebody
+  // are read a week or a fortnight at a time as well as one day.
+  const [horizon, setHorizon] = useState<Horizon>(1)
+  const lastDay = horizonEnd(date, horizon)
+  const horizonAssignments = useMemo(
+    () => assignments.filter(item => {
+      const day = dateKey(item.scheduledAt, timezone)
+      return day >= date && day <= lastDay
+    }),
+    [assignments, date, lastDay, timezone],
+  )
+  // The board answers two questions on this screen: which groups still need
+  // somebody, and which assignments are standing on a group that is no longer
+  // being played. One fetch serves both.
   const teeSheet = useResource(
     useCallback(
       () =>
         courseboardApiJson<ListResponse<TeeSheetRow>>(
-          `${COURSE_API}/tee-sheet?date=${encodeURIComponent(date)}`,
+          `${COURSE_API}/tee-sheet?date=${encodeURIComponent(date)}&to=${encodeURIComponent(lastDay)}`,
         ),
-      [date],
+      [date, lastDay],
     ),
-    [date],
+    [date, lastDay],
   )
   const orphaned = useMemo(
     () => assignmentsOnCancelledRounds(teeSheet.data?.items ?? [], dayAssignments),
@@ -905,7 +918,9 @@ function DispatchView({
 
       <UnassignedRoundsPanel
         sheet={teeSheet}
-        assignments={dayAssignments}
+        assignments={horizonAssignments}
+        horizon={horizon}
+        onHorizonChange={setHorizon}
         onChanged={onChanged}
       />
 
@@ -1910,6 +1925,9 @@ function AssignmentsTable({
       rows={sorted}
       columns={columns}
       rowKey={row => row.id}
+      // A club-sized day is fifty-odd rounds, and the whole lot laid out below
+      // the work pushes everything else off the screen.
+      pageSize={20}
       empty={(
         <EmptyState
           title={t('caddies:assignments.empty.title')}

@@ -169,6 +169,11 @@ pub struct ItemsResponse<T: ToSchema> {
 #[serde(rename_all = "camelCase")]
 pub struct TeeSheetQueryParams {
     pub date: NaiveDate,
+    /// Last day to include. Omitted, the board answers `date` alone.
+    ///
+    /// Capped at a month from `date`; every row carries its own start, so a
+    /// caller reading several days at once can tell them apart.
+    pub to: Option<NaiveDate>,
     pub golf_course_id: Option<String>,
 }
 
@@ -336,6 +341,7 @@ pub async fn get_tee_sheet(
             credentials,
             TeeSheetQuery {
                 date: query.date,
+                to: query.to,
                 golf_course_id: CourseId::from_optional(query.golf_course_id),
             },
         )

@@ -521,7 +521,14 @@ export const caddies: DeepPartial<typeof source> = {
   },
   unassigned: {
     courseFilter: 'Course',
+    horizonLabel: 'How far ahead',
+    horizon: {
+      '1': 'This day',
+      '7': '7 days',
+      '14': '14 days',
+    },
     allCourses: 'All courses',
+    dayCount: '{{n}} groups',
     title: 'Rounds without a caddie',
     description: 'Caddie-attached bookings nobody is on yet. What the automatic run could not fill is named here.',
     loading: 'Loading bookings',
@@ -533,7 +540,7 @@ export const caddies: DeepPartial<typeof source> = {
     named: '{{name}} is on this round',
     failed: 'Could not name a caddie',
     sheetTitle: 'Name a caddie',
-    sheetDescription: '{{time}} · {{course}}',
+    sheetDescription: '{{date}} {{time}} · {{course}}',
     empty: {
       title: 'Every round has a caddie',
       description: 'All caddie-attached bookings for this day are covered.',

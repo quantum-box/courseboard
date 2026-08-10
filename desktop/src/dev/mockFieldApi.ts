@@ -10,6 +10,13 @@
  * Enable: default ON while AUTH_MODE=development
  * Disable for a real local API: VITE_COURSEBOARD_MOCK_DATA=false
  */
+import {
+  generateAssignments,
+  generateCaddies,
+  generateReservations,
+  shiftDate,
+} from './mockVolume'
+
 export function isMockFieldDataEnabled() {
   if (import.meta.env.VITE_COURSEBOARD_AUTH_MODE !== 'development') return false
   const flag = import.meta.env.VITE_COURSEBOARD_MOCK_DATA
@@ -44,6 +51,17 @@ export const MOCK_FIXTURE_DATE = '2026-07-18'
 
 const NOW = `${MOCK_FIXTURE_DATE}T09:00:00+09:00`
 const TODAY = MOCK_FIXTURE_DATE
+
+/** `YYYY-MM-DD`, `days` after the fixture day. */
+function daysAfterFixture(days: number): string {
+  return shiftDate(MOCK_FIXTURE_DATE, days)
+}
+
+/**
+ * The club beyond the hand-written few: a full roster, a month of tee sheets,
+ * and the assignments already made. See `mockVolume.ts` for why.
+ */
+const generatedRoster = generateCaddies()
 
 let mockReservationPolicy: Record<string, unknown> = {
   tenantId: 'courseboard_id',
@@ -95,6 +113,9 @@ const mockCourses = [
     updatedAt: NOW,
   },
 ]
+
+/** The club's own bookings for the month around the fixture day. */
+const generatedReservations = generateReservations(MOCK_FIXTURE_DATE, mockCourses)
 
 const mockProducts: Array<{
   id: string
@@ -343,6 +364,9 @@ const mockCaddies = [
     ratingAverage: 4.0,
     ratingCount: 6,
   },
+  // The rest of the club. The five above each stand for a situation worth
+  // looking at; these are the volume a real board carries.
+  ...generatedRoster.caddies,
 ]
 
 /** The whole payroll, not just the caddies: the roster screen shows both. */
@@ -364,6 +388,7 @@ const mockStaff = [
   { id: 'staff_front', name: '松本 里奈', active: true, employmentType: 'full_time' },
   { id: 'staff_green', name: '吉田 誠', active: true, employmentType: 'full_time' },
   { id: 'staff_retired', name: '高橋 一', active: false, employmentType: 'part_time' },
+  ...generatedRoster.staff,
 ].map(member => ({
   hiredAt: null as string | null,
   contractEndDate: null as string | null,
@@ -807,6 +832,51 @@ const initialMockTeeReservations = [
     status: 'confirmed',
     holes: 18,
   },
+  // Caddies are named days ahead, so the fixtures carry groups past today —
+  // otherwise the week and fortnight views have nothing to show.
+  {
+    id: 'res_mock_14',
+    reservationNumber: 'R-2026-0113',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${daysAfterFixture(1)}T09:00:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 4,
+    partyName: '山本組',
+    status: 'confirmed',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_15',
+    reservationNumber: 'R-2026-0114',
+    golfCourseId: 'course_west',
+    courseName: '西コース',
+    teeTime: `${daysAfterFixture(3)}T07:40:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 3,
+    partyName: '木村組',
+    status: 'confirmed',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_16',
+    reservationNumber: 'R-2026-0115',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${daysAfterFixture(9)}T08:00:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 4,
+    partyName: '法人C',
+    status: 'confirmed',
+    holes: 18,
+  },
+  // A month of the club's own bookings around the fixture day. Without them a
+  // day board holds a dozen groups, and nothing on these screens is read the
+  // way it is read at sixty.
+  ...generatedReservations,
 ].map(item => ({
   ...item,
   reservationServiceId: item.playType === 'caddie' ? 'svc:caddie-18' : 'svc:self-18',
@@ -976,6 +1046,13 @@ const mockAssignments = [
     nominatedBy: 'mock',
     notes: 'デモ用: 直前ラウンドと時間帯が重複',
   },
+  // What the club has already decided: settled through tomorrow, thinning out
+  // after that. The far days are what the fortnight view is for.
+  ...generateAssignments(
+    MOCK_FIXTURE_DATE,
+    generatedReservations,
+    generatedRoster.caddies.filter(caddie => caddie.active).map(caddie => caddie.id),
+  ),
 ]
 
 const mockInvoices = [
@@ -1696,9 +1773,13 @@ function resolveGet(path: string): Json | null | undefined {
 
   if (rawPathname === '/v1/course/tee-sheet') {
     const date = url.searchParams.get('date') ?? TODAY
+    // The API answers a range when asked, for staffing planned days ahead.
+    const to = url.searchParams.get('to')
+    const lastDay = to && to > date ? to : date
     const courseId = url.searchParams.get('golfCourseId')
     const filtered = mockTeeReservations.filter(item => {
-      if (!item.teeTime.startsWith(date)) return false
+      const day = item.teeTime.slice(0, 10)
+      if (day < date || day > lastDay) return false
       if (courseId && item.golfCourseId !== courseId) return false
       return true
     })
@@ -1879,8 +1960,19 @@ function resolveGet(path: string): Json | null | undefined {
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-attendance-snapshot') {
     const date = url.searchParams.get('date') ?? TODAY
-    const working = new Set(['caddie_aya', 'caddie_ken', 'caddie_yuki'])
+    // Whoever has a round that day has come in, plus a few on standby. Naming
+    // three by hand left a forty-strong club looking almost entirely absent.
+    const onTheBoard = new Set(
+      mockAssignments
+        .filter(item => item.scheduledAt.startsWith(date) && item.status !== 'cancelled')
+        .map(item => item.caddieProfileId),
+    )
+    const working = new Set([
+      ...onTheBoard,
+      ...['caddie_aya', 'caddie_ken', 'caddie_yuki'],
+    ])
     const assignmentCounts = mockAssignments.reduce<Record<string, number>>((acc, item) => {
+      if (!item.scheduledAt.startsWith(date)) return acc
       acc[item.caddieProfileId] = (acc[item.caddieProfileId] ?? 0) + 1
       return acc
     }, {})
@@ -1900,17 +1992,27 @@ function resolveGet(path: string): Json | null | undefined {
   if (pathname === '/v1/erp/extensions/golf-course/caddie-supply') {
     const date = url.searchParams.get('date') ?? TODAY
     const safetyBuffer = Number(url.searchParams.get('safetyBuffer') ?? 1)
+    // Derived from the roster and the day's board rather than fixed: with a
+    // club-sized roster the old constants said eight groups next to a sheet
+    // holding forty.
+    const available = mockCaddies.filter(caddie => caddie.employmentStatus === 'active')
+    const twoRoundCapable = available.filter(caddie => caddie.canTwoRounds)
+    const caddieSupply = available.length + twoRoundCapable.length
+    const currentCaddieAttached = mockTeeReservations.filter(
+      item => item.teeTime.startsWith(date) && item.playType === 'caddie',
+    ).length
+    const caddieAttachedCap = Math.max(caddieSupply - safetyBuffer, 0)
     return {
       date,
-      availableCaddies: 5,
-      twoRoundCapable: 3,
-      caddieSupply: 8,
-      morningCapacity: 14,
-      afternoonCapacity: 10,
+      availableCaddies: available.length,
+      twoRoundCapable: twoRoundCapable.length,
+      caddieSupply,
+      morningCapacity: available.length,
+      afternoonCapacity: twoRoundCapable.length,
       safetyBuffer,
-      caddieAttachedCap: 18,
-      currentCaddieAttached: 8,
-      remaining: 10,
+      caddieAttachedCap,
+      currentCaddieAttached,
+      remaining: caddieAttachedCap - currentCaddieAttached,
     }
   }
 

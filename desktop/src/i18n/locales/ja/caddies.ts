@@ -525,7 +525,14 @@ export const caddies = {
   },
   unassigned: {
     courseFilter: 'コースで絞る',
+    horizonLabel: '何日先まで見るか',
+    horizon: {
+      '1': 'この日',
+      '7': '7日',
+      '14': '14日',
+    },
     allCourses: 'すべてのコース',
+    dayCount: '{{n}}組',
     title: 'キャディが決まっていない組',
     description: 'キャディ付きで受けた予約のうち、まだ担当がいない組です。自動配置で埋まらなかった分はここから決めます。',
     loading: '予約を読み込んでいます',
@@ -537,7 +544,7 @@ export const caddies = {
     named: '{{name}} を担当にしました',
     failed: '担当を決められませんでした',
     sheetTitle: '担当を決める',
-    sheetDescription: '{{time}} · {{course}}',
+    sheetDescription: '{{date}} {{time}} · {{course}}',
     empty: {
       title: 'すべての組に担当がいます',
       description: 'この日のキャディ付きの予約は、すべて担当が決まっています。',

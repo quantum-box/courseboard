@@ -5276,3 +5276,80 @@ button,
   border-top: 1px solid hsl(var(--nui-border));
   padding: 16px 14px;
 }
+
+/* How far ahead the unassigned list looks. Newly introduced control, so it
+   follows the current readability and target-size rules. */
+.horizon-switch {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.horizon-chip {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 0 14px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 24px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.horizon-chip:hover {
+  border-color: hsl(var(--nui-primary) / 50%);
+}
+
+.horizon-chip.is-on {
+  border-color: hsl(var(--nui-primary));
+  background: hsl(var(--nui-primary) / 12%);
+  color: hsl(var(--nui-primary));
+  font-weight: 600;
+}
+
+.horizon-chip:focus-visible {
+  outline: 2px solid hsl(var(--nui-primary));
+  outline-offset: 1px;
+}
+
+/* A fortnight of a club-sized board is a couple of hundred groups. The list
+   scrolls inside its panel so the rest of the screen stays put; the rules on
+   text size and target size are unchanged, which is why this scrolls rather
+   than shrinking anything. */
+.unassigned-scroll {
+  display: flex;
+  max-height: 60vh;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.unassigned-day-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  background: hsl(var(--nui-background));
+  padding: 6px 2px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+}
+
+.unassigned-day-count {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  font-weight: 400;
+}
