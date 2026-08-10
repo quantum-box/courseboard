@@ -23,13 +23,16 @@ use axum::{
     },
     middleware::{self, Next},
     response::{IntoResponse, Redirect, Response},
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
     Json, Router,
 };
 use cancellation_fees::{CancellationFeeConfig, MySqlCancellationFeeRepository};
 use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
-use course::infrastructure::{MySqlAvailabilityDeadlineRepository, MySqlSlotOverrideRepository};
+use course::infrastructure::{
+    MySqlAvailabilityDeadlineRepository, MySqlCaddieShiftRepository, MySqlShiftRulesRepository,
+    MySqlSlotOverrideRepository,
+};
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
@@ -53,6 +56,8 @@ pub struct AppState {
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
+    caddie_shifts: Arc<MySqlCaddieShiftRepository>,
+    shift_rules: Arc<MySqlShiftRulesRepository>,
     cancellation_fee_config: CancellationFeeConfig,
     http_client: reqwest::Client,
     token_verifier: Arc<dyn TokenVerifier>,
@@ -79,7 +84,11 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
-            availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(pool)),
+            availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
+                pool.clone(),
+            )),
+            caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
+            shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool)),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
             token_verifier,
@@ -114,7 +123,11 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
-            availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(pool)),
+            availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
+                pool.clone(),
+            )),
+            caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
+            shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool)),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
             token_verifier,
@@ -135,7 +148,11 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
-                availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(pool)),
+                availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
+                    pool.clone(),
+                )),
+                caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
+                shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool)),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
                 token_verifier,
@@ -147,7 +164,11 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
-                availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(pool)),
+                availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
+                    pool.clone(),
+                )),
+                caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
+                shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool)),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
                 token_verifier,
@@ -171,6 +192,18 @@ impl AppState {
     /// CourseBoard-owned shift-request filing deadlines.
     pub fn availability_deadlines(&self) -> Arc<MySqlAvailabilityDeadlineRepository> {
         self.availability_deadlines.clone()
+    }
+
+    /// CourseBoard-owned confirmed shifts, including which course each caddie
+    /// works. Field holds the request; the placement is ours (ADR-0005).
+    pub fn caddie_shifts(&self) -> Arc<MySqlCaddieShiftRepository> {
+        self.caddie_shifts.clone()
+    }
+
+    /// CourseBoard-owned shift-planning rules: which weekdays the club keeps
+    /// clear of rest days.
+    pub fn shift_rules(&self) -> Arc<MySqlShiftRulesRepository> {
+        self.shift_rules.clone()
     }
 
     fn with_profile_client(mut self, profile_client: Option<profile_proxy::ProfileClient>) -> Self {
@@ -527,6 +560,45 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/course/caddie-auto-assignments",
             post(course::interfaces::http_ops::auto_assign_caddies).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-course-supply",
+            get(course::interfaces::http_ops::get_course_caddie_supply).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-reinforcements",
+            get(course::interfaces::http_ops::list_caddie_reinforcements).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-shift-rules",
+            get(course::interfaces::http_ops::get_shift_rules)
+                .put(course::interfaces::http_ops::update_shift_rules)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/caddie-shifts",
+            get(course::interfaces::http_ops::list_caddie_shifts).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-shifts/:caddie_profile_id/:date",
+            put(course::interfaces::http_ops::update_caddie_shift).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-shift-plans/:year_month",
+            post(course::interfaces::http_ops::generate_caddie_shifts).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
         )

@@ -18,21 +18,25 @@ use super::http::{
     ItemsResponse,
 };
 use crate::course::domain::{
-    AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-    AvailabilityDeadline, AvailabilityQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
-    CaddiePatch, CaddieRating, CaddieRecommendation, CaddieSupply, PayrollSummary,
-    RecommendationQuery, ReplaceCaddieMemberships, ReservationId, UpsertCaddie,
-    UpsertCaddieAssignment, UpsertCaddieAvailability, YearMonth,
+    parse_weekday, weekday_key, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
+    AutoAssignResult, AvailabilityDeadline, AvailabilityQuery, CaddieAvailability,
+    CaddieCourseMembership, CaddieId, CaddiePatch, CaddieRating, CaddieRecommendation, CaddieShift,
+    CaddieSupply, CourseError, CourseId, DayCaddieSupply, PayrollSummary, RecommendationQuery,
+    ReplaceCaddieMemberships, ReservationId, ShiftEdit, ShiftPolicy, ShiftSpan, UnfiledRequest,
+    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, YearMonth,
+    MAX_CONSECUTIVE_WORK_DAYS, MAX_ROUNDS_PER_SHIFT,
 };
 use crate::course::usecase::{
     AutoAssignCaddiesUseCase, CreateCaddieAssignmentUseCase, CreateCaddieUseCase,
-    DeleteCaddieAvailabilityUseCase, ExportPayrollCsvUseCase, GetAttendanceSnapshotUseCase,
-    GetAvailabilityDeadlineUseCase, GetCaddieSupplyUseCase, GetPayrollSummaryUseCase,
-    ListAttendancePeriodSnapshotsUseCase, ListCaddieAvailabilitiesUseCase,
+    DeleteCaddieAvailabilityUseCase, ExportPayrollCsvUseCase, GenerateCaddieShiftsUseCase,
+    GeneratedMonth, GetAttendanceSnapshotUseCase, GetAvailabilityDeadlineUseCase,
+    GetCaddieSupplyUseCase, GetCourseCaddieSupplyUseCase, GetPayrollSummaryUseCase,
+    GetShiftRulesUseCase, ListAttendancePeriodSnapshotsUseCase, ListCaddieAvailabilitiesUseCase,
     ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase, ListCaddieRecommendationsUseCase,
-    ListUnsubmittedCaddiesUseCase, NameCaddieForRound, ReplaceCaddieMembershipsUseCase,
-    UpdateCaddieAssignmentUseCase, UpdateCaddieUseCase, UpsertAvailabilityDeadlineUseCase,
-    UpsertCaddieAvailabilityUseCase,
+    ListCaddieShiftsUseCase, ListCourseReinforcementsUseCase, ListUnsubmittedCaddiesUseCase,
+    NameCaddieForRound, ReinforcementCandidate, ReplaceCaddieMembershipsUseCase,
+    UpdateCaddieAssignmentUseCase, UpdateCaddieShiftUseCase, UpdateCaddieUseCase,
+    UpdateShiftRulesUseCase, UpsertAvailabilityDeadlineUseCase, UpsertCaddieAvailabilityUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -627,6 +631,9 @@ impl From<&CaddieRecommendation> for RecommendationDto {
 #[serde(rename_all = "camelCase")]
 pub struct RecommendationQueryParams {
     pub reservation_id: Option<String>,
+    /// The course the round tees off from. Given, the candidates are the
+    /// caddies confirmed onto that course for the day.
+    pub golf_course_id: Option<String>,
     pub scheduled_at: Option<DateTime<Utc>>,
     pub player_count: Option<i32>,
     #[serde(default)]
@@ -653,12 +660,14 @@ pub async fn list_caddie_recommendations(
     Query(query): Query<RecommendationQueryParams>,
 ) -> Result<Json<ItemsResponse<RecommendationDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = ListCaddieRecommendationsUseCase::new(ops_gateway(&state));
+    let use_case =
+        ListCaddieRecommendationsUseCase::new(ops_gateway(&state), state.caddie_shifts());
     let items = use_case
         .execute(
             credentials,
             RecommendationQuery {
                 reservation_id: ReservationId::from_optional(query.reservation_id),
+                golf_course_id: CourseId::from_optional(query.golf_course_id),
                 scheduled_at: query.scheduled_at,
                 player_count: query.player_count,
                 include_rookie_pairing: query.include_rookie_pairing,
@@ -975,6 +984,7 @@ pub async fn auto_assign_caddies(
         reservation_gateway(&state),
         catalog_gateway(&state),
         state.availability_deadlines(),
+        state.caddie_shifts(),
     );
     let result = use_case
         .execute(credentials, body.date, body.dry_run)
@@ -1311,4 +1321,496 @@ fn csv_response(csv: String) -> impl IntoResponse {
         )],
         Bytes::from(csv),
     )
+}
+
+// ─── Confirmed shifts ─────────────────────────────────────────────────────────
+
+/// One caddie's confirmed day, including the course they work it on.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CaddieShiftDto {
+    pub caddie_profile_id: String,
+    pub date: NaiveDate,
+    /// `null` when the day is off, or when the caddie has no main course yet
+    /// and nobody has placed them by hand.
+    pub golf_course_id: Option<String>,
+    pub is_working: bool,
+    /// `full_day` / `morning` / `afternoon`.
+    pub span: String,
+    pub rounds_capacity: i32,
+    /// `generated` / `edited` / `pinned`.
+    pub origin: String,
+    pub note: Option<String>,
+    pub updated_by: Option<String>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+impl From<&CaddieShift> for CaddieShiftDto {
+    fn from(value: &CaddieShift) -> Self {
+        Self {
+            caddie_profile_id: value.caddie_id().to_string(),
+            date: value.date(),
+            golf_course_id: value.course_id().map(ToString::to_string),
+            is_working: value.is_working(),
+            span: value.span().as_str().to_string(),
+            rounds_capacity: value.rounds_capacity(),
+            origin: value.origin().as_str().to_string(),
+            note: value.note().map(ToString::to_string),
+            updated_by: value.updated_by().map(ToString::to_string),
+            updated_at: value.updated_at(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftRangeQuery {
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+}
+
+/// What one run over a month produced.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedMonthDto {
+    pub year_month: String,
+    pub days_written: u64,
+    /// Days left exactly as the desk had pinned them.
+    pub pinned_kept: u64,
+    /// Caddies confirmed to work but placed nowhere, by name.
+    pub unplaced: Vec<String>,
+    /// Days turned into rest days to keep nobody working more than six in a
+    /// row, as the Labour Standards Act requires.
+    pub statutory_rest_days: u64,
+    /// Caddies still over that limit, by name. Only pinned days can do it.
+    pub overworked: Vec<String>,
+    pub deadline_warning: Option<DeadlineWarningDto>,
+}
+
+impl From<GeneratedMonth> for GeneratedMonthDto {
+    fn from(value: GeneratedMonth) -> Self {
+        Self {
+            year_month: value.year_month().as_string(),
+            days_written: value.days_written(),
+            pinned_kept: value.pinned_kept() as u64,
+            unplaced: value.unplaced().to_vec(),
+            statutory_rest_days: value.statutory_rest_days() as u64,
+            overworked: value.overworked().to_vec(),
+            deadline_warning: value.deadline_warning().map(|warning| DeadlineWarningDto {
+                deadline_date: warning.deadline_date(),
+                unsubmitted_caddie_names: warning.unsubmitted_caddie_names().to_vec(),
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCaddieShiftRequest {
+    pub is_working: bool,
+    /// `full_day` / `morning` / `afternoon`.
+    pub span: String,
+    pub rounds_capacity: i32,
+    /// Where they work it. Must be a course the caddie has a membership for,
+    /// main or sub — a sub membership is what permits the move.
+    #[serde(default)]
+    pub golf_course_id: Option<String>,
+    /// Hold this day against the next monthly run and against course moves.
+    #[serde(default)]
+    pub pinned: bool,
+    /// Required when the caddie filed this day off.
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub updated_by: Option<String>,
+}
+
+/// GET /v1/course/caddie-shifts
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-shifts",
+    tag = "course-ops",
+    params(ShiftRangeQuery),
+    responses(
+        (status = 200, description = "Confirmed shifts in the range", body = inline(ItemsResponse<CaddieShiftDto>)),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_caddie_shifts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<ShiftRangeQuery>,
+) -> Result<Json<ItemsResponse<CaddieShiftDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let use_case = ListCaddieShiftsUseCase::new(state.caddie_shifts());
+    let shifts = use_case
+        .execute(credentials.operator_id, params.from, params.to)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: shifts.iter().map(CaddieShiftDto::from).collect(),
+    }))
+}
+
+/// POST /v1/course/caddie-shift-plans/:year_month
+#[utoipa::path(
+    post,
+    path = "/v1/course/caddie-shift-plans/{year_month}",
+    tag = "course-ops",
+    params(("year_month" = String, Path, description = "YYYY-MM")),
+    responses(
+        (status = 200, description = "The month was confirmed from the filed requests", body = GeneratedMonthDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn generate_caddie_shifts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(year_month): Path<String>,
+) -> Result<Json<GeneratedMonthDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let year_month = parse_year_month(&year_month)?;
+    let use_case = GenerateCaddieShiftsUseCase::new(
+        ops_gateway(&state),
+        state.caddie_shifts(),
+        state.availability_deadlines(),
+        state.shift_rules(),
+    );
+    let generated = use_case
+        .execute(credentials, year_month)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(GeneratedMonthDto::from(generated)))
+}
+
+/// PUT /v1/course/caddie-shifts/:caddie_profile_id/:date
+#[utoipa::path(
+    put,
+    path = "/v1/course/caddie-shifts/{caddie_profile_id}/{date}",
+    tag = "course-ops",
+    params(
+        ("caddie_profile_id" = String, Path, description = "Caddie profile ID"),
+        ("date" = String, Path, description = "YYYY-MM-DD"),
+    ),
+    request_body = UpdateCaddieShiftRequest,
+    responses(
+        (status = 200, description = "The confirmed day as it now stands", body = CaddieShiftDto),
+        (status = 400, description = "The caddie cannot work that course, or the day was filed off without a reason", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn update_caddie_shift(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path((caddie_profile_id, date)): Path<(String, NaiveDate)>,
+    Json(body): Json<UpdateCaddieShiftRequest>,
+) -> Result<Json<CaddieShiftDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let caddie_id = CaddieId::try_new(caddie_profile_id).map_err(AppError::from)?;
+    let edit = ShiftEdit {
+        is_working: body.is_working,
+        span: ShiftSpan::parse(&body.span),
+        rounds_capacity: body.rounds_capacity,
+        course_id: CourseId::from_optional(body.golf_course_id),
+        pinned: body.pinned,
+        note: body.note,
+    };
+    let use_case = UpdateCaddieShiftUseCase::new(ops_gateway(&state), state.caddie_shifts());
+    let shift = use_case
+        .execute(credentials, &caddie_id, date, edit, body.updated_by)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CaddieShiftDto::from(&shift)))
+}
+
+/// One course's caddie day: who is on it, and how much of it is sold.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CourseCaddieSupplyDto {
+    pub golf_course_id: String,
+    pub course_name: String,
+    pub working_caddies: i64,
+    /// Rounds the caddies placed here can take between them.
+    pub rounds_capacity: i64,
+    pub caddie_attached_groups: i64,
+    /// Caddies here who are not pinned, so the desk could send them elsewhere.
+    pub movable_caddies: i64,
+    /// Rounds still coverable. Negative means the course is short.
+    pub shortfall: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DayCaddieSupplyDto {
+    pub date: NaiveDate,
+    pub courses: Vec<CourseCaddieSupplyDto>,
+    /// Confirmed to work but placed on no course, so covering nothing.
+    pub unplaced_caddies: i64,
+}
+
+impl From<DayCaddieSupply> for DayCaddieSupplyDto {
+    fn from(value: DayCaddieSupply) -> Self {
+        Self {
+            date: value.date(),
+            courses: value
+                .courses()
+                .iter()
+                .map(|course| CourseCaddieSupplyDto {
+                    golf_course_id: course.course_id().to_string(),
+                    course_name: course.course_name().to_string(),
+                    working_caddies: course.working_caddies(),
+                    rounds_capacity: course.rounds_capacity(),
+                    caddie_attached_groups: course.caddie_attached_groups(),
+                    movable_caddies: course.movable_caddies(),
+                    shortfall: course.shortfall(),
+                })
+                .collect(),
+            unplaced_caddies: value.unplaced_caddies(),
+        }
+    }
+}
+
+/// GET /v1/course/caddie-course-supply
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-course-supply",
+    tag = "course-ops",
+    params(SupplyQueryParams),
+    responses(
+        (status = 200, description = "The day counted course by course", body = DayCaddieSupplyDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_course_caddie_supply(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<SupplyQueryParams>,
+) -> Result<Json<DayCaddieSupplyDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let use_case = GetCourseCaddieSupplyUseCase::new(
+        state.caddie_shifts(),
+        reservation_gateway(&state),
+        catalog_gateway(&state),
+    );
+    let supply = use_case
+        .execute(credentials, params.date)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(DayCaddieSupplyDto::from(supply)))
+}
+
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct ReinforcementQueryParams {
+    pub date: NaiveDate,
+    /// The course that is short.
+    pub golf_course_id: String,
+}
+
+/// One caddie who could cover a short course today.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReinforcementDto {
+    pub caddie_profile_id: String,
+    pub display_name: String,
+    /// Where they stand now. `null` means confirmed to work but unplaced.
+    pub from_golf_course_id: Option<String>,
+    pub rounds_capacity: i32,
+    pub span: String,
+    /// The short course is this caddie's own main course.
+    pub returns_home: bool,
+}
+
+impl From<ReinforcementCandidate> for ReinforcementDto {
+    fn from(value: ReinforcementCandidate) -> Self {
+        Self {
+            caddie_profile_id: value.caddie_id.to_string(),
+            display_name: value.display_name,
+            from_golf_course_id: value.from_course_id.map(|id| id.to_string()),
+            rounds_capacity: value.rounds_capacity,
+            span: value.span.as_str().to_string(),
+            returns_home: value.returns_home,
+        }
+    }
+}
+
+/// GET /v1/course/caddie-reinforcements
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-reinforcements",
+    tag = "course-ops",
+    params(ReinforcementQueryParams),
+    responses(
+        (status = 200, description = "Caddies who could be moved to the course", body = inline(ItemsResponse<ReinforcementDto>)),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_caddie_reinforcements(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<ReinforcementQueryParams>,
+) -> Result<Json<ItemsResponse<ReinforcementDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let course_id = CourseId::try_new(params.golf_course_id).map_err(AppError::from)?;
+    let use_case = ListCourseReinforcementsUseCase::new(ops_gateway(&state), state.caddie_shifts());
+    let candidates = use_case
+        .execute(credentials, &course_id, params.date)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: candidates.into_iter().map(ReinforcementDto::from).collect(),
+    }))
+}
+
+/// The club's shift-planning rules.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftRulesDto {
+    /// Weekdays to keep clear of rest days, `mon`..`sun`. Empty means the plan
+    /// may rest anybody on any day. A preference, not a ban: the consecutive-
+    /// day limit wins when the window holds nothing else.
+    pub avoided_rest_weekdays: Vec<String>,
+    /// Days in a row anybody may be confirmed to work.
+    pub max_consecutive_work_days: i64,
+    /// Rounds a caddie may be given in a day, whatever their profile says.
+    pub max_rounds_per_day: i32,
+    /// Rest days promised over a calendar month. 0 leaves the consecutive-day
+    /// limit as the only rule.
+    pub min_rest_days_per_month: i64,
+    /// `working` or `off`: how a day nobody filed a request for is confirmed.
+    pub unfiled_request: String,
+    /// The statutory ceiling on `maxConsecutiveWorkDays`, sent so the screens
+    /// can say why a larger number is refused.
+    pub statutory_max_consecutive_work_days: i64,
+    /// The ceiling on `maxRoundsPerDay`: there is no daylight for a third.
+    pub max_rounds_ceiling: i32,
+}
+
+impl From<ShiftPolicy> for ShiftRulesDto {
+    fn from(value: ShiftPolicy) -> Self {
+        Self {
+            avoided_rest_weekdays: value
+                .weekdays()
+                .into_iter()
+                .map(|weekday| weekday_key(weekday).to_string())
+                .collect(),
+            max_consecutive_work_days: value.max_consecutive_work_days(),
+            max_rounds_per_day: value.max_rounds_per_day(),
+            min_rest_days_per_month: value.min_rest_days_per_month(),
+            unfiled_request: value.unfiled_request().as_str().to_string(),
+            statutory_max_consecutive_work_days: MAX_CONSECUTIVE_WORK_DAYS,
+            max_rounds_ceiling: MAX_ROUNDS_PER_SHIFT,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateShiftRulesRequest {
+    /// `mon`..`sun`. An empty list protects nothing.
+    pub avoided_rest_weekdays: Vec<String>,
+    /// Above the statutory ceiling is refused rather than clamped: a club
+    /// asking for eight days in a row has misread the rule, and silently
+    /// storing six would leave it thinking it got eight.
+    pub max_consecutive_work_days: i64,
+    pub max_rounds_per_day: i32,
+    pub min_rest_days_per_month: i64,
+    /// `working` or `off`.
+    pub unfiled_request: String,
+}
+
+/// GET /v1/course/caddie-shift-rules
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-shift-rules",
+    tag = "course-ops",
+    responses(
+        (status = 200, description = "The club's shift-planning rules", body = ShiftRulesDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_shift_rules(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ShiftRulesDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let use_case = GetShiftRulesUseCase::new(state.shift_rules());
+    let policy = use_case
+        .execute(credentials.operator_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ShiftRulesDto::from(policy)))
+}
+
+/// PUT /v1/course/caddie-shift-rules
+#[utoipa::path(
+    put,
+    path = "/v1/course/caddie-shift-rules",
+    tag = "course-ops",
+    request_body = UpdateShiftRulesRequest,
+    responses(
+        (status = 200, description = "The saved rules", body = ShiftRulesDto),
+        (status = 400, description = "An unknown weekday", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn update_shift_rules(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<UpdateShiftRulesRequest>,
+) -> Result<Json<ShiftRulesDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    // A typo would otherwise be stored and silently ignored every month.
+    let mut weekdays = Vec::with_capacity(body.avoided_rest_weekdays.len());
+    for raw in &body.avoided_rest_weekdays {
+        let weekday = parse_weekday(raw.trim())
+            .ok_or(CourseError::BadRequest("weekdays are mon..sun"))
+            .map_err(AppError::from)?;
+        weekdays.push(weekday);
+    }
+    if body.max_consecutive_work_days < 1
+        || body.max_consecutive_work_days > MAX_CONSECUTIVE_WORK_DAYS
+    {
+        return Err(AppError::from(CourseError::BadRequest(
+            "連続勤務の上限は1日以上6日以下です。労働基準法で週に1日は休みが必要なため、6日を超える設定はできません",
+        )));
+    }
+    if body.max_rounds_per_day < 1 || body.max_rounds_per_day > MAX_ROUNDS_PER_SHIFT {
+        return Err(AppError::from(CourseError::BadRequest(
+            "1日の最大ラウンド数は1組または2組です",
+        )));
+    }
+    if !(0..=31).contains(&body.min_rest_days_per_month) {
+        return Err(AppError::from(CourseError::BadRequest(
+            "月の最低休日数は0日以上31日以下です",
+        )));
+    }
+    let policy = ShiftPolicy::new(weekdays)
+        .with_max_consecutive_work_days(body.max_consecutive_work_days)
+        .with_max_rounds_per_day(body.max_rounds_per_day)
+        .with_min_rest_days_per_month(body.min_rest_days_per_month)
+        .with_unfiled_request(UnfiledRequest::parse(&body.unfiled_request));
+    let use_case = UpdateShiftRulesUseCase::new(state.shift_rules());
+    let saved = use_case
+        .execute(credentials.operator_id, policy)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ShiftRulesDto::from(saved)))
 }

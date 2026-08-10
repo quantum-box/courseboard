@@ -4,7 +4,14 @@ import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { courseboardApiJson } from '../../api'
-import { EmptyState, LoadingState, Panel, ResourceError } from '../../components/Page'
+import {
+  EmptyState,
+  Field,
+  LoadingState,
+  NativeSelect,
+  Panel,
+  ResourceError,
+} from '../../components/Page'
 import { Sheet } from '../../components/Sheet'
 import { useResource } from '../../hooks/useResource'
 import { showToast } from '../../lib/toast'
@@ -21,6 +28,7 @@ type ListResponse<T> = { items: T[] }
 type TeeSheetRow = {
   id: string
   reservationNumber: string
+  golfCourseId: string
   courseName: string
   teeTime: string
   playType: string
@@ -84,6 +92,9 @@ export function UnassignedRoundsPanel({
 }) {
   const { t } = useTranslation(['caddies', 'common'])
   const [naming, setNaming] = useState<TeeSheetRow | null>(null)
+  // The board is every course at once, which is right for a desk that runs
+  // several — but staffing one course at a time is the usual way through it.
+  const [courseFilter, setCourseFilter] = useState('')
 
   const sheet = useResource(
     useCallback(
@@ -100,12 +111,37 @@ export function UnassignedRoundsPanel({
     () => unassignedCaddieRounds(sheet.data?.items ?? [], assignments),
     [sheet.data, assignments],
   )
+  const courses = useMemo(() => {
+    const named = new Map<string, string>()
+    for (const row of rounds) named.set(row.golfCourseId, row.courseName)
+    return [...named].map(([id, name]) => ({ id, name }))
+  }, [rounds])
+  const shown = useMemo(
+    () => (courseFilter === '' ? rounds : rounds.filter(row => row.golfCourseId === courseFilter)),
+    [rounds, courseFilter],
+  )
 
   return (
-    <Panel title={t('caddies:unassigned.title')} description={t('caddies:unassigned.description')}>
+    <Panel
+      title={t('caddies:unassigned.title')}
+      description={t('caddies:unassigned.description')}
+      actions={courses.length > 1 ? (
+        <Field label={t('caddies:unassigned.courseFilter')} requirement="none" className="w-full sm:w-48">
+          <NativeSelect
+            value={courseFilter}
+            onChange={event => setCourseFilter(event.target.value)}
+          >
+            <option value="">{t('caddies:unassigned.allCourses')}</option>
+            {courses.map(course => (
+              <option key={course.id} value={course.id}>{course.name}</option>
+            ))}
+          </NativeSelect>
+        </Field>
+      ) : undefined}
+    >
       {sheet.loading ? <LoadingState label={t('caddies:unassigned.loading')} /> : null}
       {sheet.error ? <ResourceError error={sheet.error} onRetry={sheet.refresh} /> : null}
-      {!sheet.loading && !sheet.error && rounds.length === 0 ? (
+      {!sheet.loading && !sheet.error && shown.length === 0 ? (
         <EmptyState
           title={t('caddies:unassigned.empty.title')}
           description={t('caddies:unassigned.empty.description')}
@@ -113,7 +149,7 @@ export function UnassignedRoundsPanel({
       ) : null}
 
       <div className="space-y-2">
-        {rounds.map(round => (
+        {shown.map(round => (
           <div
             key={round.id}
             className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-background p-3"
@@ -173,6 +209,10 @@ function NameCaddieSheet({
         scheduledAt: round.teeTime,
         playerCount: String(round.partySize),
         limit: '10',
+        // Whoever walks this group stands on its course. Once the month is
+        // confirmed the candidates come from there; before that the API still
+        // offers the whole roster.
+        golfCourseId: round.golfCourseId,
       })
       return courseboardApiJson<ListResponse<Candidate>>(
         `${COURSE_API}/caddie-recommendations?${params}`,

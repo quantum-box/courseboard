@@ -23,6 +23,22 @@ export type ShiftAssignment = {
   status: string
 }
 
+/**
+ * One caddie's confirmed day, as the month was planned into. This is what the
+ * board draws once a month has been confirmed: the request says who would
+ * rather not work, the confirmed shift says who works and on which course.
+ */
+export type ConfirmedShift = {
+  caddieProfileId: string
+  date: string
+  golfCourseId: string | null
+  isWorking: boolean
+  span: string
+  roundsCapacity: number
+  origin: string
+  note: string | null
+}
+
 export type ShiftCellKind =
   | 'assigned'
   | 'available'
@@ -39,6 +55,8 @@ export type ShiftCell = {
   assignments: number
   /** Part of a run of working days at or above the warning threshold. */
   inLongStreak: boolean
+  /** The confirmed shift for the day, once the month has been planned. */
+  confirmed: ConfirmedShift | null
 }
 
 export type ShiftRow = {
@@ -48,8 +66,16 @@ export type ShiftRow = {
   maxStreak: number
 }
 
-/** One shift-free day per week means at most six working days in a row. */
-export const STREAK_WARNING_DAYS = 6
+/**
+ * A run this long has no statutory rest day in it.
+ *
+ * The Labour Standards Act wants one day off a week, which the monthly plan
+ * enforces as at most six working days in a row — so six is the legal ceiling,
+ * not a problem, and warning at six would flag every correctly planned month.
+ * Seven is the first run that is actually short of a rest day, and can now only
+ * arise from a pinned day or a hand edit.
+ */
+export const STREAK_WARNING_DAYS = 7
 
 const CANCELLED = new Set(['cancelled', 'canceled'])
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000
@@ -105,6 +131,25 @@ function availabilityProjection(status: string | undefined): AvailabilityProject
   return AVAILABILITY_PROJECTION[status.trim().toLowerCase()] ?? UNKNOWN_AVAILABILITY
 }
 
+/**
+ * A confirmed shift outranks the request behind it: the desk may have put
+ * somebody to work on a day they filed off, or moved them to another course,
+ * and the board has to show what was decided rather than what was asked for.
+ */
+function confirmedProjection(shift: ConfirmedShift): AvailabilityProjection {
+  if (!shift.isWorking) return { kind: 'off', working: false }
+  if (shift.span === 'morning') return { kind: 'morning', working: true }
+  if (shift.span === 'afternoon') return { kind: 'afternoon', working: true }
+  return { kind: 'available', working: true }
+}
+
+function dayProjection(
+  confirmed: ConfirmedShift | undefined,
+  status: string | undefined,
+): AvailabilityProjection {
+  return confirmed ? confirmedProjection(confirmed) : availabilityProjection(status)
+}
+
 function employmentStatus(status: string): string {
   const normalized = status.trim().toLowerCase()
   if (!normalized) return 'active'
@@ -118,11 +163,18 @@ export function buildShiftRow(
   dates: string[],
   availabilities: ShiftAvailability[],
   assignments: ShiftAssignment[],
+  confirmedShifts: ConfirmedShift[] = [],
 ): ShiftRow {
   const availabilityByDate = new Map<string, string>()
   for (const entry of availabilities) {
     if (entry.caddieProfileId === profile.id) {
       availabilityByDate.set(entry.date, entry.status)
+    }
+  }
+  const confirmedByDate = new Map<string, ConfirmedShift>()
+  for (const shift of confirmedShifts) {
+    if (shift.caddieProfileId === profile.id) {
+      confirmedByDate.set(shift.date, shift)
     }
   }
   const assignmentCount = new Map<string, number>()
@@ -135,12 +187,14 @@ export function buildShiftRow(
 
   const cells: ShiftCell[] = dates.map(date => {
     const assigned = assignmentCount.get(date) ?? 0
-    const availability = availabilityProjection(availabilityByDate.get(date))
+    const confirmed = confirmedByDate.get(date)
+    const day = dayProjection(confirmed, availabilityByDate.get(date))
     return {
       date,
-      kind: assigned > 0 ? 'assigned' : availability.kind,
+      kind: assigned > 0 ? 'assigned' : day.kind,
       assignments: assigned,
       inLongStreak: false,
+      confirmed: confirmed ?? null,
     }
   })
 
@@ -162,7 +216,7 @@ export function buildShiftRow(
     const date = paddedDates[index]
     const working = date !== undefined && (
       (assignmentCount.get(date) ?? 0) > 0
-      || availabilityProjection(availabilityByDate.get(date)).working
+      || dayProjection(confirmedByDate.get(date), availabilityByDate.get(date)).working
     )
     if (working) continue
     const run = paddedDates.slice(runStart, index)

@@ -32,14 +32,48 @@ mod tests {
         AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
         AvailabilityQuery, AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery,
         CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRank, CaddieRating,
-        CaddieRecommendation, CaddieRoster, CaddieSkillLevel, CaddieStaff, RecommendationQuery,
-        ReplaceCaddieMemberships, ReservationId, UpsertCaddie, UpsertCaddieAssignment,
-        UpsertCaddieAvailability,
+        CaddieRecommendation, CaddieRoster, CaddieShift, CaddieShiftGateway, CaddieSkillLevel,
+        CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships, ReservationId, UpsertCaddie,
+        UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
     use crate::course::usecase::{
         CreateCaddieAssignmentUseCase, ListCaddieAssignmentsUseCase,
         ListCaddieRecommendationsUseCase, NameCaddieForRound,
     };
+
+    /// The ranking tests predate confirmed shifts and are about who is
+    /// offered, not where they stand; an empty month leaves the whole
+    /// roster in play, which is what they assert against.
+    struct NoShifts;
+
+    #[async_trait::async_trait]
+    impl CaddieShiftGateway for NoShifts {
+        async fn list_shifts(
+            &self,
+            _tenant_id: &str,
+            _from: chrono::NaiveDate,
+            _to: chrono::NaiveDate,
+        ) -> Result<Vec<CaddieShift>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn save_shifts(
+            &self,
+            _tenant_id: &str,
+            _shifts: &[CaddieShift],
+        ) -> Result<u64, CourseError> {
+            Ok(0)
+        }
+
+        async fn get_shift(
+            &self,
+            _tenant_id: &str,
+            _caddie_id: &CaddieId,
+            _date: chrono::NaiveDate,
+        ) -> Result<Option<CaddieShift>, CourseError> {
+            Ok(None)
+        }
+    }
 
     struct FakeOps {
         caddies: Mutex<Vec<Caddie>>,
@@ -137,6 +171,15 @@ mod tests {
             _caddie_id: &CaddieId,
         ) -> Result<Vec<CaddieCourseMembership>, CourseError> {
             Ok(vec![])
+        }
+
+        async fn list_memberships_for(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _caddie_ids: &[CaddieId],
+        ) -> Result<std::collections::HashMap<String, Vec<CaddieCourseMembership>>, CourseError>
+        {
+            Ok(std::collections::HashMap::new())
         }
 
         async fn replace_caddie_memberships(
@@ -333,7 +376,7 @@ mod tests {
         );
         let ops = Arc::new(FakeOps::with(vec![working, retired]));
 
-        let ranked = ListCaddieRecommendationsUseCase::new(ops)
+        let ranked = ListCaddieRecommendationsUseCase::new(ops, Arc::new(NoShifts))
             .execute(
                 GatewayCredentials {
                     authorization: "Bearer t",
@@ -367,7 +410,7 @@ mod tests {
             .expect("lock")
             .push(standing_assignment("cad_1", "rsv_other"));
 
-        let ranked = ListCaddieRecommendationsUseCase::new(ops)
+        let ranked = ListCaddieRecommendationsUseCase::new(ops, Arc::new(NoShifts))
             .execute(
                 GatewayCredentials {
                     authorization: "Bearer t",
@@ -408,7 +451,7 @@ mod tests {
                 None,
             ));
 
-        let ranked = ListCaddieRecommendationsUseCase::new(ops)
+        let ranked = ListCaddieRecommendationsUseCase::new(ops, Arc::new(NoShifts))
             .execute(
                 GatewayCredentials {
                     authorization: "Bearer t",
@@ -453,7 +496,7 @@ mod tests {
             ));
 
         async fn ask(ops: Arc<FakeOps>, at: chrono::DateTime<Utc>) -> Vec<CaddieRecommendation> {
-            ListCaddieRecommendationsUseCase::new(ops)
+            ListCaddieRecommendationsUseCase::new(ops, Arc::new(NoShifts))
                 .execute(
                     GatewayCredentials {
                         authorization: "Bearer t",
