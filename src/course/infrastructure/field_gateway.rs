@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use reqwest::header::AUTHORIZATION;
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use crate::config::EMPTY_COURSE_STORE_URL;
 use crate::course::domain::{
@@ -705,20 +705,28 @@ impl ReservationScheduleGateway for FieldGolfCatalogGateway {
         timezone: &str,
         rules: &[AvailabilityRule],
     ) -> Result<Vec<AvailabilityRule>, CourseError> {
-        let body = json!({
-            "rules": rules
-                .iter()
-                .map(|rule| rule_to_field(rule, timezone))
-                .collect::<Vec<_>>(),
-        });
+        let path = format!(
+            "/v1/erp/reservation-resources/{}/schedule",
+            urlencoding_path(resource_id.as_str())
+        );
+        // Field's PUT is a full replacement. Read immediately before it so
+        // fields introduced by Field but not yet modeled by CourseBoard travel
+        // through the save instead of being reset to null/default.
+        let current: FieldResourceScheduleDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::GET,
+            &path,
+            credentials,
+            None,
+        )
+        .await?;
+        let body = schedule_replace_body(&current.rules, rules, timezone);
         let response: FieldResourceScheduleDto = field_send_json(
             &self.client,
             &self.base_url,
             reqwest::Method::PUT,
-            &format!(
-                "/v1/erp/reservation-resources/{}/schedule",
-                urlencoding_path(resource_id.as_str())
-            ),
+            &path,
             credentials,
             Some(&body),
         )
@@ -853,6 +861,13 @@ struct FieldAvailabilityRuleDto {
     end_time: String,
     capacity: i32,
     slot_interval_minutes: i32,
+    /// Field-owned fields that CourseBoard does not edit.
+    ///
+    /// Keeping the raw values here is deliberate: schedule PUT replaces the
+    /// entire rule, so dropping a newly added mutable field would erase it on
+    /// the next unrelated save.
+    #[serde(flatten)]
+    additional_fields: Map<String, Value>,
 }
 
 /// Field returns the generation counts at the top level; an older shape wrapped
@@ -895,8 +910,7 @@ fn rule_to_domain(rule: &FieldAvailabilityRuleDto) -> Result<AvailabilityRule, C
     )
 }
 
-/// The request rejects unknown fields, so every key here has to be one Field
-/// declares — and `dayOfWeek` has to be rotated on the way out.
+/// CourseBoard-owned schedule edits, overlaid on a rule read from Field.
 fn rule_to_field(rule: &AvailabilityRule, timezone: &str) -> Value {
     let mut body = json!({
         "timezone": timezone,
@@ -910,6 +924,49 @@ fn rule_to_field(rule: &AvailabilityRule, timezone: &str) -> Value {
         object.insert("id".into(), json!(id));
     }
     body
+}
+
+/// Fields present in Field's schedule response but rejected by its PUT input.
+///
+/// This is intentionally a deny-list rather than an allow-list. An allow-list
+/// recreates SCC-8 whenever Field adds a mutable schedule field that
+/// CourseBoard does not know yet.
+const FIELD_RULE_RESPONSE_ONLY_FIELDS: [&str; 4] = ["active", "createdAt", "updatedAt", "revision"];
+
+fn schedule_replace_body(
+    current: &[FieldAvailabilityRuleDto],
+    edited: &[AvailabilityRule],
+    timezone: &str,
+) -> Value {
+    let current_by_id: HashMap<&str, &FieldAvailabilityRuleDto> = current
+        .iter()
+        .filter_map(|rule| rule.id.as_deref().map(|id| (id, rule)))
+        .collect();
+    let rules = edited
+        .iter()
+        .map(|rule| {
+            let mut body = rule
+                .id()
+                .and_then(|id| current_by_id.get(id).copied())
+                .map(field_rule_passthrough_fields)
+                .unwrap_or_default();
+            let edited_fields = rule_to_field(rule, timezone)
+                .as_object()
+                .expect("rule_to_field always returns an object")
+                .clone();
+            body.extend(edited_fields);
+            Value::Object(body)
+        })
+        .collect::<Vec<_>>();
+    json!({ "rules": rules })
+}
+
+fn field_rule_passthrough_fields(rule: &FieldAvailabilityRuleDto) -> Map<String, Value> {
+    rule.additional_fields
+        .iter()
+        .filter(|(key, _)| !FIELD_RULE_RESPONSE_ONLY_FIELDS.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
 }
 
 pub(crate) fn normalize_base_url(field_api_url: Option<&str>) -> String {
@@ -1518,7 +1575,50 @@ fn field_error_message(body: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use axum::{extract::State, routing::get, Json, Router};
+
     use super::*;
+
+    #[derive(Clone, Default)]
+    struct ScheduleServerState {
+        calls: Arc<Mutex<Vec<&'static str>>>,
+        put_body: Arc<Mutex<Option<Value>>>,
+    }
+
+    async fn read_schedule(State(state): State<ScheduleServerState>) -> Json<Value> {
+        state.calls.lock().expect("calls lock").push("GET");
+        Json(json!({
+            "resourceId": "resource-1",
+            "rules": [{
+                "id": "rule-1",
+                "timezone": "Asia/Tokyo",
+                "dayOfWeek": 0,
+                "startTime": "07:00",
+                "endTime": "12:00",
+                "capacity": 1,
+                "slotIntervalMinutes": 8,
+                "futureWritePolicy": {
+                    "mode": "field-owned",
+                    "thresholds": [2, 4]
+                },
+                "active": true,
+                "createdAt": "2026-08-10T00:00:00Z",
+                "updatedAt": "2026-08-10T00:00:00Z",
+                "revision": 7
+            }]
+        }))
+    }
+
+    async fn write_schedule(
+        State(state): State<ScheduleServerState>,
+        Json(body): Json<Value>,
+    ) -> Json<Value> {
+        state.calls.lock().expect("calls lock").push("PUT");
+        *state.put_body.lock().expect("put body lock") = Some(body.clone());
+        Json(body)
+    }
 
     fn desk_reservation() -> NewReservation {
         NewReservation {
@@ -1555,6 +1655,65 @@ mod tests {
         let body = upsert_course_body(&input, "Europe/Berlin");
 
         assert_eq!(body["timezone"], "Europe/Berlin");
+    }
+
+    #[tokio::test]
+    async fn schedule_save_round_trips_a_field_owned_unknown_field() {
+        let state = ScheduleServerState::default();
+        let app = Router::new()
+            .route(
+                "/v1/erp/reservation-resources/resource-1/schedule",
+                get(read_schedule).put(write_schedule),
+            )
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock Field");
+        let address = listener.local_addr().expect("mock Field address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve mock Field");
+        });
+
+        let gateway = FieldGolfCatalogGateway::new(
+            reqwest::Client::new(),
+            Some(&format!("http://{address}")),
+        );
+        let edited = AvailabilityRule::try_new(Some("rule-1".into()), 1, "07:00", "12:00", 2, 8)
+            .expect("edited rule");
+        let saved = gateway
+            .replace_resource_schedule(
+                GatewayCredentials {
+                    authorization: "Bearer test-token",
+                    operator_id: "operator-test",
+                    platform_id: Some("platform-test"),
+                },
+                &ResourceId::new("resource-1"),
+                "Europe/Berlin",
+                &[edited],
+            )
+            .await
+            .expect("replace schedule");
+
+        let body = state
+            .put_body
+            .lock()
+            .expect("put body lock")
+            .clone()
+            .expect("PUT body");
+        assert_eq!(*state.calls.lock().expect("calls lock"), vec!["GET", "PUT"]);
+        assert_eq!(body["rules"][0]["capacity"], 2);
+        assert_eq!(body["rules"][0]["timezone"], "Europe/Berlin");
+        assert_eq!(
+            body["rules"][0]["futureWritePolicy"],
+            json!({ "mode": "field-owned", "thresholds": [2, 4] })
+        );
+        for response_only in FIELD_RULE_RESPONSE_ONLY_FIELDS {
+            assert!(body["rules"][0].get(response_only).is_none());
+        }
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].capacity(), 2);
+
+        server.abort();
     }
 
     fn profile_dto(value: Value) -> FieldGolfCaddieProfileDto {
