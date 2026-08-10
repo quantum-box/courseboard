@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import { unassignedCaddieRounds, wallClock } from './UnassignedRounds'
+import {
+  assignmentsOnCancelledRounds,
+  unassignedCaddieRounds,
+  wallClock,
+} from './UnassignedRounds'
 
-function round(id: string, playType: string) {
+function round(id: string, playType: string, status?: string) {
   return {
     id,
     reservationNumber: `RSV-${id}`,
@@ -11,6 +15,7 @@ function round(id: string, playType: string) {
     teeTime: '2026-08-08T07:00:00+09:00',
     playType,
     partySize: 4,
+    ...(status === undefined ? {} : { status }),
   }
 }
 
@@ -53,6 +58,55 @@ describe('unassignedCaddieRounds', () => {
       unassignedCaddieRounds([round('r1', 'caddie')], [{ reservationId: null, status: 'assigned' }])
         .map(item => item.id),
     ).toEqual(['r1'])
+  })
+})
+
+describe('assignmentsOnCancelledRounds', () => {
+  it('finds a caddie left on a group that is gone from the sheet', () => {
+    const left = assignmentsOnCancelledRounds(
+      [round('r1', 'caddie')],
+      [
+        { id: 'a1', reservationId: 'r1', status: 'assigned' },
+        { id: 'a2', reservationId: 'r_gone', status: 'assigned' },
+      ],
+    )
+    expect(left.map(item => item.id)).toEqual(['a2'])
+  })
+
+  it('reads a cancelled row on the sheet as a group nobody plays', () => {
+    // Whether the upstream drops a cancelled booking or returns it marked,
+    // the caddie standing on it is the same problem.
+    const left = assignmentsOnCancelledRounds(
+      [round('r1', 'caddie', 'cancelled')],
+      [{ id: 'a1', reservationId: 'r1', status: 'assigned' }],
+    )
+    expect(left.map(item => item.id)).toEqual(['a1'])
+  })
+
+  it('leaves an assignment that was already cancelled alone', () => {
+    expect(
+      assignmentsOnCancelledRounds(
+        [round('r1', 'caddie')],
+        [{ id: 'a1', reservationId: 'r_gone', status: 'cancelled' }],
+      ),
+    ).toEqual([])
+  })
+
+  it('says nothing about an assignment tied to no reservation', () => {
+    expect(
+      assignmentsOnCancelledRounds(
+        [round('r1', 'caddie')],
+        [{ id: 'a1', reservationId: null, status: 'assigned' }],
+      ),
+    ).toEqual([])
+  })
+
+  it('accuses nobody when the sheet is empty', () => {
+    // An empty sheet is a failed or unfinished fetch as often as a quiet day,
+    // and every assignment would look orphaned against it.
+    expect(
+      assignmentsOnCancelledRounds([], [{ id: 'a1', reservationId: 'r1', status: 'assigned' }]),
+    ).toEqual([])
   })
 })
 

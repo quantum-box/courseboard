@@ -517,6 +517,12 @@ export const caddies = {
   error: {
     generic: '操作を完了できませんでした',
   },
+  /** Assignments left on a group that is no longer on the tee sheet. */
+  orphaned: {
+    title: '取り消された予約に、担当が{{n}}件残っています',
+    body: 'この組はもう予約表にありません。担当を取り消すまで、そのキャディはこの日の担当数に数えられ、給与の集計にも入ります。',
+    badge: '予約が取り消されています',
+  },
   unassigned: {
     courseFilter: 'コースで絞る',
     allCourses: 'すべてのコース',

@@ -24,8 +24,16 @@ const COURSE_API = '/v1/course'
 
 type ListResponse<T> = { items: T[] }
 
+/** Structurally the same as the caddie screen's, which is what gets passed in. */
+type ResourceValue<T> = {
+  data: T | null
+  error: unknown
+  loading: boolean
+  refresh: () => void
+}
+
 /** The parts of a tee-sheet row this panel needs. */
-type TeeSheetRow = {
+export type TeeSheetRow = {
   id: string
   reservationNumber: string
   golfCourseId: string
@@ -35,9 +43,12 @@ type TeeSheetRow = {
   partySize: number
   partyName?: string
   displayName?: string
+  /** Absent on older rows; only the cancelled states are read here. */
+  status?: string
 }
 
 type DayAssignment = {
+  id?: string
   reservationId?: string | null
   status: string
 }
@@ -65,7 +76,38 @@ export function unassignedCaddieRounds(
       .map(assignment => assignment.reservationId)
       .filter((id): id is string => Boolean(id)),
   )
-  return rows.filter(row => row.playType === 'caddie' && !covered.has(row.id))
+  return rows
+    .filter(roundIsStillOn)
+    .filter(row => row.playType === 'caddie' && !covered.has(row.id))
+}
+
+/** Whether a tee-sheet row is a group somebody is still going to play. */
+function roundIsStillOn(row: TeeSheetRow) {
+  return row.status !== 'cancelled' && row.status !== 'rejected'
+}
+
+/**
+ * Assignments left standing on a group that is no longer being played.
+ *
+ * Cancelling through CourseBoard now releases the caddie, but a booking
+ * cancelled upstream — or cancelled before that fix shipped — leaves a row
+ * behind, and it goes on counting against the caddie's day and their month.
+ * The desk cannot see it: the group is gone from the tee sheet, so nothing on
+ * the board says why the caddie is busy.
+ *
+ * Read against a tee sheet that failed or has not arrived, every assignment
+ * would look orphaned, so an empty sheet answers nothing at all.
+ */
+export function assignmentsOnCancelledRounds<T extends DayAssignment>(
+  rows: TeeSheetRow[],
+  assignments: T[],
+): T[] {
+  if (rows.length === 0) return []
+  const stillOn = new Set(rows.filter(roundIsStillOn).map(row => row.id))
+  return assignments
+    .filter(holdsTheRound)
+    .filter(assignment => Boolean(assignment.reservationId))
+    .filter(assignment => !stillOn.has(assignment.reservationId!))
 }
 
 /** `2026-08-08T07:00:00+09:00` → `07:00`, for a row the desk reads at a glance. */
@@ -82,11 +124,11 @@ export function wallClock(teeTime: string): string {
  * fill — and until now there was no way to do it from CourseBoard at all.
  */
 export function UnassignedRoundsPanel({
-  date,
+  sheet,
   assignments,
   onChanged,
 }: {
-  date: string
+  sheet: ResourceValue<{ items: TeeSheetRow[] }>
   assignments: DayAssignment[]
   onChanged: () => void
 }) {
@@ -95,17 +137,6 @@ export function UnassignedRoundsPanel({
   // The board is every course at once, which is right for a desk that runs
   // several — but staffing one course at a time is the usual way through it.
   const [courseFilter, setCourseFilter] = useState('')
-
-  const sheet = useResource(
-    useCallback(
-      () =>
-        courseboardApiJson<{ items: TeeSheetRow[] }>(
-          `${COURSE_API}/tee-sheet?date=${encodeURIComponent(date)}`,
-        ),
-      [date],
-    ),
-    [date],
-  )
 
   const rounds = useMemo(
     () => unassignedCaddieRounds(sheet.data?.items ?? [], assignments),

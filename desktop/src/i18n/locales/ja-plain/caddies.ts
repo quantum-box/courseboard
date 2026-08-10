@@ -500,6 +500,11 @@ export const caddies: DeepPartial<typeof source> = {
   error: {
     generic: 'うまくいきませんでした',
   },
+  orphaned: {
+    title: '取り消された予約に、担当が{{n}}件のこっています',
+    body: 'この組は、もう予約の表にありません。担当を取り消すまで、そのキャディはこの日の担当の数に入り、給料の集計にも入ります。',
+    badge: 'この予約は取り消されています',
+  },
   unassigned: {
     courseFilter: 'コースをえらぶ',
     allCourses: 'ぜんぶのコース',

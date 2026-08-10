@@ -514,6 +514,11 @@ export const caddies: DeepPartial<typeof source> = {
   error: {
     generic: 'Could not finish that',
   },
+  orphaned: {
+    title: '{{n}} assignment(s) are left on a cancelled booking',
+    body: 'These groups are no longer on the tee sheet. Until the assignment is cancelled, the caddie still counts against their rounds for the day and against the month’s payroll.',
+    badge: 'Booking cancelled',
+  },
   unassigned: {
     courseFilter: 'Course',
     allCourses: 'All courses',
