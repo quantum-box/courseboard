@@ -580,7 +580,7 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
             &self.base_url,
             credentials,
             caddie_rank_fee_config::CADDIE_RANK_FEES_KEY,
-            |config| caddie_rank_fee_config::with_caddie_rank_fees(config, fees),
+            |config| Ok(caddie_rank_fee_config::with_caddie_rank_fees(config, fees)),
         )
         .await?;
         Ok(caddie_rank_fee_config::read_caddie_rank_fees(&stored))

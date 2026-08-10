@@ -79,15 +79,18 @@ pub struct UpsertReservationProduct {
     /// Inventory counts groups, so party size is a condition of the plan rather
     /// than a quantity of stock. `None` falls back to the reservation policy.
     pub max_players_per_group: Option<i32>,
-    /// Course this plan is sold on.
+    /// Courses this plan is sold on.
     ///
-    /// Optional because plans predate the field: a tenant that never split its
-    /// courses has products with nothing to point at, and refusing to save them
-    /// would lock those tenants out of their own editor.
-    pub golf_course_id: Option<CourseId>,
+    /// An empty list only comes from the legacy scalar input when it was
+    /// absent. The canonical array input requires at least one course so an
+    /// accidental empty selection can never mean "sell everywhere".
+    pub golf_course_ids: Vec<CourseId>,
+    legacy_course_id_input: bool,
 }
 
 impl UpsertReservationProduct {
+    /// Compatibility constructor for the scalar request accepted by the
+    /// currently deployed SPA.
     pub fn try_new(
         reservation_service_id: impl Into<String>,
         display_name: Option<String>,
@@ -96,6 +99,67 @@ impl UpsertReservationProduct {
         expected_duration_minutes: i32,
         golf_course_id: Option<String>,
         max_players_per_group: Option<i32>,
+    ) -> Result<Self, CourseError> {
+        let golf_course_ids = CourseId::from_optional(golf_course_id)
+            .into_iter()
+            .collect();
+        Self::try_new_inner(
+            reservation_service_id,
+            display_name,
+            play_type,
+            hole_count,
+            expected_duration_minutes,
+            golf_course_ids,
+            max_players_per_group,
+            true,
+        )
+    }
+
+    /// Canonical constructor for a product explicitly scoped to one or more
+    /// courses.
+    pub fn try_new_with_course_ids(
+        reservation_service_id: impl Into<String>,
+        display_name: Option<String>,
+        play_type: impl AsRef<str>,
+        hole_count: i32,
+        expected_duration_minutes: i32,
+        golf_course_ids: Vec<String>,
+        max_players_per_group: Option<i32>,
+    ) -> Result<Self, CourseError> {
+        if golf_course_ids.is_empty() {
+            return Err(CourseError::BadRequest(
+                "golfCourseIds must contain at least one course",
+            ));
+        }
+        let mut normalized = Vec::with_capacity(golf_course_ids.len());
+        for course_id in golf_course_ids {
+            let course_id = CourseId::try_new(course_id)?;
+            if !normalized.contains(&course_id) {
+                normalized.push(course_id);
+            }
+        }
+        Self::try_new_inner(
+            reservation_service_id,
+            display_name,
+            play_type,
+            hole_count,
+            expected_duration_minutes,
+            normalized,
+            max_players_per_group,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn try_new_inner(
+        reservation_service_id: impl Into<String>,
+        display_name: Option<String>,
+        play_type: impl AsRef<str>,
+        hole_count: i32,
+        expected_duration_minutes: i32,
+        golf_course_ids: Vec<CourseId>,
+        max_players_per_group: Option<i32>,
+        legacy_course_id_input: bool,
     ) -> Result<Self, CourseError> {
         let display_name = display_name
             .map(|value| value.trim().to_string())
@@ -124,9 +188,22 @@ impl UpsertReservationProduct {
                 }
             })?,
             expected_duration_minutes: DurationMinutes::try_new(expected_duration_minutes)?,
-            golf_course_id: CourseId::from_optional(golf_course_id),
+            golf_course_ids,
+            legacy_course_id_input,
             max_players_per_group: validate_group_size(max_players_per_group)?,
         })
+    }
+
+    pub fn golf_course_ids(&self) -> &[CourseId] {
+        &self.golf_course_ids
+    }
+
+    pub fn golf_course_id(&self) -> Option<&CourseId> {
+        (self.golf_course_ids.len() == 1).then(|| &self.golf_course_ids[0])
+    }
+
+    pub fn uses_legacy_course_id_input(&self) -> bool {
+        self.legacy_course_id_input
     }
 }
 
@@ -160,7 +237,12 @@ pub struct ReservationProduct {
     #[getter(copy)]
     expected_duration_minutes: DurationMinutes,
     #[getter(skip)]
-    golf_course_id: Option<CourseId>,
+    golf_course_ids: Vec<CourseId>,
+    /// True when a stored course constraint exists, including an empty or
+    /// malformed canonical array. This keeps fail-closed data distinct from a
+    /// product created before course scoping existed.
+    #[getter(skip)]
+    course_scope_declared: bool,
     #[getter(skip)]
     max_players_per_group: Option<i32>,
 }
@@ -180,6 +262,73 @@ impl ReservationProduct {
         golf_course_id: Option<String>,
         max_players_per_group: Option<i32>,
     ) -> Self {
+        let golf_course_ids: Vec<CourseId> = CourseId::from_optional(golf_course_id)
+            .into_iter()
+            .collect();
+        let course_scope_declared = !golf_course_ids.is_empty();
+        Self::reconstitute_inner(
+            id,
+            tenant_id,
+            reservation_service_id,
+            display_name,
+            play_type,
+            hole_count,
+            expected_duration_minutes,
+            golf_course_ids,
+            course_scope_declared,
+            max_players_per_group,
+        )
+    }
+
+    /// Rebuilds the canonical array shape. Presence of the array declares a
+    /// restriction even when malformed input decoded to an empty list.
+    #[allow(clippy::too_many_arguments)]
+    pub fn reconstitute_with_course_ids(
+        id: impl Into<ProductId>,
+        tenant_id: Option<String>,
+        reservation_service_id: impl Into<ReservationServiceId>,
+        display_name: Option<String>,
+        play_type: PlayType,
+        hole_count: i32,
+        expected_duration_minutes: i32,
+        golf_course_ids: Vec<String>,
+        max_players_per_group: Option<i32>,
+    ) -> Self {
+        let mut normalized = Vec::with_capacity(golf_course_ids.len());
+        for course_id in golf_course_ids {
+            if let Some(course_id) = CourseId::from_optional(Some(course_id)) {
+                if !normalized.contains(&course_id) {
+                    normalized.push(course_id);
+                }
+            }
+        }
+        Self::reconstitute_inner(
+            id,
+            tenant_id,
+            reservation_service_id,
+            display_name,
+            play_type,
+            hole_count,
+            expected_duration_minutes,
+            normalized,
+            true,
+            max_players_per_group,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn reconstitute_inner(
+        id: impl Into<ProductId>,
+        tenant_id: Option<String>,
+        reservation_service_id: impl Into<ReservationServiceId>,
+        display_name: Option<String>,
+        play_type: PlayType,
+        hole_count: i32,
+        expected_duration_minutes: i32,
+        golf_course_ids: Vec<CourseId>,
+        course_scope_declared: bool,
+        max_players_per_group: Option<i32>,
+    ) -> Self {
         Self {
             id: id.into(),
             tenant_id: TenantId::from_optional(tenant_id),
@@ -190,7 +339,8 @@ impl ReservationProduct {
             play_type,
             hole_count: HoleCount::from_raw(hole_count),
             expected_duration_minutes: DurationMinutes::from_raw(expected_duration_minutes),
-            golf_course_id: CourseId::from_optional(golf_course_id),
+            golf_course_ids,
+            course_scope_declared,
             max_players_per_group: max_players_per_group.filter(|value| *value > 0),
         }
     }
@@ -212,7 +362,20 @@ impl ReservationProduct {
     }
 
     pub fn golf_course_id(&self) -> Option<&CourseId> {
-        self.golf_course_id.as_ref()
+        (self.golf_course_ids.len() == 1).then(|| &self.golf_course_ids[0])
+    }
+
+    pub fn golf_course_ids(&self) -> &[CourseId] {
+        &self.golf_course_ids
+    }
+
+    /// Whether the product may be used on the selected course.
+    ///
+    /// Products from before course scoping remain unrestricted. Once either a
+    /// scalar or canonical scope is declared, membership is required; an empty
+    /// decoded canonical scope therefore fails closed.
+    pub fn is_sold_on(&self, course_id: &CourseId) -> bool {
+        !self.course_scope_declared || self.golf_course_ids.contains(course_id)
     }
 
     pub fn max_players_per_group(&self) -> Option<i32> {

@@ -13,8 +13,8 @@ use crate::course::domain::{
     course_day_bounds, has_room_for_one_more_caddie_round, parse_jst_tee_time, reconcile_remaining,
     CaddieShiftGateway, CourseError, CourseId, GatewayCredentials, GolfCatalogGateway,
     GolfCommercialGateway, NewReservation, PartyDetails, Reservation, ReservationGateway,
-    ReservationId, ReservationScheduleGateway, Resource, ResourceId, ResourceKind,
-    ResourceTimeSlot,
+    ReservationId, ReservationProduct, ReservationScheduleGateway, Resource, ResourceId,
+    ResourceKind, ResourceTimeSlot,
 };
 use crate::course::usecase::GetCourseCaddieSupplyUseCase;
 
@@ -81,7 +81,12 @@ impl CreateReservationUseCase {
             ));
         }
 
-        self.refuse_a_round_the_course_cannot_walk(credentials, &input)
+        let product = self
+            .product_for_service(credentials, input.reservation_service_id.as_deref())
+            .await?;
+        validate_product_course(product.as_ref(), &input.golf_course_id)?;
+
+        self.refuse_a_round_the_course_cannot_walk(credentials, &input, product.as_ref())
             .await?;
 
         let starts_at = parse_jst_tee_time(input.date, &input.tee_time)?;
@@ -151,14 +156,9 @@ impl CreateReservationUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
         input: &CreateReservationInput,
+        product: Option<&ReservationProduct>,
     ) -> Result<(), CourseError> {
-        let Some(service_id) = input.reservation_service_id.as_deref() else {
-            return Ok(());
-        };
-        let products = self.catalog.list_reservation_products(credentials).await?;
-        let needs_caddie = products
-            .iter()
-            .find(|product| product.reservation_service_id().as_str() == service_id)
+        let needs_caddie = product
             .map(|product| product.play_type().requires_caddie())
             .unwrap_or(false);
         if !needs_caddie {
@@ -186,6 +186,22 @@ impl CreateReservationUseCase {
         Err(CourseError::BadRequest(
             "この日はこのコースのキャディがふさがっています。他のコースから応援を回すか、セルフでの受付をご検討ください",
         ))
+    }
+
+    async fn product_for_service(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        service_id: Option<&str>,
+    ) -> Result<Option<ReservationProduct>, CourseError> {
+        let Some(service_id) = service_id else {
+            return Ok(None);
+        };
+        Ok(self
+            .catalog
+            .list_reservation_products(credentials)
+            .await?
+            .into_iter()
+            .find(|product| product.reservation_service_id().as_str() == service_id))
     }
 
     /// The reservation type every Field booking needs.
@@ -221,6 +237,18 @@ impl CreateReservationUseCase {
                 "この施設ではまだ予約を受け付ける準備ができていません。導入担当にご連絡ください",
             ))
     }
+}
+
+fn validate_product_course(
+    product: Option<&ReservationProduct>,
+    course_id: &CourseId,
+) -> Result<(), CourseError> {
+    if product.is_some_and(|product| !product.is_sold_on(course_id)) {
+        return Err(CourseError::BadRequest(
+            "選択した商品はこのコースでは利用できません。商品を選び直してください",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_course_resource(
@@ -351,6 +379,55 @@ mod tests {
             course_id.map(str::to_string),
             None,
         )
+    }
+
+    fn product(course_ids: Vec<&str>) -> ReservationProduct {
+        ReservationProduct::reconstitute_with_course_ids(
+            "product-1",
+            None,
+            "service-1",
+            Some("シーズンパス".to_string()),
+            crate::course::domain::PlayType::SelfPlay,
+            18,
+            240,
+            course_ids.into_iter().map(str::to_string).collect(),
+            None,
+        )
+    }
+
+    #[test]
+    fn product_membership_guards_courseboard_bookings_too() {
+        let season_pass = product(vec!["course-east", "course-west"]);
+        assert!(validate_product_course(Some(&season_pass), &CourseId::new("course-west")).is_ok());
+        assert!(matches!(
+            validate_product_course(Some(&season_pass), &CourseId::new("course-north")),
+            Err(CourseError::BadRequest(_))
+        ));
+
+        // Presence of a canonical but empty scope is fail closed.
+        let malformed = product(Vec::new());
+        assert!(matches!(
+            validate_product_course(Some(&malformed), &CourseId::new("course-east")),
+            Err(CourseError::BadRequest(_))
+        ));
+
+        // A product from before course scoping existed keeps its compatibility
+        // behavior until an operator assigns it a course.
+        let legacy_unrestricted = ReservationProduct::reconstitute(
+            "legacy-product",
+            None,
+            "legacy-service",
+            None,
+            crate::course::domain::PlayType::SelfPlay,
+            18,
+            240,
+            None,
+            None,
+        );
+        assert!(
+            validate_product_course(Some(&legacy_unrestricted), &CourseId::new("course-any"))
+                .is_ok()
+        );
     }
 
     #[test]
