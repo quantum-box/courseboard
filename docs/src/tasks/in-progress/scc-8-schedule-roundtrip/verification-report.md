@@ -30,6 +30,17 @@
   への `PoolTimedOut`。Docker socket に接続権限がなく local TiDB を起動できないため、
   DB-backed suite は PR CI の TiDB service で確認する。新 regression test は PASS。
 
-## Post-fix behavior and full checks
+## Post-fix behavior on Sandbox
 
-PR branch の deploy 後に追記する。
+- PR branch API build: `bld_01kzn9ez9wxrt3w0a1k34q10x4`
+- PR branch API deployment: `dep_01kzn9kd33m294ds4psrbnc32w`（active / healthz 200）
+- Field setup read-back: capacity `2`, annual season `04-01` / `11-30`, revision `2`
+- CourseBoard branch API GET: 200、capacity `2`
+- unrelated CourseBoard branch API PUT: capacity `2` → `3`、200
+- Field read-back after save: capacity `3`, annual season `04-01` / `11-30`, revision `3`
+- 判定: PASS。write と revision 更新が起きた条件で、CourseBoard が認識しない annual season が
+  同値で保持された。
+
+## PR CI
+
+PR #192 の最終 commit で確認する。
