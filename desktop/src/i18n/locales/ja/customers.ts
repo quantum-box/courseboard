@@ -17,7 +17,11 @@ export const customers = {
     failed: '顧客を登録できませんでした',
   },
   detail: {
-    description: '台帳に入っている内容と、会員種別です。',
+    description: '台帳に入っている内容です。',
+    back: '顧客台帳にもどる',
+    missing: 'この顧客は見つかりませんでした。台帳から消えている可能性があります。',
+    membershipTitle: '会員種別',
+    membershipDescription: '会員かビジターかと、その種別です。',
   },
   field: {
     name: '名前',

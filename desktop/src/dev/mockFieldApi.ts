@@ -1794,6 +1794,14 @@ function resolveGet(path: string): Json | null | undefined {
     return mockMembershipOf(decodeURIComponent(customerMembershipMatch[1] ?? ''))
   }
 
+  const customerMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)$/)
+  if (customerMatch) {
+    const customerId = decodeURIComponent(customerMatch[1] ?? '')
+    // `null` rather than `undefined`: an id nobody holds is a missing customer,
+    // not a path this mock forgot to cover.
+    return mockCustomers.find(customer => customer.id === customerId) ?? null
+  }
+
   if (rawPathname === '/v1/course/extension-status') {
     const status = extensionStatus() as { items: Array<Record<string, unknown>> }
     return status.items.find(item => item.extensionKey === 'golf_course') ?? null

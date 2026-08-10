@@ -19,7 +19,11 @@ export const customers: DeepPartial<typeof source> = {
     failed: 'Could not register the customer',
   },
   detail: {
-    description: 'What the ledger holds, and the membership against it.',
+    description: 'What the ledger holds for this person.',
+    back: 'Back to the customer ledger',
+    missing: 'This customer could not be found. They may have been removed from the ledger.',
+    membershipTitle: 'Membership',
+    membershipDescription: 'Whether they are a member or a visitor, and of what.',
   },
   field: {
     name: 'Name',

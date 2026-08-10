@@ -20,7 +20,11 @@ export const customers: DeepPartial<typeof source> = {
     failed: 'お客さまを のせられませんでした',
   },
   detail: {
-    description: '台帳に 入って いる ことと、会員の しゅるいです。',
+    description: '台帳に 入って いる ことです。',
+    back: 'お客さま台帳に もどる',
+    missing: 'この お客さまは 見つかりませんでした。台帳から きえて いるかも しれません。',
+    membershipTitle: '会員の しゅるい',
+    membershipDescription: '会員か ビジターかと、その しゅるいです。',
   },
   field: {
     name: '名前',

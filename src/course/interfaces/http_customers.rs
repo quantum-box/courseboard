@@ -27,8 +27,8 @@ use crate::course::domain::{
 use crate::course::infrastructure::{FieldCustomerGateway, FieldMembershipGateway};
 use crate::course::usecase::{
     AssignMembershipPlanUseCase, CreateCustomerUseCase, CreateMembershipPlanUseCase,
-    GetCustomerMembershipUseCase, ListMembershipPlansUseCase, SearchCustomersUseCase,
-    UpdateMembershipPlanUseCase,
+    GetCustomerMembershipUseCase, GetCustomerUseCase, ListMembershipPlansUseCase,
+    SearchCustomersUseCase, UpdateMembershipPlanUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -139,6 +139,38 @@ pub struct CreateCustomerRequest {
     pub email: Option<String>,
     #[serde(default)]
     pub phone: Option<String>,
+}
+
+/// GET /v1/course/customers/{customer_id}
+///
+/// One person, for their own page in the ledger. Unlike a search this is asked
+/// about somebody already identified, so an id nobody holds is an error rather
+/// than an empty list.
+#[utoipa::path(
+    get,
+    path = "/v1/course/customers/{customer_id}",
+    tag = "course",
+    params(("customer_id" = String, Path, description = "Customer id")),
+    responses(
+        (status = 200, description = "Customer", body = CustomerDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_customer(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(customer_id): Path<String>,
+) -> Result<Json<CustomerDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let customer_id = CustomerId::try_new(customer_id).map_err(AppError::from)?;
+    let customer = GetCustomerUseCase::new(customer_gateway(&state))
+        .execute(credentials, &customer_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CustomerDto::from(&customer)))
 }
 
 /// POST /v1/course/customers

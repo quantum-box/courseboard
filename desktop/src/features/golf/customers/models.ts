@@ -14,6 +14,10 @@ export type CustomerList = {
 
 export const customersPath = '/v1/course/customers'
 
+export function customerPath(customerId: string): string {
+  return `${customersPath}/${encodeURIComponent(customerId)}`
+}
+
 /**
  * How a candidate is told apart from the others sharing its name.
  *

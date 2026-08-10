@@ -82,6 +82,7 @@ impl Modify for SecurityAddon {
         http::list_caddie_assignments,
         http_customers::search_customers,
         http_customers::create_customer,
+        http_customers::get_customer,
         http_customers::list_membership_plans,
         http_customers::create_membership_plan,
         http_customers::update_membership_plan,

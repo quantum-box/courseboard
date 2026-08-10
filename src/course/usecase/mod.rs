@@ -28,6 +28,7 @@ mod generate_caddie_shifts;
 mod get_attendance_snapshot;
 mod get_caddie_supply;
 mod get_course_caddie_supply;
+mod get_customer;
 mod get_extension_status;
 mod get_monthly_settlement;
 mod get_payroll_summary;
@@ -97,6 +98,7 @@ pub use generate_caddie_shifts::{GenerateCaddieShiftsUseCase, GeneratedMonth};
 pub use get_attendance_snapshot::GetAttendanceSnapshotUseCase;
 pub use get_caddie_supply::GetCaddieSupplyUseCase;
 pub use get_course_caddie_supply::GetCourseCaddieSupplyUseCase;
+pub use get_customer::GetCustomerUseCase;
 pub use get_extension_status::GetExtensionStatusUseCase;
 pub use get_monthly_settlement::{
     GetMonthlySettlementUseCase, MonthlySettlementReservation, MonthlySettlementView,

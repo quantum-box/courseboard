@@ -11,6 +11,7 @@ import {
   Notice,
   Panel,
 } from '../../../components/Page'
+import { navigate, navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { MembershipBadge } from './MembershipBadge'
 import { customerDistinguisher, customersPath, type Customer } from './models'
@@ -31,7 +32,6 @@ export function CustomersPage() {
   const { t } = useTranslation(['customers', 'common'])
   const [term, setTerm] = useState('')
   const search = useCustomerSearch(term)
-  const [selected, setSelected] = useState<Customer | null>(null)
   const [creating, setCreating] = useState(false)
 
   return (
@@ -61,14 +61,13 @@ export function CustomersPage() {
 
         <ul className="customer-ledger-list">
           {search.candidates.map(customer => (
-            <li
-              className={`customer-ledger-row${selected?.id === customer.id ? ' is-selected' : ''}`}
-              key={customer.id}
-            >
-              <button
-                type="button"
+            <li className="customer-ledger-row" key={customer.id}>
+              {/* A link rather than a button: a customer's page is somewhere the
+                  desk opens in a second tab and comes back to. */}
+              <a
                 className="customer-ledger-row__pick"
-                onClick={() => setSelected(customer)}
+                href={`#/golf/customers/${encodeURIComponent(customer.id)}`}
+                onClick={event => navigateFromClick(event, `golf/customers/${customer.id}`)}
               >
                 <span className="customer-ledger-row__name">{customer.name}</span>
                 {/* Phone or email, whichever the desk has — two people share a
@@ -76,7 +75,7 @@ export function CustomersPage() {
                 <span className="customer-ledger-row__detail">
                   {customerDistinguisher(customer) ?? t('customers:noContact')}
                 </span>
-              </button>
+              </a>
               <MembershipBadge customerId={customer.id} />
             </li>
           ))}
@@ -93,26 +92,11 @@ export function CustomersPage() {
           onCancel={() => setCreating(false)}
           onCreated={customer => {
             setCreating(false)
-            setSelected(customer)
-            setTerm(customer.name)
+            navigate(`golf/customers/${customer.id}`)
           }}
         />
       ) : null}
 
-      {selected ? (
-        <Panel title={selected.name} description={t('customers:detail.description')}>
-          <dl className="customer-ledger-detail">
-            <dt>{t('customers:field.nameKana')}</dt>
-            <dd>{selected.nameKana || t('common:state.unset')}</dd>
-            <dt>{t('customers:field.phone')}</dt>
-            <dd>{selected.phone || t('common:state.unset')}</dd>
-            <dt>{t('customers:field.email')}</dt>
-            <dd>{selected.email || t('common:state.unset')}</dd>
-            <dt>{t('customers:field.membership')}</dt>
-            <dd><MembershipBadge customerId={selected.id} /></dd>
-          </dl>
-        </Panel>
-      ) : null}
     </div>
   )
 }
