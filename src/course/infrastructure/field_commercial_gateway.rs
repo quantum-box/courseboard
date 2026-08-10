@@ -5,12 +5,13 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::booking_horizon_config;
 use super::field_gateway::{
     field_get_items, field_send_json, field_send_raw, field_send_text, field_send_unit,
-    normalize_base_url,
+    normalize_base_url, read_extension_config, write_extension_config_key,
 };
 use crate::course::domain::{
-    BudgetAchievement, CourseError, DailyBudget, DailyBudgetQuery, ExtensionStatus,
+    BookingHorizon, BudgetAchievement, CourseError, DailyBudget, DailyBudgetQuery, ExtensionStatus,
     GatewayCredentials, GolfCommercialGateway, MonthlySettlement, ReservationId, ReservationPolicy,
     SettlementPeriod, UnpaidCancellationItem, UpdateExtensionConfig, UpdateReservationPolicy,
     UpsertDailyBudget,
@@ -238,6 +239,37 @@ impl GolfCommercialGateway for FieldGolfCommercialGateway {
             Some(&body),
         )
         .await
+    }
+
+    async fn get_booking_horizon(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<BookingHorizon, CourseError> {
+        Ok(booking_horizon_config::read_booking_horizon(
+            &read_extension_config(&self.client, &self.base_url, credentials).await?,
+        ))
+    }
+
+    async fn set_booking_horizon(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        horizon: &BookingHorizon,
+    ) -> Result<BookingHorizon, CourseError> {
+        // Read-modify-write: the extension config is shared with the plans the
+        // storefront reads, and sending only the horizon would take them with it.
+        let stored = write_extension_config_key(
+            &self.client,
+            &self.base_url,
+            credentials,
+            booking_horizon_config::BOOKING_HORIZON_KEY,
+            |config| {
+                Ok(booking_horizon_config::with_booking_horizon(
+                    config, horizon,
+                ))
+            },
+        )
+        .await?;
+        Ok(booking_horizon_config::read_booking_horizon(&stored))
     }
 }
 

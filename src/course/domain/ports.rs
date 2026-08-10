@@ -5,17 +5,17 @@ use chrono::{DateTime, NaiveDate, Utc};
 
 use super::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-    AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BudgetAchievement, Caddie,
-    CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
-    CaddieRankFees, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift, CaddieStaff,
-    Course, CourseError, CourseId, CourseOrder, DailyBudget, DailyBudgetQuery, DeleteSlotOverrides,
-    ExtensionStatus, GenerationSummary, MonthlySettlement, NewReservation, PartyDetails,
-    ProductSlot, RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationId,
-    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
-    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
-    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
-    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
-    UpsertDailyBudget, UpsertReservationProduct, WorkedMinutes, YearMonth,
+    AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, BudgetAchievement,
+    Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
+    CaddieId, CaddieRankFees, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift,
+    CaddieStaff, Course, CourseError, CourseId, CourseOrder, DailyBudget, DailyBudgetQuery,
+    DeleteSlotOverrides, ExtensionStatus, GenerationSummary, InventoryWatermark, MonthlySettlement,
+    NewReservation, PartyDetails, ProductSlot, RecommendationQuery, ReplaceCaddieMemberships,
+    Reservation, ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId,
+    Resource, ResourceId, ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy,
+    SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig,
+    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    UpsertCourse, UpsertDailyBudget, UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -103,6 +103,28 @@ pub trait SlotOverrideGateway: Send + Sync {
         tenant_id: &str,
         command: &DeleteSlotOverrides,
     ) -> Result<u64, CourseError>;
+}
+
+/// Port for how far each course's tee-time inventory has been built.
+///
+/// Field generates the slots but reports only counts, never a date, so the
+/// watermark that makes a daily top-up cheap is CourseBoard's own data
+/// (ADR-0005) — the same reasoning as [`SlotOverrideGateway`].
+#[async_trait]
+pub trait GeneratedThroughGateway: Send + Sync {
+    /// The watermark per course. A course absent from the map has never been
+    /// built, which is different from having been built through a past date.
+    async fn list_watermarks(
+        &self,
+        tenant_id: &str,
+    ) -> Result<HashMap<CourseId, InventoryWatermark>, CourseError>;
+
+    async fn set_watermark(
+        &self,
+        tenant_id: &str,
+        course_id: &CourseId,
+        watermark: InventoryWatermark,
+    ) -> Result<(), CourseError>;
 }
 
 /// Port for each tenant's shift-request filing deadline, one per calendar
@@ -611,4 +633,20 @@ pub trait GolfCommercialGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         input: UpdateExtensionConfig,
     ) -> Result<(), CourseError>;
+
+    /// How far ahead the club sells tee times.
+    ///
+    /// Tenant-scoped and CourseBoard's own: Field's policy only counts
+    /// backwards from the tee time, so the forward window is kept in the golf
+    /// extension config (ADR-0005).
+    async fn get_booking_horizon(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<BookingHorizon, CourseError>;
+
+    async fn set_booking_horizon(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        horizon: &BookingHorizon,
+    ) -> Result<BookingHorizon, CourseError>;
 }

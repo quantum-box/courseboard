@@ -3,9 +3,20 @@ import type { schedule as source } from '../ja/schedule'
 
 export const schedule: DeepPartial<typeof source> = {
   title: 'Bookable hours · {{course}}',
-  description: 'When this course opens, how many groups may be out at once, and how far apart they start. Daily tee times are built from this.',
+  description: 'Set which hours you take bookings in, per weekday. Saving builds the dated tee times from it, and those are what a booking lands on.',
   back: 'Back to courses',
   eyebrow: 'Course',
+  onSale: {
+    through: 'Bookings are open through {{date}}.',
+    change: 'Change how far ahead you sell',
+  },
+  week: {
+    badge: 'Weekly rule',
+    title: 'Hours you take bookings in',
+    description: 'Per weekday, set the hours you are open. Groups out at once and the tee interval decide how many starts that band holds.',
+    total: '{{n}} starts per week as it stands.',
+    empty: 'No hours yet. Add a band to a weekday card.',
+  },
   notLinked: {
     title: 'This course is not linked to a reservation resource yet',
     description: 'Bookable hours need a course-to-resource mapping. Check the setup first.',
@@ -56,10 +67,15 @@ export const schedule: DeepPartial<typeof source> = {
   save: 'Save hours',
   saveFailed: 'Could not save the hours',
   hasIssues: '{{n}} bands need fixing. Correct the rows marked in red, then save.',
-  confirmRemove: 'Saving drops {{n}} bands, and stops the tee times they would have built. Continue?',
+  confirmRemove: 'Saving drops {{n}} bands, and stops the tee times in them. Continue?',
   saved: {
     title: 'Hours saved',
-    body: 'Replaced the week for {{course}}. Build the tee times next.',
+    body: 'Replaced the week for {{course}} and opened bookings through {{date}}.',
+    notBuilt: {
+      title: 'The hours saved, but their tee times were not built',
+      body: 'The hours themselves are stored. Nothing is on sale yet, though, because the tee times were not built. Try again.',
+      retry: 'Build the tee times',
+    },
   },
   pending: {
     title: '{{course}} · unsaved changes',
@@ -72,27 +88,5 @@ export const schedule: DeepPartial<typeof source> = {
   confirm: {
     discardOnReload: 'You have unsaved hours. Discard them and reload?',
     discardOnLeave: 'You have unsaved hours. Discard them and leave this screen?',
-  },
-  generate: {
-    title: 'Build tee times',
-    description: 'Turns the hours above into dated tee times. Only what is built can be booked, and it stops selling once full.',
-    badge: 'Inventory',
-    from: 'From',
-    to: 'To',
-    preview: 'Show what would happen',
-    previewing: 'Checking',
-    run: 'Build them',
-    running: 'Building',
-    failed: 'Could not build the tee times',
-    unsavedFirst: 'Save the hours first. Unsaved changes are not built.',
-    result: {
-      title: 'Tee times built',
-      body: '{{created}} added · {{updated}} updated · {{deactivated}} stopped · {{unchanged}} unchanged',
-    },
-    preview_result: {
-      title: 'This is what building would do',
-      body: '{{created}} added · {{updated}} updated · {{deactivated}} stopped · {{unchanged}} unchanged',
-    },
-    keepsReserved: 'Slots holding a booking or a payment hold are never reduced below what they already carry.',
   },
 }

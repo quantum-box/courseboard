@@ -22,6 +22,9 @@ function normalizeHelpRoute(route: string, routes: Record<string, PageHelp>) {
   ) {
     return 'golf/caddies'
   }
+  // A course id opens that course's week and the tee times built from it — a
+  // different job from the course list its route nests under.
+  if (route.startsWith('golf/courses/')) return 'golf/courses/schedule'
   if (routes[route]) return route
   // Longest matching prefix for nested routes.
   const candidates = Object.keys(routes)

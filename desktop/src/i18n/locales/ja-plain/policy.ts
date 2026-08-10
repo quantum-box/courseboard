@@ -30,6 +30,9 @@ export const policy: DeepPartial<typeof source> = {
     cart: 'カートの使い方',
     cutoff: '予約を受け付ける期限',
     cutoffHint: 'スタート時刻の何時間前まで受け付けるか',
+    bookingHorizon: '何日先まで予約を受けるか',
+    bookingHorizonHint: '今日から数えた日数です。この間のスタート枠だけが作られて、予約を受けられます。',
+    bookingHorizonThrough: '今は {{date}} まで予約を受けられます。変えると、ぜんぶのコースの枠を作りなおします。',
   },
   cartOption: {
     optional: '使っても使わなくてもよい',
@@ -82,6 +85,7 @@ export const policy: DeepPartial<typeof source> = {
     memberDeposit: '会員が先に払う割合は 0〜100% で入れてください。',
     guestDeposit: '会員以外が先に払う割合は 0〜100% で入れてください。',
     cutoff: '受け付ける期限は 0 以上の数で入れてください。',
+    bookingHorizon: '何日先まで予約を受けるかは 1〜399 日で入れてください。',
     spendThreshold: '1人あたりの最低金額は 0 円以上で入れてください。',
   },
 }

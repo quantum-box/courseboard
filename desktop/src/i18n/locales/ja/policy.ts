@@ -25,6 +25,9 @@ export const policy = {
     cart: 'カートの扱い',
     cutoff: '予約の締め切り',
     cutoffHint: 'スタート時刻の何時間前まで受けるか',
+    bookingHorizon: '何日先まで予約を受けるか',
+    bookingHorizonHint: '今日から数えた日数です。この範囲のスタート枠だけが作られ、予約を受けられます。',
+    bookingHorizonThrough: 'いまは {{date}} まで予約を受けられます。変えると全コースの枠を作り直します。',
   },
   cartOption: {
     optional: '使っても使わなくてもよい',
@@ -75,6 +78,7 @@ export const policy = {
     memberDeposit: '会員の前払い割合は 0〜100% で入力してください。',
     guestDeposit: 'ゲストの前払い割合は 0〜100% で入力してください。',
     cutoff: '予約の締め切りは 0 以上の数で入力してください。',
+    bookingHorizon: '何日先まで予約を受けるかは 1〜399 日で入力してください。',
     spendThreshold: '1人あたりの下限金額は 0 円以上の数で入力してください。',
   },
 } as const

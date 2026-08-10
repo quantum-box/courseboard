@@ -1685,6 +1685,41 @@ button,
   gap: 8px;
 }
 
+/* How far the book actually reaches. The hours above are a rule; this one date
+   is the only thing on the screen that says what a customer can book, so it
+   sits above the editor rather than inside it. */
+.on-sale-through {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-lg);
+  padding: 9px 12px;
+  background: hsl(var(--nui-surface));
+  font-size: 13px;
+}
+
+.on-sale-through > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: hsl(var(--nui-success));
+}
+
+.link-button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: hsl(var(--nui-primary));
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-button:hover { text-decoration: none; }
+
 /* Weekly slot editor: one card per weekday, closed days included, so the week
    reads as a week instead of as a pile of rows sorted by when they were added. */
 .slot-week {
@@ -1793,6 +1828,14 @@ button,
   margin: 8px 0 0;
   color: hsl(var(--nui-muted-foreground));
   font-size: 11px;
+}
+
+/* What the whole week adds up to, said once where the week is edited rather
+   than only in the unsaved bar. */
+.slot-week-total {
+  margin: 10px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
 }
 
 .sticky-submit .slot-diff {
