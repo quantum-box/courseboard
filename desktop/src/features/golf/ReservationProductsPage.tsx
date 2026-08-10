@@ -7,7 +7,7 @@ import {
   Save,
   Settings2,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson } from '../../api'
 import { i18next } from '../../i18n'
@@ -28,6 +28,7 @@ import {
   type DataTableColumn,
 } from '../../components/Page'
 import { Sheet } from '../../components/Sheet'
+import { useResource } from '../../hooks/useResource'
 import {
   defaultDuration,
   emptyProductDraft,
@@ -79,6 +80,18 @@ function productDisplayName(product: GolfReservationProduct) {
   return product.displayName?.trim() || product.reservationServiceId
 }
 
+function upsertProduct(
+  products: GolfReservationProduct[],
+  saved: GolfReservationProduct,
+) {
+  const exists = products.some(product => product.reservationServiceId === saved.reservationServiceId)
+  return exists
+    ? products.map(product =>
+        product.reservationServiceId === saved.reservationServiceId ? saved : product,
+      )
+    : [...products, saved]
+}
+
 function courseLabel(course: GolfCourse) {
   return course.shortName?.trim() || course.name
 }
@@ -118,34 +131,25 @@ export function ReservationProductsPage({ serviceId }: { serviceId?: string }) {
 
 function ReservationProductList() {
   const { t } = useTranslation(['products', 'common'])
-  const [products, setProducts] = useState<GolfReservationProduct[]>([])
-  const [courses, setCourses] = useState<GolfCourse[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<unknown>(null)
+  const productsResource = useResource(
+    () => courseboardApiJson<{ items: GolfReservationProduct[] }>(productsPath),
+    [],
+    { cacheKey: 'reservation-products:list' },
+  )
+  const coursesResource = useResource(
+    () => courseboardApiJson<{ items: GolfCourse[] }>(coursesPath),
+    [],
+    { cacheKey: 'courses:list' },
+  )
+  const products = productsResource.data?.items ?? []
+  const courses = coursesResource.data?.items ?? []
   const [createOpen, setCreateOpen] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setLoadError(null)
-    try {
-      const [response, courseResponse] = await Promise.all([
-        courseboardApiJson<{ items: GolfReservationProduct[] }>(productsPath),
-        courseboardApiJson<{ items: GolfCourse[] }>(coursesPath),
-      ])
-      setProducts(response.items)
-      setCourses(courseResponse.items)
-    } catch (error) {
-      setLoadError(error)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  useRegisterPageReload(load)
+  const refreshAll = () => {
+    productsResource.refresh()
+    coursesResource.refresh()
+  }
+  useRegisterPageReload(refreshAll)
 
   const columns: DataTableColumn<GolfReservationProduct>[] = [
     {
@@ -207,6 +211,19 @@ function ReservationProductList() {
     },
   ]
 
+  const resources = [productsResource, coursesResource]
+  const hardError = resources.find(resource => resource.error && !resource.data)?.error
+  const refreshError = resources.find(resource => resource.error)?.error
+  const loading = resources.some(resource => resource.loading && !resource.data)
+
+  if (hardError) {
+    return (
+      <div className="page-stack">
+        <ResourceError error={hardError} onRetry={refreshAll} />
+      </div>
+    )
+  }
+
   if (loading) {
     return (
       <div className="page-stack">
@@ -215,18 +232,11 @@ function ReservationProductList() {
     )
   }
 
-  if (loadError) {
-    return (
-      <div className="page-stack">
-        <ResourceError error={loadError} onRetry={() => void load()} />
-      </div>
-    )
-  }
-
   const withoutCourse = products.filter(product => !product.golfCourseId)
 
   return (
     <div className="page-stack">
+      {refreshError ? <ResourceError error={refreshError} onRetry={refreshAll} /> : null}
       <div className="page-toolbar">
         <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
           <Plus /> {t('products:addService')}
@@ -259,9 +269,10 @@ function ReservationProductList() {
         product={null}
         courses={courses}
         onOpenChange={setCreateOpen}
-        onSaved={savedServiceId => {
+        onSaved={savedProduct => {
+          productsResource.setData({ items: upsertProduct(products, savedProduct) })
           setCreateOpen(false)
-          navigate(detailRoute(savedServiceId))
+          navigate(detailRoute(savedProduct.reservationServiceId))
         }}
       />
 
@@ -294,75 +305,63 @@ function ReservationProductList() {
 
 function ReservationProductDetail({ serviceId }: { serviceId: string }) {
   const { t } = useTranslation(['products', 'common'])
-  const [product, setProduct] = useState<GolfReservationProduct | null>(null)
-  const [courses, setCourses] = useState<GolfCourse[]>([])
-  /**
-   * Slots the plan carried before inventory moved to the course. Read-only: the
-   * storefront may still be reading them, so they stay visible until it moves.
-   */
-  const [legacySlots, setLegacySlots] = useState<GolfProductSlot[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<unknown>(null)
+  const productsResource = useResource(
+    () => courseboardApiJson<{ items: GolfReservationProduct[] }>(productsPath),
+    [],
+    { cacheKey: 'reservation-products:list' },
+  )
+  const coursesResource = useResource(
+    () => courseboardApiJson<{ items: GolfCourse[] }>(coursesPath),
+    [],
+    { cacheKey: 'courses:list' },
+  )
+  const product = productsResource.data?.items.find(
+    item => item.reservationServiceId === serviceId,
+  ) ?? null
+  const courses = coursesResource.data?.items ?? []
+  /** Slots from before inventory moved to the course. Read-only. */
+  const slotsResource = useResource(
+    () => courseboardApiJson<{ items: GolfProductSlot[] }>(slotsPath(serviceId)),
+    [serviceId],
+    {
+      cacheKey: `reservation-product-slots:${serviceId}`,
+      enabled: Boolean(product),
+    },
+  )
+  const legacySlots = slotsResource.data?.items ?? []
   const [editorOpen, setEditorOpen] = useState(false)
 
-  const loadProduct = useCallback(async () => {
-    const [response, courseResponse] = await Promise.all([
-      courseboardApiJson<{ items: GolfReservationProduct[] }>(productsPath),
-      courseboardApiJson<{ items: GolfCourse[] }>(coursesPath),
-    ])
-    const found = response.items.find(item => item.reservationServiceId === serviceId) ?? null
-    setProduct(found)
-    setCourses(courseResponse.items)
-    return found
-  }, [serviceId])
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    setLoadError(null)
-    try {
-      const found = await loadProduct()
-      if (!found) {
-        setLegacySlots([])
-        return
-      }
-      try {
-        const slots = await courseboardApiJson<{ items: GolfProductSlot[] }>(slotsPath(serviceId))
-        setLegacySlots(slots.items)
-      } catch {
-        // Their absence is not worth an error: they are leftovers either way.
-        setLegacySlots([])
-      }
-    } catch (error) {
-      setLoadError(error)
-    } finally {
-      setLoading(false)
-    }
-  }, [loadProduct, serviceId])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
-  useRegisterPageReload(load)
+  const refreshAll = () => {
+    productsResource.refresh()
+    coursesResource.refresh()
+    slotsResource.refresh()
+  }
+  useRegisterPageReload(refreshAll)
 
   const productCourse = useMemo(
     () => courses.find(course => course.id === product?.golfCourseId) ?? null,
     [courses, product],
   )
 
-  if (loading) {
+  const resources = [productsResource, coursesResource]
+  const hardError = resources.find(resource => resource.error && !resource.data)?.error
+  const refreshError = resources.find(resource => resource.error)?.error
+  const loading = resources.some(resource => resource.loading && !resource.data)
+    || (Boolean(product) && slotsResource.loading && !slotsResource.data)
+
+  if (hardError) {
     return (
       <div className="page-stack">
-        <LoadingState label={t('products:loading')} />
+        <BackToList />
+        <ResourceError error={hardError} onRetry={refreshAll} />
       </div>
     )
   }
 
-  if (loadError) {
+  if (loading) {
     return (
       <div className="page-stack">
-        <BackToList />
-        <ResourceError error={loadError} onRetry={() => void load()} />
+        <LoadingState label={t('products:loading')} />
       </div>
     )
   }
@@ -386,6 +385,7 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
 
   return (
     <div className="page-stack">
+      {refreshError ? <ResourceError error={refreshError} onRetry={refreshAll} /> : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <BackToList />
       </div>
@@ -406,9 +406,11 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
         product={product}
         courses={courses}
         onOpenChange={setEditorOpen}
-        onSaved={() => {
+        onSaved={savedProduct => {
+          productsResource.setData(current => ({
+            items: upsertProduct(current?.items ?? [], savedProduct),
+          }))
           setEditorOpen(false)
-          void loadProduct()
         }}
       />
 
@@ -533,7 +535,7 @@ function ProductEditorSheet({
   product: GolfReservationProduct | null
   courses: GolfCourse[]
   onOpenChange: (open: boolean) => void
-  onSaved: (serviceId: string) => void
+  onSaved: (product: GolfReservationProduct) => void
 }) {
   const { t } = useTranslation(['products', 'common', 'courses'])
   const [draft, setDraft] = useState<GolfReservationProductDraft>(emptyProductDraft)
@@ -583,19 +585,22 @@ function ProductEditorSheet({
     setSaving(true)
     setError(null)
     try {
-      await courseboardApiJson(`${productsPath}/${encodeURIComponent(savedServiceId)}`, {
-        method: 'POST',
-        body: JSON.stringify({
-          displayName: draft.displayName.trim(),
-          playType: draft.playType,
-          holeCount: draft.holeCount,
-          expectedDurationMinutes: draft.expectedDurationMinutes,
-          golfCourseId: draft.golfCourseId.trim() || null,
-          maxPlayersPerGroup: draft.maxPlayersPerGroup === ''
-            ? null
-            : Number(draft.maxPlayersPerGroup),
-        }),
-      })
+      const savedProduct = await courseboardApiJson<GolfReservationProduct>(
+        `${productsPath}/${encodeURIComponent(savedServiceId)}`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            displayName: draft.displayName.trim(),
+            playType: draft.playType,
+            holeCount: draft.holeCount,
+            expectedDurationMinutes: draft.expectedDurationMinutes,
+            golfCourseId: draft.golfCourseId.trim() || null,
+            maxPlayersPerGroup: draft.maxPlayersPerGroup === ''
+              ? null
+              : Number(draft.maxPlayersPerGroup),
+          }),
+        },
+      )
       showToast({
         tone: 'success',
         title: t('products:editor.saved.title'),
@@ -604,7 +609,7 @@ function ProductEditorSheet({
           serviceId: savedServiceId,
         }),
       })
-      onSaved(savedServiceId)
+      onSaved(savedProduct)
     } catch (saveError) {
       setError(errorMessage(saveError))
     } finally {

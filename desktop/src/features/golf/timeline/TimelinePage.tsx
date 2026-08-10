@@ -257,14 +257,17 @@ export function TimelinePage() {
       return courseboardApiJson<TeeSheetResponse>(`/v1/course/tee-sheet?${params}`)
     },
     [date, courseFilter],
+    { cacheKey: `tee-sheet:${date}:${courseFilter}` },
   )
   const assignmentsResource = useResource(
     () => courseboardApiJson<ListResponse<TimelineAssignment>>(`${COURSE_API}/caddie-assignments`),
     [],
+    { cacheKey: 'timeline:caddie-assignments' },
   )
   const caddiesResource = useResource(
     () => courseboardApiJson<ListResponse<TimelineCaddie>>(`${COURSE_API}/caddie-profiles`),
     [],
+    { cacheKey: 'caddie-profiles:list' },
   )
   const coursesResource = useResource(
     () => courseboardApiJson<ListResponse<{
@@ -275,6 +278,7 @@ export function TimelinePage() {
       businessHoursJson?: { open: string; close: string } | null
     }>>(`${COURSE_API}/courses`),
     [],
+    { cacheKey: 'courses:list' },
   )
 
   const refreshAll = () => {
@@ -290,12 +294,14 @@ export function TimelinePage() {
   }, [date, courseFilter])
 
   const loading = teeSheet.loading || assignmentsResource.loading || caddiesResource.loading || coursesResource.loading
-  // Prefer hard failures (especially tee-sheet 404) over a stuck loading screen
-  // while sibling requests are still in flight.
-  const error = teeSheet.error || assignmentsResource.error || caddiesResource.error || coursesResource.error
+  const resources = [teeSheet, assignmentsResource, caddiesResource, coursesResource]
+  // A first-load failure still replaces the page. A failed background refresh
+  // keeps the successful snapshot visible and puts the retry beside it.
+  const hardError = resources.find(resource => resource.error && !resource.data)?.error
+  const refreshError = resources.find(resource => resource.error)?.error
 
-  if (error) {
-    return <ResourceError error={error} onRetry={refreshAll} />
+  if (hardError) {
+    return <ResourceError error={hardError} onRetry={refreshAll} />
   }
   if (loading && !teeSheet.data) {
     return <LoadingState label={t('timeline:loading')} />
@@ -364,6 +370,7 @@ export function TimelinePage() {
 
   return (
     <div className="page-stack timeline-page">
+      {refreshError ? <ResourceError error={refreshError} onRetry={refreshAll} /> : null}
       {unavailable.length > 0 ? (
         <Notice tone="warning" title={t('timeline:partial.title')}>
           {t('timeline:partial.description')}

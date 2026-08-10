@@ -3,11 +3,19 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ApiError, courseboardApiJson } from '../../../api'
-import { Field, FormGrid } from '../../../components/Page'
+import { Field, FormGrid, Notice } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import { showToast } from '../../../lib/toast'
 import { DiscardGuard } from './DiscardGuard'
 import { MAX_PARTY_PLAYERS } from './ledgerLayout'
+import {
+  hasUnnamedReservationPlayer,
+  reservationPlayerRows,
+  resizeReservationPlayerRows,
+  toReservationPlayers,
+  type DraftReservationPlayer,
+} from './newReservationPlayers'
+import { PlayerTagInput } from './PlayerTagInput'
 
 /** Plans the desk can book this tee time under. */
 export type BookablePlan = {
@@ -33,12 +41,14 @@ export function NewReservationEditor({
   target,
   date,
   plans,
+  playerTagOptions,
   onClose,
   onCreated,
 }: {
   target: NewReservationTarget | null
   date: string
   plans: BookablePlan[]
+  playerTagOptions: string[]
   onClose: () => void
   onCreated: () => void
 }) {
@@ -46,6 +56,7 @@ export function NewReservationEditor({
   const [customerName, setCustomerName] = useState('')
   const [quantity, setQuantity] = useState('4')
   const [planId, setPlanId] = useState('')
+  const [players, setPlayers] = useState<DraftReservationPlayer[]>(() => reservationPlayerRows(4))
   const [saving, setSaving] = useState(false)
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
 
@@ -59,6 +70,7 @@ export function NewReservationEditor({
     if (!target) return
     setCustomerName('')
     setQuantity('4')
+    setPlayers(reservationPlayerRows(4))
     setConfirmingDiscard(false)
   }, [target])
 
@@ -73,11 +85,24 @@ export function NewReservationEditor({
     )
   }, [target, defaultPlanId])
 
+  const selectedPlan = coursePlans.find(entry => entry.reservationServiceId === planId)
+  const maxQuantity = Math.min(selectedPlan?.maxPlayersPerGroup ?? MAX_PARTY_PLAYERS, MAX_PARTY_PLAYERS)
+  const parsedQuantity = Number.parseInt(quantity, 10)
+  const validQuantity =
+    Number.isFinite(parsedQuantity) && parsedQuantity > 0 && parsedQuantity <= maxQuantity
+
+  useEffect(() => {
+    if (!validQuantity) return
+    setPlayers(current => resizeReservationPlayerRows(current, parsedQuantity))
+  }, [parsedQuantity, validQuantity])
+
   if (!target) return null
 
   // Only what the desk typed counts as work worth guarding; the pre-filled
   // party size and default plan are not something anyone would mourn.
-  const dirty = customerName.trim().length > 0
+  const dirty = customerName.trim().length > 0 || players.some(player =>
+    Boolean(player.name.trim() || player.tag.trim() || player.memberNumber.trim()),
+  )
   const requestClose = () => {
     if (saving) return
     if (dirty) {
@@ -90,13 +115,13 @@ export function NewReservationEditor({
   // A plan may sell a smaller group than a four-ball — a two-ball twilight
   // round, say — and that limit is the club's rule, so it wins over the
   // general cap rather than being checked only after Field accepts the booking.
-  const selectedPlan = coursePlans.find(entry => entry.reservationServiceId === planId)
-  const maxQuantity = Math.min(selectedPlan?.maxPlayersPerGroup ?? MAX_PARTY_PLAYERS, MAX_PARTY_PLAYERS)
-  const parsedQuantity = Number.parseInt(quantity, 10)
-  const validQuantity =
-    Number.isFinite(parsedQuantity) && parsedQuantity > 0 && parsedQuantity <= maxQuantity
+  const namedPlayers = toReservationPlayers(players)
+  const hasUnnamedPlayer = hasUnnamedReservationPlayer(players)
+  const hasTooManyPlayers = validQuantity && namedPlayers.length > parsedQuantity
   const canSave = customerName.trim().length > 0
     && validQuantity
+    && !hasUnnamedPlayer
+    && !hasTooManyPlayers
     && Boolean(target.resourceId)
     && !saving
 
@@ -117,6 +142,7 @@ export function NewReservationEditor({
           durationMinutes: plan?.expectedDurationMinutes || DEFAULT_DURATION_MINUTES,
           quantity: parsedQuantity,
           customerName: customerName.trim(),
+          players: namedPlayers,
         }),
       })
       showToast({ tone: 'success', message: t('ledger:newReservation.saved') })
@@ -185,6 +211,58 @@ export function NewReservationEditor({
             </Field>
           ) : null}
         </FormGrid>
+
+        {hasUnnamedPlayer ? (
+          <Notice tone="danger">{t('ledger:party.emptyPlayerName')}</Notice>
+        ) : null}
+        {hasTooManyPlayers ? (
+          <Notice tone="warning" title={t('ledger:party.partySizeTitle')}>
+            {t('ledger:party.partySizeNotice', {
+              booked: String(parsedQuantity),
+              named: String(namedPlayers.length),
+            })}
+          </Notice>
+        ) : null}
+
+        <section className="ledger-party-players" aria-label={t('ledger:party.players')}>
+          <h3>{t('ledger:party.players')}</h3>
+          {players.map((player, index) => (
+            <div className="ledger-party-player ledger-party-player--new" key={index}>
+              <Field label={t('ledger:party.playerName')}>
+                <Input
+                  value={player.name}
+                  placeholder={t('ledger:party.playerNamePlaceholder')}
+                  onChange={event =>
+                    setPlayers(rows => rows.map((row, at) =>
+                      at === index ? { ...row, name: event.target.value } : row,
+                    ))
+                  }
+                />
+              </Field>
+              <Field label={t('ledger:party.playerTag')}>
+                <PlayerTagInput
+                  value={player.tag}
+                  options={playerTagOptions}
+                  onChange={value =>
+                    setPlayers(rows => rows.map((row, at) =>
+                      at === index ? { ...row, tag: value } : row,
+                    ))
+                  }
+                />
+              </Field>
+              <Field label={t('ledger:party.memberNumber')}>
+                <Input
+                  value={player.memberNumber}
+                  onChange={event =>
+                    setPlayers(rows => rows.map((row, at) =>
+                      at === index ? { ...row, memberNumber: event.target.value } : row,
+                    ))
+                  }
+                />
+              </Field>
+            </div>
+          ))}
+        </section>
 
         <div className="ledger-party-actions">
           <Button type="button" variant="ghost" onClick={requestClose} disabled={saving}>

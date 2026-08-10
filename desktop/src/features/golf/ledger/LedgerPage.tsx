@@ -24,6 +24,7 @@ import { navigate } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { parseLocalDateParts } from '../timeline/timelineLayout'
 import type { TeeReservation } from '../timeline/models'
+import { playerTagOptionsFromConfig } from '../playerTagOptions'
 import { LedgerBoard, type SlotSelection } from './LedgerBoard'
 import { arrangeCourses, moveCourse } from './courseOrder'
 import {
@@ -149,7 +150,9 @@ export function LedgerPage() {
     const params = new URLSearchParams({ date })
     if (courseIds) params.set('golfCourseIds', courseIds)
     return courseboardApiJson<TeeLedgerResponse>(`${COURSE_API}/tee-ledger?${params}`)
-  }, [date, courseIds])
+  }, [date, courseIds], {
+    cacheKey: `tee-ledger:${date}:${courseIds ?? 'all'}`,
+  })
 
   const coursesResource = useResource(
     () =>
@@ -157,11 +160,13 @@ export function LedgerPage() {
         `${COURSE_API}/courses`,
       ),
     [],
+    { cacheKey: 'courses:list' },
   )
 
   const orderResource = useResource(
     () => courseboardApiJson<{ golfCourseIds: string[] }>(`${COURSE_API}/course-order`),
     [],
+    { cacheKey: 'courses:order' },
   )
 
   const productsResource = useResource(
@@ -176,6 +181,15 @@ export function LedgerPage() {
         }>
       >(`${COURSE_API}/reservation-products`),
     [],
+    { cacheKey: 'reservation-products:list' },
+  )
+
+  const extensionResource = useResource(
+    () => courseboardApiJson<{ configJson?: Record<string, unknown> | null } | null>(
+      `${COURSE_API}/extension-status`,
+    ),
+    [],
+    { cacheKey: 'course:extension-status' },
   )
 
   const refreshAll = () => {
@@ -183,6 +197,7 @@ export function LedgerPage() {
     coursesResource.refresh()
     orderResource.refresh()
     productsResource.refresh()
+    extensionResource.refresh()
   }
   useRegisterPageReload(refreshAll)
 
@@ -207,7 +222,9 @@ export function LedgerPage() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [boardOnly])
 
-  if (ledger.error) return <ResourceError error={ledger.error} onRetry={refreshAll} />
+  if (ledger.error && !ledger.data) {
+    return <ResourceError error={ledger.error} onRetry={refreshAll} />
+  }
   if (ledger.loading && !ledger.data) return <LoadingState label={t('ledger:loading')} />
 
   const rawColumns = ledger.data?.columns ?? []
@@ -253,6 +270,7 @@ export function LedgerPage() {
     golfCourseId: product.golfCourseId,
     maxPlayersPerGroup: product.maxPlayersPerGroup,
   }))
+  const playerTagOptions = playerTagOptionsFromConfig(extensionResource.data?.configJson)
 
   // Booking is offered on a single tee time that is not already closed or full:
   // a range selection is for marking, and a booked-out row has nothing to sell.
@@ -390,6 +408,7 @@ export function LedgerPage() {
 
   return (
     <div className={`page-stack ledger-page${boardOnly ? ' is-board-only' : ''}`}>
+      {ledger.error ? <ResourceError error={ledger.error} onRetry={refreshAll} /> : null}
       {unavailable.length > 0 && !boardOnly ? (
         <Notice tone="warning" title={t('ledger:partial.title')}>
           {t('ledger:partial.description')}
@@ -569,12 +588,14 @@ export function LedgerPage() {
         target={bookingTarget}
         date={date}
         plans={bookablePlans}
+        playerTagOptions={playerTagOptions}
         onClose={() => setBookingTarget(null)}
         onCreated={() => ledger.refresh()}
       />
 
       <PartyEditor
         reservation={editingReservation}
+        playerTagOptions={playerTagOptions}
         onClose={() => setEditingReservationId(null)}
         onSaved={(reservationId, party) =>
           setLocalParties(current => ({ ...current, [reservationId]: party }))

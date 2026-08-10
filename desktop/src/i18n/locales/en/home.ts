@@ -4,17 +4,22 @@ import type { home as source } from '../ja/home'
 export const home: DeepPartial<typeof source> = {
   title: 'Home',
   description: 'Start the day here.',
-  openTimeline: "Open today's timeline",
+  launcher: {
+    eyebrow: "Today's operations",
+    title: 'Where do you want to start?',
+    description: 'Choose the task you need, from bookings and caddie assignments to settlement.',
+    featured: 'Frequently used tasks',
+  },
   features: {
-    title: 'What you can do',
+    title: 'More tasks',
   },
   flow: {
     title: 'How today goes',
     description: 'Work top to bottom — each step hands the same booking data to the next.',
     steps: {
-      timeline: {
-        label: 'Timeline',
-        detail: "Check today's bookings and caddie assignments",
+      ledger: {
+        label: 'Reservation ledger',
+        detail: "Check today's bookings and available starts",
       },
       dispatch: {
         label: 'Caddie assignments',

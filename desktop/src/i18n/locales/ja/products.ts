@@ -87,7 +87,7 @@ export const products = {
   },
   inventory: {
     title: '受付枠',
-    description: '受付枠はコースが持ちます。同じコースで売るプランは同じティータイムを分け合うため、コース側で決めます。',
+    description: '受付枠はコースが持ちます。同じコースで売るプランは同じスタート枠を分け合うため、コース側で決めます。',
     open: '{{course}} の受付枠を開く',
     needsCourse: {
       title: 'コースを決めると受付枠を開けます',

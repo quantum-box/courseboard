@@ -33,6 +33,7 @@ pub struct CreateReservationInput {
     pub duration_minutes: i64,
     pub quantity: i32,
     pub customer_name: String,
+    pub party: PartyDetails,
 }
 
 pub struct CreateReservationUseCase {
@@ -124,7 +125,7 @@ impl CreateReservationUseCase {
             quantity: input.quantity,
             customer_name: customer_name.to_string(),
             golf_course_id: input.golf_course_id,
-            party: PartyDetails::try_new(None, None, None, Vec::new())?,
+            party: input.party,
             // A phone booking is paid at the course. Field therefore converts
             // its hold to reserved inventory in the create transaction instead
             // of leaving a checkout-dependent hold behind.

@@ -1,6 +1,6 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import { ArrowLeft, CalendarDays, Save, Sparkles, Undo2, Users } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson } from '../../api'
 import { today } from '../../lib/clock'
@@ -8,6 +8,7 @@ import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { navigate, useNavigationGuard } from '../../lib/router'
 import { showToast } from '../../lib/toast'
+import { useResource } from '../../hooks/useResource'
 import {
   EmptyState,
   Field,
@@ -96,15 +97,30 @@ type GenerationSummary = {
  */
 export function CourseSchedulePage({ courseId }: { courseId: string }) {
   const { t } = useTranslation(['schedule', 'common', 'products'])
-  const [course, setCourse] = useState<GolfCourse | null>(null)
-  const [rules, setRules] = useState<EditableRule[]>([])
+  const coursesResource = useResource(
+    () => courseboardApiJson<{ items: GolfCourse[] }>(coursesPath),
+    [],
+    { cacheKey: 'courses:list' },
+  )
+  const course = coursesResource.data?.items.find(item => item.id === courseId) ?? null
+  const resourcesResource = useResource(
+    () => courseboardApiJson<{ items: CourseResource[] }>(resourcesPath),
+    [],
+    { cacheKey: 'courses:resources', enabled: Boolean(course) },
+  )
+  const scheduleResource = useResource(
+    () => courseboardApiJson<{ items: GolfAvailabilityRule[] }>(schedulePath(courseId)),
+    [courseId],
+    { cacheKey: `course:schedule:${courseId}`, enabled: Boolean(course) },
+  )
+  const initialRules = scheduleResource.data?.items.map(toEditableRule) ?? []
+  const [rules, setRules] = useState<EditableRule[]>(initialRules)
   /** What the server holds, so the bar can name what a save would change. */
-  const [savedRules, setSavedRules] = useState<GolfAvailabilityRule[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<unknown>(null)
-  const [scheduleError, setScheduleError] = useState<string | null>(null)
+  const [savedRules, setSavedRules] = useState<GolfAvailabilityRule[]>(
+    initialRules.map(toStoredRule),
+  )
+  const acceptNextScheduleRef = useRef(false)
   const [saving, setSaving] = useState(false)
-  const [linked, setLinked] = useState(true)
   const [linking, setLinking] = useState(false)
 
   const [from, setFrom] = useState(today)
@@ -118,58 +134,46 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
   const [capacityLoading, setCapacityLoading] = useState(false)
   const [capacityError, setCapacityError] = useState<string | null>(null)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setLoadError(null)
-    setScheduleError(null)
-    try {
-      const courseResponse = await courseboardApiJson<{ items: GolfCourse[] }>(coursesPath)
-      const found = courseResponse.items.find(item => item.id === courseId) ?? null
-      setCourse(found)
-      if (!found) return
-
-      try {
-        const resources = await courseboardApiJson<{ items: CourseResource[] }>(resourcesPath)
-        setLinked(isCourseLinkedToResource(resources.items, courseId))
-      } catch {
-        // A resource list this page could not read is not itself a reason to
-        // claim the course is unlinked; the schedule below says so if it is.
-        setLinked(true)
-      }
-
-      try {
-        const response = await courseboardApiJson<{ items: GolfAvailabilityRule[] }>(
-          schedulePath(courseId),
-        )
-        const loaded = response.items.map(toEditableRule)
-        setRules(loaded)
-        setSavedRules(loaded.map(toStoredRule))
-      } catch (error) {
-        setRules([])
-        setSavedRules([])
-        setScheduleError(errorMessage(error))
-      }
-    } catch (error) {
-      setLoadError(error)
-    } finally {
-      setLoading(false)
-    }
-  }, [courseId])
-
-  useEffect(() => {
-    void load()
-  }, [load])
-
   const changes = useMemo(
     () => summarizeRuleChanges(savedRules, rules.map(toStoredRule)),
     [savedRules, rules],
   )
   const changeCount = ruleChangeCount(changes)
 
+  useEffect(() => {
+    if (!scheduleResource.data) return
+    if (changeCount > 0 && !acceptNextScheduleRef.current) return
+    acceptNextScheduleRef.current = false
+    const loaded = scheduleResource.data.items.map(toEditableRule)
+    setRules(loaded)
+    setSavedRules(loaded.map(toStoredRule))
+  }, [changeCount, scheduleResource.data])
+
+  const linked = resourcesResource.data
+    ? isCourseLinkedToResource(resourcesResource.data.items, courseId)
+    : true
+  const scheduleError = scheduleResource.error
+    ? errorMessage(scheduleResource.error)
+    : null
+  const loading = (coursesResource.loading && !coursesResource.data)
+    || (Boolean(course) && scheduleResource.loading && !scheduleResource.data)
+
   const requestReload = useCallback(() => {
     if (changeCount > 0 && !window.confirm(i18next.t('schedule:confirm.discardOnReload'))) return
-    void load()
-  }, [changeCount, load])
+    acceptNextScheduleRef.current = true
+    void Promise.all([
+      coursesResource.refresh(),
+      resourcesResource.refresh(),
+      scheduleResource.refresh(),
+    ]).then(([, , refreshedSchedule]) => {
+      if (!refreshedSchedule) acceptNextScheduleRef.current = false
+    })
+  }, [
+    changeCount,
+    coursesResource.refresh,
+    resourcesResource.refresh,
+    scheduleResource.refresh,
+  ])
 
   useRegisterPageReload(requestReload)
 
@@ -179,19 +183,29 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
 
   function revert() {
     setRules(savedRules.map(toEditableRule))
-    setScheduleError(null)
   }
 
   async function link() {
     setLinking(true)
     try {
-      await courseboardApiJson<CourseResource>(resourceLinkPath(courseId), { method: 'POST' })
+      const linkedResource = await courseboardApiJson<CourseResource>(
+        resourceLinkPath(courseId),
+        { method: 'POST' },
+      )
+      resourcesResource.setData(current => ({
+        items: [
+          ...(current?.items ?? []).filter(resource =>
+            resource.golfCourseId !== courseId || resource.resourceKind !== 'course',
+          ),
+          linkedResource,
+        ],
+      }))
       showToast({
         tone: 'success',
         title: t('schedule:link.done.title'),
         message: t('schedule:link.done.body', { course: course ? courseLabel(course) : courseId }),
       })
-      await load()
+      await scheduleResource.refresh()
     } catch (error) {
       showToast({
         tone: 'danger',
@@ -226,9 +240,9 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
         { method: 'PUT', body: JSON.stringify({ rules: payload }) },
       )
       const saved = response.items.map(toEditableRule)
+      scheduleResource.setData(response)
       setRules(saved)
       setSavedRules(saved.map(toStoredRule))
-      setScheduleError(null)
       showToast({
         tone: 'success',
         title: t('schedule:saved.title'),
@@ -316,11 +330,11 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
     )
   }
 
-  if (loadError) {
+  if (coursesResource.error && !coursesResource.data) {
     return (
       <div className="page-stack">
         <BackToCourses />
-        <ResourceError error={loadError} onRetry={() => void load()} />
+        <ResourceError error={coursesResource.error} onRetry={coursesResource.refresh} />
       </div>
     )
   }
@@ -355,6 +369,10 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
         title={t('schedule:title', { course: name })}
         description={t('schedule:description')}
       />
+
+      {coursesResource.error ? (
+        <ResourceError error={coursesResource.error} onRetry={coursesResource.refresh} />
+      ) : null}
 
       {linked ? null : (
         <Notice tone="warning" title={t('schedule:link.title')}>
