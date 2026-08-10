@@ -674,6 +674,14 @@ pub struct CreateReservationRequest {
     pub duration_minutes: i64,
     pub quantity: i32,
     pub customer_name: String,
+    #[serde(default)]
+    pub competition_name: Option<String>,
+    #[serde(default)]
+    pub organizer: Option<String>,
+    #[serde(default)]
+    pub group_number: Option<i32>,
+    #[serde(default)]
+    pub players: Vec<PartyPlayerDto>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -715,6 +723,17 @@ pub async fn create_reservation(
         catalog,
         state.caddie_shifts(),
     );
+    let party = party_from_request(
+        request.competition_name,
+        request.organizer,
+        request.group_number,
+        request
+            .players
+            .into_iter()
+            .map(|player| (player.name, player.tag, player.member_number))
+            .collect(),
+    )
+    .map_err(AppError::from)?;
     let id = use_case
         .execute(
             credentials,
@@ -732,6 +751,7 @@ pub async fn create_reservation(
                 duration_minutes: request.duration_minutes,
                 quantity: request.quantity,
                 customer_name: request.customer_name,
+                party,
             },
         )
         .await
@@ -1899,6 +1919,30 @@ pub async fn list_caddie_assignments(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_reservation_request_accepts_player_details() {
+        let request: CreateReservationRequest = serde_json::from_value(serde_json::json!({
+            "golfCourseId": "course-1",
+            "resourceId": "resource-1",
+            "date": "2026-08-12",
+            "teeTime": "07:30",
+            "durationMinutes": 270,
+            "quantity": 4,
+            "customerName": "山田 太郎",
+            "players": [{
+                "name": "増田 公陽",
+                "tag": "共通",
+                "memberNumber": "M-01"
+            }]
+        }))
+        .expect("create reservation request");
+
+        assert_eq!(request.players.len(), 1);
+        assert_eq!(request.players[0].name, "増田 公陽");
+        assert_eq!(request.players[0].tag.as_deref(), Some("共通"));
+        assert_eq!(request.players[0].member_number.as_deref(), Some("M-01"));
+    }
 
     fn params(ids: Option<&str>, id: Option<&str>) -> TeeLedgerQueryParams {
         TeeLedgerQueryParams {

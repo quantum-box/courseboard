@@ -82,7 +82,7 @@ function RouteContent({ route }: { route: string }) {
   if (route === 'golf/courses') return <CoursesPage />
   if (route.startsWith('golf/courses/')) {
     const segment = decodeRouteSegment(route.slice('golf/courses/'.length).split('/')[0] ?? '')
-    if (segment) return <CourseSchedulePage courseId={segment} />
+    if (segment) return <CourseSchedulePage key={segment} courseId={segment} />
   }
   // `golf/products/{serviceId}` opens that service's week; the bare route is the
   // list. `golf/reservation-products` is the older name for the same screens.

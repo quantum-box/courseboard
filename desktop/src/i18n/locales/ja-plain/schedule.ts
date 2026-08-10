@@ -4,7 +4,7 @@ import type { schedule as source } from '../ja/schedule'
 /** See `ja-plain/common.ts` for what this locale is for. */
 export const schedule: DeepPartial<typeof source> = {
   title: '予約を受ける時間 · {{course}}',
-  description: 'このコースを開ける時間と、同じ時間に出せる組の数、組と組の間の時間を決めます。ここで決めた内容から、日ごとのスタート時刻が作られます。',
+  description: 'このコースを開ける時間と、同じ時間に出せる組の数、組と組の間の時間を決めます。ここで決めた内容から、日ごとのスタート枠が作られます。',
   back: 'コースの一覧に戻る',
   eyebrow: 'コース',
   notLinked: {
@@ -13,7 +13,7 @@ export const schedule: DeepPartial<typeof source> = {
   },
   link: {
     title: 'このコースには、予約を受ける時間を置く場所がまだありません',
-    description: '時間と、そこから作るスタート時刻は、予約のリソースの上に置かれます。用意すると、このコース専用のリソースを作ってつなぎます。すでにある場合は作りません。',
+    description: '時間と、そこから作るスタート枠は、予約のリソースの上に置かれます。用意すると、このコース専用のリソースを作ってつなぎます。すでにある場合は作りません。',
     action: '置く場所を用意する',
     working: '用意しています…',
     done: {
@@ -47,15 +47,15 @@ export const schedule: DeepPartial<typeof source> = {
     order: '終わりは、始まりより後にしてください。',
     capacity: '組の数は 1 以上で入れてください。',
     interval: '組と組の間の時間は 1〜1440 分で入れてください。',
-    overlap: '同じ曜日で時間が重なっています。重なると、同じスタート時刻が2回作られます。',
+    overlap: '同じ曜日で時間が重なっています。重なると、同じスタート枠が2回作られます。',
   },
   save: '時間を保存する',
   saveFailed: '時間を保存できません',
   hasIssues: '{{n}} 本の時間に、まちがいがあります。赤い行を直してから保存してください。',
-  confirmRemove: 'この保存で {{n}} 本の時間がなくなります。これから作られるスタート時刻も止まります。進めますか。',
+  confirmRemove: 'この保存で {{n}} 本の時間がなくなります。これから作られるスタート枠も止まります。進めますか。',
   saved: {
     title: '時間を保存しました',
-    body: '{{course}} の1週間ぶんを入れかえました。つづけてスタート時刻を作ってください。',
+    body: '{{course}} の1週間ぶんを入れかえました。つづけてスタート枠を作ってください。',
   },
   pending: {
     title: '{{course}} · まだ保存していません',
@@ -70,17 +70,17 @@ export const schedule: DeepPartial<typeof source> = {
     discardOnLeave: '保存していない時間があります。捨てて、この画面を出ますか。',
   },
   generate: {
-    title: 'スタート時刻を作る',
-    description: '決めた時間から、日ごとのスタート時刻を作ります。作った分だけ予約を受けられて、いっぱいになると止まります。',
+    title: 'スタート枠を作る',
+    description: '決めた時間から、日ごとのスタート枠を作ります。作った分だけ予約を受けられて、いっぱいになると止まります。',
     badge: '在庫',
     from: 'はじめの日',
     to: 'おわりの日',
     preview: 'どうなるか見る',
     run: 'この内容で作る',
-    failed: 'スタート時刻を作れません',
+    failed: 'スタート枠を作れません',
     unsavedFirst: '先に時間を保存してください。保存していない分は作られません。',
     result: {
-      title: 'スタート時刻を作りました',
+      title: 'スタート枠を作りました',
       body: 'ふえた {{created}} · なおした {{updated}} · とめた {{deactivated}} · そのまま {{unchanged}}',
     },
     preview_result: {

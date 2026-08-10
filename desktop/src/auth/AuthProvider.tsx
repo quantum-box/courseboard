@@ -21,6 +21,7 @@ import {
 } from './types'
 import { resolveTenantSelection } from './tenant-selection'
 import { i18next } from '../i18n'
+import { clearResourceCache } from '../hooks/useResource'
 
 type AuthContextValue = {
   state: AuthState
@@ -113,6 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const denyAccess = useCallback(() => {
+    clearResourceCache()
     clearApiAuth()
     setState(current => current.status === 'ready'
       ? { status: 'forbidden', user: current.user, tenant: current.tenant }
@@ -120,6 +122,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [clearApiAuth])
 
   const signOut = useCallback(async (reason: AuthReason = 'logout') => {
+    clearResourceCache()
     clearApiAuth()
     clearLastReadySession()
     const notice = sessionExpiredNotice(reason)
@@ -172,6 +175,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return
         if (result.kind === 'anonymous') {
           const hadAuthenticatedSession = holdingSession || Boolean(heldPrevious)
+          clearResourceCache()
           clearApiAuth()
           clearLastReadySession()
           setAvailableTenants([])
@@ -205,12 +209,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .catch(error => {
         if (cancelled) return
         if (error instanceof AuthConfigurationError) {
+          clearResourceCache()
           clearApiAuth()
           setState({ status: 'unavailable', title: error.title, message: error.message })
           return
         }
         // Extension eligibility is unknown when profile revalidation fails.
         // Keep the Cognito session retryable, but never reactivate a stale tenant.
+        clearResourceCache()
         clearApiAuth()
         clearLastReadySession()
         setAvailableTenants([])
@@ -272,6 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ? state.user
       : undefined
     if (!currentUser || availableTenants.length === 0) return
+    clearResourceCache()
     clearApiAuth()
     replaceRequestedTenant()
     setState({ status: 'selecting-tenant', user: currentUser, tenants: availableTenants })

@@ -1,6 +1,45 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react'
+import { fieldPlatformId, fieldTenant } from '../api'
 
 const resourceCache = new Map<string, unknown>()
+const MAX_CACHE_ENTRIES = 128
+const CACHE_KEY_SEPARATOR = '\u0000'
+
+function scopedCacheKey(key: string) {
+  return `${fieldPlatformId()}:${fieldTenant()}${CACHE_KEY_SEPARATOR}${key}`
+}
+
+function logicalCacheKey(key: string) {
+  const separator = key.indexOf(CACHE_KEY_SEPARATOR)
+  return separator < 0 ? key : key.slice(separator + CACHE_KEY_SEPARATOR.length)
+}
+
+function cached<T>(key: string | null) {
+  if (!key || !resourceCache.has(key)) return undefined
+  const value = resourceCache.get(key) as T
+  // Reading refreshes recency so dynamic date/detail keys evict the least used
+  // page rather than the one the operator just revisited.
+  resourceCache.delete(key)
+  resourceCache.set(key, value)
+  return value
+}
+
+function cache(key: string, value: unknown) {
+  resourceCache.delete(key)
+  resourceCache.set(key, value)
+  while (resourceCache.size > MAX_CACHE_ENTRIES) {
+    const oldest = resourceCache.keys().next().value as string | undefined
+    if (!oldest) break
+    resourceCache.delete(oldest)
+  }
+}
 
 export type UseResourceOptions = {
   /**
@@ -19,17 +58,25 @@ export function clearResourceCache(prefix?: string) {
     return
   }
   for (const key of resourceCache.keys()) {
-    if (key === prefix || key.startsWith(prefix)) resourceCache.delete(key)
+    const logical = logicalCacheKey(key)
+    if (logical === prefix || logical.startsWith(prefix)) resourceCache.delete(key)
   }
 }
 
 /** Test helpers for the module-level cache. */
 export function peekResourceCache(key: string) {
-  return resourceCache.get(key)
+  return cached(scopedCacheKey(key))
 }
 
 export function writeResourceCache(key: string, value: unknown) {
-  resourceCache.set(key, value)
+  cache(scopedCacheKey(key), value)
+}
+
+type ResourceState<T> = {
+  key: string | null
+  data: T | null
+  error: unknown
+  loading: boolean
 }
 
 export function useResource<T>(
@@ -39,52 +86,125 @@ export function useResource<T>(
 ) {
   const loaderRef = useRef(loader)
   loaderRef.current = loader
-  const cacheKey = options.cacheKey ?? null
+  const logicalKey = options.cacheKey ?? null
+  const cacheKey = logicalKey ? scopedCacheKey(logicalKey) : null
   const enabled = options.enabled ?? true
-  const initialCached = cacheKey
-    ? resourceCache.get(cacheKey) as T | undefined
-    : undefined
-  const [data, setData] = useState<T | null>(initialCached ?? null)
-  const [error, setError] = useState<unknown>(null)
-  const [loading, setLoading] = useState(enabled && initialCached === undefined)
-  const [revision, setRevision] = useState(0)
+  const requestIdRef = useRef(0)
+  const initialCached = cached<T>(cacheKey)
+  const [state, setState] = useState<ResourceState<T>>({
+    key: cacheKey,
+    data: initialCached ?? null,
+    error: null,
+    loading: enabled && initialCached === undefined,
+  })
+  const stateRef = useRef(state)
+  stateRef.current = state
 
-  const refresh = useCallback(() => setRevision(value => value + 1), [])
+  const refresh = useCallback(async () => {
+    if (!enabled) {
+      setState(current => {
+        const next = { ...current, key: cacheKey, error: null, loading: false }
+        stateRef.current = next
+        return next
+      })
+      return undefined
+    }
+
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+    const cachedValue = cached<T>(cacheKey)
+    setState(current => {
+      const currentData = current.key === cacheKey ? current.data : null
+      const data = cachedValue ?? currentData
+      const next = {
+        key: cacheKey,
+        data,
+        error: null,
+        // A cached or already rendered value stays visible during revalidation.
+        loading: data === null,
+      }
+      stateRef.current = next
+      return next
+    })
+
+    try {
+      const value = await loaderRef.current()
+      if (requestIdRef.current !== requestId) return undefined
+      if (cacheKey) cache(cacheKey, value)
+      const next = { key: cacheKey, data: value, error: null, loading: false }
+      stateRef.current = next
+      setState(next)
+      return value
+    } catch (error) {
+      if (requestIdRef.current !== requestId) return undefined
+      setState(current => {
+        const next = {
+          key: cacheKey,
+          data: current.key === cacheKey ? current.data : (cachedValue ?? null),
+          error,
+          loading: false,
+        }
+        stateRef.current = next
+        return next
+      })
+      return undefined
+    }
+  }, [cacheKey, enabled])
 
   useEffect(() => {
     if (!enabled) {
-      setLoading(false)
-      setError(null)
+      requestIdRef.current += 1
+      setState(current => {
+        const next = { ...current, key: cacheKey, error: null, loading: false }
+        stateRef.current = next
+        return next
+      })
       return
     }
-    let active = true
-    const cached = cacheKey
-      ? resourceCache.get(cacheKey) as T | undefined
-      : undefined
-    if (cached !== undefined) {
-      setData(cached)
-      setLoading(false)
-    } else {
-      setLoading(true)
-    }
-    setError(null)
-    loaderRef.current()
-      .then(value => {
-        if (cacheKey) resourceCache.set(cacheKey, value)
-        if (active) setData(value)
-      })
-      .catch(reason => {
-        if (active) setError(reason)
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
+    void refresh()
     return () => {
-      active = false
+      requestIdRef.current += 1
     }
     // Consumers intentionally control reloads through the dependency list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...dependencies, revision, cacheKey, enabled])
+  }, [...dependencies, refresh])
 
-  return { data, setData, error, loading, refresh }
+  const setData: Dispatch<SetStateAction<T | null>> = useCallback(value => {
+    // A mutation result is newer than any revalidation that was already in
+    // flight; do not let that older response overwrite the confirmed write.
+    requestIdRef.current += 1
+    const current = stateRef.current
+    const previous = current.key === cacheKey
+      ? current.data
+      : (cached<T>(cacheKey) ?? null)
+    const data = typeof value === 'function'
+      ? (value as (current: T | null) => T | null)(previous)
+      : value
+    if (cacheKey) {
+      if (data === null) resourceCache.delete(cacheKey)
+      else cache(cacheKey, data)
+    }
+    const next = { key: cacheKey, data, error: null, loading: false }
+    stateRef.current = next
+    setState(next)
+  }, [cacheKey])
+
+  const currentCached = state.key === cacheKey ? undefined : cached<T>(cacheKey)
+  const current: ResourceState<T> = state.key === cacheKey
+    ? state
+    : {
+        key: cacheKey,
+        data: currentCached ?? null,
+        error: null,
+        loading: enabled && currentCached === undefined,
+      }
+  stateRef.current = current
+
+  return {
+    data: current.data,
+    setData,
+    error: current.error,
+    loading: current.loading,
+    refresh,
+  }
 }

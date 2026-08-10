@@ -15,6 +15,9 @@
   - [/v1/me proxyとextension連動テナント選択](src/tasks/in-progress/v1-me-proxy-extension-filter/task.md)
 
 - [Completed]()
+  - [v0.1.3]()
+    - [ページ遷移で前回表示をすぐ復元する](src/tasks/completed/v0.1.3/cached-page-navigation/task.md)
+    - [予約作成時にプレイヤー情報を入力する](src/tasks/completed/v0.1.3/reservation-create-player-details/task.md)
   - [v0.1.8]()
     - [CourseboardからFieldへのテナント文脈伝播を修正する](src/tasks/completed/v0.1.8/fix-courseboard-field-tenant-context/task.md)
   - [v0.1.6]()

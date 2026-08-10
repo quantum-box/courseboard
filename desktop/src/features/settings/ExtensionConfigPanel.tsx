@@ -1,5 +1,5 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
-import { RefreshCw, Save } from 'lucide-react'
+import { Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { i18next } from '../../i18n'
@@ -17,6 +17,14 @@ import {
 } from '../../components/Page'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
+import { clearResourceCache } from '../../hooks/useResource'
+import {
+  MAX_PLAYER_TAG_LENGTH,
+  MAX_PLAYER_TAG_OPTIONS,
+  normalizedPlayerTagOptions,
+  playerTagOptionDraftFromConfig,
+  validatePlayerTagOptions,
+} from '../golf/playerTagOptions'
 
 const extensionStatusPath = '/v1/course/extension-status'
 const extensionConfigPath = '/v1/course/config'
@@ -25,6 +33,7 @@ const currencyOptions = ['JPY', 'USD', 'EUR'] as const
 type ExtensionConfigDraft = {
   defaultCurrency: string
   timezone: string
+  playerTagOptions: string[]
 }
 
 type ExtensionStatus = {
@@ -39,9 +48,10 @@ type ExtensionStatus = {
 const defaultExtensionConfig: ExtensionConfigDraft = {
   defaultCurrency: 'JPY',
   timezone: COURSE_TIME_ZONE,
+  playerTagOptions: [],
 }
 
-function configDraftFromJson(configJson?: Record<string, unknown> | null): ExtensionConfigDraft {
+export function configDraftFromJson(configJson?: Record<string, unknown> | null): ExtensionConfigDraft {
   const defaultCurrency = typeof configJson?.defaultCurrency === 'string'
     ? configJson.defaultCurrency.trim()
     : ''
@@ -51,19 +61,34 @@ function configDraftFromJson(configJson?: Record<string, unknown> | null): Exten
   return {
     defaultCurrency: defaultCurrency || defaultExtensionConfig.defaultCurrency,
     timezone: timezone || defaultExtensionConfig.timezone,
+    playerTagOptions: playerTagOptionDraftFromConfig(configJson),
   }
 }
 
-function validateExtensionConfig(draft: ExtensionConfigDraft) {
+export function validateExtensionConfig(draft: ExtensionConfigDraft) {
   if (!draft.defaultCurrency.trim()) return i18next.t('settings:extension.validation.currencyRequired')
   if (!/^[A-Z]{3}$/.test(draft.defaultCurrency.trim())) {
     return i18next.t('settings:extension.validation.currencyFormat')
   }
   if (!draft.timezone.trim()) return i18next.t('settings:extension.validation.timezoneRequired')
+  const playerTagError = validatePlayerTagOptions(draft.playerTagOptions)
+  if (playerTagError === 'tooMany') {
+    return i18next.t('settings:extension.validation.playerTagsTooMany', {
+      max: String(MAX_PLAYER_TAG_OPTIONS),
+    })
+  }
+  if (playerTagError === 'tooLong') {
+    return i18next.t('settings:extension.validation.playerTagTooLong', {
+      max: String(MAX_PLAYER_TAG_LENGTH),
+    })
+  }
+  if (playerTagError === 'duplicate') {
+    return i18next.t('settings:extension.validation.playerTagsDuplicate')
+  }
   return null
 }
 
-function buildConfigJson(
+export function buildConfigJson(
   draft: ExtensionConfigDraft,
   previous?: Record<string, unknown> | null,
 ): Record<string, unknown> {
@@ -72,10 +97,12 @@ function buildConfigJson(
     : {}
   delete previousConfig.defaultCurrency
   delete previousConfig.timezone
+  delete previousConfig.playerTagOptions
   return {
     ...previousConfig,
     defaultCurrency: draft.defaultCurrency.trim(),
     timezone: draft.timezone.trim(),
+    playerTagOptions: normalizedPlayerTagOptions(draft.playerTagOptions),
   }
 }
 
@@ -137,6 +164,7 @@ export function ExtensionConfigPanel() {
   )
   const dirty = draft.defaultCurrency !== persisted.defaultCurrency
     || draft.timezone !== persisted.timezone
+    || JSON.stringify(draft.playerTagOptions) !== JSON.stringify(persisted.playerTagOptions)
   const knownCurrency = currencyOptions.includes(
     draft.defaultCurrency as (typeof currencyOptions)[number],
   )
@@ -157,6 +185,7 @@ export function ExtensionConfigPanel() {
       })
       setExtension(current => current ? { ...current, configJson } : current)
       setDraft(configDraftFromJson(configJson))
+      clearResourceCache('course:extension-status')
       showToast({
         tone: 'success',
         title: t('settings:extension.saved.title'),
@@ -273,6 +302,63 @@ export function ExtensionConfigPanel() {
               />
             </Field>
           </FormGrid>
+
+          <fieldset className="settings-option-field">
+            <legend>{t('settings:extension.playerTags')}</legend>
+            <p>{t('settings:extension.playerTagsHint')}</p>
+            <div className="settings-option-list">
+              {draft.playerTagOptions.map((option, index) => (
+                <div className="settings-option-row" key={index}>
+                  <Input
+                    value={option}
+                    maxLength={MAX_PLAYER_TAG_LENGTH + 1}
+                    aria-label={t('settings:extension.playerTagLabel', { n: String(index + 1) })}
+                    placeholder={t('settings:extension.playerTagPlaceholder')}
+                    onChange={event => {
+                      setDraft(current => ({
+                        ...current,
+                        playerTagOptions: current.playerTagOptions.map((value, at) =>
+                          at === index ? event.target.value : value,
+                        ),
+                      }))
+                      setSaveError(null)
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    aria-label={t('settings:extension.removePlayerTag', { n: String(index + 1) })}
+                    onClick={() => {
+                      setDraft(current => ({
+                        ...current,
+                        playerTagOptions: current.playerTagOptions.filter((_, at) => at !== index),
+                      }))
+                      setSaveError(null)
+                    }}
+                  >
+                    <Trash2 />
+                  </Button>
+                </div>
+              ))}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              disabled={draft.playerTagOptions.length >= MAX_PLAYER_TAG_OPTIONS}
+              onClick={() => {
+                setDraft(current => ({
+                  ...current,
+                  playerTagOptions: [...current.playerTagOptions, ''],
+                }))
+                setSaveError(null)
+              }}
+            >
+              <Plus />
+              {t('settings:extension.addPlayerTag')}
+            </Button>
+          </fieldset>
 
           {saveError ? (
             <Notice tone="danger" title={t('settings:extension.saveFailed')}>{saveError}</Notice>

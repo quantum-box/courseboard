@@ -58,6 +58,13 @@ describe('translation catalogues', () => {
     }
   })
 
+  it('uses start terminology instead of tee time in Japanese UI copy', () => {
+    for (const [name, catalogue] of [['ja', jaKeys], ['ja-plain', plainKeys]] as const) {
+      const teeTimes = [...catalogue.entries()].filter(([, text]) => text.includes('ティータイム'))
+      expect(teeTimes, `${name} uses ティータイム`).toEqual([])
+    }
+  })
+
   it('rewrites the copy that carries meaning into plain Japanese', () => {
     // ja-plain deliberately omits words that would read the same as ja (buttons
     // like 開く, 閉じる) and leans on the fallback. What it must not skip is the

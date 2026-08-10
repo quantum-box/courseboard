@@ -73,7 +73,7 @@ export const nav = {
     },
     'golf/courses': {
       label: 'コース',
-      description: 'コースの受付枠とティータイム',
+      description: 'コースの受付枠とスタート枠',
     },
     'golf/policy': {
       label: '予約ルール',

@@ -9,7 +9,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson } from '../../api'
 import { i18next } from '../../i18n'
@@ -30,6 +30,7 @@ import {
   type DataTableColumn,
 } from '../../components/Page'
 import { navigate } from '../../lib/router'
+import { useResource } from '../../hooks/useResource'
 import {
   courseToDraft,
   emptyCourseDraft,
@@ -119,9 +120,12 @@ function validateCourse(draft: GolfCourseDraft) {
 
 export function CoursesPage() {
   const { t } = useTranslation(['courses', 'common', 'nav'])
-  const [courses, setCourses] = useState<GolfCourse[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<unknown>(null)
+  const coursesResource = useResource(
+    () => courseboardApiJson<{ items: GolfCourse[] }>(coursesPath),
+    [],
+    { cacheKey: 'courses:list' },
+  )
+  const courses = coursesResource.data?.items ?? []
   const [editor, setEditor] = useState<EditorState>(null)
   const [draft, setDraft] = useState<GolfCourseDraft>(emptyCourseDraft)
   const [saving, setSaving] = useState(false)
@@ -133,24 +137,7 @@ export function CoursesPage() {
     showToast({ tone: 'success', title: i18next.t('common:state.saved'), message })
   }
 
-  const loadCourses = useCallback(async () => {
-    setLoading(true)
-    setLoadError(null)
-    try {
-      const response = await courseboardApiJson<{ items: GolfCourse[] }>(coursesPath)
-      setCourses(response.items)
-    } catch (error) {
-      setLoadError(error)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadCourses()
-  }, [loadCourses])
-
-  useRegisterPageReload(loadCourses)
+  useRegisterPageReload(coursesResource.refresh)
 
   function beginCreate() {
     setDraft(emptyCourseDraft())
@@ -191,23 +178,31 @@ export function CoursesPage() {
 
     try {
       if (editor.mode === 'create') {
-        await courseboardApiJson(coursesPath, {
+        const created = await courseboardApiJson<GolfCourse>(coursesPath, {
           method: 'POST',
           body: JSON.stringify(body),
         })
+        coursesResource.setData(current => ({
+          items: [...(current?.items ?? []), created],
+        }))
         saved(t('courses:notice.added', { name: body.name }))
       } else {
-        await courseboardApiJson(
+        const updated = await courseboardApiJson<GolfCourse>(
           `${coursesPath}/${encodeURIComponent(editor.courseId)}`,
           {
             method: 'PATCH',
             body: JSON.stringify(body),
           },
         )
+        coursesResource.setData(current => ({
+          items: (current?.items ?? []).map(course =>
+            course.id === updated.id ? updated : course,
+          ),
+        }))
         saved(t('courses:notice.updated', { name: body.name }))
       }
       setEditor(null)
-      await loadCourses()
+      await coursesResource.refresh()
     } catch (error) {
       setMutationError(errorMessage(error))
     } finally {
@@ -223,9 +218,12 @@ export function CoursesPage() {
         `${coursesPath}/${encodeURIComponent(course.id)}`,
         { method: 'DELETE' },
       )
+      coursesResource.setData(current => ({
+        items: (current?.items ?? []).filter(item => item.id !== course.id),
+      }))
       if (editor?.mode === 'edit' && editor.courseId === course.id) setEditor(null)
       saved(t('courses:notice.deleted', { name: course.name }))
-      await loadCourses()
+      await coursesResource.refresh()
     } catch (error) {
       // The editor is closed during a delete, so there is no form to put this
       // in; a toast is the only place it can be read without moving the table.
@@ -343,8 +341,8 @@ export function CoursesPage() {
           <ArrowLeft /> {t('common:action.backToSettings')}
         </Button>
         <PageRefreshButton
-          onClick={() => void loadCourses()}
-          loading={loading}
+          onClick={() => void coursesResource.refresh()}
+          loading={coursesResource.loading}
           label={t('common:action.refresh')}
         />
         <Button type="button" variant="primary" onClick={beginCreate}>
@@ -459,9 +457,13 @@ export function CoursesPage() {
         description={t('courses:list.description')}
         actions={<Badge variant="outline">{t('common:unit.count', { n: String(courses.length) })}</Badge>}
       >
-        {loading ? <LoadingState label={t('courses:loading')} /> : null}
-        {!loading && loadError ? <ResourceError error={loadError} onRetry={loadCourses} /> : null}
-        {!loading && !loadError ? (
+        {coursesResource.loading && !coursesResource.data
+          ? <LoadingState label={t('courses:loading')} />
+          : null}
+        {coursesResource.error
+          ? <ResourceError error={coursesResource.error} onRetry={coursesResource.refresh} />
+          : null}
+        {coursesResource.data ? (
           <DataTable
             rows={courses}
             columns={columns}

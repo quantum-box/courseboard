@@ -74,7 +74,7 @@ export const nav: DeepPartial<typeof source> = {
     },
     'golf/courses': {
       label: 'コース',
-      description: 'コースの予約を受ける時間と、スタート時刻',
+      description: 'コースの予約を受ける時間と、スタート枠',
     },
     'golf/policy': {
       label: '予約の決まりごと',
