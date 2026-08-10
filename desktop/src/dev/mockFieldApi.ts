@@ -1093,6 +1093,92 @@ function items<T>(values: T[]) {
   return { items: values }
 }
 
+/**
+ * The customer ledger, and the memberships held against it.
+ *
+ * Mutable because the whole point of the screens above them is adding a
+ * customer the desk could not find and granting a membership on the spot; a
+ * frozen fixture would let the forms be looked at but not walked through.
+ * A reload starts clean, same as the rest of this file.
+ */
+const mockCustomers: Array<Record<string, unknown>> = [
+  {
+    id: 'cus_honda',
+    name: '本田 康彦',
+    nameKana: 'ホンダ ヤスヒコ',
+    phone: '090-1234-5678',
+    email: 'honda@example.com',
+  },
+  {
+    id: 'cus_masuda',
+    name: '増田 公陽',
+    nameKana: 'マスダ キミハル',
+    phone: '090-2222-3333',
+  },
+  // No phone and no email: the walk-in nobody would otherwise write down.
+  // PLT-3358 is what makes this row possible at all.
+  { id: 'cus_tsuji', name: '辻 俊行', nameKana: 'ツジ トシユキ' },
+]
+
+const mockMembershipPlans: Array<Record<string, unknown>> = [
+  {
+    id: 'plan_full',
+    name: '正会員',
+    feeJpy: 120000,
+    active: true,
+    sortOrder: 0,
+  },
+  {
+    id: 'plan_weekday',
+    name: '平日会員',
+    feeJpy: 60000,
+    validDays: 365,
+    active: true,
+    sortOrder: 1,
+  },
+  // Retired, and still held by a member below: the settings screen has to show
+  // it, the booking screens must not offer it.
+  {
+    id: 'plan_shareholder',
+    name: '株主会員',
+    active: false,
+    sortOrder: 2,
+  },
+]
+
+/** customerId → planId. Absent means visitor, which is not a lesser state. */
+const mockMembershipAssignments = new Map<string, string>([
+  ['cus_honda', 'plan_full'],
+  ['cus_tsuji', 'plan_shareholder'],
+])
+
+function mockMembershipOf(customerId: string) {
+  const planId = mockMembershipAssignments.get(customerId)
+  const plan = planId
+    ? mockMembershipPlans.find(candidate => candidate.id === planId)
+    : undefined
+  return {
+    customerId,
+    // Mirrors the server: whether someone is a member is decided in one place
+    // and reported, never re-derived by the client from the plan's presence.
+    isMember: Boolean(plan),
+    ...(plan ? { plan, startedOn: '2026-04-01' } : {}),
+  }
+}
+
+/** Matches the server's search: name, kana, or phone, ignoring separators. */
+function mockCustomerMatches(customer: Record<string, unknown>, query: string) {
+  const needle = query.trim().toLowerCase()
+  if (!needle) return false
+  const digits = needle.replace(/[^0-9]/g, '')
+  const haystacks = [customer.name, customer.nameKana, customer.email]
+    .filter((value): value is string => typeof value === 'string')
+    .map(value => value.toLowerCase())
+  if (haystacks.some(value => value.includes(needle))) return true
+  const phone = typeof customer.phone === 'string' ? customer.phone.replace(/[^0-9]/g, '') : ''
+  return Boolean(digits) && phone.includes(digits)
+}
+
 function pathnameOf(path: string) {
   const normalized = path.startsWith('/') ? path : `/${path}`
   return normalized.split('?')[0] ?? normalized
@@ -1269,6 +1355,13 @@ function normalizeMockPath(pathname: string): string {
     || pathname === '/v1/course/caddie-rank-fees'
     || pathname.startsWith('/v1/course/caddie-shifts/')
     || pathname.startsWith('/v1/course/caddie-shift-plans/')
+    // The customer ledger and the memberships against it live in Field's own
+    // generic surfaces, not under the golf extension, so there is no
+    // `/v1/erp/extensions/golf-course/*` path to map these onto.
+    || pathname === '/v1/course/customers'
+    || pathname === '/v1/course/membership-plans'
+    || pathname.startsWith('/v1/course/customers/')
+    || pathname.startsWith('/v1/course/membership-plans/')
   ) {
     return pathname
   }
@@ -1676,6 +1769,29 @@ function resolveGet(path: string): Json | null | undefined {
 
   if (pathname === '/v1/course/booking-horizon') {
     return { days: mockBookingHorizonDays, bookableThrough: mockBookableThrough() }
+  }
+
+  if (pathname === '/v1/course/customers') {
+    const query = url.searchParams.get('name')
+      || url.searchParams.get('phone')
+      || url.searchParams.get('email')
+      || ''
+    // The server answers 400 for a search with nothing in it, which this
+    // resolver has no way to express. No screen sends one — both the picker
+    // and the ledger page hold the request until something is typed — so an
+    // empty result is the closest honest stand-in.
+    if (!query.trim()) return items([])
+    return items(mockCustomers.filter(customer => mockCustomerMatches(customer, query)))
+  }
+
+  if (pathname === '/v1/course/membership-plans') {
+    const includeInactive = url.searchParams.get('includeInactive') === 'true'
+    return items(mockMembershipPlans.filter(plan => includeInactive || plan.active === true))
+  }
+
+  const customerMembershipMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)\/membership$/)
+  if (customerMembershipMatch) {
+    return mockMembershipOf(decodeURIComponent(customerMembershipMatch[1] ?? ''))
   }
 
   if (rawPathname === '/v1/course/extension-status') {
@@ -2115,6 +2231,68 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   const pathname = normalizeMockPath(pathnameOf(path))
   const method = methodOf(init)
   const body = parseBody(init) as Record<string, unknown> | undefined
+
+  if (pathname === '/v1/course/customers' && method === 'POST') {
+    const name = typeof body?.name === 'string' ? body.name.trim() : ''
+    if (!name) return error(400, 'customer name is required')
+    const created = {
+      id: `cus_mock_${mockCustomers.length + 1}`,
+      name,
+      ...(typeof body?.nameKana === 'string' && body.nameKana.trim()
+        ? { nameKana: body.nameKana.trim() }
+        : {}),
+      ...(typeof body?.phone === 'string' && body.phone.trim()
+        ? { phone: body.phone.trim() }
+        : {}),
+      ...(typeof body?.email === 'string' && body.email.trim()
+        ? { email: body.email.trim() }
+        : {}),
+    }
+    mockCustomers.push(created)
+    return hit(created)
+  }
+
+  if (pathname === '/v1/course/membership-plans' && method === 'POST') {
+    const name = typeof body?.name === 'string' ? body.name.trim() : ''
+    if (!name) return error(400, 'plan name is required')
+    const created = {
+      id: `plan_mock_${mockMembershipPlans.length + 1}`,
+      name,
+      description: body?.description ?? null,
+      feeJpy: body?.feeJpy ?? null,
+      validDays: body?.validDays ?? null,
+      active: true,
+      sortOrder: typeof body?.sortOrder === 'number' ? body.sortOrder : mockMembershipPlans.length,
+    }
+    mockMembershipPlans.push(created)
+    return hit(created)
+  }
+
+  const planWriteMatch = pathname.match(/^\/v1\/course\/membership-plans\/([^/]+)$/)
+  if (planWriteMatch && method === 'PATCH') {
+    const planId = decodeURIComponent(planWriteMatch[1] ?? '')
+    const plan = mockMembershipPlans.find(candidate => candidate.id === planId)
+    if (!plan) return error(404, 'membership plan not found')
+    if (typeof body?.name === 'string') plan.name = body.name.trim()
+    // Explicit null clears the value, which is how the editor empties a fee.
+    if ('description' in (body ?? {})) plan.description = body?.description ?? null
+    if ('feeJpy' in (body ?? {})) plan.feeJpy = body?.feeJpy ?? null
+    if ('validDays' in (body ?? {})) plan.validDays = body?.validDays ?? null
+    if (typeof body?.active === 'boolean') plan.active = body.active
+    if (typeof body?.sortOrder === 'number') plan.sortOrder = body.sortOrder
+    return hit(plan)
+  }
+
+  const membershipGrantMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)\/membership$/)
+  if (membershipGrantMatch && method === 'POST') {
+    const customerId = decodeURIComponent(membershipGrantMatch[1] ?? '')
+    const planId = typeof body?.planId === 'string' ? body.planId : ''
+    if (!mockMembershipPlans.some(plan => plan.id === planId)) {
+      return error(404, 'membership plan not found')
+    }
+    mockMembershipAssignments.set(customerId, planId)
+    return hit(mockMembershipOf(customerId))
+  }
 
   // Desk marks and group detail are CourseBoard's own writes, so they never
   // reach a Field path; keeping them in the fixture store lets the ledger's

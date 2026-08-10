@@ -21,6 +21,10 @@ export const nav: DeepPartial<typeof source> = {
       label: 'Start ledger',
       description: 'What is open and who is out, by tee time',
     },
+    'golf/customers': {
+      label: 'Customers',
+      description: 'Members and visitors',
+    },
     'golf/timeline': {
       label: 'Timeline',
       description: "Today's bookings and caddies in time order",

@@ -12,6 +12,8 @@ export type CustomerList = {
   items: Customer[]
 }
 
+export const customersPath = '/v1/course/customers'
+
 /**
  * How a candidate is told apart from the others sharing its name.
  *

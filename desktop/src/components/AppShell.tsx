@@ -32,6 +32,7 @@ import {
 } from '@tachyon-sdk/native-ui'
 import {
   BarChart3,
+  BookUser,
   Building2,
   CalendarCheck,
   CalendarDays,
@@ -92,6 +93,7 @@ import { WorkspaceHelpPanel } from './WorkspaceHelp'
 export type NavigationRoute =
   | 'golf'
   | 'golf/ledger'
+  | 'golf/customers'
   | 'golf/timeline'
   | 'golf/products'
   | 'course-map'
@@ -135,6 +137,9 @@ export const navigationSections: NavigationSection[] = [
       // of the same day, so the ledger comes first.
       { route: 'golf/ledger', icon: Table2 },
       { route: 'golf/timeline', icon: CalendarRange },
+      // The ledger of people, beside the ledger of tee times. Members are read
+      // off it, and a visitor's second visit only registers because it exists.
+      { route: 'golf/customers', icon: BookUser },
       { route: 'golf/products', icon: CalendarCheck },
       // Courses stopped being a one-time master when the bookable week moved
       // onto them: opening hours and tee-time generation are seasonal work.

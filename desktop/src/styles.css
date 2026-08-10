@@ -5230,9 +5230,92 @@ button,
   gap: 6px;
 }
 
+/* The badge holds a plan name the club invented, so it can be any length, and
+ * it sits in rows that are already tight. Without these it wraps one character
+ * per line and "正会員" reads as a column. */
+.ledger-membership > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
 .ledger-membership__loading {
   font-size: 11px;
   opacity: .7;
+}
+
+.customer-ledger-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.customer-ledger-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid hsl(var(--nui-border) / .6);
+}
+
+.customer-ledger-row.is-selected {
+  background: hsl(var(--nui-accent) / .08);
+}
+
+.customer-ledger-row__pick {
+  display: grid;
+  gap: 2px;
+  padding: 8px 6px;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+
+.customer-ledger-row__name {
+  font-weight: 600;
+}
+
+.customer-ledger-row__detail {
+  font-size: 12px;
+  opacity: .75;
+}
+
+.customer-ledger-detail {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  align-items: center;
+}
+
+.customer-ledger-detail dt {
+  font-size: 12px;
+  opacity: .7;
+}
+
+.customer-ledger-detail dd {
+  margin: 0;
+}
+
+.customer-ledger-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .customer-ledger-detail {
+    grid-template-columns: 1fr;
+    gap: 2px 0;
+  }
+
+  .customer-ledger-detail dd {
+    margin-bottom: 8px;
+  }
 }
 
 .membership-plan-list {
