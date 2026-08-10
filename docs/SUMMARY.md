@@ -8,10 +8,13 @@
   - [ADR-0003: Courseboardの人間ユーザーtoken issuerをCognitoに統一する](src/architecture/decisions/ADR-0003-cognito-human-token-issuer.md)
   - [ADR-0004: UIのplatform APIアクセスはcourseboard-apiを経由する](src/architecture/decisions/ADR-0004-ui-platform-api-access-via-courseboard-api.md)
   - [ADR-0005: ゴルフドメイン知識はCourseBoardが所有する](src/architecture/decisions/ADR-0005-golf-domain-ownership.md)
+  - [ADR-0006: 日次サマリは集約需要として扱いダミー予約を作らない](src/architecture/decisions/ADR-0006-aggregate-caddie-demand-without-dummy-reservations.md)
 
 # Tasks
 
 - [In Progress]()
+  - [PLT-3339 日次サマリを必要キャディ数と割当に接続する](src/tasks/in-progress/plt-3339-daily-summary-caddie-demand/task.md)
+    - [設計](src/tasks/in-progress/plt-3339-daily-summary-caddie-demand/design.md)
   - [/v1/me proxyとextension連動テナント選択](src/tasks/in-progress/v1-me-proxy-extension-filter/task.md)
 
 - [Completed]()
