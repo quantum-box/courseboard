@@ -1476,7 +1476,18 @@ mod tests {
             quantity: 4,
             customer_name: "山田 太郎".into(),
             golf_course_id: CourseId::new("course-1"),
-            party: PartyDetails::default(),
+            party: PartyDetails::try_new(
+                None,
+                None,
+                None,
+                vec![crate::course::domain::PartyPlayer::try_new(
+                    "増田 公陽",
+                    Some("共通".into()),
+                    Some("M-01".into()),
+                )
+                .unwrap()],
+            )
+            .unwrap(),
             prepayment_policy: Some("none".into()),
             seed_key: None,
         }
@@ -1544,6 +1555,18 @@ mod tests {
         assert_eq!(body["resourceId"], "resource-1");
         assert_eq!(body["prepaymentPolicy"], "none");
         assert_eq!(body["quantity"], 4);
+        assert_eq!(
+            body["customFields"]["golfParty"]["players"][0]["name"],
+            "増田 公陽"
+        );
+        assert_eq!(
+            body["customFields"]["golfParty"]["players"][0]["tag"],
+            "共通"
+        );
+        assert_eq!(
+            body["customFields"]["golfParty"]["players"][0]["memberNumber"],
+            "M-01"
+        );
     }
 
     #[test]

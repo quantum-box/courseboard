@@ -11,6 +11,7 @@ import type { TeeReservation } from '../timeline/models'
 import { DiscardGuard } from './DiscardGuard'
 import { MAX_PARTY_PLAYERS, MAX_SEAT_COLUMNS } from './ledgerLayout'
 import type { PartyDetails, PartyPlayer } from './models'
+import { PlayerTagInput } from './PlayerTagInput'
 
 /** A row being edited. Blank rows are dropped on save rather than refused. */
 type DraftPlayer = { name: string; tag: string; memberNumber: string }
@@ -48,10 +49,12 @@ function toPlayers(draft: DraftPlayer[]): PartyPlayer[] {
  */
 export function PartyEditor({
   reservation,
+  playerTagOptions,
   onClose,
   onSaved,
 }: {
   reservation: TeeReservation | null
+  playerTagOptions: string[]
   onClose: () => void
   onSaved: (reservationId: string, party: PartyDetails) => void
 }) {
@@ -196,13 +199,13 @@ export function PartyEditor({
                 />
               </Field>
               <Field label={t('ledger:party.playerTag')}>
-                <Input
+                <PlayerTagInput
                   value={player.tag}
-                  placeholder={t('ledger:party.playerTagPlaceholder')}
-                  onChange={event =>
+                  options={playerTagOptions}
+                  onChange={value =>
                     setPlayers(rows =>
                       rows.map((row, at) =>
-                        at === index ? { ...row, tag: event.target.value } : row,
+                        at === index ? { ...row, tag: value } : row,
                       ),
                     )
                   }

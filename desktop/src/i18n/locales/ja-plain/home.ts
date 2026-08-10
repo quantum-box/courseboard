@@ -5,14 +5,22 @@ import type { home as source } from '../ja/home'
 export const home: DeepPartial<typeof source> = {
   title: '最初の画面',
   description: '今日の仕事は、この画面から始めます。',
-  openTimeline: '今日の予定表を開く',
+  launcher: {
+    eyebrow: '今日の仕事',
+    title: '何をしますか',
+    description: '下の四角から、これからする仕事を選んでください。',
+    featured: 'よく使う仕事',
+  },
+  features: {
+    title: 'そのほかの仕事',
+  },
   flow: {
     title: '今日の進めかた',
     description: '上から順に進めてください。前の画面で入れた内容が、次の画面にそのまま引き継がれます。',
     steps: {
-      timeline: {
-        label: '今日の予定表',
-        detail: '今日の予約と、だれが担当かを見ます',
+      ledger: {
+        label: '予約台帳',
+        detail: '今日の予約と、空いているスタートを見ます',
       },
       dispatch: {
         label: 'キャディの担当決め',

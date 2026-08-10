@@ -1,17 +1,22 @@
 export const home = {
   title: 'ホーム',
   description: '今日の仕事はここから始めます。',
-  openTimeline: '今日のタイムラインを開く',
+  launcher: {
+    eyebrow: '今日の業務',
+    title: 'どこから始めますか',
+    description: '予約の確認からキャディ配置、精算まで、行う仕事を選んでください。',
+    featured: 'よく使う業務',
+  },
   features: {
-    title: 'できること',
+    title: 'そのほかの業務',
   },
   flow: {
     title: '今日の進めかた',
     description: '上から順に進めると、同じ予約データがそのまま次の画面に引き継がれます。',
     steps: {
-      timeline: {
-        label: 'タイムライン',
-        detail: '今日の予約とキャディの割当を確認する',
+      ledger: {
+        label: '予約台帳',
+        detail: '今日の予約とスタート枠を確認する',
       },
       dispatch: {
         label: 'キャディの配置',

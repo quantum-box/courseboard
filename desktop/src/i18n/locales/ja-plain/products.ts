@@ -88,7 +88,7 @@ export const products: DeepPartial<typeof source> = {
   },
   inventory: {
     title: '予約を受ける時間',
-    description: '予約を受ける時間は、コースが持ちます。同じコースで売るプランは同じスタート時刻を分け合うので、コースの側で決めます。',
+    description: '予約を受ける時間は、コースが持ちます。同じコースで売るプランは同じスタート枠を分け合うので、コースの側で決めます。',
     open: '{{course}} の時間を開く',
     needsCourse: {
       title: 'コースを決めると開けます',

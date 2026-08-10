@@ -647,7 +647,7 @@ export function CaddiesPage({
   const profilesResource = useResource(
     () => courseboardApiJson<CaddieRosterResponse>(`${COURSE_API}/caddie-profiles`),
     [],
-    { enabled: view !== 'payroll' },
+    { enabled: view !== 'payroll', cacheKey: 'caddie-profiles:list' },
   )
   const loadPlan = caddieLoadPlan(
     view,
@@ -672,19 +672,25 @@ export function CaddiesPage({
       `${COURSE_API}/caddie-recommendations?playerCount=4&includeRookiePairing=true&limit=5`,
     ),
     [],
-    { enabled: loadPlan.recommendations },
+    {
+      enabled: loadPlan.recommendations,
+      cacheKey: 'caddie-recommendations:default',
+    },
   )
   const coursesResource = useResource(
     () => courseboardApiJson<ListResponse<GolfCourse>>(`${COURSE_API}/courses`),
     [],
-    { enabled: loadPlan.courses },
+    { enabled: loadPlan.courses, cacheKey: 'courses:list' },
   )
   const attendanceResource = useResource(
     () => courseboardApiJson<AttendanceResponse>(
       `${COURSE_API}/caddie-attendance-snapshot?date=${encodeURIComponent(operationDate)}`,
     ),
     [operationDate],
-    { enabled: loadPlan.attendance },
+    {
+      enabled: loadPlan.attendance,
+      cacheKey: `caddie-attendance:${operationDate}`,
+    },
   )
   const staffResource = useMemo<ResourceValue<ListResponse<StaffMember>>>(
     () => ({
@@ -2173,7 +2179,7 @@ function ProfilesView({
         {profilesResource.error ? (
           <ResourceError error={profilesResource.error} onRetry={profilesResource.refresh} />
         ) : null}
-        {!profilesResource.loading && !profilesResource.error ? (
+        {profilesResource.data ? (
           <DataTable
             rows={filtered}
             columns={columns}
@@ -3463,6 +3469,7 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
       `${COURSE_API}/caddie-payroll-summary?yearMonth=${encodeURIComponent(yearMonth)}`,
     ),
     [yearMonth],
+    { cacheKey: `caddie-payroll:${yearMonth}` },
   )
   useRegisterPageReload(resource.refresh)
   const rows = resource.data?.items ?? []
@@ -3569,7 +3576,7 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
           </div>
         )}
       >
-        {resource.loading ? <LoadingState label={t('caddies:payroll.loading')} /> : null}
+        {resource.loading && !resource.data ? <LoadingState label={t('caddies:payroll.loading')} /> : null}
         {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
         {resource.data ? (
           <div className="space-y-4">

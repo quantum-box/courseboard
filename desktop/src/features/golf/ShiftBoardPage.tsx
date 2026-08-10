@@ -145,6 +145,8 @@ export function ShiftBoardPage() {
       () => courseboardApiJson<ListResponse<CaddieProfile>>(`${COURSE_API}/caddie-profiles`),
       [],
     ),
+    [],
+    { cacheKey: 'caddie-profiles:list' },
   )
   const availabilityResource = useResource(
     useCallback(
@@ -153,6 +155,8 @@ export function ShiftBoardPage() {
       ),
       [range.from, range.to],
     ),
+    [range.from, range.to],
+    { cacheKey: `caddie-availabilities:${range.from}:${range.to}` },
   )
   const assignmentsResource = useResource(
     useCallback(
@@ -161,6 +165,8 @@ export function ShiftBoardPage() {
       ),
       [range.from, range.to],
     ),
+    [range.from, range.to],
+    { cacheKey: `caddie-assignments:${range.from}:${range.to}` },
   )
   const deadlineResource = useResource(
     useCallback(
@@ -169,6 +175,8 @@ export function ShiftBoardPage() {
       ),
       [yearMonth],
     ),
+    [yearMonth],
+    { cacheKey: `caddie-availability-deadline:${yearMonth}` },
   )
   const unsubmittedResource = useResource(
     useCallback(
@@ -177,6 +185,8 @@ export function ShiftBoardPage() {
       ),
       [yearMonth],
     ),
+    [yearMonth],
+    { cacheKey: `caddie-availability-submissions:${yearMonth}` },
   )
   const shiftsResource = useResource(
     useCallback(
@@ -272,17 +282,28 @@ export function ShiftBoardPage() {
   }, [rulesResource.refresh, t])
 
   const saveDeadline = useCallback(async (deadlineDate: string) => {
-    await courseboardApiJson<AvailabilityDeadline>(
+    const saved = await courseboardApiJson<AvailabilityDeadline>(
       `${COURSE_API}/caddie-availability-deadlines/${yearMonth}`,
       { method: 'PUT', body: JSON.stringify({ deadlineDate }) },
     )
-    deadlineResource.refresh()
-  }, [yearMonth, deadlineResource.refresh])
+    deadlineResource.setData(saved)
+  }, [yearMonth, deadlineResource.setData])
 
   const showCurrentWeek = useCallback(() => {
     setYearMonth(today().slice(0, 7))
     setCurrentWeekRequest(request => request + 1)
   }, [setYearMonth])
+
+  const resources = [
+    profilesResource,
+    availabilityResource,
+    assignmentsResource,
+    deadlineResource,
+    unsubmittedResource,
+  ]
+  const refreshError = resources.find(resource => resource.error)?.error
+  const loading = [profilesResource, availabilityResource, assignmentsResource]
+    .some(resource => resource.loading && !resource.data)
 
   return (
     <div className="page-stack shift-board-page">
@@ -338,10 +359,8 @@ export function ShiftBoardPage() {
           confirmedShifts={shiftsResource.data?.items ?? []}
           courses={coursesResource.data?.items ?? []}
           unsubmittedCaddies={unsubmittedResource.data?.items ?? []}
-          loading={profilesResource.loading
-            || availabilityResource.loading
-            || assignmentsResource.loading}
-          error={profilesResource.error ?? availabilityResource.error ?? assignmentsResource.error}
+          loading={loading}
+          error={refreshError}
           onRetry={refresh}
           currentWeekRequest={currentWeekRequest}
           onShowCurrentWeek={showCurrentWeek}
@@ -757,7 +776,7 @@ function ShiftBoardResults({
       {loading && rows.length === 0 ? <LoadingState label={t('shifts:loading')} /> : null}
       {error ? <ResourceError error={error} onRetry={onRetry} /> : null}
 
-      {!error && rows.length > 0 ? (
+      {rows.length > 0 ? (
         <Panel>
           {!hasAnyPlan ? (
             <EmptyState title={t('shifts:empty.title')} description={t('shifts:empty.description')} />

@@ -47,6 +47,7 @@ import {
   CreditCard,
   FolderTree,
   Gauge,
+  House,
   IdCard,
   Languages,
   LogOut,
@@ -167,6 +168,20 @@ export const navigationSections: NavigationSection[] = [
     ],
   },
 ]
+
+/**
+ * Screens kept available by direct links, the home screen, and search, but not
+ * promoted in the daily sidebar. The timeline may return here when the start
+ * desk workflow has a clear owner and purpose.
+ */
+const sidebarHiddenRoutes = new Set<NavigationRoute>(['golf/timeline'])
+
+export const sidebarNavigationSections: NavigationSection[] = navigationSections
+  .map(section => ({
+    ...section,
+    items: section.items.filter(item => !sidebarHiddenRoutes.has(item.route)),
+  }))
+  .filter(section => section.items.length > 0)
 
 /**
  * Rarely-touched tenant masters live under Settings, not the daily sidebar.
@@ -320,7 +335,9 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   const pinnedItems = useMemo(
     () => pinnedRoutes
       .map(pinnedRoute => (
-        allNavigation.find(item => item.route === pinnedRoute)
+        allNavigation.find(item => (
+          item.route === pinnedRoute && !sidebarHiddenRoutes.has(item.route)
+        ))
         ?? settingsNavigation.find(item => item.route === pinnedRoute)
       ))
       .filter((item): item is NavigationItem => Boolean(item)),
@@ -330,7 +347,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   const pinnedRouteSet = useMemo(() => new Set(pinnedRoutes), [pinnedRoutes])
 
   const unpinnedSections = useMemo(
-    () => navigationSections
+    () => sidebarNavigationSections
       .map(section => ({
         ...section,
         items: section.items.filter(item => !pinnedRouteSet.has(item.route)),
@@ -761,17 +778,35 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
             </Button>
             {/* Hovering the window edge is not discoverable on its own. */}
             {collapsed ? (
-              <Button
-                ref={sidebarOpenTriggerRef}
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="desktop-sidebar-open"
-                aria-label={t('nav:sidebar.expand')}
-                onClick={() => setCollapsed(false)}
-              >
-                <PanelLeft />
-              </Button>
+              <div className="desktop-collapsed-actions">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="desktop-home-shortcut"
+                      aria-label={navLabel('golf')}
+                      data-active={route === 'golf' ? true : undefined}
+                      onClick={event => navigateFromClick(event, 'golf')}
+                    >
+                      <House />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">{navLabel('golf')}</TooltipContent>
+                </Tooltip>
+                <Button
+                  ref={sidebarOpenTriggerRef}
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="desktop-sidebar-open"
+                  aria-label={t('nav:sidebar.expand')}
+                  onClick={() => setCollapsed(false)}
+                >
+                  <PanelLeft />
+                </Button>
+              </div>
             ) : null}
             <div className="workspace-title" data-tauri-drag-region>{title}</div>
             <div className="workspace-context">
