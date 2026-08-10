@@ -175,6 +175,7 @@ export function LedgerPage() {
         ListResponse<{
           reservationServiceId: string
           displayName?: string | null
+          playType?: string | null
           expectedDurationMinutes: number
           golfCourseId?: string | null
           maxPlayersPerGroup?: number | null
@@ -266,6 +267,7 @@ export function LedgerPage() {
   const bookablePlans: BookablePlan[] = (productsResource.data?.items ?? []).map(product => ({
     reservationServiceId: product.reservationServiceId,
     label: product.displayName?.trim() || product.reservationServiceId,
+    playType: product.playType === 'caddie' ? 'caddie' : 'self',
     expectedDurationMinutes: product.expectedDurationMinutes,
     golfCourseId: product.golfCourseId,
     maxPlayersPerGroup: product.maxPlayersPerGroup,

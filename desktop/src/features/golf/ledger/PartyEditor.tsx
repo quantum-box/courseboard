@@ -185,7 +185,7 @@ export function PartyEditor({
           <h3>{t('ledger:party.players')}</h3>
           {players.map((player, index) => (
             <div className="ledger-party-player" key={index}>
-              <Field label={t('ledger:party.playerName')}>
+              <Field className="ledger-party-field-name" label={t('ledger:party.playerName')}>
                 <Input
                   value={player.name}
                   placeholder={t('ledger:party.playerNamePlaceholder')}
@@ -198,7 +198,7 @@ export function PartyEditor({
                   }
                 />
               </Field>
-              <Field label={t('ledger:party.playerTag')}>
+              <Field className="ledger-party-field-tag" label={t('ledger:party.playerTag')}>
                 <PlayerTagInput
                   value={player.tag}
                   options={playerTagOptions}
@@ -211,7 +211,7 @@ export function PartyEditor({
                   }
                 />
               </Field>
-              <Field label={t('ledger:party.memberNumber')}>
+              <Field className="ledger-party-field-member" label={t('ledger:party.memberNumber')}>
                 <Input
                   value={player.memberNumber}
                   onChange={event =>
@@ -227,6 +227,7 @@ export function PartyEditor({
                 type="button"
                 variant="ghost"
                 size="sm"
+                className="ledger-party-remove"
                 aria-label={t('ledger:party.removePlayer')}
                 onClick={() => setPlayers(rows => rows.filter((_, at) => at !== index))}
               >
