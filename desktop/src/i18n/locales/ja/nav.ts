@@ -36,7 +36,7 @@ export const nav = {
       description: 'キャディの情報と休みの希望',
     },
     'golf/caddies/dispatch': {
-      label: '今日の配置',
+      label: 'キャディの配置',
       description: 'だれがどの組につくかを決める',
     },
     'golf/caddies/attendance': {

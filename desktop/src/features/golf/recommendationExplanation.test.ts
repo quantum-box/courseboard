@@ -60,6 +60,6 @@ describe('recommendation explanation', () => {
 
   it('puts an exhausted daily limit in the one-line explanation', () => {
     expect(recommendationSummary(candidate({ remainingRounds: 0 })))
-      .toContain('今日はもう担当できません')
+      .toContain('この日はもう担当できません')
   })
 })

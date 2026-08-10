@@ -20,7 +20,7 @@ describe('getPageHelp', () => {
 
   it('maps caddie detail routes to the roster guide, and subviews to their own', () => {
     expect(getPageHelp('golf/caddies/profile-1').title).toBe('キャディ名簿')
-    expect(getPageHelp('golf/caddies/dispatch').title).toBe('今日の配置')
+    expect(getPageHelp('golf/caddies/dispatch').title).toBe('キャディの配置')
     expect(getPageHelp('golf/caddies/attendance').title).toBe('出勤')
     expect(getPageHelp('golf/caddies/payroll').title).toBe('給与')
   })

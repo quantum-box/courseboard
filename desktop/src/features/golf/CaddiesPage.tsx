@@ -51,6 +51,7 @@ import {
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import {
+  CollapsibleSection,
   DataTable,
   EmptyState,
   Field,
@@ -895,57 +896,39 @@ function DispatchView({
   const attendance = attendanceResource.data?.items ?? []
   const attendanceById = attendanceLookup(attendance)
   const dayAssignments = assignments.filter(item => dateKey(item.scheduledAt) === date)
-  const activeAssignments = dayAssignments.filter(item => item.status !== 'cancelled')
-  const working = attendance.filter(item => item.attendanceStatus === 'working').length
-  const waiting = activeAssignments.filter(item =>
-    ['pending', 'requested', 'draft'].includes(item.status),
-  ).length
 
+  // Deciding who walks each group is the whole job of this screen, so the day
+  // picker, the groups still missing somebody and the automatic run come first
+  // and the settled assignments follow. The figures consulted while deciding —
+  // sellable capacity, the per-course balance, the ranked roster — are one
+  // click away instead of pushing the work below the fold.
   return (
     <div className="space-y-6">
+      <div className="page-toolbar">
+        <Input
+          type="date"
+          aria-label={t('caddies:operationDate')}
+          className="w-full sm:w-44"
+          value={date}
+          onChange={event => onDateChange(event.target.value)}
+        />
+      </div>
+
+      <UnassignedRoundsPanel
+        date={date}
+        assignments={dayAssignments}
+        onChanged={onChanged}
+      />
+
+      <AutoAssignPanel
+        date={date}
+        attendance={attendanceById}
+        onChanged={onChanged}
+        setFlash={setFlash}
+      />
+
       <section className="app-section space-y-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 className="section-title">{t('caddies:dispatch.boardTitle')}</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {t('caddies:dispatch.boardDescription', { date })}
-            </p>
-          </div>
-          <Field label={t('caddies:operationDate')} requirement="none" className="w-full sm:w-44">
-            <Input
-              type="date"
-              aria-label={t('caddies:operationDate')}
-              value={date}
-              onChange={event => onDateChange(event.target.value)}
-              />
-          </Field>
-        </div>
-        <MetricGrid>
-          <Metric
-            label={t('caddies:dispatch.metrics.registered')}
-            value={t('caddies:people', { n: String(profiles.length) })}
-            detail={t('caddies:dispatch.metrics.registeredDetail')}
-          />
-          <Metric
-            label={t('caddies:dispatch.metrics.working')}
-            value={t('caddies:people', { n: String(working) })}
-            detail={t('caddies:dispatch.metrics.workingDetail', { n: String(attendance.length) })}
-            tone={working > 0 ? 'success' : 'warning'}
-          />
-          <Metric
-            label={t('caddies:dispatch.metrics.todayAssignments')}
-            value={t('caddies:groups', { n: String(activeAssignments.length) })}
-            detail={t('caddies:dispatch.metrics.todayAssignmentsDetail', {
-              n: String(dayAssignments.length - activeAssignments.length),
-            })}
-          />
-          <Metric
-            label={t('caddies:dispatch.metrics.needsCheck')}
-            value={t('caddies:items', { n: String(waiting) })}
-            detail={t('caddies:dispatch.metrics.needsCheckDetail')}
-            tone={waiting > 0 ? 'warning' : 'success'}
-          />
-        </MetricGrid>
+        <h2 className="section-title">{t('caddies:dispatch.boardTitle')}</h2>
         {assignmentsResource.loading ? <LoadingState label={t('caddies:dispatch.loading')} /> : null}
         {assignmentsResource.error ? (
           <ResourceError error={assignmentsResource.error} onRetry={assignmentsResource.refresh} />
@@ -960,34 +943,14 @@ function DispatchView({
         ) : null}
       </section>
 
-      <UnassignedRoundsPanel
-        date={date}
-        assignments={dayAssignments}
-        onChanged={onChanged}
-      />
-
-      <section className="app-section space-y-4">
-        <div>
-          <h2 className="section-title">{t('caddies:dispatch.supportTitle')}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t('caddies:dispatch.supportDescription')}
-          </p>
-        </div>
+      <CollapsibleSection title={t('caddies:dispatch.supportTitle')}>
         <DailySupplyPanel date={date} />
         <CourseBalancePanel date={date} onChanged={onChanged} />
-        <div className="grid gap-4 xl:grid-cols-2">
-          <AutoAssignPanel
-            date={date}
-            attendance={attendanceById}
-            onChanged={onChanged}
-            setFlash={setFlash}
-          />
-          <RecommendationsPanel
-            resource={recommendationsResource}
-            attendance={attendanceById}
-          />
-        </div>
-      </section>
+        <RecommendationsPanel
+          resource={recommendationsResource}
+          attendance={attendanceById}
+        />
+      </CollapsibleSection>
     </div>
   )
 }
