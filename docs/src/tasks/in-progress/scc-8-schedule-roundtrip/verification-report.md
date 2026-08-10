@@ -76,7 +76,23 @@
 
 ## Follow-up post-fix behavior on Sandbox
 
-preview deployment 後に本番相当 UI で実施する。
+- frontend preview: build `bld_01kznf48482yy8z4a93029qv0r`、deployment
+  `dep_01kznf7knvagp22pyfczhtpyes`（active）。
+- API preview: build `bld_01kznf4k1asw0z2jr07zmhx1bg`、deployment
+  `dep_01kznfcfy61pnbnybqrae1wzbd`（active、healthz 200）。
+- 両 build とも commit `bed15556`。preview frontend の既定 API URL は production のため、
+  検証 tab 内だけ request URL を PR #199 API へ差し替えた。network log で画面表示の GET と
+  保存 PUT が `pr199--courseboard-api.txcloud.app` に到達したことを確認した。
+- Field setup read-back: rule `ravr_01kzndv0ph8dre02c6c9b9da74`、capacity `4`、annual season
+  `04-01` / `11-30`、effective range `2026-01-01` / `2026-12-31`、revision `2`。
+- CourseBoard PR preview UI の変更: capacity `4` → `5`。画面の `Save hours` を操作した。
+- 保存 payload: 既存 rule ID、weekday `1`、`07:00` / `12:00`、capacity `5`、interval `8`。
+  PUT は 200。
+- Field read-back after save: 同じ rule ID、capacity `5`、annual season `04-01` / `11-30`、
+  effective range `2026-01-01` / `2026-12-31`、revision `3`。
+- 判定: PASS。season と effective range の両方が、UI から別項目を保存した後も同値で残った。
+- cleanup read-back: capacity `4`、annual season `null` / `null`、effective range `null` /
+  `null`、revision `4`。検証前の値へ復元した。
 
 ## PR CI
 
