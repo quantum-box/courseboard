@@ -101,6 +101,20 @@ describe('CoursesPage save paths', () => {
     clearResourceCache()
   })
 
+  it('keeps the course master columns focused on information used from the list', async () => {
+    renderPage()
+
+    const table = await screen.findByRole('table')
+    expect(within(table).getAllByRole('columnheader').map(header => header.textContent)).toEqual([
+      'コース',
+      'ホール',
+      '営業時間',
+      '状態',
+      '更新',
+      '操作',
+    ])
+  })
+
   it('creates a course through the real Sheet and reads it back', async () => {
     storedCourses = []
     const firstRender = renderPage()

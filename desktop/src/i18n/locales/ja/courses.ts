@@ -31,7 +31,6 @@ export const courses = {
   table: {
     course: 'コース',
     holes: 'ホール',
-    interval: 'スタート間隔',
     hours: '営業時間',
     status: '状態',
     updated: '更新',

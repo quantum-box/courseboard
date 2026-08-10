@@ -220,13 +220,6 @@ export function CoursesPage() {
       cell: course => `${course.holeCount}H`,
     },
     {
-      key: 'interval',
-      header: t('courses:table.interval'),
-      mobileLabel: t('courses:table.interval'),
-      align: 'right',
-      cell: course => t('common:unit.minutes', { n: String(course.startIntervalMinutes) }),
-    },
-    {
       key: 'hours',
       header: t('courses:table.hours'),
       mobileLabel: t('courses:table.hours'),
