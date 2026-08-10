@@ -138,6 +138,17 @@ export const ledger = {
     failed: 'Could not book this tee time',
     cancel: 'Cancel',
   },
+  register: {
+    title: 'Add these to the customer ledger?',
+    lead: 'The booking is saved. These names are not in the ledger yet.',
+    roleBooker: 'Booker',
+    rolePlayer: 'Player',
+    note: 'The booking stands either way. You can add them later from the customer ledger.',
+    skip: 'Not now',
+    confirm: 'Add to the ledger',
+    saved: 'Added {{count}} to the customer ledger',
+    failed: 'Could not add them to the ledger. The booking is saved.',
+  },
   customer: {
     linked: 'In the customer ledger',
     unlink: 'Unlink',

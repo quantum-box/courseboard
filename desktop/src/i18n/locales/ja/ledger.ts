@@ -139,6 +139,17 @@ export const ledger = {
     failed: '予約を入れられませんでした',
     cancel: 'やめる',
   },
+  register: {
+    title: '顧客台帳に載せますか',
+    lead: '予約は入りました。この名前はまだ顧客台帳にありません。',
+    roleBooker: '予約者',
+    rolePlayer: 'プレイヤー',
+    note: '登録しなくても予約はそのままです。あとから顧客台帳の画面でも登録できます。',
+    skip: '登録しない',
+    confirm: '顧客台帳に載せる',
+    saved: '{{count}} 人を顧客台帳に載せました',
+    failed: '顧客台帳に載せられませんでした。予約は入っています。',
+  },
   customer: {
     linked: '顧客台帳に登録済み',
     unlink: '紐付けを外す',

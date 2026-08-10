@@ -5243,6 +5243,70 @@ button,
   opacity: .7;
 }
 
+/* Asked after the booking is saved, so it covers the sheet rather than the
+ * whole app: the booking behind it is already done, and the desk is answering
+ * an optional follow-up. */
+.ledger-register-dialog {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: hsl(var(--nui-background) / .75);
+  z-index: 20;
+}
+
+.ledger-register-dialog__panel {
+  display: grid;
+  gap: 12px;
+  width: min(420px, calc(100% - 32px));
+  padding: 20px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 8px;
+  background: hsl(var(--nui-card, var(--nui-background)));
+  box-shadow: 0 12px 32px hsl(0 0% 0% / .18);
+}
+
+.ledger-register-dialog__title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.ledger-register-dialog__lead {
+  margin: 0;
+  font-size: 13px;
+  opacity: .8;
+}
+
+.ledger-register-dialog__names {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ledger-register-dialog__names label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.ledger-register-dialog__name {
+  font-weight: 600;
+}
+
+.ledger-register-dialog__role {
+  font-size: 11px;
+  opacity: .7;
+}
+
+.ledger-register-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .customer-ledger-list {
   display: grid;
   gap: 4px;
