@@ -30,8 +30,8 @@ use cancellation_fees::{CancellationFeeConfig, MySqlCancellationFeeRepository};
 use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
-    MySqlAvailabilityDeadlineRepository, MySqlCaddieShiftRepository, MySqlShiftRulesRepository,
-    MySqlSlotOverrideRepository,
+    MySqlAvailabilityDeadlineRepository, MySqlCaddieShiftRepository,
+    MySqlGeneratedThroughRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -55,6 +55,7 @@ pub struct AppState {
     rules: Arc<MySqlTaxRuleRepository>,
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
+    generated_through: Arc<MySqlGeneratedThroughRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
     shift_rules: Arc<MySqlShiftRulesRepository>,
@@ -84,6 +85,7 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+            generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
             )),
@@ -123,6 +125,7 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+            generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
             )),
@@ -148,6 +151,7 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+                generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
                 )),
@@ -164,6 +168,7 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+                generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
                 )),
@@ -187,6 +192,11 @@ impl AppState {
     /// CourseBoard-owned desk marks on individual tee times.
     pub fn slot_overrides(&self) -> Arc<MySqlSlotOverrideRepository> {
         self.slot_overrides.clone()
+    }
+
+    /// CourseBoard-owned record of how far each course has been built.
+    pub fn generated_through(&self) -> Arc<MySqlGeneratedThroughRepository> {
+        self.generated_through.clone()
     }
 
     /// CourseBoard-owned shift-request filing deadlines.
@@ -457,6 +467,15 @@ pub fn build_router(state: AppState) -> Router {
             post(course::interfaces::http::generate_course_time_slots).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
+        )
+        .route(
+            "/v1/course/booking-horizon",
+            get(course::interfaces::http::get_booking_horizon)
+                .put(course::interfaces::http::set_booking_horizon)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
         )
         .route(
             "/v1/course/resources",

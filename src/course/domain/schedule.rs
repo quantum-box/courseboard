@@ -6,6 +6,7 @@
 //! inventory is sold.
 
 use super::{CourseError, CourseId, ResourceId};
+use chrono::{Duration, NaiveDate};
 use derive_getters::Getters;
 
 /// `capacity` counts groups, never players.
@@ -131,6 +132,81 @@ pub struct GenerationSummary {
     pub unchanged: i64,
 }
 
+/// Tee times built from a schedule, and how far out they now reach.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BuiltInventory {
+    pub summary: GenerationSummary,
+    pub bookable_through: NaiveDate,
+}
+
+/// A saved week, and the inventory built from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedSchedule {
+    pub rules: Vec<AvailabilityRule>,
+    /// `None` when the week stored but building its tee times did not.
+    ///
+    /// The two are separate writes and only the first is undoable, so a failure
+    /// in the second cannot be reported as a failed save: the rules really are
+    /// stored, and nothing is on sale. The caller has to say both.
+    pub built: Option<BuiltInventory>,
+}
+
+/// How far one course has been built, and when that was last checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InventoryWatermark {
+    /// Last date inventory reaches, inclusive.
+    pub generated_through: NaiveDate,
+    /// Course-local day the top-up last ran for this course.
+    pub checked_on: NaiveDate,
+}
+
+/// How far ahead the club sells tee times.
+///
+/// Generated inventory *is* the bookable window: a date with no slot row is
+/// refused outright when a booking is taken, so this number is what decides how
+/// far out the desk can write one. It is a golf operating rule, not an ERP
+/// concept, so CourseBoard owns it (ADR-0005) and keeps it in the tenant's golf
+/// extension config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BookingHorizon {
+    days: i64,
+}
+
+impl BookingHorizon {
+    /// Six months out: long enough for the season bookings a club takes by
+    /// phone, short enough that saving a schedule does not write a year of rows.
+    pub const DEFAULT_DAYS: i64 = 180;
+    pub const MIN_DAYS: i64 = 1;
+    /// One short of the generate cap, because the range is `today ..= today + days`.
+    pub const MAX_DAYS: i64 = 399;
+
+    pub fn try_new(days: i64) -> Result<Self, CourseError> {
+        if !(Self::MIN_DAYS..=Self::MAX_DAYS).contains(&days) {
+            return Err(CourseError::BadRequest(
+                "booking horizon must be between 1 and 399 days",
+            ));
+        }
+        Ok(Self { days })
+    }
+
+    pub fn days(&self) -> i64 {
+        self.days
+    }
+
+    /// The last date a booking may land on, counted from `today`.
+    pub fn last_bookable_date(&self, today: NaiveDate) -> NaiveDate {
+        today + Duration::days(self.days)
+    }
+}
+
+impl Default for BookingHorizon {
+    fn default() -> Self {
+        Self {
+            days: Self::DEFAULT_DAYS,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +268,27 @@ mod tests {
     fn nonsense_weekdays_and_negative_capacity_are_refused() {
         assert!(AvailabilityRule::try_new(None, 7, "07:30", "14:00", 4, 8).is_err());
         assert!(AvailabilityRule::try_new(None, 1, "07:30", "14:00", -1, 8).is_err());
+    }
+
+    #[test]
+    fn a_horizon_stays_inside_what_one_generate_call_may_cover() {
+        // The generate cap refuses a span of 400 days or more, and the range
+        // starts at today, so 399 is the largest horizon that can be written.
+        assert!(BookingHorizon::try_new(399).is_ok());
+        assert!(BookingHorizon::try_new(400).is_err());
+        assert!(BookingHorizon::try_new(0).is_err());
+        assert!(BookingHorizon::try_new(-1).is_err());
+    }
+
+    #[test]
+    fn the_last_bookable_date_is_the_horizon_counted_from_today() {
+        let today = NaiveDate::from_ymd_opt(2026, 8, 10).expect("valid date");
+        let horizon = BookingHorizon::try_new(30).expect("valid horizon");
+        assert_eq!(
+            horizon.last_bookable_date(today),
+            NaiveDate::from_ymd_opt(2026, 9, 9).expect("valid date")
+        );
+        assert_eq!(BookingHorizon::default().days(), 180);
     }
 
     #[test]

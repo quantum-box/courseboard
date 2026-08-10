@@ -1,5 +1,4 @@
 import { i18next } from '../../i18n'
-import { weekdayForIsoDate, type CaddieSlotCapacity } from './models'
 
 /**
  * One band of a course's week: when it opens, how many groups may be out at
@@ -268,47 +267,3 @@ export function weeklyStartCount(rules: GolfAvailabilityRule[]) {
   return rules.reduce((total, rule) => total + (bandStartCount(rule) ?? 0), 0)
 }
 
-/**
- * Put the caddie supply for a date onto that weekday's bands.
- *
- * One schedule per course means the supply lands whole: there is nothing to
- * share out between plans, which is what the old per-plan subtraction existed
- * to compensate for.
- *
- * Morning and afternoon split at midday, the line the supply itself is counted
- * on. A weekday with no bands yet gets the two the supply describes.
- */
-export function applyCapacityToRules(
-  rules: GolfAvailabilityRule[],
-  date: string,
-  capacity: CaddieSlotCapacity,
-): GolfAvailabilityRule[] {
-  const weekday = weekdayForIsoDate(date)
-  const matching = rules.filter(rule => rule.weekday === weekday)
-  const interval = matching[0]?.slotIntervalMinutes ?? DEFAULT_INTERVAL_MINUTES
-
-  if (matching.length === 0) {
-    return [
-      ...rules,
-      { ...emptyRule(weekday, interval), capacity: Math.max(1, capacity.morningCapacity) },
-      {
-        ...emptyRule(weekday, interval),
-        startTime: '12:00',
-        endTime: '15:00',
-        capacity: Math.max(1, capacity.afternoonCapacity),
-      },
-    ]
-  }
-
-  return rules.map(rule => (
-    rule.weekday === weekday
-      ? {
-          ...rule,
-          capacity: Math.max(
-            1,
-            rule.startTime < '12:00' ? capacity.morningCapacity : capacity.afternoonCapacity,
-          ),
-        }
-      : rule
-  ))
-}

@@ -1,5 +1,6 @@
 import { ApiError, courseboardApiJson } from '../../api'
 import { i18next } from '../../i18n'
+import { formatCourseDate } from '../../lib/clock'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import {
@@ -62,6 +63,14 @@ type GolfReservationPolicy = {
   policyHooksJson: GolfPolicyHooks | null
   metadataJson: unknown
 }
+
+type BookingHorizon = {
+  days: number
+  bookableThrough: string
+}
+
+const HORIZON_MIN_DAYS = 1
+const HORIZON_MAX_DAYS = 399
 
 type PolicyDraft = {
   reservationTypeId: string
@@ -247,10 +256,34 @@ export function PolicyPage() {
   const [exists, setExists] = useState(false)
   const [preservedHooks, setPreservedHooks] = useState<GolfPolicyHooks>({})
   const [preservedMetadata, setPreservedMetadata] = useState<unknown>({})
+  /**
+   * How far ahead the book is open. Stored apart from the Field policy — it is
+   * a golf operating rule CourseBoard owns — but it belongs on this screen,
+   * beside the cutoff that closes the same window from the other end.
+   */
+  const [horizonDays, setHorizonDays] = useState('')
+  const [savedHorizonDays, setSavedHorizonDays] = useState('')
+  const [bookableThrough, setBookableThrough] = useState<string | null>(null)
+
+  const loadHorizon = useCallback(async () => {
+    try {
+      const horizon = await courseboardApiJson<BookingHorizon>('/v1/course/booking-horizon')
+      setHorizonDays(String(horizon.days))
+      setSavedHorizonDays(String(horizon.days))
+      setBookableThrough(horizon.bookableThrough)
+    } catch {
+      // The rest of the policy screen still works without it; leaving the
+      // field blank is better than refusing to open the page.
+      setHorizonDays('')
+      setSavedHorizonDays('')
+      setBookableThrough(null)
+    }
+  }, [])
 
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError(null)
+    void loadHorizon()
     try {
       const policy = await courseboardApiJson<GolfReservationPolicy>(
         '/v1/course/reservation-policy',
@@ -273,7 +306,7 @@ export function PolicyPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [loadHorizon])
 
   useEffect(() => {
     void load()
@@ -308,6 +341,15 @@ export function PolicyPage() {
   async function savePolicy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const validation = policyValidation(draft)
+    const horizon = Number(horizonDays)
+    if (
+      horizonDays.trim() === ''
+      || !Number.isInteger(horizon)
+      || horizon < HORIZON_MIN_DAYS
+      || horizon > HORIZON_MAX_DAYS
+    ) {
+      validation.errors.push(i18next.t('policy:validation.bookingHorizon'))
+    }
     if (validation.errors.length > 0) {
       setSaveError(validation.errors)
       return
@@ -347,6 +389,17 @@ export function PolicyPage() {
         },
       )
       setExists(true)
+      // Only when it moved: writing the horizon rebuilds every course's tee
+      // times, which is not something an unrelated save should set off.
+      if (String(horizon) !== savedHorizonDays) {
+        const stored = await courseboardApiJson<BookingHorizon>('/v1/course/booking-horizon', {
+          method: 'PUT',
+          body: JSON.stringify({ days: horizon }),
+        })
+        setSavedHorizonDays(String(stored.days))
+        setHorizonDays(String(stored.days))
+        setBookableThrough(stored.bookableThrough)
+      }
       showToast({
         tone: 'success',
         title: t('policy:saved.title'),
@@ -436,6 +489,30 @@ export function PolicyPage() {
               step="1"
               value={draft.cutoffHours}
               onChange={event => changeDraft({ cutoffHours: event.target.value })}
+            />
+          </Field>
+          {/* The other end of the same window: the cutoff closes the book as a
+              tee time approaches, this opens it as far ahead as the club sells. */}
+          <Field
+            label={t('policy:basics.bookingHorizon')}
+            required
+            hint={bookableThrough
+              ? t('policy:basics.bookingHorizonThrough', {
+                  date: formatCourseDate(bookableThrough, i18next.language),
+                })
+              : t('policy:basics.bookingHorizonHint')}
+          >
+            <Input
+              required
+              type="number"
+              min={HORIZON_MIN_DAYS}
+              max={HORIZON_MAX_DAYS}
+              step="1"
+              value={horizonDays}
+              onChange={event => {
+                setHorizonDays(event.target.value)
+                setSaveError(null)
+              }}
             />
           </Field>
         </FormGrid>

@@ -8,11 +8,12 @@
 
 use std::sync::Arc;
 
-use chrono::NaiveDate;
+use chrono::{Duration, NaiveDate, Utc};
 
 use crate::course::domain::{
-    AvailabilityRule, CourseError, CourseId, GatewayCredentials, GenerationSummary,
-    GolfCatalogGateway, ReservationScheduleGateway, ResourceId, ResourceKind,
+    AvailabilityRule, BookingHorizon, BuiltInventory, CourseError, CourseId, GatewayCredentials,
+    GeneratedThroughGateway, GenerationSummary, GolfCatalogGateway, GolfCommercialGateway,
+    InventoryWatermark, ReservationScheduleGateway, ResourceId, ResourceKind, SavedSchedule,
 };
 
 /// Longest span one generate call may cover.
@@ -20,6 +21,17 @@ use crate::course::domain::{
 /// A year of 8-minute tee times is six figures of rows; the cap keeps a typo in
 /// the date range from turning into a very long write.
 const MAX_GENERATION_DAYS: i64 = 400;
+
+/// Minutes east of UTC for the course clock, as everywhere else in this product.
+const JST_OFFSET_MINUTES: i64 = 9 * 60;
+
+/// Today on the course's own clock.
+///
+/// The window starts here, so reading it an hour off in UTC would open the book
+/// on the wrong day at both ends.
+fn course_today() -> NaiveDate {
+    (Utc::now() + Duration::minutes(JST_OFFSET_MINUTES)).date_naive()
+}
 
 async fn resolve_resource(
     catalog: &Arc<dyn GolfCatalogGateway>,
@@ -71,22 +83,37 @@ impl GetCourseScheduleUseCase {
 pub struct ReplaceCourseScheduleUseCase {
     catalog: Arc<dyn GolfCatalogGateway>,
     schedules: Arc<dyn ReservationScheduleGateway>,
+    commercial: Arc<dyn GolfCommercialGateway>,
+    watermarks: Arc<dyn GeneratedThroughGateway>,
 }
 
 impl ReplaceCourseScheduleUseCase {
     pub fn new(
         catalog: Arc<dyn GolfCatalogGateway>,
         schedules: Arc<dyn ReservationScheduleGateway>,
+        commercial: Arc<dyn GolfCommercialGateway>,
+        watermarks: Arc<dyn GeneratedThroughGateway>,
     ) -> Self {
-        Self { catalog, schedules }
+        Self {
+            catalog,
+            schedules,
+            commercial,
+            watermarks,
+        }
     }
 
+    /// Store the week, then build the tee times it describes.
+    ///
+    /// The two used to be separate things the operator did, and a week saved
+    /// without the second one put nothing on sale — the rules are a statement
+    /// of intent, and a date with no slot row is refused outright at booking
+    /// time. Nothing was gained by making that an operator's job to remember.
     pub async fn execute(
         &self,
         credentials: GatewayCredentials<'_>,
         course_id: &CourseId,
         rules: Vec<AvailabilityRule>,
-    ) -> Result<Vec<AvailabilityRule>, CourseError> {
+    ) -> Result<SavedSchedule, CourseError> {
         reject_overlaps(&rules)?;
         let courses = self.catalog.list_courses(credentials).await?;
         courses
@@ -95,9 +122,94 @@ impl ReplaceCourseScheduleUseCase {
             .ok_or(CourseError::NotFound("course"))?;
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         let resource_id = resolve_resource(&self.catalog, credentials, course_id).await?;
-        self.schedules
+        let saved = self
+            .schedules
             .replace_resource_schedule(credentials, &resource_id, &timezone, &rules)
+            .await?;
+
+        // Past this point the week is stored. A horizon we could not read, or a
+        // build that failed, is reported beside a save that really did happen —
+        // turning it into an error would tell the operator to redo work that is
+        // already done, and hide that nothing is on sale.
+        let built = self
+            .build_window(credentials, course_id, &resource_id)
             .await
+            .unwrap_or_else(|error| {
+                tracing::warn!(
+                    %error,
+                    course_id = %course_id.as_str(),
+                    "the week saved but its tee times were not built"
+                );
+                None
+            });
+        Ok(SavedSchedule {
+            rules: saved,
+            built,
+        })
+    }
+
+    async fn build_window(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        course_id: &CourseId,
+        resource_id: &ResourceId,
+    ) -> Result<Option<BuiltInventory>, CourseError> {
+        let horizon = self.commercial.get_booking_horizon(credentials).await?;
+        let today = course_today();
+        let bookable_through = horizon.last_bookable_date(today);
+        let summary = self
+            .schedules
+            .generate_resource_time_slots(credentials, resource_id, today, bookable_through, false)
+            .await?;
+        // Records where the daily top-up should resume. Failing to write it
+        // only costs a redundant rebuild tomorrow, so it does not sink a save.
+        if let Err(error) = self
+            .watermarks
+            .set_watermark(
+                credentials.operator_id,
+                course_id,
+                InventoryWatermark {
+                    generated_through: bookable_through,
+                    checked_on: today,
+                },
+            )
+            .await
+        {
+            tracing::warn!(
+                %error,
+                course_id = %course_id.as_str(),
+                "tee times were built but the watermark was not moved"
+            );
+        }
+        Ok(Some(BuiltInventory {
+            summary,
+            bookable_through,
+        }))
+    }
+}
+
+/// The days still missing between what has been built and what should be on sale.
+///
+/// `None` means there is nothing to do, which is the answer on almost every
+/// call — the window only falls short once a day, when the far edge moves.
+fn top_up_range(
+    generated_through: Option<NaiveDate>,
+    today: NaiveDate,
+    bookable_through: NaiveDate,
+) -> Option<(NaiveDate, NaiveDate)> {
+    if bookable_through < today {
+        return None;
+    }
+    match generated_through {
+        Some(mark) if mark >= bookable_through => None,
+        // Resume the day after the watermark, but never reach back before
+        // today: a course nobody has opened for a month would otherwise
+        // rebuild weeks of dates that have already been played.
+        Some(mark) => {
+            let resume = mark.succ_opt().unwrap_or(today).max(today);
+            Some((resume, bookable_through))
+        }
+        None => Some((today, bookable_through)),
     }
 }
 
@@ -160,6 +272,259 @@ impl GenerateCourseTimeSlotsUseCase {
     }
 }
 
+/// Keep every course built out to the booking horizon.
+///
+/// The far edge of the book moves forward one day at a time, and nothing moves
+/// it: saving a schedule builds the window once, and a club that does not edit
+/// its week again would lose a sellable date every day until it had none. There
+/// is no scheduler in this product to move it on a timer, so the desk's own
+/// traffic carries the top-up instead.
+///
+/// That only works if the usual call is nearly free, so the watermark decides
+/// before anything upstream is touched: once every course has been checked
+/// today, this is one indexed read and nothing else. When there is work, it is
+/// a single day of tee times per course.
+///
+/// Best effort by design — it rides along with a read the operator asked for,
+/// and a course that will not build must not take that read down with it.
+///
+/// Standing in for something Field should own (PLT-3361). Two things this
+/// cannot do: it never runs on a day nobody opens CourseBoard, and it would not
+/// see a booking arriving through a channel that does not come through here.
+/// Field is always on the selling side, so a rolling window declared on the
+/// reservation resource would close both gaps — and this whole use case, the
+/// `golf_generated_through` table, and the ledger hook would go with it.
+pub struct ExtendCourseInventoryUseCase {
+    catalog: Arc<dyn GolfCatalogGateway>,
+    schedules: Arc<dyn ReservationScheduleGateway>,
+    commercial: Arc<dyn GolfCommercialGateway>,
+    watermarks: Arc<dyn GeneratedThroughGateway>,
+}
+
+impl ExtendCourseInventoryUseCase {
+    pub fn new(
+        catalog: Arc<dyn GolfCatalogGateway>,
+        schedules: Arc<dyn ReservationScheduleGateway>,
+        commercial: Arc<dyn GolfCommercialGateway>,
+        watermarks: Arc<dyn GeneratedThroughGateway>,
+    ) -> Self {
+        Self {
+            catalog,
+            schedules,
+            commercial,
+            watermarks,
+        }
+    }
+
+    /// The courses whose window was actually extended.
+    pub async fn execute(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        tenant_id: &str,
+    ) -> Result<Vec<CourseId>, CourseError> {
+        let today = course_today();
+        let stored = self.watermarks.list_watermarks(tenant_id).await?;
+        // A course with no row has never been built, and building it first is
+        // the job of saving its schedule, not of this. So a tenant whose known
+        // courses were all checked today has nothing to do, and pays one query.
+        if !stored.is_empty()
+            && stored
+                .values()
+                .all(|watermark| watermark.checked_on >= today)
+        {
+            return Ok(Vec::new());
+        }
+
+        let horizon = self.commercial.get_booking_horizon(credentials).await?;
+        let bookable_through = horizon.last_bookable_date(today);
+        let resources = self.catalog.list_resources(credentials).await?;
+
+        let mut extended = Vec::new();
+        for resource in resources
+            .iter()
+            .filter(|resource| resource.is_active())
+            .filter(|resource| resource.kind() == ResourceKind::Course)
+        {
+            let Some(course_id) = resource.golf_course_id().cloned() else {
+                continue;
+            };
+            let Some(watermark) = stored.get(&course_id).copied() else {
+                continue;
+            };
+            let Some((from, to)) =
+                top_up_range(Some(watermark.generated_through), today, bookable_through)
+            else {
+                continue;
+            };
+            let resource_id = resource
+                .reservation_resource_id()
+                .cloned()
+                .unwrap_or_else(|| resource.id().clone());
+
+            match self
+                .schedules
+                .generate_resource_time_slots(credentials, &resource_id, from, to, false)
+                .await
+            {
+                Ok(_) => {
+                    // Written only after Field says it built them: a watermark
+                    // ahead of the inventory would skip the days it claims.
+                    if let Err(error) = self
+                        .watermarks
+                        .set_watermark(
+                            tenant_id,
+                            &course_id,
+                            InventoryWatermark {
+                                generated_through: to,
+                                checked_on: today,
+                            },
+                        )
+                        .await
+                    {
+                        tracing::warn!(
+                            %error,
+                            course_id = %course_id.as_str(),
+                            "tee times were built but the watermark was not moved"
+                        );
+                        continue;
+                    }
+                    extended.push(course_id);
+                }
+                Err(error) => tracing::warn!(
+                    %error,
+                    course_id = %course_id.as_str(),
+                    "could not extend this course to the booking horizon"
+                ),
+            }
+        }
+        Ok(extended)
+    }
+}
+
+pub struct GetBookingHorizonUseCase {
+    commercial: Arc<dyn GolfCommercialGateway>,
+}
+
+impl GetBookingHorizonUseCase {
+    pub fn new(commercial: Arc<dyn GolfCommercialGateway>) -> Self {
+        Self { commercial }
+    }
+
+    pub async fn execute(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<(BookingHorizon, NaiveDate), CourseError> {
+        let horizon = self.commercial.get_booking_horizon(credentials).await?;
+        let bookable_through = horizon.last_bookable_date(course_today());
+        Ok((horizon, bookable_through))
+    }
+}
+
+/// Move the book's far edge, and put the moved window on sale for every course.
+///
+/// Shortening it is what makes this more than a config write: the tee times
+/// past the new edge are already generated and still sellable, so every course
+/// has to be rebuilt for the change to mean anything.
+pub struct SetBookingHorizonUseCase {
+    catalog: Arc<dyn GolfCatalogGateway>,
+    schedules: Arc<dyn ReservationScheduleGateway>,
+    commercial: Arc<dyn GolfCommercialGateway>,
+    watermarks: Arc<dyn GeneratedThroughGateway>,
+}
+
+impl SetBookingHorizonUseCase {
+    pub fn new(
+        catalog: Arc<dyn GolfCatalogGateway>,
+        schedules: Arc<dyn ReservationScheduleGateway>,
+        commercial: Arc<dyn GolfCommercialGateway>,
+        watermarks: Arc<dyn GeneratedThroughGateway>,
+    ) -> Self {
+        Self {
+            catalog,
+            schedules,
+            commercial,
+            watermarks,
+        }
+    }
+
+    pub async fn execute(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        horizon: BookingHorizon,
+    ) -> Result<(BookingHorizon, NaiveDate), CourseError> {
+        let stored = self
+            .commercial
+            .set_booking_horizon(credentials, &horizon)
+            .await?;
+        let today = course_today();
+        let bookable_through = stored.last_bookable_date(today);
+
+        for (course_id, resource_id) in self.course_resources(credentials).await? {
+            if let Err(error) = self
+                .schedules
+                .generate_resource_time_slots(
+                    credentials,
+                    &resource_id,
+                    today,
+                    bookable_through,
+                    false,
+                )
+                .await
+            {
+                // One course that would not rebuild must not undo the others,
+                // and the horizon itself is already stored.
+                tracing::warn!(
+                    %error,
+                    resource_id = %resource_id.as_str(),
+                    "the booking horizon moved but this course was not rebuilt"
+                );
+                continue;
+            }
+            if let Err(error) = self
+                .watermarks
+                .set_watermark(
+                    credentials.operator_id,
+                    &course_id,
+                    InventoryWatermark {
+                        generated_through: bookable_through,
+                        checked_on: today,
+                    },
+                )
+                .await
+            {
+                tracing::warn!(
+                    %error,
+                    course_id = %course_id.as_str(),
+                    "tee times were rebuilt but the watermark was not moved"
+                );
+            }
+        }
+        Ok((stored, bookable_through))
+    }
+
+    async fn course_resources(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<Vec<(CourseId, ResourceId)>, CourseError> {
+        Ok(self
+            .catalog
+            .list_resources(credentials)
+            .await?
+            .into_iter()
+            .filter(|resource| resource.is_active())
+            .filter(|resource| resource.kind() == ResourceKind::Course)
+            .filter_map(|resource| {
+                let course_id = resource.golf_course_id()?.clone();
+                let resource_id = resource
+                    .reservation_resource_id()
+                    .cloned()
+                    .unwrap_or_else(|| resource.id().clone());
+                Some((course_id, resource_id))
+            })
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,12 +533,79 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        Course, CourseOrder, ProductSlot, ReservationProduct, ReservationServiceId, Resource,
-        ResourceTimeSlot, SaveCourseResource, UpsertCourse, UpsertReservationProduct,
+        BudgetAchievement, Course, CourseOrder, DailyBudget, DailyBudgetQuery, ExtensionStatus,
+        MonthlySettlement, ProductSlot, ReservationPolicy, ReservationProduct,
+        ReservationServiceId, Resource, ResourceTimeSlot, SaveCourseResource,
+        UpdateExtensionConfig, UpdateReservationPolicy, UpsertCourse, UpsertDailyBudget,
+        UpsertReservationProduct,
     };
+    use std::collections::HashMap;
 
     fn rule(weekday: u8, start: &str, end: &str) -> AvailabilityRule {
         AvailabilityRule::try_new(None, weekday, start, end, 4, 8).expect("valid rule")
+    }
+
+    fn date(value: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(value, "%Y-%m-%d").expect("valid date")
+    }
+
+    #[test]
+    fn a_window_that_already_reaches_the_horizon_has_nothing_to_build() {
+        // The ordinary answer: the desk opens the ledger many times a day and
+        // only the first one after midnight finds anything to do.
+        assert_eq!(
+            top_up_range(
+                Some(date("2027-01-14")),
+                date("2026-07-18"),
+                date("2027-01-14"),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_window_one_day_short_builds_only_that_day() {
+        assert_eq!(
+            top_up_range(
+                Some(date("2027-01-13")),
+                date("2026-07-18"),
+                date("2027-01-14"),
+            ),
+            Some((date("2027-01-14"), date("2027-01-14")))
+        );
+    }
+
+    #[test]
+    fn a_watermark_left_in_the_past_resumes_from_today_rather_than_replaying_it() {
+        // Nobody opened the app for a month. Rebuilding the days in between
+        // would rewrite dates that have already been played.
+        assert_eq!(
+            top_up_range(
+                Some(date("2026-06-01")),
+                date("2026-07-18"),
+                date("2027-01-14"),
+            ),
+            Some((date("2026-07-18"), date("2027-01-14")))
+        );
+    }
+
+    #[test]
+    fn a_course_that_was_never_built_gets_the_whole_window() {
+        assert_eq!(
+            top_up_range(None, date("2026-07-18"), date("2027-01-14")),
+            Some((date("2026-07-18"), date("2027-01-14")))
+        );
+    }
+
+    #[test]
+    fn a_horizon_behind_today_builds_nothing_rather_than_an_inverted_range() {
+        // Not reachable through `BookingHorizon`, which is at least one day,
+        // but a range that ends before it starts is refused downstream and
+        // there is nothing sensible to build.
+        assert_eq!(
+            top_up_range(None, date("2026-07-18"), date("2026-07-17")),
+            None
+        );
     }
 
     #[test]
@@ -323,6 +755,7 @@ mod tests {
     #[derive(Default)]
     struct FakeSchedules {
         timezone_used: Mutex<Option<String>>,
+        generated: Mutex<Vec<(NaiveDate, NaiveDate)>>,
     }
 
     #[async_trait]
@@ -350,11 +783,15 @@ mod tests {
             &self,
             _credentials: GatewayCredentials<'_>,
             _resource_id: &ResourceId,
-            _from: NaiveDate,
-            _to: NaiveDate,
+            from: NaiveDate,
+            to: NaiveDate,
             _dry_run: bool,
         ) -> Result<GenerationSummary, CourseError> {
-            unimplemented!("not used")
+            self.generated.lock().expect("lock").push((from, to));
+            Ok(GenerationSummary {
+                created: 1,
+                ..GenerationSummary::default()
+            })
         }
 
         async fn list_resource_time_slots(
@@ -365,6 +802,137 @@ mod tests {
             _to: DateTime<Utc>,
         ) -> Result<Vec<ResourceTimeSlot>, CourseError> {
             unimplemented!("not used")
+        }
+    }
+
+    /// Only the booking horizon matters here; the rest of the commercial
+    /// surface is not reachable from this use case.
+    struct FakeCommercial {
+        horizon: BookingHorizon,
+    }
+
+    #[async_trait]
+    impl GolfCommercialGateway for FakeCommercial {
+        async fn get_booking_horizon(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<BookingHorizon, CourseError> {
+            Ok(self.horizon)
+        }
+
+        async fn set_booking_horizon(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _horizon: &BookingHorizon,
+        ) -> Result<BookingHorizon, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn get_reservation_policy(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<ReservationPolicy, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn update_reservation_policy(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpdateReservationPolicy,
+        ) -> Result<ReservationPolicy, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn list_daily_budgets(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _query: DailyBudgetQuery,
+        ) -> Result<Vec<DailyBudget>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn upsert_daily_budget(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpsertDailyBudget,
+        ) -> Result<DailyBudget, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn import_daily_budgets_csv(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _csv: &str,
+        ) -> Result<Vec<DailyBudget>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn list_budget_achievements(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _from: NaiveDate,
+            _to: NaiveDate,
+        ) -> Result<Vec<BudgetAchievement>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn get_monthly_settlement(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _year_month: &str,
+        ) -> Result<MonthlySettlement, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn export_monthly_settlement_csv(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _year_month: &str,
+        ) -> Result<String, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn get_extension_status(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Option<ExtensionStatus>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn update_extension_config(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpdateExtensionConfig,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+    }
+
+    #[derive(Default)]
+    struct FakeWatermarks {
+        written: Mutex<Vec<(CourseId, InventoryWatermark)>>,
+    }
+
+    #[async_trait]
+    impl GeneratedThroughGateway for FakeWatermarks {
+        async fn list_watermarks(
+            &self,
+            _tenant_id: &str,
+        ) -> Result<HashMap<CourseId, InventoryWatermark>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn set_watermark(
+            &self,
+            _tenant_id: &str,
+            course_id: &CourseId,
+            watermark: InventoryWatermark,
+        ) -> Result<(), CourseError> {
+            self.written
+                .lock()
+                .expect("lock")
+                .push((course_id.clone(), watermark));
+            Ok(())
         }
     }
 
@@ -396,7 +964,15 @@ mod tests {
             )],
         });
         let schedules = Arc::new(FakeSchedules::default());
-        let use_case = ReplaceCourseScheduleUseCase::new(catalog, schedules.clone());
+        let watermarks = Arc::new(FakeWatermarks::default());
+        let use_case = ReplaceCourseScheduleUseCase::new(
+            catalog,
+            schedules.clone(),
+            Arc::new(FakeCommercial {
+                horizon: BookingHorizon::try_new(30).expect("valid horizon"),
+            }),
+            watermarks.clone(),
+        );
 
         use_case
             .execute(
@@ -415,5 +991,73 @@ mod tests {
             schedules.timezone_used.lock().expect("lock").as_deref(),
             Some("Europe/Berlin")
         );
+    }
+
+    #[tokio::test]
+    async fn saving_a_week_builds_its_tee_times_and_records_how_far_they_reach() {
+        // The operator used to have to ask for this separately, and a week
+        // saved without it put nothing on sale at all.
+        let course_id = CourseId::new("course-east");
+        let catalog = Arc::new(FakeCatalog {
+            tenant_timezone: "Asia/Tokyo".into(),
+            courses: vec![Course::reconstitute(
+                course_id.clone(),
+                "East",
+                None,
+                18,
+                "Asia/Tokyo",
+                8,
+                true,
+                None,
+                None,
+                None,
+                None,
+            )],
+            resources: vec![Resource::reconstitute(
+                "golf-resource-east",
+                "East",
+                Some("reservation-resource-east".into()),
+                Some(course_id.to_string()),
+                ResourceKind::Course,
+                true,
+            )],
+        });
+        let schedules = Arc::new(FakeSchedules::default());
+        let watermarks = Arc::new(FakeWatermarks::default());
+        let use_case = ReplaceCourseScheduleUseCase::new(
+            catalog,
+            schedules.clone(),
+            Arc::new(FakeCommercial {
+                horizon: BookingHorizon::try_new(30).expect("valid horizon"),
+            }),
+            watermarks.clone(),
+        );
+
+        let saved = use_case
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer test",
+                    operator_id: "tenant-test",
+                    platform_id: None,
+                },
+                &course_id,
+                vec![rule(1, "07:00", "12:00")],
+            )
+            .await
+            .expect("replace schedule");
+
+        let built = saved.built.expect("the save built its tee times");
+        let generated = schedules.generated.lock().expect("lock").clone();
+        assert_eq!(generated.len(), 1, "one build for the whole window");
+        let (from, to) = generated[0];
+        assert_eq!(to, built.bookable_through);
+        assert_eq!((to - from).num_days(), 30, "today through today + horizon");
+
+        // The watermark is what lets the daily top-up resume from the right day.
+        let written = watermarks.written.lock().expect("lock").clone();
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].0, course_id);
+        assert_eq!(written[0].1.generated_through, built.bookable_through);
+        assert_eq!(written[0].1.checked_on, from);
     }
 }

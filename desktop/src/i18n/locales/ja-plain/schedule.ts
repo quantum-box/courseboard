@@ -4,9 +4,20 @@ import type { schedule as source } from '../ja/schedule'
 /** See `ja-plain/common.ts` for what this locale is for. */
 export const schedule: DeepPartial<typeof source> = {
   title: '予約を受ける時間 · {{course}}',
-  description: 'このコースを開ける時間と、同じ時間に出せる組の数、組と組の間の時間を決めます。ここで決めた内容から、日ごとのスタート枠が作られます。',
+  description: '曜日ごとに「何時から何時まで予約を受けるか」を決めます。保存すると、その内容から日ごとのスタート枠が、ひとりでに作られます。予約が入るのは、その枠です。',
   back: 'コースの一覧に戻る',
   eyebrow: 'コース',
+  onSale: {
+    through: '今、予約を受けられるのは {{date}} までです。',
+    change: '何日先まで受けるかを、変える',
+  },
+  week: {
+    badge: '毎週の決めごと',
+    title: '予約を受ける時間',
+    description: '曜日ごとに、何時から何時まで受けるかを入れます。同じ時間に出せる組の数と、組と組の間の時間で、その時間に何組出せるかが決まります。',
+    total: '今の内容だと、1週間で {{n}} スタートです。',
+    empty: 'まだ時間がありません。曜日のカードから時間を足してください。',
+  },
   notLinked: {
     title: 'このコースは、まだ予約のリソースとつながっていません',
     description: '時間を決めるには、コースと予約のリソースのつながりが要ります。設定を確かめてください。',
@@ -52,10 +63,15 @@ export const schedule: DeepPartial<typeof source> = {
   save: '時間を保存する',
   saveFailed: '時間を保存できません',
   hasIssues: '{{n}} 本の時間に、まちがいがあります。赤い行を直してから保存してください。',
-  confirmRemove: 'この保存で {{n}} 本の時間がなくなります。これから作られるスタート枠も止まります。進めますか。',
+  confirmRemove: 'この保存で {{n}} 本の時間がなくなります。その時間のスタート枠も止まります。進めますか。',
   saved: {
     title: '時間を保存しました',
-    body: '{{course}} の1週間ぶんを入れかえました。つづけてスタート枠を作ってください。',
+    body: '{{course}} の1週間ぶんを入れかえて、{{date}} まで予約を受けられるようにしました。',
+    notBuilt: {
+      title: '時間は保存しましたが、スタート枠を作れませんでした',
+      body: '時間そのものは保存できています。でも、スタート枠がまだ作られていないので、このままでは予約を受けられません。もう一度ためしてください。',
+      retry: 'スタート枠を作りなおす',
+    },
   },
   pending: {
     title: '{{course}} · まだ保存していません',
@@ -68,25 +84,5 @@ export const schedule: DeepPartial<typeof source> = {
   confirm: {
     discardOnReload: '保存していない時間があります。捨てて読み込み直しますか。',
     discardOnLeave: '保存していない時間があります。捨てて、この画面を出ますか。',
-  },
-  generate: {
-    title: 'スタート枠を作る',
-    description: '決めた時間から、日ごとのスタート枠を作ります。作った分だけ予約を受けられて、いっぱいになると止まります。',
-    badge: '在庫',
-    from: 'はじめの日',
-    to: 'おわりの日',
-    preview: 'どうなるか見る',
-    run: 'この内容で作る',
-    failed: 'スタート枠を作れません',
-    unsavedFirst: '先に時間を保存してください。保存していない分は作られません。',
-    result: {
-      title: 'スタート枠を作りました',
-      body: 'ふえた {{created}} · なおした {{updated}} · とめた {{deactivated}} · そのまま {{unchanged}}',
-    },
-    preview_result: {
-      title: 'この内容で作ると、こうなります',
-      body: 'ふえる {{created}} · なおす {{updated}} · とめる {{deactivated}} · そのまま {{unchanged}}',
-    },
-    keepsReserved: '予約が入っている枠は、数を減らす向きには変わりません。',
   },
 }

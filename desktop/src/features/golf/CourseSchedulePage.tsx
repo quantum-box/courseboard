@@ -1,9 +1,9 @@
-import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
-import { ArrowLeft, CalendarDays, Save, Sparkles, Undo2, Users } from 'lucide-react'
+import { Badge, Button } from '@tachyon-sdk/native-ui'
+import { ArrowLeft, CalendarCheck, CalendarClock, Save, Undo2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson } from '../../api'
-import { today } from '../../lib/clock'
+import { formatCourseDate } from '../../lib/clock'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { navigate, useNavigationGuard } from '../../lib/router'
@@ -11,10 +11,7 @@ import { showToast } from '../../lib/toast'
 import { useResource } from '../../hooks/useResource'
 import {
   EmptyState,
-  Field,
   LoadingState,
-  Metric,
-  MetricGrid,
   Notice,
   PageHeader,
   Panel,
@@ -23,7 +20,6 @@ import {
 } from '../../components/Page'
 import { WeekScheduleEditor, toEditableRule, type EditableRule } from './WeekScheduleEditor'
 import {
-  applyCapacityToRules,
   countRuleIssues,
   isCourseLinkedToResource,
   ruleChangeCount,
@@ -33,28 +29,15 @@ import {
   type CourseResource,
   type GolfAvailabilityRule,
 } from './schedule'
-import {
-  calculateCaddieCapacity,
-  weekdayForIsoDate,
-  weekdayLabel,
-  type CaddieSlotCapacity,
-  type CapacityAvailability,
-  type CapacityProfile,
-  type GolfCourse,
-} from './models'
+import type { GolfCourse } from './models'
 
 const coursesPath = '/v1/course/courses'
-const caddieProfilesPath = '/v1/course/caddie-profiles'
-const caddieAvailabilitiesPath = '/v1/course/caddie-availabilities'
+const bookingHorizonPath = '/v1/course/booking-horizon'
 
 const listRoute = 'golf/courses'
 
 function schedulePath(courseId: string) {
   return `${coursesPath}/${encodeURIComponent(courseId)}/schedule`
-}
-
-function generatePath(courseId: string) {
-  return `${coursesPath}/${encodeURIComponent(courseId)}/time-slots/generate`
 }
 
 const resourcesPath = '/v1/course/resources'
@@ -81,6 +64,7 @@ function courseLabel(course: GolfCourse) {
   return course.shortName?.trim() || course.name
 }
 
+
 type GenerationSummary = {
   created: number
   updated: number
@@ -88,12 +72,27 @@ type GenerationSummary = {
   unchanged: number
 }
 
+type SavedSchedule = {
+  items: GolfAvailabilityRule[]
+  /** `null` when the week stored but its tee times were not built. */
+  bookableThrough: string | null
+  built: GenerationSummary | null
+}
+
+type BookingHorizon = {
+  days: number
+  bookableThrough: string
+}
+
 /**
- * The course's bookable week, and the tee times it builds.
+ * The course's bookable week.
  *
  * Inventory belongs to the course: one tee sends out one group at a time, and
  * every plan sold on the course draws from that same line. Editing it per plan
  * is what let the same tee time be sold twice.
+ *
+ * Saving builds the tee times too. They used to be a second thing the operator
+ * had to remember, and a week saved without them put nothing on sale at all.
  */
 export function CourseSchedulePage({ courseId }: { courseId: string }) {
   const { t } = useTranslation(['schedule', 'common', 'products'])
@@ -122,23 +121,22 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
   const acceptNextScheduleRef = useRef(false)
   const [saving, setSaving] = useState(false)
   const [linking, setLinking] = useState(false)
-
-  const [from, setFrom] = useState(today)
-  const [to, setTo] = useState(today)
-  const [generating, setGenerating] = useState(false)
-  const [generateError, setGenerateError] = useState<string | null>(null)
-  const [preview, setPreview] = useState<GenerationSummary | null>(null)
-
-  const [capacityDate, setCapacityDate] = useState(today)
-  const [capacity, setCapacity] = useState<CaddieSlotCapacity | null>(null)
-  const [capacityLoading, setCapacityLoading] = useState(false)
-  const [capacityError, setCapacityError] = useState<string | null>(null)
+  const horizonResource = useResource(
+    () => courseboardApiJson<BookingHorizon>(bookingHorizonPath),
+    [],
+    { cacheKey: 'course:booking-horizon', enabled: Boolean(course) },
+  )
+  /** What the last save actually put on sale, which outranks the loaded value. */
+  const [bookableThrough, setBookableThrough] = useState<string | null>(null)
+  const [buildFailed, setBuildFailed] = useState(false)
 
   const changes = useMemo(
     () => summarizeRuleChanges(savedRules, rules.map(toStoredRule)),
     [savedRules, rules],
   )
   const changeCount = ruleChangeCount(changes)
+  const weeklyStarts = useMemo(() => weeklyStartCount(rules.map(toStoredRule)), [rules])
+  const onSaleThrough = bookableThrough ?? horizonResource.data?.bookableThrough ?? null
 
   useEffect(() => {
     if (!scheduleResource.data) return
@@ -235,18 +233,29 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
     setSaving(true)
     try {
       const payload = sortRules(rules).map(toStoredRule)
-      const response = await courseboardApiJson<{ items: GolfAvailabilityRule[] }>(
+      const response = await courseboardApiJson<SavedSchedule>(
         schedulePath(courseId),
         { method: 'PUT', body: JSON.stringify({ rules: payload }) },
       )
       const saved = response.items.map(toEditableRule)
-      scheduleResource.setData(response)
+      scheduleResource.setData({ items: response.items })
       setRules(saved)
       setSavedRules(saved.map(toStoredRule))
+      setBookableThrough(response.bookableThrough)
+      // The week is stored either way. Saying "saved" over a failed build would
+      // hide that nothing is on sale, so the two are reported apart.
+      setBuildFailed(response.bookableThrough === null)
       showToast({
-        tone: 'success',
-        title: t('schedule:saved.title'),
-        message: t('schedule:saved.body', { course: course ? courseLabel(course) : courseId }),
+        tone: response.bookableThrough === null ? 'warning' : 'success',
+        title: response.bookableThrough === null
+          ? t('schedule:saved.notBuilt.title')
+          : t('schedule:saved.title'),
+        message: response.bookableThrough === null
+          ? t('schedule:saved.notBuilt.body')
+          : t('schedule:saved.body', {
+              course: course ? courseLabel(course) : courseId,
+              date: formatCourseDate(response.bookableThrough),
+            }),
       })
     } catch (error) {
       showToast({
@@ -258,69 +267,6 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
       setSaving(false)
     }
   }
-
-  async function generate(dryRun: boolean) {
-    setGenerating(true)
-    setGenerateError(null)
-    if (!dryRun) setPreview(null)
-    try {
-      const summary = await courseboardApiJson<GenerationSummary>(generatePath(courseId), {
-        method: 'POST',
-        body: JSON.stringify({ from, to, dryRun }),
-      })
-      if (dryRun) {
-        setPreview(summary)
-        return
-      }
-      setPreview(null)
-      showToast({
-        tone: 'success',
-        title: t('schedule:generate.result.title'),
-        message: t('schedule:generate.result.body', {
-          created: String(summary.created),
-          updated: String(summary.updated),
-          deactivated: String(summary.deactivated),
-          unchanged: String(summary.unchanged),
-        }),
-      })
-    } catch (error) {
-      setGenerateError(errorMessage(error))
-    } finally {
-      setGenerating(false)
-    }
-  }
-
-  async function calculateCapacity() {
-    if (!capacityDate) return
-    setCapacityLoading(true)
-    setCapacityError(null)
-    setCapacity(null)
-    try {
-      const query = `from=${encodeURIComponent(capacityDate)}&to=${encodeURIComponent(capacityDate)}`
-      const [profilesResponse, availabilityResponse] = await Promise.all([
-        courseboardApiJson<{ items: CapacityProfile[] }>(caddieProfilesPath),
-        courseboardApiJson<{ items: CapacityAvailability[] }>(`${caddieAvailabilitiesPath}?${query}`),
-      ])
-      setCapacity(calculateCaddieCapacity(profilesResponse.items, availabilityResponse.items))
-    } catch (error) {
-      setCapacityError(errorMessage(error))
-    } finally {
-      setCapacityLoading(false)
-    }
-  }
-
-  /**
-   * One schedule per course means the caddie supply lands on it whole. Nothing
-   * to share out between plans, which is what the old per-plan subtraction was
-   * compensating for.
-   */
-  function applyCapacity() {
-    if (!capacity || !capacityDate) return
-    setRules(applyCapacityToRules(rules, capacityDate, capacity)
-      .map(rule => ('clientKey' in rule ? rule as EditableRule : toEditableRule(rule))))
-  }
-
-  const capacityWeekday = capacityDate ? weekdayForIsoDate(capacityDate) : null
 
   if (loading) {
     return (
@@ -370,6 +316,30 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
         description={t('schedule:description')}
       />
 
+      {/* What editing this week actually changes. The hours are a rule; what a
+          customer can book is the dated inventory built from it, and only this
+          date says how far that reaches. */}
+      {onSaleThrough && !buildFailed ? (
+        <p className="on-sale-through">
+          <CalendarCheck aria-hidden="true" />
+          <span>{t('schedule:onSale.through', { date: formatCourseDate(onSaleThrough) })}</span>
+          <button type="button" className="link-button" onClick={() => navigate('golf/policy')}>
+            {t('schedule:onSale.change')}
+          </button>
+        </p>
+      ) : null}
+
+      {buildFailed ? (
+        <Notice tone="warning" title={t('schedule:saved.notBuilt.title')}>
+          {t('schedule:saved.notBuilt.body')}
+          <div className="mt-2">
+            <Button type="button" variant="primary" disabled={saving} onClick={() => void save()}>
+              {saving ? t('common:action.saving') : t('schedule:saved.notBuilt.retry')}
+            </Button>
+          </div>
+        </Notice>
+      ) : null}
+
       {coursesResource.error ? (
         <ResourceError error={coursesResource.error} onRetry={coursesResource.refresh} />
       ) : null}
@@ -393,144 +363,17 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
       ) : null}
 
       <Panel
-        actions={changeCount > 0 ? (
-          <Badge variant="warning">{t('schedule:pending.added', { n: String(changes.added) })}</Badge>
-        ) : null}
+        title={t('schedule:week.title')}
+        description={t('schedule:week.description')}
+        actions={<Badge variant="outline"><CalendarClock /> {t('schedule:week.badge')}</Badge>}
       >
         <WeekScheduleEditor rules={rules} disabled={saving} onChange={setRules} />
-      </Panel>
-
-      <Panel
-        title={t('schedule:generate.title')}
-        description={t('schedule:generate.description')}
-        actions={<Badge variant="outline"><CalendarDays /> {t('schedule:generate.badge')}</Badge>}
-      >
-        <div className="flex flex-wrap items-end gap-3">
-          <Field requirement="none" label={t('schedule:generate.from')} className="w-full sm:w-44">
-            <Input type="date" value={from} onChange={event => setFrom(event.target.value)} />
-          </Field>
-          <Field requirement="none" label={t('schedule:generate.to')} className="w-full sm:w-44">
-            <Input type="date" value={to} onChange={event => setTo(event.target.value)} />
-          </Field>
-          <Button type="button" disabled={generating} onClick={() => void generate(true)}>
-            <Sparkles />
-            {generating ? t('schedule:generate.previewing') : t('schedule:generate.preview')}
-          </Button>
-        </div>
-
-        {changeCount > 0 ? (
-          <p className="capacity-weekday-note">{t('schedule:generate.unsavedFirst')}</p>
-        ) : null}
-
-        {generateError ? (
-          <Notice tone="danger" title={t('schedule:generate.failed')}>{generateError}</Notice>
-        ) : null}
-
-        {preview ? (
-          <div className="grid gap-3 pt-3">
-            <Notice tone="info" title={t('schedule:generate.preview_result.title')}>
-              {t('schedule:generate.preview_result.body', {
-                created: String(preview.created),
-                updated: String(preview.updated),
-                deactivated: String(preview.deactivated),
-                unchanged: String(preview.unchanged),
-              })}
-              <span className="notice-detail">{t('schedule:generate.keepsReserved')}</span>
-            </Notice>
-            <div className="flex justify-end">
-              <Button
-                type="button"
-                variant="primary"
-                disabled={generating}
-                onClick={() => void generate(false)}
-              >
-                <CalendarDays />
-                {generating ? t('schedule:generate.running') : t('schedule:generate.run')}
-              </Button>
-            </div>
-          </div>
-        ) : null}
-      </Panel>
-
-      <Panel
-        title={t('products:capacity.title')}
-        description={t('products:capacity.description')}
-        actions={<Badge variant="outline"><Users /> {t('products:capacity.badge')}</Badge>}
-      >
-        <div className="flex flex-wrap items-end gap-3">
-          <Field requirement="none" label={t('products:capacity.date')} className="w-full sm:w-44">
-            <Input
-              type="date"
-              value={capacityDate}
-              onChange={event => {
-                setCapacityDate(event.target.value)
-                setCapacity(null)
-                setCapacityError(null)
-              }}
-            />
-          </Field>
-          <Button
-            type="button"
-            disabled={capacityLoading || !capacityDate}
-            onClick={() => void calculateCapacity()}
-          >
-            <Sparkles />
-            {capacityLoading
-              ? t('products:capacity.calculating')
-              : t('products:capacity.calculate')}
-          </Button>
-        </div>
-
-        {capacityWeekday === null ? null : (
-          <p className="capacity-weekday-note">
-            {t('products:capacity.targetWeekday', { day: weekdayLabel(capacityWeekday) })}
-          </p>
-        )}
-
-        {capacityError ? (
-          <Notice tone="danger" title={t('products:capacity.failed')}>{capacityError}</Notice>
-        ) : null}
-
-        {capacity ? (
-          <div className="grid gap-3 pt-3">
-            <MetricGrid>
-              <Metric
-                label={t('products:capacity.morning')}
-                value={t('products:capacity.groups', { n: String(capacity.morningCapacity) })}
-                detail={t('products:capacity.limit')}
-              />
-              <Metric
-                label={t('products:capacity.afternoon')}
-                value={t('products:capacity.groups', { n: String(capacity.afternoonCapacity) })}
-                detail={t('products:capacity.limit')}
-              />
-              <Metric
-                label={t('products:capacity.activeCaddies')}
-                value={t('products:capacity.activeCaddiesValue', {
-                  available: String(capacity.activeCaddies - capacity.unavailable),
-                  total: String(capacity.activeCaddies),
-                })}
-                detail={capacity.assumedAvailable > 0
-                  ? t('products:capacity.assumed', { n: String(capacity.assumedAvailable) })
-                  : t('products:capacity.allRegistered')}
-                tone={capacity.assumedAvailable > 0 ? 'warning' : 'success'}
-              />
-            </MetricGrid>
-            {capacity.assumedAvailable > 0 ? (
-              <Notice tone="warning" title={t('products:capacity.warning.title')}>
-                {t('products:capacity.warning.description', {
-                  n: String(capacity.assumedAvailable),
-                })}
-              </Notice>
-            ) : null}
-            <div className="flex justify-end">
-              <Button type="button" variant="primary" onClick={applyCapacity}>
-                <CalendarDays />
-                {t('products:capacity.applyTo', { day: weekdayLabel(capacityWeekday ?? 0) })}
-              </Button>
-            </div>
-          </div>
-        ) : null}
+        {/* The two numbers on each row decide this, but neither says it. */}
+        <p className="slot-week-total">
+          {weeklyStarts > 0
+            ? t('schedule:week.total', { n: String(weeklyStarts) })
+            : t('schedule:week.empty')}
+        </p>
       </Panel>
 
       {changeCount > 0 ? (
