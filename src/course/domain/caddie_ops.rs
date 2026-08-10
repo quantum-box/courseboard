@@ -486,6 +486,11 @@ pub struct CaddieAssignmentQuery {
     pub caddie_id: Option<CaddieId>,
     pub from: Option<NaiveDate>,
     pub to: Option<NaiveDate>,
+    /// Only the assignments standing on one booking.
+    ///
+    /// Field filters by caddie and by date, not by booking, so an adapter is
+    /// free to ask upstream and must narrow the answer itself either way.
+    pub reservation_id: Option<ReservationId>,
 }
 
 /// Dispatch recommendation candidate.

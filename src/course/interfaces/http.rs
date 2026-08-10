@@ -797,7 +797,7 @@ pub async fn cancel_reservation(
     Json(request): Json<CancelReservationRequest>,
 ) -> Result<StatusCode, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = CancelReservationUseCase::new(reservation_gateway(&state));
+    let use_case = CancelReservationUseCase::new(reservation_gateway(&state), ops_gateway(&state));
     use_case
         .execute(
             credentials,
@@ -2002,6 +2002,7 @@ pub async fn list_caddie_assignments(
                 caddie_id: CaddieId::from_optional(query.caddie_profile_id),
                 from: query.from,
                 to: query.to,
+                reservation_id: None,
             },
         )
         .await

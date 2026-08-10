@@ -413,12 +413,13 @@ export const caddies = {
     monthLabel: '{{year}}年{{month}}月',
     guide: {
       title: '日付を押すと、その日の希望を入れられます',
-      body: '押した日の入力パネルが右から開きます。「保存」を押すまでカレンダーには残りません。',
+      body: '連続する日は、最初の日を押してから Shift を押しながら最後の日を押します。「保存」を押すまでカレンダーには残りません。',
       legendRegistered: '登録ずみの日',
       legendTwoRounds: '2ラウンド希望',
       legendBlank: '何も出ていない日＝希望なし（ふつうに出られる扱い）',
     },
     dayAction: '{{date}} の希望を入れる',
+    dateRange: '{{from}}〜{{to}}（{{n}}日）',
     sheetTitle: '{{date}} の希望',
     sheetDescription: '出られるかどうか・2ラウンドの希望・体調のメモを入れて保存します。',
     unsaved: '未保存',
@@ -436,6 +437,7 @@ export const caddies = {
       message: '{{date}} を「{{status}}」にしました。',
     },
     saveFailed: '希望を保存できませんでした',
+    timezoneInvalid: 'テナントのタイムゾーンを確認できないため、今日の日付を表示できません。設定を確認してください。',
     removed: {
       title: '希望を消しました',
       message: '{{date}} をふつうの状態に戻しました。',

@@ -196,7 +196,19 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         };
         let items: Vec<FieldGolfCaddieAssignmentDto> =
             field_get_items(&self.client, &self.base_url, &path, credentials).await?;
-        items.into_iter().map(map_caddie_assignment).collect()
+        let assignments: Result<Vec<CaddieAssignment>, CourseError> =
+            items.into_iter().map(map_caddie_assignment).collect();
+        let assignments = assignments?;
+        // Field has no booking filter, so this one is applied here. Narrowing
+        // after the fetch also keeps the answer right if a future Field learns
+        // the parameter and a caller sends both.
+        let Some(reservation_id) = query.reservation_id.as_ref() else {
+            return Ok(assignments);
+        };
+        Ok(assignments
+            .into_iter()
+            .filter(|assignment| assignment.covers_reservation(reservation_id))
+            .collect())
     }
 
     async fn create_caddie_assignment(

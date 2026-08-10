@@ -100,6 +100,12 @@ import {
   type Rank,
 } from './caddieRankFees'
 import { profilePatchPayload } from './caddieProfileEdit'
+import {
+  calendarDateInTimezone,
+  calendarSelectionAfterClick,
+  emptyCalendarDateSelection,
+  tenantTimezoneFromConfig,
+} from './availabilityCalendar'
 
 const COURSE_API = '/v1/course'
 
@@ -3079,27 +3085,59 @@ function AvailabilityCalendar({
   onDirtyChange: (dirty: boolean) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
-  const [yearMonth, setYearMonth] = useState(todayJst().slice(0, 7))
-  const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const [yearMonth, setYearMonth] = useState<string | null>(null)
+  const [selection, setSelection] = useState(emptyCalendarDateSelection)
   const [status, setStatus] = useState<AvailabilityStatus>('available')
   const [twoRounds, setTwoRounds] = useState(false)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
-  const bounds = monthBounds(yearMonth)
+  const extensionResource = useResource(
+    () => courseboardApiJson<{ configJson?: Record<string, unknown> | null } | null>(
+      `${COURSE_API}/extension-status`,
+    ),
+    [],
+    { cacheKey: 'course:extension-status' },
+  )
+  let tenantToday: string | null = null
+  let tenantClockError: unknown = extensionResource.error
+  if (!extensionResource.loading && !tenantClockError) {
+    try {
+      const timezone = tenantTimezoneFromConfig(extensionResource.data?.configJson)
+      tenantToday = calendarDateInTimezone(new Date(), timezone)
+    } catch {
+      tenantClockError = new Error(t('caddies:calendar.timezoneInvalid'))
+    }
+  }
+
+  useEffect(() => {
+    if (!tenantToday) return
+    setYearMonth(current => current ?? tenantToday.slice(0, 7))
+  }, [tenantToday])
+
+  // Bounds are not requested until the tenant clock resolves. The inert value
+  // only keeps the hook signature stable while the timezone request is pending.
+  const bounds = monthBounds(yearMonth ?? '1970-01')
   const resource = useResource(
     () => courseboardApiJson<ListResponse<AvailabilityRecord>>(
       `${COURSE_API}/caddie-availabilities?caddieProfileId=${encodeURIComponent(profile.id)}&from=${bounds.from}&to=${bounds.to}`,
     ),
     [profile.id, bounds.from, bounds.to],
-    { cacheKey: `caddie-availability:${profile.id}:${bounds.from}:${bounds.to}` },
+    {
+      cacheKey: yearMonth
+        ? `caddie-availability:${profile.id}:${bounds.from}:${bounds.to}`
+        : null,
+      enabled: yearMonth !== null,
+    },
   )
   const records = useMemo(
     () => new Map((resource.data?.items ?? []).map(record => [record.date, record])),
     [resource.data],
   )
+  const selectedDates = selection.dates
+  const selectedDate = selection.anchor
   const selectedRecord = selectedDate ? records.get(selectedDate) : undefined
-  // The form is dirty whenever it no longer matches what is stored for the
-  // selected day (or the defaults, when that day has no entry yet).
+  // The anchor supplies the shared form values. Other selected dates may have
+  // mixed stored values without making range selection itself an unsaved edit.
   const dirty = selectedDate !== null && (
     status !== (selectedRecord?.status ?? 'available')
     || twoRounds !== (selectedRecord?.twoRoundRequest ?? false)
@@ -3117,19 +3155,22 @@ function AvailabilityCalendar({
   }
 
   useEffect(() => {
-    setSelectedDate(null)
+    setSelection(emptyCalendarDateSelection())
   }, [profile.id, yearMonth])
 
   function changeMonth(amount: number) {
     if (!confirmDiscard()) return
-    setYearMonth(value => shiftMonth(value, amount))
+    setYearMonth(value => shiftMonth(value ?? tenantToday!.slice(0, 7), amount))
   }
 
-  function select(date: string) {
-    if (date === selectedDate) return
+  function select(date: string, shiftKey: boolean) {
+    const next = calendarSelectionAfterClick(selection, date, shiftKey)
+    if (next.anchor === selectedDate
+      && next.dates.length === selectedDates.length
+      && next.dates.every((value, index) => value === selectedDates[index])) return
     if (!confirmDiscard()) return
-    const record = records.get(date)
-    setSelectedDate(date)
+    const record = records.get(next.anchor!)
+    setSelection(next)
     setStatus(record?.status ?? 'available')
     setTwoRounds(record?.twoRoundRequest ?? false)
     setNote(record?.healthNote ?? '')
@@ -3138,29 +3179,40 @@ function AvailabilityCalendar({
   /** Closing the sheet is the same decision as leaving the month. */
   function closeEditor() {
     if (!confirmDiscard()) return
-    setSelectedDate(null)
+    setSelection(emptyCalendarDateSelection())
   }
 
   async function save() {
-    if (!selectedDate) return
+    if (!selectedDate || selectedDates.length === 0) return
+    const dates = [...selectedDates]
     setBusy(true)
     try {
-      await courseboardApiJson(`${COURSE_API}/caddie-availabilities`, request('POST', {
-        caddieProfileId: profile.id,
-        date: selectedDate,
-        status,
-        twoRoundRequest: twoRounds,
-        healthNote: note.trim() || null,
-      }))
+      const results = await Promise.allSettled(dates.map(date => (
+        courseboardApiJson(`${COURSE_API}/caddie-availabilities`, request('POST', {
+          caddieProfileId: profile.id,
+          date,
+          status,
+          twoRoundRequest: twoRounds,
+          healthNote: note.trim() || null,
+        }))
+      )))
+      const failed = results.find(result => result.status === 'rejected')
+      resource.refresh()
+      if (failed?.status === 'rejected') throw failed.reason
       // The sheet covers the calendar it was opened from, and the toast already
       // says what was saved — leaving it open would hide the month it changed.
-      setSelectedDate(null)
-      resource.refresh()
+      setSelection(emptyCalendarDateSelection())
       setFlash({
         tone: 'success',
         title: t('caddies:calendar.saved.title'),
         message: t('caddies:calendar.saved.message', {
-          date: selectedDate,
+          date: dates.length === 1
+            ? dates[0]
+            : t('caddies:calendar.dateRange', {
+                from: dates[0],
+                to: dates[dates.length - 1],
+                n: String(dates.length),
+              }),
           status: availabilityLabel(status),
         }),
       })
@@ -3183,7 +3235,7 @@ function AvailabilityCalendar({
         `${COURSE_API}/caddie-availabilities/${encodeURIComponent(profile.id)}/${selectedDate}`,
         request('DELETE'),
       )
-      setSelectedDate(null)
+      setSelection(emptyCalendarDateSelection())
       resource.refresh()
       setFlash({
         tone: 'success',
@@ -3202,6 +3254,16 @@ function AvailabilityCalendar({
   }
 
   const cells = calendarCells(bounds.year, bounds.month)
+  const selectionLabel = selectedDates.length > 1
+    ? t('caddies:calendar.dateRange', {
+        from: selectedDates[0],
+        to: selectedDates[selectedDates.length - 1],
+        n: String(selectedDates.length),
+      })
+    : (selectedDate ?? '')
+  const loading = yearMonth === null
+    || extensionResource.loading
+    || (resource.loading && !resource.data)
 
   return (
     <Panel
@@ -3220,9 +3282,12 @@ function AvailabilityCalendar({
         </div>
       )}
     >
-      {resource.loading && !resource.data ? <LoadingState label={t('caddies:calendar.loading')} /> : null}
+      {loading ? <LoadingState label={t('caddies:calendar.loading')} /> : null}
+      {tenantClockError ? (
+        <ResourceError error={tenantClockError} onRetry={extensionResource.refresh} />
+      ) : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
-      {!resource.loading && !resource.error ? (
+      {!loading && !tenantClockError && !resource.error ? (
         <div className="space-y-3">
           <Notice tone="info" title={t('caddies:calendar.guide.title')}>
             <p>{t('caddies:calendar.guide.body')}</p>
@@ -3250,21 +3315,29 @@ function AvailabilityCalendar({
                   if (day === null) return <div key={`blank-${index}`} className="min-h-16 border-b border-r border-border/60" />
                   const date = `${yearMonth}-${String(day).padStart(2, '0')}`
                   const record = records.get(date)
-                  const active = date === selectedDate
+                  const active = selectedDates.includes(date)
+                  const current = date === tenantToday
                   return (
                     <button
                       key={date}
                       type="button"
-                      onClick={() => select(date)}
+                      onClick={event => select(date, event.shiftKey)}
                       // Says what the click does, for a screen reader and for
                       // the tooltip — a bare date gives neither.
                       aria-label={t('caddies:calendar.dayAction', { date })}
+                      aria-current={current ? 'date' : undefined}
+                      aria-pressed={active}
                       title={t('caddies:calendar.dayAction', { date })}
                       className={`flex min-h-16 flex-col items-center justify-start gap-1 border-b border-r border-border/60 p-1 text-xs transition-colors focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
                         active ? 'bg-selected' : 'hover:bg-muted/50'
-                      }`}
+                      } ${current ? 'ring-2 ring-inset ring-primary' : ''}`}
                     >
                       <span className="font-medium">{day}</span>
+                      {current ? (
+                        <span className="text-[10px] font-semibold text-primary">
+                          {t('common:time.today')}
+                        </span>
+                      ) : null}
                       {record ? (
                         <Badge variant={record.status === 'unavailable' ? 'destructive' : record.status === 'available' ? 'success' : 'warning'} className="max-w-full truncate px-1">
                           {availabilityLabel(record.status)}
@@ -3279,11 +3352,11 @@ function AvailabilityCalendar({
           </div>
 
           <Sheet
-            open={selectedDate !== null}
+            open={selectedDates.length > 0}
             onOpenChange={open => {
               if (!open) closeEditor()
             }}
-            title={t('caddies:calendar.sheetTitle', { date: selectedDate ?? '' })}
+            title={t('caddies:calendar.sheetTitle', { date: selectionLabel })}
             description={dirty
               ? t('caddies:calendar.unsavedHint')
               : t('caddies:calendar.sheetDescription')}
@@ -3293,14 +3366,22 @@ function AvailabilityCalendar({
                 <Badge variant="warning">{t('caddies:calendar.unsaved')}</Badge>
               ) : null}
               <Field label={t('caddies:calendar.status')} required>
-                <NativeSelect value={status} onChange={event => setStatus(event.target.value as AvailabilityStatus)}>
+                <NativeSelect
+                  value={status}
+                  onChange={event => setStatus(event.target.value as AvailabilityStatus)}
+                >
                   {AVAILABILITY_STATUSES.map(value => (
                     <option key={value} value={value}>{availabilityLabel(value)}</option>
                   ))}
                 </NativeSelect>
               </Field>
               <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border px-3">
-                <input type="checkbox" checked={twoRounds} onChange={event => setTwoRounds(event.target.checked)} className="size-5 accent-primary" />
+                <input
+                  type="checkbox"
+                  checked={twoRounds}
+                  onChange={event => setTwoRounds(event.target.checked)}
+                  className="size-5 accent-primary"
+                />
                 <span className="text-sm font-medium">{t('caddies:calendar.twoRounds')}</span>
               </label>
               <Field label={t('caddies:calendar.note')}>
@@ -3315,7 +3396,7 @@ function AvailabilityCalendar({
               <Button type="button" variant="primary" className="w-full" disabled={busy} onClick={() => void save()}>
                 <CheckCircle2 /> {busy ? t('caddies:calendar.saving') : t('caddies:calendar.save')}
               </Button>
-              {selectedRecord ? (
+              {selectedDates.length === 1 && selectedRecord ? (
                 <Button type="button" variant="ghost" className="w-full text-destructive" disabled={busy} onClick={() => void remove()}>
                   <XCircle /> {t('caddies:calendar.remove')}
                 </Button>
