@@ -1,6 +1,5 @@
 import { useId, useMemo, useReducer } from 'react'
 import { useTranslation } from 'react-i18next'
-import { currentYearMonth } from '../lib/clock'
 import {
   initialYearMonthState,
   normalizeYearMonth,
@@ -16,7 +15,7 @@ export function useYearMonthValue(initialValue: string) {
   const [state, setCandidate] = useReducer(
     yearMonthReducer,
     initialValue,
-    candidate => initialYearMonthState(candidate, currentYearMonth()),
+    candidate => initialYearMonthState(candidate, initialValue),
   )
   return { ...state, setCandidate }
 }
@@ -36,15 +35,14 @@ export function YearMonthPicker({
 }) {
   const { t } = useTranslation('common')
   const errorId = useId()
-  const safeValue = normalizeYearMonth(value) ?? currentYearMonth()
+  const safeValue = normalizeYearMonth(value) ?? '1970-01'
   const [year, month] = safeValue.split('-')
   const selectedYear = Number(year)
-  const currentYear = Number(currentYearMonth().slice(0, 4))
   const years = useMemo(() => {
     const first = Math.min(FIRST_YEAR, selectedYear)
-    const last = Math.max(currentYear + FUTURE_YEAR_WINDOW, selectedYear)
+    const last = selectedYear + FUTURE_YEAR_WINDOW
     return Array.from({ length: last - first + 1 }, (_, index) => first + index)
-  }, [currentYear, selectedYear])
+  }, [selectedYear])
 
   return (
     <Field requirement="none" label={label} className={className}>

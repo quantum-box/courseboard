@@ -4,9 +4,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::course::domain::{
-    format_datetime_with_offset, jst_offset, Course, CourseError, GatewayCredentials,
-    GolfCatalogGateway, GolfCommercialGateway, MonthlySettlement, Reservation, ReservationGateway,
-    ReservationId, Resource,
+    parse_tenant_timezone, Course, CourseError, GatewayCredentials, GolfCatalogGateway,
+    GolfCommercialGateway, MonthlySettlement, Reservation, ReservationGateway, ReservationId,
+    Resource,
 };
 
 /// One booking included in the monthly total, decorated for the close screen.
@@ -96,9 +96,10 @@ impl GetMonthlySettlementUseCase {
         credentials: GatewayCredentials<'_>,
         year_month: &str,
     ) -> Result<MonthlySettlementView, CourseError> {
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         let report = self
             .commercial
-            .get_monthly_settlement(credentials, year_month)
+            .get_monthly_settlement(credentials, year_month, &timezone)
             .await?;
 
         if report.reservation_ids().is_empty() {
@@ -142,6 +143,7 @@ impl GetMonthlySettlementUseCase {
             &reservations,
             &courses,
             &resources,
+            &timezone,
         )?;
 
         Ok(MonthlySettlementView {
@@ -157,8 +159,9 @@ fn build_settlement_reservations(
     reservations: &[Reservation],
     courses: &[Course],
     resources: &[Resource],
+    timezone: &str,
 ) -> Result<Vec<MonthlySettlementReservation>, CourseError> {
-    let jst = jst_offset()?;
+    let timezone = parse_tenant_timezone(timezone)?;
     let by_id: HashMap<&str, &Reservation> = reservations
         .iter()
         .map(|reservation| (reservation.id().as_str(), reservation))
@@ -174,7 +177,13 @@ fn build_settlement_reservations(
                 reservation_id: id.clone(),
                 reservation_number: non_blank(reservation.reservation_number()),
                 customer_name: reservation.customer_name().and_then(non_blank),
-                tee_time: Some(format_datetime_with_offset(reservation.starts_at(), jst)),
+                tee_time: Some(
+                    reservation
+                        .starts_at()
+                        .with_timezone(&timezone)
+                        .format("%Y-%m-%dT%H:%M:%S%:z")
+                        .to_string(),
+                ),
                 course_name: settlement_course_name(reservation, courses, resources),
             }
         })
@@ -241,7 +250,8 @@ mod tests {
             ReservationId::new("rsv_1"),
         ];
 
-        let rows = build_settlement_reservations(&ids, &reservations, &[], &[]).unwrap();
+        let rows =
+            build_settlement_reservations(&ids, &reservations, &[], &[], "Asia/Tokyo").unwrap();
 
         assert_eq!(rows[0].reservation_id().as_str(), "rsv_missing");
         assert_eq!(rows[0].customer_name(), None);

@@ -22,9 +22,10 @@ use crate::course::domain::{
     AutoAssignResult, AvailabilityDeadline, AvailabilityQuery, CaddieAvailability,
     CaddieCourseMembership, CaddieId, CaddiePatch, CaddieRank, CaddieRankFees, CaddieRating,
     CaddieRecommendation, CaddieShift, CaddieSupply, CourseError, CourseId, DayCaddieSupply,
-    PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships, ReservationId, ShiftEdit,
-    ShiftPolicy, ShiftSpan, UnfiledRequest, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, YearMonth, MAX_CONSECUTIVE_WORK_DAYS, MAX_ROUNDS_PER_SHIFT,
+    GolfCatalogGateway, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships,
+    ReservationId, ShiftEdit, ShiftPolicy, ShiftSpan, UnfiledRequest, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, YearMonth, MAX_CONSECUTIVE_WORK_DAYS,
+    MAX_ROUNDS_PER_SHIFT,
 };
 use crate::course::usecase::{
     AutoAssignCaddiesUseCase, CreateCaddieAssignmentUseCase, CreateCaddieUseCase,
@@ -273,6 +274,10 @@ pub async fn create_caddie_assignment(
     Json(body): Json<NameCaddieForRoundRequest>,
 ) -> Result<(StatusCode, Json<CaddieAssignmentDto>), AppError> {
     let credentials = credentials(&state, &headers)?;
+    let timezone = catalog_gateway(&state)
+        .get_tenant_timezone(credentials)
+        .await
+        .map_err(AppError::from)?;
     let use_case = CreateCaddieAssignmentUseCase::new(ops_gateway(&state));
     let assignment = use_case
         .execute(
@@ -286,6 +291,7 @@ pub async fn create_caddie_assignment(
                 assignment_role: body.assignment_role,
                 notes: body.notes,
             },
+            &timezone,
         )
         .await
         .map_err(AppError::from)?;
@@ -661,6 +667,10 @@ pub async fn list_caddie_recommendations(
     Query(query): Query<RecommendationQueryParams>,
 ) -> Result<Json<ItemsResponse<RecommendationDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let timezone = catalog_gateway(&state)
+        .get_tenant_timezone(credentials)
+        .await
+        .map_err(AppError::from)?;
     let use_case =
         ListCaddieRecommendationsUseCase::new(ops_gateway(&state), state.caddie_shifts());
     let items = use_case
@@ -674,6 +684,7 @@ pub async fn list_caddie_recommendations(
                 include_rookie_pairing: query.include_rookie_pairing,
                 limit: query.limit,
             },
+            &timezone,
         )
         .await
         .map_err(AppError::from)?;
@@ -747,9 +758,13 @@ pub async fn get_attendance_snapshot(
     Query(query): Query<AttendanceQueryParams>,
 ) -> Result<Json<AttendanceReportDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let timezone = catalog_gateway(&state)
+        .get_tenant_timezone(credentials)
+        .await
+        .map_err(AppError::from)?;
     let use_case = GetAttendanceSnapshotUseCase::new(ops_gateway(&state));
     let report = use_case
-        .execute(credentials, query.date)
+        .execute(credentials, query.date, &timezone)
         .await
         .map_err(AppError::from)?;
     Ok(Json(AttendanceReportDto::from(report)))
@@ -1296,9 +1311,13 @@ pub async fn get_payroll_summary(
     Query(query): Query<YearMonthQuery>,
 ) -> Result<Json<PayrollSummaryDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let timezone = catalog_gateway(&state)
+        .get_tenant_timezone(credentials)
+        .await
+        .map_err(AppError::from)?;
     let use_case = GetPayrollSummaryUseCase::new(ops_gateway(&state));
     let summary = use_case
-        .execute(credentials, &query.year_month)
+        .execute(credentials, &query.year_month, &timezone)
         .await
         .map_err(AppError::from)?;
     Ok(Json(PayrollSummaryDto::from(&summary)))
@@ -1323,9 +1342,13 @@ pub async fn export_payroll_csv(
     Query(query): Query<YearMonthQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let timezone = catalog_gateway(&state)
+        .get_tenant_timezone(credentials)
+        .await
+        .map_err(AppError::from)?;
     let use_case = ExportPayrollCsvUseCase::new(ops_gateway(&state));
     let csv = use_case
-        .execute(credentials, &query.year_month)
+        .execute(credentials, &query.year_month, &timezone)
         .await
         .map_err(AppError::from)?;
     Ok(csv_response(csv))
@@ -1565,6 +1588,7 @@ pub async fn generate_caddie_shifts(
     let credentials = credentials(&state, &headers)?;
     let year_month = parse_year_month(&year_month)?;
     let use_case = GenerateCaddieShiftsUseCase::new(
+        catalog_gateway(&state),
         ops_gateway(&state),
         state.caddie_shifts(),
         state.availability_deadlines(),

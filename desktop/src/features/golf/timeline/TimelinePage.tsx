@@ -23,6 +23,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useTenantTimezone } from '../../../context/TenantTimezoneProvider'
 import { courseboardApiJson, nowIsoMinute, today } from '../../../api'
 import { MOCK_FIXTURE_DATE, isMockFieldDataEnabled } from '../../../dev/mockFieldApi'
 import { i18next } from '../../../i18n'
@@ -64,7 +65,7 @@ import {
   type TeeTickGeometry,
   minutesToLabel,
   nowLinePercent,
-  parseJstDateParts,
+  parseTenantDateParts,
   parseLocalDateParts,
   summarizeDay,
   toTimelineBlock,
@@ -121,8 +122,8 @@ function readPxPerHour(): number {
   }
 }
 
-function todayIsoDate() {
-  return today()
+function todayIsoDate(timezone: string) {
+  return today(timezone)
 }
 
 /**
@@ -145,12 +146,13 @@ function demoDateOrNull() {
  * for, so on a real board it pointed at a moment that had nothing to do with
  * the round in progress.
  */
-function useCurrentMinute() {
-  const [now, setNow] = useState(nowIsoMinute)
+function useCurrentMinute(timezone: string) {
+  const [now, setNow] = useState(() => nowIsoMinute(timezone))
   useEffect(() => {
-    const timer = setInterval(() => setNow(nowIsoMinute()), NOW_TICK_MS)
+    setNow(nowIsoMinute(timezone))
+    const timer = setInterval(() => setNow(nowIsoMinute(timezone)), NOW_TICK_MS)
     return () => clearInterval(timer)
-  }, [])
+  }, [timezone])
   return now
 }
 
@@ -213,8 +215,9 @@ function coverageClass(coverage: AssignmentCoverage) {
 
 export function TimelinePage() {
   const { t } = useTranslation(['timeline', 'common'])
-  const [date, setDate] = useState(todayIsoDate)
-  const currentMinute = useCurrentMinute()
+  const timezone = useTenantTimezone()
+  const [date, setDate] = useState(() => todayIsoDate(timezone))
+  const currentMinute = useCurrentMinute(timezone)
   const demoDate = demoDateOrNull()
   const [courseFilter, setCourseFilter] = useState('all')
   const [displayMode, setDisplayMode] = useState<DisplayMode>(readDisplayMode)
@@ -311,15 +314,15 @@ export function TimelinePage() {
   const unavailable = teeSheet.data?.unavailable ?? []
   const assignments = enrichAssignmentsForTimeline(
     (assignmentsResource.data?.items ?? []).filter(item =>
-      parseJstDateParts(item.scheduledAt).date === date,
+      parseTenantDateParts(item.scheduledAt, timezone).date === date,
     ),
     reservations,
   )
   const caddies = (caddiesResource.data?.items ?? []).filter(
     profile => profile.employmentStatus === 'active',
   )
-  const summary = summarizeDay(reservations, assignments)
-  const conflicts = findOverlappingAssignmentIds(assignments)
+  const summary = summarizeDay(reservations, assignments, timezone)
+  const conflicts = findOverlappingAssignmentIds(assignments, timezone)
   const hourMarks = buildHourMarks(DEFAULT_TIMELINE_WINDOW, markStepMinutes(pxPerHour))
   const nowPct = nowLinePercent(currentMinute, date)
   const trackWidth = trackWidthPx(pxPerHour)
@@ -450,7 +453,7 @@ export function TimelinePage() {
               <Input
                 type="date"
                 value={date}
-                onChange={event => setDate(event.target.value || todayIsoDate())}
+                onChange={event => setDate(event.target.value || todayIsoDate(timezone))}
               />
             </label>
             <Button
@@ -462,7 +465,7 @@ export function TimelinePage() {
             >
               <ChevronRight />
             </Button>
-            <Button type="button" variant="ghost" size="sm" onClick={() => setDate(todayIsoDate())}>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setDate(todayIsoDate(timezone))}>
               <CalendarRange />
               {t('timeline:toolbar.today')}
             </Button>
@@ -615,7 +618,7 @@ export function TimelinePage() {
                   title={t('timeline:tee.empty.title')}
                   description={t('timeline:tee.empty.description')}
                   action={(
-                    <Button type="button" variant="primary" onClick={() => setDate(todayIsoDate())}>
+                    <Button type="button" variant="primary" onClick={() => setDate(todayIsoDate(timezone))}>
                       {t('timeline:tee.empty.goToToday')}
                     </Button>
                   )}
@@ -742,7 +745,7 @@ export function TimelinePage() {
                         skill: skillLabel(profile.skillLevel),
                       }),
                       blocks: laneAssignments.map(item => {
-                        const start = parseJstDateParts(item.scheduledAt).minutes
+                        const start = parseTenantDateParts(item.scheduledAt, timezone).minutes
                         const block = toTimelineBlock(item.id, start, item.durationMinutes ?? 270)
                         const reservation = reservations.find(entry => entry.id === item.reservationId)
                         const selected = selection?.kind === 'assignment' && selection.id === item.id
@@ -780,6 +783,7 @@ export function TimelinePage() {
         assignment={selectedAssignment}
         caddies={caddies}
         assignments={assignments}
+        timezone={timezone}
         onOpenDispatch={() => navigate('golf/caddies/dispatch')}
         onClose={() => setSelection(null)}
       />
@@ -1115,6 +1119,7 @@ function DetailSheet({
   assignment,
   caddies,
   assignments,
+  timezone,
   onOpenDispatch,
   onClose,
 }: {
@@ -1122,6 +1127,7 @@ function DetailSheet({
   assignment: TimelineAssignment | null
   caddies: TimelineCaddie[]
   assignments: TimelineAssignment[]
+  timezone: string
   onOpenDispatch: () => void
   onClose: () => void
 }) {
@@ -1135,7 +1141,7 @@ function DetailSheet({
   const startLabel = reservation
     ? minutesToLabel(parseLocalDateParts(reservation.teeTime).minutes)
     : assignment
-      ? minutesToLabel(parseJstDateParts(assignment.scheduledAt).minutes)
+      ? minutesToLabel(parseTenantDateParts(assignment.scheduledAt, timezone).minutes)
       : '—'
 
   return (
@@ -1212,7 +1218,7 @@ function DetailSheet({
         </Notice>
       ) : null}
 
-      {assignment && findOverlappingAssignmentIds(assignments).has(assignment.id) ? (
+      {assignment && findOverlappingAssignmentIds(assignments, timezone).has(assignment.id) ? (
         <Notice tone="danger" title={t('timeline:detail.conflict.title')}>
           <span className="timeline-detail-conflict">
             <AlertTriangle />

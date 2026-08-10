@@ -357,13 +357,23 @@ pub fn demo_board() -> DemoBoard {
 pub const SEED_DURATION_MINUTES: i64 = 270;
 
 /// `HH:MM` on `date`, as the wall clock the ledger draws.
-pub fn seed_tee_time(date: NaiveDate, tee_time: &str) -> Result<String, CourseError> {
+pub fn seed_tee_time(
+    date: NaiveDate,
+    tee_time: &str,
+    timezone: &str,
+) -> Result<String, CourseError> {
     if tee_time.len() != 5 || tee_time.as_bytes()[2] != b':' {
         return Err(CourseError::BadRequest(
             "seed tee times must look like HH:MM",
         ));
     }
-    Ok(format!("{date}T{tee_time}:00+09:00"))
+    let hour = tee_time[..2]
+        .parse()
+        .map_err(|_| CourseError::BadRequest("invalid seed hour"))?;
+    let minute = tee_time[3..]
+        .parse()
+        .map_err(|_| CourseError::BadRequest("invalid seed minute"))?;
+    super::format_tenant_wall_clock(date, hour, minute, timezone)
 }
 
 #[cfg(test)]
@@ -535,9 +545,9 @@ mod tests {
     fn a_tee_time_is_stamped_onto_the_day_in_the_courses_own_clock() {
         let date = NaiveDate::from_ymd_opt(2026, 7, 20).unwrap();
         assert_eq!(
-            seed_tee_time(date, "06:53").unwrap(),
-            "2026-07-20T06:53:00+09:00"
+            seed_tee_time(date, "06:53", "Europe/Berlin").unwrap(),
+            "2026-07-20T06:53:00+02:00"
         );
-        assert!(seed_tee_time(date, "6:53").is_err());
+        assert!(seed_tee_time(date, "6:53", "Europe/Berlin").is_err());
     }
 }

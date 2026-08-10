@@ -27,9 +27,13 @@ impl ExportPayrollCsvUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
         year_month: &str,
+        timezone: &str,
     ) -> Result<String, CourseError> {
         Ok(payroll_csv(
-            &self.summary.execute(credentials, year_month).await?,
+            &self
+                .summary
+                .execute(credentials, year_month, timezone)
+                .await?,
         ))
     }
 }

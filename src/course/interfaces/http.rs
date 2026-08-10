@@ -16,13 +16,13 @@ use utoipa::{IntoParams, ToSchema};
 use super::openapi::ErrorBody;
 
 use crate::course::domain::{
-    jst_offset, AvailabilityRule, BookingHorizon, BusinessHours, Caddie, CaddieAssignment,
+    tenant_date_at, AvailabilityRule, BookingHorizon, BusinessHours, Caddie, CaddieAssignment,
     CaddieAssignmentQuery, CaddieId, CaddieStaff, Course, CourseError, CourseId, CourseOrder,
-    DeleteSlotOverrides, GatewayCredentials, GenerationSummary, LedgerColumn, LedgerSlot,
-    PartyDetails, ProductSlot, ReservationId, ReservationProduct, ReservationServiceId, Resource,
-    ResourceId, SavedSchedule, SlotOverride, SlotOverrideKind, SlotOverrideQuery, TeeLedger,
-    TeeLedgerQuery, TeeSheet, TeeSheetItem, TeeSheetQuery, UpsertCourse, UpsertReservationProduct,
-    UpsertSlotOverrides,
+    DeleteSlotOverrides, GatewayCredentials, GenerationSummary, GolfCatalogGateway, LedgerColumn,
+    LedgerSlot, PartyDetails, ProductSlot, ReservationId, ReservationProduct, ReservationServiceId,
+    Resource, ResourceId, SavedSchedule, SlotOverride, SlotOverrideKind, SlotOverrideQuery,
+    TeeLedger, TeeLedgerQuery, TeeSheet, TeeSheetItem, TeeSheetQuery, UpsertCourse,
+    UpsertReservationProduct, UpsertSlotOverrides,
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
@@ -581,7 +581,16 @@ pub async fn seed_demo_board(
 ) -> Result<Json<SeedDemoBoardResponse>, AppError> {
     let credentials = credentials(&state, &headers)?;
     let tenant_id = operator_id(&headers)?.to_string();
-    let date = params.date.unwrap_or_else(today_in_course_zone);
+    let date = match params.date {
+        Some(date) => date,
+        None => {
+            let timezone = catalog_gateway(&state)
+                .get_tenant_timezone(credentials)
+                .await
+                .map_err(AppError::from)?;
+            tenant_date_at(Utc::now(), &timezone).map_err(AppError::from)?
+        }
+    };
     let use_case = SeedDemoBoardUseCase::new(
         reservation_gateway(&state),
         catalog_gateway(&state),
@@ -598,14 +607,6 @@ pub async fn seed_demo_board(
         bookings_updated: summary.bookings_updated,
         marks: summary.marks,
     }))
-}
-
-/// Today as the course sees it, not as the server's clock does.
-fn today_in_course_zone() -> NaiveDate {
-    match jst_offset() {
-        Ok(jst) => Utc::now().with_timezone(&jst).date_naive(),
-        Err(_) => Utc::now().date_naive(),
-    }
 }
 
 // ─── Course order ─────────────────────────────────────────────────────────────
@@ -1642,10 +1643,11 @@ pub async fn get_booking_horizon(
     headers: HeaderMap,
 ) -> Result<Json<BookingHorizonDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let (horizon, bookable_through) = GetBookingHorizonUseCase::new(commercial_gateway(&state))
-        .execute(credentials)
-        .await
-        .map_err(AppError::from)?;
+    let (horizon, bookable_through) =
+        GetBookingHorizonUseCase::new(catalog_gateway(&state), commercial_gateway(&state))
+            .execute(credentials)
+            .await
+            .map_err(AppError::from)?;
     Ok(Json(BookingHorizonDto {
         days: horizon.days(),
         bookable_through,

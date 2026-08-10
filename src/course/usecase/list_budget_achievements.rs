@@ -5,16 +5,23 @@ use std::sync::Arc;
 use chrono::NaiveDate;
 
 use crate::course::domain::{
-    BudgetAchievement, CourseError, GatewayCredentials, GolfCommercialGateway,
+    BudgetAchievement, CourseError, GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway,
 };
 
 pub struct ListBudgetAchievementsUseCase {
+    catalog: Arc<dyn GolfCatalogGateway>,
     commercial: Arc<dyn GolfCommercialGateway>,
 }
 
 impl ListBudgetAchievementsUseCase {
-    pub fn new(commercial: Arc<dyn GolfCommercialGateway>) -> Self {
-        Self { commercial }
+    pub fn new(
+        catalog: Arc<dyn GolfCatalogGateway>,
+        commercial: Arc<dyn GolfCommercialGateway>,
+    ) -> Self {
+        Self {
+            catalog,
+            commercial,
+        }
     }
 
     pub async fn execute(
@@ -23,8 +30,9 @@ impl ListBudgetAchievementsUseCase {
         from: NaiveDate,
         to: NaiveDate,
     ) -> Result<Vec<BudgetAchievement>, CourseError> {
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         self.commercial
-            .list_budget_achievements(credentials, from, to)
+            .list_budget_achievements(credentials, from, to, &timezone)
             .await
     }
 }

@@ -18,6 +18,26 @@ use crate::course::domain::{
 };
 
 const GOLF: &str = "/v1/erp/extensions/golf-course";
+
+fn budget_achievement_path(from: NaiveDate, to: NaiveDate, timezone: &str) -> String {
+    format!(
+        "{GOLF}/daily-budgets/achievement?from={from}&to={to}&timezone={}",
+        urlencoding_query(timezone)
+    )
+}
+
+fn monthly_settlement_path(year_month: &str, timezone: &str, export: bool) -> String {
+    let suffix = if export {
+        "monthly-settlement/export.csv"
+    } else {
+        "monthly-settlement"
+    };
+    format!(
+        "{GOLF}/{suffix}?yearMonth={}&timezone={}",
+        urlencoding_query(year_month),
+        urlencoding_query(timezone)
+    )
+}
 const GOLF_CONFIG: &str = "/v1/erp/extensions/golf_course/config";
 const EXTENSIONS_STATUS: &str = "/v1/erp/extensions/status";
 const GOLF_EXTENSION_KEY: &str = "golf_course";
@@ -161,8 +181,9 @@ impl GolfCommercialGateway for FieldGolfCommercialGateway {
         credentials: GatewayCredentials<'_>,
         from: NaiveDate,
         to: NaiveDate,
+        timezone: &str,
     ) -> Result<Vec<BudgetAchievement>, CourseError> {
-        let path = format!("{GOLF}/daily-budgets/achievement?from={from}&to={to}");
+        let path = budget_achievement_path(from, to, timezone);
         let items: Vec<FieldAchievementDto> =
             field_get_items(&self.client, &self.base_url, &path, credentials).await?;
         Ok(items.into_iter().map(map_achievement).collect())
@@ -172,11 +193,9 @@ impl GolfCommercialGateway for FieldGolfCommercialGateway {
         &self,
         credentials: GatewayCredentials<'_>,
         year_month: &str,
+        timezone: &str,
     ) -> Result<MonthlySettlement, CourseError> {
-        let path = format!(
-            "{GOLF}/monthly-settlement?yearMonth={}",
-            urlencoding_query(year_month)
-        );
+        let path = monthly_settlement_path(year_month, timezone, false);
         let dto: FieldSettlementDto = field_send_json(
             &self.client,
             &self.base_url,
@@ -193,11 +212,9 @@ impl GolfCommercialGateway for FieldGolfCommercialGateway {
         &self,
         credentials: GatewayCredentials<'_>,
         year_month: &str,
+        timezone: &str,
     ) -> Result<String, CourseError> {
-        let path = format!(
-            "{GOLF}/monthly-settlement/export.csv?yearMonth={}",
-            urlencoding_query(year_month)
-        );
+        let path = monthly_settlement_path(year_month, timezone, true);
         field_send_text(
             &self.client,
             &self.base_url,
@@ -565,4 +582,21 @@ struct FieldValidationDto {
     valid: Option<bool>,
     #[serde(default)]
     errors: Option<Vec<String>>,
+}
+
+#[cfg(test)]
+mod timezone_contract_tests {
+    use super::*;
+
+    #[test]
+    fn aggregate_requests_forward_the_tenant_timezone() {
+        let from = NaiveDate::from_ymd_opt(2026, 3, 1).unwrap();
+        let to = NaiveDate::from_ymd_opt(2026, 3, 31).unwrap();
+        assert!(budget_achievement_path(from, to, "Europe/Berlin")
+            .ends_with("timezone=Europe%2FBerlin"));
+        assert!(monthly_settlement_path("2026-03", "Europe/Berlin", false)
+            .ends_with("yearMonth=2026-03&timezone=Europe%2FBerlin"));
+        assert!(monthly_settlement_path("2026-03", "Europe/Berlin", true)
+            .contains("monthly-settlement/export.csv"));
+    }
 }

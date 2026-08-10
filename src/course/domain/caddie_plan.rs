@@ -15,7 +15,8 @@
 //! Everything here is pure. The roster, the day's bookings, the standing
 //! assignments and the shift requests arrive already gathered.
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, Timelike, Utc};
+use chrono_tz::Tz;
 
 use super::{
     rank_caddies, AttendanceState, AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem,
@@ -136,8 +137,8 @@ impl PlannableCaddie {
         i64::from(self.max_rounds_per_day) > self.rounds_assigned_today
     }
 
-    fn shift_covers(&self, round: &PlannableRound, offset_minutes: i64) -> bool {
-        shift_covers_tee_time(self.availability, Some(round.starts_at), offset_minutes)
+    fn shift_covers(&self, round: &PlannableRound, timezone: Tz) -> bool {
+        shift_covers_tee_time(self.availability, Some(round.starts_at), timezone)
     }
 
     fn stands_on(&self, round: &PlannableRound) -> bool {
@@ -157,7 +158,7 @@ impl PlannableCaddie {
 pub fn shift_covers_tee_time(
     status: Option<AvailabilityStatus>,
     starts_at: Option<DateTime<Utc>>,
-    utc_offset_minutes: i64,
+    timezone: Tz,
 ) -> bool {
     let Some(status) = status else {
         return true;
@@ -168,7 +169,8 @@ pub fn shift_covers_tee_time(
     let Some(starts_at) = starts_at else {
         return true;
     };
-    let local_minutes = (starts_at.timestamp() / 60 + utc_offset_minutes).rem_euclid(24 * 60);
+    let local = starts_at.with_timezone(&timezone);
+    let local_minutes = i64::from(local.hour() * 60 + local.minute());
     match status {
         AvailabilityStatus::MorningOnly => local_minutes < MIDDAY_MINUTES,
         AvailabilityStatus::AfternoonOnly => local_minutes >= MIDDAY_MINUTES,
@@ -179,9 +181,8 @@ pub fn shift_covers_tee_time(
 /// What the caller asked of the planner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlanOptions {
-    /// Minutes east of UTC for the course's clock, used to read half-day shift
-    /// requests against local noon.
-    pub utc_offset_minutes: i64,
+    /// Tenant clock used to read half-day shift requests against local noon.
+    pub timezone: Tz,
     pub dry_run: bool,
 }
 
@@ -215,7 +216,7 @@ pub fn plan_caddie_assignments(
             .filter(|(_, caddie)| {
                 caddie.has_capacity()
                     && caddie.stands_on(round)
-                    && caddie.shift_covers(round, options.utc_offset_minutes)
+                    && caddie.shift_covers(round, options.timezone)
                     && caddie.is_free_for(round)
             })
             .map(|(index, _)| index)
@@ -229,7 +230,7 @@ pub fn plan_caddie_assignments(
             // stopped by their daily limit.
             let stopped_only_by_the_limit = pool.iter().any(|caddie| {
                 caddie.stands_on(round)
-                    && caddie.shift_covers(round, options.utc_offset_minutes)
+                    && caddie.shift_covers(round, options.timezone)
                     && caddie.is_free_for(round)
             });
             // Nobody on this course at all is a different problem from a busy
@@ -311,12 +312,9 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
 
-    /// JST, which is what every course in this product runs on.
-    const JST_OFFSET: i64 = 9 * 60;
-
     fn options() -> PlanOptions {
         PlanOptions {
-            utc_offset_minutes: JST_OFFSET,
+            timezone: chrono_tz::Asia::Tokyo,
             dry_run: true,
         }
     }
@@ -419,6 +417,21 @@ mod tests {
     }
 
     #[test]
+    fn half_day_requests_follow_the_tenant_dst_offset() {
+        let summer_morning = Utc.with_ymd_and_hms(2026, 7, 1, 5, 0, 0).unwrap();
+        assert!(shift_covers_tee_time(
+            Some(AvailabilityStatus::MorningOnly),
+            Some(summer_morning),
+            chrono_tz::Europe::Berlin,
+        ));
+        assert!(!shift_covers_tee_time(
+            Some(AvailabilityStatus::AfternoonOnly),
+            Some(summer_morning),
+            chrono_tz::Europe::Berlin,
+        ));
+    }
+
+    #[test]
     fn a_caddie_at_their_daily_limit_is_named_as_such() {
         let mut full = caddie("cad_full", "Full");
         full.max_rounds_per_day = 1;
@@ -473,11 +486,9 @@ mod course_tests {
     use super::*;
     use chrono::TimeZone;
 
-    const JST_OFFSET: i64 = 9 * 60;
-
     fn options() -> PlanOptions {
         PlanOptions {
-            utc_offset_minutes: JST_OFFSET,
+            timezone: chrono_tz::Asia::Tokyo,
             dry_run: true,
         }
     }

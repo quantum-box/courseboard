@@ -9,12 +9,14 @@
  * It lives here rather than in `api.ts` so that pure modules — timeline layout,
  * form defaults — can share it without pulling in fetch and auth.
  */
-export const COURSE_TIME_ZONE = 'Asia/Tokyo'
+export const DEFAULT_TIME_ZONE = 'Asia/Tokyo'
+/** @deprecated Use the tenant timezone context for operator calculations. */
+export const COURSE_TIME_ZONE = DEFAULT_TIME_ZONE
 
 /** Today on the course clock, as `YYYY-MM-DD`. */
-export function today() {
+export function today(timeZone = DEFAULT_TIME_ZONE) {
   return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: COURSE_TIME_ZONE,
+    timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -22,9 +24,9 @@ export function today() {
 }
 
 /** Current course-local time as `YYYY-MM-DDTHH:mm`, recomputed on every call. */
-export function nowIsoMinute() {
+export function nowIsoMinute(timeZone = DEFAULT_TIME_ZONE) {
   return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: COURSE_TIME_ZONE,
+    timeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -36,8 +38,8 @@ export function nowIsoMinute() {
     .replace(' ', 'T')
 }
 
-export function currentYearMonth() {
-  return today().slice(0, 7)
+export function currentYearMonth(timeZone = DEFAULT_TIME_ZONE) {
+  return today(timeZone).slice(0, 7)
 }
 
 /**

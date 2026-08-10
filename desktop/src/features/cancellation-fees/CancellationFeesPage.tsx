@@ -13,6 +13,7 @@ import {
 import { useCallback, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { downloadBlob, fieldApiJson, yen } from '../../api'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import {
   DataTable,
@@ -34,6 +35,7 @@ import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import { openExternal } from '../../lib/platform'
 import { currentRouteSearchParams, navigate } from '../../lib/router'
+import { today } from '../../lib/clock'
 
 type InvoiceStatus = 'Draft' | 'Sent' | 'SendFailed' | 'Paid' | 'Overdue'
 
@@ -248,6 +250,7 @@ export function CancellationFeesPage() {
 
 export function NewCancellationFeePage() {
   const { t } = useTranslation(['cancellationFees', 'common'])
+  const timezone = useTenantTimezone()
   const idempotencyKey = useRef(crypto.randomUUID())
   const orderId = currentRouteSearchParams().get('orderId')?.trim() ?? ''
   const orderLoader = useCallback(async () => {
@@ -256,7 +259,8 @@ export function NewCancellationFeePage() {
   }, [orderId])
   const orderResource = useResource(orderLoader, [orderId])
   const order = orderResource.data
-  const due = new Date(Date.now() + 7 * 86_400_000).toISOString().slice(0, 10)
+  const [year, month, day] = today(timezone).split('-').map(Number)
+  const due = new Date(Date.UTC(year!, month! - 1, day! + 7)).toISOString().slice(0, 10)
   const [sendEmail, setSendEmail] = useState(true)
   const [sendSms, setSendSms] = useState(false)
   const [amount, setAmount] = useState(5000)

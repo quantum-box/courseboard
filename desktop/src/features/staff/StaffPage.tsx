@@ -14,6 +14,7 @@ import { ArrowLeft, Link2, Pencil, Search, UserPlus, Users } from 'lucide-react'
 import { useCallback, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { ApiError, courseboardApiJson, fieldApiJson, today } from '../../api'
 import {
   DataTable,
@@ -79,7 +80,8 @@ function skillLabel(skill: string, t: TFunction<['staff', 'caddies', 'common']>)
 
 export function StaffPage({ staffId }: { staffId?: string }) {
   const { t, i18n } = useTranslation(['staff', 'caddies', 'common'])
-  const businessDate = today()
+  const timezone = useTenantTimezone()
+  const businessDate = today(timezone)
 
   const staffLoader = useCallback(
     () => fieldApiJson<ListResponse<StaffMember>>('/v1/erp/staff'),
