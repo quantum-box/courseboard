@@ -17,7 +17,6 @@ import {
 } from '../../components/Page'
 import { YearMonthPicker, useYearMonthValue } from '../../components/YearMonthPicker'
 import { useRegisterPageReload } from '../../lib/pageReload'
-import { normalizeYearMonth } from '../../lib/yearMonth'
 import { showToast } from '../../lib/toast'
 import {
   dailyRows,
@@ -86,42 +85,6 @@ function WarningLine({ warning }: { warning: ImportWarning }) {
 }
 
 /**
- * The month picker shown when a file's name does not carry one.
- *
- * Starts empty rather than on the current month: a prefilled answer to a
- * question nobody has read is how the wrong month gets imported.
- */
-function MonthChoice({
-  label,
-  hint,
-  value,
-  onChange,
-}: {
-  label: string
-  hint: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  const { value: month, error, setCandidate } = useYearMonthValue(value || currentYearMonth())
-  return (
-    <div className="grid gap-1">
-      <YearMonthPicker
-        label={label}
-        value={month}
-        error={error}
-        onChange={candidate => {
-          setCandidate(candidate)
-          const normalized = normalizeYearMonth(candidate)
-          onChange(normalized ?? '')
-        }}
-        className="sm:w-64"
-      />
-      <small className="text-xs text-muted-foreground">{hint}</small>
-    </div>
-  )
-}
-
-/**
  * Bringing the club's daily reservation export into CourseBoard.
  *
  * The screen is deliberately two steps. The export is re-issued all month long
@@ -148,10 +111,21 @@ export function ReservationImportPage() {
   const [applying, setApplying] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
   // Set only once the server has said the file name does not carry a month.
-  // Until then nothing is sent, so an unnamed file cannot be dated by accident.
+  // Until then the month below is not sent at all, so an unnamed file cannot be
+  // dated by whatever the table filter happens to be showing.
   const [needsMonth, setNeedsMonth] = useState(false)
-  const [chosenMonth, setChosenMonth] = useState('')
+  const {
+    value: importMonth,
+    error: importMonthError,
+    setCandidate: setImportMonth,
+  } = useYearMonthValue(currentYearMonth())
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Which load is the current one. Importing moves the table to the file's
+  // month, which starts a second read while the first is still in flight;
+  // without this the older answer can land last and leave the previous month's
+  // rows under the new month's heading.
+  const loadSequence = useRef(0)
 
   const range = useMemo(
     () => monthBounds(yearMonth) ?? monthBounds(currentYearMonth()),
@@ -160,6 +134,7 @@ export function ReservationImportPage() {
 
   const load = useCallback(async () => {
     if (!range) return
+    const sequence = (loadSequence.current += 1)
     setLoading(true)
     setLoadError(null)
     const params = new URLSearchParams({ from: range.from, to: range.to })
@@ -171,12 +146,16 @@ export function ReservationImportPage() {
           `/v1/course/reservation-summaries?${params.toString()}`,
         ),
       ])
+      // A newer read has already been asked for, so this answer is about a
+      // month the screen has moved on from.
+      if (loadSequence.current !== sequence) return
       setCourses(coursePayload.items)
       setStored(summaryPayload.items)
     } catch (error) {
+      if (loadSequence.current !== sequence) return
       setLoadError(error)
     } finally {
-      setLoading(false)
+      if (loadSequence.current === sequence) setLoading(false)
     }
   }, [courseFilter, range])
 
@@ -191,7 +170,6 @@ export function ReservationImportPage() {
     // A new file gets asked about on its own terms: the month chosen for the
     // last one says nothing about this one.
     setNeedsMonth(false)
-    setChosenMonth('')
     setFile(event.target.files?.[0] ?? null)
   }
 
@@ -200,7 +178,6 @@ export function ReservationImportPage() {
     setFile(null)
     setUploadError(null)
     setNeedsMonth(false)
-    setChosenMonth('')
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -213,7 +190,7 @@ export function ReservationImportPage() {
   function importPath(step: 'preview' | 'import') {
     const params = new URLSearchParams()
     if (file) params.set('fileName', file.name)
-    if (chosenMonth) params.set('yearMonth', chosenMonth)
+    if (needsMonth) params.set('yearMonth', importMonth)
     return `/v1/course/reservation-summaries/${step}?${params.toString()}`
   }
 
@@ -274,8 +251,12 @@ export function ReservationImportPage() {
           n: String(result.imported),
         }),
       })
-      // Follow the file's month rather than whatever the picker was left on,
-      // so the table below shows what was just imported.
+      // Follow the file's month rather than whatever the filter was left on,
+      // so the table below shows what was just imported. When that is a
+      // different month the range changes and the loader effect reads it; this
+      // call covers the common case of re-importing the month already shown,
+      // where nothing changes and no effect fires. The two are sequenced
+      // against each other in `load`, so the older read cannot land last.
       setYearMonth(result.yearMonth)
       discard()
       await load()
@@ -326,21 +307,31 @@ export function ReservationImportPage() {
           ) : null}
           {uploadError ? <Notice tone="danger">{uploadError}</Notice> : null}
           {needsMonth ? (
-            // Shown only after the server has asked. The file name did not say
-            // which month it covers, and nothing is sent until somebody does.
-            <MonthChoice
-              label={t('reservationImport:upload.month')}
-              hint={t('reservationImport:upload.monthHint')}
-              value={chosenMonth}
-              onChange={setChosenMonth}
-            />
+            // Shown only after the server has asked, and sent only from here.
+            // It opens on the current month because a year/month pair has no
+            // empty state to open on — which is fine, because the desk has just
+            // been told the file did not say and has to press the button again
+            // themselves. What must not happen is sending a month nobody was
+            // asked for, and until this appears none is sent at all.
+            <div className="grid gap-1">
+              <YearMonthPicker
+                label={t('reservationImport:upload.month')}
+                value={importMonth}
+                error={importMonthError}
+                onChange={setImportMonth}
+                className="sm:w-64"
+              />
+              <small className="text-xs text-muted-foreground">
+                {t('reservationImport:upload.monthHint')}
+              </small>
+            </div>
           ) : null}
           <div className="flex flex-wrap gap-2">
             <Button
               variant="primary"
               size="lg"
               type="button"
-              disabled={!file || checking || applying || (needsMonth && !chosenMonth)}
+              disabled={!file || checking || applying || (needsMonth && Boolean(importMonthError))}
               onClick={() => void check()}
             >
               <Upload />
