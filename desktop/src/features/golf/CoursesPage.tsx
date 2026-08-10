@@ -7,7 +7,6 @@ import {
   Plus,
   Save,
   Trash2,
-  X,
 } from 'lucide-react'
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -28,6 +27,7 @@ import {
   resourceErrorText,
   type DataTableColumn,
 } from '../../components/Page'
+import { Sheet } from '../../components/Sheet'
 import { navigate } from '../../lib/router'
 import { useResource } from '../../hooks/useResource'
 import {
@@ -339,23 +339,28 @@ export function CoursesPage() {
         <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
           <ArrowLeft /> {t('common:action.backToSettings')}
         </Button>
-        <Button type="button" variant="primary" onClick={beginCreate}>
+        <Button
+          type="button"
+          className="course-add-button"
+          variant="primary"
+          onClick={beginCreate}
+        >
           <Plus /> {t('courses:add')}
         </Button>
       </div>
 
       {editor ? (
-        <Panel
+        <Sheet
+          open
+          onOpenChange={open => {
+            if (!open) closeEditor()
+          }}
           title={editor.mode === 'create' ? t('courses:editor.createTitle') : t('courses:editor.editTitle')}
           description={t('courses:editor.description')}
-          actions={(
-            <Button type="button" variant="ghost" size="sm" onClick={closeEditor}>
-              <X /> {t('common:action.close')}
-            </Button>
-          )}
+          className="course-editor-sheet"
         >
           <form className="grid gap-4" onSubmit={saveCourse}>
-            <FormGrid columns={3}>
+            <FormGrid columns={1}>
               <Field label={t('courses:field.name')} required>
                 <Input
                   value={draft.name}
@@ -443,7 +448,7 @@ export function CoursesPage() {
               </Button>
             </div>
           </form>
-        </Panel>
+        </Sheet>
       ) : null}
 
       <Panel
@@ -467,7 +472,12 @@ export function CoursesPage() {
                 title={t('courses:empty.title')}
                 description={t('courses:empty.description')}
                 action={(
-                  <Button type="button" variant="primary" onClick={beginCreate}>
+                  <Button
+                    type="button"
+                    className="course-add-button"
+                    variant="primary"
+                    onClick={beginCreate}
+                  >
                     <Flag /> {t('courses:empty.action')}
                   </Button>
                 )}
