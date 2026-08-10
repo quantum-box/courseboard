@@ -77,29 +77,29 @@ export const helpEn: HelpCatalog = {
 
     'golf/products': {
       title: 'Play products',
-      summary: 'The kinds of play you sell and the slots you can accept each weekday.',
+      summary: 'What each plan you sell is made of. The bookable hours live on the course.',
       usage: [
         {
-          heading: 'Open a service',
-          body: 'Select a row to open that service’s own screen. The weekly slots are edited there.',
+          heading: 'Add a plan',
+          body: 'Press “Add a booking service” and set the plan name, booking service ID, course, play type, holes, and expected duration. Saving opens that plan’s own screen.',
         },
         {
-          heading: 'Edit the slots',
-          body: 'Each weekday has its own card. Enter start, end, groups, and players; 0 means no limit. Build one day, then use “Copy to…” to stamp it onto Mon–Fri or the weekend.',
+          heading: 'Change a plan',
+          body: 'Select a row to open the plan, then “Plan settings” to edit it. Only the booking service ID is fixed once created. Leave players per group empty to follow the reservation policy.',
         },
         {
-          heading: 'Build from caddie supply',
-          body: 'For caddie-required products, morning and afternoon slots can be derived from available caddies and applied to that date’s weekday.',
+          heading: 'Hours are edited on the course',
+          body: 'The bookable week belongs to the course. From the plan, press “Open the hours for <course>” and edit them there. Older per-plan slots are shown read-only and cannot be changed here.',
         },
       ],
       data: [
         {
           heading: 'Play type',
-          body: 'With caddie or self play. Only caddie-required products track caddie supply.',
+          body: 'With caddie or self play. Only bookings sold as with-caddie need a caddie assigned on the timeline and the assignment board. Switching it also resets the expected duration.',
         },
         {
-          heading: 'Slot',
-          body: 'The cap on groups and players for one weekday and time band. Saving replaces the whole week, so check the added/dropped/changed counts in the bottom bar first.',
+          heading: 'Course',
+          body: 'The course this plan is sold on. Opening hours and bookable hours belong to the course, so a plan without one cannot open them — the list flags those at the top.',
         },
       ],
     },
