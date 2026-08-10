@@ -21,6 +21,8 @@ import { PlayerTagInput } from './PlayerTagInput'
 export type BookablePlan = {
   reservationServiceId: string
   label: string
+  /** Whether the round is sold with a caddie. Drives the badge on the list. */
+  playType: 'caddie' | 'self'
   expectedDurationMinutes: number
   golfCourseId?: string | null
   /** Players this plan sells in one group; absent means the general cap. */
@@ -195,22 +197,41 @@ export function NewReservationEditor({
               onChange={event => setQuantity(event.target.value)}
             />
           </Field>
-          {coursePlans.length > 0 ? (
-            <Field label={t('ledger:newReservation.plan')} requirement="none">
-              <select
-                className="native-select"
-                value={planId}
-                onChange={event => setPlanId(event.target.value)}
-              >
-                {coursePlans.map(plan => (
-                  <option key={plan.reservationServiceId} value={plan.reservationServiceId}>
-                    {plan.label}
-                  </option>
-                ))}
-              </select>
-            </Field>
-          ) : null}
         </FormGrid>
+
+        {/* Every booking is sold under a plan, so the choice is on the sheet
+            rather than behind a dropdown: opening a menu to reach a field the
+            desk always has to touch is one click on every phone call. */}
+        {coursePlans.length > 0 ? (
+          <fieldset className="ledger-plan-picker">
+            <legend>{t('ledger:newReservation.plan')}</legend>
+            <div className="ledger-plan-list">
+              {coursePlans.map(plan => (
+                <label
+                  key={plan.reservationServiceId}
+                  className={`ledger-plan-option${
+                    planId === plan.reservationServiceId ? ' is-selected' : ''
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="courseboard-new-reservation-plan"
+                    value={plan.reservationServiceId}
+                    checked={planId === plan.reservationServiceId}
+                    onChange={() => setPlanId(plan.reservationServiceId)}
+                  />
+                  <span className="ledger-plan-label">{plan.label}</span>
+                  {/* Caddie or self is what the desk is really choosing between,
+                      and a plan name does not always say which. The colours are
+                      the board's, so the badge reads the same in both places. */}
+                  <span className={`ledger-plan-badge ledger-play-type-${plan.playType}`}>
+                    {t(`ledger:cell.playType.${plan.playType}`)}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
 
         {hasUnnamedPlayer ? (
           <Notice tone="danger">{t('ledger:party.emptyPlayerName')}</Notice>
@@ -228,7 +249,7 @@ export function NewReservationEditor({
           <h3>{t('ledger:party.players')}</h3>
           {players.map((player, index) => (
             <div className="ledger-party-player ledger-party-player--new" key={index}>
-              <Field label={t('ledger:party.playerName')}>
+              <Field className="ledger-party-field-name" label={t('ledger:party.playerName')}>
                 <Input
                   value={player.name}
                   placeholder={t('ledger:party.playerNamePlaceholder')}
@@ -239,7 +260,7 @@ export function NewReservationEditor({
                   }
                 />
               </Field>
-              <Field label={t('ledger:party.playerTag')}>
+              <Field className="ledger-party-field-tag" label={t('ledger:party.playerTag')}>
                 <PlayerTagInput
                   value={player.tag}
                   options={playerTagOptions}
@@ -250,7 +271,7 @@ export function NewReservationEditor({
                   }
                 />
               </Field>
-              <Field label={t('ledger:party.memberNumber')}>
+              <Field className="ledger-party-field-member" label={t('ledger:party.memberNumber')}>
                 <Input
                   value={player.memberNumber}
                   onChange={event =>

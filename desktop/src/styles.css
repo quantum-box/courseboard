@@ -4765,6 +4765,17 @@ button,
   background: hsl(var(--nui-primary) / 12%);
 }
 
+/* A booked row opens its group from anywhere on it, so the whole row shows the
+ * affordance — not just the one cell that happens to hold a button. The time
+ * column keeps its own pointer and its own action. */
+.ledger-row.is-booked > td {
+  cursor: pointer;
+}
+
+.ledger-row.is-booked:hover > td {
+  background: hsl(var(--nui-muted) / .6);
+}
+
 /* Tones. An open row is plain background so a full board reads as busy and an
  * empty one reads as empty, without any row shouting. */
 .ledger-row-partial > td,
@@ -4927,9 +4938,116 @@ button,
   padding: 0 2px 12px;
 }
 
+/* The plan is never optional, so it sits open on the sheet as a list. A box
+ * rather than a bare stack: the desk needs to see where the choices end, and
+ * the list scrolls once a club sells more plans than fit. */
+.ledger-plan-picker {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ledger-plan-picker > legend {
+  margin-bottom: 5px;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ledger-plan-list {
+  display: grid;
+  /* Half a row, so a clipped list cannot be mistaken for a complete one. */
+  max-height: 157px;
+  overflow-y: auto;
+  border: 1px solid hsl(var(--nui-border-strong));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+  /* Fades the bottom edge while plans remain below it, and lifts the fade on
+   * the last one. A scroll timeline is inactive when nothing overflows, so a
+   * club with three plans keeps its third row at full strength. */
+  animation: ledger-plan-more linear both;
+  animation-timeline: scroll(self block);
+}
+
+@keyframes ledger-plan-more {
+  from {
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
+  }
+
+  to {
+    mask-image: linear-gradient(to bottom, #000 100%, transparent);
+  }
+}
+
+/* macOS hides its overlay scrollbar until you already scroll, which is no use
+ * for saying the list can be scrolled. Styling it at all opts this one list
+ * out of overlay, so the bar stays put whenever there is more to reach. */
+.ledger-plan-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.ledger-plan-list::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: hsl(var(--nui-muted-foreground) / .45);
+  background-clip: content-box;
+}
+
+.ledger-plan-list::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--nui-muted-foreground) / .7);
+  background-clip: content-box;
+}
+
+.ledger-plan-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ledger-plan-option + .ledger-plan-option {
+  border-top: 1px solid hsl(var(--nui-border));
+}
+
+/* The name takes the slack so the badge stays on the right edge, where the eye
+ * can run down the column and pick out the caddie rounds in one pass. */
+.ledger-plan-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ledger-plan-badge {
+  flex: none;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.ledger-plan-option:hover {
+  background: hsl(var(--nui-muted) / .6);
+}
+
+.ledger-plan-option.is-selected {
+  background: hsl(var(--nui-primary) / 12%);
+  font-weight: 600;
+}
+
+/* The radio itself is what takes focus, so the row has to show it. */
+.ledger-plan-option:focus-within {
+  outline: 2px solid hsl(var(--nui-primary) / 45%);
+  outline-offset: -2px;
+}
+
 .ledger-party-players {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 
 .ledger-party-players h3 {
@@ -4938,15 +5056,46 @@ button,
   font-weight: 700;
 }
 
+/* One player takes two lines, not four squeezed columns. In a 512px sheet a
+ * column narrow enough to fit four of them wraps its own label — "プレイヤー
+ * 区分" over two lines — and a wrapped label reads as a broken form rather
+ * than a tight one. */
 .ledger-party-player {
   display: grid;
-  grid-template-columns: 1fr 96px 110px auto;
-  align-items: end;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-areas:
+    'name name remove'
+    'tag  member remove';
+  /* Top-aligned so "会員番号" keeps its label level with "プレイヤー区分".
+   * Bottom-aligning drops it a line whenever the tag turns into a free-text
+   * field and grows a second input. */
+  align-items: start;
+  gap: 10px;
+  border-top: 1px dashed hsl(var(--nui-border));
+  padding-top: 12px;
+}
+
+/* The first player opens the section; a rule above it would read as a divider
+ * from the heading. */
+.ledger-party-player:first-of-type {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .ledger-party-player--new {
-  grid-template-columns: 1fr 96px 110px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    'name name'
+    'tag  member';
+}
+
+.ledger-party-field-name { grid-area: name; }
+.ledger-party-field-tag { grid-area: tag; }
+.ledger-party-field-member { grid-area: member; }
+
+.ledger-party-remove {
+  grid-area: remove;
+  align-self: end;
 }
 
 .ledger-player-tag-input {
@@ -4962,7 +5111,19 @@ button,
 
 @media (max-width: 720px) {
   .ledger-party-player {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'name   remove'
+      'tag    tag'
+      'member member';
+  }
+
+  .ledger-party-player--new {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'name'
+      'tag'
+      'member';
   }
 
   .ledger-legend {

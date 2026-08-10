@@ -294,7 +294,20 @@ function SlotRows({
   return (
     <Fragment>
       {slot.items.map((item, index) => (
-        <tr key={item.id} className={rowClass} onContextMenu={contextMenuHandler(item)}>
+        <tr
+          key={item.id}
+          className={`${rowClass} is-booked`}
+          onContextMenu={contextMenuHandler(item)}
+          // The whole row is the group, so anywhere on it opens the group's
+          // sheet — the desk clicks the seat it means to fill rather than
+          // tracking back to the name in the first column. Cells that carry
+          // their own control (the time button, the group button) answer for
+          // themselves; this only picks up the clicks nothing else wanted.
+          onClick={event => {
+            if ((event.target as HTMLElement).closest('button, a, input, select')) return
+            onSelectReservation(item.id)
+          }}
+        >
           {index === 0 ? timeCell : null}
           <GroupCell
             item={item}
