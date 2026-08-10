@@ -223,7 +223,7 @@ const mockCaddies = [
     canTwoRounds: true,
     desiredIncome: 280000,
     employmentStatus: 'active',
-    baseFeeAmount: 12000,
+    baseFeeAmount: 0,
     currency: 'JPY',
     maxRoundsPerDay: 2,
     ratingAverage: 4.8,
@@ -242,7 +242,7 @@ const mockCaddies = [
     canTwoRounds: false,
     desiredIncome: 220000,
     employmentStatus: 'active',
-    baseFeeAmount: 10000,
+    baseFeeAmount: 0,
     currency: 'JPY',
     maxRoundsPerDay: 1,
     ratingAverage: 4.4,
@@ -280,7 +280,7 @@ const mockCaddies = [
     canTwoRounds: true,
     desiredIncome: 210000,
     employmentStatus: 'active',
-    baseFeeAmount: 10000,
+    baseFeeAmount: 0,
     currency: 'JPY',
     maxRoundsPerDay: 2,
     ratingAverage: 4.2,
@@ -299,7 +299,7 @@ const mockCaddies = [
     canTwoRounds: false,
     desiredIncome: 180000,
     employmentStatus: 'active',
-    baseFeeAmount: 9000,
+    baseFeeAmount: 0,
     currency: 'JPY',
     maxRoundsPerDay: 1,
     ratingAverage: 4.0,
@@ -436,6 +436,43 @@ function saveMockWrites(key: string, value: unknown) {
 
 /** The club's column order, as arranged during the session. */
 const mockCourseOrder: string[] = loadMockWrites<string[]>('courseOrder', [])
+
+/** What one round pays at each rank, as the payroll screen sets it. */
+const mockRankFees = loadMockWrites<{
+  a: number
+  b: number
+  c: number
+  d: number
+  currency: string
+}>('caddieRankFees', { a: 12_000, b: 11_000, c: 10_000, d: 9_000, currency: 'JPY' })
+
+/**
+ * The same arithmetic the API does: a caddie's own fee wins when they have one,
+ * otherwise their rank decides, and the month is that times the rounds worked.
+ */
+function payrollRow(profile: (typeof mockCaddies)[number]) {
+  const rank = profile.rank as 'A' | 'B' | 'C' | 'D'
+  const rankFee = mockRankFees[rank.toLowerCase() as 'a' | 'b' | 'c' | 'd']
+  const feeOverridden = profile.baseFeeAmount > 0
+  const roundFee = feeOverridden ? profile.baseFeeAmount : rankFee
+  const assignedRounds = profile.id === 'caddie_aya' ? 12 : 8
+  return {
+    caddieProfileId: profile.id,
+    displayName: profile.displayName,
+    staffId: profile.staffId,
+    workedMinutes: profile.id === 'caddie_aya' ? 2_400 : 1_600,
+    shiftedMinutes: profile.id === 'caddie_aya' ? 2_520 : 1_680,
+    assignedRounds,
+    rank,
+    roundFee,
+    feeOverridden,
+    feeTotal: roundFee * assignedRounds,
+    roundsWithoutClockIn: 0,
+    openClockIn: false,
+    currency: mockRankFees.currency,
+  }
+}
+
 
 /** Desk marks the mock day starts with, and anything written during the session. */
 const mockSlotMarks: Array<{
@@ -1094,6 +1131,9 @@ function normalizeMockPath(pathname: string): string {
     || pathname === '/v1/course/caddie-course-supply'
     || pathname === '/v1/course/caddie-reinforcements'
     || pathname === '/v1/course/caddie-shift-rules'
+    // Rank fees are a golf pay rule, kept in the extension config rather than
+    // behind a Field endpoint of their own.
+    || pathname === '/v1/course/caddie-rank-fees'
     || pathname.startsWith('/v1/course/caddie-shifts/')
     || pathname.startsWith('/v1/course/caddie-shift-plans/')
   ) {
@@ -1814,6 +1854,8 @@ function resolveGet(path: string): Json | null | undefined {
     }
   }
 
+  if (pathname === '/v1/course/caddie-rank-fees') return mockRankFees
+
   if (pathname === '/v1/erp/extensions/golf-course/caddie-payroll-summary') {
     const yearMonth = url.searchParams.get('yearMonth') ?? TODAY.slice(0, 7)
     const [year, month] = yearMonth.split('-').map(Number)
@@ -1823,18 +1865,7 @@ function resolveGet(path: string): Json | null | undefined {
         startDate: `${yearMonth}-01`,
         endDate: new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10),
       },
-      items: mockCaddies.map(profile => ({
-        caddieProfileId: profile.id,
-        displayName: profile.displayName,
-        staffId: profile.staffId,
-        workedMinutes: profile.id === 'caddie_aya' ? 2_400 : 1_600,
-        shiftedMinutes: profile.id === 'caddie_aya' ? 2_520 : 1_680,
-        assignedRounds: profile.id === 'caddie_aya' ? 12 : 8,
-        confirmedFeeTotal: profile.id === 'caddie_aya' ? 144_000 : 80_000,
-        roundsWithoutClockIn: 0,
-        openClockIn: false,
-        currency: 'JPY',
-      })),
+      items: mockCaddies.map(profile => payrollRow(profile)),
     }
   }
 
@@ -2027,6 +2058,22 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     mockCourseOrder.splice(0, mockCourseOrder.length, ...ids.filter(id => known.includes(id)))
     saveMockWrites('courseOrder', mockCourseOrder)
     return hit({ golfCourseIds: [...mockCourseOrder] })
+  }
+
+  if (pathname === '/v1/course/caddie-rank-fees' && method === 'PUT') {
+    const ranks = ['a', 'b', 'c', 'd'] as const
+    for (const rank of ranks) {
+      const amount = Number(body?.[rank])
+      // The API refuses these rather than clamping, so the mock does too.
+      if (!Number.isInteger(amount) || amount < 0 || amount > 1_000_000) {
+        return error(400, 'a round fee cannot be negative')
+      }
+      mockRankFees[rank] = amount
+    }
+    const currency = String(body?.currency ?? '').trim().toUpperCase()
+    if (currency) mockRankFees.currency = currency
+    saveMockWrites('caddieRankFees', mockRankFees)
+    return hit({ ...mockRankFees })
   }
 
   if (pathname === '/v1/course/caddie-shift-rules' && method === 'PUT') {
@@ -2416,7 +2463,7 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       displayName,
       skillLevel: String(body?.skillLevel ?? 'regular'),
       rank: String(body?.rank ?? 'D'),
-      baseFeeAmount: Number(body?.baseFeeAmount ?? 12_000),
+      baseFeeAmount: Number(body?.baseFeeAmount ?? 0),
       currency: String(body?.currency ?? 'JPY'),
       staffId: staffId || staffReferenceId,
       staffReferenceType: 'erp_staff',
@@ -2593,10 +2640,44 @@ export function resolveMockFieldApiText(path: string, init?: RequestInit): MockF
   if (method !== 'GET') return notSupported(`${method} ${pathname}`)
 
   if (
-    normalized === '/v1/erp/extensions/golf-course/monthly-settlement/export.csv'
-    || normalized === '/v1/erp/extensions/golf-course/caddie-payroll-summary/export.csv'
-    || pathname === '/v1/erp/extensions/golf-course/monthly-settlement/export.csv'
+    normalized === '/v1/erp/extensions/golf-course/caddie-payroll-summary/export.csv'
     || pathname === '/v1/erp/extensions/golf-course/caddie-payroll-summary/export.csv'
+  ) {
+    // Built from the same rows the screen shows, exactly as the API does — a
+    // file that disagreed with the screen would be the bug this export exists
+    // to avoid.
+    const yearMonth = new URL(path, 'http://mock.local').searchParams.get('yearMonth')
+      ?? TODAY.slice(0, 7)
+    const header = 'yearMonth,caddieProfileId,displayName,staffId,rank,roundFee,feeOverridden,'
+      + 'assignedRounds,feeTotal,currency,workedMinutes,shiftedMinutes,openClockIn,'
+      + 'roundsWithoutClockIn'
+    return hit([
+      header,
+      ...mockCaddies.map(profile => {
+        const row = payrollRow(profile)
+        return [
+          yearMonth,
+          row.caddieProfileId,
+          row.displayName,
+          row.staffId ?? '',
+          row.rank,
+          row.roundFee,
+          row.feeOverridden,
+          row.assignedRounds,
+          row.feeTotal,
+          row.currency,
+          row.workedMinutes,
+          row.shiftedMinutes,
+          row.openClockIn,
+          row.roundsWithoutClockIn,
+        ].join(',')
+      }),
+    ].join('\n') + '\n')
+  }
+
+  if (
+    normalized === '/v1/erp/extensions/golf-course/monthly-settlement/export.csv'
+    || pathname === '/v1/erp/extensions/golf-course/monthly-settlement/export.csv'
   ) {
     return hit([
       'metric,value',

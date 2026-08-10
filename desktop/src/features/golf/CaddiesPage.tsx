@@ -88,14 +88,26 @@ import {
   skillLabelKey,
   staffSuggestions,
 } from './caddieRegistration'
+import {
+  RANKS,
+  buildRankFees,
+  rankFeeDraft,
+  rankFeeDraftIsDirty,
+  type CaddieRankFeeDraft,
+  type CaddieRankFees,
+  type PayrollRow,
+  type Rank,
+} from './caddieRankFees'
 
 const COURSE_API = '/v1/course'
+
+/** Rows per page on the payroll sheet — a screenful without a scroll hunt. */
+const PAYROLL_PAGE_SIZE = 20
 
 type ListResponse<T> = { items: T[] }
 type CaddieRosterResponse = ListResponse<CaddieProfile> & { staff?: StaffMember[] }
 type View = 'roster' | 'dispatch' | 'attendance' | 'payroll'
 type SkillLevel = 'rookie' | 'regular' | 'veteran'
-type Rank = 'A' | 'B' | 'C' | 'D'
 type AvailabilityStatus =
   | 'available'
   | 'unavailable'
@@ -267,19 +279,6 @@ type CaddieRating = {
   score: number
   comment?: string | null
   createdAt: string
-}
-
-type PayrollRow = {
-  caddieProfileId: string
-  displayName: string
-  staffId?: string | null
-  workedMinutes: number
-  shiftedMinutes: number
-  assignedRounds: number
-  confirmedFeeTotal: number
-  currency: string
-  openClockIn: boolean
-  roundsWithoutClockIn: number
 }
 
 type PayrollResponse = {
@@ -2200,7 +2199,8 @@ function ProfileCreateDialog({
   const [displayName, setDisplayName] = useState('')
   const [skillLevel, setSkillLevel] = useState<SkillLevel>('regular')
   const [rank, setRank] = useState<Rank>('D')
-  const [baseFeeAmount, setBaseFeeAmount] = useState('12000')
+  // Zero means "pay them what their rank pays", which is the normal case.
+  const [baseFeeAmount, setBaseFeeAmount] = useState('0')
   const [pickedStaffId, setPickedStaffId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -2287,7 +2287,7 @@ function ProfileCreateDialog({
                 autoFocus
               />
             </Field>
-            <Field label={t('caddies:create.baseFee')} required>
+            <Field label={t('caddies:create.baseFee')} hint={t('caddies:create.baseFeeHint')}>
               <Input type="number" min={0} value={baseFeeAmount} onChange={event => setBaseFeeAmount(event.target.value)} />
             </Field>
             <Field label={t('caddies:create.skill')} required>
@@ -2450,8 +2450,12 @@ function ProfileDetail({
         <MetricGrid>
           <Metric
             label={t('caddies:detail.metrics.baseFee')}
-            value={formatMoney(profile.baseFeeAmount, profile.currency)}
-            detail={t('caddies:detail.metrics.baseFeeDetail')}
+            value={profile.baseFeeAmount > 0
+              ? formatMoney(profile.baseFeeAmount, profile.currency)
+              : t('caddies:detail.metrics.baseFeeByRank')}
+            detail={profile.baseFeeAmount > 0
+              ? t('caddies:detail.metrics.baseFeeDetail')
+              : t('caddies:detail.metrics.baseFeeByRankDetail', { rank: profile.rank ?? '—' })}
           />
           <Metric
             label={t('caddies:detail.metrics.dailyLimit')}
@@ -2683,7 +2687,7 @@ function ProfileEditDialog({
                 <option value="suspended">{t('caddies:employment.suspended')}</option>
               </NativeSelect>
             </Field>
-            <Field label={t('caddies:edit.baseFee')} required>
+            <Field label={t('caddies:edit.baseFee')} hint={t('caddies:edit.baseFeeHint')}>
               <Input type="number" min={0} value={baseFeeAmount} onChange={event => setBaseFeeAmount(event.target.value)} />
             </Field>
             <Field label={t('caddies:edit.currency')} required hint={t('caddies:edit.currencyHint')}>
@@ -3186,6 +3190,12 @@ function AvailabilityCalendar({
     setNote(record?.healthNote ?? '')
   }
 
+  /** Closing the sheet is the same decision as leaving the month. */
+  function closeEditor() {
+    if (!confirmDiscard()) return
+    setSelectedDate(null)
+  }
+
   async function save() {
     if (!selectedDate) return
     setBusy(true)
@@ -3197,6 +3207,9 @@ function AvailabilityCalendar({
         twoRoundRequest: twoRounds,
         healthNote: note.trim() || null,
       }))
+      // The sheet covers the calendar it was opened from, and the toast already
+      // says what was saved — leaving it open would hide the month it changed.
+      setSelectedDate(null)
       resource.refresh()
       setFlash({
         tone: 'success',
@@ -3265,7 +3278,21 @@ function AvailabilityCalendar({
       {resource.loading && !resource.data ? <LoadingState label={t('caddies:calendar.loading')} /> : null}
       {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
       {!resource.loading && !resource.error ? (
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_280px]">
+        <div className="space-y-3">
+          <Notice tone="info" title={t('caddies:calendar.guide.title')}>
+            <p>{t('caddies:calendar.guide.body')}</p>
+            <ul className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+              <li className="flex items-center gap-1.5">
+                <Badge variant="success" className="px-1">{availabilityLabel('available')}</Badge>
+                <span>{t('caddies:calendar.guide.legendRegistered')}</span>
+              </li>
+              <li className="flex items-center gap-1.5">
+                <span className="text-[10px] font-medium text-primary">2R</span>
+                <span>{t('caddies:calendar.guide.legendTwoRounds')}</span>
+              </li>
+              <li>{t('caddies:calendar.guide.legendBlank')}</li>
+            </ul>
+          </Notice>
           <div className="overflow-x-auto rounded-lg border border-border bg-background">
             <div className="min-w-[320px]">
               <div className="grid grid-cols-7 border-b border-border bg-surface text-center text-xs font-medium text-muted-foreground">
@@ -3284,6 +3311,10 @@ function AvailabilityCalendar({
                       key={date}
                       type="button"
                       onClick={() => select(date)}
+                      // Says what the click does, for a screen reader and for
+                      // the tooltip — a bare date gives neither.
+                      aria-label={t('caddies:calendar.dayAction', { date })}
+                      title={t('caddies:calendar.dayAction', { date })}
                       className={`flex min-h-16 flex-col items-center justify-start gap-1 border-b border-r border-border/60 p-1 text-xs transition-colors focus-visible:z-10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
                         active ? 'bg-selected' : 'hover:bg-muted/50'
                       }`}
@@ -3302,56 +3333,50 @@ function AvailabilityCalendar({
             </div>
           </div>
 
-          <div className="rounded-lg border border-border bg-background p-4">
-            {selectedDate ? (
-              <div className="space-y-4">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold">{selectedDate}</p>
-                    {dirty ? (
-                      <Badge variant="warning">{t('caddies:calendar.unsaved')}</Badge>
-                    ) : null}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {dirty ? t('caddies:calendar.unsavedHint') : t('caddies:calendar.editPrompt')}
-                  </p>
-                </div>
-                <Field label={t('caddies:calendar.status')} required>
-                  <NativeSelect value={status} onChange={event => setStatus(event.target.value as AvailabilityStatus)}>
-                    {AVAILABILITY_STATUSES.map(value => (
-                      <option key={value} value={value}>{availabilityLabel(value)}</option>
-                    ))}
-                  </NativeSelect>
-                </Field>
-                <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border px-3">
-                  <input type="checkbox" checked={twoRounds} onChange={event => setTwoRounds(event.target.checked)} className="size-5 accent-primary" />
-                  <span className="text-sm font-medium">{t('caddies:calendar.twoRounds')}</span>
-                </label>
-                <Field label={t('caddies:calendar.note')}>
-                  <NativeTextarea
-                    rows={4}
-                    maxLength={500}
-                    value={note}
-                    onChange={event => setNote(event.target.value)}
-                    placeholder={t('caddies:calendar.notePlaceholder')}
-                  />
-                </Field>
-                <Button type="button" variant="primary" className="w-full" disabled={busy} onClick={() => void save()}>
-                  <CheckCircle2 /> {busy ? t('caddies:calendar.saving') : t('caddies:calendar.save')}
+          <Sheet
+            open={selectedDate !== null}
+            onOpenChange={open => {
+              if (!open) closeEditor()
+            }}
+            title={t('caddies:calendar.sheetTitle', { date: selectedDate ?? '' })}
+            description={dirty
+              ? t('caddies:calendar.unsavedHint')
+              : t('caddies:calendar.sheetDescription')}
+          >
+            <div className="space-y-4 px-1 pb-1">
+              {dirty ? (
+                <Badge variant="warning">{t('caddies:calendar.unsaved')}</Badge>
+              ) : null}
+              <Field label={t('caddies:calendar.status')} required>
+                <NativeSelect value={status} onChange={event => setStatus(event.target.value as AvailabilityStatus)}>
+                  {AVAILABILITY_STATUSES.map(value => (
+                    <option key={value} value={value}>{availabilityLabel(value)}</option>
+                  ))}
+                </NativeSelect>
+              </Field>
+              <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border px-3">
+                <input type="checkbox" checked={twoRounds} onChange={event => setTwoRounds(event.target.checked)} className="size-5 accent-primary" />
+                <span className="text-sm font-medium">{t('caddies:calendar.twoRounds')}</span>
+              </label>
+              <Field label={t('caddies:calendar.note')}>
+                <NativeTextarea
+                  rows={4}
+                  maxLength={500}
+                  value={note}
+                  onChange={event => setNote(event.target.value)}
+                  placeholder={t('caddies:calendar.notePlaceholder')}
+                />
+              </Field>
+              <Button type="button" variant="primary" className="w-full" disabled={busy} onClick={() => void save()}>
+                <CheckCircle2 /> {busy ? t('caddies:calendar.saving') : t('caddies:calendar.save')}
+              </Button>
+              {selectedRecord ? (
+                <Button type="button" variant="ghost" className="w-full text-destructive" disabled={busy} onClick={() => void remove()}>
+                  <XCircle /> {t('caddies:calendar.remove')}
                 </Button>
-                {selectedRecord ? (
-                  <Button type="button" variant="ghost" className="w-full text-destructive" disabled={busy} onClick={() => void remove()}>
-                    <XCircle /> {t('caddies:calendar.remove')}
-                  </Button>
-                ) : null}
-              </div>
-            ) : (
-              <EmptyState
-                title={t('caddies:calendar.empty.title')}
-                description={t('caddies:calendar.empty.description')}
-              />
-            )}
-          </div>
+              ) : null}
+            </div>
+          </Sheet>
         </div>
       ) : null}
     </Panel>
@@ -3428,6 +3453,15 @@ function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<Caddi
   )
 }
 
+/**
+ * What the club owes for a month, one caddie per row.
+ *
+ * Deliberately just the list. Month totals and a rank split are analysis, and
+ * analysis put above a sheet somebody has to reconcile line by line pushes the
+ * work below the fold — the numbers belong on a screen built to compare months,
+ * not on the one used to check this one. What stays here is what the table
+ * needs: the month, the export, and the fee table that prices the rows.
+ */
 function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
   const { t } = useTranslation(['caddies', 'common'])
   const {
@@ -3436,6 +3470,11 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
     setCandidate: setYearMonth,
   } = useYearMonthValue(previousYearMonth())
   const [downloading, setDownloading] = useState(false)
+  const [editingFees, setEditingFees] = useState(false)
+  const feesResource = useResource(
+    () => courseboardApiJson<CaddieRankFees>(`${COURSE_API}/caddie-rank-fees`),
+    [],
+  )
   const resource = useResource(
     () => courseboardApiJson<PayrollResponse>(
       `${COURSE_API}/caddie-payroll-summary?yearMonth=${encodeURIComponent(yearMonth)}`,
@@ -3443,17 +3482,12 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
     [yearMonth],
     { cacheKey: `caddie-payroll:${yearMonth}` },
   )
-  useRegisterPageReload(resource.refresh)
+  const refreshAll = useCallback(() => {
+    feesResource.refresh()
+    resource.refresh()
+  }, [feesResource.refresh, resource.refresh])
+  useRegisterPageReload(refreshAll)
   const rows = resource.data?.items ?? []
-  const totals = rows.reduce(
-    (value, row) => ({
-      workedMinutes: value.workedMinutes + row.workedMinutes,
-      rounds: value.rounds + row.assignedRounds,
-      fees: value.fees + row.confirmedFeeTotal,
-      warnings: value.warnings + row.roundsWithoutClockIn + (row.openClockIn ? 1 : 0),
-    }),
-    { workedMinutes: 0, rounds: 0, fees: 0, warnings: 0 },
-  )
 
   async function downloadCsv() {
     setDownloading(true)
@@ -3479,6 +3513,10 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
       key: 'caddie',
       header: t('caddies:payroll.table.caddie'),
       mobileLabel: t('caddies:payroll.table.caddie'),
+      sortValue: row => row.displayName,
+      // The staff id is on the row and is what payroll cross-references, so it
+      // has to be findable even though nobody reads it at a glance.
+      searchValue: row => `${row.displayName} ${row.staffId ?? ''}`,
       cell: row => (
         <div>
           <p className="font-medium">{row.displayName}</p>
@@ -3489,22 +3527,33 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
       ),
     },
     {
-      key: 'worked',
-      header: t('caddies:payroll.table.worked'),
-      mobileLabel: t('caddies:payroll.table.worked'),
-      cell: row => formatMinutes(row.workedMinutes),
-    },
-    {
-      key: 'shifted',
-      header: t('caddies:payroll.table.shifted'),
-      mobileLabel: t('caddies:payroll.table.shifted'),
-      cell: row => formatMinutes(row.shiftedMinutes),
+      // Rank and the fee it implies are one fact, and splitting them into two
+      // columns made the row read as two unrelated numbers.
+      key: 'roundFee',
+      header: t('caddies:payroll.table.rankAndFee'),
+      mobileLabel: t('caddies:payroll.table.rankAndFee'),
+      sortValue: row => row.roundFee,
+      searchValue: row => row.rank,
+      cell: row => (
+        <div className="flex items-center gap-2">
+          <Badge variant="accent">{row.rank}</Badge>
+          <div>
+            <p className="tabular-nums">{formatMoney(row.roundFee, row.currency)}</p>
+            {row.feeOverridden ? (
+              <p className="text-xs text-muted-foreground">
+                {t('caddies:payroll.table.ownFee')}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ),
     },
     {
       key: 'rounds',
       header: t('caddies:payroll.table.rounds'),
       mobileLabel: t('caddies:payroll.table.rounds'),
       align: 'right',
+      sortValue: row => row.assignedRounds,
       cell: row => t('caddies:rounds', { n: String(row.assignedRounds) }),
     },
     {
@@ -3512,12 +3561,34 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
       header: t('caddies:payroll.table.fees'),
       mobileLabel: t('caddies:payroll.table.fees'),
       align: 'right',
-      cell: row => formatMoney(row.confirmedFeeTotal, row.currency),
+      sortValue: row => row.feeTotal,
+      // The one number the sheet exists to state, so it carries more weight
+      // than the inputs it is derived from.
+      cell: row => (
+        <span className="font-semibold tabular-nums">{formatMoney(row.feeTotal, row.currency)}</span>
+      ),
+    },
+    {
+      // Worked against rostered is a comparison, so the two belong side by side
+      // rather than in columns the eye has to travel between.
+      key: 'worked',
+      header: t('caddies:payroll.table.workedAgainstShift'),
+      mobileLabel: t('caddies:payroll.table.workedAgainstShift'),
+      sortValue: row => row.workedMinutes,
+      cell: row => (
+        <span className="whitespace-nowrap tabular-nums">
+          {formatMinutes(row.workedMinutes)}
+          <span className="text-muted-foreground"> / {formatMinutes(row.shiftedMinutes)}</span>
+        </span>
+      ),
     },
     {
       key: 'warning',
       header: t('caddies:payroll.table.check'),
       mobileLabel: t('caddies:payroll.table.check'),
+      // Sorted so the rows needing a second look come to the top first, which
+      // is the only reason to sort this column at all.
+      sortValue: row => -(row.roundsWithoutClockIn + (row.openClockIn ? 1 : 0)),
       cell: row => row.openClockIn || row.roundsWithoutClockIn > 0 ? (
         <Badge variant="warning">
           {row.openClockIn
@@ -3534,14 +3605,17 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
         title={t('caddies:payroll.title')}
         description={t('caddies:payroll.description')}
         actions={(
-          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-end">
             <YearMonthPicker
               label={t('caddies:payroll.monthLabel')}
               value={yearMonth}
               error={yearMonthError}
               onChange={setYearMonth}
-              className="sm:w-64"
+              className="sm:w-56"
             />
+            <Button type="button" variant="secondary" onClick={() => setEditingFees(true)}>
+              <Pencil /> {t('caddies:payroll.rankFees.open')}
+            </Button>
             <Button type="button" variant="primary" disabled={downloading || !resource.data} onClick={() => void downloadCsv()}>
               <Download /> {downloading ? t('caddies:payroll.exporting') : t('caddies:payroll.exportCsv')}
             </Button>
@@ -3551,59 +3625,168 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
         {resource.loading && !resource.data ? <LoadingState label={t('caddies:payroll.loading')} /> : null}
         {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
         {resource.data ? (
-          <div className="space-y-4">
+          <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
               {t('caddies:payroll.period', {
                 from: resource.data.period.startDate,
                 to: resource.data.period.endDate,
               })}
             </p>
-            <MetricGrid>
-              <Metric
-                label={t('caddies:payroll.metrics.worked')}
-                value={formatMinutes(totals.workedMinutes)}
-                detail={t('caddies:payroll.metrics.workedDetail', { n: String(rows.length) })}
-              />
-              <Metric
-                label={t('caddies:payroll.metrics.rounds')}
-                value={t('caddies:rounds', { n: String(totals.rounds) })}
-                detail={t('caddies:payroll.metrics.roundsDetail')}
-              />
-              <Metric
-                label={t('caddies:payroll.metrics.fees')}
-                value={formatMoney(totals.fees)}
-                detail={t('caddies:payroll.metrics.feesDetail')}
-              />
-              <Metric
-                label={t('caddies:payroll.metrics.warnings')}
-                value={t('caddies:items', { n: String(totals.warnings) })}
-                detail={t('caddies:payroll.metrics.warningsDetail')}
-                tone={totals.warnings > 0 ? 'warning' : 'success'}
-              />
-            </MetricGrid>
+            <DataTable
+              rows={rows}
+              columns={columns}
+              rowKey={row => row.caddieProfileId}
+              searchable
+              searchPlaceholder={t('caddies:payroll.searchPlaceholder')}
+              // Biggest payout first: the amounts worth checking twice are the
+              // large ones, and a roster sorted by name buries them.
+              defaultSort={{ key: 'fees', direction: 'desc' }}
+              pageSize={PAYROLL_PAGE_SIZE}
+              empty={(
+                <EmptyState
+                  title={t('caddies:payroll.empty.title')}
+                  description={t('caddies:payroll.empty.description')}
+                />
+              )}
+            />
           </div>
         ) : null}
       </Panel>
 
-      <Panel
-        title={t('caddies:payroll.listTitle')}
-        description={t('caddies:payroll.listDescription')}
-      >
-        {resource.data ? (
-          <DataTable
-            rows={rows}
-            columns={columns}
-            rowKey={row => row.caddieProfileId}
-            empty={(
-              <EmptyState
-                title={t('caddies:payroll.empty.title')}
-                description={t('caddies:payroll.empty.description')}
-              />
-            )}
-          />
-        ) : null}
-      </Panel>
+      <RankFeeSheet
+        open={editingFees}
+        onClose={() => setEditingFees(false)}
+        resource={feesResource}
+        setFlash={setFlash}
+        onSaved={resource.refresh}
+      />
     </div>
+  )
+}
+
+/**
+ * The per-round fee each rank is paid.
+ *
+ * Saving re-prices every month, past ones included — the club that corrects a
+ * rate here means the rate was wrong, not that it changes from today. The
+ * warning says so before the save rather than after.
+ */
+function RankFeeSheet({
+  open,
+  onClose,
+  resource,
+  setFlash,
+  onSaved,
+}: {
+  open: boolean
+  onClose: () => void
+  resource: ResourceValue<CaddieRankFees>
+  setFlash: (flash: Flash) => void
+  onSaved: () => void
+}) {
+  const { t } = useTranslation(['caddies', 'common'])
+  const fees = resource.data
+  const [draft, setDraft] = useState<CaddieRankFeeDraft | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  // The form starts from whatever the club is paying by now. Reloading after a
+  // save re-seeds it, so the fields never keep an amount the server refused.
+  useEffect(() => {
+    setDraft(fees ? rankFeeDraft(fees) : null)
+    setSaveError(null)
+  }, [fees])
+
+  const dirty = draft !== null && fees !== null && rankFeeDraftIsDirty(draft, fees)
+
+  async function save() {
+    if (!draft || !fees) return
+    let next: CaddieRankFees
+    try {
+      next = buildRankFees(draft, fees.currency)
+    } catch (reason) {
+      setSaveError(errorMessage(reason))
+      return
+    }
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await courseboardApiJson<CaddieRankFees>(`${COURSE_API}/caddie-rank-fees`, {
+        method: 'PUT',
+        body: JSON.stringify(next),
+      })
+      resource.refresh()
+      onSaved()
+      onClose()
+      setFlash({
+        tone: 'success',
+        title: t('caddies:payroll.rankFees.saved.title'),
+        message: t('caddies:payroll.rankFees.saved.message'),
+      })
+    } catch (reason) {
+      setSaveError(errorMessage(reason))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Sheet
+      open={open}
+      onOpenChange={next => {
+        if (!next) onClose()
+      }}
+      title={t('caddies:payroll.rankFees.title')}
+      description={t('caddies:payroll.rankFees.description')}
+    >
+      <div className="space-y-4 px-1 pb-1">
+        {resource.loading ? <LoadingState label={t('caddies:payroll.rankFees.loading')} /> : null}
+        {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
+        {draft && fees ? (
+          <>
+            {dirty ? <Badge variant="warning">{t('caddies:payroll.rankFees.unsaved')}</Badge> : null}
+            <FormGrid columns={2}>
+              {RANKS.map(rank => (
+                <Field
+                  key={rank}
+                  label={t('caddies:payroll.rankFees.rankLabel', { rank })}
+                  hint={t('caddies:payroll.rankFees.rankHint', { currency: fees.currency })}
+                  required
+                >
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    step={100}
+                    value={draft[rank]}
+                    onChange={event => {
+                      const value = event.target.value
+                      setDraft(current => current ? { ...current, [rank]: value } : current)
+                      setSaveError(null)
+                    }}
+                  />
+                </Field>
+              ))}
+            </FormGrid>
+            <Notice tone="info" title={t('caddies:payroll.rankFees.scope.title')}>
+              {t('caddies:payroll.rankFees.scope.description')}
+            </Notice>
+            {saveError ? (
+              <Notice tone="danger" title={t('caddies:payroll.rankFees.failed')}>{saveError}</Notice>
+            ) : null}
+            <Button
+              type="button"
+              variant="primary"
+              className="w-full"
+              disabled={!dirty || saving}
+              onClick={() => void save()}
+            >
+              <CheckCircle2 /> {saving ? t('common:action.saving') : t('caddies:payroll.rankFees.save')}
+            </Button>
+          </>
+        ) : null}
+      </div>
+    </Sheet>
   )
 }
 

@@ -3,6 +3,7 @@
 //! Field API HTTP clients live here only.
 
 mod availability_deadline_repository;
+mod caddie_rank_fee_config;
 mod caddie_shift_repository;
 mod course_order_config;
 mod field_commercial_gateway;

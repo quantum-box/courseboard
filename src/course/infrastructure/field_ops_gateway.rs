@@ -10,17 +10,18 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::caddie_rank_fee_config;
 use super::field_gateway::{
-    field_get_items, field_send_json, field_send_text, field_send_unit, map_caddie,
-    map_caddie_assignment, normalize_base_url, urlencoding_path, FieldGolfCaddieAssignmentDto,
-    FieldGolfCaddieProfileDto,
+    field_get_items, field_send_json, field_send_unit, map_caddie, map_caddie_assignment,
+    normalize_base_url, read_extension_config, urlencoding_path, write_extension_config_key,
+    FieldGolfCaddieAssignmentDto, FieldGolfCaddieProfileDto,
 };
 use crate::course::domain::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshot, AttendanceSnapshotReport,
     AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery,
     AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
-    CaddieCourseMembership, CaddieId, CaddieRating, CaddieRecommendation, CaddieRoster,
-    CaddieSkillLevel, CaddieStaff, CourseError, GatewayCredentials, GolfOpsGateway,
+    CaddieCourseMembership, CaddieId, CaddieRankFees, CaddieRating, CaddieRecommendation,
+    CaddieRoster, CaddieSkillLevel, CaddieStaff, CourseError, GatewayCredentials, GolfOpsGateway,
     RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment,
     UpsertCaddieAvailability, WorkedMinutes,
 };
@@ -558,24 +559,31 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         ))
     }
 
-    async fn export_payroll_csv(
+    async fn get_caddie_rank_fees(
         &self,
         credentials: GatewayCredentials<'_>,
-        year_month: &str,
-    ) -> Result<String, CourseError> {
-        let path = format!(
-            "{GOLF}/caddie-payroll-summary/export.csv?yearMonth={}",
-            urlencoding_query(year_month)
-        );
-        field_send_text(
+    ) -> Result<CaddieRankFees, CourseError> {
+        Ok(caddie_rank_fee_config::read_caddie_rank_fees(
+            &read_extension_config(&self.client, &self.base_url, credentials).await?,
+        ))
+    }
+
+    async fn replace_caddie_rank_fees(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        fees: &CaddieRankFees,
+    ) -> Result<CaddieRankFees, CourseError> {
+        // Read-modify-write: the extension config is shared with the plans the
+        // storefront reads, and sending only the table would take them with it.
+        let stored = write_extension_config_key(
             &self.client,
             &self.base_url,
-            reqwest::Method::GET,
-            &path,
             credentials,
-            None,
+            caddie_rank_fee_config::CADDIE_RANK_FEES_KEY,
+            |config| caddie_rank_fee_config::with_caddie_rank_fees(config, fees),
         )
-        .await
+        .await?;
+        Ok(caddie_rank_fee_config::read_caddie_rank_fees(&stored))
     }
 
     async fn list_caddie_ratings(

@@ -43,6 +43,9 @@ pub enum CaddieRank {
 }
 
 impl CaddieRank {
+    /// Best-paid first, which is the order a fee table is read in.
+    pub const ALL: [Self; 4] = [Self::A, Self::B, Self::C, Self::D];
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::A => "A",

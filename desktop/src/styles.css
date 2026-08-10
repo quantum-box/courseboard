@@ -909,7 +909,7 @@ button,
   line-height: 18px;
 }
 
-.panel > :not(.panel-header):not(.data-table-scroll) {
+.panel > :not(.panel-header):not(.data-table-scroll):not(.data-table-frame) {
   margin: 0;
 }
 
@@ -1161,6 +1161,91 @@ button,
 .metric-danger > strong { color: hsl(var(--nui-destructive)); }
 .metric-with-icon { display: inline-flex; align-items: center; gap: 7px; }
 .metric-with-icon svg { width: 17px; height: 17px; }
+
+/* Search box, table, and pager as one block. Only tables that opt into those
+   controls get the extra rows; a plain DataTable renders the same as before. */
+.data-table-frame {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+.data-table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.data-table-toolbar input[type="search"] {
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+
+.data-table-count {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.data-table-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.data-table-pager-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The whole header cell is the sort target, so the hit area matches what the
+   eye reads as the column title. */
+.data-table-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.data-table th.align-right .data-table-sort { justify-content: flex-end; }
+.data-table th.align-center .data-table-sort { justify-content: center; }
+.data-table-sort:hover { color: hsl(var(--nui-foreground)); }
+
+.data-table-sort:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid hsl(var(--nui-ring) / .6);
+  outline-offset: 2px;
+}
+
+.data-table-sort svg { flex-shrink: 0; width: 12px; height: 12px; }
+
+/* The idle glyph is a hover affordance, not decoration: showing four of them at
+   rest turns the header row into noise. */
+.data-table-sort-idle { opacity: 0; transition: opacity var(--nui-duration-fast, 120ms); }
+.data-table-sort:hover .data-table-sort-idle,
+.data-table-sort:focus-visible .data-table-sort-idle { opacity: .55; }
+
+.panel .data-table-frame > .empty-state {
+  min-height: 80px;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.dark .panel .data-table-frame > .empty-state {
+  background: hsl(var(--nui-muted) / .62);
+}
 
 .data-table-scroll {
   min-width: 0;

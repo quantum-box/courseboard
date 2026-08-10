@@ -7,6 +7,7 @@ mod availability_deadline;
 mod caddie;
 mod caddie_ops;
 mod caddie_plan;
+mod caddie_rank_fee;
 mod caddie_ranking;
 mod caddie_shift;
 mod commercial;
@@ -46,6 +47,7 @@ pub use caddie_plan::{
     plan_caddie_assignments, shift_covers_tee_time, skip_reason, CaddiePlacement, PlanOptions,
     PlannableCaddie, PlannableRound,
 };
+pub use caddie_rank_fee::CaddieRankFees;
 pub use caddie_ranking::{
     rank_caddies, AttendanceState, RankedCaddie, RankingCandidate, RankingOptions,
 };
@@ -75,7 +77,7 @@ pub use ids::{
     ProductSlotId, RatingId, ReservationId, ReservationServiceId, ResourceId, TenantId,
 };
 pub use party::{PartyDetails, PartyPlayer, MAX_PARTY_PLAYERS, PARTY_CUSTOM_FIELD_KEY};
-pub use payroll::{summarize_payroll, AttendanceDay, PayrollCandidate, WorkedMinutes};
+pub use payroll::{payroll_csv, summarize_payroll, AttendanceDay, PayrollCandidate, WorkedMinutes};
 pub use ports::{
     AvailabilityDeadlineGateway, CaddieShiftGateway, GatewayCredentials, GolfCatalogGateway,
     GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, ReservationGateway,
