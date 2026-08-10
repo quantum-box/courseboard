@@ -10,11 +10,11 @@ import {
   Input,
   Separator,
 } from '@tachyon-sdk/native-ui'
-import { ArrowLeft, Link2, Search, UserPlus, Users } from 'lucide-react'
+import { ArrowLeft, Link2, Pencil, Search, UserPlus, Users } from 'lucide-react'
 import { useCallback, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
-import { courseboardApiJson, fieldApiJson, today } from '../../api'
+import { ApiError, courseboardApiJson, fieldApiJson, today } from '../../api'
 import {
   DataTable,
   EmptyState,
@@ -30,7 +30,7 @@ import {
   type DataTableColumn,
 } from '../../components/Page'
 import { navigate } from '../../lib/router'
-import { useResource } from '../../hooks/useResource'
+import { useResource, writeResourceCache } from '../../hooks/useResource'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import { caddieCreatePayload, skillLabelKey } from '../golf/caddieRegistration'
@@ -49,6 +49,11 @@ import {
   type StaffMember,
   type StaffRow,
 } from './models'
+import {
+  StaffMemberNotFoundError,
+  updateStaffName,
+  type StaffNameUpdateResult,
+} from './staffNameUpdate'
 
 const COURSE_API = '/v1/course'
 
@@ -107,6 +112,7 @@ export function StaffPage({ staffId }: { staffId?: string }) {
   const [filter, setFilter] = useState<StaffFilter>({ query: '', status: 'active', role: 'all' })
   const [creating, setCreating] = useState(false)
   const [linking, setLinking] = useState<StaffRow | null>(null)
+  const [editingName, setEditingName] = useState<StaffMember | null>(null)
 
   const profiles = caddieResource.data?.items ?? []
   const rows = useMemo(
@@ -214,7 +220,19 @@ export function StaffPage({ staffId }: { staffId?: string }) {
               <code className="text-sm text-muted-foreground">{detail.staff.id}</code>
             </header>
 
-            <Panel title={t('staff:detail.basics')}>
+            <Panel
+              title={t('staff:detail.basics')}
+              actions={(
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setEditingName(detail.staff)}
+                >
+                  <Pencil /> {t('staff:editName.action')}
+                </Button>
+              )}
+            >
               <dl className="m-0 grid grid-cols-[auto_1fr] items-baseline gap-x-8 gap-y-2 px-0.5 text-sm">
                 <dt className="text-muted-foreground">{t('staff:table.employmentType')}</dt>
                 <dd className="m-0">
@@ -272,6 +290,25 @@ export function StaffPage({ staffId }: { staffId?: string }) {
         ) : null}
 
         {makeCaddieDialog}
+        {editingName ? (
+          <StaffNameEditDialog
+            staff={editingName}
+            onOpenChange={open => {
+              if (!open) setEditingName(null)
+            }}
+            onUpdated={result => {
+              // `result.roster` is the GET performed after Field accepted the
+              // PATCH, so the heading changes to the HRM value we confirmed.
+              writeResourceCache('staff:list', result.roster)
+              staffResource.setData(result.roster)
+              setEditingName(null)
+              showToast({
+                tone: 'success',
+                message: t('staff:editName.success', { name: result.member.name }),
+              })
+            }}
+          />
+        ) : null}
       </div>
     )
   }
@@ -363,6 +400,75 @@ export function StaffPage({ staffId }: { staffId?: string }) {
 
       {makeCaddieDialog}
     </div>
+  )
+}
+
+function StaffNameEditDialog({
+  staff,
+  onOpenChange,
+  onUpdated,
+}: {
+  staff: StaffMember
+  onOpenChange: (open: boolean) => void
+  onUpdated: (result: StaffNameUpdateResult) => void
+}) {
+  const { t } = useTranslation(['staff', 'common'])
+  const [name, setName] = useState(staff.name)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    const trimmed = name.trim()
+    if (!trimmed) {
+      setError(t('staff:editName.error.name'))
+      return
+    }
+
+    setBusy(true)
+    setError(null)
+    try {
+      onUpdated(await updateStaffName(fieldApiJson, staff.id, trimmed))
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 403) {
+        setError(t('staff:editName.error.forbidden'))
+      } else if (reason instanceof StaffMemberNotFoundError) {
+        setError(t('staff:editName.error.notFound'))
+      } else {
+        setError(errorMessage(reason, t('staff:editName.error.failed')))
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t('staff:editName.title', { name: staff.name })}</DialogTitle>
+          <DialogDescription>{t('staff:editName.description')}</DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4" onSubmit={event => void submit(event)}>
+          <Field label={t('staff:editName.name')} required>
+            <Input
+              value={name}
+              onChange={event => setName(event.target.value)}
+              autoFocus
+            />
+          </Field>
+          {error ? <Notice tone="danger">{error}</Notice> : null}
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
+              {t('common:action.cancel')}
+            </Button>
+            <Button type="submit" variant="primary" disabled={busy}>
+              <Pencil /> {busy ? t('staff:editName.submitting') : t('staff:editName.submit')}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 

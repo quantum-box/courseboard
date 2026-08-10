@@ -309,7 +309,15 @@ const mockCaddies = [
 
 /** The whole payroll, not just the caddies: the roster screen shows both. */
 const mockStaff = [
-  { id: 'staff_aya', name: '佐藤 彩', active: true, employmentType: 'part_time' },
+  {
+    id: 'staff_aya',
+    name: '佐藤 彩',
+    active: true,
+    employmentType: 'part_time',
+    hiredAt: '2024-04-01',
+    phone: '011-000-0000',
+    attributesJson: { payrollCode: 'A-17' },
+  },
   { id: 'staff_ken', name: '渡辺 健', active: true, employmentType: 'part_time' },
   { id: 'staff_mika', name: '田中 美香', active: true, employmentType: 'part_time' },
   { id: 'staff_hiro', name: '中村 浩', active: true, employmentType: 'part_time' },
@@ -318,7 +326,14 @@ const mockStaff = [
   { id: 'staff_front', name: '松本 里奈', active: true, employmentType: 'full_time' },
   { id: 'staff_green', name: '吉田 誠', active: true, employmentType: 'full_time' },
   { id: 'staff_retired', name: '高橋 一', active: false, employmentType: 'part_time' },
-]
+].map(member => ({
+  hiredAt: null as string | null,
+  contractEndDate: null as string | null,
+  phone: null as string | null,
+  email: null as string | null,
+  attributesJson: null as unknown | null,
+  ...member,
+}))
 
 /** Tenant members mirroring the Field IAM surface `GET /v1/field/iam/users`. */
 const mockIamCustomPolicies = [
@@ -2224,9 +2239,37 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       name: String(body?.name ?? 'New staff'),
       active: body?.active !== false,
       employmentType: String(body?.employmentType ?? 'part_time'),
+      hiredAt: body?.hiredAt == null ? null : String(body.hiredAt),
+      contractEndDate: body?.contractEndDate == null ? null : String(body.contractEndDate),
+      phone: body?.phone == null ? null : String(body.phone),
+      email: body?.email == null ? null : String(body.email),
+      attributesJson: body?.attributesJson ?? null,
     }
     mockStaff.push(registered)
     return hit({ ...registered })
+  }
+
+  const staffWriteMatch = pathname.match(/^\/v1\/erp\/staff\/([^/]+)$/)
+  if (staffWriteMatch && method === 'PATCH') {
+    const staffId = decodeURIComponent(staffWriteMatch[1] ?? '')
+    const index = mockStaff.findIndex(item => item.id === staffId)
+    if (index < 0) return error(404, `Mock staff ${staffId} was not found`)
+    const current = mockStaff[index]!
+    // Match Field's current full-row UPSERT contract so a name-only request
+    // visibly destroys fixture data instead of making an unsafe UI look valid.
+    const updated = {
+      id: current.id,
+      name: String(body?.name ?? ''),
+      employmentType: String(body?.employmentType ?? 'part_time'),
+      active: body?.active !== false,
+      hiredAt: body?.hiredAt == null ? null : String(body.hiredAt),
+      contractEndDate: body?.contractEndDate == null ? null : String(body.contractEndDate),
+      phone: body?.phone == null ? null : String(body.phone),
+      email: body?.email == null ? null : String(body.email),
+      attributesJson: body?.attributesJson ?? null,
+    }
+    mockStaff[index] = updated
+    return hit({ ...updated })
   }
 
   if (pathname === '/v1/field/iam/users/invite' && method === 'POST') {
@@ -2453,6 +2496,11 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
         name: displayName,
         active: true,
         employmentType: 'part_time',
+        hiredAt: null,
+        contractEndDate: null,
+        phone: null,
+        email: null,
+        attributesJson: null,
       }
       mockStaff.push(registered)
       staffId = registered.id

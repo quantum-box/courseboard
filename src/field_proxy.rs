@@ -192,6 +192,12 @@ fn is_allowed_route(method: &Method, path: &str) -> bool {
     if path == "/v1/erp/staff" {
         return method == Method::GET || method == Method::POST;
     }
+    // Staff name corrections use Field HRM's member update. Keep this narrower
+    // than the general `/staff/*` prefix: PATCH may reach one member only, not
+    // clock, leave, payroll, or any future nested HRM operation.
+    if is_staff_member_path(path) {
+        return method == Method::PATCH;
+    }
     // Tenant member management via the Field IAM surface (gated upstream by
     // the ERP action `field:ManageUsers`). Raw /v1/auth/* stays blocked — the
     // Field host does not serve it.
@@ -244,6 +250,14 @@ fn is_non_empty_subpath(path: &str, prefix: &str) -> bool {
     path.strip_prefix(prefix)
         .and_then(|suffix| suffix.strip_prefix('/'))
         .is_some_and(|suffix| !suffix.is_empty())
+}
+
+/// Exactly `/v1/erp/staff/{staff_id}`, with no nested operation after the id.
+fn is_staff_member_path(path: &str) -> bool {
+    let Some(suffix) = path.strip_prefix("/v1/erp/staff/") else {
+        return false;
+    };
+    !suffix.is_empty() && !suffix.contains('/')
 }
 
 fn is_field_iam_path(path: &str) -> bool {
@@ -370,6 +384,16 @@ mod tests {
             &Method::PATCH,
             "/v1/erp/extensions/golf-course/courses/course_1"
         ));
+        assert!(is_allowed_route(&Method::PATCH, "/v1/erp/staff/staff_1"));
+        assert!(!is_allowed_route(
+            &Method::PATCH,
+            "/v1/erp/staff/staff_1/clock-in"
+        ));
+        assert!(!is_allowed_route(
+            &Method::PATCH,
+            "/v1/erp/staff/leave-requests/leave_1"
+        ));
+        assert!(!is_allowed_route(&Method::PUT, "/v1/erp/staff/staff_1"));
         assert!(is_allowed_route(&Method::GET, "/v1/erp/orders/order_1"));
         assert!(is_allowed_route(&Method::GET, "/v1/field/iam/users"));
         assert!(is_allowed_route(

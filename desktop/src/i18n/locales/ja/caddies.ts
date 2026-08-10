@@ -340,8 +340,14 @@ export const caddies = {
   },
   edit: {
     title: '基本の情報を直す',
-    description: '名前、スキル、ランク、出勤の状態、費用と1日の上限を直します。',
+    descriptionLinked: 'スキル、ランク、出勤の状態、費用と1日の上限を直します。名前は社員の基本情報で直します。',
+    descriptionUnlinked: '表示する名前、スキル、ランク、出勤の状態、費用と1日の上限を直します。',
     displayName: '表示する名前',
+    staffName: {
+      title: '表示する名前：{{name}}',
+      description: 'このキャディは社員名簿と紐づいています。名前を直すと、社員名簿とキャディの各画面に反映されます。',
+      action: '社員基本情報で名前を直す',
+    },
     skill: 'スキル',
     rank: 'ランク',
     employment: '出勤の状態',

@@ -13,7 +13,12 @@ export type StaffMember = {
   id: string
   name: string
   active: boolean
-  employmentType?: string | null
+  employmentType: string
+  hiredAt: string | null
+  contractEndDate: string | null
+  phone: string | null
+  email: string | null
+  attributesJson: unknown | null
 }
 
 export type StaffCaddieProfile = {

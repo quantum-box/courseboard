@@ -44,6 +44,21 @@ export const staff = {
       description: 'They may have been removed, or the ID is wrong. Go back to the roster and search again.',
     },
   },
+  editName: {
+    action: 'Edit name',
+    title: 'Edit the name for {{name}}',
+    description: 'Changes the staff roster name. Caddie and other screens that use this staff record will follow it.',
+    name: 'Name',
+    submit: 'Save name',
+    submitting: 'Saving…',
+    success: 'Saved {{name}} to the staff roster.',
+    error: {
+      name: 'Enter a name.',
+      forbidden: 'You cannot edit staff names. Ask an administrator for the field:ManageHrm permission.',
+      notFound: 'The staff member was not found. Reload the roster and try again.',
+      failed: 'The staff name could not be saved. Try again.',
+    },
+  },
   create: {
     open: 'Register staff',
     title: 'Register a staff member',

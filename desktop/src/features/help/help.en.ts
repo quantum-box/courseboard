@@ -420,8 +420,8 @@ export const helpEn: HelpCatalog = {
       summary: 'Everyone the club employs. Caddies appear here as one of the roles staff hold.',
       usage: [
         {
-          heading: 'Register a staff member',
-          body: 'Use "Register staff" to enter a name and employment type. Whether they caddie is decided later.',
+          heading: 'Register or rename staff',
+          body: 'Use "Register staff" to enter a name and employment type. Later, "Edit name" on the staff detail updates every linked caddie name too.',
         },
         {
           heading: 'Give the caddie role',
@@ -435,7 +435,7 @@ export const helpEn: HelpCatalog = {
       data: [
         {
           heading: 'Staff records',
-          body: 'Held by Field HRM (/v1/erp/staff). Renaming someone or retiring them is not available on this screen yet.',
+          body: 'Held by Field HRM (/v1/erp/staff). Names can be changed here; retiring someone is not available yet.',
         },
         {
           heading: 'Today’s attendance',
