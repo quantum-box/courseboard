@@ -64,9 +64,9 @@ type DailyBudgetAchievement = {
   targetRevenue: number
   actualRevenue: number
   targetAverageSpend: number
-  actualAverageSpend: number | null
+  actualAverageSpend?: number | null
   targetCaddyAttachedRatio: number
-  actualCaddyAttachedRatio: number | null
+  actualCaddyAttachedRatio?: number | null
   reservationCount: number
   playerCount: number
 }
@@ -127,8 +127,15 @@ function rateBadgeVariant(rate: number | null) {
   return 'destructive' as const
 }
 
-function rateLabel(rate: number | null) {
-  return rate === null ? '—' : `${Math.round(rate * 100)}%`
+function optionalNumberLabel(
+  value: number | null | undefined,
+  format: (value: number) => string,
+) {
+  return value == null || !Number.isFinite(value) ? '—' : format(value)
+}
+
+function rateLabel(rate: number | null | undefined) {
+  return optionalNumberLabel(rate, value => `${Math.round(value * 100)}%`)
 }
 
 function revenueAchievementRate(actualRevenue: number, targetRevenue: number) {
@@ -491,7 +498,7 @@ export function BudgetsPage() {
                       align: 'right',
                       cell: row => (
                         <span>
-                          {row.actualAverageSpend === null ? '—' : yen(row.actualAverageSpend)}
+                          {optionalNumberLabel(row.actualAverageSpend, value => yen(value))}
                           {' / '}{yen(row.targetAverageSpend)}
                         </span>
                       ),
@@ -502,9 +509,10 @@ export function BudgetsPage() {
                       align: 'right',
                       cell: row => (
                         <span>
-                          {row.actualCaddyAttachedRatio === null
-                            ? '—'
-                            : `${Math.round(row.actualCaddyAttachedRatio * 100)}%`}
+                          {optionalNumberLabel(
+                            row.actualCaddyAttachedRatio,
+                            value => `${Math.round(value * 100)}%`,
+                          )}
                           {' / '}{Math.round(row.targetCaddyAttachedRatio * 100)}%
                         </span>
                       ),
