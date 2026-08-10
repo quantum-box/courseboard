@@ -83,6 +83,12 @@ import { caddieLoadPlan } from './caddieLoadPlan'
 import { Sheet } from '../../components/Sheet'
 import { CaddieLink } from './CaddieLink'
 import {
+  employmentLabel,
+  employmentStatusCode,
+  isEmploymentActive,
+  skillLabel,
+} from './caddieLabels'
+import {
   assignmentsOnCancelledRounds,
   horizonEnd,
   UnassignedRoundsPanel,
@@ -94,7 +100,6 @@ import {
   caddieCreatePayload,
   exactStaffMatch,
   resolveStaffId,
-  skillLabelKey,
   staffSuggestions,
 } from './caddieRegistration'
 import {
@@ -406,9 +411,6 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? resourceErrorText(error) : i18next.t('caddies:error.generic')
 }
 
-/** The API also returns the legacy `junior` code for rookies. */
-const EMPLOYMENT_STATUSES = ['active', 'inactive', 'suspended'] as const
-const ACTIVE_EMPLOYMENT = 'active'
 
 /** Shared by the create and the edit form so both offer the same choices. */
 const RANK_OPTIONS: { rank: Rank; rounds: number }[] = [
@@ -431,34 +433,6 @@ const ASSIGNMENT_STATUSES = [
   'absent',
   'no_show',
 ] as const
-
-function skillLabel(skill: string) {
-  const key = skillLabelKey(skill)
-  if (!key) return skill
-  return i18next.t(`caddies:skill.${key}` as 'caddies:skill.rookie')
-}
-
-/**
- * The API is not consistent about the case of its status codes and the server
- * compares them case-insensitively, so `"Active"` has to mean the same thing as
- * `"active"` here too — otherwise a caddie is wrongly blocked from clocking in
- * and the raw code leaks into the copy. Codes we do not know keep their
- * original spelling so nothing is silently rewritten.
- */
-function employmentStatusCode(status: string) {
-  const folded = status.trim().toLowerCase()
-  return (EMPLOYMENT_STATUSES as readonly string[]).includes(folded) ? folded : status.trim()
-}
-
-function isEmploymentActive(status: string) {
-  return employmentStatusCode(status) === ACTIVE_EMPLOYMENT
-}
-
-function employmentLabel(status: string) {
-  const code = employmentStatusCode(status)
-  if (!(EMPLOYMENT_STATUSES as readonly string[]).includes(code)) return status
-  return i18next.t(`caddies:employment.${code}` as 'caddies:employment.active')
-}
 
 /** The API returns raw role codes; anything unexpected is shown as-is. */
 function roleLabel(role: string) {

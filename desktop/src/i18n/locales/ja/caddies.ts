@@ -517,6 +517,17 @@ export const caddies = {
   error: {
     generic: '操作を完了できませんでした',
   },
+  /** The few figures the name preview shows on hover. */
+  preview: {
+    rank: '{{rank}}ランク',
+    perDay: '1日 {{n}}Rまで',
+    ratings: '評価 {{value}}（{{n}}件）',
+    ratingsNone: '評価の記録なし',
+    noStaffLink: 'スタッフ未紐付け',
+    loading: '読み込んでいます',
+    failed: '情報を読み込めませんでした',
+    open: '押すとこの人の画面へ',
+  },
   /** Assignments left on a group that is no longer on the tee sheet. */
   orphaned: {
     title: '取り消された予約に、担当が{{n}}件残っています',

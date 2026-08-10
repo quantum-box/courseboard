@@ -5405,3 +5405,50 @@ button,
   outline: 2px solid hsl(var(--nui-primary));
   outline-offset: 1px;
 }
+
+/* The name preview. Hover and focus both open it; nothing in it is only here,
+   so a device that cannot hover loses no information — the same control opens
+   the caddie's screen, where all of it is shown. */
+.caddie-link-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.caddie-preview {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% - 4px);
+  left: 0;
+  display: flex;
+  width: max-content;
+  max-width: 260px;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  box-shadow: 0 8px 24px hsl(0deg 0% 0% / 12%);
+  background: hsl(var(--nui-background));
+  padding: 10px 12px;
+  font-size: 16px;
+  line-height: 24px;
+  pointer-events: none;
+}
+
+.caddie-preview-name {
+  font-weight: 600;
+}
+
+.caddie-preview-line {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.caddie-preview-warning {
+  color: hsl(var(--nui-destructive));
+}
+
+.caddie-preview-hint {
+  margin-top: 4px;
+  border-top: 1px solid hsl(var(--nui-border));
+  padding-top: 4px;
+  color: hsl(var(--nui-muted-foreground));
+}

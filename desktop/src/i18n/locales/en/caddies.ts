@@ -514,6 +514,16 @@ export const caddies: DeepPartial<typeof source> = {
   error: {
     generic: 'Could not finish that',
   },
+  preview: {
+    rank: 'Rank {{rank}}',
+    perDay: 'Up to {{n}}R a day',
+    ratings: 'Rated {{value}} ({{n}})',
+    ratingsNone: 'No ratings recorded',
+    noStaffLink: 'No staff link',
+    loading: 'Loading',
+    failed: 'Could not load this caddie',
+    open: 'Opens this caddie’s screen',
+  },
   orphaned: {
     title: '{{n}} assignment(s) are left on a cancelled booking',
     body: 'These groups are no longer on the tee sheet. Until the assignment is cancelled, the caddie still counts against their rounds for the day and against the month’s payroll.',
