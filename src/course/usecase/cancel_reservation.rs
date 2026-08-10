@@ -156,6 +156,24 @@ mod tests {
             Ok(Vec::new())
         }
 
+        async fn get_reservation(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &ReservationId,
+        ) -> Result<Reservation, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn update_reservation_plan(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &ReservationId,
+            _service_id: &crate::course::domain::ReservationServiceId,
+            _ends_at: chrono::DateTime<chrono::Utc>,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+
         async fn update_reservation_party(
             &self,
             _credentials: GatewayCredentials<'_>,
