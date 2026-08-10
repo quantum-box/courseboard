@@ -389,6 +389,12 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/reservations/:reservation_id/plan",
+            patch(course::interfaces::http::change_reservation_plan).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/demo-seed",
             post(course::interfaces::http::seed_demo_board).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),

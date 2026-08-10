@@ -236,6 +236,30 @@ mod tests {
             Ok(self.items.lock().expect("lock").clone())
         }
 
+        async fn get_reservation(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            reservation_id: &crate::course::domain::ReservationId,
+        ) -> Result<Reservation, CourseError> {
+            self.items
+                .lock()
+                .expect("lock")
+                .iter()
+                .find(|item| item.id() == reservation_id)
+                .cloned()
+                .ok_or(CourseError::NotFound("reservation not found"))
+        }
+
+        async fn update_reservation_plan(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &crate::course::domain::ReservationId,
+            _service_id: &crate::course::domain::ReservationServiceId,
+            _ends_at: chrono::DateTime<chrono::Utc>,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+
         async fn update_reservation_party(
             &self,
             _credentials: GatewayCredentials<'_>,

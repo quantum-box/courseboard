@@ -231,6 +231,30 @@ pub trait ReservationGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<Reservation>, CourseError>;
 
+    /// One booking by id.
+    ///
+    /// Listing the day to find a single row is what the tee sheet does; a case
+    /// that only needs the booking it was handed should not pay for it.
+    async fn get_reservation(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+    ) -> Result<Reservation, CourseError>;
+
+    /// Change which plan a booking is sold under.
+    ///
+    /// The plan decides how long the round takes, so the end time moves with
+    /// it and the caller passes the one it computed. Unlike the party write
+    /// this leaves `customFields` alone: the group detail is not what changed,
+    /// and sending the object back would risk losing what is in it.
+    async fn update_reservation_plan(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+        service_id: &ReservationServiceId,
+        ends_at: DateTime<Utc>,
+    ) -> Result<(), CourseError>;
+
     /// Replaces the group detail CourseBoard keeps on one reservation.
     ///
     /// Field stores custom fields as one object and a write replaces all of it,

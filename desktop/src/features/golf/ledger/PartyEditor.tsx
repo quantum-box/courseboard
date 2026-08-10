@@ -8,9 +8,11 @@ import { Field, FormGrid, Notice } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import { showToast } from '../../../lib/toast'
 import type { TeeReservation } from '../timeline/models'
+import { plansForCourse, type BookablePlan } from './bookablePlan'
 import { DiscardGuard } from './DiscardGuard'
 import { MAX_PARTY_PLAYERS, MAX_SEAT_COLUMNS } from './ledgerLayout'
 import type { PartyDetails, PartyPlayer } from './models'
+import { PlanPicker } from './PlanPicker'
 import { PlayerTagInput } from './PlayerTagInput'
 
 /** A row being edited. Blank rows are dropped on save rather than refused. */
@@ -49,24 +51,34 @@ function toPlayers(draft: DraftPlayer[]): PartyPlayer[] {
  */
 export function PartyEditor({
   reservation,
+  plans,
   playerTagOptions,
   onClose,
   onSaved,
+  onPlanChanged,
 }: {
   reservation: TeeReservation | null
+  plans: BookablePlan[]
   playerTagOptions: string[]
   onClose: () => void
   onSaved: (reservationId: string, party: PartyDetails) => void
+  /** The board carries the play type, so it has to be refetched, not patched. */
+  onPlanChanged: () => void
 }) {
   const { t } = useTranslation(['ledger', 'common'])
   const [competitionName, setCompetitionName] = useState('')
   const [organizer, setOrganizer] = useState('')
   const [groupNumber, setGroupNumber] = useState('')
   const [players, setPlayers] = useState<DraftPlayer[]>([])
+  const [planId, setPlanId] = useState('')
   const [saving, setSaving] = useState(false)
   const [confirmingDiscard, setConfirmingDiscard] = useState(false)
   /** What the sheet opened with, so "changed" means changed by the desk. */
   const [opened, setOpened] = useState('')
+
+  const coursePlans = plansForCourse(plans, reservation?.golfCourseId)
+  /** Empty when the booking predates plans or its plan is no longer sold. */
+  const openedPlanId = reservation?.reservationServiceId ?? ''
 
   // Reset from the booking whenever a different one is opened, so the sheet
   // never shows the previous group's names against this group's tee time.
@@ -83,6 +95,7 @@ export function PartyEditor({
     setOrganizer(host)
     setGroupNumber(number)
     setPlayers(draft)
+    setPlanId(reservation.reservationServiceId ?? '')
     setOpened(JSON.stringify([competition, host, number, draft]))
     setConfirmingDiscard(false)
   }, [reservation])
@@ -91,8 +104,10 @@ export function PartyEditor({
 
   const named = toPlayers(players)
   const parsedGroupNumber = Number.parseInt(groupNumber, 10)
+  const planChanged = planId !== openedPlanId
   const dirty =
-    JSON.stringify([competitionName, organizer, groupNumber, players]) !== opened
+    planChanged
+    || JSON.stringify([competitionName, organizer, groupNumber, players]) !== opened
   const requestClose = () => {
     if (saving) return
     if (dirty) {
@@ -105,6 +120,20 @@ export function PartyEditor({
   const save = async () => {
     setSaving(true)
     try {
+      // The plan first: it is the write that can be refused — a plan sold on
+      // another course, or one seating fewer than the group. Failing before
+      // the names are sent leaves the booking exactly as the desk found it.
+      if (planChanged && planId) {
+        await courseboardApiJson(
+          `/v1/course/reservations/${encodeURIComponent(reservation.id)}/plan`,
+          {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ reservationServiceId: planId }),
+          },
+        )
+        onPlanChanged()
+      }
       const party = await courseboardApiJson<PartyDetails>(
         `/v1/course/reservations/${encodeURIComponent(reservation.id)}/party`,
         {
@@ -180,6 +209,15 @@ export function PartyEditor({
             />
           </Field>
         </FormGrid>
+
+        {/* A round booked as self that turns up wanting a caddie is changed
+            here rather than cancelled and rebooked. */}
+        <PlanPicker
+          plans={coursePlans}
+          value={planId}
+          name="courseboard-party-plan"
+          onChange={setPlanId}
+        />
 
         <section className="ledger-party-players" aria-label={t('ledger:party.players')}>
           <h3>{t('ledger:party.players')}</h3>
