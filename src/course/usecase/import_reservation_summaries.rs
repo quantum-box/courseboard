@@ -12,7 +12,7 @@ use chrono::NaiveDate;
 use crate::course::domain::{
     match_course_label, parse_reservation_sheet, CourseError, CourseId, CourseMatch,
     GatewayCredentials, GolfCatalogGateway, ImportWarning, ReservationDaySummary,
-    ReservationSummaryGateway, SheetGrid,
+    ReservationSummaryGateway, ReservationSummaryWindow, SheetGrid,
 };
 
 /// Whether to write what the file says, or only report it.
@@ -89,7 +89,10 @@ impl ImportReservationSummariesUseCase {
         let mut warnings = sheet.warnings;
         let mut summaries = Vec::with_capacity(sheet.summaries.len());
         let mut imported_courses: Vec<ImportedCourse> = Vec::new();
-        let mut skipped = sheet.summaries.len();
+        // Half-days the file held that will not reach the board. Starts with
+        // the ones the reader could not make a number of, and grows by every
+        // course that cannot be matched to one in CourseBoard.
+        let mut skipped = sheet.dropped_half_days + sheet.summaries.len();
 
         for label in &sheet.course_labels {
             let rows: Vec<_> = sheet
@@ -149,12 +152,28 @@ impl ImportReservationSummariesUseCase {
             ));
         }
 
+        // What this file speaks for: every day it has a column for, across the
+        // courses it named and CourseBoard could place. Taken from the sheet's
+        // own dates rather than from the rows that survived, so a day whose
+        // counts were all unreadable is still inside the window the import
+        // replaces — otherwise the previous export's numbers would sit there
+        // unchallenged.
+        let window = ReservationSummaryWindow {
+            from: sheet.dates.first().copied().unwrap_or_default(),
+            to: sheet.dates.last().copied().unwrap_or_default(),
+            course_ids: imported_courses
+                .iter()
+                .map(|course| course.course_id.clone())
+                .collect(),
+        };
+
         let imported = match request.mode {
             ImportMode::Preview => 0,
             ImportMode::Apply => {
                 self.summaries
-                    .upsert_reservation_summaries(
+                    .replace_reservation_summaries(
                         tenant_id,
+                        &window,
                         &summaries,
                         request.source_file.as_deref(),
                     )

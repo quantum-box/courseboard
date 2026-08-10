@@ -150,6 +150,44 @@ const mockProducts: Array<{
   },
 ]
 
+/**
+ * How far ahead the club sells, as the golf extension config would hold it.
+ *
+ * The real value lives in the tenant config and is read by the API; the fixture
+ * keeps it here so saving a week can answer with the date it opened the book to.
+ */
+let mockBookingHorizonDays = 180
+
+/** One start per interval across every band whose weekday falls in the range. */
+function mockGeneratedStarts(courseId: string, fromIso: string, toIso: string) {
+  const rules = mockSchedulesByCourse[courseId] ?? []
+  const from = new Date(fromIso)
+  const to = new Date(toIso)
+  const days = Math.max(0, Math.round((to.getTime() - from.getTime()) / 86_400_000)) + 1
+  let created = 0
+  for (let offset = 0; offset < days; offset += 1) {
+    const day = new Date(from.getTime() + offset * 86_400_000)
+    const weekday = day.getUTCDay()
+    rules
+      .filter(rule => rule.weekday === weekday)
+      .forEach(rule => {
+        const [startHour, startMinute] = rule.startTime.split(':').map(Number)
+        const [endHour, endMinute] = rule.endTime.split(':').map(Number)
+        const span = (endHour * 60 + endMinute) - (startHour * 60 + startMinute)
+        if (span > 0 && rule.slotIntervalMinutes > 0) {
+          created += Math.floor(span / rule.slotIntervalMinutes) + 1
+        }
+      })
+  }
+  return created
+}
+
+function mockBookableThrough(days = mockBookingHorizonDays) {
+  const through = new Date(`${TODAY}T00:00:00Z`)
+  through.setUTCDate(through.getUTCDate() + days)
+  return through.toISOString().slice(0, 10)
+}
+
 const mockSchedulesByCourse: Record<string, Array<{
   id: string
   weekday: number
@@ -507,6 +545,9 @@ const mockAvailabilityDeadlines: Record<string, string> = loadMockWrites('availa
 
 /** Group detail entered during the session, by reservation id. */
 const mockParties: Record<string, unknown> = loadMockWrites('parties', {})
+
+/** Plans moved onto a booking this session, by reservation id. */
+const mockPlans: Record<string, string> = loadMockWrites('plans', {})
 
 /**
  * A booking with the group detail entered this session laid over its fixture.
@@ -1556,6 +1597,10 @@ function resolveGet(path: string): Json | null | undefined {
 
   if (pathname === '/v1/erp/extensions/status') return extensionStatus()
 
+  if (pathname === '/v1/course/booking-horizon') {
+    return { days: mockBookingHorizonDays, bookableThrough: mockBookableThrough() }
+  }
+
   if (rawPathname === '/v1/course/extension-status') {
     const status = extensionStatus() as { items: Array<Record<string, unknown>> }
     return status.items.find(item => item.extensionKey === 'golf_course') ?? null
@@ -2062,6 +2107,13 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     if (index < 0) return error(404, 'Mock Field API has no such reservation')
     mockTeeReservations.splice(index, 1)
     delete mockParties[reservationId]
+    // The API takes the caddies off a group it cancels; a mock that left them
+    // assigned would show a caddie booked for a round that no longer exists.
+    for (const assignment of mockAssignments) {
+      if (assignment.reservationId === reservationId && assignment.status !== 'cancelled') {
+        assignment.status = 'cancelled'
+      }
+    }
     saveMockWrites('teeReservations', mockTeeReservations)
     saveMockWrites('parties', mockParties)
     return hit(null)
@@ -2215,6 +2267,24 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     }
     saveMockWrites('slotMarks', mockSlotMarks)
     return hit({ deleted })
+  }
+
+  const planMatch = /^\/v1\/course\/reservations\/([^/]+)\/plan$/.exec(pathname)
+  if (planMatch && method === 'PATCH') {
+    const reservation = mockTeeReservations.find(item => item.id === planMatch[1])
+    if (!reservation) return error(404, 'Mock Field API has no such reservation')
+    const serviceId = String(body?.reservationServiceId ?? '')
+    const product = mockProducts.find(item => item.reservationServiceId === serviceId)
+    if (!product) return error(404, 'Mock Field API sells no such plan')
+    if (product.golfCourseId && product.golfCourseId !== reservation.golfCourseId) {
+      return error(400, 'the plan is not sold on this booking’s course')
+    }
+    reservation.reservationServiceId = serviceId
+    reservation.durationMinutes = product.expectedDurationMinutes
+    reservation.playType = product.playType === 'caddie' ? 'caddie' : 'self'
+    mockPlans[reservation.id] = serviceId
+    saveMockWrites('plans', mockPlans)
+    return hit(null)
   }
 
   const partyMatch = /^\/v1\/course\/reservations\/([^/]+)\/party$/.exec(pathname)
@@ -2394,7 +2464,29 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       capacity: Number(rule.capacity ?? 1),
       slotIntervalMinutes: Number(rule.slotIntervalMinutes ?? 8),
     }))
-    return hit(items(mockSchedulesByCourse[courseId]))
+    // The API builds the tee times as part of the save, and answers with how
+    // far the book now reaches. The fixture has to say the same, or the screen
+    // cannot show what saving actually did.
+    const bookableThrough = mockBookableThrough()
+    return hit({
+      items: mockSchedulesByCourse[courseId],
+      bookableThrough,
+      built: {
+        created: mockGeneratedStarts(courseId, TODAY, bookableThrough),
+        updated: 0,
+        deactivated: 0,
+        unchanged: 0,
+      },
+    })
+  }
+
+  if (pathname === '/v1/course/booking-horizon' && method === 'PUT') {
+    const days = Number(body?.days)
+    if (!Number.isInteger(days) || days < 1 || days > 399) {
+      return error(400, 'booking horizon must be between 1 and 399 days')
+    }
+    mockBookingHorizonDays = days
+    return hit({ days, bookableThrough: mockBookableThrough(days) })
   }
 
   const generateMatch = pathname.match(
@@ -2402,27 +2494,12 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   )
   if (generateMatch && method === 'POST') {
     const courseId = decodeURIComponent(generateMatch[1] ?? '')
-    const rules = mockSchedulesByCourse[courseId] ?? []
-    const from = new Date(String(body?.from ?? TODAY))
-    const to = new Date(String(body?.to ?? TODAY))
-    const days = Math.max(0, Math.round((to.getTime() - from.getTime()) / 86_400_000)) + 1
-    // One start per interval across every band whose weekday falls in the range.
-    let created = 0
-    for (let offset = 0; offset < days; offset += 1) {
-      const day = new Date(from.getTime() + offset * 86_400_000)
-      const weekday = day.getUTCDay()
-      rules
-        .filter(rule => rule.weekday === weekday)
-        .forEach(rule => {
-          const [startHour, startMinute] = rule.startTime.split(':').map(Number)
-          const [endHour, endMinute] = rule.endTime.split(':').map(Number)
-          const span = (endHour * 60 + endMinute) - (startHour * 60 + startMinute)
-          if (span > 0 && rule.slotIntervalMinutes > 0) {
-            created += Math.floor(span / rule.slotIntervalMinutes) + 1
-          }
-        })
-    }
-    return hit({ created, updated: 0, deactivated: 0, unchanged: 0 })
+    return hit({
+      created: mockGeneratedStarts(courseId, String(body?.from ?? TODAY), String(body?.to ?? TODAY)),
+      updated: 0,
+      deactivated: 0,
+      unchanged: 0,
+    })
   }
 
   const productWriteMatch = pathname.match(

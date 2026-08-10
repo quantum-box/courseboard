@@ -12,7 +12,7 @@ use sqlx::{MySqlPool, Row};
 
 use crate::course::domain::{
     CourseError, CourseId, ReservationDaySummary, ReservationSummaryGateway,
-    ReservationSummaryQuery, TimeOfDay,
+    ReservationSummaryQuery, ReservationSummaryWindow, TimeOfDay,
 };
 
 /// How many rows one statement carries.
@@ -95,13 +95,19 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
             .collect()
     }
 
-    async fn upsert_reservation_summaries(
+    async fn replace_reservation_summaries(
         &self,
         tenant_id: &str,
+        window: &ReservationSummaryWindow,
         summaries: &[ReservationDaySummary],
         source_file: Option<&str>,
     ) -> Result<u64, CourseError> {
-        if summaries.is_empty() {
+        if window.from > window.to {
+            return Err(CourseError::BadRequest(
+                "the first day of the range must not be after the last",
+            ));
+        }
+        if window.course_ids.is_empty() {
             return Ok(0);
         }
         // One transaction for the whole file. A month that half-applies is
@@ -109,6 +115,30 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
         // at a board where some days came from the new export and the rest from
         // the last one, with nothing on screen saying which.
         let mut transaction = self.pool.begin().await.map_err(provider)?;
+
+        // Clear the window first so the file is the whole truth for the courses
+        // and dates it covers. Without this, a half-day the new export stopped
+        // reporting keeps the previous export's count and the board silently
+        // mixes two files. Scoped to the matched courses: a course this import
+        // could not resolve must keep what it already had.
+        let placeholders = vec!["?"; window.course_ids.len()].join(", ");
+        let statement = format!(
+            r#"
+            DELETE FROM golf_reservation_day_summaries
+            WHERE tenant_id = ?
+              AND summary_date BETWEEN ? AND ?
+              AND golf_course_id IN ({placeholders})
+            "#,
+        );
+        let mut delete = sqlx::query(&statement)
+            .bind(tenant_id)
+            .bind(window.from)
+            .bind(window.to);
+        for course_id in &window.course_ids {
+            delete = delete.bind(course_id.as_str());
+        }
+        delete.execute(&mut *transaction).await.map_err(provider)?;
+
         for chunk in summaries.chunks(UPSERT_CHUNK) {
             let values = vec!["(?, ?, ?, ?, ?, ?, ?)"; chunk.len()].join(", ");
             let statement = format!(
@@ -176,6 +206,15 @@ mod tests {
         )
     }
 
+    /// The window a July file speaks for.
+    fn july_window(courses: &[&str]) -> ReservationSummaryWindow {
+        ReservationSummaryWindow {
+            from: date(1),
+            to: date(31),
+            course_ids: courses.iter().map(|id| CourseId::new(*id)).collect(),
+        }
+    }
+
     fn whole_july() -> ReservationSummaryQuery {
         ReservationSummaryQuery {
             from: date(1),
@@ -192,7 +231,12 @@ mod tests {
             summary("course-roundtrip", 1, TimeOfDay::Afternoon, 19, 4),
         ];
         let written = repository
-            .upsert_reservation_summaries(&tenant, &imported, Some("july.xlsx"))
+            .replace_reservation_summaries(
+                &tenant,
+                &july_window(&["course-roundtrip"]),
+                &imported,
+                Some("july.xlsx"),
+            )
             .await
             .unwrap();
         assert_eq!(written, 2);
@@ -215,7 +259,12 @@ mod tests {
         ];
         for _ in 0..2 {
             repository
-                .upsert_reservation_summaries(&tenant, &imported, Some("july.xlsx"))
+                .replace_reservation_summaries(
+                    &tenant,
+                    &july_window(&["course-idempotent"]),
+                    &imported,
+                    Some("july.xlsx"),
+                )
                 .await
                 .unwrap();
         }
@@ -231,16 +280,18 @@ mod tests {
     async fn a_day_whose_bookings_moved_is_updated_rather_than_duplicated() {
         let (repository, tenant) = fresh("update").await;
         repository
-            .upsert_reservation_summaries(
+            .replace_reservation_summaries(
                 &tenant,
+                &july_window(&["course-update"]),
                 &[summary("course-update", 20, TimeOfDay::Morning, 55, 24)],
                 Some("first.xlsx"),
             )
             .await
             .unwrap();
         repository
-            .upsert_reservation_summaries(
+            .replace_reservation_summaries(
                 &tenant,
+                &july_window(&["course-update"]),
                 &[summary("course-update", 20, TimeOfDay::Morning, 61, 30)],
                 Some("second.xlsx"),
             )
@@ -262,8 +313,9 @@ mod tests {
         // leave the previous export's count standing on a day nobody plays.
         let (repository, tenant) = fresh("closed").await;
         repository
-            .upsert_reservation_summaries(
+            .replace_reservation_summaries(
                 &tenant,
+                &july_window(&["course-closed"]),
                 &[summary("course-closed", 6, TimeOfDay::Morning, 0, 0)],
                 None,
             )
@@ -279,12 +331,111 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_half_day_the_new_export_stopped_reporting_does_not_keep_the_old_count() {
+        // Yesterday's file had 7/3 morning; today's cannot read that cell. The
+        // half-day has to go with it — leaving yesterday's number there makes
+        // the board a mix of two exports with nothing saying which is which.
+        let (repository, tenant) = fresh("stale").await;
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &july_window(&["course-stale"]),
+                &[
+                    summary("course-stale", 3, TimeOfDay::Morning, 51, 24),
+                    summary("course-stale", 3, TimeOfDay::Afternoon, 24, 8),
+                ],
+                Some("first.xlsx"),
+            )
+            .await
+            .unwrap();
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &july_window(&["course-stale"]),
+                &[summary("course-stale", 3, TimeOfDay::Afternoon, 24, 8)],
+                Some("second.xlsx"),
+            )
+            .await
+            .unwrap();
+
+        let stored = repository
+            .list_reservation_summaries(&tenant, &whole_july())
+            .await
+            .unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].time_of_day(), TimeOfDay::Afternoon);
+    }
+
+    #[tokio::test]
+    async fn a_course_the_import_could_not_match_keeps_what_it_already_had() {
+        // A rename in the course master drops a course out of the match. That
+        // is a setup problem the desk is warned about — not a reason to erase
+        // the month of bookings already imported for it.
+        let (repository, tenant) = fresh("unmatched").await;
+        let kept = summary("course-unmatched-old", 3, TimeOfDay::Morning, 51, 24);
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &july_window(&["course-unmatched-old"]),
+                std::slice::from_ref(&kept),
+                Some("first.xlsx"),
+            )
+            .await
+            .unwrap();
+        // Today's import only resolves the other course, so the window names
+        // only that one.
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &july_window(&["course-unmatched-new"]),
+                &[summary(
+                    "course-unmatched-new",
+                    3,
+                    TimeOfDay::Morning,
+                    40,
+                    10,
+                )],
+                Some("second.xlsx"),
+            )
+            .await
+            .unwrap();
+
+        let stored = repository
+            .list_reservation_summaries(
+                &tenant,
+                &ReservationSummaryQuery {
+                    from: date(1),
+                    to: date(31),
+                    course_ids: vec![CourseId::new("course-unmatched-old")],
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(stored, vec![kept]);
+    }
+
+    #[tokio::test]
+    async fn a_window_naming_no_course_writes_nothing_rather_than_clearing_the_month() {
+        let (repository, tenant) = fresh("nocourse").await;
+        let written = repository
+            .replace_reservation_summaries(&tenant, &july_window(&[]), &[], Some("july.xlsx"))
+            .await
+            .unwrap();
+        assert_eq!(written, 0);
+    }
+
+    #[tokio::test]
     async fn asking_for_one_course_does_not_return_another_courses_counts() {
         let (repository, tenant) = fresh("filter").await;
         let mine = summary("course-filter-mine", 5, TimeOfDay::Morning, 40, 10);
         let other = summary("course-filter-other", 5, TimeOfDay::Morning, 30, 8);
         repository
-            .upsert_reservation_summaries(&tenant, &[mine.clone(), other], None)
+            .replace_reservation_summaries(
+                &tenant,
+                &july_window(&["course-filter-mine", "course-filter-other"]),
+                &[mine.clone(), other],
+                None,
+            )
             .await
             .unwrap();
 
@@ -306,8 +457,9 @@ mod tests {
     async fn a_range_returns_the_days_it_names_and_no_others() {
         let (repository, tenant) = fresh("range").await;
         repository
-            .upsert_reservation_summaries(
+            .replace_reservation_summaries(
                 &tenant,
+                &july_window(&["course-range"]),
                 &[
                     summary("course-range", 1, TimeOfDay::Morning, 10, 1),
                     summary("course-range", 15, TimeOfDay::Morning, 20, 2),
@@ -355,8 +507,9 @@ mod tests {
     async fn one_tenants_bookings_are_invisible_to_another() {
         let (repository, tenant) = fresh("isolation-a").await;
         repository
-            .upsert_reservation_summaries(
+            .replace_reservation_summaries(
                 &tenant,
+                &july_window(&["course-isolation"]),
                 &[summary("course-isolation", 8, TimeOfDay::Morning, 12, 3)],
                 None,
             )
@@ -387,7 +540,12 @@ mod tests {
         assert_eq!(month.len(), 186);
 
         let written = repository
-            .upsert_reservation_summaries(&tenant, &month, Some("july.xlsx"))
+            .replace_reservation_summaries(
+                &tenant,
+                &july_window(&["course-month-a", "course-month-b", "course-month-c"]),
+                &month,
+                Some("july.xlsx"),
+            )
             .await
             .unwrap();
         assert_eq!(written, 186);

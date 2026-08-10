@@ -277,7 +277,7 @@ impl ReservationImportParams {
         self.file_name
             .as_deref()
             .and_then(year_month_from_file_name)
-            .ok_or(AppError::BadRequest(
+            .ok_or(AppError::MonthRequired(
                 "the file name does not say which month it covers, so the month has to be chosen",
             ))
     }
@@ -470,15 +470,27 @@ mod tests {
 
     #[test]
     fn a_file_whose_name_says_nothing_asks_rather_than_guessing() {
-        assert!(params(Some("予約.xlsx"), None).year_month().is_err());
-        assert!(params(None, None).year_month().is_err());
+        // Answerable, and marked as such: the screen shows a month picker on
+        // this one and an error on every other refusal. Guessing here would
+        // date a whole month of bookings to the wrong days, silently.
+        for params in [params(Some("予約.xlsx"), None), params(None, None)] {
+            assert!(matches!(
+                params.year_month(),
+                Err(AppError::MonthRequired(_))
+            ));
+        }
     }
 
     #[test]
     fn a_month_that_is_not_a_month_is_refused() {
+        // Not `MonthRequired`: the desk answered, and the answer was not a
+        // month. Re-asking with the same picker would loop.
         for raw in ["2026-13", "2026", "26-07", "abcd-ef", "2026-00"] {
             assert!(
-                params(None, Some(raw)).year_month().is_err(),
+                matches!(
+                    params(None, Some(raw)).year_month(),
+                    Err(AppError::BadRequest(_))
+                ),
                 "{raw} should be refused"
             );
         }

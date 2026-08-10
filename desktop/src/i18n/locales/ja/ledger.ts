@@ -132,6 +132,9 @@ export const ledger = {
     save: '予約を入れる',
     saving: '登録しています…',
     saved: '予約を入れました',
+    noPlanTitle: 'プレー商品がありません',
+    noPlanBody:
+      '{{course}} で売れるプレー商品がまだありません。プレー商品を作ってから予約を入れてください。',
     justFilled: 'この枠はちょうど埋まりました。最新の台帳を読み込みました。',
     failed: '予約を入れられませんでした',
     cancel: 'やめる',

@@ -2,7 +2,7 @@ import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import { CalendarRange, CheckCircle2, FileSpreadsheet, Upload, X } from 'lucide-react'
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { courseboardApiJson, currentYearMonth } from '../../api'
+import { ApiError, courseboardApiJson, currentYearMonth } from '../../api'
 import {
   DataTable,
   EmptyState,
@@ -17,6 +17,7 @@ import {
 } from '../../components/Page'
 import { YearMonthPicker, useYearMonthValue } from '../../components/YearMonthPicker'
 import { useRegisterPageReload } from '../../lib/pageReload'
+import { normalizeYearMonth } from '../../lib/yearMonth'
 import { showToast } from '../../lib/toast'
 import {
   dailyRows,
@@ -85,6 +86,42 @@ function WarningLine({ warning }: { warning: ImportWarning }) {
 }
 
 /**
+ * The month picker shown when a file's name does not carry one.
+ *
+ * Starts empty rather than on the current month: a prefilled answer to a
+ * question nobody has read is how the wrong month gets imported.
+ */
+function MonthChoice({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string
+  hint: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  const { value: month, error, setCandidate } = useYearMonthValue(value || currentYearMonth())
+  return (
+    <div className="grid gap-1">
+      <YearMonthPicker
+        label={label}
+        value={month}
+        error={error}
+        onChange={candidate => {
+          setCandidate(candidate)
+          const normalized = normalizeYearMonth(candidate)
+          onChange(normalized ?? '')
+        }}
+        className="sm:w-64"
+      />
+      <small className="text-xs text-muted-foreground">{hint}</small>
+    </div>
+  )
+}
+
+/**
  * Bringing the club's daily reservation export into CourseBoard.
  *
  * The screen is deliberately two steps. The export is re-issued all month long
@@ -110,6 +147,10 @@ export function ReservationImportPage() {
   const [checking, setChecking] = useState(false)
   const [applying, setApplying] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  // Set only once the server has said the file name does not carry a month.
+  // Until then nothing is sent, so an unnamed file cannot be dated by accident.
+  const [needsMonth, setNeedsMonth] = useState(false)
+  const [chosenMonth, setChosenMonth] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const range = useMemo(
@@ -147,6 +188,10 @@ export function ReservationImportPage() {
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
     setUploadError(null)
     setPreview(null)
+    // A new file gets asked about on its own terms: the month chosen for the
+    // last one says nothing about this one.
+    setNeedsMonth(false)
+    setChosenMonth('')
     setFile(event.target.files?.[0] ?? null)
   }
 
@@ -154,44 +199,42 @@ export function ReservationImportPage() {
     setPreview(null)
     setFile(null)
     setUploadError(null)
+    setNeedsMonth(false)
+    setChosenMonth('')
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   /**
-   * The month is read from the file name on the server, so the picker is only
-   * sent once the server has said it could not find one. Parsing the name in
-   * two places is how the two would come to disagree.
+   * The month is read from the file name on the server, so the picker is sent
+   * only after the desk has been asked for one. Parsing the name in two places
+   * is how the two would come to disagree, and sending the picker's default
+   * unasked would date the whole file to whatever month happened to be showing.
    */
-  function importPath(step: 'preview' | 'import', withMonth: boolean) {
+  function importPath(step: 'preview' | 'import') {
     const params = new URLSearchParams()
     if (file) params.set('fileName', file.name)
-    if (withMonth) params.set('yearMonth', yearMonth)
+    if (chosenMonth) params.set('yearMonth', chosenMonth)
     return `/v1/course/reservation-summaries/${step}?${params.toString()}`
   }
 
   async function send(step: 'preview' | 'import') {
     if (!file) return null
-    const body = await file.arrayBuffer()
-    const request = {
+    return await courseboardApiJson<ReservationImportResult>(importPath(step), {
       method: 'POST',
       headers: { 'Content-Type': WORKBOOK_CONTENT_TYPE },
-      body,
-    } as const
-    try {
-      return await courseboardApiJson<ReservationImportResult>(
-        importPath(step, false),
-        request,
-      )
-    } catch (error) {
-      // The one error the desk can answer: say which month, then retry with it.
-      const needsMonth =
-        error instanceof Error && error.message.includes('does not say which month')
-      if (!needsMonth) throw error
-      return await courseboardApiJson<ReservationImportResult>(
-        importPath(step, true),
-        request,
-      )
-    }
+      body: await file.arrayBuffer(),
+    })
+  }
+
+  /**
+   * Whether the server is asking which month this file is, rather than
+   * refusing it. Keyed on the error code, not the message: the message is
+   * shown to the reader and is free to be rewritten.
+   */
+  function asksForTheMonth(error: unknown) {
+    if (!(error instanceof ApiError)) return false
+    const details = error.details as { error?: string } | undefined
+    return details?.error === 'month_required'
   }
 
   async function check() {
@@ -203,6 +246,13 @@ export function ReservationImportPage() {
       if (result) setPreview(result)
     } catch (error) {
       setPreview(null)
+      if (asksForTheMonth(error)) {
+        // Ask, do not assume. Picking the month showing in the filter would
+        // silently date every column of the sheet to an unrelated month.
+        setNeedsMonth(true)
+        setUploadError(t('reservationImport:error.monthRequired'))
+        return
+      }
       setUploadError(error instanceof Error ? error.message : t('reservationImport:error.failed'))
     } finally {
       setChecking(false)
@@ -230,6 +280,11 @@ export function ReservationImportPage() {
       discard()
       await load()
     } catch (error) {
+      if (asksForTheMonth(error)) {
+        setNeedsMonth(true)
+        setUploadError(t('reservationImport:error.monthRequired'))
+        return
+      }
       setUploadError(error instanceof Error ? error.message : t('reservationImport:error.failed'))
     } finally {
       setApplying(false)
@@ -270,12 +325,22 @@ export function ReservationImportPage() {
             </div>
           ) : null}
           {uploadError ? <Notice tone="danger">{uploadError}</Notice> : null}
+          {needsMonth ? (
+            // Shown only after the server has asked. The file name did not say
+            // which month it covers, and nothing is sent until somebody does.
+            <MonthChoice
+              label={t('reservationImport:upload.month')}
+              hint={t('reservationImport:upload.monthHint')}
+              value={chosenMonth}
+              onChange={setChosenMonth}
+            />
+          ) : null}
           <div className="flex flex-wrap gap-2">
             <Button
               variant="primary"
               size="lg"
               type="button"
-              disabled={!file || checking || applying}
+              disabled={!file || checking || applying || (needsMonth && !chosenMonth)}
               onClick={() => void check()}
             >
               <Upload />

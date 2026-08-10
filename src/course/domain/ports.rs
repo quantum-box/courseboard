@@ -5,18 +5,18 @@ use chrono::{DateTime, NaiveDate, Utc};
 
 use super::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-    AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BudgetAchievement, Caddie,
-    CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
-    CaddieRankFees, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift, CaddieStaff,
-    Course, CourseError, CourseId, CourseOrder, DailyBudget, DailyBudgetQuery, DeleteSlotOverrides,
-    ExtensionStatus, GenerationSummary, MonthlySettlement, NewReservation, PartyDetails,
-    ProductSlot, RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationDaySummary,
-    ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId,
-    ReservationSummaryQuery, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
-    SeededReservation, ShiftPolicy, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot,
-    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
-    WorkedMinutes, YearMonth,
+    AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, BudgetAchievement,
+    Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
+    CaddieId, CaddieRankFees, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift,
+    CaddieStaff, Course, CourseError, CourseId, CourseOrder, DailyBudget, DailyBudgetQuery,
+    DeleteSlotOverrides, ExtensionStatus, GenerationSummary, InventoryWatermark, MonthlySettlement,
+    NewReservation, PartyDetails, ProductSlot, RecommendationQuery, ReplaceCaddieMemberships,
+    Reservation, ReservationDaySummary, ReservationId, ReservationPolicy, ReservationProduct,
+    ReservationServiceId, ReservationSummaryQuery, ReservationSummaryWindow, Resource, ResourceId,
+    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
+    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
+    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
+    UpsertDailyBudget, UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -122,18 +122,43 @@ pub trait ReservationSummaryGateway: Send + Sync {
         query: &ReservationSummaryQuery,
     ) -> Result<Vec<ReservationDaySummary>, CourseError>;
 
-    /// Write one import's worth of counts.
+    /// Make `window` hold exactly `summaries` and nothing else.
     ///
-    /// The club re-exports the same month all month long as bookings come in,
-    /// so the same half-day arrives again and again: each one replaces the
-    /// count already on that (course, date, half-day) instead of adding a
-    /// second one beside it.
-    async fn upsert_reservation_summaries(
+    /// A replace rather than an upsert. The club re-exports the same month all
+    /// month long, so the same half-day arrives again and again — and a file
+    /// that stops reporting one (an unreadable count, a course renamed out of
+    /// the match) has to take the old number with it. Writing only what is
+    /// present would leave last week's count standing on a half-day this
+    /// week's file says nothing about.
+    async fn replace_reservation_summaries(
         &self,
         tenant_id: &str,
+        window: &ReservationSummaryWindow,
         summaries: &[ReservationDaySummary],
         source_file: Option<&str>,
     ) -> Result<u64, CourseError>;
+}
+
+/// Port for how far each course's tee-time inventory has been built.
+///
+/// Field generates the slots but reports only counts, never a date, so the
+/// watermark that makes a daily top-up cheap is CourseBoard's own data
+/// (ADR-0005) — the same reasoning as [`SlotOverrideGateway`].
+#[async_trait]
+pub trait GeneratedThroughGateway: Send + Sync {
+    /// The watermark per course. A course absent from the map has never been
+    /// built, which is different from having been built through a past date.
+    async fn list_watermarks(
+        &self,
+        tenant_id: &str,
+    ) -> Result<HashMap<CourseId, InventoryWatermark>, CourseError>;
+
+    async fn set_watermark(
+        &self,
+        tenant_id: &str,
+        course_id: &CourseId,
+        watermark: InventoryWatermark,
+    ) -> Result<(), CourseError>;
 }
 
 /// Port for each tenant's shift-request filing deadline, one per calendar
@@ -261,6 +286,30 @@ pub trait ReservationGateway: Send + Sync {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<Reservation>, CourseError>;
+
+    /// One booking by id.
+    ///
+    /// Listing the day to find a single row is what the tee sheet does; a case
+    /// that only needs the booking it was handed should not pay for it.
+    async fn get_reservation(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+    ) -> Result<Reservation, CourseError>;
+
+    /// Change which plan a booking is sold under.
+    ///
+    /// The plan decides how long the round takes, so the end time moves with
+    /// it and the caller passes the one it computed. Unlike the party write
+    /// this leaves `customFields` alone: the group detail is not what changed,
+    /// and sending the object back would risk losing what is in it.
+    async fn update_reservation_plan(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+        service_id: &ReservationServiceId,
+        ends_at: DateTime<Utc>,
+    ) -> Result<(), CourseError>;
 
     /// Replaces the group detail CourseBoard keeps on one reservation.
     ///
@@ -642,4 +691,20 @@ pub trait GolfCommercialGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         input: UpdateExtensionConfig,
     ) -> Result<(), CourseError>;
+
+    /// How far ahead the club sells tee times.
+    ///
+    /// Tenant-scoped and CourseBoard's own: Field's policy only counts
+    /// backwards from the tee time, so the forward window is kept in the golf
+    /// extension config (ADR-0005).
+    async fn get_booking_horizon(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<BookingHorizon, CourseError>;
+
+    async fn set_booking_horizon(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        horizon: &BookingHorizon,
+    ) -> Result<BookingHorizon, CourseError>;
 }

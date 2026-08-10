@@ -82,8 +82,8 @@ pub use ids::{
 pub use party::{PartyDetails, PartyPlayer, MAX_PARTY_PLAYERS, PARTY_CUSTOM_FIELD_KEY};
 pub use payroll::{payroll_csv, summarize_payroll, AttendanceDay, PayrollCandidate, WorkedMinutes};
 pub use ports::{
-    AvailabilityDeadlineGateway, CaddieShiftGateway, GatewayCredentials, GolfCatalogGateway,
-    GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, ReservationGateway,
+    AvailabilityDeadlineGateway, CaddieShiftGateway, GatewayCredentials, GeneratedThroughGateway,
+    GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, ReservationGateway,
     ReservationScheduleGateway, ReservationSummaryGateway, ShiftRulesGateway, SlotOverrideGateway,
     TeeLedgerQuery, TeeSheetQuery,
 };
@@ -97,12 +97,14 @@ pub use reservation_sheet::{
     SheetDaySummary, SheetGrid,
 };
 pub use reservation_summary::{
-    match_course_label, CourseMatch, ReservationDaySummary, ReservationSummaryQuery, TimeOfDay,
+    match_course_label, CourseMatch, ReservationDaySummary, ReservationSummaryQuery,
+    ReservationSummaryWindow, TimeOfDay,
 };
 pub use resource::{Resource, ResourceKind, SaveCourseResource};
 pub use schedule::{
     courseboard_weekday_to_field, field_day_of_week_to_courseboard, AvailabilityRule,
-    CourseSchedule, GenerationSummary,
+    BookingHorizon, BuiltInventory, CourseSchedule, GenerationSummary, InventoryWatermark,
+    SavedSchedule,
 };
 pub use simulator::{
     party_tax, prepare_fee_quote, prepare_range_simulation, project_row, quote_fee,

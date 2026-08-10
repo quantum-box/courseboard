@@ -16,27 +16,29 @@ use utoipa::{IntoParams, ToSchema};
 use super::openapi::ErrorBody;
 
 use crate::course::domain::{
-    jst_offset, AvailabilityRule, BusinessHours, Caddie, CaddieAssignment, CaddieAssignmentQuery,
-    CaddieId, CaddieStaff, Course, CourseError, CourseId, CourseOrder, DeleteSlotOverrides,
-    GatewayCredentials, GenerationSummary, LedgerColumn, LedgerSlot, PartyDetails, ProductSlot,
-    ReservationId, ReservationProduct, ReservationServiceId, Resource, ResourceId, SlotOverride,
-    SlotOverrideKind, SlotOverrideQuery, TeeLedger, TeeLedgerQuery, TeeSheet, TeeSheetItem,
-    TeeSheetQuery, UpsertCourse, UpsertReservationProduct, UpsertSlotOverrides,
+    jst_offset, AvailabilityRule, BookingHorizon, BusinessHours, Caddie, CaddieAssignment,
+    CaddieAssignmentQuery, CaddieId, CaddieStaff, Course, CourseError, CourseId, CourseOrder,
+    DeleteSlotOverrides, GatewayCredentials, GenerationSummary, LedgerColumn, LedgerSlot,
+    PartyDetails, ProductSlot, ReservationId, ReservationProduct, ReservationServiceId, Resource,
+    ResourceId, SavedSchedule, SlotOverride, SlotOverrideKind, SlotOverrideQuery, TeeLedger,
+    TeeLedgerQuery, TeeSheet, TeeSheetItem, TeeSheetQuery, UpsertCourse, UpsertReservationProduct,
+    UpsertSlotOverrides,
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
-    FieldReservationGateway, MySqlSlotOverrideRepository,
+    FieldReservationGateway, MySqlGeneratedThroughRepository, MySqlSlotOverrideRepository,
 };
 use crate::course::usecase::{
-    CancelReservationUseCase, CreateCourseUseCase, CreateReservationInput,
-    CreateReservationUseCase, DeleteCourseUseCase, DeleteSlotOverridesUseCase,
-    GenerateCourseTimeSlotsUseCase, GetCourseOrderUseCase, GetCourseScheduleUseCase,
-    GetTeeLedgerUseCase, GetTeeSheetUseCase, LinkCourseResourceUseCase,
-    ListCaddieAssignmentsUseCase, ListCaddiesUseCase, ListCoursesUseCase, ListProductSlotsUseCase,
+    CancelReservationUseCase, ChangeReservationPlanUseCase, CreateCourseUseCase,
+    CreateReservationInput, CreateReservationUseCase, DeleteCourseUseCase,
+    DeleteSlotOverridesUseCase, ExtendCourseInventoryUseCase, GenerateCourseTimeSlotsUseCase,
+    GetBookingHorizonUseCase, GetCourseOrderUseCase, GetCourseScheduleUseCase, GetTeeLedgerUseCase,
+    GetTeeSheetUseCase, LinkCourseResourceUseCase, ListCaddieAssignmentsUseCase,
+    ListCaddiesUseCase, ListCoursesUseCase, ListProductSlotsUseCase,
     ListReservationProductsUseCase, ListResourcesUseCase, ListSlotOverridesUseCase,
     ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase,
-    SeedDemoBoardUseCase, UpdateCourseUseCase, UpdateReservationPartyUseCase,
-    UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
+    SeedDemoBoardUseCase, SetBookingHorizonUseCase, UpdateCourseUseCase,
+    UpdateReservationPartyUseCase, UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -69,6 +71,10 @@ pub(crate) fn reservation_gateway(state: &AppState) -> Arc<FieldReservationGatew
 /// Desk marks live in CourseBoard's own MySQL, not in Field.
 pub(crate) fn slot_override_gateway(state: &AppState) -> Arc<MySqlSlotOverrideRepository> {
     state.slot_overrides()
+}
+
+pub(crate) fn generated_through_gateway(state: &AppState) -> Arc<MySqlGeneratedThroughRepository> {
+    state.generated_through()
 }
 
 pub(crate) fn commercial_gateway(state: &AppState) -> Arc<FieldGolfCommercialGateway> {
@@ -492,6 +498,23 @@ pub async fn get_tee_ledger(
 ) -> Result<Json<TeeLedgerResponse>, AppError> {
     let credentials = credentials(&state, &headers)?;
     let tenant_id = operator_id(&headers)?.to_string();
+
+    // The ledger is the screen the desk opens every day, which makes it the
+    // one place the far edge of the book can be kept moving without a
+    // scheduler. Best effort: a top-up that fails must still show the day.
+    let catalog = catalog_gateway(&state);
+    if let Err(error) = ExtendCourseInventoryUseCase::new(
+        catalog.clone(),
+        catalog,
+        commercial_gateway(&state),
+        generated_through_gateway(&state),
+    )
+    .execute(credentials, &tenant_id)
+    .await
+    {
+        tracing::warn!(%error, "could not extend the booking window while reading the ledger");
+    }
+
     let use_case = GetTeeLedgerUseCase::new(
         reservation_gateway(&state),
         catalog_gateway(&state),
@@ -797,7 +820,7 @@ pub async fn cancel_reservation(
     Json(request): Json<CancelReservationRequest>,
 ) -> Result<StatusCode, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = CancelReservationUseCase::new(reservation_gateway(&state));
+    let use_case = CancelReservationUseCase::new(reservation_gateway(&state), ops_gateway(&state));
     use_case
         .execute(
             credentials,
@@ -867,6 +890,53 @@ pub async fn update_reservation_party(
         .await
         .map_err(AppError::from)?;
     Ok(Json(PartyDto::from(&stored)))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeReservationPlanRequest {
+    /// The plan to sell the round under from now on.
+    pub reservation_service_id: String,
+}
+
+/// PATCH /v1/course/reservations/{reservation_id}/plan
+///
+/// Moves a booking onto another plan — a self round the caller decides they
+/// want a caddie for. The round's length follows the plan, so the end time is
+/// recomputed here rather than left at what the old plan implied.
+#[utoipa::path(
+    patch,
+    path = "/v1/course/reservations/{reservation_id}/plan",
+    tag = "course",
+    params(("reservation_id" = String, Path, description = "Reservation id")),
+    request_body = ChangeReservationPlanRequest,
+    responses(
+        (status = 204, description = "Plan changed"),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Plan not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn change_reservation_plan(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(reservation_id): Path<String>,
+    Json(request): Json<ChangeReservationPlanRequest>,
+) -> Result<StatusCode, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let use_case =
+        ChangeReservationPlanUseCase::new(reservation_gateway(&state), catalog_gateway(&state));
+    use_case
+        .execute(
+            credentials,
+            &ReservationId::new(reservation_id),
+            &ReservationServiceId::new(request.reservation_service_id),
+        )
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ─── Slot marks ───────────────────────────────────────────────────────────────
@@ -1438,7 +1508,7 @@ pub async fn get_course_schedule(
     params(("id" = String, Path, description = "Golf course ID")),
     request_body = ReplaceCourseScheduleRequest,
     responses(
-        (status = 200, description = "Schedule replaced", body = inline(ItemsResponse<AvailabilityRuleDto>)),
+        (status = 200, description = "Schedule replaced and its tee times built", body = SavedScheduleDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
         (status = 424, description = "Upstream provider error", body = ErrorBody),
@@ -1450,7 +1520,7 @@ pub async fn replace_course_schedule(
     headers: HeaderMap,
     Path(id): Path<String>,
     Json(body): Json<ReplaceCourseScheduleRequest>,
-) -> Result<Json<ItemsResponse<AvailabilityRuleDto>>, AppError> {
+) -> Result<Json<SavedScheduleDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
     let rules = body
         .rules
@@ -1469,13 +1539,120 @@ pub async fn replace_course_schedule(
         .map_err(AppError::from)?;
 
     let gateway = catalog_gateway(&state);
-    let use_case = ReplaceCourseScheduleUseCase::new(gateway.clone(), gateway);
+    let use_case = ReplaceCourseScheduleUseCase::new(
+        gateway.clone(),
+        gateway,
+        commercial_gateway(&state),
+        generated_through_gateway(&state),
+    );
     let saved = use_case
         .execute(credentials, &CourseId::new(id), rules)
         .await
         .map_err(AppError::from)?;
-    Ok(Json(ItemsResponse {
-        items: saved.iter().map(AvailabilityRuleDto::from).collect(),
+    Ok(Json(SavedScheduleDto::from(saved)))
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedScheduleDto {
+    pub items: Vec<AvailabilityRuleDto>,
+    /// Last date now on sale, or `null` when the week saved but its tee times
+    /// were not built.
+    pub bookable_through: Option<NaiveDate>,
+    pub built: Option<GenerationSummaryDto>,
+}
+
+impl From<SavedSchedule> for SavedScheduleDto {
+    fn from(value: SavedSchedule) -> Self {
+        Self {
+            items: value.rules.iter().map(AvailabilityRuleDto::from).collect(),
+            bookable_through: value.built.map(|built| built.bookable_through),
+            built: value
+                .built
+                .map(|built| GenerationSummaryDto::from(built.summary)),
+        }
+    }
+}
+
+// ─── Booking horizon ────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BookingHorizonDto {
+    /// Days ahead of today the book is open.
+    pub days: i64,
+    /// The last date a booking may land on, as of today.
+    pub bookable_through: NaiveDate,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetBookingHorizonRequest {
+    pub days: i64,
+}
+
+/// GET /v1/course/booking-horizon
+#[utoipa::path(
+    get,
+    path = "/v1/course/booking-horizon",
+    tag = "course",
+    responses(
+        (status = 200, description = "How far ahead the book is open", body = BookingHorizonDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_booking_horizon(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<BookingHorizonDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let (horizon, bookable_through) = GetBookingHorizonUseCase::new(commercial_gateway(&state))
+        .execute(credentials)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(BookingHorizonDto {
+        days: horizon.days(),
+        bookable_through,
+    }))
+}
+
+/// PUT /v1/course/booking-horizon
+#[utoipa::path(
+    put,
+    path = "/v1/course/booking-horizon",
+    tag = "course",
+    request_body = SetBookingHorizonRequest,
+    responses(
+        (status = 200, description = "Horizon stored and every course rebuilt", body = BookingHorizonDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn set_booking_horizon(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<SetBookingHorizonRequest>,
+) -> Result<Json<BookingHorizonDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let horizon = BookingHorizon::try_new(body.days).map_err(AppError::from)?;
+    let gateway = catalog_gateway(&state);
+    let use_case = SetBookingHorizonUseCase::new(
+        gateway.clone(),
+        gateway,
+        commercial_gateway(&state),
+        generated_through_gateway(&state),
+    );
+    let (stored, bookable_through) = use_case
+        .execute(credentials, horizon)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(BookingHorizonDto {
+        days: stored.days(),
+        bookable_through,
     }))
 }
 
@@ -1955,6 +2132,7 @@ pub async fn list_caddie_assignments(
                 caddie_id: CaddieId::from_optional(query.caddie_profile_id),
                 from: query.from,
                 to: query.to,
+                reservation_id: None,
             },
         )
         .await

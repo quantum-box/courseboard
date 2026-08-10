@@ -121,6 +121,24 @@ pub struct ReservationSummaryQuery {
     pub course_ids: Vec<CourseId>,
 }
 
+/// The stretch of the calendar one import speaks for.
+///
+/// An import is not "add these counts", it is "for these courses, these dates
+/// are now exactly this". The difference shows the day a file arrives with a
+/// half-day missing — a count that will not read, a course renamed out of the
+/// match — where merely writing what is present leaves the previous export's
+/// number sitting on that half-day, and the board becomes a mix of two files
+/// with nothing on screen saying which is which.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReservationSummaryWindow {
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+    /// Only the courses the file actually spoke about and that were matched.
+    /// A course the import could not resolve keeps whatever it already had:
+    /// a rename in the course master should not erase a month of bookings.
+    pub course_ids: Vec<CourseId>,
+}
+
 /// What matching a sheet's course label against the course master produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CourseMatch<'a> {

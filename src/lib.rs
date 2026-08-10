@@ -31,7 +31,8 @@ use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
     MySqlAvailabilityDeadlineRepository, MySqlCaddieShiftRepository,
-    MySqlReservationSummaryRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
+    MySqlGeneratedThroughRepository, MySqlReservationSummaryRepository, MySqlShiftRulesRepository,
+    MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -56,6 +57,7 @@ pub struct AppState {
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
     reservation_summaries: Arc<MySqlReservationSummaryRepository>,
+    generated_through: Arc<MySqlGeneratedThroughRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
     shift_rules: Arc<MySqlShiftRulesRepository>,
@@ -86,6 +88,7 @@ impl AppState {
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
             reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(pool.clone())),
+            generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
             )),
@@ -126,6 +129,7 @@ impl AppState {
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
             reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(pool.clone())),
+            generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
             )),
@@ -154,6 +158,7 @@ impl AppState {
                 reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(
                     pool.clone(),
                 )),
+                generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
                 )),
@@ -173,6 +178,7 @@ impl AppState {
                 reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(
                     pool.clone(),
                 )),
+                generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
                 )),
@@ -203,6 +209,11 @@ impl AppState {
     /// flag, so it cannot ride on Field's reservation inventory (ADR-0005).
     pub fn reservation_summaries(&self) -> Arc<MySqlReservationSummaryRepository> {
         self.reservation_summaries.clone()
+    }
+
+    /// CourseBoard-owned record of how far each course has been built.
+    pub fn generated_through(&self) -> Arc<MySqlGeneratedThroughRepository> {
+        self.generated_through.clone()
     }
 
     /// CourseBoard-owned shift-request filing deadlines.
@@ -405,6 +416,12 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/reservations/:reservation_id/plan",
+            patch(course::interfaces::http::change_reservation_plan).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/demo-seed",
             post(course::interfaces::http::seed_demo_board).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
@@ -467,6 +484,15 @@ pub fn build_router(state: AppState) -> Router {
             post(course::interfaces::http::generate_course_time_slots).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
+        )
+        .route(
+            "/v1/course/booking-horizon",
+            get(course::interfaces::http::get_booking_horizon)
+                .put(course::interfaces::http::set_booking_horizon)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
         )
         .route(
             "/v1/course/resources",
@@ -1341,6 +1367,13 @@ pub enum AppError {
     Forbidden,
     #[error("{0}")]
     BadRequest(&'static str),
+    /// A file whose name does not say which month it covers.
+    ///
+    /// Its own variant rather than a `BadRequest` because the screen has to
+    /// tell them apart: this one is answerable — pick a month and send it
+    /// again — and every other bad request is not.
+    #[error("{0}")]
+    MonthRequired(&'static str),
     #[error("{0}")]
     Conflict(&'static str),
     #[error("{message}")]
@@ -1377,6 +1410,7 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
+            AppError::MonthRequired(_) => (StatusCode::BAD_REQUEST, "month_required"),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             AppError::UpstreamClient { status, .. } => (status, "upstream_client_error"),
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),

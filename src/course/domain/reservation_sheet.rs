@@ -133,6 +133,11 @@ pub struct ParsedReservationSheet {
     pub course_labels: Vec<String>,
     /// The days the sheet covers, earliest first.
     pub dates: Vec<NaiveDate>,
+    /// Half-days the sheet held but this reader could not use — a count that
+    /// was not a number. Kept as a number rather than inferred from the
+    /// warnings, so "how much was left out" and "what to look at" stay
+    /// independent of each other.
+    pub dropped_half_days: usize,
 }
 
 /// The month an export covers, taken from its file name.
@@ -181,6 +186,7 @@ pub fn parse_reservation_sheet(
     // Kept separately from `summaries` because the club-wide row is the thing
     // the imported courses get checked against, not a thing to import.
     let mut club_totals: Vec<(NaiveDate, TimeOfDay, i32)> = Vec::new();
+    let mut dropped_half_days = 0usize;
 
     let mut course_label = String::new();
     let mut series = String::new();
@@ -216,6 +222,7 @@ pub fn parse_reservation_sheet(
                 if is_club_wide {
                     continue;
                 }
+                dropped_half_days += 1;
                 warnings.push(ImportWarning::UnreadableCount {
                     course_label: course_label.clone(),
                     date: day.date,
@@ -258,6 +265,7 @@ pub fn parse_reservation_sheet(
         warnings,
         course_labels,
         dates: days.into_iter().map(|day| day.date).collect(),
+        dropped_half_days,
     })
 }
 
@@ -594,6 +602,10 @@ mod tests {
                 time_of_day: TimeOfDay::Morning,
             }]
         );
+        // Counted as left out, not merely warned about: the screen tells the
+        // desk how many half-days did not make it, and a warning with a zero
+        // beside it reads as "nothing was lost".
+        assert_eq!(sheet.dropped_half_days, 1);
     }
 
     #[test]
