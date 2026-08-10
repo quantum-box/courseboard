@@ -3075,7 +3075,7 @@ function calendarCells(year: number, month: number) {
   return values
 }
 
-function AvailabilityCalendar({
+export function AvailabilityCalendar({
   profile,
   setFlash,
   onDirtyChange,
@@ -3087,6 +3087,7 @@ function AvailabilityCalendar({
   const { t } = useTranslation(['caddies', 'common'])
   const [yearMonth, setYearMonth] = useState<string | null>(null)
   const [selection, setSelection] = useState(emptyCalendarDateSelection)
+  const [editorOpen, setEditorOpen] = useState(false)
   const [status, setStatus] = useState<AvailabilityStatus>('available')
   const [twoRounds, setTwoRounds] = useState(false)
   const [note, setNote] = useState('')
@@ -3138,7 +3139,7 @@ function AvailabilityCalendar({
   const selectedRecord = selectedDate ? records.get(selectedDate) : undefined
   // The anchor supplies the shared form values. Other selected dates may have
   // mixed stored values without making range selection itself an unsaved edit.
-  const dirty = selectedDate !== null && (
+  const dirty = editorOpen && selectedDate !== null && (
     status !== (selectedRecord?.status ?? 'available')
     || twoRounds !== (selectedRecord?.twoRoundRequest ?? false)
     || note.trim() !== (selectedRecord?.healthNote ?? '').trim()
@@ -3156,6 +3157,7 @@ function AvailabilityCalendar({
 
   useEffect(() => {
     setSelection(emptyCalendarDateSelection())
+    setEditorOpen(false)
   }, [profile.id, yearMonth])
 
   function changeMonth(amount: number) {
@@ -3163,23 +3165,42 @@ function AvailabilityCalendar({
     setYearMonth(value => shiftMonth(value ?? tenantToday!.slice(0, 7), amount))
   }
 
-  function select(date: string, shiftKey: boolean) {
-    const next = calendarSelectionAfterClick(selection, date, shiftKey)
-    if (next.anchor === selectedDate
-      && next.dates.length === selectedDates.length
-      && next.dates.every((value, index) => value === selectedDates[index])) return
-    if (!confirmDiscard()) return
-    const record = records.get(next.anchor!)
-    setSelection(next)
+  function loadEditorValues(date: string | null) {
+    const record = date ? records.get(date) : undefined
     setStatus(record?.status ?? 'available')
     setTwoRounds(record?.twoRoundRequest ?? false)
     setNote(record?.healthNote ?? '')
   }
 
-  /** Closing the sheet is the same decision as leaving the month. */
+  function openEditor() {
+    if (!selectedDate) return
+    loadEditorValues(selectedDate)
+    setEditorOpen(true)
+  }
+
+  function select(date: string, shiftKey: boolean) {
+    const next = calendarSelectionAfterClick(selection, date, shiftKey)
+    const unchanged = next.anchor === selectedDate
+      && next.dates.length === selectedDates.length
+      && next.dates.every((value, index) => value === selectedDates[index])
+    if (unchanged) {
+      // Closing the editor deliberately keeps the anchor. Clicking that same
+      // day normally must therefore reopen the one-day flow instead of doing
+      // nothing; Shift keeps extending without opening the modal overlay.
+      if (!shiftKey) openEditor()
+      return
+    }
+    if (!confirmDiscard()) return
+    setSelection(next)
+    loadEditorValues(next.anchor)
+    setEditorOpen(!shiftKey)
+  }
+
+  /** Close only the editor. The calendar anchor remains for the next Shift click. */
   function closeEditor() {
     if (!confirmDiscard()) return
-    setSelection(emptyCalendarDateSelection())
+    loadEditorValues(selectedDate)
+    setEditorOpen(false)
   }
 
   async function save() {
@@ -3201,6 +3222,7 @@ function AvailabilityCalendar({
       if (failed?.status === 'rejected') throw failed.reason
       // The sheet covers the calendar it was opened from, and the toast already
       // says what was saved — leaving it open would hide the month it changed.
+      setEditorOpen(false)
       setSelection(emptyCalendarDateSelection())
       setFlash({
         tone: 'success',
@@ -3235,6 +3257,7 @@ function AvailabilityCalendar({
         `${COURSE_API}/caddie-availabilities/${encodeURIComponent(profile.id)}/${selectedDate}`,
         request('DELETE'),
       )
+      setEditorOpen(false)
       setSelection(emptyCalendarDateSelection())
       resource.refresh()
       setFlash({
@@ -3351,8 +3374,19 @@ function AvailabilityCalendar({
             </div>
           </div>
 
+          {selectedDates.length > 0 && !editorOpen ? (
+            <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-3 sm:flex-row sm:items-center sm:justify-between" aria-live="polite">
+              <p className="text-sm text-muted-foreground">
+                {t('caddies:calendar.selection', { date: selectionLabel })}
+              </p>
+              <Button type="button" variant="secondary" className="w-full sm:w-auto" onClick={openEditor}>
+                <Pencil /> {t('caddies:calendar.editSelection')}
+              </Button>
+            </div>
+          ) : null}
+
           <Sheet
-            open={selectedDates.length > 0}
+            open={editorOpen}
             onOpenChange={open => {
               if (!open) closeEditor()
             }}
