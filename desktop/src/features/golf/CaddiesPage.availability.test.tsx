@@ -56,10 +56,12 @@ function renderCalendar() {
 
 describe('AvailabilityCalendar range entry flow', () => {
   const saved = new Map<string, SavedAvailability>()
+  const postBodies: Array<Omit<SavedAvailability, 'id' | 'updatedAt'>> = []
 
   beforeEach(() => {
     clearResourceCache()
     saved.clear()
+    postBodies.length = 0
     api.json.mockReset()
     api.text.mockReset()
     api.json.mockImplementation(async (path: string, init?: RequestInit) => {
@@ -71,6 +73,7 @@ describe('AvailabilityCalendar range entry flow', () => {
       }
       if (path === '/v1/course/caddie-availabilities' && init?.method === 'POST') {
         const input = JSON.parse(String(init.body)) as Omit<SavedAvailability, 'id' | 'updatedAt'>
+        postBodies.push(input)
         const record = {
           ...input,
           id: `availability-${input.date}`,
@@ -81,6 +84,44 @@ describe('AvailabilityCalendar range entry flow', () => {
       }
       throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
     })
+  })
+
+  it('saves one day through the real Sheet and reads it back on a fresh mount', async () => {
+    const yearMonth = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Tokyo',
+      year: 'numeric',
+      month: '2-digit',
+    }).format(new Date())
+    const selectedDate = `${yearMonth}-20`
+    const firstRender = renderCalendar()
+
+    fireEvent.click(await screen.findByRole('button', {
+      name: `${selectedDate} の希望を入れる`,
+    }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByRole('combobox', { name: /出られるかどうか/ }), {
+      target: { value: 'morning_only' },
+    })
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /体調のメモ/ }), {
+      target: { value: 'single day entry' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(postBodies).toEqual([{
+      caddieProfileId: profile.id,
+      date: selectedDate,
+      status: 'morning_only',
+      twoRoundRequest: false,
+      healthNote: 'single day entry',
+    }]))
+
+    firstRender.unmount()
+    clearResourceCache()
+    renderCalendar()
+    const reloadedDay = await screen.findByRole('button', {
+      name: `${selectedDate} の希望を入れる`,
+    })
+    await waitFor(() => expect(reloadedDay.textContent).toContain('午前だけ'))
   })
 
   afterEach(() => {
@@ -145,6 +186,13 @@ describe('AvailabilityCalendar range entry flow', () => {
     fireEvent.click(within(rangeDialog).getByRole('button', { name: '保存' }))
 
     await waitFor(() => expect(saved.size).toBe(5))
+    expect(postBodies).toEqual([10, 11, 12, 13, 14].map(day => ({
+      caddieProfileId: profile.id,
+      date: date(day),
+      status: 'unavailable',
+      twoRoundRequest: false,
+      healthNote: 'range entry',
+    })))
     expect([...saved.values()].map(item => item.date)).toEqual([
       date(10),
       date(11),

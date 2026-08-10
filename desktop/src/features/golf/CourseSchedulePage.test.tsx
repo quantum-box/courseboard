@@ -158,7 +158,7 @@ describe('CourseSchedulePage save path', () => {
   })
 
   it('sends the persisted id and keeps both kinds of Field-owned date fields', async () => {
-    renderPage()
+    const firstRender = renderPage()
     const capacity = await screen.findByRole('spinbutton', {
       name: /月曜日.*同時に出せる組数/,
     })
@@ -183,6 +183,18 @@ describe('CourseSchedulePage save path', () => {
       effectiveFrom: '2026-01-01',
       effectiveTo: '2026-12-31',
     })
+
+    firstRender.unmount()
+    clearResourceCache()
+    renderPage()
+    const reloadedCapacity = await screen.findByRole('spinbutton', {
+      name: /月曜日.*同時に出せる組数/,
+    })
+    await waitFor(() => expect((reloadedCapacity as HTMLInputElement).value).toBe('2'))
+    expect(api.json.mock.calls.filter(([path, init]) => (
+      path === `/v1/course/courses/${courseId}/schedule`
+      && !(init as RequestInit | undefined)?.method
+    ))).toHaveLength(2)
   })
 
   it('marks an id-less band added in the UI as an intentional create', async () => {
