@@ -4,6 +4,7 @@ import { Panel } from '../../components/Page'
 import { navDescription, navLabel, settingsNavigation } from '../../components/AppShell'
 import { navigateFromClick } from '../../lib/router'
 import { ExtensionConfigPanel } from './ExtensionConfigPanel'
+import { MembershipPlansPanel } from './MembershipPlansPanel'
 
 export function SettingsPage() {
   const { t } = useTranslation(['settings', 'nav'])
@@ -45,6 +46,8 @@ export function SettingsPage() {
           <ChevronRight className="settings-master-arrow" aria-hidden="true" />
         </button>
       </Panel>
+
+      <MembershipPlansPanel />
 
       <ExtensionConfigPanel />
     </div>

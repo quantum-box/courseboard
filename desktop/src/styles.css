@@ -5146,6 +5146,151 @@ button,
   gap: 6px;
 }
 
+/* Picking who a name belongs to in the customer ledger. The candidates sit in
+ * the flow rather than in a floating menu: the sheet is already a scrolling
+ * form, and an overlay would be clipped by it on the row that needs it most —
+ * the last player in the group. */
+.ledger-customer-picker {
+  display: grid;
+  gap: 6px;
+}
+
+.ledger-customer-picker__linked {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.ledger-customer-picker__badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: hsl(var(--nui-muted) / .6);
+}
+
+.ledger-customer-picker__candidates {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 6px;
+  background: hsl(var(--nui-background));
+}
+
+.ledger-customer-picker__candidate {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-customer-picker__candidate:hover {
+  background: hsl(var(--nui-muted) / .5);
+}
+
+.ledger-customer-picker__candidate-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Whatever tells two people with the same name apart. Without it the list is
+ * a column of identical rows and the desk picks the first one. */
+.ledger-customer-picker__candidate-detail {
+  font-size: 11px;
+  opacity: .75;
+}
+
+.ledger-customer-picker__note {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  opacity: .75;
+}
+
+.ledger-party-players__ledger-note {
+  margin: 0;
+  font-size: 11px;
+  opacity: .75;
+}
+
+/* Member or visitor for the person on this row, beside the name it belongs to.
+ * Inline with the name rather than in a column of its own: the desk reads it
+ * while looking at the name, not while scanning a table. */
+.ledger-membership {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ledger-membership__loading {
+  font-size: 11px;
+  opacity: .7;
+}
+
+.membership-plan-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.membership-plan-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid hsl(var(--nui-border) / .6);
+}
+
+.membership-plan-row__name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.membership-plan-row__detail {
+  font-size: 12px;
+  opacity: .75;
+}
+
+.membership-plan-editor {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 6px;
+}
+
+.membership-plan-editor__active {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.membership-plan-editor__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .membership-plan-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .ledger-party-actions {
   display: flex;
   justify-content: flex-end;

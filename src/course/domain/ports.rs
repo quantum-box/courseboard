@@ -4,18 +4,20 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 
 use super::{
-    AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-    AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, BudgetAchievement,
-    Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
-    CaddieId, CaddieRankFees, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift,
-    CaddieStaff, Course, CourseError, CourseId, CourseOrder, DailyBudget, DailyBudgetQuery,
-    DeleteSlotOverrides, ExtensionStatus, GenerationSummary, InventoryWatermark, MonthlySettlement,
-    NewReservation, PartyDetails, ProductSlot, RecommendationQuery, ReplaceCaddieMemberships,
-    Reservation, ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId,
-    Resource, ResourceId, ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy,
-    SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig,
-    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
-    UpsertCourse, UpsertDailyBudget, UpsertReservationProduct, WorkedMinutes, YearMonth,
+    AssignMembershipPlan, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
+    AutoAssignResult, AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon,
+    BudgetAchievement, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
+    CaddieCourseMembership, CaddieId, CaddieRankFees, CaddieRating, CaddieRecommendation,
+    CaddieRoster, CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder, Customer,
+    CustomerId, CustomerMembership, CustomerSearchQuery, DailyBudget, DailyBudgetQuery,
+    DeleteSlotOverrides, ExtensionStatus, GenerationSummary, InventoryWatermark, MembershipPlan,
+    MembershipPlanId, MonthlySettlement, NewCustomer, NewReservation, PartyDetails, ProductSlot,
+    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationId, ReservationPolicy,
+    ReservationProduct, ReservationServiceId, Resource, ResourceId, ResourceTimeSlot,
+    SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride, SlotOverrideQuery,
+    TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
+    UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -361,6 +363,90 @@ pub trait ReservationGateway: Send + Sync {
         reservation_id: &ReservationId,
         input: &NewReservation,
     ) -> Result<(), CourseError>;
+}
+
+/// Port for the customer ledger Field keeps for the tenant.
+///
+/// The ledger is not golf data and CourseBoard stores none of it (ADR-0005).
+/// What CourseBoard owns is which ledger entry a booking and each player in a
+/// group belong to, and the golf meaning that identity carries.
+#[async_trait]
+pub trait CustomerGateway: Send + Sync {
+    /// Candidates matching what the desk typed.
+    ///
+    /// Candidates, not an answer: several people share a name and a household
+    /// shares a phone number. Implementations must not merge or dedupe — which
+    /// row is the right person is the desk's call, and guessing it wrong
+    /// attaches someone else's visit history to a booking.
+    async fn search_customers(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        query: &CustomerSearchQuery,
+    ) -> Result<Vec<Customer>, CourseError>;
+
+    async fn get_customer(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+    ) -> Result<Customer, CourseError>;
+
+    /// Adds a person to the ledger exactly as asked.
+    ///
+    /// No find-or-create: the caller has already been shown the candidates and
+    /// decided this is somebody new. Folding that decision into the write would
+    /// silently hand back an existing stranger's identity.
+    async fn create_customer(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &NewCustomer,
+    ) -> Result<Customer, CourseError>;
+}
+
+/// Port for the tenant's membership registry in Field.
+///
+/// Field owns the plans and the assignments; what is golf here is only the
+/// reading of them — that an active assignment means "member" and its absence
+/// means "visitor" (see `membership`).
+#[async_trait]
+pub trait MembershipGateway: Send + Sync {
+    /// Plans the tenant sells. Inactive ones are included only when asked for,
+    /// so a retired plan stops being offered on new bookings while the members
+    /// already holding it keep reading as members.
+    async fn list_membership_plans(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        include_inactive: bool,
+    ) -> Result<Vec<MembershipPlan>, CourseError>;
+
+    async fn create_membership_plan(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &UpsertMembershipPlan,
+    ) -> Result<MembershipPlan, CourseError>;
+
+    async fn update_membership_plan(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        plan_id: &MembershipPlanId,
+        input: &UpsertMembershipPlan,
+    ) -> Result<MembershipPlan, CourseError>;
+
+    /// Where one customer stands today.
+    ///
+    /// A customer with no membership record is a visitor, not a missing row:
+    /// implementations answer `CustomerMembership::visitor` rather than an
+    /// error, because the desk asks this about everyone who books.
+    async fn get_customer_membership(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+    ) -> Result<CustomerMembership, CourseError>;
+
+    async fn assign_membership_plan(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &AssignMembershipPlan,
+    ) -> Result<CustomerMembership, CourseError>;
 }
 
 /// Port for golf catalog (courses, resources, reservation products).

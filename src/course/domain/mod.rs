@@ -14,9 +14,11 @@ mod commercial;
 mod course;
 mod course_order;
 mod course_supply;
+mod customer;
 mod demo_board;
 mod error;
 mod ids;
+mod membership;
 mod party;
 mod payroll;
 mod ports;
@@ -68,24 +70,32 @@ pub use course_supply::{
     compute_course_supply, has_room_for_one_more_caddie_round, reinforcements_for,
     CaddieCapability, CourseCaddieSupply, DayCaddieSupply, Reinforcement,
 };
+pub use customer::{
+    Customer, CustomerSearchQuery, NewCustomer, DEFAULT_CUSTOMER_SEARCH_LIMIT,
+    MAX_CUSTOMER_SEARCH_LIMIT,
+};
 pub use demo_board::{
     demo_board, seed_tee_time, DemoBoard, SeedCourse, SeedGroup, SeedMark, SEED_DURATION_MINUTES,
     SEED_KEY_FIELD, SEED_PREFIX,
 };
 pub use error::CourseError;
 pub use ids::{
-    AssignmentId, AvailabilityId, BudgetId, CaddieId, CourseId, MembershipId, ProductId,
-    ProductSlotId, RatingId, ReservationId, ReservationServiceId, ResourceId, TenantId,
+    AssignmentId, AvailabilityId, BudgetId, CaddieId, CourseId, CustomerId, MembershipId,
+    MembershipPlanId, ProductId, ProductSlotId, RatingId, ReservationId, ReservationServiceId,
+    ResourceId, TenantId,
+};
+pub use membership::{
+    AssignMembershipPlan, CustomerMembership, MembershipPlan, UpsertMembershipPlan,
 };
 pub use party::{PartyDetails, PartyPlayer, MAX_PARTY_PLAYERS, PARTY_CUSTOM_FIELD_KEY};
 pub use payroll::{
     payroll_csv, summarize_payroll_in_timezone, AttendanceDay, PayrollCandidate, WorkedMinutes,
 };
 pub use ports::{
-    AvailabilityDeadlineGateway, CaddieShiftGateway, GatewayCredentials, GeneratedThroughGateway,
-    GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, ReservationGateway,
-    ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery,
-    TeeSheetQuery,
+    AvailabilityDeadlineGateway, CaddieShiftGateway, CustomerGateway, GatewayCredentials,
+    GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
+    GolfTaxGateway, MembershipGateway, ReservationGateway, ReservationScheduleGateway,
+    ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{

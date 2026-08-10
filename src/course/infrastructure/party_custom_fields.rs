@@ -8,7 +8,9 @@
 
 use serde_json::{json, Map, Value};
 
-use crate::course::domain::{CourseError, PartyDetails, PartyPlayer, PARTY_CUSTOM_FIELD_KEY};
+use crate::course::domain::{
+    CourseError, CustomerId, PartyDetails, PartyPlayer, PARTY_CUSTOM_FIELD_KEY,
+};
 
 /// Group detail held in `customFieldsJson`, or an empty party when the
 /// reservation has none.
@@ -50,6 +52,9 @@ fn read_player(entry: &Value) -> Option<PartyPlayer> {
         name,
         optional_text(object, "tag"),
         optional_text(object, "memberNumber"),
+        // Absent on every group written before the ledger existed, and on any
+        // player the desk has not identified yet. Both read as unlinked.
+        CustomerId::from_optional(optional_text(object, "customerId")),
     )
     .ok()
 }
@@ -111,7 +116,23 @@ fn player_to_json(player: &PartyPlayer) -> Value {
     if let Some(value) = player.member_number() {
         node.insert("memberNumber".into(), json!(value));
     }
+    if let Some(value) = player.customer_id() {
+        node.insert("customerId".into(), json!(value.as_str()));
+    }
     Value::Object(node)
+}
+
+/// One player row as the request body carried it.
+///
+/// A struct rather than a tuple: four optional-looking strings in a row is
+/// exactly the shape where a caller silently swaps two of them, and putting a
+/// customer's identity in the wrong slot attaches a booking to a stranger.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PartyPlayerInput {
+    pub name: String,
+    pub tag: Option<String>,
+    pub member_number: Option<String>,
+    pub customer_id: Option<String>,
 }
 
 /// Build a party from an untrusted request body.
@@ -123,11 +144,18 @@ pub fn party_from_request(
     competition_name: Option<String>,
     organizer: Option<String>,
     group_number: Option<i32>,
-    players: Vec<(String, Option<String>, Option<String>)>,
+    players: Vec<PartyPlayerInput>,
 ) -> Result<PartyDetails, CourseError> {
     let players = players
         .into_iter()
-        .map(|(name, tag, member_number)| PartyPlayer::try_new(name, tag, member_number))
+        .map(|player| {
+            PartyPlayer::try_new(
+                player.name,
+                player.tag,
+                player.member_number,
+                CustomerId::from_optional(player.customer_id),
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
     PartyDetails::try_new(competition_name, organizer, group_number, players)
 }
@@ -136,14 +164,28 @@ pub fn party_from_request(
 mod tests {
     use super::*;
 
+    fn named(name: &str) -> PartyPlayerInput {
+        PartyPlayerInput {
+            name: name.into(),
+            ..PartyPlayerInput::default()
+        }
+    }
+
     fn party() -> PartyDetails {
         party_from_request(
             Some("本田会".into()),
             Some("辻 俊行".into()),
             Some(1),
             vec![
-                ("増田 公陽".into(), Some("共通".into()), None),
-                ("木澤 岳志".into(), None, Some("M-0421".into())),
+                PartyPlayerInput {
+                    tag: Some("共通".into()),
+                    ..named("増田 公陽")
+                },
+                PartyPlayerInput {
+                    member_number: Some("M-0421".into()),
+                    customer_id: Some("cus_1".into()),
+                    ..named("木澤 岳志")
+                },
             ],
         )
         .unwrap()
@@ -218,7 +260,56 @@ mod tests {
 
     #[test]
     fn an_operator_typing_a_blank_name_is_told_rather_than_silently_ignored() {
-        let result = party_from_request(None, None, None, vec![("   ".into(), None, None)]);
+        let result = party_from_request(None, None, None, vec![named("   ")]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn a_group_written_before_the_ledger_existed_reads_as_unlinked() {
+        // Every party stored so far has players with no customerId. They have
+        // to keep loading, as people the desk has not identified yet.
+        let stored = json!({
+            PARTY_CUSTOM_FIELD_KEY: {
+                "players": [{ "name": "増田 公陽", "tag": "共通" }]
+            }
+        });
+        let party = read_party(Some(&stored));
+        assert_eq!(party.named_player_count(), 1);
+        assert_eq!(party.linked_player_count(), 0);
+        assert_eq!(party.players()[0].customer_id(), None);
+    }
+
+    #[test]
+    fn the_ledger_identity_of_each_player_survives_a_round_trip() {
+        let merged = merge_party(None, &party());
+        let read_back = read_party(Some(&merged));
+        assert_eq!(read_back.players()[0].customer_id(), None);
+        assert_eq!(
+            read_back.players()[1].customer_id().map(|id| id.as_str()),
+            Some("cus_1")
+        );
+        assert_eq!(read_back.linked_player_count(), 1);
+    }
+
+    #[test]
+    fn a_blank_customer_id_is_stored_as_no_link_rather_than_an_empty_identity() {
+        // The editor sends "" for a player whose customer the desk cleared.
+        // Writing that through would produce a link to a customer that is not
+        // there, which reads as identified but resolves to nothing.
+        let party = party_from_request(
+            None,
+            None,
+            None,
+            vec![PartyPlayerInput {
+                customer_id: Some("   ".into()),
+                ..named("増田 公陽")
+            }],
+        )
+        .unwrap();
+        assert_eq!(party.players()[0].customer_id(), None);
+        let merged = merge_party(None, &party);
+        assert!(merged[PARTY_CUSTOM_FIELD_KEY]["players"][0]
+            .get("customerId")
+            .is_none());
     }
 }

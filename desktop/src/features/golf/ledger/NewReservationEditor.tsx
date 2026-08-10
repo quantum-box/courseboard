@@ -6,11 +6,13 @@ import { ApiError, courseboardApiJson } from '../../../api'
 import { Field, FormGrid, Notice } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import { showToast } from '../../../lib/toast'
+import { CustomerPicker } from '../customers/CustomerPicker'
 import { plansForCourse, type BookablePlan } from './bookablePlan'
 import { DiscardGuard } from './DiscardGuard'
 import { MAX_PARTY_PLAYERS } from './ledgerLayout'
 import {
   hasUnnamedReservationPlayer,
+  linkedReservationPlayerCount,
   reservationPlayerRows,
   resizeReservationPlayerRows,
   toReservationPlayers,
@@ -51,6 +53,7 @@ export function NewReservationEditor({
 }) {
   const { t } = useTranslation(['ledger'])
   const [customerName, setCustomerName] = useState('')
+  const [customerId, setCustomerId] = useState<string | null>(null)
   const [quantity, setQuantity] = useState('4')
   const [planId, setPlanId] = useState('')
   const [players, setPlayers] = useState<DraftReservationPlayer[]>(() => reservationPlayerRows(4))
@@ -64,6 +67,7 @@ export function NewReservationEditor({
   useEffect(() => {
     if (!target) return
     setCustomerName('')
+    setCustomerId(null)
     setQuantity('4')
     setPlayers(reservationPlayerRows(4))
     setConfirmingDiscard(false)
@@ -143,6 +147,7 @@ export function NewReservationEditor({
           durationMinutes: plan?.expectedDurationMinutes || DEFAULT_DURATION_MINUTES,
           quantity: parsedQuantity,
           customerName: customerName.trim(),
+          customerId,
           players: namedPlayers,
         }),
       })
@@ -181,10 +186,12 @@ export function NewReservationEditor({
       <div className="ledger-party-editor">
         <FormGrid columns={2}>
           <Field label={t('ledger:newReservation.customerName')}>
-            <Input
-              value={customerName}
+            <CustomerPicker
+              name={customerName}
+              customerId={customerId}
               placeholder={t('ledger:newReservation.customerNamePlaceholder')}
-              onChange={event => setCustomerName(event.target.value)}
+              onNameChange={setCustomerName}
+              onSelect={customer => setCustomerId(customer?.id ?? null)}
             />
           </Field>
           <Field label={t('ledger:newReservation.quantity')}>
@@ -228,15 +235,32 @@ export function NewReservationEditor({
 
         <section className="ledger-party-players" aria-label={t('ledger:party.players')}>
           <h3>{t('ledger:party.players')}</h3>
+          {/* How much of the group made it into the ledger. Shown as a count
+              rather than a warning: taking the booking comes first, and a
+              banner on every phone call would train the desk to ignore it. */}
+          {namedPlayers.length > 0 ? (
+            <p className="ledger-party-players__ledger-note">
+              {t('ledger:customer.linkedPlayers', {
+                linked: String(linkedReservationPlayerCount(players)),
+                named: String(namedPlayers.length),
+              })}
+            </p>
+          ) : null}
           {players.map((player, index) => (
             <div className="ledger-party-player ledger-party-player--new" key={index}>
               <Field className="ledger-party-field-name" label={t('ledger:party.playerName')}>
-                <Input
-                  value={player.name}
+                <CustomerPicker
+                  name={player.name}
+                  customerId={player.customerId}
                   placeholder={t('ledger:party.playerNamePlaceholder')}
-                  onChange={event =>
+                  onNameChange={value =>
                     setPlayers(rows => rows.map((row, at) =>
-                      at === index ? { ...row, name: event.target.value } : row,
+                      at === index ? { ...row, name: value } : row,
+                    ))
+                  }
+                  onSelect={customer =>
+                    setPlayers(rows => rows.map((row, at) =>
+                      at === index ? { ...row, customerId: customer?.id ?? null } : row,
                     ))
                   }
                 />

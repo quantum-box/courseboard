@@ -55,6 +55,14 @@ export type PartyPlayer = {
   /** Booking channel or rate class shown above the name (`共通`, `優待`, …). */
   tag?: string | null
   memberNumber?: string | null
+  /**
+   * Who this player is in the customer ledger, once the desk has said so.
+   *
+   * Absent on every group entered before the ledger existed and on anyone the
+   * desk has not identified yet, so treat it as optional rather than as a field
+   * that fills itself in.
+   */
+  customerId?: string | null
 }
 
 export type PartyDetails = {

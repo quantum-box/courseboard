@@ -387,6 +387,39 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/customers",
+            get(course::interfaces::http_customers::search_customers)
+                .post(course::interfaces::http_customers::create_customer)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/customers/:customer_id/membership",
+            get(course::interfaces::http_customers::get_customer_membership)
+                .post(course::interfaces::http_customers::assign_membership_plan)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/membership-plans",
+            get(course::interfaces::http_customers::list_membership_plans)
+                .post(course::interfaces::http_customers::create_membership_plan)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/membership-plans/:plan_id",
+            patch(course::interfaces::http_customers::update_membership_plan).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/reservations/:reservation_id/cancel",
             post(course::interfaces::http::cancel_reservation).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),

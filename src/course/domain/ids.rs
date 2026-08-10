@@ -194,6 +194,23 @@ define_string_id!(
     ProductSlotId,
     "product slot id"
 );
+define_string_id!(
+    /// Identity of a membership plan a course sells (正会員, 平日会員, …).
+    ///
+    /// Distinct from `MembershipId`, which is a caddie's membership of a course
+    /// — an unrelated relation that happens to share the English word.
+    MembershipPlanId,
+    "membership plan id"
+);
+define_string_id!(
+    /// Identity of a customer in Field's ledger.
+    ///
+    /// Members and visitors share one identifier space: whether someone is a
+    /// member is a membership assignment they hold, not a different kind of
+    /// record.
+    CustomerId,
+    "customer id"
+);
 
 #[cfg(test)]
 mod tests {
