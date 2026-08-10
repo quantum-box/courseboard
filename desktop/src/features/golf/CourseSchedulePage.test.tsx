@@ -187,7 +187,16 @@ describe('CourseSchedulePage save path', () => {
 
   it('marks an id-less band added in the UI as an intentional create', async () => {
     renderPage()
+    // The page can paint between the schedule request resolving and the effect
+    // copying it into editor state. Wait for the persisted Monday row so this
+    // click exercises a real post-load edit instead of that transient frame.
+    await screen.findByRole('spinbutton', {
+      name: /月曜日.*同時に出せる組数/,
+    })
     fireEvent.click(await screen.findByRole('button', { name: '火曜日に時間帯を追加' }))
+    await screen.findByRole('spinbutton', {
+      name: /火曜日.*同時に出せる組数/,
+    })
     fireEvent.click(await screen.findByRole('button', { name: '受付枠を保存' }))
 
     await waitFor(() => expect(putBodies).toHaveLength(1))
