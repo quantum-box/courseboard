@@ -26,7 +26,6 @@ import {
   NativeTextarea,
   Notice,
   PageHeader,
-  PageRefreshButton,
   Panel,
   ResourceError,
 } from '../../components/Page'
@@ -194,7 +193,6 @@ export function CancellationFeesPage() {
                 <option key={value} value={value}>{statusLabel(value)}</option>
               ))}
             </NativeSelect>
-            <PageRefreshButton size="sm" onClick={resource.refresh} label={t('common:action.refresh')} />
           </div>
         )}
       >
@@ -360,12 +358,6 @@ export function NewCancellationFeePage() {
         description={t('cancellationFees:new.description')}
         actions={(
           <div className="flex flex-wrap gap-2">
-            {orderId ? (
-              <PageRefreshButton
-                onClick={orderResource.refresh}
-                label={t('cancellationFees:new.refreshOrder')}
-              />
-            ) : null}
             <Button type="button" onClick={() => navigate('cancellation-fees')}>
               <ArrowLeft /> {t('cancellationFees:new.backToList')}
             </Button>
@@ -632,7 +624,6 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
         })}
         actions={(
           <div className="flex flex-wrap gap-2">
-            <PageRefreshButton onClick={resource.refresh} label={t('common:action.refresh')} />
             <Button type="button" onClick={() => navigate('cancellation-fees')}>
               <ArrowLeft /> {t('cancellationFees:new.backToList')}
             </Button>

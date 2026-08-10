@@ -8,7 +8,6 @@ import {
   LoadingState,
   NativeSelect,
   Notice,
-  PageRefreshButton,
   Panel,
   ResourceError,
 } from '../../components/Page'
@@ -376,7 +375,6 @@ export function PolicyPage() {
         <Badge variant={exists ? 'success' : 'warning'}>
           {exists ? t('policy:status.configured') : t('policy:status.missing')}
         </Badge>
-        <PageRefreshButton onClick={() => void load()} />
         <Button type="submit" variant="primary" disabled={saving}>
           <Save /> {saving ? t('common:action.saving') : t('common:action.save')}
         </Button>

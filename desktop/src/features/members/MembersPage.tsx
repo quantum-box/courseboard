@@ -21,7 +21,6 @@ import {
   Field,
   LoadingState,
   Notice,
-  PageRefreshButton,
   Panel,
   ResourceError,
   resourceErrorText,
@@ -191,7 +190,6 @@ export function MembersPage() {
           description={t('members:list.description')}
           actions={(
             <>
-              <PageRefreshButton onClick={resource.refresh} loading={resource.loading} />
               <InviteDialog
                 catalog={customPolicies}
                 onInvited={message => {

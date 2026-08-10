@@ -23,7 +23,6 @@ import {
   LoadingState,
   NativeSelect,
   Notice,
-  PageRefreshButton,
   Panel,
   ResourceError,
   SearchInput,
@@ -323,7 +322,6 @@ export function StaffPage({ staffId }: { staffId?: string }) {
             <option value="other">{t('staff:filter.roleOther')}</option>
           </NativeSelect>
           <div className="flex-1" />
-          <PageRefreshButton onClick={refreshAll} loading={staffResource.loading} />
           <Button type="button" variant="primary" onClick={() => setCreating(true)}>
             <UserPlus /> {t('staff:create.open')}
           </Button>

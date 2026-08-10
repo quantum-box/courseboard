@@ -10,7 +10,6 @@ import {
   LayoutGrid,
   Maximize2,
   Minimize2,
-  RefreshCw,
   Table2,
   Users,
   ZoomIn,
@@ -379,10 +378,6 @@ export function TimelinePage() {
       ) : null}
       <div className="timeline-chrome">
         <div className="page-toolbar">
-          <Button type="button" variant="ghost" size="sm" onClick={refreshAll}>
-            <RefreshCw />
-            {t('timeline:reload')}
-          </Button>
           <Button type="button" variant="ghost" size="sm" onClick={() => navigate('golf/ledger')}>
             <Table2 />
             {t('timeline:toLedger')}

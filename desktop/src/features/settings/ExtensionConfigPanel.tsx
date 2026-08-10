@@ -1,5 +1,5 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
-import { Plus, RefreshCw, Save, Trash2 } from 'lucide-react'
+import { Plus, Save, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { i18next } from '../../i18n'
@@ -215,9 +215,6 @@ export function ExtensionConfigPanel() {
               : t('settings:extension.valid')}
           </Badge>
           {dirty ? <Badge variant="warning">{t('settings:extension.unsaved')}</Badge> : null}
-          <Button type="button" size="sm" variant="ghost" onClick={() => void load()} disabled={loading || saving} title="⌘R">
-            <RefreshCw /> {t('settings:extension.reload')}
-          </Button>
           <Button
             type="button"
             size="sm"

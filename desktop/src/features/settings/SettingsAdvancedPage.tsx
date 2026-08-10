@@ -37,7 +37,7 @@ export function SettingsAdvancedPage() {
           {t('settings:extension.missing.description')}
         </Notice>
       ) : null}
-      {resource.data ? <ExtensionSummary extension={resource.data} onRefresh={resource.refresh} /> : null}
+      {resource.data ? <ExtensionSummary extension={resource.data} /> : null}
 
       <IntegrationMetadataPanel />
     </div>

@@ -17,7 +17,6 @@ import {
   MetricGrid,
   Notice,
   PageHeader,
-  PageRefreshButton,
   Panel,
   ResourceError,
   resourceErrorText,
@@ -363,7 +362,6 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
     <div className="page-stack">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <BackToCourses />
-        <PageRefreshButton size="sm" variant="secondary" onClick={requestReload} />
       </div>
 
       <PageHeader

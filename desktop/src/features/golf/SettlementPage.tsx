@@ -27,7 +27,6 @@ import {
   Metric,
   MetricGrid,
   Notice,
-  PageRefreshButton,
   Panel,
   ResourceError,
 } from '../../components/Page'
@@ -305,11 +304,6 @@ export function SettlementPage() {
   return (
     <div className="page-stack">
       <div className="page-toolbar">
-        <PageRefreshButton
-          onClick={() => void load()}
-          loading={loading}
-          label={t('common:action.refresh')}
-        />
         <Button type="button" onClick={() => void exportCsv()} disabled={exporting}>
           <Download /> {exporting ? t('settlement:exporting') : t('settlement:exportCsv')}
         </Button>
