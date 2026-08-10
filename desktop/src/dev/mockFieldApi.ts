@@ -546,6 +546,9 @@ const mockAvailabilityDeadlines: Record<string, string> = loadMockWrites('availa
 /** Group detail entered during the session, by reservation id. */
 const mockParties: Record<string, unknown> = loadMockWrites('parties', {})
 
+/** Plans moved onto a booking this session, by reservation id. */
+const mockPlans: Record<string, string> = loadMockWrites('plans', {})
+
 /**
  * A booking with the group detail entered this session laid over its fixture.
  *
@@ -2264,6 +2267,24 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     }
     saveMockWrites('slotMarks', mockSlotMarks)
     return hit({ deleted })
+  }
+
+  const planMatch = /^\/v1\/course\/reservations\/([^/]+)\/plan$/.exec(pathname)
+  if (planMatch && method === 'PATCH') {
+    const reservation = mockTeeReservations.find(item => item.id === planMatch[1])
+    if (!reservation) return error(404, 'Mock Field API has no such reservation')
+    const serviceId = String(body?.reservationServiceId ?? '')
+    const product = mockProducts.find(item => item.reservationServiceId === serviceId)
+    if (!product) return error(404, 'Mock Field API sells no such plan')
+    if (product.golfCourseId && product.golfCourseId !== reservation.golfCourseId) {
+      return error(400, 'the plan is not sold on this booking’s course')
+    }
+    reservation.reservationServiceId = serviceId
+    reservation.durationMinutes = product.expectedDurationMinutes
+    reservation.playType = product.playType === 'caddie' ? 'caddie' : 'self'
+    mockPlans[reservation.id] = serviceId
+    saveMockWrites('plans', mockPlans)
+    return hit(null)
   }
 
   const partyMatch = /^\/v1\/course\/reservations\/([^/]+)\/party$/.exec(pathname)

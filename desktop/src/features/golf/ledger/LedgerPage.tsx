@@ -590,6 +590,7 @@ export function LedgerPage() {
         target={bookingTarget}
         date={date}
         plans={bookablePlans}
+        plansLoading={productsResource.loading}
         playerTagOptions={playerTagOptions}
         onClose={() => setBookingTarget(null)}
         onCreated={() => ledger.refresh()}
@@ -597,11 +598,13 @@ export function LedgerPage() {
 
       <PartyEditor
         reservation={editingReservation}
+        plans={bookablePlans}
         playerTagOptions={playerTagOptions}
         onClose={() => setEditingReservationId(null)}
         onSaved={(reservationId, party) =>
           setLocalParties(current => ({ ...current, [reservationId]: party }))
         }
+        onPlanChanged={() => ledger.refresh()}
       />
     </div>
   )

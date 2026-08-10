@@ -6,6 +6,7 @@ import { ApiError, courseboardApiJson } from '../../../api'
 import { Field, FormGrid, Notice } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import { showToast } from '../../../lib/toast'
+import { plansForCourse, type BookablePlan } from './bookablePlan'
 import { DiscardGuard } from './DiscardGuard'
 import { MAX_PARTY_PLAYERS } from './ledgerLayout'
 import {
@@ -15,19 +16,10 @@ import {
   toReservationPlayers,
   type DraftReservationPlayer,
 } from './newReservationPlayers'
+import { PlanPicker } from './PlanPicker'
 import { PlayerTagInput } from './PlayerTagInput'
 
-/** Plans the desk can book this tee time under. */
-export type BookablePlan = {
-  reservationServiceId: string
-  label: string
-  /** Whether the round is sold with a caddie. Drives the badge on the list. */
-  playType: 'caddie' | 'self'
-  expectedDurationMinutes: number
-  golfCourseId?: string | null
-  /** Players this plan sells in one group; absent means the general cap. */
-  maxPlayersPerGroup?: number | null
-}
+export type { BookablePlan } from './bookablePlan'
 
 export type NewReservationTarget = {
   golfCourseId: string
@@ -43,6 +35,7 @@ export function NewReservationEditor({
   target,
   date,
   plans,
+  plansLoading = false,
   playerTagOptions,
   onClose,
   onCreated,
@@ -50,6 +43,8 @@ export function NewReservationEditor({
   target: NewReservationTarget | null
   date: string
   plans: BookablePlan[]
+  /** Distinguishes "still arriving" from "this course sells nothing". */
+  plansLoading?: boolean
   playerTagOptions: string[]
   onClose: () => void
   onCreated: () => void
@@ -64,9 +59,7 @@ export function NewReservationEditor({
 
   // Plans are filtered to the course being booked; a plan sold on another
   // course would put the round on a tee sheet the desk is not looking at.
-  const coursePlans = plans.filter(
-    plan => !plan.golfCourseId || plan.golfCourseId === target?.golfCourseId,
-  )
+  const coursePlans = plansForCourse(plans, target?.golfCourseId)
 
   useEffect(() => {
     if (!target) return
@@ -120,10 +113,16 @@ export function NewReservationEditor({
   const namedPlayers = toReservationPlayers(players)
   const hasUnnamedPlayer = hasUnnamedReservationPlayer(players)
   const hasTooManyPlayers = validQuantity && namedPlayers.length > parsedQuantity
+  // A booking with no plan reaches Field as a round nobody can price, and
+  // nothing downstream — the fee simulation, the monthly settlement, the
+  // caddie split — can say what it was sold as. The list always has one
+  // picked, so this only bites when the course sells nothing at all.
+  const missingPlan = !planId
   const canSave = customerName.trim().length > 0
     && validQuantity
     && !hasUnnamedPlayer
     && !hasTooManyPlayers
+    && !missingPlan
     && Boolean(target.resourceId)
     && !saving
 
@@ -202,36 +201,18 @@ export function NewReservationEditor({
         {/* Every booking is sold under a plan, so the choice is on the sheet
             rather than behind a dropdown: opening a menu to reach a field the
             desk always has to touch is one click on every phone call. */}
-        {coursePlans.length > 0 ? (
-          <fieldset className="ledger-plan-picker">
-            <legend>{t('ledger:newReservation.plan')}</legend>
-            <div className="ledger-plan-list">
-              {coursePlans.map(plan => (
-                <label
-                  key={plan.reservationServiceId}
-                  className={`ledger-plan-option${
-                    planId === plan.reservationServiceId ? ' is-selected' : ''
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="courseboard-new-reservation-plan"
-                    value={plan.reservationServiceId}
-                    checked={planId === plan.reservationServiceId}
-                    onChange={() => setPlanId(plan.reservationServiceId)}
-                  />
-                  <span className="ledger-plan-label">{plan.label}</span>
-                  {/* Caddie or self is what the desk is really choosing between,
-                      and a plan name does not always say which. The colours are
-                      the board's, so the badge reads the same in both places. */}
-                  <span className={`ledger-plan-badge ledger-play-type-${plan.playType}`}>
-                    {t(`ledger:cell.playType.${plan.playType}`)}
-                  </span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
+        {missingPlan && !plansLoading ? (
+          <Notice tone="danger" title={t('ledger:newReservation.noPlanTitle')}>
+            {t('ledger:newReservation.noPlanBody', { course: target.courseName })}
+          </Notice>
         ) : null}
+
+        <PlanPicker
+          plans={coursePlans}
+          value={planId}
+          name="courseboard-new-reservation-plan"
+          onChange={setPlanId}
+        />
 
         {hasUnnamedPlayer ? (
           <Notice tone="danger">{t('ledger:party.emptyPlayerName')}</Notice>

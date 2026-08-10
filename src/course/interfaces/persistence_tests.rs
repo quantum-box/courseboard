@@ -53,6 +53,10 @@ struct FieldState {
     created: Mutex<Vec<Value>>,
     /// Golf courses, so the seed's create/update has somewhere to land.
     courses: Mutex<Vec<Value>>,
+    /// The plan and end time a write moved the booking to, absent until one
+    /// does — so a test can tell "never written" from "written back the same".
+    reservation_service_id: Mutex<Option<String>>,
+    reservation_ends_at: Mutex<Option<String>>,
 }
 
 async fn extension_status(State(state): State<Arc<FieldState>>) -> Json<Value> {
@@ -180,9 +184,7 @@ async fn get_reservation(
     State(state): State<Arc<FieldState>>,
     Path(_id): Path<String>,
 ) -> Json<Value> {
-    Json(reservation(
-        &state.reservation_custom_fields.lock().unwrap(),
-    ))
+    Json(current_reservation(&state))
 }
 
 async fn patch_reservation(
@@ -191,11 +193,30 @@ async fn patch_reservation(
     Json(body): Json<Value>,
 ) -> Json<Value> {
     // Field's PATCH replaces `customFields` wholesale — the behaviour the merge
-    // in the gateway exists to survive.
-    *state.reservation_custom_fields.lock().unwrap() = body["customFields"].clone();
-    Json(reservation(
-        &state.reservation_custom_fields.lock().unwrap(),
-    ))
+    // in the gateway exists to survive. A body that does not carry the key is a
+    // write about something else and leaves the object alone, which is what
+    // lets the plan change keep the group detail.
+    if let Some(custom_fields) = body.get("customFields") {
+        *state.reservation_custom_fields.lock().unwrap() = custom_fields.clone();
+    }
+    if let Some(service_id) = body.get("serviceId").and_then(Value::as_str) {
+        *state.reservation_service_id.lock().unwrap() = Some(service_id.to_string());
+    }
+    if let Some(ends_at) = body.get("endsAt").and_then(Value::as_str) {
+        *state.reservation_ends_at.lock().unwrap() = Some(ends_at.to_string());
+    }
+    Json(current_reservation(&state))
+}
+
+fn current_reservation(state: &Arc<FieldState>) -> Value {
+    let mut value = reservation(&state.reservation_custom_fields.lock().unwrap());
+    if let Some(ends_at) = state.reservation_ends_at.lock().unwrap().as_deref() {
+        value["endsAt"] = json!(ends_at);
+    }
+    if let Some(service_id) = state.reservation_service_id.lock().unwrap().as_deref() {
+        value["serviceId"] = json!(service_id);
+    }
+    value
 }
 
 fn reservation(custom_fields: &Value) -> Value {
@@ -652,6 +673,169 @@ async fn a_player_with_no_name_is_refused_rather_than_saved_half_way() {
         .unwrap()
         .get("golfParty")
         .is_none());
+}
+
+// ─── Changing the plan ────────────────────────────────────────────────────────
+
+/// A club selling both a caddie round and a self round on every course, plus
+/// one scoped to another course and one that only seats a pair.
+fn field_with_plans() -> Arc<FieldState> {
+    let state = field_with_courses();
+    *state.config.lock().unwrap() = json!({
+        "reservationProducts": [
+            {
+                "id": "svc-self",
+                "name": "セルフ18ホール",
+                "playType": "self",
+                "holeCount": 18,
+                "durationMinutes": 240,
+            },
+            {
+                "id": "svc-caddie",
+                "name": "キャディ付き18ホール",
+                "playType": "caddie",
+                "holeCount": 18,
+                "durationMinutes": 270,
+            },
+            {
+                "id": "svc-course-b-only",
+                "name": "B コース限定",
+                "playType": "caddie",
+                "holeCount": 18,
+                "durationMinutes": 270,
+                "golfCourseIds": ["course-b"],
+            },
+            {
+                "id": "svc-two-ball",
+                "name": "薄暮 2 サム",
+                "playType": "self",
+                "holeCount": 9,
+                "durationMinutes": 120,
+                "maxPlayersPerGroup": 2,
+            },
+        ]
+    });
+    state
+}
+
+#[tokio::test]
+async fn changing_the_plan_moves_the_booking_and_its_end_time() {
+    let tenant = tenant_for("changing_the_plan_moves_the_booking_and_");
+    let field = field_with_plans();
+    *field.reservation_custom_fields.lock().unwrap() = json!({ "golfCourseId": "course-a" });
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    let (status, _) = call(
+        &router(&pool, &url),
+        &tenant,
+        "PATCH",
+        "/v1/course/reservations/res-1/plan",
+        Some(json!({ "reservationServiceId": "svc-caddie" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    assert_eq!(
+        field.reservation_service_id.lock().unwrap().as_deref(),
+        Some("svc-caddie")
+    );
+    // The 22:00Z start plus the caddie plan's 270 minutes. The end time has to
+    // follow the plan, or a 4h30 round keeps the 4h slot the old one implied.
+    assert_eq!(
+        field.reservation_ends_at.lock().unwrap().as_deref(),
+        Some("2026-07-20T02:30:00Z")
+    );
+}
+
+#[tokio::test]
+async fn changing_the_plan_leaves_the_group_detail_alone() {
+    // The plan lives outside `customFields`, so this write must not send that
+    // object at all — sending it back is how the typed-in names get lost.
+    let tenant = tenant_for("changing_the_plan_leaves_the_group_detai");
+    let field = field_with_plans();
+    *field.reservation_custom_fields.lock().unwrap() = json!({
+        "golfCourseId": "course-a",
+        "golfParty": { "players": [{ "name": "増田 公陽" }] },
+    });
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    call(
+        &router(&pool, &url),
+        &tenant,
+        "PATCH",
+        "/v1/course/reservations/res-1/plan",
+        Some(json!({ "reservationServiceId": "svc-caddie" })),
+    )
+    .await;
+
+    let stored = field.reservation_custom_fields.lock().unwrap().clone();
+    assert_eq!(stored["golfCourseId"], json!("course-a"));
+    assert_eq!(
+        stored["golfParty"]["players"][0]["name"],
+        json!("増田 公陽")
+    );
+}
+
+#[tokio::test]
+async fn a_plan_sold_on_another_course_is_refused() {
+    let tenant = tenant_for("a_plan_sold_on_another_course_is_refused");
+    let field = field_with_plans();
+    *field.reservation_custom_fields.lock().unwrap() = json!({ "golfCourseId": "course-a" });
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    let (status, _) = call(
+        &router(&pool, &url),
+        &tenant,
+        "PATCH",
+        "/v1/course/reservations/res-1/plan",
+        Some(json!({ "reservationServiceId": "svc-course-b-only" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(field.reservation_service_id.lock().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn a_plan_that_seats_fewer_than_the_group_is_refused() {
+    // The booking is for four; which two to turn away is not the API's call.
+    let tenant = tenant_for("a_plan_that_seats_fewer_than_the_group_i");
+    let field = field_with_plans();
+    *field.reservation_custom_fields.lock().unwrap() = json!({ "golfCourseId": "course-a" });
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    let (status, _) = call(
+        &router(&pool, &url),
+        &tenant,
+        "PATCH",
+        "/v1/course/reservations/res-1/plan",
+        Some(json!({ "reservationServiceId": "svc-two-ball" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(field.reservation_service_id.lock().unwrap().is_none());
+}
+
+#[tokio::test]
+async fn a_plan_the_club_does_not_sell_is_not_found() {
+    let tenant = tenant_for("a_plan_the_club_does_not_sell_is_not_fou");
+    let field = field_with_plans();
+    *field.reservation_custom_fields.lock().unwrap() = json!({ "golfCourseId": "course-a" });
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    let (status, _) = call(
+        &router(&pool, &url),
+        &tenant,
+        "PATCH",
+        "/v1/course/reservations/res-1/plan",
+        Some(json!({ "reservationServiceId": "svc-nope" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
 // ─── Desk marks ───────────────────────────────────────────────────────────────

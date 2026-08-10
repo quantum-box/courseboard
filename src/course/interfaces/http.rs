@@ -29,16 +29,16 @@ use crate::course::infrastructure::{
     FieldReservationGateway, MySqlGeneratedThroughRepository, MySqlSlotOverrideRepository,
 };
 use crate::course::usecase::{
-    CancelReservationUseCase, CreateCourseUseCase, CreateReservationInput,
-    CreateReservationUseCase, DeleteCourseUseCase, DeleteSlotOverridesUseCase,
-    ExtendCourseInventoryUseCase, GenerateCourseTimeSlotsUseCase, GetBookingHorizonUseCase,
-    GetCourseOrderUseCase, GetCourseScheduleUseCase, GetTeeLedgerUseCase, GetTeeSheetUseCase,
-    LinkCourseResourceUseCase, ListCaddieAssignmentsUseCase, ListCaddiesUseCase,
-    ListCoursesUseCase, ListProductSlotsUseCase, ListReservationProductsUseCase,
-    ListResourcesUseCase, ListSlotOverridesUseCase, ReplaceCourseOrderUseCase,
-    ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase, SeedDemoBoardUseCase,
-    SetBookingHorizonUseCase, UpdateCourseUseCase, UpdateReservationPartyUseCase,
-    UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
+    CancelReservationUseCase, ChangeReservationPlanUseCase, CreateCourseUseCase,
+    CreateReservationInput, CreateReservationUseCase, DeleteCourseUseCase,
+    DeleteSlotOverridesUseCase, ExtendCourseInventoryUseCase, GenerateCourseTimeSlotsUseCase,
+    GetBookingHorizonUseCase, GetCourseOrderUseCase, GetCourseScheduleUseCase, GetTeeLedgerUseCase,
+    GetTeeSheetUseCase, LinkCourseResourceUseCase, ListCaddieAssignmentsUseCase,
+    ListCaddiesUseCase, ListCoursesUseCase, ListProductSlotsUseCase,
+    ListReservationProductsUseCase, ListResourcesUseCase, ListSlotOverridesUseCase,
+    ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase,
+    SeedDemoBoardUseCase, SetBookingHorizonUseCase, UpdateCourseUseCase,
+    UpdateReservationPartyUseCase, UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -890,6 +890,53 @@ pub async fn update_reservation_party(
         .await
         .map_err(AppError::from)?;
     Ok(Json(PartyDto::from(&stored)))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeReservationPlanRequest {
+    /// The plan to sell the round under from now on.
+    pub reservation_service_id: String,
+}
+
+/// PATCH /v1/course/reservations/{reservation_id}/plan
+///
+/// Moves a booking onto another plan — a self round the caller decides they
+/// want a caddie for. The round's length follows the plan, so the end time is
+/// recomputed here rather than left at what the old plan implied.
+#[utoipa::path(
+    patch,
+    path = "/v1/course/reservations/{reservation_id}/plan",
+    tag = "course",
+    params(("reservation_id" = String, Path, description = "Reservation id")),
+    request_body = ChangeReservationPlanRequest,
+    responses(
+        (status = 204, description = "Plan changed"),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Plan not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn change_reservation_plan(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(reservation_id): Path<String>,
+    Json(request): Json<ChangeReservationPlanRequest>,
+) -> Result<StatusCode, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let use_case =
+        ChangeReservationPlanUseCase::new(reservation_gateway(&state), catalog_gateway(&state));
+    use_case
+        .execute(
+            credentials,
+            &ReservationId::new(reservation_id),
+            &ReservationServiceId::new(request.reservation_service_id),
+        )
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ─── Slot marks ───────────────────────────────────────────────────────────────

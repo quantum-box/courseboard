@@ -86,6 +86,64 @@ impl ReservationGateway for FieldReservationGateway {
         Ok(items.into_iter().map(map_reservation).collect())
     }
 
+    async fn get_reservation(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+    ) -> Result<Reservation, CourseError> {
+        let path = format!(
+            "/v1/erp/reservations/{}",
+            urlencoding_path(reservation_id.as_str())
+        );
+        let dto: FieldReservationDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::GET,
+            &path,
+            credentials,
+            None,
+        )
+        .await?;
+        Ok(map_reservation(dto))
+    }
+
+    async fn update_reservation_plan(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+        service_id: &ReservationServiceId,
+        ends_at: DateTime<Utc>,
+    ) -> Result<(), CourseError> {
+        let path = format!(
+            "/v1/erp/reservations/{}",
+            urlencoding_path(reservation_id.as_str())
+        );
+        // No `customFields` key: this write is not about the group detail, and
+        // Field replaces that object wholesale when it is sent. Omitting it
+        // leaves what the desk typed where it is.
+        let updated: FieldReservationDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::PATCH,
+            &path,
+            credentials,
+            Some(&json!({
+                "serviceId": service_id.as_str(),
+                "endsAt": ends_at,
+            })),
+        )
+        .await?;
+        // Field answers with what it stored. A green response that kept the old
+        // plan would tell the desk the round is now caddie-served when it is
+        // still sold as self-play, and the fee would follow the wrong one.
+        if updated.service_id.as_deref() != Some(service_id.as_str()) {
+            return Err(CourseError::Provider(
+                "the plan was not stored as sent; the reservation was left unchanged".into(),
+            ));
+        }
+        Ok(())
+    }
+
     async fn update_reservation_party(
         &self,
         credentials: GatewayCredentials<'_>,

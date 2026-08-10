@@ -12,6 +12,7 @@ mod auto_assign_caddies;
 mod availability_deadline;
 mod caddie_rank_fees;
 mod cancel_reservation;
+mod change_reservation_plan;
 mod course_order;
 mod course_schedule;
 mod create_caddie;
@@ -74,6 +75,7 @@ pub use availability_deadline::{
 };
 pub use caddie_rank_fees::{GetCaddieRankFeesUseCase, ReplaceCaddieRankFeesUseCase};
 pub use cancel_reservation::CancelReservationUseCase;
+pub use change_reservation_plan::ChangeReservationPlanUseCase;
 pub use course_order::{GetCourseOrderUseCase, ReplaceCourseOrderUseCase};
 pub use course_schedule::{
     ExtendCourseInventoryUseCase, GenerateCourseTimeSlotsUseCase, GetBookingHorizonUseCase,
