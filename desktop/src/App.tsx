@@ -32,6 +32,7 @@ import { navigate, useRoute } from './lib/router'
 import { DownloadPage } from './DownloadPage'
 import { PaymentPage } from './PaymentPage'
 import { MacOSTabStrip } from './components/MacOSTabStrip'
+import { TenantTimezoneProvider } from './context/TenantTimezoneProvider'
 
 const WS_URL = 'ws://127.0.0.1:9001/ws'
 
@@ -61,9 +62,11 @@ function AppContent() {
   return (
     <AuthProvider>
       <AuthGate>
-        <AppShell route={route}>
-          <RouteContent route={route} />
-        </AppShell>
+        <TenantTimezoneProvider>
+          <AppShell route={route}>
+            <RouteContent route={route} />
+          </AppShell>
+        </TenantTimezoneProvider>
       </AuthGate>
     </AuthProvider>
   )

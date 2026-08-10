@@ -313,6 +313,7 @@ fn new_reservation_body(input: &NewReservation, creating: bool) -> Value {
     let mut body = json!({
         "startsAt": input.starts_at,
         "endsAt": input.ends_at,
+        "timezone": input.timezone,
         "quantity": input.quantity,
         "customerName": input.customer_name,
         "customFields": custom_fields,
@@ -1685,6 +1686,7 @@ mod tests {
             reservation_resource_id: Some(ResourceId::new("resource-1")),
             starts_at: "2026-08-11T22:30:00Z".parse().unwrap(),
             ends_at: "2026-08-12T03:00:00Z".parse().unwrap(),
+            timezone: "Europe/Berlin".into(),
             quantity: 4,
             customer_name: "山田 太郎".into(),
             golf_course_id: CourseId::new("course-1"),

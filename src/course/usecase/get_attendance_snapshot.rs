@@ -21,7 +21,10 @@ impl GetAttendanceSnapshotUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
         date: Option<NaiveDate>,
+        timezone: &str,
     ) -> Result<AttendanceSnapshotReport, CourseError> {
-        self.ops.get_attendance_snapshot(credentials, date).await
+        self.ops
+            .get_attendance_snapshot(credentials, date, timezone)
+            .await
     }
 }

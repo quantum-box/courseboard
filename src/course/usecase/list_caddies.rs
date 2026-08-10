@@ -228,6 +228,7 @@ mod tests {
             &self,
             _credentials: GatewayCredentials<'_>,
             date: Option<NaiveDate>,
+            _timezone: &str,
         ) -> Result<AttendanceSnapshotReport, CourseError> {
             Ok(AttendanceSnapshotReport::new(
                 date.unwrap_or_else(|| NaiveDate::from_ymd_opt(2026, 7, 18).unwrap()),
@@ -395,6 +396,7 @@ mod tests {
                     include_rookie_pairing: true,
                     ..RecommendationQuery::default()
                 },
+                "Asia/Tokyo",
             )
             .await
             .expect("recommendations");
@@ -428,6 +430,7 @@ mod tests {
                     scheduled_at: Some(morning_tee_time()),
                     ..RecommendationQuery::default()
                 },
+                "Asia/Tokyo",
             )
             .await
             .expect("recommendations");
@@ -469,6 +472,7 @@ mod tests {
                     scheduled_at: Some(Utc.with_ymd_and_hms(2026, 8, 7, 22, 0, 0).unwrap()),
                     ..RecommendationQuery::default()
                 },
+                "Asia/Tokyo",
             )
             .await
             .expect("recommendations");
@@ -514,6 +518,7 @@ mod tests {
                         scheduled_at: Some(at),
                         ..RecommendationQuery::default()
                     },
+                    "Asia/Tokyo",
                 )
                 .await
                 .expect("recommendations")
@@ -577,6 +582,7 @@ mod tests {
                     platform_id: None,
                 },
                 input,
+                "Asia/Tokyo",
             )
             .await
     }

@@ -174,6 +174,9 @@ pub struct NewReservation {
     pub reservation_resource_id: Option<ResourceId>,
     pub starts_at: DateTime<Utc>,
     pub ends_at: DateTime<Utc>,
+    /// Tenant timezone snapshot supplied to Field for policy evaluation and
+    /// retained on the reservation.
+    pub timezone: String,
     pub quantity: i32,
     pub customer_name: String,
     pub golf_course_id: CourseId,

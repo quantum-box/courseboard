@@ -6,9 +6,9 @@ use std::sync::Arc;
 use chrono::NaiveDate;
 
 use crate::course::domain::{
-    compute_caddie_supply, jst_offset, AvailabilityQuery, CaddieAvailability, CaddieDayCapacity,
-    CaddieSupply, CourseError, GatewayCredentials, GolfCatalogGateway, GolfOpsGateway,
-    ReservationGateway,
+    compute_caddie_supply, parse_tenant_timezone, AvailabilityQuery, CaddieAvailability,
+    CaddieDayCapacity, CaddieSupply, CourseError, GatewayCredentials, GolfCatalogGateway,
+    GolfOpsGateway, ReservationGateway,
 };
 
 /// Reservation states that already consume a caddie-attached tee slot.
@@ -82,11 +82,12 @@ impl GetCaddieSupplyUseCase {
             .map(|product| product.reservation_service_id().as_str())
             .collect();
 
-        let jst = jst_offset()?;
+        let tenant_timezone = self.catalog.get_tenant_timezone(credentials).await?;
+        let tenant_timezone = parse_tenant_timezone(&tenant_timezone)?;
         let reservations = self.reservations.list_reservations(credentials).await?;
         let current_caddie_attached = reservations
             .iter()
-            .filter(|reservation| reservation.occurs_on_date(date, &jst))
+            .filter(|reservation| reservation.occurs_on_date(date, &tenant_timezone))
             .filter(|reservation| ACTIVE_STATUSES.contains(&reservation.status()))
             .filter(|reservation| {
                 reservation

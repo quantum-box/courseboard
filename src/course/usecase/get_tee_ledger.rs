@@ -9,14 +9,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Utc};
+use chrono_tz::Tz;
 
 use crate::course::domain::{
-    courseboard_weekday, derive_slot_times_from_hours, derive_slot_times_from_rules, jst_offset,
-    Course, CourseError, CourseId, CourseOrder, GatewayCredentials, GolfCatalogGateway,
-    LedgerColumn, LedgerSlot, ReservationScheduleGateway, Resource, ResourceId, ResourceKind,
-    ResourceTimeSlot, SlotGridSource, SlotOverride, SlotOverrideGateway, SlotOverrideQuery,
-    TeeLedger, TeeLedgerQuery, TeeSheetItem,
+    courseboard_weekday, derive_slot_times_from_hours, derive_slot_times_from_rules,
+    parse_tenant_timezone, tenant_day_bounds, Course, CourseError, CourseId, CourseOrder,
+    GatewayCredentials, GolfCatalogGateway, LedgerColumn, LedgerSlot, ReservationScheduleGateway,
+    Resource, ResourceId, ResourceKind, ResourceTimeSlot, SlotGridSource, SlotOverride,
+    SlotOverrideGateway, SlotOverrideQuery, TeeLedger, TeeLedgerQuery, TeeSheetItem,
 };
 
 use super::get_tee_sheet::build_tee_sheet;
@@ -150,6 +151,7 @@ impl GetTeeLedgerUseCase {
                 items,
                 marks,
                 &order,
+                &timezone,
                 &mut unavailable,
             )
             .await?;
@@ -167,9 +169,11 @@ impl GetTeeLedgerUseCase {
         items: Vec<TeeSheetItem>,
         marks: Vec<SlotOverride>,
         order: &CourseOrder,
+        timezone: &str,
         unavailable: &mut Vec<String>,
     ) -> Result<Vec<LedgerColumn>, CourseError> {
-        let (window_start, window_end) = jst_day_window(query.date)?;
+        let timezone_id = parse_tenant_timezone(timezone)?;
+        let (window_start, window_end) = tenant_day_bounds(query.date, query.date, timezone)?;
         let mut items_by_course = group_items_by_course(items);
         let marks_by_course = group_marks_by_course(marks);
 
@@ -190,6 +194,7 @@ impl GetTeeLedgerUseCase {
                     resource_id.as_ref(),
                     window_start,
                     window_end,
+                    timezone_id,
                     unavailable,
                 )
                 .await;
@@ -244,6 +249,7 @@ impl GetTeeLedgerUseCase {
     /// Generated inventory first: it is the only source that knows how many
     /// groups are left. The two fallbacks say when a group *could* start, which
     /// is still a usable board and is far better than an empty one.
+    #[allow(clippy::too_many_arguments)]
     async fn resolve_grid(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -251,6 +257,7 @@ impl GetTeeLedgerUseCase {
         resource_id: Option<&ResourceId>,
         window_start: DateTime<Utc>,
         window_end: DateTime<Utc>,
+        timezone: Tz,
         unavailable: &mut Vec<String>,
     ) -> SlotGrid {
         if let Some(resource_id) = resource_id {
@@ -260,7 +267,7 @@ impl GetTeeLedgerUseCase {
                 .await
             {
                 Ok(slots) if !slots.is_empty() => {
-                    return summarize_inventory(&slots);
+                    return summarize_inventory(&slots, timezone);
                 }
                 Ok(_) => {}
                 Err(error) => {
@@ -275,7 +282,7 @@ impl GetTeeLedgerUseCase {
                 .await
             {
                 Ok(rules) => {
-                    let weekday = courseboard_weekday_of(window_start);
+                    let weekday = courseboard_weekday_of(window_start, timezone);
                     let times = derive_slot_times_from_rules(&rules, weekday);
                     if !times.is_empty() {
                         return SlotGrid::times_only(times, SlotGridSource::Schedule);
@@ -307,17 +314,14 @@ impl GetTeeLedgerUseCase {
 /// Field can generate more than one row for the same minute when a course runs
 /// parallel tees off one resource; those are one ledger row, so their capacities
 /// add up rather than the last one winning.
-fn summarize_inventory(slots: &[ResourceTimeSlot]) -> SlotGrid {
-    let Ok(jst) = jst_offset() else {
-        return SlotGrid::times_only(Vec::new(), SlotGridSource::BookingsOnly);
-    };
+fn summarize_inventory(slots: &[ResourceTimeSlot], timezone: Tz) -> SlotGrid {
     let mut capacity: HashMap<String, (i32, i32)> = HashMap::new();
     let mut active: HashMap<String, bool> = HashMap::new();
     let mut times = Vec::new();
     for slot in slots {
         let clock = slot
             .starts_at()
-            .with_timezone(&jst)
+            .with_timezone(&timezone)
             .format("%H:%M")
             .to_string();
         let entry = capacity.entry(clock.clone()).or_insert((0, 0));
@@ -471,24 +475,8 @@ fn wall_clock(tee_time: &str) -> String {
         .unwrap_or_else(|| tee_time.chars().take(5).collect())
 }
 
-/// Midnight to next midnight, JST, as the instants Field's slot list bounds on.
-fn jst_day_window(date: NaiveDate) -> Result<(DateTime<Utc>, DateTime<Utc>), CourseError> {
-    let jst = jst_offset()?;
-    let start = jst
-        .from_local_datetime(&date.and_hms_opt(0, 0, 0).unwrap_or_default())
-        .single()
-        .ok_or_else(|| CourseError::Provider("ambiguous local midnight".into()))?;
-    Ok((
-        start.with_timezone(&Utc),
-        (start + Duration::days(1)).with_timezone(&Utc),
-    ))
-}
-
-fn courseboard_weekday_of(window_start: DateTime<Utc>) -> u8 {
-    match jst_offset() {
-        Ok(jst) => courseboard_weekday(window_start.with_timezone(&jst).date_naive()),
-        Err(_) => courseboard_weekday(window_start.date_naive()),
-    }
+fn courseboard_weekday_of(window_start: DateTime<Utc>, timezone: Tz) -> u8 {
+    courseboard_weekday(window_start.with_timezone(&timezone).date_naive())
 }
 
 fn push_once(unavailable: &mut Vec<String>, value: &str) {
@@ -501,6 +489,7 @@ fn push_once(unavailable: &mut Vec<String>, value: &str) {
 mod tests {
     use super::*;
     use crate::course::domain::{PlayType, TeeSheetStatus};
+    use chrono::{Duration, NaiveDate};
 
     fn item(course: &str, tee_time: &str, party_size: i32) -> TeeSheetItem {
         TeeSheetItem::new(
@@ -537,15 +526,19 @@ mod tests {
     }
 
     #[test]
-    fn a_jst_day_runs_from_local_midnight_to_the_next_one() {
-        let (start, end) = jst_day_window(NaiveDate::from_ymd_opt(2026, 7, 20).unwrap()).unwrap();
+    fn a_tenant_day_runs_from_local_midnight_to_the_next_one() {
+        let date = NaiveDate::from_ymd_opt(2026, 7, 20).unwrap();
+        let (start, end) = tenant_day_bounds(date, date, "Asia/Tokyo").unwrap();
         assert_eq!(start.to_rfc3339(), "2026-07-19T15:00:00+00:00");
         assert_eq!(end.to_rfc3339(), "2026-07-20T15:00:00+00:00");
     }
 
     #[test]
     fn inventory_is_read_in_the_courses_own_clock_not_in_utc() {
-        let grid = summarize_inventory(&[slot("2026-07-19T21:53:00Z", 3, 2, true)]);
+        let grid = summarize_inventory(
+            &[slot("2026-07-19T21:53:00Z", 3, 2, true)],
+            chrono_tz::Asia::Tokyo,
+        );
         assert_eq!(grid.times, vec!["06:53"]);
         assert_eq!(grid.capacity_by_time.get("06:53"), Some(&(3, 2)));
         assert_eq!(grid.active_by_time.get("06:53"), Some(&true));
@@ -556,26 +549,35 @@ mod tests {
     fn parallel_rows_on_one_minute_add_up_instead_of_the_last_one_winning() {
         // A course running two tees off one resource generates two rows for the
         // same start. Keeping only one would halve the capacity the desk sees.
-        let grid = summarize_inventory(&[
-            slot("2026-07-19T22:00:00Z", 2, 1, true),
-            slot("2026-07-19T22:00:00Z", 2, 2, true),
-        ]);
+        let grid = summarize_inventory(
+            &[
+                slot("2026-07-19T22:00:00Z", 2, 1, true),
+                slot("2026-07-19T22:00:00Z", 2, 2, true),
+            ],
+            chrono_tz::Asia::Tokyo,
+        );
         assert_eq!(grid.times, vec!["07:00"]);
         assert_eq!(grid.capacity_by_time.get("07:00"), Some(&(4, 3)));
     }
 
     #[test]
     fn a_minute_stays_live_when_any_row_on_it_is_live() {
-        let grid = summarize_inventory(&[
-            slot("2026-07-19T22:00:00Z", 2, 1, false),
-            slot("2026-07-19T22:00:00Z", 2, 2, true),
-        ]);
+        let grid = summarize_inventory(
+            &[
+                slot("2026-07-19T22:00:00Z", 2, 1, false),
+                slot("2026-07-19T22:00:00Z", 2, 2, true),
+            ],
+            chrono_tz::Asia::Tokyo,
+        );
         assert_eq!(grid.active_by_time.get("07:00"), Some(&true));
     }
 
     #[test]
     fn a_minute_with_only_retired_rows_is_not_live() {
-        let grid = summarize_inventory(&[slot("2026-07-19T22:00:00Z", 2, 2, false)]);
+        let grid = summarize_inventory(
+            &[slot("2026-07-19T22:00:00Z", 2, 2, false)],
+            chrono_tz::Asia::Tokyo,
+        );
         assert_eq!(grid.active_by_time.get("07:00"), Some(&false));
     }
 

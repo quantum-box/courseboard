@@ -6,10 +6,10 @@ use std::sync::Arc;
 use chrono::NaiveDate;
 
 use crate::course::domain::{
-    format_datetime_with_offset, format_jst_wall_clock, jst_offset, Course, CourseError, CourseId,
-    GatewayCredentials, GolfCatalogGateway, PlayType, Reservation, ReservationGateway,
-    ReservationProduct, ReservationServiceId, Resource, TeeSheet, TeeSheetItem, TeeSheetQuery,
-    TeeSheetStatus, DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR,
+    format_datetime_in_timezone, format_tenant_wall_clock, parse_tenant_timezone, Course,
+    CourseError, CourseId, GatewayCredentials, GolfCatalogGateway, PlayType, Reservation,
+    ReservationGateway, ReservationProduct, ReservationServiceId, Resource, TeeSheet, TeeSheetItem,
+    TeeSheetQuery, TeeSheetStatus, DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR,
 };
 
 const DEFAULT_DURATION_MINUTES: i32 = 270;
@@ -85,7 +85,7 @@ pub(crate) fn build_tee_sheet(
     products: &[ReservationProduct],
     tenant_timezone: &str,
 ) -> Result<TeeSheet, CourseError> {
-    let jst = jst_offset()?;
+    let timezone = parse_tenant_timezone(tenant_timezone)?;
     let product_by_service: HashMap<&ReservationServiceId, &ReservationProduct> = products
         .iter()
         .map(|product| (product.reservation_service_id(), product))
@@ -93,7 +93,7 @@ pub(crate) fn build_tee_sheet(
     let items: Vec<TeeSheetItem> = reservations
         .iter()
         .filter(|reservation| reservation.is_tee_sheet_candidate())
-        .filter(|reservation| reservation.occurs_on_date(date, &jst))
+        .filter(|reservation| reservation.occurs_on_date(date, &timezone))
         .filter_map(|reservation| {
             let (course_id, course_name) = resolve_course(reservation, resources, courses);
             if let Some(filter_id) = golf_course_id {
@@ -109,16 +109,16 @@ pub(crate) fn build_tee_sheet(
                 product,
                 &course_id,
                 &course_name,
-                jst,
+                tenant_timezone,
             ))
         })
-        .collect();
+        .collect::<Result<Vec<_>, CourseError>>()?;
 
     Ok(TeeSheet::new(
         date,
         tenant_timezone,
-        format_jst_wall_clock(date, DEFAULT_DAY_START_HOUR, 0, jst),
-        format_jst_wall_clock(date, DEFAULT_DAY_END_HOUR, 0, jst),
+        format_tenant_wall_clock(date, DEFAULT_DAY_START_HOUR, 0, tenant_timezone)?,
+        format_tenant_wall_clock(date, DEFAULT_DAY_END_HOUR, 0, tenant_timezone)?,
         items,
     ))
 }
@@ -173,8 +173,8 @@ fn to_tee_sheet_item(
     product: Option<&ReservationProduct>,
     golf_course_id: &CourseId,
     course_name: &str,
-    jst: chrono::FixedOffset,
-) -> TeeSheetItem {
+    tenant_timezone: &str,
+) -> Result<TeeSheetItem, CourseError> {
     let duration_minutes = reservation
         .duration_minutes_from_range()
         .or_else(|| product.map(|item| item.fallback_duration_minutes()))
@@ -187,7 +187,7 @@ fn to_tee_sheet_item(
         .filter(|value| *value > 0)
         .unwrap_or(18);
 
-    TeeSheetItem::new(
+    Ok(TeeSheetItem::new(
         reservation.id(),
         reservation.reservation_number(),
         reservation.service_id().map(ToString::to_string),
@@ -199,7 +199,7 @@ fn to_tee_sheet_item(
         product
             .map(|item| item.golf_course_ids().to_vec())
             .unwrap_or_default(),
-        format_datetime_with_offset(reservation.starts_at(), jst),
+        format_datetime_in_timezone(reservation.starts_at(), tenant_timezone)?,
         duration_minutes,
         play_type,
         reservation.party_size(),
@@ -208,7 +208,7 @@ fn to_tee_sheet_item(
         holes,
         reservation.notes().map(str::to_string),
     )
-    .with_party(reservation.party().clone())
+    .with_party(reservation.party().clone()))
 }
 
 #[cfg(test)]
@@ -479,8 +479,8 @@ mod tests {
         assert_eq!(course_id, "course_east");
         assert_eq!(course_name, "East Course");
 
-        let jst = jst_offset().unwrap();
-        let item = to_tee_sheet_item(&reservation, None, &course_id, &course_name, jst);
+        let item =
+            to_tee_sheet_item(&reservation, None, &course_id, &course_name, "Asia/Tokyo").unwrap();
         assert_eq!(item.tee_time(), "2026-07-18T07:00:00+09:00");
         assert_eq!(item.duration_minutes(), 270);
         assert_eq!(item.play_type(), PlayType::SelfPlay);
@@ -518,14 +518,14 @@ mod tests {
             None,
             None,
         );
-        let jst = jst_offset().unwrap();
         let item = to_tee_sheet_item(
             &reservation,
             Some(&product),
             &CourseId::new("course_east"),
             "East Course",
-            jst,
-        );
+            "Asia/Tokyo",
+        )
+        .unwrap();
         assert_eq!(item.play_type(), PlayType::Caddie);
         assert_eq!(item.duration_minutes(), 240);
         assert_eq!(item.holes(), 18);
@@ -553,15 +553,14 @@ mod tests {
             vec!["course_east".into(), "course_west".into()],
             None,
         );
-        let jst = jst_offset().unwrap();
-
         let matching = to_tee_sheet_item(
             &reservation,
             Some(&season_pass),
             &CourseId::new("course_west"),
             "West Course",
-            jst,
-        );
+            "Asia/Tokyo",
+        )
+        .unwrap();
         assert!(!matching.course_mismatch());
         assert_eq!(matching.expected_course_id(), None);
 
@@ -570,8 +569,9 @@ mod tests {
             Some(&season_pass),
             &CourseId::new("course_north"),
             "North Course",
-            jst,
-        );
+            "Asia/Tokyo",
+        )
+        .unwrap();
         assert!(booked_elsewhere.course_mismatch());
         assert_eq!(
             booked_elsewhere

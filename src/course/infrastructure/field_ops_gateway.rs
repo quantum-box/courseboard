@@ -33,6 +33,19 @@ const DEFAULT_STAFF_EMPLOYMENT_TYPE: &str = "part_time";
 /// How many caddies' memberships are read from Field at once.
 const MEMBERSHIP_CONCURRENCY: usize = 8;
 
+fn attendance_snapshot_path(date: Option<NaiveDate>, timezone: &str) -> String {
+    match date {
+        Some(date) => format!(
+            "{GOLF}/caddie-attendance-snapshot?date={date}&timezone={}",
+            urlencoding_query(timezone)
+        ),
+        None => format!(
+            "{GOLF}/caddie-attendance-snapshot?timezone={}",
+            urlencoding_query(timezone)
+        ),
+    }
+}
+
 /// Loads / mutates caddie ops through Field golf-course extension endpoints.
 pub struct FieldGolfOpsGateway {
     client: reqwest::Client,
@@ -467,11 +480,9 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         &self,
         credentials: GatewayCredentials<'_>,
         date: Option<NaiveDate>,
+        timezone: &str,
     ) -> Result<AttendanceSnapshotReport, CourseError> {
-        let path = match date {
-            Some(date) => format!("{GOLF}/caddie-attendance-snapshot?date={date}"),
-            None => format!("{GOLF}/caddie-attendance-snapshot"),
-        };
+        let path = attendance_snapshot_path(date, timezone);
         let dto: FieldAttendanceReportDto = field_send_json(
             &self.client,
             &self.base_url,
@@ -941,6 +952,13 @@ mod tests {
             operator_id: "operator-test",
             platform_id: Some("platform-test"),
         }
+    }
+
+    #[test]
+    fn attendance_snapshot_forwards_the_tenant_timezone() {
+        let date = NaiveDate::from_ymd_opt(2026, 3, 29).unwrap();
+        assert!(attendance_snapshot_path(Some(date), "Europe/Berlin")
+            .ends_with("date=2026-03-29&timezone=Europe%2FBerlin"));
     }
 
     async fn spawn_field_server(app: Router) -> String {

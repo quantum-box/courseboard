@@ -2,15 +2,24 @@
 
 use std::sync::Arc;
 
-use crate::course::domain::{CourseError, GatewayCredentials, GolfCommercialGateway};
+use crate::course::domain::{
+    CourseError, GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway,
+};
 
 pub struct ExportMonthlySettlementCsvUseCase {
+    catalog: Arc<dyn GolfCatalogGateway>,
     commercial: Arc<dyn GolfCommercialGateway>,
 }
 
 impl ExportMonthlySettlementCsvUseCase {
-    pub fn new(commercial: Arc<dyn GolfCommercialGateway>) -> Self {
-        Self { commercial }
+    pub fn new(
+        catalog: Arc<dyn GolfCatalogGateway>,
+        commercial: Arc<dyn GolfCommercialGateway>,
+    ) -> Self {
+        Self {
+            catalog,
+            commercial,
+        }
     }
 
     pub async fn execute(
@@ -18,8 +27,9 @@ impl ExportMonthlySettlementCsvUseCase {
         credentials: GatewayCredentials<'_>,
         year_month: &str,
     ) -> Result<String, CourseError> {
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         self.commercial
-            .export_monthly_settlement_csv(credentials, year_month)
+            .export_monthly_settlement_csv(credentials, year_month, &timezone)
             .await
     }
 }

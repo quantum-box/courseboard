@@ -547,6 +547,7 @@ pub trait GolfOpsGateway: Send + Sync {
         &self,
         credentials: GatewayCredentials<'_>,
         date: Option<NaiveDate>,
+        timezone: &str,
     ) -> Result<AttendanceSnapshotReport, CourseError>;
 
     async fn list_attendance_period_snapshots(
@@ -633,18 +634,21 @@ pub trait GolfCommercialGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         from: NaiveDate,
         to: NaiveDate,
+        timezone: &str,
     ) -> Result<Vec<BudgetAchievement>, CourseError>;
 
     async fn get_monthly_settlement(
         &self,
         credentials: GatewayCredentials<'_>,
         year_month: &str,
+        timezone: &str,
     ) -> Result<MonthlySettlement, CourseError>;
 
     async fn export_monthly_settlement_csv(
         &self,
         credentials: GatewayCredentials<'_>,
         year_month: &str,
+        timezone: &str,
     ) -> Result<String, CourseError>;
 
     async fn get_extension_status(

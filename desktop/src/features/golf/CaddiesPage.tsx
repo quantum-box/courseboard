@@ -46,8 +46,9 @@ import {
   fieldApiJson,
   fieldApiText,
   today,
-  COURSE_TIME_ZONE,
+  currentYearMonth,
 } from '../../api'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import {
@@ -343,13 +344,10 @@ function punchClock(staffId: string, direction: 'in' | 'out', businessDate: stri
   )
 }
 
-/** Re-exported so the call sites below read the same as the rest of the app. */
-const todayJst = today
-
-function previousYearMonth() {
-  const now = new Date()
-  const previous = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, '0')}`
+function previousYearMonth(timezone: string) {
+  const [year, month] = currentYearMonth(timezone).split('-').map(Number)
+  const previous = new Date(Date.UTC(year!, month! - 2, 1))
+  return previous.toISOString().slice(0, 7)
 }
 
 function formatMoney(amount: number, currency = 'JPY') {
@@ -360,11 +358,11 @@ function formatMoney(amount: number, currency = 'JPY') {
   }).format(amount)
 }
 
-function formatDateTime(value: string) {
+function formatDateTime(value: string, timezone: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat('ja-JP', {
-    timeZone: COURSE_TIME_ZONE,
+    timeZone: timezone,
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -372,11 +370,11 @@ function formatDateTime(value: string) {
   }).format(date)
 }
 
-function dateKey(value: string) {
+function dateKey(value: string, timezone: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value.slice(0, 10)
   return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: COURSE_TIME_ZONE,
+    timeZone: timezone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -599,8 +597,9 @@ export function CaddiesPage({
   initialProfileId?: string
 } = {}) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const [view, setView] = useState<View>(initialView)
-  const [operationDate, setOperationDate] = useState(todayJst)
+  const [operationDate, setOperationDate] = useState(() => today(timezone))
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(initialProfileId ?? null)
   const [createOpen, setCreateOpen] = useState(false)
 
@@ -615,7 +614,7 @@ export function CaddiesPage({
   )
   const assignmentMonth = view === 'dispatch'
     ? operationDate.slice(0, 7)
-    : todayJst().slice(0, 7)
+    : today(timezone).slice(0, 7)
   const assignmentBounds = monthBounds(assignmentMonth)
   const assignmentsResource = useResource(
     () => courseboardApiJson<ListResponse<CaddieAssignment>>(
@@ -853,11 +852,14 @@ function DispatchView({
   setFlash: (flash: Flash) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const profiles = profilesResource.data?.items ?? []
   const assignments = assignmentsResource.data?.items ?? []
   const attendance = attendanceResource.data?.items ?? []
   const attendanceById = attendanceLookup(attendance)
-  const dayAssignments = assignments.filter(item => dateKey(item.scheduledAt) === date)
+  const dayAssignments = assignments.filter(
+    item => dateKey(item.scheduledAt, timezone) === date,
+  )
 
   // Deciding who walks each group is the whole job of this screen, so the day
   // picker, the groups still missing somebody and the automatic run come first
@@ -1327,6 +1329,7 @@ function AutoAssignPanel({
   setFlash: (flash: Flash) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const [plan, setPlan] = useState<AutoAssignResult | null>(null)
   const [busy, setBusy] = useState<'preview' | 'execute' | null>(null)
   const [error, setError] = useState<unknown>(null)
@@ -1445,7 +1448,7 @@ function AutoAssignPanel({
                     <div>
                       <p className="font-medium text-foreground">{item.caddieDisplayName}</p>
                       <p className="text-xs text-muted-foreground">
-                        {formatDateTime(item.scheduledAt)} · {item.reservationId}
+                        {formatDateTime(item.scheduledAt, timezone)} · {item.reservationId}
                       </p>
                     </div>
                     <Badge variant="accent">{t('caddies:autoAssign.candidate')}</Badge>
@@ -1556,6 +1559,7 @@ function AttendancePanel({
   showHeader?: boolean
 }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const [busyId, setBusyId] = useState<string | null>(null)
   const profileMap = useMemo(
     () => new Map(profiles.map(profile => [profile.id, profile])),
@@ -1577,7 +1581,7 @@ function AttendancePanel({
     try {
       // The day this board is showing — the same day the punch has to be
       // filed under for the row to come back on the next refresh.
-      await punchClock(staffId, direction, resource.data?.date ?? todayJst())
+      await punchClock(staffId, direction, resource.data?.date ?? today(timezone))
       onChanged()
       setFlash({
         tone: 'success',
@@ -1725,6 +1729,7 @@ function AssignmentsTable({
   setFlash: (flash: Flash) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const [busyId, setBusyId] = useState<string | null>(null)
   const profileNames = useMemo(
     () => new Map(profiles.map(profile => [profile.id, profile.displayName])),
@@ -1778,7 +1783,7 @@ function AssignmentsTable({
       key: 'time',
       header: t('caddies:assignments.table.schedule'),
       mobileLabel: t('caddies:assignments.table.schedule'),
-      cell: row => formatDateTime(row.scheduledAt),
+      cell: row => formatDateTime(row.scheduledAt, timezone),
     },
     {
       key: 'round',
@@ -1886,6 +1891,7 @@ function ProfilesView({
   onAssignmentsChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
+  const timezone = useTenantTimezone()
   const { t } = useTranslation(['caddies', 'common'])
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
@@ -1929,7 +1935,7 @@ function ProfilesView({
           courses={coursesResource.data?.items.filter(course => course.isActive !== false) ?? []}
           coursesError={coursesResource.error}
           attendance={attendanceResource.data?.items.find(item => item.caddieProfileId === selected.id) ?? null}
-          businessDate={attendanceResource.data?.date ?? todayJst()}
+          businessDate={attendanceResource.data?.date ?? today(timezone)}
           onPeopleChanged={onPeopleChanged}
           onAssignmentsChanged={onAssignmentsChanged}
           setFlash={setFlash}
@@ -3445,6 +3451,7 @@ export function AvailabilityCalendar({
 
 function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<CaddieRating>> }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const ratings = resource.data?.items ?? []
   const average = ratings.length
     ? ratings.reduce((total, rating) => total + rating.score, 0) / ratings.length
@@ -3477,7 +3484,7 @@ function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<Caddi
       key: 'created',
       header: t('caddies:ratings.table.created'),
       mobileLabel: t('caddies:ratings.table.created'),
-      cell: row => formatDateTime(row.createdAt),
+      cell: row => formatDateTime(row.createdAt, timezone),
     },
   ]
   return (
@@ -3524,11 +3531,12 @@ function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<Caddi
  */
 function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const {
     value: yearMonth,
     error: yearMonthError,
     setCandidate: setYearMonth,
-  } = useYearMonthValue(previousYearMonth())
+  } = useYearMonthValue(previousYearMonth(timezone))
   const [downloading, setDownloading] = useState(false)
   const [editingFees, setEditingFees] = useState(false)
   const feesResource = useResource(

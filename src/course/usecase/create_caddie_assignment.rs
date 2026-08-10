@@ -15,13 +15,12 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, Utc};
 
 use crate::course::domain::{
-    course_day_bounds, shift_covers_tee_time, widen_for_utc_date_filter, AvailabilityQuery,
-    CaddieAssignment, CaddieAssignmentQuery, CaddieId, CourseError, GatewayCredentials,
-    GolfOpsGateway, ReservationId, UpsertCaddieAssignment,
+    parse_tenant_timezone, shift_covers_tee_time, tenant_date_at, tenant_day_bounds,
+    widen_for_utc_date_filter, AvailabilityQuery, CaddieAssignment, CaddieAssignmentQuery,
+    CaddieId, CourseError, GatewayCredentials, GolfOpsGateway, ReservationId,
+    UpsertCaddieAssignment,
 };
 
-/// Minutes east of UTC for the course clock, as everywhere else in this product.
-const JST_OFFSET_MINUTES: i64 = 9 * 60;
 /// How long the new round holds its caddie when the caller does not say.
 const DEFAULT_ROUND_MINUTES: i64 = 270;
 
@@ -52,8 +51,10 @@ impl CreateCaddieAssignmentUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
         input: NameCaddieForRound,
+        timezone: &str,
     ) -> Result<CaddieAssignment, CourseError> {
-        let date = (input.scheduled_at + Duration::minutes(JST_OFFSET_MINUTES)).date_naive();
+        let timezone_id = parse_tenant_timezone(timezone)?;
+        let date = tenant_date_at(input.scheduled_at, timezone)?;
         let window = widen_for_utc_date_filter(date, date);
 
         let (roster, assignments, availabilities, rank_fees) = tokio::try_join!(
@@ -96,14 +97,14 @@ impl CreateCaddieAssignmentUseCase {
                 .find(|row| row.caddie_id() == &input.caddie_id)
                 .map(|row| row.status()),
             Some(input.scheduled_at),
-            JST_OFFSET_MINUTES,
+            timezone_id,
         ) {
             return Err(CourseError::BadRequest(
                 "this caddie's shift for the day does not cover that tee time",
             ));
         }
 
-        let (day_start, day_end) = course_day_bounds(date, date);
+        let (day_start, day_end) = tenant_day_bounds(date, date, timezone)?;
         let live: Vec<&CaddieAssignment> = assignments
             .iter()
             .filter(|assignment| assignment.holds_the_round())

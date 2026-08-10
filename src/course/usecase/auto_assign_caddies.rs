@@ -16,18 +16,15 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::course::domain::{
-    course_day_bounds, plan_caddie_assignments, widen_for_utc_date_filter, AttendanceState,
-    AutoAssignResult, AvailabilityDeadline, AvailabilityDeadlineGateway, AvailabilityQuery,
-    AvailabilityStatus, CaddieAssignmentQuery, CaddiePlacement, CaddieRoster, CaddieShift,
-    CaddieShiftGateway, CourseError, DeadlineWarning, GatewayCredentials, GolfCatalogGateway,
-    GolfOpsGateway, PlanOptions, PlannableCaddie, PlannableRound, ReservationGateway, TeeSheetItem,
-    TeeSheetQuery, UpsertCaddieAssignment, YearMonth,
+    parse_tenant_timezone, plan_caddie_assignments, tenant_date_at, tenant_day_bounds,
+    widen_for_utc_date_filter, AttendanceState, AutoAssignResult, AvailabilityDeadline,
+    AvailabilityDeadlineGateway, AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery,
+    CaddiePlacement, CaddieRoster, CaddieShift, CaddieShiftGateway, CourseError, DeadlineWarning,
+    GatewayCredentials, GolfCatalogGateway, GolfOpsGateway, PlanOptions, PlannableCaddie,
+    PlannableRound, ReservationGateway, TeeSheetItem, TeeSheetQuery, UpsertCaddieAssignment,
+    YearMonth,
 };
 use crate::course::usecase::GetTeeSheetUseCase;
-
-/// Minutes east of UTC for the course clock. Every course in this product runs
-/// on JST, and the tee-sheet already renders its day against the same offset.
-const JST_OFFSET_MINUTES: i64 = 9 * 60;
 
 /// What a freshly planned assignment is written as.
 const ASSIGNED_STATUS: &str = "assigned";
@@ -88,6 +85,7 @@ impl AutoAssignCaddiesUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
         date: NaiveDate,
+        today: NaiveDate,
         roster: &CaddieRoster,
     ) -> Result<Option<DeadlineWarning>, CourseError> {
         let year_month = YearMonth::from_date(date);
@@ -98,7 +96,6 @@ impl AutoAssignCaddiesUseCase {
         let Some(deadline) = deadline else {
             return Ok(None);
         };
-        let today = Utc::now().date_naive();
         if !deadline.has_passed(today) {
             return Ok(None);
         }
@@ -135,6 +132,9 @@ impl AutoAssignCaddiesUseCase {
         date: NaiveDate,
         dry_run: bool,
     ) -> Result<AutoAssignResult, CourseError> {
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
+        let timezone_id = parse_tenant_timezone(&timezone)?;
+        let today = tenant_date_at(Utc::now(), &timezone)?;
         let window = widen_for_utc_date_filter(date, date);
         let sheet = GetTeeSheetUseCase::new(self.reservations.clone(), self.catalog.clone())
             .execute(
@@ -157,7 +157,8 @@ impl AutoAssignCaddiesUseCase {
                     reservation_id: None,
                 },
             ),
-            self.ops.get_attendance_snapshot(credentials, Some(date)),
+            self.ops
+                .get_attendance_snapshot(credentials, Some(date), &timezone),
             self.ops.list_caddie_availabilities(
                 credentials,
                 AvailabilityQuery {
@@ -179,7 +180,7 @@ impl AutoAssignCaddiesUseCase {
             .map(|shift| (shift.caddie_id().as_str(), shift))
             .collect();
 
-        let (day_start, day_end) = course_day_bounds(date, date);
+        let (day_start, day_end) = tenant_day_bounds(date, date, &timezone)?;
         let live: Vec<_> = assignments
             .iter()
             .filter(|assignment| assignment.holds_the_round())
@@ -280,11 +281,13 @@ impl AutoAssignCaddiesUseCase {
             &rounds,
             &caddies,
             PlanOptions {
-                utc_offset_minutes: JST_OFFSET_MINUTES,
+                timezone: timezone_id,
                 dry_run,
             },
         );
-        let deadline_warning = self.deadline_warning(credentials, date, &roster).await?;
+        let deadline_warning = self
+            .deadline_warning(credentials, date, today, &roster)
+            .await?;
         let plan = plan.with_deadline_warning(deadline_warning);
 
         if dry_run {
@@ -394,7 +397,7 @@ mod tests {
         // the UTC date would not see the 07:00 round that this plan is mostly
         // about, and would put a second caddie on a group that already has one.
         let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
-        let (start, end) = course_day_bounds(date, date);
+        let (start, end) = tenant_day_bounds(date, date, "Asia/Tokyo").unwrap();
 
         assert_eq!(start, Utc.with_ymd_and_hms(2026, 8, 7, 15, 0, 0).unwrap());
         assert_eq!(end, Utc.with_ymd_and_hms(2026, 8, 8, 15, 0, 0).unwrap());
@@ -402,6 +405,20 @@ mod tests {
         // 07:00 JST on the 8th — the case Field's own date filter drops.
         let morning = Utc.with_ymd_and_hms(2026, 8, 7, 22, 0, 0).unwrap();
         assert!(start <= morning && morning < end);
+    }
+
+    #[test]
+    fn deadline_today_uses_the_tenant_date_during_the_jst_midnight_window() {
+        let instant = Utc.with_ymd_and_hms(2026, 8, 10, 15, 30, 0).unwrap();
+        let deadline = AvailabilityDeadline::try_new(
+            YearMonth::parse("2026-09").unwrap(),
+            NaiveDate::from_ymd_opt(2026, 8, 10).unwrap(),
+        );
+
+        let tenant_today = tenant_date_at(instant, "Asia/Tokyo").unwrap();
+        assert_eq!(tenant_today, NaiveDate::from_ymd_opt(2026, 8, 11).unwrap());
+        assert!(deadline.has_passed(tenant_today));
+        assert!(!deadline.has_passed(instant.date_naive()));
     }
 
     #[test]

@@ -17,6 +17,7 @@ import {
   useState,
 } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import {
   currentYearMonth,
   downloadText,
@@ -106,8 +107,8 @@ const CSV_COLUMNS: CsvColumn[] = [
   { name: 'target_caddy_attached_ratio', labelKey: 'targetCaddyAttachedRatio', example: '0.70' },
 ]
 
-function monthRange(yearMonth: string) {
-  const range = yearMonthRange(yearMonth) ?? yearMonthRange(currentYearMonth())
+function monthRange(yearMonth: string, fallbackYearMonth: string) {
+  const range = yearMonthRange(yearMonth) ?? yearMonthRange(fallbackYearMonth)
   return range
     ? { from: range.from, to: range.to }
     : { from: '', to: '' }
@@ -141,11 +142,13 @@ function normalizeCsvHeader(contents: string) {
 
 export function BudgetsPage() {
   const { t } = useTranslation(['budgets', 'common'])
+  const timezone = useTenantTimezone()
+  const tenantYearMonth = currentYearMonth(timezone)
   const {
     value: yearMonth,
     error: yearMonthError,
     setCandidate: setYearMonth,
-  } = useYearMonthValue(currentYearMonth())
+  } = useYearMonthValue(tenantYearMonth)
   const [courseFilter, setCourseFilter] = useState('all')
   const [courses, setCourses] = useState<GolfCourse[]>([])
   const [budgets, setBudgets] = useState<DailyBudget[]>([])
@@ -155,7 +158,7 @@ export function BudgetsPage() {
   const [loadError, setLoadError] = useState<unknown>(null)
   const [draft, setDraft] = useState<BudgetDraft>(() => ({
     golfCourseId: '',
-    date: `${currentYearMonth()}-01`,
+    date: `${tenantYearMonth}-01`,
     targetRevenue: '',
     targetAverageSpend: '',
     targetCaddyAttachedRatio: '',
@@ -168,7 +171,10 @@ export function BudgetsPage() {
   const [importing, setImporting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const range = useMemo(() => monthRange(yearMonth), [yearMonth])
+  const range = useMemo(
+    () => monthRange(yearMonth, tenantYearMonth),
+    [tenantYearMonth, yearMonth],
+  )
   const courseNames = useMemo(
     () => new Map(courses.map(course => [course.id, course.name] as const)),
     [courses],

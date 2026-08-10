@@ -8,12 +8,13 @@
 
 use std::sync::Arc;
 
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 
 use crate::course::domain::{
-    AvailabilityRule, BookingHorizon, BuiltInventory, CourseError, CourseId, GatewayCredentials,
-    GeneratedThroughGateway, GenerationSummary, GolfCatalogGateway, GolfCommercialGateway,
-    InventoryWatermark, ReservationScheduleGateway, ResourceId, ResourceKind, SavedSchedule,
+    tenant_date_at, AvailabilityRule, BookingHorizon, BuiltInventory, CourseError, CourseId,
+    GatewayCredentials, GeneratedThroughGateway, GenerationSummary, GolfCatalogGateway,
+    GolfCommercialGateway, InventoryWatermark, ReservationScheduleGateway, ResourceId,
+    ResourceKind, SavedSchedule,
 };
 
 /// Longest span one generate call may cover.
@@ -22,15 +23,12 @@ use crate::course::domain::{
 /// the date range from turning into a very long write.
 const MAX_GENERATION_DAYS: i64 = 400;
 
-/// Minutes east of UTC for the course clock, as everywhere else in this product.
-const JST_OFFSET_MINUTES: i64 = 9 * 60;
-
 /// Today on the course's own clock.
 ///
 /// The window starts here, so reading it an hour off in UTC would open the book
 /// on the wrong day at both ends.
-fn course_today() -> NaiveDate {
-    (Utc::now() + Duration::minutes(JST_OFFSET_MINUTES)).date_naive()
+fn course_today(now: DateTime<Utc>, timezone: &str) -> Result<NaiveDate, CourseError> {
+    tenant_date_at(now, timezone)
 }
 
 async fn resolve_resource(
@@ -155,7 +153,8 @@ impl ReplaceCourseScheduleUseCase {
         resource_id: &ResourceId,
     ) -> Result<Option<BuiltInventory>, CourseError> {
         let horizon = self.commercial.get_booking_horizon(credentials).await?;
-        let today = course_today();
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
+        let today = course_today(Utc::now(), &timezone)?;
         let bookable_through = horizon.last_bookable_date(today);
         let summary = self
             .schedules
@@ -322,7 +321,8 @@ impl ExtendCourseInventoryUseCase {
         credentials: GatewayCredentials<'_>,
         tenant_id: &str,
     ) -> Result<Vec<CourseId>, CourseError> {
-        let today = course_today();
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
+        let today = course_today(Utc::now(), &timezone)?;
         let stored = self.watermarks.list_watermarks(tenant_id).await?;
         // A course with no row has never been built, and building it first is
         // the job of saving its schedule, not of this. So a tenant whose known
@@ -402,12 +402,19 @@ impl ExtendCourseInventoryUseCase {
 }
 
 pub struct GetBookingHorizonUseCase {
+    catalog: Arc<dyn GolfCatalogGateway>,
     commercial: Arc<dyn GolfCommercialGateway>,
 }
 
 impl GetBookingHorizonUseCase {
-    pub fn new(commercial: Arc<dyn GolfCommercialGateway>) -> Self {
-        Self { commercial }
+    pub fn new(
+        catalog: Arc<dyn GolfCatalogGateway>,
+        commercial: Arc<dyn GolfCommercialGateway>,
+    ) -> Self {
+        Self {
+            catalog,
+            commercial,
+        }
     }
 
     pub async fn execute(
@@ -415,7 +422,8 @@ impl GetBookingHorizonUseCase {
         credentials: GatewayCredentials<'_>,
     ) -> Result<(BookingHorizon, NaiveDate), CourseError> {
         let horizon = self.commercial.get_booking_horizon(credentials).await?;
-        let bookable_through = horizon.last_bookable_date(course_today());
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
+        let bookable_through = horizon.last_bookable_date(course_today(Utc::now(), &timezone)?);
         Ok((horizon, bookable_through))
     }
 }
@@ -456,7 +464,8 @@ impl SetBookingHorizonUseCase {
             .commercial
             .set_booking_horizon(credentials, &horizon)
             .await?;
-        let today = course_today();
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
+        let today = course_today(Utc::now(), &timezone)?;
         let bookable_through = stored.last_bookable_date(today);
 
         for (course_id, resource_id) in self.course_resources(credentials).await? {
@@ -540,6 +549,15 @@ mod tests {
         UpsertReservationProduct,
     };
     use std::collections::HashMap;
+
+    #[test]
+    fn booking_horizon_today_follows_the_tenant_clock() {
+        let instant: DateTime<Utc> = "2026-07-01T22:30:00Z".parse().unwrap();
+        assert_eq!(
+            course_today(instant, "Europe/Berlin").unwrap(),
+            NaiveDate::from_ymd_opt(2026, 7, 2).unwrap(),
+        );
+    }
 
     fn rule(weekday: u8, start: &str, end: &str) -> AvailabilityRule {
         AvailabilityRule::try_new(None, weekday, start, end, 4, 8).expect("valid rule")
@@ -872,6 +890,7 @@ mod tests {
             _credentials: GatewayCredentials<'_>,
             _from: NaiveDate,
             _to: NaiveDate,
+            _timezone: &str,
         ) -> Result<Vec<BudgetAchievement>, CourseError> {
             unimplemented!("not used")
         }
@@ -880,6 +899,7 @@ mod tests {
             &self,
             _credentials: GatewayCredentials<'_>,
             _year_month: &str,
+            _timezone: &str,
         ) -> Result<MonthlySettlement, CourseError> {
             unimplemented!("not used")
         }
@@ -888,6 +908,7 @@ mod tests {
             &self,
             _credentials: GatewayCredentials<'_>,
             _year_month: &str,
+            _timezone: &str,
         ) -> Result<String, CourseError> {
             unimplemented!("not used")
         }

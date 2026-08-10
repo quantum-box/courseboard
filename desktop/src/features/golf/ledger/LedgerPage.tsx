@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useTenantTimezone } from '../../../context/TenantTimezoneProvider'
 
 import { courseboardApiJson, nowIsoMinute, today } from '../../../api'
 import {
@@ -54,8 +55,8 @@ const NOW_TICK_MS = 30_000
 
 type ListResponse<T> = { items: T[] }
 
-function todayIsoDate() {
-  return today()
+function todayIsoDate(timezone: string) {
+  return today(timezone)
 }
 
 function shiftDate(isoDate: string, deltaDays: number) {
@@ -64,12 +65,13 @@ function shiftDate(isoDate: string, deltaDays: number) {
   return next.toISOString().slice(0, 10)
 }
 
-function useCurrentMinute() {
-  const [now, setNow] = useState(nowIsoMinute)
+function useCurrentMinute(timezone: string) {
+  const [now, setNow] = useState(() => nowIsoMinute(timezone))
   useEffect(() => {
-    const timer = setInterval(() => setNow(nowIsoMinute()), NOW_TICK_MS)
+    setNow(nowIsoMinute(timezone))
+    const timer = setInterval(() => setNow(nowIsoMinute(timezone)), NOW_TICK_MS)
     return () => clearInterval(timer)
-  }, [])
+  }, [timezone])
   return now
 }
 
@@ -84,11 +86,13 @@ function DateControls({
   onShift,
   onSet,
   labels,
+  todayDate,
 }: {
   date: string
   onShift: (delta: number) => void
   onSet: (date: string) => void
   labels: { prev: string; next: string; date: string; today: string }
+  todayDate: string
 }) {
   return (
     <div className="ledger-date-controls">
@@ -106,7 +110,7 @@ function DateControls({
         <Input
           type="date"
           value={date}
-          onChange={event => onSet(event.target.value || todayIsoDate())}
+          onChange={event => onSet(event.target.value || todayDate)}
         />
       </label>
       <Button
@@ -118,7 +122,7 @@ function DateControls({
       >
         <ChevronRight />
       </Button>
-      <Button type="button" variant="ghost" size="sm" onClick={() => onSet(todayIsoDate())}>
+      <Button type="button" variant="ghost" size="sm" onClick={() => onSet(todayDate)}>
         <CalendarRange />
         {labels.today}
       </Button>
@@ -128,7 +132,9 @@ function DateControls({
 
 export function LedgerPage() {
   const { t } = useTranslation(['ledger', 'timeline', 'common'])
-  const [date, setDate] = useState(todayIsoDate)
+  const timezone = useTenantTimezone()
+  const tenantToday = todayIsoDate(timezone)
+  const [date, setDate] = useState(() => tenantToday)
   /** Empty means every course. Remembered: the desk works the same columns daily. */
   const [selectedCourseIds, setSelectedCourseIds] = useState(readStoredCourseIds)
   const [selection, setSelection] = useState<SlotSelection | null>(null)
@@ -143,7 +149,7 @@ export function LedgerPage() {
   const [cancellingReservationId, setCancellingReservationId] = useState<string | null>(null)
   /** Parties saved this session, so the board updates without a full reload. */
   const [localParties, setLocalParties] = useState<Record<string, PartyDetails>>({})
-  const currentMinute = useCurrentMinute()
+  const currentMinute = useCurrentMinute(timezone)
 
   const courseIds = courseIdsParam(selectedCourseIds)
   const ledger = useResource(() => {
@@ -423,6 +429,7 @@ export function LedgerPage() {
               with the rest of the chrome out of the way. */}
           <DateControls
             date={date}
+            todayDate={tenantToday}
             onShift={delta => setDate(value => shiftDate(value, delta))}
             onSet={setDate}
             labels={{
@@ -479,6 +486,7 @@ export function LedgerPage() {
         <section className="ledger-toolbar" aria-label={t('timeline:toolbar.label')}>
           <DateControls
             date={date}
+            todayDate={tenantToday}
             onShift={delta => setDate(value => shiftDate(value, delta))}
             onSet={setDate}
             labels={{

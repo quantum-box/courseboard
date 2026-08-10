@@ -11,10 +11,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{Duration, NaiveDate};
 
 use crate::course::domain::{
-    demo_board, seed_tee_time, BusinessHours, CourseError, CourseId, CourseOrder,
+    demo_board, parse_tenant_tee_time, BusinessHours, CourseError, CourseId, CourseOrder,
     GatewayCredentials, GolfCatalogGateway, NewReservation, PlayType, ReservationGateway,
     SeedCourse, SeedGroup, SlotOverride, SlotOverrideGateway, UpsertCourse,
     UpsertReservationProduct, UpsertSlotOverrides, SEED_DURATION_MINUTES, SEED_PREFIX,
@@ -210,6 +210,7 @@ impl SeedDemoBoardUseCase {
             .into_iter()
             .map(|entry| (entry.seed_key, entry.id))
             .collect();
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
 
         let mut created = 0;
         let mut updated = 0;
@@ -225,6 +226,7 @@ impl SeedDemoBoardUseCase {
                 service_ids
                     .get(&(group.course_key, group.play_type))
                     .cloned(),
+                &timezone,
             )?;
             match seeded.get(&group.seed_key(date)) {
                 Some(id) => {
@@ -295,14 +297,16 @@ fn booking_for(
     course_id: &CourseId,
     reservation_type_id: &str,
     reservation_service_id: Option<String>,
+    timezone: &str,
 ) -> Result<NewReservation, CourseError> {
-    let starts_at = parse_tee_time(&seed_tee_time(date, group.tee_time)?)?;
+    let starts_at = parse_tenant_tee_time(date, group.tee_time, timezone)?;
     Ok(NewReservation {
         reservation_type_id: reservation_type_id.to_string(),
         reservation_service_id,
         reservation_resource_id: None,
         starts_at,
         ends_at: starts_at + Duration::minutes(SEED_DURATION_MINUTES),
+        timezone: timezone.to_string(),
         quantity: group.party_size,
         customer_name: group.customer_name.to_string(),
         golf_course_id: course_id.clone(),
@@ -310,12 +314,6 @@ fn booking_for(
         prepayment_policy: None,
         seed_key: Some(group.seed_key(date)),
     })
-}
-
-fn parse_tee_time(value: &str) -> Result<DateTime<Utc>, CourseError> {
-    DateTime::parse_from_rfc3339(value)
-        .map(|value| value.with_timezone(&Utc))
-        .map_err(|_| CourseError::Provider("the seed built an unreadable tee time".into()))
 }
 
 #[cfg(test)]
@@ -341,7 +339,15 @@ mod tests {
     fn a_booking_lands_on_the_requested_day_in_the_courses_own_clock() {
         let date = NaiveDate::from_ymd_opt(2026, 7, 20).unwrap();
         let group = &demo_board().groups[0];
-        let booking = booking_for(group, date, &CourseId::new("course-1"), "type-1", None).unwrap();
+        let booking = booking_for(
+            group,
+            date,
+            &CourseId::new("course-1"),
+            "type-1",
+            None,
+            "Asia/Tokyo",
+        )
+        .unwrap();
         assert_eq!(booking.starts_at.to_rfc3339(), "2026-07-19T21:53:00+00:00");
         assert_eq!(
             (booking.ends_at - booking.starts_at).num_minutes(),
@@ -359,6 +365,7 @@ mod tests {
             &CourseId::new("course-1"),
             "type-1",
             Some("cb-demo:karanuma-in:caddie".into()),
+            "Asia/Tokyo",
         )
         .unwrap();
         assert_eq!(booking.seed_key, Some(group.seed_key(date)));

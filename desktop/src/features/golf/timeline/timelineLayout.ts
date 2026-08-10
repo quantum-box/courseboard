@@ -1,5 +1,5 @@
 import { i18next } from '../../../i18n'
-import { COURSE_TIME_ZONE } from '../../../lib/clock'
+import { DEFAULT_TIME_ZONE } from '../../../lib/clock'
 
 import type {
   AssignmentCoverage,
@@ -122,10 +122,15 @@ export function parseLocalDateParts(iso: string): { date: string; minutes: numbe
 
 const DEFAULT_ASSIGNMENT_DURATION_MINUTES = 270
 
-/** Convert any ISO timestamp to JST calendar date + wall-clock minutes. */
-export function parseJstDateParts(iso: string): { date: string; minutes: number } {
-  // Prefer explicit +09:00 wall-clock digits (tee-sheet / mock contract).
-  if (/[+-]09:00$/.test(iso) || /\+0900$/.test(iso)) {
+/** Convert any ISO timestamp to tenant calendar date + wall-clock minutes. */
+export function parseTenantDateParts(
+  iso: string,
+  timezone = DEFAULT_TIME_ZONE,
+): { date: string; minutes: number } {
+  // Tee-sheet values carry the tenant offset, so their wall-clock digits are
+  // already authoritative. Assignment timestamps are normally UTC and take
+  // the IANA conversion below.
+  if (/[+-]\d{2}:?\d{2}$/.test(iso)) {
     return parseLocalDateParts(iso)
   }
   const parsed = new Date(iso)
@@ -133,13 +138,13 @@ export function parseJstDateParts(iso: string): { date: string; minutes: number 
     return parseLocalDateParts(iso)
   }
   const date = new Intl.DateTimeFormat('sv-SE', {
-    timeZone: COURSE_TIME_ZONE,
+    timeZone: timezone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   }).format(parsed)
   const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: COURSE_TIME_ZONE,
+    timeZone: timezone,
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
@@ -148,6 +153,9 @@ export function parseJstDateParts(iso: string): { date: string; minutes: number 
   const minute = Number(parts.find(part => part.type === 'minute')?.value ?? '0')
   return { date, minutes: hour * 60 + minute }
 }
+
+/** @deprecated Use parseTenantDateParts and pass the tenant timezone. */
+export const parseJstDateParts = parseTenantDateParts
 
 export function resolveAssignmentDurationMinutes(
   assignment: TimelineAssignment,
@@ -260,7 +268,10 @@ export function coverageForReservation(
   return primary ? 'assigned' : 'partial'
 }
 
-export function findOverlappingAssignmentIds(assignments: TimelineAssignment[]): Set<string> {
+export function findOverlappingAssignmentIds(
+  assignments: TimelineAssignment[],
+  timezone = DEFAULT_TIME_ZONE,
+): Set<string> {
   const byCaddie = new Map<string, TimelineAssignment[]>()
   for (const assignment of assignments) {
     const list = byCaddie.get(assignment.caddieProfileId) ?? []
@@ -273,12 +284,12 @@ export function findOverlappingAssignmentIds(assignments: TimelineAssignment[]):
     const sorted = [...list].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
     for (let i = 0; i < sorted.length; i += 1) {
       const current = sorted[i]!
-      const currentStart = parseJstDateParts(current.scheduledAt).minutes
+      const currentStart = parseTenantDateParts(current.scheduledAt, timezone).minutes
       const currentDuration = current.durationMinutes ?? DEFAULT_ASSIGNMENT_DURATION_MINUTES
       const currentEnd = currentStart + Math.max(currentDuration, 15)
       for (let j = i + 1; j < sorted.length; j += 1) {
         const next = sorted[j]!
-        const nextStart = parseJstDateParts(next.scheduledAt).minutes
+        const nextStart = parseTenantDateParts(next.scheduledAt, timezone).minutes
         if (nextStart >= currentEnd) break
         const nextDuration = next.durationMinutes ?? DEFAULT_ASSIGNMENT_DURATION_MINUTES
         const nextEnd = nextStart + Math.max(nextDuration, 15)
@@ -295,6 +306,7 @@ export function findOverlappingAssignmentIds(assignments: TimelineAssignment[]):
 export function summarizeDay(
   reservations: TeeReservation[],
   assignments: TimelineAssignment[],
+  timezone = DEFAULT_TIME_ZONE,
 ) {
   const caddieRequired = reservations.filter(item => item.playType === 'caddie')
   let assigned = 0
@@ -318,7 +330,7 @@ export function summarizeDay(
     unassigned,
     partial,
     coverageRate,
-    conflicts: findOverlappingAssignmentIds(assignments).size,
+    conflicts: findOverlappingAssignmentIds(assignments, timezone).size,
   }
 }
 
