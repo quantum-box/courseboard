@@ -365,6 +365,35 @@ export const helpEn: HelpCatalog = {
       ],
     },
 
+    'golf/courses/schedule': {
+      title: 'Bookable hours',
+      summary: 'Set the hours you take bookings in, per weekday. Saving builds the dated tee times from them automatically.',
+      usage: [
+        {
+          heading: 'Set the hours',
+          body: 'On each weekday card, set when the course opens, how many groups go out at once, and how far apart they start. Build one day, then use “Copy to…” for the rest of the week. Saving replaces the whole week, so check the added/removed/changed counts at the bottom first.',
+        },
+        {
+          heading: 'Saving builds the tee times',
+          body: 'Saving turns the hours into dated tee times, and those are what a booking lands on. The date at the top of the screen says how far the book now reaches. Change how far ahead you sell under “Booking rules”.',
+        },
+        {
+          heading: 'Caddie cover lives elsewhere',
+          body: 'The group count here is what one tee can send out — a course constraint. Whether the caddies cover the day is answered on “Today’s placement”, against each course’s roster and its caddie-attached bookings.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Bookable hours',
+          body: 'Per weekday and band: groups out at once, and the tee interval. A rule that repeats every week — nothing books against it directly.',
+        },
+        {
+          heading: 'Tee times',
+          body: 'The dated, one-group slots built from the hours. Slots holding a booking or a payment hold are never reduced below what they already carry.',
+        },
+      ],
+    },
+
     'golf/policy': {
       title: 'Booking rules',
       summary: 'One-time setup for the conditions under which you accept bookings.',

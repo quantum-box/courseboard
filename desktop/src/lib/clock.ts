@@ -39,3 +39,20 @@ export function nowIsoMinute() {
 export function currentYearMonth() {
   return today().slice(0, 7)
 }
+
+/**
+ * A `YYYY-MM-DD` value written the way the locale writes a date.
+ *
+ * Parsed by parts on purpose: `new Date('2026-08-10')` is midnight UTC, which
+ * reads as the 9th west of Greenwich — wrong by a day for a value nobody
+ * attached a time to.
+ */
+export function formatCourseDate(iso: string, locale?: string) {
+  const [year, month, day] = iso.split('-').map(Number)
+  if (!year || !month || !day) return iso
+  return new Intl.DateTimeFormat(locale, {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  }).format(new Date(year, month - 1, day))
+}

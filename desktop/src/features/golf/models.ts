@@ -76,31 +76,6 @@ export type GolfProductSlot = {
   maxPlayers: number
 }
 
-export type CapacityProfile = {
-  id: string
-  active?: boolean
-  canTwoRounds?: boolean
-}
-
-export type CapacityAvailability = {
-  caddieProfileId: string
-  status:
-    | 'available'
-    | 'unavailable'
-    | 'morning_only'
-    | 'afternoon_only'
-    | 'light_duty'
-  twoRoundRequest?: boolean
-}
-
-export type CaddieSlotCapacity = {
-  morningCapacity: number
-  afternoonCapacity: number
-  totalRounds: number
-  activeCaddies: number
-  unavailable: number
-  assumedAvailable: number
-}
 
 const WEEKDAY_KEYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
 
@@ -394,93 +369,7 @@ export function nextSlotForWeekday(slots: GolfProductSlot[], weekday: number): G
   }
 }
 
-export function calculateCaddieCapacity(
-  sourceProfiles: CapacityProfile[],
-  availabilities: CapacityAvailability[],
-): CaddieSlotCapacity {
-  const profiles = sourceProfiles.filter(profile => profile.active !== false)
-  const availabilityByCaddie = new Map(
-    availabilities.map(availability => [availability.caddieProfileId, availability]),
-  )
-  let morningCapacity = 0
-  let afternoonCapacity = 0
-  let totalRounds = 0
-  let unavailable = 0
-  let assumedAvailable = 0
-
-  profiles.forEach(profile => {
-    const availability = availabilityByCaddie.get(profile.id)
-    const status = availability?.status ?? 'available'
-    if (!availability) assumedAvailable += 1
-    if (status === 'unavailable') {
-      unavailable += 1
-      return
-    }
-
-    const worksMorning = status !== 'afternoon_only'
-    const worksAfternoon = status !== 'morning_only'
-    if (worksMorning) morningCapacity += 1
-    if (worksAfternoon) afternoonCapacity += 1
-
-    const canTakeTwoRounds = Boolean(
-      profile.canTwoRounds
-      && availability?.twoRoundRequest
-      && status !== 'light_duty'
-      && worksMorning
-      && worksAfternoon,
-    )
-    totalRounds += canTakeTwoRounds ? 2 : 1
-  })
-
-  return {
-    morningCapacity,
-    afternoonCapacity,
-    totalRounds,
-    activeCaddies: profiles.length,
-    unavailable,
-    assumedAvailable,
-  }
-}
-
-
-
-
 export function weekdayForIsoDate(date: string) {
   const [year, month, day] = date.split('-').map(Number)
   return new Date(Date.UTC(year, month - 1, day)).getUTCDay()
-}
-
-export function applyCapacityToSlots(
-  slots: GolfProductSlot[],
-  date: string,
-  capacity: CaddieSlotCapacity,
-) {
-  const weekday = weekdayForIsoDate(date)
-  const matching = slots.filter(slot => slot.weekday === weekday)
-  if (matching.length === 0) {
-    return [
-      ...slots,
-      {
-        ...emptySlot(weekday),
-        maxGroups: capacity.morningCapacity,
-      },
-      {
-        ...emptySlot(weekday),
-        startTime: '12:00',
-        endTime: '15:00',
-        maxGroups: capacity.afternoonCapacity,
-      },
-    ]
-  }
-
-  return slots.map(slot => (
-    slot.weekday === weekday
-      ? {
-          ...slot,
-          maxGroups: slot.startTime < '12:00'
-            ? capacity.morningCapacity
-            : capacity.afternoonCapacity,
-        }
-      : slot
-  ))
 }

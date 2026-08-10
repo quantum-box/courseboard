@@ -76,7 +76,8 @@ pub use caddie_rank_fees::{GetCaddieRankFeesUseCase, ReplaceCaddieRankFeesUseCas
 pub use cancel_reservation::CancelReservationUseCase;
 pub use course_order::{GetCourseOrderUseCase, ReplaceCourseOrderUseCase};
 pub use course_schedule::{
-    GenerateCourseTimeSlotsUseCase, GetCourseScheduleUseCase, ReplaceCourseScheduleUseCase,
+    ExtendCourseInventoryUseCase, GenerateCourseTimeSlotsUseCase, GetBookingHorizonUseCase,
+    GetCourseScheduleUseCase, ReplaceCourseScheduleUseCase, SetBookingHorizonUseCase,
 };
 pub use create_caddie::CreateCaddieUseCase;
 pub use create_caddie_assignment::{CreateCaddieAssignmentUseCase, NameCaddieForRound};

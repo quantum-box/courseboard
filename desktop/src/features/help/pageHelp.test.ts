@@ -25,6 +25,11 @@ describe('getPageHelp', () => {
     expect(getPageHelp('golf/caddies/payroll').title).toBe('給与')
   })
 
+  it('gives a course id its own guide instead of the course list', () => {
+    expect(getPageHelp('golf/courses').title).toBe('コース設定')
+    expect(getPageHelp('golf/courses/course-1').title).toBe('受付枠')
+  })
+
   it('falls back for unknown routes', () => {
     expect(getPageHelp('unknown').title).toBe('Course Board')
   })

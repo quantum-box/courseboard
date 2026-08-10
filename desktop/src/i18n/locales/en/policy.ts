@@ -28,6 +28,9 @@ export const policy: DeepPartial<typeof source> = {
     cart: 'Cart',
     cutoff: 'Booking cutoff',
     cutoffHint: 'How many hours before the tee time bookings close',
+    bookingHorizon: 'How far ahead you sell',
+    bookingHorizonHint: 'Days from today. Only tee times inside this window are built, and only those can be booked.',
+    bookingHorizonThrough: 'Bookings are open through {{date}}. Changing this rebuilds every course.',
   },
   cartOption: {
     optional: 'Optional',
@@ -78,6 +81,7 @@ export const policy: DeepPartial<typeof source> = {
     memberDeposit: 'Enter a member deposit between 0 and 100%.',
     guestDeposit: 'Enter a guest deposit between 0 and 100%.',
     cutoff: 'Enter a cutoff of 0 or more hours.',
+    bookingHorizon: 'Enter how far ahead you sell, between 1 and 399 days.',
     spendThreshold: 'Enter a minimum per player of 0 or more.',
   },
 }
