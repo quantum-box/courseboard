@@ -1088,6 +1088,14 @@ function normalizeMockPath(pathname: string): string {
     pathname === '/v1/course/tee-sheet'
     || pathname === '/v1/course/extension-status'
     || pathname === '/v1/course/config'
+    // Confirmed shifts and the balance board are CourseBoard's own data, with
+    // nothing behind them in Field to map onto.
+    || pathname === '/v1/course/caddie-shifts'
+    || pathname === '/v1/course/caddie-course-supply'
+    || pathname === '/v1/course/caddie-reinforcements'
+    || pathname === '/v1/course/caddie-shift-rules'
+    || pathname.startsWith('/v1/course/caddie-shifts/')
+    || pathname.startsWith('/v1/course/caddie-shift-plans/')
   ) {
     return pathname
   }
@@ -1156,6 +1164,334 @@ function normalizeMockPath(pathname: string): string {
     }
   }
   return pathname
+}
+
+
+/**
+ * Confirmed shifts, as CourseBoard's own table would hold them.
+ *
+ * Unlike everything else in this file these are not Field fixtures: the
+ * placement of a caddie onto a course is CourseBoard's data (ADR-0005). They
+ * live here so the shift board and the balance board can be worked on without
+ * a database behind the dev server.
+ */
+type MockShift = {
+  caddieProfileId: string
+  date: string
+  golfCourseId: string | null
+  isWorking: boolean
+  span: string
+  roundsCapacity: number
+  origin: string
+  note: string | null
+  updatedBy: string | null
+  updatedAt: string | null
+}
+
+const mockShifts: MockShift[] = loadMockWrites<MockShift[]>('caddieShifts', [])
+
+/** Half the roster is based on each course, and can cover the other. */
+function mockMemberships(profileId: string) {
+  const index = Math.max(0, mockCaddies.findIndex(caddie => caddie.id === profileId))
+  const main = index % 2 === 0 ? 'course_east' : 'course_west'
+  const sub = main === 'course_east' ? 'course_west' : 'course_east'
+  return [
+    {
+      id: `membership_${profileId}_${main}`,
+      caddieProfileId: profileId,
+      golfCourseId: main,
+      isPrimary: true,
+    },
+    {
+      id: `membership_${profileId}_${sub}`,
+      caddieProfileId: profileId,
+      golfCourseId: sub,
+      isPrimary: false,
+    },
+  ]
+}
+
+function mainCourseOf(profileId: string): string | null {
+  return mockMemberships(profileId).find(entry => entry.isPrimary)?.golfCourseId ?? null
+}
+
+function shiftKey(caddieProfileId: string, date: string) {
+  return `${caddieProfileId}:${date}`
+}
+
+function storeShift(shift: MockShift) {
+  const index = mockShifts.findIndex(
+    entry => shiftKey(entry.caddieProfileId, entry.date) === shiftKey(shift.caddieProfileId, shift.date),
+  )
+  if (index < 0) mockShifts.push(shift)
+  else mockShifts[index] = shift
+  // Confirmed shifts outlive a reload, like the desk marks do: a month planned
+  // in one screen has to still be there when the balance board is opened.
+  saveMockWrites('caddieShifts', mockShifts)
+}
+
+/** The statutory ceiling the API clamps to. */
+const MOCK_STATUTORY_MAX_CONSECUTIVE_WORK_DAYS = 6
+const MOCK_MAX_ROUNDS_CEILING = 2
+
+const MOCK_WEEK = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] as const
+
+/** The club's shift-planning rules, as the API would hold them. */
+type MockShiftRules = {
+  avoidedRestWeekdays: string[]
+  maxConsecutiveWorkDays: number
+  maxRoundsPerDay: number
+  minRestDaysPerMonth: number
+  unfiledRequest: string
+}
+
+const mockShiftRules: MockShiftRules = loadMockWrites<MockShiftRules>('shiftRules', {
+  avoidedRestWeekdays: ['sat', 'sun'],
+  maxConsecutiveWorkDays: MOCK_STATUTORY_MAX_CONSECUTIVE_WORK_DAYS,
+  maxRoundsPerDay: MOCK_MAX_ROUNDS_CEILING,
+  minRestDaysPerMonth: 0,
+  unfiledRequest: 'working',
+})
+
+function mockShiftRulesDto() {
+  return {
+    ...mockShiftRules,
+    avoidedRestWeekdays: [...mockShiftRules.avoidedRestWeekdays],
+    statutoryMaxConsecutiveWorkDays: MOCK_STATUTORY_MAX_CONSECUTIVE_WORK_DAYS,
+    maxRoundsCeiling: MOCK_MAX_ROUNDS_CEILING,
+  }
+}
+
+function weekdayKeyOf(date: string): string {
+  return MOCK_WEEK[new Date(`${date}T00:00:00Z`).getUTCDay()] ?? 'mon'
+}
+
+/** The same rules the API applies, kept simple enough to read at a glance. */
+/**
+ * The same rules the API applies: at most six working days in a row, with the
+ * rest day chosen from the window rather than always taken at the deadline —
+ * protected weekdays first, then whichever day fewest colleagues are already
+ * off, then the latest such day.
+ */
+function planMockMonth(yearMonth: string) {
+  const [year, month] = yearMonth.split('-').map(Number)
+  if (!year || !month) {
+    return {
+      daysWritten: 0,
+      pinnedKept: 0,
+      statutoryRestDays: 0,
+      unplaced: [] as string[],
+      overworked: [] as string[],
+    }
+  }
+  const first = `${yearMonth}-01`
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  const last = `${yearMonth}-${String(lastDay).padStart(2, '0')}`
+  const days = datesBetween(first, last)
+  const filed = resolveGet(
+    `/v1/erp/extensions/golf-course/caddie-availabilities?from=${first}&to=${last}`,
+  ) as { items: Array<{ caddieProfileId: string; date: string; status: string; twoRoundRequest?: boolean }> } | null
+  const requests = new Map<string, { status: string; twoRoundRequest: boolean }>()
+  for (const entry of filed?.items ?? []) {
+    requests.set(shiftKey(entry.caddieProfileId, entry.date), {
+      status: entry.status,
+      twoRoundRequest: Boolean(entry.twoRoundRequest),
+    })
+  }
+
+  let daysWritten = 0
+  let pinnedKept = 0
+  let statutoryRestDays = 0
+  const unplaced = new Set<string>()
+  const overworked = new Set<string>()
+  const restingByDate = new Map<string, number>()
+
+  for (const caddie of mockCaddies) {
+    const main = mainCourseOf(caddie.id)
+    const pinnedFor = (date: string) => mockShifts.find(
+      entry => shiftKey(entry.caddieProfileId, entry.date) === shiftKey(caddie.id, date)
+        && entry.origin === 'pinned',
+    )
+    const alreadyOff = (date: string) => {
+      const pinned = pinnedFor(date)
+      if (pinned) return !pinned.isWorking
+      const filed = requests.get(shiftKey(caddie.id, date))
+      if (filed) return filed.status === 'unavailable'
+      return mockShiftRules.unfiledRequest === 'off'
+    }
+
+    // Days worked before the 1st, so a run crossing the month boundary is not
+    // forgiven by the calendar.
+    let carried = 0
+    for (let back = 1; back <= mockShiftRules.maxConsecutiveWorkDays; back += 1) {
+      const day = new Date(`${first}T00:00:00Z`)
+      day.setUTCDate(day.getUTCDate() - back)
+      const earlier = mockShifts.find(
+        entry => shiftKey(entry.caddieProfileId, entry.date)
+          === shiftKey(caddie.id, day.toISOString().slice(0, 10)),
+      )
+      if (!earlier?.isWorking) break
+      carried += 1
+    }
+
+    // Pick this caddie's rest days first, then write the month against them.
+    const chosenRest = new Set<string>()
+    let worked = carried
+    let index = 0
+    while (index < days.length) {
+      const lastOfWindow = index + Math.max(0, mockShiftRules.maxConsecutiveWorkDays - worked)
+      if (lastOfWindow >= days.length) break
+      const window = days.slice(index, lastOfWindow + 1)
+      const filedOffset = window.findIndex(alreadyOff)
+      if (filedOffset >= 0) {
+        const rest = window[filedOffset]!
+        restingByDate.set(rest, (restingByDate.get(rest) ?? 0) + 1)
+        index += filedOffset + 1
+        worked = 0
+        continue
+      }
+      const choice = window
+        .filter(date => !pinnedFor(date)?.isWorking)
+        .sort((left, right) => {
+          const protectedDay = (date: string) =>
+            (mockShiftRules.avoidedRestWeekdays.includes(weekdayKeyOf(date)) ? 1 : 0)
+          return protectedDay(left) - protectedDay(right)
+            || (restingByDate.get(left) ?? 0) - (restingByDate.get(right) ?? 0)
+            || right.localeCompare(left)
+        })[0]
+      if (!choice) {
+        overworked.add(caddie.displayName)
+        worked += window.length
+        index = lastOfWindow + 1
+        continue
+      }
+      chosenRest.add(choice)
+      restingByDate.set(choice, (restingByDate.get(choice) ?? 0) + 1)
+      index += window.indexOf(choice) + 1
+      worked = 0
+    }
+
+    // Top up to the rest days the work rules promise, as the API does.
+    let restSoFar = days.filter(date => alreadyOff(date) || chosenRest.has(date)).length
+    while (restSoFar < mockShiftRules.minRestDaysPerMonth) {
+      const pick = days
+        .filter(date => !chosenRest.has(date) && !alreadyOff(date) && !pinnedFor(date)?.isWorking)
+        .sort((left, right) => {
+          const protectedDay = (date: string) =>
+            (mockShiftRules.avoidedRestWeekdays.includes(weekdayKeyOf(date)) ? 1 : 0)
+          return protectedDay(left) - protectedDay(right)
+            || (restingByDate.get(left) ?? 0) - (restingByDate.get(right) ?? 0)
+            || left.localeCompare(right)
+        })[0]
+      if (!pick) break
+      chosenRest.add(pick)
+      restingByDate.set(pick, (restingByDate.get(pick) ?? 0) + 1)
+      restSoFar += 1
+    }
+
+    for (const date of days) {
+      const pinned = pinnedFor(date)
+      if (pinned) {
+        pinnedKept += 1
+        daysWritten += 1
+        continue
+      }
+      const request = requests.get(shiftKey(caddie.id, date))
+      const status = request?.status
+        ?? (mockShiftRules.unfiledRequest === 'off' ? 'unavailable' : 'available')
+      const restDue = chosenRest.has(date)
+      const off = status === 'unavailable' || restDue
+      if (restDue && status !== 'unavailable') statutoryRestDays += 1
+      const span = status === 'morning_only'
+        ? 'morning'
+        : status === 'afternoon_only'
+          ? 'afternoon'
+          : 'full_day'
+      const twoRounds = span === 'full_day'
+        && status !== 'light_duty'
+        && Boolean(caddie.canTwoRounds)
+        && Boolean(request?.twoRoundRequest)
+        && mockShiftRules.maxRoundsPerDay >= 2
+      storeShift({
+        caddieProfileId: caddie.id,
+        date,
+        golfCourseId: off ? null : main,
+        isWorking: !off,
+        span: off ? 'full_day' : span,
+        roundsCapacity: off ? 0 : twoRounds ? 2 : 1,
+        origin: 'generated',
+        note: null,
+        updatedBy: null,
+        updatedAt: null,
+      })
+      if (!off && !main) unplaced.add(caddie.displayName)
+      daysWritten += 1
+    }
+  }
+  return {
+    daysWritten,
+    pinnedKept,
+    statutoryRestDays,
+    unplaced: [...unplaced],
+    overworked: [...overworked],
+  }
+}
+
+function caddieAttachedByCourse(date: string): Map<string, number> {
+  const demand = new Map<string, number>()
+  for (const reservation of mockTeeReservations) {
+    if (!reservation.teeTime.startsWith(date)) continue
+    if (reservation.playType !== 'caddie') continue
+    if (reservation.status === 'cancelled') continue
+    demand.set(reservation.golfCourseId, (demand.get(reservation.golfCourseId) ?? 0) + 1)
+  }
+  return demand
+}
+
+function mockCourseSupply(date: string) {
+  const working = mockShifts.filter(shift => shift.date === date && shift.isWorking)
+  const demand = caddieAttachedByCourse(date)
+  return {
+    date,
+    courses: mockCourses.filter(course => course.isActive).map(course => {
+      const placed = working.filter(shift => shift.golfCourseId === course.id)
+      const roundsCapacity = placed.reduce((total, shift) => total + shift.roundsCapacity, 0)
+      const caddieAttachedGroups = demand.get(course.id) ?? 0
+      return {
+        golfCourseId: course.id,
+        courseName: course.name,
+        workingCaddies: placed.length,
+        roundsCapacity,
+        caddieAttachedGroups,
+        movableCaddies: placed.filter(shift => shift.origin !== 'pinned').length,
+        shortfall: roundsCapacity - caddieAttachedGroups,
+      }
+    }),
+    unplacedCaddies: working.filter(shift => shift.golfCourseId === null).length,
+  }
+}
+
+function mockReinforcements(date: string, courseId: string) {
+  return mockShifts
+    .filter(shift => shift.date === date && shift.isWorking)
+    .filter(shift => shift.origin !== 'pinned')
+    .filter(shift => shift.golfCourseId !== courseId)
+    .filter(shift => mockMemberships(shift.caddieProfileId)
+      .some(entry => entry.golfCourseId === courseId))
+    .map(shift => ({
+      caddieProfileId: shift.caddieProfileId,
+      displayName: mockCaddies.find(caddie => caddie.id === shift.caddieProfileId)?.displayName
+        ?? shift.caddieProfileId,
+      fromGolfCourseId: shift.golfCourseId,
+      roundsCapacity: shift.roundsCapacity,
+      span: shift.span,
+      returnsHome: mainCourseOf(shift.caddieProfileId) === courseId,
+    }))
+    .sort((left, right) => {
+      const cost = (entry: typeof left) =>
+        entry.fromGolfCourseId === null ? 0 : entry.returnsHome ? 1 : 2
+      return cost(left) - cost(right) || left.caddieProfileId.localeCompare(right.caddieProfileId)
+    })
 }
 
 function resolveGet(path: string): Json | null | undefined {
@@ -1232,6 +1568,32 @@ function resolveGet(path: string): Json | null | undefined {
   }
 
   // CourseBoard course-api tee-sheet (not Field golf-course extension).
+  if (rawPathname === '/v1/course/caddie-shifts') {
+    const from = url.searchParams.get('from') ?? TODAY
+    const to = url.searchParams.get('to') ?? from
+    return items(
+      mockShifts
+        .filter(shift => shift.date >= from && shift.date <= to)
+        .sort((left, right) => left.date.localeCompare(right.date)
+          || left.caddieProfileId.localeCompare(right.caddieProfileId)),
+    )
+  }
+
+  if (rawPathname === '/v1/course/caddie-shift-rules') {
+    return mockShiftRulesDto()
+  }
+
+  if (rawPathname === '/v1/course/caddie-course-supply') {
+    return mockCourseSupply(url.searchParams.get('date') ?? TODAY)
+  }
+
+  if (rawPathname === '/v1/course/caddie-reinforcements') {
+    return items(mockReinforcements(
+      url.searchParams.get('date') ?? TODAY,
+      url.searchParams.get('golfCourseId') ?? '',
+    ))
+  }
+
   if (rawPathname === '/v1/course/tee-sheet') {
     const date = url.searchParams.get('date') ?? TODAY
     const courseId = url.searchParams.get('golfCourseId')
@@ -1481,14 +1843,7 @@ function resolveGet(path: string): Json | null | undefined {
   )
   if (membershipMatch) {
     const profileId = decodeURIComponent(membershipMatch[1] ?? '')
-    return items([
-      {
-        id: `membership_${profileId}_east`,
-        caddieProfileId: profileId,
-        golfCourseId: 'course_east',
-        isPrimary: true,
-      },
-    ])
+    return items(mockMemberships(profileId))
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-ratings') {
@@ -1672,6 +2027,78 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     mockCourseOrder.splice(0, mockCourseOrder.length, ...ids.filter(id => known.includes(id)))
     saveMockWrites('courseOrder', mockCourseOrder)
     return hit({ golfCourseIds: [...mockCourseOrder] })
+  }
+
+  if (pathname === '/v1/course/caddie-shift-rules' && method === 'PUT') {
+    const weekdays = Array.isArray(body?.avoidedRestWeekdays)
+      ? body.avoidedRestWeekdays.map(String).filter(day => MOCK_WEEK.includes(day as never))
+      : []
+    const consecutive = Number(body?.maxConsecutiveWorkDays ?? mockShiftRules.maxConsecutiveWorkDays)
+    const rounds = Number(body?.maxRoundsPerDay ?? mockShiftRules.maxRoundsPerDay)
+    const minRest = Number(body?.minRestDaysPerMonth ?? mockShiftRules.minRestDaysPerMonth)
+    // The API refuses these rather than clamping, so the mock does too.
+    if (consecutive < 1 || consecutive > MOCK_STATUTORY_MAX_CONSECUTIVE_WORK_DAYS) {
+      return error(400, '連続勤務の上限は1日以上6日以下です')
+    }
+    if (rounds < 1 || rounds > MOCK_MAX_ROUNDS_CEILING) {
+      return error(400, '1日の最大ラウンド数は1組または2組です')
+    }
+    if (minRest < 0 || minRest > 31) {
+      return error(400, '月の最低休日数は0日以上31日以下です')
+    }
+    mockShiftRules.avoidedRestWeekdays = weekdays
+    mockShiftRules.maxConsecutiveWorkDays = consecutive
+    mockShiftRules.maxRoundsPerDay = rounds
+    mockShiftRules.minRestDaysPerMonth = minRest
+    mockShiftRules.unfiledRequest = body?.unfiledRequest === 'off' ? 'off' : 'working'
+    saveMockWrites('shiftRules', mockShiftRules)
+    return hit(mockShiftRulesDto())
+  }
+
+  const shiftPlanMatch = pathname.match(/^\/v1\/course\/caddie-shift-plans\/([^/]+)$/)
+  if (shiftPlanMatch && method === 'POST') {
+    const yearMonth = decodeURIComponent(shiftPlanMatch[1] ?? '')
+    const run = planMockMonth(yearMonth)
+    return hit({
+      yearMonth,
+      daysWritten: run.daysWritten,
+      pinnedKept: run.pinnedKept,
+      unplaced: run.unplaced,
+      statutoryRestDays: run.statutoryRestDays,
+      overworked: run.overworked,
+      deadlineWarning: null,
+    })
+  }
+
+  const shiftDayMatch = pathname.match(/^\/v1\/course\/caddie-shifts\/([^/]+)\/([^/]+)$/)
+  if (shiftDayMatch && method === 'PUT') {
+    const caddieProfileId = decodeURIComponent(shiftDayMatch[1] ?? '')
+    const date = decodeURIComponent(shiftDayMatch[2] ?? '')
+    const isWorking = body?.isWorking !== false
+    const golfCourseId = body?.golfCourseId == null ? null : String(body.golfCourseId)
+    // The API refuses a course the caddie has no membership for; the mock
+    // refuses it too, so the message can be seen without a backend.
+    if (
+      isWorking
+      && golfCourseId
+      && !mockMemberships(caddieProfileId).some(entry => entry.golfCourseId === golfCourseId)
+    ) {
+      return error(400, 'the caddie has no membership for that course')
+    }
+    const stored: MockShift = {
+      caddieProfileId,
+      date,
+      golfCourseId: isWorking ? golfCourseId : null,
+      isWorking,
+      span: isWorking ? String(body?.span ?? 'full_day') : 'full_day',
+      roundsCapacity: isWorking ? Number(body?.roundsCapacity ?? 1) : 0,
+      origin: body?.pinned === true ? 'pinned' : 'edited',
+      note: body?.note == null ? null : String(body.note),
+      updatedBy: body?.updatedBy == null ? null : String(body.updatedBy),
+      updatedAt: NOW,
+    }
+    storeShift(stored)
+    return hit(stored)
   }
 
   if (pathname === '/v1/course/slot-overrides' && method === 'PUT') {

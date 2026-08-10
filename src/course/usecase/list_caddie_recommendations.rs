@@ -12,9 +12,9 @@ use std::sync::Arc;
 
 use crate::course::domain::{
     course_day_bounds, rank_caddies, shift_covers_tee_time, widen_for_utc_date_filter,
-    AttendanceState, AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery,
-    CaddieRecommendation, CourseError, GatewayCredentials, GolfOpsGateway, RankingCandidate,
-    RankingOptions, RecommendationQuery,
+    AttendanceState, AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery, CaddiePlacement,
+    CaddieRecommendation, CaddieShift, CaddieShiftGateway, CourseError, GatewayCredentials,
+    GolfOpsGateway, RankingCandidate, RankingOptions, RecommendationQuery,
 };
 
 /// Minutes east of UTC for the course clock, as everywhere else in this product.
@@ -22,11 +22,12 @@ const JST_OFFSET_MINUTES: i64 = 9 * 60;
 
 pub struct ListCaddieRecommendationsUseCase {
     ops: Arc<dyn GolfOpsGateway>,
+    shifts: Arc<dyn CaddieShiftGateway>,
 }
 
 impl ListCaddieRecommendationsUseCase {
-    pub fn new(ops: Arc<dyn GolfOpsGateway>) -> Self {
-        Self { ops }
+    pub fn new(ops: Arc<dyn GolfOpsGateway>, shifts: Arc<dyn CaddieShiftGateway>) -> Self {
+        Self { ops, shifts }
     }
 
     pub async fn execute(
@@ -43,7 +44,7 @@ impl ListCaddieRecommendationsUseCase {
             });
 
         let window = widen_for_utc_date_filter(date, date);
-        let (roster, ratings, assignments, attendance, availabilities) = tokio::try_join!(
+        let (roster, ratings, assignments, attendance, availabilities, confirmed) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
             self.ops.list_caddie_ratings(credentials, None),
             self.ops.list_caddie_assignments(
@@ -64,7 +65,17 @@ impl ListCaddieRecommendationsUseCase {
                     date: None,
                 },
             ),
+            self.shifts.list_shifts(credentials.operator_id, date, date),
         )?;
+
+        // Who stands where today. A day the month was never confirmed for
+        // leaves this empty, and the ranking then offers the whole roster as
+        // it did before placements existed.
+        let shift_by_caddie: HashMap<&str, &CaddieShift> = confirmed
+            .iter()
+            .filter(|shift| shift.date() == date)
+            .map(|shift| (shift.caddie_id().as_str(), shift))
+            .collect();
 
         let mut rating_totals: HashMap<String, (f64, i64)> = HashMap::new();
         for rating in &ratings {
@@ -112,6 +123,25 @@ impl ListCaddieRecommendationsUseCase {
             // wrong one. Attendance only orders the people who could work
             // today; the roster decides who those are.
             .filter(|caddie| caddie.is_assignable())
+            // A day confirmed as off is not a candidate, and a caddie standing
+            // on another course cannot walk this round — moving them is the
+            // balance board's job, not a suggestion to be ranked low.
+            .filter(|caddie| {
+                shift_by_caddie
+                    .get(caddie.id().as_str())
+                    .map(|shift| shift.is_working())
+                    .unwrap_or(true)
+            })
+            .filter(|caddie| {
+                let placement = match shift_by_caddie.get(caddie.id().as_str()) {
+                    Some(shift) => match shift.course_id() {
+                        Some(course_id) => CaddiePlacement::On(course_id.clone()),
+                        None => CaddiePlacement::Unplaced,
+                    },
+                    None => CaddiePlacement::Unconfirmed,
+                };
+                placement.covers(query.golf_course_id.as_ref())
+            })
             // Same for somebody who filed for the day off. Asked about a
             // specific tee time, a half-day request is judged too; asked about
             // the day as a whole, it cannot be, so it stays in.

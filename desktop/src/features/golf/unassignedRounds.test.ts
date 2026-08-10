@@ -6,6 +6,7 @@ function round(id: string, playType: string) {
   return {
     id,
     reservationNumber: `RSV-${id}`,
+    golfCourseId: 'course-out',
     courseName: '羊ヶ丘',
     teeTime: '2026-08-08T07:00:00+09:00',
     playType,

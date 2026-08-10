@@ -80,6 +80,7 @@ import {
 import { useResource } from '../../hooks/useResource'
 import { navigate, useNavigationGuard } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
+import { Sheet } from '../../components/Sheet'
 import { UnassignedRoundsPanel } from './UnassignedRounds'
 import { showToast } from '../../lib/toast'
 import {
@@ -577,6 +578,7 @@ const RATIONALE_KEYS: Record<string, string> = {
   // Why the planner left a round unstaffed.
   no_caddie_available: 'caddies:rationale.noCaddieAvailable',
   all_caddies_at_daily_limit: 'caddies:rationale.allAtDailyLimit',
+  no_caddie_on_the_course: 'caddies:rationale.noCaddieOnCourse',
 }
 
 export function readableRationale(rationale: string[]) {
@@ -977,6 +979,7 @@ function DispatchView({
           </p>
         </div>
         <DailySupplyPanel date={date} />
+        <CourseBalancePanel date={date} onChanged={onChanged} />
         <div className="grid gap-4 xl:grid-cols-2">
           <AutoAssignPanel
             date={date}
@@ -1107,6 +1110,288 @@ function DailySupplyPanel({ date }: { date: string }) {
         </div>
       ) : null}
     </Panel>
+  )
+}
+
+/** One course's caddie day, as the balance board reads it. */
+type CourseCaddieSupply = {
+  golfCourseId: string
+  courseName: string
+  workingCaddies: number
+  roundsCapacity: number
+  caddieAttachedGroups: number
+  movableCaddies: number
+  shortfall: number
+}
+
+type DayCaddieSupply = {
+  date: string
+  courses: CourseCaddieSupply[]
+  unplacedCaddies: number
+}
+
+type Reinforcement = {
+  caddieProfileId: string
+  displayName: string
+  fromGolfCourseId: string | null
+  roundsCapacity: number
+  span: string
+  returnsHome: boolean
+}
+
+/**
+ * The day course by course, and the way to even it out.
+ *
+ * The tenant-wide supply above answers whether the day can be sold at all.
+ * This answers where the people are: a course can be short while the tenant
+ * as a whole has room, and the fix is to move somebody across for that day.
+ */
+function CourseBalancePanel({ date, onChanged }: { date: string; onChanged: () => void }) {
+  const { t } = useTranslation(['caddies', 'common'])
+  const [reinforcing, setReinforcing] = useState<CourseCaddieSupply | null>(null)
+  const resource = useResource(
+    () => courseboardApiJson<DayCaddieSupply>(
+      `${COURSE_API}/caddie-course-supply?date=${encodeURIComponent(date)}`,
+    ),
+    [date],
+  )
+
+  const columns: DataTableColumn<CourseCaddieSupply>[] = [
+    {
+      key: 'course',
+      header: t('caddies:balance.table.course'),
+      mobileLabel: t('caddies:balance.table.course'),
+      cell: row => <span className="font-medium">{row.courseName}</span>,
+    },
+    {
+      key: 'caddies',
+      header: t('caddies:balance.table.caddies'),
+      mobileLabel: t('caddies:balance.table.caddies'),
+      align: 'right',
+      cell: row => t('caddies:people', { n: String(row.workingCaddies) }),
+    },
+    {
+      key: 'capacity',
+      header: t('caddies:balance.table.capacity'),
+      mobileLabel: t('caddies:balance.table.capacity'),
+      align: 'right',
+      cell: row => t('caddies:groups', { n: String(row.roundsCapacity) }),
+    },
+    {
+      key: 'booked',
+      header: t('caddies:balance.table.booked'),
+      mobileLabel: t('caddies:balance.table.booked'),
+      align: 'right',
+      cell: row => t('caddies:groups', { n: String(row.caddieAttachedGroups) }),
+    },
+    {
+      key: 'shortfall',
+      header: t('caddies:balance.table.shortfall'),
+      mobileLabel: t('caddies:balance.table.shortfall'),
+      align: 'right',
+      cell: row => (
+        <Badge variant={row.shortfall < 0 ? 'destructive' : 'success'}>
+          {row.shortfall < 0
+            ? t('caddies:balance.short', { n: String(-row.shortfall) })
+            : t('caddies:balance.spare', { n: String(row.shortfall) })}
+        </Badge>
+      ),
+    },
+    {
+      key: 'actions',
+      header: t('caddies:balance.table.actions'),
+      mobileLabel: t('caddies:balance.table.actions'),
+      align: 'right',
+      cell: row => (
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="min-h-9"
+          onClick={() => setReinforcing(row)}
+        >
+          <UserPlus /> {t('caddies:balance.callIn')}
+        </Button>
+      ),
+    },
+  ]
+
+  const short = (resource.data?.courses ?? []).filter(course => course.shortfall < 0)
+
+  return (
+    <Panel title={t('caddies:balance.title')} description={t('caddies:balance.description')}>
+      {resource.loading ? <LoadingState label={t('caddies:balance.loading')} /> : null}
+      {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
+      {resource.data ? (
+        <div className="space-y-3">
+          {short.length > 0 ? (
+            <Notice tone="warning" title={t('caddies:balance.shortTitle')}>
+              {t('caddies:balance.shortBody', {
+                names: short.map(course => course.courseName).join('、'),
+              })}
+            </Notice>
+          ) : null}
+          {resource.data.unplacedCaddies > 0 ? (
+            <Notice tone="warning" title={t('caddies:balance.unplacedTitle')}>
+              {t('caddies:balance.unplacedBody', {
+                n: String(resource.data.unplacedCaddies),
+              })}
+            </Notice>
+          ) : null}
+          {resource.data.courses.length === 0 ? (
+            <EmptyState
+              title={t('caddies:balance.empty.title')}
+              description={t('caddies:balance.empty.description')}
+            />
+          ) : (
+            <DataTable
+              columns={columns}
+              rows={resource.data.courses}
+              rowKey={row => row.golfCourseId}
+            />
+          )}
+        </div>
+      ) : null}
+
+      <ReinforcementSheet
+        course={reinforcing}
+        date={date}
+        onClose={() => setReinforcing(null)}
+        onMoved={() => {
+          setReinforcing(null)
+          resource.refresh()
+          onChanged()
+        }}
+      />
+    </Panel>
+  )
+}
+
+/**
+ * Pick who comes over for the day.
+ *
+ * The list is already filtered to caddies who may work this course — a sub
+ * membership is what permits the move — and leaves out anybody the desk
+ * pinned somewhere.
+ */
+function ReinforcementSheet({
+  course,
+  date,
+  onClose,
+  onMoved,
+}: {
+  course: CourseCaddieSupply | null
+  date: string
+  onClose: () => void
+  onMoved: () => void
+}) {
+  const { t } = useTranslation(['caddies', 'common'])
+  const [moving, setMoving] = useState<string | null>(null)
+  const courseId = course?.golfCourseId ?? null
+
+  const candidates = useResource(
+    () => {
+      if (!courseId) return Promise.resolve({ items: [] as Reinforcement[] })
+      const params = new URLSearchParams({ date, golfCourseId: courseId })
+      return courseboardApiJson<ListResponse<Reinforcement>>(
+        `${COURSE_API}/caddie-reinforcements?${params}`,
+      )
+    },
+    [courseId, date],
+    { enabled: courseId !== null },
+  )
+
+  async function move(candidate: Reinforcement) {
+    if (!course) return
+    setMoving(candidate.caddieProfileId)
+    try {
+      await courseboardApiJson(
+        `${COURSE_API}/caddie-shifts/${encodeURIComponent(candidate.caddieProfileId)}/${date}`,
+        request('PUT', {
+          isWorking: true,
+          span: candidate.span,
+          roundsCapacity: candidate.roundsCapacity,
+          golfCourseId: course.golfCourseId,
+          // Moved for the day, not pinned there: the next monthly run should
+          // put them back on their own course unless the desk says otherwise.
+          pinned: false,
+        }),
+      )
+      showToast({
+        tone: 'success',
+        message: t('caddies:balance.moved', {
+          name: candidate.displayName,
+          course: course.courseName,
+        }),
+      })
+      onMoved()
+    } catch (error) {
+      showToast({
+        tone: 'danger',
+        title: t('caddies:balance.moveFailed'),
+        message: errorMessage(error),
+      })
+    } finally {
+      setMoving(null)
+    }
+  }
+
+  return (
+    <Sheet
+      open={course !== null}
+      onOpenChange={open => {
+        if (!open) onClose()
+      }}
+      title={t('caddies:balance.sheetTitle')}
+      description={course
+        ? t('caddies:balance.sheetDescription', { course: course.courseName, date })
+        : undefined}
+    >
+      <div className="space-y-2">
+        {candidates.loading ? <LoadingState label={t('caddies:balance.loadingCandidates')} /> : null}
+        {candidates.error ? (
+          <ResourceError error={candidates.error} onRetry={candidates.refresh} />
+        ) : null}
+        {!candidates.loading && !candidates.error && (candidates.data?.items.length ?? 0) === 0 ? (
+          <EmptyState
+            title={t('caddies:balance.noCandidates.title')}
+            description={t('caddies:balance.noCandidates.description')}
+          />
+        ) : null}
+
+        {candidates.data?.items.map(candidate => (
+          <div
+            key={candidate.caddieProfileId}
+            className="flex items-center gap-3 rounded-lg border border-border bg-background p-3"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-foreground">{candidate.displayName}</p>
+              <p className="text-xs text-muted-foreground">
+                {candidate.returnsHome
+                  ? t('caddies:balance.returnsHome')
+                  : candidate.fromGolfCourseId
+                    ? t('caddies:balance.borrowedFrom')
+                    : t('caddies:balance.fromUnplaced')}
+                {' · '}
+                {t('caddies:groups', { n: String(candidate.roundsCapacity) })}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="primary"
+              size="sm"
+              className="min-h-11"
+              disabled={moving !== null}
+              onClick={() => void move(candidate)}
+            >
+              {moving === candidate.caddieProfileId
+                ? t('caddies:balance.moving')
+                : t('caddies:balance.move')}
+            </Button>
+          </div>
+        ))}
+      </div>
+    </Sheet>
   )
 }
 

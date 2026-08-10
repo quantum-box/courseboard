@@ -18,10 +18,10 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 use crate::course::domain::{
     course_day_bounds, plan_caddie_assignments, widen_for_utc_date_filter, AttendanceState,
     AutoAssignResult, AvailabilityDeadline, AvailabilityDeadlineGateway, AvailabilityQuery,
-    AvailabilityStatus, CaddieAssignmentQuery, CaddieRoster, CourseError, DeadlineWarning,
-    GatewayCredentials, GolfCatalogGateway, GolfOpsGateway, PlanOptions, PlannableCaddie,
-    PlannableRound, ReservationGateway, TeeSheetItem, TeeSheetQuery, UpsertCaddieAssignment,
-    YearMonth,
+    AvailabilityStatus, CaddieAssignmentQuery, CaddiePlacement, CaddieRoster, CaddieShift,
+    CaddieShiftGateway, CourseError, DeadlineWarning, GatewayCredentials, GolfCatalogGateway,
+    GolfOpsGateway, PlanOptions, PlannableCaddie, PlannableRound, ReservationGateway, TeeSheetItem,
+    TeeSheetQuery, UpsertCaddieAssignment, YearMonth,
 };
 use crate::course::usecase::GetTeeSheetUseCase;
 
@@ -35,6 +35,17 @@ const PRIMARY_ROLE: &str = "primary";
 
 /// The tee-sheet carries its start as the offset-bearing string the screens
 /// render; the planner needs the instant behind it.
+/// How the planner should read a caddie's day.
+fn placement_for(shift: Option<&CaddieShift>) -> CaddiePlacement {
+    match shift {
+        Some(shift) => match shift.course_id() {
+            Some(course_id) => CaddiePlacement::On(course_id.clone()),
+            None => CaddiePlacement::Unplaced,
+        },
+        None => CaddiePlacement::Unconfirmed,
+    }
+}
+
 fn round_starts_at(item: &TeeSheetItem) -> Result<DateTime<Utc>, CourseError> {
     DateTime::parse_from_rfc3339(item.tee_time())
         .map(|value| value.with_timezone(&Utc))
@@ -46,6 +57,7 @@ pub struct AutoAssignCaddiesUseCase {
     reservations: Arc<dyn ReservationGateway>,
     catalog: Arc<dyn GolfCatalogGateway>,
     deadlines: Arc<dyn AvailabilityDeadlineGateway>,
+    shifts: Arc<dyn CaddieShiftGateway>,
 }
 
 impl AutoAssignCaddiesUseCase {
@@ -54,12 +66,14 @@ impl AutoAssignCaddiesUseCase {
         reservations: Arc<dyn ReservationGateway>,
         catalog: Arc<dyn GolfCatalogGateway>,
         deadlines: Arc<dyn AvailabilityDeadlineGateway>,
+        shifts: Arc<dyn CaddieShiftGateway>,
     ) -> Self {
         Self {
             ops,
             reservations,
             catalog,
             deadlines,
+            shifts,
         }
     }
 
@@ -132,7 +146,7 @@ impl AutoAssignCaddiesUseCase {
             )
             .await?;
 
-        let (roster, assignments, attendance, availabilities) = tokio::try_join!(
+        let (roster, assignments, attendance, availabilities, confirmed) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
             self.ops.list_caddie_assignments(
                 credentials,
@@ -152,7 +166,17 @@ impl AutoAssignCaddiesUseCase {
                     date: None,
                 },
             ),
+            self.shifts.list_shifts(credentials.operator_id, date, date),
         )?;
+
+        // Where the confirmed month put each caddie. A day nobody confirmed
+        // leaves this empty, and the plan then behaves exactly as it did
+        // before placements existed.
+        let shift_by_caddie: HashMap<&str, &CaddieShift> = confirmed
+            .iter()
+            .filter(|shift| shift.date() == date)
+            .map(|shift| (shift.caddie_id().as_str(), shift))
+            .collect();
 
         let (day_start, day_end) = course_day_bounds(date, date);
         let live: Vec<_> = assignments
@@ -181,6 +205,7 @@ impl AutoAssignCaddiesUseCase {
                     starts_at: round_starts_at(item)?,
                     duration_minutes: Some(item.duration_minutes()),
                     player_count: item.party_size(),
+                    course_id: Some(item.golf_course_id().clone()),
                 })
             })
             .collect::<Result<Vec<_>, CourseError>>()?;
@@ -208,6 +233,14 @@ impl AutoAssignCaddiesUseCase {
             .caddies()
             .iter()
             .filter(|caddie| caddie.is_assignable())
+            // A day confirmed as off is not a candidate, whatever the request
+            // behind it said — the desk may have changed it either way.
+            .filter(|caddie| {
+                shift_by_caddie
+                    .get(caddie.id().as_str())
+                    .map(|shift| shift.is_working())
+                    .unwrap_or(true)
+            })
             .map(|caddie| {
                 let id = caddie.id().as_str();
                 let committed: Vec<_> = live
@@ -215,6 +248,7 @@ impl AutoAssignCaddiesUseCase {
                     .filter(|assignment| assignment.caddie_id().as_str() == id)
                     .collect();
                 PlannableCaddie {
+                    placement: placement_for(shift_by_caddie.get(id).copied()),
                     caddie_id: id.to_string(),
                     display_name: caddie.display_name().to_string(),
                     skill_level: caddie.skill_level(),

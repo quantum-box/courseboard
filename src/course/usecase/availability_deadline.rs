@@ -249,6 +249,15 @@ mod tests {
             Ok(vec![])
         }
 
+        async fn list_memberships_for(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _caddie_ids: &[CaddieId],
+        ) -> Result<std::collections::HashMap<String, Vec<CaddieCourseMembership>>, CourseError>
+        {
+            Ok(std::collections::HashMap::new())
+        }
+
         async fn replace_caddie_memberships(
             &self,
             _credentials: GatewayCredentials<'_>,

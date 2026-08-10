@@ -574,6 +574,9 @@ impl CaddieRecommendation {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct RecommendationQuery {
     pub reservation_id: Option<ReservationId>,
+    /// The course the round tees off from. Given, the candidates are the
+    /// caddies confirmed onto that course for the day.
+    pub golf_course_id: Option<CourseId>,
     pub scheduled_at: Option<DateTime<Utc>>,
     pub player_count: Option<i32>,
     pub include_rookie_pairing: bool,

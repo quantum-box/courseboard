@@ -29,6 +29,8 @@ const GOLF: &str = "/v1/erp/extensions/golf-course";
 /// Caddies are hired per round, so a staff member registered while creating one
 /// starts as part-time; HRM can change it afterwards.
 const DEFAULT_STAFF_EMPLOYMENT_TYPE: &str = "part_time";
+/// How many caddies' memberships are read from Field at once.
+const MEMBERSHIP_CONCURRENCY: usize = 8;
 
 /// Loads / mutates caddie ops through Field golf-course extension endpoints.
 pub struct FieldGolfOpsGateway {
@@ -248,6 +250,57 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         let items: Vec<FieldMembershipDto> =
             field_get_items(&self.client, &self.base_url, &path, credentials).await?;
         Ok(items.into_iter().map(map_membership).collect())
+    }
+
+    /// Field has no bulk membership endpoint, so the roster is fetched a few
+    /// caddies at a time — enough concurrency to plan a month quickly, not so
+    /// much that a large roster opens a connection per person.
+    async fn list_memberships_for(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        caddie_ids: &[CaddieId],
+    ) -> Result<HashMap<String, Vec<CaddieCourseMembership>>, CourseError> {
+        let mut memberships = HashMap::new();
+        for group in caddie_ids.chunks(MEMBERSHIP_CONCURRENCY) {
+            let mut running = tokio::task::JoinSet::new();
+            for caddie_id in group {
+                let client = self.client.clone();
+                let base_url = self.base_url.clone();
+                let caddie_id = caddie_id.clone();
+                // The spawned request needs credentials it owns; every other
+                // call borrows them from the inbound request.
+                let authorization = credentials.authorization.to_string();
+                let operator_id = credentials.operator_id.to_string();
+                let platform_id = credentials.platform_id.map(str::to_string);
+                running.spawn(async move {
+                    let path = format!(
+                        "{GOLF}/caddie-profiles/{}/courses",
+                        urlencoding_path(&caddie_id)
+                    );
+                    let items: Vec<FieldMembershipDto> = field_get_items(
+                        &client,
+                        &base_url,
+                        &path,
+                        GatewayCredentials {
+                            authorization: &authorization,
+                            operator_id: &operator_id,
+                            platform_id: platform_id.as_deref(),
+                        },
+                    )
+                    .await?;
+                    Ok::<_, CourseError>((
+                        caddie_id.into_inner(),
+                        items.into_iter().map(map_membership).collect(),
+                    ))
+                });
+            }
+            while let Some(joined) = running.join_next().await {
+                let (caddie_id, items) =
+                    joined.map_err(|error| CourseError::Provider(error.to_string()))??;
+                memberships.insert(caddie_id, items);
+            }
+        }
+        Ok(memberships)
     }
 
     async fn replace_caddie_memberships(

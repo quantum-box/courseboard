@@ -706,12 +706,14 @@ pub async fn create_reservation(
     Json(request): Json<CreateReservationRequest>,
 ) -> Result<Json<CreatedReservationDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    // The Field catalog gateway serves both the catalog and the schedule port.
     let catalog = catalog_gateway(&state);
     let use_case = CreateReservationUseCase::new(
         reservation_gateway(&state),
         commercial_gateway(&state),
         catalog.clone(),
         catalog,
+        state.caddie_shifts(),
     );
     let id = use_case
         .execute(

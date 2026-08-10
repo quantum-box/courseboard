@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 
@@ -5,15 +7,15 @@ use super::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
     AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BudgetAchievement, Caddie,
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
-    CaddieRating, CaddieRecommendation, CaddieRoster, CaddieStaff, Course, CourseError, CourseId,
-    CourseOrder, DailyBudget, DailyBudgetQuery, DeleteSlotOverrides, ExtensionStatus,
-    GenerationSummary, MonthlySettlement, NewReservation, PartyDetails, ProductSlot,
-    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationId, ReservationPolicy,
-    ReservationProduct, ReservationServiceId, Resource, ResourceId, ResourceTimeSlot,
-    SaveCourseResource, SeededReservation, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot,
-    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
-    WorkedMinutes, YearMonth,
+    CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift, CaddieStaff, Course,
+    CourseError, CourseId, CourseOrder, DailyBudget, DailyBudgetQuery, DeleteSlotOverrides,
+    ExtensionStatus, GenerationSummary, MonthlySettlement, NewReservation, PartyDetails,
+    ProductSlot, RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationId,
+    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
+    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
+    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
+    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
+    UpsertDailyBudget, UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -120,6 +122,57 @@ pub trait AvailabilityDeadlineGateway: Send + Sync {
         tenant_id: &str,
         deadline: AvailabilityDeadline,
     ) -> Result<AvailabilityDeadline, CourseError>;
+}
+
+/// Port for the club's own shift-planning rules.
+///
+/// The law fixes one ceiling; the rest — which weekdays to keep clear, how many
+/// rounds a day, how much rest a month, how to read a day nobody filed for —
+/// are the club's own operating decisions, and Field has nowhere to hold them
+/// (ADR-0005).
+#[async_trait]
+pub trait ShiftRulesGateway: Send + Sync {
+    /// Never absent: a tenant that has set nothing gets the statutory limits
+    /// and the weekend held back, which is what a golf club wants until it
+    /// says otherwise.
+    async fn get_shift_policy(&self, tenant_id: &str) -> Result<ShiftPolicy, CourseError>;
+
+    async fn upsert_shift_policy(
+        &self,
+        tenant_id: &str,
+        policy: &ShiftPolicy,
+    ) -> Result<ShiftPolicy, CourseError>;
+}
+
+/// Port for the confirmed shifts a month was planned into.
+///
+/// Field holds the shift *request* but has nowhere to record which course a
+/// caddie works — that placement is a golf dispatch decision (ADR-0005), so
+/// the confirmed month is CourseBoard's own data, like the filing deadline
+/// that gates it.
+#[async_trait]
+pub trait CaddieShiftGateway: Send + Sync {
+    async fn list_shifts(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<CaddieShift>, CourseError>;
+
+    /// Write a planned month. Days absent from `shifts` are left alone, so a
+    /// run over one month never disturbs the months around it.
+    async fn save_shifts(
+        &self,
+        tenant_id: &str,
+        shifts: &[CaddieShift],
+    ) -> Result<u64, CourseError>;
+
+    async fn get_shift(
+        &self,
+        tenant_id: &str,
+        caddie_id: &CaddieId,
+        date: NaiveDate,
+    ) -> Result<Option<CaddieShift>, CourseError>;
 }
 
 /// Port for the generic reservation schedule and the inventory it generates.
@@ -390,6 +443,18 @@ pub trait GolfOpsGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         caddie_id: &CaddieId,
     ) -> Result<Vec<CaddieCourseMembership>, CourseError>;
+
+    /// Memberships for several caddies at once, keyed by caddie id.
+    ///
+    /// Field answers memberships one caddie at a time, but planning a month
+    /// and finding who can be sent to a short course both need the whole
+    /// roster's. Batching it here keeps the fan-out in the adapter, where the
+    /// transport that forces it lives.
+    async fn list_memberships_for(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        caddie_ids: &[CaddieId],
+    ) -> Result<HashMap<String, Vec<CaddieCourseMembership>>, CourseError>;
 
     async fn replace_caddie_memberships(
         &self,

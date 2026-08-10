@@ -8,9 +8,11 @@ mod caddie;
 mod caddie_ops;
 mod caddie_plan;
 mod caddie_ranking;
+mod caddie_shift;
 mod commercial;
 mod course;
 mod course_order;
+mod course_supply;
 mod demo_board;
 mod error;
 mod ids;
@@ -41,11 +43,16 @@ pub use caddie_ops::{
     ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 pub use caddie_plan::{
-    plan_caddie_assignments, shift_covers_tee_time, skip_reason, PlanOptions, PlannableCaddie,
-    PlannableRound,
+    plan_caddie_assignments, shift_covers_tee_time, skip_reason, CaddiePlacement, PlanOptions,
+    PlannableCaddie, PlannableRound,
 };
 pub use caddie_ranking::{
     rank_caddies, AttendanceState, RankedCaddie, RankingCandidate, RankingOptions,
+};
+pub use caddie_shift::{
+    parse_weekday, plan_month_shifts, weekday_key, CaddieShift, MonthShiftPlan, ShiftEdit,
+    ShiftOrigin, ShiftPolicy, ShiftRequest, ShiftSeed, ShiftSpan, UnfiledRequest,
+    MAX_CONSECUTIVE_WORK_DAYS, MAX_ROUNDS_PER_SHIFT,
 };
 pub use commercial::{
     BudgetAchievement, DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement,
@@ -54,6 +61,10 @@ pub use commercial::{
 };
 pub use course::{BusinessHours, Course, HoleCount, StartIntervalMinutes, UpsertCourse};
 pub use course_order::CourseOrder;
+pub use course_supply::{
+    compute_course_supply, has_room_for_one_more_caddie_round, reinforcements_for,
+    CaddieCapability, CourseCaddieSupply, DayCaddieSupply, Reinforcement,
+};
 pub use demo_board::{
     demo_board, seed_tee_time, DemoBoard, SeedCourse, SeedGroup, SeedMark, SEED_DURATION_MINUTES,
     SEED_KEY_FIELD, SEED_PREFIX,
@@ -66,9 +77,10 @@ pub use ids::{
 pub use party::{PartyDetails, PartyPlayer, MAX_PARTY_PLAYERS, PARTY_CUSTOM_FIELD_KEY};
 pub use payroll::{summarize_payroll, AttendanceDay, PayrollCandidate, WorkedMinutes};
 pub use ports::{
-    AvailabilityDeadlineGateway, GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway,
-    GolfOpsGateway, GolfTaxGateway, ReservationGateway, ReservationScheduleGateway,
-    SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
+    AvailabilityDeadlineGateway, CaddieShiftGateway, GatewayCredentials, GolfCatalogGateway,
+    GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, ReservationGateway,
+    ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery,
+    TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{

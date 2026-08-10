@@ -19,7 +19,8 @@ use chrono::{DateTime, Duration, Utc};
 
 use super::{
     rank_caddies, AttendanceState, AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem,
-    AvailabilityStatus, CaddieSkillLevel, RankingCandidate, RankingOptions, ReservationId,
+    AvailabilityStatus, CaddieSkillLevel, CourseId, RankingCandidate, RankingOptions,
+    ReservationId,
 };
 
 /// How long a round occupies a caddie when the booking does not say.
@@ -42,6 +43,36 @@ pub mod skip_reason {
     pub const NO_CADDIE_AVAILABLE: &str = "no_caddie_available";
     /// Everyone who could otherwise have taken it has filled their day.
     pub const ALL_AT_DAILY_LIMIT: &str = "all_caddies_at_daily_limit";
+    /// Nobody is standing on the course this round tees off from. Answered by
+    /// moving somebody across on the balance board, not by the shift board.
+    pub const NO_CADDIE_ON_COURSE: &str = "no_caddie_on_the_course";
+}
+
+/// Where the confirmed month put a caddie for the day.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CaddiePlacement {
+    /// The month was never confirmed for this day. Nothing says where they
+    /// stand, so the planner treats them as it always did — available to any
+    /// course — rather than refusing to staff a day for want of a plan.
+    Unconfirmed,
+    /// Confirmed onto a course. They walk that course and no other.
+    On(CourseId),
+    /// Confirmed to work with no course decided. Still usable anywhere; the
+    /// gap is reported on the balance board rather than costing a round.
+    Unplaced,
+}
+
+impl CaddiePlacement {
+    /// Whether this caddie may take a round on `course_id`.
+    pub fn covers(&self, course_id: Option<&CourseId>) -> bool {
+        match (self, course_id) {
+            (Self::On(placed), Some(course)) => placed == course,
+            // A round whose course could not be resolved is not a reason to
+            // leave it unstaffed.
+            (Self::On(_), None) => true,
+            _ => true,
+        }
+    }
 }
 
 /// One caddie-attached round that still needs somebody on it.
@@ -51,6 +82,8 @@ pub struct PlannableRound {
     pub starts_at: DateTime<Utc>,
     pub duration_minutes: Option<i32>,
     pub player_count: i32,
+    /// The course this group tees off from, which decides who may walk it.
+    pub course_id: Option<CourseId>,
 }
 
 impl PlannableRound {
@@ -87,6 +120,8 @@ pub struct PlannableCaddie {
     /// Stretches already committed, from standing assignments and from earlier
     /// rounds in this same plan.
     pub busy: Vec<(DateTime<Utc>, DateTime<Utc>)>,
+    /// Where the confirmed month put them for the day.
+    pub placement: CaddiePlacement,
 }
 
 impl PlannableCaddie {
@@ -103,6 +138,10 @@ impl PlannableCaddie {
 
     fn shift_covers(&self, round: &PlannableRound, offset_minutes: i64) -> bool {
         shift_covers_tee_time(self.availability, Some(round.starts_at), offset_minutes)
+    }
+
+    fn stands_on(&self, round: &PlannableRound) -> bool {
+        self.placement.covers(round.course_id.as_ref())
     }
 }
 
@@ -175,6 +214,7 @@ pub fn plan_caddie_assignments(
             .enumerate()
             .filter(|(_, caddie)| {
                 caddie.has_capacity()
+                    && caddie.stands_on(round)
                     && caddie.shift_covers(round, options.utc_offset_minutes)
                     && caddie.is_free_for(round)
             })
@@ -188,12 +228,19 @@ pub fn plan_caddie_assignments(
             // on shift and free of an overlapping round can only have been
             // stopped by their daily limit.
             let stopped_only_by_the_limit = pool.iter().any(|caddie| {
-                caddie.shift_covers(round, options.utc_offset_minutes) && caddie.is_free_for(round)
+                caddie.stands_on(round)
+                    && caddie.shift_covers(round, options.utc_offset_minutes)
+                    && caddie.is_free_for(round)
             });
+            // Nobody on this course at all is a different problem from a busy
+            // course, and it is fixed somewhere else — say so.
+            let nobody_stands_here = !pool.iter().any(|caddie| caddie.stands_on(round));
             skipped.push(AutoAssignSkippedItem::new(
                 round.reservation_id.clone(),
                 if stopped_only_by_the_limit {
                     skip_reason::ALL_AT_DAILY_LIMIT
+                } else if nobody_stands_here {
+                    skip_reason::NO_CADDIE_ON_COURSE
                 } else {
                     skip_reason::NO_CADDIE_AVAILABLE
                 },
@@ -283,6 +330,7 @@ mod tests {
                 .unwrap(),
             duration_minutes: Some(270),
             player_count: players,
+            course_id: None,
         }
     }
 
@@ -298,6 +346,7 @@ mod tests {
             attendance: AttendanceState::Working,
             availability: None,
             busy: Vec::new(),
+            placement: CaddiePlacement::Unconfirmed,
         }
     }
 
@@ -416,5 +465,98 @@ mod tests {
 
         assert_eq!(plan.assigned()[0].reservation_id().as_str(), "rsv_early");
         assert_eq!(plan.assigned()[0].caddie_id().as_str(), "cad_strong");
+    }
+}
+
+#[cfg(test)]
+mod course_tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    const JST_OFFSET: i64 = 9 * 60;
+
+    fn options() -> PlanOptions {
+        PlanOptions {
+            utc_offset_minutes: JST_OFFSET,
+            dry_run: true,
+        }
+    }
+
+    fn round_on(id: &str, course: Option<&str>) -> PlannableRound {
+        PlannableRound {
+            reservation_id: ReservationId::new(id),
+            starts_at: Utc.with_ymd_and_hms(2026, 8, 8, 22, 0, 0).unwrap(),
+            duration_minutes: Some(270),
+            player_count: 4,
+            course_id: course.map(CourseId::new),
+        }
+    }
+
+    fn caddie_at(id: &str, placement: CaddiePlacement) -> PlannableCaddie {
+        PlannableCaddie {
+            caddie_id: id.into(),
+            display_name: id.into(),
+            skill_level: CaddieSkillLevel::Regular,
+            rating_average: None,
+            rating_count: 0,
+            max_rounds_per_day: 2,
+            rounds_assigned_today: 0,
+            attendance: AttendanceState::Working,
+            availability: None,
+            busy: Vec::new(),
+            placement,
+        }
+    }
+
+    #[test]
+    fn a_round_is_walked_by_somebody_standing_on_its_own_course() {
+        let result = plan_caddie_assignments(
+            &[round_on("r1", Some("out"))],
+            &[
+                caddie_at("on-in", CaddiePlacement::On(CourseId::new("in"))),
+                caddie_at("on-out", CaddiePlacement::On(CourseId::new("out"))),
+            ],
+            options(),
+        );
+
+        assert_eq!(result.assigned().len(), 1);
+        assert_eq!(result.assigned()[0].caddie_id().as_str(), "on-out");
+    }
+
+    #[test]
+    fn a_course_nobody_stands_on_says_so_rather_than_blaming_the_shift_board() {
+        let result = plan_caddie_assignments(
+            &[round_on("r1", Some("out"))],
+            &[caddie_at("on-in", CaddiePlacement::On(CourseId::new("in")))],
+            options(),
+        );
+
+        assert_eq!(result.assigned().len(), 0);
+        assert_eq!(
+            result.skipped()[0].reason(),
+            skip_reason::NO_CADDIE_ON_COURSE
+        );
+    }
+
+    #[test]
+    fn a_day_the_month_was_never_confirmed_for_is_planned_as_it_always_was() {
+        let result = plan_caddie_assignments(
+            &[round_on("r1", Some("out"))],
+            &[caddie_at("anywhere", CaddiePlacement::Unconfirmed)],
+            options(),
+        );
+
+        assert_eq!(result.assigned().len(), 1);
+    }
+
+    #[test]
+    fn somebody_confirmed_with_no_course_can_still_take_a_round() {
+        let result = plan_caddie_assignments(
+            &[round_on("r1", Some("out"))],
+            &[caddie_at("unplaced", CaddiePlacement::Unplaced)],
+            options(),
+        );
+
+        assert_eq!(result.assigned().len(), 1);
     }
 }

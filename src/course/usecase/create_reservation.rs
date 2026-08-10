@@ -10,11 +10,13 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::course::domain::{
-    course_day_bounds, parse_jst_tee_time, reconcile_remaining, CourseError, CourseId,
-    GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway, NewReservation, PartyDetails,
-    Reservation, ReservationGateway, ReservationId, ReservationScheduleGateway, Resource,
-    ResourceId, ResourceKind, ResourceTimeSlot,
+    course_day_bounds, has_room_for_one_more_caddie_round, parse_jst_tee_time, reconcile_remaining,
+    CaddieShiftGateway, CourseError, CourseId, GatewayCredentials, GolfCatalogGateway,
+    GolfCommercialGateway, NewReservation, PartyDetails, Reservation, ReservationGateway,
+    ReservationId, ReservationScheduleGateway, Resource, ResourceId, ResourceKind,
+    ResourceTimeSlot,
 };
+use crate::course::usecase::GetCourseCaddieSupplyUseCase;
 
 /// A round is a day's work at most; anything longer is a typo or an attack.
 const MAX_DURATION_MINUTES: i64 = 24 * 60;
@@ -38,6 +40,7 @@ pub struct CreateReservationUseCase {
     commercial: Arc<dyn GolfCommercialGateway>,
     catalog: Arc<dyn GolfCatalogGateway>,
     schedules: Arc<dyn ReservationScheduleGateway>,
+    shifts: Arc<dyn CaddieShiftGateway>,
 }
 
 impl CreateReservationUseCase {
@@ -46,12 +49,14 @@ impl CreateReservationUseCase {
         commercial: Arc<dyn GolfCommercialGateway>,
         catalog: Arc<dyn GolfCatalogGateway>,
         schedules: Arc<dyn ReservationScheduleGateway>,
+        shifts: Arc<dyn CaddieShiftGateway>,
     ) -> Self {
         Self {
             reservations,
             commercial,
             catalog,
             schedules,
+            shifts,
         }
     }
 
@@ -74,6 +79,9 @@ impl CreateReservationUseCase {
                 "duration must be between 1 minute and 24 hours",
             ));
         }
+
+        self.refuse_a_round_the_course_cannot_walk(credentials, &input)
+            .await?;
 
         let starts_at = parse_jst_tee_time(input.date, &input.tee_time)?;
         let ends_at = starts_at + Duration::minutes(input.duration_minutes);
@@ -128,6 +136,55 @@ impl CreateReservationUseCase {
             .create_reservation(credentials, &new_reservation)
             .await
             .map_err(normalize_inventory_conflict)
+    }
+
+    /// Stop a caddie-attached round being sold onto a course that has no
+    /// caddie left to walk it.
+    ///
+    /// Only once the month is confirmed: before that nothing says who stands
+    /// where, and refusing every booking for want of a plan would be worse
+    /// than the overbooking this prevents. A self-play round is never
+    /// affected, and neither is a booking whose plan cannot be identified —
+    /// the guard is for the case it can prove.
+    async fn refuse_a_round_the_course_cannot_walk(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &CreateReservationInput,
+    ) -> Result<(), CourseError> {
+        let Some(service_id) = input.reservation_service_id.as_deref() else {
+            return Ok(());
+        };
+        let products = self.catalog.list_reservation_products(credentials).await?;
+        let needs_caddie = products
+            .iter()
+            .find(|product| product.reservation_service_id().as_str() == service_id)
+            .map(|product| product.play_type().requires_caddie())
+            .unwrap_or(false);
+        if !needs_caddie {
+            return Ok(());
+        }
+
+        let confirmed = self
+            .shifts
+            .list_shifts(credentials.operator_id, input.date, input.date)
+            .await?;
+        if confirmed.is_empty() {
+            return Ok(());
+        }
+
+        let supply = GetCourseCaddieSupplyUseCase::new(
+            self.shifts.clone(),
+            self.reservations.clone(),
+            self.catalog.clone(),
+        )
+        .execute(credentials, input.date)
+        .await?;
+        if has_room_for_one_more_caddie_round(&supply, &input.golf_course_id) {
+            return Ok(());
+        }
+        Err(CourseError::BadRequest(
+            "この日はこのコースのキャディがふさがっています。他のコースから応援を回すか、セルフでの受付をご検討ください",
+        ))
     }
 
     /// The reservation type every Field booking needs.
