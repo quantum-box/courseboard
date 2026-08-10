@@ -18,18 +18,29 @@ import {
 /**
  * `clientKey` keeps a band identifiable while it is being edited: a saved band
  * has an id, one the operator just added has nothing else to key React on, and
- * both move around as the week gets sorted.
+ * both move around as the week gets sorted. `isNew` is separate from the
+ * absence of an id so a malformed persisted row cannot silently turn into a
+ * create when the whole week is saved.
  */
-export type EditableRule = GolfAvailabilityRule & { clientKey: string }
+export type EditableRule = GolfAvailabilityRule & { clientKey: string; isNew: boolean }
 
 let clientRuleSequence = 0
 
-export function toEditableRule(rule: GolfAvailabilityRule): EditableRule {
+function editableRule(rule: GolfAvailabilityRule, isNew: boolean): EditableRule {
   clientRuleSequence += 1
   return {
     ...normalizeRule(rule),
-    clientKey: rule.id ?? `local-rule-${clientRuleSequence}`,
+    clientKey: rule.id ?? `${isNew ? 'local' : 'persisted'}-rule-${clientRuleSequence}`,
+    isNew,
   }
+}
+
+export function toEditableRule(rule: GolfAvailabilityRule): EditableRule {
+  return editableRule(rule, false)
+}
+
+function toNewEditableRule(rule: GolfAvailabilityRule): EditableRule {
+  return editableRule(rule, true)
 }
 
 const WEEKDAYS = [1, 2, 3, 4, 5] as const
@@ -59,7 +70,7 @@ export function WeekScheduleEditor({
   }
 
   function addRule(weekday: number) {
-    onChange([...rules, toEditableRule(nextRuleForWeekday(rules, weekday))])
+    onChange([...rules, toNewEditableRule(nextRuleForWeekday(rules, weekday))])
   }
 
   function removeRule(clientKey: string) {
@@ -72,7 +83,9 @@ export function WeekScheduleEditor({
    */
   function copyWeekday(from: number, target: CopyTarget) {
     const copied = copyWeekdayRules(rules, from, target.targets)
-    onChange(copied.map(rule => ('clientKey' in rule ? rule as EditableRule : toEditableRule(rule))))
+    onChange(copied.map(rule => (
+      'clientKey' in rule ? rule as EditableRule : toNewEditableRule(rule)
+    )))
   }
 
   function copyTargets(from: number): CopyTarget[] {

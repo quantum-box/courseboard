@@ -48,12 +48,30 @@ function resourceLinkPath(courseId: string) {
 
 function toStoredRule(rule: EditableRule): GolfAvailabilityRule {
   return {
+    ...(rule.id ? { id: rule.id } : {}),
     weekday: rule.weekday,
     startTime: rule.startTime,
     endTime: rule.endTime,
     capacity: rule.capacity,
     slotIntervalMinutes: rule.slotIntervalMinutes,
   }
+}
+
+type SaveAvailabilityRule = GolfAvailabilityRule & { isNew?: true }
+
+/**
+ * Full-replace requests cannot otherwise tell an intentional create from a
+ * persisted row whose id was accidentally dropped. Keep that intent explicit
+ * at the UI/API boundary and fail before sending an ambiguous replacement.
+ */
+function toSaveRule(rule: EditableRule): SaveAvailabilityRule {
+  const stored = toStoredRule(rule)
+  if (rule.isNew) {
+    if (rule.id) throw new Error(i18next.t('schedule:newRuleHasId'))
+    return { ...stored, isNew: true }
+  }
+  if (!rule.id) throw new Error(i18next.t('schedule:missingRuleId'))
+  return stored
 }
 
 function errorMessage(error: unknown) {
@@ -232,7 +250,7 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
 
     setSaving(true)
     try {
-      const payload = sortRules(rules).map(toStoredRule)
+      const payload = sortRules(rules).map(toSaveRule)
       const response = await courseboardApiJson<SavedSchedule>(
         schedulePath(courseId),
         { method: 'PUT', body: JSON.stringify({ rules: payload }) },

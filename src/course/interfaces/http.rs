@@ -1436,7 +1436,50 @@ impl From<&AvailabilityRule> for AvailabilityRuleDto {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplaceCourseScheduleRequest {
-    pub rules: Vec<AvailabilityRuleDto>,
+    pub rules: Vec<ReplaceAvailabilityRuleDto>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceAvailabilityRuleDto {
+    pub id: Option<String>,
+    /// Required only for a rule created in this editor session. A full-replace
+    /// request cannot otherwise distinguish a create from a persisted rule
+    /// whose id was accidentally dropped.
+    #[serde(default)]
+    pub is_new: bool,
+    pub weekday: u8,
+    pub start_time: String,
+    pub end_time: String,
+    pub capacity: i32,
+    pub slot_interval_minutes: i32,
+}
+
+impl ReplaceAvailabilityRuleDto {
+    fn into_domain(self) -> Result<AvailabilityRule, CourseError> {
+        let id = self.id.filter(|value| !value.trim().is_empty());
+        match (id.is_some(), self.is_new) {
+            (false, false) => {
+                return Err(CourseError::BadRequest(
+                    "a schedule rule without an id must be marked isNew",
+                ));
+            }
+            (true, true) => {
+                return Err(CourseError::BadRequest(
+                    "a schedule rule with an id must not be marked isNew",
+                ));
+            }
+            _ => {}
+        }
+        AvailabilityRule::try_new(
+            id,
+            self.weekday,
+            self.start_time,
+            self.end_time,
+            self.capacity,
+            self.slot_interval_minutes,
+        )
+    }
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -1525,16 +1568,7 @@ pub async fn replace_course_schedule(
     let rules = body
         .rules
         .into_iter()
-        .map(|rule| {
-            AvailabilityRule::try_new(
-                rule.id,
-                rule.weekday,
-                rule.start_time,
-                rule.end_time,
-                rule.capacity,
-                rule.slot_interval_minutes,
-            )
-        })
+        .map(ReplaceAvailabilityRuleDto::into_domain)
         .collect::<Result<Vec<_>, _>>()
         .map_err(AppError::from)?;
 
@@ -2146,6 +2180,53 @@ pub async fn list_caddie_assignments(
 mod tests {
     use super::*;
     use crate::course::domain::PlayType;
+
+    fn schedule_rule_request(id: Option<&str>, is_new: Option<bool>) -> ReplaceAvailabilityRuleDto {
+        let mut value = serde_json::json!({
+            "weekday": 1,
+            "startTime": "07:00",
+            "endTime": "12:00",
+            "capacity": 2,
+            "slotIntervalMinutes": 8
+        });
+        let object = value.as_object_mut().expect("schedule rule object");
+        if let Some(id) = id {
+            object.insert("id".into(), serde_json::json!(id));
+        }
+        if let Some(is_new) = is_new {
+            object.insert("isNew".into(), serde_json::json!(is_new));
+        }
+        serde_json::from_value(value).expect("schedule rule request")
+    }
+
+    #[test]
+    fn schedule_replace_distinguishes_existing_rules_from_explicit_creates() {
+        let existing = schedule_rule_request(Some("rule-1"), None)
+            .into_domain()
+            .expect("existing rule");
+        assert_eq!(existing.id(), Some("rule-1"));
+
+        let created = schedule_rule_request(None, Some(true))
+            .into_domain()
+            .expect("new rule");
+        assert_eq!(created.id(), None);
+    }
+
+    #[test]
+    fn schedule_replace_rejects_ambiguous_or_contradictory_rule_identity() {
+        assert!(matches!(
+            schedule_rule_request(None, None).into_domain(),
+            Err(CourseError::BadRequest(
+                "a schedule rule without an id must be marked isNew"
+            ))
+        ));
+        assert!(matches!(
+            schedule_rule_request(Some("rule-1"), Some(true)).into_domain(),
+            Err(CourseError::BadRequest(
+                "a schedule rule with an id must not be marked isNew"
+            ))
+        ));
+    }
 
     fn product_request(
         golf_course_ids: Option<Vec<&str>>,
