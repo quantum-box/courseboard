@@ -10,12 +10,13 @@ use super::{
     CaddieRankFees, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift, CaddieStaff,
     Course, CourseError, CourseId, CourseOrder, DailyBudget, DailyBudgetQuery, DeleteSlotOverrides,
     ExtensionStatus, GenerationSummary, MonthlySettlement, NewReservation, PartyDetails,
-    ProductSlot, RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationId,
-    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
-    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
-    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
-    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
-    UpsertDailyBudget, UpsertReservationProduct, WorkedMinutes, YearMonth,
+    ProductSlot, RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationDaySummary,
+    ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId,
+    ReservationSummaryQuery, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
+    SeededReservation, ShiftPolicy, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot,
+    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
+    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
+    WorkedMinutes, YearMonth,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -102,6 +103,36 @@ pub trait SlotOverrideGateway: Send + Sync {
         &self,
         tenant_id: &str,
         command: &DeleteSlotOverrides,
+    ) -> Result<u64, CourseError>;
+}
+
+/// Port for the daily reservation counts imported from the club's booking
+/// system.
+///
+/// The booking system exports counts per course per half-day and nothing
+/// finer — no start times, no per-booking caddie flag (PLT-3247) — so these
+/// cannot be Field reservations consuming tee-time inventory. They are
+/// CourseBoard's own series (ADR-0005), the same reasoning as
+/// [`SlotOverrideGateway`].
+#[async_trait]
+pub trait ReservationSummaryGateway: Send + Sync {
+    async fn list_reservation_summaries(
+        &self,
+        tenant_id: &str,
+        query: &ReservationSummaryQuery,
+    ) -> Result<Vec<ReservationDaySummary>, CourseError>;
+
+    /// Write one import's worth of counts.
+    ///
+    /// The club re-exports the same month all month long as bookings come in,
+    /// so the same half-day arrives again and again: each one replaces the
+    /// count already on that (course, date, half-day) instead of adding a
+    /// second one beside it.
+    async fn upsert_reservation_summaries(
+        &self,
+        tenant_id: &str,
+        summaries: &[ReservationDaySummary],
+        source_file: Option<&str>,
     ) -> Result<u64, CourseError>;
 }
 

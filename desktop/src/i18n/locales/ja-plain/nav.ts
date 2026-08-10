@@ -28,6 +28,10 @@ export const nav: DeepPartial<typeof source> = {
       label: 'プレーの料金プラン',
       description: '売るプランと、予約を受けられる時間の枠',
     },
+    'golf/reservation-import': {
+      label: '予約の取りこみ',
+      description: '予約システムのファイルから、日ごとの組の数を入れる',
+    },
     'course-map': {
       label: 'コースの地図',
       description: 'カートが今どこにいるかを見ます',

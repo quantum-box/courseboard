@@ -16,7 +16,7 @@ pub mod smart_assign;
 use auth::{AuthError, TokenVerifier};
 use axum::{
     body::Body,
-    extract::{FromRef, State},
+    extract::{DefaultBodyLimit, FromRef, State},
     http::{
         header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE},
         HeaderName, HeaderValue, Method, Request, StatusCode,
@@ -30,8 +30,8 @@ use cancellation_fees::{CancellationFeeConfig, MySqlCancellationFeeRepository};
 use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
-    MySqlAvailabilityDeadlineRepository, MySqlCaddieShiftRepository, MySqlShiftRulesRepository,
-    MySqlSlotOverrideRepository,
+    MySqlAvailabilityDeadlineRepository, MySqlCaddieShiftRepository,
+    MySqlReservationSummaryRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -55,6 +55,7 @@ pub struct AppState {
     rules: Arc<MySqlTaxRuleRepository>,
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
+    reservation_summaries: Arc<MySqlReservationSummaryRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
     shift_rules: Arc<MySqlShiftRulesRepository>,
@@ -84,6 +85,7 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+            reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
             )),
@@ -123,6 +125,7 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+            reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
             )),
@@ -148,6 +151,9 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+                reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(
+                    pool.clone(),
+                )),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
                 )),
@@ -164,6 +170,9 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+                reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(
+                    pool.clone(),
+                )),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
                 )),
@@ -187,6 +196,13 @@ impl AppState {
     /// CourseBoard-owned desk marks on individual tee times.
     pub fn slot_overrides(&self) -> Arc<MySqlSlotOverrideRepository> {
         self.slot_overrides.clone()
+    }
+
+    /// CourseBoard-owned daily reservation counts imported from the club's
+    /// booking system. The export has no start times and no per-booking caddie
+    /// flag, so it cannot ride on Field's reservation inventory (ADR-0005).
+    pub fn reservation_summaries(&self) -> Arc<MySqlReservationSummaryRepository> {
+        self.reservation_summaries.clone()
     }
 
     /// CourseBoard-owned shift-request filing deadlines.
@@ -648,6 +664,39 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/course/reservation-policy",
             get(course::interfaces::http_commercial::get_reservation_policy)
                 .patch(course::interfaces::http_commercial::update_reservation_policy)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/reservation-summaries/preview",
+            post(course::interfaces::http_reservation_summary::preview_reservation_summaries)
+                // A spreadsheet does not fit axum's 2 MB default for a JSON
+                // body, and a file too big to be one of these exports should be
+                // turned away as it arrives rather than after it is buffered.
+                .route_layer(DefaultBodyLimit::max(
+                    course::interfaces::http_reservation_summary::MAX_WORKBOOK_BYTES,
+                ))
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/reservation-summaries/import",
+            post(course::interfaces::http_reservation_summary::import_reservation_summaries)
+                .route_layer(DefaultBodyLimit::max(
+                    course::interfaces::http_reservation_summary::MAX_WORKBOOK_BYTES,
+                ))
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/reservation-summaries",
+            get(course::interfaces::http_reservation_summary::list_reservation_summaries)
                 .route_layer(middleware::from_fn_with_state(
                     state.clone(),
                     require_valid_token,

@@ -29,6 +29,10 @@ export const nav: DeepPartial<typeof source> = {
       label: 'Play products',
       description: 'Play plans and bookable slots',
     },
+    'golf/reservation-import': {
+      label: 'Import bookings',
+      description: 'Bring daily group counts in from the booking system',
+    },
     'course-map': {
       label: 'Course map',
       description: 'See where each cart is now',
