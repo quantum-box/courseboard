@@ -35,7 +35,6 @@ export const courses: DeepPartial<typeof source> = {
   table: {
     course: 'Course',
     holes: 'Holes',
-    interval: 'Start interval',
     hours: 'Opening hours',
     status: 'Status',
     updated: 'Updated',
