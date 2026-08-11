@@ -248,6 +248,20 @@ mod tests {
         .unwrap()
     }
 
+    /// A row as it was written before names were recorded: counts and a course,
+    /// and no way to say which name in the file produced it.
+    fn nameless(course: &str, day: u32, total: i32, caddie: i32) -> ReservationDaySummary {
+        ReservationDaySummary::try_new(
+            CourseId::new(course),
+            date(day),
+            TimeOfDay::Morning,
+            total,
+            caddie,
+            None,
+        )
+        .unwrap()
+    }
+
     /// Each test gets its own tenant so they can share one database without
     /// seeing each other's counts, and each *run* gets its own so two runs
     /// cannot either.
@@ -469,6 +483,40 @@ mod tests {
             .unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].course_id().as_str(), "course-right");
+    }
+
+    #[tokio::test]
+    async fn a_row_with_no_name_is_still_cleared_by_the_course_it_was_written_under() {
+        // Everything imported before names were recorded is like this. The name
+        // cannot reach it, so the course has to — and the caller puts the course
+        // the name used to match into the window for exactly this reason.
+        let (repository, tenant) = fresh("nameless").await;
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&[], &["course-legacy"]),
+                &[nameless("course-legacy", 8, 30, 12)],
+                Some("first.xlsx"),
+            )
+            .await
+            .unwrap();
+        // The desk has since excluded the name. Nothing is written, and the
+        // window names the course those rows sit under.
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&["真駒内"], &["course-legacy"]),
+                &[],
+                Some("second.xlsx"),
+            )
+            .await
+            .unwrap();
+
+        let stored = repository
+            .list_reservation_summaries(&tenant, &whole_july())
+            .await
+            .unwrap();
+        assert!(stored.is_empty());
     }
 
     #[tokio::test]

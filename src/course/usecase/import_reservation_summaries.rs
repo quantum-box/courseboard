@@ -11,9 +11,10 @@ use std::sync::Arc;
 use chrono::NaiveDate;
 
 use crate::course::domain::{
-    parse_reservation_sheet, resolve_course_label, CourseError, CourseId, CourseResolution,
-    GatewayCredentials, GolfCatalogGateway, ImportWarning, ReservationCourseLinkGateway,
-    ReservationDaySummary, ReservationSummaryGateway, ReservationSummaryWindow, SheetGrid,
+    match_course_label, parse_reservation_sheet, resolve_course_label, Course, CourseError,
+    CourseId, CourseMatch, CourseResolution, GatewayCredentials, GolfCatalogGateway, ImportWarning,
+    ReservationCourseLinkGateway, ReservationDaySummary, ReservationSummaryGateway,
+    ReservationSummaryWindow, SheetGrid,
 };
 
 /// Whether to write what the file says, or only report it.
@@ -243,10 +244,7 @@ impl ImportReservationSummariesUseCase {
                 .filter(|course| course.is_answered())
                 .map(|course| course.sheet_label.clone())
                 .collect(),
-            course_ids: imported_courses
-                .iter()
-                .filter_map(|course| course.course_id.clone())
-                .collect(),
+            course_ids: courses_a_file_speaks_for(&imported_courses, &courses),
         };
 
         let imported = match request.mode {
@@ -273,6 +271,39 @@ impl ImportReservationSummariesUseCase {
             dates: sheet.dates,
         })
     }
+}
+
+/// Every course this file's replacement has to be able to reach.
+///
+/// Two groups. The obvious one is where the counts are going. The other is
+/// where they may already be: a row written before names were recorded carries
+/// none, so the only handle on it is the course it was written under — and back
+/// then that was whatever plain name-matching chose, the desk having had no way
+/// to say otherwise. Once the desk points such a name somewhere else, or
+/// excludes it, those rows sit under a course this import would not otherwise
+/// touch, and nothing else can reach them.
+///
+/// Only for a name that has an answer. A name still being asked about has
+/// decided nothing, and must not take a month away on its way past.
+fn courses_a_file_speaks_for(imported: &[ImportedCourse], courses: &[Course]) -> Vec<CourseId> {
+    let mut ids: Vec<CourseId> = Vec::new();
+    let mut add = |id: CourseId| {
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    };
+    for course in imported {
+        if let Some(id) = course.course_id.clone() {
+            add(id);
+        }
+        if course.is_answered() {
+            if let CourseMatch::Matched(matched) = match_course_label(&course.sheet_label, courses)
+            {
+                add(matched.id().clone());
+            }
+        }
+    }
+    ids
 }
 
 /// Fold rows that would land on the same stored slot into one, and say which
@@ -348,7 +379,89 @@ fn combine_names_sharing_a_course(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::course::domain::TimeOfDay;
+    use crate::course::domain::{TimeOfDay, DEFAULT_TIMEZONE};
+
+    fn course(id: &str, name: &str) -> Course {
+        Course::reconstitute(
+            CourseId::new(id),
+            name.to_string(),
+            None,
+            18,
+            DEFAULT_TIMEZONE.to_string(),
+            8,
+            true,
+            None,
+            None,
+            None,
+            None,
+        )
+    }
+
+    fn answered(label: &str, resolution: &'static str, course_id: Option<&str>) -> ImportedCourse {
+        ImportedCourse {
+            sheet_label: label.to_string(),
+            resolution,
+            course_id: course_id.map(CourseId::new),
+            course_name: None,
+            candidates: Vec::new(),
+            day_count: 62,
+            total_groups: 0,
+            caddie_groups: 0,
+        }
+    }
+
+    #[test]
+    fn a_re_pointed_name_still_reaches_the_course_it_used_to_be_matched_to() {
+        // The month was imported before names were recorded, so its rows carry
+        // none and sit under whatever the matcher chose — 真駒内. The desk has
+        // since said 真駒内 means a different course. Without the old course in
+        // the window those rows have nothing left able to reach them, and the
+        // board shows the month twice.
+        let courses = vec![
+            course("course-makomanai", "真駒内"),
+            course("course-new", "新"),
+        ];
+        let ids = courses_a_file_speaks_for(
+            &[answered("真駒内", "linked", Some("course-new"))],
+            &courses,
+        );
+        assert_eq!(
+            ids,
+            vec![
+                CourseId::new("course-new"),
+                CourseId::new("course-makomanai")
+            ]
+        );
+    }
+
+    #[test]
+    fn an_excluded_name_still_reaches_the_course_it_used_to_be_matched_to() {
+        // The window names no course at all through the resolution — this is
+        // the only thing keeping the excluded month reachable.
+        let courses = vec![course("course-makomanai", "真駒内")];
+        let ids = courses_a_file_speaks_for(&[answered("真駒内", "ignored", None)], &courses);
+        assert_eq!(ids, vec![CourseId::new("course-makomanai")]);
+    }
+
+    #[test]
+    fn a_name_still_being_asked_about_takes_no_month_away_on_its_way_past() {
+        // A course master rename drops a name out of the answer set. That is a
+        // setup problem the desk is warned about, not a reason to erase what it
+        // already imported.
+        let courses = vec![course("course-makomanai", "真駒内")];
+        let ids = courses_a_file_speaks_for(&[answered("真駒内", "unresolved", None)], &courses);
+        assert!(ids.is_empty());
+    }
+
+    #[test]
+    fn a_course_named_once_is_named_once_in_the_window() {
+        let courses = vec![course("course-makomanai", "真駒内")];
+        let ids = courses_a_file_speaks_for(
+            &[answered("真駒内", "suggested", Some("course-makomanai"))],
+            &courses,
+        );
+        assert_eq!(ids, vec![CourseId::new("course-makomanai")]);
+    }
 
     fn row(course: &str, day: u32, label: &str, total: i32, caddie: i32) -> ReservationDaySummary {
         ReservationDaySummary::try_new(
