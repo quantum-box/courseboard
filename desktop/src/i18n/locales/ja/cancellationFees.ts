@@ -107,7 +107,7 @@ export const cancellationFees = {
       smsBody: 'SMSの文面',
       smsBodyHint: 'この文面はSMSだけに使います（メール本文には使いません）。{url} のところに支払いのURLが入ります。',
       smsBodyDefault:
-        'Course Boardです。\nキャンセル料 {amount}{currency} のお支払いをお願いします。\n支払期限: {dueDate}\n{url}',
+        'Course Boardです。\nキャンセル料{amount}円のお支払いをお願いします。\n支払期限:{dueDate}\n{url}',
     },
     total: '請求の金額',
     submit: '請求を作って送る',
