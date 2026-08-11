@@ -9,6 +9,10 @@
   - [ADR-0004: UIのplatform APIアクセスはcourseboard-apiを経由する](src/architecture/decisions/ADR-0004-ui-platform-api-access-via-courseboard-api.md)
   - [ADR-0005: ゴルフドメイン知識はCourseBoardが所有する](src/architecture/decisions/ADR-0005-golf-domain-ownership.md)
 
+# Business
+
+- [キャンセル料徴収の原価と課金モデル](src/business/cancellation-fee-pricing.md)
+
 # Tasks
 
 - [In Progress]()
