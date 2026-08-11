@@ -426,7 +426,11 @@ export function ReservationImportPage() {
                   variant="primary"
                   size="lg"
                   type="button"
-                  disabled={applying || !totals?.courseCount}
+                  // Unsaved course choices are not what the import would use:
+                  // it re-uploads the file and the server reads the answers on
+                  // file. Importing now would apply the previous mapping while
+                  // the screen shows the new one.
+                  disabled={applying || mappingChanged || !totals?.courseCount}
                   onClick={() => void apply()}
                 >
                   <CheckCircle2 />

@@ -215,9 +215,19 @@ pub fn resolve_course_label<'a>(
     courses: &'a [Course],
     links: &[ReservationCourseLink],
 ) -> CourseResolution<'a> {
+    // An answer written exactly as the sheet writes it wins over one that only
+    // matches after normalizing. They should never both exist — saving removes
+    // the collision — but if one ever did, the newer spelling is the one the
+    // desk was looking at.
+    let wanted = normalize_course_label(label);
     let saved = links
         .iter()
-        .find(|link| normalize_course_label(&link.sheet_label) == normalize_course_label(label));
+        .find(|link| link.sheet_label == label)
+        .or_else(|| {
+            links
+                .iter()
+                .find(|link| normalize_course_label(&link.sheet_label) == wanted)
+        });
     if let Some(link) = saved {
         let Some(course_id) = link.course_id.as_ref() else {
             return CourseResolution::Ignored;
@@ -304,7 +314,12 @@ pub fn match_course_label<'a>(label: &str, courses: &'a [Course]) -> CourseMatch
 /// Drops the hole count the sheet appends (`真駒内\n36H`), every kind of space,
 /// and the small-ke spelling difference that makes `羊ケ丘` and `羊ヶ丘` look
 /// like different courses to a computer and like the same one to everybody else.
-fn normalize_course_label(value: &str) -> String {
+///
+/// Public because the store has to agree with the matcher on when two names are
+/// the same one: an answer saved for `東 コース` and another for `東コース` are
+/// answers to the same question, and keeping both lets the older one shadow the
+/// newer one forever.
+pub fn normalize_course_label(value: &str) -> String {
     let head = value.split(['\n', '\r']).next().unwrap_or(value);
     let head = strip_hole_count(head.trim());
     head.chars()

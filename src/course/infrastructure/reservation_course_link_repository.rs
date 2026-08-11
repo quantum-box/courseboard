@@ -9,7 +9,8 @@ use async_trait::async_trait;
 use sqlx::{MySqlPool, Row};
 
 use crate::course::domain::{
-    CourseError, CourseId, ReservationCourseLink, ReservationCourseLinkGateway,
+    normalize_course_label, CourseError, CourseId, ReservationCourseLink,
+    ReservationCourseLinkGateway,
 };
 
 pub struct MySqlReservationCourseLinkRepository {
@@ -67,10 +68,44 @@ impl ReservationCourseLinkGateway for MySqlReservationCourseLinkRepository {
         if links.is_empty() {
             return Ok(Vec::new());
         }
+        // Answers already on file whose name means the same as one being saved.
+        //
+        // The import decides two names are the same one by normalizing them, so
+        // an answer for `東 コース` and an answer for `東コース` are answers to
+        // the same question. The unique key cannot see that — it compares the
+        // raw text — so an export that changes only its spacing would leave both
+        // rows in place, and the import would keep reading whichever sorted
+        // first. Clearing the old spelling is what makes the new answer stick.
+        let existing = self.list_course_links(tenant_id).await?;
+        let superseded: Vec<String> = existing
+            .iter()
+            .map(|link| link.sheet_label.clone())
+            .filter(|stored| {
+                let stored_key = normalize_course_label(stored);
+                links.iter().any(|link| {
+                    link.sheet_label.trim() != stored
+                        && normalize_course_label(link.sheet_label.trim()) == stored_key
+                })
+            })
+            .collect();
+
         // One transaction: the desk answers the whole list of names it was
         // shown, and half of those answers landing would leave the next import
         // asking again about names that were already decided.
         let mut transaction = self.pool.begin().await.map_err(provider)?;
+        for stale in &superseded {
+            sqlx::query(
+                r#"
+                DELETE FROM golf_reservation_course_links
+                WHERE tenant_id = ? AND sheet_label = ?
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(stale)
+            .execute(&mut *transaction)
+            .await
+            .map_err(provider)?;
+        }
         for link in links {
             let label = link.sheet_label.trim();
             if label.is_empty() {
@@ -181,6 +216,41 @@ mod tests {
 
         let stored = repository.list_course_links(&tenant).await.unwrap();
         assert_eq!(stored, vec![link("滝の", Some("course-takino"))]);
+    }
+
+    #[tokio::test]
+    async fn re_answering_a_name_that_only_respaced_replaces_the_old_answer() {
+        // The import treats `東 コース` and `東コース` as the same name. Left in
+        // place, the old spelling would keep answering for the new one — and
+        // whichever sorted first would decide, which is nobody's intent.
+        let (repository, tenant) = fresh("respaced").await;
+        repository
+            .save_course_links(&tenant, &[link("東 コース", Some("course-old"))], None)
+            .await
+            .unwrap();
+        repository
+            .save_course_links(&tenant, &[link("東コース", Some("course-new"))], None)
+            .await
+            .unwrap();
+
+        let stored = repository.list_course_links(&tenant).await.unwrap();
+        assert_eq!(stored, vec![link("東コース", Some("course-new"))]);
+    }
+
+    #[tokio::test]
+    async fn a_name_that_means_something_else_is_left_alone() {
+        let (repository, tenant) = fresh("distinct").await;
+        repository
+            .save_course_links(&tenant, &[link("東コース", Some("course-east"))], None)
+            .await
+            .unwrap();
+        repository
+            .save_course_links(&tenant, &[link("西コース", Some("course-west"))], None)
+            .await
+            .unwrap();
+
+        let stored = repository.list_course_links(&tenant).await.unwrap();
+        assert_eq!(stored.len(), 2);
     }
 
     #[tokio::test]
