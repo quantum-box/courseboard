@@ -217,14 +217,14 @@ mod tests {
             .await
             .unwrap();
 
+        // Looked up by name rather than by position. Rows come back in the
+        // store's own collation order, which has nothing to say about whether
+        // the answers survived — and asserting a position would be asserting
+        // how a database sorts Japanese.
         let stored = repository.list_course_links(&tenant).await.unwrap();
-        assert_eq!(
-            stored,
-            vec![
-                link("真駒内", Some("course-a")),
-                link("滝の", Some("course-b"))
-            ]
-        );
+        assert_eq!(stored.len(), 2);
+        assert!(stored.contains(&link("真駒内", Some("course-a"))));
+        assert!(stored.contains(&link("滝の", Some("course-b"))));
     }
 
     #[tokio::test]
