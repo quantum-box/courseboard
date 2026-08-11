@@ -248,4 +248,28 @@ describe('mockFieldApi', () => {
       }),
     })).toEqual({ kind: 'error', status: 409, message: 'この枠はちょうど埋まりました' })
   })
+
+  it('answers feature flag evaluation with every requested key enabled', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    expect(resolveMockFieldApiJson('/v1/course/feature-flags/evaluate', {
+      method: 'POST',
+      body: JSON.stringify({
+        keys: ['feature.courseboard.flag-evaluation-smoke', 'feature.courseboard.other'],
+      }),
+    })).toEqual({
+      kind: 'hit',
+      data: {
+        values: [
+          { key: 'feature.courseboard.flag-evaluation-smoke', enabled: true },
+          { key: 'feature.courseboard.other', enabled: true },
+        ],
+      },
+    })
+
+    expect(resolveMockFieldApiJson('/v1/course/feature-flags/evaluate', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })).toEqual({ kind: 'hit', data: { values: [] } })
+  })
 })
