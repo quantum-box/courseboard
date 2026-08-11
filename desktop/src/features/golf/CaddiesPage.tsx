@@ -2022,7 +2022,10 @@ function ProfilesView({
       mobileLabel: t('caddies:roster.table.name'),
       cell: profile => (
         <div className="grid gap-0.5">
-          <strong>{profile.displayName}</strong>
+          {/* text-lg (16px/24px) matches .caddie-link exactly, the class the
+              attendance tab's CaddieLink name uses — so a caddie's name
+              doesn't visibly change size when switching tabs. */}
+          <strong className="text-lg">{profile.displayName}</strong>
           <span className="text-xs text-muted-foreground">{profile.id}</span>
         </div>
       ),
