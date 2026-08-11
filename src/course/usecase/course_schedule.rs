@@ -156,6 +156,13 @@ impl ReplaceCourseScheduleUseCase {
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         let today = course_today(Utc::now(), &timezone)?;
         let bookable_through = horizon.last_bookable_date(today);
+        // The club named a closing date that has passed: the week is worth
+        // storing for next season, but there is no day left to build, and asking
+        // Field for a range that ends before it starts is an error rather than
+        // an empty result.
+        if bookable_through < today {
+            return Ok(None);
+        }
         let summary = self
             .schedules
             .generate_resource_time_slots(credentials, resource_id, today, bookable_through, false)
@@ -460,12 +467,18 @@ impl SetBookingHorizonUseCase {
         credentials: GatewayCredentials<'_>,
         horizon: BookingHorizon,
     ) -> Result<(BookingHorizon, NaiveDate), CourseError> {
+        // A named closing date is only meaningful against the club's own today,
+        // which the handler cannot know without the tenant's timezone. Checked
+        // before the write, so a date nobody can sell to is refused rather than
+        // stored and then quietly clamped.
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
+        let today = course_today(Utc::now(), &timezone)?;
+        horizon.validate_on(today)?;
+
         let stored = self
             .commercial
             .set_booking_horizon(credentials, &horizon)
             .await?;
-        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
-        let today = course_today(Utc::now(), &timezone)?;
         let bookable_through = stored.last_bookable_date(today);
 
         for (course_id, resource_id) in self.course_resources(credentials).await? {
@@ -990,7 +1003,7 @@ mod tests {
             catalog,
             schedules.clone(),
             Arc::new(FakeCommercial {
-                horizon: BookingHorizon::try_new(30).expect("valid horizon"),
+                horizon: BookingHorizon::try_days(30).expect("valid horizon"),
             }),
             watermarks.clone(),
         );
@@ -1049,7 +1062,7 @@ mod tests {
             catalog,
             schedules.clone(),
             Arc::new(FakeCommercial {
-                horizon: BookingHorizon::try_new(30).expect("valid horizon"),
+                horizon: BookingHorizon::try_days(30).expect("valid horizon"),
             }),
             watermarks.clone(),
         );
@@ -1080,5 +1093,71 @@ mod tests {
         assert_eq!(written[0].0, course_id);
         assert_eq!(written[0].1.generated_through, built.bookable_through);
         assert_eq!(written[0].1.checked_on, from);
+    }
+
+    #[tokio::test]
+    async fn a_week_saved_after_the_season_closed_is_stored_without_building_anything() {
+        // The club sells to a date that has passed. The week is still worth
+        // keeping — it is next season's — but there is no day left to build, and
+        // a range ending before it starts is an error at Field, not an empty
+        // result.
+        let course_id = CourseId::new("course-east");
+        let catalog = Arc::new(FakeCatalog {
+            tenant_timezone: "Asia/Tokyo".into(),
+            courses: vec![Course::reconstitute(
+                course_id.clone(),
+                "East",
+                None,
+                18,
+                "Asia/Tokyo",
+                8,
+                true,
+                None,
+                None,
+                None,
+                None,
+            )],
+            resources: vec![Resource::reconstitute(
+                "golf-resource-east",
+                "East",
+                Some("reservation-resource-east".into()),
+                Some(course_id.to_string()),
+                ResourceKind::Course,
+                true,
+            )],
+        });
+        let schedules = Arc::new(FakeSchedules::default());
+        let watermarks = Arc::new(FakeWatermarks::default());
+        let use_case = ReplaceCourseScheduleUseCase::new(
+            catalog,
+            schedules.clone(),
+            Arc::new(FakeCommercial {
+                horizon: BookingHorizon::through(
+                    NaiveDate::from_ymd_opt(2020, 11, 30).expect("valid date"),
+                ),
+            }),
+            watermarks.clone(),
+        );
+
+        let saved = use_case
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer test",
+                    operator_id: "tenant-test",
+                    platform_id: None,
+                },
+                &course_id,
+                vec![rule(1, "07:00", "12:00")],
+            )
+            .await
+            .expect("replace schedule");
+
+        assert_eq!(saved.rules.len(), 1, "the week is stored either way");
+        assert!(
+            saved.built.is_none(),
+            "nothing on sale past a closed season"
+        );
+        assert!(schedules.generated.lock().expect("lock").is_empty());
+        assert!(watermarks.written.lock().expect("lock").is_empty());
     }
 }

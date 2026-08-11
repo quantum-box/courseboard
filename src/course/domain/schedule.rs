@@ -163,13 +163,21 @@ pub struct InventoryWatermark {
 /// How far ahead the club sells tee times.
 ///
 /// Generated inventory *is* the bookable window: a date with no slot row is
-/// refused outright when a booking is taken, so this number is what decides how
-/// far out the desk can write one. It is a golf operating rule, not an ERP
-/// concept, so CourseBoard owns it (ADR-0005) and keeps it in the tenant's golf
-/// extension config.
+/// refused outright when a booking is taken, so this is what decides how far out
+/// the desk can write one. It is a golf operating rule, not an ERP concept, so
+/// CourseBoard owns it (ADR-0005) and keeps it in the tenant's golf extension
+/// config.
+///
+/// Two shapes, because clubs run their book two different ways. A course open
+/// all year keeps a rolling window — always six months ahead, whatever today is.
+/// A course with a season has an end its book cannot cross, and counting days to
+/// it would mean editing the number every week to hold the same closing date.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BookingHorizon {
-    days: i64,
+pub enum BookingHorizon {
+    /// Rolling: the far edge stays this many days ahead of today.
+    Days(i64),
+    /// Fixed: the far edge is this date, and it comes closer as days pass.
+    Through(NaiveDate),
 }
 
 impl BookingHorizon {
@@ -180,30 +188,76 @@ impl BookingHorizon {
     /// One short of the generate cap, because the range is `today ..= today + days`.
     pub const MAX_DAYS: i64 = 399;
 
-    pub fn try_new(days: i64) -> Result<Self, CourseError> {
+    pub fn try_days(days: i64) -> Result<Self, CourseError> {
         if !(Self::MIN_DAYS..=Self::MAX_DAYS).contains(&days) {
             return Err(CourseError::BadRequest(
                 "booking horizon must be between 1 and 399 days",
             ));
         }
-        Ok(Self { days })
+        Ok(Self::Days(days))
     }
 
-    pub fn days(&self) -> i64 {
-        self.days
+    pub fn through(date: NaiveDate) -> Self {
+        Self::Through(date)
     }
 
-    /// The last date a booking may land on, counted from `today`.
+    pub fn days(&self) -> Option<i64> {
+        match self {
+            Self::Days(days) => Some(*days),
+            Self::Through(_) => None,
+        }
+    }
+
+    pub fn through_date(&self) -> Option<NaiveDate> {
+        match self {
+            Self::Days(_) => None,
+            Self::Through(date) => Some(*date),
+        }
+    }
+
+    /// Whether a date the operator typed can be stored as the far edge today.
+    ///
+    /// Refused rather than clamped: a club typing next season's closing date
+    /// two years out has said something this cannot honour, and silently
+    /// selling 399 days instead would look like it worked. Yesterday is refused
+    /// for the same reason — closing the book is `today`, and a date already
+    /// behind us is a typo far more often than an intent.
+    pub fn validate_on(&self, today: NaiveDate) -> Result<(), CourseError> {
+        let Self::Through(date) = self else {
+            return Ok(());
+        };
+        if *date < today {
+            return Err(CourseError::BadRequest(
+                "the last bookable date cannot be in the past",
+            ));
+        }
+        if *date > today + Duration::days(Self::MAX_DAYS) {
+            return Err(CourseError::BadRequest(
+                "the last bookable date cannot be more than 399 days ahead",
+            ));
+        }
+        Ok(())
+    }
+
+    /// The last date a booking may land on, as of `today`.
+    ///
+    /// A stored date is clamped to what can actually be generated, not because
+    /// the operator may set one further out — that is refused on the way in —
+    /// but because the same stored value is read on every later day too, and a
+    /// horizon nobody touched must never ask Field for a range it will reject.
+    /// A date already behind us comes back as it is: the book is closed, and the
+    /// callers that build inventory read that as nothing to build.
     pub fn last_bookable_date(&self, today: NaiveDate) -> NaiveDate {
-        today + Duration::days(self.days)
+        match self {
+            Self::Days(days) => today + Duration::days(*days),
+            Self::Through(date) => (*date).min(today + Duration::days(Self::MAX_DAYS)),
+        }
     }
 }
 
 impl Default for BookingHorizon {
     fn default() -> Self {
-        Self {
-            days: Self::DEFAULT_DAYS,
-        }
+        Self::Days(Self::DEFAULT_DAYS)
     }
 }
 
@@ -274,21 +328,80 @@ mod tests {
     fn a_horizon_stays_inside_what_one_generate_call_may_cover() {
         // The generate cap refuses a span of 400 days or more, and the range
         // starts at today, so 399 is the largest horizon that can be written.
-        assert!(BookingHorizon::try_new(399).is_ok());
-        assert!(BookingHorizon::try_new(400).is_err());
-        assert!(BookingHorizon::try_new(0).is_err());
-        assert!(BookingHorizon::try_new(-1).is_err());
+        assert!(BookingHorizon::try_days(399).is_ok());
+        assert!(BookingHorizon::try_days(400).is_err());
+        assert!(BookingHorizon::try_days(0).is_err());
+        assert!(BookingHorizon::try_days(-1).is_err());
     }
 
     #[test]
     fn the_last_bookable_date_is_the_horizon_counted_from_today() {
         let today = NaiveDate::from_ymd_opt(2026, 8, 10).expect("valid date");
-        let horizon = BookingHorizon::try_new(30).expect("valid horizon");
+        let horizon = BookingHorizon::try_days(30).expect("valid horizon");
         assert_eq!(
             horizon.last_bookable_date(today),
             NaiveDate::from_ymd_opt(2026, 9, 9).expect("valid date")
         );
-        assert_eq!(BookingHorizon::default().days(), 180);
+        assert_eq!(BookingHorizon::default().days(), Some(180));
+    }
+
+    #[test]
+    fn a_named_closing_date_is_the_far_edge_and_does_not_move_with_today() {
+        let closing = NaiveDate::from_ymd_opt(2026, 11, 30).expect("valid date");
+        let horizon = BookingHorizon::through(closing);
+        for today in [
+            NaiveDate::from_ymd_opt(2026, 8, 10).expect("valid date"),
+            NaiveDate::from_ymd_opt(2026, 9, 30).expect("valid date"),
+        ] {
+            assert_eq!(horizon.last_bookable_date(today), closing);
+        }
+        assert_eq!(horizon.days(), None);
+        assert_eq!(horizon.through_date(), Some(closing));
+    }
+
+    #[test]
+    fn a_closing_date_already_behind_us_leaves_nothing_on_sale() {
+        // Every caller that builds inventory refuses a range that ends before it
+        // starts, so a season that has ended stops generating on its own.
+        let today = NaiveDate::from_ymd_opt(2026, 12, 1).expect("valid date");
+        let closed = NaiveDate::from_ymd_opt(2026, 11, 30).expect("valid date");
+        assert!(BookingHorizon::through(closed).last_bookable_date(today) < today);
+    }
+
+    #[test]
+    fn a_stored_date_past_the_generate_cap_is_clamped_rather_than_sent_to_field() {
+        // It cannot be written this way, but a date stored when the cap was
+        // further off — or by another writer — is still read every day after.
+        let today = NaiveDate::from_ymd_opt(2026, 8, 10).expect("valid date");
+        let far = NaiveDate::from_ymd_opt(2030, 1, 1).expect("valid date");
+        assert_eq!(
+            BookingHorizon::through(far).last_bookable_date(today),
+            today + Duration::days(BookingHorizon::MAX_DAYS)
+        );
+    }
+
+    #[test]
+    fn a_closing_date_is_refused_when_it_is_behind_today_or_past_the_cap() {
+        let today = NaiveDate::from_ymd_opt(2026, 8, 10).expect("valid date");
+        assert!(BookingHorizon::through(today).validate_on(today).is_ok());
+        assert!(
+            BookingHorizon::through(today + Duration::days(BookingHorizon::MAX_DAYS))
+                .validate_on(today)
+                .is_ok()
+        );
+        assert!(BookingHorizon::through(today - Duration::days(1))
+            .validate_on(today)
+            .is_err());
+        assert!(
+            BookingHorizon::through(today + Duration::days(BookingHorizon::MAX_DAYS + 1))
+                .validate_on(today)
+                .is_err()
+        );
+        // A rolling horizon was already checked when it was built.
+        assert!(BookingHorizon::try_days(180)
+            .expect("valid horizon")
+            .validate_on(today)
+            .is_ok());
     }
 
     #[test]
