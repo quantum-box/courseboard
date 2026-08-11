@@ -11,6 +11,7 @@ pub mod demo_seed;
 pub mod feature_flags;
 pub mod field_api;
 pub mod field_proxy;
+pub mod migrations;
 pub mod profile_proxy;
 pub mod smart_assign;
 
@@ -38,7 +39,7 @@ use course::infrastructure::{
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
-use sqlx::{migrate::Migrator, FromRow, MySqlPool};
+use sqlx::{FromRow, MySqlPool};
 use thiserror::Error;
 use tower_http::{
     catch_panic::CatchPanicLayer,
@@ -50,8 +51,6 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 const COURSEBOARD_AUTHORIZATION_HEADER: &str = "x-courseboard-authorization";
-static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
-
 #[derive(Clone)]
 pub struct AppState {
     rules: Arc<MySqlTaxRuleRepository>,
@@ -982,8 +981,10 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
         .connect_with(connect_options)
         .await?;
 
-    run_migrations(&pool).await?;
+    build_app_with_pool(config, pool).await
+}
 
+async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::Result<Router> {
     let course_gateway_url = config.course_gateway_base_url();
     if course_gateway_url == crate::config::EMPTY_COURSE_STORE_URL
         || course_gateway_url.starts_with("empty://")
@@ -1030,11 +1031,6 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
     Ok(build_router(state))
 }
 
-pub async fn run_migrations(pool: &MySqlPool) -> Result<(), AppError> {
-    MIGRATOR.run(pool).await?;
-    Ok(())
-}
-
 /// Guards on the migration set itself, which no database is needed to check.
 ///
 /// A migration's version is the number its file name starts with, and every
@@ -1048,7 +1044,7 @@ pub async fn run_migrations(pool: &MySqlPool) -> Result<(), AppError> {
 /// refuses to boot.
 #[cfg(test)]
 mod migration_set {
-    use super::MIGRATOR;
+    use crate::migrations::MIGRATOR;
     use std::collections::HashMap;
 
     #[test]
@@ -1637,7 +1633,9 @@ pub(crate) mod test_support {
             .expect("connect test TiDB database");
         let mut migrated = MIGRATED.lock().await;
         if !*migrated {
-            super::run_migrations(&pool).await.expect("run migrations");
+            crate::migrations::run_migrations(&pool)
+                .await
+                .expect("run migrations");
             *migrated = true;
         }
         pool
