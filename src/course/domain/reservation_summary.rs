@@ -57,6 +57,14 @@ pub struct ReservationDaySummary {
     /// from.
     #[getter(copy)]
     caddie_groups: i32,
+    /// The name in the export this count came from.
+    ///
+    /// Kept because it is what stays put when the desk re-points a name at a
+    /// different course: the replacement has to be able to find the rows the
+    /// old course still holds. Absent on rows written before names were
+    /// recorded.
+    #[getter(skip)]
+    sheet_label: Option<String>,
 }
 
 impl ReservationDaySummary {
@@ -66,6 +74,7 @@ impl ReservationDaySummary {
         time_of_day: TimeOfDay,
         total_groups: i32,
         caddie_groups: i32,
+        sheet_label: Option<String>,
     ) -> Result<Self, CourseError> {
         if total_groups < 0 || caddie_groups < 0 {
             return Err(CourseError::BadRequest("group counts cannot be negative"));
@@ -76,6 +85,7 @@ impl ReservationDaySummary {
             time_of_day,
             total_groups,
             caddie_groups,
+            sheet_label,
         })
     }
 
@@ -86,6 +96,7 @@ impl ReservationDaySummary {
         time_of_day: TimeOfDay,
         total_groups: i32,
         caddie_groups: i32,
+        sheet_label: Option<String>,
     ) -> Self {
         Self {
             course_id,
@@ -93,11 +104,27 @@ impl ReservationDaySummary {
             time_of_day,
             total_groups,
             caddie_groups,
+            sheet_label,
         }
     }
 
     pub fn course_id(&self) -> &CourseId {
         &self.course_id
+    }
+
+    pub fn sheet_label(&self) -> Option<&str> {
+        self.sheet_label.as_deref()
+    }
+
+    /// The name reduced to what the import compares names by.
+    ///
+    /// Stored beside the name because it is what the row has to be *found* by.
+    /// An export that respells a name between months — a space in or out, a
+    /// small ケ for a large one — still means the same course to the import, so
+    /// a replacement keyed on the raw text would walk straight past last
+    /// month's rows.
+    pub fn sheet_label_key(&self) -> Option<String> {
+        self.sheet_label.as_deref().map(normalize_course_label)
     }
 
     /// Groups going out without a caddie.
@@ -133,10 +160,152 @@ pub struct ReservationSummaryQuery {
 pub struct ReservationSummaryWindow {
     pub from: NaiveDate,
     pub to: NaiveDate,
-    /// Only the courses the file actually spoke about and that were matched.
-    /// A course the import could not resolve keeps whatever it already had:
-    /// a rename in the course master should not erase a month of bookings.
+    /// Every name this file holds, including the ones it will not import.
+    ///
+    /// An excluded name has to be in the window: saying "leave this course out"
+    /// only means something if it also takes away what that name put on the
+    /// board last month. The same goes for a name re-pointed at another course
+    /// — the rows the old course holds are found by the name, not by the course
+    /// they happen to sit under.
+    pub sheet_labels: Vec<String>,
+    /// Courses this file is writing to. Rows here predate names being recorded
+    /// and have no other handle; a course the file does not mention keeps what
+    /// it has.
     pub course_ids: Vec<CourseId>,
+}
+
+/// The desk's standing answer for one name in the export.
+///
+/// Stored because the question is asked every month and the answer does not
+/// change: a club whose courses are named differently from the booking
+/// system's would otherwise re-map them on every import, and a club that
+/// manages one of its three courses here would be re-told about the other two
+/// forever.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReservationCourseLink {
+    /// The name as the sheet writes it.
+    pub sheet_label: String,
+    /// `None` means "do not import this one". A decision, not a gap — which is
+    /// why it is stored rather than inferred from the absence of a row.
+    pub course_id: Option<CourseId>,
+}
+
+/// What the desk decided about one name, on its way to being stored.
+///
+/// Three states, because two were not enough to say everything the screen can
+/// say. Storage holds the first two as a row and the last as the absence of one,
+/// which is what the import reads as a question still to be asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CourseDecision {
+    /// This name is that course.
+    Course(CourseId),
+    /// Leave this name out. An answer, not a gap.
+    DoNotImport,
+    /// Take back whatever was answered before.
+    ///
+    /// A desk that mapped a name by mistake has to be able to get back to not
+    /// having decided — which is not the same as deciding to leave the course
+    /// out, and is the only state that makes the import ask again.
+    Undecided,
+}
+
+/// One name, and what the desk just said about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReservationCourseAnswer {
+    pub sheet_label: String,
+    pub decision: CourseDecision,
+}
+
+/// What one name in the export resolved to, and how.
+///
+/// How matters: a course the desk chose is settled, while one the matcher
+/// guessed is a suggestion the desk may want to look at. Both import; only the
+/// second is worth showing prominently.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CourseResolution<'a> {
+    /// The desk said so. Beats anything the matcher would have guessed.
+    Linked(&'a Course),
+    /// Matched by name. Imports, and the preview says it was a guess so a wrong
+    /// one can be corrected before it is applied.
+    Suggested(&'a Course),
+    /// The desk said not to import this one.
+    Ignored,
+    /// Nothing matched and nobody has said what it is.
+    Unresolved,
+    /// Several courses fit the name, so choosing one would be a guess. The
+    /// names come back so the desk can pick.
+    Ambiguous(Vec<String>),
+}
+
+impl<'a> CourseResolution<'a> {
+    /// The course this name's counts should be written against, if any.
+    pub fn course(&self) -> Option<&'a Course> {
+        match self {
+            Self::Linked(course) | Self::Suggested(course) => Some(course),
+            _ => None,
+        }
+    }
+
+    /// Whether the desk still has to answer something for this name.
+    ///
+    /// A suggestion does not count: it imports, and the preview shows what it
+    /// picked. Only a name with nowhere to go is an open question.
+    pub fn needs_an_answer(&self) -> bool {
+        matches!(self, Self::Unresolved | Self::Ambiguous(_))
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Linked(_) => "linked",
+            Self::Suggested(_) => "suggested",
+            Self::Ignored => "ignored",
+            Self::Unresolved => "unresolved",
+            Self::Ambiguous(_) => "ambiguous",
+        }
+    }
+}
+
+/// Decide what one name in the export refers to.
+///
+/// The desk's saved answer wins over the matcher, always. Guessing is what the
+/// matcher is for, and a stored decision is not a guess — including the
+/// decision to leave a course out, which no amount of name similarity should
+/// override.
+pub fn resolve_course_label<'a>(
+    label: &str,
+    courses: &'a [Course],
+    links: &[ReservationCourseLink],
+) -> CourseResolution<'a> {
+    // An answer written exactly as the sheet writes it wins over one that only
+    // matches after normalizing. They should never both exist — saving removes
+    // the collision — but if one ever did, the newer spelling is the one the
+    // desk was looking at.
+    let wanted = normalize_course_label(label);
+    let saved = links
+        .iter()
+        .find(|link| link.sheet_label == label)
+        .or_else(|| {
+            links
+                .iter()
+                .find(|link| normalize_course_label(&link.sheet_label) == wanted)
+        });
+    if let Some(link) = saved {
+        let Some(course_id) = link.course_id.as_ref() else {
+            return CourseResolution::Ignored;
+        };
+        // A link pointing at a course that has since been deleted falls back to
+        // the matcher rather than silently dropping the course: the desk's
+        // answer is stale, not wrong on purpose.
+        if let Some(course) = courses.iter().find(|course| course.id() == course_id) {
+            return CourseResolution::Linked(course);
+        }
+    }
+
+    match match_course_label(label, courses) {
+        CourseMatch::Matched(course) => CourseResolution::Suggested(course),
+        CourseMatch::Unknown => CourseResolution::Unresolved,
+        CourseMatch::Ambiguous(candidates) => CourseResolution::Ambiguous(candidates),
+    }
 }
 
 /// What matching a sheet's course label against the course master produced.
@@ -159,9 +328,55 @@ pub enum CourseMatch<'a> {
 /// drop a third of the club, so the comparison is done on a normalized form and
 /// an inexact hit is allowed only when exactly one course produces it.
 pub fn match_course_label<'a>(label: &str, courses: &'a [Course]) -> CourseMatch<'a> {
+    match courses_matching_label(label, courses).as_slice() {
+        [] => CourseMatch::Unknown,
+        [only] => CourseMatch::Matched(only),
+        several => CourseMatch::Ambiguous(several.iter().map(|c| c.name().to_string()).collect()),
+    }
+}
+
+/// Every course a sheet label could be naming.
+///
+/// One of them is a match; several is a tie the import refuses to break. Exposed
+/// beside [`match_course_label`] because "where could this name's rows already
+/// be" needs the whole set rather than the verdict: a name that ties today may
+/// have matched exactly one course on the day its rows were written, and the
+/// replacement has to be able to reach them either way.
+pub fn courses_matching_label<'a>(label: &str, courses: &'a [Course]) -> Vec<&'a Course> {
+    let (exact, partial) = candidates_for(label, courses);
+    // An exact hit settles it even if some other course also happens to contain
+    // the same characters: `滝の` should not become ambiguous because a
+    // `滝の東` exists.
+    if exact.is_empty() {
+        partial
+    } else {
+        exact
+    }
+}
+
+/// Every course this label has ever been able to name.
+///
+/// Both tiers, where [`courses_matching_label`] takes only the better one. That
+/// is right for deciding where counts go today and wrong for finding where they
+/// went before: a label that matched `東コース` on looks alone still matched it,
+/// and a course later registered as exactly `東` does not move those rows. A row
+/// with no name of its own has only its course to be found by, so the search has
+/// to cover every course the name could have reached.
+pub fn courses_a_label_may_have_matched<'a>(label: &str, courses: &'a [Course]) -> Vec<&'a Course> {
+    let (mut exact, partial) = candidates_for(label, courses);
+    for course in partial {
+        if !exact.iter().any(|kept| kept.id() == course.id()) {
+            exact.push(course);
+        }
+    }
+    exact
+}
+
+/// The two tiers of match, in order of confidence.
+fn candidates_for<'a>(label: &str, courses: &'a [Course]) -> (Vec<&'a Course>, Vec<&'a Course>) {
     let wanted = normalize_course_label(label);
     if wanted.is_empty() {
-        return CourseMatch::Unknown;
+        return (Vec::new(), Vec::new());
     }
 
     let names = |course: &'a Course| -> Vec<String> {
@@ -176,16 +391,6 @@ pub fn match_course_label<'a>(label: &str, courses: &'a [Course]) -> CourseMatch
         .iter()
         .filter(|course| names(course).contains(&wanted))
         .collect();
-    // An exact hit settles it even if some other course also happens to contain
-    // the same characters: `滝の` should not become ambiguous because a
-    // `滝の東` exists.
-    if let [only] = exact.as_slice() {
-        return CourseMatch::Matched(only);
-    }
-    if exact.len() > 1 {
-        return CourseMatch::Ambiguous(exact.iter().map(|c| c.name().to_string()).collect());
-    }
-
     let partial: Vec<&Course> = courses
         .iter()
         .filter(|course| {
@@ -194,11 +399,7 @@ pub fn match_course_label<'a>(label: &str, courses: &'a [Course]) -> CourseMatch
                 .any(|name| !name.is_empty() && (name.contains(&wanted) || wanted.contains(name)))
         })
         .collect();
-    match partial.as_slice() {
-        [] => CourseMatch::Unknown,
-        [only] => CourseMatch::Matched(only),
-        several => CourseMatch::Ambiguous(several.iter().map(|c| c.name().to_string()).collect()),
-    }
+    (exact, partial)
 }
 
 /// Reduce a course name to the part two people would agree on.
@@ -206,7 +407,12 @@ pub fn match_course_label<'a>(label: &str, courses: &'a [Course]) -> CourseMatch
 /// Drops the hole count the sheet appends (`真駒内\n36H`), every kind of space,
 /// and the small-ke spelling difference that makes `羊ケ丘` and `羊ヶ丘` look
 /// like different courses to a computer and like the same one to everybody else.
-fn normalize_course_label(value: &str) -> String {
+///
+/// Public because the store has to agree with the matcher on when two names are
+/// the same one: an answer saved for `東 コース` and another for `東コース` are
+/// answers to the same question, and keeping both lets the older one shadow the
+/// newer one forever.
+pub fn normalize_course_label(value: &str) -> String {
     let head = value.split(['\n', '\r']).next().unwrap_or(value);
     let head = strip_hole_count(head.trim());
     head.chars()
@@ -319,6 +525,43 @@ mod tests {
     }
 
     #[test]
+    fn a_tied_name_still_says_which_courses_it_could_have_written_to() {
+        // The verdict throws the tie away, and rows written before names were
+        // recorded can only be found by the course they went to. Back when the
+        // club had one 東コース the match was unique, so either candidate may be
+        // holding them.
+        let courses = vec![course("東コース", None), course("東コース 旧", None)];
+        let candidates = courses_matching_label("東\n18H", &courses);
+        assert_eq!(candidates.len(), 2);
+    }
+
+    #[test]
+    fn a_name_that_now_hits_a_course_exactly_still_remembers_the_one_it_used_to_reach() {
+        // `東` reached `東コース` on looks alone until the club registered a
+        // course called exactly `東`. The rows it wrote back then did not move,
+        // and having no name of their own they can only be found by that course.
+        let courses = vec![course("東コース", None), course("東", None)];
+        let names: Vec<&str> = courses_a_label_may_have_matched("東\n18H", &courses)
+            .iter()
+            .map(|course| course.name())
+            .collect();
+        assert!(names.contains(&"東"));
+        assert!(names.contains(&"東コース"));
+
+        // The verdict is unchanged: today the name means the exact course.
+        assert!(matches!(
+            match_course_label("東\n18H", &courses),
+            CourseMatch::Matched(course) if course.name() == "東"
+        ));
+    }
+
+    #[test]
+    fn a_name_nobody_registered_could_have_written_nowhere() {
+        let courses = vec![course("真駒内", None)];
+        assert!(courses_matching_label("羊ケ丘\n18H", &courses).is_empty());
+    }
+
+    #[test]
     fn a_course_nobody_registered_is_unknown_rather_than_matched_to_the_nearest() {
         let courses = vec![course("真駒内", None)];
         assert_eq!(
@@ -336,6 +579,90 @@ mod tests {
         ));
     }
 
+    fn link(label: &str, course_id: Option<&str>) -> ReservationCourseLink {
+        ReservationCourseLink {
+            sheet_label: label.to_string(),
+            course_id: course_id.map(CourseId::new),
+        }
+    }
+
+    #[test]
+    fn a_name_nobody_has_answered_for_is_matched_as_a_suggestion() {
+        // The club this was built from has courses named the way its export
+        // writes them, so the common case still needs no setup at all.
+        let courses = vec![course("真駒内", None)];
+        assert!(matches!(
+            resolve_course_label("真駒内\n36H", &courses, &[]),
+            CourseResolution::Suggested(_)
+        ));
+    }
+
+    #[test]
+    fn a_club_whose_courses_are_named_differently_can_say_so_once() {
+        // Nothing about `第一コース` looks like `真駒内`, and no amount of
+        // normalizing will make it. Without somewhere to say what it is, this
+        // club could never import anything.
+        let courses = vec![course("第一コース", None)];
+        assert_eq!(
+            resolve_course_label("真駒内\n36H", &courses, &[]),
+            CourseResolution::Unresolved
+        );
+        let CourseResolution::Linked(linked) = resolve_course_label(
+            "真駒内\n36H",
+            &courses,
+            &[link("真駒内", Some("course-第一コース"))],
+        ) else {
+            panic!("the desk's answer should settle it");
+        };
+        assert_eq!(linked.name(), "第一コース");
+    }
+
+    #[test]
+    fn a_course_the_club_does_not_manage_here_can_be_left_out_on_purpose() {
+        // Three courses in the export, one registered: the other two are not a
+        // problem to be reported every month, they are a decision.
+        let courses = vec![course("真駒内", None)];
+        assert_eq!(
+            resolve_course_label("滝の\n27H", &courses, &[link("滝の", None)]),
+            CourseResolution::Ignored
+        );
+    }
+
+    #[test]
+    fn the_desks_answer_beats_the_matcher_even_when_the_matcher_is_confident() {
+        // Otherwise "leave this one out" could never stick on a course whose
+        // name happens to match, which is exactly the course somebody would
+        // want to leave out — a test course named after a real one.
+        let courses = vec![course("真駒内", None)];
+        assert_eq!(
+            resolve_course_label("真駒内\n36H", &courses, &[link("真駒内", None)]),
+            CourseResolution::Ignored
+        );
+    }
+
+    #[test]
+    fn an_answer_pointing_at_a_deleted_course_falls_back_to_matching() {
+        // Stale, not deliberate. Dropping the course silently would be the one
+        // outcome nobody asked for.
+        let courses = vec![course("真駒内", None)];
+        assert!(matches!(
+            resolve_course_label(
+                "真駒内\n36H",
+                &courses,
+                &[link("真駒内", Some("course-gone"))]
+            ),
+            CourseResolution::Suggested(_)
+        ));
+    }
+
+    #[test]
+    fn only_a_name_with_nowhere_to_go_is_an_open_question() {
+        let courses = vec![course("真駒内", None)];
+        assert!(!resolve_course_label("真駒内", &courses, &[]).needs_an_answer());
+        assert!(!resolve_course_label("滝の", &courses, &[link("滝の", None)]).needs_an_answer());
+        assert!(resolve_course_label("滝の", &courses, &[]).needs_an_answer());
+    }
+
     #[test]
     fn caddie_attached_groups_are_part_of_the_total_not_extra_to_it() {
         let summary = ReservationDaySummary::try_new(
@@ -344,6 +671,7 @@ mod tests {
             TimeOfDay::Morning,
             51,
             24,
+            Some("真駒内".to_string()),
         )
         .unwrap();
         assert_eq!(summary.self_play_groups(), 27);
@@ -357,6 +685,7 @@ mod tests {
             TimeOfDay::Morning,
             10,
             14,
+            Some("真駒内".to_string()),
         )
         .unwrap();
         assert_eq!(summary.self_play_groups(), 0);
@@ -370,6 +699,7 @@ mod tests {
             TimeOfDay::Morning,
             -1,
             0,
+            None,
         )
         .is_err());
     }

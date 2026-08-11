@@ -122,6 +122,20 @@ pub enum ImportWarning {
         course_label: String,
         candidates: Vec<String>,
     },
+    /// Several names in the file point at one CourseBoard course, so their
+    /// counts were added together.
+    ///
+    /// Adding up is right when the club's booking system splits one course
+    /// across two lines, and wrong when the desk pointed a name at the wrong
+    /// course — and the two look identical from here. So it is done rather than
+    /// refused, and said out loud: a board where one name's bookings vanished
+    /// is the one outcome nobody could have spotted.
+    CoursesCombined {
+        /// The CourseBoard course they all landed on.
+        course_name: String,
+        /// The names in the file that were added together.
+        sheet_labels: Vec<String>,
+    },
 }
 
 /// Everything one sheet yielded.

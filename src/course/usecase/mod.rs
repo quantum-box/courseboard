@@ -58,6 +58,7 @@ mod membership;
 mod quote_golf_fee;
 mod replace_caddie_memberships;
 mod replace_product_slots;
+mod save_reservation_course_links;
 mod search_customers;
 mod seed_demo_board;
 mod shift_rules;
@@ -138,6 +139,7 @@ pub use membership::{
 pub use quote_golf_fee::QuoteGolfFeeUseCase;
 pub use replace_caddie_memberships::ReplaceCaddieMembershipsUseCase;
 pub use replace_product_slots::ReplaceProductSlotsUseCase;
+pub use save_reservation_course_links::SaveReservationCourseLinksUseCase;
 pub use search_customers::SearchCustomersUseCase;
 pub use seed_demo_board::{SeedDemoBoardUseCase, SeedSummary};
 pub use shift_rules::{GetShiftRulesUseCase, UpdateShiftRulesUseCase};
