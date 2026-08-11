@@ -23,6 +23,7 @@ import {
   dailyRows,
   formatMonthDay,
   formatYearMonth,
+  hasSomethingToApply,
   IGNORE_COURSE,
   importTotals,
   monthBounds,
@@ -430,7 +431,11 @@ export function ReservationImportPage() {
                   // it re-uploads the file and the server reads the answers on
                   // file. Importing now would apply the previous mapping while
                   // the screen shows the new one.
-                  disabled={applying || mappingChanged || !totals?.courseCount}
+                  //
+                  // Enabled on a file that imports nothing but excludes
+                  // something: that file's job is to take the excluded names
+                  // off the board.
+                  disabled={applying || mappingChanged || !hasSomethingToApply(preview.courses)}
                   onClick={() => void apply()}
                 >
                   <CheckCircle2 />

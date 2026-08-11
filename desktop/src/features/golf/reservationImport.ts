@@ -177,6 +177,19 @@ export function importTotals(courses: ImportedCourse[]): ImportTotals {
 }
 
 /**
+ * Whether applying this file would change anything on the board.
+ *
+ * Not the same as "has courses to import". A club that decides to stop
+ * importing the one course in its file writes no rows and still has real work
+ * to do: last month's numbers for that name have to come off the board, and
+ * saving the choice alone does not touch them — only applying the file does.
+ * The inert case is a file the desk has answered for nowhere yet.
+ */
+export function hasSomethingToApply(courses: ImportedCourse[]): boolean {
+  return courses.some(course => course.imported || course.resolution === 'ignored')
+}
+
+/**
  * A warning reduced to the pieces a sentence needs.
  *
  * Never a row or cell reference: "7月3日の滝の（午前）の組数が読み取れません" sends

@@ -11,8 +11,8 @@ use chrono::NaiveDate;
 use sqlx::{MySqlPool, Row};
 
 use crate::course::domain::{
-    CourseError, CourseId, ReservationDaySummary, ReservationSummaryGateway,
-    ReservationSummaryQuery, ReservationSummaryWindow, TimeOfDay,
+    normalize_course_label, CourseError, CourseId, ReservationDaySummary,
+    ReservationSummaryGateway, ReservationSummaryQuery, ReservationSummaryWindow, TimeOfDay,
 };
 
 /// How many rows one statement carries.
@@ -129,10 +129,19 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
         // no longer writing to, and only the name still reaches them. The course
         // catches rows written before names were recorded, which have no name to
         // be found by. A course the file does not mention keeps what it has.
+        //
+        // Names are matched on the key, not the text: an export that respells a
+        // name between months means the same course to the import, so keying the
+        // delete on the raw text would walk past the rows it wrote.
+        let label_keys: Vec<String> = window
+            .sheet_labels
+            .iter()
+            .map(|label| normalize_course_label(label))
+            .collect();
         let mut clauses: Vec<String> = Vec::new();
-        if !window.sheet_labels.is_empty() {
-            let placeholders = vec!["?"; window.sheet_labels.len()].join(", ");
-            clauses.push(format!("sheet_label IN ({placeholders})"));
+        if !label_keys.is_empty() {
+            let placeholders = vec!["?"; label_keys.len()].join(", ");
+            clauses.push(format!("sheet_label_key IN ({placeholders})"));
         }
         if !window.course_ids.is_empty() {
             let placeholders = vec!["?"; window.course_ids.len()].join(", ");
@@ -151,8 +160,8 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
             .bind(tenant_id)
             .bind(window.from)
             .bind(window.to);
-        for label in &window.sheet_labels {
-            delete = delete.bind(label.as_str());
+        for key in &label_keys {
+            delete = delete.bind(key.as_str());
         }
         for course_id in &window.course_ids {
             delete = delete.bind(course_id.as_str());
@@ -160,15 +169,17 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
         delete.execute(&mut *transaction).await.map_err(provider)?;
 
         for chunk in summaries.chunks(UPSERT_CHUNK) {
-            let values = vec!["(?, ?, ?, ?, ?, ?, ?, ?)"; chunk.len()].join(", ");
+            let values = vec!["(?, ?, ?, ?, ?, ?, ?, ?, ?)"; chunk.len()].join(", ");
             let statement = format!(
                 r#"
                 INSERT INTO golf_reservation_day_summaries
-                    (tenant_id, golf_course_id, sheet_label, summary_date, time_of_day,
+                    (tenant_id, golf_course_id, sheet_label, sheet_label_key,
+                     summary_date, time_of_day,
                      total_groups, caddie_groups, source_file)
                 VALUES {values}
                 ON DUPLICATE KEY UPDATE
                     sheet_label = VALUES(sheet_label),
+                    sheet_label_key = VALUES(sheet_label_key),
                     total_groups = VALUES(total_groups),
                     caddie_groups = VALUES(caddie_groups),
                     source_file = VALUES(source_file),
@@ -181,6 +192,7 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
                     .bind(tenant_id)
                     .bind(summary.course_id().as_str())
                     .bind(summary.sheet_label())
+                    .bind(summary.sheet_label_key())
                     .bind(summary.date())
                     .bind(summary.time_of_day().as_str())
                     .bind(summary.total_groups())
@@ -457,6 +469,46 @@ mod tests {
             .unwrap();
         assert_eq!(stored.len(), 1);
         assert_eq!(stored[0].course_id().as_str(), "course-right");
+    }
+
+    #[tokio::test]
+    async fn a_name_the_export_respelled_still_finds_the_rows_it_wrote() {
+        // `東 コース` and `東コース` are the same name to the import. If the
+        // export loses the space in August and the desk excludes the course in
+        // the same breath, the course is no handle either — the rows would sit
+        // on the board with nothing left able to reach them.
+        let (repository, tenant) = fresh("respelled").await;
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&["東 コース"], &["course-east"]),
+                &[labelled(
+                    "course-east",
+                    7,
+                    TimeOfDay::Morning,
+                    18,
+                    5,
+                    "東 コース",
+                )],
+                Some("first.xlsx"),
+            )
+            .await
+            .unwrap();
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&["東コース"], &[]),
+                &[],
+                Some("second.xlsx"),
+            )
+            .await
+            .unwrap();
+
+        let stored = repository
+            .list_reservation_summaries(&tenant, &whole_july())
+            .await
+            .unwrap();
+        assert!(stored.is_empty());
     }
 
     #[tokio::test]

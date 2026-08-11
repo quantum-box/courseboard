@@ -4,6 +4,7 @@ import {
   dailyRows,
   formatMonthDay,
   formatYearMonth,
+  hasSomethingToApply,
   IGNORE_COURSE,
   importTotals,
   monthBounds,
@@ -136,6 +137,37 @@ describe('importTotals', () => {
       dayCount: 0,
       totalGroups: 0,
     })
+  })
+})
+
+describe('hasSomethingToApply', () => {
+  function course(resolution: ImportedCourse['resolution']): ImportedCourse {
+    return {
+      sheetLabel: '真駒内',
+      resolution,
+      golfCourseId: resolution === 'unresolved' ? undefined : 'course-a',
+      imported: resolution === 'linked' || resolution === 'suggested',
+      dayCount: 62,
+      totalGroups: 0,
+      caddieGroups: 0,
+    }
+  }
+
+  it('lets a file through when it has a course to import', () => {
+    expect(hasSomethingToApply([course('linked')])).toBe(true)
+    expect(hasSomethingToApply([course('suggested')])).toBe(true)
+  })
+
+  it('lets a file through whose only course is being dropped', () => {
+    // A club that stops importing its one course still needs the month it
+    // already imported taken off the board, and applying the file is the only
+    // thing that does that — saving the choice alone touches nothing.
+    expect(hasSomethingToApply([course('ignored')])).toBe(true)
+  })
+
+  it('holds back a file nobody has answered for', () => {
+    expect(hasSomethingToApply([course('unresolved'), course('ambiguous')])).toBe(false)
+    expect(hasSomethingToApply([])).toBe(false)
   })
 })
 

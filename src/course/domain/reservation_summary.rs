@@ -116,6 +116,17 @@ impl ReservationDaySummary {
         self.sheet_label.as_deref()
     }
 
+    /// The name reduced to what the import compares names by.
+    ///
+    /// Stored beside the name because it is what the row has to be *found* by.
+    /// An export that respells a name between months — a space in or out, a
+    /// small ケ for a large one — still means the same course to the import, so
+    /// a replacement keyed on the raw text would walk straight past last
+    /// month's rows.
+    pub fn sheet_label_key(&self) -> Option<String> {
+        self.sheet_label.as_deref().map(normalize_course_label)
+    }
+
     /// Groups going out without a caddie.
     ///
     /// Saturates at zero rather than going negative: a file that reports more
