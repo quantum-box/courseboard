@@ -36,6 +36,12 @@ export function CustomersPage() {
 
   return (
     <div className="page-stack">
+      <div className="page-toolbar">
+        <Button type="button" variant="primary" onClick={() => navigate('golf/customers/new')}>
+          <UserPlus /> {t('customers:create.open')}
+        </Button>
+      </div>
+
       <Panel title={t('customers:search.title')} description={t('customers:search.description')}>
         <Field label={t('customers:search.label')}>
           <Input
@@ -80,11 +86,6 @@ export function CustomersPage() {
             </li>
           ))}
         </ul>
-
-        <Button type="button" variant="ghost" size="sm" onClick={() => navigate('golf/customers/new')}>
-          <UserPlus />
-          {t('customers:create.open')}
-        </Button>
       </Panel>
     </div>
   )
