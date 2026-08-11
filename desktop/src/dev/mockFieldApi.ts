@@ -2240,6 +2240,17 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   const method = methodOf(init)
   const body = parseBody(init) as Record<string, unknown> | undefined
 
+  if (pathname === '/v1/course/feature-flags/evaluate' && method === 'POST') {
+    // Mock mode behaves like an all-enabled flag store so gated features stay
+    // reachable in fixture-driven development.
+    const keys = Array.isArray(body?.keys) ? (body.keys as unknown[]) : []
+    return hit({
+      values: keys
+        .filter((key): key is string => typeof key === 'string')
+        .map(key => ({ key, enabled: true })),
+    })
+  }
+
   if (pathname === '/v1/course/customers' && method === 'POST') {
     const name = typeof body?.name === 'string' ? body.name.trim() : ''
     if (!name) return error(400, 'customer name is required')
