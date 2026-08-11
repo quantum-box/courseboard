@@ -242,6 +242,31 @@ describe('protected API 401 handling', () => {
     expect(resourceErrorText(error)).toBe(message)
     expect(resourceErrorText(error)).not.toContain('外部サービス')
   })
+
+  it('leaves multipart FormData content type to the browser', async () => {
+    configureApiAuth({
+      tenantId: 'tn_1',
+      operatorId: 'tn_1',
+      platformId: 'plat_1',
+      getAccessToken: async () => 'valid-token',
+      onUnauthorized: vi.fn(),
+      onForbidden: vi.fn(),
+    })
+    const fetchMock = vi.fn(async (..._args: [RequestInfo | URL, RequestInit?]) => Response.json({ ok: true }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const form = new FormData()
+    form.append('year', '2026')
+    await expect(courseboardApiJson('/v1/course/reservation-report-imports/preview', {
+      method: 'POST',
+      body: form,
+    })).resolves.toEqual({ ok: true })
+
+    const request = fetchMock.mock.calls[0]?.[1]
+    const headers = new Headers(request?.headers)
+    expect(headers.get('content-type')).toBeNull()
+    expect(request?.body).toBe(form)
+  })
 })
 
 describe('nowIsoMinute', () => {

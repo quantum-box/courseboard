@@ -31,6 +31,8 @@ use crate::field_api::DEFAULT_FIELD_API_URL;
 const GOLF_EXTENSION_KEY: &str = "golf_course";
 const RESERVATION_LIST_LIMIT: u32 = 2000;
 const FIELD_UPSTREAM_TIMEOUT: Duration = Duration::from_secs(15);
+/// OCR-backed tabular analysis can take longer than ordinary Field JSON calls.
+const TABULAR_ANALYZE_TIMEOUT: Duration = Duration::from_secs(90);
 /// How many times a config write re-merges after losing to a concurrent writer.
 ///
 /// Three: enough to ride out one collision and the retry of the writer that
@@ -1444,10 +1446,9 @@ async fn field_send_json_inner<T: for<'de> Deserialize<'de>>(
         let message = response.text().await.unwrap_or_default();
         return Err(map_field_status_error(status, &message));
     }
-    response
-        .json()
-        .await
-        .map_err(|error| map_field_body_error(&method, path_and_query, error))
+    response.json().await.map_err(|error| {
+        map_field_body_error_with_timeout(&method, path_and_query, error, FIELD_UPSTREAM_TIMEOUT)
+    })
 }
 
 /// Name the call that failed.
@@ -1461,24 +1462,51 @@ fn map_field_body_error(
     path_and_query: &str,
     error: reqwest::Error,
 ) -> CourseError {
-    CourseError::Provider(field_body_error_message(
+    map_field_body_error_with_timeout(method, path_and_query, error, FIELD_UPSTREAM_TIMEOUT)
+}
+
+fn map_field_body_error_with_timeout(
+    method: &reqwest::Method,
+    path_and_query: &str,
+    error: reqwest::Error,
+    timeout: Duration,
+) -> CourseError {
+    CourseError::Provider(field_body_error_message_with_timeout(
         method,
         path_and_query,
         error.is_timeout(),
         &error,
+        timeout,
     ))
 }
 
+#[cfg(test)]
 fn field_body_error_message(
     method: &reqwest::Method,
     path_and_query: &str,
     timed_out: bool,
     detail: &dyn std::fmt::Display,
 ) -> String {
+    field_body_error_message_with_timeout(
+        method,
+        path_and_query,
+        timed_out,
+        detail,
+        FIELD_UPSTREAM_TIMEOUT,
+    )
+}
+
+fn field_body_error_message_with_timeout(
+    method: &reqwest::Method,
+    path_and_query: &str,
+    timed_out: bool,
+    detail: &dyn std::fmt::Display,
+    timeout: Duration,
+) -> String {
     if timed_out {
         return format!(
             "Field API request timed out after {} seconds: {method} {path_and_query}",
-            FIELD_UPSTREAM_TIMEOUT.as_secs()
+            timeout.as_secs()
         );
     }
     format!("Field API decode failed for {method} {path_and_query}: {detail}")
@@ -1564,6 +1592,36 @@ pub(crate) async fn field_send_raw(
         .map_err(|error| map_field_body_error(&method, path_and_query, error))
 }
 
+/// Send a multipart request to a Field endpoint while preserving the same
+/// forwarded bearer/operator/platform headers used by JSON gateways.
+pub(crate) async fn field_send_multipart<T: for<'de> Deserialize<'de>>(
+    client: &reqwest::Client,
+    base_url: &str,
+    method: reqwest::Method,
+    path_and_query: &str,
+    credentials: GatewayCredentials<'_>,
+    form: reqwest::multipart::Form,
+) -> Result<T, CourseError> {
+    if is_empty_course_store(base_url) {
+        return Err(empty_course_store_error());
+    }
+    let url = format!("{base_url}{path_and_query}");
+    let response = field_request(client, method.clone(), &url, credentials)
+        .timeout(TABULAR_ANALYZE_TIMEOUT)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|error| map_field_request_error_with_timeout(error, TABULAR_ANALYZE_TIMEOUT))?;
+    let status = response.status();
+    if !status.is_success() {
+        let message = response.text().await.unwrap_or_default();
+        return Err(map_field_status_error(status, &message));
+    }
+    response.json().await.map_err(|error| {
+        map_field_body_error_with_timeout(&method, path_and_query, error, TABULAR_ANALYZE_TIMEOUT)
+    })
+}
+
 fn field_request(
     client: &reqwest::Client,
     method: reqwest::Method,
@@ -1583,10 +1641,14 @@ fn field_request(
 }
 
 fn map_field_request_error(error: reqwest::Error) -> CourseError {
+    map_field_request_error_with_timeout(error, FIELD_UPSTREAM_TIMEOUT)
+}
+
+fn map_field_request_error_with_timeout(error: reqwest::Error, timeout: Duration) -> CourseError {
     if error.is_timeout() {
         return CourseError::Provider(format!(
             "Field API request timed out after {} seconds",
-            FIELD_UPSTREAM_TIMEOUT.as_secs()
+            timeout.as_secs()
         ));
     }
     CourseError::Provider(format!("Field API request failed: {error}"))
@@ -1957,6 +2019,11 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("platform-test")
         );
+    }
+
+    #[test]
+    fn tabular_analyze_allows_ocr_time() {
+        assert_eq!(TABULAR_ANALYZE_TIMEOUT, Duration::from_secs(90));
     }
 
     #[test]

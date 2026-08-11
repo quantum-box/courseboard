@@ -112,10 +112,77 @@ const mockCourses = [
     createdAt: NOW,
     updatedAt: NOW,
   },
+  {
+    id: 'course_hill',
+    name: '羊ケ丘コース',
+    shortName: '羊ケ丘',
+    holeCount: 18,
+    timezone: 'Asia/Tokyo',
+    businessHoursJson: { open: '07:00', close: '17:00' },
+    startIntervalMinutes: 10,
+    isActive: true,
+    createdAt: NOW,
+    updatedAt: NOW,
+  },
 ]
 
 /** The club's own bookings for the month around the fixture day. */
 const generatedReservations = generateReservations(MOCK_FIXTURE_DATE, mockCourses)
+
+type MockReservationReportEntry = {
+  id: string
+  sourceCourseKey: string
+  sourceCourseName: string
+  golfCourseId: string
+  date: string
+  dayPart: 'morning' | 'afternoon'
+  groupCount: number
+  caddieAttachedGroupCount: number
+  sourceFileSha256: string
+  updatedAt: string
+}
+
+const MOCK_RESERVATION_REPORT_SOURCE = 'daily_reservation_status_xlsx'
+const MOCK_RESERVATION_REPORT_FACILITIES = [
+  { sourceCourseKey: '真駒内', sourceCourseName: '真駒内\n36H' },
+  { sourceCourseKey: '滝の', sourceCourseName: '滝の\n27H' },
+  { sourceCourseKey: '羊ケ丘', sourceCourseName: '羊ケ丘\n18H' },
+] as const
+
+function mockReservationReportRows(year: number) {
+  const rows: Array<{
+    sourceCourseKey: string
+    sourceCourseName: string
+    date: string
+    dayPart: 'morning' | 'afternoon'
+    groupCount: number
+    caddieAttachedGroupCount: number
+  }> = []
+  let index = 0
+  for (let day = 1; day <= 31; day += 1) {
+    const date = `${year}-07-${String(day).padStart(2, '0')}`
+    for (const facility of MOCK_RESERVATION_REPORT_FACILITIES) {
+      for (const dayPart of ['morning', 'afternoon'] as const) {
+        // Keep the mock totals stable for UI and idempotency checks: 186 rows,
+        // 6,314 groups, and 2,476 caddie-attached groups.
+        rows.push({
+          ...facility,
+          date,
+          dayPart,
+          groupCount: 34 - (index < 10 ? 1 : 0),
+          caddieAttachedGroupCount: 13 + (index < 58 ? 1 : 0),
+        })
+        index += 1
+      }
+    }
+  }
+  return rows
+}
+
+// Initialized after the shared sessionStorage helper below. Keeping the read
+// below that helper also lets Vite hot reload restore imported rows instead of
+// falling back while the storage-key constant is still in its temporal dead zone.
+let mockReservationReportEntries: MockReservationReportEntry[] = []
 
 const mockProducts: Array<{
   id: string
@@ -511,6 +578,8 @@ function saveMockWrites(key: string, value: unknown) {
     // ignore storage failures
   }
 }
+
+mockReservationReportEntries = loadMockWrites('reservationReportEntries', [])
 
 /** The club's column order, as arranged during the session. */
 const mockCourseOrder: string[] = loadMockWrites<string[]>('courseOrder', [])
@@ -1197,6 +1266,12 @@ function parseBody(init?: RequestInit): unknown {
   }
 }
 
+function multipartText(init: RequestInit | undefined, key: string) {
+  if (typeof FormData === 'undefined' || !(init?.body instanceof FormData)) return undefined
+  const value = init.body.get(key)
+  return typeof value === 'string' ? value : undefined
+}
+
 function notSupported(action: string): MockFieldResult<never> {
   return error(
     501,
@@ -1821,6 +1896,14 @@ function resolveGet(path: string): Json | null | undefined {
     }
   }
 
+  if (rawPathname === '/v1/course/reservation-report-entries') {
+    const from = url.searchParams.get('from') ?? ''
+    const to = url.searchParams.get('to') ?? ''
+    return items(mockReservationReportEntries
+      .filter(entry => (!from || entry.date >= from) && (!to || entry.date <= to))
+      .map(entry => ({ ...entry })))
+  }
+
   if (pathname === '/v1/erp/extensions/golf-course/courses') {
     return items(mockCourses.map(course => ({ ...course })))
   }
@@ -2311,6 +2394,124 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     }
     mockMembershipAssignments.set(customerId, planId)
     return hit(mockMembershipOf(customerId))
+  }
+
+  if (
+    pathname === '/v1/course/reservation-report-imports/preview'
+    && method === 'POST'
+  ) {
+    const year = Number(multipartText(init, 'year') ?? '2026')
+    if (!Number.isInteger(year) || year < 1900 || year > 2200) {
+      return error(400, 'year must be a valid calendar year')
+    }
+    const rows = mockReservationReportRows(year)
+    return hit({
+      sourceSystem: MOCK_RESERVATION_REPORT_SOURCE,
+      sourceFileSha256: 'mock-report-sha256',
+      normalizedFingerprint: 'mock-normalized-fingerprint',
+      facilities: MOCK_RESERVATION_REPORT_FACILITIES.map(facility => ({ ...facility })),
+      rows,
+      analysis: {
+        sourceType: 'xlsx',
+        sheetNames: ['日別予約状況'],
+        selectedSheet: '日別予約状況',
+        headerRow: 1,
+        headers: ['施設', '日付', '時間帯', '組数', 'キャ付'],
+        mapping: {
+          mode: 'alias',
+          fields: [
+            { source: '施設', target: 'facilityName', required: true, confidence: 1, explanation: '固定帳票の施設列', samples: ['真駒内'] },
+            { source: '日付', target: 'date', required: true, confidence: 1, explanation: '固定帳票の日付列', samples: ['7/1'] },
+            { source: '時間帯', target: 'dayPart', required: true, confidence: 1, explanation: '固定帳票の時間帯列', samples: ['午前'] },
+            { source: '組数', target: 'groupCount', required: true, confidence: 1, explanation: '固定帳票の組数列', samples: ['34'] },
+            { source: 'キャ付', target: 'caddieAttachedGroupCount', required: true, confidence: 1, explanation: '固定帳票のキャディ列', samples: ['13'] },
+          ],
+          notes: null,
+        },
+        warnings: [],
+      },
+      totals: {
+        facilityCount: MOCK_RESERVATION_REPORT_FACILITIES.length,
+        rowCount: rows.length,
+        groupCount: rows.reduce((sum, row) => sum + row.groupCount, 0),
+        caddieAttachedGroupCount: rows.reduce(
+          (sum, row) => sum + row.caddieAttachedGroupCount,
+          0,
+        ),
+      },
+    })
+  }
+
+  if (pathname === '/v1/course/reservation-report-imports' && method === 'POST') {
+    const year = Number(multipartText(init, 'year') ?? '2026')
+    const rawMappings = multipartText(init, 'courseMappings')
+    const normalizedFingerprint = multipartText(init, 'normalizedFingerprint')
+    if (normalizedFingerprint !== 'mock-normalized-fingerprint') {
+      return error(409, 'the report changed while it was being analyzed; preview it again')
+    }
+    let mappings: Record<string, string> = {}
+    try {
+      const parsed = rawMappings ? JSON.parse(rawMappings) as unknown : null
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        mappings = Object.fromEntries(
+          Object.entries(parsed).map(([key, value]) => [key, String(value)]),
+        )
+      }
+    } catch {
+      return error(400, 'courseMappings must be valid JSON')
+    }
+    const rows = mockReservationReportRows(year)
+    const selectedCourses = new Set<string>()
+    for (const facility of MOCK_RESERVATION_REPORT_FACILITIES) {
+      const golfCourseId = mappings[facility.sourceCourseKey]
+      if (!golfCourseId) return error(400, 'every source facility must be mapped')
+      if (selectedCourses.has(golfCourseId)) return error(400, 'course mappings must be unique')
+      selectedCourses.add(golfCourseId)
+    }
+    let createdCount = 0
+    let updatedCount = 0
+    let unchangedCount = 0
+    for (const row of rows) {
+      const golfCourseId = mappings[row.sourceCourseKey]!
+      const key = `${row.sourceCourseKey}:${row.date}:${row.dayPart}`
+      const index = mockReservationReportEntries.findIndex(entry => (
+        `${entry.sourceCourseKey}:${entry.date}:${entry.dayPart}` === key
+      ))
+      const existing = index >= 0 ? mockReservationReportEntries[index] : undefined
+      const next: MockReservationReportEntry = {
+        ...row,
+        id: existing?.id ?? `report_${key}`,
+        golfCourseId,
+        sourceFileSha256: 'mock-report-sha256',
+        updatedAt: NOW,
+      }
+      if (!existing) createdCount += 1
+      else if (
+        existing.golfCourseId !== next.golfCourseId
+        || existing.groupCount !== next.groupCount
+        || existing.caddieAttachedGroupCount !== next.caddieAttachedGroupCount
+        || existing.sourceFileSha256 !== next.sourceFileSha256
+      ) updatedCount += 1
+      else unchangedCount += 1
+      if (index >= 0) mockReservationReportEntries[index] = next
+      else mockReservationReportEntries.push(next)
+    }
+    saveMockWrites('reservationReportEntries', mockReservationReportEntries)
+    return hit({
+      createdCount,
+      updatedCount,
+      unchangedCount,
+      totals: {
+        facilityCount: MOCK_RESERVATION_REPORT_FACILITIES.length,
+        rowCount: rows.length,
+        groupCount: rows.reduce((sum, row) => sum + row.groupCount, 0),
+        caddieAttachedGroupCount: rows.reduce(
+          (sum, row) => sum + row.caddieAttachedGroupCount,
+          0,
+        ),
+      },
+      items: mockReservationReportEntries.map(entry => ({ ...entry })),
+    })
   }
 
   // Desk marks and group detail are CourseBoard's own writes, so they never

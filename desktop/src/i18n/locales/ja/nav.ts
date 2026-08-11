@@ -23,6 +23,10 @@ export const nav = {
       label: '顧客台帳',
       description: '会員とビジターの記録',
     },
+    'golf/reservation-report-import': {
+      label: '予約表をとりこむ',
+      description: 'CSV・Excel・PDFの日別集計を確認して保存する',
+    },
     'golf/timeline': {
       label: 'タイムライン',
       description: '今日の予約とキャディを時間順に見る',

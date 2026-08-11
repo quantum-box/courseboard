@@ -15,12 +15,13 @@ import { nav } from './nav'
 import { payment } from './payment'
 import { policy } from './policy'
 import { products } from './products'
+import { reservationReportImport } from './reservationReportImport'
 import { schedule } from './schedule'
 import { settings } from './settings'
 import { settlement } from './settlement'
+import { shifts } from './shifts'
 import { simulator } from './simulator'
 import { staff } from './staff'
-import { shifts } from './shifts'
 import { timeline } from './timeline'
 
 /** Japanese is the source of truth: every key must exist here first. */
@@ -42,12 +43,13 @@ export const ja = {
   payment,
   policy,
   products,
+  reservationReportImport,
   schedule,
   settings,
   settlement,
+  shifts,
   simulator,
   staff,
-  shifts,
   timeline,
 } as const
 

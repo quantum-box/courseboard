@@ -24,6 +24,10 @@ export const nav: DeepPartial<typeof source> = {
       label: 'お客さま台帳',
       description: '会員と ビジターの きろく',
     },
+    'golf/reservation-report-import': {
+      label: '予約表を読み込む',
+      description: 'CSV・Excel・PDFの日ごとの数を確かめて保存します',
+    },
     'golf/timeline': {
       label: '今日の予定表',
       description: '今日の予約と担当を、時間の順に並べて見ます',

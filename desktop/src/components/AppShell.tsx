@@ -47,6 +47,7 @@ import {
   Clock,
   CreditCard,
   FolderTree,
+  FileSpreadsheet,
   Gauge,
   House,
   IdCard,
@@ -94,6 +95,7 @@ export type NavigationRoute =
   | 'golf'
   | 'golf/ledger'
   | 'golf/customers'
+  | 'golf/reservation-report-import'
   | 'golf/timeline'
   | 'golf/products'
   | 'course-map'
@@ -136,6 +138,7 @@ export const navigationSections: NavigationSection[] = [
       // The ledger is the start desk's board; the timeline is the caddie view
       // of the same day, so the ledger comes first.
       { route: 'golf/ledger', icon: Table2 },
+      { route: 'golf/reservation-report-import', icon: FileSpreadsheet },
       { route: 'golf/timeline', icon: CalendarRange },
       // The ledger of people, beside the ledger of tee times. Members are read
       // off it, and a visitor's second visit only registers because it exists.

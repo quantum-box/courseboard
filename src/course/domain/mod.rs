@@ -25,6 +25,7 @@ mod ports;
 mod pricing_settings;
 mod product;
 mod reservation;
+mod reservation_report;
 mod resource;
 mod schedule;
 mod simulator;
@@ -102,6 +103,14 @@ pub use product::{
     DurationMinutes, PlayType, ProductSlot, ReservationProduct, UpsertReservationProduct,
 };
 pub use reservation::{NewReservation, Reservation, SeededReservation};
+pub use reservation_report::{
+    ExternalReservationReportEntry, ReservationReport, ReservationReportAnalyzeGateway,
+    ReservationReportDayPart, ReservationReportEntryQuery, ReservationReportFacility,
+    ReservationReportGateway, ReservationReportRow, ReservationReportTotals,
+    ReservationReportUpsertSummary, TabularAnalyzeMapping, TabularAnalyzeMappingField,
+    TabularAnalyzeResult, TabularAnalyzeRow, DAILY_RESERVATION_STATUS_SOURCE,
+    TABULAR_RESERVATION_REPORT_SOURCE,
+};
 pub use resource::{Resource, ResourceKind, SaveCourseResource};
 pub use schedule::{
     courseboard_weekday_to_field, field_day_of_week_to_courseboard, AvailabilityRule,
