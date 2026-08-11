@@ -26,7 +26,7 @@ import { LedgerPage } from './features/golf/ledger/LedgerPage'
 import { TimelinePage } from './features/golf/timeline/TimelinePage'
 import { SettingsAdvancedPage } from './features/settings/SettingsAdvancedPage'
 import { CustomerDetailPage } from './features/golf/customers/CustomerDetailPage'
-import { CustomersPage } from './features/golf/customers/CustomersPage'
+import { CustomersPage, NewCustomerPage } from './features/golf/customers/CustomersPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { StaffPage } from './features/staff/StaffPage'
 import { useCartUpdates } from './hooks/useCartUpdates'
@@ -140,6 +140,7 @@ function RouteContent({ route }: { route: string }) {
   }
   if (route === 'course-map') return <CourseMapPage />
   if (route === 'golf/customers') return <CustomersPage />
+  if (route === 'golf/customers/new') return <NewCustomerPage />
   if (route.startsWith('golf/customers/')) {
     const segment = decodeRouteSegment(route.slice('golf/customers/'.length).split('/')[0] ?? '')
     if (segment) return <CustomerDetailPage key={segment} customerId={segment} />

@@ -1,5 +1,5 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
-import { UserPlus } from 'lucide-react'
+import { ArrowLeft, UserPlus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -9,6 +9,7 @@ import {
   FormGrid,
   LoadingState,
   Notice,
+  PageHeader,
   Panel,
 } from '../../../components/Page'
 import { navigate, navigateFromClick } from '../../../lib/router'
@@ -32,7 +33,6 @@ export function CustomersPage() {
   const { t } = useTranslation(['customers', 'common'])
   const [term, setTerm] = useState('')
   const search = useCustomerSearch(term)
-  const [creating, setCreating] = useState(false)
 
   return (
     <div className="page-stack">
@@ -81,22 +81,11 @@ export function CustomersPage() {
           ))}
         </ul>
 
-        <Button type="button" variant="ghost" size="sm" onClick={() => setCreating(true)}>
+        <Button type="button" variant="ghost" size="sm" onClick={() => navigate('golf/customers/new')}>
           <UserPlus />
           {t('customers:create.open')}
         </Button>
       </Panel>
-
-      {creating ? (
-        <NewCustomerPanel
-          onCancel={() => setCreating(false)}
-          onCreated={customer => {
-            setCreating(false)
-            navigate(`golf/customers/${customer.id}`)
-          }}
-        />
-      ) : null}
-
     </div>
   )
 }
@@ -107,14 +96,12 @@ export function CustomersPage() {
  * Only the name is required. A phone booking often yields nothing else, and
  * demanding an email here is exactly what kept visitors out of the ledger
  * before PLT-3358.
+ *
+ * Its own route, not a panel bolted onto the search screen: the desk fills
+ * this in while on the phone, and a route survives a refresh or a bookmark
+ * the way a piece of local state does not.
  */
-function NewCustomerPanel({
-  onCancel,
-  onCreated,
-}: {
-  onCancel: () => void
-  onCreated: (customer: Customer) => void
-}) {
+export function NewCustomerPage() {
   const { t } = useTranslation(['customers', 'common'])
   const [draft, setDraft] = useState({ name: '', nameKana: '', phone: '', email: '' })
   const [saving, setSaving] = useState(false)
@@ -134,7 +121,7 @@ function NewCustomerPanel({
         }),
       })
       showToast({ tone: 'success', message: t('customers:create.saved') })
-      onCreated(created)
+      navigate(`golf/customers/${created.id}`)
     } catch (error) {
       showToast({
         tone: 'danger',
@@ -147,48 +134,65 @@ function NewCustomerPanel({
   }
 
   return (
-    <Panel title={t('customers:create.title')} description={t('customers:create.description')}>
-      <FormGrid columns={2}>
-        <Field label={t('customers:field.name')}>
-          <Input
-            value={draft.name}
-            placeholder={t('customers:create.namePlaceholder')}
-            onChange={event => setDraft({ ...draft, name: event.target.value })}
-          />
-        </Field>
-        <Field label={t('customers:field.nameKana')} requirement="optional">
-          <Input
-            value={draft.nameKana}
-            onChange={event => setDraft({ ...draft, nameKana: event.target.value })}
-          />
-        </Field>
-        <Field label={t('customers:field.phone')} requirement="optional">
-          <Input
-            value={draft.phone}
-            onChange={event => setDraft({ ...draft, phone: event.target.value })}
-          />
-        </Field>
-        <Field label={t('customers:field.email')} requirement="optional">
-          <Input
-            value={draft.email}
-            onChange={event => setDraft({ ...draft, email: event.target.value })}
-          />
-        </Field>
-      </FormGrid>
+    <div className="page-stack page-narrow">
+      <PageHeader
+        title={t('customers:create.title')}
+        description={t('customers:create.description')}
+        actions={(
+          <Button type="button" onClick={() => navigate('golf/customers')}>
+            <ArrowLeft /> {t('customers:detail.back')}
+          </Button>
+        )}
+      />
 
-      <div className="customer-ledger-actions">
-        <Button type="button" variant="ghost" onClick={onCancel} disabled={saving}>
-          {t('common:action.cancel')}
-        </Button>
-        <Button
-          type="button"
-          variant="primary"
-          onClick={save}
-          disabled={saving || !draft.name.trim()}
-        >
-          {saving ? t('common:action.saving') : t('common:action.save')}
-        </Button>
-      </div>
-    </Panel>
+      <Panel>
+        <FormGrid columns={2}>
+          <Field label={t('customers:field.name')}>
+            <Input
+              value={draft.name}
+              placeholder={t('customers:create.namePlaceholder')}
+              onChange={event => setDraft({ ...draft, name: event.target.value })}
+            />
+          </Field>
+          <Field label={t('customers:field.nameKana')} requirement="optional">
+            <Input
+              value={draft.nameKana}
+              onChange={event => setDraft({ ...draft, nameKana: event.target.value })}
+            />
+          </Field>
+          <Field label={t('customers:field.phone')} requirement="optional">
+            <Input
+              value={draft.phone}
+              onChange={event => setDraft({ ...draft, phone: event.target.value })}
+            />
+          </Field>
+          <Field label={t('customers:field.email')} requirement="optional">
+            <Input
+              value={draft.email}
+              onChange={event => setDraft({ ...draft, email: event.target.value })}
+            />
+          </Field>
+        </FormGrid>
+
+        <div className="customer-ledger-actions">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => navigate('golf/customers')}
+            disabled={saving}
+          >
+            {t('common:action.cancel')}
+          </Button>
+          <Button
+            type="button"
+            variant="primary"
+            onClick={save}
+            disabled={saving || !draft.name.trim()}
+          >
+            {saving ? t('common:action.saving') : t('common:action.save')}
+          </Button>
+        </div>
+      </Panel>
+    </div>
   )
 }
