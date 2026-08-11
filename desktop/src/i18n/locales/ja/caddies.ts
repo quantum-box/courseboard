@@ -17,6 +17,11 @@ export const caddies = {
       description: 'ランク別の単価から1か月ぶんの支給額を計算し、出勤と照らし合わせて給与のCSVに渡します。',
     },
   },
+  tabs: {
+    label: '表示の切り替え',
+    list: '一覧',
+    attendance: '出勤',
+  },
   add: 'キャディを追加',
   added: {
     title: 'キャディを追加しました',

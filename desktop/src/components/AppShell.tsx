@@ -44,7 +44,6 @@ import {
   CircleDollarSign,
   CircleHelp,
   ClipboardCheck,
-  Clock,
   CreditCard,
   FolderTree,
   Gauge,
@@ -150,9 +149,10 @@ export const navigationSections: NavigationSection[] = [
     id: 'caddie',
     showLabel: true,
     items: [
+      // Attendance moved inside the roster screen as a tab; the daily punch
+      // board is a view of the same people, not a separate destination.
       { route: 'golf/caddies', icon: Users },
       { route: 'golf/caddies/dispatch', icon: ClipboardCheck },
-      { route: 'golf/caddies/attendance', icon: Clock },
       { route: 'golf/caddies/shifts', icon: CalendarDays },
       { route: 'golf/caddies/payroll', icon: CircleDollarSign },
     ],
@@ -275,7 +275,10 @@ function focusableWithin(root: HTMLElement) {
     .filter(element => element.getClientRects().length > 0)
 }
 
-const CADDIE_SUBVIEWS = new Set(['dispatch', 'attendance', 'shifts', 'payroll'])
+// `attendance` is intentionally absent: it renders as a tab inside the
+// roster screen, so its route counts as the roster route for nav/title
+// purposes (see CADDIE_SUBVIEWS usage below).
+const CADDIE_SUBVIEWS = new Set(['dispatch', 'shifts', 'payroll'])
 
 function caddieRouteSegment(route: string) {
   if (!route.startsWith('golf/caddies/')) return null

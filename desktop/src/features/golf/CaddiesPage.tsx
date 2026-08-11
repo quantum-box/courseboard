@@ -728,9 +728,23 @@ export function CaddiesPage({
   useRegisterPageReload(view === 'payroll' ? null : refreshCurrentView)
 
   const showingProfileDetail = view === 'roster' && Boolean(selectedProfileId)
+  // Attendance is a tab of the roster, not a separate destination, so the
+  // switcher shows whenever we're on either side of that split.
+  const showingRosterTabs = (view === 'roster' && !showingProfileDetail) || view === 'attendance'
 
   return (
     <div className="page-stack">
+      {showingRosterTabs ? (
+        <div className="grid w-fit grid-cols-2 gap-1 rounded-lg border border-border bg-surface p-1" role="tablist" aria-label={t('caddies:tabs.label')}>
+          <DetailTabButton active={view === 'roster'} onClick={() => navigate('golf/caddies')}>
+            <Users /> {t('caddies:tabs.list')}
+          </DetailTabButton>
+          <DetailTabButton active={view === 'attendance'} onClick={() => navigate('golf/caddies/attendance')}>
+            <Clock /> {t('caddies:tabs.attendance')}
+          </DetailTabButton>
+        </div>
+      ) : null}
+
       {view === 'roster' && !showingProfileDetail ? (
         <div className="page-toolbar">
           <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
