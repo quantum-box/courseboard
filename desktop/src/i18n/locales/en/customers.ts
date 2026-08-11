@@ -23,6 +23,10 @@ export const customers: DeepPartial<typeof source> = {
     saved: 'Customer registered',
     failed: 'Could not register the customer',
   },
+  recent: {
+    title: 'Just registered',
+    description: 'Listed while this screen stays open. To find them later, search by name or phone number.',
+  },
   detail: {
     description: 'What the ledger holds for this person.',
     back: 'Back to the customer ledger',

@@ -21,6 +21,10 @@ export const customers = {
     saved: '顧客を登録しました',
     failed: '顧客を登録できませんでした',
   },
+  recent: {
+    title: 'いま登録した顧客',
+    description: 'この画面を開いている間だけ並びます。あとから開くときは名前や電話番号で検索してください。',
+  },
   detail: {
     description: '台帳に入っている内容です。',
     back: '顧客台帳にもどる',

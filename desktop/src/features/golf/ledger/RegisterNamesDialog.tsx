@@ -6,6 +6,7 @@ import { courseboardApiJson } from '../../../api'
 import { Notice } from '../../../components/Page'
 import { showToast } from '../../../lib/toast'
 import { customersPath, type Customer } from '../customers/models'
+import { rememberRegisteredCustomer } from '../customers/recentlyRegistered'
 import type { DraftReservationPlayer } from './newReservationPlayers'
 import type { UnregisteredName } from './unregisteredNames'
 
@@ -67,6 +68,9 @@ export function RegisterNamesDialog({
           body: JSON.stringify({ name: entry.name }),
         })
         registered += 1
+        // Listed on the customer ledger screen afterwards: this dialog gives
+        // the desk no way back to the people it just wrote down.
+        rememberRegisteredCustomer(created)
         if (entry.role === 'player' && typeof entry.playerIndex === 'number') {
           const row = linkedPlayers[entry.playerIndex]
           if (row) linkedPlayers[entry.playerIndex] = { ...row, customerId: created.id }

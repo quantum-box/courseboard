@@ -24,6 +24,10 @@ export const customers: DeepPartial<typeof source> = {
     saved: 'お客さまを のせました',
     failed: 'お客さまを のせられませんでした',
   },
+  recent: {
+    title: 'いま のせた お客さま',
+    description: 'この 画面を 開いて いる あいだだけ ならびます。あとから 開く ときは 名前や 電話ばんごうで さがして ください。',
+  },
   detail: {
     description: '台帳に 入って いる ことです。',
     back: 'お客さま台帳に もどる',

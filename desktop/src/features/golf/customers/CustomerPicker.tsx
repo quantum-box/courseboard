@@ -6,6 +6,7 @@ import { courseboardApiJson } from '../../../api'
 import { showToast } from '../../../lib/toast'
 import { MembershipBadge } from './MembershipBadge'
 import { customerDistinguisher, type Customer } from './models'
+import { rememberRegisteredCustomer } from './recentlyRegistered'
 import { useCustomerSearch } from './useCustomerSearch'
 
 /**
@@ -55,6 +56,9 @@ export function CustomerPicker({
       })
       setShowCandidates(false)
       onSelect(created)
+      // Also listed on the customer ledger screen, so the desk can open the
+      // person they registered mid-booking without searching for them again.
+      rememberRegisteredCustomer(created)
       showToast({ tone: 'success', message: t('ledger:customer.registered') })
     } catch (registerError) {
       showToast({

@@ -12,10 +12,14 @@ import {
   Panel,
 } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
-import { navigate, navigateFromClick } from '../../../lib/router'
+import { navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { MembershipBadge } from './MembershipBadge'
 import { customerDistinguisher, customersPath, type Customer } from './models'
+import {
+  rememberRegisteredCustomer,
+  useRecentlyRegisteredCustomers,
+} from './recentlyRegistered'
 import { customerSearchParameter, useCustomerSearch } from './useCustomerSearch'
 
 /**
@@ -28,12 +32,18 @@ import { customerSearchParameter, useCustomerSearch } from './useCustomerSearch'
  * There is no "list everyone" here on purpose. The search refuses an empty box
  * server-side: walking the whole ledger a page at a time is what a scraper
  * wants, and the desk always arrives with a name or a number in hand.
+ *
+ * The one exception is the person the desk has just registered. They arrived
+ * with no name to search for — they were being written down, not looked up —
+ * so the registrations made in this session stay listed until the desk
+ * searches for somebody else.
  */
 export function CustomersPage() {
   const { t } = useTranslation(['customers', 'common'])
   const [term, setTerm] = useState('')
   const search = useCustomerSearch(term)
   const [creating, setCreating] = useState(false)
+  const justRegistered = useRecentlyRegisteredCustomers()
   const trimmedTerm = term.trim()
   const searchParameter = customerSearchParameter(term)
   const searchCondition = searchParameter
@@ -73,38 +83,62 @@ export function CustomersPage() {
           <Notice tone="info">{t('customers:search.prompt')}</Notice>
         ) : null}
 
-        <ul className="customer-ledger-list">
-          {search.candidates.map(customer => (
-            <li className="customer-ledger-row" key={customer.id}>
-              {/* A link rather than a button: a customer's page is somewhere the
-                  desk opens in a second tab and comes back to. */}
-              <a
-                className="customer-ledger-row__pick"
-                href={`#/golf/customers/${encodeURIComponent(customer.id)}`}
-                onClick={event => navigateFromClick(event, `golf/customers/${customer.id}`)}
-              >
-                <span className="customer-ledger-row__name">{customer.name}</span>
-                {/* Phone or email, whichever the desk has — two people share a
-                    name often enough that the row needs something else on it. */}
-                <span className="customer-ledger-row__detail">
-                  {customerDistinguisher(customer) ?? t('customers:noContact')}
-                </span>
-              </a>
-              <MembershipBadge customerId={customer.id} />
-            </li>
-          ))}
-        </ul>
+        <CustomerRows customers={search.candidates} />
       </Panel>
+
+      {/* Only while nothing is being searched: once the desk has typed a name,
+          the answer to that question is the list they are reading, and a second
+          list underneath it holding the same person twice is noise. */}
+      {!trimmedTerm && justRegistered.length > 0 ? (
+        <Panel
+          title={t('customers:recent.title')}
+          description={t('customers:recent.description')}
+        >
+          <CustomerRows customers={justRegistered} />
+        </Panel>
+      ) : null}
 
       <NewCustomerSheet
         open={creating}
         onOpenChange={setCreating}
         onCreated={customer => {
           setCreating(false)
-          navigate(`golf/customers/${customer.id}`)
+          // Stays on the ledger screen. Registering used to jump straight to the
+          // new customer's page, which left the desk one "back" away from an
+          // empty search box with no trace of the person they had just added —
+          // the save read as having done nothing.
+          rememberRegisteredCustomer(customer)
         }}
       />
     </div>
+  )
+}
+
+/** One row per person, for whichever list is being shown. */
+function CustomerRows({ customers }: { customers: readonly Customer[] }) {
+  const { t } = useTranslation(['customers'])
+  return (
+    <ul className="customer-ledger-list">
+      {customers.map(customer => (
+        <li className="customer-ledger-row" key={customer.id}>
+          {/* A link rather than a button: a customer's page is somewhere the
+              desk opens in a second tab and comes back to. */}
+          <a
+            className="customer-ledger-row__pick"
+            href={`#/golf/customers/${encodeURIComponent(customer.id)}`}
+            onClick={event => navigateFromClick(event, `golf/customers/${customer.id}`)}
+          >
+            <span className="customer-ledger-row__name">{customer.name}</span>
+            {/* Phone or email, whichever the desk has — two people share a
+                name often enough that the row needs something else on it. */}
+            <span className="customer-ledger-row__detail">
+              {customerDistinguisher(customer) ?? t('customers:noContact')}
+            </span>
+          </a>
+          <MembershipBadge customerId={customer.id} />
+        </li>
+      ))}
+    </ul>
   )
 }
 
