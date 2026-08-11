@@ -173,6 +173,18 @@ export function ReservationImportPage() {
     setFile(event.target.files?.[0] ?? null)
   }
 
+  /**
+   * Changing the month throws the checked result away.
+   *
+   * The month only reaches the rows as a year, so previewing 2026 and then
+   * applying 2027 would write a month nobody looked at — and the check step is
+   * worth having only while it describes what the button below it will do.
+   */
+  function chooseImportMonth(candidate: string) {
+    setImportMonth(candidate)
+    setPreview(null)
+  }
+
   function discard() {
     setPreview(null)
     setFile(null)
@@ -318,7 +330,7 @@ export function ReservationImportPage() {
                 label={t('reservationImport:upload.month')}
                 value={importMonth}
                 error={importMonthError}
-                onChange={setImportMonth}
+                onChange={chooseImportMonth}
                 className="sm:w-64"
               />
               <small className="text-xs text-muted-foreground">
