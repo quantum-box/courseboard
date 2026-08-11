@@ -60,7 +60,8 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
         };
         let statement = format!(
             r#"
-            SELECT golf_course_id, summary_date, time_of_day, total_groups, caddie_groups
+            SELECT golf_course_id, summary_date, time_of_day, total_groups, caddie_groups,
+                   sheet_label
             FROM golf_reservation_day_summaries
             WHERE tenant_id = ?
               AND summary_date BETWEEN ? AND ?
@@ -90,6 +91,7 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
                     TimeOfDay::parse(&time_of_day)?,
                     row.try_get("total_groups").map_err(provider)?,
                     row.try_get("caddie_groups").map_err(provider)?,
+                    row.try_get("sheet_label").map_err(provider)?,
                 ))
             })
             .collect()
@@ -107,7 +109,7 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
                 "the first day of the range must not be after the last",
             ));
         }
-        if window.course_ids.is_empty() {
+        if window.sheet_labels.is_empty() && window.course_ids.is_empty() {
             return Ok(0);
         }
         // One transaction for the whole file. A month that half-applies is
@@ -116,38 +118,57 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
         // the last one, with nothing on screen saying which.
         let mut transaction = self.pool.begin().await.map_err(provider)?;
 
-        // Clear the window first so the file is the whole truth for the courses
-        // and dates it covers. Without this, a half-day the new export stopped
+        // Clear the window first so the file is the whole truth for the dates
+        // and names it covers. Without this, a half-day the new export stopped
         // reporting keeps the previous export's count and the board silently
-        // mixes two files. Scoped to the matched courses: a course this import
-        // could not resolve must keep what it already had.
-        let placeholders = vec!["?"; window.course_ids.len()].join(", ");
+        // mixes two files.
+        //
+        // Two handles, because rows can be found by either. The name is the one
+        // that survives the desk re-pointing it at another course or excluding
+        // it — the rows it wrote last month sit under a course this import is
+        // no longer writing to, and only the name still reaches them. The course
+        // catches rows written before names were recorded, which have no name to
+        // be found by. A course the file does not mention keeps what it has.
+        let mut clauses: Vec<String> = Vec::new();
+        if !window.sheet_labels.is_empty() {
+            let placeholders = vec!["?"; window.sheet_labels.len()].join(", ");
+            clauses.push(format!("sheet_label IN ({placeholders})"));
+        }
+        if !window.course_ids.is_empty() {
+            let placeholders = vec!["?"; window.course_ids.len()].join(", ");
+            clauses.push(format!("golf_course_id IN ({placeholders})"));
+        }
         let statement = format!(
             r#"
             DELETE FROM golf_reservation_day_summaries
             WHERE tenant_id = ?
               AND summary_date BETWEEN ? AND ?
-              AND golf_course_id IN ({placeholders})
+              AND ({})
             "#,
+            clauses.join(" OR "),
         );
         let mut delete = sqlx::query(&statement)
             .bind(tenant_id)
             .bind(window.from)
             .bind(window.to);
+        for label in &window.sheet_labels {
+            delete = delete.bind(label.as_str());
+        }
         for course_id in &window.course_ids {
             delete = delete.bind(course_id.as_str());
         }
         delete.execute(&mut *transaction).await.map_err(provider)?;
 
         for chunk in summaries.chunks(UPSERT_CHUNK) {
-            let values = vec!["(?, ?, ?, ?, ?, ?, ?)"; chunk.len()].join(", ");
+            let values = vec!["(?, ?, ?, ?, ?, ?, ?, ?)"; chunk.len()].join(", ");
             let statement = format!(
                 r#"
                 INSERT INTO golf_reservation_day_summaries
-                    (tenant_id, golf_course_id, summary_date, time_of_day,
+                    (tenant_id, golf_course_id, sheet_label, summary_date, time_of_day,
                      total_groups, caddie_groups, source_file)
                 VALUES {values}
                 ON DUPLICATE KEY UPDATE
+                    sheet_label = VALUES(sheet_label),
                     total_groups = VALUES(total_groups),
                     caddie_groups = VALUES(caddie_groups),
                     source_file = VALUES(source_file),
@@ -159,6 +180,7 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
                 query = query
                     .bind(tenant_id)
                     .bind(summary.course_id().as_str())
+                    .bind(summary.sheet_label())
                     .bind(summary.date())
                     .bind(summary.time_of_day().as_str())
                     .bind(summary.total_groups())
@@ -192,8 +214,26 @@ mod tests {
         total: i32,
         caddie: i32,
     ) -> ReservationDaySummary {
-        ReservationDaySummary::try_new(CourseId::new(course), date(day), time_of_day, total, caddie)
-            .unwrap()
+        labelled(course, day, time_of_day, total, caddie, "真駒内")
+    }
+
+    fn labelled(
+        course: &str,
+        day: u32,
+        time_of_day: TimeOfDay,
+        total: i32,
+        caddie: i32,
+        label: &str,
+    ) -> ReservationDaySummary {
+        ReservationDaySummary::try_new(
+            CourseId::new(course),
+            date(day),
+            time_of_day,
+            total,
+            caddie,
+            Some(label.to_string()),
+        )
+        .unwrap()
     }
 
     /// Each test gets its own tenant so they can share one database without
@@ -208,9 +248,14 @@ mod tests {
 
     /// The window a July file speaks for.
     fn july_window(courses: &[&str]) -> ReservationSummaryWindow {
+        labelled_window(&["真駒内"], courses)
+    }
+
+    fn labelled_window(labels: &[&str], courses: &[&str]) -> ReservationSummaryWindow {
         ReservationSummaryWindow {
             from: date(1),
             to: date(31),
+            sheet_labels: labels.iter().map(|label| label.to_string()).collect(),
             course_ids: courses.iter().map(|id| CourseId::new(*id)).collect(),
         }
     }
@@ -367,16 +412,154 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn re_pointing_a_name_at_another_course_takes_its_old_rows_with_it() {
+        // The desk imported 真駒内 against the wrong course and fixed it. The
+        // rows already written sit under a course this import no longer writes
+        // to, so only the name still reaches them — and left behind, the board
+        // would show the same month twice.
+        let (repository, tenant) = fresh("repoint").await;
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&["真駒内"], &["course-wrong"]),
+                &[labelled(
+                    "course-wrong",
+                    3,
+                    TimeOfDay::Morning,
+                    51,
+                    24,
+                    "真駒内",
+                )],
+                Some("first.xlsx"),
+            )
+            .await
+            .unwrap();
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&["真駒内"], &["course-right"]),
+                &[labelled(
+                    "course-right",
+                    3,
+                    TimeOfDay::Morning,
+                    51,
+                    24,
+                    "真駒内",
+                )],
+                Some("second.xlsx"),
+            )
+            .await
+            .unwrap();
+
+        let stored = repository
+            .list_reservation_summaries(&tenant, &whole_july())
+            .await
+            .unwrap();
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].course_id().as_str(), "course-right");
+    }
+
+    #[tokio::test]
+    async fn excluding_a_name_clears_what_it_put_on_the_board() {
+        // "Leave this course out" means nothing if last month's numbers stay.
+        // The window names no course at all here, which is exactly the case the
+        // old early return walked away from.
+        let (repository, tenant) = fresh("exclude").await;
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&["羊ケ丘"], &["course-hitsuji"]),
+                &[labelled(
+                    "course-hitsuji",
+                    4,
+                    TimeOfDay::Morning,
+                    26,
+                    11,
+                    "羊ケ丘",
+                )],
+                Some("first.xlsx"),
+            )
+            .await
+            .unwrap();
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&["羊ケ丘"], &[]),
+                &[],
+                Some("second.xlsx"),
+            )
+            .await
+            .unwrap();
+
+        let stored = repository
+            .list_reservation_summaries(&tenant, &whole_july())
+            .await
+            .unwrap();
+        assert!(stored.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_name_the_file_does_not_mention_keeps_what_it_has() {
+        let (repository, tenant) = fresh("untouched").await;
+        let kept = labelled("course-other", 5, TimeOfDay::Morning, 40, 10, "滝の");
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&["滝の"], &["course-other"]),
+                std::slice::from_ref(&kept),
+                None,
+            )
+            .await
+            .unwrap();
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&["真駒内"], &["course-makomanai"]),
+                &[labelled(
+                    "course-makomanai",
+                    5,
+                    TimeOfDay::Morning,
+                    70,
+                    21,
+                    "真駒内",
+                )],
+                None,
+            )
+            .await
+            .unwrap();
+
+        let stored = repository
+            .list_reservation_summaries(
+                &tenant,
+                &ReservationSummaryQuery {
+                    from: date(1),
+                    to: date(31),
+                    course_ids: vec![CourseId::new("course-other")],
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(stored, vec![kept]);
+    }
+
+    #[tokio::test]
     async fn a_course_the_import_could_not_match_keeps_what_it_already_had() {
         // A rename in the course master drops a course out of the match. That
         // is a setup problem the desk is warned about — not a reason to erase
         // the month of bookings already imported for it.
         let (repository, tenant) = fresh("unmatched").await;
-        let kept = summary("course-unmatched-old", 3, TimeOfDay::Morning, 51, 24);
+        let kept = labelled(
+            "course-unmatched-old",
+            3,
+            TimeOfDay::Morning,
+            51,
+            24,
+            "旧コース",
+        );
         repository
             .replace_reservation_summaries(
                 &tenant,
-                &july_window(&["course-unmatched-old"]),
+                &labelled_window(&["旧コース"], &["course-unmatched-old"]),
                 std::slice::from_ref(&kept),
                 Some("first.xlsx"),
             )
@@ -415,24 +598,52 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_window_naming_no_course_writes_nothing_rather_than_clearing_the_month() {
+    async fn a_window_naming_nothing_at_all_writes_nothing_rather_than_clearing_the_month() {
+        // A file whose every name is still an open question resolves to no name
+        // and no course. It has nothing to say about the month, so it must not
+        // be read as saying the month is empty.
         let (repository, tenant) = fresh("nocourse").await;
+        let kept = labelled("course-kept", 6, TimeOfDay::Morning, 33, 9, "真駒内");
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&["真駒内"], &["course-kept"]),
+                std::slice::from_ref(&kept),
+                Some("june.xlsx"),
+            )
+            .await
+            .unwrap();
+
         let written = repository
-            .replace_reservation_summaries(&tenant, &july_window(&[]), &[], Some("july.xlsx"))
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&[], &[]),
+                &[],
+                Some("july.xlsx"),
+            )
             .await
             .unwrap();
         assert_eq!(written, 0);
+
+        let stored = repository
+            .list_reservation_summaries(&tenant, &whole_july())
+            .await
+            .unwrap();
+        assert_eq!(stored, vec![kept]);
     }
 
     #[tokio::test]
     async fn asking_for_one_course_does_not_return_another_courses_counts() {
         let (repository, tenant) = fresh("filter").await;
         let mine = summary("course-filter-mine", 5, TimeOfDay::Morning, 40, 10);
-        let other = summary("course-filter-other", 5, TimeOfDay::Morning, 30, 8);
+        let other = labelled("course-filter-other", 5, TimeOfDay::Morning, 30, 8, "滝の");
         repository
             .replace_reservation_summaries(
                 &tenant,
-                &july_window(&["course-filter-mine", "course-filter-other"]),
+                &labelled_window(
+                    &["真駒内", "滝の"],
+                    &["course-filter-mine", "course-filter-other"],
+                ),
                 &[mine.clone(), other],
                 None,
             )
@@ -532,7 +743,19 @@ mod tests {
             .flat_map(|day| {
                 ["a", "b", "c"].into_iter().flat_map(move |course| {
                     TimeOfDay::ALL.into_iter().map(move |time_of_day| {
-                        summary(&format!("course-month-{course}"), day, time_of_day, 40, 12)
+                        let label = match course {
+                            "a" => "真駒内",
+                            "b" => "滝の",
+                            _ => "羊ケ丘",
+                        };
+                        labelled(
+                            &format!("course-month-{course}"),
+                            day,
+                            time_of_day,
+                            40,
+                            12,
+                            label,
+                        )
                     })
                 })
             })
@@ -542,7 +765,10 @@ mod tests {
         let written = repository
             .replace_reservation_summaries(
                 &tenant,
-                &july_window(&["course-month-a", "course-month-b", "course-month-c"]),
+                &labelled_window(
+                    &["真駒内", "滝の", "羊ケ丘"],
+                    &["course-month-a", "course-month-b", "course-month-c"],
+                ),
                 &month,
                 Some("july.xlsx"),
             )

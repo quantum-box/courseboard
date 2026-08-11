@@ -57,6 +57,14 @@ pub struct ReservationDaySummary {
     /// from.
     #[getter(copy)]
     caddie_groups: i32,
+    /// The name in the export this count came from.
+    ///
+    /// Kept because it is what stays put when the desk re-points a name at a
+    /// different course: the replacement has to be able to find the rows the
+    /// old course still holds. Absent on rows written before names were
+    /// recorded.
+    #[getter(skip)]
+    sheet_label: Option<String>,
 }
 
 impl ReservationDaySummary {
@@ -66,6 +74,7 @@ impl ReservationDaySummary {
         time_of_day: TimeOfDay,
         total_groups: i32,
         caddie_groups: i32,
+        sheet_label: Option<String>,
     ) -> Result<Self, CourseError> {
         if total_groups < 0 || caddie_groups < 0 {
             return Err(CourseError::BadRequest("group counts cannot be negative"));
@@ -76,6 +85,7 @@ impl ReservationDaySummary {
             time_of_day,
             total_groups,
             caddie_groups,
+            sheet_label,
         })
     }
 
@@ -86,6 +96,7 @@ impl ReservationDaySummary {
         time_of_day: TimeOfDay,
         total_groups: i32,
         caddie_groups: i32,
+        sheet_label: Option<String>,
     ) -> Self {
         Self {
             course_id,
@@ -93,11 +104,16 @@ impl ReservationDaySummary {
             time_of_day,
             total_groups,
             caddie_groups,
+            sheet_label,
         }
     }
 
     pub fn course_id(&self) -> &CourseId {
         &self.course_id
+    }
+
+    pub fn sheet_label(&self) -> Option<&str> {
+        self.sheet_label.as_deref()
     }
 
     /// Groups going out without a caddie.
@@ -133,9 +149,17 @@ pub struct ReservationSummaryQuery {
 pub struct ReservationSummaryWindow {
     pub from: NaiveDate,
     pub to: NaiveDate,
-    /// Only the courses the file actually spoke about and that were matched.
-    /// A course the import could not resolve keeps whatever it already had:
-    /// a rename in the course master should not erase a month of bookings.
+    /// Every name this file holds, including the ones it will not import.
+    ///
+    /// An excluded name has to be in the window: saying "leave this course out"
+    /// only means something if it also takes away what that name put on the
+    /// board last month. The same goes for a name re-pointed at another course
+    /// — the rows the old course holds are found by the name, not by the course
+    /// they happen to sit under.
+    pub sheet_labels: Vec<String>,
+    /// Courses this file is writing to. Rows here predate names being recorded
+    /// and have no other handle; a course the file does not mention keeps what
+    /// it has.
     pub course_ids: Vec<CourseId>,
 }
 
@@ -541,6 +565,7 @@ mod tests {
             TimeOfDay::Morning,
             51,
             24,
+            Some("真駒内".to_string()),
         )
         .unwrap();
         assert_eq!(summary.self_play_groups(), 27);
@@ -554,6 +579,7 @@ mod tests {
             TimeOfDay::Morning,
             10,
             14,
+            Some("真駒内".to_string()),
         )
         .unwrap();
         assert_eq!(summary.self_play_groups(), 0);
@@ -567,6 +593,7 @@ mod tests {
             TimeOfDay::Morning,
             -1,
             0,
+            None,
         )
         .is_err());
     }

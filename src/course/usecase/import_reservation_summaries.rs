@@ -63,6 +63,13 @@ impl ImportedCourse {
     pub fn is_imported(&self) -> bool {
         matches!(self.resolution, "linked" | "suggested")
     }
+
+    /// Whether the import knows what this name means — either a course to write
+    /// to, or a decision to leave it out. Both are answers; only a name still
+    /// being asked about is not.
+    pub fn is_answered(&self) -> bool {
+        !matches!(self.resolution, "unresolved" | "ambiguous")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,6 +163,7 @@ impl ImportReservationSummariesUseCase {
                         row.time_of_day,
                         row.total_groups,
                         row.caddie_groups,
+                        Some(label.clone()),
                     )?);
                 }
             } else {
@@ -185,7 +193,7 @@ impl ImportReservationSummariesUseCase {
         skipped -= summaries.len();
         let unanswered_courses = imported_courses
             .iter()
-            .filter(|course| matches!(course.resolution, "unresolved" | "ambiguous"))
+            .filter(|course| !course.is_answered())
             .count();
 
         // Deliberately not an error when nothing resolved. A club whose courses
@@ -194,14 +202,24 @@ impl ImportReservationSummariesUseCase {
         // caller decides what to do with an outcome that would write nothing.
 
         // What this file speaks for: every day it has a column for, across the
-        // courses it named and CourseBoard could place. Taken from the sheet's
-        // own dates rather than from the rows that survived, so a day whose
-        // counts were all unreadable is still inside the window the import
-        // replaces — otherwise the previous export's numbers would sit there
-        // unchallenged.
+        // names it has an answer for. Taken from the sheet's own dates rather
+        // than from the rows that survived, so a day whose counts were all
+        // unreadable is still inside the window the import replaces — otherwise
+        // the previous export's numbers would sit there unchallenged.
         let window = ReservationSummaryWindow {
             from: sheet.dates.first().copied().unwrap_or_default(),
             to: sheet.dates.last().copied().unwrap_or_default(),
+            // Names the import has an answer for, which is more than the names
+            // it writes. A name the desk has just excluded, or re-pointed at
+            // another course, has to take its old rows with it — and those sit
+            // under a course this import is no longer writing to, so the name is
+            // the only handle that still reaches them. A name still being asked
+            // about is left out: it keeps what it has until someone decides.
+            sheet_labels: imported_courses
+                .iter()
+                .filter(|course| course.is_answered())
+                .map(|course| course.sheet_label.clone())
+                .collect(),
             course_ids: imported_courses
                 .iter()
                 .filter_map(|course| course.course_id.clone())
