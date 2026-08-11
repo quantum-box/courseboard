@@ -101,6 +101,8 @@ spec:
         # $internal_service_ref:... placeholder that Url::parse rejects).
         - name: TACHYON_FIELD_API_URL
           value: https://tachyon-field-api.txcloud.app
+        - name: TACHYON_API_URL
+          value: https://api.n1.tachy.one
       environments:
         production:
           envVars:
@@ -120,6 +122,8 @@ spec:
               value: 5oafg9ptonbjumdh1pc7khirp1
             - name: TACHYON_FIELD_API_URL
               value: https://tachyon-field-api.txcloud.app
+            - name: TACHYON_API_URL
+              value: https://api.n1.tachy.one
         preview:
           # Tachyon provisions an isolated database and scoped user for each PR.
           # DATABASE_URL is injected from the matching PR-scoped secret.
@@ -138,3 +142,29 @@ spec:
               value: 5oafg9ptonbjumdh1pc7khirp1
             - name: TACHYON_FIELD_API_URL
               value: https://tachyon-field-api.txcloud.app
+            - name: TACHYON_API_URL
+              value: https://api.n1.tachy.one
+---
+# CourseBoard-owned feature flags (PLT-3384).
+#
+# Shares tenant tn_01ks18jhh1xvggktfzjx5jqsen with tachyonfield's `field-flags`
+# manifest: keys stay under `feature.courseboard.*` (field owns
+# `feature.field.*`) so neither manifest ever declares the other's keys — the
+# same key declared by two manifests is a conflict error on apply.
+#
+# Evaluation is fail-closed and prune stops a feature immediately; check with
+# `dryRun: true` before removing a key. Existing unmanaged flags in this tenant
+# (`context.*` / `integration.*`, no marker tag) are never pruned by this
+# manifest.
+apiVersion: apps.tachy.one/v1alpha
+kind: FeatureFlags
+metadata:
+  name: courseboard-flags
+  tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
+spec:
+  flags:
+    - key: feature.courseboard.flag-evaluation-smoke
+      name: CourseBoard feature flag evaluation smoke test
+      description: Non-functional canary for validating the CourseBoard evaluation path
+      enabled: true
+      defaultValue: false

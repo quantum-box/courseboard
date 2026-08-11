@@ -64,6 +64,11 @@ pub struct RuntimeConfig {
     #[arg(long, env = "TACHYON_AUTH_API_URL")]
     pub tachyon_auth_api_url: Option<String>,
 
+    /// Tachyon platform API used for feature flag evaluation (GraphQL
+    /// `featureFlagValues`). Set to `empty://local` to disable (tests).
+    #[arg(long, env = "TACHYON_API_URL")]
+    pub tachyon_api_url: Option<String>,
+
     #[arg(long, env = "TACHYON_FIELD_API_URL")]
     pub tachyon_field_api_url: Option<String>,
     #[arg(long, env = "FIELD_API_URL")]
@@ -174,6 +179,13 @@ impl RuntimeConfig {
         .unwrap_or_else(|| DEFAULT_FIELD_API_URL.to_string())
     }
 
+    /// Tachyon platform API for feature flag evaluation. Defaults to
+    /// production; `empty://local` (or any `empty://`) opts out in tests.
+    pub fn tachyon_api_base_url(&self) -> String {
+        non_empty(self.tachyon_api_url.as_deref())
+            .unwrap_or_else(|| crate::feature_flags::DEFAULT_TACHYON_API_URL.to_string())
+    }
+
     pub fn field_api_bearer_token(&self) -> Option<String> {
         non_empty(self.field_api_bearer_token.as_deref())
     }
@@ -208,6 +220,7 @@ impl Default for RuntimeConfig {
             public_ui_base_url: DEFAULT_PUBLIC_UI_BASE_URL.to_string(),
             sms_sender_name: DEFAULT_SMS_SENDER_NAME.to_string(),
             tachyon_auth_api_url: None,
+            tachyon_api_url: None,
             tachyon_field_api_url: None,
             field_api_url: None,
             courseboard_field_api_url: None,

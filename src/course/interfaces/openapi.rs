@@ -13,6 +13,7 @@ use super::http_commercial;
 use super::http_customers;
 use super::http_ops;
 use super::http_simulator;
+use crate::feature_flags;
 use crate::profile_proxy;
 
 /// Standard API error body returned by [`crate::AppError`].
@@ -130,6 +131,7 @@ impl Modify for SecurityAddon {
         http_simulator::calculate_fee,
         http_simulator::simulate_range,
         profile_proxy::get_me,
+        feature_flags::evaluate_feature_flags,
     ),
     components(
         schemas(
@@ -247,6 +249,9 @@ impl Modify for SecurityAddon {
             profile_proxy::ProfileUser,
             profile_proxy::ProfileTenant,
             profile_proxy::ProfileErrorResponse,
+            feature_flags::FeatureFlagValue,
+            feature_flags::EvaluateFeatureFlagsRequest,
+            feature_flags::EvaluateFeatureFlagsResponse,
         )
     ),
     modifiers(&SecurityAddon),

@@ -8,6 +8,7 @@ pub mod cancellation_fees;
 pub mod config;
 pub mod course;
 pub mod demo_seed;
+pub mod feature_flags;
 pub mod field_api;
 pub mod field_proxy;
 pub mod profile_proxy;
@@ -65,6 +66,7 @@ pub struct AppState {
     field_api: Option<DynFieldApi>,
     field_api_config_error: Option<String>,
     profile_client: Option<Arc<profile_proxy::ProfileClient>>,
+    feature_flags: Option<Arc<dyn feature_flags::FeatureFlagEvaluator>>,
 }
 
 impl AppState {
@@ -99,6 +101,7 @@ impl AppState {
                 "Field API client is not configured for the admin UI".to_string(),
             ),
             profile_client: None,
+            feature_flags: None,
         }
     }
 
@@ -137,6 +140,7 @@ impl AppState {
             field_api: Some(field_api),
             field_api_config_error: None,
             profile_client: None,
+            feature_flags: None,
         }
     }
 
@@ -163,6 +167,7 @@ impl AppState {
                 field_api: Some(Arc::new(client)),
                 field_api_config_error: None,
                 profile_client: None,
+                feature_flags: None,
             },
             Err(error) => Self {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
@@ -180,6 +185,7 @@ impl AppState {
                 field_api: None,
                 field_api_config_error: Some(error.to_string()),
                 profile_client: None,
+                feature_flags: None,
             },
         }
     }
@@ -218,6 +224,20 @@ impl AppState {
 
     fn with_profile_client(mut self, profile_client: Option<profile_proxy::ProfileClient>) -> Self {
         self.profile_client = profile_client.map(Arc::new);
+        self
+    }
+
+    /// Platform feature flag evaluation port. `None` keeps the endpoint
+    /// registered but failing closed with 424 (unit tests, opt-outs).
+    pub fn feature_flags(&self) -> Option<Arc<dyn feature_flags::FeatureFlagEvaluator>> {
+        self.feature_flags.clone()
+    }
+
+    pub fn with_feature_flag_evaluator(
+        mut self,
+        evaluator: Option<Arc<dyn feature_flags::FeatureFlagEvaluator>>,
+    ) -> Self {
+        self.feature_flags = evaluator;
         self
     }
 }
@@ -367,6 +387,12 @@ pub fn build_router(state: AppState) -> Router {
                 collection_auth_state,
                 require_valid_token,
             )),
+        )
+        .route(
+            "/v1/course/feature-flags/evaluate",
+            post(feature_flags::evaluate_feature_flags).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
         )
         .route(
             "/v1/course/tee-sheet",
@@ -945,9 +971,13 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
         config.field_api_client_credentials_config(),
         config.field_api_bearer_token(),
     );
+    let feature_flag_evaluator = Arc::new(feature_flags::TachyonFeatureFlagEvaluator::new(
+        &config.tachyon_api_base_url(),
+    ));
     let state =
         AppState::with_optional_field_api(pool, token_verifier, field_api, cancellation_fee_config)
-            .with_profile_client(profile_client);
+            .with_profile_client(profile_client)
+            .with_feature_flag_evaluator(Some(feature_flag_evaluator));
 
     Ok(build_router(state))
 }
