@@ -75,23 +75,37 @@ impl ReservationCourseLinkGateway for MySqlReservationCourseLinkRepository {
                 ));
             }
         }
-        // Rows to clear: every name being taken back, plus any answer on file
-        // whose name means the same as one being saved.
+        // One answer per question, where the question is the normalized name.
         //
-        // The second is there because the import decides two names are the same
-        // one by normalizing them, so an answer for `東 コース` and an answer for
-        // `東コース` are answers to the same question. The unique key cannot see
-        // that — it compares the raw text — so an export that changes only its
-        // spacing would leave both rows in place, and the import would keep
-        // reading whichever sorted first. Clearing the old spelling is what makes
-        // the new answer stick.
+        // The import decides two names are the same one by normalizing them, so
+        // `東 コース` and `東コース` are two spellings of a single question. The
+        // unique key cannot see that — it compares the raw text — so storing
+        // both would leave the import reading whichever sorted first. A request
+        // carrying both spellings keeps the last, which is the same rule that
+        // makes a new spelling supersede an old one across saves.
+        let mut kept: Vec<&ReservationCourseAnswer> = Vec::new();
+        for answer in answers {
+            let key = normalize_course_label(answer.sheet_label.trim());
+            match kept
+                .iter()
+                .position(|seen| normalize_course_label(seen.sheet_label.trim()) == key)
+            {
+                Some(at) => kept[at] = answer,
+                None => kept.push(answer),
+            }
+        }
+
+        // Rows to clear: every name being taken back, plus any answer on file
+        // whose name means the same as one being saved but is spelled
+        // differently. Clearing the old spelling is what makes the new answer
+        // stick.
         let existing = self.list_course_links(tenant_id).await?;
         let mut clear: Vec<String> = existing
             .iter()
             .map(|link| link.sheet_label.clone())
             .filter(|stored| {
                 let stored_key = normalize_course_label(stored);
-                answers.iter().any(|answer| {
+                kept.iter().any(|answer| {
                     answer.sheet_label.trim() != stored
                         && normalize_course_label(answer.sheet_label.trim()) == stored_key
                 })
@@ -100,7 +114,7 @@ impl ReservationCourseLinkGateway for MySqlReservationCourseLinkRepository {
         // Taking an answer back removes the row, which is how the import reads
         // "nobody has looked at this name yet". Storing NULL instead would say
         // "leave this course out" — the answer the desk is trying to undo.
-        for answer in answers {
+        for answer in &kept {
             if answer.decision == CourseDecision::Undecided {
                 clear.push(answer.sheet_label.trim().to_string());
             }
@@ -123,7 +137,7 @@ impl ReservationCourseLinkGateway for MySqlReservationCourseLinkRepository {
             .await
             .map_err(provider)?;
         }
-        for answer in answers {
+        for answer in &kept {
             let course_id = match &answer.decision {
                 CourseDecision::Course(id) => Some(id.as_str()),
                 CourseDecision::DoNotImport => None,
@@ -340,6 +354,28 @@ mod tests {
 
         let stored = repository.list_course_links(&tenant).await.unwrap();
         assert_eq!(stored, vec![link("東コース", Some("course-new"))]);
+    }
+
+    #[tokio::test]
+    async fn one_save_carrying_two_spellings_of_one_name_stores_a_single_answer() {
+        // The import reads `東 コース` and `東コース` as one question. Storing an
+        // answer for each would leave it reading whichever sorted first, which
+        // is nobody's choice.
+        let (repository, tenant) = fresh("same-save").await;
+        repository
+            .save_course_links(
+                &tenant,
+                &[
+                    answer("東 コース", Some("course-first")),
+                    answer("東コース", Some("course-last")),
+                ],
+                None,
+            )
+            .await
+            .unwrap();
+
+        let stored = repository.list_course_links(&tenant).await.unwrap();
+        assert_eq!(stored, vec![link("東コース", Some("course-last"))]);
     }
 
     #[tokio::test]

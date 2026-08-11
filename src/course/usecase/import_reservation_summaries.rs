@@ -11,8 +11,8 @@ use std::sync::Arc;
 use chrono::NaiveDate;
 
 use crate::course::domain::{
-    match_course_label, parse_reservation_sheet, resolve_course_label, Course, CourseError,
-    CourseId, CourseMatch, CourseResolution, GatewayCredentials, GolfCatalogGateway, ImportWarning,
+    courses_matching_label, parse_reservation_sheet, resolve_course_label, Course, CourseError,
+    CourseId, CourseResolution, GatewayCredentials, GolfCatalogGateway, ImportWarning,
     ReservationCourseLinkGateway, ReservationDaySummary, ReservationSummaryGateway,
     ReservationSummaryWindow, SheetGrid,
 };
@@ -285,6 +285,13 @@ impl ImportReservationSummariesUseCase {
 ///
 /// Only for a name that has an answer. A name still being asked about has
 /// decided nothing, and must not take a month away on its way past.
+///
+/// Every course the name could be pointing at counts, not only the one it
+/// resolves to today. A name that now ties between two courses may have matched
+/// exactly one of them when its rows were written, and there is nothing left in
+/// the row to say which — so both have to be reachable. The delete this feeds
+/// only ever touches rows with no name of their own, which is what keeps that
+/// safe.
 fn courses_a_file_speaks_for(imported: &[ImportedCourse], courses: &[Course]) -> Vec<CourseId> {
     let mut ids: Vec<CourseId> = Vec::new();
     let mut add = |id: CourseId| {
@@ -297,8 +304,7 @@ fn courses_a_file_speaks_for(imported: &[ImportedCourse], courses: &[Course]) ->
             add(id);
         }
         if course.is_answered() {
-            if let CourseMatch::Matched(matched) = match_course_label(&course.sheet_label, courses)
-            {
+            for matched in courses_matching_label(&course.sheet_label, courses) {
                 add(matched.id().clone());
             }
         }

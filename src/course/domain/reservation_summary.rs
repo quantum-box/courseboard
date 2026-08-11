@@ -328,9 +328,24 @@ pub enum CourseMatch<'a> {
 /// drop a third of the club, so the comparison is done on a normalized form and
 /// an inexact hit is allowed only when exactly one course produces it.
 pub fn match_course_label<'a>(label: &str, courses: &'a [Course]) -> CourseMatch<'a> {
+    match courses_matching_label(label, courses).as_slice() {
+        [] => CourseMatch::Unknown,
+        [only] => CourseMatch::Matched(only),
+        several => CourseMatch::Ambiguous(several.iter().map(|c| c.name().to_string()).collect()),
+    }
+}
+
+/// Every course a sheet label could be naming.
+///
+/// One of them is a match; several is a tie the import refuses to break. Exposed
+/// beside [`match_course_label`] because "where could this name's rows already
+/// be" needs the whole set rather than the verdict: a name that ties today may
+/// have matched exactly one course on the day its rows were written, and the
+/// replacement has to be able to reach them either way.
+pub fn courses_matching_label<'a>(label: &str, courses: &'a [Course]) -> Vec<&'a Course> {
     let wanted = normalize_course_label(label);
     if wanted.is_empty() {
-        return CourseMatch::Unknown;
+        return Vec::new();
     }
 
     let names = |course: &'a Course| -> Vec<String> {
@@ -341,33 +356,25 @@ pub fn match_course_label<'a>(label: &str, courses: &'a [Course]) -> CourseMatch
         names
     };
 
+    // An exact hit settles it even if some other course also happens to contain
+    // the same characters: `滝の` should not become ambiguous because a
+    // `滝の東` exists.
     let exact: Vec<&Course> = courses
         .iter()
         .filter(|course| names(course).contains(&wanted))
         .collect();
-    // An exact hit settles it even if some other course also happens to contain
-    // the same characters: `滝の` should not become ambiguous because a
-    // `滝の東` exists.
-    if let [only] = exact.as_slice() {
-        return CourseMatch::Matched(only);
-    }
-    if exact.len() > 1 {
-        return CourseMatch::Ambiguous(exact.iter().map(|c| c.name().to_string()).collect());
+    if !exact.is_empty() {
+        return exact;
     }
 
-    let partial: Vec<&Course> = courses
+    courses
         .iter()
         .filter(|course| {
             names(course)
                 .iter()
                 .any(|name| !name.is_empty() && (name.contains(&wanted) || wanted.contains(name)))
         })
-        .collect();
-    match partial.as_slice() {
-        [] => CourseMatch::Unknown,
-        [only] => CourseMatch::Matched(only),
-        several => CourseMatch::Ambiguous(several.iter().map(|c| c.name().to_string()).collect()),
-    }
+        .collect()
 }
 
 /// Reduce a course name to the part two people would agree on.
@@ -490,6 +497,23 @@ mod tests {
             panic!("a label matching two courses must not resolve to one");
         };
         assert_eq!(candidates.len(), 2);
+    }
+
+    #[test]
+    fn a_tied_name_still_says_which_courses_it_could_have_written_to() {
+        // The verdict throws the tie away, and rows written before names were
+        // recorded can only be found by the course they went to. Back when the
+        // club had one 東コース the match was unique, so either candidate may be
+        // holding them.
+        let courses = vec![course("東コース", None), course("東コース 旧", None)];
+        let candidates = courses_matching_label("東\n18H", &courses);
+        assert_eq!(candidates.len(), 2);
+    }
+
+    #[test]
+    fn a_name_nobody_registered_could_have_written_nowhere() {
+        let courses = vec![course("真駒内", None)];
+        assert!(courses_matching_label("羊ケ丘\n18H", &courses).is_empty());
     }
 
     #[test]
