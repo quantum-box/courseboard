@@ -68,6 +68,32 @@ spec:
         path: /healthz
         expectedStatus: 200
         expectedBody: '"status":"ok"'
+      # The postDeploy hook targets Tachyon's isolated candidate alias. It runs
+      # after the provider has created the candidate but before stable traffic
+      # is promoted; a FunctionError discards the candidate and leaves the
+      # currently serving Lambda untouched.
+      hooks:
+        postDeploy:
+          - name: migration-gate-before-activation
+            lambdaInvoke:
+              appName: courseboard-api
+              payload:
+                version: "2.0"
+                routeKey: COURSEBOARD_MIGRATION_GATE
+                rawPath: /healthz
+                rawQueryString: ""
+                headers:
+                  host: courseboard-migration-gate.internal
+                requestContext:
+                  domainName: courseboard-migration-gate.internal
+                  http:
+                    method: GET
+                    path: /healthz
+            timeoutSeconds: 900
+      production:
+        requiredReleaseChecks:
+          - repository: quantum-box/courseboard
+            name: CourseBoard production migration gate
       watchPaths:
         - Cargo.toml
         - Cargo.lock
