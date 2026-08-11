@@ -21,6 +21,11 @@ export const caddies: DeepPartial<typeof source> = {
       description: '1か月分の働いた時間と費用をまとめて、給料の計算に渡す表を作ります。',
     },
   },
+  tabs: {
+    label: '表示の切り替え',
+    list: '一覧',
+    attendance: '出勤',
+  },
   add: 'キャディを登録する',
   added: {
     title: 'キャディを登録しました',

@@ -20,6 +20,11 @@ export const caddies: DeepPartial<typeof source> = {
       description: 'Price a month off the rank fees, reconcile it against attendance, then hand it to payroll as CSV.',
     },
   },
+  tabs: {
+    label: 'Switch view',
+    list: 'List',
+    attendance: 'Attendance',
+  },
   add: 'Add a caddie',
   added: {
     title: 'Caddie added',
