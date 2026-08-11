@@ -103,17 +103,19 @@ button,
 }
 
 /* A recommendation is a decision aid, not a grade. Keep the rank and its
-   factual reasons readable; the unbounded ordering value lives in disclosure. */
+   factual reasons readable; the unbounded ordering value lives in disclosure.
+   One of these prints per candidate, so readable means the app's body text —
+   at 16px with a 44px disclosure the shortlist was three names to a screen. */
 .recommendation-explanation {
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 13px;
+  line-height: 20px;
 }
 
 .recommendation-explanation-summary {
-  margin-top: 4px;
+  margin-top: 2px;
   color: hsl(var(--nui-muted-foreground));
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 12px;
+  line-height: 18px;
 }
 
 .recommendation-explanation details {
@@ -121,19 +123,18 @@ button,
 }
 
 .recommendation-explanation summary {
-  min-height: 44px;
-  padding-block: 10px;
+  padding-block: 4px;
   color: hsl(var(--nui-primary));
   cursor: pointer;
-  font-size: 16px;
+  font-size: 12px;
   font-weight: 600;
-  line-height: 24px;
+  line-height: 18px;
 }
 
 .recommendation-explanation dl {
   display: grid;
-  gap: 8px;
-  margin: 0 0 8px;
+  gap: 4px;
+  margin: 0 0 6px;
 }
 
 .recommendation-explanation dl > div {
@@ -810,34 +811,20 @@ button,
   gap: 8px;
 }
 
-/* Adding a course is an occasional action, so its form lives in the shared
-   sheet while the list stays put. These are newly introduced controls on this
-   screen and therefore use the current readability and target-size rules even
-   while older controls are still being migrated. */
-.course-add-button {
+/* Every sheet's close glyph is small, but the operation still needs a full
+   target. It sits in the panel's corner, so a large target here costs no form
+   any height — which is why this is the one 44px rule the app still keeps. */
+.courseboard-sheet > button {
   min-width: 44px;
   min-height: 44px;
-  font-size: 16px;
 }
 
-.course-editor-sheet {
-  font-size: 16px;
-  line-height: 1.5;
-}
-
+/* Adding a course is an occasional action, so its form lives in the shared
+   sheet while the list stays put. `.course-add-button` carries no style of its
+   own: it is a toolbar button like the one beside it, and the height a control
+   gets is the app's. Only the header needs a rule, to clear the close glyph. */
 .course-editor-sheet > :first-child {
   padding-right: 40px;
-}
-
-.course-editor-sheet :is(p, .field-label, .field-label *, .field-hint, .notice) {
-  font-size: 16px;
-  line-height: 1.5;
-}
-
-.course-editor-sheet :is(button, [role='button'], input, select, textarea) {
-  min-width: 44px;
-  min-height: 44px;
-  font-size: 16px;
 }
 
 .page-header {
@@ -1346,33 +1333,14 @@ button,
 .data-table .clickable-row { cursor: pointer; outline: none; }
 .data-table .clickable-row:focus-visible { box-shadow: inset 2px 0 hsl(var(--nui-primary)), inset 0 0 0 1px hsl(var(--nui-ring) / .4); background: hsl(var(--nui-selected)); }
 
-/* Monthly close is a reconciliation screen: every booking row must remain
-   readable while the operator compares several entries at once. */
-.settlement-reservations-panel .panel-header h2,
-.settlement-reservations-panel .panel-header p,
-.settlement-reservation-count,
-.settlement-reservations-panel .data-table {
-  font-size: 16px;
-  line-height: 1.5;
-}
-
+/* Monthly close is a reconciliation screen: the operator compares several
+   bookings at once, so the panel scrolls the list rather than enlarging it.
+   The 44px rows and 16px cells this used to carry cut the panel to six
+   bookings and made the one table on the screen read as a different product
+   from every other list in the app. It is a data-table; it looks like one. */
 .settlement-reservations-panel .data-table-scroll {
   max-height: 360px;
   overflow: auto;
-}
-
-.settlement-reservations-panel .data-table th {
-  height: 44px;
-  font-size: 16px;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.settlement-reservations-panel .data-table td {
-  min-height: 44px;
-  padding-block: 10px;
-  font-size: 16px;
-  line-height: 24px;
 }
 
 .settlement-reservation-unavailable {
@@ -1382,12 +1350,7 @@ button,
 
 .settlement-reservation-unavailable span {
   color: hsl(var(--nui-muted-foreground));
-  font-size: 16px;
-}
-
-.settlement-reservations-panel .data-table td::before {
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 11px;
 }
 
 .align-left { text-align: left; }
@@ -3973,19 +3936,6 @@ button,
   --shift-board-streak-width: 64px;
 }
 
-.shift-board-toolbar,
-.shift-board-toolbar .field-label,
-.shift-board-toolbar .text-sm,
-.shift-board-threshold {
-  font-size: 16px;
-}
-
-.shift-board-toolbar :is(button, input, select) {
-  min-width: 44px;
-  min-height: 44px;
-  font-size: 16px;
-}
-
 .shift-board-month-picker {
   width: min(100%, 300px);
 }
@@ -4016,12 +3966,6 @@ button,
   gap: 8px;
 }
 
-.shift-board-navigation button {
-  min-width: 44px;
-  min-height: 44px;
-  font-size: 16px;
-}
-
 .shift-board-scroll {
   position: relative;
   max-height: clamp(320px, calc(100dvh - 260px), 720px);
@@ -4040,15 +3984,19 @@ button,
   border-collapse: collapse;
   min-width: 100%;
   width: max-content;
-  font-size: 16px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
+/* A club is forty-odd caddies against a month. The cell is as tall as the
+   glyph and the course name it stacks, not as tall as a fingertip: at 44px a
+   screen held twelve of the roster, which is not enough of a month's shape to
+   see who is working every weekend. */
 .shift-board th,
 .shift-board td {
   border: 1px solid hsl(var(--nui-border));
-  min-width: 32px;
-  height: 44px;
+  min-width: 28px;
+  height: 30px;
   padding: 0 2px;
   text-align: center;
   vertical-align: middle;
@@ -4058,7 +4006,7 @@ button,
   position: sticky;
   top: 0;
   z-index: 3;
-  height: 48px;
+  height: 34px;
   background: hsl(var(--nui-muted) / .5);
   font-weight: 500;
   color: hsl(var(--nui-muted-foreground));
@@ -4067,15 +4015,15 @@ button,
 
 .shift-board thead .shift-board-day {
   display: block;
-  font-size: 16px;
-  line-height: 20px;
+  font-size: 12px;
+  line-height: 15px;
   color: hsl(var(--nui-foreground));
 }
 
 .shift-board thead .shift-board-dow {
   display: block;
-  font-size: 16px;
-  line-height: 20px;
+  font-size: 11px;
+  line-height: 14px;
 }
 
 .shift-board .shift-board-name {
@@ -4108,7 +4056,7 @@ button,
 
 .shift-board-profile-status {
   color: hsl(var(--nui-muted-foreground));
-  font-size: 16px;
+  font-size: 11px;
   font-weight: 400;
 }
 
@@ -4156,7 +4104,7 @@ button,
   display: inline-flex;
   width: 100%;
   justify-content: center;
-  font-size: 16px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
@@ -4175,11 +4123,10 @@ button,
   margin-top: 4px;
 }
 
-/* The toolbar gives every control a 44px tap target. On a checkbox that draws
-   a huge empty box, so the label carries the target and the box stays a box. */
+/* Seven of these sit on one line, so the label is as tall as the box beside
+   it: a tap target here only pushed the rule below them off the sheet. */
 .shift-board-weekday-toggle {
   display: inline-flex;
-  min-height: 44px;
   align-items: center;
   gap: 4px;
   white-space: nowrap;
@@ -4195,13 +4142,8 @@ button,
   accent-color: hsl(var(--nui-primary));
 }
 
-/* The rules sheet holds the same controls the toolbar used to, so it keeps the
-   same 44px targets rather than shrinking them for being behind a button. */
-.shift-rules-sheet :is(button, input, select) {
-  min-height: 44px;
-  font-size: 16px;
-}
-
+/* The rules sheet holds the same controls the toolbar does, so it keeps the
+   same heights — which are the app's, not a per-page pair of numbers. */
 .shift-rules-sheet .shift-board-deadline {
   padding-bottom: 0;
 }
@@ -4213,11 +4155,12 @@ button,
   line-height: 1.5;
 }
 
-/* The whole cell opens the day for editing, so the hit area is the cell. */
+/* The whole cell opens the day for editing, so the hit area is the cell —
+   wide rather than tall, which is the direction that costs the board nothing. */
 .shift-board-cell-button {
   display: flex;
   width: 100%;
-  min-height: 40px;
+  min-height: 26px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
@@ -4254,9 +4197,9 @@ button,
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
-  gap: 8px 12px;
-  font-size: 16px;
-  line-height: 24px;
+  gap: 6px 12px;
+  font-size: 11px;
+  line-height: 18px;
   color: hsl(var(--nui-muted-foreground));
 }
 
@@ -4614,14 +4557,6 @@ button,
 .ledger-mark-reservation {
   display: grid;
   gap: 8px;
-}
-
-/* Dialog's close glyph is small, but the operation still needs a full target.
-   It sits in the corner, so a large target here costs the form no height. */
-.ledger-mark-editor-sheet > button,
-.ledger-reservation-sheet > button {
-  min-width: 44px;
-  min-height: 44px;
 }
 
 /* The board scrolls sideways as a whole so course columns stay side by side,
@@ -5600,9 +5535,9 @@ button,
   outline-offset: 1px;
 }
 
-/* Supporting figures the operator opens when they want them. Newly introduced
-   control, so it follows the current readability and target-size rules (16px
-   text, 44px hit area) rather than the denser older screens around it. */
+/* Supporting figures the operator opens when they want them. The row is a
+   heading, sized by its own padding — there is one per section, so it needs no
+   target of its own. */
 .collapsible-section {
   border: 1px solid hsl(var(--nui-border));
   border-radius: var(--nui-radius-md);
@@ -5611,13 +5546,12 @@ button,
 
 .collapsible-summary {
   display: flex;
-  min-height: 44px;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  font-size: 16px;
+  padding: 7px 12px;
+  font-size: 13px;
   font-weight: 600;
-  line-height: 24px;
+  line-height: 20px;
   cursor: pointer;
   list-style: none;
 }
@@ -5627,8 +5561,8 @@ button,
 }
 
 .collapsible-summary svg {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   flex: none;
   color: hsl(var(--nui-muted-foreground));
   transition: transform 120ms ease;
@@ -5651,8 +5585,9 @@ button,
   padding: 16px 14px;
 }
 
-/* How far ahead the unassigned list looks. Newly introduced control, so it
-   follows the current readability and target-size rules. */
+/* How far ahead the unassigned list looks. A chip switch like the ledger's,
+   and the same size as one: the height a control gets on this screen is the
+   app's, never a number this page picked for itself. */
 .horizon-switch {
   display: inline-flex;
   gap: 4px;
@@ -5660,15 +5595,15 @@ button,
 
 .horizon-chip {
   display: inline-flex;
-  min-height: 44px;
+  height: var(--control-height);
   align-items: center;
   border: 1px solid hsl(var(--nui-border));
   border-radius: var(--nui-radius-md);
-  padding: 0 14px;
+  padding: 0 10px;
   background: hsl(var(--nui-background));
   color: hsl(var(--nui-muted-foreground));
-  font-size: 16px;
-  line-height: 24px;
+  font-size: 12px;
+  line-height: 18px;
   cursor: pointer;
   transition:
     background-color 120ms ease,
@@ -5693,9 +5628,7 @@ button,
 }
 
 /* A fortnight of a club-sized board is a couple of hundred groups. The list
-   scrolls inside its panel so the rest of the screen stays put; the rules on
-   text size and target size are unchanged, which is why this scrolls rather
-   than shrinking anything. */
+   scrolls inside its panel so the rest of the screen stays put. */
 .unassigned-scroll {
   display: flex;
   max-height: 60vh;
@@ -5716,29 +5649,27 @@ button,
   margin: 0 0 6px;
   border-bottom: 1px solid hsl(var(--nui-border));
   background: hsl(var(--nui-background));
-  padding: 6px 2px;
-  font-size: 16px;
+  padding: 5px 2px;
+  font-size: 13px;
   font-weight: 600;
-  line-height: 24px;
+  line-height: 20px;
 }
 
 .unassigned-day-count {
   color: hsl(var(--nui-muted-foreground));
-  font-size: 16px;
+  font-size: 12px;
   font-weight: 400;
 }
 
-/* A caddie's name, wherever one is shown. Newly introduced control, so it
-   follows the current readability and target-size rules: the row is the target,
-   and the name is never smaller than body text. */
+/* A caddie's name, wherever one is shown — and it is shown once per row, on a
+   board of forty of them. The badge beside the name already gives the row its
+   height; a 44px target on top of that is height every other row pays for. */
 .caddie-link,
 .caddie-link-plain {
   display: inline-flex;
-  min-height: 44px;
   align-items: center;
-  gap: 8px;
-  font-size: 16px;
-  line-height: 24px;
+  gap: 6px;
+  line-height: 18px;
   text-align: left;
 }
 
@@ -5751,17 +5682,19 @@ button,
   cursor: pointer;
 }
 
+/* Sized to the name it sits beside, because it is what sets the row's height
+   wherever a roster prints one per line. */
 .caddie-link-initial {
   display: inline-flex;
-  width: 28px;
-  height: 28px;
+  width: 20px;
+  height: 20px;
   flex: none;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
   background: hsl(var(--nui-primary) / 12%);
   color: hsl(var(--nui-primary));
-  font-size: 14px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -5802,9 +5735,9 @@ button,
   border-radius: var(--nui-radius-md);
   box-shadow: 0 8px 24px hsl(0deg 0% 0% / 12%);
   background: hsl(var(--nui-background));
-  padding: 10px 12px;
-  font-size: 16px;
-  line-height: 24px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 18px;
   pointer-events: none;
 }
 
