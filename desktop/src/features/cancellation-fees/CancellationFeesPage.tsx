@@ -84,6 +84,68 @@ type OrderData = {
   status: string
 }
 
+export type InvoiceBillTo =
+  | { kind: 'customer'; customerId: string }
+  | { kind: 'client'; clientId: string; affiliationId: string }
+
+type CancellationFeeInvoiceRequestInput = {
+  billTo: InvoiceBillTo
+  clientName: string
+  clientEmail?: string
+  clientPhone?: string
+  dueDate: string
+  taxAmount: number
+  notes: string
+  description: string
+  amount: number
+  sendEmail: boolean
+  sendSms: boolean
+  smsMessage?: string
+}
+
+export function invoiceBillTo(input: {
+  kind: string
+  customerId?: string
+  clientId?: string
+  affiliationId?: string
+}): InvoiceBillTo | undefined {
+  if (input.kind === 'customer') {
+    const customerId = input.customerId?.trim()
+    return customerId ? { kind: 'customer', customerId } : undefined
+  }
+  if (input.kind === 'client') {
+    const clientId = input.clientId?.trim()
+    const affiliationId = input.affiliationId?.trim()
+    return clientId && affiliationId
+      ? { kind: 'client', clientId, affiliationId }
+      : undefined
+  }
+  return undefined
+}
+
+export function cancellationFeeInvoiceRequestBody(input: CancellationFeeInvoiceRequestInput) {
+  return {
+    billTo: input.billTo,
+    clientName: input.clientName,
+    clientEmail: input.clientEmail,
+    clientPhone: input.clientPhone,
+    dueDate: input.dueDate,
+    currency: 'JPY',
+    taxAmount: input.taxAmount,
+    notes: input.notes,
+    lineItems: [{
+      description: input.description,
+      quantity: 1,
+      unitPrice: input.amount,
+    }],
+    createPaymentLink: true,
+    paymentLinkProvider: 'stripe',
+    sendEmail: input.sendEmail,
+    sendSms: input.sendSms,
+    smsMessage: input.smsMessage,
+  }
+}
+
 const INVOICE_STATUSES: InvoiceStatus[] = ['Draft', 'Sent', 'SendFailed', 'Paid', 'Overdue']
 
 function statusLabel(status: InvoiceStatus) {
@@ -263,6 +325,7 @@ export function NewCancellationFeePage() {
   const due = new Date(Date.UTC(year!, month! - 1, day! + 7)).toISOString().slice(0, 10)
   const [sendEmail, setSendEmail] = useState(true)
   const [sendSms, setSendSms] = useState(false)
+  const [billToKind, setBillToKind] = useState<'customer' | 'client'>(orderId ? 'client' : 'customer')
   const [amount, setAmount] = useState(5000)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -287,6 +350,12 @@ export function NewCancellationFeePage() {
     const reason = String(form.get('reason') ?? '').trim()
     const notes = String(form.get('notes') ?? '').trim()
     const customerPhone = normalizePhone(String(form.get('clientPhone') ?? ''))
+    const billTo = invoiceBillTo({
+      kind: String(form.get('billToKind') ?? ''),
+      customerId: String(form.get('customerId') ?? ''),
+      clientId: String(form.get('clientId') ?? ''),
+      affiliationId: String(form.get('affiliationId') ?? ''),
+    })
     if (!Number.isFinite(amount) || amount <= 0) {
       setError(t('cancellationFees:new.validation.amount'))
       return
@@ -295,19 +364,22 @@ export function NewCancellationFeePage() {
       setError(t('cancellationFees:new.validation.phone'))
       return
     }
+    if (!billTo) {
+      setError(t('cancellationFees:new.validation.billTo'))
+      return
+    }
 
     setSubmitting(true)
     try {
       const invoice = await fieldApiJson<InvoiceData>('/v1/invoices', {
         method: 'POST',
         headers: { 'idempotency-key': idempotencyKey.current },
-        body: JSON.stringify({
-          clientId: String(form.get('clientId') ?? '').trim() || `courseboard:${reference || crypto.randomUUID()}`,
+        body: JSON.stringify(cancellationFeeInvoiceRequestBody({
+          billTo,
           clientName,
           clientEmail: sendEmail ? String(form.get('clientEmail') ?? '').trim() : undefined,
           clientPhone: sendSms ? customerPhone : undefined,
           dueDate: String(form.get('dueDate') ?? ''),
-          currency: 'JPY',
           taxAmount: Number(form.get('taxAmount') ?? 0),
           notes: [
             '[courseboard:cancellation-fee]',
@@ -316,19 +388,14 @@ export function NewCancellationFeePage() {
             reason ? t('cancellationFees:new.message.reason', { reason }) : null,
             notes || null,
           ].filter(Boolean).join('\n'),
-          lineItems: [{
-            description: reference
-              ? t('cancellationFees:new.message.lineItem', { reference })
-              : t('cancellationFees:lineItemLabel'),
-            quantity: 1,
-            unitPrice: amount,
-          }],
-          createPaymentLink: true,
-          paymentLinkProvider: 'stripe',
+          description: reference
+            ? t('cancellationFees:new.message.lineItem', { reference })
+            : t('cancellationFees:lineItemLabel'),
+          amount,
           sendEmail,
           sendSms,
           smsMessage: sendSms ? String(form.get('smsMessage') ?? '') : undefined,
-        }),
+        })),
       })
       setCreated(invoice)
       try {
@@ -448,16 +515,42 @@ export function NewCancellationFeePage() {
           description={t('cancellationFees:new.client.description')}
         >
           <FormGrid>
+            <Field label={t('cancellationFees:new.client.kind')} required>
+              <NativeSelect
+                name="billToKind"
+                value={billToKind}
+                onChange={event => setBillToKind(event.target.value as 'customer' | 'client')}
+              >
+                <option value="customer">{t('cancellationFees:new.client.customer')}</option>
+                <option value="client">{t('cancellationFees:new.client.company')}</option>
+              </NativeSelect>
+            </Field>
             <Field label={t('cancellationFees:new.client.name')} required>
               <Input name="clientName" required defaultValue={order?.clientName ?? ''} />
             </Field>
-            <Field label={t('cancellationFees:new.client.id')}>
-              <Input
-                name="clientId"
-                placeholder={t('cancellationFees:new.client.idPlaceholder')}
-                defaultValue={order?.clientId ?? ''}
-              />
-            </Field>
+            {billToKind === 'customer' ? (
+              <Field label={t('cancellationFees:new.client.customerId')} required>
+                <Input name="customerId" required placeholder={t('cancellationFees:new.client.customerIdPlaceholder')} />
+              </Field>
+            ) : (
+              <>
+                <Field label={t('cancellationFees:new.client.id')} required>
+                  <Input
+                    name="clientId"
+                    required
+                    placeholder={t('cancellationFees:new.client.idPlaceholder')}
+                    defaultValue={order?.clientId ?? ''}
+                  />
+                </Field>
+                <Field label={t('cancellationFees:new.client.affiliationId')} required>
+                  <Input
+                    name="affiliationId"
+                    required
+                    placeholder={t('cancellationFees:new.client.affiliationIdPlaceholder')}
+                  />
+                </Field>
+              </>
+            )}
             <Field label={t('cancellationFees:new.client.due')} required>
               <Input name="dueDate" type="date" required defaultValue={due} />
             </Field>

@@ -1,5 +1,10 @@
 # CourseBoard の請求先と法人売掛の連携設計
 
+> 2026-08-11 更新: 本文は PLT-3409 より前の全体設計記録を含む。今回の実装範囲は PLT-3406 の
+> 項目 1 だけである。Field の manual invoice typed `billTo` は tachyonfield #1012
+> (`45f6428121cbd5c4a75422ecc1cca3320ad8d3a3`) で main に入ったが、production 反映は未確認である。
+> 項目 2 / 3 / 4 に関する設計は今回実装しない。
+
 ## Links
 
 - [taskdoc](./task.md)
@@ -187,14 +192,13 @@ reservation billing invoice は、保存済み bill-to が client なら real cl
 affiliation evidence を invoice に引き継ぐ。同じ client 宛の複数 invoice は同じ `client_id` と
 `bill_to_client_id` を持つ。
 
-一方、#1001 の phase 1 は manual invoice input を typed 化していない。
-`POST /v1/invoices` の create request は今も required な自由文字列 `clientId` を受け、
-`Invoice::create` は `bill_to = None` を保存する。REST response に optional `billTo` が増えただけである。
+#1001 の phase 1 では manual invoice input が未対応だったが、PLT-3409 / tachyonfield #1012 で
+`POST /v1/invoices` の `CreateInvoiceRequest` に optional `billTo` が追加された。形は reservation と同じで、
+`billTo` があれば `Invoice::create_with_bill_to` を通る。`clientId` は compatibility 用に optional となり、
+`billTo` だけの request では typed identity から補われる。`billTo` なしの既存呼び出しは従来挙動を保つ。
 
-従って、CourseBoard のキャンセル料画面と legacy collection API が synthetic ID をやめて typed bill-to を
-直接送るには、Field に manual/direct invoice 用の typed create contract が追加で必要である。
-real client ID を旧 `clientId` に入れるだけでは typed projection と validation が無く、今回の目的を
-満たしたことにはしない。
+今回の CourseBoard 実装では legacy `clientId` を併送せず、2 つのキャンセル料 producer がどちらも
+`billTo` を request body に載せる。Field production への #1012 反映確認は merge gate として残す。
 
 ### 2.4 AR/AP balance の境界
 
@@ -350,11 +354,10 @@ client surface を CourseBoard gateway から使うのか、Field に REST の�
 
 1. reservation ID があるケースを reservation billing invoice へ統合し、独立請求だけを manual invoice に
    残す。
-2. Field に direct/manual invoice の typed `billTo` input と real customer/client validation を追加する。
+2. Field の direct/manual invoice typed `billTo` input（PLT-3409 / #1012）を使う。
 
-#1001 だけを前提に旧 `clientId` へ real client ID を送る実装は行わない。typed column が空の legacy caller を
-増やし続けるためである。両 CourseBoard producer の synthetic fallback は、typed contract が runtime に
-到達し、全 producer を同時に切り替えられるまで残る既知負債として扱う。
+旧 `clientId` へ real client ID を送るだけの実装は行わない。2 producer を同時に `billTo` へ切り替え、
+synthetic fallback を削除する。runtime 到達前に merge しないことで contract の deploy 順を守る。
 
 ### 4.6 月次精算と売掛
 
@@ -379,7 +382,7 @@ CourseBoard から勝手に Field 実装を書かず、次は業種非依存 con
 | client の検索・ID 指定取得、または affiliation response の client summary | 会社名で所属を選べない |
 | affiliation の終了・訂正 API と競合制御 | 「登録・変更」UI の変更側を作れない |
 | reservation update の `customerId`（PLT-3379） | 名前だけで作った予約を後から法人 bill-to にできない |
-| manual invoice の typed bill-to create | direct cancellation fee の synthetic ID を安全に廃止できない |
+| ~~manual invoice の typed bill-to create~~ | PLT-3409 / #1012 で解消。今回の項目 1 で利用する |
 | invoice 発行から AR/AP item への transactional / retryable projection | balance API が invoice を網羅する保証がない |
 | balance の ID 単位 grouping | 同一 client が名称変更で複数行になる |
 | settlement 日を考慮した historical as-of | 過去月末残高が後日の入金で変わる |
@@ -470,15 +473,17 @@ CourseBoard は状態を読み取る形である。
 9. 法人の請求担当者、請求住所、適格請求書情報、部門・コストセンターをどこから取得するか。
 10. 月次締め後の入金をどの日付で過去残高と当月残高へ反映するか。
 
-## 8. 実装を始める gate
+## 8. 項目 1 の merge gate
 
-今回は設計だけとし、次を満たすまで実装しない。
+PLT-3409 / #1012 が main に merge されたため、CourseBoard の項目 1 は実装できる。PR は作成してよいが、
+次を満たすまで merge しない。
 
-- tachyonfield #1001 を含む main deployment が成功し、対象 runtime に contract が到達する。
-- admin reservation create/update の `billTo` と権限組合せを許可 tenant で read/write 検証できる。
-- surface 方針と現場確認事項のうち、実装 shape を変える項目が決まる。
-- 必須 Field follow-up の issue と導入順が決まる。
-- legacy invoice / AR/AP の再分類を今回 scope に含めないことを維持する。
+- #1012 を含む Field production deployment が成功し、`POST /v1/invoices` の `billTo` contract が対象
+  runtime に到達したことを確認する。
+- CourseBoard の 2 producer がともに request body に `billTo` を載せ、synthetic `clientId` を送らない
+  regression test が green である。
+- merge は CPO が行う。
+- legacy invoice / AR/AP の再分類を今回 scope に含めない。
 
 ## 9. 将来の検証計画
 
@@ -502,7 +507,8 @@ CourseBoard は状態を読み取る形である。
 - 既存 invoice の自動再分類、legacy raw value の更新、resolution の上書き
 - 名称やメールによる法人の自動名寄せ
 - tachyonfield #1001 未 deploy runtime に対する先行実装
-- 今回の docs PR での API、UI、migration、tenant data の変更
+- 項目 2（所属会社 UI）、項目 3（予約 `billTo`）、項目 4（月次精算の売掛残高）の API / UI 変更
+- migration、tenant data の変更
 
 ## 参照した実装
 

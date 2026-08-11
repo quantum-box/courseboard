@@ -90,10 +90,17 @@ export const cancellationFees: DeepPartial<typeof source> = {
     },
     client: {
       title: 'Billed to',
-      description: 'Without a client ID, a unique reference ID is issued instead.',
+      description: 'Choose a person or company registered in Field as the invoice recipient.',
+      kind: 'Recipient type',
+      customer: 'Person',
+      company: 'Company',
       name: 'Client name',
       id: 'Client ID',
-      idPlaceholder: 'Only if one already exists',
+      idPlaceholder: 'cl_...',
+      customerId: 'Customer ID',
+      customerIdPlaceholder: 'cus_...',
+      affiliationId: 'Affiliation ID',
+      affiliationIdPlaceholder: 'ccaf_...',
       due: 'Due date',
     },
     delivery: {
@@ -120,6 +127,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
       consent: 'Confirm the recipient’s consent before sending SMS.',
       amount: 'Enter a cancellation fee of 1 or more.',
       phone: 'Enter the SMS number as a Japanese mobile number or in E.164 form.',
+      billTo: 'Enter a customer ID, or both a company client ID and affiliation ID.',
     },
     message: {
       intro: 'This is an invoice for a cancellation fee.',
