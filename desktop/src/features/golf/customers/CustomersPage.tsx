@@ -1,5 +1,5 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
-import { ArrowLeft, UserPlus } from 'lucide-react'
+import { UserPlus } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -9,9 +9,9 @@ import {
   FormGrid,
   LoadingState,
   Notice,
-  PageHeader,
   Panel,
 } from '../../../components/Page'
+import { Sheet } from '../../../components/Sheet'
 import { navigate, navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { MembershipBadge } from './MembershipBadge'
@@ -33,11 +33,12 @@ export function CustomersPage() {
   const { t } = useTranslation(['customers', 'common'])
   const [term, setTerm] = useState('')
   const search = useCustomerSearch(term)
+  const [creating, setCreating] = useState(false)
 
   return (
     <div className="page-stack">
       <div className="page-toolbar">
-        <Button type="button" variant="primary" onClick={() => navigate('golf/customers/new')}>
+        <Button type="button" variant="primary" onClick={() => setCreating(true)}>
           <UserPlus /> {t('customers:create.open')}
         </Button>
       </div>
@@ -87,9 +88,20 @@ export function CustomersPage() {
           ))}
         </ul>
       </Panel>
+
+      <NewCustomerSheet
+        open={creating}
+        onOpenChange={setCreating}
+        onCreated={customer => {
+          setCreating(false)
+          navigate(`golf/customers/${customer.id}`)
+        }}
+      />
     </div>
   )
 }
+
+const EMPTY_DRAFT = { name: '', nameKana: '', phone: '', email: '' }
 
 /**
  * Registering someone the desk could not find.
@@ -98,14 +110,27 @@ export function CustomersPage() {
  * demanding an email here is exactly what kept visitors out of the ledger
  * before PLT-3358.
  *
- * Its own route, not a panel bolted onto the search screen: the desk fills
- * this in while on the phone, and a route survives a refresh or a bookmark
- * the way a piece of local state does not.
+ * A sheet rather than a route: this is a quick aside while the desk is on the
+ * phone, not a destination — the search screen (and whatever the desk typed
+ * into it) should still be there underneath when it closes.
  */
-export function NewCustomerPage() {
+function NewCustomerSheet({
+  open,
+  onOpenChange,
+  onCreated,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCreated: (customer: Customer) => void
+}) {
   const { t } = useTranslation(['customers', 'common'])
-  const [draft, setDraft] = useState({ name: '', nameKana: '', phone: '', email: '' })
+  const [draft, setDraft] = useState(EMPTY_DRAFT)
   const [saving, setSaving] = useState(false)
+
+  function close(next: boolean) {
+    if (!next) setDraft(EMPTY_DRAFT)
+    onOpenChange(next)
+  }
 
   const save = async () => {
     if (!draft.name.trim()) return
@@ -122,7 +147,8 @@ export function NewCustomerPage() {
         }),
       })
       showToast({ tone: 'success', message: t('customers:create.saved') })
-      navigate(`golf/customers/${created.id}`)
+      setDraft(EMPTY_DRAFT)
+      onCreated(created)
     } catch (error) {
       showToast({
         tone: 'danger',
@@ -135,65 +161,53 @@ export function NewCustomerPage() {
   }
 
   return (
-    <div className="page-stack page-narrow">
-      <PageHeader
-        title={t('customers:create.title')}
-        description={t('customers:create.description')}
-        actions={(
-          <Button type="button" onClick={() => navigate('golf/customers')}>
-            <ArrowLeft /> {t('customers:detail.back')}
-          </Button>
-        )}
-      />
+    <Sheet
+      open={open}
+      onOpenChange={close}
+      title={t('customers:create.title')}
+      description={t('customers:create.description')}
+    >
+      <FormGrid columns={2}>
+        <Field label={t('customers:field.name')}>
+          <Input
+            value={draft.name}
+            placeholder={t('customers:create.namePlaceholder')}
+            onChange={event => setDraft({ ...draft, name: event.target.value })}
+          />
+        </Field>
+        <Field label={t('customers:field.nameKana')} requirement="optional">
+          <Input
+            value={draft.nameKana}
+            onChange={event => setDraft({ ...draft, nameKana: event.target.value })}
+          />
+        </Field>
+        <Field label={t('customers:field.phone')} requirement="optional">
+          <Input
+            value={draft.phone}
+            onChange={event => setDraft({ ...draft, phone: event.target.value })}
+          />
+        </Field>
+        <Field label={t('customers:field.email')} requirement="optional">
+          <Input
+            value={draft.email}
+            onChange={event => setDraft({ ...draft, email: event.target.value })}
+          />
+        </Field>
+      </FormGrid>
 
-      <Panel>
-        <FormGrid columns={2}>
-          <Field label={t('customers:field.name')}>
-            <Input
-              value={draft.name}
-              placeholder={t('customers:create.namePlaceholder')}
-              onChange={event => setDraft({ ...draft, name: event.target.value })}
-            />
-          </Field>
-          <Field label={t('customers:field.nameKana')} requirement="optional">
-            <Input
-              value={draft.nameKana}
-              onChange={event => setDraft({ ...draft, nameKana: event.target.value })}
-            />
-          </Field>
-          <Field label={t('customers:field.phone')} requirement="optional">
-            <Input
-              value={draft.phone}
-              onChange={event => setDraft({ ...draft, phone: event.target.value })}
-            />
-          </Field>
-          <Field label={t('customers:field.email')} requirement="optional">
-            <Input
-              value={draft.email}
-              onChange={event => setDraft({ ...draft, email: event.target.value })}
-            />
-          </Field>
-        </FormGrid>
-
-        <div className="customer-ledger-actions">
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => navigate('golf/customers')}
-            disabled={saving}
-          >
-            {t('common:action.cancel')}
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            onClick={save}
-            disabled={saving || !draft.name.trim()}
-          >
-            {saving ? t('common:action.saving') : t('common:action.save')}
-          </Button>
-        </div>
-      </Panel>
-    </div>
+      <div className="customer-ledger-actions">
+        <Button type="button" variant="ghost" onClick={() => close(false)} disabled={saving}>
+          {t('common:action.cancel')}
+        </Button>
+        <Button
+          type="button"
+          variant="primary"
+          onClick={save}
+          disabled={saving || !draft.name.trim()}
+        >
+          {saving ? t('common:action.saving') : t('common:action.save')}
+        </Button>
+      </div>
+    </Sheet>
   )
 }
