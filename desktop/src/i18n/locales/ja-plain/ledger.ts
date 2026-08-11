@@ -34,6 +34,7 @@ export const ledger = {
     openingHours: 'あいている時間から',
     bookingsOnly: 'よやくだけ',
     derivedNotice: 'この列は うけつけ枠が ないので、あきの数が わかりません。',
+    openCourseSetup: 'このコースの うけつけ枠を ひらく',
   },
   head: {
     time: '時こく',

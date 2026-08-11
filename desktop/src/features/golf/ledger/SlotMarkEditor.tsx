@@ -22,6 +22,7 @@ export function SlotMarkEditor({
   saving,
   canBook,
   reservationBlockMessage,
+  onOpenBlockFix,
   onLabelChange,
   onClose,
   onSpecial,
@@ -35,6 +36,8 @@ export function SlotMarkEditor({
   /** A booking goes on one tee time, so a range selection cannot offer it. */
   canBook: boolean
   reservationBlockMessage: string | null
+  /** Opens the screen that fixes the block, for the reasons that have one. */
+  onOpenBlockFix: (() => void) | null
   onLabelChange: (value: string) => void
   onClose: () => void
   onSpecial: () => void
@@ -61,6 +64,14 @@ export function SlotMarkEditor({
             {reservationBlockMessage ? (
               <Notice tone="warning" title={t('ledger:newReservation.blockedTitle')}>
                 {reservationBlockMessage}
+                {onOpenBlockFix ? (
+                  <>
+                    {' '}
+                    <button type="button" className="link-button" onClick={onOpenBlockFix}>
+                      {t('ledger:source.openCourseSetup')}
+                    </button>
+                  </>
+                ) : null}
               </Notice>
             ) : canBook ? (
               <Button type="button" variant="primary" disabled={saving} onClick={onBook}>

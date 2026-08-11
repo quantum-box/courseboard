@@ -1,3 +1,4 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from '@tachyon-sdk/native-ui'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Fragment, type MouseEvent as ReactMouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -46,6 +47,7 @@ export function LedgerBoard({
   onOpenContextMenu,
   onSelectReservation,
   onMoveColumn,
+  onOpenCourseSetup,
 }: {
   columns: LedgerColumn[]
   /** Minutes past midnight in the course's clock, or null on another day. */
@@ -57,6 +59,7 @@ export function LedgerBoard({
   onOpenContextMenu: (target: SlotContextTarget) => void
   onSelectReservation: (id: string) => void
   onMoveColumn: (golfCourseId: string, delta: -1 | 1) => void
+  onOpenCourseSetup: (golfCourseId: string) => void
 }) {
   return (
     <div className="ledger-board">
@@ -76,6 +79,7 @@ export function LedgerBoard({
           onOpenContextMenu={onOpenContextMenu}
           onSelectReservation={onSelectReservation}
           onMoveColumn={onMoveColumn}
+          onOpenCourseSetup={onOpenCourseSetup}
         />
       ))}
     </div>
@@ -94,6 +98,7 @@ function LedgerColumnTable({
   onOpenContextMenu,
   onSelectReservation,
   onMoveColumn,
+  onOpenCourseSetup,
 }: {
   column: LedgerColumn
   nowMinutes: number | null
@@ -106,6 +111,7 @@ function LedgerColumnTable({
   onOpenContextMenu: (target: SlotContextTarget) => void
   onSelectReservation: (id: string) => void
   onMoveColumn: (golfCourseId: string, delta: -1 | 1) => void
+  onOpenCourseSetup: (golfCourseId: string) => void
 }) {
   const { t } = useTranslation(['ledger'])
   const seatColumns = seatColumnCount(column)
@@ -120,24 +126,60 @@ function LedgerColumnTable({
     <section className="ledger-column" aria-label={column.courseName}>
       <header className="ledger-column-head">
         <div className="ledger-column-title">
-          <h2>{column.courseName}</h2>
+          {/* The heading is the obvious thing to reach for when the desk wants
+              this course's setup, so it carries the link rather than making
+              them find the same course again in the course list. */}
+          <h2>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="ledger-column-name"
+                  onClick={() => onOpenCourseSetup(column.golfCourseId)}
+                >
+                  {column.courseName}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {t('ledger:source.openCourseSetup')}
+              </TooltipContent>
+            </Tooltip>
+          </h2>
+          {/* Two unlabelled chevrons on a header say nothing about what they
+              move. The name is on the tooltip rather than "left"/"right" alone,
+              so a board of four columns still reads which one is about to go.
+              A disabled arrow gets no tooltip — it also does nothing. */}
           <div className="ledger-column-move">
-            <button
-              type="button"
-              aria-label={t('ledger:order.moveLeft', { name: column.courseName })}
-              disabled={!canMoveLeft}
-              onClick={() => onMoveColumn(column.golfCourseId, -1)}
-            >
-              <ChevronLeft aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              aria-label={t('ledger:order.moveRight', { name: column.courseName })}
-              disabled={!canMoveRight}
-              onClick={() => onMoveColumn(column.golfCourseId, 1)}
-            >
-              <ChevronRight aria-hidden="true" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t('ledger:order.moveLeft', { name: column.courseName })}
+                  disabled={!canMoveLeft}
+                  onClick={() => onMoveColumn(column.golfCourseId, -1)}
+                >
+                  <ChevronLeft aria-hidden="true" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {t('ledger:order.moveLeft', { name: column.courseName })}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t('ledger:order.moveRight', { name: column.courseName })}
+                  disabled={!canMoveRight}
+                  onClick={() => onMoveColumn(column.golfCourseId, 1)}
+                >
+                  <ChevronRight aria-hidden="true" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {t('ledger:order.moveRight', { name: column.courseName })}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
         <p className="ledger-column-totals">{formatColumnTotals(column)}</p>
@@ -150,8 +192,20 @@ function LedgerColumnTable({
             <span>{t('ledger:column.open', { n: String(column.openSlotCount) })}</span>
           ) : null}
         </p>
+        {/* The notice used to state the problem and stop there, leaving the desk
+            to work out that the answer lives on the course's own screen. It is
+            two clicks from here, so the notice carries the way there. */}
         {derived ? (
-          <p className="ledger-column-derived">{t('ledger:source.derivedNotice')}</p>
+          <p className="ledger-column-derived">
+            {t('ledger:source.derivedNotice')}{' '}
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => onOpenCourseSetup(column.golfCourseId)}
+            >
+              {t('ledger:source.openCourseSetup')}
+            </button>
+          </p>
         ) : null}
       </header>
 

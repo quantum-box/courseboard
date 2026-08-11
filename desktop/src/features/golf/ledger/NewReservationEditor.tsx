@@ -208,7 +208,10 @@ export function NewReservationEditor({
     >
       <div className="ledger-party-editor">
         <FormGrid columns={2}>
-          <Field label={t('ledger:newReservation.customerName')}>
+          {/* Both are what `canSave` already insists on. Marked as such, because
+              a field labelled 任意 that greys out the save button is the screen
+              disagreeing with itself. */}
+          <Field label={t('ledger:newReservation.customerName')} required>
             <CustomerPicker
               name={customerName}
               customerId={customerId}
@@ -217,7 +220,7 @@ export function NewReservationEditor({
               onSelect={customer => setCustomerId(customer?.id ?? null)}
             />
           </Field>
-          <Field label={t('ledger:newReservation.quantity')}>
+          <Field label={t('ledger:newReservation.quantity')} required>
             <Input
               type="number"
               min={1}

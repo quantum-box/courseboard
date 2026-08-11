@@ -34,6 +34,7 @@ export const ledger = {
     openingHours: 'From opening hours',
     bookingsOnly: 'Bookings only',
     derivedNotice: 'No slots have been generated for this course, so how many groups are left is unknown.',
+    openCourseSetup: 'Open this course’s booking slots',
   },
   head: {
     time: 'Time',

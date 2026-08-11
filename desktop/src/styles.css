@@ -1103,16 +1103,31 @@ button,
   align-self: start;
 }
 
+/* "任意" is running text continuing the label, so it sits on the label's
+   baseline. Centred, at two thirds the label's size and six pixels off its
+   shoulder, it read as a superscript hung above and to the right of the word it
+   belongs to. The badge is a pill rather than running text, so it keeps
+   centring, and keeps the wider gap that a pill needs. */
 .field-label {
   display: flex;
   min-height: 18px;
-  align-items: center;
-  gap: 6px;
+  align-items: baseline;
+  gap: 4px;
   font-size: 12px;
   font-weight: 500;
 }
 
-.field-label .optional,
+.field-label > *:not(.optional) {
+  align-self: center;
+  margin-left: 2px;
+}
+
+.field-label .optional {
+  color: hsl(var(--nui-subtle-foreground));
+  font-size: 11px;
+  font-weight: 400;
+}
+
 .field-hint {
   color: hsl(var(--nui-subtle-foreground));
   font-size: 10px;
@@ -4599,34 +4614,14 @@ button,
 .ledger-mark-reservation {
   display: grid;
   gap: 8px;
-  font-size: 16px;
-  line-height: 1.5;
 }
 
-.ledger-mark-editor-sheet,
-.ledger-reservation-sheet,
-.ledger-mark-editor-sheet .text-sm,
-.ledger-reservation-sheet .text-sm {
-  font-size: 16px;
-  line-height: 1.5;
-}
-
-/* Dialog's close glyph is small, but the operation still needs a full target. */
+/* Dialog's close glyph is small, but the operation still needs a full target.
+   It sits in the corner, so a large target here costs the form no height. */
 .ledger-mark-editor-sheet > button,
 .ledger-reservation-sheet > button {
   min-width: 44px;
   min-height: 44px;
-}
-
-.ledger-mark-sheet .field-label,
-.ledger-mark-sheet .field-label .optional,
-.ledger-mark-sheet .field-hint,
-.ledger-mark-sheet input,
-.ledger-mark-actions button,
-.ledger-mark-reservation button {
-  min-height: 44px;
-  font-size: 16px;
-  line-height: 1.5;
 }
 
 /* The board scrolls sideways as a whole so course columns stay side by side,
@@ -4677,6 +4672,23 @@ button,
   font-size: 14px;
   font-weight: 700;
   line-height: 18px;
+}
+
+/* Reads as the heading it is; the underline arrives on hover and focus so a
+   board of four columns is not four blue links across the top. */
+.ledger-column-name {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-column-name:hover,
+.ledger-column-name:focus-visible {
+  text-decoration: underline;
 }
 
 .ledger-column-move {
@@ -4886,10 +4898,15 @@ button,
   font-size: 11px;
 }
 
+/* No min-height: the row is as tall as the time beside it and no taller. A
+   44px touch target here pushed every empty row past the time column's own
+   height, and a day's worth of them turned a board that showed the morning at a
+   glance into one the desk has to scroll. The whole cell is the target, which
+   is the full width of the column — narrow only in the one direction that costs
+   nothing to hit. */
 .ledger-empty-button {
   display: block;
   width: 100%;
-  min-height: 44px;
   border: none;
   padding: 5px 8px;
   background: none;
@@ -4899,10 +4916,10 @@ button,
   cursor: pointer;
 }
 
+/* Reads at the same size as the remaining count it stands in for, so a column
+   of blocked rows lines up with a column of open ones. */
 .ledger-reservation-block-label {
   display: block;
-  font-size: 16px;
-  line-height: 1.5;
 }
 
 .ledger-empty-button:hover,
@@ -5504,25 +5521,10 @@ button,
   gap: 8px;
 }
 
-.ledger-reservation-sheet .ledger-party-editor {
-  font-size: 16px;
-  line-height: 1.5;
-}
-
-.ledger-reservation-sheet .field-label,
-.ledger-reservation-sheet .field-label .optional,
-.ledger-reservation-sheet .field-hint,
-.ledger-reservation-sheet input,
-.ledger-reservation-sheet select,
-.ledger-reservation-sheet .ledger-party-actions button {
-  min-height: 44px;
-  font-size: 16px;
-  line-height: 1.5;
-}
-
-.ledger-reservation-sheet .native-select {
-  height: 44px;
-}
+/* The sheet's fields are the app's fields. They were pushed to a 44px touch
+   target with 16px text, which on a four-player booking is a form the desk has
+   to scroll through while someone is on the phone — and it read as a different
+   product from every other screen. */
 
 @media (max-width: 720px) {
   .ledger-party-player {

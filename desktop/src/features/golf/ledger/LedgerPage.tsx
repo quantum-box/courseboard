@@ -40,6 +40,8 @@ import {
 import { summarizeLedger, teeTimesBetween } from './ledgerLayout'
 import type { PartyDetails, SlotMarkKind, TeeLedgerResponse } from './models'
 import {
+  blockFixRoute,
+  courseSetupRoute,
   reservationBlockReason,
   reservationTarget,
   selectedReservationTarget,
@@ -308,6 +310,9 @@ export function LedgerPage() {
   }
   const selectedBookingBlockMessage = selectedBookingBlock
     ? bookingBlockMessages[selectedBookingBlock]
+    : null
+  const selectedBookingBlockFix = selectedBookingBlock && selectedBookingTarget
+    ? blockFixRoute(selectedBookingBlock, selectedBookingTarget.column.golfCourseId)
     : null
   const bookableSelection = selectedBookingTarget && !selectedBookingBlock
     ? {
@@ -582,6 +587,7 @@ export function LedgerPage() {
             onOpenContextMenu={setContextTarget}
             onSelectReservation={setEditingReservationId}
             onMoveColumn={savingOrder ? () => {} : moveColumn}
+            onOpenCourseSetup={golfCourseId => navigate(courseSetupRoute(golfCourseId))}
           />
         )}
       </div>
@@ -609,6 +615,9 @@ export function LedgerPage() {
         saving={savingMarks}
         canBook={bookableSelection !== null}
         reservationBlockMessage={selectedBookingBlockMessage}
+        onOpenBlockFix={
+          selectedBookingBlockFix ? () => navigate(selectedBookingBlockFix) : null
+        }
         onLabelChange={setMarkLabel}
         onClose={() => applyMark('closed')}
         onSpecial={() => applyMark('special_rate')}
