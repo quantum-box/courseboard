@@ -10,6 +10,10 @@
   - [ADR-0005: ゴルフドメイン知識はCourseBoardが所有する](src/architecture/decisions/ADR-0005-golf-domain-ownership.md)
   - [ADR-0006: 日次サマリは集約需要として扱いダミー予約を作らない](src/architecture/decisions/ADR-0006-aggregate-caddie-demand-without-dummy-reservations.md)
 
+# Business
+
+- [キャンセル料徴収の原価と課金モデル](src/business/cancellation-fee-pricing.md)
+
 # Tasks
 
 - [In Progress]()
