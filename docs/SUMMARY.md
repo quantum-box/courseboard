@@ -15,6 +15,8 @@
 - [In Progress]()
   - [PLT-3339 日次サマリを必要キャディ数と割当に接続する](src/tasks/in-progress/plt-3339-daily-summary-caddie-demand/task.md)
     - [設計](src/tasks/in-progress/plt-3339-daily-summary-caddie-demand/design.md)
+  - [CourseBoard の請求先と法人売掛を連携する](src/tasks/in-progress/plt-3406-bill-to/task.md)
+    - [設計](src/tasks/in-progress/plt-3406-bill-to/design.md)
   - [/v1/me proxyとextension連動テナント選択](src/tasks/in-progress/v1-me-proxy-extension-filter/task.md)
 
 - [Completed]()
