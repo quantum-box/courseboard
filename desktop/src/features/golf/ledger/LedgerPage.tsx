@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useTenantTimezone } from '../../../context/TenantTimezoneProvider'
 
 import { courseboardApiJson, nowIsoMinute, today } from '../../../api'
 import {
@@ -39,11 +40,21 @@ import {
 import { summarizeLedger, teeTimesBetween } from './ledgerLayout'
 import type { PartyDetails, SlotMarkKind, TeeLedgerResponse } from './models'
 import {
+  blockFixRoute,
+  courseSetupRoute,
+  reservationBlockReason,
+  reservationTarget,
+  selectedReservationTarget,
+  type ReservationBlockReason,
+} from './newReservation'
+import {
   NewReservationEditor,
+  type CreatedBooking,
   type BookablePlan,
   type NewReservationTarget,
 } from './NewReservationEditor'
 import { CancelReservationDialog } from './CancelReservationDialog'
+import { RegisterNamesDialog } from './RegisterNamesDialog'
 import { PartyEditor } from './PartyEditor'
 import { SlotContextMenu, type SlotContextTarget } from './SlotContextMenu'
 import { SlotMarkEditor } from './SlotMarkEditor'
@@ -54,8 +65,8 @@ const NOW_TICK_MS = 30_000
 
 type ListResponse<T> = { items: T[] }
 
-function todayIsoDate() {
-  return today()
+function todayIsoDate(timezone: string) {
+  return today(timezone)
 }
 
 function shiftDate(isoDate: string, deltaDays: number) {
@@ -64,12 +75,13 @@ function shiftDate(isoDate: string, deltaDays: number) {
   return next.toISOString().slice(0, 10)
 }
 
-function useCurrentMinute() {
-  const [now, setNow] = useState(nowIsoMinute)
+function useCurrentMinute(timezone: string) {
+  const [now, setNow] = useState(() => nowIsoMinute(timezone))
   useEffect(() => {
-    const timer = setInterval(() => setNow(nowIsoMinute()), NOW_TICK_MS)
+    setNow(nowIsoMinute(timezone))
+    const timer = setInterval(() => setNow(nowIsoMinute(timezone)), NOW_TICK_MS)
     return () => clearInterval(timer)
-  }, [])
+  }, [timezone])
   return now
 }
 
@@ -84,11 +96,13 @@ function DateControls({
   onShift,
   onSet,
   labels,
+  todayDate,
 }: {
   date: string
   onShift: (delta: number) => void
   onSet: (date: string) => void
   labels: { prev: string; next: string; date: string; today: string }
+  todayDate: string
 }) {
   return (
     <div className="ledger-date-controls">
@@ -106,7 +120,7 @@ function DateControls({
         <Input
           type="date"
           value={date}
-          onChange={event => onSet(event.target.value || todayIsoDate())}
+          onChange={event => onSet(event.target.value || todayDate)}
         />
       </label>
       <Button
@@ -118,7 +132,7 @@ function DateControls({
       >
         <ChevronRight />
       </Button>
-      <Button type="button" variant="ghost" size="sm" onClick={() => onSet(todayIsoDate())}>
+      <Button type="button" variant="ghost" size="sm" onClick={() => onSet(todayDate)}>
         <CalendarRange />
         {labels.today}
       </Button>
@@ -128,7 +142,9 @@ function DateControls({
 
 export function LedgerPage() {
   const { t } = useTranslation(['ledger', 'timeline', 'common'])
-  const [date, setDate] = useState(todayIsoDate)
+  const timezone = useTenantTimezone()
+  const tenantToday = todayIsoDate(timezone)
+  const [date, setDate] = useState(() => tenantToday)
   /** Empty means every course. Remembered: the desk works the same columns daily. */
   const [selectedCourseIds, setSelectedCourseIds] = useState(readStoredCourseIds)
   const [selection, setSelection] = useState<SlotSelection | null>(null)
@@ -137,13 +153,20 @@ export function LedgerPage() {
   const [savingOrder, setSavingOrder] = useState(false)
   const [editingReservationId, setEditingReservationId] = useState<string | null>(null)
   const [bookingTarget, setBookingTarget] = useState<NewReservationTarget | null>(null)
+  /**
+   * A saved booking whose names are not in the customer ledger yet.
+   *
+   * Kept on the page rather than in the booking sheet so the sheet can close
+   * first: the booking is finished, and the question that follows is optional.
+   */
+  const [ledgerPrompt, setLedgerPrompt] = useState<CreatedBooking | null>(null)
   /** Hides the page chrome so the board itself fills the window. */
   const [boardOnly, setBoardOnly] = useState(false)
   const [contextTarget, setContextTarget] = useState<SlotContextTarget | null>(null)
   const [cancellingReservationId, setCancellingReservationId] = useState<string | null>(null)
   /** Parties saved this session, so the board updates without a full reload. */
   const [localParties, setLocalParties] = useState<Record<string, PartyDetails>>({})
-  const currentMinute = useCurrentMinute()
+  const currentMinute = useCurrentMinute(timezone)
 
   const courseIds = courseIdsParam(selectedCourseIds)
   const ledger = useResource(() => {
@@ -274,24 +297,31 @@ export function LedgerPage() {
   }))
   const playerTagOptions = playerTagOptionsFromConfig(extensionResource.data?.configJson)
 
-  // Booking is offered on a single tee time that is not already closed or full:
-  // a range selection is for marking, and a booked-out row has nothing to sell.
-  const bookableSelection = (() => {
-    if (!selection || selection.teeTimes.length !== 1) return null
-    const teeTime = selection.teeTimes[0]!
-    const column = columns.find(entry => entry.golfCourseId === selection.golfCourseId)
-    const slot = column?.slots.find(entry => entry.teeTime === teeTime)
-    // Same gate as the open row and the context menu. The server checks again
-    // because this snapshot can age, but the desk should not be invited to
-    // enter a booking that this board already knows it cannot accept.
-    if (!column || !slot || !slot.isSellable) return null
-    return {
-      golfCourseId: column.golfCourseId,
-      courseName: column.courseName,
-      teeTime,
-      resourceId: column.resourceId ?? null,
-    }
-  })()
+  const selectedBookingTarget = selectedReservationTarget(columns, selection)
+  const selectedBookingBlock = selectedBookingTarget
+    ? reservationBlockReason(selectedBookingTarget)
+    : null
+  const bookingBlockMessages: Record<ReservationBlockReason, string> = {
+    full: t('ledger:newReservation.block.full'),
+    stopped: t('ledger:newReservation.block.stopped'),
+    missingInventory: t('ledger:newReservation.block.missingInventory'),
+    missingResource: t('ledger:newReservation.block.missingResource'),
+    notSellable: t('ledger:newReservation.block.notSellable'),
+  }
+  const selectedBookingBlockMessage = selectedBookingBlock
+    ? bookingBlockMessages[selectedBookingBlock]
+    : null
+  const selectedBookingBlockFix = selectedBookingBlock && selectedBookingTarget
+    ? blockFixRoute(selectedBookingBlock, selectedBookingTarget.column.golfCourseId)
+    : null
+  const bookableSelection = selectedBookingTarget && !selectedBookingBlock
+    ? {
+        golfCourseId: selectedBookingTarget.column.golfCourseId,
+        courseName: selectedBookingTarget.column.courseName,
+        teeTime: selectedBookingTarget.slot.teeTime,
+        resourceId: selectedBookingTarget.column.resourceId ?? null,
+      }
+    : null
 
   const toggleSlot = (golfCourseId: string, teeTime: string, extend: boolean) => {
     setSelection(current => {
@@ -316,14 +346,20 @@ export function LedgerPage() {
 
   /** Straight to the form: a caller is on the phone while this runs. */
   const bookSlot = (golfCourseId: string, teeTime: string) => {
-    const column = columns.find(entry => entry.golfCourseId === golfCourseId)
-    if (!column) return
+    const target = reservationTarget(columns, golfCourseId, teeTime)
+    if (!target) return
+    if (reservationBlockReason(target)) {
+      // The row may have changed between drawing the board and this click.
+      // Keep the operator on the row and show the current reason in the sheet.
+      setSelection({ golfCourseId, teeTimes: [teeTime] })
+      return
+    }
     setSelection(null)
     setBookingTarget({
       golfCourseId,
-      courseName: column.courseName,
+      courseName: target.column.courseName,
       teeTime,
-      resourceId: column.resourceId ?? null,
+      resourceId: target.column.resourceId ?? null,
     })
   }
 
@@ -423,6 +459,7 @@ export function LedgerPage() {
               with the rest of the chrome out of the way. */}
           <DateControls
             date={date}
+            todayDate={tenantToday}
             onShift={delta => setDate(value => shiftDate(value, delta))}
             onSet={setDate}
             labels={{
@@ -479,6 +516,7 @@ export function LedgerPage() {
         <section className="ledger-toolbar" aria-label={t('timeline:toolbar.label')}>
           <DateControls
             date={date}
+            todayDate={tenantToday}
             onShift={delta => setDate(value => shiftDate(value, delta))}
             onSet={setDate}
             labels={{
@@ -549,6 +587,7 @@ export function LedgerPage() {
             onOpenContextMenu={setContextTarget}
             onSelectReservation={setEditingReservationId}
             onMoveColumn={savingOrder ? () => {} : moveColumn}
+            onOpenCourseSetup={golfCourseId => navigate(courseSetupRoute(golfCourseId))}
           />
         )}
       </div>
@@ -575,6 +614,10 @@ export function LedgerPage() {
         label={markLabel}
         saving={savingMarks}
         canBook={bookableSelection !== null}
+        reservationBlockMessage={selectedBookingBlockMessage}
+        onOpenBlockFix={
+          selectedBookingBlockFix ? () => navigate(selectedBookingBlockFix) : null
+        }
         onLabelChange={setMarkLabel}
         onClose={() => applyMark('closed')}
         onSpecial={() => applyMark('special_rate')}
@@ -593,8 +636,23 @@ export function LedgerPage() {
         plansLoading={productsResource.loading}
         playerTagOptions={playerTagOptions}
         onClose={() => setBookingTarget(null)}
-        onCreated={() => ledger.refresh()}
+        onCreated={booking => {
+          void ledger.refresh()
+          // Only after the sheet is gone and the booking is drawn on the board.
+          // Asked over a still-open form, this reads as a step the booking is
+          // waiting on rather than an optional follow-up.
+          if (booking && booking.names.length > 0) setLedgerPrompt(booking)
+        }}
       />
+
+      {ledgerPrompt ? (
+        <RegisterNamesDialog
+          reservationId={ledgerPrompt.reservationId}
+          names={ledgerPrompt.names}
+          players={ledgerPrompt.players}
+          onDone={() => setLedgerPrompt(null)}
+        />
+      ) : null}
 
       <PartyEditor
         reservation={editingReservation}

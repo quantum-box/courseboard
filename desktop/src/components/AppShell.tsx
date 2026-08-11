@@ -32,6 +32,7 @@ import {
 } from '@tachyon-sdk/native-ui'
 import {
   BarChart3,
+  BookUser,
   Building2,
   CalendarCheck,
   CalendarDays,
@@ -43,7 +44,6 @@ import {
   CircleDollarSign,
   CircleHelp,
   ClipboardCheck,
-  Clock,
   CreditCard,
   FileUp,
   FolderTree,
@@ -93,6 +93,7 @@ import { WorkspaceHelpPanel } from './WorkspaceHelp'
 export type NavigationRoute =
   | 'golf'
   | 'golf/ledger'
+  | 'golf/customers'
   | 'golf/timeline'
   | 'golf/products'
   | 'golf/reservation-import'
@@ -137,6 +138,9 @@ export const navigationSections: NavigationSection[] = [
       // of the same day, so the ledger comes first.
       { route: 'golf/ledger', icon: Table2 },
       { route: 'golf/timeline', icon: CalendarRange },
+      // The ledger of people, beside the ledger of tee times. Members are read
+      // off it, and a visitor's second visit only registers because it exists.
+      { route: 'golf/customers', icon: BookUser },
       { route: 'golf/products', icon: CalendarCheck },
       // The club's booking system is the source of the month's bookings; this
       // is where they come in, so it sits with the board they land on.
@@ -150,9 +154,10 @@ export const navigationSections: NavigationSection[] = [
     id: 'caddie',
     showLabel: true,
     items: [
+      // Attendance moved inside the roster screen as a tab; the daily punch
+      // board is a view of the same people, not a separate destination.
       { route: 'golf/caddies', icon: Users },
       { route: 'golf/caddies/dispatch', icon: ClipboardCheck },
-      { route: 'golf/caddies/attendance', icon: Clock },
       { route: 'golf/caddies/shifts', icon: CalendarDays },
       { route: 'golf/caddies/payroll', icon: CircleDollarSign },
     ],
@@ -275,7 +280,10 @@ function focusableWithin(root: HTMLElement) {
     .filter(element => element.getClientRects().length > 0)
 }
 
-const CADDIE_SUBVIEWS = new Set(['dispatch', 'attendance', 'shifts', 'payroll'])
+// `attendance` is intentionally absent: it renders as a tab inside the
+// roster screen, so its route counts as the roster route for nav/title
+// purposes (see CADDIE_SUBVIEWS usage below).
+const CADDIE_SUBVIEWS = new Set(['dispatch', 'shifts', 'payroll'])
 
 function caddieRouteSegment(route: string) {
   if (!route.startsWith('golf/caddies/')) return null
@@ -298,6 +306,9 @@ export function routeTitle(route: string) {
   if (route === 'settings/advanced') return i18next.t('settings:advanced.title')
   if (route === 'settings') return navLabel('settings')
   if (isCaddieRosterRoute(route)) return navLabel('golf/caddies')
+  // A customer's own page carries the ledger's name in the title bar; the
+  // person's name is already the first thing on the page itself.
+  if (route.startsWith('golf/customers/')) return navLabel('golf/customers')
   const match = settingsNavigation.find(item => isActive(route, item.route))
     ?? allNavigation.find(item => isActive(route, item.route))
   return match ? navLabel(match.route) : i18next.t('common:app.name')

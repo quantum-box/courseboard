@@ -18,6 +18,7 @@ mod course_schedule;
 mod create_caddie;
 mod create_caddie_assignment;
 mod create_course;
+mod create_customer;
 mod create_reservation;
 mod delete_caddie_availability;
 mod delete_course;
@@ -27,6 +28,7 @@ mod generate_caddie_shifts;
 mod get_attendance_snapshot;
 mod get_caddie_supply;
 mod get_course_caddie_supply;
+mod get_customer;
 mod get_extension_status;
 mod get_monthly_settlement;
 mod get_payroll_summary;
@@ -52,9 +54,11 @@ mod list_product_slots;
 mod list_reservation_products;
 mod list_reservation_summaries;
 mod list_resources;
+mod membership;
 mod quote_golf_fee;
 mod replace_caddie_memberships;
 mod replace_product_slots;
+mod search_customers;
 mod seed_demo_board;
 mod shift_rules;
 mod simulate_green_fee_range;
@@ -86,6 +90,7 @@ pub use course_schedule::{
 pub use create_caddie::CreateCaddieUseCase;
 pub use create_caddie_assignment::{CreateCaddieAssignmentUseCase, NameCaddieForRound};
 pub use create_course::CreateCourseUseCase;
+pub use create_customer::CreateCustomerUseCase;
 pub use create_reservation::{CreateReservationInput, CreateReservationUseCase};
 pub use delete_caddie_availability::DeleteCaddieAvailabilityUseCase;
 pub use delete_course::DeleteCourseUseCase;
@@ -95,6 +100,7 @@ pub use generate_caddie_shifts::{GenerateCaddieShiftsUseCase, GeneratedMonth};
 pub use get_attendance_snapshot::GetAttendanceSnapshotUseCase;
 pub use get_caddie_supply::GetCaddieSupplyUseCase;
 pub use get_course_caddie_supply::GetCourseCaddieSupplyUseCase;
+pub use get_customer::GetCustomerUseCase;
 pub use get_extension_status::GetExtensionStatusUseCase;
 pub use get_monthly_settlement::{
     GetMonthlySettlementUseCase, MonthlySettlementReservation, MonthlySettlementView,
@@ -125,9 +131,14 @@ pub use list_product_slots::ListProductSlotsUseCase;
 pub use list_reservation_products::ListReservationProductsUseCase;
 pub use list_reservation_summaries::ListReservationSummariesUseCase;
 pub use list_resources::ListResourcesUseCase;
+pub use membership::{
+    AssignMembershipPlanUseCase, CreateMembershipPlanUseCase, GetCustomerMembershipUseCase,
+    ListMembershipPlansUseCase, UpdateMembershipPlanUseCase,
+};
 pub use quote_golf_fee::QuoteGolfFeeUseCase;
 pub use replace_caddie_memberships::ReplaceCaddieMembershipsUseCase;
 pub use replace_product_slots::ReplaceProductSlotsUseCase;
+pub use search_customers::SearchCustomersUseCase;
 pub use seed_demo_board::{SeedDemoBoardUseCase, SeedSummary};
 pub use shift_rules::{GetShiftRulesUseCase, UpdateShiftRulesUseCase};
 pub use simulate_green_fee_range::SimulateGreenFeeRangeUseCase;

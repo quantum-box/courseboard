@@ -10,6 +10,13 @@
  * Enable: default ON while AUTH_MODE=development
  * Disable for a real local API: VITE_COURSEBOARD_MOCK_DATA=false
  */
+import {
+  generateAssignments,
+  generateCaddies,
+  generateReservations,
+  shiftDate,
+} from './mockVolume'
+
 export function isMockFieldDataEnabled() {
   if (import.meta.env.VITE_COURSEBOARD_AUTH_MODE !== 'development') return false
   const flag = import.meta.env.VITE_COURSEBOARD_MOCK_DATA
@@ -44,6 +51,17 @@ export const MOCK_FIXTURE_DATE = '2026-07-18'
 
 const NOW = `${MOCK_FIXTURE_DATE}T09:00:00+09:00`
 const TODAY = MOCK_FIXTURE_DATE
+
+/** `YYYY-MM-DD`, `days` after the fixture day. */
+function daysAfterFixture(days: number): string {
+  return shiftDate(MOCK_FIXTURE_DATE, days)
+}
+
+/**
+ * The club beyond the hand-written few: a full roster, a month of tee sheets,
+ * and the assignments already made. See `mockVolume.ts` for why.
+ */
+const generatedRoster = generateCaddies()
 
 let mockReservationPolicy: Record<string, unknown> = {
   tenantId: 'courseboard_id',
@@ -95,6 +113,9 @@ const mockCourses = [
     updatedAt: NOW,
   },
 ]
+
+/** The club's own bookings for the month around the fixture day. */
+const generatedReservations = generateReservations(MOCK_FIXTURE_DATE, mockCourses)
 
 const mockProducts: Array<{
   id: string
@@ -155,8 +176,13 @@ const mockProducts: Array<{
  *
  * The real value lives in the tenant config and is read by the API; the fixture
  * keeps it here so saving a week can answer with the date it opened the book to.
+ * Either a rolling day count or a named closing date, the same two shapes the
+ * config stores.
  */
-let mockBookingHorizonDays = 180
+let mockBookingHorizon: { mode: 'days'; days: number } | { mode: 'through'; through: string } = {
+  mode: 'days',
+  days: 180,
+}
 
 /** One start per interval across every band whose weekday falls in the range. */
 function mockGeneratedStarts(courseId: string, fromIso: string, toIso: string) {
@@ -182,10 +208,20 @@ function mockGeneratedStarts(courseId: string, fromIso: string, toIso: string) {
   return created
 }
 
-function mockBookableThrough(days = mockBookingHorizonDays) {
+function mockBookableThrough(horizon = mockBookingHorizon) {
+  if (horizon.mode === 'through') return horizon.through
   const through = new Date(`${TODAY}T00:00:00Z`)
-  through.setUTCDate(through.getUTCDate() + days)
+  through.setUTCDate(through.getUTCDate() + horizon.days)
   return through.toISOString().slice(0, 10)
+}
+
+function mockHorizonResponse(horizon = mockBookingHorizon) {
+  return {
+    mode: horizon.mode,
+    days: horizon.mode === 'days' ? horizon.days : null,
+    through: horizon.mode === 'through' ? horizon.through : null,
+    bookableThrough: mockBookableThrough(horizon),
+  }
 }
 
 const mockSchedulesByCourse: Record<string, Array<{
@@ -343,6 +379,9 @@ const mockCaddies = [
     ratingAverage: 4.0,
     ratingCount: 6,
   },
+  // The rest of the club. The five above each stand for a situation worth
+  // looking at; these are the volume a real board carries.
+  ...generatedRoster.caddies,
 ]
 
 /** The whole payroll, not just the caddies: the roster screen shows both. */
@@ -364,6 +403,7 @@ const mockStaff = [
   { id: 'staff_front', name: '松本 里奈', active: true, employmentType: 'full_time' },
   { id: 'staff_green', name: '吉田 誠', active: true, employmentType: 'full_time' },
   { id: 'staff_retired', name: '高橋 一', active: false, employmentType: 'part_time' },
+  ...generatedRoster.staff,
 ].map(member => ({
   hiredAt: null as string | null,
   contractEndDate: null as string | null,
@@ -807,6 +847,51 @@ const initialMockTeeReservations = [
     status: 'confirmed',
     holes: 18,
   },
+  // Caddies are named days ahead, so the fixtures carry groups past today —
+  // otherwise the week and fortnight views have nothing to show.
+  {
+    id: 'res_mock_14',
+    reservationNumber: 'R-2026-0113',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${daysAfterFixture(1)}T09:00:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 4,
+    partyName: '山本組',
+    status: 'confirmed',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_15',
+    reservationNumber: 'R-2026-0114',
+    golfCourseId: 'course_west',
+    courseName: '西コース',
+    teeTime: `${daysAfterFixture(3)}T07:40:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 3,
+    partyName: '木村組',
+    status: 'confirmed',
+    holes: 18,
+  },
+  {
+    id: 'res_mock_16',
+    reservationNumber: 'R-2026-0115',
+    golfCourseId: 'course_east',
+    courseName: '東コース',
+    teeTime: `${daysAfterFixture(9)}T08:00:00+09:00`,
+    durationMinutes: 270,
+    playType: 'caddie',
+    partySize: 4,
+    partyName: '法人C',
+    status: 'confirmed',
+    holes: 18,
+  },
+  // A month of the club's own bookings around the fixture day. Without them a
+  // day board holds a dozen groups, and nothing on these screens is read the
+  // way it is read at sixty.
+  ...generatedReservations,
 ].map(item => ({
   ...item,
   reservationServiceId: item.playType === 'caddie' ? 'svc:caddie-18' : 'svc:self-18',
@@ -976,6 +1061,13 @@ const mockAssignments = [
     nominatedBy: 'mock',
     notes: 'デモ用: 直前ラウンドと時間帯が重複',
   },
+  // What the club has already decided: settled through tomorrow, thinning out
+  // after that. The far days are what the fortnight view is for.
+  ...generateAssignments(
+    MOCK_FIXTURE_DATE,
+    generatedReservations,
+    generatedRoster.caddies.filter(caddie => caddie.active).map(caddie => caddie.id),
+  ),
 ]
 
 const mockInvoices = [
@@ -1014,6 +1106,114 @@ const mockInvoices = [
 
 function items<T>(values: T[]) {
   return { items: values }
+}
+
+/**
+ * The customer ledger, and the memberships held against it.
+ *
+ * Mutable because the whole point of the screens above them is adding a
+ * customer the desk could not find and granting a membership on the spot; a
+ * frozen fixture would let the forms be looked at but not walked through.
+ * A reload starts clean, same as the rest of this file.
+ */
+const mockCustomers: Array<Record<string, unknown>> = [
+  {
+    id: 'cus_honda',
+    name: '本田 康彦',
+    nameKana: 'ホンダ ヤスヒコ',
+    phone: '090-1234-5678',
+    email: 'honda@example.com',
+  },
+  {
+    id: 'cus_masuda',
+    name: '増田 公陽',
+    nameKana: 'マスダ キミハル',
+    phone: '090-2222-3333',
+  },
+  // No phone and no email: the walk-in nobody would otherwise write down.
+  // PLT-3358 is what makes this row possible at all.
+  { id: 'cus_tsuji', name: '辻 俊行', nameKana: 'ツジ トシユキ' },
+]
+
+const mockMembershipPlans: Array<Record<string, unknown>> = [
+  {
+    id: 'plan_full',
+    name: '正会員',
+    feeJpy: 120000,
+    active: true,
+    sortOrder: 0,
+  },
+  {
+    id: 'plan_weekday',
+    name: '平日会員',
+    feeJpy: 60000,
+    validDays: 365,
+    active: true,
+    sortOrder: 1,
+  },
+  // Retired, and still held by a member below: the settings screen has to show
+  // it, the booking screens must not offer it.
+  {
+    id: 'plan_shareholder',
+    name: '株主会員',
+    active: false,
+    sortOrder: 2,
+  },
+]
+
+/** customerId → planId. Absent means visitor, which is not a lesser state. */
+const mockMembershipAssignments = new Map<string, string>([
+  ['cus_honda', 'plan_full'],
+  ['cus_tsuji', 'plan_shareholder'],
+])
+
+function mockMembershipOf(customerId: string) {
+  const planId = mockMembershipAssignments.get(customerId)
+  const plan = planId
+    ? mockMembershipPlans.find(candidate => candidate.id === planId)
+    : undefined
+  return {
+    customerId,
+    // Mirrors the server: whether someone is a member is decided in one place
+    // and reported, never re-derived by the client from the plan's presence.
+    isMember: Boolean(plan),
+    ...(plan ? { plan, startedOn: '2026-04-01' } : {}),
+  }
+}
+
+type MockCustomerSearch = {
+  name: string | null
+  phone: string | null
+  email: string | null
+}
+
+function mockPhoneDigits(value: string) {
+  return value
+    .replace(/[０-９]/g, digit => String.fromCharCode(digit.charCodeAt(0) - 0xFEE0))
+    .replace(/[^0-9]/g, '')
+}
+
+/** Mirrors Field's separate name/kana, phone, and exact-email filters. */
+function mockCustomerMatches(customer: Record<string, unknown>, search: MockCustomerSearch) {
+  if (search.name) {
+    const needle = search.name.toLowerCase()
+    const names = [customer.name, customer.nameKana]
+      .filter((value): value is string => typeof value === 'string')
+      .map(value => value.toLowerCase())
+    if (!names.some(value => value.includes(needle))) return false
+  }
+
+  if (search.phone) {
+    const needle = mockPhoneDigits(search.phone)
+    const phone = typeof customer.phone === 'string' ? mockPhoneDigits(customer.phone) : ''
+    if (!needle || !phone.includes(needle)) return false
+  }
+
+  if (search.email) {
+    if (customer.email !== search.email) return false
+  }
+
+  return Boolean(search.name || search.phone || search.email)
 }
 
 function pathnameOf(path: string) {
@@ -1192,6 +1392,13 @@ function normalizeMockPath(pathname: string): string {
     || pathname === '/v1/course/caddie-rank-fees'
     || pathname.startsWith('/v1/course/caddie-shifts/')
     || pathname.startsWith('/v1/course/caddie-shift-plans/')
+    // The customer ledger and the memberships against it live in Field's own
+    // generic surfaces, not under the golf extension, so there is no
+    // `/v1/erp/extensions/golf-course/*` path to map these onto.
+    || pathname === '/v1/course/customers'
+    || pathname === '/v1/course/membership-plans'
+    || pathname.startsWith('/v1/course/customers/')
+    || pathname.startsWith('/v1/course/membership-plans/')
   ) {
     return pathname
   }
@@ -1598,7 +1805,39 @@ function resolveGet(path: string): Json | null | undefined {
   if (pathname === '/v1/erp/extensions/status') return extensionStatus()
 
   if (pathname === '/v1/course/booking-horizon') {
-    return { days: mockBookingHorizonDays, bookableThrough: mockBookableThrough() }
+    return mockHorizonResponse()
+  }
+
+  if (pathname === '/v1/course/customers') {
+    const search: MockCustomerSearch = {
+      name: url.searchParams.get('name')?.trim() || null,
+      phone: url.searchParams.get('phone')?.trim() || null,
+      email: url.searchParams.get('email')?.trim() || null,
+    }
+    // The server answers 400 for a search with nothing in it, which this
+    // resolver has no way to express. No screen sends one — both the picker
+    // and the ledger page hold the request until something is typed — so an
+    // empty result is the closest honest stand-in.
+    if (!search.name && !search.phone && !search.email) return items([])
+    return items(mockCustomers.filter(customer => mockCustomerMatches(customer, search)))
+  }
+
+  if (pathname === '/v1/course/membership-plans') {
+    const includeInactive = url.searchParams.get('includeInactive') === 'true'
+    return items(mockMembershipPlans.filter(plan => includeInactive || plan.active === true))
+  }
+
+  const customerMembershipMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)\/membership$/)
+  if (customerMembershipMatch) {
+    return mockMembershipOf(decodeURIComponent(customerMembershipMatch[1] ?? ''))
+  }
+
+  const customerMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)$/)
+  if (customerMatch) {
+    const customerId = decodeURIComponent(customerMatch[1] ?? '')
+    // `null` rather than `undefined`: an id nobody holds is a missing customer,
+    // not a path this mock forgot to cover.
+    return mockCustomers.find(customer => customer.id === customerId) ?? null
   }
 
   if (rawPathname === '/v1/course/extension-status') {
@@ -1696,9 +1935,13 @@ function resolveGet(path: string): Json | null | undefined {
 
   if (rawPathname === '/v1/course/tee-sheet') {
     const date = url.searchParams.get('date') ?? TODAY
+    // The API answers a range when asked, for staffing planned days ahead.
+    const to = url.searchParams.get('to')
+    const lastDay = to && to > date ? to : date
     const courseId = url.searchParams.get('golfCourseId')
     const filtered = mockTeeReservations.filter(item => {
-      if (!item.teeTime.startsWith(date)) return false
+      const day = item.teeTime.slice(0, 10)
+      if (day < date || day > lastDay) return false
       if (courseId && item.golfCourseId !== courseId) return false
       return true
     })
@@ -1879,8 +2122,19 @@ function resolveGet(path: string): Json | null | undefined {
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-attendance-snapshot') {
     const date = url.searchParams.get('date') ?? TODAY
-    const working = new Set(['caddie_aya', 'caddie_ken', 'caddie_yuki'])
+    // Whoever has a round that day has come in, plus a few on standby. Naming
+    // three by hand left a forty-strong club looking almost entirely absent.
+    const onTheBoard = new Set(
+      mockAssignments
+        .filter(item => item.scheduledAt.startsWith(date) && item.status !== 'cancelled')
+        .map(item => item.caddieProfileId),
+    )
+    const working = new Set([
+      ...onTheBoard,
+      ...['caddie_aya', 'caddie_ken', 'caddie_yuki'],
+    ])
     const assignmentCounts = mockAssignments.reduce<Record<string, number>>((acc, item) => {
+      if (!item.scheduledAt.startsWith(date)) return acc
       acc[item.caddieProfileId] = (acc[item.caddieProfileId] ?? 0) + 1
       return acc
     }, {})
@@ -1900,17 +2154,27 @@ function resolveGet(path: string): Json | null | undefined {
   if (pathname === '/v1/erp/extensions/golf-course/caddie-supply') {
     const date = url.searchParams.get('date') ?? TODAY
     const safetyBuffer = Number(url.searchParams.get('safetyBuffer') ?? 1)
+    // Derived from the roster and the day's board rather than fixed: with a
+    // club-sized roster the old constants said eight groups next to a sheet
+    // holding forty.
+    const available = mockCaddies.filter(caddie => caddie.employmentStatus === 'active')
+    const twoRoundCapable = available.filter(caddie => caddie.canTwoRounds)
+    const caddieSupply = available.length + twoRoundCapable.length
+    const currentCaddieAttached = mockTeeReservations.filter(
+      item => item.teeTime.startsWith(date) && item.playType === 'caddie',
+    ).length
+    const caddieAttachedCap = Math.max(caddieSupply - safetyBuffer, 0)
     return {
       date,
-      availableCaddies: 5,
-      twoRoundCapable: 3,
-      caddieSupply: 8,
-      morningCapacity: 14,
-      afternoonCapacity: 10,
+      availableCaddies: available.length,
+      twoRoundCapable: twoRoundCapable.length,
+      caddieSupply,
+      morningCapacity: available.length,
+      afternoonCapacity: twoRoundCapable.length,
       safetyBuffer,
-      caddieAttachedCap: 18,
-      currentCaddieAttached: 8,
-      remaining: 10,
+      caddieAttachedCap,
+      currentCaddieAttached,
+      remaining: caddieAttachedCap - currentCaddieAttached,
     }
   }
 
@@ -2013,6 +2277,79 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   const pathname = normalizeMockPath(pathnameOf(path))
   const method = methodOf(init)
   const body = parseBody(init) as Record<string, unknown> | undefined
+
+  if (pathname === '/v1/course/feature-flags/evaluate' && method === 'POST') {
+    // Mock mode behaves like an all-enabled flag store so gated features stay
+    // reachable in fixture-driven development.
+    const keys = Array.isArray(body?.keys) ? (body.keys as unknown[]) : []
+    return hit({
+      values: keys
+        .filter((key): key is string => typeof key === 'string')
+        .map(key => ({ key, enabled: true })),
+    })
+  }
+
+  if (pathname === '/v1/course/customers' && method === 'POST') {
+    const name = typeof body?.name === 'string' ? body.name.trim() : ''
+    if (!name) return error(400, 'customer name is required')
+    const created = {
+      id: `cus_mock_${mockCustomers.length + 1}`,
+      name,
+      ...(typeof body?.nameKana === 'string' && body.nameKana.trim()
+        ? { nameKana: body.nameKana.trim() }
+        : {}),
+      ...(typeof body?.phone === 'string' && body.phone.trim()
+        ? { phone: body.phone.trim() }
+        : {}),
+      ...(typeof body?.email === 'string' && body.email.trim()
+        ? { email: body.email.trim() }
+        : {}),
+    }
+    mockCustomers.push(created)
+    return hit(created)
+  }
+
+  if (pathname === '/v1/course/membership-plans' && method === 'POST') {
+    const name = typeof body?.name === 'string' ? body.name.trim() : ''
+    if (!name) return error(400, 'plan name is required')
+    const created = {
+      id: `plan_mock_${mockMembershipPlans.length + 1}`,
+      name,
+      description: body?.description ?? null,
+      feeJpy: body?.feeJpy ?? null,
+      validDays: body?.validDays ?? null,
+      active: true,
+      sortOrder: typeof body?.sortOrder === 'number' ? body.sortOrder : mockMembershipPlans.length,
+    }
+    mockMembershipPlans.push(created)
+    return hit(created)
+  }
+
+  const planWriteMatch = pathname.match(/^\/v1\/course\/membership-plans\/([^/]+)$/)
+  if (planWriteMatch && method === 'PATCH') {
+    const planId = decodeURIComponent(planWriteMatch[1] ?? '')
+    const plan = mockMembershipPlans.find(candidate => candidate.id === planId)
+    if (!plan) return error(404, 'membership plan not found')
+    if (typeof body?.name === 'string') plan.name = body.name.trim()
+    // Explicit null clears the value, which is how the editor empties a fee.
+    if ('description' in (body ?? {})) plan.description = body?.description ?? null
+    if ('feeJpy' in (body ?? {})) plan.feeJpy = body?.feeJpy ?? null
+    if ('validDays' in (body ?? {})) plan.validDays = body?.validDays ?? null
+    if (typeof body?.active === 'boolean') plan.active = body.active
+    if (typeof body?.sortOrder === 'number') plan.sortOrder = body.sortOrder
+    return hit(plan)
+  }
+
+  const membershipGrantMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)\/membership$/)
+  if (membershipGrantMatch && method === 'POST') {
+    const customerId = decodeURIComponent(membershipGrantMatch[1] ?? '')
+    const planId = typeof body?.planId === 'string' ? body.planId : ''
+    if (!mockMembershipPlans.some(plan => plan.id === planId)) {
+      return error(404, 'membership plan not found')
+    }
+    mockMembershipAssignments.set(customerId, planId)
+    return hit(mockMembershipOf(customerId))
+  }
 
   // Desk marks and group detail are CourseBoard's own writes, so they never
   // reach a Field path; keeping them in the fixture store lets the ledger's
@@ -2481,12 +2818,25 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   }
 
   if (pathname === '/v1/course/booking-horizon' && method === 'PUT') {
+    const through = body?.through
+    if (body?.days != null && through != null) {
+      return error(400, 'send either days or through, not both')
+    }
+    if (typeof through === 'string') {
+      const furthest = new Date(`${TODAY}T00:00:00Z`)
+      furthest.setUTCDate(furthest.getUTCDate() + 399)
+      if (through < TODAY || through > furthest.toISOString().slice(0, 10)) {
+        return error(400, 'the last bookable date must be between today and 399 days ahead')
+      }
+      mockBookingHorizon = { mode: 'through', through }
+      return hit(mockHorizonResponse())
+    }
     const days = Number(body?.days)
     if (!Number.isInteger(days) || days < 1 || days > 399) {
       return error(400, 'booking horizon must be between 1 and 399 days')
     }
-    mockBookingHorizonDays = days
-    return hit({ days, bookableThrough: mockBookableThrough(days) })
+    mockBookingHorizon = { mode: 'days', days }
+    return hit(mockHorizonResponse())
   }
 
   const generateMatch = pathname.match(

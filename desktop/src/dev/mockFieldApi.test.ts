@@ -248,4 +248,45 @@ describe('mockFieldApi', () => {
       }),
     })).toEqual({ kind: 'error', status: 409, message: 'この枠はちょうど埋まりました' })
   })
+
+  it('answers feature flag evaluation with every requested key enabled', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    expect(resolveMockFieldApiJson('/v1/course/feature-flags/evaluate', {
+      method: 'POST',
+      body: JSON.stringify({
+        keys: ['feature.courseboard.flag-evaluation-smoke', 'feature.courseboard.other'],
+      }),
+    })).toEqual({
+      kind: 'hit',
+      data: {
+        values: [
+          { key: 'feature.courseboard.flag-evaluation-smoke', enabled: true },
+          { key: 'feature.courseboard.other', enabled: true },
+        ],
+      },
+    })
+
+    expect(resolveMockFieldApiJson('/v1/course/feature-flags/evaluate', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    })).toEqual({ kind: 'hit', data: { values: [] } })
+  })
+
+  it('keeps customer filters separate and makes email matching exact', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+
+    const customerIds = (path: string) => {
+      const result = resolveMockFieldApiJson(path)
+      expect(result.kind).toBe('hit')
+      if (result.kind !== 'hit') return []
+      return (result.data as { items: Array<{ id: string }> }).items.map(customer => customer.id)
+    }
+
+    expect(customerIds('/v1/course/customers?name=090-1234-5678')).toEqual([])
+    expect(customerIds('/v1/course/customers?name=honda%40example.com')).toEqual([])
+    expect(customerIds('/v1/course/customers?email=honda%40example.com')).toContain('cus_honda')
+    expect(customerIds('/v1/course/customers?email=honda%40example')).toEqual([])
+  })
 })

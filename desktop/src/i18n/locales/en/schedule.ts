@@ -66,6 +66,8 @@ export const schedule: DeepPartial<typeof source> = {
   },
   save: 'Save hours',
   saveFailed: 'Could not save the hours',
+  missingRuleId: 'A saved band could not be identified. Reload the page, then try again.',
+  newRuleHasId: 'A newly added band is in an invalid state. Reload the page, then try again.',
   hasIssues: '{{n}} bands need fixing. Correct the rows marked in red, then save.',
   confirmRemove: 'Saving drops {{n}} bands, and stops the tee times in them. Continue?',
   saved: {

@@ -11,14 +11,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::course::domain::{
-    course_day_bounds, rank_caddies, shift_covers_tee_time, widen_for_utc_date_filter,
-    AttendanceState, AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery, CaddiePlacement,
-    CaddieRecommendation, CaddieShift, CaddieShiftGateway, CourseError, GatewayCredentials,
-    GolfOpsGateway, RankingCandidate, RankingOptions, RecommendationQuery,
+    parse_tenant_timezone, rank_caddies, shift_covers_tee_time, tenant_date_at, tenant_day_bounds,
+    widen_for_utc_date_filter, AttendanceState, AvailabilityQuery, AvailabilityStatus,
+    CaddieAssignmentQuery, CaddiePlacement, CaddieRecommendation, CaddieShift, CaddieShiftGateway,
+    CourseError, GatewayCredentials, GolfOpsGateway, RankingCandidate, RankingOptions,
+    RecommendationQuery,
 };
-
-/// Minutes east of UTC for the course clock, as everywhere else in this product.
-const JST_OFFSET_MINUTES: i64 = 9 * 60;
 
 pub struct ListCaddieRecommendationsUseCase {
     ops: Arc<dyn GolfOpsGateway>,
@@ -34,14 +32,14 @@ impl ListCaddieRecommendationsUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
         query: RecommendationQuery,
+        timezone: &str,
     ) -> Result<Vec<CaddieRecommendation>, CourseError> {
+        let timezone_id = parse_tenant_timezone(timezone)?;
         // The day being planned, which is also the day attendance is read for.
-        let date = query
-            .scheduled_at
-            .map(|at| (at + chrono::Duration::minutes(JST_OFFSET_MINUTES)).date_naive())
-            .unwrap_or_else(|| {
-                (chrono::Utc::now() + chrono::Duration::minutes(JST_OFFSET_MINUTES)).date_naive()
-            });
+        let date = tenant_date_at(
+            query.scheduled_at.unwrap_or_else(chrono::Utc::now),
+            timezone,
+        )?;
 
         let window = widen_for_utc_date_filter(date, date);
         let (roster, ratings, assignments, attendance, availabilities, confirmed) = tokio::try_join!(
@@ -56,7 +54,8 @@ impl ListCaddieRecommendationsUseCase {
                     reservation_id: None,
                 },
             ),
-            self.ops.get_attendance_snapshot(credentials, Some(date)),
+            self.ops
+                .get_attendance_snapshot(credentials, Some(date), timezone),
             self.ops.list_caddie_availabilities(
                 credentials,
                 AvailabilityQuery {
@@ -89,7 +88,7 @@ impl ListCaddieRecommendationsUseCase {
 
         // Field filters on the UTC date, so the day was fetched wide; count only
         // what actually falls inside the course's own day.
-        let (day_start, day_end) = course_day_bounds(date, date);
+        let (day_start, day_end) = tenant_day_bounds(date, date, timezone)?;
         let mut rounds_today: HashMap<String, i64> = HashMap::new();
         for assignment in assignments.iter().filter(|assignment| {
             let at = assignment.scheduled_at();
@@ -150,7 +149,7 @@ impl ListCaddieRecommendationsUseCase {
                 shift_covers_tee_time(
                     availability_by_caddie.get(caddie.id().as_str()).copied(),
                     query.scheduled_at,
-                    JST_OFFSET_MINUTES,
+                    timezone_id,
                 )
             })
             .map(|caddie| {

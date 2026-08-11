@@ -27,7 +27,6 @@ export const courses: DeepPartial<typeof source> = {
     startIntervalHint: '1〜60分の間で入れてください',
   },
   table: {
-    interval: '組と組の間',
     hours: '営業している時間',
     status: '今の状態',
     updated: '最後に直した日',

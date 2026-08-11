@@ -270,10 +270,27 @@ pub struct CancellationFeeCollection {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum CancellationFeeBillToRequest {
+    Customer {
+        customer_id: String,
+    },
+    Client {
+        client_id: String,
+        affiliation_id: String,
+    },
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CreateCancellationFeeCollectionRequest {
     pub tenant_id: String,
     pub reference: Option<String>,
+    pub bill_to: CancellationFeeBillToRequest,
     pub customer_name: String,
     pub customer_phone: String,
     pub amount: i64,
@@ -357,6 +374,7 @@ pub async fn create_collection(
     let customer_name = required_text(&request.customer_name, "customer_name is required")?;
     let customer_phone = required_text(&request.customer_phone, "customer_phone is required")?;
     let due_date = required_text(&request.due_date, "due_date is required")?;
+    let bill_to = validated_bill_to(&request.bill_to)?;
     if request.amount <= 0 {
         return Err(AppError::BadRequest("amount must be greater than zero"));
     }
@@ -397,6 +415,7 @@ pub async fn create_collection(
             due_date,
             currency: &currency,
             bearer_token: &bearer_token,
+            bill_to,
         },
     )
     .await?;
@@ -667,6 +686,7 @@ struct FieldInvoiceCreateInput<'a> {
     due_date: &'a str,
     currency: &'a str,
     bearer_token: &'a str,
+    bill_to: CancellationFeeBillToRequest,
 }
 
 async fn create_field_invoice(
@@ -682,12 +702,9 @@ async fn create_field_invoice(
         .filter(|value| !value.is_empty())
         .unwrap_or("キャンセル料")
         .to_string();
-    let client_id = optional_ref(input.request.reference.as_deref())
-        .map(|reference| format!("courseboard:{reference}"))
-        .unwrap_or_else(|| format!("courseboard:{}", input.collection_id));
     let body = FieldCreateInvoiceRequest {
         invoice_number: Some(format!("CB-{}", input.collection_id)),
-        client_id,
+        bill_to: input.bill_to,
         client_name: Some(input.customer_name.to_string()),
         client_email: None,
         client_phone: Some(input.customer_phone.to_string()),
@@ -899,7 +916,7 @@ fn field_invoice_notes(
 #[serde(rename_all = "camelCase")]
 struct FieldCreateInvoiceRequest {
     invoice_number: Option<String>,
-    client_id: String,
+    bill_to: CancellationFeeBillToRequest,
     client_name: Option<String>,
     client_email: Option<String>,
     client_phone: Option<String>,
@@ -915,6 +932,27 @@ struct FieldCreateInvoiceRequest {
     send_email: Option<bool>,
     send_sms: Option<bool>,
     sms_message: Option<String>,
+}
+
+fn validated_bill_to(
+    bill_to: &CancellationFeeBillToRequest,
+) -> Result<CancellationFeeBillToRequest, AppError> {
+    match bill_to {
+        CancellationFeeBillToRequest::Customer { customer_id } => {
+            Ok(CancellationFeeBillToRequest::Customer {
+                customer_id: required_text(customer_id, "bill_to.customerId is required")?
+                    .to_string(),
+            })
+        }
+        CancellationFeeBillToRequest::Client {
+            client_id,
+            affiliation_id,
+        } => Ok(CancellationFeeBillToRequest::Client {
+            client_id: required_text(client_id, "bill_to.clientId is required")?.to_string(),
+            affiliation_id: required_text(affiliation_id, "bill_to.affiliationId is required")?
+                .to_string(),
+        }),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -951,4 +989,70 @@ struct FieldPublicInvoicePaymentIntentResponse {
 #[serde(rename_all = "camelCase")]
 struct FieldInvoiceStripePublishableKeyResponse {
     publishable_key: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn field_invoice_body_serializes_typed_bill_to_without_legacy_client_id() {
+        let body = FieldCreateInvoiceRequest {
+            invoice_number: Some("CB-cfc_test".to_string()),
+            bill_to: CancellationFeeBillToRequest::Client {
+                client_id: "cl_company_x".to_string(),
+                affiliation_id: "ccaf_person_a_company_x".to_string(),
+            },
+            client_name: Some("Company X".to_string()),
+            client_email: None,
+            client_phone: Some("+819012345678".to_string()),
+            line_items: vec![FieldCreateInvoiceLineItemRequest {
+                description: "キャンセル料".to_string(),
+                quantity: 1,
+                unit_price: 5_000,
+                tax_category: Some("out_of_scope".to_string()),
+            }],
+            due_date: "2026-08-31".to_string(),
+            status: Some("Sent".to_string()),
+            currency: Some("JPY".to_string()),
+            tax_category: Some("out_of_scope".to_string()),
+            tax_amount: Some(0),
+            notes: None,
+            create_payment_link: Some(true),
+            payment_link_provider: Some("stripe".to_string()),
+            send_email: Some(false),
+            send_sms: Some(false),
+            sms_message: None,
+        };
+
+        let body = serde_json::to_value(body).expect("serialize Field invoice request");
+        assert_eq!(
+            body["billTo"],
+            serde_json::json!({
+                "kind": "client",
+                "clientId": "cl_company_x",
+                "affiliationId": "ccaf_person_a_company_x"
+            })
+        );
+        assert!(body.get("clientId").is_none());
+        assert!(!body.to_string().contains("courseboard:"));
+    }
+
+    #[test]
+    fn validates_and_trims_both_typed_bill_to_variants() {
+        assert_eq!(
+            validated_bill_to(&CancellationFeeBillToRequest::Customer {
+                customer_id: " cus_person_a ".to_string(),
+            })
+            .unwrap(),
+            CancellationFeeBillToRequest::Customer {
+                customer_id: "cus_person_a".to_string(),
+            }
+        );
+        assert!(validated_bill_to(&CancellationFeeBillToRequest::Client {
+            client_id: "cl_company_x".to_string(),
+            affiliation_id: " ".to_string(),
+        })
+        .is_err());
+    }
 }

@@ -11,6 +11,7 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::NaiveDate;
+use chrono_tz::Tz;
 
 use super::{
     AssignmentStatus, CaddieAssignment, CaddieRank, CaddieRankFees, PayrollRow, PayrollSummary,
@@ -63,12 +64,31 @@ fn is_billable(assignment: &CaddieAssignment) -> bool {
 /// staff record; everything else is keyed by caddie. A caddie with no staff
 /// link therefore has no minutes, which is the truth rather than a gap: without
 /// a staff record there is nothing to clock in against.
-pub fn summarize_payroll(
+#[cfg(test)]
+fn summarize_payroll(
     candidates: &[PayrollCandidate],
     assignments: &[CaddieAssignment],
     attendance: &[AttendanceDay],
     worked_by_staff: &HashMap<String, WorkedMinutes>,
     rank_fees: &CaddieRankFees,
+) -> Vec<PayrollRow> {
+    summarize_payroll_in_timezone(
+        candidates,
+        assignments,
+        attendance,
+        worked_by_staff,
+        rank_fees,
+        chrono_tz::Asia::Tokyo,
+    )
+}
+
+pub fn summarize_payroll_in_timezone(
+    candidates: &[PayrollCandidate],
+    assignments: &[CaddieAssignment],
+    attendance: &[AttendanceDay],
+    worked_by_staff: &HashMap<String, WorkedMinutes>,
+    rank_fees: &CaddieRankFees,
+    timezone: Tz,
 ) -> Vec<PayrollRow> {
     let mut rounds: HashMap<&str, i64> = HashMap::new();
     // Which days a caddie actually has a round on, so a missing clock-in can be
@@ -78,10 +98,12 @@ pub fn summarize_payroll(
     for assignment in assignments.iter().filter(|item| is_billable(item)) {
         let id = assignment.caddie_id();
         *rounds.entry(id).or_insert(0) += 1;
-        round_days
-            .entry(id)
-            .or_default()
-            .insert(assignment.scheduled_at().date_naive());
+        round_days.entry(id).or_default().insert(
+            assignment
+                .scheduled_at()
+                .with_timezone(&timezone)
+                .date_naive(),
+        );
     }
 
     let mut clocked_days: HashMap<&str, HashSet<NaiveDate>> = HashMap::new();
@@ -407,6 +429,23 @@ mod tests {
             20_000,
             "both rounds are paid even though there was one clock-in"
         );
+    }
+
+    #[test]
+    fn round_days_are_matched_in_the_tenant_timezone() {
+        let rows = summarize_payroll_in_timezone(
+            &[candidate("a", Some("staff_a"))],
+            &[assignment("a", "2026-07-01T22:30:00Z", 12_000, "completed")],
+            &[AttendanceDay {
+                caddie_id: "a".to_string(),
+                date: day("2026-07-02"),
+                status: "clocked_out".to_string(),
+            }],
+            &HashMap::new(),
+            &fees(),
+            chrono_tz::Europe::Berlin,
+        );
+        assert_eq!(rows[0].rounds_without_clock_in(), 0);
     }
 
     #[test]

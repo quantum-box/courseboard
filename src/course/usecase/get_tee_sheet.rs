@@ -6,10 +6,10 @@ use std::sync::Arc;
 use chrono::NaiveDate;
 
 use crate::course::domain::{
-    format_datetime_with_offset, format_jst_wall_clock, jst_offset, Course, CourseError, CourseId,
-    GatewayCredentials, GolfCatalogGateway, PlayType, Reservation, ReservationGateway,
-    ReservationProduct, ReservationServiceId, Resource, TeeSheet, TeeSheetItem, TeeSheetQuery,
-    TeeSheetStatus, DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR,
+    format_datetime_in_timezone, format_tenant_wall_clock, parse_tenant_timezone, Course,
+    CourseError, CourseId, GatewayCredentials, GolfCatalogGateway, PlayType, Reservation,
+    ReservationGateway, ReservationProduct, ReservationServiceId, Resource, TeeSheet, TeeSheetItem,
+    TeeSheetQuery, TeeSheetStatus, DEFAULT_DAY_END_HOUR, DEFAULT_DAY_START_HOUR,
 };
 
 const DEFAULT_DURATION_MINUTES: i32 = 270;
@@ -63,7 +63,11 @@ impl GetTeeSheetUseCase {
             Vec::new()
         });
 
-        let sheet = build_tee_sheet(
+        // A range is several days of the same board, built from the one set of
+        // reservations already in hand. The sheet keeps the first day as its
+        // own: the day markers describe that day, and every row carries its own
+        // start, which is what a caller reading more than one day goes by.
+        let mut sheet = build_tee_sheet(
             query.date,
             query.golf_course_id.as_ref(),
             &reservations,
@@ -72,6 +76,18 @@ impl GetTeeSheetUseCase {
             &products,
             &timezone,
         )?;
+        for date in query.dates().into_iter().skip(1) {
+            let next = build_tee_sheet(
+                date,
+                query.golf_course_id.as_ref(),
+                &reservations,
+                &courses,
+                &resources,
+                &products,
+                &timezone,
+            )?;
+            sheet = sheet.extended_with(next);
+        }
         Ok(sheet.with_unavailable(unavailable))
     }
 }
@@ -85,7 +101,7 @@ pub(crate) fn build_tee_sheet(
     products: &[ReservationProduct],
     tenant_timezone: &str,
 ) -> Result<TeeSheet, CourseError> {
-    let jst = jst_offset()?;
+    let timezone = parse_tenant_timezone(tenant_timezone)?;
     let product_by_service: HashMap<&ReservationServiceId, &ReservationProduct> = products
         .iter()
         .map(|product| (product.reservation_service_id(), product))
@@ -93,7 +109,7 @@ pub(crate) fn build_tee_sheet(
     let items: Vec<TeeSheetItem> = reservations
         .iter()
         .filter(|reservation| reservation.is_tee_sheet_candidate())
-        .filter(|reservation| reservation.occurs_on_date(date, &jst))
+        .filter(|reservation| reservation.occurs_on_date(date, &timezone))
         .filter_map(|reservation| {
             let (course_id, course_name) = resolve_course(reservation, resources, courses);
             if let Some(filter_id) = golf_course_id {
@@ -109,16 +125,16 @@ pub(crate) fn build_tee_sheet(
                 product,
                 &course_id,
                 &course_name,
-                jst,
+                tenant_timezone,
             ))
         })
-        .collect();
+        .collect::<Result<Vec<_>, CourseError>>()?;
 
     Ok(TeeSheet::new(
         date,
         tenant_timezone,
-        format_jst_wall_clock(date, DEFAULT_DAY_START_HOUR, 0, jst),
-        format_jst_wall_clock(date, DEFAULT_DAY_END_HOUR, 0, jst),
+        format_tenant_wall_clock(date, DEFAULT_DAY_START_HOUR, 0, tenant_timezone)?,
+        format_tenant_wall_clock(date, DEFAULT_DAY_END_HOUR, 0, tenant_timezone)?,
         items,
     ))
 }
@@ -173,8 +189,8 @@ fn to_tee_sheet_item(
     product: Option<&ReservationProduct>,
     golf_course_id: &CourseId,
     course_name: &str,
-    jst: chrono::FixedOffset,
-) -> TeeSheetItem {
+    tenant_timezone: &str,
+) -> Result<TeeSheetItem, CourseError> {
     let duration_minutes = reservation
         .duration_minutes_from_range()
         .or_else(|| product.map(|item| item.fallback_duration_minutes()))
@@ -187,7 +203,7 @@ fn to_tee_sheet_item(
         .filter(|value| *value > 0)
         .unwrap_or(18);
 
-    TeeSheetItem::new(
+    Ok(TeeSheetItem::new(
         reservation.id(),
         reservation.reservation_number(),
         reservation.service_id().map(ToString::to_string),
@@ -199,7 +215,7 @@ fn to_tee_sheet_item(
         product
             .map(|item| item.golf_course_ids().to_vec())
             .unwrap_or_default(),
-        format_datetime_with_offset(reservation.starts_at(), jst),
+        format_datetime_in_timezone(reservation.starts_at(), tenant_timezone)?,
         duration_minutes,
         play_type,
         reservation.party_size(),
@@ -208,7 +224,7 @@ fn to_tee_sheet_item(
         holes,
         reservation.notes().map(str::to_string),
     )
-    .with_party(reservation.party().clone())
+    .with_party(reservation.party().clone()))
 }
 
 #[cfg(test)]
@@ -479,8 +495,8 @@ mod tests {
         assert_eq!(course_id, "course_east");
         assert_eq!(course_name, "East Course");
 
-        let jst = jst_offset().unwrap();
-        let item = to_tee_sheet_item(&reservation, None, &course_id, &course_name, jst);
+        let item =
+            to_tee_sheet_item(&reservation, None, &course_id, &course_name, "Asia/Tokyo").unwrap();
         assert_eq!(item.tee_time(), "2026-07-18T07:00:00+09:00");
         assert_eq!(item.duration_minutes(), 270);
         assert_eq!(item.play_type(), PlayType::SelfPlay);
@@ -518,14 +534,14 @@ mod tests {
             None,
             None,
         );
-        let jst = jst_offset().unwrap();
         let item = to_tee_sheet_item(
             &reservation,
             Some(&product),
             &CourseId::new("course_east"),
             "East Course",
-            jst,
-        );
+            "Asia/Tokyo",
+        )
+        .unwrap();
         assert_eq!(item.play_type(), PlayType::Caddie);
         assert_eq!(item.duration_minutes(), 240);
         assert_eq!(item.holes(), 18);
@@ -553,15 +569,14 @@ mod tests {
             vec!["course_east".into(), "course_west".into()],
             None,
         );
-        let jst = jst_offset().unwrap();
-
         let matching = to_tee_sheet_item(
             &reservation,
             Some(&season_pass),
             &CourseId::new("course_west"),
             "West Course",
-            jst,
-        );
+            "Asia/Tokyo",
+        )
+        .unwrap();
         assert!(!matching.course_mismatch());
         assert_eq!(matching.expected_course_id(), None);
 
@@ -570,8 +585,9 @@ mod tests {
             Some(&season_pass),
             &CourseId::new("course_north"),
             "North Course",
-            jst,
-        );
+            "Asia/Tokyo",
+        )
+        .unwrap();
         assert!(booked_elsewhere.course_mismatch());
         assert_eq!(
             booked_elsewhere
@@ -692,6 +708,7 @@ mod tests {
                 },
                 TeeSheetQuery {
                     date,
+                    to: None,
                     golf_course_id: Some(CourseId::new("course_east")),
                 },
             )
@@ -704,6 +721,79 @@ mod tests {
         assert_eq!(sheet.items()[0].status().as_str(), "confirmed");
         assert_eq!(sheet.timezone(), "Europe/Berlin");
         assert!(sheet.unavailable().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_range_answers_every_day_it_covers_on_one_board() {
+        // Staffing is planned a fortnight out, so the groups still missing a
+        // caddie are asked for once rather than a day at a time.
+        let first = NaiveDate::from_ymd_opt(2026, 7, 18).expect("date");
+        let second_day_start = Utc.with_ymd_and_hms(2026, 7, 18, 22, 0, 0).unwrap();
+        let reservations = Arc::new(FakeReservationGateway {
+            items: Mutex::new(vec![
+                sample_reservation(),
+                Reservation::reconstitute(
+                    "res_2",
+                    "R-2",
+                    Some("svc:caddie-18".into()),
+                    Some("res_east".into()),
+                    Some("Suzuki".into()),
+                    "confirmed",
+                    second_day_start,
+                    second_day_start + Duration::minutes(270),
+                    4,
+                    None,
+                    None,
+                ),
+            ]),
+        });
+        let catalog = Arc::new(FakeGolfCatalogGateway {
+            tenant_timezone: DEFAULT_TIMEZONE.into(),
+            courses: Mutex::new(vec![Course::reconstitute(
+                "course_east",
+                "East Course",
+                Some("East".into()),
+                18,
+                DEFAULT_TIMEZONE,
+                8,
+                true,
+                None,
+                None,
+                None,
+                None,
+            )]),
+            resources: Mutex::new(vec![Resource::reconstitute(
+                "golfres_east",
+                "East Course",
+                Some("res_east".into()),
+                Some("course_east".into()),
+                ResourceKind::Course,
+                true,
+            )]),
+            products: Mutex::new(Vec::new()),
+            products_fail: false,
+        });
+
+        let sheet = GetTeeSheetUseCase::new(reservations, catalog)
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer test",
+                    operator_id: "scc",
+                    platform_id: None,
+                },
+                TeeSheetQuery {
+                    date: first,
+                    to: NaiveDate::from_ymd_opt(2026, 7, 19),
+                    golf_course_id: None,
+                },
+            )
+            .await
+            .expect("execute use case");
+
+        let names: Vec<&str> = sheet.items().iter().map(|item| item.party_name()).collect();
+        assert_eq!(names, vec!["Yamada", "Suzuki"]);
+        // The board still describes its first day; the rows carry their own.
+        assert_eq!(sheet.date(), first);
     }
 
     #[tokio::test]
@@ -740,6 +830,7 @@ mod tests {
                 },
                 TeeSheetQuery {
                     date,
+                    to: None,
                     golf_course_id: None,
                 },
             )

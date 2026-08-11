@@ -9,7 +9,7 @@
 
 use derive_getters::Getters;
 
-use super::CourseError;
+use super::{CourseError, CustomerId};
 
 /// The key CourseBoard owns inside a reservation's custom fields.
 ///
@@ -38,6 +38,14 @@ pub struct PartyPlayer {
     tag: Option<String>,
     #[getter(skip)]
     member_number: Option<String>,
+    /// Who this player is in the customer ledger, once the desk has said so.
+    ///
+    /// Optional on purpose. A booking taken by phone often has four names and
+    /// no identities behind them, and requiring the link would stop the desk
+    /// from writing the booking down at all. An unlinked player is a player
+    /// whose ledger entry has not been decided yet, not an error.
+    #[getter(skip)]
+    customer_id: Option<CustomerId>,
 }
 
 impl PartyPlayer {
@@ -45,12 +53,14 @@ impl PartyPlayer {
         name: impl Into<String>,
         tag: Option<String>,
         member_number: Option<String>,
+        customer_id: Option<CustomerId>,
     ) -> Result<Self, CourseError> {
         let name = normalize_required(name.into(), "player name")?;
         Ok(Self {
             name,
             tag: normalize_optional(tag)?,
             member_number: normalize_optional(member_number)?,
+            customer_id,
         })
     }
 
@@ -64,6 +74,15 @@ impl PartyPlayer {
 
     pub fn member_number(&self) -> Option<&str> {
         self.member_number.as_deref()
+    }
+
+    pub fn customer_id(&self) -> Option<&CustomerId> {
+        self.customer_id.as_ref()
+    }
+
+    /// Whether this player has been identified in the ledger.
+    pub fn is_linked(&self) -> bool {
+        self.customer_id.is_some()
     }
 }
 
@@ -144,6 +163,18 @@ impl PartyDetails {
     pub fn named_player_count(&self) -> i32 {
         self.players.len() as i32
     }
+
+    /// Players already identified in the customer ledger.
+    ///
+    /// Reported separately from the headcount so the desk can see how much of
+    /// the group is still anonymous rather than assuming a named group is a
+    /// recorded one.
+    pub fn linked_player_count(&self) -> i32 {
+        self.players
+            .iter()
+            .filter(|player| player.is_linked())
+            .count() as i32
+    }
 }
 
 fn normalize_required(value: String, label: &'static str) -> Result<String, CourseError> {
@@ -186,7 +217,7 @@ mod tests {
     use super::*;
 
     fn player(name: &str) -> PartyPlayer {
-        PartyPlayer::try_new(name, None, None).unwrap()
+        PartyPlayer::try_new(name, None, None, None).unwrap()
     }
 
     #[test]
@@ -208,13 +239,31 @@ mod tests {
 
     #[test]
     fn a_player_must_actually_be_named() {
-        assert!(PartyPlayer::try_new("  ", None, None).is_err());
+        assert!(PartyPlayer::try_new("  ", None, None, None).is_err());
     }
 
     #[test]
     fn player_tags_survive_unknown_values_because_every_course_invents_its_own() {
-        let player = PartyPlayer::try_new("増田 公陽", Some(" 共通 ".into()), None).unwrap();
+        let player = PartyPlayer::try_new("増田 公陽", Some(" 共通 ".into()), None, None).unwrap();
         assert_eq!(player.tag(), Some("共通"));
+    }
+
+    #[test]
+    fn a_player_taken_by_phone_is_recorded_without_a_ledger_identity() {
+        // The desk has a name and nothing else. That still has to save.
+        let player = PartyPlayer::try_new("増田 公陽", None, None, None).unwrap();
+        assert!(!player.is_linked());
+        assert_eq!(player.customer_id(), None);
+    }
+
+    #[test]
+    fn the_desk_can_see_how_much_of_a_group_is_still_anonymous() {
+        let linked =
+            PartyPlayer::try_new("本田 康彦", None, None, Some(CustomerId::new("cus_1"))).unwrap();
+        let details =
+            PartyDetails::try_new(None, None, None, vec![linked, player("同伴者")]).unwrap();
+        assert_eq!(details.named_player_count(), 2);
+        assert_eq!(details.linked_player_count(), 1);
     }
 
     #[test]

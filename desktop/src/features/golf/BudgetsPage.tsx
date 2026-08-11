@@ -17,6 +17,7 @@ import {
   useState,
 } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import {
   currentYearMonth,
   downloadText,
@@ -62,11 +63,10 @@ type DailyBudgetAchievement = {
   date: string
   targetRevenue: number
   actualRevenue: number
-  revenueAchievementRate: number | null
   targetAverageSpend: number
-  actualAverageSpend: number | null
+  actualAverageSpend?: number | null
   targetCaddyAttachedRatio: number
-  actualCaddyAttachedRatio: number | null
+  actualCaddyAttachedRatio?: number | null
   reservationCount: number
   playerCount: number
 }
@@ -106,8 +106,8 @@ const CSV_COLUMNS: CsvColumn[] = [
   { name: 'target_caddy_attached_ratio', labelKey: 'targetCaddyAttachedRatio', example: '0.70' },
 ]
 
-function monthRange(yearMonth: string) {
-  const range = yearMonthRange(yearMonth) ?? yearMonthRange(currentYearMonth())
+function monthRange(yearMonth: string, fallbackYearMonth: string) {
+  const range = yearMonthRange(yearMonth) ?? yearMonthRange(fallbackYearMonth)
   return range
     ? { from: range.from, to: range.to }
     : { from: '', to: '' }
@@ -127,8 +127,19 @@ function rateBadgeVariant(rate: number | null) {
   return 'destructive' as const
 }
 
-function rateLabel(rate: number | null) {
-  return rate === null ? '—' : `${Math.round(rate * 100)}%`
+function optionalNumberLabel(
+  value: number | null | undefined,
+  format: (value: number) => string,
+) {
+  return value == null || !Number.isFinite(value) ? '—' : format(value)
+}
+
+function rateLabel(rate: number | null | undefined) {
+  return optionalNumberLabel(rate, value => `${Math.round(value * 100)}%`)
+}
+
+function revenueAchievementRate(actualRevenue: number, targetRevenue: number) {
+  return targetRevenue > 0 ? actualRevenue / targetRevenue : null
 }
 
 function normalizeCsvHeader(contents: string) {
@@ -141,11 +152,13 @@ function normalizeCsvHeader(contents: string) {
 
 export function BudgetsPage() {
   const { t } = useTranslation(['budgets', 'common'])
+  const timezone = useTenantTimezone()
+  const tenantYearMonth = currentYearMonth(timezone)
   const {
     value: yearMonth,
     error: yearMonthError,
     setCandidate: setYearMonth,
-  } = useYearMonthValue(currentYearMonth())
+  } = useYearMonthValue(tenantYearMonth)
   const [courseFilter, setCourseFilter] = useState('all')
   const [courses, setCourses] = useState<GolfCourse[]>([])
   const [budgets, setBudgets] = useState<DailyBudget[]>([])
@@ -155,7 +168,7 @@ export function BudgetsPage() {
   const [loadError, setLoadError] = useState<unknown>(null)
   const [draft, setDraft] = useState<BudgetDraft>(() => ({
     golfCourseId: '',
-    date: `${currentYearMonth()}-01`,
+    date: `${tenantYearMonth}-01`,
     targetRevenue: '',
     targetAverageSpend: '',
     targetCaddyAttachedRatio: '',
@@ -168,7 +181,10 @@ export function BudgetsPage() {
   const [importing, setImporting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const range = useMemo(() => monthRange(yearMonth), [yearMonth])
+  const range = useMemo(
+    () => monthRange(yearMonth, tenantYearMonth),
+    [tenantYearMonth, yearMonth],
+  )
   const courseNames = useMemo(
     () => new Map(courses.map(course => [course.id, course.name] as const)),
     [courses],
@@ -249,7 +265,7 @@ export function BudgetsPage() {
       actual,
       reservations,
       players,
-      rate: target > 0 ? actual / target : null,
+      rate: revenueAchievementRate(actual, target),
     }
   }, [achievements])
 
@@ -464,11 +480,17 @@ export function BudgetsPage() {
                       key: 'rate',
                       header: t('budgets:progress.table.rate'),
                       align: 'right',
-                      cell: row => (
-                        <Badge variant={rateBadgeVariant(row.revenueAchievementRate)}>
-                          {rateLabel(row.revenueAchievementRate)}
-                        </Badge>
-                      ),
+                      cell: row => {
+                        const rate = revenueAchievementRate(
+                          row.actualRevenue,
+                          row.targetRevenue,
+                        )
+                        return (
+                          <Badge variant={rateBadgeVariant(rate)}>
+                            {rateLabel(rate)}
+                          </Badge>
+                        )
+                      },
                     },
                     {
                       key: 'average',
@@ -476,7 +498,7 @@ export function BudgetsPage() {
                       align: 'right',
                       cell: row => (
                         <span>
-                          {row.actualAverageSpend === null ? '—' : yen(row.actualAverageSpend)}
+                          {optionalNumberLabel(row.actualAverageSpend, value => yen(value))}
                           {' / '}{yen(row.targetAverageSpend)}
                         </span>
                       ),
@@ -487,9 +509,10 @@ export function BudgetsPage() {
                       align: 'right',
                       cell: row => (
                         <span>
-                          {row.actualCaddyAttachedRatio === null
-                            ? '—'
-                            : `${Math.round(row.actualCaddyAttachedRatio * 100)}%`}
+                          {optionalNumberLabel(
+                            row.actualCaddyAttachedRatio,
+                            value => `${Math.round(value * 100)}%`,
+                          )}
                           {' / '}{Math.round(row.targetCaddyAttachedRatio * 100)}%
                         </span>
                       ),

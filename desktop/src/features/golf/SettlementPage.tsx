@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import {
   currentYearMonth,
   downloadText,
@@ -183,11 +184,12 @@ function paymentStatusLabel(status: string) {
 
 export function SettlementPage() {
   const { t } = useTranslation(['settlement', 'common'])
+  const timezone = useTenantTimezone()
   const {
     value: yearMonth,
     error: yearMonthError,
     setCandidate: setYearMonth,
-  } = useYearMonthValue(currentYearMonth())
+  } = useYearMonthValue(currentYearMonth(timezone))
   const [report, setReport] = useState<GolfMonthlySettlementReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)

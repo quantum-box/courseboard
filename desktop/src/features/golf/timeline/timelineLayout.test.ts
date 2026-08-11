@@ -15,6 +15,7 @@ import {
   nowLinePercent,
   parseClockMinutes,
   parseJstDateParts,
+  parseTenantDateParts,
   parseLocalDateParts,
   teeTickGeometry,
   summarizeDay,
@@ -67,6 +68,13 @@ describe('timelineLayout', () => {
     })
     expect(parseJstDateParts('2026-07-18T07:00:00+09:00')).toEqual({
       date: '2026-07-18',
+      minutes: 7 * 60,
+    })
+  })
+
+  it('maps assignments through the tenant IANA timezone', () => {
+    expect(parseTenantDateParts('2026-07-01T05:00:00Z', 'Europe/Berlin')).toEqual({
+      date: '2026-07-01',
       minutes: 7 * 60,
     })
   })

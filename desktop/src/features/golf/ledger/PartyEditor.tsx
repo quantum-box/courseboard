@@ -7,6 +7,7 @@ import { courseboardApiJson } from '../../../api'
 import { Field, FormGrid, Notice } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import { showToast } from '../../../lib/toast'
+import { CustomerPicker } from '../customers/CustomerPicker'
 import type { TeeReservation } from '../timeline/models'
 import { plansForCourse, type BookablePlan } from './bookablePlan'
 import { DiscardGuard } from './DiscardGuard'
@@ -16,7 +17,13 @@ import { PlanPicker } from './PlanPicker'
 import { PlayerTagInput } from './PlayerTagInput'
 
 /** A row being edited. Blank rows are dropped on save rather than refused. */
-type DraftPlayer = { name: string; tag: string; memberNumber: string }
+type DraftPlayer = {
+  name: string
+  tag: string
+  memberNumber: string
+  /** Ledger identity already on the booking, or one the desk just picked. */
+  customerId: string | null
+}
 
 function toDraft(party: PartyDetails | null | undefined, partySize: number): DraftPlayer[] {
   const players = party?.players ?? []
@@ -29,6 +36,7 @@ function toDraft(party: PartyDetails | null | undefined, partySize: number): Dra
     name: players[index]?.name ?? '',
     tag: players[index]?.tag ?? '',
     memberNumber: players[index]?.memberNumber ?? '',
+    customerId: players[index]?.customerId ?? null,
   }))
 }
 
@@ -39,6 +47,7 @@ function toPlayers(draft: DraftPlayer[]): PartyPlayer[] {
       name: row.name.trim(),
       ...(row.tag.trim() ? { tag: row.tag.trim() } : {}),
       ...(row.memberNumber.trim() ? { memberNumber: row.memberNumber.trim() } : {}),
+      ...(row.customerId ? { customerId: row.customerId } : {}),
     }))
 }
 
@@ -224,13 +233,19 @@ export function PartyEditor({
           {players.map((player, index) => (
             <div className="ledger-party-player" key={index}>
               <Field className="ledger-party-field-name" label={t('ledger:party.playerName')}>
-                <Input
-                  value={player.name}
+                <CustomerPicker
+                  name={player.name}
+                  customerId={player.customerId}
                   placeholder={t('ledger:party.playerNamePlaceholder')}
-                  onChange={event =>
+                  onNameChange={value =>
+                    setPlayers(rows =>
+                      rows.map((row, at) => (at === index ? { ...row, name: value } : row)),
+                    )
+                  }
+                  onSelect={customer =>
                     setPlayers(rows =>
                       rows.map((row, at) =>
-                        at === index ? { ...row, name: event.target.value } : row,
+                        at === index ? { ...row, customerId: customer?.id ?? null } : row,
                       ),
                     )
                   }
@@ -279,7 +294,7 @@ export function PartyEditor({
             size="sm"
             disabled={players.length >= MAX_PARTY_PLAYERS}
             onClick={() =>
-              setPlayers(rows => [...rows, { name: '', tag: '', memberNumber: '' }])
+              setPlayers(rows => [...rows, { name: '', tag: '', memberNumber: '', customerId: null }])
             }
           >
             <Plus />

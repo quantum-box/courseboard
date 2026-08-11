@@ -6,7 +6,7 @@
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use derive_getters::Getters;
 
-use super::{CourseId, PartyDetails, ReservationId, ReservationServiceId, ResourceId};
+use super::{CourseId, CustomerId, PartyDetails, ReservationId, ReservationServiceId, ResourceId};
 
 /// Party reservation that may appear on a tee sheet.
 #[derive(Debug, Clone, PartialEq, Eq, Getters)]
@@ -21,6 +21,13 @@ pub struct Reservation {
     resource_id: Option<ResourceId>,
     #[getter(skip)]
     customer_name: Option<String>,
+    /// The booking's customer in Field's ledger, when one has been identified.
+    ///
+    /// `customer_name` is what the desk typed; this is who that turned out to
+    /// be. The name stays even once the link exists, because the booking should
+    /// keep reading the way it was taken if the ledger entry is later renamed.
+    #[getter(skip)]
+    customer_id: Option<CustomerId>,
     #[getter(skip)]
     status: String,
     #[getter(copy)]
@@ -66,12 +73,18 @@ impl Reservation {
             quantity: quantity.max(1),
             golf_course_id: CourseId::from_optional(golf_course_id),
             party: PartyDetails::default(),
+            customer_id: None,
             notes,
         }
     }
 
     pub fn with_party(mut self, party: PartyDetails) -> Self {
         self.party = party;
+        self
+    }
+
+    pub fn with_customer_id(mut self, customer_id: Option<CustomerId>) -> Self {
+        self.customer_id = customer_id;
         self
     }
 
@@ -97,6 +110,10 @@ impl Reservation {
 
     pub fn customer_name(&self) -> Option<&str> {
         self.customer_name.as_deref()
+    }
+
+    pub fn customer_id(&self) -> Option<&CustomerId> {
+        self.customer_id.as_ref()
     }
 
     pub fn status(&self) -> &str {
@@ -174,8 +191,15 @@ pub struct NewReservation {
     pub reservation_resource_id: Option<ResourceId>,
     pub starts_at: DateTime<Utc>,
     pub ends_at: DateTime<Utc>,
+    /// Tenant timezone snapshot supplied to Field for policy evaluation and
+    /// retained on the reservation.
+    pub timezone: String,
     pub quantity: i32,
     pub customer_name: String,
+    /// The ledger entry the desk picked for the person booking, if they picked
+    /// one. Absent means the booking is written down under a name only, which
+    /// is normal for a call that came in without a name the desk recognised.
+    pub customer_id: Option<CustomerId>,
     pub golf_course_id: CourseId,
     pub party: PartyDetails,
     /// Explicit per-booking payment policy when the booking channel owns it.

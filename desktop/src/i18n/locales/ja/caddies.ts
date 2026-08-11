@@ -17,6 +17,11 @@ export const caddies = {
       description: 'ランク別の単価から1か月ぶんの支給額を計算し、出勤と照らし合わせて給与のCSVに渡します。',
     },
   },
+  tabs: {
+    label: '表示の切り替え',
+    list: '一覧',
+    attendance: '出勤',
+  },
   add: 'キャディを追加',
   added: {
     title: 'キャディを追加しました',
@@ -517,9 +522,33 @@ export const caddies = {
   error: {
     generic: '操作を完了できませんでした',
   },
+  /** The few figures the name preview shows on hover. */
+  preview: {
+    rank: '{{rank}}ランク',
+    perDay: '1日 {{n}}Rまで',
+    ratings: '評価 {{value}}（{{n}}件）',
+    ratingsNone: '評価の記録なし',
+    noStaffLink: 'スタッフ未紐付け',
+    loading: '読み込んでいます',
+    failed: '情報を読み込めませんでした',
+    open: '押すとこの人の画面へ',
+  },
+  /** Assignments left on a group that is no longer on the tee sheet. */
+  orphaned: {
+    title: '取り消された予約に、担当が{{n}}件残っています',
+    body: 'この組はもう予約表にありません。担当を取り消すまで、そのキャディはこの日の担当数に数えられ、給与の集計にも入ります。',
+    badge: '予約が取り消されています',
+  },
   unassigned: {
     courseFilter: 'コースで絞る',
+    horizonLabel: '何日先まで見るか',
+    horizon: {
+      '1': 'この日',
+      '7': '7日',
+      '14': '14日',
+    },
     allCourses: 'すべてのコース',
+    dayCount: '{{n}}組',
     title: 'キャディが決まっていない組',
     description: 'キャディ付きで受けた予約のうち、まだ担当がいない組です。自動配置で埋まらなかった分はここから決めます。',
     loading: '予約を読み込んでいます',
@@ -531,7 +560,7 @@ export const caddies = {
     named: '{{name}} を担当にしました',
     failed: '担当を決められませんでした',
     sheetTitle: '担当を決める',
-    sheetDescription: '{{time}} · {{course}}',
+    sheetDescription: '{{date}} {{time}} · {{course}}',
     empty: {
       title: 'すべての組に担当がいます',
       description: 'この日のキャディ付きの予約は、すべて担当が決まっています。',

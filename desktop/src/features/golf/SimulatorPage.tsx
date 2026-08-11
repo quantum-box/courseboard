@@ -3,6 +3,8 @@ import { Calculator, LineChart } from 'lucide-react'
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson, courseboardApiText, yen } from '../../api'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
+import { today } from '../../lib/clock'
 import {
   PREFECTURES,
   buildGolfExtensionConfig,
@@ -69,17 +71,11 @@ type RangeSimulation = {
 
 const counter = new Intl.NumberFormat('ja-JP')
 
-function ymd(value: Date) {
-  const month = String(value.getMonth() + 1).padStart(2, '0')
-  const day = String(value.getDate()).padStart(2, '0')
-  return `${value.getFullYear()}-${month}-${day}`
-}
-
-function defaultDates() {
-  const today = new Date()
-  const nextMonth = new Date(today)
-  nextMonth.setMonth(nextMonth.getMonth() + 1)
-  return { dateFrom: ymd(today), dateTo: ymd(nextMonth) }
+function defaultDates(timezone: string) {
+  const dateFrom = today(timezone)
+  const [year, month, day] = dateFrom.split('-').map(Number)
+  const dateTo = new Date(Date.UTC(year!, month!, day!)).toISOString().slice(0, 10)
+  return { dateFrom, dateTo }
 }
 
 function numberValue(value: FormDataEntryValue | null) {
@@ -194,7 +190,8 @@ function TaxSettingsPanel() {
 
 export function SimulatorPage() {
   const { t } = useTranslation(['simulator', 'common'])
-  const dates = useMemo(defaultDates, [])
+  const timezone = useTenantTimezone()
+  const dates = useMemo(() => defaultDates(timezone), [timezone])
 
   const [quote, setQuote] = useState<FeeQuote | null>(null)
   const [quoteError, setQuoteError] = useState<unknown>(null)

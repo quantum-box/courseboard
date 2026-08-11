@@ -11,9 +11,9 @@
 use std::sync::Arc;
 
 use crate::course::domain::{
-    course_day_bounds, summarize_payroll, widen_for_utc_date_filter, AttendanceDay,
-    CaddieAssignmentQuery, CourseError, GatewayCredentials, GolfOpsGateway, PayrollCandidate,
-    PayrollPeriod, PayrollSummary,
+    parse_tenant_timezone, summarize_payroll_in_timezone, tenant_day_bounds,
+    widen_for_utc_date_filter, AttendanceDay, CaddieAssignmentQuery, CourseError,
+    GatewayCredentials, GolfOpsGateway, PayrollCandidate, PayrollPeriod, PayrollSummary,
 };
 
 pub struct GetPayrollSummaryUseCase {
@@ -29,13 +29,14 @@ impl GetPayrollSummaryUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
         year_month: &str,
+        timezone: &str,
     ) -> Result<PayrollSummary, CourseError> {
         let period = PayrollPeriod::try_new(year_month)?;
+        let timezone_id = parse_tenant_timezone(timezone)?;
         let (from, to) = (period.start_date(), period.end_date());
 
-        // Field filters on the UTC date, and the course clock runs ahead of it:
-        // a 07:00 round on the 1st is 22:00 on the last of the month before.
-        // Fetched wide, then cut back to the month's own days below.
+        // The legacy assignment list filters on the UTC date. Fetch wide, then
+        // cut back to the tenant month's exact UTC bounds below.
         let window = widen_for_utc_date_filter(from, to);
         let (roster, assignments, attendance, worked, rank_fees) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
@@ -75,7 +76,7 @@ impl GetPayrollSummaryUseCase {
             })
             .collect();
 
-        let (period_start, period_end) = course_day_bounds(from, to);
+        let (period_start, period_end) = tenant_day_bounds(from, to, timezone)?;
         let assignments: Vec<_> = assignments
             .into_iter()
             .filter(|assignment| {
@@ -86,7 +87,14 @@ impl GetPayrollSummaryUseCase {
 
         Ok(PayrollSummary::new(
             period,
-            summarize_payroll(&candidates, &assignments, &days, &worked, &rank_fees),
+            summarize_payroll_in_timezone(
+                &candidates,
+                &assignments,
+                &days,
+                &worked,
+                &rank_fees,
+                timezone_id,
+            ),
         ))
     }
 }

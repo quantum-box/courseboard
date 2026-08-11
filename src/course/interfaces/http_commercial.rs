@@ -365,7 +365,8 @@ pub async fn list_budget_achievements(
     Query(query): Query<AchievementQueryParams>,
 ) -> Result<Json<ItemsResponse<BudgetAchievementDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = ListBudgetAchievementsUseCase::new(commercial_gateway(&state));
+    let use_case =
+        ListBudgetAchievementsUseCase::new(catalog_gateway(&state), commercial_gateway(&state));
     let items = use_case
         .execute(credentials, query.from, query.to)
         .await
@@ -597,7 +598,8 @@ pub async fn export_monthly_settlement_csv(
     Query(query): Query<YearMonthQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = ExportMonthlySettlementCsvUseCase::new(commercial_gateway(&state));
+    let use_case =
+        ExportMonthlySettlementCsvUseCase::new(catalog_gateway(&state), commercial_gateway(&state));
     let csv = use_case
         .execute(credentials, &query.year_month)
         .await

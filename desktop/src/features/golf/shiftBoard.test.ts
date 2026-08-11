@@ -4,6 +4,7 @@ import { jaPlain } from '../../i18n/locales/ja-plain'
 import {
   buildShiftRow,
   jstDateOf,
+  tenantDateOf,
   monthDates,
   STREAK_WARNING_DAYS,
   type ConfirmedShift,
@@ -109,6 +110,10 @@ describe('buildShiftRow', () => {
       { caddieProfileId: CADDIE, scheduledAt: '2026-06-30T22:00:00Z', status: 'assigned' },
     ])
     expect(row.cells[0]).toMatchObject({ date: '2026-07-01', kind: 'assigned' })
+  })
+
+  it('files assignments under the configured tenant date', () => {
+    expect(tenantDateOf('2026-07-01T22:30:00Z', 'Europe/Berlin')).toBe('2026-07-02')
   })
 
   it('detects streaks that cross the month boundary', () => {

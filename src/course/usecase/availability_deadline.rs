@@ -304,6 +304,7 @@ mod tests {
             &self,
             _credentials: GatewayCredentials<'_>,
             date: Option<NaiveDate>,
+            _timezone: &str,
         ) -> Result<AttendanceSnapshotReport, CourseError> {
             Ok(AttendanceSnapshotReport::new(
                 date.unwrap_or_else(|| NaiveDate::from_ymd_opt(2026, 8, 1).unwrap()),

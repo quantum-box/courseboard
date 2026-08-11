@@ -1,13 +1,12 @@
 //! Tee sheet day board composed from reservations + golf catalog.
 
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveTime, TimeZone, Utc};
+use chrono::NaiveDate;
 use derive_getters::Getters;
 
 use super::party::PartyDetails;
 use super::product::PlayType;
-use super::{CourseError, CourseId, ReservationId};
+use super::{format_tenant_wall_clock, CourseError, CourseId, ReservationId};
 
-const JST_OFFSET_SECS: i32 = 9 * 3600;
 pub const DEFAULT_DAY_START_HOUR: u32 = 6;
 pub const DEFAULT_DAY_END_HOUR: u32 = 18;
 
@@ -252,17 +251,27 @@ impl TeeSheet {
         self
     }
 
+    /// Append a later day's rows, keeping this sheet's own day markers.
+    ///
+    /// Used when the caller asked for a range: the answer stays one board, and
+    /// its `date`, `day_start` and `day_end` go on describing the first day.
+    /// Rows carry their own start, so a reader of several days is not misled.
+    pub fn extended_with(mut self, later: Self) -> Self {
+        self.items.extend(later.items);
+        self
+    }
+
     pub fn unavailable(&self) -> &[String] {
         &self.unavailable
     }
 
     pub fn empty_day(date: NaiveDate, timezone: impl Into<String>) -> Result<Self, CourseError> {
-        let jst = jst_offset()?;
+        let timezone = timezone.into();
         Ok(Self::new(
             date,
-            timezone,
-            format_jst_wall_clock(date, DEFAULT_DAY_START_HOUR, 0, jst),
-            format_jst_wall_clock(date, DEFAULT_DAY_END_HOUR, 0, jst),
+            &timezone,
+            format_tenant_wall_clock(date, DEFAULT_DAY_START_HOUR, 0, &timezone)?,
+            format_tenant_wall_clock(date, DEFAULT_DAY_END_HOUR, 0, &timezone)?,
             Vec::new(),
         ))
     }
@@ -288,69 +297,16 @@ impl TeeSheet {
     }
 }
 
-pub fn jst_offset() -> Result<FixedOffset, CourseError> {
-    FixedOffset::east_opt(JST_OFFSET_SECS)
-        .ok_or_else(|| CourseError::Provider("invalid JST offset".into()))
-}
-
-/// A span of operating days as the instants that bound it.
-///
-/// `from` opens at local midnight and `to` closes at local midnight the next
-/// day, so a whole day is `[start, end)`.
-pub fn course_day_bounds(from: NaiveDate, to: NaiveDate) -> (DateTime<Utc>, DateTime<Utc>) {
-    let offset = chrono::Duration::seconds(JST_OFFSET_SECS as i64);
-    let open = from.and_time(NaiveTime::MIN).and_utc() - offset;
-    let close = to.and_time(NaiveTime::MIN).and_utc() - offset + chrono::Duration::days(1);
-    (open, close)
-}
-
 /// Widen a date range before handing it to Field.
 ///
-/// Field filters timestamped rows on their **UTC** date, and the course clock
-/// runs nine hours ahead: 07:00 on the 8th is 22:00 on the 7th in UTC. Asking
-/// for one local date therefore drops that day's whole morning — the busiest
-/// part of a golf day — so callers ask wide and narrow with
-/// [`course_day_bounds`].
+/// Some legacy Field list contracts still filter timestamped rows on their
+/// **UTC** date. A tenant-local date can span two UTC dates, so callers ask one
+/// day wide on both sides and narrow with [`tenant_day_bounds`](super::tenant_day_bounds).
 pub fn widen_for_utc_date_filter(from: NaiveDate, to: NaiveDate) -> (NaiveDate, NaiveDate) {
     (
         from - chrono::Duration::days(1),
         to + chrono::Duration::days(1),
     )
-}
-
-pub fn format_datetime_with_offset(value: DateTime<chrono::Utc>, offset: FixedOffset) -> String {
-    value
-        .with_timezone(&offset)
-        .format("%Y-%m-%dT%H:%M:%S%:z")
-        .to_string()
-}
-
-pub fn format_jst_wall_clock(date: NaiveDate, hour: u32, minute: u32, jst: FixedOffset) -> String {
-    let naive = date.and_time(NaiveTime::from_hms_opt(hour, minute, 0).unwrap_or(NaiveTime::MIN));
-    jst.from_local_datetime(&naive)
-        .single()
-        .unwrap_or_else(|| jst.from_utc_datetime(&naive))
-        .format("%Y-%m-%dT%H:%M:%S%:z")
-        .to_string()
-}
-
-/// Parse `HH:MM` on `date` as the instant that wall clock names in the
-/// course's own (JST) timezone — the inverse of [`format_jst_wall_clock`].
-pub fn parse_jst_tee_time(date: NaiveDate, tee_time: &str) -> Result<DateTime<Utc>, CourseError> {
-    let bad_format = || CourseError::BadRequest("tee time must look like HH:MM");
-    let (hour_str, minute_str) = tee_time.split_once(':').ok_or_else(bad_format)?;
-    if hour_str.len() != 2 || minute_str.len() != 2 {
-        return Err(bad_format());
-    }
-    let hour: u32 = hour_str.parse().map_err(|_| bad_format())?;
-    let minute: u32 = minute_str.parse().map_err(|_| bad_format())?;
-    let naive = date.and_time(NaiveTime::from_hms_opt(hour, minute, 0).ok_or_else(bad_format)?);
-    let jst = jst_offset()?;
-    Ok(jst
-        .from_local_datetime(&naive)
-        .single()
-        .unwrap_or_else(|| jst.from_utc_datetime(&naive))
-        .with_timezone(&Utc))
 }
 
 #[cfg(test)]
@@ -360,7 +316,7 @@ mod tests {
     #[test]
     fn a_course_day_is_bounded_by_local_midnight_not_utc_midnight() {
         let date = NaiveDate::from_ymd_opt(2026, 8, 8).unwrap();
-        let (open, close) = course_day_bounds(date, date);
+        let (open, close) = super::super::tenant_day_bounds(date, date, "Asia/Tokyo").unwrap();
 
         assert_eq!(open.to_rfc3339(), "2026-08-07T15:00:00+00:00");
         assert_eq!(close.to_rfc3339(), "2026-08-08T15:00:00+00:00");
@@ -368,10 +324,12 @@ mod tests {
 
     #[test]
     fn a_month_runs_from_the_first_local_morning_to_the_last_local_night() {
-        let (open, close) = course_day_bounds(
+        let (open, close) = super::super::tenant_day_bounds(
             NaiveDate::from_ymd_opt(2026, 8, 1).unwrap(),
             NaiveDate::from_ymd_opt(2026, 8, 31).unwrap(),
-        );
+            "Asia/Tokyo",
+        )
+        .unwrap();
 
         assert_eq!(open.to_rfc3339(), "2026-07-31T15:00:00+00:00");
         assert_eq!(close.to_rfc3339(), "2026-08-31T15:00:00+00:00");
@@ -379,8 +337,8 @@ mod tests {
 
     #[test]
     fn the_upstream_window_reaches_a_day_past_each_end() {
-        // Field's filter reads the UTC date, so the local day's morning sits on
-        // the date before. Asking narrow drops it entirely.
+        // A tenant day can start on the UTC date before or finish on the UTC
+        // date after. Asking narrow can therefore drop part of it.
         let (from, to) = widen_for_utc_date_filter(
             NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),
             NaiveDate::from_ymd_opt(2026, 8, 8).unwrap(),

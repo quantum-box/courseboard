@@ -28,6 +28,12 @@ export const policy = {
     bookingHorizon: '何日先まで予約を受けるか',
     bookingHorizonHint: '今日から数えた日数です。この範囲のスタート枠だけが作られ、予約を受けられます。',
     bookingHorizonThrough: 'いまは {{date}} まで予約を受けられます。変えると全コースの枠を作り直します。',
+    bookingHorizonMode: 'どこまで予約を受けるか',
+    bookingHorizonModeDays: '今日から日数で決める',
+    bookingHorizonModeThrough: '日付で決める（シーズンの最終日など）',
+    bookingHorizonThroughLabel: '予約を受ける最終日',
+    bookingHorizonThroughHint: 'この日までのスタート枠だけが作られます。日にちが経っても最終日は動きません。今日から399日先まで指定できます。',
+    bookingHorizonClosed: 'この最終日はもう過ぎています。新しいスタート枠は作られません。次のシーズンを受けるときは日付を先に延ばしてください。',
   },
   cartOption: {
     optional: '使っても使わなくてもよい',
@@ -79,6 +85,7 @@ export const policy = {
     guestDeposit: 'ゲストの前払い割合は 0〜100% で入力してください。',
     cutoff: '予約の締め切りは 0 以上の数で入力してください。',
     bookingHorizon: '何日先まで予約を受けるかは 1〜399 日で入力してください。',
+    bookingHorizonThrough: '予約を受ける最終日は、今日から399日先までの日付で入れてください。',
     spendThreshold: '1人あたりの下限金額は 0 円以上の数で入力してください。',
   },
 } as const

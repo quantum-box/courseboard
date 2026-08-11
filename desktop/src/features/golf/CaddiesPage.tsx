@@ -46,8 +46,9 @@ import {
   fieldApiJson,
   fieldApiText,
   today,
-  COURSE_TIME_ZONE,
+  currentYearMonth,
 } from '../../api'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import {
@@ -80,13 +81,25 @@ import { useResource } from '../../hooks/useResource'
 import { navigate, useNavigationGuard } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
 import { Sheet } from '../../components/Sheet'
-import { UnassignedRoundsPanel } from './UnassignedRounds'
+import { CaddieLink } from './CaddieLink'
+import {
+  employmentLabel,
+  employmentStatusCode,
+  isEmploymentActive,
+  skillLabel,
+} from './caddieLabels'
+import {
+  assignmentsOnCancelledRounds,
+  horizonEnd,
+  UnassignedRoundsPanel,
+  type Horizon,
+  type TeeSheetRow,
+} from './UnassignedRounds'
 import { showToast } from '../../lib/toast'
 import {
   caddieCreatePayload,
   exactStaffMatch,
   resolveStaffId,
-  skillLabelKey,
   staffSuggestions,
 } from './caddieRegistration'
 import {
@@ -343,13 +356,10 @@ function punchClock(staffId: string, direction: 'in' | 'out', businessDate: stri
   )
 }
 
-/** Re-exported so the call sites below read the same as the rest of the app. */
-const todayJst = today
-
-function previousYearMonth() {
-  const now = new Date()
-  const previous = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  return `${previous.getFullYear()}-${String(previous.getMonth() + 1).padStart(2, '0')}`
+function previousYearMonth(timezone: string) {
+  const [year, month] = currentYearMonth(timezone).split('-').map(Number)
+  const previous = new Date(Date.UTC(year!, month! - 2, 1))
+  return previous.toISOString().slice(0, 7)
 }
 
 function formatMoney(amount: number, currency = 'JPY') {
@@ -360,11 +370,11 @@ function formatMoney(amount: number, currency = 'JPY') {
   }).format(amount)
 }
 
-function formatDateTime(value: string) {
+function formatDateTime(value: string, timezone: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat('ja-JP', {
-    timeZone: COURSE_TIME_ZONE,
+    timeZone: timezone,
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -372,11 +382,11 @@ function formatDateTime(value: string) {
   }).format(date)
 }
 
-function dateKey(value: string) {
+function dateKey(value: string, timezone: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value.slice(0, 10)
   return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: COURSE_TIME_ZONE,
+    timeZone: timezone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
@@ -401,9 +411,6 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? resourceErrorText(error) : i18next.t('caddies:error.generic')
 }
 
-/** The API also returns the legacy `junior` code for rookies. */
-const EMPLOYMENT_STATUSES = ['active', 'inactive', 'suspended'] as const
-const ACTIVE_EMPLOYMENT = 'active'
 
 /** Shared by the create and the edit form so both offer the same choices. */
 const RANK_OPTIONS: { rank: Rank; rounds: number }[] = [
@@ -426,34 +433,6 @@ const ASSIGNMENT_STATUSES = [
   'absent',
   'no_show',
 ] as const
-
-function skillLabel(skill: string) {
-  const key = skillLabelKey(skill)
-  if (!key) return skill
-  return i18next.t(`caddies:skill.${key}` as 'caddies:skill.rookie')
-}
-
-/**
- * The API is not consistent about the case of its status codes and the server
- * compares them case-insensitively, so `"Active"` has to mean the same thing as
- * `"active"` here too — otherwise a caddie is wrongly blocked from clocking in
- * and the raw code leaks into the copy. Codes we do not know keep their
- * original spelling so nothing is silently rewritten.
- */
-function employmentStatusCode(status: string) {
-  const folded = status.trim().toLowerCase()
-  return (EMPLOYMENT_STATUSES as readonly string[]).includes(folded) ? folded : status.trim()
-}
-
-function isEmploymentActive(status: string) {
-  return employmentStatusCode(status) === ACTIVE_EMPLOYMENT
-}
-
-function employmentLabel(status: string) {
-  const code = employmentStatusCode(status)
-  if (!(EMPLOYMENT_STATUSES as readonly string[]).includes(code)) return status
-  return i18next.t(`caddies:employment.${code}` as 'caddies:employment.active')
-}
 
 /** The API returns raw role codes; anything unexpected is shown as-is. */
 function roleLabel(role: string) {
@@ -599,8 +578,9 @@ export function CaddiesPage({
   initialProfileId?: string
 } = {}) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const [view, setView] = useState<View>(initialView)
-  const [operationDate, setOperationDate] = useState(todayJst)
+  const [operationDate, setOperationDate] = useState(() => today(timezone))
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(initialProfileId ?? null)
   const [createOpen, setCreateOpen] = useState(false)
 
@@ -615,7 +595,7 @@ export function CaddiesPage({
   )
   const assignmentMonth = view === 'dispatch'
     ? operationDate.slice(0, 7)
-    : todayJst().slice(0, 7)
+    : today(timezone).slice(0, 7)
   const assignmentBounds = monthBounds(assignmentMonth)
   const assignmentsResource = useResource(
     () => courseboardApiJson<ListResponse<CaddieAssignment>>(
@@ -748,9 +728,23 @@ export function CaddiesPage({
   useRegisterPageReload(view === 'payroll' ? null : refreshCurrentView)
 
   const showingProfileDetail = view === 'roster' && Boolean(selectedProfileId)
+  // Attendance is a tab of the roster, not a separate destination, so the
+  // switcher shows whenever we're on either side of that split.
+  const showingRosterTabs = (view === 'roster' && !showingProfileDetail) || view === 'attendance'
 
   return (
     <div className="page-stack">
+      {showingRosterTabs ? (
+        <div className="grid w-fit grid-cols-2 gap-1 rounded-lg border border-border bg-surface p-1" role="tablist" aria-label={t('caddies:tabs.label')}>
+          <DetailTabButton active={view === 'roster'} onClick={() => navigate('golf/caddies')}>
+            <Users /> {t('caddies:tabs.list')}
+          </DetailTabButton>
+          <DetailTabButton active={view === 'attendance'} onClick={() => navigate('golf/caddies/attendance')}>
+            <Clock /> {t('caddies:tabs.attendance')}
+          </DetailTabButton>
+        </div>
+      ) : null}
+
       {view === 'roster' && !showingProfileDetail ? (
         <div className="page-toolbar">
           <Button type="button" variant="primary" onClick={() => setCreateOpen(true)}>
@@ -853,11 +847,46 @@ function DispatchView({
   setFlash: (flash: Flash) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const profiles = profilesResource.data?.items ?? []
   const assignments = assignmentsResource.data?.items ?? []
   const attendance = attendanceResource.data?.items ?? []
   const attendanceById = attendanceLookup(attendance)
-  const dayAssignments = assignments.filter(item => dateKey(item.scheduledAt) === date)
+  const dayAssignments = assignments.filter(
+    item => dateKey(item.scheduledAt, timezone) === date,
+  )
+  // Staffing is decided ahead of the day, so the groups still missing somebody
+  // are read a week or a fortnight at a time as well as one day.
+  const [horizon, setHorizon] = useState<Horizon>(1)
+  const lastDay = horizonEnd(date, horizon)
+  const horizonAssignments = useMemo(
+    () => assignments.filter(item => {
+      const day = dateKey(item.scheduledAt, timezone)
+      return day >= date && day <= lastDay
+    }),
+    [assignments, date, lastDay, timezone],
+  )
+  // The board answers two questions on this screen: which groups still need
+  // somebody, and which assignments are standing on a group that is no longer
+  // being played. One fetch serves both.
+  const teeSheet = useResource(
+    useCallback(
+      () =>
+        courseboardApiJson<ListResponse<TeeSheetRow>>(
+          `${COURSE_API}/tee-sheet?date=${encodeURIComponent(date)}&to=${encodeURIComponent(lastDay)}`,
+        ),
+      [date, lastDay],
+    ),
+    [date, lastDay],
+  )
+  const orphaned = useMemo(
+    () => assignmentsOnCancelledRounds(teeSheet.data?.items ?? [], dayAssignments),
+    [teeSheet.data, dayAssignments],
+  )
+  const orphanedIds = useMemo(
+    () => new Set(orphaned.map(assignment => assignment.id)),
+    [orphaned],
+  )
 
   // Deciding who walks each group is the whole job of this screen, so the day
   // picker, the groups still missing somebody and the automatic run come first
@@ -877,8 +906,10 @@ function DispatchView({
       </div>
 
       <UnassignedRoundsPanel
-        date={date}
-        assignments={dayAssignments}
+        sheet={teeSheet}
+        assignments={horizonAssignments}
+        horizon={horizon}
+        onHorizonChange={setHorizon}
         onChanged={onChanged}
       />
 
@@ -891,6 +922,11 @@ function DispatchView({
 
       <section className="app-section space-y-3">
         <h2 className="section-title">{t('caddies:dispatch.boardTitle')}</h2>
+        {orphaned.length > 0 ? (
+          <Notice tone="warning" title={t('caddies:orphaned.title', { n: String(orphaned.length) })}>
+            {t('caddies:orphaned.body')}
+          </Notice>
+        ) : null}
         {assignmentsResource.loading ? <LoadingState label={t('caddies:dispatch.loading')} /> : null}
         {assignmentsResource.error ? (
           <ResourceError error={assignmentsResource.error} onRetry={assignmentsResource.refresh} />
@@ -899,6 +935,7 @@ function DispatchView({
           <AssignmentsTable
             assignments={dayAssignments}
             profiles={profiles}
+            orphanedIds={orphanedIds}
             onChanged={onChanged}
             setFlash={setFlash}
           />
@@ -1285,7 +1322,10 @@ function ReinforcementSheet({
             className="flex items-center gap-3 rounded-lg border border-border bg-background p-3"
           >
             <div className="min-w-0 flex-1">
-              <p className="font-medium text-foreground">{candidate.displayName}</p>
+              <CaddieLink
+                caddieId={candidate.caddieProfileId}
+                displayName={candidate.displayName}
+              />
               <p className="text-xs text-muted-foreground">
                 {candidate.returnsHome
                   ? t('caddies:balance.returnsHome')
@@ -1327,6 +1367,7 @@ function AutoAssignPanel({
   setFlash: (flash: Flash) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const [plan, setPlan] = useState<AutoAssignResult | null>(null)
   const [busy, setBusy] = useState<'preview' | 'execute' | null>(null)
   const [error, setError] = useState<unknown>(null)
@@ -1445,7 +1486,7 @@ function AutoAssignPanel({
                     <div>
                       <p className="font-medium text-foreground">{item.caddieDisplayName}</p>
                       <p className="text-xs text-muted-foreground">
-                        {formatDateTime(item.scheduledAt)} · {item.reservationId}
+                        {formatDateTime(item.scheduledAt, timezone)} · {item.reservationId}
                       </p>
                     </div>
                     <Badge variant="accent">{t('caddies:autoAssign.candidate')}</Badge>
@@ -1519,7 +1560,7 @@ function RecommendationsPanel({
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
-                <p className="font-medium text-foreground">{item.displayName}</p>
+                <CaddieLink caddieId={item.caddieProfileId} displayName={item.displayName} />
                 <Badge variant="neutral">{skillLabel(item.skillLevel)}</Badge>
                 {(() => {
                   const status = item.attendanceStatus
@@ -1556,6 +1597,7 @@ function AttendancePanel({
   showHeader?: boolean
 }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const [busyId, setBusyId] = useState<string | null>(null)
   const profileMap = useMemo(
     () => new Map(profiles.map(profile => [profile.id, profile])),
@@ -1577,7 +1619,7 @@ function AttendancePanel({
     try {
       // The day this board is showing — the same day the punch has to be
       // filed under for the row to come back on the next refresh.
-      await punchClock(staffId, direction, resource.data?.date ?? todayJst())
+      await punchClock(staffId, direction, resource.data?.date ?? today(timezone))
       onChanged()
       setFlash({
         tone: 'success',
@@ -1606,7 +1648,7 @@ function AttendancePanel({
       mobileLabel: t('caddies:attendance.table.caddie'),
       cell: row => (
         <div>
-          <p className="font-medium">{row.displayName}</p>
+          <CaddieLink caddieId={row.caddieProfileId} displayName={row.displayName} />
           <p className="text-xs text-muted-foreground">
             {t('caddies:attendance.table.todayGroups', { n: String(row.todayAssignments) })}
           </p>
@@ -1713,18 +1755,28 @@ function AttendancePanel({
   )
 }
 
+const EMPTY_ORPHANS: Set<string> = new Set()
+
 function AssignmentsTable({
   assignments,
   profiles,
+  orphanedIds = EMPTY_ORPHANS,
   onChanged,
   setFlash,
 }: {
   assignments: CaddieAssignment[]
   profiles: CaddieProfile[]
+  /**
+   * Assignments whose group is no longer on the tee sheet. Only the day board
+   * knows this — a caddie's own history spans months of tee sheets nobody
+   * fetched, so it says nothing rather than guessing.
+   */
+  orphanedIds?: Set<string>
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const [busyId, setBusyId] = useState<string | null>(null)
   const profileNames = useMemo(
     () => new Map(profiles.map(profile => [profile.id, profile.displayName])),
@@ -1778,7 +1830,7 @@ function AssignmentsTable({
       key: 'time',
       header: t('caddies:assignments.table.schedule'),
       mobileLabel: t('caddies:assignments.table.schedule'),
-      cell: row => formatDateTime(row.scheduledAt),
+      cell: row => formatDateTime(row.scheduledAt, timezone),
     },
     {
       key: 'round',
@@ -1788,6 +1840,9 @@ function AssignmentsTable({
         <div>
           <p className="font-medium">{row.roundReference ?? row.reservationId ?? row.id}</p>
           <p className="text-xs text-muted-foreground">{roleLabel(row.assignmentRole)}</p>
+          {orphanedIds.has(row.id) ? (
+            <Badge variant="warning">{t('caddies:orphaned.badge')}</Badge>
+          ) : null}
         </div>
       ),
     },
@@ -1795,7 +1850,12 @@ function AssignmentsTable({
       key: 'caddie',
       header: t('caddies:assignments.table.caddie'),
       mobileLabel: t('caddies:assignments.table.caddie'),
-      cell: row => profileNames.get(row.caddieProfileId) ?? row.caddieProfileId,
+      cell: row => (
+        <CaddieLink
+          caddieId={row.caddieProfileId}
+          displayName={profileNames.get(row.caddieProfileId)}
+        />
+      ),
     },
     {
       key: 'fee',
@@ -1817,18 +1877,8 @@ function AssignmentsTable({
       header: t('caddies:assignments.table.actions'),
       mobileLabel: t('caddies:assignments.table.actions'),
       align: 'right',
-      cell: row => row.status === 'assigned' ? (
-        <div className="flex justify-end gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant="secondary"
-            className="min-h-9"
-            disabled={busyId === row.id}
-            onClick={() => void updateStatus(row, 'completed')}
-          >
-            <CheckCircle2 /> {t('caddies:assignments.complete')}
-          </Button>
+      cell: row => {
+        const cancel = (
           <Button
             type="button"
             size="sm"
@@ -1839,8 +1889,31 @@ function AssignmentsTable({
           >
             <XCircle /> {t('caddies:assignments.cancel')}
           </Button>
-        </div>
-      ) : <span className="text-muted-foreground">—</span>,
+        )
+        if (row.status === 'assigned') {
+          return (
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="min-h-9"
+                disabled={busyId === row.id}
+                onClick={() => void updateStatus(row, 'completed')}
+              >
+                <CheckCircle2 /> {t('caddies:assignments.complete')}
+              </Button>
+              {cancel}
+            </div>
+          )
+        }
+        // A round that is gone cannot be walked or completed, whatever state
+        // the row was left in — so releasing the caddie stays available.
+        if (orphanedIds.has(row.id)) {
+          return <div className="flex justify-end gap-2">{cancel}</div>
+        }
+        return <span className="text-muted-foreground">—</span>
+      },
     },
   ]
 
@@ -1849,6 +1922,9 @@ function AssignmentsTable({
       rows={sorted}
       columns={columns}
       rowKey={row => row.id}
+      // A club-sized day is fifty-odd rounds, and the whole lot laid out below
+      // the work pushes everything else off the screen.
+      pageSize={20}
       empty={(
         <EmptyState
           title={t('caddies:assignments.empty.title')}
@@ -1886,6 +1962,7 @@ function ProfilesView({
   onAssignmentsChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
+  const timezone = useTenantTimezone()
   const { t } = useTranslation(['caddies', 'common'])
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
@@ -1929,7 +2006,7 @@ function ProfilesView({
           courses={coursesResource.data?.items.filter(course => course.isActive !== false) ?? []}
           coursesError={coursesResource.error}
           attendance={attendanceResource.data?.items.find(item => item.caddieProfileId === selected.id) ?? null}
-          businessDate={attendanceResource.data?.date ?? todayJst()}
+          businessDate={attendanceResource.data?.date ?? today(timezone)}
           onPeopleChanged={onPeopleChanged}
           onAssignmentsChanged={onAssignmentsChanged}
           setFlash={setFlash}
@@ -1945,7 +2022,10 @@ function ProfilesView({
       mobileLabel: t('caddies:roster.table.name'),
       cell: profile => (
         <div className="grid gap-0.5">
-          <strong>{profile.displayName}</strong>
+          {/* text-lg (16px/24px) matches .caddie-link exactly, the class the
+              attendance tab's CaddieLink name uses — so a caddie's name
+              doesn't visibly change size when switching tabs. */}
+          <strong className="text-lg">{profile.displayName}</strong>
           <span className="text-xs text-muted-foreground">{profile.id}</span>
         </div>
       ),
@@ -3445,6 +3525,7 @@ export function AvailabilityCalendar({
 
 function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<CaddieRating>> }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const ratings = resource.data?.items ?? []
   const average = ratings.length
     ? ratings.reduce((total, rating) => total + rating.score, 0) / ratings.length
@@ -3477,7 +3558,7 @@ function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<Caddi
       key: 'created',
       header: t('caddies:ratings.table.created'),
       mobileLabel: t('caddies:ratings.table.created'),
-      cell: row => formatDateTime(row.createdAt),
+      cell: row => formatDateTime(row.createdAt, timezone),
     },
   ]
   return (
@@ -3524,11 +3605,12 @@ function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<Caddi
  */
 function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const {
     value: yearMonth,
     error: yearMonthError,
     setCandidate: setYearMonth,
-  } = useYearMonthValue(previousYearMonth())
+  } = useYearMonthValue(previousYearMonth(timezone))
   const [downloading, setDownloading] = useState(false)
   const [editingFees, setEditingFees] = useState(false)
   const feesResource = useResource(

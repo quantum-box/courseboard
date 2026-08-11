@@ -127,12 +127,8 @@ export const helpEn: HelpCatalog = {
 
     'golf/caddies': {
       title: 'Caddie roster',
-      summary: 'Caddie details, staff links, day-off requests, and ratings.',
+      summary: 'Caddie details, staff links, day-off requests, ratings, and attendance.',
       usage: [
-        {
-          heading: 'Find someone',
-          body: 'Filter the list by name, availability, skill, or whether they are linked to a staff record.',
-        },
         {
           heading: 'Link to staff',
           body: 'Being a caddie is one staff role, so a newly added caddie is linked from their name automatically. Older unlinked profiles are flagged at the top; attendance and payroll only include linked caddies.',
@@ -140,6 +136,10 @@ export const helpEn: HelpCatalog = {
         {
           heading: 'Record day-off requests',
           body: 'On the day-off tab, click a date to open it in a panel on the right. Set availability and a condition note, then save — assignments and capacity use them.',
+        },
+        {
+          heading: 'Record attendance',
+          body: 'Switch to the Attendance tab above to compare the day’s assignments with clock-ins and record them on the spot.',
         },
       ],
       data: [
@@ -164,7 +164,7 @@ export const helpEn: HelpCatalog = {
         },
         {
           heading: 'Adjust assignments',
-          body: 'Complete or cancel assignments from the list. Clock-ins happen on the Attendance screen.',
+          body: 'Complete or cancel assignments from the list. Clock-ins happen on the roster’s Attendance tab.',
         },
         {
           heading: 'Fill the gaps automatically',

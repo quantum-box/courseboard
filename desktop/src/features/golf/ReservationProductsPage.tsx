@@ -10,6 +10,7 @@ import {
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson } from '../../api'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { navigate } from '../../lib/router'
@@ -64,11 +65,12 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? resourceErrorText(error) : i18next.t('products:error.generic')
 }
 
-function formatUpdatedAt(value?: string | null) {
+function formatUpdatedAt(value: string | null | undefined, timezone: string) {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat('ja-JP', {
+    timeZone: timezone,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -131,6 +133,7 @@ export function ReservationProductsPage({ serviceId }: { serviceId?: string }) {
 
 function ReservationProductList() {
   const { t } = useTranslation(['products', 'common'])
+  const timezone = useTenantTimezone()
   const productsResource = useResource(
     () => courseboardApiJson<{ items: GolfReservationProduct[] }>(productsPath),
     [],
@@ -195,7 +198,7 @@ function ReservationProductList() {
       key: 'updated',
       header: t('products:list.table.updated'),
       mobileLabel: t('products:list.table.updated'),
-      cell: product => formatUpdatedAt(product.updatedAt),
+      cell: product => formatUpdatedAt(product.updatedAt, timezone),
     },
     {
       key: 'open',
@@ -305,6 +308,7 @@ function ReservationProductList() {
 
 function ReservationProductDetail({ serviceId }: { serviceId: string }) {
   const { t } = useTranslation(['products', 'common'])
+  const timezone = useTenantTimezone()
   const productsResource = useResource(
     () => courseboardApiJson<{ items: GolfReservationProduct[] }>(productsPath),
     [],
@@ -463,7 +467,7 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
           </div>
           <div>
             <dt>{t('products:list.table.updated')}</dt>
-            <dd>{formatUpdatedAt(product.updatedAt)}</dd>
+            <dd>{formatUpdatedAt(product.updatedAt, timezone)}</dd>
           </div>
         </dl>
       </Panel>

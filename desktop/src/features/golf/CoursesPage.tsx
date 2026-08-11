@@ -11,6 +11,7 @@ import {
 import { useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson } from '../../api'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
@@ -53,10 +54,11 @@ function errorMessage(error: unknown) {
   return error instanceof Error ? resourceErrorText(error) : i18next.t('courses:error.generic')
 }
 
-function formatUpdatedAt(value: string) {
+function formatUpdatedAt(value: string, timezone: string) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value || '—'
   return new Intl.DateTimeFormat('ja-JP', {
+    timeZone: timezone,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -79,6 +81,7 @@ function validateCourse(draft: GolfCourseDraft) {
 
 export function CoursesPage() {
   const { t } = useTranslation(['courses', 'common', 'nav'])
+  const timezone = useTenantTimezone()
   const coursesResource = useResource(
     () => courseboardApiJson<{ items: GolfCourse[] }>(coursesPath),
     [],
@@ -217,13 +220,6 @@ export function CoursesPage() {
       cell: course => `${course.holeCount}H`,
     },
     {
-      key: 'interval',
-      header: t('courses:table.interval'),
-      mobileLabel: t('courses:table.interval'),
-      align: 'right',
-      cell: course => t('common:unit.minutes', { n: String(course.startIntervalMinutes) }),
-    },
-    {
       key: 'hours',
       header: t('courses:table.hours'),
       mobileLabel: t('courses:table.hours'),
@@ -245,7 +241,7 @@ export function CoursesPage() {
       key: 'updated',
       header: t('courses:table.updated'),
       mobileLabel: t('courses:table.updated'),
-      cell: course => formatUpdatedAt(course.updatedAt),
+      cell: course => formatUpdatedAt(course.updatedAt, timezone),
     },
     {
       key: 'actions',

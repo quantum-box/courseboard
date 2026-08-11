@@ -5,6 +5,7 @@
  */
 
 import { yearMonthDates } from '../../lib/yearMonth'
+import { DEFAULT_TIME_ZONE } from '../../lib/clock'
 
 export type ShiftAvailability = {
   caddieProfileId: string
@@ -78,19 +79,28 @@ export type ShiftRow = {
 export const STREAK_WARNING_DAYS = 7
 
 const CANCELLED = new Set(['cancelled', 'canceled'])
-const JST_OFFSET_MS = 9 * 60 * 60 * 1000
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /**
- * Calendar date in Asia/Tokyo. Production timestamps are UTC (`...Z`), so a
- * 07:00 JST round arrives as 22:00Z on the previous date — slicing the string
- * would file it under the wrong day.
+ * Calendar date in the tenant timezone. Production timestamps are UTC, so
+ * slicing the string would file early local rounds under the wrong day.
  */
-export function jstDateOf(isoTimestamp: string): string {
-  const ms = Date.parse(isoTimestamp)
-  if (Number.isNaN(ms)) return isoTimestamp.slice(0, 10)
-  return new Date(ms + JST_OFFSET_MS).toISOString().slice(0, 10)
+export function tenantDateOf(
+  isoTimestamp: string,
+  timezone = DEFAULT_TIME_ZONE,
+): string {
+  const instant = new Date(isoTimestamp)
+  if (Number.isNaN(instant.getTime())) return isoTimestamp.slice(0, 10)
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(instant)
 }
+
+/** @deprecated Use tenantDateOf and pass the tenant timezone. */
+export const jstDateOf = tenantDateOf
 
 /** Month range widened by the streak window, for fetching assignments. */
 export function paddedRange(dates: string[]): { from: string; to: string } {
@@ -164,6 +174,7 @@ export function buildShiftRow(
   availabilities: ShiftAvailability[],
   assignments: ShiftAssignment[],
   confirmedShifts: ConfirmedShift[] = [],
+  timezone = DEFAULT_TIME_ZONE,
 ): ShiftRow {
   const availabilityByDate = new Map<string, string>()
   for (const entry of availabilities) {
@@ -181,7 +192,7 @@ export function buildShiftRow(
   for (const assignment of assignments) {
     if (assignment.caddieProfileId !== profile.id) continue
     if (CANCELLED.has(assignment.status)) continue
-    const date = jstDateOf(assignment.scheduledAt)
+    const date = tenantDateOf(assignment.scheduledAt, timezone)
     assignmentCount.set(date, (assignmentCount.get(date) ?? 0) + 1)
   }
 

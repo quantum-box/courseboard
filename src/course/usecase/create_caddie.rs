@@ -199,6 +199,7 @@ mod tests {
             &self,
             _credentials: GatewayCredentials<'_>,
             _date: Option<NaiveDate>,
+            _timezone: &str,
         ) -> Result<AttendanceSnapshotReport, CourseError> {
             Err(CourseError::BadRequest("not used in test"))
         }

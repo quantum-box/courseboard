@@ -62,6 +62,8 @@ export const schedule: DeepPartial<typeof source> = {
   },
   save: '時間を保存する',
   saveFailed: '時間を保存できません',
+  missingRuleId: '保存した時間を見分けられません。画面を読みこみなおして、もう一度ためしてください。',
+  newRuleHasId: '新しくふやした時間の状態が正しくありません。画面を読みこみなおして、もう一度ためしてください。',
   hasIssues: '{{n}} 本の時間に、まちがいがあります。赤い行を直してから保存してください。',
   confirmRemove: 'この保存で {{n}} 本の時間がなくなります。その時間のスタート枠も止まります。進めますか。',
   saved: {

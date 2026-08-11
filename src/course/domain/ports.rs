@@ -4,19 +4,21 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 
 use super::{
-    AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-    AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, BudgetAchievement,
-    Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
-    CaddieId, CaddieRankFees, CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift,
-    CaddieStaff, Course, CourseError, CourseId, CourseOrder, DailyBudget, DailyBudgetQuery,
-    DeleteSlotOverrides, ExtensionStatus, GenerationSummary, InventoryWatermark, MonthlySettlement,
-    NewReservation, PartyDetails, ProductSlot, RecommendationQuery, ReplaceCaddieMemberships,
-    Reservation, ReservationDaySummary, ReservationId, ReservationPolicy, ReservationProduct,
-    ReservationServiceId, ReservationSummaryQuery, ReservationSummaryWindow, Resource, ResourceId,
-    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
-    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
-    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
-    UpsertDailyBudget, UpsertReservationProduct, WorkedMinutes, YearMonth,
+    AssignMembershipPlan, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
+    AutoAssignResult, AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon,
+    BudgetAchievement, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
+    CaddieCourseMembership, CaddieId, CaddieRankFees, CaddieRating, CaddieRecommendation,
+    CaddieRoster, CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder, Customer,
+    CustomerId, CustomerMembership, CustomerSearchQuery, DailyBudget, DailyBudgetQuery,
+    DeleteSlotOverrides, ExtensionStatus, GenerationSummary, InventoryWatermark, MembershipPlan,
+    MembershipPlanId, MonthlySettlement, NewCustomer, NewReservation, PartyDetails, ProductSlot,
+    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationDaySummary,
+    ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId,
+    ReservationSummaryQuery, ReservationSummaryWindow, Resource, ResourceId, ResourceTimeSlot,
+    SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride, SlotOverrideQuery,
+    TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
+    UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -58,8 +60,35 @@ pub trait GolfTaxGateway: Send + Sync {
 #[derive(Debug, Clone)]
 pub struct TeeSheetQuery {
     pub date: NaiveDate,
+    /// Last day to include, when the caller wants more than `date`.
+    ///
+    /// Staffing is planned ahead, and the groups still missing a caddie are
+    /// asked for a fortnight at a time rather than one day at a time. Absent —
+    /// or before `date` — means the single day the board has always answered.
+    pub to: Option<NaiveDate>,
     pub golf_course_id: Option<CourseId>,
 }
+
+impl TeeSheetQuery {
+    /// The days this query covers, in order.
+    pub fn dates(&self) -> Vec<NaiveDate> {
+        let last = self.to.filter(|to| *to > self.date).unwrap_or(self.date);
+        let mut dates = Vec::new();
+        let mut day = self.date;
+        while day <= last && dates.len() < MAX_TEE_SHEET_DAYS {
+            dates.push(day);
+            let Some(next) = day.succ_opt() else { break };
+            day = next;
+        }
+        dates
+    }
+}
+
+/// How many days one tee-sheet request may cover.
+///
+/// Long enough for the fortnight the desk staffs ahead, short enough that a
+/// mistyped range cannot ask for a year of boards in one call.
+const MAX_TEE_SHEET_DAYS: usize = 31;
 
 #[derive(Debug, Clone)]
 pub struct TeeLedgerQuery {
@@ -370,6 +399,90 @@ pub trait ReservationGateway: Send + Sync {
     ) -> Result<(), CourseError>;
 }
 
+/// Port for the customer ledger Field keeps for the tenant.
+///
+/// The ledger is not golf data and CourseBoard stores none of it (ADR-0005).
+/// What CourseBoard owns is which ledger entry a booking and each player in a
+/// group belong to, and the golf meaning that identity carries.
+#[async_trait]
+pub trait CustomerGateway: Send + Sync {
+    /// Candidates matching what the desk typed.
+    ///
+    /// Candidates, not an answer: several people share a name and a household
+    /// shares a phone number. Implementations must not merge or dedupe — which
+    /// row is the right person is the desk's call, and guessing it wrong
+    /// attaches someone else's visit history to a booking.
+    async fn search_customers(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        query: &CustomerSearchQuery,
+    ) -> Result<Vec<Customer>, CourseError>;
+
+    async fn get_customer(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+    ) -> Result<Customer, CourseError>;
+
+    /// Adds a person to the ledger exactly as asked.
+    ///
+    /// No find-or-create: the caller has already been shown the candidates and
+    /// decided this is somebody new. Folding that decision into the write would
+    /// silently hand back an existing stranger's identity.
+    async fn create_customer(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &NewCustomer,
+    ) -> Result<Customer, CourseError>;
+}
+
+/// Port for the tenant's membership registry in Field.
+///
+/// Field owns the plans and the assignments; what is golf here is only the
+/// reading of them — that an active assignment means "member" and its absence
+/// means "visitor" (see `membership`).
+#[async_trait]
+pub trait MembershipGateway: Send + Sync {
+    /// Plans the tenant sells. Inactive ones are included only when asked for,
+    /// so a retired plan stops being offered on new bookings while the members
+    /// already holding it keep reading as members.
+    async fn list_membership_plans(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        include_inactive: bool,
+    ) -> Result<Vec<MembershipPlan>, CourseError>;
+
+    async fn create_membership_plan(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &UpsertMembershipPlan,
+    ) -> Result<MembershipPlan, CourseError>;
+
+    async fn update_membership_plan(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        plan_id: &MembershipPlanId,
+        input: &UpsertMembershipPlan,
+    ) -> Result<MembershipPlan, CourseError>;
+
+    /// Where one customer stands today.
+    ///
+    /// A customer with no membership record is a visitor, not a missing row:
+    /// implementations answer `CustomerMembership::visitor` rather than an
+    /// error, because the desk asks this about everyone who books.
+    async fn get_customer_membership(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+    ) -> Result<CustomerMembership, CourseError>;
+
+    async fn assign_membership_plan(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &AssignMembershipPlan,
+    ) -> Result<CustomerMembership, CourseError>;
+}
+
 /// Port for golf catalog (courses, resources, reservation products).
 ///
 /// Implementations may call Field golf-course extension APIs; those paths must
@@ -581,6 +694,7 @@ pub trait GolfOpsGateway: Send + Sync {
         &self,
         credentials: GatewayCredentials<'_>,
         date: Option<NaiveDate>,
+        timezone: &str,
     ) -> Result<AttendanceSnapshotReport, CourseError>;
 
     async fn list_attendance_period_snapshots(
@@ -667,18 +781,21 @@ pub trait GolfCommercialGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         from: NaiveDate,
         to: NaiveDate,
+        timezone: &str,
     ) -> Result<Vec<BudgetAchievement>, CourseError>;
 
     async fn get_monthly_settlement(
         &self,
         credentials: GatewayCredentials<'_>,
         year_month: &str,
+        timezone: &str,
     ) -> Result<MonthlySettlement, CourseError>;
 
     async fn export_monthly_settlement_csv(
         &self,
         credentials: GatewayCredentials<'_>,
         year_month: &str,
+        timezone: &str,
     ) -> Result<String, CourseError>;
 
     async fn get_extension_status(
@@ -707,4 +824,52 @@ pub trait GolfCommercialGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         horizon: &BookingHorizon,
     ) -> Result<BookingHorizon, CourseError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn day(day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 7, day).expect("date")
+    }
+
+    fn query(to: Option<NaiveDate>) -> TeeSheetQuery {
+        TeeSheetQuery {
+            date: day(18),
+            to,
+            golf_course_id: None,
+        }
+    }
+
+    #[test]
+    fn no_end_asks_for_the_one_day() {
+        assert_eq!(query(None).dates(), vec![day(18)]);
+    }
+
+    #[test]
+    fn an_end_asks_for_every_day_up_to_it() {
+        assert_eq!(
+            query(Some(day(20))).dates(),
+            vec![day(18), day(19), day(20)]
+        );
+    }
+
+    #[test]
+    fn an_end_before_the_start_is_the_one_day() {
+        // A backwards range is a typo, not a request for nothing.
+        assert_eq!(query(Some(day(10))).dates(), vec![day(18)]);
+    }
+
+    #[test]
+    fn a_long_range_stops_at_a_month() {
+        let dates = TeeSheetQuery {
+            date: day(1),
+            to: NaiveDate::from_ymd_opt(2027, 7, 1),
+            golf_course_id: None,
+        }
+        .dates();
+        assert_eq!(dates.len(), MAX_TEE_SHEET_DAYS);
+        assert_eq!(dates[0], day(1));
+    }
 }

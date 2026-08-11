@@ -8,6 +8,7 @@ pub mod cancellation_fees;
 pub mod config;
 pub mod course;
 pub mod demo_seed;
+pub mod feature_flags;
 pub mod field_api;
 pub mod field_proxy;
 pub mod profile_proxy;
@@ -66,6 +67,7 @@ pub struct AppState {
     token_verifier: Arc<dyn TokenVerifier>,
     field_api: Option<DynFieldApi>,
     field_api_config_error: Option<String>,
+    feature_flags: Arc<feature_flags::EvaluateFeatureFlags>,
     profile_client: Option<Arc<profile_proxy::ProfileClient>>,
 }
 
@@ -101,6 +103,7 @@ impl AppState {
             field_api_config_error: Some(
                 "Field API client is not configured for the admin UI".to_string(),
             ),
+            feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
             profile_client: None,
         }
     }
@@ -140,6 +143,7 @@ impl AppState {
             token_verifier,
             field_api: Some(field_api),
             field_api_config_error: None,
+            feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
             profile_client: None,
         }
     }
@@ -169,6 +173,7 @@ impl AppState {
                 token_verifier,
                 field_api: Some(Arc::new(client)),
                 field_api_config_error: None,
+                feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
                 profile_client: None,
             },
             Err(error) => Self {
@@ -189,6 +194,7 @@ impl AppState {
                 token_verifier,
                 field_api: None,
                 field_api_config_error: Some(error.to_string()),
+                feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
                 profile_client: None,
             },
         }
@@ -231,6 +237,18 @@ impl AppState {
     /// clear of rest days.
     pub fn shift_rules(&self) -> Arc<MySqlShiftRulesRepository> {
         self.shift_rules.clone()
+    }
+
+    pub(crate) fn feature_flags(&self) -> Arc<feature_flags::EvaluateFeatureFlags> {
+        self.feature_flags.clone()
+    }
+
+    fn with_feature_flag_evaluator(
+        mut self,
+        evaluator: Arc<dyn feature_flags::FeatureFlagEvaluator>,
+    ) -> Self {
+        self.feature_flags = Arc::new(feature_flags::EvaluateFeatureFlags::new(evaluator));
+        self
     }
 
     fn with_profile_client(mut self, profile_client: Option<profile_proxy::ProfileClient>) -> Self {
@@ -400,6 +418,45 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/course/reservations",
             post(course::interfaces::http::create_reservation).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/customers",
+            get(course::interfaces::http_customers::search_customers)
+                .post(course::interfaces::http_customers::create_customer)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/customers/:customer_id",
+            get(course::interfaces::http_customers::get_customer).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/customers/:customer_id/membership",
+            get(course::interfaces::http_customers::get_customer_membership)
+                .post(course::interfaces::http_customers::assign_membership_plan)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/membership-plans",
+            get(course::interfaces::http_customers::list_membership_plans)
+                .post(course::interfaces::http_customers::create_membership_plan)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/membership-plans/:plan_id",
+            patch(course::interfaces::http_customers::update_membership_plan).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
         )
@@ -786,6 +843,12 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/feature-flags/evaluate",
+            post(feature_flags::evaluate_feature_flags).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/field-api/*path",
             get(field_proxy::proxy_field_api)
                 .post(field_proxy::proxy_field_api)
@@ -946,9 +1009,10 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
         Arc::new(auth::OidcJwtVerifier::discover(auth_config).await?)
     };
     let cancellation_fee_config = config.cancellation_fee_config();
+    let tachyon_api_url = config.tachyon_api_base_url();
     let profile_client = profile_proxy::ProfileClient::from_field_api_url(
         &course_gateway_url,
-        config.tachyon_auth_api_url.as_deref(),
+        Some(&tachyon_api_url),
     )
     .context("courseboard profile proxy configuration is invalid")?;
     let field_api = FieldApiClient::from_config(
@@ -958,6 +1022,9 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
     );
     let state =
         AppState::with_optional_field_api(pool, token_verifier, field_api, cancellation_fee_config)
+            .with_feature_flag_evaluator(Arc::new(feature_flags::TachyonFeatureFlagEvaluator::new(
+                &tachyon_api_url,
+            )))
             .with_profile_client(profile_client);
 
     Ok(build_router(state))
@@ -1880,6 +1947,16 @@ mod tests {
                     .and_then(|value| value.to_str().ok()),
                 Some("scc")
             );
+            assert_eq!(
+                body["billTo"],
+                serde_json::json!({
+                    "kind": "client",
+                    "clientId": "cl_company_x",
+                    "affiliationId": "ccaf_person_a_company_x"
+                })
+            );
+            assert!(body.get("clientId").is_none());
+            assert!(!body.to_string().contains("courseboard:"));
             assert_eq!(body["clientName"], "山田 太郎");
             assert_eq!(body["lineItems"][0]["unitPrice"], 5000);
             (
@@ -2275,6 +2352,11 @@ mod tests {
         let body = serde_json::json!({
             "tenant_id": "scc",
             "reference": "RSV-1001",
+            "bill_to": {
+                "kind": "client",
+                "clientId": "cl_company_x",
+                "affiliationId": "ccaf_person_a_company_x"
+            },
             "customer_name": "山田 太郎",
             "customer_phone": "+819012345678",
             "amount": 5000,
@@ -2310,6 +2392,23 @@ mod tests {
         );
         assert!(created.collection.payment_url.contains("index.html#/pay/"));
         assert!(created.sms_message.contains("キャンセル料5000円"));
+
+        let mut second_body = body.clone();
+        second_body["reference"] = serde_json::json!("RSV-1002");
+        let second_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/cancellation-fee-collections")
+                    .header(AUTHORIZATION, format!("Bearer {}", auth.valid_token()))
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(second_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second_response.status(), StatusCode::OK);
 
         let token = created
             .collection
@@ -2354,6 +2453,10 @@ mod tests {
                     .body(Body::from(
                         serde_json::json!({
                             "tenant_id": "scc",
+                            "bill_to": {
+                                "kind": "customer",
+                                "customerId": "cus_person_a"
+                            },
                             "customer_name": "山田 太郎",
                             "customer_phone": "+819012345678",
                             "amount": 5000,

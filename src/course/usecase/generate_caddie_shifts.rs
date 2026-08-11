@@ -14,10 +14,10 @@ use std::sync::Arc;
 use chrono::{NaiveDate, Utc};
 
 use crate::course::domain::{
-    plan_month_shifts, AvailabilityDeadline, AvailabilityDeadlineGateway, AvailabilityQuery,
-    Caddie, CaddieAvailability, CaddieId, CaddieShiftGateway, CourseError, CourseId,
-    DeadlineWarning, GatewayCredentials, GolfOpsGateway, ShiftRequest, ShiftRulesGateway,
-    ShiftSeed, YearMonth, MAX_CONSECUTIVE_WORK_DAYS,
+    plan_month_shifts, tenant_date_at, AvailabilityDeadline, AvailabilityDeadlineGateway,
+    AvailabilityQuery, Caddie, CaddieAvailability, CaddieId, CaddieShiftGateway, CourseError,
+    CourseId, DeadlineWarning, GatewayCredentials, GolfCatalogGateway, GolfOpsGateway,
+    ShiftRequest, ShiftRulesGateway, ShiftSeed, YearMonth, MAX_CONSECUTIVE_WORK_DAYS,
 };
 
 /// What one run over a month produced.
@@ -72,6 +72,7 @@ impl GeneratedMonth {
 }
 
 pub struct GenerateCaddieShiftsUseCase {
+    catalog: Arc<dyn GolfCatalogGateway>,
     ops: Arc<dyn GolfOpsGateway>,
     shifts: Arc<dyn CaddieShiftGateway>,
     deadlines: Arc<dyn AvailabilityDeadlineGateway>,
@@ -80,12 +81,14 @@ pub struct GenerateCaddieShiftsUseCase {
 
 impl GenerateCaddieShiftsUseCase {
     pub fn new(
+        catalog: Arc<dyn GolfCatalogGateway>,
         ops: Arc<dyn GolfOpsGateway>,
         shifts: Arc<dyn CaddieShiftGateway>,
         deadlines: Arc<dyn AvailabilityDeadlineGateway>,
         rules: Arc<dyn ShiftRulesGateway>,
     ) -> Self {
         Self {
+            catalog,
             ops,
             shifts,
             deadlines,
@@ -98,6 +101,8 @@ impl GenerateCaddieShiftsUseCase {
         credentials: GatewayCredentials<'_>,
         year_month: YearMonth,
     ) -> Result<GeneratedMonth, CourseError> {
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
+        let today = tenant_date_at(Utc::now(), &timezone)?;
         let (month_start, month_end) = year_month.bounds();
         let (roster, availabilities, existing) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
@@ -161,12 +166,7 @@ impl GenerateCaddieShiftsUseCase {
             unplaced: plan.unplaced().to_vec(),
             statutory_rest_days: plan.statutory_rest_days(),
             overworked: plan.overworked().to_vec(),
-            deadline_warning: unsubmitted_warning(
-                deadline,
-                Utc::now().date_naive(),
-                &seeds,
-                &availabilities,
-            ),
+            deadline_warning: unsubmitted_warning(deadline, today, &seeds, &availabilities),
         })
     }
 

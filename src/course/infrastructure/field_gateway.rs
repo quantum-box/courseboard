@@ -17,8 +17,8 @@ use crate::config::EMPTY_COURSE_STORE_URL;
 use crate::course::domain::{
     field_day_of_week_to_courseboard, AvailabilityRule, Caddie, CaddieAssignment, CaddieRank,
     CaddieSkillLevel, CaddieUpstreamIdentity, Course, CourseError, CourseId, CourseOrder,
-    GatewayCredentials, GenerationSummary, GolfCatalogGateway, NewReservation, PartyDetails,
-    ProductSlot, Reservation, ReservationGateway, ReservationId, ReservationProduct,
+    CustomerId, GatewayCredentials, GenerationSummary, GolfCatalogGateway, NewReservation,
+    PartyDetails, ProductSlot, Reservation, ReservationGateway, ReservationId, ReservationProduct,
     ReservationScheduleGateway, ReservationServiceId, Resource, ResourceId, ResourceKind,
     ResourceTimeSlot, SaveCourseResource, SeededReservation, UpsertCourse,
     UpsertReservationProduct, SEED_KEY_FIELD,
@@ -313,10 +313,17 @@ fn new_reservation_body(input: &NewReservation, creating: bool) -> Value {
     let mut body = json!({
         "startsAt": input.starts_at,
         "endsAt": input.ends_at,
+        "timezone": input.timezone,
         "quantity": input.quantity,
         "customerName": input.customer_name,
         "customFields": custom_fields,
     });
+    // Only when the desk identified the caller. Field otherwise resolves a
+    // customer from the email on the booking, and a desk booking has none —
+    // sending a null would not help it and an empty string would be a lie.
+    if let Some(customer_id) = input.customer_id.as_ref() {
+        body["customerId"] = json!(customer_id.as_str());
+    }
     if let Some(service_id) = input.reservation_service_id.as_deref() {
         body["serviceId"] = json!(service_id);
     }
@@ -1087,6 +1094,7 @@ fn map_reservation(value: FieldReservationDto) -> Reservation {
         value.notes,
     )
     .with_party(party)
+    .with_customer_id(CustomerId::from_optional(value.customer_id))
 }
 
 fn map_course(value: FieldGolfCourseDto) -> Course {
@@ -1259,6 +1267,8 @@ struct FieldReservationDto {
     resource_id: Option<String>,
     #[serde(default)]
     customer_name: Option<String>,
+    #[serde(default)]
+    customer_id: Option<String>,
     status: String,
     starts_at: DateTime<Utc>,
     ends_at: DateTime<Utc>,
@@ -1685,8 +1695,10 @@ mod tests {
             reservation_resource_id: Some(ResourceId::new("resource-1")),
             starts_at: "2026-08-11T22:30:00Z".parse().unwrap(),
             ends_at: "2026-08-12T03:00:00Z".parse().unwrap(),
+            timezone: "Europe/Berlin".into(),
             quantity: 4,
             customer_name: "山田 太郎".into(),
+            customer_id: None,
             golf_course_id: CourseId::new("course-1"),
             party: PartyDetails::try_new(
                 None,
@@ -1696,6 +1708,7 @@ mod tests {
                     "増田 公陽",
                     Some("共通".into()),
                     Some("M-01".into()),
+                    None,
                 )
                 .unwrap()],
             )
@@ -1772,6 +1785,20 @@ mod tests {
         assert_eq!(saved[0].capacity(), 2);
 
         server.abort();
+    }
+
+    #[test]
+    fn a_booking_the_desk_did_not_identify_carries_no_customer_id_at_all() {
+        let body = new_reservation_body(&desk_reservation(), true);
+        assert!(body.get("customerId").is_none());
+    }
+
+    #[test]
+    fn identifying_the_caller_puts_them_on_the_booking() {
+        let mut input = desk_reservation();
+        input.customer_id = Some(CustomerId::new("cus_1"));
+        let body = new_reservation_body(&input, true);
+        assert_eq!(body["customerId"], json!("cus_1"));
     }
 
     fn profile_dto(value: Value) -> FieldGolfCaddieProfileDto {

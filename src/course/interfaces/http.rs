@@ -16,17 +16,18 @@ use utoipa::{IntoParams, ToSchema};
 use super::openapi::ErrorBody;
 
 use crate::course::domain::{
-    jst_offset, AvailabilityRule, BookingHorizon, BusinessHours, Caddie, CaddieAssignment,
+    tenant_date_at, AvailabilityRule, BookingHorizon, BusinessHours, Caddie, CaddieAssignment,
     CaddieAssignmentQuery, CaddieId, CaddieStaff, Course, CourseError, CourseId, CourseOrder,
-    DeleteSlotOverrides, GatewayCredentials, GenerationSummary, LedgerColumn, LedgerSlot,
-    PartyDetails, ProductSlot, ReservationId, ReservationProduct, ReservationServiceId, Resource,
-    ResourceId, SavedSchedule, SlotOverride, SlotOverrideKind, SlotOverrideQuery, TeeLedger,
-    TeeLedgerQuery, TeeSheet, TeeSheetItem, TeeSheetQuery, UpsertCourse, UpsertReservationProduct,
-    UpsertSlotOverrides,
+    CustomerId, DeleteSlotOverrides, GatewayCredentials, GenerationSummary, GolfCatalogGateway,
+    LedgerColumn, LedgerSlot, PartyDetails, ProductSlot, ReservationId, ReservationProduct,
+    ReservationServiceId, Resource, ResourceId, SavedSchedule, SlotOverride, SlotOverrideKind,
+    SlotOverrideQuery, TeeLedger, TeeLedgerQuery, TeeSheet, TeeSheetItem, TeeSheetQuery,
+    UpsertCourse, UpsertReservationProduct, UpsertSlotOverrides,
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
     FieldReservationGateway, MySqlGeneratedThroughRepository, MySqlSlotOverrideRepository,
+    PartyPlayerInput,
 };
 use crate::course::usecase::{
     CancelReservationUseCase, ChangeReservationPlanUseCase, CreateCourseUseCase,
@@ -169,6 +170,11 @@ pub struct ItemsResponse<T: ToSchema> {
 #[serde(rename_all = "camelCase")]
 pub struct TeeSheetQueryParams {
     pub date: NaiveDate,
+    /// Last day to include. Omitted, the board answers `date` alone.
+    ///
+    /// Capped at a month from `date`; every row carries its own start, so a
+    /// caller reading several days at once can tell them apart.
+    pub to: Option<NaiveDate>,
     pub golf_course_id: Option<String>,
 }
 
@@ -216,6 +222,24 @@ pub struct PartyPlayerDto {
     pub tag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub member_number: Option<String>,
+    /// Who this player is in the customer ledger, once the desk has said so.
+    ///
+    /// Absent on every group entered before the ledger existed and on anyone
+    /// the desk has not identified yet, so a client must treat it as optional
+    /// rather than as a field that will fill itself in.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub customer_id: Option<String>,
+}
+
+impl From<PartyPlayerDto> for PartyPlayerInput {
+    fn from(value: PartyPlayerDto) -> Self {
+        Self {
+            name: value.name,
+            tag: value.tag,
+            member_number: value.member_number,
+            customer_id: value.customer_id,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -244,6 +268,7 @@ impl From<&PartyDetails> for PartyDto {
                     name: player.name().to_string(),
                     tag: player.tag().map(str::to_string),
                     member_number: player.member_number().map(str::to_string),
+                    customer_id: player.customer_id().map(ToString::to_string),
                 })
                 .collect(),
         }
@@ -336,6 +361,7 @@ pub async fn get_tee_sheet(
             credentials,
             TeeSheetQuery {
                 date: query.date,
+                to: query.to,
                 golf_course_id: CourseId::from_optional(query.golf_course_id),
             },
         )
@@ -581,7 +607,16 @@ pub async fn seed_demo_board(
 ) -> Result<Json<SeedDemoBoardResponse>, AppError> {
     let credentials = credentials(&state, &headers)?;
     let tenant_id = operator_id(&headers)?.to_string();
-    let date = params.date.unwrap_or_else(today_in_course_zone);
+    let date = match params.date {
+        Some(date) => date,
+        None => {
+            let timezone = catalog_gateway(&state)
+                .get_tenant_timezone(credentials)
+                .await
+                .map_err(AppError::from)?;
+            tenant_date_at(Utc::now(), &timezone).map_err(AppError::from)?
+        }
+    };
     let use_case = SeedDemoBoardUseCase::new(
         reservation_gateway(&state),
         catalog_gateway(&state),
@@ -598,14 +633,6 @@ pub async fn seed_demo_board(
         bookings_updated: summary.bookings_updated,
         marks: summary.marks,
     }))
-}
-
-/// Today as the course sees it, not as the server's clock does.
-fn today_in_course_zone() -> NaiveDate {
-    match jst_offset() {
-        Ok(jst) => Utc::now().with_timezone(&jst).date_naive(),
-        Err(_) => Utc::now().date_naive(),
-    }
 }
 
 // ─── Course order ─────────────────────────────────────────────────────────────
@@ -705,6 +732,13 @@ pub struct CreateReservationRequest {
     pub duration_minutes: i64,
     pub quantity: i32,
     pub customer_name: String,
+    /// The ledger entry the desk picked for whoever is booking.
+    ///
+    /// Optional: a call the desk cannot place a name to still has to become a
+    /// booking. The name is always recorded; the identity is recorded when it
+    /// is known.
+    #[serde(default)]
+    pub customer_id: Option<String>,
     #[serde(default)]
     pub competition_name: Option<String>,
     #[serde(default)]
@@ -758,11 +792,7 @@ pub async fn create_reservation(
         request.competition_name,
         request.organizer,
         request.group_number,
-        request
-            .players
-            .into_iter()
-            .map(|player| (player.name, player.tag, player.member_number))
-            .collect(),
+        request.players.into_iter().map(Into::into).collect(),
     )
     .map_err(AppError::from)?;
     let id = use_case
@@ -782,6 +812,7 @@ pub async fn create_reservation(
                 duration_minutes: request.duration_minutes,
                 quantity: request.quantity,
                 customer_name: request.customer_name,
+                customer_id: CustomerId::from_optional(request.customer_id),
                 party,
             },
         )
@@ -877,11 +908,7 @@ pub async fn update_reservation_party(
         request.competition_name,
         request.organizer,
         request.group_number,
-        request
-            .players
-            .into_iter()
-            .map(|player| (player.name, player.tag, player.member_number))
-            .collect(),
+        request.players.into_iter().map(Into::into).collect(),
     )
     .map_err(AppError::from)?;
     let use_case = UpdateReservationPartyUseCase::new(reservation_gateway(&state));
@@ -1436,7 +1463,50 @@ impl From<&AvailabilityRule> for AvailabilityRuleDto {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReplaceCourseScheduleRequest {
-    pub rules: Vec<AvailabilityRuleDto>,
+    pub rules: Vec<ReplaceAvailabilityRuleDto>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceAvailabilityRuleDto {
+    pub id: Option<String>,
+    /// Required only for a rule created in this editor session. A full-replace
+    /// request cannot otherwise distinguish a create from a persisted rule
+    /// whose id was accidentally dropped.
+    #[serde(default)]
+    pub is_new: bool,
+    pub weekday: u8,
+    pub start_time: String,
+    pub end_time: String,
+    pub capacity: i32,
+    pub slot_interval_minutes: i32,
+}
+
+impl ReplaceAvailabilityRuleDto {
+    fn into_domain(self) -> Result<AvailabilityRule, CourseError> {
+        let id = self.id.filter(|value| !value.trim().is_empty());
+        match (id.is_some(), self.is_new) {
+            (false, false) => {
+                return Err(CourseError::BadRequest(
+                    "a schedule rule without an id must be marked isNew",
+                ));
+            }
+            (true, true) => {
+                return Err(CourseError::BadRequest(
+                    "a schedule rule with an id must not be marked isNew",
+                ));
+            }
+            _ => {}
+        }
+        AvailabilityRule::try_new(
+            id,
+            self.weekday,
+            self.start_time,
+            self.end_time,
+            self.capacity,
+            self.slot_interval_minutes,
+        )
+    }
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -1525,16 +1595,7 @@ pub async fn replace_course_schedule(
     let rules = body
         .rules
         .into_iter()
-        .map(|rule| {
-            AvailabilityRule::try_new(
-                rule.id,
-                rule.weekday,
-                rule.start_time,
-                rule.end_time,
-                rule.capacity,
-                rule.slot_interval_minutes,
-            )
-        })
+        .map(ReplaceAvailabilityRuleDto::into_domain)
         .collect::<Result<Vec<_>, _>>()
         .map_err(AppError::from)?;
 
@@ -1579,16 +1640,53 @@ impl From<SavedSchedule> for SavedScheduleDto {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BookingHorizonDto {
-    /// Days ahead of today the book is open.
-    pub days: i64,
-    /// The last date a booking may land on, as of today.
+    /// `days` for a rolling window, `through` for a named closing date.
+    pub mode: String,
+    /// Days ahead of today the book is open, in `days` mode.
+    pub days: Option<i64>,
+    /// The closing date the club named, in `through` mode.
+    pub through: Option<NaiveDate>,
+    /// The last date a booking may land on, as of today. Behind today once a
+    /// named closing date has passed, which is a closed book rather than an
+    /// error.
     pub bookable_through: NaiveDate,
 }
 
+impl BookingHorizonDto {
+    fn new(horizon: BookingHorizon, bookable_through: NaiveDate) -> Self {
+        Self {
+            mode: match horizon {
+                BookingHorizon::Days(_) => "days",
+                BookingHorizon::Through(_) => "through",
+            }
+            .to_string(),
+            days: horizon.days(),
+            through: horizon.through_date(),
+            bookable_through,
+        }
+    }
+}
+
+/// Exactly one of the two is sent; the other says which shape was not chosen.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SetBookingHorizonRequest {
-    pub days: i64,
+    pub days: Option<i64>,
+    pub through: Option<NaiveDate>,
+}
+
+impl SetBookingHorizonRequest {
+    fn into_horizon(self) -> Result<BookingHorizon, CourseError> {
+        match (self.days, self.through) {
+            (Some(days), None) => BookingHorizon::try_days(days),
+            (None, Some(date)) => Ok(BookingHorizon::through(date)),
+            // Both would leave the far edge to whichever field the server
+            // happened to prefer, and neither says nothing at all.
+            _ => Err(CourseError::BadRequest(
+                "send either days or through, not both",
+            )),
+        }
+    }
 }
 
 /// GET /v1/course/booking-horizon
@@ -1608,14 +1706,12 @@ pub async fn get_booking_horizon(
     headers: HeaderMap,
 ) -> Result<Json<BookingHorizonDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let (horizon, bookable_through) = GetBookingHorizonUseCase::new(commercial_gateway(&state))
-        .execute(credentials)
-        .await
-        .map_err(AppError::from)?;
-    Ok(Json(BookingHorizonDto {
-        days: horizon.days(),
-        bookable_through,
-    }))
+    let (horizon, bookable_through) =
+        GetBookingHorizonUseCase::new(catalog_gateway(&state), commercial_gateway(&state))
+            .execute(credentials)
+            .await
+            .map_err(AppError::from)?;
+    Ok(Json(BookingHorizonDto::new(horizon, bookable_through)))
 }
 
 /// PUT /v1/course/booking-horizon
@@ -1638,7 +1734,7 @@ pub async fn set_booking_horizon(
     Json(body): Json<SetBookingHorizonRequest>,
 ) -> Result<Json<BookingHorizonDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let horizon = BookingHorizon::try_new(body.days).map_err(AppError::from)?;
+    let horizon = body.into_horizon().map_err(AppError::from)?;
     let gateway = catalog_gateway(&state);
     let use_case = SetBookingHorizonUseCase::new(
         gateway.clone(),
@@ -1650,10 +1746,7 @@ pub async fn set_booking_horizon(
         .execute(credentials, horizon)
         .await
         .map_err(AppError::from)?;
-    Ok(Json(BookingHorizonDto {
-        days: stored.days(),
-        bookable_through,
-    }))
+    Ok(Json(BookingHorizonDto::new(stored, bookable_through)))
 }
 
 /// POST /v1/course/courses/:id/time-slots/generate
@@ -2146,6 +2239,53 @@ pub async fn list_caddie_assignments(
 mod tests {
     use super::*;
     use crate::course::domain::PlayType;
+
+    fn schedule_rule_request(id: Option<&str>, is_new: Option<bool>) -> ReplaceAvailabilityRuleDto {
+        let mut value = serde_json::json!({
+            "weekday": 1,
+            "startTime": "07:00",
+            "endTime": "12:00",
+            "capacity": 2,
+            "slotIntervalMinutes": 8
+        });
+        let object = value.as_object_mut().expect("schedule rule object");
+        if let Some(id) = id {
+            object.insert("id".into(), serde_json::json!(id));
+        }
+        if let Some(is_new) = is_new {
+            object.insert("isNew".into(), serde_json::json!(is_new));
+        }
+        serde_json::from_value(value).expect("schedule rule request")
+    }
+
+    #[test]
+    fn schedule_replace_distinguishes_existing_rules_from_explicit_creates() {
+        let existing = schedule_rule_request(Some("rule-1"), None)
+            .into_domain()
+            .expect("existing rule");
+        assert_eq!(existing.id(), Some("rule-1"));
+
+        let created = schedule_rule_request(None, Some(true))
+            .into_domain()
+            .expect("new rule");
+        assert_eq!(created.id(), None);
+    }
+
+    #[test]
+    fn schedule_replace_rejects_ambiguous_or_contradictory_rule_identity() {
+        assert!(matches!(
+            schedule_rule_request(None, None).into_domain(),
+            Err(CourseError::BadRequest(
+                "a schedule rule without an id must be marked isNew"
+            ))
+        ));
+        assert!(matches!(
+            schedule_rule_request(Some("rule-1"), Some(true)).into_domain(),
+            Err(CourseError::BadRequest(
+                "a schedule rule with an id must not be marked isNew"
+            ))
+        ));
+    }
 
     fn product_request(
         golf_course_ids: Option<Vec<&str>>,

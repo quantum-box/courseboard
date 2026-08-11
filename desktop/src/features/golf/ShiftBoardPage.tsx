@@ -3,6 +3,7 @@ import { CalendarCheck, Pin, SlidersHorizontal } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { courseboardApiJson, currentYearMonth, today } from '../../api'
 import {
   EmptyState,
@@ -21,6 +22,7 @@ import { useResource } from '../../hooks/useResource'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
+import { CaddieLink } from './CaddieLink'
 import {
   buildShiftRow,
   monthDates,
@@ -89,8 +91,8 @@ function courseLabel(course: GolfCourse | undefined) {
   return short && short.length > 0 ? short : course.name.slice(0, 2)
 }
 
-// The date string is already the JST calendar date, so read it as a plain
-// UTC date; appending +09:00 would land on the previous UTC day.
+// The value is a calendar date, not an instant. UTC construction keeps its
+// weekday independent of the browser device timezone.
 function weekdayIndex(date: string) {
   return new Date(`${date}T00:00:00Z`).getUTCDay()
 }
@@ -129,12 +131,13 @@ function employmentStatusLabel(status: string) {
 
 export function ShiftBoardPage() {
   const { t } = useTranslation(['shifts', 'common'])
+  const timezone = useTenantTimezone()
   const [currentWeekRequest, setCurrentWeekRequest] = useState(0)
   const {
     value: yearMonth,
     error: yearMonthError,
     setCandidate: setYearMonth,
-  } = useYearMonthValue(currentYearMonth())
+  } = useYearMonthValue(currentYearMonth(timezone))
   const dates = useMemo(() => monthDates(yearMonth), [yearMonth])
   // Availability participates in consecutive-work warnings too, so both
   // sources need the same padded range around the displayed month.
@@ -290,7 +293,7 @@ export function ShiftBoardPage() {
   }, [yearMonth, deadlineResource.setData])
 
   const showCurrentWeek = useCallback(() => {
-    setYearMonth(today().slice(0, 7))
+    setYearMonth(today(timezone).slice(0, 7))
     setCurrentWeekRequest(request => request + 1)
   }, [setYearMonth])
 
@@ -352,6 +355,7 @@ export function ShiftBoardPage() {
       <SectionErrorBoundary resetKey={yearMonth}>
         <ShiftBoardResults
           yearMonth={yearMonth}
+          timezone={timezone}
           dates={dates}
           profiles={profilesResource.data?.items ?? []}
           availabilities={availabilityResource.data?.items ?? []}
@@ -656,6 +660,7 @@ function AvoidedWeekdaysEditor({
 
 function ShiftBoardResults({
   yearMonth,
+  timezone,
   dates,
   profiles,
   availabilities,
@@ -671,6 +676,7 @@ function ShiftBoardResults({
   onEdit,
 }: {
   yearMonth: string
+  timezone: string
   dates: string[]
   profiles: CaddieProfile[]
   availabilities: ShiftAvailability[]
@@ -695,8 +701,15 @@ function ShiftBoardResults({
   )
   const rows = useMemo(() => profiles.map(profile => ({
     profile,
-    row: buildShiftRow(profile, dates, availabilities, assignments, confirmedShifts),
-  })), [profiles, dates, availabilities, assignments, confirmedShifts])
+    row: buildShiftRow(
+      profile,
+      dates,
+      availabilities,
+      assignments,
+      confirmedShifts,
+      timezone,
+    ),
+  })), [profiles, dates, availabilities, assignments, confirmedShifts, timezone])
   const longStreakNames = rows
     .filter(entry => entry.row.maxStreak >= STREAK_WARNING_DAYS)
     .map(entry => entry.profile.displayName)
@@ -750,7 +763,7 @@ function ShiftBoardResults({
 
   useEffect(() => {
     if (currentWeekRequest === 0) return undefined
-    const frame = window.requestAnimationFrame(() => scrollToDate(today()))
+    const frame = window.requestAnimationFrame(() => scrollToDate(today(timezone)))
     return () => window.cancelAnimationFrame(frame)
   }, [currentWeekRequest, dates, scrollToDate])
 
@@ -847,7 +860,9 @@ function ShiftBoardResults({
                     <tr key={profile.id} data-employment-status={row.employmentStatus}>
                       <th scope="row" className="shift-board-name">
                         <span className="shift-board-profile">
-                          <span className="shift-board-profile-name">{profile.displayName}</span>
+                          <span className="shift-board-profile-name">
+                            <CaddieLink caddieId={profile.id} displayName={profile.displayName} />
+                          </span>
                           {statusLabel ? (
                             <span className="shift-board-profile-status">
                               {statusLabel}

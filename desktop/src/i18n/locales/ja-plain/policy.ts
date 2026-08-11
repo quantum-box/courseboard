@@ -33,6 +33,12 @@ export const policy: DeepPartial<typeof source> = {
     bookingHorizon: '何日先まで予約を受けるか',
     bookingHorizonHint: '今日から数えた日数です。この間のスタート枠だけが作られて、予約を受けられます。',
     bookingHorizonThrough: '今は {{date}} まで予約を受けられます。変えると、ぜんぶのコースの枠を作りなおします。',
+    bookingHorizonMode: 'どこまで予約を受けるか',
+    bookingHorizonModeDays: '今日から 日数で決める',
+    bookingHorizonModeThrough: '日づけで決める（シーズンの さいごの日など）',
+    bookingHorizonThroughLabel: '予約を受ける さいごの日',
+    bookingHorizonThroughHint: 'この日までの スタート枠だけを作ります。日がたっても さいごの日は動きません。今日から 399日先まで えらべます。',
+    bookingHorizonClosed: 'この さいごの日は もう すぎています。新しいスタート枠は 作られません。つぎのシーズンを受けるときは 日づけを 先にのばしてください。',
   },
   cartOption: {
     optional: '使っても使わなくてもよい',
@@ -86,6 +92,7 @@ export const policy: DeepPartial<typeof source> = {
     guestDeposit: '会員以外が先に払う割合は 0〜100% で入れてください。',
     cutoff: '受け付ける期限は 0 以上の数で入れてください。',
     bookingHorizon: '何日先まで予約を受けるかは 1〜399 日で入れてください。',
+    bookingHorizonThrough: '予約を受ける さいごの日は、今日から 399日先までの 日づけで入れてください。',
     spendThreshold: '1人あたりの最低金額は 0 円以上で入れてください。',
   },
 }

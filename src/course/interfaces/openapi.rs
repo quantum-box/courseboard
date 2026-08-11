@@ -10,10 +10,11 @@ use utoipa::{
 
 use super::http;
 use super::http_commercial;
+use super::http_customers;
 use super::http_ops;
 use super::http_reservation_summary;
 use super::http_simulator;
-use crate::profile_proxy;
+use crate::{feature_flags, profile_proxy};
 
 /// Standard API error body returned by [`crate::AppError`].
 #[derive(Debug, Serialize, ToSchema)]
@@ -80,6 +81,14 @@ impl Modify for SecurityAddon {
         http::replace_product_slots,
         http::list_caddies,
         http::list_caddie_assignments,
+        http_customers::search_customers,
+        http_customers::create_customer,
+        http_customers::get_customer,
+        http_customers::list_membership_plans,
+        http_customers::create_membership_plan,
+        http_customers::update_membership_plan,
+        http_customers::get_customer_membership,
+        http_customers::assign_membership_plan,
         http_ops::create_caddie,
         http_ops::update_caddie,
         http_ops::create_caddie_assignment,
@@ -124,6 +133,7 @@ impl Modify for SecurityAddon {
         http_commercial::update_extension_config,
         http_simulator::calculate_fee,
         http_simulator::simulate_range,
+        feature_flags::evaluate_feature_flags,
         profile_proxy::get_me,
     ),
     components(
@@ -138,6 +148,14 @@ impl Modify for SecurityAddon {
             http::ChangeReservationPlanRequest,
             http::CreateReservationRequest,
             http::CreatedReservationDto,
+            http_customers::CustomerDto,
+            http_customers::CustomerSearchParams,
+            http_customers::CreateCustomerRequest,
+            http_customers::MembershipPlanDto,
+            http_customers::MembershipPlanListParams,
+            http_customers::UpsertMembershipPlanRequest,
+            http_customers::CustomerMembershipDto,
+            http_customers::AssignMembershipPlanRequest,
             http::CancelReservationRequest,
             http::LedgerSlotDto,
             http::LedgerColumnDto,
@@ -234,6 +252,9 @@ impl Modify for SecurityAddon {
             http_simulator::SimulateRangeRequest,
             http_simulator::SimulateRangeResponse,
             http_simulator::SimulateRangeRowDto,
+            feature_flags::EvaluateFeatureFlagsRequest,
+            feature_flags::EvaluateFeatureFlagsResponse,
+            feature_flags::FeatureFlagValue,
             profile_proxy::ProfileResponse,
             profile_proxy::ProfileUser,
             profile_proxy::ProfileTenant,
@@ -245,6 +266,7 @@ impl Modify for SecurityAddon {
         (name = "course", description = "Courses, tee sheet, resources, and reservation products"),
         (name = "course-ops", description = "Caddie operations, payroll, and assignments"),
         (name = "course-commercial", description = "Budgets, settlement, policy, and extension config"),
+        (name = "feature-flags", description = "CourseBoard-owned tenant feature evaluation"),
         (name = "identity", description = "Authenticated CourseBoard profile"),
     ),
     security(
@@ -269,6 +291,7 @@ mod tests {
         assert!(paths.contains_key("/v1/course/tee-sheet"));
         assert!(paths.contains_key("/v1/course/courses"));
         assert!(paths.contains_key("/v1/course/caddie-profiles"));
+        assert!(paths.contains_key("/v1/course/feature-flags/evaluate"));
         assert!(paths.contains_key("/v1/course/caddie-attendance-snapshots"));
         assert!(paths.contains_key("/v1/course/reservation-policy"));
         assert!(paths.contains_key("/v1/course/daily-budgets"));

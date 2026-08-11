@@ -10,11 +10,11 @@ use std::sync::Arc;
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::course::domain::{
-    course_day_bounds, has_room_for_one_more_caddie_round, parse_jst_tee_time, reconcile_remaining,
-    CaddieShiftGateway, CourseError, CourseId, GatewayCredentials, GolfCatalogGateway,
-    GolfCommercialGateway, NewReservation, PartyDetails, Reservation, ReservationGateway,
-    ReservationId, ReservationProduct, ReservationScheduleGateway, Resource, ResourceId,
-    ResourceKind, ResourceTimeSlot,
+    has_room_for_one_more_caddie_round, parse_tenant_tee_time, reconcile_remaining,
+    tenant_day_bounds, CaddieShiftGateway, CourseError, CourseId, CustomerId, GatewayCredentials,
+    GolfCatalogGateway, GolfCommercialGateway, NewReservation, PartyDetails, Reservation,
+    ReservationGateway, ReservationId, ReservationProduct, ReservationScheduleGateway, Resource,
+    ResourceId, ResourceKind, ResourceTimeSlot,
 };
 use crate::course::usecase::GetCourseCaddieSupplyUseCase;
 
@@ -33,6 +33,12 @@ pub struct CreateReservationInput {
     pub duration_minutes: i64,
     pub quantity: i32,
     pub customer_name: String,
+    /// The ledger entry the desk picked for the person booking, if any.
+    ///
+    /// Never required. A booking must be writable from a name alone — the desk
+    /// takes calls faster than it can identify people, and a booking refused
+    /// for want of a ledger entry is a tee time nobody sold.
+    pub customer_id: Option<CustomerId>,
     pub party: PartyDetails,
 }
 
@@ -89,7 +95,8 @@ impl CreateReservationUseCase {
         self.refuse_a_round_the_course_cannot_walk(credentials, &input, product.as_ref())
             .await?;
 
-        let starts_at = parse_jst_tee_time(input.date, &input.tee_time)?;
+        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
+        let starts_at = parse_tenant_tee_time(input.date, &input.tee_time, &timezone)?;
         let ends_at = starts_at + Duration::minutes(input.duration_minutes);
 
         // Never trust an id posted by the browser merely because it appeared on
@@ -102,7 +109,7 @@ impl CreateReservationUseCase {
             &input.reservation_resource_id,
         )?;
 
-        let (window_start, window_end) = course_day_bounds(input.date, input.date);
+        let (window_start, window_end) = tenant_day_bounds(input.date, input.date, &timezone)?;
         let (slots, reservations) = tokio::join!(
             self.schedules.list_resource_time_slots(
                 credentials,
@@ -127,8 +134,10 @@ impl CreateReservationUseCase {
             reservation_resource_id: Some(input.reservation_resource_id),
             starts_at,
             ends_at,
+            timezone,
             quantity: input.quantity,
             customer_name: customer_name.to_string(),
+            customer_id: input.customer_id,
             golf_course_id: input.golf_course_id,
             party: input.party,
             // A phone booking is paid at the course. Field therefore converts

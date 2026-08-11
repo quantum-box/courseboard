@@ -20,6 +20,10 @@ import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import { clearResourceCache } from '../../hooks/useResource'
 import {
+  notifyTenantTimezoneChanged,
+  useTenantTimezone,
+} from '../../context/TenantTimezoneProvider'
+import {
   MAX_PLAYER_TAG_LENGTH,
   MAX_PLAYER_TAG_OPTIONS,
   normalizedPlayerTagOptions,
@@ -110,11 +114,12 @@ export function buildConfigJson(
   }
 }
 
-function formatUpdatedAt(value?: string | null) {
+function formatUpdatedAt(value: string | null | undefined, timezone: string) {
   if (!value) return '—'
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat('ja-JP', {
+    timeZone: timezone,
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -135,6 +140,7 @@ function errorMessage(error: unknown) {
 
 export function ExtensionConfigPanel() {
   const { t } = useTranslation(['settings', 'common'])
+  const timezone = useTenantTimezone()
   const [extension, setExtension] = useState<ExtensionStatus | null>(null)
   const [draft, setDraft] = useState<ExtensionConfigDraft>(defaultExtensionConfig)
   const [loading, setLoading] = useState(true)
@@ -190,6 +196,7 @@ export function ExtensionConfigPanel() {
       setExtension(current => current ? { ...current, configJson } : current)
       setDraft(configDraftFromJson(configJson))
       clearResourceCache('course:extension-status')
+      notifyTenantTimezoneChanged(draft.timezone)
       showToast({
         tone: 'success',
         title: t('settings:extension.saved.title'),
@@ -255,7 +262,7 @@ export function ExtensionConfigPanel() {
             <Field
               label={t('settings:extension.currency')}
               hint={t('settings:extension.currencyHint', {
-                updated: formatUpdatedAt(extension?.updatedAt),
+                updated: formatUpdatedAt(extension?.updatedAt, timezone),
               })}
               required
             >

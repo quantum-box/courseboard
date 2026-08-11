@@ -26,6 +26,8 @@ import { ShiftBoardPage } from './features/golf/ShiftBoardPage'
 import { LedgerPage } from './features/golf/ledger/LedgerPage'
 import { TimelinePage } from './features/golf/timeline/TimelinePage'
 import { SettingsAdvancedPage } from './features/settings/SettingsAdvancedPage'
+import { CustomerDetailPage } from './features/golf/customers/CustomerDetailPage'
+import { CustomersPage } from './features/golf/customers/CustomersPage'
 import { SettingsPage } from './features/settings/SettingsPage'
 import { StaffPage } from './features/staff/StaffPage'
 import { useCartUpdates } from './hooks/useCartUpdates'
@@ -33,6 +35,8 @@ import { navigate, useRoute } from './lib/router'
 import { DownloadPage } from './DownloadPage'
 import { PaymentPage } from './PaymentPage'
 import { MacOSTabStrip } from './components/MacOSTabStrip'
+import { TenantTimezoneProvider } from './context/TenantTimezoneProvider'
+import { FeatureFlagProvider } from './feature-flags/FeatureFlags'
 
 const WS_URL = 'ws://127.0.0.1:9001/ws'
 
@@ -62,9 +66,13 @@ function AppContent() {
   return (
     <AuthProvider>
       <AuthGate>
-        <AppShell route={route}>
-          <RouteContent route={route} />
-        </AppShell>
+        <FeatureFlagProvider>
+          <TenantTimezoneProvider>
+            <AppShell route={route}>
+              <RouteContent route={route} />
+            </AppShell>
+          </TenantTimezoneProvider>
+        </FeatureFlagProvider>
       </AuthGate>
     </AuthProvider>
   )
@@ -133,6 +141,11 @@ function RouteContent({ route }: { route: string }) {
     return <CancellationFeeDetailPage invoiceId={decodeRouteSegment(route.slice('cancellation-fees/'.length))} />
   }
   if (route === 'course-map') return <CourseMapPage />
+  if (route === 'golf/customers') return <CustomersPage />
+  if (route.startsWith('golf/customers/')) {
+    const segment = decodeRouteSegment(route.slice('golf/customers/'.length).split('/')[0] ?? '')
+    if (segment) return <CustomerDetailPage key={segment} customerId={segment} />
+  }
   if (route === 'settings') return <SettingsPage />
   if (route === 'settings/advanced') return <SettingsAdvancedPage />
   if (route === 'settings/members') return <MembersPage />

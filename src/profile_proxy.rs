@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use utoipa::ToSchema;
 
-use crate::config::EMPTY_COURSE_STORE_URL;
+use crate::config::{DEFAULT_TACHYON_API_URL, EMPTY_COURSE_STORE_URL};
 
 const EXTENSION_KEY: &str = "golf_course";
 const FIELD_PROFILE_PATH: &str = "/v1/erp/me";
@@ -21,7 +21,6 @@ const PROFILE_REQUEST_TIMEOUT: Duration = Duration::from_secs(7);
 /// Tenants can live under different platforms (production vs sandbox). The
 /// operator lookup tells the client which `x-platform-id` each tenant needs;
 /// without it Field's tenant policy check denies platform-mismatched tenants.
-const DEFAULT_TACHYON_AUTH_API_URL: &str = "https://api.n1.tachy.one";
 const OPERATOR_LOOKUP_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_OPERATOR_LOOKUPS: usize = 20;
 
@@ -47,7 +46,7 @@ impl ProfileClient {
         let auth_api_url = tachyon_auth_api_url
             .map(str::trim)
             .filter(|value| !value.is_empty())
-            .unwrap_or(DEFAULT_TACHYON_AUTH_API_URL);
+            .unwrap_or(DEFAULT_TACHYON_API_URL);
         let client = Self::with_timeout(field_api_url, PROFILE_REQUEST_TIMEOUT)?;
         if auth_api_url.starts_with("empty://") {
             return Ok(Some(client));

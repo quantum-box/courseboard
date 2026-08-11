@@ -1,3 +1,4 @@
+import { Tooltip, TooltipContent, TooltipTrigger } from '@tachyon-sdk/native-ui'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Fragment, type MouseEvent as ReactMouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -18,6 +19,10 @@ import {
   type SeatCell,
 } from './ledgerLayout'
 import type { LedgerColumn, LedgerSlot } from './models'
+import {
+  reservationBlockReason,
+  type ReservationBlockReason,
+} from './newReservation'
 
 export type SlotSelection = {
   golfCourseId: string
@@ -42,6 +47,7 @@ export function LedgerBoard({
   onOpenContextMenu,
   onSelectReservation,
   onMoveColumn,
+  onOpenCourseSetup,
 }: {
   columns: LedgerColumn[]
   /** Minutes past midnight in the course's clock, or null on another day. */
@@ -53,6 +59,7 @@ export function LedgerBoard({
   onOpenContextMenu: (target: SlotContextTarget) => void
   onSelectReservation: (id: string) => void
   onMoveColumn: (golfCourseId: string, delta: -1 | 1) => void
+  onOpenCourseSetup: (golfCourseId: string) => void
 }) {
   return (
     <div className="ledger-board">
@@ -72,6 +79,7 @@ export function LedgerBoard({
           onOpenContextMenu={onOpenContextMenu}
           onSelectReservation={onSelectReservation}
           onMoveColumn={onMoveColumn}
+          onOpenCourseSetup={onOpenCourseSetup}
         />
       ))}
     </div>
@@ -90,6 +98,7 @@ function LedgerColumnTable({
   onOpenContextMenu,
   onSelectReservation,
   onMoveColumn,
+  onOpenCourseSetup,
 }: {
   column: LedgerColumn
   nowMinutes: number | null
@@ -102,6 +111,7 @@ function LedgerColumnTable({
   onOpenContextMenu: (target: SlotContextTarget) => void
   onSelectReservation: (id: string) => void
   onMoveColumn: (golfCourseId: string, delta: -1 | 1) => void
+  onOpenCourseSetup: (golfCourseId: string) => void
 }) {
   const { t } = useTranslation(['ledger'])
   const seatColumns = seatColumnCount(column)
@@ -116,24 +126,60 @@ function LedgerColumnTable({
     <section className="ledger-column" aria-label={column.courseName}>
       <header className="ledger-column-head">
         <div className="ledger-column-title">
-          <h2>{column.courseName}</h2>
+          {/* The heading is the obvious thing to reach for when the desk wants
+              this course's setup, so it carries the link rather than making
+              them find the same course again in the course list. */}
+          <h2>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className="ledger-column-name"
+                  onClick={() => onOpenCourseSetup(column.golfCourseId)}
+                >
+                  {column.courseName}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {t('ledger:source.openCourseSetup')}
+              </TooltipContent>
+            </Tooltip>
+          </h2>
+          {/* Two unlabelled chevrons on a header say nothing about what they
+              move. The name is on the tooltip rather than "left"/"right" alone,
+              so a board of four columns still reads which one is about to go.
+              A disabled arrow gets no tooltip — it also does nothing. */}
           <div className="ledger-column-move">
-            <button
-              type="button"
-              aria-label={t('ledger:order.moveLeft', { name: column.courseName })}
-              disabled={!canMoveLeft}
-              onClick={() => onMoveColumn(column.golfCourseId, -1)}
-            >
-              <ChevronLeft aria-hidden="true" />
-            </button>
-            <button
-              type="button"
-              aria-label={t('ledger:order.moveRight', { name: column.courseName })}
-              disabled={!canMoveRight}
-              onClick={() => onMoveColumn(column.golfCourseId, 1)}
-            >
-              <ChevronRight aria-hidden="true" />
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t('ledger:order.moveLeft', { name: column.courseName })}
+                  disabled={!canMoveLeft}
+                  onClick={() => onMoveColumn(column.golfCourseId, -1)}
+                >
+                  <ChevronLeft aria-hidden="true" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {t('ledger:order.moveLeft', { name: column.courseName })}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t('ledger:order.moveRight', { name: column.courseName })}
+                  disabled={!canMoveRight}
+                  onClick={() => onMoveColumn(column.golfCourseId, 1)}
+                >
+                  <ChevronRight aria-hidden="true" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {t('ledger:order.moveRight', { name: column.courseName })}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
         <p className="ledger-column-totals">{formatColumnTotals(column)}</p>
@@ -146,8 +192,20 @@ function LedgerColumnTable({
             <span>{t('ledger:column.open', { n: String(column.openSlotCount) })}</span>
           ) : null}
         </p>
+        {/* The notice used to state the problem and stop there, leaving the desk
+            to work out that the answer lives on the course's own screen. It is
+            two clicks from here, so the notice carries the way there. */}
         {derived ? (
-          <p className="ledger-column-derived">{t('ledger:source.derivedNotice')}</p>
+          <p className="ledger-column-derived">
+            {t('ledger:source.derivedNotice')}{' '}
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => onOpenCourseSetup(column.golfCourseId)}
+            >
+              {t('ledger:source.openCourseSetup')}
+            </button>
+          </p>
         ) : null}
       </header>
 
@@ -216,6 +274,7 @@ function SlotRows({
 }) {
   const { t } = useTranslation(['ledger'])
   const tone = slotTone(slot)
+  const bookingBlock = reservationBlockReason({ column, slot })
   // An empty slot is still one row: the empty row is the answer to "what is
   // open at 07:14", so it can never be collapsed away.
   const rowCount = Math.max(slot.items.length, 1)
@@ -260,7 +319,7 @@ function SlotRows({
         teeTime: slot.teeTime,
         reservationId: item?.id,
         reservationName: item?.partyName,
-        canBook: slot.items.length === 0 && slot.isSellable,
+        canBook: slot.items.length === 0 && bookingBlock === null,
       })
     }
 
@@ -276,7 +335,7 @@ function SlotRows({
             type="button"
             className="ledger-empty-button"
             onClick={event => {
-              if (event.shiftKey || !slot.isSellable) {
+              if (event.shiftKey || bookingBlock !== null) {
                 onToggleSlot(column.golfCourseId, slot.teeTime, event.shiftKey)
                 return
               }
@@ -284,7 +343,7 @@ function SlotRows({
             }}
             aria-pressed={isSelected}
           >
-            <SlotEmptyLabel slot={slot} />
+            <SlotEmptyLabel slot={slot} bookingBlock={bookingBlock} />
           </button>
         </td>
       </tr>
@@ -340,12 +399,24 @@ function SlotStatus({ slot }: { slot: LedgerSlot }) {
   return null
 }
 
-function SlotEmptyLabel({ slot }: { slot: LedgerSlot }) {
+function SlotEmptyLabel({
+  slot,
+  bookingBlock,
+}: {
+  slot: LedgerSlot
+  bookingBlock: ReservationBlockReason | null
+}) {
   const { t } = useTranslation(['ledger'])
   const remaining = remainingGroups(slot)
-  if (!slot.isActive) return <span>{t('ledger:cell.retired')}</span>
-  if (slot.mark?.kind === 'closed') {
-    return <span>{slot.mark.label || t('ledger:cell.closed')}</span>
+  if (bookingBlock) {
+    const labels: Record<ReservationBlockReason, string> = {
+      full: t('ledger:newReservation.blockLabel.full'),
+      stopped: slot.mark?.label || t('ledger:newReservation.blockLabel.stopped'),
+      missingInventory: t('ledger:newReservation.blockLabel.missingInventory'),
+      missingResource: t('ledger:newReservation.blockLabel.missingResource'),
+      notSellable: t('ledger:newReservation.blockLabel.notSellable'),
+    }
+    return <span className="ledger-reservation-block-label">{labels[bookingBlock]}</span>
   }
   // The remaining count already says the row is open, so it stands alone; the
   // word is only needed where nothing counted the capacity. Most rows on a
