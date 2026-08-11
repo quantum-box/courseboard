@@ -70,6 +70,25 @@ export const reservationImport = {
     unknown: 'ファイルに確認したほうがよい点があります。取り込んだあと、元の予約表と見比べてください。',
   },
 
+  /** コースの対応付け。名前で当てられなかったものはここで答える。 */
+  courses: {
+    unanswered: '{{n}}件のコースが、どのコースのことか決まっていません。下で選ぶまで、そのコースの予約は入りません。',
+    state: '状態',
+    unset: '選んでください',
+    ignore: '取り込まない',
+    save: 'この対応付けで保存する',
+    saving: '保存しています…',
+    saveHint: '一度保存すれば、次の月からは選び直す必要はありません。',
+    saveFailed: '対応付けを保存できませんでした。',
+    resolution: {
+      linked: '指定済み',
+      suggested: '名前から推定',
+      ignored: '取り込まない',
+      unresolved: '対応するコースが不明',
+      ambiguous: '候補が複数',
+    },
+  },
+
   daily: {
     title: '日ごとの組数',
     description: '{{from}} 〜 {{to}}',

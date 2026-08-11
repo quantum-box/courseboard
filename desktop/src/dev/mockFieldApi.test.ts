@@ -349,4 +349,61 @@ describe('mockFieldApi', () => {
     expect(checked.yearMonth).toBe('2026-07')
     expect(wrote.imported).toBeGreaterThan(0)
   })
+
+  it('leaves one export name unanswered so the mapping step is reachable', () => {
+    // A fixture where every name matches would never exercise the screen's
+    // whole reason for existing.
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const preview = resolveMockFieldApiJson(
+      '/v1/course/reservation-summaries/preview?fileName=x.xlsx',
+      { method: 'POST', body: new ArrayBuffer(8) },
+    )
+    expect(preview.kind).toBe('hit')
+    if (preview.kind !== 'hit') return
+    const body = preview.data as {
+      unansweredCourses: number
+      courses: Array<{ sheetLabel: string; resolution: string; imported: boolean }>
+    }
+    expect(body.unansweredCourses).toBeGreaterThan(0)
+    expect(body.courses.some(course => course.resolution === 'unresolved')).toBe(true)
+    // The rest still import, so a partly-answered file is not a dead end.
+    expect(body.courses.some(course => course.imported)).toBe(true)
+  })
+
+  it('remembers an answer so the same file stops asking', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const before = resolveMockFieldApiJson(
+      '/v1/course/reservation-summaries/preview?fileName=x.xlsx',
+      { method: 'POST', body: new ArrayBuffer(8) },
+    )
+    if (before.kind !== 'hit') throw new Error('preview should answer')
+    const unanswered = (before.data as {
+      courses: Array<{ sheetLabel: string; resolution: string }>
+    }).courses.find(course => course.resolution === 'unresolved')
+    expect(unanswered).toBeDefined()
+
+    const saved = resolveMockFieldApiJson('/v1/course/reservation-summaries/course-links', {
+      method: 'PUT',
+      body: JSON.stringify({
+        items: [{ sheetLabel: unanswered?.sheetLabel, golfCourseId: 'course_east' }],
+      }),
+    })
+    expect(saved.kind).toBe('hit')
+
+    const after = resolveMockFieldApiJson(
+      '/v1/course/reservation-summaries/preview?fileName=x.xlsx',
+      { method: 'POST', body: new ArrayBuffer(8) },
+    )
+    if (after.kind !== 'hit') throw new Error('preview should answer')
+    const body = after.data as {
+      unansweredCourses: number
+      courses: Array<{ sheetLabel: string; resolution: string }>
+    }
+    expect(body.unansweredCourses).toBe(0)
+    expect(
+      body.courses.find(course => course.sheetLabel === unanswered?.sheetLabel)?.resolution,
+    ).toBe('linked')
+  })
 })

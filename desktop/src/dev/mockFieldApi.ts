@@ -171,6 +171,24 @@ function generateReservationSummaries(): MockReservationSummary[] {
 
 const mockReservationSummaries = generateReservationSummaries()
 
+/**
+ * The desk's answers about which course each export name refers to.
+ *
+ * Starts empty on purpose: the first import a club does is the one where every
+ * name is still a question, and that is the state the screen most needs to be
+ * walked through without a backend.
+ */
+const mockReservationCourseLinks = new Map<string, string | null>()
+
+function mockReservationCourseLinkItems() {
+  return {
+    items: [...mockReservationCourseLinks.entries()].map(([sheetLabel, golfCourseId]) => ({
+      sheetLabel,
+      ...(golfCourseId ? { golfCourseId } : {}),
+    })),
+  }
+}
+
 function mockReservationSummaryDto(summary: MockReservationSummary) {
   return {
     ...summary,
@@ -1979,6 +1997,10 @@ function resolveGet(path: string): Json | null | undefined {
     )
   }
 
+  if (rawPathname === '/v1/course/reservation-summaries/course-links') {
+    return mockReservationCourseLinkItems()
+  }
+
   if (rawPathname === '/v1/course/reservation-summaries') {
     const from = url.searchParams.get('from') ?? TODAY
     const to = url.searchParams.get('to') ?? from
@@ -2377,30 +2399,65 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     // screen: what it has to show is a month's worth of counts, a per-course
     // breakdown, and the two-step check — none of which depend on the bytes.
     const dates = [...new Set(mockReservationSummaries.map(summary => summary.date))].sort()
-    const courses = mockCourses.map(course => {
+    const courses = mockCourses.map((course, index) => {
       const rows = mockReservationSummaries.filter(row => row.golfCourseId === course.id)
+      const sheetLabel = course.shortName ?? course.name
+      const saved = mockReservationCourseLinks.get(sheetLabel)
+      // The last course starts unanswered so the mapping step is reachable in
+      // mock mode. A screen whose whole point is "what do I do when the name
+      // does not match" is not worth much if the fixtures always match.
+      const resolution = saved === null
+        ? 'ignored'
+        : saved
+          ? 'linked'
+          : index === mockCourses.length - 1
+            ? 'unresolved'
+            : 'suggested'
+      const linkedId = saved ?? (resolution === 'suggested' ? course.id : undefined)
       return {
-        sheetLabel: course.shortName ?? course.name,
-        golfCourseId: course.id,
-        courseName: course.name,
+        sheetLabel,
+        resolution,
+        golfCourseId: linkedId ?? undefined,
+        courseName: linkedId ? course.name : undefined,
+        imported: resolution === 'linked' || resolution === 'suggested',
         dayCount: rows.length,
         totalGroups: rows.reduce((sum, row) => sum + row.totalGroups, 0),
         caddieGroups: rows.reduce((sum, row) => sum + row.caddieGroups, 0),
       }
     })
+    const importing = courses.filter(course => course.imported)
     const applied = reservationImportMatch[1] === 'import'
     return hit({
       yearMonth: MOCK_FIXTURE_DATE.slice(0, 7),
       // A preview writes nothing, so it reports nothing written — the same
       // distinction the real endpoint draws.
-      imported: applied ? mockReservationSummaries.length : 0,
+      imported: applied
+        ? mockReservationSummaries.filter(row =>
+          importing.some(course => course.golfCourseId === row.golfCourseId)).length
+        : 0,
       skipped: 0,
+      unansweredCourses: courses.filter(course => course.resolution === 'unresolved').length,
       from: dates[0] ?? MOCK_FIXTURE_DATE,
       to: dates[dates.length - 1] ?? MOCK_FIXTURE_DATE,
       courses,
       warnings: [],
-      summaries: mockReservationSummaries.map(mockReservationSummaryDto),
+      summaries: mockReservationSummaries
+        .filter(row => importing.some(course => course.golfCourseId === row.golfCourseId))
+        .map(mockReservationSummaryDto),
     })
+  }
+
+  if (pathname === '/v1/course/reservation-summaries/course-links' && method === 'PUT') {
+    const items = Array.isArray(body?.items) ? (body.items as Array<Record<string, unknown>>) : []
+    for (const item of items) {
+      const label = typeof item.sheetLabel === 'string' ? item.sheetLabel.trim() : ''
+      if (!label) return error(400, 'a course link needs the name the sheet uses')
+      const courseId = typeof item.golfCourseId === 'string' ? item.golfCourseId.trim() : ''
+      // Null, not absent: "do not import" is an answer the import has to be
+      // able to tell apart from a name nobody has looked at.
+      mockReservationCourseLinks.set(label, courseId || null)
+    }
+    return hit(mockReservationCourseLinkItems())
   }
 
   if (pathname === '/v1/course/customers' && method === 'POST') {

@@ -126,6 +126,8 @@ impl Modify for SecurityAddon {
         http_reservation_summary::preview_reservation_summaries,
         http_reservation_summary::import_reservation_summaries,
         http_reservation_summary::list_reservation_summaries,
+        http_reservation_summary::list_reservation_course_links,
+        http_reservation_summary::save_reservation_course_links,
         http_commercial::list_budget_achievements,
         http_commercial::get_monthly_settlement,
         http_commercial::export_monthly_settlement_csv,
@@ -228,6 +230,8 @@ impl Modify for SecurityAddon {
             http_reservation_summary::ReservationSummaryDto,
             http_reservation_summary::ImportWarningDto,
             http_reservation_summary::ImportedCourseDto,
+            http_reservation_summary::ReservationCourseLinkDto,
+            http_reservation_summary::SaveReservationCourseLinksRequest,
             http_reservation_summary::ReservationImportResultDto,
             http_commercial::DailyBudgetQueryParams,
             http_commercial::UpsertDailyBudgetRequest,
@@ -297,6 +301,7 @@ mod tests {
         assert!(paths.contains_key("/v1/course/daily-budgets"));
         assert!(paths.contains_key("/v1/course/reservation-summaries"));
         assert!(paths.contains_key("/v1/course/reservation-summaries/import"));
+        assert!(paths.contains_key("/v1/course/reservation-summaries/course-links"));
         assert!(paths.contains_key("/v1/me"));
         let components = json
             .pointer("/components/schemas")

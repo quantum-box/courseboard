@@ -16,13 +16,14 @@ use utoipa::{IntoParams, ToSchema};
 use super::http::{catalog_gateway, credentials, operator_id, ItemsResponse};
 use super::openapi::ErrorBody;
 use crate::course::domain::{
-    year_month_from_file_name, CourseId, ImportWarning, ReservationDaySummary,
-    ReservationSummaryQuery,
+    year_month_from_file_name, CourseId, ImportWarning, ReservationCourseLink,
+    ReservationDaySummary, ReservationSummaryQuery,
 };
 use crate::course::infrastructure::read_reservation_sheet;
 use crate::course::usecase::{
     ImportMode, ImportReservationSummariesRequest, ImportReservationSummariesUseCase,
     ImportedCourse, ListReservationSummariesUseCase, ReservationImportOutcome,
+    SaveReservationCourseLinksUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -164,11 +165,23 @@ impl From<&ImportWarning> for ImportWarningDto {
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportedCourseDto {
-    /// The course name as the file writes it, so the desk can see what the
-    /// import matched its courses to.
+    /// The course name as the file writes it. Also the key the desk's answer
+    /// is stored against.
     pub sheet_label: String,
-    pub golf_course_id: String,
-    pub course_name: String,
+    /// `linked` (the desk said so) | `suggested` (matched by name) |
+    /// `ignored` (the desk said to leave it out) | `unresolved` |
+    /// `ambiguous`. The screen asks about the last two.
+    pub resolution: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub golf_course_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub course_name: Option<String>,
+    /// Course names this one could have meant, when several fit.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
+    pub candidates: Vec<String>,
+    /// Whether this name's counts are part of the import.
+    pub imported: bool,
     pub day_count: usize,
     pub total_groups: i32,
     pub caddie_groups: i32,
@@ -178,8 +191,11 @@ impl From<&ImportedCourse> for ImportedCourseDto {
     fn from(value: &ImportedCourse) -> Self {
         Self {
             sheet_label: value.sheet_label.clone(),
-            golf_course_id: value.course_id.to_string(),
+            resolution: value.resolution.to_string(),
+            golf_course_id: value.course_id.as_ref().map(|id| id.to_string()),
             course_name: value.course_name.clone(),
+            candidates: value.candidates.clone(),
+            imported: value.is_imported(),
             day_count: value.day_count,
             total_groups: value.total_groups,
             caddie_groups: value.caddie_groups,
@@ -202,6 +218,9 @@ pub struct ReservationImportResultDto {
     pub imported: u64,
     /// Half-days the file held that the import left out.
     pub skipped: usize,
+    /// Course names the desk still has to answer for. Not a failure — the
+    /// screen shows them so they can be answered once.
+    pub unanswered_courses: usize,
     pub from: NaiveDate,
     pub to: NaiveDate,
     pub courses: Vec<ImportedCourseDto>,
@@ -220,6 +239,7 @@ impl ReservationImportResultDto {
             year_month: format!("{year:04}-{month:02}"),
             imported: outcome.imported,
             skipped: outcome.skipped,
+            unanswered_courses: outcome.unanswered_courses,
             from: outcome.dates.first().copied().unwrap_or_default(),
             to: outcome.dates.last().copied().unwrap_or_default(),
             courses: outcome
@@ -314,6 +334,7 @@ async fn run_import(
     let use_case = ImportReservationSummariesUseCase::new(
         catalog_gateway(&state),
         state.reservation_summaries(),
+        state.reservation_course_links(),
     );
     let outcome = use_case
         .execute(
@@ -388,6 +409,99 @@ pub async fn import_reservation_summaries(
     body: Bytes,
 ) -> Result<Json<ReservationImportResultDto>, AppError> {
     run_import(state, headers, params, body, ImportMode::Apply).await
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReservationCourseLinkDto {
+    /// The course name exactly as the export writes it.
+    pub sheet_label: String,
+    /// Absent means "do not import this one" — an answer, not a blank. A club
+    /// that runs three courses and manages one here says so this way and stops
+    /// being asked.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub golf_course_id: Option<String>,
+}
+
+impl From<&ReservationCourseLink> for ReservationCourseLinkDto {
+    fn from(value: &ReservationCourseLink) -> Self {
+        Self {
+            sheet_label: value.sheet_label.clone(),
+            golf_course_id: value.course_id.as_ref().map(|id| id.to_string()),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveReservationCourseLinksRequest {
+    pub items: Vec<ReservationCourseLinkDto>,
+}
+
+/// GET /v1/course/reservation-summaries/course-links
+#[utoipa::path(
+    get,
+    path = "/v1/course/reservation-summaries/course-links",
+    tag = "course-reservation-summary",
+    responses(
+        (status = 200, description = "Which course each export name refers to", body = inline(ItemsResponse<ReservationCourseLinkDto>)),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_reservation_course_links(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ItemsResponse<ReservationCourseLinkDto>>, AppError> {
+    let tenant_id = operator_id(&headers)?.to_string();
+    let use_case = SaveReservationCourseLinksUseCase::new(state.reservation_course_links());
+    let items = use_case.list(&tenant_id).await.map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: items.iter().map(ReservationCourseLinkDto::from).collect(),
+    }))
+}
+
+/// PUT /v1/course/reservation-summaries/course-links
+#[utoipa::path(
+    put,
+    path = "/v1/course/reservation-summaries/course-links",
+    tag = "course-reservation-summary",
+    request_body = SaveReservationCourseLinksRequest,
+    responses(
+        (status = 200, description = "The answers now on file", body = inline(ItemsResponse<ReservationCourseLinkDto>)),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn save_reservation_course_links(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<SaveReservationCourseLinksRequest>,
+) -> Result<Json<ItemsResponse<ReservationCourseLinkDto>>, AppError> {
+    let tenant_id = operator_id(&headers)?.to_string();
+    let links: Vec<ReservationCourseLink> = request
+        .items
+        .into_iter()
+        .map(|item| ReservationCourseLink {
+            sheet_label: item.sheet_label,
+            course_id: item
+                .golf_course_id
+                .map(|id| id.trim().to_string())
+                .filter(|id| !id.is_empty())
+                .map(CourseId::new),
+        })
+        .collect();
+    let use_case = SaveReservationCourseLinksUseCase::new(state.reservation_course_links());
+    let saved = use_case
+        .execute(&tenant_id, &links, Some(operator_id(&headers)?))
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: saved.iter().map(ReservationCourseLinkDto::from).collect(),
+    }))
 }
 
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]
@@ -520,6 +634,7 @@ mod tests {
             warnings: Vec::new(),
             imported: 0,
             skipped: 0,
+            unanswered_courses: 0,
             dates,
         }
     }

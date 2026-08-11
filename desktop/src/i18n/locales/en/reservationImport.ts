@@ -74,6 +74,24 @@ export const reservationImport: DeepPartial<typeof source> = {
       'There is something in this file worth checking. Compare it against the original booking sheet after importing.',
   },
 
+  courses: {
+    unanswered: '{{n}} course(s) have no course chosen yet. Their bookings stay out until you pick one below.',
+    state: 'State',
+    unset: 'Choose a course',
+    ignore: 'Do not import',
+    save: 'Save these choices',
+    saving: 'Saving…',
+    saveHint: 'Saved once, next month needs no picking.',
+    saveFailed: 'Those choices could not be saved.',
+    resolution: {
+      linked: 'Chosen',
+      suggested: 'Matched by name',
+      ignored: 'Left out',
+      unresolved: 'No matching course',
+      ambiguous: 'Several could fit',
+    },
+  },
+
   daily: {
     title: 'Groups by day',
     description: '{{from}} – {{to}}',

@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  courseChoiceOf,
   dailyRows,
   formatMonthDay,
   formatYearMonth,
+  IGNORE_COURSE,
   importTotals,
   monthBounds,
   warningCopy,
+  type ImportedCourse,
   type ReservationSummary,
 } from './reservationImport'
 
@@ -75,9 +78,26 @@ describe('dailyRows', () => {
 })
 
 describe('importTotals', () => {
+  function course(
+    sheetLabel: string,
+    resolution: ImportedCourse['resolution'],
+    totalGroups: number,
+    caddieGroups: number,
+  ): ImportedCourse {
+    return {
+      sheetLabel,
+      resolution,
+      golfCourseId: resolution === 'unresolved' ? undefined : `course-${sheetLabel}`,
+      imported: resolution === 'linked' || resolution === 'suggested',
+      dayCount: 62,
+      totalGroups,
+      caddieGroups,
+    }
+  }
+
   const courses = [
-    { sheetLabel: '真駒内', golfCourseId: 'a', courseName: '真駒内', dayCount: 62, totalGroups: 1800, caddieGroups: 700 },
-    { sheetLabel: '滝の', golfCourseId: 'b', courseName: '滝の', dayCount: 62, totalGroups: 1500, caddieGroups: 600 },
+    course('真駒内', 'suggested', 1800, 700),
+    course('滝の', 'linked', 1500, 600),
   ]
 
   it('counts days the way a calendar does, not half-days', () => {
@@ -94,8 +114,56 @@ describe('importTotals', () => {
     })
   })
 
-  it('survives a file that matched no course at all', () => {
-    expect(importTotals([])).toMatchObject({ courseCount: 0, dayCount: 0, totalGroups: 0 })
+  it('counts only what is going in, not everything the file holds', () => {
+    // A club that imports one of the three courses in the file checks this
+    // figure against its booking system. Counting the courses it left out
+    // would mean the number never matches what landed on the board.
+    const mixed = [
+      ...courses,
+      course('羊ケ丘', 'ignored', 900, 300),
+      course('テスト', 'unresolved', 40, 10),
+    ]
+    expect(importTotals(mixed)).toMatchObject({
+      courseCount: 2,
+      totalGroups: 3300,
+      caddieGroups: 1300,
+    })
+  })
+
+  it('survives a file where nothing has been answered yet', () => {
+    expect(importTotals([course('謎', 'unresolved', 40, 10)])).toMatchObject({
+      courseCount: 0,
+      dayCount: 0,
+      totalGroups: 0,
+    })
+  })
+})
+
+describe('courseChoiceOf', () => {
+  function course(resolution: ImportedCourse['resolution'], golfCourseId?: string): ImportedCourse {
+    return {
+      sheetLabel: '真駒内',
+      resolution,
+      golfCourseId,
+      imported: resolution === 'linked' || resolution === 'suggested',
+      dayCount: 62,
+      totalGroups: 0,
+      caddieGroups: 0,
+    }
+  }
+
+  it('starts on the course a name already resolves to', () => {
+    expect(courseChoiceOf(course('linked', 'course-a'))).toBe('course-a')
+    expect(courseChoiceOf(course('suggested', 'course-a'))).toBe('course-a')
+  })
+
+  it('shows a deliberate omission as one, not as an unanswered question', () => {
+    expect(courseChoiceOf(course('ignored'))).toBe(IGNORE_COURSE)
+  })
+
+  it('starts an unanswered name empty so it reads as a question', () => {
+    expect(courseChoiceOf(course('unresolved'))).toBe('')
+    expect(courseChoiceOf(course('ambiguous'))).toBe('')
   })
 })
 

@@ -1,5 +1,5 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
-import { CalendarRange, CheckCircle2, FileSpreadsheet, Upload, X } from 'lucide-react'
+import { CalendarRange, CheckCircle2, FileSpreadsheet, Save, Upload, X } from 'lucide-react'
 import { type ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, courseboardApiJson, currentYearMonth } from '../../api'
@@ -19,9 +19,11 @@ import { YearMonthPicker, useYearMonthValue } from '../../components/YearMonthPi
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import {
+  courseChoiceOf,
   dailyRows,
   formatMonthDay,
   formatYearMonth,
+  IGNORE_COURSE,
   importTotals,
   monthBounds,
   warningCopy,
@@ -114,6 +116,11 @@ export function ReservationImportPage() {
   // Until then the month below is not sent at all, so an unnamed file cannot be
   // dated by whatever the table filter happens to be showing.
   const [needsMonth, setNeedsMonth] = useState(false)
+  // The desk's answers for this file's course names, before they are saved.
+  // Keyed by the name the sheet uses, which is what the answer is stored
+  // against — a course id would not survive the name being asked about again.
+  const [courseChoice, setCourseChoice] = useState<Record<string, string>>({})
+  const [savingLinks, setSavingLinks] = useState(false)
   const {
     value: importMonth,
     error: importMonthError,
@@ -164,9 +171,56 @@ export function ReservationImportPage() {
   }, [load])
   useRegisterPageReload(load)
 
+  function chooseCourse(sheetLabel: string, value: string) {
+    setCourseChoice(current => ({ ...current, [sheetLabel]: value }))
+  }
+
+  /**
+   * Record what each name in this file refers to, then look again.
+   *
+   * Saved rather than applied to this import alone: the same file arrives every
+   * month, and a club whose course names differ from the export's would
+   * otherwise answer the same question every time.
+   */
+  async function saveCourseChoices() {
+    if (!preview) return
+    setSavingLinks(true)
+    setUploadError(null)
+    try {
+      await courseboardApiJson('/v1/course/reservation-summaries/course-links', {
+        method: 'PUT',
+        body: JSON.stringify({
+          items: preview.courses
+            .map(course => ({
+              sheetLabel: course.sheetLabel,
+              choice: courseChoice[course.sheetLabel] ?? courseChoiceOf(course),
+            }))
+            .filter(item => item.choice !== '')
+            .map(item => ({
+              sheetLabel: item.sheetLabel,
+              // "Do not import" is an answer, and it travels as the absence of
+              // a course rather than as a sentinel the API would have to know.
+              golfCourseId: item.choice === IGNORE_COURSE ? undefined : item.choice,
+            })),
+        }),
+      })
+      setCourseChoice({})
+      // Look again rather than patching the result in place: the counts, the
+      // warnings and the totals all move when a course joins or leaves.
+      await check()
+    } catch (error) {
+      setUploadError(
+        error instanceof Error ? error.message : t('reservationImport:courses.saveFailed'),
+      )
+    } finally {
+      setSavingLinks(false)
+    }
+  }
+
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
     setUploadError(null)
     setPreview(null)
+    setCourseChoice({})
     // A new file gets asked about on its own terms. The month answered for the
     // last one says nothing about this one, and carrying it over is invisible:
     // backfilling an unnamed 2025 file and then picking an unnamed 2026 one
@@ -191,6 +245,7 @@ export function ReservationImportPage() {
   function discard() {
     setPreview(null)
     setFile(null)
+    setCourseChoice({})
     setUploadError(null)
     setNeedsMonth(false)
     setImportMonth(currentYearMonth())
@@ -292,6 +347,16 @@ export function ReservationImportPage() {
     () => (preview ? importTotals(preview.courses) : null),
     [preview],
   )
+  const mappingChanged = useMemo(
+    () =>
+      Boolean(preview)
+      && (preview?.courses ?? []).some(
+        course =>
+          courseChoice[course.sheetLabel] !== undefined
+          && courseChoice[course.sheetLabel] !== courseChoiceOf(course),
+      ),
+    [preview, courseChoice],
+  )
   const rows = useMemo(
     () => dailyRows(preview ? preview.summaries : stored),
     [preview, stored],
@@ -361,7 +426,7 @@ export function ReservationImportPage() {
                   variant="primary"
                   size="lg"
                   type="button"
-                  disabled={applying}
+                  disabled={applying || !totals?.courseCount}
                   onClick={() => void apply()}
                 >
                   <CheckCircle2 />
@@ -411,9 +476,17 @@ export function ReservationImportPage() {
             />
           </MetricGrid>
 
+          {preview.unansweredCourses > 0 ? (
+            <Notice tone="warning">
+              {t('reservationImport:courses.unanswered', {
+                n: String(preview.unansweredCourses),
+              })}
+            </Notice>
+          ) : null}
+
           <DataTable
             rows={preview.courses}
-            rowKey={course => course.golfCourseId}
+            rowKey={course => course.sheetLabel}
             columns={[
               {
                 key: 'sheetLabel',
@@ -425,7 +498,31 @@ export function ReservationImportPage() {
                 key: 'courseName',
                 header: t('reservationImport:preview.courses.courseName'),
                 mobileLabel: t('reservationImport:preview.courses.courseName'),
-                cell: course => course.courseName,
+                cell: course => (
+                  <NativeSelect
+                    value={courseChoice[course.sheetLabel] ?? courseChoiceOf(course)}
+                    onChange={event => chooseCourse(course.sheetLabel, event.target.value)}
+                  >
+                    <option value="">{t('reservationImport:courses.unset')}</option>
+                    {courses.map(option => (
+                      <option key={option.id} value={option.id}>
+                        {option.name}
+                      </option>
+                    ))}
+                    <option value={IGNORE_COURSE}>{t('reservationImport:courses.ignore')}</option>
+                  </NativeSelect>
+                ),
+              },
+              {
+                key: 'resolution',
+                header: t('reservationImport:courses.state'),
+                mobileLabel: t('reservationImport:courses.state'),
+                cell: course => (
+                  <span className="text-2xs text-muted-foreground">
+                    {t(`reservationImport:courses.resolution.${course.resolution}`)}
+                    {course.candidates?.length ? `: ${course.candidates.join('、')}` : ''}
+                  </span>
+                ),
               },
               {
                 key: 'days',
@@ -450,6 +547,25 @@ export function ReservationImportPage() {
               },
             ]}
           />
+
+          {mappingChanged ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="primary"
+                type="button"
+                disabled={savingLinks}
+                onClick={() => void saveCourseChoices()}
+              >
+                <Save />
+                {savingLinks
+                  ? t('reservationImport:courses.saving')
+                  : t('reservationImport:courses.save')}
+              </Button>
+              <span className="text-xs text-muted-foreground">
+                {t('reservationImport:courses.saveHint')}
+              </span>
+            </div>
+          ) : null}
         </Panel>
       ) : null}
 

@@ -19,14 +19,47 @@ export type ReservationSummary = {
   selfPlayGroups: number
 }
 
+/**
+ * What became of one course name in the file.
+ *
+ * `linked` — the desk said which course this is.
+ * `suggested` — matched by name; imports, and the preview says it was a guess.
+ * `ignored` — the desk said to leave this one out.
+ * `unresolved` / `ambiguous` — still a question, and the screen asks it.
+ */
+export type CourseResolution =
+  | 'linked'
+  | 'suggested'
+  | 'ignored'
+  | 'unresolved'
+  | 'ambiguous'
+
 export type ImportedCourse = {
-  /** The course name as the file writes it. */
+  /** The course name as the file writes it. Also the key an answer is saved against. */
   sheetLabel: string
-  golfCourseId: string
-  courseName: string
+  resolution: CourseResolution
+  golfCourseId?: string
+  courseName?: string
+  candidates?: string[]
+  /** Whether this name's counts are part of the import. */
+  imported: boolean
   dayCount: number
   totalGroups: number
   caddieGroups: number
+}
+
+/** The value the course picker uses for "do not import this one". */
+export const IGNORE_COURSE = '__ignore__'
+
+/**
+ * What the picker should start on for one course name.
+ *
+ * An unanswered name starts empty so it reads as a question rather than as a
+ * choice somebody already made.
+ */
+export function courseChoiceOf(course: ImportedCourse): string {
+  if (course.resolution === 'ignored') return IGNORE_COURSE
+  return course.golfCourseId ?? ''
 }
 
 /**
@@ -67,6 +100,8 @@ export type ReservationImportResult = {
   courses: ImportedCourse[]
   warnings: ImportWarning[]
   summaries: ReservationSummary[]
+  /** Course names the desk still has to answer for. */
+  unansweredCourses: number
 }
 
 /** One row of the day-by-day table: a date, with its two halves side by side. */
@@ -120,15 +155,24 @@ export type ImportTotals = {
   caddieGroups: number
 }
 
-/** What the whole file adds up to, for the glance that answers "is this the right month". */
+/**
+ * What the import adds up to, for the glance that answers "is this the right
+ * month".
+ *
+ * Counts only the courses that are actually going in. A club that imports one
+ * of the three courses in the file should see that course's numbers, not the
+ * file's — otherwise the figure it checks against the booking system would
+ * never match what landed on the board.
+ */
 export function importTotals(courses: ImportedCourse[]): ImportTotals {
+  const importing = courses.filter(course => course.imported)
   return {
-    courseCount: courses.length,
+    courseCount: importing.length,
     // A course contributes two half-days per date, so its day count is halved
     // back into days a person would recognise.
-    dayCount: Math.max(...courses.map(course => Math.ceil(course.dayCount / 2)), 0),
-    totalGroups: courses.reduce((sum, course) => sum + course.totalGroups, 0),
-    caddieGroups: courses.reduce((sum, course) => sum + course.caddieGroups, 0),
+    dayCount: Math.max(...importing.map(course => Math.ceil(course.dayCount / 2)), 0),
+    totalGroups: importing.reduce((sum, course) => sum + course.totalGroups, 0),
+    caddieGroups: importing.reduce((sum, course) => sum + course.caddieGroups, 0),
   }
 }
 

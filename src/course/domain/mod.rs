@@ -96,9 +96,9 @@ pub use payroll::{
 pub use ports::{
     AvailabilityDeadlineGateway, CaddieShiftGateway, CustomerGateway, GatewayCredentials,
     GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
-    GolfTaxGateway, MembershipGateway, ReservationGateway, ReservationScheduleGateway,
-    ReservationSummaryGateway, ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery,
-    TeeSheetQuery,
+    GolfTaxGateway, MembershipGateway, ReservationCourseLinkGateway, ReservationGateway,
+    ReservationScheduleGateway, ReservationSummaryGateway, ShiftRulesGateway, SlotOverrideGateway,
+    TeeLedgerQuery, TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{
@@ -110,8 +110,8 @@ pub use reservation_sheet::{
     SheetDaySummary, SheetGrid,
 };
 pub use reservation_summary::{
-    match_course_label, CourseMatch, ReservationDaySummary, ReservationSummaryQuery,
-    ReservationSummaryWindow, TimeOfDay,
+    match_course_label, resolve_course_label, CourseMatch, CourseResolution, ReservationCourseLink,
+    ReservationDaySummary, ReservationSummaryQuery, ReservationSummaryWindow, TimeOfDay,
 };
 pub use resource::{Resource, ResourceKind, SaveCourseResource};
 pub use schedule::{

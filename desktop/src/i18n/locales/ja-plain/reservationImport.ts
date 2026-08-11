@@ -70,6 +70,24 @@ export const reservationImport: DeepPartial<typeof source> = {
     unknown: 'ファイルに、たしかめたほうがよい点があります。入れたあとで、元の予約表と見くらべてください。',
   },
 
+  courses: {
+    unanswered: '{{n}}件のコースが、どのコースのことか決まっていません。下でえらぶまで、そのコースの予約は入りません。',
+    state: 'いまの状態',
+    unset: 'えらんでください',
+    ignore: '入れない',
+    save: 'この組み合わせで保存する',
+    saving: '保存しています…',
+    saveHint: '一度保存すれば、次の月からはえらび直さなくて大丈夫です。',
+    saveFailed: '組み合わせを保存できませんでした。',
+    resolution: {
+      linked: 'えらび済み',
+      suggested: '名前から推定',
+      ignored: '入れない',
+      unresolved: '合うコースが分からない',
+      ambiguous: '候補が2つ以上',
+    },
+  },
+
   daily: {
     title: '日ごとの組の数',
     description: '{{from}} 〜 {{to}}',

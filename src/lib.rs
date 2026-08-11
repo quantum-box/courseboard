@@ -32,8 +32,8 @@ use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
     MySqlAvailabilityDeadlineRepository, MySqlCaddieShiftRepository,
-    MySqlGeneratedThroughRepository, MySqlReservationSummaryRepository, MySqlShiftRulesRepository,
-    MySqlSlotOverrideRepository,
+    MySqlGeneratedThroughRepository, MySqlReservationCourseLinkRepository,
+    MySqlReservationSummaryRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -58,6 +58,7 @@ pub struct AppState {
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
     reservation_summaries: Arc<MySqlReservationSummaryRepository>,
+    reservation_course_links: Arc<MySqlReservationCourseLinkRepository>,
     generated_through: Arc<MySqlGeneratedThroughRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
@@ -90,6 +91,9 @@ impl AppState {
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
             reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(pool.clone())),
+            reservation_course_links: Arc::new(MySqlReservationCourseLinkRepository::new(
+                pool.clone(),
+            )),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -132,6 +136,9 @@ impl AppState {
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
             reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(pool.clone())),
+            reservation_course_links: Arc::new(MySqlReservationCourseLinkRepository::new(
+                pool.clone(),
+            )),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -162,6 +169,9 @@ impl AppState {
                 reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(
                     pool.clone(),
                 )),
+                reservation_course_links: Arc::new(MySqlReservationCourseLinkRepository::new(
+                    pool.clone(),
+                )),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -181,6 +191,9 @@ impl AppState {
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
                 reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(
+                    pool.clone(),
+                )),
+                reservation_course_links: Arc::new(MySqlReservationCourseLinkRepository::new(
                     pool.clone(),
                 )),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
@@ -220,6 +233,13 @@ impl AppState {
     /// CourseBoard-owned record of how far each course has been built.
     pub fn generated_through(&self) -> Arc<MySqlGeneratedThroughRepository> {
         self.generated_through.clone()
+    }
+
+    /// CourseBoard-owned answers about which course each name in the booking
+    /// system's export refers to. Field's course master carries no external
+    /// identifier, so the mapping is ours (ADR-0005).
+    pub fn reservation_course_links(&self) -> Arc<MySqlReservationCourseLinkRepository> {
+        self.reservation_course_links.clone()
     }
 
     /// CourseBoard-owned shift-request filing deadlines.
@@ -747,6 +767,15 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/course/reservation-policy",
             get(course::interfaces::http_commercial::get_reservation_policy)
                 .patch(course::interfaces::http_commercial::update_reservation_policy)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/reservation-summaries/course-links",
+            get(course::interfaces::http_reservation_summary::list_reservation_course_links)
+                .put(course::interfaces::http_reservation_summary::save_reservation_course_links)
                 .route_layer(middleware::from_fn_with_state(
                     state.clone(),
                     require_valid_token,

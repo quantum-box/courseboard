@@ -10,9 +10,9 @@ use std::sync::Arc;
 use chrono::NaiveDate;
 
 use crate::course::domain::{
-    match_course_label, parse_reservation_sheet, CourseError, CourseId, CourseMatch,
-    GatewayCredentials, GolfCatalogGateway, ImportWarning, ReservationDaySummary,
-    ReservationSummaryGateway, ReservationSummaryWindow, SheetGrid,
+    parse_reservation_sheet, resolve_course_label, CourseError, CourseId, CourseResolution,
+    GatewayCredentials, GolfCatalogGateway, ImportWarning, ReservationCourseLinkGateway,
+    ReservationDaySummary, ReservationSummaryGateway, ReservationSummaryWindow, SheetGrid,
 };
 
 /// Whether to write what the file says, or only report it.
@@ -34,18 +34,35 @@ pub struct ImportReservationSummariesRequest {
     pub mode: ImportMode,
 }
 
-/// A course the file names, paired with the course it was matched to.
+/// One course name in the file, and what became of it.
+///
+/// Every name the sheet holds gets one of these, whether it imports or not.
+/// The screen is where the desk answers the ones that have no course yet, so it
+/// has to be shown the whole list rather than only the part that worked.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImportedCourse {
-    /// The name as the sheet writes it, so the desk can see what was matched.
+    /// The name as the sheet writes it. Also the key the desk's answer is
+    /// stored against.
     pub sheet_label: String,
-    pub course_id: CourseId,
-    pub course_name: String,
-    /// Half-days this course contributes.
+    /// `linked` | `suggested` | `ignored` | `unresolved` | `ambiguous`.
+    pub resolution: &'static str,
+    /// Absent for a name with no course behind it.
+    pub course_id: Option<CourseId>,
+    pub course_name: Option<String>,
+    /// Course names a name could have meant, when several fit.
+    pub candidates: Vec<String>,
+    /// Half-days this name contributes. Counted whether it imports or not, so
+    /// the desk can see the size of what it is being asked about.
     pub day_count: usize,
     /// Groups across the whole file, for the "is this the right month" glance.
     pub total_groups: i32,
     pub caddie_groups: i32,
+}
+
+impl ImportedCourse {
+    pub fn is_imported(&self) -> bool {
+        matches!(self.resolution, "linked" | "suggested")
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,22 +73,33 @@ pub struct ReservationImportOutcome {
     /// Half-days written. Zero on a preview, which writes nothing.
     pub imported: u64,
     /// Half-days the file held but the import left out — an unreadable count,
-    /// or a course CourseBoard does not have.
+    /// or a course with no answer yet.
     pub skipped: usize,
+    /// Names the desk still has to answer for. Not an error: a club that
+    /// manages one of its three courses here is in this state on purpose until
+    /// it says so, and a club whose courses are named differently starts here
+    /// every time until it says so once.
+    pub unanswered_courses: usize,
     pub dates: Vec<NaiveDate>,
 }
 
 pub struct ImportReservationSummariesUseCase {
     catalog: Arc<dyn GolfCatalogGateway>,
     summaries: Arc<dyn ReservationSummaryGateway>,
+    links: Arc<dyn ReservationCourseLinkGateway>,
 }
 
 impl ImportReservationSummariesUseCase {
     pub fn new(
         catalog: Arc<dyn GolfCatalogGateway>,
         summaries: Arc<dyn ReservationSummaryGateway>,
+        links: Arc<dyn ReservationCourseLinkGateway>,
     ) -> Self {
-        Self { catalog, summaries }
+        Self {
+            catalog,
+            summaries,
+            links,
+        }
     }
 
     pub async fn execute(
@@ -85,13 +113,14 @@ impl ImportReservationSummariesUseCase {
         }
         let sheet = parse_reservation_sheet(&request.grid, request.year)?;
         let courses = self.catalog.list_courses(credentials).await?;
+        let links = self.links.list_course_links(tenant_id).await?;
 
         let mut warnings = sheet.warnings;
         let mut summaries = Vec::with_capacity(sheet.summaries.len());
         let mut imported_courses: Vec<ImportedCourse> = Vec::new();
         // Half-days the file held that will not reach the board. Starts with
         // the ones the reader could not make a number of, and grows by every
-        // course that cannot be matched to one in CourseBoard.
+        // name with no course behind it.
         let mut skipped = sheet.dropped_half_days + sheet.summaries.len();
 
         for label in &sheet.course_labels {
@@ -100,57 +129,69 @@ impl ImportReservationSummariesUseCase {
                 .iter()
                 .filter(|summary| summary.course_label == *label)
                 .collect();
-            match match_course_label(label, &courses) {
-                CourseMatch::Unknown => {
-                    // Once per course, not once per day: a club that has not
-                    // registered 羊ケ丘 does not need to be told sixty-two times.
-                    warnings.push(ImportWarning::UnknownCourse {
-                        course_label: label.clone(),
-                    });
-                    continue;
+            let resolution = resolve_course_label(label, &courses, &links);
+
+            // Every name in the file gets a row, imported or not. The screen
+            // asks the desk about the ones with nowhere to go, and it cannot
+            // ask about what it was never told.
+            let mut entry = ImportedCourse {
+                sheet_label: label.clone(),
+                resolution: resolution.kind(),
+                course_id: resolution.course().map(|course| course.id().clone()),
+                course_name: resolution.course().map(|course| course.name().to_string()),
+                candidates: match &resolution {
+                    CourseResolution::Ambiguous(candidates) => candidates.clone(),
+                    _ => Vec::new(),
+                },
+                day_count: rows.len(),
+                total_groups: rows.iter().map(|row| row.total_groups).sum(),
+                caddie_groups: rows.iter().map(|row| row.caddie_groups).sum(),
+            };
+
+            if let Some(course) = resolution.course() {
+                for row in rows {
+                    summaries.push(ReservationDaySummary::try_new(
+                        course.id().clone(),
+                        row.date,
+                        row.time_of_day,
+                        row.total_groups,
+                        row.caddie_groups,
+                    )?);
                 }
-                CourseMatch::Ambiguous(candidates) => {
-                    warnings.push(ImportWarning::AmbiguousCourse {
-                        course_label: label.clone(),
-                        candidates,
-                    });
-                    continue;
-                }
-                CourseMatch::Matched(course) => {
-                    let mut imported = ImportedCourse {
-                        sheet_label: label.clone(),
-                        course_id: course.id().clone(),
-                        course_name: course.name().to_string(),
-                        day_count: rows.len(),
-                        total_groups: 0,
-                        caddie_groups: 0,
-                    };
-                    for row in rows {
-                        imported.total_groups += row.total_groups;
-                        imported.caddie_groups += row.caddie_groups;
-                        summaries.push(ReservationDaySummary::try_new(
-                            course.id().clone(),
-                            row.date,
-                            row.time_of_day,
-                            row.total_groups,
-                            row.caddie_groups,
-                        )?);
+            } else {
+                // Reported once per name, not once per day: a club being asked
+                // about 羊ケ丘 does not need telling sixty-two times. A name the
+                // desk has already left out is not reported at all — that
+                // question is answered.
+                match &resolution {
+                    CourseResolution::Unresolved => {
+                        warnings.push(ImportWarning::UnknownCourse {
+                            course_label: label.clone(),
+                        });
                     }
-                    imported_courses.push(imported);
+                    CourseResolution::Ambiguous(candidates) => {
+                        warnings.push(ImportWarning::AmbiguousCourse {
+                            course_label: label.clone(),
+                            candidates: candidates.clone(),
+                        });
+                    }
+                    _ => {}
                 }
+                entry.day_count = rows.len();
             }
+            imported_courses.push(entry);
         }
 
         skipped -= summaries.len();
-        if summaries.is_empty() {
-            // Every course in the file is one CourseBoard does not have. This
-            // is a setup problem the desk can fix — register the courses, or
-            // rename them to match — not an upstream failure, so it is said as
-            // one rather than reported as an empty success.
-            return Err(CourseError::BadRequest(
-                "no course in the file matches a course registered in CourseBoard",
-            ));
-        }
+        let unanswered_courses = imported_courses
+            .iter()
+            .filter(|course| matches!(course.resolution, "unresolved" | "ambiguous"))
+            .count();
+
+        // Deliberately not an error when nothing resolved. A club whose courses
+        // are named differently from the export's starts here every time, and a
+        // file that refused to open could never be the place they fix it. The
+        // caller decides what to do with an outcome that would write nothing.
 
         // What this file speaks for: every day it has a column for, across the
         // courses it named and CourseBoard could place. Taken from the sheet's
@@ -163,7 +204,7 @@ impl ImportReservationSummariesUseCase {
             to: sheet.dates.last().copied().unwrap_or_default(),
             course_ids: imported_courses
                 .iter()
-                .map(|course| course.course_id.clone())
+                .filter_map(|course| course.course_id.clone())
                 .collect(),
         };
 
@@ -187,6 +228,7 @@ impl ImportReservationSummariesUseCase {
             warnings,
             imported,
             skipped,
+            unanswered_courses,
             dates: sheet.dates,
         })
     }
