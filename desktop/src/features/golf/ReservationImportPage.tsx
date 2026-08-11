@@ -167,9 +167,12 @@ export function ReservationImportPage() {
   function chooseFile(event: ChangeEvent<HTMLInputElement>) {
     setUploadError(null)
     setPreview(null)
-    // A new file gets asked about on its own terms: the month chosen for the
-    // last one says nothing about this one.
+    // A new file gets asked about on its own terms. The month answered for the
+    // last one says nothing about this one, and carrying it over is invisible:
+    // backfilling an unnamed 2025 file and then picking an unnamed 2026 one
+    // would put the second into 2025 with the picker quietly showing why.
     setNeedsMonth(false)
+    setImportMonth(currentYearMonth())
     setFile(event.target.files?.[0] ?? null)
   }
 
@@ -190,6 +193,7 @@ export function ReservationImportPage() {
     setFile(null)
     setUploadError(null)
     setNeedsMonth(false)
+    setImportMonth(currentYearMonth())
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
