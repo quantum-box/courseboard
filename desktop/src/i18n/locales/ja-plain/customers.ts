@@ -6,10 +6,15 @@ export const customers: DeepPartial<typeof source> = {
   search: {
     title: 'お客さまを さがす',
     description: '会員の 人も ビジターの 人も、来た 人は ここに のります。',
-    label: '名前・カナ・電話ばんごう',
-    placeholder: 'たとえば）本田、ホンダ、090-1234',
-    prompt: '名前か カナ、電話ばんごうを 2文字いじょう 入れて ください。',
-    noMatches: '「{{term}}」に あう 人は いませんでした。あたらしく のせられます。',
+    label: '名前・カナ・電話ばんごう・メールアドレス',
+    placeholder: 'たとえば）本田、ホンダ、090-1234、honda@example.com',
+    prompt: '名前・カナ・電話ばんごう・メールアドレスを 入れて ください。名前は 1文字から さがせます。',
+    condition: {
+      name: '名前・カナ',
+      phone: '電話ばんごう',
+      email: 'メールアドレス',
+    },
+    noMatches: '「{{term}}」を {{condition}}として さがしましたが、あう 人は いませんでした。入力を たしかめて、正しければ あたらしく のせられます。',
   },
   create: {
     open: 'お客さまを あたらしく のせる',

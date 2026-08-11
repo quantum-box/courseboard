@@ -38,7 +38,7 @@ export function CustomerPicker({
   // Suppressed after a pick so the list does not reopen over the chosen name,
   // and again while the desk edits a name it has already linked.
   const [showCandidates, setShowCandidates] = useState(false)
-  const { candidates, searching, error } = useCustomerSearch(
+  const { candidates, searching, completedQuery, error } = useCustomerSearch(
     showCandidates && !customerId ? name : '',
   )
 
@@ -154,7 +154,7 @@ export function CustomerPicker({
               </button>
             )
           })}
-          {!searching && !error && candidates.length === 0 ? (
+          {!searching && !error && completedQuery === trimmed && candidates.length === 0 ? (
             <p className="ledger-customer-picker__note">{t('ledger:customer.noCandidates')}</p>
           ) : null}
           <Button

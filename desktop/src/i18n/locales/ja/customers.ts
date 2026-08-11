@@ -3,10 +3,15 @@ export const customers = {
   search: {
     title: '顧客をさがす',
     description: '会員もビジターも、来場した人はここに載ります。',
-    label: '名前・カナ・電話番号',
-    placeholder: '例）本田、ホンダ、090-1234',
-    prompt: '名前かカナ、電話番号を2文字以上入れてください。',
-    noMatches: '「{{term}}」に当てはまる人は見つかりませんでした。新しく登録できます。',
+    label: '名前・カナ・電話番号・メールアドレス',
+    placeholder: '例）本田、ホンダ、090-1234、honda@example.com',
+    prompt: '名前・カナ・電話番号・メールアドレスを入力してください。1文字の名前から検索できます。',
+    condition: {
+      name: '名前・カナ',
+      phone: '電話番号',
+      email: 'メールアドレス',
+    },
+    noMatches: '「{{term}}」を{{condition}}として検索しましたが、該当する顧客は見つかりませんでした。入力を確認し、正しければ新しく登録できます。',
   },
   create: {
     open: '顧客を新しく登録する',
