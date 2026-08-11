@@ -140,6 +140,23 @@ mod tests {
     use crate::config::{RuntimeConfig, EMPTY_COURSE_STORE_URL};
 
     static TEST_DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    const PRODUCTION_MIGRATION_GATE_CHECK: &str = "name: CourseBoard production migration gate";
+    const TEMPORARY_RELEASE_CHECK_EXCEPTION: &str = "TEMPORARY (PLT-3438)";
+
+    fn assert_production_migration_gate_release_policy(manifest: &str) {
+        let gate_is_wired = manifest.contains(PRODUCTION_MIGRATION_GATE_CHECK);
+        let temporary_exception_is_documented =
+            manifest.contains(TEMPORARY_RELEASE_CHECK_EXCEPTION);
+
+        // PLT-3438 temporarily permits deploys while the production migration
+        // credential is being wired. Once that is complete, this marker must be
+        // removed together with restoring the release check. Requiring one of
+        // these two explicit states keeps a silent removal fail-closed.
+        assert!(
+            gate_is_wired || temporary_exception_is_documented,
+            "production migration gate must be wired or explicitly exempted with {TEMPORARY_RELEASE_CHECK_EXCEPTION}"
+        );
+    }
 
     struct TestDatabase {
         admin_pool: MySqlPool,
@@ -255,9 +272,9 @@ mod tests {
         let local_start = include_str!("../desktop/scripts/run-courseboard-with-env.sh");
 
         assert!(manifest.contains("name: migration-gate-before-activation"));
-        assert!(manifest.contains("name: CourseBoard production migration gate"));
+        assert_production_migration_gate_release_policy(manifest);
         assert!(workflow.contains("run: cargo run --bin courseboard-migrate"));
-        assert!(workflow.contains("name: CourseBoard production migration gate"));
+        assert!(workflow.contains(PRODUCTION_MIGRATION_GATE_CHECK));
 
         let migrate = local_start
             .find("cargo run --bin courseboard-migrate")
@@ -266,6 +283,19 @@ mod tests {
             .find("exec cargo run --bin courseboard")
             .expect("local start must launch the serving binary");
         assert!(migrate < serve, "local migration gate must precede serving");
+    }
+
+    #[test]
+    fn documented_temporary_release_check_exception_is_allowed() {
+        assert_production_migration_gate_release_policy(
+            "production:\n  # TEMPORARY (PLT-3438): requiredReleaseChecks is disabled",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "production migration gate must be wired or explicitly exempted")]
+    fn silent_release_check_removal_is_rejected() {
+        assert_production_migration_gate_release_policy("production:\n  watchPaths: []");
     }
 
     async fn poison_last_checksum(pool: &MySqlPool) -> (i64, String, String) {
