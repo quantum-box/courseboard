@@ -316,11 +316,20 @@ export function ResourceError({
  * `none` is for filters and other controls that are never submitted: neither
  * "required" nor "optional" says anything true about them.
  */
+/**
+ * A labelled control.
+ *
+ * Only what the form insists on is marked. Marking the rest as well put "任意"
+ * on thirteen of the booking sheet's sixteen fields, where it said nothing the
+ * absence of "必須" did not already say, and buried the two that matter. Pass
+ * `requirement="optional"` where a single optional field sits among required
+ * ones and the desk would otherwise wonder.
+ */
 export function Field({
   label,
   hint,
   required,
-  requirement = required ? 'required' : 'optional',
+  requirement = required ? 'required' : 'none',
   children,
   className = '',
 }: {

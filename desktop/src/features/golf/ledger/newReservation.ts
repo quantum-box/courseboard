@@ -40,6 +40,35 @@ export function selectedReservationTarget(
  * those rows would create a compatibility manual slot whose remaining count the
  * ledger cannot reconcile with generated inventory.
  */
+/** The course's own screen, where its resource and tee times are set up. */
+export function courseSetupRoute(golfCourseId: string): string {
+  return `golf/courses/${encodeURIComponent(golfCourseId)}`
+}
+
+/**
+ * The screen that puts this block right, when a screen can.
+ *
+ * `missingInventory` and `missingResource` are setup states rather than
+ * statements about the day, and both are fixed in the same place: saving the
+ * course's week links its resource and builds the tee times it describes. The
+ * other three describe this row on this day, so there is nothing to open — a
+ * link on "満枠" would send the desk somewhere that cannot help.
+ */
+export function blockFixRoute(
+  reason: ReservationBlockReason,
+  golfCourseId: string,
+): string | null {
+  switch (reason) {
+    case 'missingInventory':
+    case 'missingResource':
+      return courseSetupRoute(golfCourseId)
+    case 'full':
+    case 'stopped':
+    case 'notSellable':
+      return null
+  }
+}
+
 export function reservationBlockReason(
   target: ReservationTarget,
 ): ReservationBlockReason | null {
