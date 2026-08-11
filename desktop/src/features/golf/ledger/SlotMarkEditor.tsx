@@ -2,7 +2,7 @@ import { Button, Input } from '@tachyon-sdk/native-ui'
 import { CalendarPlus, Lock, Tag, Trash2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { Field } from '../../../components/Page'
+import { Field, Notice } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import type { SlotSelection } from './LedgerBoard'
 import type { SlotMarkKind } from './models'
@@ -21,6 +21,7 @@ export function SlotMarkEditor({
   label,
   saving,
   canBook,
+  reservationBlockMessage,
   onLabelChange,
   onClose,
   onSpecial,
@@ -33,6 +34,7 @@ export function SlotMarkEditor({
   saving: boolean
   /** A booking goes on one tee time, so a range selection cannot offer it. */
   canBook: boolean
+  reservationBlockMessage: string | null
   onLabelChange: (value: string) => void
   onClose: () => void
   onSpecial: () => void
@@ -51,14 +53,21 @@ export function SlotMarkEditor({
       description={t('ledger:marks.selected', {
         n: String(selection?.teeTimes.length ?? 0),
       })}
+      className="ledger-mark-editor-sheet"
     >
       <div className="ledger-mark-sheet">
-        {canBook ? (
-          <div className="ledger-mark-actions">
-            <Button type="button" variant="primary" disabled={saving} onClick={onBook}>
-              <CalendarPlus />
-              {t('ledger:newReservation.open')}
-            </Button>
+        {selection?.teeTimes.length === 1 ? (
+          <div className="ledger-mark-reservation">
+            {reservationBlockMessage ? (
+              <Notice tone="warning" title={t('ledger:newReservation.blockedTitle')}>
+                {reservationBlockMessage}
+              </Notice>
+            ) : canBook ? (
+              <Button type="button" variant="primary" disabled={saving} onClick={onBook}>
+                <CalendarPlus />
+                {t('ledger:newReservation.open')}
+              </Button>
+            ) : null}
           </div>
         ) : null}
 

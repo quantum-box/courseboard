@@ -204,6 +204,7 @@ export function NewReservationEditor({
         course: target.courseName,
         time: target.teeTime,
       })}
+      className="ledger-reservation-sheet"
     >
       <div className="ledger-party-editor">
         <FormGrid columns={2}>
