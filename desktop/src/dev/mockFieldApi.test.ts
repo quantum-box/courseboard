@@ -289,4 +289,64 @@ describe('mockFieldApi', () => {
     expect(customerIds('/v1/course/customers?email=honda%40example.com')).toContain('cus_honda')
     expect(customerIds('/v1/course/customers?email=honda%40example')).toEqual([])
   })
+
+  it('serves the reservation import screen so it opens on fixtures', () => {
+    // Every /v1/course/* request short-circuits through here in mock mode, so a
+    // screen with no fixture fails on its first load rather than showing
+    // anything.
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const listed = resolveMockFieldApiJson(
+      '/v1/course/reservation-summaries?from=2026-07-01&to=2026-07-31',
+    )
+    expect(listed.kind).toBe('hit')
+    if (listed.kind !== 'hit') return
+    const body = listed.data as {
+      items: Array<{ date: string; timeOfDay: string; totalGroups: number; selfPlayGroups: number }>
+    }
+    // A month of half-days, so the table looks like an imported month.
+    expect(body.items.length).toBeGreaterThan(31 * 2)
+    expect(body.items.every(item => ['am', 'pm'].includes(item.timeOfDay))).toBe(true)
+    expect(body.items.every(item => item.selfPlayGroups >= 0)).toBe(true)
+  })
+
+  it('keeps the reservation import range and course filters honest', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const oneDay = resolveMockFieldApiJson(
+      '/v1/course/reservation-summaries?from=2026-07-03&to=2026-07-03&golfCourseIds=course_east',
+    )
+    expect(oneDay.kind).toBe('hit')
+    if (oneDay.kind !== 'hit') return
+    const body = oneDay.data as { items: Array<{ date: string; golfCourseId: string }> }
+    // One course, one day, two halves.
+    expect(body.items).toHaveLength(2)
+    expect(body.items.every(item => item.date === '2026-07-03')).toBe(true)
+    expect(body.items.every(item => item.golfCourseId === 'course_east')).toBe(true)
+  })
+
+  it('answers the import check without writing and the import with a count', () => {
+    // The two-step flow is the point of the screen, so the mock has to keep the
+    // two steps distinguishable.
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const upload = { method: 'POST', body: new ArrayBuffer(8) }
+    const preview = resolveMockFieldApiJson(
+      '/v1/course/reservation-summaries/preview?fileName=x.xlsx',
+      upload,
+    )
+    const applied = resolveMockFieldApiJson(
+      '/v1/course/reservation-summaries/import?fileName=x.xlsx',
+      upload,
+    )
+    expect(preview.kind).toBe('hit')
+    expect(applied.kind).toBe('hit')
+    if (preview.kind !== 'hit' || applied.kind !== 'hit') return
+    const checked = preview.data as { imported: number; courses: unknown[]; yearMonth: string }
+    const wrote = applied.data as { imported: number }
+    expect(checked.imported).toBe(0)
+    expect(checked.courses.length).toBeGreaterThan(0)
+    expect(checked.yearMonth).toBe('2026-07')
+    expect(wrote.imported).toBeGreaterThan(0)
+  })
 })

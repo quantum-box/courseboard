@@ -45,6 +45,7 @@ import {
   CircleHelp,
   ClipboardCheck,
   CreditCard,
+  FileUp,
   FolderTree,
   Gauge,
   House,
@@ -95,6 +96,7 @@ export type NavigationRoute =
   | 'golf/customers'
   | 'golf/timeline'
   | 'golf/products'
+  | 'golf/reservation-import'
   | 'course-map'
   | 'golf/caddies'
   | 'golf/caddies/dispatch'
@@ -140,6 +142,9 @@ export const navigationSections: NavigationSection[] = [
       // off it, and a visitor's second visit only registers because it exists.
       { route: 'golf/customers', icon: BookUser },
       { route: 'golf/products', icon: CalendarCheck },
+      // The club's booking system is the source of the month's bookings; this
+      // is where they come in, so it sits with the board they land on.
+      { route: 'golf/reservation-import', icon: FileUp },
       // Courses stopped being a one-time master when the bookable week moved
       // onto them: opening hours and tee-time generation are seasonal work.
       { route: 'golf/courses', icon: FolderTree },

@@ -17,7 +17,7 @@ pub mod smart_assign;
 use auth::{AuthError, TokenVerifier};
 use axum::{
     body::Body,
-    extract::{FromRef, State},
+    extract::{DefaultBodyLimit, FromRef, State},
     http::{
         header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE},
         HeaderName, HeaderValue, Method, Request, StatusCode,
@@ -32,7 +32,8 @@ use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
     MySqlAvailabilityDeadlineRepository, MySqlCaddieShiftRepository,
-    MySqlGeneratedThroughRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
+    MySqlGeneratedThroughRepository, MySqlReservationSummaryRepository, MySqlShiftRulesRepository,
+    MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -56,6 +57,7 @@ pub struct AppState {
     rules: Arc<MySqlTaxRuleRepository>,
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
+    reservation_summaries: Arc<MySqlReservationSummaryRepository>,
     generated_through: Arc<MySqlGeneratedThroughRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
@@ -87,6 +89,7 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+            reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(pool.clone())),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -128,6 +131,7 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+            reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(pool.clone())),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -155,6 +159,9 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+                reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(
+                    pool.clone(),
+                )),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -173,6 +180,9 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+                reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(
+                    pool.clone(),
+                )),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -198,6 +208,13 @@ impl AppState {
     /// CourseBoard-owned desk marks on individual tee times.
     pub fn slot_overrides(&self) -> Arc<MySqlSlotOverrideRepository> {
         self.slot_overrides.clone()
+    }
+
+    /// CourseBoard-owned daily reservation counts imported from the club's
+    /// booking system. The export has no start times and no per-booking caddie
+    /// flag, so it cannot ride on Field's reservation inventory (ADR-0005).
+    pub fn reservation_summaries(&self) -> Arc<MySqlReservationSummaryRepository> {
+        self.reservation_summaries.clone()
     }
 
     /// CourseBoard-owned record of how far each course has been built.
@@ -736,6 +753,39 @@ pub fn build_router(state: AppState) -> Router {
                 )),
         )
         .route(
+            "/v1/course/reservation-summaries/preview",
+            post(course::interfaces::http_reservation_summary::preview_reservation_summaries)
+                // A spreadsheet does not fit axum's 2 MB default for a JSON
+                // body, and a file too big to be one of these exports should be
+                // turned away as it arrives rather than after it is buffered.
+                .route_layer(DefaultBodyLimit::max(
+                    course::interfaces::http_reservation_summary::MAX_WORKBOOK_BYTES,
+                ))
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/reservation-summaries/import",
+            post(course::interfaces::http_reservation_summary::import_reservation_summaries)
+                .route_layer(DefaultBodyLimit::max(
+                    course::interfaces::http_reservation_summary::MAX_WORKBOOK_BYTES,
+                ))
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/reservation-summaries",
+            get(course::interfaces::http_reservation_summary::list_reservation_summaries)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/v1/course/daily-budgets/achievement",
             get(course::interfaces::http_commercial::list_budget_achievements).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
@@ -983,6 +1033,61 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
 pub async fn run_migrations(pool: &MySqlPool) -> Result<(), AppError> {
     MIGRATOR.run(pool).await?;
     Ok(())
+}
+
+/// Guards on the migration set itself, which no database is needed to check.
+///
+/// A migration's version is the number its file name starts with, and every
+/// database records that number against the checksum of the file it ran. Two
+/// files sharing a version therefore do not clash at compile time, or on a
+/// fresh database, or in CI — they clash on the one database that already ran
+/// the other one, at start-up, days later.
+///
+/// Two branches picking the same day's number is the ordinary way this happens:
+/// both merge cleanly, and nothing says a word until a long-lived environment
+/// refuses to boot.
+#[cfg(test)]
+mod migration_set {
+    use super::MIGRATOR;
+    use std::collections::HashMap;
+
+    #[test]
+    fn no_two_migrations_share_a_version() {
+        let mut by_version: HashMap<i64, Vec<&str>> = HashMap::new();
+        for migration in MIGRATOR.iter() {
+            by_version
+                .entry(migration.version)
+                .or_default()
+                .push(&migration.description);
+        }
+        let clashes: Vec<String> = by_version
+            .iter()
+            .filter(|(_, descriptions)| descriptions.len() > 1)
+            .map(|(version, descriptions)| format!("{version}: {}", descriptions.join(", ")))
+            .collect();
+        assert!(
+            clashes.is_empty(),
+            "two migrations share a version, so whichever database ran the other one first will \
+             refuse to start: {}",
+            clashes.join(" / "),
+        );
+    }
+
+    #[test]
+    fn every_migration_is_dated_the_way_the_rest_are() {
+        // `YYYYMMDDNNNN`: the day the migration was written, then a counter
+        // for that day. A file numbered some other way sorts into the wrong
+        // place, and a run of them lands on a database in an order nobody
+        // intended.
+        for migration in MIGRATOR.iter() {
+            assert!(
+                (202_001_010_000..=209_912_319_999).contains(&migration.version),
+                "{} is numbered {}, which is not a YYYYMMDDNNNN stamp",
+                migration.description,
+                migration.version,
+            );
+        }
+    }
 }
 
 async fn healthz() -> Json<HealthResponse> {
@@ -1384,6 +1489,13 @@ pub enum AppError {
     Forbidden,
     #[error("{0}")]
     BadRequest(&'static str),
+    /// A file whose name does not say which month it covers.
+    ///
+    /// Its own variant rather than a `BadRequest` because the screen has to
+    /// tell them apart: this one is answerable — pick a month and send it
+    /// again — and every other bad request is not.
+    #[error("{0}")]
+    MonthRequired(&'static str),
     #[error("{0}")]
     Conflict(&'static str),
     #[error("{message}")]
@@ -1420,6 +1532,7 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
+            AppError::MonthRequired(_) => (StatusCode::BAD_REQUEST, "month_required"),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             AppError::UpstreamClient { status, .. } => (status, "upstream_client_error"),
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),

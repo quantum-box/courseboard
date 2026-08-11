@@ -25,6 +25,8 @@ mod ports;
 mod pricing_settings;
 mod product;
 mod reservation;
+mod reservation_sheet;
+mod reservation_summary;
 mod resource;
 mod schedule;
 mod simulator;
@@ -95,13 +97,22 @@ pub use ports::{
     AvailabilityDeadlineGateway, CaddieShiftGateway, CustomerGateway, GatewayCredentials,
     GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
     GolfTaxGateway, MembershipGateway, ReservationGateway, ReservationScheduleGateway,
-    ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
+    ReservationSummaryGateway, ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery,
+    TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{
     DurationMinutes, PlayType, ProductSlot, ReservationProduct, UpsertReservationProduct,
 };
 pub use reservation::{NewReservation, Reservation, SeededReservation};
+pub use reservation_sheet::{
+    parse_reservation_sheet, year_month_from_file_name, ImportWarning, ParsedReservationSheet,
+    SheetDaySummary, SheetGrid,
+};
+pub use reservation_summary::{
+    match_course_label, CourseMatch, ReservationDaySummary, ReservationSummaryQuery,
+    ReservationSummaryWindow, TimeOfDay,
+};
 pub use resource::{Resource, ResourceKind, SaveCourseResource};
 pub use schedule::{
     courseboard_weekday_to_field, field_day_of_week_to_courseboard, AvailabilityRule,

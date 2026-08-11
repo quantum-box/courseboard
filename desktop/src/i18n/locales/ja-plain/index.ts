@@ -15,6 +15,7 @@ import { nav } from './nav'
 import { payment } from './payment'
 import { policy } from './policy'
 import { products } from './products'
+import { reservationImport } from './reservationImport'
 import { schedule } from './schedule'
 import { settings } from './settings'
 import { settlement } from './settlement'
@@ -41,6 +42,7 @@ export const jaPlain = {
   payment,
   policy,
   products,
+  reservationImport,
   schedule,
   settings,
   settlement,

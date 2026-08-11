@@ -12,8 +12,9 @@ use super::{
     CustomerId, CustomerMembership, CustomerSearchQuery, DailyBudget, DailyBudgetQuery,
     DeleteSlotOverrides, ExtensionStatus, GenerationSummary, InventoryWatermark, MembershipPlan,
     MembershipPlanId, MonthlySettlement, NewCustomer, NewReservation, PartyDetails, ProductSlot,
-    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationId, ReservationPolicy,
-    ReservationProduct, ReservationServiceId, Resource, ResourceId, ResourceTimeSlot,
+    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationDaySummary,
+    ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId,
+    ReservationSummaryQuery, ReservationSummaryWindow, Resource, ResourceId, ResourceTimeSlot,
     SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride, SlotOverrideQuery,
     TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
     UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
@@ -131,6 +132,39 @@ pub trait SlotOverrideGateway: Send + Sync {
         &self,
         tenant_id: &str,
         command: &DeleteSlotOverrides,
+    ) -> Result<u64, CourseError>;
+}
+
+/// Port for the daily reservation counts imported from the club's booking
+/// system.
+///
+/// The booking system exports counts per course per half-day and nothing
+/// finer — no start times, no per-booking caddie flag (PLT-3247) — so these
+/// cannot be Field reservations consuming tee-time inventory. They are
+/// CourseBoard's own series (ADR-0005), the same reasoning as
+/// [`SlotOverrideGateway`].
+#[async_trait]
+pub trait ReservationSummaryGateway: Send + Sync {
+    async fn list_reservation_summaries(
+        &self,
+        tenant_id: &str,
+        query: &ReservationSummaryQuery,
+    ) -> Result<Vec<ReservationDaySummary>, CourseError>;
+
+    /// Make `window` hold exactly `summaries` and nothing else.
+    ///
+    /// A replace rather than an upsert. The club re-exports the same month all
+    /// month long, so the same half-day arrives again and again — and a file
+    /// that stops reporting one (an unreadable count, a course renamed out of
+    /// the match) has to take the old number with it. Writing only what is
+    /// present would leave last week's count standing on a half-day this
+    /// week's file says nothing about.
+    async fn replace_reservation_summaries(
+        &self,
+        tenant_id: &str,
+        window: &ReservationSummaryWindow,
+        summaries: &[ReservationDaySummary],
+        source_file: Option<&str>,
     ) -> Result<u64, CourseError>;
 }
 

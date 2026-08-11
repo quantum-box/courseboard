@@ -117,6 +117,67 @@ const mockCourses = [
 /** The club's own bookings for the month around the fixture day. */
 const generatedReservations = generateReservations(MOCK_FIXTURE_DATE, mockCourses)
 
+/**
+ * Daily reservation counts, as the club's booking system exports them.
+ *
+ * Generated rather than typed out because the screen is a month at a time: one
+ * row per course per half-day is 31 x 2 x however many courses, and a fixture
+ * that only covered a week would make the table look like a broken import.
+ *
+ * The numbers lean on the shape of the real July export — mornings busier than
+ * afternoons, weekends busier than weekdays, and a course shut for a few days
+ * so the "closed reads as zero" case is visible without editing anything.
+ */
+type MockReservationSummary = {
+  golfCourseId: string
+  date: string
+  timeOfDay: 'am' | 'pm'
+  totalGroups: number
+  caddieGroups: number
+}
+
+function generateReservationSummaries(): MockReservationSummary[] {
+  const [year, month] = MOCK_FIXTURE_DATE.split('-').map(Number)
+  const lastDay = new Date(Date.UTC(year ?? 2026, month ?? 7, 0)).getUTCDate()
+  const summaries: MockReservationSummary[] = []
+  for (let day = 1; day <= lastDay; day += 1) {
+    const date = `${MOCK_FIXTURE_DATE.slice(0, 8)}${String(day).padStart(2, '0')}`
+    const weekend = [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay())
+    mockCourses.forEach((course, index) => {
+      // One course keeps a short closure mid-month, the way 真駒内 does.
+      const closed = index === 1 && day >= 9 && day <= 11
+      const morning = closed ? 0 : (weekend ? 26 : 20) - index * 3 + (day % 4)
+      const afternoon = closed ? 0 : (weekend ? 17 : 11) - index * 2 + (day % 3)
+      summaries.push(
+        {
+          golfCourseId: course.id,
+          date,
+          timeOfDay: 'am',
+          totalGroups: morning,
+          caddieGroups: Math.round(morning * 0.35),
+        },
+        {
+          golfCourseId: course.id,
+          date,
+          timeOfDay: 'pm',
+          totalGroups: afternoon,
+          caddieGroups: Math.round(afternoon * 0.3),
+        },
+      )
+    })
+  }
+  return summaries
+}
+
+const mockReservationSummaries = generateReservationSummaries()
+
+function mockReservationSummaryDto(summary: MockReservationSummary) {
+  return {
+    ...summary,
+    selfPlayGroups: Math.max(summary.totalGroups - summary.caddieGroups, 0),
+  }
+}
+
 const mockProducts: Array<{
   id: string
   tenantId: string
@@ -1918,6 +1979,24 @@ function resolveGet(path: string): Json | null | undefined {
     )
   }
 
+  if (rawPathname === '/v1/course/reservation-summaries') {
+    const from = url.searchParams.get('from') ?? TODAY
+    const to = url.searchParams.get('to') ?? from
+    const courseIds = (url.searchParams.get('golfCourseIds') ?? '')
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean)
+    return items(
+      mockReservationSummaries
+        .filter(summary => summary.date >= from && summary.date <= to)
+        .filter(summary => !courseIds.length || courseIds.includes(summary.golfCourseId))
+        .sort((left, right) => left.date.localeCompare(right.date)
+          || left.golfCourseId.localeCompare(right.golfCourseId)
+          || left.timeOfDay.localeCompare(right.timeOfDay))
+        .map(mockReservationSummaryDto),
+    )
+  }
+
   if (rawPathname === '/v1/course/caddie-shift-rules') {
     return mockShiftRulesDto()
   }
@@ -2286,6 +2365,41 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       values: keys
         .filter((key): key is string => typeof key === 'string')
         .map(key => ({ key, enabled: true })),
+    })
+  }
+
+  const reservationImportMatch = pathname.match(
+    /^\/v1\/course\/reservation-summaries\/(preview|import)$/,
+  )
+  if (reservationImportMatch && method === 'POST') {
+    // The uploaded workbook is a binary body this resolver cannot read, so the
+    // answer is built from the fixture month instead. That is enough for the
+    // screen: what it has to show is a month's worth of counts, a per-course
+    // breakdown, and the two-step check — none of which depend on the bytes.
+    const dates = [...new Set(mockReservationSummaries.map(summary => summary.date))].sort()
+    const courses = mockCourses.map(course => {
+      const rows = mockReservationSummaries.filter(row => row.golfCourseId === course.id)
+      return {
+        sheetLabel: course.shortName ?? course.name,
+        golfCourseId: course.id,
+        courseName: course.name,
+        dayCount: rows.length,
+        totalGroups: rows.reduce((sum, row) => sum + row.totalGroups, 0),
+        caddieGroups: rows.reduce((sum, row) => sum + row.caddieGroups, 0),
+      }
+    })
+    const applied = reservationImportMatch[1] === 'import'
+    return hit({
+      yearMonth: MOCK_FIXTURE_DATE.slice(0, 7),
+      // A preview writes nothing, so it reports nothing written — the same
+      // distinction the real endpoint draws.
+      imported: applied ? mockReservationSummaries.length : 0,
+      skipped: 0,
+      from: dates[0] ?? MOCK_FIXTURE_DATE,
+      to: dates[dates.length - 1] ?? MOCK_FIXTURE_DATE,
+      courses,
+      warnings: [],
+      summaries: mockReservationSummaries.map(mockReservationSummaryDto),
     })
   }
 

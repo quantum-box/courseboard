@@ -36,6 +36,7 @@ mod get_reservation_policy;
 mod get_tee_ledger;
 mod get_tee_sheet;
 mod import_daily_budgets_csv;
+mod import_reservation_summaries;
 mod link_course_resource;
 mod list_attendance_period_snapshots;
 mod list_budget_achievements;
@@ -51,6 +52,7 @@ mod list_courses;
 mod list_daily_budgets;
 mod list_product_slots;
 mod list_reservation_products;
+mod list_reservation_summaries;
 mod list_resources;
 mod membership;
 mod quote_golf_fee;
@@ -108,6 +110,10 @@ pub use get_reservation_policy::GetReservationPolicyUseCase;
 pub use get_tee_ledger::GetTeeLedgerUseCase;
 pub use get_tee_sheet::GetTeeSheetUseCase;
 pub use import_daily_budgets_csv::ImportDailyBudgetsCsvUseCase;
+pub use import_reservation_summaries::{
+    ImportMode, ImportReservationSummariesRequest, ImportReservationSummariesUseCase,
+    ImportedCourse, ReservationImportOutcome,
+};
 pub use link_course_resource::LinkCourseResourceUseCase;
 pub use list_attendance_period_snapshots::ListAttendancePeriodSnapshotsUseCase;
 pub use list_budget_achievements::ListBudgetAchievementsUseCase;
@@ -123,6 +129,7 @@ pub use list_courses::ListCoursesUseCase;
 pub use list_daily_budgets::ListDailyBudgetsUseCase;
 pub use list_product_slots::ListProductSlotsUseCase;
 pub use list_reservation_products::ListReservationProductsUseCase;
+pub use list_reservation_summaries::ListReservationSummariesUseCase;
 pub use list_resources::ListResourcesUseCase;
 pub use membership::{
     AssignMembershipPlanUseCase, CreateMembershipPlanUseCase, GetCustomerMembershipUseCase,
