@@ -70,6 +70,8 @@ export const reservationImport: DeepPartial<typeof source> = {
       'No course in Course Board matches "{{course}}" from the file, so its bookings were left out. Match the course name in course settings.',
     ambiguousCourse:
       '"{{course}}" from the file could be any of {{candidates}}, so its bookings were left out. Make the course names distinguishable.',
+    coursesCombined:
+      '{{candidates}} in the file all point at "{{course}}", so their group counts were added together. Map them to separate courses to keep them apart.',
     unknown:
       'There is something in this file worth checking. Compare it against the original booking sheet after importing.',
   },

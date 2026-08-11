@@ -79,6 +79,8 @@ function WarningLine({ warning }: { warning: ImportWarning }) {
         return t('warning.unknownCourse', { course })
       case 'ambiguousCourse':
         return t('warning.ambiguousCourse', { course, candidates })
+      case 'coursesCombined':
+        return t('warning.coursesCombined', { course, candidates })
       default:
         return t('warning.unknown')
     }

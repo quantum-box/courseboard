@@ -67,6 +67,8 @@ export const reservationImport: DeepPartial<typeof source> = {
       'ファイルの「{{course}}」に合うコースが Course Board にありません。このコースの予約は入れません。コースの設定で名前を合わせてください。',
     ambiguousCourse:
       'ファイルの「{{course}}」は {{candidates}} のどれか分かりません。このコースの予約は入れません。コースの名前を見分けられるようにしてください。',
+    coursesCombined:
+      'ファイルの {{candidates}} が、どれも「{{course}}」になっています。組の数はたして入れました。べつべつに記録したいときは、コースをべつに選びなおしてください。',
     unknown: 'ファイルに、たしかめたほうがよい点があります。入れたあとで、元の予約表と見くらべてください。',
   },
 

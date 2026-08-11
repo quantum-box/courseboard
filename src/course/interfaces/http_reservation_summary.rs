@@ -158,6 +158,18 @@ impl From<&ImportWarning> for ImportWarningDto {
                 candidates: candidates.clone(),
                 ..empty
             },
+            // `candidates` carries the sheet names here rather than course
+            // names. It is the same shape — the other names this warning is
+            // about — and the screen's wording says which it is reading.
+            ImportWarning::CoursesCombined {
+                course_name,
+                sheet_labels,
+            } => Self {
+                kind: "coursesCombined".into(),
+                course_label: Some(course_name.clone()),
+                candidates: sheet_labels.clone(),
+                ..empty
+            },
         }
     }
 }

@@ -5,6 +5,7 @@
 //! preview that counted differently from the import it precedes would be worse
 //! than no preview at all.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::NaiveDate;
@@ -190,7 +191,29 @@ impl ImportReservationSummariesUseCase {
             imported_courses.push(entry);
         }
 
+        // Counted before names sharing a course are folded together: those
+        // half-days all reach the board, they just reach it on one row.
         skipped -= summaries.len();
+
+        // Names sharing a course have to share a row before storage sees them.
+        //
+        // A row is keyed by course, date and half-day — the name is not in the
+        // key — so two names on one course arrive as two rows competing for the
+        // same slot, and the second silently overwrites the first. The board
+        // would then show one name's bookings where it should show both, with
+        // the preview still totalling both and nothing anywhere saying which
+        // half went missing.
+        for (course_id, labels) in combine_names_sharing_a_course(&mut summaries)? {
+            warnings.push(ImportWarning::CoursesCombined {
+                course_name: imported_courses
+                    .iter()
+                    .find(|course| course.course_id.as_ref() == Some(&course_id))
+                    .and_then(|course| course.course_name.clone())
+                    .unwrap_or_else(|| course_id.as_str().to_string()),
+                sheet_labels: labels,
+            });
+        }
+
         let unanswered_courses = imported_courses
             .iter()
             .filter(|course| !course.is_answered())
@@ -249,5 +272,167 @@ impl ImportReservationSummariesUseCase {
             unanswered_courses,
             dates: sheet.dates,
         })
+    }
+}
+
+/// Fold rows that would land on the same stored slot into one, and say which
+/// names each course took.
+///
+/// Adding the counts is the only reading that keeps every group the file
+/// reported: a club whose booking system lists one course on two lines means
+/// the sum, and a desk that pointed a name at the wrong course sees a number
+/// that is visibly too big rather than one quietly too small. Returned rather
+/// than warned about here so the caller can name the course the way the desk
+/// knows it.
+fn combine_names_sharing_a_course(
+    summaries: &mut Vec<ReservationDaySummary>,
+) -> Result<Vec<(CourseId, Vec<String>)>, CourseError> {
+    let mut folded: Vec<ReservationDaySummary> = Vec::with_capacity(summaries.len());
+    // Where each (course, date, half-day) already sits in `folded`.
+    let mut slots: HashMap<(String, NaiveDate, &'static str), usize> = HashMap::new();
+    // Course, and the names that landed on it — in the order the sheet lists
+    // them, so the warning reads the way the file does.
+    let mut shared: Vec<(CourseId, Vec<String>)> = Vec::new();
+
+    for summary in summaries.iter() {
+        let key = (
+            summary.course_id().as_str().to_string(),
+            summary.date(),
+            summary.time_of_day().as_str(),
+        );
+        let Some(&at) = slots.get(&key) else {
+            slots.insert(key, folded.len());
+            folded.push(summary.clone());
+            continue;
+        };
+        let kept = &folded[at];
+        let (course_id, date, time_of_day, kept_label) = (
+            kept.course_id().clone(),
+            kept.date(),
+            kept.time_of_day(),
+            kept.sheet_label().map(str::to_string),
+        );
+        let total_groups = kept.total_groups() + summary.total_groups();
+        let caddie_groups = kept.caddie_groups() + summary.caddie_groups();
+
+        let names = match shared.iter_mut().find(|(id, _)| *id == course_id) {
+            Some((_, names)) => names,
+            None => {
+                // The row already in place brought the first name.
+                shared.push((course_id.clone(), kept_label.iter().cloned().collect()));
+                &mut shared.last_mut().expect("just pushed").1
+            }
+        };
+        if let Some(label) = summary.sheet_label() {
+            if !names.iter().any(|seen| seen == label) {
+                names.push(label.to_string());
+            }
+        }
+
+        // The kept row's name is the one stored. Either reaches the row again
+        // through the course, and both are in the replacement window.
+        folded[at] = ReservationDaySummary::try_new(
+            course_id,
+            date,
+            time_of_day,
+            total_groups,
+            caddie_groups,
+            kept_label,
+        )?;
+    }
+
+    *summaries = folded;
+    Ok(shared)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::course::domain::TimeOfDay;
+
+    fn row(course: &str, day: u32, label: &str, total: i32, caddie: i32) -> ReservationDaySummary {
+        ReservationDaySummary::try_new(
+            CourseId::new(course),
+            NaiveDate::from_ymd_opt(2026, 7, day).unwrap(),
+            TimeOfDay::Morning,
+            total,
+            caddie,
+            Some(label.to_string()),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn two_names_on_one_course_add_up_instead_of_one_replacing_the_other() {
+        // Storage keys a row by course, date and half-day, so these two would
+        // compete for one slot and the second would win. Whichever name lost
+        // would take its bookings off the board with nothing to show for it.
+        let mut summaries = vec![
+            row("course-east", 3, "東 OUT", 12, 5),
+            row("course-east", 3, "東 IN", 9, 2),
+        ];
+        let shared = combine_names_sharing_a_course(&mut summaries).unwrap();
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].total_groups(), 21);
+        assert_eq!(summaries[0].caddie_groups(), 7);
+        assert_eq!(
+            shared,
+            vec![(
+                CourseId::new("course-east"),
+                vec!["東 OUT".to_string(), "東 IN".to_string()]
+            )]
+        );
+    }
+
+    #[test]
+    fn the_folded_row_keeps_a_name_so_a_later_import_can_still_find_it() {
+        let mut summaries = vec![
+            row("course-east", 3, "東 OUT", 12, 5),
+            row("course-east", 3, "東 IN", 9, 2),
+        ];
+        combine_names_sharing_a_course(&mut summaries).unwrap();
+        assert_eq!(summaries[0].sheet_label(), Some("東 OUT"));
+    }
+
+    #[test]
+    fn names_on_different_courses_are_left_alone() {
+        let mut summaries = vec![
+            row("course-a", 3, "真駒内", 12, 5),
+            row("course-b", 3, "滝の", 9, 2),
+        ];
+        let shared = combine_names_sharing_a_course(&mut summaries).unwrap();
+
+        assert_eq!(summaries.len(), 2);
+        assert!(shared.is_empty());
+    }
+
+    #[test]
+    fn one_name_across_a_month_is_not_mistaken_for_two_names_on_a_day() {
+        // Same course and name, different dates. Folding those would collapse
+        // the month into a day.
+        let mut summaries = vec![
+            row("course-a", 3, "真駒内", 12, 5),
+            row("course-a", 4, "真駒内", 9, 2),
+        ];
+        let shared = combine_names_sharing_a_course(&mut summaries).unwrap();
+
+        assert_eq!(summaries.len(), 2);
+        assert!(shared.is_empty());
+    }
+
+    #[test]
+    fn a_name_repeated_in_the_file_is_reported_once_not_once_per_day() {
+        let mut summaries = vec![
+            row("course-east", 3, "東 OUT", 12, 5),
+            row("course-east", 3, "東 IN", 9, 2),
+            row("course-east", 4, "東 OUT", 11, 4),
+            row("course-east", 4, "東 IN", 8, 1),
+        ];
+        let shared = combine_names_sharing_a_course(&mut summaries).unwrap();
+
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(shared.len(), 1);
+        assert_eq!(shared[0].1, vec!["東 OUT".to_string(), "東 IN".to_string()]);
     }
 }

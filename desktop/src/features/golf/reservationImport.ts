@@ -75,6 +75,7 @@ export const WARNING_KINDS = [
   'courseTotalsDisagreeWithSheet',
   'unknownCourse',
   'ambiguousCourse',
+  'coursesCombined',
 ] as const
 
 export type WarningKind = (typeof WARNING_KINDS)[number]
@@ -208,7 +209,10 @@ export type WarningCopy = {
   caddieGroups: number
   sheetTotal: number
   importedTotal: number
-  /** Course names a label could have meant, already joined for reading. */
+  /**
+   * The other names this warning is about, already joined for reading — the
+   * courses a label could have meant, or the labels that were added together.
+   */
   candidates: string
 }
 
