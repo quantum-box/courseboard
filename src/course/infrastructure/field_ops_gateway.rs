@@ -202,6 +202,12 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         if let Some(to) = query.to {
             params.push(format!("to={to}"));
         }
+        if let Some(reservation_id) = query.reservation_id.as_deref() {
+            params.push(format!(
+                "reservationId={}",
+                urlencoding_query(reservation_id)
+            ));
+        }
         let path = if params.is_empty() {
             format!("{GOLF}/caddie-assignments")
         } else {
@@ -212,9 +218,9 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         let assignments: Result<Vec<CaddieAssignment>, CourseError> =
             items.into_iter().map(map_caddie_assignment).collect();
         let assignments = assignments?;
-        // Field has no booking filter, so this one is applied here. Narrowing
-        // after the fetch also keeps the answer right if a future Field learns
-        // the parameter and a caller sends both.
+        // Keep narrowing after the fetch even though the request carries the
+        // filter: older Field deployments may ignore reservationId and return
+        // other bookings.
         let Some(reservation_id) = query.reservation_id.as_ref() else {
             return Ok(assignments);
         };
@@ -945,6 +951,7 @@ mod tests {
 
     const ATTENDANCE_PERIOD_PATH: &str =
         "/v1/erp/extensions/golf-course/caddie-attendance-snapshots";
+    const CADDIE_ASSIGNMENTS_PATH: &str = "/v1/erp/extensions/golf-course/caddie-assignments";
 
     fn test_credentials() -> GatewayCredentials<'static> {
         GatewayCredentials {
@@ -1047,6 +1054,104 @@ mod tests {
             CourseError::UpstreamClient { status: 400, message }
                 if message == "from must be on or before to"
         ));
+    }
+
+    #[tokio::test]
+    async fn caddie_assignment_query_forwards_reservation_id() {
+        let seen_uri = Arc::new(Mutex::new(None));
+        let app = Router::new().route(
+            CADDIE_ASSIGNMENTS_PATH,
+            get({
+                let seen_uri = seen_uri.clone();
+                move |OriginalUri(uri): OriginalUri| {
+                    let seen_uri = seen_uri.clone();
+                    async move {
+                        *seen_uri.lock().expect("lock seen URI") = Some(uri.to_string());
+                        Json(json!({ "items": [] }))
+                    }
+                }
+            }),
+        );
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
+
+        let items = gateway
+            .list_caddie_assignments(
+                test_credentials(),
+                CaddieAssignmentQuery {
+                    caddie_id: Some(CaddieId::new("caddie-1")),
+                    from: Some(NaiveDate::from_ymd_opt(2026, 8, 1).unwrap()),
+                    to: Some(NaiveDate::from_ymd_opt(2026, 8, 31).unwrap()),
+                    reservation_id: Some(crate::course::domain::ReservationId::new(
+                        "reservation-1",
+                    )),
+                },
+            )
+            .await
+            .expect("caddie assignments response");
+
+        assert!(items.is_empty());
+        assert_eq!(
+            seen_uri.lock().expect("lock seen URI").as_deref(),
+            Some(
+                "/v1/erp/extensions/golf-course/caddie-assignments?caddieProfileId=caddie-1&from=2026-08-01&to=2026-08-31&reservationId=reservation-1"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn caddie_assignment_query_filters_locally_when_field_ignores_reservation_id() {
+        let app = Router::new().route(
+            CADDIE_ASSIGNMENTS_PATH,
+            get(|| async {
+                Json(json!({
+                    "items": [
+                        {
+                            "id": "assignment-target",
+                            "caddieProfileId": "caddie-1",
+                            "reservationId": "reservation-target",
+                            "scheduledAt": "2026-08-10T00:00:00Z",
+                            "status": "assigned",
+                            "assignmentRole": "primary",
+                            "feeAmount": 12000,
+                            "feeCurrency": "JPY"
+                        },
+                        {
+                            "id": "assignment-other",
+                            "caddieProfileId": "caddie-2",
+                            "reservationId": "reservation-other",
+                            "scheduledAt": "2026-08-10T01:00:00Z",
+                            "status": "assigned",
+                            "assignmentRole": "primary",
+                            "feeAmount": 12000,
+                            "feeCurrency": "JPY"
+                        }
+                    ]
+                }))
+            }),
+        );
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
+
+        let items = gateway
+            .list_caddie_assignments(
+                test_credentials(),
+                CaddieAssignmentQuery {
+                    reservation_id: Some(crate::course::domain::ReservationId::new(
+                        "reservation-target",
+                    )),
+                    ..CaddieAssignmentQuery::default()
+                },
+            )
+            .await
+            .expect("caddie assignments response");
+
+        assert_eq!(items.len(), 1);
+        assert!(
+            items[0].covers_reservation(&crate::course::domain::ReservationId::new(
+                "reservation-target"
+            ))
+        );
     }
 
     #[tokio::test]
