@@ -31,6 +31,12 @@ export const policy: DeepPartial<typeof source> = {
     bookingHorizon: 'How far ahead you sell',
     bookingHorizonHint: 'Days from today. Only tee times inside this window are built, and only those can be booked.',
     bookingHorizonThrough: 'Bookings are open through {{date}}. Changing this rebuilds every course.',
+    bookingHorizonMode: 'How the far edge is set',
+    bookingHorizonModeDays: 'A rolling number of days',
+    bookingHorizonModeThrough: 'A fixed date (a season’s last day)',
+    bookingHorizonThroughLabel: 'Last bookable date',
+    bookingHorizonThroughHint: 'Only tee times through this date are built, and the date stays put as the days pass. Up to 399 days ahead.',
+    bookingHorizonClosed: 'This date has passed, so no new tee times are being built. Move it forward to open the next season.',
   },
   cartOption: {
     optional: 'Optional',
@@ -82,6 +88,7 @@ export const policy: DeepPartial<typeof source> = {
     guestDeposit: 'Enter a guest deposit between 0 and 100%.',
     cutoff: 'Enter a cutoff of 0 or more hours.',
     bookingHorizon: 'Enter how far ahead you sell, between 1 and 399 days.',
+    bookingHorizonThrough: 'Enter a last bookable date between today and 399 days ahead.',
     spendThreshold: 'Enter a minimum per player of 0 or more.',
   },
 }

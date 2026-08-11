@@ -176,8 +176,13 @@ const mockProducts: Array<{
  *
  * The real value lives in the tenant config and is read by the API; the fixture
  * keeps it here so saving a week can answer with the date it opened the book to.
+ * Either a rolling day count or a named closing date, the same two shapes the
+ * config stores.
  */
-let mockBookingHorizonDays = 180
+let mockBookingHorizon: { mode: 'days'; days: number } | { mode: 'through'; through: string } = {
+  mode: 'days',
+  days: 180,
+}
 
 /** One start per interval across every band whose weekday falls in the range. */
 function mockGeneratedStarts(courseId: string, fromIso: string, toIso: string) {
@@ -203,10 +208,20 @@ function mockGeneratedStarts(courseId: string, fromIso: string, toIso: string) {
   return created
 }
 
-function mockBookableThrough(days = mockBookingHorizonDays) {
+function mockBookableThrough(horizon = mockBookingHorizon) {
+  if (horizon.mode === 'through') return horizon.through
   const through = new Date(`${TODAY}T00:00:00Z`)
-  through.setUTCDate(through.getUTCDate() + days)
+  through.setUTCDate(through.getUTCDate() + horizon.days)
   return through.toISOString().slice(0, 10)
+}
+
+function mockHorizonResponse(horizon = mockBookingHorizon) {
+  return {
+    mode: horizon.mode,
+    days: horizon.mode === 'days' ? horizon.days : null,
+    through: horizon.mode === 'through' ? horizon.through : null,
+    bookableThrough: mockBookableThrough(horizon),
+  }
 }
 
 const mockSchedulesByCourse: Record<string, Array<{
@@ -1768,7 +1783,7 @@ function resolveGet(path: string): Json | null | undefined {
   if (pathname === '/v1/erp/extensions/status') return extensionStatus()
 
   if (pathname === '/v1/course/booking-horizon') {
-    return { days: mockBookingHorizonDays, bookableThrough: mockBookableThrough() }
+    return mockHorizonResponse()
   }
 
   if (pathname === '/v1/course/customers') {
@@ -2780,12 +2795,25 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   }
 
   if (pathname === '/v1/course/booking-horizon' && method === 'PUT') {
+    const through = body?.through
+    if (body?.days != null && through != null) {
+      return error(400, 'send either days or through, not both')
+    }
+    if (typeof through === 'string') {
+      const furthest = new Date(`${TODAY}T00:00:00Z`)
+      furthest.setUTCDate(furthest.getUTCDate() + 399)
+      if (through < TODAY || through > furthest.toISOString().slice(0, 10)) {
+        return error(400, 'the last bookable date must be between today and 399 days ahead')
+      }
+      mockBookingHorizon = { mode: 'through', through }
+      return hit(mockHorizonResponse())
+    }
     const days = Number(body?.days)
     if (!Number.isInteger(days) || days < 1 || days > 399) {
       return error(400, 'booking horizon must be between 1 and 399 days')
     }
-    mockBookingHorizonDays = days
-    return hit({ days, bookableThrough: mockBookableThrough(days) })
+    mockBookingHorizon = { mode: 'days', days }
+    return hit(mockHorizonResponse())
   }
 
   const generateMatch = pathname.match(

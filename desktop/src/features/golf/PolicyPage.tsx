@@ -1,6 +1,19 @@
-import { ApiError, courseboardApiJson } from '../../api'
+import { ApiError, courseboardApiJson, today } from '../../api'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import { formatCourseDate } from '../../lib/clock'
+import {
+  HORIZON_MAX_DAYS,
+  HORIZON_MIN_DAYS,
+  addDays,
+  emptyHorizonDraft,
+  horizonDraftFrom,
+  horizonIssue,
+  horizonPayload,
+  sameHorizon,
+  type BookingHorizonResponse,
+  type HorizonDraft,
+} from './bookingHorizon'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import {
@@ -64,13 +77,7 @@ type GolfReservationPolicy = {
   metadataJson: unknown
 }
 
-type BookingHorizon = {
-  days: number
-  bookableThrough: string
-}
-
-const HORIZON_MIN_DAYS = 1
-const HORIZON_MAX_DAYS = 399
+type BookingHorizon = BookingHorizonResponse
 
 type PolicyDraft = {
   reservationTypeId: string
@@ -248,6 +255,7 @@ function policyValidation(draft: PolicyDraft) {
 
 export function PolicyPage() {
   const { t } = useTranslation(['policy', 'common', 'nav', 'courses'])
+  const timezone = useTenantTimezone()
   const [draft, setDraft] = useState<PolicyDraft>(emptyDraft)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -261,21 +269,25 @@ export function PolicyPage() {
    * a golf operating rule CourseBoard owns — but it belongs on this screen,
    * beside the cutoff that closes the same window from the other end.
    */
-  const [horizonDays, setHorizonDays] = useState('')
-  const [savedHorizonDays, setSavedHorizonDays] = useState('')
+  const [horizon, setHorizon] = useState<HorizonDraft>(emptyHorizonDraft)
+  const [savedHorizon, setSavedHorizon] = useState<HorizonDraft>(emptyHorizonDraft)
   const [bookableThrough, setBookableThrough] = useState<string | null>(null)
+  // The club's own day, not the browser's: a date picker bounded by a UTC
+  // "today" refuses this morning's date at a desk in Japan.
+  const courseToday = today(timezone)
+  const horizonClosed = bookableThrough !== null && bookableThrough < courseToday
 
   const loadHorizon = useCallback(async () => {
     try {
-      const horizon = await courseboardApiJson<BookingHorizon>('/v1/course/booking-horizon')
-      setHorizonDays(String(horizon.days))
-      setSavedHorizonDays(String(horizon.days))
-      setBookableThrough(horizon.bookableThrough)
+      const stored = await courseboardApiJson<BookingHorizon>('/v1/course/booking-horizon')
+      setHorizon(horizonDraftFrom(stored))
+      setSavedHorizon(horizonDraftFrom(stored))
+      setBookableThrough(stored.bookableThrough)
     } catch {
       // The rest of the policy screen still works without it; leaving the
       // field blank is better than refusing to open the page.
-      setHorizonDays('')
-      setSavedHorizonDays('')
+      setHorizon(emptyHorizonDraft())
+      setSavedHorizon(emptyHorizonDraft())
       setBookableThrough(null)
     }
   }, [])
@@ -314,6 +326,11 @@ export function PolicyPage() {
 
   useRegisterPageReload(load)
 
+  function changeHorizon(patch: Partial<HorizonDraft>) {
+    setHorizon(previous => ({ ...previous, ...patch }))
+    setSaveError(null)
+  }
+
   function changeDraft(patch: Partial<PolicyDraft>) {
     setDraft(previous => ({ ...previous, ...patch }))
     setSaveError(null)
@@ -341,14 +358,11 @@ export function PolicyPage() {
   async function savePolicy(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const validation = policyValidation(draft)
-    const horizon = Number(horizonDays)
-    if (
-      horizonDays.trim() === ''
-      || !Number.isInteger(horizon)
-      || horizon < HORIZON_MIN_DAYS
-      || horizon > HORIZON_MAX_DAYS
-    ) {
+    const issue = horizonIssue(horizon, courseToday)
+    if (issue === 'days') {
       validation.errors.push(i18next.t('policy:validation.bookingHorizon'))
+    } else if (issue === 'through') {
+      validation.errors.push(i18next.t('policy:validation.bookingHorizonThrough'))
     }
     if (validation.errors.length > 0) {
       setSaveError(validation.errors)
@@ -391,13 +405,13 @@ export function PolicyPage() {
       setExists(true)
       // Only when it moved: writing the horizon rebuilds every course's tee
       // times, which is not something an unrelated save should set off.
-      if (String(horizon) !== savedHorizonDays) {
+      if (!sameHorizon(horizon, savedHorizon)) {
         const stored = await courseboardApiJson<BookingHorizon>('/v1/course/booking-horizon', {
           method: 'PUT',
-          body: JSON.stringify({ days: horizon }),
+          body: JSON.stringify(horizonPayload(horizon)),
         })
-        setSavedHorizonDays(String(stored.days))
-        setHorizonDays(String(stored.days))
+        setHorizon(horizonDraftFrom(stored))
+        setSavedHorizon(horizonDraftFrom(stored))
         setBookableThrough(stored.bookableThrough)
       }
       showToast({
@@ -492,29 +506,59 @@ export function PolicyPage() {
             />
           </Field>
           {/* The other end of the same window: the cutoff closes the book as a
-              tee time approaches, this opens it as far ahead as the club sells. */}
-          <Field
-            label={t('policy:basics.bookingHorizon')}
-            required
-            hint={bookableThrough
-              ? t('policy:basics.bookingHorizonThrough', {
-                  date: formatCourseDate(bookableThrough, i18next.language),
-                })
-              : t('policy:basics.bookingHorizonHint')}
-          >
-            <Input
-              required
-              type="number"
-              min={HORIZON_MIN_DAYS}
-              max={HORIZON_MAX_DAYS}
-              step="1"
-              value={horizonDays}
-              onChange={event => {
-                setHorizonDays(event.target.value)
-                setSaveError(null)
-              }}
-            />
+              tee time approaches, this opens it as far ahead as the club sells.
+              A club that plays all year wants the rolling day count; one with a
+              season wants a date, because a day count would have to be edited
+              every week to keep the same closing day. */}
+          <Field label={t('policy:basics.bookingHorizonMode')} required>
+            <NativeSelect
+              value={horizon.mode}
+              onChange={event => changeHorizon({
+                mode: event.target.value === 'through' ? 'through' : 'days',
+              })}
+            >
+              <option value="days">{t('policy:basics.bookingHorizonModeDays')}</option>
+              <option value="through">{t('policy:basics.bookingHorizonModeThrough')}</option>
+            </NativeSelect>
           </Field>
+          {horizon.mode === 'through' ? (
+            <Field
+              label={t('policy:basics.bookingHorizonThroughLabel')}
+              required
+              hint={horizonClosed
+                ? t('policy:basics.bookingHorizonClosed')
+                : t('policy:basics.bookingHorizonThroughHint')}
+            >
+              <Input
+                required
+                type="date"
+                min={courseToday}
+                max={addDays(courseToday, HORIZON_MAX_DAYS)}
+                value={horizon.through}
+                onChange={event => changeHorizon({ through: event.target.value })}
+              />
+            </Field>
+          ) : (
+            <Field
+              label={t('policy:basics.bookingHorizon')}
+              required
+              hint={bookableThrough
+                ? t('policy:basics.bookingHorizonThrough', {
+                    date: formatCourseDate(bookableThrough, i18next.language),
+                  })
+                : t('policy:basics.bookingHorizonHint')}
+            >
+              <Input
+                required
+                type="number"
+                min={HORIZON_MIN_DAYS}
+                max={HORIZON_MAX_DAYS}
+                step="1"
+                value={horizon.days}
+                onChange={event => changeHorizon({ days: event.target.value })}
+              />
+            </Field>
+          )}
         </FormGrid>
       </Panel>
 

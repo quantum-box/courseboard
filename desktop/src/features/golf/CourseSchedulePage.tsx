@@ -97,8 +97,8 @@ type SavedSchedule = {
   built: GenerationSummary | null
 }
 
+/** Only the far edge matters here; how it was set is the policy screen's business. */
 type BookingHorizon = {
-  days: number
   bookableThrough: string
 }
 
