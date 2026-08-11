@@ -123,16 +123,23 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
         // reporting keeps the previous export's count and the board silently
         // mixes two files.
         //
-        // Two handles, because rows can be found by either. The name is the one
-        // that survives the desk re-pointing it at another course or excluding
-        // it — the rows it wrote last month sit under a course this import is
-        // no longer writing to, and only the name still reaches them. The course
-        // catches rows written before names were recorded, which have no name to
-        // be found by. A course the file does not mention keeps what it has.
+        // A row belongs to the name that wrote it, and that is what decides
+        // whether this file may clear it. The name survives the desk re-pointing
+        // it at another course or excluding it — the rows it wrote last month
+        // sit under a course this import is no longer writing to, and only the
+        // name still reaches them.
         //
         // Names are matched on the key, not the text: an export that respells a
         // name between months means the same course to the import, so keying the
         // delete on the raw text would walk past the rows it wrote.
+        //
+        // A row written before names were recorded has no name to belong to, so
+        // the course it was written under is the only thing left to attribute it
+        // by — and that is the *only* thing the course is used for here. Left
+        // unrestricted, the course would also take rows another name wrote and
+        // this file says nothing about: a club importing two courses from two
+        // files into one CourseBoard course would lose one of them every time
+        // the other was corrected.
         let label_keys: Vec<String> = window
             .sheet_labels
             .iter()
@@ -145,7 +152,9 @@ impl ReservationSummaryGateway for MySqlReservationSummaryRepository {
         }
         if !window.course_ids.is_empty() {
             let placeholders = vec!["?"; window.course_ids.len()].join(", ");
-            clauses.push(format!("golf_course_id IN ({placeholders})"));
+            clauses.push(format!(
+                "(sheet_label_key IS NULL AND golf_course_id IN ({placeholders}))"
+            ));
         }
         let statement = format!(
             r#"
@@ -517,6 +526,45 @@ mod tests {
             .await
             .unwrap();
         assert!(stored.is_empty());
+    }
+
+    #[tokio::test]
+    async fn naming_a_course_to_reach_its_nameless_rows_does_not_take_another_names_rows_too() {
+        // A club whose booking system exports two courses in two files, both
+        // landing on one CourseBoard course. The window has to name that course
+        // to reach anything imported before names were recorded — but naming it
+        // must not let this file clear what the other file's name wrote, which
+        // it says nothing about and will not write back.
+        let (repository, tenant) = fresh("legacy-scope").await;
+        let legacy = nameless("course-shared", 9, 30, 12);
+        let other_file = labelled("course-shared", 10, TimeOfDay::Morning, 20, 6, "滝の");
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&["滝の"], &["course-shared"]),
+                &[legacy.clone(), other_file.clone()],
+                Some("first.xlsx"),
+            )
+            .await
+            .unwrap();
+
+        // This file speaks for 真駒内 only, and the desk has just excluded it.
+        // `course-shared` is in the window solely to reach the nameless row.
+        repository
+            .replace_reservation_summaries(
+                &tenant,
+                &labelled_window(&["真駒内"], &["course-shared"]),
+                &[],
+                Some("second.xlsx"),
+            )
+            .await
+            .unwrap();
+
+        let stored = repository
+            .list_reservation_summaries(&tenant, &whole_july())
+            .await
+            .unwrap();
+        assert_eq!(stored, vec![other_file]);
     }
 
     #[tokio::test]
