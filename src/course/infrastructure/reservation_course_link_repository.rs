@@ -9,8 +9,8 @@ use async_trait::async_trait;
 use sqlx::{MySqlPool, Row};
 
 use crate::course::domain::{
-    normalize_course_label, CourseError, CourseId, ReservationCourseLink,
-    ReservationCourseLinkGateway,
+    normalize_course_label, CourseDecision, CourseError, CourseId, ReservationCourseAnswer,
+    ReservationCourseLink, ReservationCourseLinkGateway,
 };
 
 pub struct MySqlReservationCourseLinkRepository {
@@ -62,38 +62,55 @@ impl ReservationCourseLinkGateway for MySqlReservationCourseLinkRepository {
     async fn save_course_links(
         &self,
         tenant_id: &str,
-        links: &[ReservationCourseLink],
+        answers: &[ReservationCourseAnswer],
         updated_by: Option<&str>,
     ) -> Result<Vec<ReservationCourseLink>, CourseError> {
-        if links.is_empty() {
+        if answers.is_empty() {
             return Ok(Vec::new());
         }
-        // Answers already on file whose name means the same as one being saved.
+        for answer in answers {
+            if answer.sheet_label.trim().is_empty() {
+                return Err(CourseError::BadRequest(
+                    "a course link needs the name the sheet uses",
+                ));
+            }
+        }
+        // Rows to clear: every name being taken back, plus any answer on file
+        // whose name means the same as one being saved.
         //
-        // The import decides two names are the same one by normalizing them, so
-        // an answer for `東 コース` and an answer for `東コース` are answers to
-        // the same question. The unique key cannot see that — it compares the
-        // raw text — so an export that changes only its spacing would leave both
-        // rows in place, and the import would keep reading whichever sorted
-        // first. Clearing the old spelling is what makes the new answer stick.
+        // The second is there because the import decides two names are the same
+        // one by normalizing them, so an answer for `東 コース` and an answer for
+        // `東コース` are answers to the same question. The unique key cannot see
+        // that — it compares the raw text — so an export that changes only its
+        // spacing would leave both rows in place, and the import would keep
+        // reading whichever sorted first. Clearing the old spelling is what makes
+        // the new answer stick.
         let existing = self.list_course_links(tenant_id).await?;
-        let superseded: Vec<String> = existing
+        let mut clear: Vec<String> = existing
             .iter()
             .map(|link| link.sheet_label.clone())
             .filter(|stored| {
                 let stored_key = normalize_course_label(stored);
-                links.iter().any(|link| {
-                    link.sheet_label.trim() != stored
-                        && normalize_course_label(link.sheet_label.trim()) == stored_key
+                answers.iter().any(|answer| {
+                    answer.sheet_label.trim() != stored
+                        && normalize_course_label(answer.sheet_label.trim()) == stored_key
                 })
             })
             .collect();
+        // Taking an answer back removes the row, which is how the import reads
+        // "nobody has looked at this name yet". Storing NULL instead would say
+        // "leave this course out" — the answer the desk is trying to undo.
+        for answer in answers {
+            if answer.decision == CourseDecision::Undecided {
+                clear.push(answer.sheet_label.trim().to_string());
+            }
+        }
 
         // One transaction: the desk answers the whole list of names it was
         // shown, and half of those answers landing would leave the next import
         // asking again about names that were already decided.
         let mut transaction = self.pool.begin().await.map_err(provider)?;
-        for stale in &superseded {
+        for stale in &clear {
             sqlx::query(
                 r#"
                 DELETE FROM golf_reservation_course_links
@@ -106,13 +123,12 @@ impl ReservationCourseLinkGateway for MySqlReservationCourseLinkRepository {
             .await
             .map_err(provider)?;
         }
-        for link in links {
-            let label = link.sheet_label.trim();
-            if label.is_empty() {
-                return Err(CourseError::BadRequest(
-                    "a course link needs the name the sheet uses",
-                ));
-            }
+        for answer in answers {
+            let course_id = match &answer.decision {
+                CourseDecision::Course(id) => Some(id.as_str()),
+                CourseDecision::DoNotImport => None,
+                CourseDecision::Undecided => continue,
+            };
             sqlx::query(
                 r#"
                 INSERT INTO golf_reservation_course_links
@@ -125,8 +141,8 @@ impl ReservationCourseLinkGateway for MySqlReservationCourseLinkRepository {
                 "#,
             )
             .bind(tenant_id)
-            .bind(label)
-            .bind(link.course_id.as_ref().map(|id| id.as_str()))
+            .bind(answer.sheet_label.trim())
+            .bind(course_id)
             .bind(updated_by)
             .execute(&mut *transaction)
             .await
@@ -156,12 +172,31 @@ mod tests {
         }
     }
 
+    /// The desk answering with a course, or with "leave this one out".
+    fn answer(label: &str, course_id: Option<&str>) -> ReservationCourseAnswer {
+        ReservationCourseAnswer {
+            sheet_label: label.to_string(),
+            decision: match course_id {
+                Some(id) => CourseDecision::Course(CourseId::new(id)),
+                None => CourseDecision::DoNotImport,
+            },
+        }
+    }
+
+    /// The desk taking its answer back.
+    fn undecided(label: &str) -> ReservationCourseAnswer {
+        ReservationCourseAnswer {
+            sheet_label: label.to_string(),
+            decision: CourseDecision::Undecided,
+        }
+    }
+
     #[tokio::test]
     async fn an_answer_survives_the_round_trip_so_the_next_month_needs_no_setup() {
         let (repository, tenant) = fresh("roundtrip").await;
         let answers = vec![
-            link("真駒内", Some("course-a")),
-            link("滝の", Some("course-b")),
+            answer("真駒内", Some("course-a")),
+            answer("滝の", Some("course-b")),
         ];
         repository
             .save_course_links(&tenant, &answers, Some("desk@example.com"))
@@ -169,7 +204,13 @@ mod tests {
             .unwrap();
 
         let stored = repository.list_course_links(&tenant).await.unwrap();
-        assert_eq!(stored, answers);
+        assert_eq!(
+            stored,
+            vec![
+                link("真駒内", Some("course-a")),
+                link("滝の", Some("course-b"))
+            ]
+        );
     }
 
     #[tokio::test]
@@ -178,7 +219,7 @@ mod tests {
         // different thing the import has to keep asking about.
         let (repository, tenant) = fresh("ignored").await;
         repository
-            .save_course_links(&tenant, &[link("羊ケ丘", None)], None)
+            .save_course_links(&tenant, &[answer("羊ケ丘", None)], None)
             .await
             .unwrap();
 
@@ -190,11 +231,11 @@ mod tests {
     async fn changing_an_answer_replaces_it_rather_than_adding_a_second() {
         let (repository, tenant) = fresh("replace").await;
         repository
-            .save_course_links(&tenant, &[link("真駒内", Some("course-old"))], None)
+            .save_course_links(&tenant, &[answer("真駒内", Some("course-old"))], None)
             .await
             .unwrap();
         repository
-            .save_course_links(&tenant, &[link("真駒内", Some("course-new"))], None)
+            .save_course_links(&tenant, &[answer("真駒内", Some("course-new"))], None)
             .await
             .unwrap();
 
@@ -206,16 +247,80 @@ mod tests {
     async fn a_course_can_be_put_back_after_being_left_out() {
         let (repository, tenant) = fresh("restore").await;
         repository
-            .save_course_links(&tenant, &[link("滝の", None)], None)
+            .save_course_links(&tenant, &[answer("滝の", None)], None)
             .await
             .unwrap();
         repository
-            .save_course_links(&tenant, &[link("滝の", Some("course-takino"))], None)
+            .save_course_links(&tenant, &[answer("滝の", Some("course-takino"))], None)
             .await
             .unwrap();
 
         let stored = repository.list_course_links(&tenant).await.unwrap();
         assert_eq!(stored, vec![link("滝の", Some("course-takino"))]);
+    }
+
+    #[tokio::test]
+    async fn taking_an_answer_back_leaves_the_name_unanswered_rather_than_excluded() {
+        // The desk pointed 真駒内 at the wrong course and wants to think again.
+        // Storing "do not import" instead would silence the very question it
+        // needs asked, and the mistake would look like a decision.
+        let (repository, tenant) = fresh("undo").await;
+        repository
+            .save_course_links(&tenant, &[answer("真駒内", Some("course-wrong"))], None)
+            .await
+            .unwrap();
+        repository
+            .save_course_links(&tenant, &[undecided("真駒内")], None)
+            .await
+            .unwrap();
+
+        let stored = repository.list_course_links(&tenant).await.unwrap();
+        assert!(stored.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_exclusion_can_be_taken_back_too() {
+        let (repository, tenant) = fresh("undo-ignore").await;
+        repository
+            .save_course_links(&tenant, &[answer("羊ケ丘", None)], None)
+            .await
+            .unwrap();
+        repository
+            .save_course_links(&tenant, &[undecided("羊ケ丘")], None)
+            .await
+            .unwrap();
+
+        let stored = repository.list_course_links(&tenant).await.unwrap();
+        assert!(stored.is_empty());
+    }
+
+    #[tokio::test]
+    async fn taking_one_answer_back_leaves_the_others_alone() {
+        // The screen saves every name it showed at once, so a single undo
+        // arrives alongside the answers that are not changing.
+        let (repository, tenant) = fresh("undo-one").await;
+        repository
+            .save_course_links(
+                &tenant,
+                &[
+                    answer("真駒内", Some("course-a")),
+                    answer("滝の", Some("course-b")),
+                ],
+                None,
+            )
+            .await
+            .unwrap();
+        repository
+            .save_course_links(
+                &tenant,
+                &[undecided("真駒内"), answer("滝の", Some("course-b"))],
+                None,
+            )
+            .await
+            .unwrap();
+
+        let stored = repository.list_course_links(&tenant).await.unwrap();
+        assert_eq!(stored, vec![link("滝の", Some("course-b"))]);
     }
 
     #[tokio::test]
@@ -225,11 +330,11 @@ mod tests {
         // whichever sorted first would decide, which is nobody's intent.
         let (repository, tenant) = fresh("respaced").await;
         repository
-            .save_course_links(&tenant, &[link("東 コース", Some("course-old"))], None)
+            .save_course_links(&tenant, &[answer("東 コース", Some("course-old"))], None)
             .await
             .unwrap();
         repository
-            .save_course_links(&tenant, &[link("東コース", Some("course-new"))], None)
+            .save_course_links(&tenant, &[answer("東コース", Some("course-new"))], None)
             .await
             .unwrap();
 
@@ -241,11 +346,11 @@ mod tests {
     async fn a_name_that_means_something_else_is_left_alone() {
         let (repository, tenant) = fresh("distinct").await;
         repository
-            .save_course_links(&tenant, &[link("東コース", Some("course-east"))], None)
+            .save_course_links(&tenant, &[answer("東コース", Some("course-east"))], None)
             .await
             .unwrap();
         repository
-            .save_course_links(&tenant, &[link("西コース", Some("course-west"))], None)
+            .save_course_links(&tenant, &[answer("西コース", Some("course-west"))], None)
             .await
             .unwrap();
 
@@ -257,7 +362,7 @@ mod tests {
     async fn a_name_with_nothing_in_it_is_refused() {
         let (repository, tenant) = fresh("blank").await;
         assert!(repository
-            .save_course_links(&tenant, &[link("   ", Some("course-a"))], None)
+            .save_course_links(&tenant, &[answer("   ", Some("course-a"))], None)
             .await
             .is_err());
     }
@@ -266,7 +371,7 @@ mod tests {
     async fn one_tenants_answers_are_invisible_to_another() {
         let (repository, tenant) = fresh("isolation-a").await;
         repository
-            .save_course_links(&tenant, &[link("真駒内", Some("course-a"))], None)
+            .save_course_links(&tenant, &[answer("真駒内", Some("course-a"))], None)
             .await
             .unwrap();
 

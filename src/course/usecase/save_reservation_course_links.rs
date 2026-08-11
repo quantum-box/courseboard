@@ -7,7 +7,9 @@
 
 use std::sync::Arc;
 
-use crate::course::domain::{CourseError, ReservationCourseLink, ReservationCourseLinkGateway};
+use crate::course::domain::{
+    CourseError, ReservationCourseAnswer, ReservationCourseLink, ReservationCourseLinkGateway,
+};
 
 pub struct SaveReservationCourseLinksUseCase {
     links: Arc<dyn ReservationCourseLinkGateway>,
@@ -26,17 +28,17 @@ impl SaveReservationCourseLinksUseCase {
     pub async fn execute(
         &self,
         tenant_id: &str,
-        links: &[ReservationCourseLink],
+        answers: &[ReservationCourseAnswer],
         updated_by: Option<&str>,
     ) -> Result<Vec<ReservationCourseLink>, CourseError> {
         require_tenant(tenant_id)?;
-        if links.is_empty() {
+        if answers.is_empty() {
             return Err(CourseError::BadRequest(
                 "at least one course name is required",
             ));
         }
         self.links
-            .save_course_links(tenant_id, links, updated_by)
+            .save_course_links(tenant_id, answers, updated_by)
             .await
     }
 }

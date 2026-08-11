@@ -405,5 +405,27 @@ describe('mockFieldApi', () => {
     expect(
       body.courses.find(course => course.sheetLabel === unanswered?.sheetLabel)?.resolution,
     ).toBe('linked')
+
+    // And the desk can take that answer back: a blank choice sends neither a
+    // course nor the exclusion flag, and the name goes back to being asked
+    // about rather than being recorded as one to leave out.
+    const cleared = resolveMockFieldApiJson('/v1/course/reservation-summaries/course-links', {
+      method: 'PUT',
+      body: JSON.stringify({
+        items: [{ sheetLabel: unanswered?.sheetLabel, doNotImport: false }],
+      }),
+    })
+    expect(cleared.kind).toBe('hit')
+
+    const undone = resolveMockFieldApiJson(
+      '/v1/course/reservation-summaries/preview?fileName=x.xlsx',
+      { method: 'POST', body: new ArrayBuffer(8) },
+    )
+    if (undone.kind !== 'hit') throw new Error('preview should answer')
+    expect(
+      (undone.data as { courses: Array<{ sheetLabel: string; resolution: string }> }).courses.find(
+        course => course.sheetLabel === unanswered?.sheetLabel,
+      )?.resolution,
+    ).toBe('unresolved')
   })
 })

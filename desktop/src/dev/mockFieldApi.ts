@@ -2453,9 +2453,17 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       const label = typeof item.sheetLabel === 'string' ? item.sheetLabel.trim() : ''
       if (!label) return error(400, 'a course link needs the name the sheet uses')
       const courseId = typeof item.golfCourseId === 'string' ? item.golfCourseId.trim() : ''
-      // Null, not absent: "do not import" is an answer the import has to be
-      // able to tell apart from a name nobody has looked at.
-      mockReservationCourseLinks.set(label, courseId || null)
+      if (courseId) {
+        mockReservationCourseLinks.set(label, courseId)
+      } else if (item.doNotImport === true) {
+        // Null, not absent: "do not import" is an answer the import has to be
+        // able to tell apart from a name nobody has looked at.
+        mockReservationCourseLinks.set(label, null)
+      } else {
+        // Neither: the desk took its answer back, so the name goes back among
+        // the questions. Absent, which is what "nobody has looked at this" is.
+        mockReservationCourseLinks.delete(label)
+      }
     }
     return hit(mockReservationCourseLinkItems())
   }

@@ -16,8 +16,8 @@ use utoipa::{IntoParams, ToSchema};
 use super::http::{catalog_gateway, credentials, operator_id, ItemsResponse};
 use super::openapi::ErrorBody;
 use crate::course::domain::{
-    year_month_from_file_name, CourseId, ImportWarning, ReservationCourseLink,
-    ReservationDaySummary, ReservationSummaryQuery,
+    year_month_from_file_name, CourseDecision, CourseId, ImportWarning, ReservationCourseAnswer,
+    ReservationCourseLink, ReservationDaySummary, ReservationSummaryQuery,
 };
 use crate::course::infrastructure::read_reservation_sheet;
 use crate::course::usecase::{
@@ -444,10 +444,28 @@ impl From<&ReservationCourseLink> for ReservationCourseLinkDto {
     }
 }
 
+/// One name and what the desk just said about it.
+///
+/// Three states, not two. `golfCourseId` names a course; `doNotImport` leaves it
+/// out; neither takes the answer back and puts the name among the questions
+/// again. That last one is why this is not the same shape as the stored link:
+/// the desk has to be able to undo a mapping it made by mistake, and "no answer"
+/// is not something a stored row can say.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReservationCourseChoiceDto {
+    pub sheet_label: String,
+    #[serde(default)]
+    pub golf_course_id: Option<String>,
+    #[serde(default)]
+    pub do_not_import: bool,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveReservationCourseLinksRequest {
-    pub items: Vec<ReservationCourseLinkDto>,
+    /// Every name the screen showed, answered or not.
+    pub items: Vec<ReservationCourseChoiceDto>,
 }
 
 /// GET /v1/course/reservation-summaries/course-links
@@ -494,21 +512,30 @@ pub async fn save_reservation_course_links(
     Json(request): Json<SaveReservationCourseLinksRequest>,
 ) -> Result<Json<ItemsResponse<ReservationCourseLinkDto>>, AppError> {
     let tenant_id = operator_id(&headers)?.to_string();
-    let links: Vec<ReservationCourseLink> = request
+    let answers: Vec<ReservationCourseAnswer> = request
         .items
         .into_iter()
-        .map(|item| ReservationCourseLink {
-            sheet_label: item.sheet_label,
-            course_id: item
+        .map(|item| {
+            let course_id = item
                 .golf_course_id
                 .map(|id| id.trim().to_string())
                 .filter(|id| !id.is_empty())
-                .map(CourseId::new),
+                .map(CourseId::new);
+            ReservationCourseAnswer {
+                sheet_label: item.sheet_label,
+                // A named course wins over the flag, so a body that sets both
+                // cannot quietly drop the course it also named.
+                decision: match (course_id, item.do_not_import) {
+                    (Some(id), _) => CourseDecision::Course(id),
+                    (None, true) => CourseDecision::DoNotImport,
+                    (None, false) => CourseDecision::Undecided,
+                },
+            }
         })
         .collect();
     let use_case = SaveReservationCourseLinksUseCase::new(state.reservation_course_links());
     let saved = use_case
-        .execute(&tenant_id, &links, Some(operator_id(&headers)?))
+        .execute(&tenant_id, &answers, Some(operator_id(&headers)?))
         .await
         .map_err(AppError::from)?;
     Ok(Json(ItemsResponse {

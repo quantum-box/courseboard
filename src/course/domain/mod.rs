@@ -110,9 +110,9 @@ pub use reservation_sheet::{
     SheetDaySummary, SheetGrid,
 };
 pub use reservation_summary::{
-    match_course_label, normalize_course_label, resolve_course_label, CourseMatch,
-    CourseResolution, ReservationCourseLink, ReservationDaySummary, ReservationSummaryQuery,
-    ReservationSummaryWindow, TimeOfDay,
+    match_course_label, normalize_course_label, resolve_course_label, CourseDecision, CourseMatch,
+    CourseResolution, ReservationCourseAnswer, ReservationCourseLink, ReservationDaySummary,
+    ReservationSummaryQuery, ReservationSummaryWindow, TimeOfDay,
 };
 pub use resource::{Resource, ResourceKind, SaveCourseResource};
 pub use schedule::{

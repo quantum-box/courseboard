@@ -12,13 +12,14 @@ use super::{
     CustomerId, CustomerMembership, CustomerSearchQuery, DailyBudget, DailyBudgetQuery,
     DeleteSlotOverrides, ExtensionStatus, GenerationSummary, InventoryWatermark, MembershipPlan,
     MembershipPlanId, MonthlySettlement, NewCustomer, NewReservation, PartyDetails, ProductSlot,
-    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationCourseLink,
-    ReservationDaySummary, ReservationId, ReservationPolicy, ReservationProduct,
-    ReservationServiceId, ReservationSummaryQuery, ReservationSummaryWindow, Resource, ResourceId,
-    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
-    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
-    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
-    UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
+    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationCourseAnswer,
+    ReservationCourseLink, ReservationDaySummary, ReservationId, ReservationPolicy,
+    ReservationProduct, ReservationServiceId, ReservationSummaryQuery, ReservationSummaryWindow,
+    Resource, ResourceId, ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy,
+    SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig,
+    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes,
+    YearMonth,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -204,13 +205,16 @@ pub trait ReservationCourseLinkGateway: Send + Sync {
         tenant_id: &str,
     ) -> Result<Vec<ReservationCourseLink>, CourseError>;
 
-    /// Record the desk's answers. Each replaces the answer for that name; an
-    /// answer of "do not import" is stored, not represented by absence, so the
-    /// import can tell a decision from a name nobody has looked at yet.
+    /// Record the desk's answers. Each replaces whatever that name said before.
+    ///
+    /// "Do not import" is stored rather than represented by absence, so the
+    /// import can tell a decision from a name nobody has looked at yet — and
+    /// taking an answer back is therefore its own thing, which removes the row
+    /// and puts the name back among the questions.
     async fn save_course_links(
         &self,
         tenant_id: &str,
-        links: &[ReservationCourseLink],
+        answers: &[ReservationCourseAnswer],
         updated_by: Option<&str>,
     ) -> Result<Vec<ReservationCourseLink>, CourseError>;
 }

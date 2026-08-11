@@ -193,17 +193,24 @@ export function ReservationImportPage() {
       await courseboardApiJson('/v1/course/reservation-summaries/course-links', {
         method: 'PUT',
         body: JSON.stringify({
+          // Every name the screen showed, including the ones left blank. A
+          // blank is what the desk picks to undo a mapping it made by mistake,
+          // and dropping those from the body would leave the old answer on file
+          // with the screen showing something else.
           items: preview.courses
             .map(course => ({
               sheetLabel: course.sheetLabel,
               choice: courseChoice[course.sheetLabel] ?? courseChoiceOf(course),
             }))
-            .filter(item => item.choice !== '')
             .map(item => ({
               sheetLabel: item.sheetLabel,
-              // "Do not import" is an answer, and it travels as the absence of
-              // a course rather than as a sentinel the API would have to know.
-              golfCourseId: item.choice === IGNORE_COURSE ? undefined : item.choice,
+              golfCourseId:
+                item.choice === IGNORE_COURSE || item.choice === '' ? undefined : item.choice,
+              // "Do not import" is an answer and travels as its own flag.
+              // Without it, an absent course would have to mean both that and
+              // "no answer yet", which are the two states this screen exists to
+              // keep apart.
+              doNotImport: item.choice === IGNORE_COURSE,
             })),
         }),
       })

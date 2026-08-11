@@ -190,6 +190,32 @@ pub struct ReservationCourseLink {
     pub course_id: Option<CourseId>,
 }
 
+/// What the desk decided about one name, on its way to being stored.
+///
+/// Three states, because two were not enough to say everything the screen can
+/// say. Storage holds the first two as a row and the last as the absence of one,
+/// which is what the import reads as a question still to be asked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CourseDecision {
+    /// This name is that course.
+    Course(CourseId),
+    /// Leave this name out. An answer, not a gap.
+    DoNotImport,
+    /// Take back whatever was answered before.
+    ///
+    /// A desk that mapped a name by mistake has to be able to get back to not
+    /// having decided — which is not the same as deciding to leave the course
+    /// out, and is the only state that makes the import ask again.
+    Undecided,
+}
+
+/// One name, and what the desk just said about it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReservationCourseAnswer {
+    pub sheet_label: String,
+    pub decision: CourseDecision,
+}
+
 /// What one name in the export resolved to, and how.
 ///
 /// How matters: a course the desk chose is settled, while one the matcher
