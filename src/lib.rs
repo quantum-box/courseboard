@@ -968,6 +968,61 @@ pub async fn run_migrations(pool: &MySqlPool) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Guards on the migration set itself, which no database is needed to check.
+///
+/// A migration's version is the number its file name starts with, and every
+/// database records that number against the checksum of the file it ran. Two
+/// files sharing a version therefore do not clash at compile time, or on a
+/// fresh database, or in CI — they clash on the one database that already ran
+/// the other one, at start-up, days later.
+///
+/// Two branches picking the same day's number is the ordinary way this happens:
+/// both merge cleanly, and nothing says a word until a long-lived environment
+/// refuses to boot.
+#[cfg(test)]
+mod migration_set {
+    use super::MIGRATOR;
+    use std::collections::HashMap;
+
+    #[test]
+    fn no_two_migrations_share_a_version() {
+        let mut by_version: HashMap<i64, Vec<&str>> = HashMap::new();
+        for migration in MIGRATOR.iter() {
+            by_version
+                .entry(migration.version)
+                .or_default()
+                .push(&migration.description);
+        }
+        let clashes: Vec<String> = by_version
+            .iter()
+            .filter(|(_, descriptions)| descriptions.len() > 1)
+            .map(|(version, descriptions)| format!("{version}: {}", descriptions.join(", ")))
+            .collect();
+        assert!(
+            clashes.is_empty(),
+            "two migrations share a version, so whichever database ran the other one first will \
+             refuse to start: {}",
+            clashes.join(" / "),
+        );
+    }
+
+    #[test]
+    fn every_migration_is_dated_the_way_the_rest_are() {
+        // `YYYYMMDDNNNN`: the day the migration was written, then a counter
+        // for that day. A file numbered some other way sorts into the wrong
+        // place, and a run of them lands on a database in an order nobody
+        // intended.
+        for migration in MIGRATOR.iter() {
+            assert!(
+                (202_001_010_000..=209_912_319_999).contains(&migration.version),
+                "{} is numbered {}, which is not a YYYYMMDDNNNN stamp",
+                migration.description,
+                migration.version,
+            );
+        }
+    }
+}
+
 async fn healthz() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
