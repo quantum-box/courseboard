@@ -1181,17 +1181,39 @@ function mockMembershipOf(customerId: string) {
   }
 }
 
-/** Matches the server's search: name, kana, or phone, ignoring separators. */
-function mockCustomerMatches(customer: Record<string, unknown>, query: string) {
-  const needle = query.trim().toLowerCase()
-  if (!needle) return false
-  const digits = needle.replace(/[^0-9]/g, '')
-  const haystacks = [customer.name, customer.nameKana, customer.email]
-    .filter((value): value is string => typeof value === 'string')
-    .map(value => value.toLowerCase())
-  if (haystacks.some(value => value.includes(needle))) return true
-  const phone = typeof customer.phone === 'string' ? customer.phone.replace(/[^0-9]/g, '') : ''
-  return Boolean(digits) && phone.includes(digits)
+type MockCustomerSearch = {
+  name: string | null
+  phone: string | null
+  email: string | null
+}
+
+function mockPhoneDigits(value: string) {
+  return value
+    .replace(/[０-９]/g, digit => String.fromCharCode(digit.charCodeAt(0) - 0xFEE0))
+    .replace(/[^0-9]/g, '')
+}
+
+/** Mirrors Field's separate name/kana, phone, and exact-email filters. */
+function mockCustomerMatches(customer: Record<string, unknown>, search: MockCustomerSearch) {
+  if (search.name) {
+    const needle = search.name.toLowerCase()
+    const names = [customer.name, customer.nameKana]
+      .filter((value): value is string => typeof value === 'string')
+      .map(value => value.toLowerCase())
+    if (!names.some(value => value.includes(needle))) return false
+  }
+
+  if (search.phone) {
+    const needle = mockPhoneDigits(search.phone)
+    const phone = typeof customer.phone === 'string' ? mockPhoneDigits(customer.phone) : ''
+    if (!needle || !phone.includes(needle)) return false
+  }
+
+  if (search.email) {
+    if (customer.email !== search.email) return false
+  }
+
+  return Boolean(search.name || search.phone || search.email)
 }
 
 function pathnameOf(path: string) {
@@ -1787,16 +1809,17 @@ function resolveGet(path: string): Json | null | undefined {
   }
 
   if (pathname === '/v1/course/customers') {
-    const query = url.searchParams.get('name')
-      || url.searchParams.get('phone')
-      || url.searchParams.get('email')
-      || ''
+    const search: MockCustomerSearch = {
+      name: url.searchParams.get('name')?.trim() || null,
+      phone: url.searchParams.get('phone')?.trim() || null,
+      email: url.searchParams.get('email')?.trim() || null,
+    }
     // The server answers 400 for a search with nothing in it, which this
     // resolver has no way to express. No screen sends one — both the picker
     // and the ledger page hold the request until something is typed — so an
     // empty result is the closest honest stand-in.
-    if (!query.trim()) return items([])
-    return items(mockCustomers.filter(customer => mockCustomerMatches(customer, query)))
+    if (!search.name && !search.phone && !search.email) return items([])
+    return items(mockCustomers.filter(customer => mockCustomerMatches(customer, search)))
   }
 
   if (pathname === '/v1/course/membership-plans') {

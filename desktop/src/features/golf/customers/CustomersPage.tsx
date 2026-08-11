@@ -16,7 +16,7 @@ import { navigate, navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { MembershipBadge } from './MembershipBadge'
 import { customerDistinguisher, customersPath, type Customer } from './models'
-import { useCustomerSearch } from './useCustomerSearch'
+import { customerSearchParameter, useCustomerSearch } from './useCustomerSearch'
 
 /**
  * The customer ledger.
@@ -34,6 +34,11 @@ export function CustomersPage() {
   const [term, setTerm] = useState('')
   const search = useCustomerSearch(term)
   const [creating, setCreating] = useState(false)
+  const trimmedTerm = term.trim()
+  const searchParameter = customerSearchParameter(term)
+  const searchCondition = searchParameter
+    ? t(`customers:search.condition.${searchParameter}`)
+    : ''
 
   return (
     <div className="page-stack">
@@ -57,12 +62,14 @@ export function CustomersPage() {
             the desk still has to be able to register someone. */}
         {search.error ? <Notice tone="danger">{search.error}</Notice> : null}
 
-        {!search.searching && !search.error && term.trim().length >= 2
+        {!search.searching && !search.error && search.completedQuery === trimmedTerm
           && search.candidates.length === 0 ? (
-          <Notice tone="info">{t('customers:search.noMatches', { term: term.trim() })}</Notice>
+          <Notice tone="info">
+            {t('customers:search.noMatches', { term: trimmedTerm, condition: searchCondition })}
+          </Notice>
         ) : null}
 
-        {term.trim().length < 2 ? (
+        {!trimmedTerm ? (
           <Notice tone="info">{t('customers:search.prompt')}</Notice>
         ) : null}
 

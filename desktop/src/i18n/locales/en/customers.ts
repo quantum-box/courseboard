@@ -5,10 +5,15 @@ export const customers: DeepPartial<typeof source> = {
   search: {
     title: 'Find a customer',
     description: 'Members and visitors alike — everyone who plays here is in this ledger.',
-    label: 'Name, reading, or phone',
-    placeholder: 'e.g. Honda, ホンダ, 090-1234',
-    prompt: 'Type at least two characters of a name, reading, or phone number.',
-    noMatches: 'Nobody matches "{{term}}". You can register them as a new customer.',
+    label: 'Name, reading, phone, or email',
+    placeholder: 'e.g. Honda, ホンダ, 090-1234, honda@example.com',
+    prompt: 'Enter a name, reading, phone number, or email address. Names can be searched from one character.',
+    condition: {
+      name: 'a name or reading',
+      phone: 'a phone number',
+      email: 'an email address',
+    },
+    noMatches: 'No customer matched "{{term}}" when searched as {{condition}}. Check the input; if it is correct, you can register a new customer.',
   },
   create: {
     open: 'Register a new customer',

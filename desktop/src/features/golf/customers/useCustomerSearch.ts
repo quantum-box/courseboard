@@ -3,20 +3,42 @@ import { useEffect, useRef, useState } from 'react'
 import { courseboardApiJson } from '../../../api'
 import type { Customer, CustomerList } from './models'
 
-/**
- * Shortest string worth asking the ledger about.
- *
- * One character of a Japanese surname matches most of the tenant, which is a
- * list nobody can pick out of and a request nobody needed.
- */
-const MIN_QUERY_LENGTH = 2
-
 /** Long enough that typing a full name is one request, not six. */
 const DEBOUNCE_MS = 250
+
+export type CustomerSearchParameter = 'name' | 'phone' | 'email'
+
+const PHONE_DIGIT = /[0-9０-９]/u
+const PHONE_CHARACTERS = /^[0-9０-９\s()+.‐‑‒–—―−ー－-]+$/u
+
+/**
+ * Route the ledger's single box onto Field's three distinct filters.
+ *
+ * An at-sign is unambiguous enough to prefer the exact email filter. A phone
+ * search must contain a digit and only digits or familiar phone separators;
+ * notably, full-width digits stay untouched for Field to normalise. Everything
+ * else is a name query, which Field also matches against the kana reading.
+ */
+export function customerSearchParameter(query: string): CustomerSearchParameter | null {
+  const trimmed = query.trim()
+  if (!trimmed) return null
+  if (trimmed.includes('@')) return 'email'
+  if (PHONE_DIGIT.test(trimmed) && PHONE_CHARACTERS.test(trimmed)) return 'phone'
+  return 'name'
+}
+
+export function customerSearchPath(query: string): string | null {
+  const trimmed = query.trim()
+  const parameter = customerSearchParameter(trimmed)
+  if (!parameter) return null
+  return `/v1/course/customers?${parameter}=${encodeURIComponent(trimmed)}`
+}
 
 export type CustomerSearchState = {
   candidates: Customer[]
   searching: boolean
+  /** Trimmed input for which `candidates` is the completed answer. */
+  completedQuery: string | null
   /** Set when the ledger could not be reached; the desk keeps typing regardless. */
   error: string | null
 }
@@ -34,6 +56,7 @@ export function useCustomerSearch(query: string): CustomerSearchState {
   const [state, setState] = useState<CustomerSearchState>({
     candidates: [],
     searching: false,
+    completedQuery: null,
     error: null,
   })
   // Answers can arrive out of order; only the newest query may set state, or a
@@ -42,27 +65,32 @@ export function useCustomerSearch(query: string): CustomerSearchState {
 
   useEffect(() => {
     const trimmed = query.trim()
-    if (trimmed.length < MIN_QUERY_LENGTH) {
+    const path = customerSearchPath(trimmed)
+    if (!path) {
       latest.current += 1
-      setState({ candidates: [], searching: false, error: null })
+      setState({ candidates: [], searching: false, completedQuery: null, error: null })
       return
     }
 
     const generation = ++latest.current
-    setState(current => ({ ...current, searching: true }))
+    setState({ candidates: [], searching: true, completedQuery: null, error: null })
     const timer = setTimeout(() => {
       void (async () => {
         try {
-          const found = await courseboardApiJson<CustomerList>(
-            `/v1/course/customers?name=${encodeURIComponent(trimmed)}`,
-          )
+          const found = await courseboardApiJson<CustomerList>(path)
           if (latest.current !== generation) return
-          setState({ candidates: found.items ?? [], searching: false, error: null })
+          setState({
+            candidates: found.items ?? [],
+            searching: false,
+            completedQuery: trimmed,
+            error: null,
+          })
         } catch (error) {
           if (latest.current !== generation) return
           setState({
             candidates: [],
             searching: false,
+            completedQuery: null,
             error: error instanceof Error ? error.message : String(error),
           })
         }
