@@ -6,6 +6,7 @@ export const nav = {
     caddie: 'キャディ',
     company: '会社',
     finance: '売上と請求',
+    dataIntegration: 'データ連携',
     settings: '設定',
     account: 'アカウント',
     tenantMaster: '最初に決める設定',

@@ -120,7 +120,7 @@ export type NavigationItem = {
 
 export type NavigationSection = {
   /** Matches a key under `nav:sections`; `showLabel: false` renders the group unlabelled. */
-  id: 'home' | 'courseBooking' | 'caddie' | 'finance' | 'company'
+  id: 'home' | 'courseBooking' | 'caddie' | 'finance' | 'company' | 'dataIntegration'
   showLabel: boolean
   items: NavigationItem[]
 }
@@ -138,7 +138,6 @@ export const navigationSections: NavigationSection[] = [
       // The ledger is the start desk's board; the timeline is the caddie view
       // of the same day, so the ledger comes first.
       { route: 'golf/ledger', icon: Table2 },
-      { route: 'golf/reservation-report-import', icon: FileSpreadsheet },
       { route: 'golf/timeline', icon: CalendarRange },
       // The ledger of people, beside the ledger of tee times. Members are read
       // off it, and a visitor's second visit only registers because it exists.
@@ -174,6 +173,11 @@ export const navigationSections: NavigationSection[] = [
       { route: 'golf/simulator', icon: Calculator },
       { route: 'cancellation-fees', icon: CreditCard },
     ],
+  },
+  {
+    id: 'dataIntegration',
+    showLabel: true,
+    items: [{ route: 'golf/reservation-report-import', icon: FileSpreadsheet }],
   },
 ]
 

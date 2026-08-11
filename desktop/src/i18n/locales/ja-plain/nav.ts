@@ -9,6 +9,7 @@ export const nav: DeepPartial<typeof source> = {
     caddie: 'キャディ',
     company: '会社',
     finance: '売上とお金',
+    dataIntegration: 'データ連携',
     tenantMaster: '最初に決めておく設定',
   },
   items: {
