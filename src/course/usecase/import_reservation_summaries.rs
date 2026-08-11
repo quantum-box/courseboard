@@ -11,8 +11,8 @@ use std::sync::Arc;
 use chrono::NaiveDate;
 
 use crate::course::domain::{
-    courses_matching_label, parse_reservation_sheet, resolve_course_label, Course, CourseError,
-    CourseId, CourseResolution, GatewayCredentials, GolfCatalogGateway, ImportWarning,
+    courses_a_label_may_have_matched, parse_reservation_sheet, resolve_course_label, Course,
+    CourseError, CourseId, CourseResolution, GatewayCredentials, GolfCatalogGateway, ImportWarning,
     ReservationCourseLinkGateway, ReservationDaySummary, ReservationSummaryGateway,
     ReservationSummaryWindow, SheetGrid,
 };
@@ -304,7 +304,7 @@ fn courses_a_file_speaks_for(imported: &[ImportedCourse], courses: &[Course]) ->
             add(id);
         }
         if course.is_answered() {
-            for matched in courses_matching_label(&course.sheet_label, courses) {
+            for matched in courses_a_label_may_have_matched(&course.sheet_label, courses) {
                 add(matched.id().clone());
             }
         }

@@ -343,9 +343,40 @@ pub fn match_course_label<'a>(label: &str, courses: &'a [Course]) -> CourseMatch
 /// have matched exactly one course on the day its rows were written, and the
 /// replacement has to be able to reach them either way.
 pub fn courses_matching_label<'a>(label: &str, courses: &'a [Course]) -> Vec<&'a Course> {
+    let (exact, partial) = candidates_for(label, courses);
+    // An exact hit settles it even if some other course also happens to contain
+    // the same characters: `滝の` should not become ambiguous because a
+    // `滝の東` exists.
+    if exact.is_empty() {
+        partial
+    } else {
+        exact
+    }
+}
+
+/// Every course this label has ever been able to name.
+///
+/// Both tiers, where [`courses_matching_label`] takes only the better one. That
+/// is right for deciding where counts go today and wrong for finding where they
+/// went before: a label that matched `東コース` on looks alone still matched it,
+/// and a course later registered as exactly `東` does not move those rows. A row
+/// with no name of its own has only its course to be found by, so the search has
+/// to cover every course the name could have reached.
+pub fn courses_a_label_may_have_matched<'a>(label: &str, courses: &'a [Course]) -> Vec<&'a Course> {
+    let (mut exact, partial) = candidates_for(label, courses);
+    for course in partial {
+        if !exact.iter().any(|kept| kept.id() == course.id()) {
+            exact.push(course);
+        }
+    }
+    exact
+}
+
+/// The two tiers of match, in order of confidence.
+fn candidates_for<'a>(label: &str, courses: &'a [Course]) -> (Vec<&'a Course>, Vec<&'a Course>) {
     let wanted = normalize_course_label(label);
     if wanted.is_empty() {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
 
     let names = |course: &'a Course| -> Vec<String> {
@@ -356,25 +387,19 @@ pub fn courses_matching_label<'a>(label: &str, courses: &'a [Course]) -> Vec<&'a
         names
     };
 
-    // An exact hit settles it even if some other course also happens to contain
-    // the same characters: `滝の` should not become ambiguous because a
-    // `滝の東` exists.
     let exact: Vec<&Course> = courses
         .iter()
         .filter(|course| names(course).contains(&wanted))
         .collect();
-    if !exact.is_empty() {
-        return exact;
-    }
-
-    courses
+    let partial: Vec<&Course> = courses
         .iter()
         .filter(|course| {
             names(course)
                 .iter()
                 .any(|name| !name.is_empty() && (name.contains(&wanted) || wanted.contains(name)))
         })
-        .collect()
+        .collect();
+    (exact, partial)
 }
 
 /// Reduce a course name to the part two people would agree on.
@@ -508,6 +533,26 @@ mod tests {
         let courses = vec![course("東コース", None), course("東コース 旧", None)];
         let candidates = courses_matching_label("東\n18H", &courses);
         assert_eq!(candidates.len(), 2);
+    }
+
+    #[test]
+    fn a_name_that_now_hits_a_course_exactly_still_remembers_the_one_it_used_to_reach() {
+        // `東` reached `東コース` on looks alone until the club registered a
+        // course called exactly `東`. The rows it wrote back then did not move,
+        // and having no name of their own they can only be found by that course.
+        let courses = vec![course("東コース", None), course("東", None)];
+        let names: Vec<&str> = courses_a_label_may_have_matched("東\n18H", &courses)
+            .iter()
+            .map(|course| course.name())
+            .collect();
+        assert!(names.contains(&"東"));
+        assert!(names.contains(&"東コース"));
+
+        // The verdict is unchanged: today the name means the exact course.
+        assert!(matches!(
+            match_course_label("東\n18H", &courses),
+            CourseMatch::Matched(course) if course.name() == "東"
+        ));
     }
 
     #[test]
