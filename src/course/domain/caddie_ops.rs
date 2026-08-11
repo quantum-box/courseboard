@@ -488,8 +488,8 @@ pub struct CaddieAssignmentQuery {
     pub to: Option<NaiveDate>,
     /// Only the assignments standing on one booking.
     ///
-    /// Field filters by caddie and by date, not by booking, so an adapter is
-    /// free to ask upstream and must narrow the answer itself either way.
+    /// Field accepts this filter upstream. Adapters still narrow the returned
+    /// rows themselves so older Field deployments cannot leak other bookings.
     pub reservation_id: Option<ReservationId>,
 }
 

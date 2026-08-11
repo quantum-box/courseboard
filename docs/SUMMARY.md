@@ -20,6 +20,8 @@
   - [/v1/me proxyとextension連動テナント選択](src/tasks/in-progress/v1-me-proxy-extension-filter/task.md)
 
 - [Completed]()
+  - [v0.1.9]()
+    - [キャディ配置を予約 ID で上流絞り込みする](src/tasks/completed/v0.1.9/plt-3377-reservation-filter/task.md)
   - [v0.1.4]()
     - [更新・再読み込みボタンを廃止する](src/tasks/completed/v0.1.4/remove-refresh-controls/task.md)
   - [v0.1.3]()
