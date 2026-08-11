@@ -97,7 +97,7 @@ impl TabularAnalyzeMapping {
         notes: Option<String>,
     ) -> Result<Self, CourseError> {
         let mode = mode.into();
-        if !matches!(mode.as_str(), "alias" | "ai") {
+        if !matches!(mode.as_str(), "alias" | "ai" | "user") {
             return Err(CourseError::Provider(
                 "tabular analyze mapping mode is invalid".into(),
             ));

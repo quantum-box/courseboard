@@ -48,6 +48,8 @@ Excelで出力できる。一方、CourseBoardにはこの集計を取り込む�
 - [x] Playwright MCPでUI操作と表示を確認する。
 - [x] 固定帳票に一致しないCSV/XLS/XLSX/PDFはFieldのtabular analyzeで列対応を確認し、同じ行の不変条件を再検証する。
 - [x] previewのnormalizedFingerprint（mappingと正規化済み行）を保存前に再解析して比較し、fallback結果が変わった場合は409で再previewを要求する（固定xlsxは旧client互換）。
+- [x] AI/aliasの列候補を利用者へ返し、CourseBoardの5項目ごとに修正・明示承認してから保存できるようにする。
+- [x] 承認済み `columnMappings` をpreview/importの両方で元ファイルへ再適用し、必須・存在・重複とfingerprintをサーバー側で検証する。
 
 ## 完了条件
 
@@ -70,8 +72,9 @@ Excelで出力できる。一方、CourseBoardにはこの集計を取り込む�
 - analyzeの対象項目は `facilityName`、`date`、`dayPart`、`groupCount`、
   `caddieAttachedGroupCount` に限定する。返却された列mappingと行はCourseBoard側で必須列、日付の対象年、
   午前/午後、非負値、キャディ付き組数が組数を超えないこと、重複keyがないことを再検証する。
-- プレビューのmapping表示は確認材料であり保存入力ではない。確定時にも元ファイルを再送して固定解析または
-  tabular analyzeを再実行し、fallback解析時はnormalizedFingerprintの一致を確認する。固定xlsxではfingerprintなしの旧clientも許容する。
+- プレビューのAI/alias mappingは候補であり、利用者が元列を変更して明示承認する。承認済みmappingを
+  `columnMappings` としてpreview/importへ送り、確定時にも元ファイルを再送してtabular analyzeへ再適用する。
+  fallback解析時は承認済みmappingを含むnormalizedFingerprintの一致を確認する。固定xlsxではfingerprintなしの旧clientも許容する。
 - この集計は予約明細ではないため、台帳・空き枠・請求・月次精算の正本にはしない。
 - 暫定保存先はFieldのcourse scope extension configとする。全体置換APIのため、異なる
   内容を同時更新した場合は後勝ちになる。将来はFieldの業種非依存snapshot capabilityへ移す。

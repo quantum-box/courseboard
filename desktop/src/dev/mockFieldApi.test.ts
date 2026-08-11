@@ -173,6 +173,28 @@ describe('mockFieldApi', () => {
       caddieAttachedGroupCount: 2476,
     })
 
+    const approvedColumns = {
+      facilityName: '施設',
+      date: '日付',
+      dayPart: '時間帯',
+      groupCount: '組数',
+      caddieAttachedGroupCount: 'キャ付',
+    }
+    const approvedPreviewForm = new FormData()
+    approvedPreviewForm.append('year', '2026')
+    approvedPreviewForm.append('file', new File(['mock'], 'daily.xlsx'))
+    approvedPreviewForm.append('columnMappings', JSON.stringify(approvedColumns))
+    const approvedPreview = resolveMockFieldApiJson('/v1/course/reservation-report-imports/preview', {
+      method: 'POST',
+      body: approvedPreviewForm,
+    })
+    expect(approvedPreview.kind).toBe('hit')
+    if (approvedPreview.kind !== 'hit') return
+    expect(approvedPreview.data).toMatchObject({
+      normalizedFingerprint: 'mock-user-normalized-fingerprint',
+      analysis: { mapping: { mode: 'user' } },
+    })
+
     const pdfForm = new FormData()
     pdfForm.append('year', '2026')
     pdfForm.append('file', new File(['%PDF-1.7'], 'daily.pdf', { type: 'application/pdf' }))
@@ -189,7 +211,8 @@ describe('mockFieldApi', () => {
       滝の: 'course_west',
       羊ケ丘: 'course_hill',
     }))
-    firstImportForm.append('normalizedFingerprint', 'mock-normalized-fingerprint')
+    firstImportForm.append('columnMappings', JSON.stringify(approvedColumns))
+    firstImportForm.append('normalizedFingerprint', 'mock-user-normalized-fingerprint')
     const firstImport = resolveMockFieldApiJson('/v1/course/reservation-report-imports', {
       method: 'POST',
       body: firstImportForm,

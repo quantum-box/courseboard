@@ -26,10 +26,13 @@
    `context` とroot配列の `targetSchema` はCourseBoardの5項目に固定し、requestの `mappingMode=auto`を使う。
 4. Fieldのheaders/rows/mappingをCourseBoardの不変条件で再検証し、施設名、日付、時間帯、組数、
    キャディ付き組数と集計値を返す。ブラウザはFieldへ直接接続しない。
-5. UIは施設ごとにCourseBoardのコースを選ばせ、列mappingと月間表で値を確認させる。
-6. 同じ元ファイル、対象年、施設対応を取込APIへ送り直す。新しいUIはプレビューの
-   `normalizedFingerprint`（mappingと正規化済み施設・行のsha256）も送る。
-7. APIは固定parserまたはtabular analyzeを再実行・再検証し、対応先コースごとのField extension configへupsertする。
+5. UIはFieldの候補をCourseBoardの5項目ごとの選択欄として表示する。利用者は元列を変更でき、
+   明示的な承認後に `columnMappings` と元ファイルをpreview APIへ再送する。
+6. APIは利用者mappingの必須・元列存在・重複を検証し、そのmappingで値を再変換する。UIは更新された
+   月間表と施設を使って保存先コースを選ばせる。
+7. 同じ元ファイル、対象年、承認済み列対応、施設対応を取込APIへ送り直す。新しいUIはプレビューの
+   `normalizedFingerprint`（承認済みmappingと正規化済み施設・行のsha256）も送る。
+8. APIは固定parserまたはtabular analyzeを再実行し、承認済みmappingを再適用・再検証して、対応先コースごとのField extension configへupsertする。
    fallback解析時はfingerprintが一致しなければ409で保存を止めて再プレビューを要求する。
    固定xlsxはfingerprintなしの旧クライアントも受け付ける。
 
@@ -71,16 +74,19 @@ Fieldのconfig APIはcompare-and-swapを持たないため、異なる内容の�
 
 CourseBoardがFieldへ送るmultipartは `file`、`context`、root配列の `targetSchema`、`mappingMode=auto`。Field responseのmapping modeは `alias` または `ai` として表示する。
 Fieldの返却 `headers`、`rows[{sourceRowNumber,values}]`、`mapping.fields` を保存入力として信用せず、
-CourseBoardが対象列を1つずつ解決してから値を日付・時間帯・件数へ変換する。Fieldのmappingはプレビューに表示するが、
-確定時は元ファイルを再送して同じ処理を行い、fallback時はnormalizedFingerprintを比較する。FieldのAIは列候補を作る補助であり、予約明細は生成しない。
+CourseBoardが対象列を1つずつ解決してから値を日付・時間帯・件数へ変換する。Fieldのmappingは候補であり、
+UIは利用者が元列を修正して承認できるようにする。承認済みmappingは `target -> source header` の
+`columnMappings` としてpreview/importの両方へ送り、サーバーが元ファイルへ再適用する。
+fallback時は承認済みmappingを含むnormalizedFingerprintを比較する。FieldのAIは列候補を作る補助であり、予約明細は生成しない。
 
 ### API
 
 - `POST /v1/course/reservation-report-imports/preview`
-  - multipart: `file`, `year`
+  - multipart: `file`, `year`, optional `columnMappings` JSON
   - parsed facilities, rows, totalsを返す。
 - `POST /v1/course/reservation-report-imports`
-  - multipart: `file`, `year`, `courseMappings` JSON, optional `normalizedFingerprint`（fallback解析時は必須）
+  - multipart: `file`, `year`, `courseMappings` JSON, optional `columnMappings` JSON、optional `normalizedFingerprint`
+  - fallback解析時は `columnMappings` と `normalizedFingerprint` を必須にする。
   - upsert結果とtotalsを返す。
 - `GET /v1/course/reservation-report-entries?from=...&to=...`
   - tenant scopeの取込済み集計を返す。
@@ -88,7 +94,8 @@ CourseBoardが対象列を1つずつ解決してから値を日付・時間帯�
 ### UI
 
 予約領域に「予約表をとりこむ」専用画面を追加する。画面の仕事は
-ファイル選択、施設対応、確認、取込の4段階に限定する。主役は元帳票にならった
+ファイル選択、列・施設対応、確認、取込の4段階に限定する。列対応では判定方法、確信度、
+sampleを表示し、利用者が元列を変更して明示承認するまで先へ進ませない。主役は元帳票にならった
 月間プレビューで、施設ごとに午前/午後の組数とキャディ付き組数を確認できる。
 個別予約は作らないことを画面上に明記する。
 
@@ -121,10 +128,10 @@ CourseBoardが対象列を1つずつ解決してから値を日付・時間帯�
 - parser unit: 指定xlsx、見出し不正、日付不正、負数、キャディ数超過、全体除外。
 - gateway/usecase: 初回insert、同一再取込、修正版update、既存config key保持、tenant分離。
 - HTTP: multipart上限、認証、mapping不足・重複、preview/import response。
-- TypeScript: course mapping、summary、month grid、file state。
+- TypeScript: column mapping、明示承認、course mapping、summary、month grid、file state。
 - Playwright系CLI: ファイル選択、preview、mapping、確定、成功結果、再取込。
 
 ## ADR decision
 
 運用データにextension configを暫定利用し、将来Field capabilityへ移す境界判断を
-ADR-0006として記録する。
+ADR-0007として記録する。

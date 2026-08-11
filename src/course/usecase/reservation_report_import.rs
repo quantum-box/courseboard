@@ -14,7 +14,8 @@ use crate::course::domain::{
     CourseError, CourseId, ExternalReservationReportEntry, GatewayCredentials, GolfCatalogGateway,
     ReservationReport, ReservationReportAnalyzeGateway, ReservationReportDayPart,
     ReservationReportFacility, ReservationReportGateway, ReservationReportRow,
-    ReservationReportUpsertSummary, TabularAnalyzeResult,
+    ReservationReportUpsertSummary, TabularAnalyzeMapping, TabularAnalyzeMappingField,
+    TabularAnalyzeResult,
 };
 
 pub const MAX_RESERVATION_REPORT_BYTES: usize = 5 * 1024 * 1024;
@@ -418,6 +419,7 @@ impl PreviewReservationReportUseCase {
         bytes: &[u8],
         year: i32,
         filename: Option<&str>,
+        column_mappings: Option<&HashMap<String, String>>,
     ) -> Result<ReservationReportPreview, CourseError> {
         if bytes.is_empty() || bytes.len() > MAX_RESERVATION_REPORT_BYTES {
             return parse_reservation_report(bytes, year, filename).map(|report| {
@@ -439,6 +441,10 @@ impl PreviewReservationReportUseCase {
                 let analysis = analyzer
                     .analyze_tabular(credentials, bytes, filename, year)
                     .await?;
+                let analysis = match column_mappings {
+                    Some(mappings) => apply_user_column_mappings(analysis, mappings)?,
+                    None => analysis,
+                };
                 let report = reservation_report_from_tabular(bytes, year, &analysis)?;
                 Ok(ReservationReportPreview {
                     report,
@@ -447,6 +453,69 @@ impl PreviewReservationReportUseCase {
             }
         }
     }
+}
+
+/// Replace provider suggestions with the exact source-to-CourseBoard mapping
+/// explicitly approved by the operator. The raw rows still come from Field and
+/// are revalidated below before they become CourseBoard values.
+fn apply_user_column_mappings(
+    analysis: TabularAnalyzeResult,
+    mappings: &HashMap<String, String>,
+) -> Result<TabularAnalyzeResult, CourseError> {
+    if mappings.len() != TARGET_FIELDS.len() {
+        return Err(CourseError::BadRequest(
+            "every CourseBoard reservation field must have one column mapping",
+        ));
+    }
+    let mut used_sources = HashSet::new();
+    let mut fields = Vec::with_capacity(TARGET_FIELDS.len());
+    for target in TARGET_FIELDS {
+        let source = mappings
+            .get(target)
+            .map(String::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .ok_or(CourseError::BadRequest(
+                "every CourseBoard reservation field must have one column mapping",
+            ))?;
+        let source_index = resolve_source_index(&analysis, source)?;
+        if !used_sources.insert(source_index) {
+            return Err(CourseError::BadRequest(
+                "column mappings must use distinct source columns",
+            ));
+        }
+        let samples = analysis
+            .rows()
+            .iter()
+            .filter_map(|row| row.values().get(source_index))
+            .map(|value| value.trim())
+            .filter(|value| !value.is_empty())
+            .take(5)
+            .map(ToString::to_string)
+            .collect();
+        fields.push(TabularAnalyzeMappingField::new(
+            analysis.headers()[source_index].clone(),
+            target,
+            true,
+            1.0,
+            "approved by the CourseBoard operator",
+            samples,
+        )?);
+    }
+    let mapping = TabularAnalyzeMapping::new(
+        "user",
+        fields,
+        Some("The operator approved this column mapping in CourseBoard.".into()),
+    )?;
+    TabularAnalyzeResult::new(
+        analysis.source_type().to_string(),
+        analysis.sheet_names().to_vec(),
+        analysis.selected_sheet().map(str::to_string),
+        analysis.header_row(),
+        analysis.headers().to_vec(),
+        analysis.rows().to_vec(),
+        mapping,
+        analysis.warnings().to_vec(),
+    )
 }
 
 fn reservation_report_from_tabular(
@@ -1048,6 +1117,7 @@ mod tests {
             b"%PDF-1.7\nreservation report",
             2026,
             Some("report.pdf"),
+            None,
         )
         .await
         .unwrap();
@@ -1084,6 +1154,7 @@ mod tests {
             b"not-an-xlsx",
             2026,
             Some("report.xls"),
+            None,
         )
         .await
         .unwrap_err();
@@ -1091,5 +1162,47 @@ mod tests {
             error,
             CourseError::BadRequest("caddie-attached groups cannot exceed groups")
         ));
+    }
+
+    #[tokio::test]
+    async fn operator_column_mapping_overrides_the_ai_candidate() {
+        let gateway = FakeAnalyzeGateway {
+            result: tabular_analysis(vec![TabularAnalyzeRow::new(
+                2,
+                vec![
+                    "東".into(),
+                    "2026-07-18".into(),
+                    "morning".into(),
+                    "3".into(),
+                    "8".into(),
+                ],
+            )
+            .unwrap()]),
+        };
+        let mappings = HashMap::from([
+            ("facilityName".into(), "Facility".into()),
+            ("date".into(), "Date".into()),
+            ("dayPart".into(), "Part".into()),
+            ("groupCount".into(), "Caddie groups".into()),
+            ("caddieAttachedGroupCount".into(), "Groups".into()),
+        ]);
+        let preview = PreviewReservationReportUseCase::execute_with_fallback(
+            GatewayCredentials {
+                authorization: "Bearer test",
+                operator_id: "tenant",
+                platform_id: None,
+            },
+            &gateway,
+            b"not-an-xlsx",
+            2026,
+            Some("report.csv"),
+            Some(&mappings),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(preview.report().rows()[0].group_count(), 8);
+        assert_eq!(preview.report().rows()[0].caddie_attached_group_count(), 3);
+        assert_eq!(preview.tabular_analysis().unwrap().mapping().mode(), "user");
     }
 }

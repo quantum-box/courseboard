@@ -224,6 +224,7 @@ struct UploadedReservationReport {
     filename: Option<String>,
     year: i32,
     mappings: Option<HashMap<String, String>>,
+    column_mappings: Option<HashMap<String, String>>,
     normalized_fingerprint: Option<String>,
 }
 
@@ -235,6 +236,7 @@ async fn read_upload(
     let mut filename = None;
     let mut year = None;
     let mut mappings = None;
+    let mut column_mappings = None;
     let mut normalized_fingerprint = None;
     while let Some(field) = multipart
         .next_field()
@@ -273,6 +275,16 @@ async fn read_upload(
                         .map_err(|_| AppError::BadRequest("courseMappings is invalid"))?,
                 );
             }
+            "columnMappings" => {
+                let value = field
+                    .text()
+                    .await
+                    .map_err(|_| AppError::BadRequest("columnMappings is invalid"))?;
+                column_mappings = Some(
+                    serde_json::from_str::<HashMap<String, String>>(&value)
+                        .map_err(|_| AppError::BadRequest("columnMappings is invalid"))?,
+                );
+            }
             "normalizedFingerprint" => {
                 let value = field
                     .text()
@@ -293,6 +305,7 @@ async fn read_upload(
         filename,
         year,
         mappings,
+        column_mappings,
         normalized_fingerprint,
     })
 }
@@ -323,6 +336,7 @@ pub async fn preview_reservation_report(
         &upload.bytes,
         upload.year,
         upload.filename.as_deref(),
+        upload.column_mappings.as_ref(),
     )
     .await
     .map_err(AppError::from)?;
@@ -357,10 +371,21 @@ pub async fn import_reservation_report(
         &upload.bytes,
         upload.year,
         upload.filename.as_deref(),
+        upload.column_mappings.as_ref(),
     )
     .await
     .map_err(AppError::from)?;
     let report = preview.report();
+    if preview.tabular_analysis().is_some()
+        && upload
+            .column_mappings
+            .as_ref()
+            .is_none_or(HashMap::is_empty)
+    {
+        return Err(AppError::BadRequest(
+            "columnMappings is required for analyzed table imports",
+        ));
+    }
     let actual_fingerprint =
         normalized_reservation_report_fingerprint(report, preview.tabular_analysis());
     match (

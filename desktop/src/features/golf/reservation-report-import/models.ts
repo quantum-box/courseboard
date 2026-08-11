@@ -56,6 +56,17 @@ export type ReservationReportMappingField = {
   samples: string[]
 }
 
+export const RESERVATION_REPORT_TARGETS = [
+  'facilityName',
+  'date',
+  'dayPart',
+  'groupCount',
+  'caddieAttachedGroupCount',
+] as const
+
+export type ReservationReportTarget = typeof RESERVATION_REPORT_TARGETS[number]
+export type ReservationReportColumnMappings = Partial<Record<ReservationReportTarget, string>>
+
 export type ReservationReportImportResult = {
   createdCount: number
   updatedCount: number
@@ -98,7 +109,34 @@ export type MappingValidation =
   | { valid: true }
   | { valid: false; reason: 'missing' | 'duplicate'; sourceCourseKey?: string }
 
+export type ColumnMappingValidation =
+  | { valid: true }
+  | { valid: false; reason: 'missing' | 'duplicate' | 'unknown' }
+
 export const MAX_FILE_BYTES = 5 * 1024 * 1024
+
+export function columnMappingsFromAnalysis(
+  analysis: ReservationReportAnalysis | undefined,
+): ReservationReportColumnMappings {
+  if (!analysis) return {}
+  return Object.fromEntries(
+    analysis.mapping.fields
+      .filter(field => RESERVATION_REPORT_TARGETS.includes(field.target as ReservationReportTarget))
+      .map(field => [field.target, field.source]),
+  )
+}
+
+export function validateColumnMappings(
+  headers: string[],
+  mappings: ReservationReportColumnMappings,
+): ColumnMappingValidation {
+  const selected = RESERVATION_REPORT_TARGETS.map(target => mappings[target]?.trim() ?? '')
+  if (selected.some(source => !source)) return { valid: false, reason: 'missing' }
+  if (new Set(selected).size !== selected.length) return { valid: false, reason: 'duplicate' }
+  const known = new Set(headers.map(header => header.trim()))
+  if (selected.some(source => !known.has(source))) return { valid: false, reason: 'unknown' }
+  return { valid: true }
+}
 
 function courseNameVariants(value: string) {
   const compact = value

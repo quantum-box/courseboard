@@ -6147,6 +6147,53 @@ button,
   color: hsl(var(--nui-muted-foreground));
 }
 
+.reservation-report-column-mapping td .native-select {
+  min-width: 180px;
+}
+
+.reservation-report-column-mapping td > strong,
+.reservation-report-column-mapping td > small {
+  display: block;
+}
+
+.reservation-report-column-mapping td > small {
+  max-width: 260px;
+  margin-top: 4px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.reservation-report-column-approval {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid hsl(var(--nui-border-strong));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+  cursor: pointer;
+}
+
+.reservation-report-column-approval input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: hsl(var(--nui-primary));
+}
+
+.reservation-report-column-approval span,
+.reservation-report-column-approval small {
+  display: block;
+}
+
+.reservation-report-column-approval small {
+  margin-top: 4px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 .reservation-report-preview-toolbar,
 .reservation-report-saved-toolbar {
   display: flex;

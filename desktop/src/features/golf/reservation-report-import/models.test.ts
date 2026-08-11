@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
   MAX_FILE_BYTES,
+  columnMappingsFromAnalysis,
   fileValidationError,
   monthGridRows,
   monthsInRows,
   suggestCourseMappings,
   sumRows,
   validateCourseMappings,
+  validateColumnMappings,
+  type ReservationReportAnalysis,
   type ReservationReportRow,
 } from './models'
 
@@ -73,6 +76,50 @@ describe('reservation report pure helpers', () => {
       reason: 'duplicate',
     })
     expect(validateCourseMappings(facilities, { east: 'course-1', west: 'course-2' })).toEqual({ valid: true })
+  })
+
+  it('requires one distinct source column for every CourseBoard field', () => {
+    const headers = ['施設', '日付', '時間帯', '組数', 'キャ付']
+    const mappings = {
+      facilityName: '施設',
+      date: '日付',
+      dayPart: '時間帯',
+      groupCount: '組数',
+      caddieAttachedGroupCount: 'キャ付',
+    }
+    expect(validateColumnMappings(headers, mappings)).toEqual({ valid: true })
+    expect(validateColumnMappings(headers, { ...mappings, date: '' })).toMatchObject({
+      valid: false,
+      reason: 'missing',
+    })
+    expect(validateColumnMappings(headers, { ...mappings, date: '施設' })).toMatchObject({
+      valid: false,
+      reason: 'duplicate',
+    })
+    expect(validateColumnMappings(headers, { ...mappings, date: '受付日' })).toMatchObject({
+      valid: false,
+      reason: 'unknown',
+    })
+  })
+
+  it('initializes editable column mappings from the provider candidates', () => {
+    const analysis = {
+      sourceType: 'csv',
+      sheetNames: [],
+      headers: ['施設', '日付'],
+      mapping: {
+        mode: 'ai',
+        fields: [
+          { source: '施設', target: 'facilityName', required: true, confidence: 0.9, explanation: 'AI', samples: [] },
+          { source: '日付', target: 'date', required: true, confidence: 0.8, explanation: 'AI', samples: [] },
+        ],
+      },
+      warnings: [],
+    } satisfies ReservationReportAnalysis
+    expect(columnMappingsFromAnalysis(analysis)).toEqual({
+      facilityName: '施設',
+      date: '日付',
+    })
   })
 
   it('groups morning and afternoon rows into a monthly table', () => {

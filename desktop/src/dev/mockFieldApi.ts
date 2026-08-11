@@ -2404,11 +2404,42 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     if (!Number.isInteger(year) || year < 1900 || year > 2200) {
       return error(400, 'year must be a valid calendar year')
     }
+    const headers = ['施設', '日付', '時間帯', '組数', 'キャ付']
+    const defaultColumnMappings: Record<string, string> = {
+      facilityName: '施設',
+      date: '日付',
+      dayPart: '時間帯',
+      groupCount: '組数',
+      caddieAttachedGroupCount: 'キャ付',
+    }
+    const rawColumnMappings = multipartText(init, 'columnMappings')
+    let columnMappings = defaultColumnMappings
+    if (rawColumnMappings) {
+      try {
+        const parsed = JSON.parse(rawColumnMappings) as Record<string, unknown>
+        columnMappings = Object.fromEntries(
+          Object.entries(parsed).map(([target, source]) => [target, String(source)]),
+        )
+      } catch {
+        return error(400, 'columnMappings must be valid JSON')
+      }
+      const selected = Object.values(columnMappings)
+      if (
+        Object.keys(columnMappings).length !== Object.keys(defaultColumnMappings).length
+        || Object.keys(defaultColumnMappings).some(target => !columnMappings[target])
+        || selected.some(source => !headers.includes(source))
+        || new Set(selected).size !== selected.length
+      ) {
+        return error(400, 'every CourseBoard field must have one distinct source column')
+      }
+    }
     const rows = mockReservationReportRows(year)
     return hit({
       sourceSystem: MOCK_RESERVATION_REPORT_SOURCE,
       sourceFileSha256: 'mock-report-sha256',
-      normalizedFingerprint: 'mock-normalized-fingerprint',
+      normalizedFingerprint: rawColumnMappings
+        ? 'mock-user-normalized-fingerprint'
+        : 'mock-normalized-fingerprint',
       facilities: MOCK_RESERVATION_REPORT_FACILITIES.map(facility => ({ ...facility })),
       rows,
       analysis: {
@@ -2416,17 +2447,18 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
         sheetNames: ['日別予約状況'],
         selectedSheet: '日別予約状況',
         headerRow: 1,
-        headers: ['施設', '日付', '時間帯', '組数', 'キャ付'],
+        headers,
         mapping: {
-          mode: 'alias',
-          fields: [
-            { source: '施設', target: 'facilityName', required: true, confidence: 1, explanation: '固定帳票の施設列', samples: ['真駒内'] },
-            { source: '日付', target: 'date', required: true, confidence: 1, explanation: '固定帳票の日付列', samples: ['7/1'] },
-            { source: '時間帯', target: 'dayPart', required: true, confidence: 1, explanation: '固定帳票の時間帯列', samples: ['午前'] },
-            { source: '組数', target: 'groupCount', required: true, confidence: 1, explanation: '固定帳票の組数列', samples: ['34'] },
-            { source: 'キャ付', target: 'caddieAttachedGroupCount', required: true, confidence: 1, explanation: '固定帳票のキャディ列', samples: ['13'] },
-          ],
-          notes: null,
+          mode: rawColumnMappings ? 'user' : 'alias',
+          fields: Object.entries(defaultColumnMappings).map(([target, defaultSource]) => ({
+            source: columnMappings[target] ?? defaultSource,
+            target,
+            required: true,
+            confidence: 1,
+            explanation: rawColumnMappings ? 'CourseBoardで利用者が確認' : '既知の列名から判定',
+            samples: target === 'facilityName' ? ['真駒内'] : [],
+          })),
+          notes: rawColumnMappings ? '利用者が列対応を確認しました。' : null,
         },
         warnings: [],
       },
@@ -2445,8 +2477,12 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   if (pathname === '/v1/course/reservation-report-imports' && method === 'POST') {
     const year = Number(multipartText(init, 'year') ?? '2026')
     const rawMappings = multipartText(init, 'courseMappings')
+    const rawColumnMappings = multipartText(init, 'columnMappings')
     const normalizedFingerprint = multipartText(init, 'normalizedFingerprint')
-    if (normalizedFingerprint !== 'mock-normalized-fingerprint') {
+    if (!rawColumnMappings) {
+      return error(400, 'columnMappings is required for analyzed table imports')
+    }
+    if (normalizedFingerprint !== 'mock-user-normalized-fingerprint') {
       return error(409, 'the report changed while it was being analyzed; preview it again')
     }
     let mappings: Record<string, string> = {}

@@ -1,6 +1,7 @@
 import { courseboardApiJson } from '../../../api'
 import type {
   ReservationReportCourseMapping,
+  ReservationReportColumnMappings,
   ReservationReportEntry,
   ReservationReportImportResult,
   ReservationReportPreview,
@@ -15,19 +16,25 @@ function reportForm(
   year: number,
   mappings?: Record<string, string>,
   normalizedFingerprint?: string,
+  columnMappings?: ReservationReportColumnMappings,
 ) {
   const form = new FormData()
   form.append('file', file, file.name)
   form.append('year', String(year))
   if (mappings) form.append('courseMappings', JSON.stringify(mappings))
   if (normalizedFingerprint) form.append('normalizedFingerprint', normalizedFingerprint)
+  if (columnMappings) form.append('columnMappings', JSON.stringify(columnMappings))
   return form
 }
 
-export function previewReservationReport(file: File, year: number) {
+export function previewReservationReport(
+  file: File,
+  year: number,
+  columnMappings?: ReservationReportColumnMappings,
+) {
   return courseboardApiJson<ReservationReportPreview>(PREVIEW_PATH, {
     method: 'POST',
-    body: reportForm(file, year),
+    body: reportForm(file, year, undefined, undefined, columnMappings),
   })
 }
 
@@ -36,10 +43,11 @@ export function importReservationReport(
   year: number,
   mappings: Record<string, string>,
   normalizedFingerprint: string,
+  columnMappings?: ReservationReportColumnMappings,
 ) {
   return courseboardApiJson<ReservationReportImportResult>(IMPORT_PATH, {
     method: 'POST',
-    body: reportForm(file, year, mappings, normalizedFingerprint),
+    body: reportForm(file, year, mappings, normalizedFingerprint, columnMappings),
   })
 }
 

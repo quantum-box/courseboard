@@ -25,6 +25,8 @@ import {
 } from '../../../components/Page'
 import { importReservationReport, listReservationReportEntries, previewReservationReport } from './api'
 import {
+  RESERVATION_REPORT_TARGETS,
+  columnMappingsFromAnalysis,
   fileValidationError,
   formatMonth,
   formatReportDate,
@@ -33,7 +35,9 @@ import {
   suggestCourseMappings,
   sumRows,
   validateCourseMappings,
+  validateColumnMappings,
   type ReservationReportAnalysis,
+  type ReservationReportColumnMappings,
   type ReservationReportCourse,
   type ReservationReportEntry,
   type ReservationReportImportResult,
@@ -76,11 +80,15 @@ export function ReservationReportImportPage() {
   const [fileError, setFileError] = useState<ReturnType<typeof fileValidationError>>(null)
   const [preview, setPreview] = useState<ReservationReportPreview | null>(null)
   const [mappings, setMappings] = useState<Record<string, string>>({})
+  const [columnMappings, setColumnMappings] = useState<ReservationReportColumnMappings>({})
+  const [columnMappingApproved, setColumnMappingApproved] = useState(false)
+  const [columnMappingError, setColumnMappingError] = useState<'missing' | 'duplicate' | 'unknown' | 'unapproved' | 'reparse' | null>(null)
   const [previewMonth, setPreviewMonth] = useState(currentYearMonth())
   const [previewError, setPreviewError] = useState<string | null>(null)
   const [mappingError, setMappingError] = useState<'missing' | 'duplicate' | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
   const [previewing, setPreviewing] = useState(false)
+  const [mappingPreviewing, setMappingPreviewing] = useState(false)
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState<ReservationReportImportResult | null>(null)
   const [courses, setCourses] = useState<ReservationReportCourse[]>([])
@@ -158,6 +166,8 @@ export function ReservationReportImportPage() {
     setFileError(fileValidationError(next))
     setPreviewError(null)
     setImportError(null)
+    setColumnMappingApproved(false)
+    setColumnMappingError(null)
   }
 
   function validateFileAndYear() {
@@ -186,6 +196,9 @@ export function ReservationReportImportPage() {
       }
       setPreview(payload)
       setMappings(suggestCourseMappings(payload.facilities, courses))
+      setColumnMappings(columnMappingsFromAnalysis(payload.analysis))
+      setColumnMappingApproved(false)
+      setColumnMappingError(null)
       setPreviewMonth(reportMonth(payload.rows))
       if (payload.rows.length === 0) {
         setPreviewError(t('reservationReportImport:notice.noRows'))
@@ -209,9 +222,52 @@ export function ReservationReportImportPage() {
     setMappingError(null)
   }
 
-  function continueToConfirm() {
-    if (!preview) return
-    const validation = validateCourseMappings(preview.facilities, mappings)
+  function handleColumnMappingChange(target: string, source: string) {
+    setColumnMappings(current => ({ ...current, [target]: source }))
+    setColumnMappingApproved(false)
+    setColumnMappingError(null)
+  }
+
+  async function continueToConfirm() {
+    if (!preview || !file) return
+    let confirmedPreview = preview
+    let confirmedCourseMappings = mappings
+    if (preview.analysis) {
+      const columnValidation = validateColumnMappings(preview.analysis.headers, columnMappings)
+      if (!columnValidation.valid) {
+        setColumnMappingError(columnValidation.reason)
+        return
+      }
+      if (!columnMappingApproved) {
+        setColumnMappingError('unapproved')
+        return
+      }
+      setMappingPreviewing(true)
+      setColumnMappingError(null)
+      try {
+        const payload = await previewReservationReport(file, Number(year), columnMappings)
+        if (!isPreviewPayload(payload)) {
+          setColumnMappingError('reparse')
+          return
+        }
+        confirmedPreview = payload
+        const suggested = suggestCourseMappings(payload.facilities, courses)
+        confirmedCourseMappings = Object.fromEntries(payload.facilities.map(facility => [
+          facility.sourceCourseKey,
+          mappings[facility.sourceCourseKey] ?? suggested[facility.sourceCourseKey] ?? '',
+        ]))
+        setPreview(payload)
+        setMappings(confirmedCourseMappings)
+        setColumnMappings(columnMappingsFromAnalysis(payload.analysis))
+        setPreviewMonth(reportMonth(payload.rows))
+      } catch {
+        setColumnMappingError('reparse')
+        return
+      } finally {
+        setMappingPreviewing(false)
+      }
+    }
+    const validation = validateCourseMappings(confirmedPreview.facilities, confirmedCourseMappings)
     if (!validation.valid) {
       setMappingError(validation.reason)
       return
@@ -222,6 +278,14 @@ export function ReservationReportImportPage() {
 
   async function confirmImport() {
     if (!preview || !file) return
+    if (preview.analysis) {
+      const columnValidation = validateColumnMappings(preview.analysis.headers, columnMappings)
+      if (!columnValidation.valid || !columnMappingApproved) {
+        setColumnMappingError(columnValidation.valid ? 'unapproved' : columnValidation.reason)
+        setStage('mapping')
+        return
+      }
+    }
     const validation = validateCourseMappings(preview.facilities, mappings)
     if (!validation.valid) {
       setMappingError(validation.reason)
@@ -237,6 +301,7 @@ export function ReservationReportImportPage() {
         parsedYear,
         mappings,
         preview.normalizedFingerprint,
+        preview.analysis ? columnMappings : undefined,
       )
       setResult(saved)
       setStage('result')
@@ -260,6 +325,9 @@ export function ReservationReportImportPage() {
     setFile(null)
     setPreview(null)
     setMappings({})
+    setColumnMappings({})
+    setColumnMappingApproved(false)
+    setColumnMappingError(null)
     setResult(null)
     setFileError(null)
     setPreviewError(null)
@@ -363,6 +431,23 @@ export function ReservationReportImportPage() {
 
       {stage === 'mapping' && preview ? (
         <Panel title={t('reservationReportImport:mapping.title')} description={t('reservationReportImport:mapping.description')} className="reservation-report-panel">
+          {preview.analysis ? (
+            <TabularMappingPreview
+              analysis={preview.analysis}
+              mappings={columnMappings}
+              approved={columnMappingApproved}
+              onMappingChange={handleColumnMappingChange}
+              onApprovedChange={checked => {
+                setColumnMappingApproved(checked)
+                setColumnMappingError(null)
+              }}
+            />
+          ) : null}
+          {columnMappingError ? (
+            <Notice tone="danger" title={t('reservationReportImport:mapping.columnErrorTitle')}>
+              {t(`reservationReportImport:mapping.columnError.${columnMappingError}`)}
+            </Notice>
+          ) : null}
           <div className="reservation-report-mapping-list">
             {preview.facilities.map(facility => {
               const selected = mappings[facility.sourceCourseKey] ?? ''
@@ -390,7 +475,6 @@ export function ReservationReportImportPage() {
               )
             })}
           </div>
-          {preview.analysis ? <TabularMappingPreview analysis={preview.analysis} /> : null}
           {mappingError ? (
             <Notice tone="danger" title={mappingError === 'duplicate'
               ? t('reservationReportImport:notice.mappingDuplicate')
@@ -404,8 +488,9 @@ export function ReservationReportImportPage() {
             <Button type="button" variant="secondary" onClick={() => setStage('choose')}>
               <ArrowLeft /> {t('reservationReportImport:action.back')}
             </Button>
-            <Button type="button" variant="primary" onClick={continueToConfirm}>
-              <ArrowRight /> {t('reservationReportImport:action.continue')}
+            <Button type="button" variant="primary" disabled={mappingPreviewing} onClick={() => { void continueToConfirm() }}>
+              {mappingPreviewing ? <RefreshCw className="spin" /> : <ArrowRight />}
+              {mappingPreviewing ? t('reservationReportImport:action.recheckingMapping') : t('reservationReportImport:action.continue')}
             </Button>
           </div>
         </Panel>
@@ -468,7 +553,19 @@ export function ReservationReportImportPage() {
   )
 }
 
-function TabularMappingPreview({ analysis }: { analysis: ReservationReportAnalysis }) {
+function TabularMappingPreview({
+  analysis,
+  mappings,
+  approved,
+  onMappingChange,
+  onApprovedChange,
+}: {
+  analysis: ReservationReportAnalysis
+  mappings: ReservationReportColumnMappings
+  approved: boolean
+  onMappingChange: (target: string, source: string) => void
+  onApprovedChange: (checked: boolean) => void
+}) {
   const { t } = useTranslation('reservationReportImport')
   const targetLabels: Record<string, string> = {
     facilityName: t('mapping.target.facilityName'),
@@ -485,24 +582,67 @@ function TabularMappingPreview({ analysis }: { analysis: ReservationReportAnalys
         <table className="reservation-report-table">
           <thead>
             <tr>
-              <th>{t('mapping.sourceColumn')}</th>
               <th>{t('mapping.targetColumn')}</th>
+              <th>{t('mapping.sourceColumn')}</th>
+              <th>{t('mapping.method')}</th>
               <th>{t('mapping.confidence')}</th>
               <th>{t('mapping.samples')}</th>
             </tr>
           </thead>
           <tbody>
-            {analysis.mapping.fields.map(field => (
-              <tr key={`${field.source}:${field.target}`}>
-                <td>{field.source}</td>
-                <td>{targetLabels[field.target] ?? field.target}</td>
-                <td>{Math.round(Math.max(0, Math.min(1, field.confidence)) * 100)}%</td>
-                <td>{field.samples.length > 0 ? field.samples.join('、') : '—'}</td>
-              </tr>
-            ))}
+            {RESERVATION_REPORT_TARGETS.map(target => {
+              const source = mappings[target] ?? ''
+              const field = analysis.mapping.fields.find(candidate => (
+                candidate.target === target && candidate.source === source
+              ))
+              const method = field
+                ? analysis.mapping.mode === 'ai'
+                  ? t('mapping.methodValue.ai')
+                  : analysis.mapping.mode === 'user'
+                    ? t('mapping.methodValue.user')
+                    : t('mapping.methodValue.alias')
+                : t('mapping.methodValue.manual')
+              const explanation = analysis.mapping.mode === 'user'
+                ? t('mapping.approvedExplanation')
+                : field?.explanation
+              return (
+                <tr key={target}>
+                  <td><strong>{targetLabels[target]}</strong></td>
+                  <td>
+                    <NativeSelect
+                      value={source}
+                      aria-label={t('mapping.sourceForTarget', { target: targetLabels[target] })}
+                      onChange={event => onMappingChange(target, event.target.value)}
+                    >
+                      <option value="">{t('mapping.sourceUnselected')}</option>
+                      {analysis.headers.map(header => <option key={header} value={header}>{header}</option>)}
+                    </NativeSelect>
+                  </td>
+                  <td>
+                    <strong>{method}</strong>
+                    {explanation ? <small>{explanation}</small> : null}
+                  </td>
+                  <td>{field && analysis.mapping.mode !== 'user'
+                    ? `${Math.round(Math.max(0, Math.min(1, field.confidence)) * 100)}%`
+                    : '—'}</td>
+                  <td>{field?.samples.length ? field.samples.join('、') : '—'}</td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
+      <label className="reservation-report-column-approval">
+        <input
+          type="checkbox"
+          checked={approved}
+          onChange={event => onApprovedChange(event.target.checked)}
+        />
+        <span>
+          <strong>{t('mapping.approve')}</strong>
+          <small>{t('mapping.approveHint')}</small>
+        </span>
+      </label>
       {analysis.mapping.notes ? <p className="reservation-report-mapping-note">{analysis.mapping.notes}</p> : null}
       {analysis.warnings.length > 0 ? (
         <Notice tone="warning" title={t('mapping.warningTitle')}>
