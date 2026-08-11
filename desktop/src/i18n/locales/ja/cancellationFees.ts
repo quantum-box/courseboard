@@ -87,10 +87,17 @@ export const cancellationFees = {
     },
     client: {
       title: '請求先',
-      description: '取引先IDがないときは、重ならない参照IDを作ります。',
+      description: 'Field に登録された個人または法人を、請求先として指定します。',
+      kind: '請求先の種類',
+      customer: '個人',
+      company: '法人',
       name: '請求先の名前',
       id: '取引先ID',
-      idPlaceholder: 'すでにIDがあるときだけ',
+      idPlaceholder: 'cl_...',
+      customerId: '顧客ID',
+      customerIdPlaceholder: 'cus_...',
+      affiliationId: '所属ID',
+      affiliationIdPlaceholder: 'ccaf_...',
       due: '支払い期限',
     },
     delivery: {
@@ -117,6 +124,7 @@ export const cancellationFees = {
       consent: 'SMS を送る前に、受け取る人の同意の確認が必要です。',
       amount: 'キャンセル料は 1 円以上で入力してください。',
       phone: 'SMS の送り先を、日本の携帯番号か E.164 の形で入力してください。',
+      billTo: '個人の顧客ID、または法人の取引先IDと所属IDを入力してください。',
     },
     message: {
       intro: 'キャンセル料のご請求です。',

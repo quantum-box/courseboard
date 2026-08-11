@@ -1834,6 +1834,16 @@ mod tests {
                     .and_then(|value| value.to_str().ok()),
                 Some("scc")
             );
+            assert_eq!(
+                body["billTo"],
+                serde_json::json!({
+                    "kind": "client",
+                    "clientId": "cl_company_x",
+                    "affiliationId": "ccaf_person_a_company_x"
+                })
+            );
+            assert!(body.get("clientId").is_none());
+            assert!(!body.to_string().contains("courseboard:"));
             assert_eq!(body["clientName"], "山田 太郎");
             assert_eq!(body["lineItems"][0]["unitPrice"], 5000);
             (
@@ -2229,6 +2239,11 @@ mod tests {
         let body = serde_json::json!({
             "tenant_id": "scc",
             "reference": "RSV-1001",
+            "bill_to": {
+                "kind": "client",
+                "clientId": "cl_company_x",
+                "affiliationId": "ccaf_person_a_company_x"
+            },
             "customer_name": "山田 太郎",
             "customer_phone": "+819012345678",
             "amount": 5000,
@@ -2264,6 +2279,23 @@ mod tests {
         );
         assert!(created.collection.payment_url.contains("index.html#/pay/"));
         assert!(created.sms_message.contains("キャンセル料5000円"));
+
+        let mut second_body = body.clone();
+        second_body["reference"] = serde_json::json!("RSV-1002");
+        let second_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/cancellation-fee-collections")
+                    .header(AUTHORIZATION, format!("Bearer {}", auth.valid_token()))
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(second_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second_response.status(), StatusCode::OK);
 
         let token = created
             .collection
@@ -2308,6 +2340,10 @@ mod tests {
                     .body(Body::from(
                         serde_json::json!({
                             "tenant_id": "scc",
+                            "bill_to": {
+                                "kind": "customer",
+                                "customerId": "cus_person_a"
+                            },
                             "customer_name": "山田 太郎",
                             "customer_phone": "+819012345678",
                             "amount": 5000,

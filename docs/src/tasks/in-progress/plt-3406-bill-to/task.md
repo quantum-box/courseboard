@@ -1,66 +1,49 @@
-# CourseBoard の請求先と法人売掛を連携する
+# CourseBoard のキャンセル料請求へ型付き請求先を渡す
 
 ## Links
 
 - [設計](./design.md)
 - [PLT-3406](https://linear.app/issue/PLT-3406)
-- [PLT-3373](https://linear.app/issue/PLT-3373)
-- [tachyonfield #1001](https://github.com/quantum-box/tachyonfield/pull/1001)
-- [PLT-3358 の CourseBoard 側設計](../reservation-customer-ledger/design.md)
+- [PLT-3409](https://linear.app/issue/PLT-3409)
+- [tachyonfield #1012](https://github.com/quantum-box/tachyonfield/pull/1012)
 
 ## 状態
 
-調査・設計まで完了。実装は未着手。
+PLT-3406 の項目 1 だけを実装中。項目 2（所属会社 UI）、項目 3（予約 `billTo`）、項目 4
+（月次精算の売掛残高）は対象外。
 
-tachyonfield #1001 は merge 済みだが、依頼時点では PLT-3403 の並行 deploy 競合による
-`PreconditionFailedException` で main deployment が失敗しており、production runtime に contract が
-未到達である。呼び先が存在しない状態では実装を検証できないため、この task では docs だけを変更する。
+Field の `POST /v1/invoices` typed `billTo` contract は tachyonfield #1012、merge commit
+`45f6428121cbd5c4a75422ecc1cca3320ad8d3a3` で main に入った。ただし 2026-08-11 時点で Field
+production への反映は未確認である。
 
-## 調査結果
+## 実装
 
-- [x] fresh `origin/main` `75d90463b2cfb22763c138078acc02022a8416a7` を基準にした。
-- [x] 顧客台帳は `/v1/storekit/customers`、予約は `/v1/erp/reservations` であることを確認した。
-- [x] 予約 create / update、PLT-3358 の代表者・全プレイヤー紐付けを確認した。
-- [x] CourseBoard domain / API / UI に bill-to が無いことを確認した。
-- [x] 月次精算が golf extension 集計と reservation billing invoice を使い、AR/AP balance を読まないことを
-  確認した。
-- [x] キャンセル料の direct invoice と legacy collection API が `courseboard:` synthetic ID を生成することを
-  確認した。
-- [x] tachyonfield #1001 の affiliation、admin reservation bill-to、invoice typed response、AR/AP 伝播を
-  実 contract で確認した。
-- [x] storefront が `billTo` を拒否する一方、CourseBoard の予約作成はすでに admin surface であるという
-  issue 前提との差を切り分けた。
-- [x] 予約時同送と予約後設定の得失を整理した。
-- [x] プロダクト判断、Field contract、現場確認事項を分離した。
-- [x] 実データにはアクセスしなかった。実顧客 tenant には読み書きとも触れていない。
+- [x] allowlist 付き BFF を使うキャンセル料画面が Field `POST /v1/invoices` に `billTo` を送る。
+- [x] legacy `POST /cancellation-fee-collections` が型付き `bill_to` を受け、Field request の
+  `billTo` に写像する。
+- [x] 2 経路とも legacy `clientId` と `courseboard:{reference}` の合成 ID を送らない。
+- [x] 個人 `{kind: customer, customerId}` と法人
+  `{kind: client, clientId, affiliationId}` を扱う。
+- [x] 2 経路の Field request body を直接検査する regression test を置く。
+- [x] Field merge commit 上で、同じ typed client 宛の 2 invoice が同じ counterparty identity を持つ
+  test を実行した（1 passed）。
+- [x] Field #1012 の CI log で、`GET /v1/erp/ar-ap/balances` が同じ typed client 宛の 2 invoice を
+  `counterparty_id` 1 行・`item_count = 2` に集約する test の PASS を確認した。ローカル再実行は DB
+  pool timeout で完走しなかったため、ローカル PASS とは記録しない。
+- [ ] CourseBoard の required checks が green になる。
+- [ ] Field production に #1012 の contract が到達したことを CPO が確認する。
 
-## 実装前 blocker
+## Merge gate
 
-- [ ] tachyonfield #1001 を含む main deployment が成功する。
-- [ ] 予約時同送、予約後設定、hybrid のどれを採るか決める。
-- [ ] 法人売掛を確定する担当とタイミングを現場に確認する。
-- [ ] 一予約一 invoice と法人月次合算 invoice のどちらかを現場に確認する。
-- [ ] client lookup と affiliation の終了・訂正 contract を Field 側で決める。
-- [ ] 代表者 customer ID の後付け contract（PLT-3379）を解決する。
-- [ ] direct/manual invoice の typed bill-to input を Field 側で決める。
-- [ ] invoice から AR/AP への転記責務と retry / failure visibility を決める。
-- [ ] historical as-of、ID grouping、source / currency scope を満たす balance contract を決める。
-
-## 実装候補
-
-blocker 解消後に scope を切り直す。現時点の候補は次である。
-
-1. affiliation / client lookup の CourseBoard domain・gateway・API
-2. 顧客詳細の所属会社 UI
-3. reservation bill-to の read/create/update と予約 UI
-4. 請求先確認待ち queue（後付けまたは hybrid の場合）
-5. キャンセル料 invoice producer の統合と synthetic ID 廃止
-6. invoice → AR/AP posting の状態可視化
-7. 月次精算の相手先別売掛と CSV
+- PR は作成してよいが、この作業者は merge しない。merge は CPO が行う。
+- Field production に `billTo` contract が到達したことを確認するまで merge しない。未到達の Field に
+  CourseBoard が `billTo` を送ると、production のキャンセル料請求が 400 になる可能性がある。
+- production 反映を実測できない間は PASS と記録しない。
 
 ## Non-goals
 
-- 今回の API / UI / migration 実装
-- tenant data の作成・更新
+- プレーヤーの所属会社の登録・変更 UI
+- 予約作成・変更時の `billTo`
+- 月次精算での相手先別売掛残高の表示
 - 既存 invoice / AR/AP の再分類
-- production deployment または merge
+- production の設定変更またはデータ書き込み
