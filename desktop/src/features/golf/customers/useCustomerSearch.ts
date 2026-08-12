@@ -27,11 +27,32 @@ export function customerSearchParameter(query: string): CustomerSearchParameter 
   return 'name'
 }
 
-export function customerSearchPath(query: string): string | null {
+/**
+ * Rows the ledger screen holds so its table can page through them, rather than
+ * the shorter default a picker wants. Field caps a customer listing at 100, so
+ * asking for more only ever gets 100 back — past that the desk searches.
+ */
+export const LEDGER_PAGE_ROWS = 100
+
+/**
+ * `listWhenEmpty` is what the ledger screen asks for: an empty box means the
+ * ledger itself, so opening the screen — or reloading it — shows who is in
+ * there instead of a blank page. The picker inside a booking does not, since
+ * candidates for a name nobody has typed yet would cover the form.
+ */
+export function customerSearchPath(
+  query: string,
+  { listWhenEmpty = false, limit }: { listWhenEmpty?: boolean; limit?: number } = {},
+): string | null {
   const trimmed = query.trim()
   const parameter = customerSearchParameter(trimmed)
-  if (!parameter) return null
-  return `/v1/course/customers?${parameter}=${encodeURIComponent(trimmed)}`
+  const cap = limit ? `limit=${limit}` : ''
+  if (!parameter) {
+    if (!listWhenEmpty) return null
+    return cap ? `/v1/course/customers?${cap}` : '/v1/course/customers'
+  }
+  const filter = `${parameter}=${encodeURIComponent(trimmed)}`
+  return `/v1/course/customers?${cap ? `${filter}&${cap}` : filter}`
 }
 
 export type CustomerSearchState = {
@@ -52,7 +73,10 @@ export type CustomerSearchState = {
  * picking is the desk's, and auto-selecting a lone match would silently attach
  * whoever happened to be the only 本田 in the ledger.
  */
-export function useCustomerSearch(query: string): CustomerSearchState {
+export function useCustomerSearch(
+  query: string,
+  { listWhenEmpty = false, limit }: { listWhenEmpty?: boolean; limit?: number } = {},
+): CustomerSearchState {
   const [state, setState] = useState<CustomerSearchState>({
     candidates: [],
     searching: false,
@@ -65,7 +89,7 @@ export function useCustomerSearch(query: string): CustomerSearchState {
 
   useEffect(() => {
     const trimmed = query.trim()
-    const path = customerSearchPath(trimmed)
+    const path = customerSearchPath(trimmed, { listWhenEmpty, limit })
     if (!path) {
       latest.current += 1
       setState({ candidates: [], searching: false, completedQuery: null, error: null })
@@ -98,7 +122,7 @@ export function useCustomerSearch(query: string): CustomerSearchState {
     }, DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [query])
+  }, [query, listWhenEmpty, limit])
 
   return state
 }

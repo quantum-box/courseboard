@@ -1893,12 +1893,16 @@ function resolveGet(path: string): Json | null | undefined {
       phone: url.searchParams.get('phone')?.trim() || null,
       email: url.searchParams.get('email')?.trim() || null,
     }
-    // The server answers 400 for a search with nothing in it, which this
-    // resolver has no way to express. No screen sends one — both the picker
-    // and the ledger page hold the request until something is typed — so an
-    // empty result is the closest honest stand-in.
-    if (!search.name && !search.phone && !search.email) return items([])
-    return items(mockCustomers.filter(customer => mockCustomerMatches(customer, search)))
+    const limit = Number(url.searchParams.get('limit')) || 20
+    // Nothing typed is the ledger listing the screen opens with, newest first
+    // — the same shape the server answers, so the empty state is exercised
+    // here rather than only against Field.
+    if (!search.name && !search.phone && !search.email) {
+      return items([...mockCustomers].reverse().slice(0, limit))
+    }
+    return items(
+      mockCustomers.filter(customer => mockCustomerMatches(customer, search)).slice(0, limit),
+    )
   }
 
   if (pathname === '/v1/course/membership-plans') {

@@ -17,6 +17,9 @@ function SearchResult({ query }: { query: string }) {
   )
 }
 
+/** Mirrors the ledger table's page size; a second page needs one row more. */
+const PAGE_ROWS = 20
+
 async function finishDebounce() {
   await act(async () => {
     await vi.advanceTimersByTimeAsync(250)
@@ -53,15 +56,95 @@ describe('customer search acceptance', () => {
     expect(screen.getByTestId('customer-ids').textContent).toContain(customerId)
   })
 
-  it('検索対象にemailを明示し、空欄には入力案内を表示する', () => {
+  it('検索欄が空でも台帳の顧客が並ぶ', async () => {
     render(
       <I18nextProvider i18n={i18next}>
         <CustomersPage />
       </I18nextProvider>,
     )
 
+    await finishDebounce()
+
+    // What a reload lands on. An empty box is the ledger, not a blank page.
     expect(screen.getByLabelText('名前・カナ・電話番号・メールアドレス')).toBeTruthy()
-    expect(screen.getByText(/1文字の名前から検索できます/)).toBeTruthy()
+    expect(screen.getByText('本田 康彦')).toBeTruthy()
+    expect(screen.getByText(/新しく登録した順に/)).toBeTruthy()
+    // The same table the other rosters use — columns and a pager, not a list.
+    expect(screen.getByRole('table')).toBeTruthy()
+    expect(screen.getByRole('columnheader', { name: /カナ/ })).toBeTruthy()
+  })
+
+  it('20人を超えるとページャで次のページに進める', async () => {
+    render(
+      <I18nextProvider i18n={i18next}>
+        <CustomersPage />
+      </I18nextProvider>,
+    )
+    // Enough rows that the ledger needs a second page, registered through the
+    // real sheet so they arrive the way the desk's do.
+    for (let index = 0; index < 21; index += 1) {
+      fireEvent.click(screen.getByRole('button', { name: /顧客を新しく登録する/ }))
+      fireEvent.change(screen.getByLabelText('名前'), {
+        target: { value: `頁送り 太郎${index}` },
+      })
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: '保存' }))
+      })
+    }
+    fireEvent.change(
+      screen.getByLabelText('名前・カナ・電話番号・メールアドレス'),
+      { target: { value: '' } },
+    )
+    await finishDebounce()
+
+    expect(screen.getAllByRole('row').length).toBe(PAGE_ROWS + 1)
+    fireEvent.click(screen.getByRole('button', { name: /次へ/ }))
+
+    expect(screen.getByText('本田 康彦')).toBeTruthy()
+  })
+
+  it('登録した顧客はリロード後の一覧にも残る', async () => {
+    const { unmount } = render(
+      <I18nextProvider i18n={i18next}>
+        <CustomersPage />
+      </I18nextProvider>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /顧客を新しく登録する/ }))
+    fireEvent.change(screen.getByLabelText('名前'), { target: { value: '桐生 あかね' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    })
+    await finishDebounce()
+    // A fresh mount with no typed query is what a reload gives the desk.
+    unmount()
+
+    render(
+      <I18nextProvider i18n={i18next}>
+        <CustomersPage />
+      </I18nextProvider>,
+    )
+    await finishDebounce()
+
+    expect(screen.getByText('桐生 あかね')).toBeTruthy()
+  })
+
+  it('登録した顧客がそのまま台帳に出る', async () => {
+    render(
+      <I18nextProvider i18n={i18next}>
+        <CustomersPage />
+      </I18nextProvider>,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /顧客を新しく登録する/ }))
+    fireEvent.change(screen.getByLabelText('名前'), { target: { value: '辻 みどり' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    })
+
+    await finishDebounce()
+
+    // The desk stays on the ledger and sees the row, rather than being sent to
+    // the new customer's page and coming back to an empty search box.
+    expect(screen.getByText('辻 みどり')).toBeTruthy()
   })
 
   it('0件では実際に使った検索条件と入力確認を表示する', async () => {

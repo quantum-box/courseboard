@@ -8,6 +8,10 @@ export const customers: DeepPartial<typeof source> = {
     label: 'Name, reading, phone, or email',
     placeholder: 'e.g. Honda, ホンダ, 090-1234, honda@example.com',
     prompt: 'Enter a name, reading, phone number, or email address. Names can be searched from one character.',
+    recent: 'Showing up to {{count}} of the most recently registered customers. Search by name, reading, phone, or email to find anyone else.',
+    emptyLedgerTitle: 'No customers yet',
+    emptyLedger: 'Use "Register a new customer" to add one.',
+    noMatchesTitle: 'No customer matches "{{term}}"',
     condition: {
       name: 'a name or reading',
       phone: 'a phone number',

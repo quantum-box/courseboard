@@ -1,10 +1,13 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
 import { UserPlus } from 'lucide-react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { courseboardApiJson } from '../../../api'
 import {
+  DataTable,
+  type DataTableColumn,
+  EmptyState,
   Field,
   FormGrid,
   LoadingState,
@@ -12,11 +15,18 @@ import {
   Panel,
 } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
-import { navigate, navigateFromClick } from '../../../lib/router'
+import { navigate } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { MembershipBadge } from './MembershipBadge'
-import { customerDistinguisher, customersPath, type Customer } from './models'
-import { customerSearchParameter, useCustomerSearch } from './useCustomerSearch'
+import { customersPath, type Customer } from './models'
+import {
+  customerSearchParameter,
+  LEDGER_PAGE_ROWS,
+  useCustomerSearch,
+} from './useCustomerSearch'
+
+/** Same as the other rosters: a screenful of rows, then a pager. */
+const PAGE_SIZE = 20
 
 /**
  * The customer ledger.
@@ -25,14 +35,17 @@ import { customerSearchParameter, useCustomerSearch } from './useCustomerSearch'
  * they are the person nobody would otherwise write down, and the reason this
  * screen exists is so the second visit can be recognised as a second visit.
  *
- * There is no "list everyone" here on purpose. The search refuses an empty box
- * server-side: walking the whole ledger a page at a time is what a scraper
- * wants, and the desk always arrives with a name or a number in hand.
+ * An empty box lists the newest arrivals rather than nothing, capped at what
+ * Field will hand over in one go. Past that cap the desk searches — the cap is
+ * why this is a ledger the desk can look at, not a way to walk the whole tenant.
  */
 export function CustomersPage() {
   const { t } = useTranslation(['customers', 'common'])
   const [term, setTerm] = useState('')
-  const search = useCustomerSearch(term)
+  // An empty box lists the ledger rather than waiting to be typed into: the
+  // desk arrives with a name most of the time, but not always, and a screen
+  // that answers a reload with nothing reads as if the ledger were empty.
+  const search = useCustomerSearch(term, { listWhenEmpty: true, limit: LEDGER_PAGE_ROWS })
   const [creating, setCreating] = useState(false)
   const trimmedTerm = term.trim()
   const searchParameter = customerSearchParameter(term)
@@ -40,15 +53,57 @@ export function CustomersPage() {
     ? t(`customers:search.condition.${searchParameter}`)
     : ''
 
+  const columns = useMemo<DataTableColumn<Customer>[]>(() => [
+    {
+      key: 'name',
+      header: t('customers:field.name'),
+      cell: customer => <strong>{customer.name}</strong>,
+      sortValue: customer => customer.name,
+    },
+    {
+      key: 'nameKana',
+      header: t('customers:field.nameKana'),
+      // Blank rather than a dash: a visitor taken by phone usually has no
+      // reading on file, and that is the normal state, not a gap to fill.
+      cell: customer => customer.nameKana ?? null,
+      sortValue: customer => customer.nameKana ?? null,
+    },
+    {
+      key: 'phone',
+      header: t('customers:field.phone'),
+      cell: customer => customer.phone ?? null,
+      sortValue: customer => customer.phone ?? null,
+    },
+    {
+      key: 'email',
+      header: t('customers:field.email'),
+      cell: customer => customer.email ?? null,
+      sortValue: customer => customer.email ?? null,
+    },
+    {
+      key: 'membership',
+      header: t('customers:field.membership'),
+      align: 'right',
+      // Member or visitor, for every row on the page. The desk asks this about
+      // a name before it prices anything, so it belongs in the list too.
+      cell: customer => <MembershipBadge customerId={customer.id} />,
+    },
+  ], [t])
+
   return (
     <div className="page-stack">
-      <div className="page-toolbar">
-        <Button type="button" variant="primary" onClick={() => setCreating(true)}>
-          <UserPlus /> {t('customers:create.open')}
-        </Button>
-      </div>
-
-      <Panel title={t('customers:search.title')} description={t('customers:search.description')}>
+      {/* Registering sits on the panel's own header rather than a strip above
+          it: a toolbar holding one button leaves a band of empty page between
+          the workspace bar and the first thing to read. */}
+      <Panel
+        title={t('customers:search.title')}
+        description={t('customers:search.description')}
+        actions={(
+          <Button type="button" variant="primary" onClick={() => setCreating(true)}>
+            <UserPlus /> {t('customers:create.open')}
+          </Button>
+        )}
+      >
         <Field label={t('customers:search.label')}>
           <Input
             value={term}
@@ -62,38 +117,37 @@ export function CustomersPage() {
             the desk still has to be able to register someone. */}
         {search.error ? <Notice tone="danger">{search.error}</Notice> : null}
 
-        {!search.searching && !search.error && search.completedQuery === trimmedTerm
-          && search.candidates.length === 0 ? (
-          <Notice tone="info">
-            {t('customers:search.noMatches', { term: trimmedTerm, condition: searchCondition })}
-          </Notice>
+        {/* Said once, above the rows: what is listed is the newest arrivals and
+            not the whole ledger, so a regular missing from it sends the desk to
+            the search box rather than to the conclusion that they were lost. */}
+        {!trimmedTerm && search.candidates.length > 0 ? (
+          <p className="customer-ledger-hint">
+            {t('customers:search.recent', { count: LEDGER_PAGE_ROWS })}
+          </p>
         ) : null}
 
-        {!trimmedTerm ? (
-          <Notice tone="info">{t('customers:search.prompt')}</Notice>
+        {!search.searching && !search.error ? (
+          <DataTable
+            rows={search.candidates}
+            columns={columns}
+            rowKey={customer => customer.id}
+            onRowClick={customer => navigate(`golf/customers/${customer.id}`)}
+            pageSize={PAGE_SIZE}
+            empty={(
+              <EmptyState
+                title={trimmedTerm
+                  ? t('customers:search.noMatchesTitle', { term: trimmedTerm })
+                  : t('customers:search.emptyLedgerTitle')}
+                description={trimmedTerm
+                  ? t('customers:search.noMatches', {
+                    term: trimmedTerm,
+                    condition: searchCondition,
+                  })
+                  : t('customers:search.emptyLedger')}
+              />
+            )}
+          />
         ) : null}
-
-        <ul className="customer-ledger-list">
-          {search.candidates.map(customer => (
-            <li className="customer-ledger-row" key={customer.id}>
-              {/* A link rather than a button: a customer's page is somewhere the
-                  desk opens in a second tab and comes back to. */}
-              <a
-                className="customer-ledger-row__pick"
-                href={`#/golf/customers/${encodeURIComponent(customer.id)}`}
-                onClick={event => navigateFromClick(event, `golf/customers/${customer.id}`)}
-              >
-                <span className="customer-ledger-row__name">{customer.name}</span>
-                {/* Phone or email, whichever the desk has — two people share a
-                    name often enough that the row needs something else on it. */}
-                <span className="customer-ledger-row__detail">
-                  {customerDistinguisher(customer) ?? t('customers:noContact')}
-                </span>
-              </a>
-              <MembershipBadge customerId={customer.id} />
-            </li>
-          ))}
-        </ul>
       </Panel>
 
       <NewCustomerSheet
@@ -101,7 +155,12 @@ export function CustomersPage() {
         onOpenChange={setCreating}
         onCreated={customer => {
           setCreating(false)
-          navigate(`golf/customers/${customer.id}`)
+          // Search for what was just registered rather than opening it. There is
+          // no "list everyone" here, so a desk that got sent to the new page and
+          // came back would find an empty box and no sign the person was saved.
+          // Their row underneath the search is that sign — and the next visitor
+          // can be registered without navigating back.
+          setTerm(customer.name)
         }}
       />
     </div>

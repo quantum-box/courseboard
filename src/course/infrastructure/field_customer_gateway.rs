@@ -47,8 +47,12 @@ impl CustomerGateway for FieldCustomerGateway {
         query: &CustomerSearchQuery,
     ) -> Result<Vec<Customer>, CourseError> {
         let path = format!("/v1/storekit/customers?{}", search_query_string(query)?);
-        let items: Vec<FieldCustomerDto> =
+        let mut items: Vec<FieldCustomerDto> =
             field_get_items(&self.client, &self.base_url, &path, credentials).await?;
+        // Field echoes `limit: 0` and has answered an unlimited listing before,
+        // so the cap is honoured here too rather than trusted upstream. An
+        // empty search asks for the ledger, and the ledger is not bounded.
+        items.truncate(query.limit as usize);
         Ok(items.into_iter().map(map_customer).collect())
     }
 
@@ -166,6 +170,13 @@ mod tests {
         assert!(encoded.contains("name=%E5%B1%B1%E7%94%B0+%E5%A4%AA%E9%83%8E"));
         assert!(encoded.contains("limit=5"));
         assert!(!encoded.contains("phone="));
+    }
+
+    #[test]
+    fn an_empty_search_asks_field_for_the_ledger_with_only_a_cap() {
+        let query = CustomerSearchQuery::try_new(None, None, None, None).unwrap();
+        let encoded = search_query_string(&query).unwrap();
+        assert_eq!(encoded, "limit=20");
     }
 
     #[test]
