@@ -109,6 +109,7 @@ export const reservationReportImport: DeepPartial<typeof source> = {
     created: '新しく保存した行',
     updated: '数を直した行',
     unchanged: '変わらなかった行',
+    month: '保存した月',
     facilities: '施設の数',
     rows: '日ごとの行数',
     groups: '組数',

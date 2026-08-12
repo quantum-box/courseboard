@@ -127,12 +127,8 @@ export const helpEn: HelpCatalog = {
 
     'golf/caddies': {
       title: 'Caddie roster',
-      summary: 'Caddie details, staff links, day-off requests, and ratings.',
+      summary: 'Caddie details, staff links, day-off requests, ratings, and attendance.',
       usage: [
-        {
-          heading: 'Find someone',
-          body: 'Filter the list by name, availability, skill, or whether they are linked to a staff record.',
-        },
         {
           heading: 'Link to staff',
           body: 'Being a caddie is one staff role, so a newly added caddie is linked from their name automatically. Older unlinked profiles are flagged at the top; attendance and payroll only include linked caddies.',
@@ -140,6 +136,10 @@ export const helpEn: HelpCatalog = {
         {
           heading: 'Record day-off requests',
           body: 'On the day-off tab, click a date to open it in a panel on the right. Set availability and a condition note, then save — assignments and capacity use them.',
+        },
+        {
+          heading: 'Record attendance',
+          body: 'Switch to the Attendance tab above to compare the day’s assignments with clock-ins and record them on the spot.',
         },
       ],
       data: [
@@ -164,7 +164,7 @@ export const helpEn: HelpCatalog = {
         },
         {
           heading: 'Adjust assignments',
-          body: 'Complete or cancel assignments from the list. Clock-ins happen on the Attendance screen.',
+          body: 'Complete or cancel assignments from the list. Clock-ins happen on the roster’s Attendance tab.',
         },
         {
           heading: 'Fill the gaps automatically',
@@ -253,6 +253,34 @@ export const helpEn: HelpCatalog = {
       ],
     },
 
+    'golf/reservation-import': {
+      title: 'Import bookings',
+      summary: 'Read the booking system\'s daily reservation export and bring the month\'s group counts in.',
+      usage: [
+        {
+          heading: 'Choose a file',
+          body: 'Pick the .xlsx exactly as the booking system exported it. The month it covers is read from the file name.',
+        },
+        {
+          heading: 'Check before importing',
+          body: 'Check the file first: you get the counts and anything worth a look, and nothing is written yet. Import it once it looks right.',
+        },
+        {
+          heading: 'Re-import the same month freely',
+          body: 'Re-exporting and re-importing a month overwrites its daily counts rather than adding a second set.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Groups and caddie-attached groups',
+          body: 'Groups booked for each half of the day, and how many of those asked for a caddie. Start times and per-booking caddie flags are not in the export.',
+        },
+        {
+          heading: 'Left out',
+          body: 'Half-days whose counts were not numbers, plus courses Course Board does not have. If this is not zero, read the warnings.',
+        },
+      ],
+    },
     'golf/budgets': {
       title: 'Revenue targets',
       summary: 'Set daily revenue targets and compare them with actual bookings.',

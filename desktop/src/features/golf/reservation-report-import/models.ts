@@ -133,8 +133,14 @@ export function validateColumnMappings(
   const selected = RESERVATION_REPORT_TARGETS.map(target => mappings[target]?.trim() ?? '')
   if (selected.some(source => !source)) return { valid: false, reason: 'missing' }
   if (new Set(selected).size !== selected.length) return { valid: false, reason: 'duplicate' }
-  const known = new Set(headers.map(header => header.trim()))
-  if (selected.some(source => !known.has(source))) return { valid: false, reason: 'unknown' }
+  const headerCounts = new Map<string, number>()
+  for (const header of headers) {
+    const normalized = header.trim()
+    headerCounts.set(normalized, (headerCounts.get(normalized) ?? 0) + 1)
+  }
+  if (selected.some(source => headerCounts.get(source) !== 1)) {
+    return { valid: false, reason: 'unknown' }
+  }
   return { valid: true }
 }
 

@@ -109,6 +109,7 @@ export const reservationReportImport: DeepPartial<typeof source> = {
     created: 'New rows saved',
     updated: 'Rows updated',
     unchanged: 'Rows unchanged',
+    month: 'Imported month',
     facilities: 'Facilities',
     rows: 'Daily rows',
     groups: 'Groups',

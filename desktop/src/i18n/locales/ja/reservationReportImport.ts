@@ -106,6 +106,7 @@ export const reservationReportImport = {
     created: '新しく保存した行',
     updated: '値を更新した行',
     unchanged: '変更がなかった行',
+    month: '保存した月',
     facilities: '施設数',
     rows: '日別の行数',
     groups: '組数',

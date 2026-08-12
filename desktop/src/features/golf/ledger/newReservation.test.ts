@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { LedgerColumn, LedgerSlot } from './models'
 import {
+  blockFixRoute,
+  courseSetupRoute,
   reservationBlockReason,
   reservationTarget,
   selectedReservationTarget,
@@ -99,5 +101,25 @@ describe('ledger reservation availability', () => {
         },
       }),
     })).toBe('stopped')
+  })
+})
+
+describe('where a block is put right', () => {
+  it.each(['missingInventory', 'missingResource'] as const)(
+    'sends %s to the course that owns the slots',
+    reason => {
+      expect(blockFixRoute(reason, 'course-1')).toBe('golf/courses/course-1')
+    },
+  )
+
+  it.each(['full', 'stopped', 'notSellable'] as const)(
+    'offers nothing to open for %s, which is about this row today',
+    reason => {
+      expect(blockFixRoute(reason, 'course-1')).toBeNull()
+    },
+  )
+
+  it('escapes a course id that would otherwise break the route', () => {
+    expect(courseSetupRoute('course/1 2')).toBe('golf/courses/course%2F1%202')
   })
 })

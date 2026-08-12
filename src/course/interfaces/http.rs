@@ -1640,16 +1640,53 @@ impl From<SavedSchedule> for SavedScheduleDto {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BookingHorizonDto {
-    /// Days ahead of today the book is open.
-    pub days: i64,
-    /// The last date a booking may land on, as of today.
+    /// `days` for a rolling window, `through` for a named closing date.
+    pub mode: String,
+    /// Days ahead of today the book is open, in `days` mode.
+    pub days: Option<i64>,
+    /// The closing date the club named, in `through` mode.
+    pub through: Option<NaiveDate>,
+    /// The last date a booking may land on, as of today. Behind today once a
+    /// named closing date has passed, which is a closed book rather than an
+    /// error.
     pub bookable_through: NaiveDate,
 }
 
+impl BookingHorizonDto {
+    fn new(horizon: BookingHorizon, bookable_through: NaiveDate) -> Self {
+        Self {
+            mode: match horizon {
+                BookingHorizon::Days(_) => "days",
+                BookingHorizon::Through(_) => "through",
+            }
+            .to_string(),
+            days: horizon.days(),
+            through: horizon.through_date(),
+            bookable_through,
+        }
+    }
+}
+
+/// Exactly one of the two is sent; the other says which shape was not chosen.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SetBookingHorizonRequest {
-    pub days: i64,
+    pub days: Option<i64>,
+    pub through: Option<NaiveDate>,
+}
+
+impl SetBookingHorizonRequest {
+    fn into_horizon(self) -> Result<BookingHorizon, CourseError> {
+        match (self.days, self.through) {
+            (Some(days), None) => BookingHorizon::try_days(days),
+            (None, Some(date)) => Ok(BookingHorizon::through(date)),
+            // Both would leave the far edge to whichever field the server
+            // happened to prefer, and neither says nothing at all.
+            _ => Err(CourseError::BadRequest(
+                "send either days or through, not both",
+            )),
+        }
+    }
 }
 
 /// GET /v1/course/booking-horizon
@@ -1674,10 +1711,7 @@ pub async fn get_booking_horizon(
             .execute(credentials)
             .await
             .map_err(AppError::from)?;
-    Ok(Json(BookingHorizonDto {
-        days: horizon.days(),
-        bookable_through,
-    }))
+    Ok(Json(BookingHorizonDto::new(horizon, bookable_through)))
 }
 
 /// PUT /v1/course/booking-horizon
@@ -1700,7 +1734,7 @@ pub async fn set_booking_horizon(
     Json(body): Json<SetBookingHorizonRequest>,
 ) -> Result<Json<BookingHorizonDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let horizon = BookingHorizon::try_new(body.days).map_err(AppError::from)?;
+    let horizon = body.into_horizon().map_err(AppError::from)?;
     let gateway = catalog_gateway(&state);
     let use_case = SetBookingHorizonUseCase::new(
         gateway.clone(),
@@ -1712,10 +1746,7 @@ pub async fn set_booking_horizon(
         .execute(credentials, horizon)
         .await
         .map_err(AppError::from)?;
-    Ok(Json(BookingHorizonDto {
-        days: stored.days(),
-        bookable_through,
-    }))
+    Ok(Json(BookingHorizonDto::new(stored, bookable_through)))
 }
 
 /// POST /v1/course/courses/:id/time-slots/generate

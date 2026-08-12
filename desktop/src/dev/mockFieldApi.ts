@@ -184,6 +184,85 @@ function mockReservationReportRows(year: number) {
 // falling back while the storage-key constant is still in its temporal dead zone.
 let mockReservationReportEntries: MockReservationReportEntry[] = []
 
+/**
+ * Daily reservation counts, as the club's booking system exports them.
+ *
+ * Generated rather than typed out because the screen is a month at a time: one
+ * row per course per half-day is 31 x 2 x however many courses, and a fixture
+ * that only covered a week would make the table look like a broken import.
+ *
+ * The numbers lean on the shape of the real July export — mornings busier than
+ * afternoons, weekends busier than weekdays, and a course shut for a few days
+ * so the "closed reads as zero" case is visible without editing anything.
+ */
+type MockReservationSummary = {
+  golfCourseId: string
+  date: string
+  timeOfDay: 'am' | 'pm'
+  totalGroups: number
+  caddieGroups: number
+}
+
+function generateReservationSummaries(): MockReservationSummary[] {
+  const [year, month] = MOCK_FIXTURE_DATE.split('-').map(Number)
+  const lastDay = new Date(Date.UTC(year ?? 2026, month ?? 7, 0)).getUTCDate()
+  const summaries: MockReservationSummary[] = []
+  for (let day = 1; day <= lastDay; day += 1) {
+    const date = `${MOCK_FIXTURE_DATE.slice(0, 8)}${String(day).padStart(2, '0')}`
+    const weekend = [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay())
+    mockCourses.forEach((course, index) => {
+      // One course keeps a short closure mid-month, the way 真駒内 does.
+      const closed = index === 1 && day >= 9 && day <= 11
+      const morning = closed ? 0 : (weekend ? 26 : 20) - index * 3 + (day % 4)
+      const afternoon = closed ? 0 : (weekend ? 17 : 11) - index * 2 + (day % 3)
+      summaries.push(
+        {
+          golfCourseId: course.id,
+          date,
+          timeOfDay: 'am',
+          totalGroups: morning,
+          caddieGroups: Math.round(morning * 0.35),
+        },
+        {
+          golfCourseId: course.id,
+          date,
+          timeOfDay: 'pm',
+          totalGroups: afternoon,
+          caddieGroups: Math.round(afternoon * 0.3),
+        },
+      )
+    })
+  }
+  return summaries
+}
+
+const mockReservationSummaries = generateReservationSummaries()
+
+/**
+ * The desk's answers about which course each export name refers to.
+ *
+ * Starts empty on purpose: the first import a club does is the one where every
+ * name is still a question, and that is the state the screen most needs to be
+ * walked through without a backend.
+ */
+const mockReservationCourseLinks = new Map<string, string | null>()
+
+function mockReservationCourseLinkItems() {
+  return {
+    items: [...mockReservationCourseLinks.entries()].map(([sheetLabel, golfCourseId]) => ({
+      sheetLabel,
+      ...(golfCourseId ? { golfCourseId } : {}),
+    })),
+  }
+}
+
+function mockReservationSummaryDto(summary: MockReservationSummary) {
+  return {
+    ...summary,
+    selfPlayGroups: Math.max(summary.totalGroups - summary.caddieGroups, 0),
+  }
+}
+
 const mockProducts: Array<{
   id: string
   tenantId: string
@@ -243,8 +322,13 @@ const mockProducts: Array<{
  *
  * The real value lives in the tenant config and is read by the API; the fixture
  * keeps it here so saving a week can answer with the date it opened the book to.
+ * Either a rolling day count or a named closing date, the same two shapes the
+ * config stores.
  */
-let mockBookingHorizonDays = 180
+let mockBookingHorizon: { mode: 'days'; days: number } | { mode: 'through'; through: string } = {
+  mode: 'days',
+  days: 180,
+}
 
 /** One start per interval across every band whose weekday falls in the range. */
 function mockGeneratedStarts(courseId: string, fromIso: string, toIso: string) {
@@ -270,10 +354,20 @@ function mockGeneratedStarts(courseId: string, fromIso: string, toIso: string) {
   return created
 }
 
-function mockBookableThrough(days = mockBookingHorizonDays) {
+function mockBookableThrough(horizon = mockBookingHorizon) {
+  if (horizon.mode === 'through') return horizon.through
   const through = new Date(`${TODAY}T00:00:00Z`)
-  through.setUTCDate(through.getUTCDate() + days)
+  through.setUTCDate(through.getUTCDate() + horizon.days)
   return through.toISOString().slice(0, 10)
+}
+
+function mockHorizonResponse(horizon = mockBookingHorizon) {
+  return {
+    mode: horizon.mode,
+    days: horizon.mode === 'days' ? horizon.days : null,
+    through: horizon.mode === 'through' ? horizon.through : null,
+    bookableThrough: mockBookableThrough(horizon),
+  }
 }
 
 const mockSchedulesByCourse: Record<string, Array<{
@@ -1235,17 +1329,39 @@ function mockMembershipOf(customerId: string) {
   }
 }
 
-/** Matches the server's search: name, kana, or phone, ignoring separators. */
-function mockCustomerMatches(customer: Record<string, unknown>, query: string) {
-  const needle = query.trim().toLowerCase()
-  if (!needle) return false
-  const digits = needle.replace(/[^0-9]/g, '')
-  const haystacks = [customer.name, customer.nameKana, customer.email]
-    .filter((value): value is string => typeof value === 'string')
-    .map(value => value.toLowerCase())
-  if (haystacks.some(value => value.includes(needle))) return true
-  const phone = typeof customer.phone === 'string' ? customer.phone.replace(/[^0-9]/g, '') : ''
-  return Boolean(digits) && phone.includes(digits)
+type MockCustomerSearch = {
+  name: string | null
+  phone: string | null
+  email: string | null
+}
+
+function mockPhoneDigits(value: string) {
+  return value
+    .replace(/[０-９]/g, digit => String.fromCharCode(digit.charCodeAt(0) - 0xFEE0))
+    .replace(/[^0-9]/g, '')
+}
+
+/** Mirrors Field's separate name/kana, phone, and exact-email filters. */
+function mockCustomerMatches(customer: Record<string, unknown>, search: MockCustomerSearch) {
+  if (search.name) {
+    const needle = search.name.toLowerCase()
+    const names = [customer.name, customer.nameKana]
+      .filter((value): value is string => typeof value === 'string')
+      .map(value => value.toLowerCase())
+    if (!names.some(value => value.includes(needle))) return false
+  }
+
+  if (search.phone) {
+    const needle = mockPhoneDigits(search.phone)
+    const phone = typeof customer.phone === 'string' ? mockPhoneDigits(customer.phone) : ''
+    if (!needle || !phone.includes(needle)) return false
+  }
+
+  if (search.email) {
+    if (customer.email !== search.email) return false
+  }
+
+  return Boolean(search.name || search.phone || search.email)
 }
 
 function pathnameOf(path: string) {
@@ -1843,20 +1959,21 @@ function resolveGet(path: string): Json | null | undefined {
   if (pathname === '/v1/erp/extensions/status') return extensionStatus()
 
   if (pathname === '/v1/course/booking-horizon') {
-    return { days: mockBookingHorizonDays, bookableThrough: mockBookableThrough() }
+    return mockHorizonResponse()
   }
 
   if (pathname === '/v1/course/customers') {
-    const query = url.searchParams.get('name')
-      || url.searchParams.get('phone')
-      || url.searchParams.get('email')
-      || ''
+    const search: MockCustomerSearch = {
+      name: url.searchParams.get('name')?.trim() || null,
+      phone: url.searchParams.get('phone')?.trim() || null,
+      email: url.searchParams.get('email')?.trim() || null,
+    }
     // The server answers 400 for a search with nothing in it, which this
     // resolver has no way to express. No screen sends one — both the picker
     // and the ledger page hold the request until something is typed — so an
     // empty result is the closest honest stand-in.
-    if (!query.trim()) return items([])
-    return items(mockCustomers.filter(customer => mockCustomerMatches(customer, query)))
+    if (!search.name && !search.phone && !search.email) return items([])
+    return items(mockCustomers.filter(customer => mockCustomerMatches(customer, search)))
   }
 
   if (pathname === '/v1/course/membership-plans') {
@@ -1960,6 +2077,28 @@ function resolveGet(path: string): Json | null | undefined {
         .filter(shift => shift.date >= from && shift.date <= to)
         .sort((left, right) => left.date.localeCompare(right.date)
           || left.caddieProfileId.localeCompare(right.caddieProfileId)),
+    )
+  }
+
+  if (rawPathname === '/v1/course/reservation-summaries/course-links') {
+    return mockReservationCourseLinkItems()
+  }
+
+  if (rawPathname === '/v1/course/reservation-summaries') {
+    const from = url.searchParams.get('from') ?? TODAY
+    const to = url.searchParams.get('to') ?? from
+    const courseIds = (url.searchParams.get('golfCourseIds') ?? '')
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean)
+    return items(
+      mockReservationSummaries
+        .filter(summary => summary.date >= from && summary.date <= to)
+        .filter(summary => !courseIds.length || courseIds.includes(summary.golfCourseId))
+        .sort((left, right) => left.date.localeCompare(right.date)
+          || left.golfCourseId.localeCompare(right.golfCourseId)
+          || left.timeOfDay.localeCompare(right.timeOfDay))
+        .map(mockReservationSummaryDto),
     )
   }
 
@@ -2332,6 +2471,84 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
         .filter((key): key is string => typeof key === 'string')
         .map(key => ({ key, enabled: true })),
     })
+  }
+
+  const reservationImportMatch = pathname.match(
+    /^\/v1\/course\/reservation-summaries\/(preview|import)$/,
+  )
+  if (reservationImportMatch && method === 'POST') {
+    // The uploaded workbook is a binary body this resolver cannot read, so the
+    // answer is built from the fixture month instead. That is enough for the
+    // screen: what it has to show is a month's worth of counts, a per-course
+    // breakdown, and the two-step check — none of which depend on the bytes.
+    const dates = [...new Set(mockReservationSummaries.map(summary => summary.date))].sort()
+    const courses = mockCourses.map((course, index) => {
+      const rows = mockReservationSummaries.filter(row => row.golfCourseId === course.id)
+      const sheetLabel = course.shortName ?? course.name
+      const saved = mockReservationCourseLinks.get(sheetLabel)
+      // The last course starts unanswered so the mapping step is reachable in
+      // mock mode. A screen whose whole point is "what do I do when the name
+      // does not match" is not worth much if the fixtures always match.
+      const resolution = saved === null
+        ? 'ignored'
+        : saved
+          ? 'linked'
+          : index === mockCourses.length - 1
+            ? 'unresolved'
+            : 'suggested'
+      const linkedId = saved ?? (resolution === 'suggested' ? course.id : undefined)
+      return {
+        sheetLabel,
+        resolution,
+        golfCourseId: linkedId ?? undefined,
+        courseName: linkedId ? course.name : undefined,
+        imported: resolution === 'linked' || resolution === 'suggested',
+        dayCount: rows.length,
+        totalGroups: rows.reduce((sum, row) => sum + row.totalGroups, 0),
+        caddieGroups: rows.reduce((sum, row) => sum + row.caddieGroups, 0),
+      }
+    })
+    const importing = courses.filter(course => course.imported)
+    const applied = reservationImportMatch[1] === 'import'
+    return hit({
+      yearMonth: MOCK_FIXTURE_DATE.slice(0, 7),
+      // A preview writes nothing, so it reports nothing written — the same
+      // distinction the real endpoint draws.
+      imported: applied
+        ? mockReservationSummaries.filter(row =>
+          importing.some(course => course.golfCourseId === row.golfCourseId)).length
+        : 0,
+      skipped: 0,
+      unansweredCourses: courses.filter(course => course.resolution === 'unresolved').length,
+      from: dates[0] ?? MOCK_FIXTURE_DATE,
+      to: dates[dates.length - 1] ?? MOCK_FIXTURE_DATE,
+      courses,
+      warnings: [],
+      summaries: mockReservationSummaries
+        .filter(row => importing.some(course => course.golfCourseId === row.golfCourseId))
+        .map(mockReservationSummaryDto),
+    })
+  }
+
+  if (pathname === '/v1/course/reservation-summaries/course-links' && method === 'PUT') {
+    const items = Array.isArray(body?.items) ? (body.items as Array<Record<string, unknown>>) : []
+    for (const item of items) {
+      const label = typeof item.sheetLabel === 'string' ? item.sheetLabel.trim() : ''
+      if (!label) return error(400, 'a course link needs the name the sheet uses')
+      const courseId = typeof item.golfCourseId === 'string' ? item.golfCourseId.trim() : ''
+      if (courseId) {
+        mockReservationCourseLinks.set(label, courseId)
+      } else if (item.doNotImport === true) {
+        // Null, not absent: "do not import" is an answer the import has to be
+        // able to tell apart from a name nobody has looked at.
+        mockReservationCourseLinks.set(label, null)
+      } else {
+        // Neither: the desk took its answer back, so the name goes back among
+        // the questions. Absent, which is what "nobody has looked at this" is.
+        mockReservationCourseLinks.delete(label)
+      }
+    }
+    return hit(mockReservationCourseLinkItems())
   }
 
   if (pathname === '/v1/course/customers' && method === 'POST') {
@@ -3017,12 +3234,25 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   }
 
   if (pathname === '/v1/course/booking-horizon' && method === 'PUT') {
+    const through = body?.through
+    if (body?.days != null && through != null) {
+      return error(400, 'send either days or through, not both')
+    }
+    if (typeof through === 'string') {
+      const furthest = new Date(`${TODAY}T00:00:00Z`)
+      furthest.setUTCDate(furthest.getUTCDate() + 399)
+      if (through < TODAY || through > furthest.toISOString().slice(0, 10)) {
+        return error(400, 'the last bookable date must be between today and 399 days ahead')
+      }
+      mockBookingHorizon = { mode: 'through', through }
+      return hit(mockHorizonResponse())
+    }
     const days = Number(body?.days)
     if (!Number.isInteger(days) || days < 1 || days > 399) {
       return error(400, 'booking horizon must be between 1 and 399 days')
     }
-    mockBookingHorizonDays = days
-    return hit({ days, bookableThrough: mockBookableThrough(days) })
+    mockBookingHorizon = { mode: 'days', days }
+    return hit(mockHorizonResponse())
   }
 
   const generateMatch = pathname.match(

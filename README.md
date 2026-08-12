@@ -52,6 +52,10 @@ Request:
 {
   "tenant_id": "scc",
   "reference": "RSV-1001",
+  "bill_to": {
+    "kind": "customer",
+    "customerId": "cus_..."
+  },
   "customer_name": "山田 太郎",
   "customer_phone": "+819012345678",
   "amount": 5000,
@@ -61,6 +65,11 @@ Request:
   "send_sms": true
 }
 ```
+
+`bill_to` は Field の型付き請求先です。個人は上記の `customer`、法人は
+`{"kind":"client","clientId":"cl_...","affiliationId":"ccaf_..."}` を指定します。
+Course Board はこの値を Field `POST /v1/invoices` の `billTo` として転送し、legacy `clientId` や
+`courseboard:{reference}` の合成 ID は送りません。
 
 Response には公開 payment URL と SMS status が含まれます。
 

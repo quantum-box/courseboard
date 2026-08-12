@@ -100,6 +100,10 @@ describe('reservation report pure helpers', () => {
       valid: false,
       reason: 'unknown',
     })
+    expect(validateColumnMappings([...headers, '日付'], mappings)).toMatchObject({
+      valid: false,
+      reason: 'unknown',
+    })
   })
 
   it('initializes editable column mappings from the provider candidates', () => {

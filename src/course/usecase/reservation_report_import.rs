@@ -594,6 +594,7 @@ fn reservation_report_from_tabular(
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     ReservationReport::new(format!("{:x}", hasher.finalize()), facilities, rows)
+        .map(|report| report.with_source_system(analysis.source_type()))
 }
 
 struct MappingIndexes {
@@ -648,12 +649,22 @@ fn resolve_source_index(
     source: &str,
 ) -> Result<usize, CourseError> {
     let normalized = source.trim().to_ascii_lowercase();
-    if let Some(index) = analysis
+    let matching_indexes = analysis
         .headers()
         .iter()
-        .position(|header| header.trim().to_ascii_lowercase() == normalized)
-    {
-        return Ok(index);
+        .enumerate()
+        .filter_map(|(index, header)| {
+            (header.trim().to_ascii_lowercase() == normalized).then_some(index)
+        })
+        .collect::<Vec<_>>();
+    match matching_indexes.as_slice() {
+        [index] => return Ok(*index),
+        [_, _, ..] => {
+            return Err(CourseError::BadRequest(
+                "tabular report contains duplicate source headers",
+            ))
+        }
+        [] => {}
     }
     if let Some(index) = normalized
         .strip_prefix("column_")
@@ -697,7 +708,23 @@ fn parse_tabular_day_part(value: &str) -> Result<ReservationReportDayPart, Cours
 }
 
 fn parse_tabular_count(value: &str, _target: &str) -> Result<i64, CourseError> {
-    let normalized = value.trim().replace([',', '，'], "");
+    let raw = value.trim().replace('，', ",");
+    if raw.contains(',') {
+        let mut groups = raw.split(',');
+        let first = groups.next().unwrap_or_default();
+        if first.is_empty()
+            || first.len() > 3
+            || !first.chars().all(|character| character.is_ascii_digit())
+            || groups.any(|group| {
+                group.len() != 3 || !group.chars().all(|character| character.is_ascii_digit())
+            })
+        {
+            return Err(CourseError::BadRequest(
+                "tabular reservation count has invalid digit separators",
+            ));
+        }
+    }
+    let normalized = raw.replace(',', "");
     if normalized.is_empty() {
         return Err(CourseError::BadRequest(
             "tabular reservation count is missing",
@@ -725,7 +752,16 @@ fn parse_tabular_date(value: &str, year: i32) -> Result<NaiveDate, CourseError> 
             "tabular reservation date is missing",
         ));
     }
-    if let Ok(serial) = trimmed.parse::<i64>() {
+    let excel_serial = trimmed.parse::<i64>().ok().or_else(|| {
+        trimmed.parse::<f64>().ok().and_then(|value| {
+            (value.is_finite()
+                && value.fract() == 0.0
+                && value >= i64::MIN as f64
+                && value <= i64::MAX as f64)
+                .then_some(value as i64)
+        })
+    });
+    if let Some(serial) = excel_serial {
         if (20_000..=100_000).contains(&serial) {
             let date = NaiveDate::from_ymd_opt(1899, 12, 30)
                 .and_then(|base| base.checked_add_signed(Duration::days(serial)))
@@ -872,7 +908,8 @@ fn mapped_entries(
                 row,
                 course_id.clone(),
                 report.source_file_sha256(),
-            ))
+            )
+            .with_source_system(report.source_system()))
         })
         .collect()
 }
@@ -1204,5 +1241,88 @@ mod tests {
         assert_eq!(preview.report().rows()[0].group_count(), 8);
         assert_eq!(preview.report().rows()[0].caddie_attached_group_count(), 3);
         assert_eq!(preview.tabular_analysis().unwrap().mapping().mode(), "user");
+    }
+
+    #[test]
+    fn tabular_numbers_require_valid_separators_and_accept_integral_excel_dates() {
+        assert_eq!(parse_tabular_count("1,234", "groupCount").unwrap(), 1234);
+        assert!(parse_tabular_count("12,34", "groupCount").is_err());
+        assert!(parse_tabular_count("1,,234", "groupCount").is_err());
+        assert_eq!(
+            parse_tabular_date("46221.0", 2026).unwrap(),
+            NaiveDate::from_ymd_opt(2026, 7, 18).unwrap()
+        );
+    }
+
+    #[test]
+    fn duplicate_source_headers_are_rejected() {
+        let base = tabular_analysis(vec![TabularAnalyzeRow::new(
+            2,
+            vec![
+                "東".into(),
+                "2026-07-18".into(),
+                "2026-07-18".into(),
+                "morning".into(),
+                "8".into(),
+                "3".into(),
+            ],
+        )
+        .unwrap()]);
+        let duplicate = TabularAnalyzeResult::new(
+            base.source_type().to_string(),
+            base.sheet_names().to_vec(),
+            base.selected_sheet().map(str::to_string),
+            base.header_row(),
+            vec![
+                "Facility".into(),
+                "Date".into(),
+                "Date".into(),
+                "Part".into(),
+                "Groups".into(),
+                "Caddie groups".into(),
+            ],
+            base.rows().to_vec(),
+            base.mapping().clone(),
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(matches!(
+            reservation_report_from_tabular(b"csv", 2026, &duplicate),
+            Err(CourseError::BadRequest(
+                "tabular report contains duplicate source headers"
+            ))
+        ));
+    }
+
+    #[test]
+    fn report_rejects_overflowing_totals() {
+        let facility = ReservationReportFacility::new("east", "東");
+        let date = NaiveDate::from_ymd_opt(2026, 7, 18).unwrap();
+        let rows = vec![
+            ReservationReportRow::new(
+                "east",
+                "東",
+                date,
+                ReservationReportDayPart::Morning,
+                i64::MAX,
+                0,
+            )
+            .unwrap(),
+            ReservationReportRow::new(
+                "east",
+                "東",
+                date,
+                ReservationReportDayPart::Afternoon,
+                1,
+                0,
+            )
+            .unwrap(),
+        ];
+        assert!(matches!(
+            ReservationReport::new("hash", vec![facility], rows),
+            Err(CourseError::BadRequest(
+                "reservation report group totals are too large"
+            ))
+        ));
     }
 }

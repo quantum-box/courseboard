@@ -83,10 +83,17 @@ export const cancellationFees: DeepPartial<typeof source> = {
     },
     client: {
       title: '請求する相手',
-      description: '相手の管理番号がないときは、重ならない番号をこちらで作ります。',
+      description: 'Field に登録されている個人または会社を選びます。',
+      kind: '相手の種類',
+      customer: '個人',
+      company: '会社',
       name: '相手の名前',
       id: '相手の管理番号',
-      idPlaceholder: 'すでに番号があるときだけ入れてください',
+      idPlaceholder: 'cl_...',
+      customerId: 'お客さまの管理番号',
+      customerIdPlaceholder: 'cus_...',
+      affiliationId: '会社との所属の管理番号',
+      affiliationIdPlaceholder: 'ccaf_...',
       due: '支払いの期限',
     },
     delivery: {
@@ -112,6 +119,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
       consent: 'ショートメールを送る前に、受け取る人の同意を確かめてください。',
       amount: 'キャンセル料は 1 円以上で入れてください。',
       phone: '送り先は、日本の携帯電話の番号で入れてください。',
+      billTo: '個人の管理番号、または会社と所属の管理番号を入れてください。',
     },
     error: {
       delivery: 'お知らせを送れませんでした',

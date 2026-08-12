@@ -11,6 +11,7 @@ pub mod demo_seed;
 pub mod feature_flags;
 pub mod field_api;
 pub mod field_proxy;
+pub mod migrations;
 pub mod profile_proxy;
 pub mod smart_assign;
 
@@ -32,12 +33,13 @@ use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
     FieldReservationReportGateway, MySqlAvailabilityDeadlineRepository, MySqlCaddieShiftRepository,
-    MySqlGeneratedThroughRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
+    MySqlGeneratedThroughRepository, MySqlReservationCourseLinkRepository,
+    MySqlReservationSummaryRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions};
-use sqlx::{migrate::Migrator, FromRow, MySqlPool};
+use sqlx::{FromRow, MySqlPool};
 use thiserror::Error;
 use tower_http::{
     catch_panic::CatchPanicLayer,
@@ -49,13 +51,13 @@ use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
 const COURSEBOARD_AUTHORIZATION_HEADER: &str = "x-courseboard-authorization";
-static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
-
 #[derive(Clone)]
 pub struct AppState {
     rules: Arc<MySqlTaxRuleRepository>,
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
+    reservation_summaries: Arc<MySqlReservationSummaryRepository>,
+    reservation_course_links: Arc<MySqlReservationCourseLinkRepository>,
     generated_through: Arc<MySqlGeneratedThroughRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
@@ -88,6 +90,10 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+            reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(pool.clone())),
+            reservation_course_links: Arc::new(MySqlReservationCourseLinkRepository::new(
+                pool.clone(),
+            )),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -133,6 +139,10 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+            reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(pool.clone())),
+            reservation_course_links: Arc::new(MySqlReservationCourseLinkRepository::new(
+                pool.clone(),
+            )),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -164,6 +174,12 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+                reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(
+                    pool.clone(),
+                )),
+                reservation_course_links: Arc::new(MySqlReservationCourseLinkRepository::new(
+                    pool.clone(),
+                )),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -186,6 +202,12 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+                reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(
+                    pool.clone(),
+                )),
+                reservation_course_links: Arc::new(MySqlReservationCourseLinkRepository::new(
+                    pool.clone(),
+                )),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -217,9 +239,23 @@ impl AppState {
         self.slot_overrides.clone()
     }
 
+    /// CourseBoard-owned daily reservation counts imported from the club's
+    /// booking system. The export has no start times and no per-booking caddie
+    /// flag, so it cannot ride on Field's reservation inventory (ADR-0005).
+    pub fn reservation_summaries(&self) -> Arc<MySqlReservationSummaryRepository> {
+        self.reservation_summaries.clone()
+    }
+
     /// CourseBoard-owned record of how far each course has been built.
     pub fn generated_through(&self) -> Arc<MySqlGeneratedThroughRepository> {
         self.generated_through.clone()
+    }
+
+    /// CourseBoard-owned answers about which course each name in the booking
+    /// system's export refers to. Field's course master carries no external
+    /// identifier, so the mapping is ours (ADR-0005).
+    pub fn reservation_course_links(&self) -> Arc<MySqlReservationCourseLinkRepository> {
+        self.reservation_course_links.clone()
     }
 
     /// CourseBoard-owned shift-request filing deadlines.
@@ -789,6 +825,48 @@ pub fn build_router(state: AppState) -> Router {
                 )),
         )
         .route(
+            "/v1/course/reservation-summaries/course-links",
+            get(course::interfaces::http_reservation_summary::list_reservation_course_links)
+                .put(course::interfaces::http_reservation_summary::save_reservation_course_links)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/reservation-summaries/preview",
+            post(course::interfaces::http_reservation_summary::preview_reservation_summaries)
+                // A spreadsheet does not fit axum's 2 MB default for a JSON
+                // body, and a file too big to be one of these exports should be
+                // turned away as it arrives rather than after it is buffered.
+                .route_layer(DefaultBodyLimit::max(
+                    course::interfaces::http_reservation_summary::MAX_WORKBOOK_BYTES,
+                ))
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/reservation-summaries/import",
+            post(course::interfaces::http_reservation_summary::import_reservation_summaries)
+                .route_layer(DefaultBodyLimit::max(
+                    course::interfaces::http_reservation_summary::MAX_WORKBOOK_BYTES,
+                ))
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/reservation-summaries",
+            get(course::interfaces::http_reservation_summary::list_reservation_summaries)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/v1/course/daily-budgets/achievement",
             get(course::interfaces::http_commercial::list_budget_achievements).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
@@ -985,8 +1063,10 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
         .connect_with(connect_options)
         .await?;
 
-    run_migrations(&pool).await?;
+    build_app_with_pool(config, pool).await
+}
 
+async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::Result<Router> {
     let course_gateway_url = config.course_gateway_base_url();
     if course_gateway_url == crate::config::EMPTY_COURSE_STORE_URL
         || course_gateway_url.starts_with("empty://")
@@ -1033,9 +1113,59 @@ pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
     Ok(build_router(state))
 }
 
-pub async fn run_migrations(pool: &MySqlPool) -> Result<(), AppError> {
-    MIGRATOR.run(pool).await?;
-    Ok(())
+/// Guards on the migration set itself, which no database is needed to check.
+///
+/// A migration's version is the number its file name starts with, and every
+/// database records that number against the checksum of the file it ran. Two
+/// files sharing a version therefore do not clash at compile time, or on a
+/// fresh database, or in CI — they clash on the one database that already ran
+/// the other one, at start-up, days later.
+///
+/// Two branches picking the same day's number is the ordinary way this happens:
+/// both merge cleanly, and nothing says a word until a long-lived environment
+/// refuses to boot.
+#[cfg(test)]
+mod migration_set {
+    use crate::migrations::MIGRATOR;
+    use std::collections::HashMap;
+
+    #[test]
+    fn no_two_migrations_share_a_version() {
+        let mut by_version: HashMap<i64, Vec<&str>> = HashMap::new();
+        for migration in MIGRATOR.iter() {
+            by_version
+                .entry(migration.version)
+                .or_default()
+                .push(&migration.description);
+        }
+        let clashes: Vec<String> = by_version
+            .iter()
+            .filter(|(_, descriptions)| descriptions.len() > 1)
+            .map(|(version, descriptions)| format!("{version}: {}", descriptions.join(", ")))
+            .collect();
+        assert!(
+            clashes.is_empty(),
+            "two migrations share a version, so whichever database ran the other one first will \
+             refuse to start: {}",
+            clashes.join(" / "),
+        );
+    }
+
+    #[test]
+    fn every_migration_is_dated_the_way_the_rest_are() {
+        // `YYYYMMDDNNNN`: the day the migration was written, then a counter
+        // for that day. A file numbered some other way sorts into the wrong
+        // place, and a run of them lands on a database in an order nobody
+        // intended.
+        for migration in MIGRATOR.iter() {
+            assert!(
+                (202_001_010_000..=209_912_319_999).contains(&migration.version),
+                "{} is numbered {}, which is not a YYYYMMDDNNNN stamp",
+                migration.description,
+                migration.version,
+            );
+        }
+    }
 }
 
 async fn healthz() -> Json<HealthResponse> {
@@ -1437,6 +1567,13 @@ pub enum AppError {
     Forbidden,
     #[error("{0}")]
     BadRequest(&'static str),
+    /// A file whose name does not say which month it covers.
+    ///
+    /// Its own variant rather than a `BadRequest` because the screen has to
+    /// tell them apart: this one is answerable — pick a month and send it
+    /// again — and every other bad request is not.
+    #[error("{0}")]
+    MonthRequired(&'static str),
     #[error("{0}")]
     Conflict(&'static str),
     #[error("{message}")]
@@ -1473,6 +1610,7 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
+            AppError::MonthRequired(_) => (StatusCode::BAD_REQUEST, "month_required"),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             AppError::UpstreamClient { status, .. } => (status, "upstream_client_error"),
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),
@@ -1577,7 +1715,9 @@ pub(crate) mod test_support {
             .expect("connect test TiDB database");
         let mut migrated = MIGRATED.lock().await;
         if !*migrated {
-            super::run_migrations(&pool).await.expect("run migrations");
+            crate::migrations::run_migrations(&pool)
+                .await
+                .expect("run migrations");
             *migrated = true;
         }
         pool
@@ -1887,6 +2027,16 @@ mod tests {
                     .and_then(|value| value.to_str().ok()),
                 Some("scc")
             );
+            assert_eq!(
+                body["billTo"],
+                serde_json::json!({
+                    "kind": "client",
+                    "clientId": "cl_company_x",
+                    "affiliationId": "ccaf_person_a_company_x"
+                })
+            );
+            assert!(body.get("clientId").is_none());
+            assert!(!body.to_string().contains("courseboard:"));
             assert_eq!(body["clientName"], "山田 太郎");
             assert_eq!(body["lineItems"][0]["unitPrice"], 5000);
             (
@@ -2282,6 +2432,11 @@ mod tests {
         let body = serde_json::json!({
             "tenant_id": "scc",
             "reference": "RSV-1001",
+            "bill_to": {
+                "kind": "client",
+                "clientId": "cl_company_x",
+                "affiliationId": "ccaf_person_a_company_x"
+            },
             "customer_name": "山田 太郎",
             "customer_phone": "+819012345678",
             "amount": 5000,
@@ -2317,6 +2472,23 @@ mod tests {
         );
         assert!(created.collection.payment_url.contains("index.html#/pay/"));
         assert!(created.sms_message.contains("キャンセル料5000円"));
+
+        let mut second_body = body.clone();
+        second_body["reference"] = serde_json::json!("RSV-1002");
+        let second_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/cancellation-fee-collections")
+                    .header(AUTHORIZATION, format!("Bearer {}", auth.valid_token()))
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(Body::from(second_body.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(second_response.status(), StatusCode::OK);
 
         let token = created
             .collection
@@ -2361,6 +2533,10 @@ mod tests {
                     .body(Body::from(
                         serde_json::json!({
                             "tenant_id": "scc",
+                            "bill_to": {
+                                "kind": "customer",
+                                "customerId": "cus_person_a"
+                            },
                             "customer_name": "山田 太郎",
                             "customer_phone": "+819012345678",
                             "amount": 5000,

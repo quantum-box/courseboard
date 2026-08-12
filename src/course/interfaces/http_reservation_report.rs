@@ -11,8 +11,8 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use super::http::{catalog_gateway, credentials};
-use crate::course::domain::ExternalReservationReportEntry;
+use super::http::{bearer_authorization, catalog_gateway, operator_id};
+use crate::course::domain::{ExternalReservationReportEntry, GatewayCredentials};
 use crate::course::usecase::{
     normalized_reservation_report_fingerprint, ImportReservationReportUseCase,
     ListReservationReportEntriesUseCase, PreviewReservationReportUseCase,
@@ -50,7 +50,7 @@ pub struct ReservationReportTotalsDto {
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReservationReportPreviewResponse {
-    pub source_system: &'static str,
+    pub source_system: String,
     pub source_file_sha256: String,
     pub normalized_fingerprint: String,
     pub facilities: Vec<ReservationReportFacilityDto>,
@@ -132,7 +132,7 @@ fn preview_response(preview: ReservationReportPreview) -> ReservationReportPrevi
     let report = preview.report();
     let totals = report.totals();
     ReservationReportPreviewResponse {
-        source_system: crate::course::domain::DAILY_RESERVATION_STATUS_SOURCE,
+        source_system: report.source_system().to_string(),
         source_file_sha256: report.source_file_sha256().to_string(),
         normalized_fingerprint: normalized_reservation_report_fingerprint(
             report,
@@ -150,6 +150,22 @@ fn preview_response(preview: ReservationReportPreview) -> ReservationReportPrevi
         totals: totals_response(totals),
         analysis: preview.tabular_analysis().map(analysis_response),
     }
+}
+
+fn reservation_report_credentials(headers: &HeaderMap) -> Result<GatewayCredentials<'_>, AppError> {
+    let platform_id = headers
+        .get("x-platform-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(AppError::BadRequest("x-platform-id header is required"))?;
+    Ok(GatewayCredentials {
+        // This endpoint processes a user-selected file. Always preserve the
+        // verified user's bearer instead of replacing it with a static token.
+        authorization: bearer_authorization(headers)?,
+        operator_id: operator_id(headers)?,
+        platform_id: Some(platform_id),
+    })
 }
 
 fn analysis_response(
@@ -328,7 +344,7 @@ pub async fn preview_reservation_report(
     multipart: Multipart,
 ) -> Result<Json<ReservationReportPreviewResponse>, AppError> {
     super::http::bearer_authorization(&headers)?;
-    let credentials = credentials(&state, &headers)?;
+    let credentials = reservation_report_credentials(&headers)?;
     let upload = read_upload(multipart, false).await?;
     let preview = PreviewReservationReportUseCase::execute_with_fallback(
         credentials,
@@ -363,7 +379,7 @@ pub async fn import_reservation_report(
     multipart: Multipart,
 ) -> Result<Json<ReservationReportImportResponse>, AppError> {
     super::http::bearer_authorization(&headers)?;
-    let credentials = credentials(&state, &headers)?;
+    let credentials = reservation_report_credentials(&headers)?;
     let upload = read_upload(multipart, true).await?;
     let preview = PreviewReservationReportUseCase::execute_with_fallback(
         credentials,
@@ -447,7 +463,7 @@ pub async fn list_reservation_report_entries(
     Query(query): Query<ReservationReportEntriesQuery>,
 ) -> Result<Json<ReservationReportEntriesResponse>, AppError> {
     super::http::bearer_authorization(&headers)?;
-    let credentials = credentials(&state, &headers)?;
+    let credentials = reservation_report_credentials(&headers)?;
     let use_case = ListReservationReportEntriesUseCase::new(
         state.reservation_report_gateway(),
         catalog_gateway(&state),
@@ -459,4 +475,28 @@ pub async fn list_reservation_report_entries(
     Ok(Json(ReservationReportEntriesResponse {
         items: entries.iter().map(entry_response).collect(),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::{header::AUTHORIZATION, HeaderValue};
+
+    use super::*;
+
+    #[test]
+    fn import_credentials_preserve_user_bearer_and_require_platform() {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer user-token"));
+        headers.insert("x-operator-id", HeaderValue::from_static("operator-1"));
+        assert!(matches!(
+            reservation_report_credentials(&headers),
+            Err(AppError::BadRequest("x-platform-id header is required"))
+        ));
+
+        headers.insert("x-platform-id", HeaderValue::from_static("platform-1"));
+        let credentials = reservation_report_credentials(&headers).unwrap();
+        assert_eq!(credentials.authorization, "Bearer user-token");
+        assert_eq!(credentials.operator_id, "operator-1");
+        assert_eq!(credentials.platform_id, Some("platform-1"));
+    }
 }

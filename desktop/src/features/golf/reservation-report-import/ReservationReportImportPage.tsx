@@ -91,6 +91,7 @@ export function ReservationReportImportPage() {
   const [mappingPreviewing, setMappingPreviewing] = useState(false)
   const [importing, setImporting] = useState(false)
   const [result, setResult] = useState<ReservationReportImportResult | null>(null)
+  const [resultMonth, setResultMonth] = useState(currentYearMonth())
   const [courses, setCourses] = useState<ReservationReportCourse[]>([])
   const [courseError, setCourseError] = useState<string | null>(null)
   const [courseLoading, setCourseLoading] = useState(true)
@@ -99,6 +100,7 @@ export function ReservationReportImportPage() {
   const [savedLoading, setSavedLoading] = useState(true)
   const [savedError, setSavedError] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const savedRequestRef = useRef(0)
 
   const loadCourses = useCallback(async () => {
     setCourseLoading(true)
@@ -114,21 +116,24 @@ export function ReservationReportImportPage() {
     }
   }, [])
 
-  const loadSavedEntries = useCallback(async (month = savedMonth) => {
+  const loadSavedEntries = useCallback(async (month: string) => {
     const range = yearMonthRange(month)
     if (!range) return
+    const requestId = ++savedRequestRef.current
     setSavedLoading(true)
     setSavedError(null)
     try {
       const payload = await listReservationReportEntries(range.from, range.to)
+      if (requestId !== savedRequestRef.current) return
       setSavedEntries(payload.items ?? [])
     } catch (error) {
+      if (requestId !== savedRequestRef.current) return
       setSavedEntries([])
       setSavedError(resourceErrorText(error))
     } finally {
-      setSavedLoading(false)
+      if (requestId === savedRequestRef.current) setSavedLoading(false)
     }
-  }, [savedMonth])
+  }, [])
 
   useEffect(() => {
     void loadCourses()
@@ -152,8 +157,10 @@ export function ReservationReportImportPage() {
     [currentPreviewMonth, preview],
   )
   const previewTotals = useMemo(
-    () => (preview ? sumRows(preview.rows) : null),
-    [preview],
+    () => (preview
+      ? sumRows(preview.rows.filter(row => row.date.startsWith(`${currentPreviewMonth}-`)))
+      : null),
+    [currentPreviewMonth, preview],
   )
   const courseNames = useMemo(
     () => new Map(courses.map(course => [course.id, course.shortName?.trim() || course.name] as const)),
@@ -306,6 +313,7 @@ export function ReservationReportImportPage() {
       setResult(saved)
       setStage('result')
       const importedMonth = reportMonth(preview.rows)
+      setResultMonth(importedMonth)
       setSavedMonth(importedMonth)
       await loadSavedEntries(importedMonth)
       showToast({
@@ -530,7 +538,7 @@ export function ReservationReportImportPage() {
       {stage === 'result' && result ? (
         <Panel title={t('reservationReportImport:result.title')} description={t('reservationReportImport:result.description')} className="reservation-report-panel">
           <div className="reservation-report-result-heading"><CheckCircle2 aria-hidden="true" /><strong>{t('reservationReportImport:result.title')}</strong></div>
-          <ResultStats result={result} />
+          <ResultStats result={result} month={resultMonth} locale={localeForDate(i18n.language)} />
           <div className="reservation-report-form-actions">
             <Button type="button" variant="primary" onClick={startOver}>
               <Upload /> {t('reservationReportImport:action.startOver')}
@@ -710,13 +718,23 @@ function ReportTotals({ totals }: { totals: ReturnType<typeof sumRows> }) {
   )
 }
 
-function ResultStats({ result }: { result: ReservationReportImportResult }) {
+function ResultStats({
+  result,
+  month,
+  locale,
+}: {
+  result: ReservationReportImportResult
+  month: string
+  locale: string
+}) {
   const { t } = useTranslation('reservationReportImport')
   return (
     <div className="reservation-report-result-grid">
       <div><span>{t('result.created')}</span><strong>{result.createdCount}</strong></div>
       <div><span>{t('result.updated')}</span><strong>{result.updatedCount}</strong></div>
       <div><span>{t('result.unchanged')}</span><strong>{result.unchangedCount}</strong></div>
+      <div><span>{t('result.month')}</span><strong>{formatMonth(month, locale)}</strong></div>
+      <div><span>{t('result.facilities')}</span><strong>{result.totals.facilityCount}</strong></div>
       <div><span>{t('result.rows')}</span><strong>{result.totals.rowCount}</strong></div>
       <div><span>{t('result.groups')}</span><strong>{result.totals.groupCount}</strong></div>
       <div><span>{t('result.caddie')}</span><strong>{result.totals.caddieAttachedGroupCount}</strong></div>

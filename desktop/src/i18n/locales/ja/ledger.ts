@@ -36,6 +36,8 @@ export const ledger = {
     bookingsOnly: '予約のみ',
     /** Shown when the rows were derived rather than generated. */
     derivedNotice: 'この列は受付枠が作られていないため、空き数は分かりません。',
+    /** Sends the desk to the course screen that links the resource and builds the slots. */
+    openCourseSetup: 'このコースの受付枠を開く',
   },
   head: {
     time: '時刻',

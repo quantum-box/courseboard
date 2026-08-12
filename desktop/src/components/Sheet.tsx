@@ -13,6 +13,9 @@ import type { ReactNode } from 'react'
  * so the centred modal can be re-anchored to the right edge.
  */
 const SHEET_CLASSNAME = [
+  // Named so the stylesheet can reach the panel itself — the close glyph is a
+  // direct child of it, and it is the one control here that wants a big target.
+  'courseboard-sheet',
   // Anchor right, full height, instead of centred.
   'left-auto right-0 top-0 h-dvh max-h-dvh w-full max-w-lg translate-x-0 translate-y-0',
   'rounded-none border-y-0 border-r-0',

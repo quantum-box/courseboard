@@ -21,7 +21,7 @@ use crate::course::domain::{
     ReservationReportAnalyzeGateway, ReservationReportDayPart, ReservationReportEntryQuery,
     ReservationReportGateway, ReservationReportUpsertSummary, TabularAnalyzeMapping,
     TabularAnalyzeMappingField, TabularAnalyzeResult, TabularAnalyzeRow,
-    DAILY_RESERVATION_STATUS_SOURCE, TABULAR_RESERVATION_REPORT_SOURCE,
+    TABULAR_RESERVATION_REPORT_SOURCE,
 };
 
 const CONFIG_PATH: &str = "/v1/erp/extensions/golf_course/config";
@@ -219,12 +219,30 @@ impl ReservationReportGateway for FieldReservationReportGateway {
                 .push(entry);
         }
 
-        let target_courses: std::collections::HashSet<&str> = grouped.keys().copied().collect();
+        let source_keys: std::collections::HashSet<&str> = entries
+            .iter()
+            .map(|entry| entry.source_course_key())
+            .collect();
         let mut summary = ReservationReportUpsertSummary::default();
-        for (golf_course_id, entries) in grouped {
-            let current = self
-                .read_store_or_tenant_config(credentials, golf_course_id)
-                .await?;
+        let mut plans = Vec::<(String, Value, Value)>::new();
+
+        // Read and prepare every affected course before the first write. This
+        // also removes remapped source rows from a course that remains a target
+        // for another source facility.
+        for course in courses.iter().filter(|course| course.is_active()) {
+            let golf_course_id = course.id().as_str();
+            let target_entries = grouped.get(golf_course_id);
+            let current = if target_entries.is_some() {
+                self.read_store_or_tenant_config(credentials, golf_course_id)
+                    .await?
+            } else if let Some(config) = self
+                .read_scope_config(credentials, "store", Some(golf_course_id))
+                .await?
+            {
+                config
+            } else {
+                continue;
+            };
             let mut next = object_config(&current)?;
             let mut report = report_object(next.get(REPORT_KEY))?;
             let mut row_map = report
@@ -236,17 +254,25 @@ impl ReservationReportGateway for FieldReservationReportGateway {
                 })
                 .transpose()?
                 .unwrap_or_default();
-            let mut changed = false;
-            let first_entry = entries.first().copied();
-            for entry in entries {
+            let original_row_map = row_map.clone();
+            row_map.retain(|_, value| {
+                !value
+                    .get("sourceCourseKey")
+                    .and_then(Value::as_str)
+                    .is_some_and(|key| source_keys.contains(key))
+            });
+
+            let first_entry = target_entries.and_then(|entries| entries.first().copied());
+            for entry in target_entries.into_iter().flatten() {
                 let key = row_key(entry.date(), entry.day_part());
-                let previous = row_map.get(&key).cloned();
+                let previous = original_row_map.get(&key).cloned();
                 let unchanged = previous
                     .as_ref()
                     .map(|value| row_matches_entry(value, entry))
                     .unwrap_or(false);
                 if unchanged {
                     summary.unchanged_count += 1;
+                    row_map.insert(key, previous.expect("unchanged row exists"));
                     continue;
                 }
                 let updated_at = Utc::now();
@@ -256,13 +282,12 @@ impl ReservationReportGateway for FieldReservationReportGateway {
                 } else {
                     summary.created_count += 1;
                 }
-                changed = true;
             }
-            if changed {
+            if row_map != original_row_map {
                 if let Some(first) = first_entry {
                     report.insert(
                         "sourceSystem".into(),
-                        Value::String(DAILY_RESERVATION_STATUS_SOURCE.into()),
+                        Value::String(first.source_system().into()),
                     );
                     report.insert(
                         "sourceCourseKey".into(),
@@ -278,54 +303,26 @@ impl ReservationReportGateway for FieldReservationReportGateway {
                     );
                     report.insert("updatedAt".into(), Value::String(Utc::now().to_rfc3339()));
                 }
-                report.insert(ROWS_KEY.into(), Value::Object(row_map));
-                next.insert(REPORT_KEY.into(), Value::Object(report));
-                self.write_store_config(credentials, golf_course_id, &Value::Object(next))
-                    .await?;
+            }
+            report.insert(ROWS_KEY.into(), Value::Object(row_map));
+            next.insert(REPORT_KEY.into(), Value::Object(report));
+            let next = Value::Object(next);
+            if next != current {
+                plans.push((golf_course_id.to_string(), current, next));
             }
         }
 
-        // A source facility can be remapped to another active course. Remove
-        // that source's old rows from every other store only after all new
-        // destinations have been written, so a failed destination write cannot
-        // leave the report missing from both courses.
-        let source_keys: std::collections::HashSet<&str> = entries
-            .iter()
-            .map(|entry| entry.source_course_key())
-            .collect();
-        for course in courses.iter().filter(|course| course.is_active()) {
-            if target_courses.contains(course.id().as_str()) {
-                continue;
+        let mut written = Vec::<(&str, &Value)>::new();
+        for (course_id, original, next) in &plans {
+            if let Err(error) = self.write_store_config(credentials, course_id, next).await {
+                for (written_course_id, written_original) in written.into_iter().rev() {
+                    let _ = self
+                        .write_store_config(credentials, written_course_id, written_original)
+                        .await;
+                }
+                return Err(error);
             }
-            let Some(current) = self
-                .read_scope_config(credentials, "store", Some(course.id().as_str()))
-                .await?
-            else {
-                continue;
-            };
-            let mut next = object_config(&current)?;
-            let Some(report_value) = next.get(REPORT_KEY) else {
-                continue;
-            };
-            let mut report = report_object(Some(report_value))?;
-            let Some(rows_value) = report.get_mut(ROWS_KEY) else {
-                continue;
-            };
-            let rows = rows_value.as_object_mut().ok_or(CourseError::Provider(
-                "reservation report rows config is not an object".into(),
-            ))?;
-            let before = rows.len();
-            rows.retain(|_, value| {
-                !value
-                    .get("sourceCourseKey")
-                    .and_then(Value::as_str)
-                    .is_some_and(|key| source_keys.contains(key))
-            });
-            if rows.len() != before {
-                next.insert(REPORT_KEY.into(), Value::Object(report));
-                self.write_store_config(credentials, course.id().as_str(), &Value::Object(next))
-                    .await?;
-            }
+            written.push((course_id.as_str(), original));
         }
         Ok(summary)
     }
@@ -415,7 +412,11 @@ impl ReservationReportAnalyzeGateway for FieldReservationReportGateway {
             Some("xls") => "application/vnd.ms-excel",
             Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             Some("pdf") => "application/pdf",
-            _ => "application/octet-stream",
+            _ => {
+                return Err(CourseError::BadRequest(
+                    "reservation report must be a csv, xls, xlsx, or pdf file",
+                ))
+            }
         };
         let part = reqwest::multipart::Part::bytes(bytes.to_vec())
             .file_name(filename.to_string())
@@ -530,7 +531,7 @@ fn report_object(value: Option<&Value>) -> Result<Map<String, Value>, CourseErro
 
 fn entry_value(entry: &ExternalReservationReportEntry, updated_at: DateTime<Utc>) -> Value {
     json!({
-        "sourceSystem": DAILY_RESERVATION_STATUS_SOURCE,
+        "sourceSystem": entry.source_system(),
         "sourceCourseKey": entry.source_course_key(),
         "sourceCourseName": entry.source_course_name(),
         "golfCourseId": entry.golf_course_id().as_str(),
@@ -544,7 +545,7 @@ fn entry_value(entry: &ExternalReservationReportEntry, updated_at: DateTime<Utc>
 }
 
 fn row_matches_entry(value: &Value, entry: &ExternalReservationReportEntry) -> bool {
-    value.get("sourceSystem").and_then(Value::as_str) == Some(DAILY_RESERVATION_STATUS_SOURCE)
+    value.get("sourceSystem").and_then(Value::as_str) == Some(entry.source_system())
         && value.get("sourceCourseKey").and_then(Value::as_str) == Some(entry.source_course_key())
         && value.get("sourceCourseName").and_then(Value::as_str) == Some(entry.source_course_name())
         && value.get("golfCourseId").and_then(Value::as_str)
@@ -611,6 +612,7 @@ mod tests {
         tenant: Value,
         stores: Mutex<HashMap<String, Value>>,
         patches: Mutex<Vec<Value>>,
+        fail_on_patch: Mutex<Option<usize>>,
     }
 
     fn test_credentials() -> GatewayCredentials<'static> {
@@ -662,7 +664,19 @@ mod tests {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        state.patches.lock().expect("patch lock").push(body.clone());
+        let mut patches = state.patches.lock().expect("patch lock");
+        let patch_number = patches.len() + 1;
+        patches.push(body.clone());
+        let mut fail_on_patch = state.fail_on_patch.lock().expect("fail lock");
+        if *fail_on_patch == Some(patch_number) {
+            *fail_on_patch = None;
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(json!({ "message": "injected failure" })),
+            );
+        }
+        drop(fail_on_patch);
+        drop(patches);
         state
             .stores
             .lock()
@@ -926,6 +940,50 @@ mod tests {
             .expect("list after remap");
         assert_eq!(listed_after_remap.len(), 1);
         assert_eq!(listed_after_remap[0].golf_course_id().as_str(), "course-2");
+    }
+
+    #[tokio::test]
+    async fn multi_course_failure_rolls_back_prior_writes() {
+        let original_one = json!({ "kept": "one" });
+        let original_two = json!({ "kept": "two" });
+        let state = Arc::new(ConfigState {
+            stores: Mutex::new(HashMap::from([
+                ("course-1".into(), original_one.clone()),
+                ("course-2".into(), original_two.clone()),
+            ])),
+            fail_on_patch: Mutex::new(Some(2)),
+            ..Default::default()
+        });
+        let app = Router::new()
+            .route(CONFIG_PATH, get(get_config).patch(patch_config))
+            .with_state(state.clone());
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldReservationReportGateway::new(reqwest::Client::new(), Some(&base_url));
+        let first = entry();
+        let second_row = ReservationReportRow::new(
+            "滝の",
+            "滝の",
+            NaiveDate::from_ymd_opt(2026, 7, 1).unwrap(),
+            ReservationReportDayPart::Morning,
+            2,
+            0,
+        )
+        .unwrap();
+        let second =
+            ExternalReservationReportEntry::new(&second_row, CourseId::new("course-2"), "hash");
+
+        assert!(gateway
+            .upsert_entries(
+                test_credentials(),
+                &[first, second],
+                &[active_course("course-1"), active_course("course-2")],
+            )
+            .await
+            .is_err());
+
+        let stores = state.stores.lock().expect("store lock");
+        assert_eq!(stores["course-1"], original_one);
+        assert_eq!(stores["course-2"], original_two);
     }
 
     #[tokio::test]

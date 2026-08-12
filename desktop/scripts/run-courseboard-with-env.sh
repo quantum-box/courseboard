@@ -34,4 +34,5 @@ case "${TACHYON_FIELD_API_URL}" in
 esac
 
 cd "$ROOT"
+cargo run --bin courseboard-migrate
 exec cargo run --bin courseboard "$@"

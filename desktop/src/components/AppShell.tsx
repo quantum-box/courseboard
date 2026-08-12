@@ -44,8 +44,8 @@ import {
   CircleDollarSign,
   CircleHelp,
   ClipboardCheck,
-  Clock,
   CreditCard,
+  FileUp,
   FolderTree,
   FileSpreadsheet,
   Gauge,
@@ -98,6 +98,7 @@ export type NavigationRoute =
   | 'golf/reservation-report-import'
   | 'golf/timeline'
   | 'golf/products'
+  | 'golf/reservation-import'
   | 'course-map'
   | 'golf/caddies'
   | 'golf/caddies/dispatch'
@@ -143,6 +144,9 @@ export const navigationSections: NavigationSection[] = [
       // off it, and a visitor's second visit only registers because it exists.
       { route: 'golf/customers', icon: BookUser },
       { route: 'golf/products', icon: CalendarCheck },
+      // The club's booking system is the source of the month's bookings; this
+      // is where they come in, so it sits with the board they land on.
+      { route: 'golf/reservation-import', icon: FileUp },
       // Courses stopped being a one-time master when the bookable week moved
       // onto them: opening hours and tee-time generation are seasonal work.
       { route: 'golf/courses', icon: FolderTree },
@@ -152,9 +156,10 @@ export const navigationSections: NavigationSection[] = [
     id: 'caddie',
     showLabel: true,
     items: [
+      // Attendance moved inside the roster screen as a tab; the daily punch
+      // board is a view of the same people, not a separate destination.
       { route: 'golf/caddies', icon: Users },
       { route: 'golf/caddies/dispatch', icon: ClipboardCheck },
-      { route: 'golf/caddies/attendance', icon: Clock },
       { route: 'golf/caddies/shifts', icon: CalendarDays },
       { route: 'golf/caddies/payroll', icon: CircleDollarSign },
     ],
@@ -282,7 +287,10 @@ function focusableWithin(root: HTMLElement) {
     .filter(element => element.getClientRects().length > 0)
 }
 
-const CADDIE_SUBVIEWS = new Set(['dispatch', 'attendance', 'shifts', 'payroll'])
+// `attendance` is intentionally absent: it renders as a tab inside the
+// roster screen, so its route counts as the roster route for nav/title
+// purposes (see CADDIE_SUBVIEWS usage below).
+const CADDIE_SUBVIEWS = new Set(['dispatch', 'shifts', 'payroll'])
 
 function caddieRouteSegment(route: string) {
   if (!route.startsWith('golf/caddies/')) return null

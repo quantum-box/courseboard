@@ -36,6 +36,10 @@ export const nav = {
       label: 'プレー商品',
       description: 'プレー料金プランと受付できる枠',
     },
+    'golf/reservation-import': {
+      label: '予約の取り込み',
+      description: '予約システムのファイルから日ごとの組数を入れる',
+    },
     'course-map': {
       label: 'コースマップ',
       description: 'カートが今どこにいるかを見る',

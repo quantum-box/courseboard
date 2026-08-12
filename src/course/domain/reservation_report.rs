@@ -363,6 +363,7 @@ impl ReservationReportFacility {
 /// Aggregate returned by the parser and used for preview/import totals.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReservationReport {
+    source_system: String,
     source_file_sha256: String,
     facilities: Vec<ReservationReportFacility>,
     rows: Vec<ReservationReportRow>,
@@ -379,11 +380,36 @@ impl ReservationReport {
                 "reservation report contains no facility rows",
             ));
         }
+        let group_count = rows.iter().try_fold(0_i64, |total, row| {
+            total
+                .checked_add(row.group_count())
+                .ok_or(CourseError::BadRequest(
+                    "reservation report group totals are too large",
+                ))
+        })?;
+        let caddie_attached_group_count = rows.iter().try_fold(0_i64, |total, row| {
+            total
+                .checked_add(row.caddie_attached_group_count())
+                .ok_or(CourseError::BadRequest(
+                    "reservation report caddie totals are too large",
+                ))
+        })?;
+        let _ = (group_count, caddie_attached_group_count);
         Ok(Self {
+            source_system: DAILY_RESERVATION_STATUS_SOURCE.to_string(),
             source_file_sha256: source_file_sha256.into(),
             facilities,
             rows,
         })
+    }
+
+    pub fn with_source_system(mut self, source_system: impl Into<String>) -> Self {
+        self.source_system = source_system.into();
+        self
+    }
+
+    pub fn source_system(&self) -> &str {
+        &self.source_system
     }
 
     pub fn source_file_sha256(&self) -> &str {
@@ -436,6 +462,7 @@ pub struct ExternalReservationReportEntry {
     group_count: i64,
     caddie_attached_group_count: i64,
     source_file_sha256: String,
+    source_system: String,
     updated_at: Option<DateTime<Utc>>,
 }
 
@@ -455,6 +482,7 @@ impl ExternalReservationReportEntry {
             group_count: row.group_count(),
             caddie_attached_group_count: row.caddie_attached_group_count(),
             source_file_sha256: source_file_sha256.into(),
+            source_system: DAILY_RESERVATION_STATUS_SOURCE.to_string(),
             updated_at: None,
         }
     }
@@ -490,6 +518,7 @@ impl ExternalReservationReportEntry {
             group_count,
             caddie_attached_group_count,
             source_file_sha256: source_file_sha256.into(),
+            source_system: DAILY_RESERVATION_STATUS_SOURCE.to_string(),
             updated_at,
         })
     }
@@ -521,6 +550,9 @@ impl ExternalReservationReportEntry {
     pub fn source_file_sha256(&self) -> &str {
         &self.source_file_sha256
     }
+    pub fn source_system(&self) -> &str {
+        &self.source_system
+    }
     pub fn updated_at(&self) -> Option<DateTime<Utc>> {
         self.updated_at
     }
@@ -532,6 +564,11 @@ impl ExternalReservationReportEntry {
     ) -> Self {
         self.id = Some(id.into());
         self.updated_at = updated_at;
+        self
+    }
+
+    pub fn with_source_system(mut self, source_system: impl Into<String>) -> Self {
+        self.source_system = source_system.into();
         self
     }
 }

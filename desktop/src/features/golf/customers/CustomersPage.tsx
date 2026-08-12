@@ -11,11 +11,12 @@ import {
   Notice,
   Panel,
 } from '../../../components/Page'
+import { Sheet } from '../../../components/Sheet'
 import { navigate, navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { MembershipBadge } from './MembershipBadge'
 import { customerDistinguisher, customersPath, type Customer } from './models'
-import { useCustomerSearch } from './useCustomerSearch'
+import { customerSearchParameter, useCustomerSearch } from './useCustomerSearch'
 
 /**
  * The customer ledger.
@@ -33,9 +34,20 @@ export function CustomersPage() {
   const [term, setTerm] = useState('')
   const search = useCustomerSearch(term)
   const [creating, setCreating] = useState(false)
+  const trimmedTerm = term.trim()
+  const searchParameter = customerSearchParameter(term)
+  const searchCondition = searchParameter
+    ? t(`customers:search.condition.${searchParameter}`)
+    : ''
 
   return (
     <div className="page-stack">
+      <div className="page-toolbar">
+        <Button type="button" variant="primary" onClick={() => setCreating(true)}>
+          <UserPlus /> {t('customers:create.open')}
+        </Button>
+      </div>
+
       <Panel title={t('customers:search.title')} description={t('customers:search.description')}>
         <Field label={t('customers:search.label')}>
           <Input
@@ -50,12 +62,14 @@ export function CustomersPage() {
             the desk still has to be able to register someone. */}
         {search.error ? <Notice tone="danger">{search.error}</Notice> : null}
 
-        {!search.searching && !search.error && term.trim().length >= 2
+        {!search.searching && !search.error && search.completedQuery === trimmedTerm
           && search.candidates.length === 0 ? (
-          <Notice tone="info">{t('customers:search.noMatches', { term: term.trim() })}</Notice>
+          <Notice tone="info">
+            {t('customers:search.noMatches', { term: trimmedTerm, condition: searchCondition })}
+          </Notice>
         ) : null}
 
-        {term.trim().length < 2 ? (
+        {!trimmedTerm ? (
           <Notice tone="info">{t('customers:search.prompt')}</Notice>
         ) : null}
 
@@ -80,26 +94,21 @@ export function CustomersPage() {
             </li>
           ))}
         </ul>
-
-        <Button type="button" variant="ghost" size="sm" onClick={() => setCreating(true)}>
-          <UserPlus />
-          {t('customers:create.open')}
-        </Button>
       </Panel>
 
-      {creating ? (
-        <NewCustomerPanel
-          onCancel={() => setCreating(false)}
-          onCreated={customer => {
-            setCreating(false)
-            navigate(`golf/customers/${customer.id}`)
-          }}
-        />
-      ) : null}
-
+      <NewCustomerSheet
+        open={creating}
+        onOpenChange={setCreating}
+        onCreated={customer => {
+          setCreating(false)
+          navigate(`golf/customers/${customer.id}`)
+        }}
+      />
     </div>
   )
 }
+
+const EMPTY_DRAFT = { name: '', nameKana: '', phone: '', email: '' }
 
 /**
  * Registering someone the desk could not find.
@@ -107,17 +116,28 @@ export function CustomersPage() {
  * Only the name is required. A phone booking often yields nothing else, and
  * demanding an email here is exactly what kept visitors out of the ledger
  * before PLT-3358.
+ *
+ * A sheet rather than a route: this is a quick aside while the desk is on the
+ * phone, not a destination — the search screen (and whatever the desk typed
+ * into it) should still be there underneath when it closes.
  */
-function NewCustomerPanel({
-  onCancel,
+function NewCustomerSheet({
+  open,
+  onOpenChange,
   onCreated,
 }: {
-  onCancel: () => void
+  open: boolean
+  onOpenChange: (open: boolean) => void
   onCreated: (customer: Customer) => void
 }) {
   const { t } = useTranslation(['customers', 'common'])
-  const [draft, setDraft] = useState({ name: '', nameKana: '', phone: '', email: '' })
+  const [draft, setDraft] = useState(EMPTY_DRAFT)
   const [saving, setSaving] = useState(false)
+
+  function close(next: boolean) {
+    if (!next) setDraft(EMPTY_DRAFT)
+    onOpenChange(next)
+  }
 
   const save = async () => {
     if (!draft.name.trim()) return
@@ -134,6 +154,7 @@ function NewCustomerPanel({
         }),
       })
       showToast({ tone: 'success', message: t('customers:create.saved') })
+      setDraft(EMPTY_DRAFT)
       onCreated(created)
     } catch (error) {
       showToast({
@@ -147,7 +168,12 @@ function NewCustomerPanel({
   }
 
   return (
-    <Panel title={t('customers:create.title')} description={t('customers:create.description')}>
+    <Sheet
+      open={open}
+      onOpenChange={close}
+      title={t('customers:create.title')}
+      description={t('customers:create.description')}
+    >
       <FormGrid columns={2}>
         <Field label={t('customers:field.name')}>
           <Input
@@ -177,7 +203,7 @@ function NewCustomerPanel({
       </FormGrid>
 
       <div className="customer-ledger-actions">
-        <Button type="button" variant="ghost" onClick={onCancel} disabled={saving}>
+        <Button type="button" variant="ghost" onClick={() => close(false)} disabled={saving}>
           {t('common:action.cancel')}
         </Button>
         <Button
@@ -189,6 +215,6 @@ function NewCustomerPanel({
           {saving ? t('common:action.saving') : t('common:action.save')}
         </Button>
       </div>
-    </Panel>
+    </Sheet>
   )
 }
