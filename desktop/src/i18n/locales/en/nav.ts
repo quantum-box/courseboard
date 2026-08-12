@@ -8,6 +8,7 @@ export const nav: DeepPartial<typeof source> = {
     caddie: 'Caddies',
     company: 'Company',
     finance: 'Revenue & billing',
+    dataIntegration: 'Data integration',
     settings: 'Settings',
     account: 'Account',
     tenantMaster: 'Initial setup',
@@ -24,6 +25,10 @@ export const nav: DeepPartial<typeof source> = {
     'golf/customers': {
       label: 'Customers',
       description: 'Members and visitors',
+    },
+    'golf/reservation-report-import': {
+      label: 'Booking report',
+      description: 'Review and save daily CSV, Excel, or PDF totals',
     },
     'golf/timeline': {
       label: 'Timeline',

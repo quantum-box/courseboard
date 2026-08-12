@@ -9,6 +9,7 @@
   - [ADR-0004: UIのplatform APIアクセスはcourseboard-apiを経由する](src/architecture/decisions/ADR-0004-ui-platform-api-access-via-courseboard-api.md)
   - [ADR-0005: ゴルフドメイン知識はCourseBoardが所有する](src/architecture/decisions/ADR-0005-golf-domain-ownership.md)
   - [ADR-0006: 日次サマリは集約需要として扱いダミー予約を作らない](src/architecture/decisions/ADR-0006-aggregate-caddie-demand-without-dummy-reservations.md)
+  - [ADR-0007: 外部予約帳票の集計をField extension configへ暫定保存する](src/architecture/decisions/ADR-0007-external-reservation-report-snapshots.md)
 
 # Business
 
@@ -24,6 +25,8 @@
   - [/v1/me proxyとextension連動テナント選択](src/tasks/in-progress/v1-me-proxy-extension-filter/task.md)
 
 - [Completed]()
+  - [v0.1.10]()
+    - [既存予約システムの日別予約表をとりこむ](src/tasks/completed/v0.1.10/reservation-report-import/task.md)
   - [v0.1.9]()
     - [キャディ配置を予約 ID で上流絞り込みする](src/tasks/completed/v0.1.9/plt-3377-reservation-filter/task.md)
   - [v0.1.4]()

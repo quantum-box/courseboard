@@ -5759,3 +5759,574 @@ button,
   padding-top: 4px;
   color: hsl(var(--nui-muted-foreground));
 }
+
+/* Daily reservation report import: a quiet paper-and-fairway treatment keeps
+ * the long monthly table calm while the green rail makes the four-step path
+ * obvious. New copy and controls intentionally meet the 16px/44px UI rule. */
+.reservation-report-import-page {
+  max-width: 1280px;
+  gap: 18px;
+  padding: 20px 24px 40px;
+}
+
+.reservation-report-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  border-left: 5px solid var(--course-turf);
+  padding: 4px 0 4px 18px;
+}
+
+.reservation-report-hero-mark {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  flex: none;
+  place-items: center;
+  border-radius: 14px;
+  background: hsl(var(--nui-selected));
+  color: hsl(var(--nui-primary));
+}
+
+.reservation-report-hero-mark svg {
+  width: 26px;
+  height: 26px;
+}
+
+.reservation-report-kicker {
+  margin: 0 0 4px;
+  color: hsl(var(--nui-primary));
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.reservation-report-hero h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -.03em;
+  line-height: 1.2;
+}
+
+.reservation-report-hero p:last-child {
+  max-width: 760px;
+  margin: 8px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.reservation-report-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-lg);
+  background: hsl(var(--nui-border));
+}
+
+.reservation-report-step {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: hsl(var(--nui-muted) / .32);
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.reservation-report-step > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+  background: hsl(var(--nui-background));
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.reservation-report-step > strong {
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.reservation-report-step[data-current] {
+  background: hsl(var(--nui-selected));
+  color: hsl(var(--nui-foreground));
+}
+
+.reservation-report-step[data-current] > span {
+  background: hsl(var(--nui-primary));
+  color: hsl(var(--nui-primary-foreground));
+}
+
+.reservation-report-import-page > .notice {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.reservation-report-import-page > .notice > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.reservation-report-import-page .notice-copy > strong,
+.reservation-report-import-page .notice-copy > div {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.reservation-report-panel {
+  gap: 16px;
+}
+
+.reservation-report-panel .panel-header h2 {
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+.reservation-report-panel .panel-header p {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.reservation-report-panel > form,
+.reservation-report-panel > .reservation-report-mapping-list,
+.reservation-report-panel > .reservation-report-column-mapping,
+.reservation-report-panel > .reservation-report-table-scroll,
+.reservation-report-panel > .reservation-report-empty-month,
+.reservation-report-panel > .reservation-report-totals,
+.reservation-report-panel > .reservation-report-result-grid,
+.reservation-report-panel > .reservation-report-result-heading,
+.reservation-report-panel > .reservation-report-preview-toolbar,
+.reservation-report-panel > .reservation-report-saved-toolbar {
+  margin: 0;
+}
+
+.reservation-report-choose-form {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr);
+  gap: 18px;
+  padding: 18px;
+}
+
+.reservation-report-import-page .field {
+  gap: 8px;
+}
+
+.reservation-report-import-page .field-label {
+  min-height: 24px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.reservation-report-import-page .field-label .inline-flex {
+  min-height: 24px;
+  height: auto;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.reservation-report-import-page .field-hint,
+.reservation-report-import-page .optional {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.reservation-report-import-page .loading-state,
+.reservation-report-import-page .notice-detail {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.reservation-report-import-page .native-select,
+.reservation-report-import-page input[type='month'] {
+  min-height: 44px;
+  height: 44px;
+  padding: 8px 38px 8px 12px;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.reservation-report-import-page input[type='month'] {
+  width: min(260px, 100%);
+  border: 1px solid hsl(var(--nui-border-strong));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-foreground));
+}
+
+.reservation-report-import-page button {
+  min-height: 44px;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.reservation-report-file-control {
+  position: relative;
+  display: flex;
+  min-height: 44px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.reservation-report-file-control > input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.reservation-report-file-name {
+  min-width: 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.reservation-report-field-error {
+  display: block;
+  color: hsl(var(--nui-destructive));
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.reservation-report-form-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.reservation-report-mapping-list {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-border));
+}
+
+.reservation-report-mapping-row {
+  display: grid;
+  grid-template-columns: minmax(180px, .9fr) minmax(220px, 1.3fr) auto;
+  align-items: end;
+  gap: 16px;
+  min-height: 90px;
+  padding: 14px 16px;
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.reservation-report-source {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reservation-report-source strong {
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.reservation-report-source span {
+  color: hsl(var(--nui-muted-foreground));
+  font-family: var(--nui-font-mono);
+  font-size: 16px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.reservation-report-mapping-row .field-label {
+  display: none;
+}
+
+.reservation-report-mapping-row .inline-flex {
+  min-height: 44px;
+  align-self: center;
+  font-size: 16px;
+}
+
+.reservation-report-column-mapping {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .28);
+}
+
+.reservation-report-column-mapping h3 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.reservation-report-column-mapping p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.reservation-report-mapping-note {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.reservation-report-column-mapping td .native-select {
+  min-width: 180px;
+}
+
+.reservation-report-column-mapping td > strong,
+.reservation-report-column-mapping td > small {
+  display: block;
+}
+
+.reservation-report-column-mapping td > small {
+  max-width: 260px;
+  margin-top: 4px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.reservation-report-column-approval {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid hsl(var(--nui-border-strong));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+  cursor: pointer;
+}
+
+.reservation-report-column-approval input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: hsl(var(--nui-primary));
+}
+
+.reservation-report-column-approval span,
+.reservation-report-column-approval small {
+  display: block;
+}
+
+.reservation-report-column-approval small {
+  margin-top: 4px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.reservation-report-preview-toolbar,
+.reservation-report-saved-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.reservation-report-preview-count {
+  padding-bottom: 8px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.reservation-report-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.reservation-report-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.reservation-report-table th,
+.reservation-report-table td {
+  min-height: 44px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 10px 14px;
+  font-size: 16px;
+  line-height: 24px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.reservation-report-table th {
+  height: 44px;
+  background: hsl(var(--nui-surface));
+  color: hsl(var(--nui-muted-foreground));
+  font-weight: 700;
+}
+
+.reservation-report-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.reservation-report-table .align-right {
+  text-align: right;
+}
+
+.reservation-report-empty-month {
+  min-height: 80px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .45);
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.reservation-report-totals,
+.reservation-report-result-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-border));
+}
+
+.reservation-report-result-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.reservation-report-totals > div,
+.reservation-report-result-grid > div {
+  display: flex;
+  min-height: 84px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 14px 16px;
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.reservation-report-totals span,
+.reservation-report-result-grid span {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.reservation-report-totals strong,
+.reservation-report-result-grid strong {
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.reservation-report-result-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: hsl(var(--nui-success));
+  font-size: 20px;
+  line-height: 1.4;
+}
+
+.reservation-report-result-heading svg {
+  width: 28px;
+  height: 28px;
+}
+
+.reservation-report-saved-panel .panel-actions button {
+  min-width: 44px;
+}
+
+@media (max-width: 800px) {
+  .reservation-report-import-page {
+    padding: 16px 12px 32px;
+  }
+
+  .reservation-report-hero h1 {
+    font-size: 24px;
+  }
+
+  .reservation-report-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reservation-report-choose-form {
+    grid-template-columns: 1fr;
+  }
+
+  .reservation-report-mapping-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 10px;
+  }
+
+  .reservation-report-mapping-row .inline-flex {
+    justify-self: start;
+  }
+
+  .reservation-report-totals,
+  .reservation-report-result-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .reservation-report-hero {
+    gap: 10px;
+    padding-left: 12px;
+  }
+
+  .reservation-report-hero-mark {
+    width: 44px;
+    height: 44px;
+  }
+
+  .reservation-report-hero-mark svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .reservation-report-kicker,
+  .reservation-report-hero p:last-child,
+  .reservation-report-step > strong {
+    font-size: 16px;
+  }
+
+  .reservation-report-step {
+    min-height: 58px;
+    padding: 8px 10px;
+  }
+
+  .reservation-report-step > span {
+    width: 30px;
+    height: 30px;
+  }
+
+  .reservation-report-form-actions {
+    justify-content: stretch;
+  }
+
+  .reservation-report-form-actions > button {
+    flex: 1 1 100%;
+  }
+}

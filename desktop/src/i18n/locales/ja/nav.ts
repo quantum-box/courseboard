@@ -6,6 +6,7 @@ export const nav = {
     caddie: 'キャディ',
     company: '会社',
     finance: '売上と請求',
+    dataIntegration: 'データ連携',
     settings: '設定',
     account: 'アカウント',
     tenantMaster: '最初に決める設定',
@@ -22,6 +23,10 @@ export const nav = {
     'golf/customers': {
       label: '顧客台帳',
       description: '会員とビジターの記録',
+    },
+    'golf/reservation-report-import': {
+      label: '予約表をとりこむ',
+      description: 'CSV・Excel・PDFの日別集計を確認して保存する',
     },
     'golf/timeline': {
       label: 'タイムライン',

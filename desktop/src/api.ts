@@ -104,7 +104,9 @@ export function fieldPlatformId() {
 
 function requestHeaders(init?: RequestInit, token?: string) {
   const headers = new Headers(init?.headers)
-  if (!headers.has('Content-Type') && init?.body) {
+  // Let the browser add the multipart boundary for FormData. Setting JSON here
+  // makes xlsx uploads fail before the CourseBoard endpoint can parse them.
+  if (!headers.has('Content-Type') && init?.body && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
   const operatorId = apiAuthContext?.operatorId ?? fieldTenant()
@@ -131,7 +133,7 @@ function requestHeaders(init?: RequestInit, token?: string) {
 
 function publicRequestHeaders(init?: RequestInit) {
   const headers = new Headers(init?.headers)
-  if (!headers.has('Content-Type') && init?.body) {
+  if (!headers.has('Content-Type') && init?.body && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
   return headers

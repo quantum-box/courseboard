@@ -139,6 +139,102 @@ describe('mockFieldApi', () => {
     expect((extensionStatus.data as { extensionKey: string }).extensionKey).toBe('golf_course')
   })
 
+  it('previews and upserts the three-course reservation report fixture idempotently', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    if (typeof sessionStorage !== 'undefined') {
+      sessionStorage.removeItem('courseboard.mock.ledgerWrites.reservationReportEntries')
+    }
+
+    const form = new FormData()
+    form.append('year', '2026')
+    form.append('file', new File(['mock'], 'daily.xlsx'))
+    const preview = resolveMockFieldApiJson('/v1/course/reservation-report-imports/preview', {
+      method: 'POST',
+      body: form,
+    })
+    expect(preview.kind).toBe('hit')
+    if (preview.kind !== 'hit') return
+    const previewBody = preview.data as {
+      facilities: unknown[]
+      rows: unknown[]
+      analysis?: { mapping?: { fields?: unknown[] } }
+      normalizedFingerprint?: string
+      totals: { facilityCount: number; rowCount: number; groupCount: number; caddieAttachedGroupCount: number }
+    }
+    expect(previewBody.facilities).toHaveLength(3)
+    expect(previewBody.rows).toHaveLength(186)
+    expect(previewBody.normalizedFingerprint).toBe('mock-normalized-fingerprint')
+    expect(previewBody.analysis?.mapping?.fields).toHaveLength(5)
+    expect(previewBody.totals).toEqual({
+      facilityCount: 3,
+      rowCount: 186,
+      groupCount: 6314,
+      caddieAttachedGroupCount: 2476,
+    })
+
+    const approvedColumns = {
+      facilityName: '施設',
+      date: '日付',
+      dayPart: '時間帯',
+      groupCount: '組数',
+      caddieAttachedGroupCount: 'キャ付',
+    }
+    const approvedPreviewForm = new FormData()
+    approvedPreviewForm.append('year', '2026')
+    approvedPreviewForm.append('file', new File(['mock'], 'daily.xlsx'))
+    approvedPreviewForm.append('columnMappings', JSON.stringify(approvedColumns))
+    const approvedPreview = resolveMockFieldApiJson('/v1/course/reservation-report-imports/preview', {
+      method: 'POST',
+      body: approvedPreviewForm,
+    })
+    expect(approvedPreview.kind).toBe('hit')
+    if (approvedPreview.kind !== 'hit') return
+    expect(approvedPreview.data).toMatchObject({
+      normalizedFingerprint: 'mock-user-normalized-fingerprint',
+      analysis: { mapping: { mode: 'user' } },
+    })
+
+    const pdfForm = new FormData()
+    pdfForm.append('year', '2026')
+    pdfForm.append('file', new File(['%PDF-1.7'], 'daily.pdf', { type: 'application/pdf' }))
+    const pdfPreview = resolveMockFieldApiJson('/v1/course/reservation-report-imports/preview', {
+      method: 'POST',
+      body: pdfForm,
+    })
+    expect(pdfPreview.kind).toBe('hit')
+
+    const firstImportForm = new FormData()
+    firstImportForm.append('year', '2026')
+    firstImportForm.append('courseMappings', JSON.stringify({
+      真駒内: 'course_east',
+      滝の: 'course_west',
+      羊ケ丘: 'course_hill',
+    }))
+    firstImportForm.append('columnMappings', JSON.stringify(approvedColumns))
+    firstImportForm.append('normalizedFingerprint', 'mock-user-normalized-fingerprint')
+    const firstImport = resolveMockFieldApiJson('/v1/course/reservation-report-imports', {
+      method: 'POST',
+      body: firstImportForm,
+    })
+    expect(firstImport.kind).toBe('hit')
+    if (firstImport.kind !== 'hit') return
+    expect(firstImport.data).toMatchObject({ createdCount: 186, updatedCount: 0, unchangedCount: 0 })
+
+    const secondImport = resolveMockFieldApiJson('/v1/course/reservation-report-imports', {
+      method: 'POST',
+      body: firstImportForm,
+    })
+    expect(secondImport.kind).toBe('hit')
+    if (secondImport.kind !== 'hit') return
+    expect(secondImport.data).toMatchObject({ createdCount: 0, updatedCount: 0, unchangedCount: 186 })
+
+    const saved = resolveMockFieldApiJson('/v1/course/reservation-report-entries?from=2026-07-01&to=2026-07-31')
+    expect(saved.kind).toBe('hit')
+    if (saved.kind !== 'hit') return
+    expect((saved.data as { items: unknown[] }).items).toHaveLength(186)
+  })
+
   it('creates and cancels a reservation through the course-api contract', () => {
     vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
@@ -155,7 +251,7 @@ describe('mockFieldApi', () => {
     }
     const eastBefore = beforeBody.columns.find(column => column.golfCourseId === 'course_east')
     expect(eastBefore?.resourceId).toBe('res_east')
-    expect(eastBefore?.slots.find(slot => slot.teeTime === '07:24')?.bookedGroups).toBe(0)
+    expect(eastBefore?.slots.find(slot => slot.teeTime === '07:40')?.bookedGroups).toBe(0)
 
     // prepaymentPolicy is deliberately absent here: the real CourseBoard
     // usecase adds "none" to its outbound Field request.
@@ -166,7 +262,7 @@ describe('mockFieldApi', () => {
         resourceId: 'res_east',
         reservationServiceId: 'svc:caddie-18',
         date: '2026-07-18',
-        teeTime: '07:24',
+        teeTime: '07:40',
         durationMinutes: 270,
         quantity: 4,
         customerName: '  オフライン予約  ',
@@ -181,7 +277,7 @@ describe('mockFieldApi', () => {
     if (afterCreate.kind !== 'hit') return
     const createdSlot = (afterCreate.data as typeof beforeBody).columns
       .find(column => column.golfCourseId === 'course_east')
-      ?.slots.find(slot => slot.teeTime === '07:24')
+      ?.slots.find(slot => slot.teeTime === '07:40')
     expect(createdSlot?.bookedGroups).toBe(1)
 
     const sheet = resolveMockFieldApiJson('/v1/course/tee-sheet?date=2026-07-18')
@@ -207,7 +303,7 @@ describe('mockFieldApi', () => {
     if (afterCancel.kind !== 'hit') return
     const cancelledSlot = (afterCancel.data as typeof beforeBody).columns
       .find(column => column.golfCourseId === 'course_east')
-      ?.slots.find(slot => slot.teeTime === '07:24')
+      ?.slots.find(slot => slot.teeTime === '07:40')
     expect(cancelledSlot?.bookedGroups).toBe(0)
   })
 

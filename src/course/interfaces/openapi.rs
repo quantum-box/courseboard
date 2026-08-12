@@ -12,6 +12,7 @@ use super::http;
 use super::http_commercial;
 use super::http_customers;
 use super::http_ops;
+use super::http_reservation_report;
 use super::http_reservation_summary;
 use super::http_simulator;
 use crate::{feature_flags, profile_proxy};
@@ -58,6 +59,9 @@ impl Modify for SecurityAddon {
         http::cancel_reservation,
         http::update_reservation_party,
         http::change_reservation_plan,
+        http_reservation_report::preview_reservation_report,
+        http_reservation_report::import_reservation_report,
+        http_reservation_report::list_reservation_report_entries,
         http::seed_demo_board,
         http::get_course_order,
         http::replace_course_order,
@@ -182,6 +186,17 @@ impl Modify for SecurityAddon {
             http::SetBookingHorizonRequest,
             http::ProductSlotDto,
             http::ReplaceProductSlotsRequest,
+            http_reservation_report::ReservationReportFacilityDto,
+            http_reservation_report::ReservationReportRowDto,
+            http_reservation_report::ReservationReportTotalsDto,
+            http_reservation_report::ReservationReportPreviewResponse,
+            http_reservation_report::ReservationReportAnalysisDto,
+            http_reservation_report::ReservationReportMappingDto,
+            http_reservation_report::ReservationReportMappingFieldDto,
+            http_reservation_report::ReservationReportImportResponse,
+            http_reservation_report::ReservationReportEntryDto,
+            http_reservation_report::ReservationReportEntriesResponse,
+            http_reservation_report::ReservationReportEntriesQuery,
             http::CaddieDto,
             http::CaddieAssignmentDto,
             http::CaddieAssignmentQueryParams,

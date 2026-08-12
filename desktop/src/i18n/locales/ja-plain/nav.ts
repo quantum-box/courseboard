@@ -9,6 +9,7 @@ export const nav: DeepPartial<typeof source> = {
     caddie: 'キャディ',
     company: '会社',
     finance: '売上とお金',
+    dataIntegration: 'データ連携',
     tenantMaster: '最初に決めておく設定',
   },
   items: {
@@ -23,6 +24,10 @@ export const nav: DeepPartial<typeof source> = {
     'golf/customers': {
       label: 'お客さま台帳',
       description: '会員と ビジターの きろく',
+    },
+    'golf/reservation-report-import': {
+      label: '予約表を読み込む',
+      description: 'CSV・Excel・PDFの日ごとの数を確かめて保存します',
     },
     'golf/timeline': {
       label: '今日の予定表',

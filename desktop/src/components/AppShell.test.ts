@@ -10,4 +10,12 @@ describe('sidebar navigation', () => {
     expect(routes(navigationSections)).toContain('golf/timeline')
     expect(routes(sidebarNavigationSections)).not.toContain('golf/timeline')
   })
+
+  it('keeps occasional data imports in the final sidebar section', () => {
+    const finalSection = sidebarNavigationSections.at(-1)
+    expect(finalSection?.id).toBe('dataIntegration')
+    expect(finalSection?.items.map(item => item.route)).toEqual([
+      'golf/reservation-report-import',
+    ])
+  })
 })

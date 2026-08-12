@@ -47,6 +47,7 @@ import {
   CreditCard,
   FileUp,
   FolderTree,
+  FileSpreadsheet,
   Gauge,
   House,
   IdCard,
@@ -94,6 +95,7 @@ export type NavigationRoute =
   | 'golf'
   | 'golf/ledger'
   | 'golf/customers'
+  | 'golf/reservation-report-import'
   | 'golf/timeline'
   | 'golf/products'
   | 'golf/reservation-import'
@@ -119,7 +121,7 @@ export type NavigationItem = {
 
 export type NavigationSection = {
   /** Matches a key under `nav:sections`; `showLabel: false` renders the group unlabelled. */
-  id: 'home' | 'courseBooking' | 'caddie' | 'finance' | 'company'
+  id: 'home' | 'courseBooking' | 'caddie' | 'finance' | 'company' | 'dataIntegration'
   showLabel: boolean
   items: NavigationItem[]
 }
@@ -176,6 +178,11 @@ export const navigationSections: NavigationSection[] = [
       { route: 'golf/simulator', icon: Calculator },
       { route: 'cancellation-fees', icon: CreditCard },
     ],
+  },
+  {
+    id: 'dataIntegration',
+    showLabel: true,
+    items: [{ route: 'golf/reservation-report-import', icon: FileSpreadsheet }],
   },
 ]
 

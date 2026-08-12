@@ -24,6 +24,7 @@ import { SettlementPage } from './features/golf/SettlementPage'
 import { SimulatorPage } from './features/golf/SimulatorPage'
 import { ShiftBoardPage } from './features/golf/ShiftBoardPage'
 import { LedgerPage } from './features/golf/ledger/LedgerPage'
+import { ReservationReportImportPage } from './features/golf/reservation-report-import/ReservationReportImportPage'
 import { TimelinePage } from './features/golf/timeline/TimelinePage'
 import { SettingsAdvancedPage } from './features/settings/SettingsAdvancedPage'
 import { CustomerDetailPage } from './features/golf/customers/CustomerDetailPage'
@@ -104,6 +105,7 @@ function RouteContent({ route }: { route: string }) {
     return <ReservationProductsPage serviceId={segment || undefined} />
   }
   if (route === 'golf/ledger') return <LedgerPage />
+  if (route === 'golf/reservation-report-import') return <ReservationReportImportPage />
   if (route === 'golf/timeline') return <TimelinePage />
   if (route === 'golf/caddies/shifts') return <ShiftBoardPage />
   if (route === 'golf/caddies' || route.startsWith('golf/caddies/')) {
