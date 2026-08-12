@@ -478,12 +478,16 @@ pub async fn assign_membership_plan(
 mod tests {
     use super::*;
 
+    use crate::course::domain::DEFAULT_CUSTOMER_SEARCH_LIMIT;
+
     #[test]
-    fn a_search_with_an_empty_box_is_refused_rather_than_listing_everyone() {
+    fn a_search_with_an_empty_box_lists_the_ledger_up_to_the_cap() {
         let params: CustomerSearchParams = serde_json::from_value(serde_json::json!({})).unwrap();
         let query =
-            CustomerSearchQuery::try_new(params.name, params.phone, params.email, params.limit);
-        assert!(query.is_err());
+            CustomerSearchQuery::try_new(params.name, params.phone, params.email, params.limit)
+                .unwrap();
+        assert_eq!(query.name, None);
+        assert_eq!(query.limit, DEFAULT_CUSTOMER_SEARCH_LIMIT);
     }
 
     #[test]

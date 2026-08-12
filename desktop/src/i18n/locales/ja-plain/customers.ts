@@ -9,6 +9,10 @@ export const customers: DeepPartial<typeof source> = {
     label: '名前・カナ・電話ばんごう・メールアドレス',
     placeholder: 'たとえば）本田、ホンダ、090-1234、honda@example.com',
     prompt: '名前・カナ・電話ばんごう・メールアドレスを 入れて ください。名前は 1文字から さがせます。',
+    recent: 'あたらしく のせた 順に {{count}}人まで 出して います。ここに いない 人は、名前・カナ・電話ばんごう・メールアドレスで さがして ください。',
+    emptyLedgerTitle: 'まだ お客さまが いません',
+    emptyLedger: '「お客さまを あたらしく のせる」から 入れられます。',
+    noMatchesTitle: '「{{term}}」に あう 人は いません',
     condition: {
       name: '名前・カナ',
       phone: '電話ばんごう',

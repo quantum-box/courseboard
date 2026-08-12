@@ -122,11 +122,17 @@ impl NewCustomer {
     }
 }
 
-/// What the desk typed into the search box.
+/// What the desk typed into the search box, or nothing at all.
 ///
 /// Field matches `name` against both the display name and its kana, and `phone`
 /// with separators ignored on both sides. `email` is exact — an address is
 /// either the one on file or it is not.
+///
+/// Nothing typed means the ledger itself: the most recent arrivals, capped at
+/// `limit`. A desk that has just written somebody down looks for them where it
+/// wrote them, and a screen that answers an empty box with nothing reads as if
+/// the save was lost. The cap is what keeps this from being a way to walk the
+/// whole tenant a page at a time.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CustomerSearchQuery {
     pub name: Option<String>,
@@ -145,14 +151,6 @@ impl CustomerSearchQuery {
         let name = normalize_optional(name)?;
         let phone = normalize_optional(phone)?;
         let email = normalize_optional(email)?;
-        // A search with nothing in it would list the tenant's whole ledger one
-        // page at a time. The desk never wants that, and it is the shape a
-        // scraper wants most.
-        if name.is_none() && phone.is_none() && email.is_none() {
-            return Err(CourseError::BadRequest(
-                "a customer search needs a name, a phone number, or an email",
-            ));
-        }
         Ok(Self {
             name,
             phone,
@@ -225,9 +223,19 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_search_is_refused_rather_than_listing_the_whole_ledger() {
-        assert!(CustomerSearchQuery::try_new(None, None, None, None).is_err());
-        assert!(CustomerSearchQuery::try_new(Some("  ".into()), None, None, None).is_err());
+    fn an_empty_search_asks_for_the_ledger_itself_rather_than_being_refused() {
+        // What the desk sees on opening the screen, and after a reload: the
+        // ledger, not an empty page that reads as if nothing was ever saved.
+        let query = CustomerSearchQuery::try_new(None, None, None, None).unwrap();
+        assert_eq!(query.name, None);
+        assert_eq!(query.phone, None);
+        assert_eq!(query.email, None);
+        // Still bounded — an empty box is a listing, not a way to walk the
+        // whole tenant a page at a time.
+        assert_eq!(query.limit, DEFAULT_CUSTOMER_SEARCH_LIMIT);
+
+        let blank = CustomerSearchQuery::try_new(Some("  ".into()), None, None, None).unwrap();
+        assert_eq!(blank.name, None);
     }
 
     #[test]
