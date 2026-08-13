@@ -22,7 +22,8 @@ CourseBoardで確認するためには、このゴルフ固有集計を保持す
 
 - Fieldの予約、在庫、商品、請求を作成・更新しない。
 - CourseBoard DBには新しい保存テーブルを作らない。
-- 対応先コースごとのField `store` scope configへ、既存keyを保持したmergeで保存する。
+- Fieldが対応する `tenant` scope configへ、既存keyを保持したmergeで保存する。
+- CourseBoard固有namespaceの下でコースIDごとに行を分離し、複数コースを1回の更新で保存する。
 - namespaced keyのentry mapを日付・午前/午後で一意にし、再取込をupsertにする。
 - この集計を予約明細へ推測変換しない。
 - 将来Fieldに業種非依存の外部集計snapshot capabilityができた場合は、そこへ移行する。
@@ -59,3 +60,4 @@ CourseBoardで確認するためには、このゴルフ固有集計を保持す
 - [ADR-0005](./ADR-0005-golf-domain-ownership.md)
 - [taskdoc](../../tasks/completed/v0.1.10/reservation-report-import/task.md)
 - [設計](../../tasks/completed/v0.1.10/reservation-report-import/design.md)
+- [保存スコープ修正](../../tasks/completed/v0.1.11/fix-reservation-report-tenant-scope/task.md)

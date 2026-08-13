@@ -746,7 +746,19 @@ fn parse_tabular_count(value: &str, _target: &str) -> Result<i64, CourseError> {
 }
 
 fn parse_tabular_date(value: &str, year: i32) -> Result<NaiveDate, CourseError> {
-    let trimmed = value.trim();
+    let normalized = value
+        .trim()
+        .chars()
+        .map(|character| match character {
+            '０'..='９' => char::from_u32(character as u32 - '０' as u32 + '0' as u32)
+                .expect("full-width digit maps to ASCII"),
+            '／' => '/',
+            '－' | '−' | 'ー' => '-',
+            '．' => '.',
+            other => other,
+        })
+        .collect::<String>();
+    let trimmed = normalized.trim();
     if trimmed.is_empty() {
         return Err(CourseError::BadRequest(
             "tabular reservation date is missing",
@@ -782,8 +794,9 @@ fn parse_tabular_date(value: &str, year: i32) -> Result<NaiveDate, CourseError> 
         .unwrap_or(trimmed)
         .trim()
         .trim_end_matches([')', '）']);
-    for format in ["%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d"] {
-        if let Ok(date) = NaiveDate::parse_from_str(first_line, format) {
+    let date_part = first_line.split('T').next().unwrap_or(first_line).trim();
+    for format in ["%Y-%m-%d", "%Y/%m/%d", "%Y.%m.%d", "%Y年%m月%d日"] {
+        if let Ok(date) = NaiveDate::parse_from_str(date_part, format) {
             if date.year() != year {
                 return Err(CourseError::BadRequest(
                     "tabular reservation date year does not match report year",
@@ -792,9 +805,9 @@ fn parse_tabular_date(value: &str, year: i32) -> Result<NaiveDate, CourseError> 
             return Ok(date);
         }
     }
-    let (month, day) = if let Some((month, day)) = first_line.split_once('/') {
+    let (month, day) = if let Some((month, day)) = date_part.split_once('/') {
         (month, day)
-    } else if let Some((month, day)) = first_line.split_once('月') {
+    } else if let Some((month, day)) = date_part.split_once('月') {
         (month, day.trim_end_matches('日'))
     } else {
         return Err(CourseError::BadRequest(
@@ -1252,6 +1265,20 @@ mod tests {
             parse_tabular_date("46221.0", 2026).unwrap(),
             NaiveDate::from_ymd_opt(2026, 7, 18).unwrap()
         );
+        for value in [
+            "2026年8月20日",
+            "２０２６／８／２０",
+            "2026-08-20T00:00:00",
+            "8月20日(木)",
+        ] {
+            assert_eq!(
+                parse_tabular_date(value, 2026).unwrap(),
+                NaiveDate::from_ymd_opt(2026, 8, 20).unwrap(),
+                "{value}"
+            );
+        }
+        assert!(parse_tabular_date("20/8/2026", 2026).is_err());
+        assert!(parse_tabular_date("2025-08-20", 2026).is_err());
     }
 
     #[test]
