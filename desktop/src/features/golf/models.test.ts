@@ -168,7 +168,7 @@ describe('validateProduct', () => {
     playType: 'caddie' as const,
     holeCount: 18,
     expectedDurationMinutes: 240,
-    golfCourseId: 'course_east',
+    golfCourseIds: ['course_east'],
     maxPlayersPerGroup: '',
   }
 
@@ -177,7 +177,18 @@ describe('validateProduct', () => {
   })
 
   it('still saves a plan that names no course, so existing plans stay editable', () => {
-    expect(validateProduct({ ...valid, golfCourseId: '' })).toBeNull()
+    expect(validateProduct({ ...valid, golfCourseIds: [] })).toBeNull()
+  })
+
+  it('takes the several courses one plan can be sold on', () => {
+    expect(validateProduct({ ...valid, golfCourseIds: ['course_east', 'course_west'] }))
+      .toBeNull()
+    expect(
+      validateProduct(
+        { ...valid, golfCourseIds: ['course_east', 'course_west'] },
+        { requireCourse: true },
+      ),
+    ).toBeNull()
   })
 
   it('keeps players per group inside a sane range when it is given at all', () => {
@@ -188,7 +199,7 @@ describe('validateProduct', () => {
   })
 
   it('makes a new plan name its course, which is how the backlog empties', () => {
-    expect(validateProduct({ ...valid, golfCourseId: '' }, { requireCourse: true }))
+    expect(validateProduct({ ...valid, golfCourseIds: [] }, { requireCourse: true }))
       .not.toBeNull()
     expect(validateProduct(valid, { requireCourse: true })).toBeNull()
   })

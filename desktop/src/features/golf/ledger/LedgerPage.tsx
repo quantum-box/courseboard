@@ -200,6 +200,7 @@ export function LedgerPage() {
           displayName?: string | null
           playType?: string | null
           expectedDurationMinutes: number
+          golfCourseIds?: string[] | null
           golfCourseId?: string | null
           maxPlayersPerGroup?: number | null
         }>
@@ -292,6 +293,7 @@ export function LedgerPage() {
     label: product.displayName?.trim() || product.reservationServiceId,
     playType: product.playType === 'caddie' ? 'caddie' : 'self',
     expectedDurationMinutes: product.expectedDurationMinutes,
+    golfCourseIds: product.golfCourseIds,
     golfCourseId: product.golfCourseId,
     maxPlayersPerGroup: product.maxPlayersPerGroup,
   }))

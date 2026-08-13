@@ -46,7 +46,9 @@ export type GolfReservationProduct = {
   playType: PlayType
   holeCount: number
   expectedDurationMinutes: number
-  /** Course this plan is sold on; absent on plans written before courses split. */
+  /** Courses this plan is sold on; absent on plans written before courses split. */
+  golfCourseIds?: string[] | null
+  /** Compatibility alias the API sends only for a plan on exactly one course. */
   golfCourseId?: string | null
   /** Players allowed in one group; absent means the reservation policy decides. */
   maxPlayersPerGroup?: number | null
@@ -60,8 +62,8 @@ export type GolfReservationProductDraft = {
   playType: PlayType
   holeCount: number
   expectedDurationMinutes: number
-  /** Empty string means "not tied to a course yet". */
-  golfCourseId: string
+  /** Empty means "not tied to a course yet". */
+  golfCourseIds: string[]
   /** Empty string means "use the reservation policy", not "zero players". */
   maxPlayersPerGroup: string
 }
@@ -119,9 +121,21 @@ export function emptyProductDraft(): GolfReservationProductDraft {
     playType: 'caddie',
     holeCount: 18,
     expectedDurationMinutes: defaultDuration('caddie', 18),
-    golfCourseId: '',
+    golfCourseIds: [],
     maxPlayersPerGroup: '',
   }
+}
+
+/**
+ * The courses a plan is sold on, whichever shape the API answered in.
+ *
+ * A plan on several courses only has the array; one written before the array
+ * existed only has the scalar. Reading both here keeps every caller from
+ * having to know which vintage it is looking at.
+ */
+export function productCourseIds(product: GolfReservationProduct): string[] {
+  if (product.golfCourseIds) return product.golfCourseIds
+  return product.golfCourseId ? [product.golfCourseId] : []
 }
 
 export function productToDraft(product: GolfReservationProduct): GolfReservationProductDraft {
@@ -131,7 +145,7 @@ export function productToDraft(product: GolfReservationProduct): GolfReservation
     playType: product.playType,
     holeCount: product.holeCount,
     expectedDurationMinutes: product.expectedDurationMinutes,
-    golfCourseId: product.golfCourseId ?? '',
+    golfCourseIds: productCourseIds(product),
     maxPlayersPerGroup: product.maxPlayersPerGroup ? String(product.maxPlayersPerGroup) : '',
   }
 }
@@ -181,7 +195,7 @@ export function validateProduct(
   if (!/^[A-Za-z0-9._:-]+$/.test(draft.serviceId.trim())) {
     return i18next.t('products:validation.serviceIdFormat')
   }
-  if (requireCourse && !draft.golfCourseId.trim()) {
+  if (requireCourse && draft.golfCourseIds.length === 0) {
     return i18next.t('products:validation.courseRequired')
   }
   if (draft.maxPlayersPerGroup.trim()) {

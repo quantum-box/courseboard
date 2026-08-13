@@ -5,6 +5,7 @@ use clap::Parser;
 use crate::{
     auth::{AuthConfig, AuthConfigError},
     cancellation_fees::CancellationFeeConfig,
+    course::infrastructure::DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
     field_api::{ClientCredentialsConfig, DEFAULT_FIELD_API_URL},
 };
 
@@ -84,6 +85,19 @@ pub struct RuntimeConfig {
     #[arg(long, env = "TACHYON_FIELD_API_AUDIENCE")]
     pub field_api_audience: Option<String>,
 
+    /// Kill switch for selling one plan on several courses (SCC-3 / PLT-3353).
+    ///
+    /// On by default. Set to `false` to stop CourseBoard writing the paired
+    /// `golfCourseIds` / `eligibleResourceIds` shape when the Field it talks to
+    /// turns out not to read the second array yet.
+    #[arg(
+        long,
+        env = "COURSEBOARD_MULTI_COURSE_PRODUCT_WRITES",
+        default_value_t = DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
+        action = clap::ArgAction::Set,
+    )]
+    pub multi_course_product_writes: bool,
+
     #[arg(long, env = "TWILIO_ACCOUNT_SID")]
     pub twilio_account_sid: Option<String>,
     #[arg(long, env = "TWILIO_AUTH_TOKEN")]
@@ -148,6 +162,7 @@ impl RuntimeConfig {
             twilio_auth_token: non_empty(self.twilio_auth_token.as_deref()),
             twilio_messaging_service_sid: non_empty(self.twilio_messaging_service_sid.as_deref()),
             twilio_from_number: non_empty(self.twilio_from_number.as_deref()),
+            multi_course_product_writes: self.multi_course_product_writes,
         }
     }
 
@@ -224,6 +239,7 @@ impl Default for RuntimeConfig {
             field_api_client_secret: None,
             field_api_scope: None,
             field_api_audience: None,
+            multi_course_product_writes: DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
             twilio_account_sid: None,
             twilio_auth_token: None,
             twilio_messaging_service_sid: None,

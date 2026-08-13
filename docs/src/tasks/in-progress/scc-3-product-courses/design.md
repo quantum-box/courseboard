@@ -48,8 +48,18 @@
 
 ## Write gate
 
-PLT-3353 deploy 前は `GENERIC_RESOURCE_ELIGIBILITY_WRITES_ENABLED=false` とし、
-新しい array pair を production path から書かない。
+`COURSEBOARD_MULTI_COURSE_PRODUCT_WRITES`（既定 true）。PLT-3353 が deploy されて
+いない Field を相手にしていると分かったときに、code revert なしで writer を止める
+kill switch として残す。false のときの挙動は下記の gate 閉鎖時と同じ。
+
+canonical shape を書くのは**複数コースの membership を持つ商品だけ**。1 コースの
+商品は、既に canonical key を持っている場合を除いて scalar のまま保存する。
+1 コースなら scalar と array は同じことを表すうえ、canonical 化には全コースの
+reservation resource が必要で、resource 未作成のコース（デモ seed 直後など）の
+保存を落とすため。1 → 2 コースで canonical へ昇格し scalar を消す。2 → 1 では
+canonical のまま両 array を書き直す。
+
+gate 閉鎖時（kill switch を false にしたとき）の挙動は次のとおり。
 
 - legacy 商品への singleton request は従来の scalar shape で保存できる。
 - 既存 canonical 商品は、array input が現在の membership と完全一致する場合だけ
@@ -60,12 +70,9 @@ PLT-3353 deploy 前は `GENERIC_RESOURCE_ELIGIBILITY_WRITES_ENABLED=false` と�
 - 既存 multi-course 商品を legacy scalar request で更新する操作は拒否し、旧 SPA が
   singleton へ黙って縮退させる経路を閉じる。
 
-gate を `true` にする条件は、(1) PLT-3353 が Field に deploy 済みであり、かつ
-(2) storefront が `eligibleResourceIds` を選択 resource の membership として
-解釈することを実リクエストで確認済みであること。この 2 条件が揃うまでは変更しない。
-解禁後、CourseBoard は全 selected course の resource を先に解決し、
+gate が開いているとき、CourseBoard は全 selected course の resource を先に解決し、
 `golfCourseIds` と `eligibleResourceIds` を同じ product object へ書き、legacy scalar
-を削除する。
+を削除する。1 件でも解決できなければ PATCH 自体を行わない。
 
 ## Deploy と rollback
 
@@ -93,7 +100,8 @@ redemption を表す entitlement capability は別 issue とする。
 
 - legacy scalar、canonical singleton、canonical multi を CourseBoard が読める。
 - 空・欠落・malformed・unknown resource eligibility は unrestricted にならない。
-- canonical active resource を持たない course が 1 つでもあれば config を保存しない。
+- canonical shape を書く商品では、canonical active resource を持たない course が
+  1 つでもあれば config を保存しない。
 - CourseBoard の予約作成と tee sheet mismatch 判定が course membership を使う。
 - legacy scalar-only update で multi membership を縮退できない。
 - `availability` と Field / 他 surface が持つ未知 key を保存時に維持する。

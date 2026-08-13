@@ -53,6 +53,10 @@ struct FieldState {
     created: Mutex<Vec<Value>>,
     /// Golf courses, so the seed's create/update has somewhere to land.
     courses: Mutex<Vec<Value>>,
+    /// The reservation resources those courses map to. A plan sold on a course
+    /// is stored against the resource behind it, so a canonical write needs
+    /// these to exist the way they do in a real tenant.
+    resources: Mutex<Vec<Value>>,
     /// The plan and end time a write moved the booking to, absent until one
     /// does — so a test can tell "never written" from "written back the same".
     reservation_service_id: Mutex<Option<String>>,
@@ -132,6 +136,28 @@ fn field_with_courses() -> Arc<FieldState> {
     state
 }
 
+/// A tenant whose courses each have the one active resource Field books on.
+fn field_with_course_resources() -> Arc<FieldState> {
+    let state = field_with_courses();
+    *state.resources.lock().unwrap() = vec![
+        course_resource("course-a", "resource-a"),
+        course_resource("course-b", "resource-b"),
+        course_resource("course-c", "resource-c"),
+    ];
+    state
+}
+
+fn course_resource(course_id: &str, resource_id: &str) -> Value {
+    json!({
+        "id": format!("golf-{resource_id}"),
+        "name": course_id,
+        "reservationResourceId": resource_id,
+        "golfCourseId": course_id,
+        "resourceKind": "course",
+        "active": true,
+    })
+}
+
 fn course(id: &str, name: &str) -> Value {
     json!({
         "id": id,
@@ -144,8 +170,8 @@ fn course(id: &str, name: &str) -> Value {
     })
 }
 
-async fn list_resources() -> Json<Value> {
-    Json(json!({ "items": [] }))
+async fn list_resources(State(state): State<Arc<FieldState>>) -> Json<Value> {
+    Json(json!({ "items": state.resources.lock().unwrap().clone() }))
 }
 
 async fn list_reservations(State(state): State<Arc<FieldState>>) -> Json<Value> {
@@ -284,6 +310,14 @@ async fn spawn_field(state: Arc<FieldState>) -> String {
 /// contention. The pool is the storage these tests are checking, not the state
 /// they are trying to drop.
 fn router(pool: &MySqlPool, field_url: &str) -> Router {
+    router_with_multi_course_writes(pool, field_url, true)
+}
+
+fn router_with_multi_course_writes(
+    pool: &MySqlPool,
+    field_url: &str,
+    multi_course_product_writes: bool,
+) -> Router {
     // The `/v1/course/*` gateways build their own Field client from the config
     // URL; the admin-UI Field client this state can also hold is not on their
     // path, so it stays unset.
@@ -299,6 +333,7 @@ fn router(pool: &MySqlPool, field_url: &str) -> Router {
             twilio_auth_token: None,
             twilio_messaging_service_sid: None,
             twilio_from_number: None,
+            multi_course_product_writes,
         },
     ))
 }
@@ -507,6 +542,151 @@ async fn the_ledger_draws_its_columns_in_the_order_that_was_saved() {
     // last the column for the stub's booking, which names no course at all — a
     // group standing on a tee nobody can identify still has to be visible.
     assert_eq!(names, vec!["course-c", "course-a", "course-b", ""]);
+}
+
+// ─── Plans sold on several courses ────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_plan_sold_on_two_courses_is_stored_against_both_of_their_resources() {
+    // The point of SCC-3: one plan, the same conditions, sold on more than one
+    // course. Field only knows resources, so the write has to leave both the
+    // course membership CourseBoard reads and the resource allow-list the
+    // storefront filters on.
+    let tenant = tenant_for("a_plan_sold_on_two_courses_is_stored_aga");
+    let field = field_with_course_resources();
+    *field.config.lock().unwrap() = json!({});
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    let (status, body) = call(
+        &router(&pool, &url),
+        &tenant,
+        "POST",
+        "/v1/course/reservation-products/season-pass",
+        Some(json!({
+            "displayName": "シーズンパス",
+            "playType": "caddie",
+            "holeCount": 18,
+            "expectedDurationMinutes": 240,
+            "golfCourseIds": ["course-a", "course-b"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["golfCourseIds"], json!(["course-a", "course-b"]));
+    // A plan on two courses has no single course to name, so the compatibility
+    // alias stays empty rather than picking one.
+    assert_eq!(body["golfCourseId"], Value::Null);
+
+    let stored = field.config.lock().unwrap().clone();
+    let product = &stored["reservationProducts"][0];
+    assert_eq!(product["golfCourseIds"], json!(["course-a", "course-b"]));
+    assert_eq!(
+        product["eligibleResourceIds"],
+        json!(["resource-a", "resource-b"])
+    );
+    // The scalar is what an old storefront would filter on, and it can only
+    // name one course; leaving it behind would hide the plan on the other.
+    assert_eq!(product["golfCourseId"], Value::Null);
+
+    // A fresh router: the membership came back from Field, not from a cache.
+    let (status, body) = call(
+        &router(&pool, &url),
+        &tenant,
+        "GET",
+        "/v1/course/reservation-products",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        body["items"][0]["golfCourseIds"],
+        json!(["course-a", "course-b"])
+    );
+}
+
+#[tokio::test]
+async fn a_plan_on_one_course_still_answers_the_compatibility_alias() {
+    let tenant = tenant_for("a_plan_on_one_course_still_answers_the_c");
+    let field = field_with_course_resources();
+    *field.config.lock().unwrap() = json!({});
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    let (status, body) = call(
+        &router(&pool, &url),
+        &tenant,
+        "POST",
+        "/v1/course/reservation-products/weekday-standard",
+        Some(json!({
+            "displayName": "平日スタンダード",
+            "playType": "self",
+            "golfCourseIds": ["course-a"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["golfCourseIds"], json!(["course-a"]));
+    assert_eq!(body["golfCourseId"], json!("course-a"));
+}
+
+#[tokio::test]
+async fn a_course_without_a_resource_stops_the_whole_plan_from_being_saved() {
+    // Half a membership is worse than none: the plan would be sold on the
+    // course that resolved and silently missing from the one that did not.
+    let tenant = tenant_for("a_course_without_a_resource_stops_the_wh");
+    let field = field_with_courses();
+    *field.config.lock().unwrap() = json!({});
+    *field.resources.lock().unwrap() = vec![course_resource("course-a", "resource-a")];
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    let (status, _) = call(
+        &router(&pool, &url),
+        &tenant,
+        "POST",
+        "/v1/course/reservation-products/season-pass",
+        Some(json!({
+            "displayName": "シーズンパス",
+            "playType": "caddie",
+            "golfCourseIds": ["course-a", "course-b"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        field.config.lock().unwrap()["reservationProducts"],
+        Value::Null
+    );
+}
+
+#[tokio::test]
+async fn the_kill_switch_refuses_a_multi_course_plan_instead_of_shrinking_it() {
+    // Turned off, the writer must be visibly closed. Saving one of the two
+    // courses, or answering 200 without writing, would look like it worked.
+    let tenant = tenant_for("the_kill_switch_refuses_a_multi_course_p");
+    let field = field_with_course_resources();
+    *field.config.lock().unwrap() = json!({});
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    let (status, _) = call(
+        &router_with_multi_course_writes(&pool, &url, false),
+        &tenant,
+        "POST",
+        "/v1/course/reservation-products/season-pass",
+        Some(json!({
+            "displayName": "シーズンパス",
+            "playType": "caddie",
+            "golfCourseIds": ["course-a", "course-b"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        field.config.lock().unwrap()["reservationProducts"],
+        Value::Null
+    );
 }
 
 #[tokio::test]

@@ -150,6 +150,15 @@ fn read_course_ids(product: &Value) -> Option<Vec<String>> {
     Some(course_ids)
 }
 
+/// Whether the stored plan already carries the canonical arrays.
+///
+/// A plan that has them keeps being written that way even when it is down to a
+/// single course, because the resource allow-list beside them has to be
+/// rewritten with it.
+pub(crate) fn uses_canonical_scope(config: &Value, service_id: &ReservationServiceId) -> bool {
+    find_product(config, service_id).is_some_and(|product| read_course_ids(product).is_some())
+}
+
 /// Writes the plan into the products array, keeping every key Field or another
 /// surface put there. A plan the operator never edited must survive untouched.
 pub(crate) fn upsert_product(
@@ -167,9 +176,21 @@ pub(crate) fn upsert_product(
         .and_then(|index| products.get(index).cloned())
         .unwrap_or_else(|| json!({ "id": service_id, "enabled": true, "bookingMode": "slot" }));
 
-    let preserve_existing_canonical_scope = match mode {
-        ProductWriteMode::LegacyScalar => prepare_legacy_scope_write(&product, input)?,
-        ProductWriteMode::Canonical { resources } => {
+    // One course on a plan that never carried the canonical arrays keeps the
+    // scalar shape Field's legacy path reads. Promoting it would demand a
+    // reservation resource for a course that may not have one yet, and a single
+    // course expresses the same thing either way — only membership of several
+    // courses needs the pair of arrays.
+    let canonical_resources = match mode {
+        ProductWriteMode::LegacyScalar => None,
+        ProductWriteMode::Canonical { resources } => (input.golf_course_ids().len() > 1
+            || read_course_ids(&product).is_some())
+        .then_some(resources),
+    };
+
+    let preserve_existing_canonical_scope = match canonical_resources {
+        None => prepare_legacy_scope_write(&product, input)?,
+        Some(resources) => {
             refuse_legacy_scalar_shrink(&product, input)?;
             let (course_ids, resource_ids) = resolve_canonical_scope(input, resources)?;
             write_canonical_scope(&mut product, &course_ids, &resource_ids, resources)?;
@@ -189,7 +210,7 @@ pub(crate) fn upsert_product(
             "durationMinutes".into(),
             json!(input.expected_duration_minutes.get()),
         );
-        if matches!(mode, ProductWriteMode::LegacyScalar) && !preserve_existing_canonical_scope {
+        if canonical_resources.is_none() && !preserve_existing_canonical_scope {
             match input.golf_course_id() {
                 Some(course_id) => {
                     object.insert(GOLF_COURSE_ID_KEY.into(), json!(course_id.as_str()));
@@ -230,7 +251,8 @@ fn prepare_legacy_scope_write(
     let Some(existing_course_ids) = read_course_ids(product) else {
         if input.golf_course_ids().len() > 1 {
             return Err(CourseError::BadRequest(
-                "multi-course product writes are disabled until the PLT-3353 storefront rollout is verified",
+                "selling one plan on several courses is turned off \
+                 (COURSEBOARD_MULTI_COURSE_PRODUCT_WRITES)",
             ));
         }
         return Ok(false);
@@ -811,13 +833,95 @@ mod tests {
         assert!(matches!(
             result,
             Err(CourseError::BadRequest(
-                "multi-course product writes are disabled until the PLT-3353 storefront rollout is verified"
+                "selling one plan on several courses is turned off \
+                 (COURSEBOARD_MULTI_COURSE_PRODUCT_WRITES)"
             ))
         ));
         assert!(config[PRODUCTS_KEY]
             .as_array()
             .expect("products")
             .is_empty());
+    }
+
+    #[test]
+    fn one_course_keeps_the_scalar_shape_even_with_the_writer_open() {
+        // A plan on a single course says the same thing in either shape, and
+        // the scalar one needs no reservation resource to exist yet — which is
+        // what a freshly seeded club, or any course nobody has linked, has.
+        let config = config_with(json!([]));
+        let next = upsert_product(
+            &config,
+            &scoped_input("weekday-standard", &["course_east"]),
+            ProductWriteMode::Canonical { resources: &[] },
+        )
+        .expect("save a single-course plan");
+
+        let product = &next[PRODUCTS_KEY][0];
+        assert_eq!(product[GOLF_COURSE_ID_KEY], json!("course_east"));
+        assert!(product.get(GOLF_COURSE_IDS_KEY).is_none());
+        assert!(product.get(ELIGIBLE_RESOURCE_IDS_KEY).is_none());
+    }
+
+    #[test]
+    fn adding_a_second_course_promotes_the_plan_and_drops_the_scalar() {
+        // The scalar can only name one course, so leaving it would hide the
+        // plan on the course that was just added.
+        let config = config_with(json!([{
+            "id": "season-pass",
+            "name": "シーズンパス",
+            GOLF_COURSE_ID_KEY: "course_east",
+        }]));
+        let resources = vec![
+            resource("course_east", "resource_east", true),
+            resource("course_west", "resource_west", true),
+        ];
+
+        let next = upsert_product(
+            &config,
+            &scoped_input("season-pass", &["course_east", "course_west"]),
+            ProductWriteMode::Canonical {
+                resources: &resources,
+            },
+        )
+        .expect("promote the plan");
+
+        let product = &next[PRODUCTS_KEY][0];
+        assert_eq!(
+            product[GOLF_COURSE_IDS_KEY],
+            json!(["course_east", "course_west"])
+        );
+        assert_eq!(
+            product[ELIGIBLE_RESOURCE_IDS_KEY],
+            json!(["resource_east", "resource_west"])
+        );
+        assert!(product.get(GOLF_COURSE_ID_KEY).is_none());
+    }
+
+    #[test]
+    fn dropping_back_to_one_course_rewrites_both_arrays() {
+        let config = config_with(json!([{
+            "id": "season-pass",
+            "name": "シーズンパス",
+            GOLF_COURSE_IDS_KEY: ["course_east", "course_west"],
+            ELIGIBLE_RESOURCE_IDS_KEY: ["resource_east", "resource_west"],
+        }]));
+        let resources = vec![
+            resource("course_east", "resource_east", true),
+            resource("course_west", "resource_west", true),
+        ];
+
+        let next = upsert_product(
+            &config,
+            &scoped_input("season-pass", &["course_east"]),
+            ProductWriteMode::Canonical {
+                resources: &resources,
+            },
+        )
+        .expect("shrink the plan");
+
+        let product = &next[PRODUCTS_KEY][0];
+        assert_eq!(product[GOLF_COURSE_IDS_KEY], json!(["course_east"]));
+        assert_eq!(product[ELIGIBLE_RESOURCE_IDS_KEY], json!(["resource_east"]));
     }
 
     #[test]

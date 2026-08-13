@@ -263,12 +263,19 @@ function mockReservationSummaryDto(summary: MockReservationSummary) {
   }
 }
 
+function productCourseIds(product: { golfCourseIds?: string[] | null; golfCourseId: string | null }) {
+  if (product.golfCourseIds) return product.golfCourseIds
+  return product.golfCourseId ? [product.golfCourseId] : []
+}
+
 const mockProducts: Array<{
   id: string
   tenantId: string
   extensionKey: string
   reservationServiceId: string
   displayName: string | null
+  /** Courses the plan is sold on; the scalar below is its one-course alias. */
+  golfCourseIds?: string[] | null
   golfCourseId: string | null
   playType: string
   holeCount: number
@@ -2043,6 +2050,9 @@ function resolveGet(path: string): Json | null | undefined {
   if (pathname === '/v1/erp/extensions/golf-course/reservation-products') {
     return items(mockProducts.map(product => ({
       ...product,
+      // The API always answers with the array and adds the scalar only for a
+      // plan on one course, so the fixtures have to read back the same way.
+      golfCourseIds: productCourseIds(product),
       tenantId: TENANT_ID() || product.tenantId,
     })))
   }
@@ -3279,13 +3289,19 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     const serviceId = decodeURIComponent(productWriteMatch[1] ?? '')
     const index = mockProducts.findIndex(item => item.reservationServiceId === serviceId)
     const current = index < 0 ? null : mockProducts[index]!
+    const golfCourseIds = Array.isArray(body?.golfCourseIds)
+      ? (body.golfCourseIds as unknown[]).map(String)
+      : body?.golfCourseId == null
+        ? []
+        : [String(body.golfCourseId)]
     const saved = {
       id: current?.id ?? `product_${serviceId.replace(/[^A-Za-z0-9]+/g, '_')}`,
       tenantId: TENANT_ID() || 'courseboard_id',
       extensionKey: 'golf_course',
       reservationServiceId: serviceId,
       displayName: body?.displayName == null ? null : String(body.displayName),
-      golfCourseId: body?.golfCourseId == null ? null : String(body.golfCourseId),
+      golfCourseIds,
+      golfCourseId: golfCourseIds.length === 1 ? golfCourseIds[0]! : null,
       playType: String(body?.playType ?? current?.playType ?? 'caddie'),
       holeCount: Number(body?.holeCount ?? current?.holeCount ?? 18),
       expectedDurationMinutes: Number(

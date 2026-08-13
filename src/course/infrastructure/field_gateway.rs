@@ -39,14 +39,13 @@ const TABULAR_ANALYZE_TIMEOUT: Duration = Duration::from_secs(90);
 /// caused it, few enough that two screens saving in a loop fail loudly rather
 /// than hammering Field.
 const CONFIG_WRITE_ATTEMPTS: usize = 3;
-/// Safety gate for the deploy order approved for SCC-3.
+/// Default for the SCC-3 writer gate, now that PLT-3353 has landed in Field.
 ///
-/// Keep false until PLT-3353 has been deployed to Field *and* the storefront is
-/// confirmed to interpret `eligibleResourceIds` as resource membership. Read
-/// compatibility and both CourseBoard request shapes are safe before then, but
-/// creating the new paired array shape would make the current storefront
-/// misread the product.
-const GENERIC_RESOURCE_ELIGIBILITY_WRITES_ENABLED: bool = false;
+/// The deploy order is Field first, so the paired array shape is only safe to
+/// write against a Field that reads `eligibleResourceIds`. Shipping it on by
+/// default is what makes the feature reachable; the kill switch beside it is
+/// what makes an unexpectedly old Field recoverable without a code revert.
+pub const DEFAULT_MULTI_COURSE_PRODUCT_WRITES: bool = true;
 
 fn is_empty_course_store(base_url: &str) -> bool {
     base_url.trim().eq_ignore_ascii_case(EMPTY_COURSE_STORE_URL)
@@ -372,13 +371,28 @@ struct FieldReservationTypeDto {
 pub struct FieldGolfCatalogGateway {
     client: reqwest::Client,
     base_url: String,
+    /// Whether a plan may be stored against more than one course (SCC-3).
+    multi_course_product_writes: bool,
 }
 
 impl FieldGolfCatalogGateway {
     pub fn new(client: reqwest::Client, field_api_url: Option<&str>) -> Self {
+        Self::with_multi_course_product_writes(
+            client,
+            field_api_url,
+            DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
+        )
+    }
+
+    pub fn with_multi_course_product_writes(
+        client: reqwest::Client,
+        field_api_url: Option<&str>,
+        multi_course_product_writes: bool,
+    ) -> Self {
         Self {
             client,
             base_url: normalize_base_url(field_api_url),
+            multi_course_product_writes,
         }
     }
 
@@ -684,15 +698,28 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         credentials: GatewayCredentials<'_>,
         input: UpsertReservationProduct,
     ) -> Result<ReservationProduct, CourseError> {
-        // Resolve every course before entering the config write. This branch is
-        // intentionally unreachable in production until PLT-3353 is deployed;
-        // the canonical codec is still compiled and unit-tested now.
-        let resources =
-            if GENERIC_RESOURCE_ELIGIBILITY_WRITES_ENABLED && !input.golf_course_ids().is_empty() {
-                Some(self.list_resources(credentials).await?)
-            } else {
-                None
+        // Resolve every course before entering the config write: a plan that
+        // names a course Field cannot place must fail before anything is
+        // stored, not halfway through the pair of arrays.
+        //
+        // Only membership of several courses needs that resolution. A plan on
+        // one course keeps the scalar shape unless it already carries the
+        // arrays, and asking Field for resources it would not use turns a save
+        // that used to work into a failure on tenants that have none.
+        let needs_resources = self.multi_course_product_writes
+            && match input.golf_course_ids().len() {
+                0 => false,
+                1 => generic_product_config::uses_canonical_scope(
+                    &self.read_config(credentials).await?,
+                    &input.reservation_service_id,
+                ),
+                _ => true,
             };
+        let resources = if needs_resources {
+            Some(self.list_resources(credentials).await?)
+        } else {
+            None
+        };
         let write_mode = resources
             .as_deref()
             .map(|resources| generic_product_config::ProductWriteMode::Canonical { resources })

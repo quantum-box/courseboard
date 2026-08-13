@@ -2008,6 +2008,7 @@ mod tests {
             twilio_auth_token: None,
             twilio_messaging_service_sid: None,
             twilio_from_number: None,
+            multi_course_product_writes: true,
         }
     }
 

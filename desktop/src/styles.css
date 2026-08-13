@@ -1812,6 +1812,27 @@ button,
   margin-top: 6px;
 }
 
+/* A plan can be sold on several courses; the cell names each one. */
+.course-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.course-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+.course-checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .capacity-weekday-note {
   margin: 8px 0 0;
   color: hsl(var(--nui-muted-foreground));
