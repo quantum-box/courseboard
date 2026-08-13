@@ -33,6 +33,7 @@ import { useResource } from '../../hooks/useResource'
 import {
   defaultDuration,
   emptyProductDraft,
+  productCourseIds,
   productToDraft,
   sortSlots,
   weekdayLabel,
@@ -98,6 +99,13 @@ function courseLabel(course: GolfCourse) {
   return course.shortName?.trim() || course.name
 }
 
+/**
+ * The courses a plan is sold on, named rather than listed by id.
+ *
+ * A plan can name a course that no longer exists — the plan keeps selling on
+ * an id nothing answers to — so an unresolved id is called out beside the ones
+ * that resolved instead of being dropped from the line.
+ */
 function CourseCell({
   product,
   courses,
@@ -106,10 +114,19 @@ function CourseCell({
   courses: GolfCourse[]
 }) {
   const { t } = useTranslation('products')
-  const course = courses.find(item => item.id === product.golfCourseId)
-  if (course) return <>{courseLabel(course)}</>
-  if (product.golfCourseId) return <Badge variant="warning">{t('course.unknown')}</Badge>
-  return <Badge variant="warning">{t('course.unset')}</Badge>
+  const courseIds = productCourseIds(product)
+  if (courseIds.length === 0) return <Badge variant="warning">{t('course.unset')}</Badge>
+
+  return (
+    <span className="course-cell">
+      {courseIds.map(courseId => {
+        const course = courses.find(item => item.id === courseId)
+        return course
+          ? <span key={courseId}>{courseLabel(course)}</span>
+          : <Badge key={courseId} variant="warning">{t('course.unknown')}</Badge>
+      })}
+    </span>
+  )
 }
 
 function PlayTypeBadge({ playType }: { playType: PlayType }) {
@@ -235,7 +252,7 @@ function ReservationProductList() {
     )
   }
 
-  const withoutCourse = products.filter(product => !product.golfCourseId)
+  const withoutCourse = products.filter(product => productCourseIds(product).length === 0)
 
   return (
     <div className="page-stack">
@@ -342,8 +359,12 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
   }
   useRegisterPageReload(refreshAll)
 
-  const productCourse = useMemo(
-    () => courses.find(course => course.id === product?.golfCourseId) ?? null,
+  const productCourses = useMemo(
+    () => {
+      if (!product) return []
+      const courseIds = productCourseIds(product)
+      return courses.filter(course => courseIds.includes(course.id))
+    },
     [courses, product],
   )
 
@@ -418,7 +439,7 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
         }}
       />
 
-      {product.golfCourseId ? null : (
+      {productCourseIds(product).length > 0 ? null : (
         <Notice
           tone="warning"
           title={t('products:course.required.title')}
@@ -478,15 +499,21 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
         title={t('products:inventory.title')}
         description={t('products:inventory.description')}
       >
-        {productCourse ? (
-          <Button
-            type="button"
-            variant="primary"
-            onClick={() => navigate(scheduleRoute(productCourse.id))}
-          >
-            <CalendarDays />
-            {t('products:inventory.open', { course: courseLabel(productCourse) })}
-          </Button>
+        {/* One button per course: the plan is shared, the tee times are not. */}
+        {productCourses.length > 0 ? (
+          <div className="flex flex-wrap gap-2">
+            {productCourses.map(course => (
+              <Button
+                key={course.id}
+                type="button"
+                variant="primary"
+                onClick={() => navigate(scheduleRoute(course.id))}
+              >
+                <CalendarDays />
+                {t('products:inventory.open', { course: courseLabel(course) })}
+              </Button>
+            ))}
+          </div>
         ) : (
           <Notice tone="info" title={t('products:inventory.needsCourse.title')}>
             {t('products:inventory.needsCourse.description')}
@@ -598,7 +625,12 @@ function ProductEditorSheet({
             playType: draft.playType,
             holeCount: draft.holeCount,
             expectedDurationMinutes: draft.expectedDurationMinutes,
-            golfCourseId: draft.golfCourseId.trim() || null,
+            // The API takes one shape or the other, never both. An empty
+            // selection has no array to send, so it clears the course through
+            // the scalar the way it always did.
+            ...(draft.golfCourseIds.length > 0
+              ? { golfCourseIds: draft.golfCourseIds }
+              : { golfCourseId: null }),
             maxPlayersPerGroup: draft.maxPlayersPerGroup === ''
               ? null
               : Number(draft.maxPlayersPerGroup),
@@ -665,18 +697,18 @@ function ProductEditorSheet({
               required
             />
           </Field>
-          <Field
-            label={t('products:editor.course')}
-            hint={t('products:editor.courseHint')}
-            requirement="none"
-          >
-            <NativeSelectField
-              value={draft.golfCourseId}
-              onChange={value => setDraft(current => ({ ...current, golfCourseId: value }))}
-              placeholder={t('products:editor.courseUnset')}
-              options={courses.map(course => ({ value: course.id, label: courseLabel(course) }))}
+          {/* `Field` is a <label>, and a label inside a label sends every
+              click to the same checkbox — so this one row lays out the same
+              classes itself. */}
+          <div className="field">
+            <span className="field-label">{t('products:editor.course')}</span>
+            <CourseChecklist
+              courses={courses}
+              selected={draft.golfCourseIds}
+              onChange={golfCourseIds => setDraft(current => ({ ...current, golfCourseIds }))}
             />
-          </Field>
+            <span className="field-hint">{t('products:editor.courseHint')}</span>
+          </div>
           <Field label={t('products:editor.playType')} required>
             <NativeSelectField
               value={draft.playType}
@@ -747,6 +779,51 @@ function ProductEditorSheet({
         </div>
       </form>
     </Sheet>
+  )
+}
+
+/**
+ * Which courses the plan is sold on.
+ *
+ * Checkboxes rather than a multi-select list: the desk reads the row it is
+ * about to tick, and a plan usually covers either one course or all of them —
+ * both of which are a glance here and a drag in a list box. Selection order is
+ * ignored on purpose; the courses are stored in the order the club lists them
+ * so two plans on the same pair read the same way.
+ */
+function CourseChecklist({
+  courses,
+  selected,
+  onChange,
+}: {
+  courses: GolfCourse[]
+  selected: string[]
+  onChange: (courseIds: string[]) => void
+}) {
+  const { t } = useTranslation('products')
+  if (courses.length === 0) {
+    return <p className="text-xs text-muted-foreground">{t('editor.courseNone')}</p>
+  }
+
+  return (
+    <div className="course-checklist">
+      {courses.map(course => (
+        <label key={course.id} className="course-checklist-item">
+          <input
+            type="checkbox"
+            checked={selected.includes(course.id)}
+            onChange={event => onChange(
+              event.target.checked
+                ? courses
+                    .map(item => item.id)
+                    .filter(id => id === course.id || selected.includes(id))
+                : selected.filter(id => id !== course.id),
+            )}
+          />
+          <span>{courseLabel(course)}</span>
+        </label>
+      ))}
+    </div>
   )
 }
 

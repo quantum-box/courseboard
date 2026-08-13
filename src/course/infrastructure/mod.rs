@@ -27,7 +27,9 @@ pub use availability_deadline_repository::MySqlAvailabilityDeadlineRepository;
 pub use caddie_shift_repository::MySqlCaddieShiftRepository;
 pub use field_commercial_gateway::FieldGolfCommercialGateway;
 pub use field_customer_gateway::FieldCustomerGateway;
-pub use field_gateway::{FieldGolfCatalogGateway, FieldReservationGateway};
+pub use field_gateway::{
+    FieldGolfCatalogGateway, FieldReservationGateway, DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
+};
 pub use field_membership_gateway::FieldMembershipGateway;
 pub use field_ops_gateway::FieldGolfOpsGateway;
 pub use generated_through_repository::MySqlGeneratedThroughRepository;

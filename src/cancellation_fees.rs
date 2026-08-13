@@ -10,7 +10,10 @@ use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, MySqlPool};
 
-use crate::{field_api::DEFAULT_FIELD_API_URL, AppError};
+use crate::{
+    course::infrastructure::DEFAULT_MULTI_COURSE_PRODUCT_WRITES, field_api::DEFAULT_FIELD_API_URL,
+    AppError,
+};
 
 #[derive(Clone)]
 pub struct CancellationFeeConfig {
@@ -25,6 +28,14 @@ pub struct CancellationFeeConfig {
     pub twilio_auth_token: Option<String>,
     pub twilio_messaging_service_sid: Option<String>,
     pub twilio_from_number: Option<String>,
+    /// Whether a plan may be sold on more than one course (SCC-3).
+    ///
+    /// The paired `golfCourseIds` / `eligibleResourceIds` write only makes
+    /// sense against a Field that reads the second array (PLT-3353). Turning
+    /// this off stops the writer without a code revert, which is the order the
+    /// rollback has to happen in: CourseBoard stops writing before Field goes
+    /// back to a version that would ignore the eligibility.
+    pub multi_course_product_writes: bool,
 }
 
 impl CancellationFeeConfig {
@@ -55,6 +66,7 @@ impl Default for CancellationFeeConfig {
             twilio_auth_token: None,
             twilio_messaging_service_sid: None,
             twilio_from_number: None,
+            multi_course_product_writes: DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
         }
     }
 }

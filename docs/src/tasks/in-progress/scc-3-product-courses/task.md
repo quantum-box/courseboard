@@ -7,8 +7,10 @@
 
 ## 状態
 
-PLT-3353 を blocker とする。CourseBoard Phase 2a の compatibility 実装は進めるが、
-Field deploy 前に canonical writer は解禁しない。
+PLT-3353 は Done（[tachyonfield#1034](https://github.com/quantum-box/tachyonfield/pull/1034)
+が 2026-08-13 に merge）。CourseBoard の canonical writer と SPA の複数選択を実装済み。
+残りは prod Field の deploy 確認と storefront の実リクエスト確認で、それが取れるまで
+`COURSEBOARD_MULTI_COURSE_PRODUCT_WRITES=false` で writer を止められる。
 
 ## Plan
 
@@ -20,10 +22,15 @@ Field deploy 前に canonical writer は解禁しない。
 - [x] PLT-3353 deploy 前の production writer gate を閉じる。
 - [x] fail-closed 5 パターン、legacy scalar 更新拒否、resource 不在時の全体拒否、
   `availability` 保持を test に固定する。
-- [ ] PLT-3353 の deploy と、storefront が `eligibleResourceIds` を選択 resource の
-  membership として解釈することを実リクエストで確認する。
-- [ ] CourseBoard API の canonical writer gate を解禁して deploy する。
-- [ ] CourseBoard SPA に複数 course 選択、array save、membership filter を実装して deploy する。
+- [x] canonical writer gate を解禁し、kill switch を
+  `COURSEBOARD_MULTI_COURSE_PRODUCT_WRITES` として env に出す。
+- [x] 1 コースの商品は canonical 化せず scalar のままにする。resource 未作成の
+  コースやデモ seed の保存を、複数コース化のために壊さない。
+- [x] CourseBoard SPA に複数 course 選択、array save、予約時の membership filter を
+  実装する。
+- [ ] PLT-3353 が prod Field に deploy 済みであり、storefront が
+  `eligibleResourceIds` を選択 resource の membership として解釈することを
+  実リクエストで確認する。
 - [ ] Field storefront と CourseBoard の E2E を確認する。
 - [ ] SCC-3 を完了にする。
 
