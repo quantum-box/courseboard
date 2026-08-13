@@ -50,7 +50,7 @@ use tower_http::{
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
-const COURSEBOARD_AUTHORIZATION_HEADER: &str = "x-courseboard-authorization";
+pub(crate) const COURSEBOARD_AUTHORIZATION_HEADER: &str = "x-courseboard-authorization";
 #[derive(Clone)]
 pub struct AppState {
     rules: Arc<MySqlTaxRuleRepository>,
@@ -926,6 +926,12 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/course/feature-flags/evaluate",
             post(feature_flags::evaluate_feature_flags).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/field/client-capabilities",
+            get(course::interfaces::http_field::get_client_capabilities).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
         )

@@ -30,6 +30,7 @@ mod get_caddie_supply;
 mod get_course_caddie_supply;
 mod get_customer;
 mod get_extension_status;
+mod get_field_client_capabilities;
 mod get_monthly_settlement;
 mod get_payroll_summary;
 mod get_reservation_policy;
@@ -104,6 +105,7 @@ pub use get_caddie_supply::GetCaddieSupplyUseCase;
 pub use get_course_caddie_supply::GetCourseCaddieSupplyUseCase;
 pub use get_customer::GetCustomerUseCase;
 pub use get_extension_status::GetExtensionStatusUseCase;
+pub use get_field_client_capabilities::GetFieldClientCapabilitiesUseCase;
 pub use get_monthly_settlement::{
     GetMonthlySettlementUseCase, MonthlySettlementReservation, MonthlySettlementView,
 };

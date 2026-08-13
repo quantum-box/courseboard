@@ -10,16 +10,16 @@ use super::{
     CaddieCourseMembership, CaddieId, CaddieRankFees, CaddieRating, CaddieRecommendation,
     CaddieRoster, CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder, Customer,
     CustomerId, CustomerMembership, CustomerSearchQuery, DailyBudget, DailyBudgetQuery,
-    DeleteSlotOverrides, ExtensionStatus, GenerationSummary, InventoryWatermark, MembershipPlan,
-    MembershipPlanId, MonthlySettlement, NewCustomer, NewReservation, PartyDetails, ProductSlot,
-    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationCourseAnswer,
-    ReservationCourseLink, ReservationDaySummary, ReservationId, ReservationPolicy,
-    ReservationProduct, ReservationServiceId, ReservationSummaryQuery, ReservationSummaryWindow,
-    Resource, ResourceId, ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy,
-    SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig,
-    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
-    UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes,
-    YearMonth,
+    DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
+    GenerationSummary, InventoryWatermark, MembershipPlan, MembershipPlanId, MonthlySettlement,
+    NewCustomer, NewReservation, PartyDetails, ProductSlot, RecommendationQuery,
+    ReplaceCaddieMemberships, Reservation, ReservationCourseAnswer, ReservationCourseLink,
+    ReservationDaySummary, ReservationId, ReservationPolicy, ReservationProduct,
+    ReservationServiceId, ReservationSummaryQuery, ReservationSummaryWindow, Resource, ResourceId,
+    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
+    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
+    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
+    UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -30,6 +30,15 @@ pub struct GatewayCredentials<'a> {
     pub authorization: &'a str,
     pub operator_id: &'a str,
     pub platform_id: Option<&'a str>,
+}
+
+/// Port for SDK-backed Field capability discovery.
+#[async_trait]
+pub trait FieldCapabilitiesGateway: Send + Sync {
+    async fn get_client_capabilities(
+        &self,
+        context: &FieldRequestContext,
+    ) -> Result<FieldClientCapabilities, CourseError>;
 }
 
 /// Port for tenant golf course tax rules.

@@ -17,6 +17,7 @@ mod course_supply;
 mod customer;
 mod demo_board;
 mod error;
+mod field_capabilities;
 mod ids;
 mod membership;
 mod party;
@@ -82,6 +83,10 @@ pub use demo_board::{
     SEED_KEY_FIELD, SEED_PREFIX,
 };
 pub use error::CourseError;
+pub use field_capabilities::{
+    FieldAccessToken, FieldAgentDocumentCapabilities, FieldClientCapabilities,
+    FieldDocumentQueueCapabilities, FieldOperatorId, FieldPlatformId, FieldRequestContext,
+};
 pub use ids::{
     AssignmentId, AvailabilityId, BudgetId, CaddieId, CourseId, CustomerId, MembershipId,
     MembershipPlanId, ProductId, ProductSlotId, RatingId, ReservationId, ReservationServiceId,
@@ -95,11 +100,11 @@ pub use payroll::{
     payroll_csv, summarize_payroll_in_timezone, AttendanceDay, PayrollCandidate, WorkedMinutes,
 };
 pub use ports::{
-    AvailabilityDeadlineGateway, CaddieShiftGateway, CustomerGateway, GatewayCredentials,
-    GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
-    GolfTaxGateway, MembershipGateway, ReservationCourseLinkGateway, ReservationGateway,
-    ReservationScheduleGateway, ReservationSummaryGateway, ShiftRulesGateway, SlotOverrideGateway,
-    TeeLedgerQuery, TeeSheetQuery,
+    AvailabilityDeadlineGateway, CaddieShiftGateway, CustomerGateway, FieldCapabilitiesGateway,
+    GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
+    GolfOpsGateway, GolfTaxGateway, MembershipGateway, ReservationCourseLinkGateway,
+    ReservationGateway, ReservationScheduleGateway, ReservationSummaryGateway, ShiftRulesGateway,
+    SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{
