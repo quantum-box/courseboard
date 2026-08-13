@@ -16,7 +16,6 @@
 - [キャンセル料徴収の原価と課金モデル](src/business/cancellation-fee-pricing.md)
 
 # Tasks
-
 - [In Progress]()
   - [PLT-3339 日次サマリを必要キャディ数と割当に接続する](src/tasks/in-progress/plt-3339-daily-summary-caddie-demand/task.md)
     - [設計](src/tasks/in-progress/plt-3339-daily-summary-caddie-demand/design.md)
@@ -25,6 +24,8 @@
   - [/v1/me proxyとextension連動テナント選択](src/tasks/in-progress/v1-me-proxy-extension-filter/task.md)
 
 - [Completed]()
+  - [v0.1.11]()
+    - [予約表集計を有効なテナントスコープへ保存する](src/tasks/completed/v0.1.11/fix-reservation-report-tenant-scope/task.md)
   - [v0.1.10]()
     - [既存予約システムの日別予約表をとりこむ](src/tasks/completed/v0.1.10/reservation-report-import/task.md)
   - [v0.1.9]()

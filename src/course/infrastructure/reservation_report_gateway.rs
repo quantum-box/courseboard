@@ -1,9 +1,8 @@
 //! Field extension-config gateway for daily reservation-count snapshots.
 //!
-//! The report is kept in Field's tenant/store extension-config records.  A
-//! store scope is used for each golf course so one course's import cannot
-//! overwrite another course's rows; the tenant config is only the schema/base
-//! used when a store scope has not been created yet.
+//! Field's extension-config contract has no `store` scope. Reports are kept in
+//! the tenant config and partitioned by CourseBoard course id inside the
+//! extension-owned JSON object.
 
 use std::collections::BTreeMap;
 
@@ -27,6 +26,7 @@ use crate::course::domain::{
 const CONFIG_PATH: &str = "/v1/erp/extensions/golf_course/config";
 const TABULAR_ANALYZE_PATH: &str = "/v1/erp/extensions/golf-course/tabular/analyze";
 const REPORT_KEY: &str = "courseBoardReservationReport";
+const COURSES_KEY: &str = "courses";
 const ROWS_KEY: &str = "rows";
 
 const TABULAR_TARGET_SCHEMA: &str = r#"[
@@ -158,32 +158,13 @@ impl FieldReservationReportGateway {
         }
     }
 
-    async fn read_store_or_tenant_config(
+    async fn write_tenant_config(
         &self,
         credentials: GatewayCredentials<'_>,
-        golf_course_id: &str,
-    ) -> Result<Value, CourseError> {
-        if let Some(config) = self
-            .read_scope_config(credentials, "store", Some(golf_course_id))
-            .await?
-        {
-            return Ok(config);
-        }
-        Ok(self
-            .read_scope_config(credentials, "tenant", None)
-            .await?
-            .unwrap_or_else(|| json!({})))
-    }
-
-    async fn write_store_config(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        golf_course_id: &str,
         config: &Value,
     ) -> Result<(), CourseError> {
         let body = json!({
-            "scopeType": "store",
-            "scopeId": golf_course_id,
+            "scopeType": "tenant",
             "configJson": config,
         });
         field_send_unit(
@@ -223,28 +204,29 @@ impl ReservationReportGateway for FieldReservationReportGateway {
             .iter()
             .map(|entry| entry.source_course_key())
             .collect();
+        let current = self
+            .read_scope_config(credentials, "tenant", None)
+            .await?
+            .unwrap_or_else(|| json!({}));
+        let mut next = object_config(&current)?;
+        let mut report_root = report_object(next.get(REPORT_KEY))?;
+        let mut course_reports = report_root
+            .remove(COURSES_KEY)
+            .map(|value| {
+                value.as_object().cloned().ok_or(CourseError::Provider(
+                    "reservation report courses config is not an object".into(),
+                ))
+            })
+            .transpose()?
+            .unwrap_or_default();
         let mut summary = ReservationReportUpsertSummary::default();
-        let mut plans = Vec::<(String, Value, Value)>::new();
 
-        // Read and prepare every affected course before the first write. This
-        // also removes remapped source rows from a course that remains a target
-        // for another source facility.
+        // Clean and rebuild every active course in memory, then commit the
+        // tenant config once so a multi-course import cannot partially persist.
         for course in courses.iter().filter(|course| course.is_active()) {
             let golf_course_id = course.id().as_str();
             let target_entries = grouped.get(golf_course_id);
-            let current = if target_entries.is_some() {
-                self.read_store_or_tenant_config(credentials, golf_course_id)
-                    .await?
-            } else if let Some(config) = self
-                .read_scope_config(credentials, "store", Some(golf_course_id))
-                .await?
-            {
-                config
-            } else {
-                continue;
-            };
-            let mut next = object_config(&current)?;
-            let mut report = report_object(next.get(REPORT_KEY))?;
+            let mut report = report_object(course_reports.get(golf_course_id))?;
             let mut row_map = report
                 .remove(ROWS_KEY)
                 .map(|rows| {
@@ -305,24 +287,22 @@ impl ReservationReportGateway for FieldReservationReportGateway {
                 }
             }
             report.insert(ROWS_KEY.into(), Value::Object(row_map));
-            next.insert(REPORT_KEY.into(), Value::Object(report));
-            let next = Value::Object(next);
-            if next != current {
-                plans.push((golf_course_id.to_string(), current, next));
+            if report
+                .get(ROWS_KEY)
+                .and_then(Value::as_object)
+                .is_some_and(Map::is_empty)
+            {
+                course_reports.remove(golf_course_id);
+            } else {
+                course_reports.insert(golf_course_id.to_string(), Value::Object(report));
             }
         }
 
-        let mut written = Vec::<(&str, &Value)>::new();
-        for (course_id, original, next) in &plans {
-            if let Err(error) = self.write_store_config(credentials, course_id, next).await {
-                for (written_course_id, written_original) in written.into_iter().rev() {
-                    let _ = self
-                        .write_store_config(credentials, written_course_id, written_original)
-                        .await;
-                }
-                return Err(error);
-            }
-            written.push((course_id.as_str(), original));
+        report_root.insert(COURSES_KEY.into(), Value::Object(course_reports));
+        next.insert(REPORT_KEY.into(), Value::Object(report_root));
+        let next = Value::Object(next);
+        if next != current {
+            self.write_tenant_config(credentials, &next).await?;
         }
         Ok(summary)
     }
@@ -334,13 +314,24 @@ impl ReservationReportGateway for FieldReservationReportGateway {
         query: ReservationReportEntryQuery,
     ) -> Result<Vec<ExternalReservationReportEntry>, CourseError> {
         let query = query.validate()?;
+        let config = self
+            .read_scope_config(credentials, "tenant", None)
+            .await?
+            .unwrap_or_else(|| json!({}));
+        let report_root = report_object(config.get(REPORT_KEY))?;
+        let course_reports = match report_root.get(COURSES_KEY) {
+            None | Some(Value::Null) => None,
+            Some(Value::Object(reports)) => Some(reports),
+            Some(_) => {
+                return Err(CourseError::Provider(
+                    "reservation report courses config is not an object".into(),
+                ));
+            }
+        };
         let mut entries = Vec::new();
         for course in courses.iter().filter(|course| course.is_active()) {
-            let config = self
-                .read_scope_config(credentials, "store", Some(course.id().as_str()))
-                .await?
-                .unwrap_or_else(|| json!({}));
-            let Some(report) = config.get(REPORT_KEY) else {
+            let Some(report) = course_reports.and_then(|reports| reports.get(course.id().as_str()))
+            else {
                 continue;
             };
             let Some(rows) = report.get(ROWS_KEY).and_then(Value::as_object) else {
@@ -609,10 +600,8 @@ mod tests {
 
     #[derive(Default)]
     struct ConfigState {
-        tenant: Value,
-        stores: Mutex<HashMap<String, Value>>,
+        tenant: Mutex<Value>,
         patches: Mutex<Vec<Value>>,
-        fail_on_patch: Mutex<Option<usize>>,
     }
 
     fn test_credentials() -> GatewayCredentials<'static> {
@@ -640,18 +629,13 @@ mod tests {
         State(state): State<Arc<ConfigState>>,
         Query(query): Query<HashMap<String, String>>,
     ) -> (StatusCode, Json<Value>) {
-        if query.get("scopeType").map(String::as_str) == Some("store") {
-            let Some(scope_id) = query.get("scopeId") else {
-                return (StatusCode::BAD_REQUEST, Json(json!({})));
-            };
-            if let Some(config) = state.stores.lock().expect("store lock").get(scope_id) {
-                return (StatusCode::OK, Json(json!({ "configJson": config })));
-            }
-            return (StatusCode::NOT_FOUND, Json(json!({ "message": "missing" })));
-        }
+        assert_eq!(query.get("scopeType").map(String::as_str), Some("tenant"));
+        assert!(!query.contains_key("scopeId"));
         (
             StatusCode::OK,
-            Json(json!({ "configJson": state.tenant.clone() })),
+            Json(json!({
+                "configJson": state.tenant.lock().expect("tenant lock").clone()
+            })),
         )
     }
 
@@ -659,29 +643,12 @@ mod tests {
         State(state): State<Arc<ConfigState>>,
         Json(body): Json<Value>,
     ) -> (StatusCode, Json<Value>) {
-        let scope_id = body
-            .get("scopeId")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
+        assert_eq!(body["scopeType"], "tenant");
+        assert!(body.get("scopeId").is_none());
         let mut patches = state.patches.lock().expect("patch lock");
-        let patch_number = patches.len() + 1;
         patches.push(body.clone());
-        let mut fail_on_patch = state.fail_on_patch.lock().expect("fail lock");
-        if *fail_on_patch == Some(patch_number) {
-            *fail_on_patch = None;
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({ "message": "injected failure" })),
-            );
-        }
-        drop(fail_on_patch);
         drop(patches);
-        state
-            .stores
-            .lock()
-            .expect("store lock")
-            .insert(scope_id, body["configJson"].clone());
+        *state.tenant.lock().expect("tenant lock") = body["configJson"].clone();
         (StatusCode::OK, Json(json!({ "ok": true })))
     }
 
@@ -799,10 +766,10 @@ mod tests {
     #[tokio::test]
     async fn upsert_is_idempotent_and_keeps_the_tenant_config_base() {
         let state = Arc::new(ConfigState {
-            tenant: json!({
+            tenant: Mutex::new(json!({
                 "requiredField": "kept",
                 "reservationProducts": [{"id": "product-1"}]
-            }),
+            })),
             ..Default::default()
         });
         let app = Router::new()
@@ -825,17 +792,12 @@ mod tests {
         assert_eq!(first.updated_count, 0);
         assert_eq!(first.unchanged_count, 0);
 
-        let stored = state
-            .stores
-            .lock()
-            .expect("store lock")
-            .get("course-1")
-            .cloned()
-            .expect("store config");
+        let stored = state.tenant.lock().expect("tenant lock").clone();
         assert_eq!(stored["requiredField"], "kept");
         assert_eq!(stored["reservationProducts"][0]["id"], "product-1");
         assert_eq!(
-            stored[REPORT_KEY][ROWS_KEY]["2026-07-01:morning"]["sourceFileSha256"],
+            stored[REPORT_KEY][COURSES_KEY]["course-1"][ROWS_KEY]["2026-07-01:morning"]
+                ["sourceFileSha256"],
             "hash"
         );
 
@@ -943,17 +905,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn multi_course_failure_rolls_back_prior_writes() {
-        let original_one = json!({ "kept": "one" });
-        let original_two = json!({ "kept": "two" });
-        let state = Arc::new(ConfigState {
-            stores: Mutex::new(HashMap::from([
-                ("course-1".into(), original_one.clone()),
-                ("course-2".into(), original_two.clone()),
-            ])),
-            fail_on_patch: Mutex::new(Some(2)),
-            ..Default::default()
-        });
+    async fn multi_course_import_commits_once_in_tenant_scope() {
+        let state = Arc::new(ConfigState::default());
         let app = Router::new()
             .route(CONFIG_PATH, get(get_config).patch(patch_config))
             .with_state(state.clone());
@@ -972,18 +925,63 @@ mod tests {
         let second =
             ExternalReservationReportEntry::new(&second_row, CourseId::new("course-2"), "hash");
 
-        assert!(gateway
+        gateway
             .upsert_entries(
                 test_credentials(),
                 &[first, second],
                 &[active_course("course-1"), active_course("course-2")],
             )
             .await
-            .is_err());
+            .expect("multi-course import");
 
-        let stores = state.stores.lock().expect("store lock");
-        assert_eq!(stores["course-1"], original_one);
-        assert_eq!(stores["course-2"], original_two);
+        assert_eq!(state.patches.lock().expect("patch lock").len(), 1);
+        let tenant = state.tenant.lock().expect("tenant lock");
+        assert!(tenant[REPORT_KEY][COURSES_KEY]["course-1"][ROWS_KEY].is_object());
+        assert!(tenant[REPORT_KEY][COURSES_KEY]["course-2"][ROWS_KEY].is_object());
+    }
+
+    #[tokio::test]
+    async fn list_entries_rejects_malformed_report_containers() {
+        let cases = [
+            (
+                json!({ REPORT_KEY: "invalid" }),
+                "reservation report config is not an object",
+            ),
+            (
+                json!({ REPORT_KEY: { COURSES_KEY: [] } }),
+                "reservation report courses config is not an object",
+            ),
+        ];
+
+        for (tenant_config, expected_message) in cases {
+            let state = Arc::new(ConfigState {
+                tenant: Mutex::new(tenant_config),
+                ..Default::default()
+            });
+            let app = Router::new()
+                .route(CONFIG_PATH, get(get_config).patch(patch_config))
+                .with_state(state);
+            let base_url = spawn_field_server(app).await;
+            let gateway =
+                FieldReservationReportGateway::new(reqwest::Client::new(), Some(&base_url));
+
+            let error = gateway
+                .list_entries(
+                    test_credentials(),
+                    &[active_course("course-1")],
+                    ReservationReportEntryQuery {
+                        from: None,
+                        to: None,
+                    },
+                )
+                .await
+                .expect_err("malformed report config must fail");
+
+            assert!(matches!(
+                error,
+                CourseError::Provider(message) if message == expected_message
+            ));
+        }
     }
 
     #[tokio::test]
