@@ -318,10 +318,16 @@ impl ReservationReportGateway for FieldReservationReportGateway {
             .read_scope_config(credentials, "tenant", None)
             .await?
             .unwrap_or_else(|| json!({}));
-        let course_reports = config
-            .get(REPORT_KEY)
-            .and_then(|report| report.get(COURSES_KEY))
-            .and_then(Value::as_object);
+        let report_root = report_object(config.get(REPORT_KEY))?;
+        let course_reports = match report_root.get(COURSES_KEY) {
+            None | Some(Value::Null) => None,
+            Some(Value::Object(reports)) => Some(reports),
+            Some(_) => {
+                return Err(CourseError::Provider(
+                    "reservation report courses config is not an object".into(),
+                ));
+            }
+        };
         let mut entries = Vec::new();
         for course in courses.iter().filter(|course| course.is_active()) {
             let Some(report) = course_reports.and_then(|reports| reports.get(course.id().as_str()))
@@ -932,6 +938,50 @@ mod tests {
         let tenant = state.tenant.lock().expect("tenant lock");
         assert!(tenant[REPORT_KEY][COURSES_KEY]["course-1"][ROWS_KEY].is_object());
         assert!(tenant[REPORT_KEY][COURSES_KEY]["course-2"][ROWS_KEY].is_object());
+    }
+
+    #[tokio::test]
+    async fn list_entries_rejects_malformed_report_containers() {
+        let cases = [
+            (
+                json!({ REPORT_KEY: "invalid" }),
+                "reservation report config is not an object",
+            ),
+            (
+                json!({ REPORT_KEY: { COURSES_KEY: [] } }),
+                "reservation report courses config is not an object",
+            ),
+        ];
+
+        for (tenant_config, expected_message) in cases {
+            let state = Arc::new(ConfigState {
+                tenant: Mutex::new(tenant_config),
+                ..Default::default()
+            });
+            let app = Router::new()
+                .route(CONFIG_PATH, get(get_config).patch(patch_config))
+                .with_state(state);
+            let base_url = spawn_field_server(app).await;
+            let gateway =
+                FieldReservationReportGateway::new(reqwest::Client::new(), Some(&base_url));
+
+            let error = gateway
+                .list_entries(
+                    test_credentials(),
+                    &[active_course("course-1")],
+                    ReservationReportEntryQuery {
+                        from: None,
+                        to: None,
+                    },
+                )
+                .await
+                .expect_err("malformed report config must fail");
+
+            assert!(matches!(
+                error,
+                CourseError::Provider(message) if message == expected_message
+            ));
+        }
     }
 
     #[tokio::test]

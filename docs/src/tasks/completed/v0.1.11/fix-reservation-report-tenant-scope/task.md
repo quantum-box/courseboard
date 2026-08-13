@@ -25,6 +25,7 @@ Fieldが対応する `tenant` scopeへ保存先を改め、CourseBoard namespace
 4. 予約表以外の既存テナント設定を保持した。
 5. Excel日付シリアル、全角区切り、和文日付、時刻付きISO日付を決定的に正規化した。
 6. 選択年と異なる年、存在しない日付、日/月と月/日を推測しなければならない形式は拒否した。
+7. 予約表設定またはコース別コンテナが壊れている場合は、空データとして扱わず上流エラーを返すようにした。
 
 ## 変更しないもの
 
@@ -34,8 +35,8 @@ Fieldが対応する `tenant` scopeへ保存先を改め、CourseBoard namespace
 
 ## 検証
 
-- `cargo test reservation_report --lib`: 16件成功
-- `cargo test`: lib 680件、lambda 1件成功
+- `cargo test reservation_report --lib`: 17件成功
+- `cargo test`: lib 681件、lambda 1件成功
 - `cargo clippy --all-targets --all-features -- -D warnings`: 成功
 - `cargo fmt --check`: 成功
 - `git diff --check`: 成功
