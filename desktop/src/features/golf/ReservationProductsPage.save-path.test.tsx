@@ -71,11 +71,11 @@ function storedProduct(body: Record<string, unknown>, serviceId: string): GolfRe
   }
 }
 
-function renderPage() {
+function renderPage(serviceId?: string) {
   return render(
     <I18nextProvider i18n={i18next}>
       <PageReloadProvider>
-        <ReservationProductsPage />
+        <ReservationProductsPage serviceId={serviceId} />
       </PageReloadProvider>
     </I18nextProvider>,
   )
@@ -104,6 +104,9 @@ describe('ReservationProductsPage save paths', () => {
       }
       if (path === productsPath && !init?.method) {
         return { items: storedProducts.map(product => ({ ...product })) }
+      }
+      if (path.startsWith(`${productsPath}/`) && path.endsWith('/slots') && !init?.method) {
+        return { items: [] }
       }
       if (path === coursesPath && !init?.method) {
         return { items: courses.map(item => ({ ...item })) }
@@ -166,5 +169,33 @@ describe('ReservationProductsPage save paths', () => {
     const table = await screen.findByRole('table')
     expect(within(table).getByText('東コース')).toBeTruthy()
     expect(within(table).getByText('西コース')).toBeTruthy()
+  })
+
+  it('edits another field without changing an existing 27-hole product', async () => {
+    storedProducts = [storedProduct(
+      {
+        displayName: '札幌27Hプラン',
+        golfCourseIds: ['course-east'],
+        holeCount: 27,
+        expectedDurationMinutes: 360,
+      },
+      'sapporo-27h',
+    )]
+    renderPage('sapporo-27h')
+
+    fireEvent.click(await screen.findByRole('button', { name: 'プラン設定' }))
+    const dialog = await screen.findByRole('dialog')
+    const holeCount = within(dialog).getByRole('combobox', { name: /ホール数/ })
+    expect(holeCount).toHaveProperty('value', '27')
+    expect(within(holeCount).getByRole('option', { name: '27ホール' })).toBeTruthy()
+
+    fireEvent.change(within(dialog).getByRole('spinbutton', { name: /かかる時間/ }), {
+      target: { value: '390' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: 'プレー設定を保存' }))
+
+    await waitFor(() => expect(writes).toHaveLength(1))
+    expect(writes[0]!.body.holeCount).toBe(27)
+    expect(writes[0]!.body.expectedDurationMinutes).toBe(390)
   })
 })

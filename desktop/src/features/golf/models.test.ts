@@ -222,10 +222,34 @@ describe('validateProduct', () => {
     expect(validateProduct({ ...valid, expectedDurationMinutes: 240.5 })).not.toBeNull()
   })
 
-  it('only knows 9 and 18 holes', () => {
+  it('only offers 9 and 18 holes for a new plan', () => {
     expect(validateProduct({ ...valid, holeCount: 27 })).not.toBeNull()
     expect(validateProduct({ ...valid, holeCount: 0 })).not.toBeNull()
     expect(validateProduct({ ...valid, holeCount: 9 })).toBeNull()
+  })
+
+  it('lets an existing plan keep the hole count it arrived with', () => {
+    // 27 hole courses are ordinary, and the catalog these products come from
+    // admits them. Rejecting the number a product already had made every other
+    // field uneditable: the price could not be changed without making it an 18.
+    expect(validateProduct(
+      { ...valid, holeCount: 27 },
+      { existingHoleCount: 27 },
+    )).toBeNull()
+    expect(validateProduct(
+      { ...valid, holeCount: 36 },
+      { existingHoleCount: 36 },
+    )).toBeNull()
+
+    // Changing it to another unsupported number is still refused.
+    expect(validateProduct(
+      { ...valid, holeCount: 36 },
+      { existingHoleCount: 27 },
+    )).not.toBeNull()
+    expect(validateProduct(
+      { ...valid, holeCount: 0 },
+      { existingHoleCount: 27 },
+    )).not.toBeNull()
   })
 
   it('keeps the service id to characters a URL path can carry', () => {

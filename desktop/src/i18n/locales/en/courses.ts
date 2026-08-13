@@ -31,6 +31,7 @@ export const courses: DeepPartial<typeof source> = {
   option: {
     holes18: '18 holes',
     holes9: '9 holes',
+    holesOther: '{{n}} holes',
   },
   table: {
     course: 'Course',
