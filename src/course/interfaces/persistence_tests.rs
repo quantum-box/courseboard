@@ -27,7 +27,10 @@ use tower::ServiceExt;
 
 use crate::auth::StaticBearerVerifier;
 use crate::cancellation_fees::CancellationFeeConfig;
-use sqlx::MySqlPool;
+use sqlx::{
+    mysql::{MySqlConnectOptions, MySqlPoolOptions},
+    MySqlPool,
+};
 
 use crate::{build_router, AppState};
 
@@ -313,6 +316,17 @@ fn router(pool: &MySqlPool, field_url: &str) -> Router {
     router_with_multi_course_writes(pool, field_url, true)
 }
 
+/// This route persists only through Field; a lazy pool makes that boundary
+/// test independent of an unrelated CourseBoard test database.
+fn unused_pool() -> MySqlPool {
+    MySqlPoolOptions::new().connect_lazy_with(
+        MySqlConnectOptions::new()
+            .host("127.0.0.1")
+            .username("root")
+            .database("unused_plan_config_test"),
+    )
+}
+
 fn router_with_multi_course_writes(
     pool: &MySqlPool,
     field_url: &str,
@@ -544,7 +558,105 @@ async fn the_ledger_draws_its_columns_in_the_order_that_was_saved() {
     assert_eq!(names, vec!["course-c", "course-a", "course-b", ""]);
 }
 
-// ─── Plans sold on several courses ────────────────────────────────────────────
+// ─── Plan extension config round trips ───────────────────────────────────────────
+
+#[tokio::test]
+async fn editing_a_plan_preserves_its_unknown_extension_config_keys() {
+    // CourseBoard projects a plan into its known golf fields for the editor,
+    // but Field stores the raw product object. A future Field release or
+    // another surface may add keys that this version cannot project yet.
+    let tenant = tenant_for("editing_a_plan_preserves_its_unknown_exten");
+    let field = field_with_courses();
+    let unknown_plan_settings = json!({
+        "pricingVersion": 2,
+        "channels": ["channel-dummy"],
+        "rules": { "futureFlag": true },
+    });
+    *field.config.lock().unwrap() = json!({
+        "reservationProducts": [
+            {
+                "id": "future-ready-plan",
+                "name": "Before edit",
+                "playType": "self",
+                "holeCount": 18,
+                "durationMinutes": 240,
+                "golfCourseId": "course-a",
+                "futurePlanSettings": unknown_plan_settings.clone(),
+            },
+            {
+                "id": "neighbour-plan",
+                "futureNeighbourKey": { "keep": true },
+            },
+        ],
+        "futureTenantKey": { "keep": true },
+    });
+    let url = spawn_field(field.clone()).await;
+    let pool = unused_pool();
+
+    // The typed read intentionally exposes only CourseBoard's known fields.
+    let (status, before) = call(
+        &router(&pool, &url),
+        &tenant,
+        "GET",
+        "/v1/course/reservation-products",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(before["items"][0]["displayName"], json!("Before edit"));
+    assert_eq!(before["items"][0]["futurePlanSettings"], Value::Null);
+
+    let (status, saved) = call(
+        &router(&pool, &url),
+        &tenant,
+        "POST",
+        "/v1/course/reservation-products/future-ready-plan",
+        Some(json!({
+            "displayName": "After edit",
+            "playType": "caddie",
+            "holeCount": 18,
+            "expectedDurationMinutes": 270,
+            "golfCourseIds": ["course-a"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["displayName"], json!("After edit"));
+
+    // Field replaces configJson wholesale. These assertions therefore prove
+    // that the real HTTP write-back carried the unprojected plan data through,
+    // rather than rebuilding the product from the typed domain object.
+    let stored = field.config.lock().unwrap().clone();
+    let stored_products = stored["reservationProducts"]
+        .as_array()
+        .expect("stored products");
+    let edited = stored_products
+        .iter()
+        .find(|product| product["id"] == json!("future-ready-plan"))
+        .expect("edited plan");
+    let neighbour = stored_products
+        .iter()
+        .find(|product| product["id"] == json!("neighbour-plan"))
+        .expect("neighbour plan");
+    assert_eq!(edited["futurePlanSettings"], unknown_plan_settings);
+    assert_eq!(neighbour["futureNeighbourKey"], json!({ "keep": true }));
+    assert_eq!(stored["futureTenantKey"], json!({ "keep": true }));
+
+    // A fresh router reads the edited known field back from Field, so the test
+    // covers read -> write-back -> persisted read rather than an in-memory value.
+    let (status, after) = call(
+        &router(&pool, &url),
+        &tenant,
+        "GET",
+        "/v1/course/reservation-products",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(after["items"][0]["displayName"], json!("After edit"));
+}
+
+// ─── Plans sold on several courses ───────────────────────────────────────────
 
 #[tokio::test]
 async fn a_plan_sold_on_two_courses_is_stored_against_both_of_their_resources() {
