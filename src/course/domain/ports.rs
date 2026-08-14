@@ -13,13 +13,12 @@ use super::{
     DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
     GenerationSummary, InventoryWatermark, MembershipPlan, MembershipPlanId, MonthlySettlement,
     NewCustomer, NewReservation, PartyDetails, ProductSlot, RecommendationQuery,
-    ReplaceCaddieMemberships, Reservation, ReservationCourseAnswer, ReservationCourseLink,
-    ReservationDaySummary, ReservationId, ReservationPolicy, ReservationProduct,
-    ReservationServiceId, ReservationSummaryQuery, ReservationSummaryWindow, Resource, ResourceId,
-    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
-    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
-    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
-    UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
+    ReplaceCaddieMemberships, Reservation, ReservationId, ReservationPolicy, ReservationProduct,
+    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
+    SeededReservation, ShiftPolicy, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot,
+    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
+    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan,
+    UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -145,39 +144,6 @@ pub trait SlotOverrideGateway: Send + Sync {
     ) -> Result<u64, CourseError>;
 }
 
-/// Port for the daily reservation counts imported from the club's booking
-/// system.
-///
-/// The booking system exports counts per course per half-day and nothing
-/// finer — no start times, no per-booking caddie flag (PLT-3247) — so these
-/// cannot be Field reservations consuming tee-time inventory. They are
-/// CourseBoard's own series (ADR-0005), the same reasoning as
-/// [`SlotOverrideGateway`].
-#[async_trait]
-pub trait ReservationSummaryGateway: Send + Sync {
-    async fn list_reservation_summaries(
-        &self,
-        tenant_id: &str,
-        query: &ReservationSummaryQuery,
-    ) -> Result<Vec<ReservationDaySummary>, CourseError>;
-
-    /// Make `window` hold exactly `summaries` and nothing else.
-    ///
-    /// A replace rather than an upsert. The club re-exports the same month all
-    /// month long, so the same half-day arrives again and again — and a file
-    /// that stops reporting one (an unreadable count, a course renamed out of
-    /// the match) has to take the old number with it. Writing only what is
-    /// present would leave last week's count standing on a half-day this
-    /// week's file says nothing about.
-    async fn replace_reservation_summaries(
-        &self,
-        tenant_id: &str,
-        window: &ReservationSummaryWindow,
-        summaries: &[ReservationDaySummary],
-        source_file: Option<&str>,
-    ) -> Result<u64, CourseError>;
-}
-
 /// Port for how far each course's tee-time inventory has been built.
 ///
 /// Field generates the slots but reports only counts, never a date, so the
@@ -198,34 +164,6 @@ pub trait GeneratedThroughGateway: Send + Sync {
         course_id: &CourseId,
         watermark: InventoryWatermark,
     ) -> Result<(), CourseError>;
-}
-
-/// Port for the desk's answers about which course a name in the booking
-/// system's export refers to.
-///
-/// Guessing from the name works for the club this was built from and cannot be
-/// relied on for the next one, so the answers are kept. Field's course master
-/// carries no external identifier, and naming is the golf anti-corruption
-/// layer, so they are CourseBoard's (ADR-0005).
-#[async_trait]
-pub trait ReservationCourseLinkGateway: Send + Sync {
-    async fn list_course_links(
-        &self,
-        tenant_id: &str,
-    ) -> Result<Vec<ReservationCourseLink>, CourseError>;
-
-    /// Record the desk's answers. Each replaces whatever that name said before.
-    ///
-    /// "Do not import" is stored rather than represented by absence, so the
-    /// import can tell a decision from a name nobody has looked at yet — and
-    /// taking an answer back is therefore its own thing, which removes the row
-    /// and puts the name back among the questions.
-    async fn save_course_links(
-        &self,
-        tenant_id: &str,
-        answers: &[ReservationCourseAnswer],
-        updated_by: Option<&str>,
-    ) -> Result<Vec<ReservationCourseLink>, CourseError>;
 }
 
 /// Port for each tenant's shift-request filing deadline, one per calendar

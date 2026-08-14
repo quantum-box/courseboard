@@ -18,7 +18,6 @@ import { CoursesPage } from './features/golf/CoursesPage'
 import { GolfHomePage } from './features/golf/GolfHomePage'
 import { MembersPage } from './features/members/MembersPage'
 import { PolicyPage } from './features/golf/PolicyPage'
-import { ReservationImportPage } from './features/golf/ReservationImportPage'
 import { ReservationProductsPage } from './features/golf/ReservationProductsPage'
 import { SettlementPage } from './features/golf/SettlementPage'
 import { SimulatorPage } from './features/golf/SimulatorPage'
@@ -132,7 +131,6 @@ function RouteContent({ route }: { route: string }) {
     // Stable key: opening a person updates props instead of remounting the list.
     return <StaffPage key="staff" staffId={segment || undefined} />
   }
-  if (route === 'golf/reservation-import') return <ReservationImportPage />
   if (route === 'golf/budgets') return <BudgetsPage />
   if (route === 'golf/policy') return <PolicyPage />
   if (route === 'golf/settlement') return <SettlementPage />

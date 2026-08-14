@@ -27,8 +27,6 @@ mod pricing_settings;
 mod product;
 mod reservation;
 mod reservation_report;
-mod reservation_sheet;
-mod reservation_summary;
 mod resource;
 mod schedule;
 mod simulator;
@@ -102,9 +100,9 @@ pub use payroll::{
 pub use ports::{
     AvailabilityDeadlineGateway, CaddieShiftGateway, CustomerGateway, FieldCapabilitiesGateway,
     GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
-    GolfOpsGateway, GolfTaxGateway, MembershipGateway, ReservationCourseLinkGateway,
-    ReservationGateway, ReservationScheduleGateway, ReservationSummaryGateway, ShiftRulesGateway,
-    SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
+    GolfOpsGateway, GolfTaxGateway, MembershipGateway, ReservationGateway,
+    ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery,
+    TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{
@@ -118,16 +116,6 @@ pub use reservation_report::{
     ReservationReportUpsertSummary, TabularAnalyzeMapping, TabularAnalyzeMappingField,
     TabularAnalyzeResult, TabularAnalyzeRow, DAILY_RESERVATION_STATUS_SOURCE,
     TABULAR_RESERVATION_REPORT_SOURCE,
-};
-pub use reservation_sheet::{
-    parse_reservation_sheet, year_month_from_file_name, ImportWarning, ParsedReservationSheet,
-    SheetDaySummary, SheetGrid,
-};
-pub use reservation_summary::{
-    courses_a_label_may_have_matched, courses_matching_label, match_course_label,
-    normalize_course_label, resolve_course_label, CourseDecision, CourseMatch, CourseResolution,
-    ReservationCourseAnswer, ReservationCourseLink, ReservationDaySummary, ReservationSummaryQuery,
-    ReservationSummaryWindow, TimeOfDay,
 };
 pub use resource::{Resource, ResourceKind, SaveCourseResource};
 pub use schedule::{
