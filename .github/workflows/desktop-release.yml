@@ -31,7 +31,7 @@ env:
 jobs:
   version:
     name: Resolve version
-    runs-on: ubuntu-latest
+    runs-on: tachyoncloud
     outputs:
       value: ${{ steps.version.outputs.value }}
     steps:
@@ -164,7 +164,7 @@ jobs:
     # explicit, environment-protected action until both platform signing
     # identities have been connected and verified in this workflow.
     if: github.event_name == 'workflow_dispatch' && inputs.publish == true
-    runs-on: ubuntu-latest
+    runs-on: tachyoncloud
     environment: desktop-release
     steps:
       - name: Checkout
