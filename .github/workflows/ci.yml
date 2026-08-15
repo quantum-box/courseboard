@@ -115,7 +115,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev
+          # `file` is not in the self-hosted runner image, and appimagetool
+          # refuses to run without it.
+          sudo apt-get install -y libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev file
 
       - name: Setup Node
         uses: actions/setup-node@v4
