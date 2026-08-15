@@ -74,6 +74,13 @@ gate が開いているとき、CourseBoard は全 selected course の resource 
 `golfCourseIds` と `eligibleResourceIds` を同じ product object へ書き、legacy scalar
 を削除する。1 件でも解決できなければ PATCH 自体を行わない。
 
+resource を持たない course は、この解決の前に usecase が用意する（
+`ensure_course_resources`）。course が resource を持つのは誰かが用意したときだけで、
+それは Field 側のモデルの都合でしかない。商品でその course を選んだ操作自体が用意の
+意思表示なので、コースごとの受付枠画面へ往復させない。作成は course ごとに冪等
+（Field が `resourceCode` で upsert する）で、1 コースの商品は従来どおり scalar の
+まま保存するので resource を持たないテナントの保存も変わらない。
+
 ## Deploy と rollback
 
 順序は次で固定し、逆順にはしない。

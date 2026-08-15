@@ -18,7 +18,7 @@ use axum::{
     body::Body,
     extract::{Path, State},
     http::{Request, StatusCode},
-    routing::{get, patch},
+    routing::{get, patch, post},
     Json, Router,
 };
 use http_body_util::BodyExt;
@@ -60,6 +60,9 @@ struct FieldState {
     /// is stored against the resource behind it, so a canonical write needs
     /// these to exist the way they do in a real tenant.
     resources: Mutex<Vec<Value>>,
+    /// Names the generic reservation resources were created under, so a test
+    /// can tell a resource that was already there from one CourseBoard made.
+    created_reservation_resources: Mutex<Vec<String>>,
     /// The plan and end time a write moved the booking to, absent until one
     /// does — so a test can tell "never written" from "written back the same".
     reservation_service_id: Mutex<Option<String>>,
@@ -177,6 +180,40 @@ async fn list_resources(State(state): State<Arc<FieldState>>) -> Json<Value> {
     Json(json!({ "items": state.resources.lock().unwrap().clone() }))
 }
 
+async fn create_reservation_resource(
+    State(state): State<Arc<FieldState>>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    let mut created = state.created_reservation_resources.lock().unwrap();
+    created.push(body["name"].as_str().unwrap_or_default().to_string());
+    Json(json!({ "id": format!("resource-new-{}", created.len()) }))
+}
+
+/// Field upserts the mapping on `resourceCode`, so saving the same course twice
+/// corrects its row instead of giving the course a second resource.
+async fn save_course_resource(
+    State(state): State<Arc<FieldState>>,
+    Json(body): Json<Value>,
+) -> Json<Value> {
+    let stored = json!({
+        "id": format!("golf-{}", body["resourceCode"].as_str().unwrap_or_default()),
+        "name": body["name"],
+        "reservationResourceId": body["reservationResourceId"],
+        "golfCourseId": body["golfCourseId"],
+        "resourceKind": "course",
+        "active": true,
+    });
+    let mut resources = state.resources.lock().unwrap();
+    match resources
+        .iter_mut()
+        .find(|resource| resource["id"] == stored["id"])
+    {
+        Some(slot) => *slot = stored.clone(),
+        None => resources.push(stored.clone()),
+    }
+    Json(stored)
+}
+
 async fn list_reservations(State(state): State<Arc<FieldState>>) -> Json<Value> {
     let mut items = vec![reservation(
         &state.reservation_custom_fields.lock().unwrap(),
@@ -280,7 +317,11 @@ async fn spawn_field(state: Arc<FieldState>) -> String {
         .route("/v1/erp/reservation-types", get(list_reservation_types))
         .route(
             "/v1/erp/extensions/golf-course/resources",
-            get(list_resources),
+            get(list_resources).post(save_course_resource),
+        )
+        .route(
+            "/v1/erp/reservation-resources",
+            post(create_reservation_resource),
         )
         .route(
             "/v1/erp/reservations",
@@ -743,17 +784,19 @@ async fn a_plan_on_one_course_still_answers_the_compatibility_alias() {
 }
 
 #[tokio::test]
-async fn a_course_without_a_resource_stops_the_whole_plan_from_being_saved() {
-    // Half a membership is worse than none: the plan would be sold on the
-    // course that resolved and silently missing from the one that did not.
-    let tenant = tenant_for("a_course_without_a_resource_stops_the_wh");
+async fn a_course_without_a_resource_is_given_one_rather_than_losing_the_plan() {
+    // Where a course keeps its tee times is Field's model. Selling the plan on
+    // the course is the whole of what the desk meant, so the resource behind it
+    // is made here instead of the save failing until somebody goes and presses
+    // a button on another screen.
+    let tenant = tenant_for("a_course_without_a_resource_is_given_one");
     let field = field_with_courses();
     *field.config.lock().unwrap() = json!({});
     *field.resources.lock().unwrap() = vec![course_resource("course-a", "resource-a")];
     let url = spawn_field(field.clone()).await;
     let pool = crate::test_support::test_pool().await;
 
-    let (status, _) = call(
+    let (status, body) = call(
         &router(&pool, &url),
         &tenant,
         "POST",
@@ -765,7 +808,56 @@ async fn a_course_without_a_resource_stops_the_whole_plan_from_being_saved() {
         })),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["golfCourseIds"], json!(["course-a", "course-b"]));
+
+    // Only the course that was missing one, and named after itself so the
+    // resource is recognisable in Field.
+    assert_eq!(
+        *field.created_reservation_resources.lock().unwrap(),
+        vec!["B course".to_string()]
+    );
+
+    // Half a membership is worse than none: both courses must be placeable, so
+    // the stored eligibility names a resource for each.
+    let stored = field.config.lock().unwrap().clone();
+    let product = &stored["reservationProducts"][0];
+    assert_eq!(product["golfCourseIds"], json!(["course-a", "course-b"]));
+    assert_eq!(
+        product["eligibleResourceIds"],
+        json!(["resource-a", "resource-new-1"])
+    );
+}
+
+#[tokio::test]
+async fn a_course_this_tenant_does_not_have_stops_the_whole_plan_from_being_saved() {
+    // A course id nothing answers to is a mistake to report, not a resource to
+    // invent: writing the plan anyway would sell it on one course and leave it
+    // silently missing from the other.
+    let tenant = tenant_for("a_course_this_tenant_does_not_have_stops");
+    let field = field_with_course_resources();
+    *field.config.lock().unwrap() = json!({});
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    let (status, _) = call(
+        &router(&pool, &url),
+        &tenant,
+        "POST",
+        "/v1/course/reservation-products/season-pass",
+        Some(json!({
+            "displayName": "シーズンパス",
+            "playType": "caddie",
+            "golfCourseIds": ["course-a", "course-ghost"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert!(field
+        .created_reservation_resources
+        .lock()
+        .unwrap()
+        .is_empty());
     assert_eq!(
         field.config.lock().unwrap()["reservationProducts"],
         Value::Null
