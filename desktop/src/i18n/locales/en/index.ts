@@ -16,7 +16,6 @@ import { payment } from './payment'
 import { policy } from './policy'
 import { products } from './products'
 import { reservationReportImport } from './reservationReportImport'
-import { reservationImport } from './reservationImport'
 import { schedule } from './schedule'
 import { settings } from './settings'
 import { settlement } from './settlement'
@@ -44,7 +43,6 @@ export const en = {
   policy,
   products,
   reservationReportImport,
-  reservationImport,
   schedule,
   settings,
   settlement,

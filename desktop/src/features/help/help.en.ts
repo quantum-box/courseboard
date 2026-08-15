@@ -253,34 +253,6 @@ export const helpEn: HelpCatalog = {
       ],
     },
 
-    'golf/reservation-import': {
-      title: 'Import bookings',
-      summary: 'Read the booking system\'s daily reservation export and bring the month\'s group counts in.',
-      usage: [
-        {
-          heading: 'Choose a file',
-          body: 'Pick the .xlsx exactly as the booking system exported it. The month it covers is read from the file name.',
-        },
-        {
-          heading: 'Check before importing',
-          body: 'Check the file first: you get the counts and anything worth a look, and nothing is written yet. Import it once it looks right.',
-        },
-        {
-          heading: 'Re-import the same month freely',
-          body: 'Re-exporting and re-importing a month overwrites its daily counts rather than adding a second set.',
-        },
-      ],
-      data: [
-        {
-          heading: 'Groups and caddie-attached groups',
-          body: 'Groups booked for each half of the day, and how many of those asked for a caddie. Start times and per-booking caddie flags are not in the export.',
-        },
-        {
-          heading: 'Left out',
-          body: 'Half-days whose counts were not numbers, plus courses Course Board does not have. If this is not zero, read the warnings.',
-        },
-      ],
-    },
     'golf/budgets': {
       title: 'Revenue targets',
       summary: 'Set daily revenue targets and compare them with actual bookings.',
