@@ -42,6 +42,7 @@ import {
   type ReservationReportEntry,
   type ReservationReportImportResult,
   type ReservationReportPreview,
+  type ReservationReportReviewRow,
 } from './models'
 
 type ImportStage = 'choose' | 'mapping' | 'confirm' | 'result'
@@ -518,6 +519,10 @@ export function ReservationReportImportPage() {
           </div>
           <MonthlyPreviewTable rows={previewRows} locale={localeForDate(i18n.language)} />
           {previewTotals ? <ReportTotals totals={previewTotals} /> : null}
+          <ReviewNotice
+            rows={preview.review ?? []}
+            locale={localeForDate(i18n.language)}
+          />
           {importError ? (
             <Notice tone="danger" title={t('reservationReportImport:notice.importFailed')}>
               {importError}
@@ -539,6 +544,10 @@ export function ReservationReportImportPage() {
         <Panel title={t('reservationReportImport:result.title')} description={t('reservationReportImport:result.description')} className="reservation-report-panel">
           <div className="reservation-report-result-heading"><CheckCircle2 aria-hidden="true" /><strong>{t('reservationReportImport:result.title')}</strong></div>
           <ResultStats result={result} month={resultMonth} locale={localeForDate(i18n.language)} />
+          <ReviewNotice
+            rows={preview?.review ?? []}
+            locale={localeForDate(i18n.language)}
+          />
           <div className="reservation-report-form-actions">
             <Button type="button" variant="primary" onClick={startOver}>
               <Upload /> {t('reservationReportImport:action.startOver')}
@@ -715,6 +724,35 @@ function ReportTotals({ totals }: { totals: ReturnType<typeof sumRows> }) {
       <div><span>{t('result.groups')}</span><strong>{totals.groupCount}</strong></div>
       <div><span>{t('result.caddie')}</span><strong>{totals.caddieAttachedGroupCount}</strong></div>
     </div>
+  )
+}
+
+/**
+ * The half-days the report contradicts itself on.
+ *
+ * A notice rather than a block: the counts are already in, and the desk is the
+ * only one who can say which of the two numbers the original report meant.
+ */
+function ReviewNotice({ rows, locale }: { rows: ReservationReportReviewRow[]; locale: string }) {
+  const { t } = useTranslation('reservationReportImport')
+  if (!rows.length) return null
+  return (
+    <Notice tone="warning" title={t('review.title')}>
+      <p>{t('review.description')}</p>
+      <ul className="reservation-report-review-list">
+        {rows.map(row => (
+          <li key={`${row.sourceCourseName}-${row.date}-${row.dayPart}`}>
+            {t('review.caddieExceedsGroups', {
+              date: formatReportDate(row.date, locale),
+              course: row.sourceCourseName,
+              half: String(t(row.dayPart === 'morning' ? 'preview.morning' : 'preview.afternoon')),
+              groups: String(row.groupCount),
+              caddie: String(row.caddieAttachedGroupCount),
+            })}
+          </li>
+        ))}
+      </ul>
+    </Notice>
   )
 }
 

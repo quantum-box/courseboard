@@ -186,6 +186,7 @@ impl Modify for SecurityAddon {
             http_reservation_report::ReservationReportRowDto,
             http_reservation_report::ReservationReportTotalsDto,
             http_reservation_report::ReservationReportPreviewResponse,
+            http_reservation_report::ReservationReportReviewDto,
             http_reservation_report::ReservationReportAnalysisDto,
             http_reservation_report::ReservationReportMappingDto,
             http_reservation_report::ReservationReportMappingFieldDto,

@@ -1180,7 +1180,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tabular_fallback_rejects_caddie_count_above_groups() {
+    async fn tabular_fallback_flags_caddie_count_above_groups_without_refusing_the_file() {
         let gateway = FakeAnalyzeGateway {
             result: tabular_analysis(vec![TabularAnalyzeRow::new(
                 2,
@@ -1194,7 +1194,10 @@ mod tests {
             )
             .unwrap()]),
         };
-        let error = PreviewReservationReportUseCase::execute_with_fallback(
+        // One of the two numbers is wrong and the report does not say which.
+        // Refusing the file would leave the club unable to import the month at
+        // all over a single half-day, so the row imports and gets flagged.
+        let preview = PreviewReservationReportUseCase::execute_with_fallback(
             GatewayCredentials {
                 authorization: "Bearer test",
                 operator_id: "tenant",
@@ -1207,11 +1210,13 @@ mod tests {
             None,
         )
         .await
-        .unwrap_err();
-        assert!(matches!(
-            error,
-            CourseError::BadRequest("caddie-attached groups cannot exceed groups")
-        ));
+        .unwrap();
+        let flagged = preview.report().rows_needing_review();
+        assert_eq!(flagged.len(), 1);
+        assert_eq!(flagged[0].group_count(), 1);
+        assert_eq!(flagged[0].caddie_attached_group_count(), 2);
+        // Flagged, not corrected: the counts are stored as the report wrote them.
+        assert_eq!(preview.report().rows().len(), 1);
     }
 
     #[tokio::test]

@@ -2523,6 +2523,9 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
           0,
         ),
       },
+      // The fixture report is internally consistent, so it has nothing for the
+      // desk to compare against the original.
+      review: [],
     })
   }
 
