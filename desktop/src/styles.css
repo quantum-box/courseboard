@@ -1080,6 +1080,36 @@ button,
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* A grey bar where a value will be, for screens that draw their own shape while
+ * the slow part of the page is still on the way. Sized by the caller so it
+ * takes the room the real value will take and nothing moves when it lands. */
+.skeleton-bar {
+  display: inline-block;
+  border-radius: 3px;
+  background: hsl(var(--nui-muted-foreground) / 18%);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(var(--nui-muted-foreground) / 10%) 50%,
+    transparent 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 160px 100%;
+  animation: skeleton-sweep 1.4s linear infinite;
+}
+
+@keyframes skeleton-sweep {
+  from { background-position: -160px 0; }
+  to { background-position: calc(100% + 160px) 0; }
+}
+
+/* The sweep is decoration; the bars still say the page is working without it. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-bar {
+    animation: none;
+  }
+}
+
 .form-grid {
   display: grid;
   align-items: start;
@@ -4870,6 +4900,19 @@ button,
    glance into one the desk has to scroll. The whole cell is the target, which
    is the full width of the column — narrow only in the one direction that costs
    nothing to hit. */
+/* The stand-in board reuses the real column and table classes so the rows sit
+ * where they will sit; only the cell padding has to be restated, because the
+ * real one comes from the button inside the cell. */
+.ledger-skeleton-cell {
+  display: block;
+  padding: 5px 8px;
+}
+
+.ledger-board.is-skeleton .ledger-column {
+  /* No column can be reordered or opened yet, so nothing here invites a click. */
+  pointer-events: none;
+}
+
 .ledger-empty-button {
   display: block;
   width: 100%;
@@ -5531,6 +5574,12 @@ button,
 .ledger-course-chip:focus-visible {
   outline: 2px solid hsl(var(--nui-primary));
   outline-offset: 1px;
+}
+
+.ledger-course-chip.is-skeleton {
+  display: inline-flex;
+  align-items: center;
+  cursor: default;
 }
 
 /* Supporting figures the operator opens when they want them. The row is a

@@ -80,13 +80,22 @@ impl GetTeeLedgerUseCase {
         // ADR-0005 put the board on several independent Field endpoints and any
         // of them can be down alone, so one failure must degrade the ledger
         // rather than black out the operator's day.
-        let (reservations, courses, timezone, resources, products, order) = tokio::join!(
+        //
+        // The marks are our own table and depend on nothing fetched here, so
+        // they ride along rather than costing the desk a round trip of their
+        // own after everything else has landed.
+        let mark_query = SlotOverrideQuery {
+            date: query.date,
+            course_ids: query.golf_course_ids.clone(),
+        };
+        let (reservations, courses, timezone, resources, products, order, marks) = tokio::join!(
             self.reservations.list_reservations(credentials),
             self.catalog.list_courses(credentials),
             self.catalog.get_tenant_timezone(credentials),
             self.catalog.list_resources(credentials),
             self.catalog.list_reservation_products(credentials),
             self.catalog.get_course_order(credentials),
+            self.marks.list_slot_overrides(tenant_id, &mark_query),
         );
         let reservations = reservations?;
         let courses = courses?;
@@ -126,21 +135,11 @@ impl GetTeeLedgerUseCase {
         )?;
         let items = sheet.into_items();
 
-        let marks = self
-            .marks
-            .list_slot_overrides(
-                tenant_id,
-                &SlotOverrideQuery {
-                    date: query.date,
-                    course_ids: query.golf_course_ids.clone(),
-                },
-            )
-            .await
-            .unwrap_or_else(|error| {
-                tracing::warn!(%error, "tee ledger built without slot marks");
-                unavailable.push("slotOverrides".to_string());
-                Vec::new()
-            });
+        let marks = marks.unwrap_or_else(|error| {
+            tracing::warn!(%error, "tee ledger built without slot marks");
+            unavailable.push("slotOverrides".to_string());
+            Vec::new()
+        });
 
         let columns = self
             .build_columns(
@@ -177,27 +176,43 @@ impl GetTeeLedgerUseCase {
         let mut items_by_course = group_items_by_course(items);
         let marks_by_course = group_marks_by_course(marks);
 
+        let drawn: Vec<&Course> = courses
+            .iter()
+            .filter(|course| course.is_active())
+            .filter(|course| query.includes(course.id()))
+            .collect();
+
+        // Each course's grid is its own round trip to Field, and none of them
+        // reads any other's answer. Run one after another, a four-course club
+        // waited four times over before a single row was drawn.
+        let grids = futures::future::join_all(drawn.iter().map(|course| {
+            let resource_id = resolve_resource(resources, course.id());
+            async move {
+                let (grid, missing) = self
+                    .resolve_grid(
+                        credentials,
+                        course,
+                        resource_id.as_ref(),
+                        window_start,
+                        window_end,
+                        timezone_id,
+                    )
+                    .await;
+                (resource_id, grid, missing)
+            }
+        }))
+        .await;
+
         let mut columns = Vec::new();
-        for course in courses.iter().filter(|course| course.is_active()) {
-            if !query.includes(course.id()) {
-                continue;
+        for (course, (resource_id, grid, missing)) in drawn.into_iter().zip(grids) {
+            // Collected after the fan-out rather than inside it: what is
+            // reported is one line per degraded source, not one per course.
+            for source in missing {
+                push_once(unavailable, source);
             }
 
-            let resource_id = resolve_resource(resources, course.id());
             let course_items = items_by_course.remove(course.id()).unwrap_or_default();
             let course_marks = marks_by_course.get(course.id());
-
-            let grid = self
-                .resolve_grid(
-                    credentials,
-                    course,
-                    resource_id.as_ref(),
-                    window_start,
-                    window_end,
-                    timezone_id,
-                    unavailable,
-                )
-                .await;
 
             columns.push(build_column(
                 course.id().clone(),
@@ -249,7 +264,10 @@ impl GetTeeLedgerUseCase {
     /// Generated inventory first: it is the only source that knows how many
     /// groups are left. The two fallbacks say when a group *could* start, which
     /// is still a usable board and is far better than an empty one.
-    #[allow(clippy::too_many_arguments)]
+    ///
+    /// Returns the sources that were unreachable alongside the grid rather than
+    /// writing them anywhere: the courses resolve concurrently, and a shared
+    /// list would have to be locked to be written from all of them.
     async fn resolve_grid(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -258,8 +276,8 @@ impl GetTeeLedgerUseCase {
         window_start: DateTime<Utc>,
         window_end: DateTime<Utc>,
         timezone: Tz,
-        unavailable: &mut Vec<String>,
-    ) -> SlotGrid {
+    ) -> (SlotGrid, Vec<&'static str>) {
+        let mut missing = Vec::new();
         if let Some(resource_id) = resource_id {
             match self
                 .schedules
@@ -267,12 +285,12 @@ impl GetTeeLedgerUseCase {
                 .await
             {
                 Ok(slots) if !slots.is_empty() => {
-                    return summarize_inventory(&slots, timezone);
+                    return (summarize_inventory(&slots, timezone), missing);
                 }
                 Ok(_) => {}
                 Err(error) => {
                     tracing::warn!(%error, course = %course.id(), "tee ledger fell back from inventory");
-                    push_once(unavailable, "timeSlots");
+                    missing.push("timeSlots");
                 }
             }
 
@@ -285,12 +303,15 @@ impl GetTeeLedgerUseCase {
                     let weekday = courseboard_weekday_of(window_start, timezone);
                     let times = derive_slot_times_from_rules(&rules, weekday);
                     if !times.is_empty() {
-                        return SlotGrid::times_only(times, SlotGridSource::Schedule);
+                        return (
+                            SlotGrid::times_only(times, SlotGridSource::Schedule),
+                            missing,
+                        );
                     }
                 }
                 Err(error) => {
                     tracing::warn!(%error, course = %course.id(), "tee ledger fell back from schedule");
-                    push_once(unavailable, "courseSchedule");
+                    missing.push("courseSchedule");
                 }
             }
         }
@@ -305,7 +326,7 @@ impl GetTeeLedgerUseCase {
         } else {
             SlotGridSource::OpeningHours
         };
-        SlotGrid::times_only(times, source)
+        (SlotGrid::times_only(times, source), missing)
     }
 }
 

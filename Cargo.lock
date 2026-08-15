@@ -466,6 +466,7 @@ dependencies = [
  "derive-getters",
  "dotenvy",
  "field-sdk",
+ "futures",
  "http-body-util",
  "jsonwebtoken",
  "lambda_http",

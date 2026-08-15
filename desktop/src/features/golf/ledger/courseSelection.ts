@@ -56,6 +56,20 @@ export function resolveSelection(selected: string[], available: CourseOption[]):
     return selected.filter(id => ids.has(id))
 }
 
+/**
+ * How many stand-in columns the board draws while the day is being fetched.
+ *
+ * The picked courses when there are any, otherwise the club's — the course list
+ * is a much lighter call than the board and normally lands first, so the
+ * stand-in already has the right shape. Two is the guess for the first paint,
+ * when neither has arrived; the ceiling keeps a large club from drawing a
+ * screenful of placeholders it would scroll past anyway.
+ */
+export function pendingColumnCount(selected: string[], available: CourseOption[]): number {
+    const wanted = selected.length > 0 ? selected.length : available.length
+    return Math.min(wanted || 2, 6)
+}
+
 /** Whether this course is drawn, given that empty means all. */
 export function isCourseShown(selected: string[], courseId: string): boolean {
     return selected.length === 0 || selected.includes(courseId)
