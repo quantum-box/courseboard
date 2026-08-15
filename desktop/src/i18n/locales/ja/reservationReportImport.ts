@@ -88,6 +88,11 @@ export const reservationReportImport = {
       caddieAttachedGroupCount: 'キャディ付きの組数',
     },
   },
+  review: {
+    title: '確認が必要な日があります',
+    description: 'キャディ付きの組数が全体の組数を超えています。取り込みは止まりません。ここに出ている日だけ、あとで元の予約表と見比べてください。',
+    caddieExceedsGroups: '{{date}}の{{course}}（{{half}}）は、キャディ付き{{caddie}}組が全体の{{groups}}組を超えています。',
+  },
   preview: {
     title: '月間表を確認する',
     description: '午前・午後の組数とキャディ付きの組数を保存前に確認できます。',

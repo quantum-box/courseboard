@@ -57,7 +57,8 @@ Excelで出力できる。一方、CourseBoardにはこの集計を取り込む�
 - 同じファイルを2回取り込んでも保存件数が増えず、同じ一意キーが1件だけ残る。
 - 同一キーの値が変わったファイルは、新しい組数とキャディ付き組数へ更新される。
 - 同じ内容を並列取込しても、日付と時間帯をkeyにしたmap構造により重複行ができない。
-- 不正なシート名、見出し、日付、負数、キャディ付き組数が組数を超える入力を拒否する。
+- 不正なシート名、見出し、日付、負数の入力を拒否する。
+  （2026-08-15 変更: キャディ付き組数が組数を超える行は拒否せず、取り込んだうえで警告する。）
 - 施設の対応が未選択または重複している状態では取込を開始できない。
 - 取込結果に対象月、施設数、行数、組数、キャディ付き組数が表示される。
 
@@ -71,7 +72,10 @@ Excelで出力できる。一方、CourseBoardにはこの集計を取り込む�
 - tabular analyzeのrequestは `mappingMode=auto`、Field responseのmapping modeは `alias` または `ai` とする。
 - analyzeの対象項目は `facilityName`、`date`、`dayPart`、`groupCount`、
   `caddieAttachedGroupCount` に限定する。返却された列mappingと行はCourseBoard側で必須列、日付の対象年、
-  午前/午後、非負値、キャディ付き組数が組数を超えないこと、重複keyがないことを再検証する。
+  午前/午後、非負値、重複keyがないことを再検証する。
+  （2026-08-15 変更: 「キャディ付き組数が組数を超えないこと」は拒否条件から外した。
+  1行のためにその月を丸ごと取り込めなくなるため、値は帳票のまま保持して取り込み、
+  preview / import responseの `review` として画面に確認を促す。）
 - プレビューのAI/alias mappingは候補であり、利用者が元列を変更して明示承認する。承認済みmappingを
   `columnMappings` としてpreview/importへ送り、確定時にも元ファイルを再送してtabular analyzeへ再適用する。
   fallback解析時は承認済みmappingを含むnormalizedFingerprintの一致を確認する。固定xlsxではfingerprintなしの旧clientも許容する。

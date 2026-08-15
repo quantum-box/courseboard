@@ -264,6 +264,14 @@ impl ReservationReportDayPart {
 }
 
 /// One parsed row before a CourseBoard course has been selected.
+///
+/// Caddie-attached groups are part of the total rather than extra to it, so a
+/// row reporting more of them than groups is saying something impossible. It is
+/// kept anyway, exactly as the report wrote it: the club's booking system does
+/// occasionally export one, and refusing the file would leave the club unable
+/// to import the month at all over a single half-day. The row is flagged
+/// instead — see [`Self::caddie_count_exceeds_groups`] — and the desk compares
+/// it against the original report.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReservationReportRow {
     source_course_key: String,
@@ -286,11 +294,6 @@ impl ReservationReportRow {
         if group_count < 0 || caddie_attached_group_count < 0 {
             return Err(CourseError::BadRequest(
                 "reservation report counts must be non-negative",
-            ));
-        }
-        if caddie_attached_group_count > group_count {
-            return Err(CourseError::BadRequest(
-                "caddie-attached groups cannot exceed groups",
             ));
         }
         let source_course_key = source_course_key.into();
@@ -330,6 +333,14 @@ impl ReservationReportRow {
 
     pub fn caddie_attached_group_count(&self) -> i64 {
         self.caddie_attached_group_count
+    }
+
+    /// Whether this row reports more caddie-attached groups than groups.
+    ///
+    /// One of the two numbers is wrong, and the report does not say which, so
+    /// this is a question for the desk rather than something to correct here.
+    pub fn caddie_count_exceeds_groups(&self) -> bool {
+        self.caddie_attached_group_count > self.group_count
     }
 }
 
@@ -422,6 +433,17 @@ impl ReservationReport {
 
     pub fn rows(&self) -> &[ReservationReportRow] {
         &self.rows
+    }
+
+    /// The rows the desk should compare against the original report.
+    ///
+    /// Everything here still imports. The point is to name the few half-days
+    /// worth a second look, not to hold up a month over them.
+    pub fn rows_needing_review(&self) -> Vec<&ReservationReportRow> {
+        self.rows
+            .iter()
+            .filter(|row| row.caddie_count_exceeds_groups())
+            .collect()
     }
 
     pub fn totals(&self) -> ReservationReportTotals {

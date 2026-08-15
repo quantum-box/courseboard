@@ -91,6 +91,11 @@ export const reservationReportImport: DeepPartial<typeof source> = {
       caddieAttachedGroupCount: 'キャディ付きの組数',
     },
   },
+  review: {
+    title: 'たしかめてほしい日があります',
+    description: 'キャディが付く組の数が、ぜんぶの組の数より多くなっています。入れるのは止まりません。ここに出ている日だけ、あとで元の表と見くらべてください。',
+    caddieExceedsGroups: '{{date}}の{{course}}（{{half}}）は、キャディが付く組が{{caddie}}組で、ぜんぶの{{groups}}組より多くなっています。',
+  },
   preview: {
     title: '1か月の表を確かめる',
     description: '保存する前に、午前と午後の組数、キャディ付きの組数を確認できます。',

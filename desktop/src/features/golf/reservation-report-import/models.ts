@@ -28,7 +28,26 @@ export type ReservationReportPreview = {
   facilities: ReservationReportFacility[]
   rows: ReservationReportRow[]
   totals: ReservationReportTotals
+  /** Half-days the report contradicts itself on. All of them still import. */
+  review?: ReservationReportReviewRow[]
   analysis?: ReservationReportAnalysis
+}
+
+/**
+ * One row worth comparing against the original report.
+ *
+ * `caddieExceedsGroups` means more caddie-attached groups than groups, which
+ * cannot both be right — caddie-attached groups are part of the total, not
+ * extra to it. The counts are carried through as the report wrote them, so the
+ * desk can see which of the two numbers looks wrong.
+ */
+export type ReservationReportReviewRow = {
+  kind: string
+  sourceCourseName: string
+  date: string
+  dayPart: ReservationReportDayPart
+  groupCount: number
+  caddieAttachedGroupCount: number
 }
 
 export type ReservationReportAnalysis = {

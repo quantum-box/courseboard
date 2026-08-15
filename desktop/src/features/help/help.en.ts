@@ -253,6 +253,34 @@ export const helpEn: HelpCatalog = {
       ],
     },
 
+    'golf/reservation-report-import': {
+      title: 'Import reservation reports',
+      summary: "Read a report exported from the club's booking system and store the daily group counts.",
+      usage: [
+        {
+          heading: 'Choose a report and a year',
+          body: 'Pick an Excel, CSV, or PDF report and choose the year it covers — the report itself does not say. Files larger than 5 MB are refused.',
+        },
+        {
+          heading: 'Map the columns and the courses',
+          body: 'A known daily report is read as-is. Anything else comes back with a suggested column mapping to check and approve, and then you pick the Course Board course for each facility in the report.',
+        },
+        {
+          heading: 'Check the month before saving',
+          body: 'Morning and afternoon groups, and caddie-attached groups, are laid out for the month. Nothing is written yet; save once it looks right. Re-importing the same facility, date, and half-day updates the value rather than adding a second row.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Groups and caddie-attached groups',
+          body: 'Groups booked for each half of the day, and how many of those asked for a caddie. Start times and per-booking caddie flags are not in the export.',
+        },
+        {
+          heading: 'No individual bookings',
+          body: 'Only the daily totals are stored: without a booker, a party size, or a start time there is nothing to put on the tee sheet. A PDF with no readable text is sent to Tachyon AI OCR, and what it read is shown before anything is saved.',
+        },
+      ],
+    },
     'golf/budgets': {
       title: 'Revenue targets',
       summary: 'Set daily revenue targets and compare them with actual bookings.',
