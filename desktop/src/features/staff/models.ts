@@ -12,7 +12,12 @@ import { resolveStaffId } from '../golf/caddieRegistration'
 export type StaffMember = {
   id: string
   name: string
+  /**
+   * Derived by Field from `employmentStatus`; never written by this app.
+   * Sending it would collapse a staff member on leave into a retired one.
+   */
   active: boolean
+  employmentStatus: string
   employmentType: string
   hiredAt: string | null
   contractEndDate: string | null
@@ -43,6 +48,8 @@ export type StaffAttendanceSnapshot = {
 
 export type StaffRow = {
   staff: StaffMember
+  /** Where this person stands with the club, as [`staffEmploymentStatus`] reads it. */
+  status: StaffEmploymentStatus
   /** The caddie profile this staff member holds, when they caddie at all. */
   caddie: StaffCaddieProfile | null
   /**
@@ -54,12 +61,47 @@ export type StaffRow = {
 
 export type StaffFilter = {
   query: string
-  status: 'all' | 'active' | 'retired'
+  status: 'all' | StaffEmploymentStatus
   role: 'all' | 'caddie' | 'other'
 }
 
-/** Employment types offered when registering someone. */
-export const EMPLOYMENT_TYPES = ['full_time', 'part_time'] as const
+/** Where a staff member stands with the club. */
+export const STAFF_EMPLOYMENT_STATUSES = ['active', 'on_leave', 'retired'] as const
+export type StaffEmploymentStatus = (typeof STAFF_EMPLOYMENT_STATUSES)[number]
+
+/**
+ * Where a staff member stands with the club, as Field HRM records it.
+ *
+ * Field owns the status outright: `active` on the same record is derived from
+ * it upstream, so it is only worth reading when the status itself is missing —
+ * a cached response from before Field grew the column.
+ */
+export function staffEmploymentStatus(member: StaffMember): StaffEmploymentStatus {
+  const stored = member.employmentStatus?.trim().toLowerCase()
+  if (stored && (STAFF_EMPLOYMENT_STATUSES as readonly string[]).includes(stored)) {
+    return stored as StaffEmploymentStatus
+  }
+  return member.active ? 'active' : 'retired'
+}
+
+/**
+ * The caddie employment status that matches a staff member's standing.
+ *
+ * A retired staff member left flagged "出勤できる" on the caddie roster keeps
+ * turning up in shift and assignment screens, so the two rosters are kept in
+ * step whenever the staff status changes.
+ */
+export function caddieStatusForStaff(status: StaffEmploymentStatus) {
+  if (status === 'active') return 'active'
+  return status === 'on_leave' ? 'inactive' : 'suspended'
+}
+
+/**
+ * Employment types offered when registering someone, and the only ones Field
+ * HRM accepts. `contract` is offered too so editing somebody hired on one does
+ * not quietly move them onto a different contract.
+ */
+export const EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contract'] as const
 export type EmploymentType = (typeof EMPLOYMENT_TYPES)[number]
 
 /**
@@ -112,25 +154,27 @@ export function staffRows(
 ): StaffRow[] {
   const caddies = caddiesByStaffId(profiles)
   const attendance = attendanceByStaffId(snapshots)
-  return [...staff]
-    // Retired staff sink below the people the roster is actually about.
-    .sort((left, right) => Number(right.active) - Number(left.active)
-      || left.name.localeCompare(right.name, 'ja'))
+  return staff
     .map(member => {
-      const status = attendance.get(member.id)
+      const clock = attendance.get(member.id)
       return {
         staff: member,
+        status: staffEmploymentStatus(member),
         caddie: caddies.get(member.id) ?? null,
-        ...(status ? { attendance: status } : {}),
+        ...(clock ? { attendance: clock } : {}),
       }
     })
+    // Whoever is at work today comes first, then the people on leave, then the
+    // ones who have left — the roster is read from the top by the front desk.
+    .sort((left, right) => STAFF_EMPLOYMENT_STATUSES.indexOf(left.status)
+      - STAFF_EMPLOYMENT_STATUSES.indexOf(right.status)
+      || left.staff.name.localeCompare(right.staff.name, 'ja'))
 }
 
 export function filterStaffRows(rows: StaffRow[], filter: StaffFilter) {
   const query = normalize(filter.query)
   return rows.filter(row => {
-    if (filter.status === 'active' && !row.staff.active) return false
-    if (filter.status === 'retired' && row.staff.active) return false
+    if (filter.status !== 'all' && row.status !== filter.status) return false
     if (filter.role === 'caddie' && !row.caddie) return false
     if (filter.role === 'other' && row.caddie) return false
     if (!query) return true
@@ -140,12 +184,18 @@ export function filterStaffRows(rows: StaffRow[], filter: StaffFilter) {
   })
 }
 
-/** Body for `POST /v1/erp/staff`. */
+/**
+ * Body for `POST /v1/erp/staff`.
+ *
+ * The status is named rather than the `active` flag Field derives from it:
+ * the two disagreeing is resolved upstream in the status's favour, so writing
+ * the flag would only ever be a slower way of saying the same thing wrong.
+ */
 export function newStaffPayload(name: string, employmentType: EmploymentType) {
   return {
     name: name.trim(),
     employmentType,
-    active: true,
+    employmentStatus: 'active',
   }
 }
 
