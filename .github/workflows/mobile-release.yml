@@ -41,7 +41,7 @@ env:
 jobs:
   validate:
     name: Validate release inputs
-    runs-on: ubuntu-latest
+    runs-on: tachyoncloud
     outputs:
       platform: ${{ steps.release.outputs.platform }}
       version: ${{ steps.release.outputs.version }}
@@ -84,6 +84,9 @@ jobs:
     name: Android release AAB
     needs: validate
     if: needs.validate.outputs.platform == 'both' || needs.validate.outputs.platform == 'android'
+    # ADR-0027 例外: Android SDK / NDK と 4 ABI 分の Rust 中間物は ephemeral
+    # runner Pod の disk 前提が異なる。ci.yml の android_bundle と揃えて、
+    # 実測できるまで GitHub-hosted に残す。
     runs-on: ubuntu-latest
     environment: mobile-release
     defaults:
@@ -186,6 +189,8 @@ jobs:
     name: iOS release IPA
     needs: validate
     if: needs.validate.outputs.platform == 'both' || needs.validate.outputs.platform == 'ios'
+    # ADR-0027 例外: macOS 固有 job は GitHub-hosted matrix を維持する。
+    # Xcode による IPA 生成と Apple 署名は Linux runner で代替できない。
     runs-on: macos-26
     environment: mobile-release
     defaults:

@@ -11,7 +11,9 @@ env:
 jobs:
   rust:
     name: Rust
-    runs-on: ubuntu-latest
+    # clippy --all-targets --all-features と cargo test は compile-heavy なため、
+    # standard runner ではなく 4vcpu scale set を使う（ADR-0027）。
+    runs-on: tachyoncloud-4vcpu
     services:
       tidb:
         image: pingcap/tidb:v8.5.7
@@ -41,7 +43,7 @@ jobs:
 
   frontend:
     name: React / Vite frontend
-    runs-on: ubuntu-latest
+    runs-on: tachyoncloud
     defaults:
       run:
         working-directory: desktop
@@ -91,8 +93,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # ADR-0027 例外: Tauri の Linux bundle は GTK / webkit2gtk を
+          # apt-get で入れる前提で、これらは tachyoncloud runner image に
+          # baked されていない。runner image へ依存を追加し smoke で検証する
+          # まで GitHub-hosted に残す。
           - platform: linux-x64
             os: ubuntu-latest
+          # ADR-0027 例外: Windows 固有 job は GitHub-hosted matrix を維持する。
           - platform: windows-x64
             os: windows-latest
     runs-on: ${{ matrix.os }}
@@ -174,6 +181,9 @@ jobs:
     name: Android debug bundle
     if: github.event_name == 'push'
     needs: frontend
+    # ADR-0027 例外: 下の "Free runner disk space" は GitHub-hosted image 固有の
+    # path を消して 14 GB を空ける前提で、Android SDK / NDK と 4 ABI 分の Rust
+    # 中間物は ephemeral runner Pod の disk 前提が異なる。実測でき次第移行する。
     runs-on: ubuntu-latest
     defaults:
       run:
