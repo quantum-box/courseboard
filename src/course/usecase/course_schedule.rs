@@ -113,13 +113,24 @@ impl ReplaceCourseScheduleUseCase {
         rules: Vec<AvailabilityRule>,
     ) -> Result<SavedSchedule, CourseError> {
         reject_overlaps(&rules)?;
-        let courses = self.catalog.list_courses(credentials).await?;
-        courses
+        // Four independent reads of upstream state, none of which depends on
+        // another. Run serially they were four round trips the operator waited
+        // through before the save had even started.
+        let (courses, timezone, resource_id, horizon) = tokio::join!(
+            self.catalog.list_courses(credentials),
+            self.catalog.get_tenant_timezone(credentials),
+            resolve_resource(&self.catalog, credentials, course_id),
+            // Deliberately not `?`-ed here. A horizon we cannot read must not
+            // stop a week from being stored, so its failure is carried into the
+            // build below where that is already the rule.
+            self.commercial.get_booking_horizon(credentials),
+        );
+        courses?
             .iter()
             .find(|course| course.id() == course_id)
             .ok_or(CourseError::NotFound("course"))?;
-        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
-        let resource_id = resolve_resource(&self.catalog, credentials, course_id).await?;
+        let timezone = timezone?;
+        let resource_id = resource_id?;
         let saved = self
             .schedules
             .replace_resource_schedule(credentials, &resource_id, &timezone, &rules)
@@ -130,7 +141,7 @@ impl ReplaceCourseScheduleUseCase {
         // turning it into an error would tell the operator to redo work that is
         // already done, and hide that nothing is on sale.
         let built = self
-            .build_window(credentials, course_id, &resource_id)
+            .build_window(credentials, course_id, &resource_id, &timezone, horizon)
             .await
             .unwrap_or_else(|error| {
                 tracing::warn!(
@@ -151,10 +162,11 @@ impl ReplaceCourseScheduleUseCase {
         credentials: GatewayCredentials<'_>,
         course_id: &CourseId,
         resource_id: &ResourceId,
+        timezone: &str,
+        horizon: Result<BookingHorizon, CourseError>,
     ) -> Result<Option<BuiltInventory>, CourseError> {
-        let horizon = self.commercial.get_booking_horizon(credentials).await?;
-        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
-        let today = course_today(Utc::now(), &timezone)?;
+        let horizon = horizon?;
+        let today = course_today(Utc::now(), timezone)?;
         let bookable_through = horizon.last_bookable_date(today);
         // The club named a closing date that has passed: the week is worth
         // storing for next season, but there is no day left to build, and asking
@@ -665,10 +677,15 @@ mod tests {
         assert!(reject_overlaps(&rules).is_err());
     }
 
+    #[derive(Default)]
     struct FakeCatalog {
         tenant_timezone: String,
         courses: Vec<Course>,
         resources: Vec<Resource>,
+        /// The tenant timezone comes from the extension config, which is one of
+        /// the slowest reads Field serves. Asking twice in one save used to be
+        /// invisible.
+        timezone_reads: Mutex<u32>,
     }
 
     #[async_trait]
@@ -677,6 +694,7 @@ mod tests {
             &self,
             _credentials: GatewayCredentials<'_>,
         ) -> Result<String, CourseError> {
+            *self.timezone_reads.lock().expect("lock") += 1;
             Ok(self.tenant_timezone.clone())
         }
 
@@ -839,7 +857,8 @@ mod tests {
     /// Only the booking horizon matters here; the rest of the commercial
     /// surface is not reachable from this use case.
     struct FakeCommercial {
-        horizon: BookingHorizon,
+        /// `None` stands for a horizon Field would not answer for.
+        horizon: Option<BookingHorizon>,
     }
 
     #[async_trait]
@@ -848,7 +867,8 @@ mod tests {
             &self,
             _credentials: GatewayCredentials<'_>,
         ) -> Result<BookingHorizon, CourseError> {
-            Ok(self.horizon)
+            self.horizon
+                .ok_or_else(|| CourseError::Provider("booking horizon unavailable".into()))
         }
 
         async fn set_booking_horizon(
@@ -996,6 +1016,7 @@ mod tests {
                 ResourceKind::Course,
                 true,
             )],
+            ..FakeCatalog::default()
         });
         let schedules = Arc::new(FakeSchedules::default());
         let watermarks = Arc::new(FakeWatermarks::default());
@@ -1003,7 +1024,7 @@ mod tests {
             catalog,
             schedules.clone(),
             Arc::new(FakeCommercial {
-                horizon: BookingHorizon::try_days(30).expect("valid horizon"),
+                horizon: Some(BookingHorizon::try_days(30).expect("valid horizon")),
             }),
             watermarks.clone(),
         );
@@ -1055,14 +1076,15 @@ mod tests {
                 ResourceKind::Course,
                 true,
             )],
+            ..FakeCatalog::default()
         });
         let schedules = Arc::new(FakeSchedules::default());
         let watermarks = Arc::new(FakeWatermarks::default());
         let use_case = ReplaceCourseScheduleUseCase::new(
-            catalog,
+            catalog.clone(),
             schedules.clone(),
             Arc::new(FakeCommercial {
-                horizon: BookingHorizon::try_days(30).expect("valid horizon"),
+                horizon: Some(BookingHorizon::try_days(30).expect("valid horizon")),
             }),
             watermarks.clone(),
         );
@@ -1081,6 +1103,11 @@ mod tests {
             .expect("replace schedule");
 
         let built = saved.built.expect("the save built its tee times");
+        assert_eq!(
+            *catalog.timezone_reads.lock().expect("lock"),
+            1,
+            "the tenant timezone is one extension-config read, not one per user of it"
+        );
         let generated = schedules.generated.lock().expect("lock").clone();
         assert_eq!(generated.len(), 1, "one build for the whole window");
         let (from, to) = generated[0];
@@ -1125,6 +1152,7 @@ mod tests {
                 ResourceKind::Course,
                 true,
             )],
+            ..FakeCatalog::default()
         });
         let schedules = Arc::new(FakeSchedules::default());
         let watermarks = Arc::new(FakeWatermarks::default());
@@ -1132,9 +1160,9 @@ mod tests {
             catalog,
             schedules.clone(),
             Arc::new(FakeCommercial {
-                horizon: BookingHorizon::through(
+                horizon: Some(BookingHorizon::through(
                     NaiveDate::from_ymd_opt(2020, 11, 30).expect("valid date"),
-                ),
+                )),
             }),
             watermarks.clone(),
         );
@@ -1159,5 +1187,67 @@ mod tests {
         );
         assert!(schedules.generated.lock().expect("lock").is_empty());
         assert!(watermarks.written.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_horizon_that_cannot_be_read_still_stores_the_week() {
+        // The horizon is now fetched up front, alongside the reads the save
+        // genuinely depends on. That must not promote it into something the
+        // save waits on being right — the week is the operator's work, and it
+        // is stored whether or not the far edge of the book could be read.
+        let course_id = CourseId::new("course-east");
+        let catalog = Arc::new(FakeCatalog {
+            tenant_timezone: "Asia/Tokyo".into(),
+            courses: vec![Course::reconstitute(
+                course_id.clone(),
+                "East",
+                None,
+                18,
+                "Asia/Tokyo",
+                8,
+                true,
+                None,
+                None,
+                None,
+                None,
+            )],
+            resources: vec![Resource::reconstitute(
+                "golf-resource-east",
+                "East",
+                Some("reservation-resource-east".into()),
+                Some(course_id.to_string()),
+                ResourceKind::Course,
+                true,
+            )],
+            ..FakeCatalog::default()
+        });
+        let schedules = Arc::new(FakeSchedules::default());
+        let watermarks = Arc::new(FakeWatermarks::default());
+        let use_case = ReplaceCourseScheduleUseCase::new(
+            catalog,
+            schedules.clone(),
+            Arc::new(FakeCommercial { horizon: None }),
+            watermarks.clone(),
+        );
+
+        let saved = use_case
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer test",
+                    operator_id: "tenant-test",
+                    platform_id: None,
+                },
+                &course_id,
+                vec![rule(1, "07:00", "12:00")],
+            )
+            .await
+            .expect("the week stores without a horizon");
+
+        assert_eq!(saved.rules.len(), 1);
+        assert!(
+            saved.built.is_none(),
+            "the operator is told nothing was put on sale"
+        );
+        assert!(schedules.generated.lock().expect("lock").is_empty());
     }
 }
