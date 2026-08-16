@@ -243,7 +243,7 @@ export const caddies = {
     title: 'キャディ名簿',
     count: '{{shown}} / {{total}}人',
     add: '追加',
-    search: '名前・ID・スタッフID',
+    search: '名前でさがす',
     searchLabel: 'キャディをさがす',
     loading: '名簿を読み込んでいます',
     filter: {
@@ -376,7 +376,7 @@ export const caddies = {
       existing: 'いまいるスタッフ',
       new: '新しいスタッフ',
       search: 'さがす',
-      searchPlaceholder: '名前またはスタッフID',
+      searchPlaceholder: '名前でさがす',
       staff: 'スタッフ',
       staffPlaceholder: 'スタッフを選ぶ',
       newName: '新しいスタッフの名前',
@@ -459,7 +459,6 @@ export const caddies = {
     table: {
       rating: '評価',
       comment: 'コメント',
-      customer: 'お客さま',
       created: '日時',
     },
     empty: {
@@ -471,7 +470,7 @@ export const caddies = {
     title: '給与への受け渡し',
     description: 'ランク別の単価から出したキャディごとの支給額です。紐づけ漏れ・退勤の記録なし・割当に対する未出勤を確かめてから、CSVを出します。',
     monthLabel: '給与の対象の月',
-    searchPlaceholder: 'キャディ名・スタッフID・ランクでしぼる',
+    searchPlaceholder: 'キャディ名・ランクでしぼる',
     exportCsv: 'CSVを出す',
     exporting: '出しています…',
     loading: '給与の集計を読み込んでいます',

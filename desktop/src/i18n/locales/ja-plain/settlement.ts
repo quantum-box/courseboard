@@ -42,7 +42,6 @@ export const settlement: DeepPartial<typeof source> = {
     title: 'この月に入っている予約',
     description: 'お客さま、利用した日時、コースを並べて、売上や入ったお金と見比べます。',
     empty: 'この月の予約はありません',
-    systemNumber: '予約を調べるための番号: {{id}}',
     table: {
       dateTime: '利用した日時',
       customer: 'お客さま',
@@ -77,7 +76,7 @@ export const settlement: DeepPartial<typeof source> = {
     reused: '前に作った請求書をそのまま使いました',
     issued: '請求書を作りました',
     openPayment: '支払いの画面を開く',
-    paymentUrlNote: '予約 {{id}} の支払いの画面を開けます。',
+    paymentUrlNote: '支払いの画面を開けます。',
     invalidUrl: '支払いの画面のリンクが正しくありません。',
     openFailed: '支払いの画面を開けませんでした。',
     issueFailed: '請求書を作れませんでした。',

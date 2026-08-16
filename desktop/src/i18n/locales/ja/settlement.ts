@@ -41,7 +41,6 @@ export const settlement = {
     badge: '{{n}} 件',
     empty: '対象の予約はありません',
     dateTime: '{{month}}月{{day}}日 {{time}}',
-    systemNumber: '予約を調べるための番号: {{id}}',
     table: {
       dateTime: '利用日時',
       customer: 'お客さま',
@@ -77,7 +76,7 @@ export const settlement = {
     reused: 'すでにある請求を使いました',
     issued: '請求書を発行しました',
     openPayment: '支払いページを開く',
-    paymentUrlNote: '予約 {{id}} の支払いページを開けます。',
+    paymentUrlNote: '支払いページを開けます。',
     invalidUrl: '支払いページのURLが正しくありません。',
     openFailed: '支払いページを開けませんでした。',
     issueFailed: '請求書を発行できませんでした。',

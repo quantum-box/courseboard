@@ -309,7 +309,7 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
         <BackToCourses />
         <EmptyState
           title={t('schedule:notLinked.title')}
-          description={courseId}
+          description={t('schedule:notLinked.description')}
           action={(
             <Button type="button" variant="primary" onClick={() => navigate(listRoute)}>
               {t('schedule:back')}

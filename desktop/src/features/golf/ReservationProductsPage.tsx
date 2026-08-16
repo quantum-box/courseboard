@@ -177,14 +177,7 @@ function ReservationProductList() {
       key: 'service',
       header: t('products:list.table.service'),
       mobileLabel: t('products:list.table.service'),
-      cell: product => (
-        <div className="grid gap-0.5">
-          <strong>{productDisplayName(product)}</strong>
-          <span className="text-xs text-muted-foreground">
-            {t('products:slots.subtitle', { serviceId: product.reservationServiceId })}
-          </span>
-        </div>
-      ),
+      cell: product => <strong>{productDisplayName(product)}</strong>,
     },
     {
       key: 'course',
@@ -419,7 +412,6 @@ function ReservationProductDetail({ serviceId }: { serviceId: string }) {
       <PageHeader
         eyebrow={t('products:list.title')}
         title={productDisplayName(product)}
-        description={t('products:slots.subtitle', { serviceId })}
         actions={(
           <Button type="button" onClick={() => setEditorOpen(true)}>
             <Settings2 /> {t('products:list.editPlan')}

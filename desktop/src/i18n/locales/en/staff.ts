@@ -3,7 +3,7 @@ export const staff = {
   caddieUnavailable: 'Caddie data could not be loaded, so the caddie column stays blank.',
   filter: {
     search: 'Search',
-    searchPlaceholder: 'Name or staff ID',
+    searchPlaceholder: 'Search by name',
     employment: 'Employment status',
     role: 'Role',
     roleCaddie: 'Works as a caddie',

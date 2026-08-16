@@ -45,7 +45,6 @@ export const settlement: DeepPartial<typeof source> = {
     badge: '{{n}} bookings',
     empty: 'No bookings in range',
     dateTime: '{{month}}/{{day}} {{time}}',
-    systemNumber: 'Lookup number: {{id}}',
     table: {
       dateTime: 'Tee time',
       customer: 'Customer',
@@ -82,7 +81,7 @@ export const settlement: DeepPartial<typeof source> = {
     reused: 'Reused the existing invoice',
     issued: 'Invoice issued',
     openPayment: 'Open the payment page',
-    paymentUrlNote: 'You can open the payment page for booking {{id}}.',
+    paymentUrlNote: 'You can open the payment page.',
     invalidUrl: 'The payment URL is not valid.',
     openFailed: 'Could not open the payment page.',
     issueFailed: 'Could not issue the invoice.',

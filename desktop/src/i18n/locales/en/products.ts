@@ -92,9 +92,8 @@ export const products: DeepPartial<typeof source> = {
       limits: '{{groups}} groups · {{players}} players',
     },
   },
-  /** What is left of the per-plan week: the id line, and the legacy read-only list. */
+  /** What is left of the per-plan week: the legacy read-only list. */
   slots: {
-    subtitle: 'ID: {{serviceId}}',
     week: {
       dayLabel: '{{day}}',
     },
