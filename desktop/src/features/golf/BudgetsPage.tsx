@@ -745,11 +745,10 @@ export function BudgetsPage() {
                 {
                   key: 'course',
                   header: t('budgets:list.table.course'),
+                  // The course id shows only as a fallback, when the course is
+                  // gone from the list and there is no name left to print.
                   cell: row => (
-                    <div>
-                      <strong>{courseNames.get(row.golfCourseId) ?? row.golfCourseId}</strong>
-                      <div className="text-2xs text-subtle-foreground">{row.golfCourseId}</div>
-                    </div>
+                    <strong>{courseNames.get(row.golfCourseId) ?? row.golfCourseId}</strong>
                   ),
                 },
                 { key: 'date', header: t('budgets:list.table.date'), cell: row => row.date },

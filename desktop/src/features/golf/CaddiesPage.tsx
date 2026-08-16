@@ -1486,7 +1486,7 @@ function AutoAssignPanel({
                     <div>
                       <p className="font-medium text-foreground">{item.caddieDisplayName}</p>
                       <p className="text-xs text-muted-foreground">
-                        {formatDateTime(item.scheduledAt, timezone)} · {item.reservationId}
+                        {formatDateTime(item.scheduledAt, timezone)}
                       </p>
                     </div>
                     <Badge variant="accent">{t('caddies:autoAssign.candidate')}</Badge>
@@ -1519,7 +1519,7 @@ function AutoAssignPanel({
               <ul className="list-inside list-disc space-y-1">
                 {plan.skipped.map(item => (
                   <li key={item.reservationId}>
-                    {item.reservationId}: {rationaleText([item.reason])}
+                    {rationaleText([item.reason])}
                   </li>
                 ))}
               </ul>
@@ -2026,7 +2026,6 @@ function ProfilesView({
               attendance tab's CaddieLink name uses — so a caddie's name
               doesn't visibly change size when switching tabs. */}
           <strong className="text-lg">{profile.displayName}</strong>
-          <span className="text-xs text-muted-foreground">{profile.id}</span>
         </div>
       ),
     },
@@ -2333,7 +2332,7 @@ function ProfileCreateDialog({
                       setPickedStaffId(item.id)
                     }}
                   >
-                    <Link2 /> {item.name}（{item.id}）
+                    <Link2 /> {item.name}
                   </Button>
                 ))}
               </div>
@@ -2446,7 +2445,6 @@ function ProfileDetail({
                 <Badge variant="accent">{t('caddies:detail.rankBadge', { rank: profile.rank })}</Badge>
               ) : null}
             </div>
-            <p className="mt-1 break-all text-xs text-muted-foreground">{profile.id}</p>
           </div>
           <Button type="button" variant="secondary" className="w-full sm:w-auto" onClick={() => setEditOpen(true)}>
             <Pencil /> {t('caddies:detail.edit')}
@@ -2810,7 +2808,6 @@ function StaffManagementPanel({
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <p className="font-medium">{linkedStaff?.name ?? profile.displayName}</p>
-                <p className="mt-1 break-all text-xs text-muted-foreground">{staffId}</p>
               </div>
               <Badge variant={attendance ? attendanceVariant(attendance.attendanceStatus) : 'neutral'}>
                 {attendance
@@ -3548,12 +3545,9 @@ function RatingsPanel({ resource }: { resource: ResourceValue<ListResponse<Caddi
       mobileLabel: t('caddies:ratings.table.comment'),
       cell: row => row.comment || '—',
     },
-    {
-      key: 'customer',
-      header: t('caddies:ratings.table.customer'),
-      mobileLabel: t('caddies:ratings.table.customer'),
-      cell: row => <span className="break-all">{row.customerId}</span>,
-    },
+    // No customer column: the rating carries only the customer id, and a raw
+    // id names nobody. The score, the comment and when it landed are what the
+    // caddie's record is read for.
     {
       key: 'created',
       header: t('caddies:ratings.table.created'),
@@ -3659,12 +3653,17 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
       // The staff id is on the row and is what payroll cross-references, so it
       // has to be findable even though nobody reads it at a glance.
       searchValue: row => `${row.displayName} ${row.staffId ?? ''}`,
+      // A linked row needs no second line: the id says nothing the name does
+      // not. Only the missing link is worth calling out, because payroll
+      // cannot hand that row over.
       cell: row => (
         <div>
           <p className="font-medium">{row.displayName}</p>
-          <p className="text-xs text-muted-foreground">
-            {row.staffId ?? t('caddies:payroll.table.noStaff')}
-          </p>
+          {row.staffId ? null : (
+            <p className="text-xs text-muted-foreground">
+              {t('caddies:payroll.table.noStaff')}
+            </p>
+          )}
         </div>
       ),
     },

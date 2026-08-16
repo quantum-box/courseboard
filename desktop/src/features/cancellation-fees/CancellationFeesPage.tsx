@@ -277,7 +277,7 @@ export function CancellationFeesPage() {
               {
                 key: 'number',
                 header: t('cancellationFees:list.table.number'),
-                cell: invoice => <div className="primary-cell"><strong>{invoice.invoiceNumber}</strong><small>{invoice.id}</small></div>,
+                cell: invoice => <div className="primary-cell"><strong>{invoice.invoiceNumber}</strong></div>,
               },
               {
                 key: 'client',
@@ -488,7 +488,7 @@ export function NewCancellationFeePage() {
               <Input
                 name="reference"
                 placeholder="RSV-1001 / ORD-1001"
-                defaultValue={order ? `${order.orderNumber} / ${order.id}` : ''}
+                defaultValue={order ? order.orderNumber : ''}
               />
             </Field>
             <Field label={t('cancellationFees:new.detail.amount')} required>

@@ -240,7 +240,7 @@ export const caddies: DeepPartial<typeof source> = {
     title: 'Caddie roster',
     count: '{{shown}} / {{total}}',
     add: 'Add',
-    search: 'Name, ID, or staff ID',
+    search: 'Search by name',
     searchLabel: 'Search caddies',
     loading: 'Loading the roster',
     filter: {
@@ -373,7 +373,7 @@ export const caddies: DeepPartial<typeof source> = {
       existing: 'Existing staff',
       new: 'New staff',
       search: 'Search',
-      searchPlaceholder: 'Name or staff ID',
+      searchPlaceholder: 'Search by name',
       staff: 'Staff',
       staffPlaceholder: 'Select a staff record',
       newName: 'New staff name',
@@ -456,7 +456,6 @@ export const caddies: DeepPartial<typeof source> = {
     table: {
       rating: 'Rating',
       comment: 'Comment',
-      customer: 'Customer',
       created: 'When',
     },
     empty: {
@@ -468,7 +467,7 @@ export const caddies: DeepPartial<typeof source> = {
     title: 'Payroll handoff',
     description: 'Pay per caddie, priced off the rank fees. Check missing staff links, missing clock-outs, and assignments without a clock-in before exporting.',
     monthLabel: 'Payroll month',
-    searchPlaceholder: 'Filter by name, staff id, or rank',
+    searchPlaceholder: 'Filter by name or rank',
     exportCsv: 'Export CSV',
     exporting: 'Exporting…',
     loading: 'Loading the payroll totals',

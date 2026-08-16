@@ -441,11 +441,6 @@ export function SettlementPage() {
                       cell: row => nonBlank(row.customerName) ?? (
                         <div className="settlement-reservation-unavailable">
                           <strong>{t('settlement:reservations.unknown.customer')}</strong>
-                          <span>
-                            {t('settlement:reservations.systemNumber', {
-                              id: row.reservationId,
-                            })}
-                          </span>
                         </div>
                       ),
                     },
@@ -494,7 +489,6 @@ export function SettlementPage() {
                           {item?.reservationNumber
                             || t('settlement:unpaidCancellations.numberUnknown')}
                         </strong>
-                        <div className="text-2xs text-subtle-foreground">{id}</div>
                         {item ? (
                           <div className="text-2xs text-subtle-foreground">
                             {yen(item.cancellationFeeAmount)}
@@ -559,12 +553,7 @@ export function SettlementPage() {
                 {
                   key: 'reservation',
                   header: t('settlement:billing.table.reservation'),
-                  cell: row => (
-                    <div>
-                      <strong>{row.reservationNumber}</strong>
-                      <div className="text-2xs text-subtle-foreground">{row.reservationId}</div>
-                    </div>
-                  ),
+                  cell: row => <strong>{row.reservationNumber}</strong>,
                 },
                 {
                   key: 'status',
@@ -585,16 +574,11 @@ export function SettlementPage() {
                   key: 'invoice',
                   header: t('settlement:billing.table.invoice'),
                   cell: row => (
-                    <div className="grid gap-1">
-                      <Badge variant={row.linkIssued ? 'accent' : 'outline'}>
-                        {row.linkIssued
-                          ? t('settlement:billing.table.issued')
-                          : t('settlement:billing.table.notIssued')}
-                      </Badge>
-                      {row.invoiceId ? (
-                        <span className="text-2xs text-subtle-foreground">{row.invoiceId}</span>
-                      ) : null}
-                    </div>
+                    <Badge variant={row.linkIssued ? 'accent' : 'outline'}>
+                      {row.linkIssued
+                        ? t('settlement:billing.table.issued')
+                        : t('settlement:billing.table.notIssued')}
+                    </Badge>
                   ),
                 },
                 {

@@ -231,7 +231,7 @@ export const caddies: DeepPartial<typeof source> = {
     title: 'キャディの名簿',
     count: '{{shown}}人 / 全{{total}}人',
     add: '登録する',
-    search: '名前や番号でさがす',
+    search: '名前でさがす',
     searchLabel: 'キャディをさがす',
     loading: '名簿を読み込んでいます',
     filter: {
@@ -363,7 +363,7 @@ export const caddies: DeepPartial<typeof source> = {
       existing: '今いる社員',
       new: '新しく作る',
       search: 'さがす',
-      searchPlaceholder: '名前か社員番号',
+      searchPlaceholder: '名前でさがす',
       staff: '社員',
       staffPlaceholder: '社員を選んでください',
       newName: '新しく作る社員の名前',
@@ -443,7 +443,6 @@ export const caddies: DeepPartial<typeof source> = {
     table: {
       rating: '評価',
       comment: 'コメント',
-      customer: 'お客さま',
       created: '日時',
     },
     empty: {
@@ -455,7 +454,7 @@ export const caddies: DeepPartial<typeof source> = {
     title: '給料の集計',
     description: 'ランクごとに決めた金額から出した、キャディ一人ひとりに払う金額です。社員情報の結びつき、退勤の記録、出勤の記録がない担当を確かめてから、表のファイルに書き出してください。',
     monthLabel: '集計する月',
-    searchPlaceholder: '名前・社員番号・ランクでしぼる',
+    searchPlaceholder: '名前・ランクでしぼる',
     exportCsv: '表のファイルで書き出す',
     exporting: '書き出しています…',
     loading: '集計を読み込んでいます',

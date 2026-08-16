@@ -4,7 +4,7 @@ export const staff = {
   caddieUnavailable: 'キャディの情報を読み込めないので、役割の列は空欄になります。',
   filter: {
     search: 'さがす',
-    searchPlaceholder: '名前または社員ID',
+    searchPlaceholder: '名前でさがす',
     employment: '在籍の状態',
     role: '役割',
     roleCaddie: 'キャディを担当',

@@ -3,7 +3,7 @@ export const staff = {
   caddieUnavailable: 'キャディの情報を読み込めないので、キャディのらんは空になります。',
   filter: {
     search: 'さがす',
-    searchPlaceholder: '名前か社員番号',
+    searchPlaceholder: '名前でさがす',
     employment: '今どうしているか',
     role: '仕事',
     roleCaddie: 'キャディをする人',

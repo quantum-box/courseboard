@@ -90,9 +90,8 @@ export const products: DeepPartial<typeof source> = {
       limits: '{{groups}}組 · {{players}}人',
     },
   },
-  /** 残っているのは管理番号の行と、直せない古い枠の一覧だけ。 */
+  /** 残っているのは直せない古い枠の一覧だけ。 */
   slots: {
-    subtitle: '管理番号: {{serviceId}}',
     week: {
       dayLabel: '{{day}}曜日',
     },

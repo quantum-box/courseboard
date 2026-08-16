@@ -171,6 +171,9 @@ export function StaffPage({ staffId }: { staffId?: string }) {
     {
       key: 'name',
       header: t('staff:table.name'),
+      // The staff id is a machine key: it identifies nobody at a glance and
+      // only crowds the name it sits under. The row already carries the id
+      // through rowKey and the detail route.
       cell: (row: StaffRow) => (
         <div>
           <strong>{row.staff.name}</strong>
@@ -180,8 +183,6 @@ export function StaffPage({ staffId }: { staffId?: string }) {
               <StatusBadge status={row.status} t={t} />
             </>
           )}
-          <br />
-          <code>{row.staff.id}</code>
         </div>
       ),
     },
@@ -257,7 +258,6 @@ export function StaffPage({ staffId }: { staffId?: string }) {
             <header className="flex flex-wrap items-center gap-2">
               <h1 className="m-0 text-xl font-semibold leading-7">{detail.staff.name}</h1>
               <StatusBadge status={detail.status} t={t} />
-              <code className="text-sm text-muted-foreground">{detail.staff.id}</code>
             </header>
 
             <Panel

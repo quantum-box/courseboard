@@ -89,9 +89,8 @@ export const products = {
       limits: '{{groups}}組 · {{players}}名',
     },
   },
-  /** What is left of the per-plan week: the id line, and the legacy read-only list. */
+  /** What is left of the per-plan week: the legacy read-only list. */
   slots: {
-    subtitle: '管理番号: {{serviceId}}',
     week: {
       dayLabel: '{{day}}曜日',
     },
