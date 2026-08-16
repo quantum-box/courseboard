@@ -67,9 +67,23 @@ allowlist に個人顧客 `consumer` を含む）。CourseBoard は受付用紙�
 - [ ] 実 Field API に対する動作確認（テナントに `field:RegisterMembership` が要る）
 - [ ] CourseBoard の required checks が green になる
 
+## 確認済み
+
+prod Field（テナント `tn_01kxd5gdvm9thcbj8c2e8c6yhq`）に対して、印字された日本語の
+受付用紙（4人・氏名/カナ/電話/メール）を読ませ、4人とも全項目一致で読み取れた。
+HEIC も JPEG 変換を経て同じ経路を通る。
+
+権限について。`field:RegisterMembership` は platform 登録済みのアクションで、
+説明は "Register Field customer memberships with subjects, consents, and credentials"。
+このテナントのメンバー3人は `role: null`（テナントオーナー、AdministratorAccess）
+のため OCR は通る。
+
 ## 未確認
 
-- 実 Field production の `/v1/field/ocr/consumer/draft` に対しては未実行。
-  権限は Field 側で `field:RegisterMembership` に紐付いているため、受付担当の
-  ロールに含まれているかをテナントごとに確認する必要がある。
-- 読み取り精度は用紙のレイアウトに依存する。実際の受付用紙での確認は未実施。
+- **staff ロールでの実行可否。** `pol_erp_staff` の説明は "Field staff with customer
+  CRUD and operational read access" で、membership の register が含まれるかは
+  読み取れない。ポリシーに紐づくアクション一覧は platform API から取得できなかった
+  （`GET /v1/auth/policies/{id}` は statements を返さず、`/actions` と `/statements`
+  は 404）。実証には staff ロールのユーザーが要る。オーナー以外の受付担当が使う
+  テナントでは、最初の1回で 403 が出ないか確認すること。
+- 実際の受付用紙（手書き・複写伝票）での読み取り精度 → [PLT-3591](https://linear.app/issue/PLT-3591)
