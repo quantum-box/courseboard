@@ -93,12 +93,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ADR-0027 例外: Tauri の Linux bundle は GTK / webkit2gtk を
-          # apt-get で入れる前提で、これらは tachyoncloud runner image に
-          # baked されていない。runner image へ依存を追加し smoke で検証する
-          # まで GitHub-hosted に残す。
+          # Tauri の release build は compile-heavy で、standard runner の
+          # 4 GiB では runner ごと落ちる。ADR-0027 の heavy Rust job 扱い。
           - platform: linux-x64
-            os: ubuntu-latest
+            os: tachyoncloud-4vcpu
           # ADR-0027 例外: Windows 固有 job は GitHub-hosted matrix を維持する。
           - platform: windows-x64
             os: windows-latest
@@ -118,11 +116,30 @@ jobs:
       - name: Use SSH for private GitHub dependencies
         run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
 
+      # tachyoncloud の runner image には GitHub-hosted image と違い github.com の
+      # host key が入っていない。CARGO_NET_GIT_FETCH_WITH_CLI により cargo は git を
+      # 呼ぶため、photon の取得が Host key verification failed で落ちる。
+      # ssh-keyscan の TOFU ではなく、TLS 検証を通る meta API の公開鍵を使う。
+      # Windows は GitHub-hosted のままで host key を持つので対象外。
+      - name: Trust github.com SSH host key
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: /
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          curl -fsSL https://api.github.com/meta \
+            | jq -r '.ssh_keys[] | "github.com \(.)"' >> ~/.ssh/known_hosts
+          sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
+
+      # tachyoncloud の runner image は libgtk-3-dev / libwebkit2gtk-4.1-dev を
+      # 持つが、Tauri の bundler が使う xdg-mime (xdg-utils) と file は入って
+      # いない。GitHub-hosted image には両方あるため従来は不要だった。
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libayatana-appindicator3-dev librsvg2-dev libwebkit2gtk-4.1-dev
+          sudo apt-get install -y libayatana-appindicator3-dev librsvg2-dev \
+            libwebkit2gtk-4.1-dev xdg-utils file
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -181,10 +198,10 @@ jobs:
     name: Android debug bundle
     if: github.event_name == 'push'
     needs: frontend
-    # ADR-0027 例外: 下の "Free runner disk space" は GitHub-hosted image 固有の
-    # path を消して 14 GB を空ける前提で、Android SDK / NDK と 4 ABI 分の Rust
-    # 中間物は ephemeral runner Pod の disk 前提が異なる。実測でき次第移行する。
-    runs-on: ubuntu-latest
+    # 4 ABI 分の Rust をコンパイルするため standard runner の 4 GiB では
+    # runner が CPU/Memory 不足で server との通信を失って落ちる。
+    # ADR-0027 の heavy Rust job 扱い。
+    runs-on: tachyoncloud-4vcpu
     defaults:
       run:
         working-directory: desktop
@@ -192,17 +209,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Four Android targets of Rust debug objects plus Gradle packaging fill the
-      # runner's 14 GB, and `:app:packageUniversalDebug` dies with "No space left
-      # on device" — sometimes taking the runner with it, which surfaces as a job
-      # that failed with no failing step. None of these toolchains are used here.
-      - name: Free runner disk space
+      # Four Android targets of Rust debug objects plus Gradle packaging used to
+      # fill the GitHub-hosted runner's 14 GB, and `:app:packageUniversalDebug`
+      # died with "No space left on device" — sometimes taking the runner with
+      # it, which surfaced as a job that failed with no failing step. None of
+      # those preinstalled toolchains are used here.
+      #
+      # tachyoncloud の runner Pod にはこれらの path が存在しないため、実在する
+      # ものだけを回収する。df は Android SDK / NDK 展開前の残容量を記録する。
+      - name: Report and reclaim runner disk space
         working-directory: /
         run: |
           df -h /
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
+          for path in /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
             /opt/ghc /usr/local/.ghcup /usr/local/share/powershell \
-            /usr/local/share/boost /usr/share/swift
+            /usr/local/share/boost /usr/share/swift; do
+            [ -e "${path}" ] || continue
+            if command -v sudo >/dev/null 2>&1; then
+              sudo rm -rf "${path}"
+            else
+              rm -rf "${path}"
+            fi
+          done
           df -h /
 
       - name: Authenticate private native dependencies
@@ -212,6 +240,16 @@ jobs:
 
       - name: Use SSH for private GitHub dependencies
         run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
+
+      # tachyoncloud の runner image には github.com の host key が無く、photon の
+      # 取得が Host key verification failed で落ちる。desktop_bundle と同じ対処。
+      - name: Trust github.com SSH host key
+        working-directory: /
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          curl -fsSL https://api.github.com/meta \
+            | jq -r '.ssh_keys[] | "github.com \(.)"' >> ~/.ssh/known_hosts
+          sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
 
       - name: Setup Node
         uses: actions/setup-node@v4
