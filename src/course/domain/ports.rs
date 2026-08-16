@@ -12,10 +12,10 @@ use super::{
     CustomerId, CustomerMembership, CustomerSearchQuery, DailyBudget, DailyBudgetQuery,
     DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
     GenerationSummary, InventoryWatermark, MembershipPlan, MembershipPlanId, MonthlySettlement,
-    NewCustomer, NewReservation, PartyDetails, ProductSlot, RecommendationQuery,
-    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
-    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
-    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
+    NewCustomer, NewReservation, PartyDetails, ProductSlot, ReceptionDraft, ReceptionSheet,
+    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate,
+    ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
+    ResourceId, ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
     SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
     UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
     UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
@@ -422,6 +422,26 @@ pub trait CustomerGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         input: &NewCustomer,
     ) -> Result<Customer, CourseError>;
+}
+
+/// Port for reading a paper reception sheet into ledger candidates.
+///
+/// Separate from `CustomerGateway` because it is a different upstream capability
+/// with a different failure mode: the ledger has to stay usable on a morning
+/// when the document reader is down, and a screen that registers by hand should
+/// not be holding a port it cannot reach.
+#[async_trait]
+pub trait CustomerReceptionOcrGateway: Send + Sync {
+    /// Reads one sheet. Nothing is stored — upstream keeps neither the document
+    /// nor the raw text, and neither does CourseBoard.
+    ///
+    /// Returns a draft, never a write: every row is a proposal the desk checks
+    /// against the original before anybody lands in the ledger.
+    async fn draft_reception(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        sheet: ReceptionSheet,
+    ) -> Result<ReceptionDraft, CourseError>;
 }
 
 /// Port for the tenant's membership registry in Field.

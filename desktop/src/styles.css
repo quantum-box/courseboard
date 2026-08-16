@@ -5448,6 +5448,125 @@ button,
   }
 }
 
+/* ── Registering from a scanned reception sheet ─────────────────────────────
+   Two columns because the work is comparison: the rows on the left, the sheet
+   they were read from on the right. Desk density throughout — this screen is
+   worked through during a morning rush, not tapped at. */
+
+.visually-hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.reception-hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: .7;
+}
+
+.reception-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+/* The scan stays put while the rows scroll: a value checked against a sheet
+   that has scrolled away is a value checked against memory. */
+.reception-preview {
+  position: sticky;
+  top: 0;
+}
+
+.reception-preview-frame,
+.reception-preview-image {
+  width: 100%;
+  max-height: 72vh;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .3);
+}
+
+.reception-preview-frame {
+  height: 72vh;
+}
+
+.reception-preview-image {
+  height: auto;
+  object-fit: contain;
+}
+
+.reception-row-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: 8px;
+  list-style: none;
+}
+
+.reception-row {
+  display: grid;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 10px;
+  gap: 8px;
+}
+
+/* Registered rows stay on screen, dimmed: the desk counts them off against
+   the paper, and a row that vanished would read as a row that was lost. */
+.reception-row-saved {
+  background: hsl(var(--nui-muted) / .35);
+  opacity: .8;
+}
+
+.reception-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reception-row-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+/* Under the input it belongs to, so correcting and comparing happen without
+   the eye leaving the field. */
+.reception-read-value {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  opacity: .7;
+  overflow-wrap: anywhere;
+}
+
+.reception-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 1100px) {
+  .reception-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .reception-preview {
+    position: static;
+  }
+}
+
+@media (max-width: 720px) {
+  .reception-row-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
 .membership-plan-list {
   display: grid;
   gap: 4px;

@@ -9,6 +9,7 @@ mod caddie_shift_repository;
 mod course_order_config;
 mod field_commercial_gateway;
 mod field_customer_gateway;
+mod field_customer_reception_gateway;
 mod field_gateway;
 mod field_membership_gateway;
 mod field_ops_gateway;
@@ -25,6 +26,7 @@ pub use availability_deadline_repository::MySqlAvailabilityDeadlineRepository;
 pub use caddie_shift_repository::MySqlCaddieShiftRepository;
 pub use field_commercial_gateway::FieldGolfCommercialGateway;
 pub use field_customer_gateway::FieldCustomerGateway;
+pub use field_customer_reception_gateway::FieldCustomerReceptionGateway;
 pub use field_gateway::{
     FieldGolfCatalogGateway, FieldReservationGateway, DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
 };

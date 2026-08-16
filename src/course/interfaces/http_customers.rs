@@ -10,7 +10,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Multipart, Path, Query, State},
     http::HeaderMap,
     Json,
 };
@@ -22,19 +22,30 @@ use super::openapi::ErrorBody;
 
 use crate::course::domain::{
     AssignMembershipPlan, Customer, CustomerId, CustomerMembership, CustomerSearchQuery,
-    MembershipPlan, MembershipPlanId, NewCustomer, UpsertMembershipPlan,
+    MembershipPlan, MembershipPlanId, NewCustomer, ReceptionDraftRow, ReceptionSheet,
+    UpsertMembershipPlan,
 };
-use crate::course::infrastructure::{FieldCustomerGateway, FieldMembershipGateway};
+use crate::course::infrastructure::{
+    FieldCustomerGateway, FieldCustomerReceptionGateway, FieldMembershipGateway,
+};
 use crate::course::usecase::{
     AssignMembershipPlanUseCase, CreateCustomerUseCase, CreateMembershipPlanUseCase,
-    GetCustomerMembershipUseCase, GetCustomerUseCase, ListMembershipPlansUseCase,
-    SearchCustomersUseCase, UpdateMembershipPlanUseCase,
+    DraftCustomerReceptionUseCase, GetCustomerMembershipUseCase, GetCustomerUseCase,
+    ListMembershipPlansUseCase, SearchCustomersUseCase, UpdateMembershipPlanUseCase,
 };
 use crate::{AppError, AppState};
 
 fn customer_gateway(state: &AppState) -> Arc<FieldCustomerGateway> {
     let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
     Arc::new(FieldCustomerGateway::new(
+        state.http_client.clone(),
+        field_api_url,
+    ))
+}
+
+fn reception_gateway(state: &AppState) -> Arc<FieldCustomerReceptionGateway> {
+    let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
+    Arc::new(FieldCustomerReceptionGateway::new(
         state.http_client.clone(),
         field_api_url,
     ))
@@ -208,6 +219,113 @@ pub async fn create_customer(
         .await
         .map_err(AppError::from)?;
     Ok(Json(CustomerDto::from(&created)))
+}
+
+// ─── Reception sheet OCR ──────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceptionDraftRowDto {
+    /// Absent when the reader could not make the name out. The row is still
+    /// returned: the desk has the original on screen beside it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_kana: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+impl From<&ReceptionDraftRow> for ReceptionDraftRowDto {
+    fn from(value: &ReceptionDraftRow) -> Self {
+        Self {
+            name: value.name().map(str::to_string),
+            name_kana: value.name_kana().map(str::to_string),
+            phone: value.phone().map(str::to_string),
+            email: value.email().map(str::to_string),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceptionDraftDto {
+    pub visitors: Vec<ReceptionDraftRowDto>,
+    /// What the reader could not do, in the desk's language. Shown as-is: a
+    /// partial read looks identical to a complete one on screen otherwise.
+    pub warnings: Vec<String>,
+}
+
+/// POST /v1/course/customers/reception-draft
+///
+/// Reads a scanned reception sheet and answers with rows to check. Writes
+/// nothing: registering is still `POST /v1/course/customers`, one approved row
+/// at a time, so a misread name never reaches the ledger unseen.
+#[utoipa::path(
+    post,
+    path = "/v1/course/customers/reception-draft",
+    tag = "course",
+    request_body(
+        content = String,
+        description = "multipart/form-data with a single `file` part (JPEG, PNG, or PDF, up to 10MB)",
+        content_type = "multipart/form-data"
+    ),
+    responses(
+        (status = 200, description = "Rows read off the sheet", body = ReceptionDraftDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn draft_customer_reception(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> Result<Json<ReceptionDraftDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let sheet = read_reception_sheet(multipart).await?;
+    let draft = DraftCustomerReceptionUseCase::new(reception_gateway(&state))
+        .execute(credentials, sheet)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ReceptionDraftDto {
+        visitors: draft
+            .rows()
+            .iter()
+            .map(ReceptionDraftRowDto::from)
+            .collect(),
+        warnings: draft.warnings().to_vec(),
+    }))
+}
+
+async fn read_reception_sheet(mut multipart: Multipart) -> Result<ReceptionSheet, AppError> {
+    let mut sheet = None;
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| AppError::BadRequest("invalid multipart request"))?
+    {
+        if field.name() != Some("file") {
+            continue;
+        }
+        if sheet.is_some() {
+            return Err(AppError::BadRequest(
+                "multipart request must contain exactly one file",
+            ));
+        }
+        // The scanner's filename is neither read nor forwarded.
+        let content_type = field.content_type().unwrap_or_default().to_string();
+        let bytes = field
+            .bytes()
+            .await
+            .map_err(|_| AppError::BadRequest("failed to read the reception sheet"))?;
+        sheet =
+            Some(ReceptionSheet::try_new(bytes.to_vec(), &content_type).map_err(AppError::from)?);
+    }
+    sheet.ok_or(AppError::BadRequest("multipart field 'file' is required"))
 }
 
 // ─── Membership ───────────────────────────────────────────────────────────────

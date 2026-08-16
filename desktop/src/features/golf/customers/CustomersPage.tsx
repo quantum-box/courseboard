@@ -1,5 +1,5 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
-import { UserPlus } from 'lucide-react'
+import { FileScan, UserPlus } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -15,7 +15,7 @@ import {
   Panel,
 } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
-import { navigate } from '../../../lib/router'
+import { navigate, navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { MembershipBadge } from './MembershipBadge'
 import { customersPath, type Customer } from './models'
@@ -99,9 +99,21 @@ export function CustomersPage() {
         title={t('customers:search.title')}
         description={t('customers:search.description')}
         actions={(
-          <Button type="button" variant="primary" onClick={() => setCreating(true)}>
-            <UserPlus /> {t('customers:create.open')}
-          </Button>
+          <>
+            {/* Reading a sheet is its own screen, not a sheet-over-the-ledger:
+                it needs the scan and the rows side by side, which is more than
+                a quick aside while the desk is on the phone. */}
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={event => navigateFromClick(event, 'golf/customers/reception')}
+            >
+              <FileScan /> {t('customers:reception.open')}
+            </Button>
+            <Button type="button" variant="primary" onClick={() => setCreating(true)}>
+              <UserPlus /> {t('customers:create.open')}
+            </Button>
+          </>
         )}
       >
         <Field label={t('customers:search.label')}>

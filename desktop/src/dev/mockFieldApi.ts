@@ -2446,6 +2446,29 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     })
   }
 
+  if (pathname === '/v1/course/customers/reception-draft' && method === 'POST') {
+    if (typeof FormData === 'undefined' || !(init?.body instanceof FormData)) {
+      return error(400, "multipart field 'file' is required")
+    }
+    // A read good enough to be worth checking, and wrong in the ways a real one
+    // is: a kana nobody wrote down, a row whose name the scan lost. The screen
+    // exists for exactly these rows, so the fixture has to contain them.
+    return hit({
+      visitors: [
+        {
+          name: '本田 康彦',
+          nameKana: 'ホンダ ヤスヒコ',
+          phone: '090-1234-5678',
+          email: 'honda@example.com',
+        },
+        { name: '増田 公陽', nameKana: 'マスダ キミハル', phone: '090-2222-3333' },
+        { name: '辻 俊行' },
+        { phone: '080-4444-5555' },
+      ],
+      warnings: ['読み取れない項目があります。原本を見ながらすべての項目を確認してください。'],
+    })
+  }
+
   if (pathname === '/v1/course/customers' && method === 'POST') {
     const name = typeof body?.name === 'string' ? body.name.trim() : ''
     if (!name) return error(400, 'customer name is required')
