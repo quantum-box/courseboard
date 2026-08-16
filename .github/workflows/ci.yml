@@ -11,9 +11,7 @@ env:
 jobs:
   rust:
     name: Rust
-    # GitHub-hosted runners share an Actions budget that has stopped this
-    # workflow before a single step ran. The self-hosted pool is outside it.
-    runs-on: tachyoncloud-4vcpu
+    runs-on: ubuntu-latest
     services:
       tidb:
         image: pingcap/tidb:v8.5.7
@@ -43,7 +41,7 @@ jobs:
 
   frontend:
     name: React / Vite frontend
-    runs-on: tachyoncloud-4vcpu
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: desktop
@@ -94,9 +92,7 @@ jobs:
       matrix:
         include:
           - platform: linux-x64
-            os: tachyoncloud-4vcpu
-          # No Windows in the self-hosted pool, so this one stays on the
-          # GitHub-hosted runner and on the shared budget.
+            os: ubuntu-latest
           - platform: windows-x64
             os: windows-latest
     runs-on: ${{ matrix.os }}
@@ -178,7 +174,7 @@ jobs:
     name: Android debug bundle
     if: github.event_name == 'push'
     needs: frontend
-    runs-on: tachyoncloud-4vcpu
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: desktop
