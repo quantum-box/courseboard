@@ -1,0 +1,21 @@
+-- Retire CourseBoard's own copy of the club's daily reservation counts.
+--
+-- These tables backed a second implementation of the same import that
+-- `reservation-report-import` provides. Two screens read the same export into
+-- two different stores, and the desk was being shown both.
+--
+-- ADR-0007 settled where this data lives: the counts are an operational
+-- snapshot of somebody else's reservation system, so they stay in Field
+-- alongside the reservations they summarize rather than being copied into
+-- CourseBoard. It considered a dedicated CourseBoard table — the route these
+-- migrations took — and rejected it as the physical transfer ADR-0005 forbids.
+--
+-- Dropped rather than left in place: an unused table with rows in it is a
+-- second answer to "how many groups played on 7/1" that nothing maintains and
+-- the next reader has no way to date.
+--
+-- Nothing outside the removed feature read either table. The rows were written
+-- only by the import screen being removed with them, and the caddie-demand work
+-- (ADR-0006) reads Field, not these.
+DROP TABLE IF EXISTS golf_reservation_day_summaries;
+DROP TABLE IF EXISTS golf_reservation_course_links;

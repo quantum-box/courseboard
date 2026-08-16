@@ -33,8 +33,7 @@ use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
     FieldReservationReportGateway, MySqlAvailabilityDeadlineRepository, MySqlCaddieShiftRepository,
-    MySqlGeneratedThroughRepository, MySqlReservationCourseLinkRepository,
-    MySqlReservationSummaryRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
+    MySqlGeneratedThroughRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -56,8 +55,6 @@ pub struct AppState {
     rules: Arc<MySqlTaxRuleRepository>,
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
-    reservation_summaries: Arc<MySqlReservationSummaryRepository>,
-    reservation_course_links: Arc<MySqlReservationCourseLinkRepository>,
     generated_through: Arc<MySqlGeneratedThroughRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
@@ -90,10 +87,6 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
-            reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(pool.clone())),
-            reservation_course_links: Arc::new(MySqlReservationCourseLinkRepository::new(
-                pool.clone(),
-            )),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -139,10 +132,6 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
-            reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(pool.clone())),
-            reservation_course_links: Arc::new(MySqlReservationCourseLinkRepository::new(
-                pool.clone(),
-            )),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -174,12 +163,6 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
-                reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(
-                    pool.clone(),
-                )),
-                reservation_course_links: Arc::new(MySqlReservationCourseLinkRepository::new(
-                    pool.clone(),
-                )),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -202,12 +185,6 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
-                reservation_summaries: Arc::new(MySqlReservationSummaryRepository::new(
-                    pool.clone(),
-                )),
-                reservation_course_links: Arc::new(MySqlReservationCourseLinkRepository::new(
-                    pool.clone(),
-                )),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -239,23 +216,9 @@ impl AppState {
         self.slot_overrides.clone()
     }
 
-    /// CourseBoard-owned daily reservation counts imported from the club's
-    /// booking system. The export has no start times and no per-booking caddie
-    /// flag, so it cannot ride on Field's reservation inventory (ADR-0005).
-    pub fn reservation_summaries(&self) -> Arc<MySqlReservationSummaryRepository> {
-        self.reservation_summaries.clone()
-    }
-
     /// CourseBoard-owned record of how far each course has been built.
     pub fn generated_through(&self) -> Arc<MySqlGeneratedThroughRepository> {
         self.generated_through.clone()
-    }
-
-    /// CourseBoard-owned answers about which course each name in the booking
-    /// system's export refers to. Field's course master carries no external
-    /// identifier, so the mapping is ours (ADR-0005).
-    pub fn reservation_course_links(&self) -> Arc<MySqlReservationCourseLinkRepository> {
-        self.reservation_course_links.clone()
     }
 
     /// CourseBoard-owned shift-request filing deadlines.
@@ -819,48 +782,6 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/course/reservation-policy",
             get(course::interfaces::http_commercial::get_reservation_policy)
                 .patch(course::interfaces::http_commercial::update_reservation_policy)
-                .route_layer(middleware::from_fn_with_state(
-                    state.clone(),
-                    require_valid_token,
-                )),
-        )
-        .route(
-            "/v1/course/reservation-summaries/course-links",
-            get(course::interfaces::http_reservation_summary::list_reservation_course_links)
-                .put(course::interfaces::http_reservation_summary::save_reservation_course_links)
-                .route_layer(middleware::from_fn_with_state(
-                    state.clone(),
-                    require_valid_token,
-                )),
-        )
-        .route(
-            "/v1/course/reservation-summaries/preview",
-            post(course::interfaces::http_reservation_summary::preview_reservation_summaries)
-                // A spreadsheet does not fit axum's 2 MB default for a JSON
-                // body, and a file too big to be one of these exports should be
-                // turned away as it arrives rather than after it is buffered.
-                .route_layer(DefaultBodyLimit::max(
-                    course::interfaces::http_reservation_summary::MAX_WORKBOOK_BYTES,
-                ))
-                .route_layer(middleware::from_fn_with_state(
-                    state.clone(),
-                    require_valid_token,
-                )),
-        )
-        .route(
-            "/v1/course/reservation-summaries/import",
-            post(course::interfaces::http_reservation_summary::import_reservation_summaries)
-                .route_layer(DefaultBodyLimit::max(
-                    course::interfaces::http_reservation_summary::MAX_WORKBOOK_BYTES,
-                ))
-                .route_layer(middleware::from_fn_with_state(
-                    state.clone(),
-                    require_valid_token,
-                )),
-        )
-        .route(
-            "/v1/course/reservation-summaries",
-            get(course::interfaces::http_reservation_summary::list_reservation_summaries)
                 .route_layer(middleware::from_fn_with_state(
                     state.clone(),
                     require_valid_token,

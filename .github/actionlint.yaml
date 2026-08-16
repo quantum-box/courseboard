@@ -1,0 +1,6 @@
+self-hosted-runner:
+  labels:
+    - tachyoncloud
+    - tachyoncloud-4vcpu
+
+config-variables: null

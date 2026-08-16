@@ -30,32 +30,59 @@ impl LinkCourseResourceUseCase {
         credentials: GatewayCredentials<'_>,
         course_id: &CourseId,
     ) -> Result<Resource, CourseError> {
-        let course = self
-            .catalog
-            .list_courses(credentials)
-            .await?
-            .into_iter()
+        ensure_course_resources(
+            self.catalog.as_ref(),
+            credentials,
+            std::slice::from_ref(course_id),
+        )
+        .await?
+        .pop()
+        .ok_or(CourseError::NotFound("course"))
+    }
+}
+
+/// The resource each course books against, creating the ones that are missing.
+///
+/// A course only gets a resource when somebody asks for one, so the courses a
+/// club added months ago and the course it added this morning are equally
+/// likely to be without. Callers that need every course placeable — selling one
+/// plan across several courses is the one that does — would otherwise have to
+/// send the operator back to each course to press a button whose purpose the
+/// screen never explains.
+///
+/// Resources come back in the order the courses were asked for. Field upserts
+/// the mapping on `resource_code`, so a course that already has one keeps it
+/// and running this twice does not split its tee times across two resources.
+pub(crate) async fn ensure_course_resources(
+    catalog: &dyn GolfCatalogGateway,
+    credentials: GatewayCredentials<'_>,
+    course_ids: &[CourseId],
+) -> Result<Vec<Resource>, CourseError> {
+    let mut resources = catalog.list_resources(credentials).await?;
+    let mut courses = None;
+    let mut resolved = Vec::with_capacity(course_ids.len());
+
+    for course_id in course_ids {
+        if let Some(existing) = canonical_resource(&resources, course_id) {
+            resolved.push(existing.clone());
+            continue;
+        }
+
+        // Only fetched once a course turns out to need one: the name is the
+        // sole reason to ask, and most saves find every resource in place.
+        if courses.is_none() {
+            courses = Some(catalog.list_courses(credentials).await?);
+        }
+        let course = courses
+            .iter()
+            .flatten()
             .find(|course| course.id() == course_id)
             .ok_or(CourseError::NotFound("course"))?;
 
-        let existing = self
-            .catalog
-            .list_resources(credentials)
-            .await?
-            .into_iter()
-            .filter(|resource| resource.kind() == ResourceKind::Course)
-            .find(|resource| resource.golf_course_id() == Some(course_id));
-        if let Some(existing) = existing {
-            if existing.reservation_resource_id().is_some() {
-                return Ok(existing);
-            }
-        }
-
-        let reservation_resource_id = self
-            .catalog
+        let reservation_resource_id = catalog
             .create_reservation_resource(credentials, course.name())
             .await?;
-        self.catalog
+        let saved = catalog
             .save_course_resource(
                 credentials,
                 SaveCourseResource {
@@ -68,8 +95,25 @@ impl LinkCourseResourceUseCase {
                     reservation_resource_id,
                 },
             )
-            .await
+            .await?;
+        resources.push(saved.clone());
+        resolved.push(saved);
     }
+
+    Ok(resolved)
+}
+
+/// The one active course resource a plan may name, if the course has it.
+///
+/// Matches what the canonical product writer accepts, so a course this returns
+/// `None` for is exactly a course that write would have refused.
+fn canonical_resource<'a>(resources: &'a [Resource], course_id: &CourseId) -> Option<&'a Resource> {
+    resources
+        .iter()
+        .filter(|resource| resource.kind() == ResourceKind::Course)
+        .filter(|resource| resource.is_active())
+        .find(|resource| resource.golf_course_id() == Some(course_id))
+        .filter(|resource| resource.reservation_resource_id().is_some())
 }
 
 #[cfg(test)]

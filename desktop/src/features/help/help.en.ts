@@ -253,21 +253,21 @@ export const helpEn: HelpCatalog = {
       ],
     },
 
-    'golf/reservation-import': {
-      title: 'Import bookings',
-      summary: 'Read the booking system\'s daily reservation export and bring the month\'s group counts in.',
+    'golf/reservation-report-import': {
+      title: 'Import reservation reports',
+      summary: "Read a report exported from the club's booking system and store the daily group counts.",
       usage: [
         {
-          heading: 'Choose a file',
-          body: 'Pick the .xlsx exactly as the booking system exported it. The month it covers is read from the file name.',
+          heading: 'Choose a report and a year',
+          body: 'Pick an Excel, CSV, or PDF report and choose the year it covers — the report itself does not say. Files larger than 5 MB are refused.',
         },
         {
-          heading: 'Check before importing',
-          body: 'Check the file first: you get the counts and anything worth a look, and nothing is written yet. Import it once it looks right.',
+          heading: 'Map the columns and the courses',
+          body: 'A known daily report is read as-is. Anything else comes back with a suggested column mapping to check and approve, and then you pick the Course Board course for each facility in the report.',
         },
         {
-          heading: 'Re-import the same month freely',
-          body: 'Re-exporting and re-importing a month overwrites its daily counts rather than adding a second set.',
+          heading: 'Check the month before saving',
+          body: 'Morning and afternoon groups, and caddie-attached groups, are laid out for the month. Nothing is written yet; save once it looks right. Re-importing the same facility, date, and half-day updates the value rather than adding a second row.',
         },
       ],
       data: [
@@ -276,8 +276,8 @@ export const helpEn: HelpCatalog = {
           body: 'Groups booked for each half of the day, and how many of those asked for a caddie. Start times and per-booking caddie flags are not in the export.',
         },
         {
-          heading: 'Left out',
-          body: 'Half-days whose counts were not numbers, plus courses Course Board does not have. If this is not zero, read the warnings.',
+          heading: 'No individual bookings',
+          body: 'Only the daily totals are stored: without a booker, a party size, or a start time there is nothing to put on the tee sheet. A PDF with no readable text is sent to Tachyon AI OCR, and what it read is shown before anything is saved.',
         },
       ],
     },

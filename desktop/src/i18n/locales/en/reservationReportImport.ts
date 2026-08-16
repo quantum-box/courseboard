@@ -91,6 +91,11 @@ export const reservationReportImport: DeepPartial<typeof source> = {
       caddieAttachedGroupCount: 'Groups with caddie',
     },
   },
+  review: {
+    title: 'Some half-days are worth a look',
+    description: 'More caddie-attached groups than groups. Nothing is held up — just compare these half-days against the original report.',
+    caddieExceedsGroups: '{{course}} ({{half}}) on {{date}}: {{caddie}} caddie-attached groups out of {{groups}} groups.',
+  },
   preview: {
     title: 'Review the month',
     description: 'Check morning and afternoon group counts, including groups with a caddie, before saving.',

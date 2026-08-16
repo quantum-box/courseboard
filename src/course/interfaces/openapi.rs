@@ -14,7 +14,6 @@ use super::http_customers;
 use super::http_field;
 use super::http_ops;
 use super::http_reservation_report;
-use super::http_reservation_summary;
 use super::http_simulator;
 use crate::{feature_flags, profile_proxy};
 
@@ -128,11 +127,6 @@ impl Modify for SecurityAddon {
         http_commercial::list_daily_budgets,
         http_commercial::upsert_daily_budget,
         http_commercial::import_daily_budgets_csv,
-        http_reservation_summary::preview_reservation_summaries,
-        http_reservation_summary::import_reservation_summaries,
-        http_reservation_summary::list_reservation_summaries,
-        http_reservation_summary::list_reservation_course_links,
-        http_reservation_summary::save_reservation_course_links,
         http_commercial::list_budget_achievements,
         http_commercial::get_monthly_settlement,
         http_commercial::export_monthly_settlement_csv,
@@ -192,6 +186,7 @@ impl Modify for SecurityAddon {
             http_reservation_report::ReservationReportRowDto,
             http_reservation_report::ReservationReportTotalsDto,
             http_reservation_report::ReservationReportPreviewResponse,
+            http_reservation_report::ReservationReportReviewDto,
             http_reservation_report::ReservationReportAnalysisDto,
             http_reservation_report::ReservationReportMappingDto,
             http_reservation_report::ReservationReportMappingFieldDto,
@@ -244,12 +239,6 @@ impl Modify for SecurityAddon {
             http_commercial::ReservationPolicyDto,
             http_commercial::UpdateReservationPolicyRequest,
             http_commercial::DailyBudgetDto,
-            http_reservation_summary::ReservationSummaryDto,
-            http_reservation_summary::ImportWarningDto,
-            http_reservation_summary::ImportedCourseDto,
-            http_reservation_summary::ReservationCourseLinkDto,
-            http_reservation_summary::SaveReservationCourseLinksRequest,
-            http_reservation_summary::ReservationImportResultDto,
             http_commercial::DailyBudgetQueryParams,
             http_commercial::UpsertDailyBudgetRequest,
             http_commercial::BudgetAchievementDto,
@@ -320,9 +309,8 @@ mod tests {
         assert!(paths.contains_key("/v1/course/caddie-attendance-snapshots"));
         assert!(paths.contains_key("/v1/course/reservation-policy"));
         assert!(paths.contains_key("/v1/course/daily-budgets"));
-        assert!(paths.contains_key("/v1/course/reservation-summaries"));
-        assert!(paths.contains_key("/v1/course/reservation-summaries/import"));
-        assert!(paths.contains_key("/v1/course/reservation-summaries/course-links"));
+        assert!(paths.contains_key("/v1/course/reservation-report-imports"));
+        assert!(paths.contains_key("/v1/course/reservation-report-entries"));
         assert!(paths.contains_key("/v1/field/client-capabilities"));
         assert!(paths.contains_key("/v1/me"));
         let components = json
@@ -331,7 +319,7 @@ mod tests {
             .expect("schemas");
         assert!(components.contains_key("TeeSheetResponse"));
         assert!(components.contains_key("CourseDto"));
-        assert!(components.contains_key("ReservationImportResultDto"));
+        assert!(components.contains_key("ReservationReportPreviewResponse"));
         assert!(components.contains_key("ErrorBody"));
         assert!(components.contains_key("ProfileResponse"));
         assert!(components.contains_key("ProfileErrorResponse"));

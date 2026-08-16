@@ -29,7 +29,7 @@ concurrency:
 jobs:
   main_ref_guard:
     name: Reject non-main production migration refs
-    runs-on: ubuntu-latest
+    runs-on: tachyoncloud
     timeout-minutes: 2
     steps:
       - name: Require main
@@ -73,7 +73,7 @@ jobs:
     name: CourseBoard production migration gate
     needs: migration_gate
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: tachyoncloud
     timeout-minutes: 2
     steps:
       - name: Fail closed unless migration gate succeeded

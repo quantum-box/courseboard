@@ -56,8 +56,28 @@ pub struct ReservationReportPreviewResponse {
     pub facilities: Vec<ReservationReportFacilityDto>,
     pub rows: Vec<ReservationReportRowDto>,
     pub totals: ReservationReportTotalsDto,
+    /// Half-days worth comparing against the original report. Every one of
+    /// them still imports.
+    pub review: Vec<ReservationReportReviewDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub analysis: Option<ReservationReportAnalysisDto>,
+}
+
+/// One row the report contradicts itself on.
+///
+/// Only one kind so far — more caddie-attached groups than groups — but it is
+/// named rather than implied so a second kind does not have to change the shape
+/// the screen reads.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReservationReportReviewDto {
+    /// `caddieExceedsGroups`.
+    pub kind: String,
+    pub source_course_name: String,
+    pub date: NaiveDate,
+    pub day_part: String,
+    pub group_count: i64,
+    pub caddie_attached_group_count: i64,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -148,6 +168,11 @@ fn preview_response(preview: ReservationReportPreview) -> ReservationReportPrevi
             .collect(),
         rows: report.rows().iter().map(row_response).collect(),
         totals: totals_response(totals),
+        review: report
+            .rows_needing_review()
+            .into_iter()
+            .map(review_response)
+            .collect(),
         analysis: preview.tabular_analysis().map(analysis_response),
     }
 }
@@ -195,6 +220,19 @@ fn analysis_response(
             notes: analysis.mapping().notes().map(str::to_string),
         },
         warnings: analysis.warnings().to_vec(),
+    }
+}
+
+fn review_response(
+    row: &crate::course::domain::ReservationReportRow,
+) -> ReservationReportReviewDto {
+    ReservationReportReviewDto {
+        kind: "caddieExceedsGroups".to_string(),
+        source_course_name: row.source_course_name().to_string(),
+        date: row.date(),
+        day_part: row.day_part().as_str().to_string(),
+        group_count: row.group_count(),
+        caddie_attached_group_count: row.caddie_attached_group_count(),
     }
 }
 

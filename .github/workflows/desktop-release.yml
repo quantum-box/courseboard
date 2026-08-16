@@ -31,7 +31,7 @@ env:
 jobs:
   version:
     name: Resolve version
-    runs-on: ubuntu-latest
+    runs-on: tachyoncloud
     outputs:
       value: ${{ steps.version.outputs.value }}
     steps:
@@ -56,6 +56,8 @@ jobs:
   build:
     name: Build ${{ matrix.platform }}
     needs: version
+    # ADR-0027 例外: macOS / Windows 固有 job は GitHub-hosted matrix を維持する。
+    # Apple 署名 / notarization と MSI 生成は Linux runner で代替できない。
     strategy:
       fail-fast: false
       matrix:
@@ -164,7 +166,7 @@ jobs:
     # explicit, environment-protected action until both platform signing
     # identities have been connected and verified in this workflow.
     if: github.event_name == 'workflow_dispatch' && inputs.publish == true
-    runs-on: ubuntu-latest
+    runs-on: tachyoncloud
     environment: desktop-release
     steps:
       - name: Checkout

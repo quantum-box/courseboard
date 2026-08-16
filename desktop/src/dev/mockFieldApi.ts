@@ -184,85 +184,6 @@ function mockReservationReportRows(year: number) {
 // falling back while the storage-key constant is still in its temporal dead zone.
 let mockReservationReportEntries: MockReservationReportEntry[] = []
 
-/**
- * Daily reservation counts, as the club's booking system exports them.
- *
- * Generated rather than typed out because the screen is a month at a time: one
- * row per course per half-day is 31 x 2 x however many courses, and a fixture
- * that only covered a week would make the table look like a broken import.
- *
- * The numbers lean on the shape of the real July export — mornings busier than
- * afternoons, weekends busier than weekdays, and a course shut for a few days
- * so the "closed reads as zero" case is visible without editing anything.
- */
-type MockReservationSummary = {
-  golfCourseId: string
-  date: string
-  timeOfDay: 'am' | 'pm'
-  totalGroups: number
-  caddieGroups: number
-}
-
-function generateReservationSummaries(): MockReservationSummary[] {
-  const [year, month] = MOCK_FIXTURE_DATE.split('-').map(Number)
-  const lastDay = new Date(Date.UTC(year ?? 2026, month ?? 7, 0)).getUTCDate()
-  const summaries: MockReservationSummary[] = []
-  for (let day = 1; day <= lastDay; day += 1) {
-    const date = `${MOCK_FIXTURE_DATE.slice(0, 8)}${String(day).padStart(2, '0')}`
-    const weekend = [0, 6].includes(new Date(`${date}T00:00:00Z`).getUTCDay())
-    mockCourses.forEach((course, index) => {
-      // One course keeps a short closure mid-month, the way 真駒内 does.
-      const closed = index === 1 && day >= 9 && day <= 11
-      const morning = closed ? 0 : (weekend ? 26 : 20) - index * 3 + (day % 4)
-      const afternoon = closed ? 0 : (weekend ? 17 : 11) - index * 2 + (day % 3)
-      summaries.push(
-        {
-          golfCourseId: course.id,
-          date,
-          timeOfDay: 'am',
-          totalGroups: morning,
-          caddieGroups: Math.round(morning * 0.35),
-        },
-        {
-          golfCourseId: course.id,
-          date,
-          timeOfDay: 'pm',
-          totalGroups: afternoon,
-          caddieGroups: Math.round(afternoon * 0.3),
-        },
-      )
-    })
-  }
-  return summaries
-}
-
-const mockReservationSummaries = generateReservationSummaries()
-
-/**
- * The desk's answers about which course each export name refers to.
- *
- * Starts empty on purpose: the first import a club does is the one where every
- * name is still a question, and that is the state the screen most needs to be
- * walked through without a backend.
- */
-const mockReservationCourseLinks = new Map<string, string | null>()
-
-function mockReservationCourseLinkItems() {
-  return {
-    items: [...mockReservationCourseLinks.entries()].map(([sheetLabel, golfCourseId]) => ({
-      sheetLabel,
-      ...(golfCourseId ? { golfCourseId } : {}),
-    })),
-  }
-}
-
-function mockReservationSummaryDto(summary: MockReservationSummary) {
-  return {
-    ...summary,
-    selfPlayGroups: Math.max(summary.totalGroups - summary.caddieGroups, 0),
-  }
-}
-
 function productCourseIds(product: { golfCourseIds?: string[] | null; golfCourseId: string | null }) {
   if (product.golfCourseIds) return product.golfCourseIds
   return product.golfCourseId ? [product.golfCourseId] : []
@@ -2094,28 +2015,6 @@ function resolveGet(path: string): Json | null | undefined {
     )
   }
 
-  if (rawPathname === '/v1/course/reservation-summaries/course-links') {
-    return mockReservationCourseLinkItems()
-  }
-
-  if (rawPathname === '/v1/course/reservation-summaries') {
-    const from = url.searchParams.get('from') ?? TODAY
-    const to = url.searchParams.get('to') ?? from
-    const courseIds = (url.searchParams.get('golfCourseIds') ?? '')
-      .split(',')
-      .map(value => value.trim())
-      .filter(Boolean)
-    return items(
-      mockReservationSummaries
-        .filter(summary => summary.date >= from && summary.date <= to)
-        .filter(summary => !courseIds.length || courseIds.includes(summary.golfCourseId))
-        .sort((left, right) => left.date.localeCompare(right.date)
-          || left.golfCourseId.localeCompare(right.golfCourseId)
-          || left.timeOfDay.localeCompare(right.timeOfDay))
-        .map(mockReservationSummaryDto),
-    )
-  }
-
   if (rawPathname === '/v1/course/caddie-shift-rules') {
     return mockShiftRulesDto()
   }
@@ -2487,84 +2386,6 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     })
   }
 
-  const reservationImportMatch = pathname.match(
-    /^\/v1\/course\/reservation-summaries\/(preview|import)$/,
-  )
-  if (reservationImportMatch && method === 'POST') {
-    // The uploaded workbook is a binary body this resolver cannot read, so the
-    // answer is built from the fixture month instead. That is enough for the
-    // screen: what it has to show is a month's worth of counts, a per-course
-    // breakdown, and the two-step check — none of which depend on the bytes.
-    const dates = [...new Set(mockReservationSummaries.map(summary => summary.date))].sort()
-    const courses = mockCourses.map((course, index) => {
-      const rows = mockReservationSummaries.filter(row => row.golfCourseId === course.id)
-      const sheetLabel = course.shortName ?? course.name
-      const saved = mockReservationCourseLinks.get(sheetLabel)
-      // The last course starts unanswered so the mapping step is reachable in
-      // mock mode. A screen whose whole point is "what do I do when the name
-      // does not match" is not worth much if the fixtures always match.
-      const resolution = saved === null
-        ? 'ignored'
-        : saved
-          ? 'linked'
-          : index === mockCourses.length - 1
-            ? 'unresolved'
-            : 'suggested'
-      const linkedId = saved ?? (resolution === 'suggested' ? course.id : undefined)
-      return {
-        sheetLabel,
-        resolution,
-        golfCourseId: linkedId ?? undefined,
-        courseName: linkedId ? course.name : undefined,
-        imported: resolution === 'linked' || resolution === 'suggested',
-        dayCount: rows.length,
-        totalGroups: rows.reduce((sum, row) => sum + row.totalGroups, 0),
-        caddieGroups: rows.reduce((sum, row) => sum + row.caddieGroups, 0),
-      }
-    })
-    const importing = courses.filter(course => course.imported)
-    const applied = reservationImportMatch[1] === 'import'
-    return hit({
-      yearMonth: MOCK_FIXTURE_DATE.slice(0, 7),
-      // A preview writes nothing, so it reports nothing written — the same
-      // distinction the real endpoint draws.
-      imported: applied
-        ? mockReservationSummaries.filter(row =>
-          importing.some(course => course.golfCourseId === row.golfCourseId)).length
-        : 0,
-      skipped: 0,
-      unansweredCourses: courses.filter(course => course.resolution === 'unresolved').length,
-      from: dates[0] ?? MOCK_FIXTURE_DATE,
-      to: dates[dates.length - 1] ?? MOCK_FIXTURE_DATE,
-      courses,
-      warnings: [],
-      summaries: mockReservationSummaries
-        .filter(row => importing.some(course => course.golfCourseId === row.golfCourseId))
-        .map(mockReservationSummaryDto),
-    })
-  }
-
-  if (pathname === '/v1/course/reservation-summaries/course-links' && method === 'PUT') {
-    const items = Array.isArray(body?.items) ? (body.items as Array<Record<string, unknown>>) : []
-    for (const item of items) {
-      const label = typeof item.sheetLabel === 'string' ? item.sheetLabel.trim() : ''
-      if (!label) return error(400, 'a course link needs the name the sheet uses')
-      const courseId = typeof item.golfCourseId === 'string' ? item.golfCourseId.trim() : ''
-      if (courseId) {
-        mockReservationCourseLinks.set(label, courseId)
-      } else if (item.doNotImport === true) {
-        // Null, not absent: "do not import" is an answer the import has to be
-        // able to tell apart from a name nobody has looked at.
-        mockReservationCourseLinks.set(label, null)
-      } else {
-        // Neither: the desk took its answer back, so the name goes back among
-        // the questions. Absent, which is what "nobody has looked at this" is.
-        mockReservationCourseLinks.delete(label)
-      }
-    }
-    return hit(mockReservationCourseLinkItems())
-  }
-
   if (pathname === '/v1/course/customers' && method === 'POST') {
     const name = typeof body?.name === 'string' ? body.name.trim() : ''
     if (!name) return error(400, 'customer name is required')
@@ -2702,6 +2523,9 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
           0,
         ),
       },
+      // The fixture report is internally consistent, so it has nothing for the
+      // desk to compare against the original.
+      review: [],
     })
   }
 

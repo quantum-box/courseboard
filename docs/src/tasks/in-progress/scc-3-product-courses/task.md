@@ -28,6 +28,8 @@ PLT-3353 は Done（[tachyonfield#1034](https://github.com/quantum-box/tachyonfi
   コースやデモ seed の保存を、複数コース化のために壊さない。
 - [x] CourseBoard SPA に複数 course 選択、array save、予約時の membership filter を
   実装する。
+- [x] 複数 course の保存時に、resource を持たない course の resource を自動で用意する。
+  受付枠の置き場は Field の実装都合であり、コースを選ぶ操作の前提条件にしない。
 - [ ] PLT-3353 が prod Field に deploy 済みであり、storefront が
   `eligibleResourceIds` を選択 resource の membership として解釈することを
   実リクエストで確認する。
