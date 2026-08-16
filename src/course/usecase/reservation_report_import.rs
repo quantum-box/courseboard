@@ -1357,4 +1357,147 @@ mod tests {
             ))
         ));
     }
+
+    /// The club's own July 2026 export, as received on 2026-07-18.  The parser
+    /// is deliberately strict about the layout and refuses a workbook it does
+    /// not recognize, so only the real file proves that the weather suffix on a
+    /// date cell, the merged facility headers, the budget row's full-width
+    /// hyphen, and the hole-count suffix are all still handled.
+    const SAMPLE: &[u8] = include_bytes!(
+        "../../../tests/fixtures/日別予約状況_組数_20260718_202607_真駒内_滝の_羊ケ丘.xlsx"
+    );
+
+    const SAMPLE_FILENAME: &str = "日別予約状況_組数_20260718_202607_真駒内_滝の_羊ケ丘.xlsx";
+
+    fn sample_report() -> ReservationReport {
+        parse_reservation_report(SAMPLE, 2026, Some(SAMPLE_FILENAME)).expect("sample parses")
+    }
+
+    fn sample_row<'a>(
+        report: &'a ReservationReport,
+        course_key: &str,
+        day: u32,
+        day_part: ReservationReportDayPart,
+    ) -> &'a ReservationReportRow {
+        let date = NaiveDate::from_ymd_opt(2026, 7, day).unwrap();
+        report
+            .rows()
+            .iter()
+            .find(|row| {
+                row.source_course_key() == course_key
+                    && row.date() == date
+                    && row.day_part() == day_part
+            })
+            .unwrap_or_else(|| panic!("{course_key} {date} {} is missing", day_part.as_str()))
+    }
+
+    #[test]
+    fn the_clubs_own_export_yields_one_row_per_facility_day_and_day_part() {
+        let report = sample_report();
+
+        let facilities = report
+            .facilities()
+            .iter()
+            .map(|facility| facility.source_course_key())
+            .collect::<Vec<_>>();
+        assert_eq!(facilities, ["真駒内", "滝の", "羊ケ丘"]);
+        // The header cells carry the hole count on a second line.
+        assert_eq!(report.facilities()[0].source_course_name(), "真駒内\n36H");
+
+        // 3 facilities * 31 days * morning and afternoon.
+        assert_eq!(report.rows().len(), 186);
+        for facility in report.facilities() {
+            let rows = report
+                .rows()
+                .iter()
+                .filter(|row| row.source_course_key() == facility.source_course_key())
+                .count();
+            assert_eq!(rows, 62, "{} row count", facility.source_course_key());
+        }
+    }
+
+    #[test]
+    fn the_clubs_own_export_keeps_the_sheets_totals() {
+        let report = sample_report();
+
+        let per_facility = |key: &str| -> (i64, i64) {
+            report
+                .rows()
+                .iter()
+                .filter(|row| row.source_course_key() == key)
+                .fold((0, 0), |(groups, caddie), row| {
+                    (
+                        groups + row.group_count(),
+                        caddie + row.caddie_attached_group_count(),
+                    )
+                })
+        };
+        assert_eq!(per_facility("真駒内"), (2249, 926));
+        assert_eq!(per_facility("滝の"), (2399, 1006));
+        assert_eq!(per_facility("羊ケ丘"), (1666, 544));
+
+        let groups: i64 = report.rows().iter().map(|row| row.group_count()).sum();
+        let caddie: i64 = report
+            .rows()
+            .iter()
+            .map(|row| row.caddie_attached_group_count())
+            .sum();
+        assert_eq!((groups, caddie), (6314, 2476));
+
+        // Row 20 column F of the sheet.  The 56 that the grand-total row shows
+        // for the same slot is a caddie count for every facility at once, not
+        // this facility's group count.
+        let morning = sample_row(&report, "真駒内", 1, ReservationReportDayPart::Morning);
+        assert_eq!(morning.group_count(), 70);
+        assert_eq!(morning.caddie_attached_group_count(), 21);
+    }
+
+    #[test]
+    fn a_day_the_facility_is_closed_arrives_as_zero_rather_than_as_a_gap() {
+        let report = sample_report();
+
+        // 真駒内 is closed on these July days while the other two trade as
+        // usual, so the zeros have to survive as rows of their own.
+        for day in [6, 7, 9, 10, 11, 12] {
+            for day_part in [
+                ReservationReportDayPart::Morning,
+                ReservationReportDayPart::Afternoon,
+            ] {
+                let row = sample_row(&report, "真駒内", day, day_part);
+                assert_eq!(row.group_count(), 0, "真駒内 7/{day} {}", day_part.as_str());
+                assert_eq!(
+                    row.caddie_attached_group_count(),
+                    0,
+                    "真駒内 7/{day} {}",
+                    day_part.as_str()
+                );
+            }
+        }
+        assert_eq!(
+            sample_row(&report, "滝の", 6, ReservationReportDayPart::Morning).group_count(),
+            51
+        );
+    }
+
+    #[test]
+    fn the_sheets_grand_total_column_is_not_imported_as_a_facility() {
+        let report = sample_report();
+
+        assert!(report
+            .facilities()
+            .iter()
+            .all(|facility| !facility.source_course_key().contains("全体")));
+        assert!(report
+            .rows()
+            .iter()
+            .all(|row| !row.source_course_key().contains("全体")));
+    }
+
+    #[test]
+    fn the_same_export_always_fingerprints_the_same_way() {
+        assert_eq!(
+            sample_report().source_file_sha256(),
+            "6c86ff72b634797724a747742a85cc2c5a2766cd9e188f226739d7dfb5563cd8"
+        );
+    }
 }
