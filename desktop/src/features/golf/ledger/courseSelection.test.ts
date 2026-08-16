@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   courseIdsParam,
   isCourseShown,
+  pendingColumnCount,
   readStoredCourseIds,
   resolveSelection,
   sameSelection,
@@ -65,6 +66,30 @@ describe('courseIdsParam', () => {
 
   it('sends the picked courses as one comma-separated value', () => {
     expect(courseIdsParam(['course-east', 'course-west'])).toBe('course-east,course-west')
+  })
+})
+
+describe('pendingColumnCount', () => {
+  it('stands in for the picked courses', () => {
+    expect(pendingColumnCount(['course-east'], courses)).toBe(1)
+  })
+
+  it('stands in for the whole club when nothing is picked', () => {
+    expect(pendingColumnCount([], courses)).toBe(2)
+  })
+
+  it('guesses two before either list has arrived', () => {
+    // The first paint happens before the course list lands; a board of zero
+    // columns would read as "this club has no courses".
+    expect(pendingColumnCount([], [])).toBe(2)
+  })
+
+  it('stops at six so a large club does not draw a screenful of placeholders', () => {
+    const many = Array.from({ length: 12 }, (_, index) => ({
+      id: `course-${index}`,
+      name: `コース${index}`,
+    }))
+    expect(pendingColumnCount([], many)).toBe(6)
   })
 })
 

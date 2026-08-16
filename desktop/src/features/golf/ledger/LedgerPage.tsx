@@ -14,7 +14,6 @@ import { useTenantTimezone } from '../../../context/TenantTimezoneProvider'
 import { courseboardApiJson, nowIsoMinute, today } from '../../../api'
 import {
   EmptyState,
-  LoadingState,
   Notice,
   Panel,
   ResourceError,
@@ -27,10 +26,12 @@ import { parseLocalDateParts } from '../timeline/timelineLayout'
 import type { TeeReservation } from '../timeline/models'
 import { playerTagOptionsFromConfig } from '../playerTagOptions'
 import { LedgerBoard, type SlotSelection } from './LedgerBoard'
+import { LedgerBoardSkeleton, SkeletonBar } from './LedgerSkeleton'
 import { arrangeCourses, moveCourse } from './courseOrder'
 import {
   courseIdsParam,
   isCourseShown,
+  pendingColumnCount,
   readStoredCourseIds,
   resolveSelection,
   toggleCourse,
@@ -247,10 +248,13 @@ export function LedgerPage() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [boardOnly])
 
-  if (ledger.error && !ledger.data) {
-    return <ResourceError error={ledger.error} onRetry={refreshAll} />
-  }
-  if (ledger.loading && !ledger.data) return <LoadingState label={t('ledger:loading')} />
+  // The board is the slowest thing here and the toolbar does not depend on it,
+  // so the page is drawn as soon as it can be and the board area alone says it
+  // is still working. Blanking everything cost the desk the date controls and
+  // the course filter for as long as the day took to arrive.
+  const boardPending = ledger.loading && !ledger.data
+  const boardFailed = Boolean(ledger.error) && !ledger.data
+  const coursesLoading = coursesResource.loading && !coursesResource.data
 
   const rawColumns = ledger.data?.columns ?? []
   // Parties saved this session are grafted onto the fetched board so a save
@@ -272,6 +276,7 @@ export function LedgerPage() {
   // A course that was retired since the pick was stored would otherwise keep
   // narrowing the board to a column that no longer exists.
   const livePicks = resolveSelection(selectedCourseIds, courseOptions)
+  const skeletonColumnCount = pendingColumnCount(selectedCourseIds, courseOptions)
   // Moving a column is computed against the whole arrangement, not just the
   // columns on screen, so filtering the board never rearranges it for others.
   const storedOrder = orderResource.data?.golfCourseIds ?? []
@@ -494,24 +499,48 @@ export function LedgerPage() {
           </Button>
         </div>
 
-        <div className="ledger-summary" aria-label={t('ledger:summary.label')}>
+        {/* The totals are read off the board, so they wait for it — but the bar
+            keeps its height rather than pushing the toolbar down when the day
+            lands. */}
+        <div
+          className="ledger-summary"
+          aria-label={t('ledger:summary.label')}
+          aria-busy={boardPending || undefined}
+        >
           <div className="ledger-summary-item">
             <span>{t('ledger:summary.groups')}</span>
-            <strong>{t('ledger:summary.groupsValue', { n: String(totals.groups) })}</strong>
-            <small>
-              {t('ledger:summary.breakdown', {
-                self: String(totals.selfGroups),
-                caddie: String(totals.caddieGroups),
-              })}
-            </small>
+            {boardPending ? (
+              <>
+                <SkeletonBar width="5ch" height={14} />
+                <SkeletonBar width="14ch" />
+              </>
+            ) : (
+              <>
+                <strong>{t('ledger:summary.groupsValue', { n: String(totals.groups) })}</strong>
+                <small>
+                  {t('ledger:summary.breakdown', {
+                    self: String(totals.selfGroups),
+                    caddie: String(totals.caddieGroups),
+                  })}
+                </small>
+              </>
+            )}
           </div>
           <div className="ledger-summary-item">
             <span>{t('ledger:summary.players')}</span>
-            <strong>{t('ledger:summary.playersValue', { n: String(totals.players) })}</strong>
+            {boardPending ? (
+              <SkeletonBar width="5ch" height={14} />
+            ) : (
+              <strong>{t('ledger:summary.playersValue', { n: String(totals.players) })}</strong>
+            )}
           </div>
           <div className="ledger-summary-item">
             <span>{t('ledger:summary.open')}</span>
-            <strong>{t('ledger:summary.openValue', { n: String(totals.openSlots) })}</strong>
+            {boardPending ? (
+              <SkeletonBar width="5ch" height={14} />
+            ) : (
+              <strong>{t('ledger:summary.openValue', { n: String(totals.openSlots) })}</strong>
+            )}
           </div>
         </div>
 
@@ -551,6 +580,16 @@ export function LedgerPage() {
                 {course.name}
               </button>
             ))}
+            {/* The course list is its own request. Standing in for the chips
+                keeps the toolbar from growing a row under the date controls the
+                moment they arrive. */}
+            {coursesLoading
+              ? Array.from({ length: skeletonColumnCount }, (_, index) => (
+                  <span key={index} className="ledger-course-chip is-skeleton" aria-hidden="true">
+                    <SkeletonBar width="6ch" />
+                  </span>
+                ))
+              : null}
           </fieldset>
           <div className="ledger-legend" aria-label={t('ledger:legend.label')}>
             <span className="ledger-legend-item tone-open">{t('ledger:legend.open')}</span>
@@ -566,7 +605,16 @@ export function LedgerPage() {
       )}
 
       <div className="ledger-workspace">
-        {columns.length === 0 ? (
+        {boardPending ? (
+          // The course list is a far lighter call than the board and usually
+          // lands first, so the stand-in already has the right number of
+          // columns; two is what a club has when nothing is known yet.
+          <LedgerBoardSkeleton columns={skeletonColumnCount} />
+        ) : boardFailed ? (
+          // The failure is already stated at the top of the page. Repeating it
+          // here would say it twice; the empty state would say something false.
+          null
+        ) : columns.length === 0 ? (
           <Panel className="ledger-panel" title={t('ledger:title')} description={t('ledger:description')}>
             <EmptyState
               title={t('ledger:empty.title')}
