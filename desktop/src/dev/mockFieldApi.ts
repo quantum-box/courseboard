@@ -3290,6 +3290,14 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     const index = mockCaddies.findIndex(item => item.id === caddieId)
     if (index < 0) return error(404, `Mock caddie ${caddieId} was not found`)
     const current = mockCaddies[index]!
+    // Field resolves the profile's staff link on every write, so a profile
+    // whose staff member has been deleted can no longer be edited at all.
+    // Reproduced here because the screens that delete staff have to suspend
+    // the caddie first, and a mock that quietly allowed this let that ship.
+    const linkedStaffId = (current as { staffId?: string | null }).staffId
+    if (linkedStaffId && !mockStaff.some(member => member.id === linkedStaffId)) {
+      return error(404, 'NotFoundError: staff member not found')
+    }
     const updated = { ...current, ...body, id: current.id }
     mockCaddies[index] = updated as typeof current
     return hit(updated)
