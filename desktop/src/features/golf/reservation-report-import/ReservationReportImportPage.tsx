@@ -1,5 +1,5 @@
 import { Badge, Button } from '@tachyon-sdk/native-ui'
-import { ArrowLeft, ArrowRight, CheckCircle2, FileSpreadsheet, RefreshCw, Upload } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CheckCircle2, FileSpreadsheet, RefreshCw, Upload, X } from 'lucide-react'
 import {
   type ChangeEvent,
   type FormEvent,
@@ -172,6 +172,19 @@ export function ReservationReportImportPage() {
     const next = event.target.files?.[0] ?? null
     setFile(next)
     setFileError(fileValidationError(next))
+    setPreviewError(null)
+    setImportError(null)
+    setColumnMappingApproved(false)
+    setColumnMappingError(null)
+  }
+
+  /** Clearing is deliberate, so it goes back to the untouched state rather
+   * than to the "you must choose a file" error the same empty value means
+   * when the form is submitted. */
+  function handleFileClear() {
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    setFile(null)
+    setFileError(null)
     setPreviewError(null)
     setImportError(null)
     setColumnMappingApproved(false)
@@ -397,11 +410,21 @@ export function ReservationReportImportPage() {
                   aria-describedby={fileError ? 'reservation-report-file-error' : undefined}
                 />
                 <Button type="button" variant="secondary" onClick={() => fileInputRef.current?.click()}>
-                  <Upload /> {t('reservationReportImport:file.choose')}
+                  <Upload /> {t(file ? 'reservationReportImport:file.replace' : 'reservationReportImport:file.choose')}
                 </Button>
-                <span className="reservation-report-file-name">
-                  {file ? t('reservationReportImport:file.selected', { name: file.name }) : t('reservationReportImport:file.missing')}
-                </span>
+                {file ? (
+                  <span className="reservation-report-file-selected">
+                    <FileSpreadsheet aria-hidden="true" />
+                    <span className="reservation-report-file-selected-name">{file.name}</span>
+                    <Button type="button" variant="ghost" onClick={handleFileClear}>
+                      <X /> {t('reservationReportImport:file.clear')}
+                    </Button>
+                  </span>
+                ) : (
+                  <span className="reservation-report-file-name">
+                    {t('reservationReportImport:file.empty')}
+                  </span>
+                )}
               </div>
               {fileError ? (
                 <span id="reservation-report-file-error" className="reservation-report-field-error" role="alert">

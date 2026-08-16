@@ -6039,6 +6039,37 @@ button,
   overflow-wrap: anywhere;
 }
 
+/* The chosen file has to read as a different state from the empty one at a
+   glance, so it gets a filled row of its own rather than the same muted
+   sentence with different words in it. */
+.reservation-report-file-selected {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 8px;
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-foreground));
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.reservation-report-file-selected > svg {
+  flex: none;
+  color: hsl(var(--nui-primary));
+}
+
+.reservation-report-file-selected-name {
+  min-width: 0;
+  flex: 1;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .reservation-report-field-error {
   display: block;
   color: hsl(var(--nui-destructive));

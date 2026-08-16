@@ -19,7 +19,9 @@ export const reservationReportImport = {
   },
   file: {
     choose: '表ファイルを選ぶ',
-    selected: '選んだファイル: {{name}}',
+    replace: '別のファイルを選ぶ',
+    clear: '選択を取り消す',
+    empty: 'まだ選んでいません。',
     hint: '5MB以下の .csv、.xls、.xlsx、.pdf ファイルを選んでください。決まった日別予約表はそのまま読み込み、それ以外は表の列を確認して読み込みます。文字を読めないPDFはTachyon AI OCRへ送信され、結果を保存前に確認します。',
     missing: '表ファイルを選んでください。',
     tooLarge: 'ファイルが大きすぎます。5MB以下の表を選んでください。',

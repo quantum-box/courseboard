@@ -22,7 +22,9 @@ export const reservationReportImport: DeepPartial<typeof source> = {
   },
   file: {
     choose: 'Choose a table file',
-    selected: 'Selected file: {{name}}',
+    replace: 'Choose a different file',
+    clear: 'Clear the selection',
+    empty: 'No file chosen yet.',
     hint: 'Choose a .csv, .xls, .xlsx, or .pdf file up to 5 MB. The fixed daily report is read directly; other files show their mapped columns for review. PDFs whose text cannot be read are sent to Tachyon AI OCR, and you can review the result before saving.',
     missing: 'Choose a table file.',
     tooLarge: 'That file is too large. Choose a table file up to 5 MB.',

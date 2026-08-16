@@ -22,7 +22,9 @@ export const reservationReportImport: DeepPartial<typeof source> = {
   },
   file: {
     choose: '表ファイルを選ぶ',
-    selected: '選んだ表: {{name}}',
+    replace: 'ほかのファイルを選ぶ',
+    clear: '選んだ表をやめる',
+    empty: 'まだ選んでいません。',
     hint: '5MB以下のCSV、XLS、XLSX、PDFの表を選びます。決まった日別予約表は自動で読み込み、それ以外は列の対応を確かめます。文字を読めないPDFはTachyon AI OCRへ送り、保存前に結果を確かめます。',
     missing: '表ファイルを選んでください。',
     tooLarge: '表が大きすぎます。5MB以下の表を選んでください。',
