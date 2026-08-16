@@ -2,22 +2,27 @@ import { describe, expect, it } from 'vitest'
 import {
   attendanceByStaffId,
   caddieLinkPayload,
+  caddieStatusForStaff,
   caddiesByStaffId,
   employmentTypeKey,
   filterStaffRows,
   newStaffPayload,
+  staffEmploymentStatus,
   staffRows,
   unlinkedCaddies,
   type StaffAttendanceSnapshot,
   type StaffCaddieProfile,
+  type StaffEmploymentStatus,
   type StaffMember,
 } from './models'
 
-function staff(id: string, name: string, active: boolean): StaffMember {
+function staff(id: string, name: string, status: StaffEmploymentStatus): StaffMember {
   return {
     id,
     name,
-    active,
+    // Field derives the flag from the status; the two never disagree on read.
+    active: status === 'active',
+    employmentStatus: status,
     employmentType: 'part_time',
     hiredAt: null,
     contractEndDate: null,
@@ -28,9 +33,10 @@ function staff(id: string, name: string, active: boolean): StaffMember {
 }
 
 const STAFF: StaffMember[] = [
-  staff('staff_aya', '佐藤 彩', true),
-  staff('staff_kitchen', '厨房 太郎', true),
-  staff('staff_old', '退職 花子', false),
+  staff('staff_aya', '佐藤 彩', 'active'),
+  staff('staff_kitchen', '厨房 太郎', 'active'),
+  staff('staff_old', '退職 花子', 'retired'),
+  staff('staff_leave', '休職 次郎', 'on_leave'),
 ]
 
 const PROFILES: StaffCaddieProfile[] = [
@@ -93,10 +99,9 @@ describe('attendanceByStaffId', () => {
 describe('staffRows', () => {
   const rows = staffRows(STAFF, PROFILES, SNAPSHOTS)
 
-  it('sinks retired staff below the people still employed', () => {
-    expect(rows.at(-1)?.staff.id).toBe('staff_old')
-    expect(rows.slice(0, 2).map(row => row.staff.id).sort())
-      .toEqual(['staff_aya', 'staff_kitchen'])
+  it('orders the roster by how present somebody is', () => {
+    expect(rows.map(row => row.staff.id))
+      .toEqual(['staff_aya', 'staff_kitchen', 'staff_leave', 'staff_old'])
   })
 
   it('folds the caddie role and today clock state into the row', () => {
@@ -129,10 +134,43 @@ describe('filterStaffRows', () => {
   it('splits the roster by employment and by the caddie role', () => {
     expect(filterStaffRows(rows, { ...base, status: 'retired' }).map(row => row.staff.id))
       .toEqual(['staff_old'])
+    expect(filterStaffRows(rows, { ...base, status: 'on_leave' }).map(row => row.staff.id))
+      .toEqual(['staff_leave'])
+    expect(filterStaffRows(rows, { ...base, status: 'active' }).map(row => row.staff.id))
+      .toEqual(['staff_aya', 'staff_kitchen'])
     expect(filterStaffRows(rows, { ...base, role: 'caddie' }).map(row => row.staff.id))
       .toEqual(['staff_aya', 'staff_old'])
     expect(filterStaffRows(rows, { ...base, role: 'other' }).map(row => row.staff.id))
-      .toEqual(['staff_kitchen'])
+      .toEqual(['staff_kitchen', 'staff_leave'])
+  })
+})
+
+describe('staffEmploymentStatus', () => {
+  it('takes the status Field stores', () => {
+    expect(staffEmploymentStatus(staff('s', 'x', 'on_leave'))).toBe('on_leave')
+    expect(staffEmploymentStatus(staff('s', 'x', 'retired'))).toBe('retired')
+    expect(staffEmploymentStatus(staff('s', 'x', 'active'))).toBe('active')
+  })
+
+  it('falls back to the flag for a record stored before Field had the column', () => {
+    const legacy = { ...staff('s', 'x', 'active'), employmentStatus: '' }
+    expect(staffEmploymentStatus(legacy)).toBe('active')
+    expect(staffEmploymentStatus({ ...legacy, active: false })).toBe('retired')
+  })
+
+  it('does not read a status it cannot show', () => {
+    const unknown = { ...staff('s', 'x', 'on_leave'), employmentStatus: 'seconded' }
+    // `active` is false alongside a non-active status upstream, so an unknown
+    // code reads as away rather than at work.
+    expect(staffEmploymentStatus(unknown)).toBe('retired')
+  })
+})
+
+describe('caddieStatusForStaff', () => {
+  it('keeps a caddie off the board once their staff record says they are away', () => {
+    expect(caddieStatusForStaff('active')).toBe('active')
+    expect(caddieStatusForStaff('on_leave')).toBe('inactive')
+    expect(caddieStatusForStaff('retired')).toBe('suspended')
   })
 })
 
@@ -153,7 +191,7 @@ describe('employmentTypeKey', () => {
 describe('payloads', () => {
   it('registers a staff member as active under a trimmed name', () => {
     expect(newStaffPayload('  山田 花子 ', 'full_time'))
-      .toEqual({ name: '山田 花子', employmentType: 'full_time', active: true })
+      .toEqual({ name: '山田 花子', employmentType: 'full_time', employmentStatus: 'active' })
   })
 
   it('sends only the link when attaching an existing caddie profile', () => {

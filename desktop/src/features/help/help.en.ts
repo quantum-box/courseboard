@@ -477,8 +477,8 @@ export const helpEn: HelpCatalog = {
       summary: 'Everyone the club employs. Caddies appear here as one of the roles staff hold.',
       usage: [
         {
-          heading: 'Register or rename staff',
-          body: 'Use "Register staff" to enter a name and employment type. Later, "Edit name" on the staff detail updates every linked caddie name too.',
+          heading: 'Register, edit, or remove staff',
+          body: 'Use "Register staff" to enter a name and employment type. Later, "Edit basics" on the staff detail changes the name, the employment type, and the employment status (employed, on leave, retired). Staff on leave or retired drop out of the employed list, and a linked caddie profile is set to match. "Remove" on the detail takes somebody off the roster for good — for someone who simply left, retire them instead.',
         },
         {
           heading: 'Give the caddie role',
@@ -486,13 +486,13 @@ export const helpEn: HelpCatalog = {
         },
         {
           heading: 'Search',
-          body: 'Search by name, staff ID, or caddie name, and filter by employment or role.',
+          body: 'Search by name, staff ID, or caddie name, and filter by employment status or role.',
         },
       ],
       data: [
         {
           heading: 'Staff records',
-          body: 'Held by Field HRM (/v1/erp/staff). Names can be changed here; retiring someone is not available yet.',
+          body: 'Held by Field HRM (/v1/erp/staff). Name, employment type, and employment status are all editable here, and staff can be removed. A removal hides the record upstream, so attendance and payroll are kept.',
         },
         {
           heading: 'Today’s attendance',

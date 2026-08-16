@@ -192,11 +192,14 @@ fn is_allowed_route(method: &Method, path: &str) -> bool {
     if path == "/v1/erp/staff" {
         return method == Method::GET || method == Method::POST;
     }
-    // Staff name corrections use Field HRM's member update. Keep this narrower
-    // than the general `/staff/*` prefix: PATCH may reach one member only, not
-    // clock, leave, payroll, or any future nested HRM operation.
+    // Roster edits and removals use Field HRM's member update and delete. Keep
+    // this narrower than the general `/staff/*` prefix: these may reach one
+    // member only, not clock, leave, payroll, or any future nested HRM
+    // operation. DELETE hides the member upstream and keeps their attendance
+    // and payroll, but Field offers no way back — the roster screen confirms
+    // before it is called.
     if is_staff_member_path(path) {
-        return method == Method::PATCH;
+        return method == Method::PATCH || method == Method::DELETE;
     }
     // Tenant member management via the Field IAM surface (gated upstream by
     // the ERP action `field:ManageUsers`). Raw /v1/auth/* stays blocked — the
@@ -385,8 +388,16 @@ mod tests {
             "/v1/erp/extensions/golf-course/courses/course_1"
         ));
         assert!(is_allowed_route(&Method::PATCH, "/v1/erp/staff/staff_1"));
+        assert!(is_allowed_route(&Method::DELETE, "/v1/erp/staff/staff_1"));
         assert!(!is_allowed_route(
             &Method::PATCH,
+            "/v1/erp/staff/staff_1/clock-in"
+        ));
+        // Deleting one member is allowed; wiping the roster is not a route the
+        // client may reach, whatever Field would do with it.
+        assert!(!is_allowed_route(&Method::DELETE, "/v1/erp/staff"));
+        assert!(!is_allowed_route(
+            &Method::DELETE,
             "/v1/erp/staff/staff_1/clock-in"
         ));
         assert!(!is_allowed_route(

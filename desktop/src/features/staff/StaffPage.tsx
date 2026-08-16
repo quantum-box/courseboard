@@ -10,7 +10,7 @@ import {
   Input,
   Separator,
 } from '@tachyon-sdk/native-ui'
-import { ArrowLeft, Link2, Pencil, Search, UserPlus, Users } from 'lucide-react'
+import { ArrowLeft, Link2, Pencil, Search, Trash2, UserPlus, Users } from 'lucide-react'
 import { useCallback, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
@@ -37,7 +37,9 @@ import { showToast } from '../../lib/toast'
 import { caddieCreatePayload, skillLabelKey } from '../golf/caddieRegistration'
 import {
   EMPLOYMENT_TYPES,
+  STAFF_EMPLOYMENT_STATUSES,
   caddieLinkPayload,
+  caddieStatusForStaff,
   employmentTypeKey,
   filterStaffRows,
   newStaffPayload,
@@ -46,15 +48,18 @@ import {
   type EmploymentType,
   type StaffAttendanceSnapshot,
   type StaffCaddieProfile,
+  type StaffEmploymentStatus,
   type StaffFilter,
   type StaffMember,
   type StaffRow,
 } from './models'
 import {
-  StaffMemberNotFoundError,
-  updateStaffName,
-  type StaffNameUpdateResult,
-} from './staffNameUpdate'
+  deleteStaffMember,
+  rosterWith,
+  rosterWithout,
+  updateStaffBasics,
+  type StaffListResponse,
+} from './staffUpdate'
 
 const COURSE_API = '/v1/course'
 
@@ -78,13 +83,40 @@ function skillLabel(skill: string, t: TFunction<['staff', 'caddies', 'common']>)
   return key ? t(`caddies:skill.${key}` as 'caddies:skill.regular') : skill
 }
 
+function statusLabel(
+  status: StaffEmploymentStatus,
+  t: TFunction<['staff', 'caddies', 'common']>,
+) {
+  return t(`staff:status.${status}` as 'staff:status.retired')
+}
+
+/**
+ * Only somebody who is away carries a badge. Marking every working staff
+ * member "在籍" says nothing the roster does not already imply, and buries the
+ * handful of rows the front desk is looking for.
+ */
+function StatusBadge({
+  status,
+  t,
+}: {
+  status: StaffEmploymentStatus
+  t: TFunction<['staff', 'caddies', 'common']>
+}) {
+  if (status === 'active') return null
+  return (
+    <Badge variant={status === 'on_leave' ? 'warning' : 'neutral'}>
+      {statusLabel(status, t)}
+    </Badge>
+  )
+}
+
 export function StaffPage({ staffId }: { staffId?: string }) {
   const { t, i18n } = useTranslation(['staff', 'caddies', 'common'])
   const timezone = useTenantTimezone()
   const businessDate = today(timezone)
 
   const staffLoader = useCallback(
-    () => fieldApiJson<ListResponse<StaffMember>>('/v1/erp/staff'),
+    () => fieldApiJson<StaffListResponse>('/v1/erp/staff'),
     [],
   )
   const caddieLoader = useCallback(
@@ -114,7 +146,15 @@ export function StaffPage({ staffId }: { staffId?: string }) {
   const [filter, setFilter] = useState<StaffFilter>({ query: '', status: 'active', role: 'all' })
   const [creating, setCreating] = useState(false)
   const [linking, setLinking] = useState<StaffRow | null>(null)
-  const [editingName, setEditingName] = useState<StaffMember | null>(null)
+  const [editing, setEditing] = useState<StaffRow | null>(null)
+  const [deleting, setDeleting] = useState<StaffRow | null>(null)
+
+  /** Replace one member in the roster the screen is already showing. */
+  const applyMember = useCallback((member: StaffMember) => {
+    const roster = rosterWith(staffResource.data ?? { items: [member] }, member)
+    writeResourceCache('staff:list', roster)
+    staffResource.setData(roster)
+  }, [staffResource.data, staffResource.setData])
 
   const profiles = caddieResource.data?.items ?? []
   const rows = useMemo(
@@ -134,10 +174,10 @@ export function StaffPage({ staffId }: { staffId?: string }) {
       cell: (row: StaffRow) => (
         <div>
           <strong>{row.staff.name}</strong>
-          {row.staff.active ? null : (
+          {row.status === 'active' ? null : (
             <>
               {' '}
-              <Badge variant="neutral">{t('staff:retired')}</Badge>
+              <StatusBadge status={row.status} t={t} />
             </>
           )}
           <br />
@@ -216,9 +256,7 @@ export function StaffPage({ staffId }: { staffId?: string }) {
           <>
             <header className="flex flex-wrap items-center gap-2">
               <h1 className="m-0 text-xl font-semibold leading-7">{detail.staff.name}</h1>
-              {detail.staff.active ? null : (
-                <Badge variant="neutral">{t('staff:retired')}</Badge>
-              )}
+              <StatusBadge status={detail.status} t={t} />
               <code className="text-sm text-muted-foreground">{detail.staff.id}</code>
             </header>
 
@@ -229,9 +267,9 @@ export function StaffPage({ staffId }: { staffId?: string }) {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => setEditingName(detail.staff)}
+                  onClick={() => setEditing(detail)}
                 >
-                  <Pencil /> {t('staff:editName.action')}
+                  <Pencil /> {t('staff:edit.action')}
                 </Button>
               )}
             >
@@ -245,6 +283,8 @@ export function StaffPage({ staffId }: { staffId?: string }) {
                       : '—'
                   })()}
                 </dd>
+                <dt className="text-muted-foreground">{t('staff:table.status')}</dt>
+                <dd className="m-0">{statusLabel(detail.status, t)}</dd>
               </dl>
             </Panel>
 
@@ -259,7 +299,7 @@ export function StaffPage({ staffId }: { staffId?: string }) {
                 >
                   <Users /> {t('staff:detail.openCaddie')}
                 </Button>
-              ) : detail.staff.active ? (
+              ) : detail.status === 'active' ? (
                 <Button type="button" variant="ghost" size="sm" onClick={() => setLinking(detail)}>
                   <Link2 /> {t('staff:action.makeCaddie')}
                 </Button>
@@ -283,6 +323,24 @@ export function StaffPage({ staffId }: { staffId?: string }) {
                 <p className="m-0 px-0.5 text-sm text-muted-foreground">{t('staff:detail.noCaddie')}</p>
               )}
             </Panel>
+
+            <Panel
+              title={t('staff:delete.title')}
+              actions={(
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDeleting(detail)}
+                >
+                  <Trash2 /> {t('staff:delete.action')}
+                </Button>
+              )}
+            >
+              <p className="m-0 px-0.5 text-sm text-muted-foreground">
+                {t('staff:delete.description')}
+              </p>
+            </Panel>
           </>
         ) : staffResource.data ? (
           <EmptyState
@@ -292,22 +350,53 @@ export function StaffPage({ staffId }: { staffId?: string }) {
         ) : null}
 
         {makeCaddieDialog}
-        {editingName ? (
-          <StaffNameEditDialog
-            staff={editingName}
+        {editing ? (
+          <StaffBasicsEditDialog
+            row={editing}
             onOpenChange={open => {
-              if (!open) setEditingName(null)
+              if (!open) setEditing(null)
             }}
-            onUpdated={result => {
-              // `result.roster` is the GET performed after Field accepted the
-              // PATCH, so the heading changes to the HRM value we confirmed.
-              writeResourceCache('staff:list', result.roster)
-              staffResource.setData(result.roster)
-              setEditingName(null)
-              showToast({
-                tone: 'success',
-                message: t('staff:editName.success', { name: result.member.name }),
-              })
+            onUpdated={(member, caddieSynced) => {
+              // Field returns the stored row, so the heading shows what HRM
+              // now holds rather than what this screen submitted.
+              applyMember(member)
+              caddieResource.refresh()
+              setEditing(null)
+              showToast(caddieSynced
+                ? { tone: 'success', message: t('staff:edit.success', { name: member.name }) }
+                : {
+                  tone: 'warning',
+                  message: t('staff:edit.caddieUnsynced', { name: member.name }),
+                })
+            }}
+          />
+        ) : null}
+        {deleting ? (
+          <StaffDeleteDialog
+            row={deleting}
+            onOpenChange={open => {
+              if (!open) setDeleting(null)
+            }}
+            onDeleted={caddieSynced => {
+              const roster = rosterWithout(
+                staffResource.data ?? { items: [] },
+                deleting.staff.id,
+              )
+              writeResourceCache('staff:list', roster)
+              staffResource.setData(roster)
+              caddieResource.refresh()
+              setDeleting(null)
+              showToast(caddieSynced
+                ? {
+                  tone: 'success',
+                  message: t('staff:delete.success', { name: deleting.staff.name }),
+                }
+                : {
+                  tone: 'warning',
+                  message: t('staff:delete.caddieUnsynced', { name: deleting.staff.name }),
+                })
+              // The detail route no longer resolves to anybody.
+              navigate('staff')
             }}
           />
         ) : null}
@@ -343,8 +432,9 @@ export function StaffPage({ staffId }: { staffId?: string }) {
             aria-label={t('staff:filter.employment')}
             className="sm:w-40"
           >
-            <option value="active">{t('staff:filter.employmentActive')}</option>
-            <option value="retired">{t('staff:filter.employmentRetired')}</option>
+            {STAFF_EMPLOYMENT_STATUSES.map(status => (
+              <option key={status} value={status}>{statusLabel(status, t)}</option>
+            ))}
             <option value="all">{t('staff:filter.all')}</option>
           </NativeSelect>
           <NativeSelect
@@ -405,42 +495,212 @@ export function StaffPage({ staffId }: { staffId?: string }) {
   )
 }
 
-function StaffNameEditDialog({
-  staff,
+/**
+ * Correcting the name, the contract, and where somebody stands with the club.
+ *
+ * Leaving and going on leave are edits to the same record rather than separate
+ * actions: a club that mixes the two up wants to switch between them, not undo
+ * a retirement.
+ */
+function StaffBasicsEditDialog({
+  row,
   onOpenChange,
   onUpdated,
 }: {
-  staff: StaffMember
+  row: StaffRow
   onOpenChange: (open: boolean) => void
-  onUpdated: (result: StaffNameUpdateResult) => void
+  onUpdated: (member: StaffMember, caddieSynced: boolean) => void
 }) {
-  const { t } = useTranslation(['staff', 'common'])
-  const [name, setName] = useState(staff.name)
+  const { t } = useTranslation(['staff', 'caddies', 'common'])
+  const [name, setName] = useState(row.staff.name)
+  const [employmentType, setEmploymentType] = useState<EmploymentType>(
+    // Field HRM defaults an unnamed contract to part-time, so the select shows
+    // what a save would actually store rather than an empty box.
+    employmentTypeKey(row.staff.employmentType) ?? 'part_time',
+  )
+  const [status, setStatus] = useState<StaffEmploymentStatus>(row.status)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const caddie = row.caddie
+  const caddieStatus = caddieStatusForStaff(status)
+  const caddieChanges = caddie !== null
+    && (caddie.employmentStatus ?? 'active').trim().toLowerCase() !== caddieStatus
 
   async function submit(event: FormEvent) {
     event.preventDefault()
     const trimmed = name.trim()
     if (!trimmed) {
-      setError(t('staff:editName.error.name'))
+      setError(t('staff:edit.error.name'))
       return
     }
 
     setBusy(true)
     setError(null)
     try {
-      onUpdated(await updateStaffName(fieldApiJson, staff.id, trimmed))
+      const member = await updateStaffBasics(fieldApiJson, row.staff, {
+        name: trimmed,
+        employmentType,
+        status,
+      })
+      onUpdated(member, await syncCaddie())
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 403) {
-        setError(t('staff:editName.error.forbidden'))
-      } else if (reason instanceof StaffMemberNotFoundError) {
-        setError(t('staff:editName.error.notFound'))
+        setError(t('staff:edit.error.forbidden'))
+      } else if (reason instanceof ApiError && reason.status === 404) {
+        // Field 404s an id it no longer has: somebody deleted this person
+        // while the dialog was open.
+        setError(t('staff:edit.error.notFound'))
       } else {
-        setError(errorMessage(reason, t('staff:editName.error.failed')))
+        setError(errorMessage(reason, t('staff:edit.error.failed')))
       }
     } finally {
       setBusy(false)
+    }
+  }
+
+  /**
+   * Whether the caddie roster now agrees. The staff record is already saved by
+   * this point, so a failure here is reported as a warning and left for the
+   * caddie screen — undoing the roster edit would lose the change the operator
+   * actually asked for.
+   */
+  async function syncCaddie() {
+    if (!caddie || !caddieChanges) return true
+    try {
+      await courseboardApiJson(
+        `${COURSE_API}/caddie-profiles/${encodeURIComponent(caddie.id)}`,
+        request('PATCH', { employmentStatus: caddieStatus }),
+      )
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>{t('staff:edit.title', { name: row.staff.name })}</DialogTitle>
+          <DialogDescription>{t('staff:edit.description')}</DialogDescription>
+        </DialogHeader>
+        <form className="space-y-4" onSubmit={event => void submit(event)}>
+          <Field label={t('staff:edit.name')} required>
+            <Input
+              value={name}
+              onChange={event => setName(event.target.value)}
+              autoFocus
+            />
+          </Field>
+          <FormGrid columns={2}>
+            <Field label={t('staff:edit.employmentType')} required>
+              <NativeSelect
+                value={employmentType}
+                onChange={event => setEmploymentType(event.target.value as EmploymentType)}
+              >
+                {EMPLOYMENT_TYPES.map(type => (
+                  <option key={type} value={type}>
+                    {t(`staff:employmentType.${type}` as 'staff:employmentType.full_time')}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+            <Field
+              label={t('staff:edit.status')}
+              required
+              hint={status === 'active' ? undefined : t('staff:edit.statusHint')}
+            >
+              <NativeSelect
+                value={status}
+                onChange={event => setStatus(event.target.value as StaffEmploymentStatus)}
+              >
+                {STAFF_EMPLOYMENT_STATUSES.map(option => (
+                  <option key={option} value={option}>{statusLabel(option, t)}</option>
+                ))}
+              </NativeSelect>
+            </Field>
+          </FormGrid>
+
+          {caddieChanges ? (
+            <Notice tone="info">
+              {t('staff:edit.caddieNotice', {
+                status: t(`caddies:employment.${caddieStatus}` as 'caddies:employment.active'),
+              })}
+            </Notice>
+          ) : null}
+          {error ? <Notice tone="danger">{error}</Notice> : null}
+
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
+              {t('common:action.cancel')}
+            </Button>
+            <Button type="submit" variant="primary" disabled={busy}>
+              <Pencil /> {busy ? t('staff:edit.submitting') : t('staff:edit.submit')}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/**
+ * Removing somebody from the roster.
+ *
+ * Field hides the record and keeps their attendance and payroll, but there is
+ * no API that brings them back — so this asks plainly rather than reusing the
+ * one-click confirm the member list uses for invitations.
+ */
+function StaffDeleteDialog({
+  row,
+  onOpenChange,
+  onDeleted,
+}: {
+  row: StaffRow
+  onOpenChange: (open: boolean) => void
+  onDeleted: (caddieSynced: boolean) => void
+}) {
+  const { t } = useTranslation(['staff', 'common'])
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function remove() {
+    setBusy(true)
+    setError(null)
+    try {
+      // Delete first. Standing the caddie down beforehand would leave them
+      // suspended for nothing if this call then failed and the operator gave
+      // up — an edit they never asked for, off the back of an error.
+      await deleteStaffMember(fieldApiJson, row.staff.id)
+      onDeleted(await standCaddieDown())
+    } catch (reason) {
+      if (reason instanceof ApiError && reason.status === 403) {
+        setError(t('staff:delete.error.forbidden'))
+      } else if (reason instanceof ApiError && reason.status === 404) {
+        setError(t('staff:delete.error.notFound'))
+      } else {
+        setError(errorMessage(reason, t('staff:delete.error.failed')))
+      }
+      setBusy(false)
+    }
+  }
+
+  /**
+   * Whether the caddie roster agrees. The staff record is gone by now and the
+   * roster can no longer reach this profile, so a failure is reported and left
+   * for the caddie screen rather than retried here.
+   */
+  async function standCaddieDown() {
+    if (!row.caddie) return true
+    try {
+      await courseboardApiJson(
+        `${COURSE_API}/caddie-profiles/${encodeURIComponent(row.caddie.id)}`,
+        request('PATCH', { employmentStatus: 'suspended' }),
+      )
+      return true
+    } catch {
+      return false
     }
   }
 
@@ -448,27 +708,24 @@ function StaffNameEditDialog({
     <Dialog open onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{t('staff:editName.title', { name: staff.name })}</DialogTitle>
-          <DialogDescription>{t('staff:editName.description')}</DialogDescription>
+          <DialogTitle>{t('staff:delete.confirm.title', { name: row.staff.name })}</DialogTitle>
+          <DialogDescription>{t('staff:delete.confirm.description')}</DialogDescription>
         </DialogHeader>
-        <form className="space-y-4" onSubmit={event => void submit(event)}>
-          <Field label={t('staff:editName.name')} required>
-            <Input
-              value={name}
-              onChange={event => setName(event.target.value)}
-              autoFocus
-            />
-          </Field>
+        <div className="space-y-4">
+          <Notice tone="warning">{t('staff:delete.confirm.warning')}</Notice>
+          {row.caddie ? (
+            <Notice tone="info">{t('staff:delete.confirm.caddieNotice')}</Notice>
+          ) : null}
           {error ? <Notice tone="danger">{error}</Notice> : null}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)} disabled={busy}>
-              {t('common:action.cancel')}
+              {t('staff:delete.confirm.keep')}
             </Button>
-            <Button type="submit" variant="primary" disabled={busy}>
-              <Pencil /> {busy ? t('staff:editName.submitting') : t('staff:editName.submit')}
+            <Button type="button" variant="destructive" onClick={() => void remove()} disabled={busy}>
+              <Trash2 /> {busy ? t('staff:delete.confirm.submitting') : t('staff:delete.confirm.submit')}
             </Button>
           </DialogFooter>
-        </form>
+        </div>
       </DialogContent>
     </Dialog>
   )

@@ -458,8 +458,38 @@ const mockCaddies = [
   ...generatedRoster.caddies,
 ]
 
+type MockStaffMember = {
+  id: string
+  name: string
+  active: boolean
+  employmentStatus: string
+  employmentType: string
+  hiredAt?: string | null
+  contractEndDate?: string | null
+  phone?: string | null
+  email?: string | null
+  attributesJson?: unknown
+}
+
+/**
+ * The status Field would store, given what a request named.
+ *
+ * `employmentStatus` outranks `active` upstream, so a request naming both is
+ * resolved the same way here — otherwise a client that still sends the flag
+ * would look correct against the mock and retire people against Field.
+ */
+function mockEmploymentStatus(status: unknown, active: unknown) {
+  if (status != null) {
+    const folded = String(status).trim().toLowerCase()
+    if (folded === 'on_leave' || folded === 'leave' || folded === 'suspended') return 'on_leave'
+    if (folded === 'retired' || folded === 'resigned' || folded === 'inactive') return 'retired'
+    return 'active'
+  }
+  return active === false ? 'retired' : 'active'
+}
+
 /** The whole payroll, not just the caddies: the roster screen shows both. */
-const mockStaff = [
+const mockStaff: MockStaffMember[] = [
   {
     id: 'staff_aya',
     name: '佐藤 彩',
@@ -476,16 +506,32 @@ const mockStaff = [
   { id: 'staff_kitchen', name: '小林 大輔', active: true, employmentType: 'full_time' },
   { id: 'staff_front', name: '松本 里奈', active: true, employmentType: 'full_time' },
   { id: 'staff_green', name: '吉田 誠', active: true, employmentType: 'full_time' },
+  // One of each standing, so the roster's filter has something to separate.
+  {
+    id: 'staff_leave',
+    name: '小川 早苗',
+    employmentStatus: 'on_leave',
+    employmentType: 'full_time',
+  },
   { id: 'staff_retired', name: '高橋 一', active: false, employmentType: 'part_time' },
   ...generatedRoster.staff,
-].map(member => ({
-  hiredAt: null as string | null,
-  contractEndDate: null as string | null,
-  phone: null as string | null,
-  email: null as string | null,
-  attributesJson: null as unknown | null,
-  ...member,
-}))
+].map(member => {
+  const record = member as Partial<MockStaffMember> & { id: string; name: string }
+  // Field derives `active` from the status, so the fixtures cannot disagree
+  // about somebody the way two hand-written fields would.
+  const employmentStatus = mockEmploymentStatus(record.employmentStatus, record.active)
+  return {
+    hiredAt: null,
+    contractEndDate: null,
+    phone: null,
+    email: null,
+    attributesJson: null,
+    ...record,
+    employmentType: record.employmentType ?? 'part_time',
+    employmentStatus,
+    active: employmentStatus === 'active',
+  } satisfies MockStaffMember
+})
 
 /** Tenant members mirroring the Field IAM surface `GET /v1/field/iam/users`. */
 const mockIamCustomPolicies = [
@@ -2895,10 +2941,12 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   }
 
   if (pathname === '/v1/erp/staff' && method === 'POST') {
+    const status = mockEmploymentStatus(body?.employmentStatus, body?.active)
     const registered = {
       id: `staff_${Date.now()}`,
       name: String(body?.name ?? 'New staff'),
-      active: body?.active !== false,
+      employmentStatus: status,
+      active: status === 'active',
       employmentType: String(body?.employmentType ?? 'part_time'),
       hiredAt: body?.hiredAt == null ? null : String(body.hiredAt),
       contractEndDate: body?.contractEndDate == null ? null : String(body.contractEndDate),
@@ -2916,21 +2964,38 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     const index = mockStaff.findIndex(item => item.id === staffId)
     if (index < 0) return error(404, `Mock staff ${staffId} was not found`)
     const current = mockStaff[index]!
-    // Match Field's current full-row UPSERT contract so a name-only request
-    // visibly destroys fixture data instead of making an unsafe UI look valid.
-    const updated = {
-      id: current.id,
-      name: String(body?.name ?? ''),
-      employmentType: String(body?.employmentType ?? 'part_time'),
-      active: body?.active !== false,
-      hiredAt: body?.hiredAt == null ? null : String(body.hiredAt),
-      contractEndDate: body?.contractEndDate == null ? null : String(body.contractEndDate),
-      phone: body?.phone == null ? null : String(body.phone),
-      email: body?.email == null ? null : String(body.email),
-      attributesJson: body?.attributesJson ?? null,
+    // Field merges a patch: a key left out keeps its stored value, and an
+    // explicit null clears the ones that are nullable. Mirroring that here is
+    // what keeps a partial request from looking destructive when it is not.
+    const updated: MockStaffMember = { ...current }
+    if (body?.name !== undefined) updated.name = String(body.name)
+    if (body?.employmentType !== undefined) {
+      updated.employmentType = String(body.employmentType)
+    }
+    if (body?.employmentStatus !== undefined || body?.active !== undefined) {
+      updated.employmentStatus = mockEmploymentStatus(body?.employmentStatus, body?.active)
+      updated.active = updated.employmentStatus === 'active'
+    }
+    for (const key of ['hiredAt', 'contractEndDate', 'phone', 'email'] as const) {
+      if (body?.[key] !== undefined) {
+        updated[key] = body[key] == null ? null : String(body[key])
+      }
+    }
+    if (body?.attributesJson !== undefined) {
+      updated.attributesJson = body.attributesJson ?? null
     }
     mockStaff[index] = updated
     return hit({ ...updated })
+  }
+
+  if (staffWriteMatch && method === 'DELETE') {
+    const staffId = decodeURIComponent(staffWriteMatch[1] ?? '')
+    const index = mockStaff.findIndex(item => item.id === staffId)
+    // Field hides the record rather than dropping it, but from every read this
+    // app makes the two are the same thing — and a second delete is a 404.
+    if (index < 0) return error(404, `Mock staff ${staffId} was not found`)
+    mockStaff.splice(index, 1)
+    return hit(null)
   }
 
   if (pathname === '/v1/field/iam/users/invite' && method === 'POST') {
@@ -3178,10 +3243,11 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     if (!staffId && !staffReferenceId) {
       // Being a caddie is one staff role, so course-api registers the staff
       // member a body without a link names, then links it.
-      const registered = {
+      const registered: MockStaffMember = {
         id: `staff_${Date.now()}`,
         name: displayName,
         active: true,
+        employmentStatus: 'active',
         employmentType: 'part_time',
         hiredAt: null,
         contractEndDate: null,
