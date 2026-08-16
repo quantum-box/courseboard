@@ -377,7 +377,7 @@ export function StaffPage({ staffId }: { staffId?: string }) {
             onOpenChange={open => {
               if (!open) setDeleting(null)
             }}
-            onDeleted={caddieSynced => {
+            onDeleted={() => {
               const roster = rosterWithout(
                 staffResource.data ?? { items: [] },
                 deleting.staff.id,
@@ -386,15 +386,10 @@ export function StaffPage({ staffId }: { staffId?: string }) {
               staffResource.setData(roster)
               caddieResource.refresh()
               setDeleting(null)
-              showToast(caddieSynced
-                ? {
-                  tone: 'success',
-                  message: t('staff:delete.success', { name: deleting.staff.name }),
-                }
-                : {
-                  tone: 'warning',
-                  message: t('staff:delete.caddieUnsynced', { name: deleting.staff.name }),
-                })
+              showToast({
+                tone: 'success',
+                message: t('staff:delete.success', { name: deleting.staff.name }),
+              })
               // The detail route no longer resolves to anybody.
               navigate('staff')
             }}
@@ -645,6 +640,14 @@ function StaffBasicsEditDialog({
   )
 }
 
+/** The caddie roster refused the edit that has to land before a delete. */
+class CaddieStandDownError extends Error {
+  constructor(readonly reason: unknown) {
+    super('the caddie profile could not be suspended')
+    this.name = 'CaddieStandDownError'
+  }
+}
+
 /**
  * Removing somebody from the roster.
  *
@@ -659,7 +662,7 @@ function StaffDeleteDialog({
 }: {
   row: StaffRow
   onOpenChange: (open: boolean) => void
-  onDeleted: (caddieSynced: boolean) => void
+  onDeleted: () => void
 }) {
   const { t } = useTranslation(['staff', 'common'])
   const [busy, setBusy] = useState(false)
@@ -669,13 +672,21 @@ function StaffDeleteDialog({
     setBusy(true)
     setError(null)
     try {
-      // Delete first. Standing the caddie down beforehand would leave them
-      // suspended for nothing if this call then failed and the operator gave
-      // up — an edit they never asked for, off the back of an error.
+      // Stand the caddie down first, and abandon the delete if that fails.
+      //
+      // Deleting the staff member is the point of no return for their caddie
+      // profile too: Field resolves the profile's staff link through the staff
+      // record, and a deleted one is not found, so every later write to that
+      // profile fails — from here and from the caddie screen alike. A caddie
+      // stranded that way stays "出勤できる" on the assignment board with no
+      // way back.
+      await standCaddieDown()
       await deleteStaffMember(fieldApiJson, row.staff.id)
-      onDeleted(await standCaddieDown())
+      onDeleted()
     } catch (reason) {
-      if (reason instanceof ApiError && reason.status === 403) {
+      if (reason instanceof CaddieStandDownError) {
+        setError(t('staff:delete.error.caddie'))
+      } else if (reason instanceof ApiError && reason.status === 403) {
         setError(t('staff:delete.error.forbidden'))
       } else if (reason instanceof ApiError && reason.status === 404) {
         setError(t('staff:delete.error.notFound'))
@@ -687,20 +698,20 @@ function StaffDeleteDialog({
   }
 
   /**
-   * Whether the caddie roster agrees. The staff record is gone by now and the
-   * roster can no longer reach this profile, so a failure is reported and left
-   * for the caddie screen rather than retried here.
+   * Suspend the caddie profile, or refuse to go any further.
+   *
+   * Failing here leaves the staff member and their caddie exactly as they
+   * were — the one failure in this flow the operator can retry or undo.
    */
   async function standCaddieDown() {
-    if (!row.caddie) return true
+    if (!row.caddie) return
     try {
       await courseboardApiJson(
         `${COURSE_API}/caddie-profiles/${encodeURIComponent(row.caddie.id)}`,
         request('PATCH', { employmentStatus: 'suspended' }),
       )
-      return true
-    } catch {
-      return false
+    } catch (reason) {
+      throw new CaddieStandDownError(reason)
     }
   }
 
