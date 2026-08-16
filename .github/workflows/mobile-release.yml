@@ -84,10 +84,9 @@ jobs:
     name: Android release AAB
     needs: validate
     if: needs.validate.outputs.platform == 'both' || needs.validate.outputs.platform == 'android'
-    # ADR-0027 例外: Android SDK / NDK と 4 ABI 分の Rust 中間物は ephemeral
-    # runner Pod の disk 前提が異なる。ci.yml の android_bundle と揃えて、
-    # 実測できるまで GitHub-hosted に残す。
-    runs-on: ubuntu-latest
+    # 4 ABI 分の Rust をコンパイルするため standard runner の 4 GiB では
+    # runner が CPU/Memory 不足で落ちる。ADR-0027 の heavy Rust job 扱い。
+    runs-on: tachyoncloud-4vcpu
     environment: mobile-release
     defaults:
       run:
@@ -103,6 +102,16 @@ jobs:
 
       - name: Use SSH for private GitHub dependencies
         run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
+
+      # tachyoncloud の runner image には github.com の host key が無く、photon の
+      # 取得が Host key verification failed で落ちる。ci.yml と同じ対処。
+      - name: Trust github.com SSH host key
+        working-directory: /
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          curl -fsSL https://api.github.com/meta \
+            | jq -r '.ssh_keys[] | "github.com \(.)"' >> ~/.ssh/known_hosts
+          sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
 
       - name: Setup Node
         uses: actions/setup-node@v4
