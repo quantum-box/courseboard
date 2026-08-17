@@ -13,6 +13,7 @@ import { plansForCourse, type BookablePlan } from './bookablePlan'
 import { DiscardGuard } from './DiscardGuard'
 import { MAX_PARTY_PLAYERS, MAX_SEAT_COLUMNS } from './ledgerLayout'
 import type { PartyDetails, PartyPlayer } from './models'
+import { resizeReservationPlayerRows } from './newReservationPlayers'
 import { PlanPicker } from './PlanPicker'
 import { PlayerTagInput } from './PlayerTagInput'
 
@@ -52,7 +53,14 @@ function toPlayers(draft: DraftPlayer[]): PartyPlayer[] {
 }
 
 /**
- * Edit the competition, group number, and named players on one booking.
+ * Edit one booking: who it is for, how many are playing, what it is sold as,
+ * and the group detail the desk keeps against it.
+ *
+ * Everything the booking was taken with opens already filled in. A sheet that
+ * showed only the golf group detail read as an empty form over a booking that
+ * plainly had a name and a headcount on the board behind it, and the two
+ * fields the desk corrects most — a group that turns up as three, a name taken
+ * down wrong — could only be fixed by cancelling and rebooking.
  *
  * The whole roster is sent on save. Patching one seat would need a stable id
  * per player, and the desk works the cell as one thing — it retypes the group,
@@ -64,17 +72,23 @@ export function PartyEditor({
   playerTagOptions,
   onClose,
   onSaved,
-  onPlanChanged,
+  onReservationChanged,
 }: {
   reservation: TeeReservation | null
   plans: BookablePlan[]
   playerTagOptions: string[]
   onClose: () => void
   onSaved: (reservationId: string, party: PartyDetails) => void
-  /** The board carries the play type, so it has to be refetched, not patched. */
-  onPlanChanged: () => void
+  /**
+   * The board carries the play type, the booked name, and the seat count, so
+   * a change to any of them has to be refetched rather than patched in place.
+   */
+  onReservationChanged: () => void
 }) {
   const { t } = useTranslation(['ledger', 'common'])
+  const [customerName, setCustomerName] = useState('')
+  const [customerId, setCustomerId] = useState<string | null>(null)
+  const [quantity, setQuantity] = useState('')
   const [competitionName, setCompetitionName] = useState('')
   const [organizer, setOrganizer] = useState('')
   const [groupNumber, setGroupNumber] = useState('')
@@ -93,6 +107,9 @@ export function PartyEditor({
   // never shows the previous group's names against this group's tee time.
   useEffect(() => {
     if (!reservation) return
+    const booked = reservation.partyName ?? ''
+    const identity = reservation.customerId ?? null
+    const seats = String(reservation.partySize)
     const competition = reservation.party?.competitionName ?? ''
     const host = reservation.party?.organizer ?? ''
     const number =
@@ -100,23 +117,59 @@ export function PartyEditor({
         ? String(reservation.party.groupNumber)
         : ''
     const draft = toDraft(reservation.party, reservation.partySize)
+    setCustomerName(booked)
+    setCustomerId(identity)
+    setQuantity(seats)
     setCompetitionName(competition)
     setOrganizer(host)
     setGroupNumber(number)
     setPlayers(draft)
     setPlanId(reservation.reservationServiceId ?? '')
-    setOpened(JSON.stringify([competition, host, number, draft]))
+    setOpened(JSON.stringify([booked, identity, seats, competition, host, number, draft]))
     setConfirmingDiscard(false)
   }, [reservation])
+
+  const selectedPlan = coursePlans.find(entry => entry.reservationServiceId === planId)
+  // The cap is on what the desk may add, not on what a booking may already be:
+  // a five-ball Field accepted has to stay editable, or its group detail could
+  // never be corrected either.
+  const maxQuantity = Math.max(
+    Math.min(selectedPlan?.maxPlayersPerGroup ?? MAX_PARTY_PLAYERS, MAX_PARTY_PLAYERS),
+    reservation?.partySize ?? 1,
+  )
+  const parsedQuantity = Number.parseInt(quantity, 10)
+  const validQuantity =
+    Number.isFinite(parsedQuantity) && parsedQuantity > 0 && parsedQuantity <= maxQuantity
+
+  // A group that grew gets the seats to type the extra names into. Shrinking
+  // leaves a row that already has a name on it alone — dropping it here would
+  // throw the name away before the desk has said which player left.
+  useEffect(() => {
+    if (!validQuantity) return
+    setPlayers(current => resizeReservationPlayerRows(current, parsedQuantity))
+  }, [parsedQuantity, validQuantity])
 
   if (!reservation) return null
 
   const named = toPlayers(players)
   const parsedGroupNumber = Number.parseInt(groupNumber, 10)
   const planChanged = planId !== openedPlanId
+  const bookingChanged =
+    customerName.trim() !== (reservation.partyName ?? '').trim()
+    || customerId !== (reservation.customerId ?? null)
+    || (validQuantity && parsedQuantity !== reservation.partySize)
   const dirty =
     planChanged
-    || JSON.stringify([competitionName, organizer, groupNumber, players]) !== opened
+    || JSON.stringify([
+      customerName,
+      customerId,
+      quantity,
+      competitionName,
+      organizer,
+      groupNumber,
+      players,
+    ]) !== opened
+  const canSave = customerName.trim().length > 0 && validQuantity && !saving
   const requestClose = () => {
     if (saving) return
     if (dirty) {
@@ -141,7 +194,24 @@ export function PartyEditor({
             body: JSON.stringify({ reservationServiceId: planId }),
           },
         )
-        onPlanChanged()
+        onReservationChanged()
+      }
+      // Then the booking itself, so a headcount is checked against the plan the
+      // round is now sold under rather than the one it is leaving.
+      if (bookingChanged) {
+        await courseboardApiJson(
+          `/v1/course/reservations/${encodeURIComponent(reservation.id)}`,
+          {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              customerName: customerName.trim(),
+              customerId,
+              quantity: parsedQuantity,
+            }),
+          },
+        )
+        onReservationChanged()
       }
       const party = await courseboardApiJson<PartyDetails>(
         `/v1/course/reservations/${encodeURIComponent(reservation.id)}/party`,
@@ -185,14 +255,37 @@ export function PartyEditor({
         {/* Only once names exist. A booking nobody has typed into is the normal
             starting state, and warning about it would put a banner on every
             group the desk opens for the first time. */}
-        {named.length > 0 && named.length !== reservation.partySize ? (
+        {named.length > 0 && validQuantity && named.length !== parsedQuantity ? (
           <Notice tone="warning" title={t('ledger:party.partySizeTitle')}>
             {t('ledger:party.partySizeNotice', {
-              booked: String(reservation.partySize),
+              booked: String(parsedQuantity),
               named: String(named.length),
             })}
           </Notice>
         ) : null}
+
+        {/* What the booking was taken with. Shown first and already filled in:
+            it is what the desk reads off the board before it clicks the row. */}
+        <FormGrid columns={2}>
+          <Field label={t('ledger:newReservation.customerName')} required>
+            <CustomerPicker
+              name={customerName}
+              customerId={customerId}
+              placeholder={t('ledger:newReservation.customerNamePlaceholder')}
+              onNameChange={setCustomerName}
+              onSelect={customer => setCustomerId(customer?.id ?? null)}
+            />
+          </Field>
+          <Field label={t('ledger:newReservation.quantity')} required>
+            <Input
+              type="number"
+              min={1}
+              max={maxQuantity}
+              value={quantity}
+              onChange={event => setQuantity(event.target.value)}
+            />
+          </Field>
+        </FormGrid>
 
         <FormGrid columns={2}>
           <Field label={t('ledger:party.competition')}>
@@ -306,7 +399,7 @@ export function PartyEditor({
           <Button type="button" variant="ghost" onClick={requestClose} disabled={saving}>
             {t('ledger:party.cancel')}
           </Button>
-          <Button type="button" variant="primary" onClick={save} disabled={saving}>
+          <Button type="button" variant="primary" onClick={save} disabled={!canSave}>
             {saving ? t('ledger:party.saving') : t('ledger:party.save')}
           </Button>
         </div>

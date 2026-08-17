@@ -38,6 +38,15 @@ export function CustomerPicker({
   // Suppressed after a pick so the list does not reopen over the chosen name,
   // and again while the desk edits a name it has already linked.
   const [showCandidates, setShowCandidates] = useState(false)
+  /**
+   * Whether the desk has typed in this box yet.
+   *
+   * Focus alone is not a question about who this is. A sheet opened on an
+   * existing booking puts the cursor in a box that already holds a name, and
+   * answering that with a candidate list — over the field below it, offering to
+   * add a name that is already on the booking — is a search nobody asked for.
+   */
+  const [typed, setTyped] = useState(false)
   const { candidates, searching, completedQuery, error } = useCustomerSearch(
     showCandidates && !customerId ? name : '',
   )
@@ -95,13 +104,16 @@ export function CustomerPicker({
         onChange={event => {
           const value = event.target.value
           onNameChange(value)
+          setTyped(true)
           setShowCandidates(true)
           // Editing the name unlinks it: the identity was for the name that
           // was there, and keeping it would attach one person's history to
           // another person's name.
           if (customerId) onSelect(null)
         }}
-        onFocus={() => setShowCandidates(true)}
+        onFocus={() => {
+          if (typed) setShowCandidates(true)
+        }}
       />
 
       {customerId ? (

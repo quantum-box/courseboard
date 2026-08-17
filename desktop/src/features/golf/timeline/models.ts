@@ -24,6 +24,8 @@ export type TeeReservation = {
   playType: PlayType
   partySize: number
   partyName: string
+  /** Who `partyName` turned out to be in the ledger, once the desk has said. */
+  customerId?: string | null
   status: TeeReservationStatus
   holes: number
   notes?: string | null

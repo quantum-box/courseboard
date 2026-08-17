@@ -18,10 +18,10 @@ use crate::course::domain::{
     field_day_of_week_to_courseboard, AvailabilityRule, Caddie, CaddieAssignment, CaddieRank,
     CaddieSkillLevel, CaddieUpstreamIdentity, Course, CourseError, CourseId, CourseOrder,
     CustomerId, GatewayCredentials, GenerationSummary, GolfCatalogGateway, NewReservation,
-    PartyDetails, ProductSlot, Reservation, ReservationGateway, ReservationId, ReservationProduct,
-    ReservationScheduleGateway, ReservationServiceId, Resource, ResourceId, ResourceKind,
-    ResourceTimeSlot, SaveCourseResource, SeededReservation, UpsertCourse,
-    UpsertReservationProduct, SEED_KEY_FIELD,
+    PartyDetails, ProductSlot, Reservation, ReservationBookingUpdate, ReservationGateway,
+    ReservationId, ReservationProduct, ReservationScheduleGateway, ReservationServiceId, Resource,
+    ResourceId, ResourceKind, ResourceTimeSlot, SaveCourseResource, SeededReservation,
+    UpsertCourse, UpsertReservationProduct, SEED_KEY_FIELD,
 };
 use crate::course::infrastructure::course_order_config;
 use crate::course::infrastructure::generic_product_config;
@@ -140,6 +140,47 @@ impl ReservationGateway for FieldReservationGateway {
         if updated.service_id.as_deref() != Some(service_id.as_str()) {
             return Err(CourseError::Provider(
                 "the plan was not stored as sent; the reservation was left unchanged".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    async fn update_reservation_booking(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+        update: &ReservationBookingUpdate,
+    ) -> Result<(), CourseError> {
+        let path = format!(
+            "/v1/erp/reservations/{}",
+            urlencoding_path(reservation_id.as_str())
+        );
+        let body = reservation_booking_body(update);
+        let updated: FieldReservationDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::PATCH,
+            &path,
+            credentials,
+            Some(&body),
+        )
+        .await?;
+        // Field answers with what it stored. A green response that kept the old
+        // headcount would leave the desk seating four where three turned up.
+        if updated.quantity != update.quantity {
+            return Err(CourseError::Provider(
+                "the headcount was not stored as sent; the reservation was left unchanged".into(),
+            ));
+        }
+        // Only when the booking carries no ledger entry. Once it does, the name
+        // on the reservation is Field's to resolve from that entry, and holding
+        // it to what the desk typed would fail a write that in fact went through.
+        if update.customer_id.is_none()
+            && updated.customer_name.as_deref().map(str::trim) != Some(update.customer_name.trim())
+        {
+            return Err(CourseError::Provider(
+                "the booking name was not stored as sent; the reservation was left unchanged"
+                    .into(),
             ));
         }
         Ok(())
@@ -297,6 +338,26 @@ impl ReservationGateway for FieldReservationGateway {
         .await?;
         Ok(())
     }
+}
+
+/// The body Field takes when the desk corrects a booking it already took.
+///
+/// No `customFields` key, for the same reason the plan write omits one: Field
+/// replaces that object wholesale, and it holds both the group detail and the
+/// booking's `golfCourseId`. Sending the caller and the headcount on their own
+/// leaves all of that where it is.
+fn reservation_booking_body(update: &ReservationBookingUpdate) -> Value {
+    let mut body = json!({
+        "customerName": update.customer_name,
+        "quantity": update.quantity,
+    });
+    // Only when the desk has identified the caller — the same rule the create
+    // follows. A null would not clear the link and an empty string would be a
+    // lie about who the booking is for.
+    if let Some(customer_id) = update.customer_id.as_ref() {
+        body["customerId"] = json!(customer_id.as_str());
+    }
+    body
 }
 
 /// The body Field takes for a seeded booking.
@@ -1887,6 +1948,32 @@ mod tests {
         let mut input = desk_reservation();
         input.customer_id = Some(CustomerId::new("cus_1"));
         let body = new_reservation_body(&input, true);
+        assert_eq!(body["customerId"], json!("cus_1"));
+    }
+
+    #[test]
+    fn correcting_a_booking_never_sends_the_custom_fields_object() {
+        // Field replaces `customFields` wholesale. A booking write that carried
+        // one would take the group detail and the booking's own `golfCourseId`
+        // down with it — the round would leave the course it is played on.
+        let body = reservation_booking_body(&ReservationBookingUpdate {
+            customer_name: "増田 公陽".to_string(),
+            customer_id: None,
+            quantity: 3,
+        });
+        assert_eq!(body["customerName"], json!("増田 公陽"));
+        assert_eq!(body["quantity"], json!(3));
+        assert!(body.get("customFields").is_none());
+        assert!(body.get("customerId").is_none());
+    }
+
+    #[test]
+    fn a_corrected_booking_carries_the_ledger_entry_the_desk_picked() {
+        let body = reservation_booking_body(&ReservationBookingUpdate {
+            customer_name: "増田 公陽".to_string(),
+            customer_id: Some(CustomerId::new("cus_1")),
+            quantity: 4,
+        });
         assert_eq!(body["customerId"], json!("cus_1"));
     }
 

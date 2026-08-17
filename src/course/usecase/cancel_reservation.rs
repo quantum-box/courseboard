@@ -174,6 +174,15 @@ mod tests {
             unimplemented!("not used")
         }
 
+        async fn update_reservation_booking(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &ReservationId,
+            _update: &crate::course::domain::ReservationBookingUpdate,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+
         async fn update_reservation_party(
             &self,
             _credentials: GatewayCredentials<'_>,

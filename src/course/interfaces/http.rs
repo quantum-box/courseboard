@@ -39,7 +39,8 @@ use crate::course::usecase::{
     ListReservationProductsUseCase, ListResourcesUseCase, ListSlotOverridesUseCase,
     ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase,
     SeedDemoBoardUseCase, SetBookingHorizonUseCase, UpdateCourseUseCase,
-    UpdateReservationPartyUseCase, UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
+    UpdateReservationBookingInput, UpdateReservationBookingUseCase, UpdateReservationPartyUseCase,
+    UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -202,6 +203,12 @@ pub struct TeeSheetItemDto {
     pub play_type: String,
     pub party_size: i32,
     pub party_name: String,
+    /// Who the booking is for in the customer ledger, when the desk has said.
+    ///
+    /// Absent on a booking taken under a name alone, which is the normal way a
+    /// phone call is written down.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub customer_id: Option<String>,
     /// Competition, group number, and named players the desk keeps.
     ///
     /// Absent until someone enters them: Field hands over one customer name and
@@ -311,6 +318,7 @@ impl From<&TeeSheetItem> for TeeSheetItemDto {
             play_type: value.play_type().as_str().to_string(),
             party_size: value.party_size(),
             party_name: value.party_name().to_string(),
+            customer_id: value.customer_id().map(ToString::to_string),
             party: Some(value.party())
                 .filter(|party| !party.is_empty())
                 .map(PartyDto::from),
@@ -858,6 +866,66 @@ pub async fn cancel_reservation(
             credentials,
             &ReservationId::new(reservation_id),
             request.reason.as_deref(),
+        )
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ─── Reservation booking ──────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateReservationBookingRequest {
+    /// Who the booking is under, as the desk would read it out.
+    pub customer_name: String,
+    /// The ledger entry for that person, when the desk has identified one.
+    ///
+    /// Absent leaves the link the booking already has rather than clearing it:
+    /// Field owns the customer on its side and has no way to unset one.
+    #[serde(default)]
+    pub customer_id: Option<String>,
+    /// How many are playing.
+    pub quantity: i32,
+}
+
+/// PATCH /v1/course/reservations/{reservation_id}
+///
+/// Corrects the caller and the headcount on a booking already taken. The group
+/// detail has its own call: this one deliberately leaves it alone.
+#[utoipa::path(
+    patch,
+    path = "/v1/course/reservations/{reservation_id}",
+    tag = "course",
+    params(("reservation_id" = String, Path, description = "Reservation id")),
+    request_body = UpdateReservationBookingRequest,
+    responses(
+        (status = 204, description = "Booking updated"),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Reservation not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn update_reservation_booking(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(reservation_id): Path<String>,
+    Json(request): Json<UpdateReservationBookingRequest>,
+) -> Result<StatusCode, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let use_case =
+        UpdateReservationBookingUseCase::new(reservation_gateway(&state), catalog_gateway(&state));
+    use_case
+        .execute(
+            credentials,
+            &ReservationId::new(reservation_id),
+            UpdateReservationBookingInput {
+                customer_name: request.customer_name,
+                customer_id: CustomerId::from_optional(request.customer_id),
+                quantity: request.quantity,
+            },
         )
         .await
         .map_err(AppError::from)?;

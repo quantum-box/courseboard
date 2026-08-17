@@ -711,6 +711,12 @@ const mockParties: Record<string, unknown> = loadMockWrites('parties', {})
 /** Plans moved onto a booking this session, by reservation id. */
 const mockPlans: Record<string, string> = loadMockWrites('plans', {})
 
+/** Callers and headcounts corrected this session, by reservation id. */
+const mockBookings: Record<string, { partyName: string; partySize: number }> = loadMockWrites(
+  'bookings',
+  {},
+)
+
 /**
  * A booking with the group detail entered this session laid over its fixture.
  *
@@ -2904,6 +2910,21 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     }
     saveMockWrites('slotMarks', mockSlotMarks)
     return hit({ deleted })
+  }
+
+  const bookingMatch = /^\/v1\/course\/reservations\/([^/]+)$/.exec(pathname)
+  if (bookingMatch && method === 'PATCH') {
+    const reservation = mockTeeReservations.find(item => item.id === bookingMatch[1])
+    if (!reservation) return error(404, 'Mock Field API has no such reservation')
+    const customerName = String(body?.customerName ?? '').trim()
+    const quantity = Number(body?.quantity)
+    if (!customerName) return error(400, 'customer name is required')
+    if (!Number.isInteger(quantity) || quantity <= 0) return error(400, 'quantity must be positive')
+    reservation.partyName = customerName
+    reservation.partySize = quantity
+    mockBookings[reservation.id] = { partyName: customerName, partySize: quantity }
+    saveMockWrites('bookings', mockBookings)
+    return hit(null)
   }
 
   const planMatch = /^\/v1\/course\/reservations\/([^/]+)\/plan$/.exec(pathname)
