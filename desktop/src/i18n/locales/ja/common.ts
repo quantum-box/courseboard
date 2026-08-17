@@ -36,6 +36,9 @@ export const common = {
   state: {
     loading: '読み込み中',
     saved: '保存しました',
+    reloading: '再読み込み中…',
+    reloaded: '再読み込みしました',
+    reloadFailed: '再読み込みできませんでした',
     empty: 'データがありません',
     emptyRows: '表示できるデータがありません',
     required: '必須',

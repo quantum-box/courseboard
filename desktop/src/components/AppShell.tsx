@@ -86,6 +86,7 @@ import { i18next, LOCALES, LOCALE_LABELS, currentLocale, setLocale } from '../i1
 import { PageReloadProvider, usePageReload } from '../lib/pageReload'
 import { navigate, navigateFromClick } from '../lib/router'
 import { isPageRefreshShortcut } from '../lib/shortcuts'
+import { showToast } from '../lib/toast'
 import { CourseBoardBrand } from './CourseBoardBrand'
 import { WorkspaceHelpPanel } from './WorkspaceHelp'
 
@@ -236,6 +237,7 @@ const SIDEBAR_DEFAULT_WIDTH = 240
 const RESIZE_DRAG_THRESHOLD = 3
 /** Keyboard step for the resize handle. */
 const RESIZE_KEY_STEP = 16
+const RELOAD_INDICATOR_MIN_MS = 600
 
 function clampSidebarWidth(value: number) {
   return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(value)))
@@ -371,6 +373,8 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
     return stored ? stored === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches
   })
   const pointerInsideSidebarRef = useRef(false)
+  const reloadRequestRef = useRef(0)
+  const reloadFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const accountMenuOpenRef = useRef(false)
   const desktopSidebarRef = useRef<HTMLElement | null>(null)
   const sidebarOpenTriggerRef = useRef<HTMLButtonElement | null>(null)
@@ -466,8 +470,45 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (isPageRefreshShortcut(event)) {
-        if (triggerPageReload()) {
+        const reload = triggerPageReload()
+        if (reload !== false) {
           event.preventDefault()
+          const request = reloadRequestRef.current + 1
+          reloadRequestRef.current = request
+          const startedAt = Date.now()
+          if (reloadFeedbackTimerRef.current) clearTimeout(reloadFeedbackTimerRef.current)
+          showToast({
+            tone: 'loading',
+            message: t('common:state.reloading'),
+            id: 'page-reload',
+            position: 'bottom-left',
+          })
+          void reload.then(
+            () => {
+              const remaining = Math.max(0, RELOAD_INDICATOR_MIN_MS - (Date.now() - startedAt))
+              reloadFeedbackTimerRef.current = setTimeout(() => {
+                if (reloadRequestRef.current !== request) return
+                showToast({
+                  tone: 'success',
+                  message: t('common:state.reloaded'),
+                  id: 'page-reload',
+                  position: 'bottom-left',
+                })
+              }, remaining)
+            },
+            () => {
+              const remaining = Math.max(0, RELOAD_INDICATOR_MIN_MS - (Date.now() - startedAt))
+              reloadFeedbackTimerRef.current = setTimeout(() => {
+                if (reloadRequestRef.current !== request) return
+                showToast({
+                  tone: 'danger',
+                  message: t('common:state.reloadFailed'),
+                  id: 'page-reload',
+                  position: 'bottom-left',
+                })
+              }, remaining)
+            },
+          )
         }
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -476,8 +517,11 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
       }
     }
     window.addEventListener('keydown', onKeyDown, true)
-    return () => window.removeEventListener('keydown', onKeyDown, true)
-  }, [triggerPageReload])
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true)
+      if (reloadFeedbackTimerRef.current) clearTimeout(reloadFeedbackTimerRef.current)
+    }
+  }, [t, triggerPageReload])
 
   // The mobile drawer is a modal: focus moves into it, returns to the hamburger
   // on close, and the workspace behind it is inert while it is open.

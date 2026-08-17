@@ -1,10 +1,39 @@
-import { Button, Input } from '@tachyon-sdk/native-ui'
-import { CalendarCheck, Pin, SlidersHorizontal, Wand2 } from 'lucide-react'
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Input,
+} from '@tachyon-sdk/native-ui'
+import {
+  CalendarCheck,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  Pin,
+  Printer,
+  SlidersHorizontal,
+  Wand2,
+} from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
+import { createPortal, flushSync } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
-import { courseboardApiJson, currentYearMonth, today } from '../../api'
+import {
+  courseboardApiJson,
+  currentYearMonth,
+  downloadBlob,
+  downloadText,
+  today,
+} from '../../api'
 import {
   EmptyState,
   Field,
@@ -36,6 +65,12 @@ import {
   type ShiftAvailability,
   type ShiftCell,
 } from './shiftBoard'
+import {
+  shiftExportCsv,
+  shiftExportXlsx,
+  type ShiftExportDocument,
+  type ShiftExportWeekend,
+} from './shiftBoardExport'
 
 const COURSE_API = '/v1/course'
 
@@ -87,6 +122,12 @@ type GeneratedMonth = {
 /** A month planned but not written: what the run reported, and every day of it. */
 type ShiftPlanPreview = { summary: GeneratedMonth; shifts: ConfirmedShift[] }
 
+type ShiftPrintSource = {
+  kind: 'confirmed' | 'draft'
+  shifts: ConfirmedShift[]
+  changedDays: Set<string> | null
+}
+
 /** The one day the desk opened for editing. */
 type ShiftEditTarget = { profile: CaddieProfile; cell: ShiftCell }
 
@@ -108,9 +149,11 @@ function weekdayLabel(date: string) {
   return i18next.t(`common:weekday.${keys[weekdayIndex(date)] ?? 'sun'}`)
 }
 
-function isWeekend(date: string) {
+function weekdayClassName(date: string) {
   const day = weekdayIndex(date)
-  return day === 0 || day === 6
+  if (day === 6) return 'shift-board-weekend shift-board-saturday'
+  if (day === 0) return 'shift-board-weekend shift-board-sunday'
+  return undefined
 }
 
 function cellGlyph(cell: ShiftCell) {
@@ -133,6 +176,95 @@ function employmentStatusLabel(status: string) {
     return i18next.t(`shifts:employment.${status}` as 'shifts:employment.inactive')
   }
   return i18next.t('shifts:employment.unknown')
+}
+
+function exportWeekend(date: string): ShiftExportWeekend {
+  const day = weekdayIndex(date)
+  if (day === 6) return 'saturday'
+  if (day === 0) return 'sunday'
+  return null
+}
+
+function buildShiftExportDocument({
+  source,
+  yearMonth,
+  timezone,
+  dates,
+  profiles,
+  availabilities,
+  assignments,
+  courses,
+}: {
+  source: ShiftPrintSource
+  yearMonth: string
+  timezone: string
+  dates: string[]
+  profiles: CaddieProfile[]
+  availabilities: ShiftAvailability[]
+  assignments: ShiftAssignment[]
+  courses: GolfCourse[]
+}): ShiftExportDocument {
+  const courseById = new Map(courses.map(course => [course.id, course]))
+  const title = i18next.t(source.kind === 'draft'
+    ? 'shifts:print.draftTitle'
+    : 'shifts:print.confirmedTitle', { month: yearMonth })
+  const headers = [
+    i18next.t('shifts:table.caddie'),
+    i18next.t('shifts:export.employment'),
+    i18next.t('shifts:streak.header'),
+    ...dates.map(date => `${Number(date.slice(8, 10))} ${weekdayLabel(date)}`),
+  ]
+  const rows = profiles.map(profile => {
+    const row = buildShiftRow(
+      profile,
+      dates,
+      availabilities,
+      assignments,
+      source.shifts,
+      timezone,
+    )
+    const values = row.cells.map(cell => {
+      const marks = []
+      if (source.changedDays?.has(shiftKey({ caddieProfileId: profile.id, date: cell.date }))) {
+        marks.push(i18next.t('shifts:export.changedMark'))
+      }
+      if (cell.confirmed?.origin === 'pinned') marks.push(i18next.t('shifts:export.pinnedMark'))
+      const course = cell.confirmed?.golfCourseId
+        ? courseLabel(courseById.get(cell.confirmed.golfCourseId))
+        : ''
+      return [...marks, cellDisplay(cell), course].filter(Boolean).join(' ')
+    })
+    return {
+      values: [
+        profile.displayName,
+        employmentStatusLabel(row.employmentStatus) ?? i18next.t('shifts:export.active'),
+        row.maxStreak > 0
+          ? i18next.t('shifts:streak.days', { n: String(row.maxStreak) })
+          : '—',
+        ...values,
+      ],
+      employmentStatus: row.employmentStatus,
+      dayStyles: row.cells.map(cell => ({
+        kind: cell.kind,
+        weekend: exportWeekend(cell.date),
+        longStreak: cell.inLongStreak,
+        changed: source.changedDays?.has(
+          shiftKey({ caddieProfileId: profile.id, date: cell.date }),
+        ) ?? false,
+        pinned: cell.confirmed?.origin === 'pinned',
+      })),
+    }
+  })
+  return {
+    title,
+    note: i18next.t('shifts:export.note'),
+    sheetName: i18next.t(source.kind === 'draft'
+      ? 'shifts:export.draftSheet'
+      : 'shifts:export.confirmedSheet'),
+    headers,
+    headerWeekends: [null, null, null, ...dates.map(exportWeekend)],
+    rows,
+  }
 }
 
 export function ShiftBoardPage() {
@@ -219,17 +351,21 @@ export function ShiftBoardPage() {
   const [draft, setDraft] = useState<ShiftPlanPreview | null>(null)
   const [lastRun, setLastRun] = useState<GeneratedMonth | null>(null)
   const [editing, setEditing] = useState<ShiftEditTarget | null>(null)
+  const [printSource, setPrintSource] = useState<ShiftPrintSource | null>(null)
+  const originalPrintTitle = useRef<string | null>(null)
   // The rules are read once a month at most, so they sit behind a button
   // rather than taking a row of the toolbar on every visit.
   const [rulesOpen, setRulesOpen] = useState(false)
 
   const refresh = useCallback(() => {
-    profilesResource.refresh()
-    availabilityResource.refresh()
-    assignmentsResource.refresh()
-    deadlineResource.refresh()
-    unsubmittedResource.refresh()
-    shiftsResource.refresh()
+    return Promise.all([
+      profilesResource.refresh(),
+      availabilityResource.refresh(),
+      assignmentsResource.refresh(),
+      deadlineResource.refresh(),
+      unsubmittedResource.refresh(),
+      shiftsResource.refresh(),
+    ]).then(() => undefined)
   }, [
     profilesResource.refresh,
     availabilityResource.refresh,
@@ -242,7 +378,7 @@ export function ShiftBoardPage() {
 
   // A run rewrites a month of everybody's working days, so it is planned first
   // and written second: this asks for the month the requests would produce and
-  // draws it on the board, without touching what is confirmed today.
+  // opens it in a temporary review dialog, without touching the confirmed board.
   const planMonth = useCallback(async () => {
     setPlanning(true)
     try {
@@ -333,6 +469,85 @@ export function ShiftBoardPage() {
     setLastRun(null)
   }, [yearMonth])
 
+  const exportFileStem = useCallback((source: ShiftPrintSource) => t(
+    source.kind === 'draft'
+      ? 'shifts:export.draftFilename'
+      : 'shifts:export.confirmedFilename',
+    { month: String(Number(yearMonth.slice(5, 7))) },
+  ), [t, yearMonth])
+
+  useEffect(() => {
+    const finishPrinting = () => {
+      setPrintSource(null)
+      if (originalPrintTitle.current !== null) {
+        document.title = originalPrintTitle.current
+        originalPrintTitle.current = null
+      }
+    }
+    window.addEventListener('afterprint', finishPrinting)
+    return () => {
+      window.removeEventListener('afterprint', finishPrinting)
+      if (originalPrintTitle.current !== null) {
+        document.title = originalPrintTitle.current
+        originalPrintTitle.current = null
+      }
+    }
+  }, [])
+
+  const printBoard = useCallback((source: ShiftPrintSource) => {
+    // The printable table is rendered in a body-level portal. Flush it before
+    // opening the native dialog so the browser captures all 31 days, not only
+    // the horizontally visible part of the on-screen table.
+    flushSync(() => setPrintSource(source))
+    if (originalPrintTitle.current === null) originalPrintTitle.current = document.title
+    document.title = exportFileStem(source)
+    window.print()
+  }, [exportFileStem])
+
+  const exportBoard = useCallback(async (
+    source: ShiftPrintSource,
+    format: 'csv' | 'xlsx',
+  ) => {
+    try {
+      const document = buildShiftExportDocument({
+        source,
+        yearMonth,
+        timezone,
+        dates,
+        profiles: profilesResource.data?.items ?? [],
+        availabilities: availabilityResource.data?.items ?? [],
+        assignments: assignmentsResource.data?.items ?? [],
+        courses: coursesResource.data?.items ?? [],
+      })
+      const filename = `${exportFileStem(source)}.${format}`
+      if (format === 'csv') {
+        downloadText(filename, shiftExportCsv(document))
+      } else {
+        const bytes = await shiftExportXlsx(document)
+        await downloadBlob(filename, new Blob([bytes], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }))
+      }
+      showToast({ tone: 'success', message: t('shifts:export.done', { format: format.toUpperCase() }) })
+    } catch (error) {
+      showToast({
+        tone: 'danger',
+        title: t('shifts:export.failed'),
+        message: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }, [
+    yearMonth,
+    timezone,
+    dates,
+    profilesResource.data,
+    availabilityResource.data,
+    assignmentsResource.data,
+    coursesResource.data,
+    exportFileStem,
+    t,
+  ])
+
   const showCurrentWeek = useCallback(() => {
     setYearMonth(today(timezone).slice(0, 7))
     setCurrentWeekRequest(request => request + 1)
@@ -363,6 +578,25 @@ export function ShiftBoardPage() {
           {/* The month picker is what the desk reads; the actions sit away
               from it, against the right edge. */}
           <div className="ml-auto flex flex-wrap items-end gap-3 pb-1">
+            <ShiftExportMenu
+              label={t('shifts:export.action')}
+              disabled={loading || (profilesResource.data?.items.length ?? 0) === 0}
+              onPrint={() => printBoard({
+                kind: 'confirmed',
+                shifts: shiftsResource.data?.items ?? [],
+                changedDays: null,
+              })}
+              onCsv={() => void exportBoard({
+                kind: 'confirmed',
+                shifts: shiftsResource.data?.items ?? [],
+                changedDays: null,
+              }, 'csv')}
+              onExcel={() => void exportBoard({
+                kind: 'confirmed',
+                shifts: shiftsResource.data?.items ?? [],
+                changedDays: null,
+              }, 'xlsx')}
+            />
             <Button type="button" variant="secondary" onClick={() => setRulesOpen(true)}>
               <SlidersHorizontal />
               {t('shifts:rules.open')}
@@ -389,15 +623,28 @@ export function ShiftBoardPage() {
         onSaveRules={saveRules}
       />
 
-      {draft ? (
-        <DraftPlanNotice
-          draft={draft}
-          rules={rulesResource.data ?? null}
-          confirming={confirming}
-          onConfirm={() => void confirmMonth()}
-          onDiscard={() => setDraft(null)}
-        />
-      ) : null}
+      <ShiftPlanPreviewDialog
+        draft={draft}
+        rules={rulesResource.data ?? null}
+        confirming={confirming}
+        onConfirm={() => void confirmMonth()}
+        onDiscard={() => setDraft(null)}
+        onPrint={source => printBoard(source)}
+        onExport={(source, format) => void exportBoard(source, format)}
+        yearMonth={yearMonth}
+        timezone={timezone}
+        dates={dates}
+        profiles={profilesResource.data?.items ?? []}
+        availabilities={availabilityResource.data?.items ?? []}
+        assignments={assignmentsResource.data?.items ?? []}
+        confirmedShifts={shiftsResource.data?.items ?? []}
+        unsubmittedCaddies={unsubmittedResource.data?.items ?? []}
+        loading={loading}
+        error={refreshError}
+        onRetry={refresh}
+        currentWeekRequest={currentWeekRequest}
+        onShowCurrentWeek={showCurrentWeek}
+      />
 
       {lastRun ? (
         <ConfirmedRunNotice run={lastRun} rules={rulesResource.data ?? null} />
@@ -412,8 +659,7 @@ export function ShiftBoardPage() {
           availabilities={availabilityResource.data?.items ?? []}
           assignments={assignmentsResource.data?.items ?? []}
           confirmedShifts={shiftsResource.data?.items ?? []}
-          draftShifts={draft?.shifts ?? null}
-          courses={coursesResource.data?.items ?? []}
+          draftShifts={null}
           unsubmittedCaddies={unsubmittedResource.data?.items ?? []}
           loading={loading}
           error={refreshError}
@@ -432,6 +678,20 @@ export function ShiftBoardPage() {
           setEditing(null)
           shiftsResource.refresh()
         }}
+      />
+
+      <ShiftBoardPrintView
+        source={printSource ?? {
+          kind: 'confirmed',
+          shifts: shiftsResource.data?.items ?? [],
+          changedDays: null,
+        }}
+        yearMonth={yearMonth}
+        timezone={timezone}
+        dates={dates}
+        profiles={profilesResource.data?.items ?? []}
+        availabilities={availabilityResource.data?.items ?? []}
+        assignments={assignmentsResource.data?.items ?? []}
       />
     </div>
   )
@@ -481,49 +741,305 @@ function RunSummaryLines({ run, rules }: { run: GeneratedMonth; rules: ShiftRule
 /**
  * The month the run proposed, waiting to be confirmed.
  *
- * A run rewrites a month of everybody's working days, so it is drawn on the
- * board first and written only when the desk says so. Nothing is saved while
- * this is on screen — leaving the month, or throwing the plan away, costs
- * nothing but the run.
+ * The confirmed table stays mounted behind this dialog and is deliberately
+ * not given the proposed shifts. Closing the dialog is the same as throwing
+ * the plan away; while the confirm request is in flight, the controlled
+ * dialog ignores every close request so the operator cannot lose that state.
  */
-function DraftPlanNotice({
+function ShiftPlanPreviewDialog({
   draft,
   rules,
   confirming,
   onConfirm,
   onDiscard,
+  onPrint,
+  onExport,
+  yearMonth,
+  timezone,
+  dates,
+  profiles,
+  availabilities,
+  assignments,
+  confirmedShifts,
+  unsubmittedCaddies,
+  loading,
+  error,
+  onRetry,
+  currentWeekRequest,
+  onShowCurrentWeek,
 }: {
-  draft: ShiftPlanPreview
+  draft: ShiftPlanPreview | null
   rules: ShiftRules | null
   confirming: boolean
   onConfirm: () => void
   onDiscard: () => void
+  onPrint: (source: ShiftPrintSource) => void
+  onExport: (source: ShiftPrintSource, format: 'csv' | 'xlsx') => void
+  yearMonth: string
+  timezone: string
+  dates: string[]
+  profiles: CaddieProfile[]
+  availabilities: ShiftAvailability[]
+  assignments: ShiftAssignment[]
+  confirmedShifts: ConfirmedShift[]
+  unsubmittedCaddies: UnsubmittedCaddie[]
+  loading: boolean
+  error: unknown
+  onRetry: () => void
+  currentWeekRequest: number
+  onShowCurrentWeek: () => void
 }) {
   const { t } = useTranslation(['shifts'])
+
+  const changedDates = useMemo(() => {
+    if (!draft) return new Set<string>()
+    const dates = new Set<string>()
+    for (const key of draftChangeKeys(confirmedShifts, draft.shifts)) {
+      const separator = key.indexOf(':')
+      if (separator >= 0) dates.add(key.slice(separator + 1))
+    }
+    return dates
+  }, [confirmedShifts, draft])
+
+  if (!draft) return null
   const run = draft.summary
+  const draftSource: ShiftPrintSource = {
+    kind: 'draft',
+    shifts: withDraftShifts(confirmedShifts, draft.shifts),
+    changedDays: draftChangeKeys(confirmedShifts, draft.shifts),
+  }
+
   return (
-    <Notice
-      tone={runNeedsAttention(run) ? 'warning' : 'info'}
-      title={t('shifts:draft.noticeTitle', { month: run.yearMonth })}
+    <Dialog
+      open
+      onOpenChange={open => {
+        if (!open && !confirming) onDiscard()
+      }}
     >
-      <p>
-        {t('shifts:draft.noticeBody', {
-          n: String(run.daysWritten),
-          pinned: String(run.pinnedKept),
-        })}
-      </p>
-      <RunSummaryLines run={run} rules={rules} />
-      <p className="text-muted-foreground">{t('shifts:draft.readOnly')}</p>
-      <div className="shift-draft-actions flex flex-wrap gap-2">
-        <Button type="button" variant="primary" disabled={confirming} onClick={onConfirm}>
-          <CalendarCheck />
-          {confirming ? t('shifts:confirm.running') : t('shifts:draft.apply')}
+      <DialogContent className="shift-board-preview-dialog flex flex-col overflow-hidden">
+        <DialogHeader className="flex-none">
+          <DialogTitle>{t('shifts:draft.dialogTitle', { month: run.yearMonth })}</DialogTitle>
+          <DialogDescription>{t('shifts:draft.dialogDescription')}</DialogDescription>
+        </DialogHeader>
+
+        <div className="shift-board-preview-dialog-body min-h-0 flex-1 space-y-4 overflow-y-auto">
+          <Notice
+            tone={runNeedsAttention(run) ? 'warning' : 'info'}
+            title={t('shifts:draft.summaryTitle')}
+          >
+            <p>
+              {t('shifts:draft.noticeBody', {
+                n: String(run.daysWritten),
+                pinned: String(run.pinnedKept),
+              })}
+            </p>
+            <p>{t('shifts:draft.changedDays', { n: String(changedDates.size) })}</p>
+            <RunSummaryLines run={run} rules={rules} />
+            <p className="text-muted-foreground">{t('shifts:draft.readOnly')}</p>
+          </Notice>
+
+          <ShiftBoardResults
+            yearMonth={yearMonth}
+            timezone={timezone}
+            dates={dates}
+            profiles={profiles}
+            availabilities={availabilities}
+            assignments={assignments}
+            confirmedShifts={confirmedShifts}
+            draftShifts={draft.shifts}
+            unsubmittedCaddies={unsubmittedCaddies}
+            loading={loading}
+            error={error}
+            onRetry={onRetry}
+            currentWeekRequest={currentWeekRequest}
+            onShowCurrentWeek={onShowCurrentWeek}
+            onEdit={() => undefined}
+          />
+        </div>
+
+        <DialogFooter className="flex-none border-t border-border pt-4">
+          <ShiftExportMenu
+            label={t('shifts:export.draftAction')}
+            disabled={confirming}
+            onPrint={() => onPrint(draftSource)}
+            onCsv={() => onExport(draftSource, 'csv')}
+            onExcel={() => onExport(draftSource, 'xlsx')}
+          />
+          <Button type="button" variant="secondary" disabled={confirming} onClick={onDiscard}>
+            {t('shifts:draft.discard')}
+          </Button>
+          <Button type="button" variant="primary" disabled={confirming} onClick={onConfirm}>
+            <CalendarCheck />
+            {confirming ? t('shifts:confirm.running') : t('shifts:draft.apply')}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ShiftExportMenu({
+  label,
+  disabled,
+  onPrint,
+  onCsv,
+  onExcel,
+}: {
+  label: string
+  disabled: boolean
+  onPrint: () => void
+  onCsv: () => void
+  onExcel: () => void
+}) {
+  const { t } = useTranslation(['shifts'])
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="secondary" disabled={disabled}>
+          <Download />
+          {label}
         </Button>
-        <Button type="button" variant="secondary" disabled={confirming} onClick={onDiscard}>
-          {t('shifts:draft.discard')}
-        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={onPrint}>
+          <Printer />
+          {t('shifts:export.pdfPrint')}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onCsv}>
+          <FileText />
+          {t('shifts:export.csv')}
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onExcel}>
+          <FileSpreadsheet />
+          {t('shifts:export.excel')}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
+/**
+ * A print-only monthly board.
+ *
+ * The interactive board is horizontally scrollable and therefore unsuitable
+ * as a print source. This body-level portal lays out the complete month on one
+ * A3 landscape page, which the native dialog can send to a printer or save as
+ * PDF without changing any shift data.
+ */
+function ShiftBoardPrintView({
+  source,
+  yearMonth,
+  timezone,
+  dates,
+  profiles,
+  availabilities,
+  assignments,
+}: {
+  source: ShiftPrintSource | null
+  yearMonth: string
+  timezone: string
+  dates: string[]
+  profiles: CaddieProfile[]
+  availabilities: ShiftAvailability[]
+  assignments: ShiftAssignment[]
+}) {
+  const { t } = useTranslation(['shifts'])
+  const rows = useMemo(() => {
+    if (!source) return []
+    return profiles.map(profile => ({
+      profile,
+      row: buildShiftRow(
+        profile,
+        dates,
+        availabilities,
+        assignments,
+        source.shifts,
+        timezone,
+      ),
+    }))
+  }, [source, profiles, dates, availabilities, assignments, timezone])
+
+  if (!source || rows.length === 0 || typeof document === 'undefined') return null
+
+  return createPortal(
+    <section
+      className="shift-board-print"
+      data-print-source={source.kind}
+      aria-label={t('shifts:print.aria', { month: yearMonth })}
+    >
+      <header className="shift-board-print-header">
+        <div>
+          <p className="shift-board-print-brand">CourseBoard</p>
+          <h1>
+            {t(source.kind === 'draft'
+              ? 'shifts:print.draftTitle'
+              : 'shifts:print.confirmedTitle', { month: yearMonth })}
+          </h1>
+        </div>
+        <p>{t('shifts:print.pageNote')}</p>
+      </header>
+
+      <div className="shift-board-print-legend" aria-label={t('shifts:legend.label')}>
+        <span><i data-kind="assigned" /> {t('shifts:legend.assigned')}</span>
+        <span><i data-kind="available" /> {t('shifts:legend.available')}</span>
+        <span><i data-kind="off" /> {t('shifts:legend.off')}</span>
+        <span><i data-kind="morning" /> {t('shifts:legend.morning')}</span>
+        <span><i data-kind="afternoon" /> {t('shifts:legend.afternoon')}</span>
+        <span><i data-kind="light" /> {t('shifts:legend.light')}</span>
+        <span><i data-kind="unknown" /> {t('shifts:legend.unknown')}</span>
+        <span><i data-pinned="true" /> {t('shifts:legend.pinned')}</span>
+        {source.kind === 'draft' ? (
+          <span><i data-draft-change="true" /> {t('shifts:draft.legendChanged')}</span>
+        ) : null}
       </div>
-    </Notice>
+
+      <table aria-label={t('shifts:print.aria', { month: yearMonth })}>
+        <thead>
+          <tr>
+            <th scope="col" className="shift-board-print-name">{t('shifts:table.caddie')}</th>
+            <th scope="col" className="shift-board-print-streak">{t('shifts:streak.header')}</th>
+            {dates.map(date => (
+              <th key={date} scope="col" className={weekdayClassName(date)}>
+                <span>{Number(date.slice(8, 10))}</span>
+                <small>{weekdayLabel(date)}</small>
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ profile, row }) => (
+            <tr key={profile.id} data-employment-status={row.employmentStatus}>
+              <th scope="row" className="shift-board-print-name">
+                {profile.displayName}
+              </th>
+              <td
+                className="shift-board-print-streak"
+                data-long-streak={row.maxStreak >= STREAK_WARNING_DAYS || undefined}
+              >
+                {row.maxStreak > 0
+                  ? t('shifts:streak.days', { n: String(row.maxStreak) })
+                  : '—'}
+              </td>
+              {row.cells.map(cell => (
+                <td
+                  key={cell.date}
+                  data-kind={cell.kind}
+                  data-long-streak={cell.inLongStreak || undefined}
+                  data-pinned={cell.confirmed?.origin === 'pinned' || undefined}
+                  data-draft-change={source.changedDays?.has(
+                    shiftKey({ caddieProfileId: profile.id, date: cell.date }),
+                  ) || undefined}
+                  className={weekdayClassName(cell.date)}
+                >
+                  <span className="shift-board-print-mark">{cellDisplay(cell)}</span>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>,
+    document.body,
   )
 }
 
@@ -782,7 +1298,6 @@ function ShiftBoardResults({
   assignments,
   confirmedShifts,
   draftShifts,
-  courses,
   unsubmittedCaddies,
   loading,
   error,
@@ -798,9 +1313,8 @@ function ShiftBoardResults({
   availabilities: ShiftAvailability[]
   assignments: ShiftAssignment[]
   confirmedShifts: ConfirmedShift[]
-  /** The month a run proposed, drawn in place of what is confirmed today. */
+  /** A proposed month, used only by the read-only preview dialog. */
   draftShifts: ConfirmedShift[] | null
-  courses: GolfCourse[]
   unsubmittedCaddies: UnsubmittedCaddie[]
   loading: boolean
   error: unknown
@@ -813,12 +1327,9 @@ function ShiftBoardResults({
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const [canScrollBack, setCanScrollBack] = useState(false)
   const [canScrollForward, setCanScrollForward] = useState(false)
-  const courseById = useMemo(
-    () => new Map(courses.map(course => [course.id, course])),
-    [courses],
-  )
-  // While a plan is on screen the board draws it, not what is confirmed —
-  // that is the whole point of reading it before writing it.
+  // The normal page passes null here and therefore always draws confirmed
+  // shifts. The preview dialog passes the proposal to this same renderer so
+  // the difference is visible without changing the underlying board.
   const shownShifts = useMemo(
     () => (draftShifts ? withDraftShifts(confirmedShifts, draftShifts) : confirmedShifts),
     [confirmedShifts, draftShifts],
@@ -976,7 +1487,7 @@ function ShiftBoardResults({
                       key={date}
                       scope="col"
                       data-shift-date={date}
-                      className={isWeekend(date) ? 'shift-board-weekend' : undefined}
+                      className={weekdayClassName(date)}
                     >
                       <span className="shift-board-day">{Number(date.slice(8, 10))}</span>
                       <span className="shift-board-dow">{weekdayLabel(date)}</span>
@@ -995,7 +1506,7 @@ function ShiftBoardResults({
                             <CaddieLink caddieId={profile.id} displayName={profile.displayName} />
                           </span>
                           {statusLabel ? (
-                            <span className="shift-board-profile-status">
+                            <span className="shift-board-profile-status sr-only">
                               {statusLabel}
                             </span>
                           ) : null}
@@ -1017,7 +1528,7 @@ function ShiftBoardResults({
                           data-draft-change={changedDays?.has(
                             shiftKey({ caddieProfileId: profile.id, date: cell.date }),
                           ) || undefined}
-                          className={isWeekend(cell.date) ? 'shift-board-weekend' : undefined}
+                          className={weekdayClassName(cell.date)}
                         >
                           <button
                             type="button"
@@ -1040,11 +1551,6 @@ function ShiftBoardResults({
                             <span className="shift-board-mark" aria-hidden="true">
                               {cellDisplay(cell)}
                             </span>
-                            {cell.confirmed?.golfCourseId ? (
-                              <span className="shift-board-course" aria-hidden="true">
-                                {courseLabel(courseById.get(cell.confirmed.golfCourseId))}
-                              </span>
-                            ) : null}
                           </button>
                         </td>
                       ))}

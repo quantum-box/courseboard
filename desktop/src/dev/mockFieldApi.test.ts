@@ -45,6 +45,36 @@ describe('mockFieldApi', () => {
     expect(courseBody.items.length).toBeGreaterThanOrEqual(2)
   })
 
+  it('previews a shift plan without writing it to the confirmed board', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const month = '2031-08'
+    const before = resolveMockFieldApiJson(
+      `/v1/course/caddie-shifts?from=${month}-01&to=${month}-31`,
+    )
+    expect(before).toMatchObject({ kind: 'hit', data: { items: [] } })
+
+    const preview = resolveMockFieldApiJson(
+      `/v1/course/caddie-shift-plans/${month}/preview`,
+      { method: 'POST' },
+    )
+    expect(preview.kind).toBe('hit')
+    if (preview.kind !== 'hit') return
+    expect(preview.data).toMatchObject({
+      summary: { yearMonth: month },
+    })
+    expect((preview.data as { shifts: unknown[] }).shifts.length).toBeGreaterThan(0)
+
+    const after = resolveMockFieldApiJson(
+      `/v1/course/caddie-shifts?from=${month}-01&to=${month}-31`,
+    )
+    expect(after).toEqual(before)
+
+    expect(resolveMockFieldApiJson(
+      `/v1/course/caddie-availability-deadlines/${month}`,
+    )).toEqual({ kind: 'hit', data: { yearMonth: month, deadlineDate: `${month}-20` } })
+  })
+
   it('registers the staff member a caddie names when the body carries no link', () => {
     vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')

@@ -8,11 +8,11 @@ import {
   type ReactNode,
 } from 'react'
 
-type ReloadHandler = () => void
+type ReloadHandler = () => void | Promise<unknown>
 
 type PageReloadContextValue = {
   registerPageReload: (handler: ReloadHandler) => () => void
-  triggerPageReload: () => boolean
+  triggerPageReload: () => false | Promise<void>
 }
 
 const PageReloadContext = createContext<PageReloadContextValue | null>(null)
@@ -30,8 +30,8 @@ export function PageReloadProvider({ children }: { children: ReactNode }) {
   const triggerPageReload = useCallback(() => {
     const handlers = [...handlersRef.current]
     if (handlers.length === 0) return false
-    for (const handler of handlers) handler()
-    return true
+    return Promise.all(handlers.map(handler => Promise.resolve().then(handler)))
+      .then(() => undefined)
   }, [])
 
   const value = useMemo(
