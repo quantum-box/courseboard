@@ -15,6 +15,7 @@ mod course;
 mod course_order;
 mod course_supply;
 mod customer;
+mod customer_reception;
 mod demo_board;
 mod error;
 mod field_capabilities;
@@ -76,6 +77,12 @@ pub use customer::{
     Customer, CustomerSearchQuery, NewCustomer, DEFAULT_CUSTOMER_SEARCH_LIMIT,
     MAX_CUSTOMER_SEARCH_LIMIT,
 };
+pub use customer_reception::{
+    reception_sheet_schema, ReceptionDraft, ReceptionDraftRow, ReceptionOcrColumn,
+    ReceptionOcrField, ReceptionSheet, ReceptionSheetMediaType, MAX_RECEPTION_ROWS,
+    MAX_RECEPTION_SHEET_BYTES, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL,
+    RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
+};
 pub use demo_board::{
     demo_board, seed_tee_time, DemoBoard, SeedCourse, SeedGroup, SeedMark, SEED_DURATION_MINUTES,
     SEED_KEY_FIELD, SEED_PREFIX,
@@ -98,9 +105,9 @@ pub use payroll::{
     payroll_csv, summarize_payroll_in_timezone, AttendanceDay, PayrollCandidate, WorkedMinutes,
 };
 pub use ports::{
-    AvailabilityDeadlineGateway, CaddieShiftGateway, CustomerGateway, FieldCapabilitiesGateway,
-    GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
-    GolfOpsGateway, GolfTaxGateway, MembershipGateway, ReservationGateway,
+    AvailabilityDeadlineGateway, CaddieShiftGateway, CustomerGateway, CustomerReceptionOcrGateway,
+    FieldCapabilitiesGateway, GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway,
+    GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, MembershipGateway, ReservationGateway,
     ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery,
     TeeSheetQuery,
 };

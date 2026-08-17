@@ -310,6 +310,9 @@ export function routeTitle(route: string) {
   if (route === 'settings/advanced') return i18next.t('settings:advanced.title')
   if (route === 'settings') return navLabel('settings')
   if (isCaddieRosterRoute(route)) return navLabel('golf/caddies')
+  // Reading a sheet is its own piece of work, not a person's page, so it says
+  // so in the title bar rather than borrowing the ledger's name.
+  if (route === 'golf/customers/reception') return i18next.t('customers:reception.title')
   // A customer's own page carries the ledger's name in the title bar; the
   // person's name is already the first thing on the page itself.
   if (route.startsWith('golf/customers/')) return navLabel('golf/customers')

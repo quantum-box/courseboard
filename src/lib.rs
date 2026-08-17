@@ -435,6 +435,19 @@ pub fn build_router(state: AppState) -> Router {
                     require_valid_token,
                 )),
         )
+        // Static before the id route: `reception-draft` is a verb on the
+        // ledger, not somebody's customer id.
+        .route(
+            "/v1/course/customers/reception-draft",
+            post(course::interfaces::http_customers::draft_customer_reception)
+                .layer(DefaultBodyLimit::max(
+                    course::domain::MAX_RECEPTION_SHEET_BYTES + 256 * 1024,
+                ))
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
         .route(
             "/v1/course/customers/:customer_id",
             get(course::interfaces::http_customers::get_customer).route_layer(
