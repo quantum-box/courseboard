@@ -640,11 +640,11 @@ function StaffBasicsEditDialog({
   )
 }
 
-/** The caddie roster refused the edit that has to land before a delete. */
-class CaddieStandDownError extends Error {
+/** The caddie roster refused the delete that has to land before a delete. */
+class CaddieDeleteError extends Error {
   constructor(readonly reason: unknown) {
-    super('the caddie profile could not be suspended')
-    this.name = 'CaddieStandDownError'
+    super('the caddie profile could not be deleted')
+    this.name = 'CaddieDeleteError'
   }
 }
 
@@ -672,19 +672,18 @@ function StaffDeleteDialog({
     setBusy(true)
     setError(null)
     try {
-      // Stand the caddie down first, and abandon the delete if that fails.
+      // Delete the caddie first, and abandon the staff delete if that fails.
       //
-      // Deleting the staff member is the point of no return for their caddie
-      // profile too: Field resolves the profile's staff link through the staff
-      // record, and a deleted one is not found, so every later write to that
-      // profile fails — from here and from the caddie screen alike. A caddie
-      // stranded that way stays "出勤できる" on the assignment board with no
-      // way back.
-      await standCaddieDown()
+      // Failing in this order leaves both records as they were, which is the
+      // one outcome the operator can retry. The other order cannot be undone:
+      // Field resolves a profile's staff link through the staff record, so
+      // once the staff member is gone the caddie can only be reached by id
+      // from this screen.
+      await removeCaddie()
       await deleteStaffMember(fieldApiJson, row.staff.id)
       onDeleted()
     } catch (reason) {
-      if (reason instanceof CaddieStandDownError) {
+      if (reason instanceof CaddieDeleteError) {
         setError(t('staff:delete.error.caddie'))
       } else if (reason instanceof ApiError && reason.status === 403) {
         setError(t('staff:delete.error.forbidden'))
@@ -698,20 +697,23 @@ function StaffDeleteDialog({
   }
 
   /**
-   * Suspend the caddie profile, or refuse to go any further.
+   * Take the caddie off the roster, or refuse to go any further.
    *
    * Failing here leaves the staff member and their caddie exactly as they
-   * were — the one failure in this flow the operator can retry or undo.
+   * were — the one failure in this flow the operator can retry or undo. A
+   * caddie somebody else already deleted is not a failure: the roster is
+   * where this wanted it, so the staff delete carries on.
    */
-  async function standCaddieDown() {
+  async function removeCaddie() {
     if (!row.caddie) return
     try {
       await courseboardApiJson(
         `${COURSE_API}/caddie-profiles/${encodeURIComponent(row.caddie.id)}`,
-        request('PATCH', { employmentStatus: 'suspended' }),
+        request('DELETE'),
       )
     } catch (reason) {
-      throw new CaddieStandDownError(reason)
+      if (reason instanceof ApiError && reason.status === 404) return
+      throw new CaddieDeleteError(reason)
     }
   }
 

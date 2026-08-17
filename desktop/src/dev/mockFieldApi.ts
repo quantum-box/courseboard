@@ -3303,6 +3303,16 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     return hit(updated)
   }
 
+  if (caddieMatch && method === 'DELETE') {
+    const caddieId = decodeURIComponent(caddieMatch[1] ?? '')
+    const index = mockCaddies.findIndex(item => item.id === caddieId)
+    // Field keeps the row and hides it, but every read this app makes treats
+    // hidden as gone — and deleting a caddie twice is a 404.
+    if (index < 0) return error(404, `Mock caddie ${caddieId} was not found`)
+    mockCaddies.splice(index, 1)
+    return hit(null)
+  }
+
   const assignmentMatch = pathname.match(
     /^\/v1\/erp\/extensions\/golf-course\/caddie-assignments\/([^/]+)$/,
   )

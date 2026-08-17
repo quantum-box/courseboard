@@ -624,9 +624,12 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/v1/course/caddie-profiles/:id",
-            patch(course::interfaces::http_ops::update_caddie).route_layer(
-                middleware::from_fn_with_state(state.clone(), require_valid_token),
-            ),
+            patch(course::interfaces::http_ops::update_caddie)
+                .delete(course::interfaces::http_ops::delete_caddie)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
         )
         .route(
             "/v1/course/caddie-profiles/:id/courses",

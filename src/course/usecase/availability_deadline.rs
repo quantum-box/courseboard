@@ -216,6 +216,14 @@ mod tests {
             Err(CourseError::BadRequest("not used in test"))
         }
 
+        async fn delete_caddie(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _caddie_id: &CaddieId,
+        ) -> Result<(), CourseError> {
+            Err(CourseError::BadRequest("not used in test"))
+        }
+
         async fn list_caddie_assignments(
             &self,
             _credentials: GatewayCredentials<'_>,

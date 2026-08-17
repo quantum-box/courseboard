@@ -592,6 +592,17 @@ pub trait GolfOpsGateway: Send + Sync {
         input: UpsertCaddie,
     ) -> Result<Caddie, CourseError>;
 
+    /// Take a caddie off the roster.
+    ///
+    /// Upstream keeps the row and hides it, so the rounds, ratings and payroll
+    /// that point at this caddie still add up — what goes away is the roster
+    /// entry and every screen that plans future work from it.
+    async fn delete_caddie(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        caddie_id: &CaddieId,
+    ) -> Result<(), CourseError>;
+
     async fn list_caddie_assignments(
         &self,
         credentials: GatewayCredentials<'_>,

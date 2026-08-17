@@ -20,6 +20,7 @@ mod create_caddie_assignment;
 mod create_course;
 mod create_customer;
 mod create_reservation;
+mod delete_caddie;
 mod delete_caddie_availability;
 mod delete_course;
 mod export_monthly_settlement_csv;
@@ -92,6 +93,7 @@ pub use create_caddie_assignment::{CreateCaddieAssignmentUseCase, NameCaddieForR
 pub use create_course::CreateCourseUseCase;
 pub use create_customer::CreateCustomerUseCase;
 pub use create_reservation::{CreateReservationInput, CreateReservationUseCase};
+pub use delete_caddie::DeleteCaddieUseCase;
 pub use delete_caddie_availability::DeleteCaddieAvailabilityUseCase;
 pub use delete_course::DeleteCourseUseCase;
 pub use export_monthly_settlement_csv::ExportMonthlySettlementCsvUseCase;
