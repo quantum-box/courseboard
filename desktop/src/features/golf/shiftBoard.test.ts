@@ -306,6 +306,15 @@ describe('a month planned but not confirmed', () => {
     ])
   })
 
+  it('marks nothing when the month has never been confirmed', () => {
+    const changed = draftChangeKeys(
+      [shift('2026-06-30')],
+      [shift('2026-07-01'), shift('2026-07-02')],
+    )
+
+    expect([...changed]).toEqual([])
+  })
+
   it('does not call a day changed just because the run relabelled a hand edit', () => {
     const changed = draftChangeKeys(
       [shift('2026-07-01', { origin: 'edited' })],

@@ -74,11 +74,19 @@ export function shiftDiffers(saved: ConfirmedShift | undefined, draft: Confirmed
     || (saved.golfCourseId ?? null) !== (draft.golfCourseId ?? null)
 }
 
-/** Which days a proposed month would change, so the board can mark them. */
+/**
+ * Which days a proposed month would change, so the board can mark them.
+ *
+ * A month nobody has confirmed yet has no changes to show — every day would be
+ * marked, which says nothing and covers the board. The marks are for the run
+ * that replaces a month already in use.
+ */
 export function draftChangeKeys(
   confirmed: ConfirmedShift[],
   draft: ConfirmedShift[],
 ): Set<string> {
+  const draftDates = new Set(draft.map(shift => shift.date))
+  if (!confirmed.some(shift => draftDates.has(shift.date))) return new Set()
   const saved = new Map(confirmed.map(shift => [shiftKey(shift), shift]))
   const changed = new Set<string>()
   for (const shift of draft) {
