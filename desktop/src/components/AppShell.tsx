@@ -307,6 +307,9 @@ function isActive(route: string, itemRoute: string) {
 }
 
 export function routeTitle(route: string) {
+  if (route === 'golf/reservation-products' || route.startsWith('golf/reservation-products/')) {
+    return navLabel('golf/products')
+  }
   if (route === 'settings/advanced') return i18next.t('settings:advanced.title')
   if (route === 'settings') return navLabel('settings')
   if (isCaddieRosterRoute(route)) return navLabel('golf/caddies')
@@ -319,6 +322,27 @@ export function routeTitle(route: string) {
   const match = settingsNavigation.find(item => isActive(route, item.route))
     ?? allNavigation.find(item => isActive(route, item.route))
   return match ? navLabel(match.route) : i18next.t('common:app.name')
+}
+
+export function routeDescription(route: string) {
+  if (route === 'golf/reservation-products' || route.startsWith('golf/reservation-products/')) {
+    return navDescription('golf/products')
+  }
+  if (route === 'settings/advanced') return i18next.t('settings:advanced.description')
+  if (route === 'settings') return i18next.t('settings:description')
+  if (route === 'golf/customers/reception') return i18next.t('customers:reception.description')
+  if (route.startsWith('golf/customers/')) return navDescription('golf/customers')
+  const match = settingsNavigation.find(item => isActive(route, item.route))
+    ?? allNavigation.find(item => isActive(route, item.route))
+  return match ? navDescription(match.route) : i18next.t('nav:notFound.description')
+}
+
+export function isKnownAppRoute(route: string) {
+  if (route === 'golf/reservation-products' || route.startsWith('golf/reservation-products/')) return true
+  if (route === 'settings' || route === 'settings/advanced') return true
+  if (route === 'golf/customers/reception' || route.startsWith('golf/customers/')) return true
+  return settingsNavigation.some(item => isActive(route, item.route))
+    || allNavigation.some(item => isActive(route, item.route))
 }
 
 export function AppShell({ route, children }: { route: string; children: ReactNode }) {

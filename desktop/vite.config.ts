@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { fileURLToPath } from 'node:url'
 
 export default defineConfig(({ command, mode }) => {
   // Vite exposes .env files to application code automatically, but config-time
@@ -19,6 +20,17 @@ export default defineConfig(({ command, mode }) => {
     // there. Anything served over HTTP therefore needs an absolute base —
     // `/` here, `VITE_BASE_PATH` for a mount that is not the root.
     base: env.VITE_BASE_PATH ?? (command === 'serve' ? '/' : './'),
+    build: {
+      // Keep an indexable HTML entry for the one public route. Cloudflare's
+      // auto-trailing-slash handling serves download.html at /download, while
+      // every protected SPA route falls back to the noindex index.html shell.
+      rollupOptions: {
+        input: {
+          app: fileURLToPath(new URL('./index.html', import.meta.url)),
+          download: fileURLToPath(new URL('./download.html', import.meta.url)),
+        },
+      },
+    },
     clearScreen: false,
     server: {
       host: host || false,

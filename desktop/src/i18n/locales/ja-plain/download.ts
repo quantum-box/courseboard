@@ -3,6 +3,10 @@ import type { download as source } from '../ja/download'
 
 /** See `ja-plain/common.ts` for what this locale is for. */
 export const download: DeepPartial<typeof source> = {
+  meta: {
+    title: 'Course Board を受け取る',
+    description: 'ゴルフ場の仕事で使う Course Board の、Mac・Windows 向け最新版を受け取れます。',
+  },
   hero: {
     title: 'いつものパソコンで、コースの仕事を。',
     subtitle: 'パソコンに入れて使う Course Board を、ここから受け取れます。',

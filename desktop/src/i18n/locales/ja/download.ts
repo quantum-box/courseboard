@@ -1,4 +1,8 @@
 export const download = {
+  meta: {
+    title: 'Course Board をダウンロード',
+    description: 'ゴルフ場運営アプリ Course Board の Mac・Windows 向け最新版をダウンロードできます。',
+  },
   hero: {
     title: 'いつもの端末で、コース運営を。',
     subtitle: 'Course Board のデスクトップ版をダウンロードできます。',
