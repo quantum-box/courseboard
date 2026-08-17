@@ -70,7 +70,7 @@ import {
   type DataTableColumn,
 } from '../../components/Page'
 import { SectionErrorBoundary } from '../../components/SectionErrorBoundary'
-import { YearMonthPicker, useYearMonthValue } from '../../components/YearMonthPicker'
+import { YearMonthPicker, useRouteYearMonthValue } from '../../components/YearMonthPicker'
 import { weekdayIndexes, weekdayLabel } from './models'
 import {
   RecommendationExplanation,
@@ -78,7 +78,8 @@ import {
   type RecommendationForExplanation,
 } from './RecommendationExplanation'
 import { useResource } from '../../hooks/useResource'
-import { navigate, useNavigationGuard } from '../../lib/router'
+import { normalizeIsoDate } from '../../lib/clock'
+import { navigate, useNavigationGuard, useRouteParamState } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
 import { Sheet } from '../../components/Sheet'
 import { CaddieLink } from './CaddieLink'
@@ -580,7 +581,11 @@ export function CaddiesPage({
   const { t } = useTranslation(['caddies', 'common'])
   const timezone = useTenantTimezone()
   const [view, setView] = useState<View>(initialView)
-  const [operationDate, setOperationDate] = useState(() => today(timezone))
+  /** In the URL: the dispatch board and the attendance sheet are one day. */
+  const [operationDate, setOperationDate] = useRouteParamState('date', {
+    fallback: today(timezone),
+    normalize: normalizeIsoDate,
+  })
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(initialProfileId ?? null)
   const [createOpen, setCreateOpen] = useState(false)
 
@@ -684,16 +689,21 @@ export function CaddiesPage({
     recommendationsResource.refresh()
   }
 
+  /** The same route with the day on it, for moves that stay on this screen. */
+  function dayRoute(route: string) {
+    return `${route}?date=${encodeURIComponent(operationDate)}`
+  }
+
   function selectProfile(profileId: string) {
     setSelectedProfileId(profileId)
     setView('roster')
-    navigate(`golf/caddies/${encodeURIComponent(profileId)}`)
+    navigate(dayRoute(`golf/caddies/${encodeURIComponent(profileId)}`))
   }
 
   function backToRoster() {
     // Going back unmounts the detail screen and with it the day-off form, so ask
     // `navigate` first: it runs the unsaved-changes guard the detail registers.
-    if (!navigate('golf/caddies')) return
+    if (!navigate(dayRoute('golf/caddies'))) return
     setSelectedProfileId(null)
   }
 
@@ -736,10 +746,13 @@ export function CaddiesPage({
     <div className="page-stack">
       {showingRosterTabs ? (
         <div className="grid w-fit grid-cols-2 gap-1 rounded-lg border border-border bg-surface p-1" role="tablist" aria-label={t('caddies:tabs.label')}>
-          <DetailTabButton active={view === 'roster'} onClick={() => navigate('golf/caddies')}>
+          {/* Both tabs carry the day: this screen is not remounted by the
+              switch, but `navigate` rebuilds the hash from the route alone, so
+              a bare route would drop the operator back onto today. */}
+          <DetailTabButton active={view === 'roster'} onClick={() => navigate(dayRoute('golf/caddies'))}>
             <Users /> {t('caddies:tabs.list')}
           </DetailTabButton>
-          <DetailTabButton active={view === 'attendance'} onClick={() => navigate('golf/caddies/attendance')}>
+          <DetailTabButton active={view === 'attendance'} onClick={() => navigate(dayRoute('golf/caddies/attendance'))}>
             <Clock /> {t('caddies:tabs.attendance')}
           </DetailTabButton>
         </div>
@@ -3604,7 +3617,7 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
     value: yearMonth,
     error: yearMonthError,
     setCandidate: setYearMonth,
-  } = useYearMonthValue(previousYearMonth(timezone))
+  } = useRouteYearMonthValue('yearMonth', previousYearMonth(timezone))
   const [downloading, setDownloading] = useState(false)
   const [editingFees, setEditingFees] = useState(false)
   const feesResource = useResource(

@@ -1,42 +1,70 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  adoptLegacyLocation,
   currentRoute,
   currentRouteSearchParams,
+  currentTenantId,
   goBack,
   navigate,
   registerNavigationGuard,
+  replaceTenantId,
 } from './router'
 
 afterEach(() => vi.unstubAllGlobals())
 
-describe('hash routing', () => {
-  it('keeps hash query parameters out of the route', () => {
-    vi.stubGlobal('window', {
-      location: {
-        hash: '#/cancellation-fees/new?orderId=ord_1',
-        search: '',
-      },
-    })
+function stubLocation(url: string) {
+  const parsed = new URL(url)
+  vi.stubGlobal('window', {
+    location: {
+      href: parsed.href,
+      protocol: parsed.protocol,
+      pathname: parsed.pathname,
+      search: parsed.search,
+      hash: parsed.hash,
+    },
+  })
+}
 
-    expect(currentRoute()).toBe('cancellation-fees/new')
-    expect(currentRouteSearchParams().get('orderId')).toBe('ord_1')
+describe('reading a location', () => {
+  it('takes the tenant off the front of the path', () => {
+    stubLocation('http://localhost/tn_1/golf/ledger?date=2026-08-12')
+
+    expect(currentTenantId()).toBe('tn_1')
+    expect(currentRoute()).toBe('golf/ledger')
+    expect(currentRouteSearchParams().get('date')).toBe('2026-08-12')
   })
 
-  it('lets a hash query override the top-level query', () => {
-    vi.stubGlobal('window', {
-      location: {
-        hash: '#/cancellation-fees/new?orderId=ord_hash',
-        search: '?orderId=ord_top&mode=sandbox',
-      },
-    })
+  it('reads a link that names no tenant', () => {
+    // The first segment is a route the app renders, so it is not a club.
+    stubLocation('http://localhost/golf/ledger')
 
-    const params = currentRouteSearchParams()
-    expect(params.get('orderId')).toBe('ord_hash')
-    expect(params.get('mode')).toBe('sandbox')
+    expect(currentTenantId()).toBeNull()
+    expect(currentRoute()).toBe('golf/ledger')
+  })
+
+  it('leaves a payment link out of any tenant', () => {
+    // The payer has no club of their own to put in front of the token.
+    stubLocation('http://localhost/pay/tok_1')
+
+    expect(currentTenantId()).toBeNull()
+    expect(currentRoute()).toBe('pay/tok_1')
+  })
+
+  it('falls back to the home route', () => {
+    stubLocation('http://localhost/tn_1')
+
+    expect(currentTenantId()).toBe('tn_1')
+    expect(currentRoute()).toBe('golf')
+  })
+
+  it('still reads a query the old hash shape carries', () => {
+    stubLocation('http://localhost/cancellation-fees/new#/cancellation-fees/new?orderId=ord_1')
+
+    expect(currentRouteSearchParams().get('orderId')).toBe('ord_1')
   })
 })
 
-const ORIGIN = 'http://localhost/index.html'
+const ORIGIN = 'http://localhost'
 
 /**
  * The suite runs without a DOM, so the pieces of `window` the router touches are
@@ -46,21 +74,29 @@ const ORIGIN = 'http://localhost/index.html'
 function stubBrowser(initialRoute = 'golf') {
   const listeners = new Map<string, Set<(event: { type: string }) => void>>()
   const entries: { href: string; state: unknown }[] = [
-    { href: `${ORIGIN}#/${initialRoute}`, state: null },
+    { href: `${ORIGIN}/${initialRoute}`, state: null },
   ]
   let index = 0
 
-  const location = { href: entries[0].href, hash: `#/${initialRoute}`, search: '' }
+  const location = {
+    href: entries[0].href,
+    protocol: 'http:',
+    pathname: `/${initialRoute}`,
+    search: '',
+    hash: '',
+  }
 
   function resolve(url: string) {
-    return url.startsWith('#') ? `${ORIGIN}${url}` : url
+    return new URL(url, location.href).href
   }
 
   function apply() {
     const entry = entries[index]
-    location.href = entry.href
-    const hashAt = entry.href.indexOf('#')
-    location.hash = hashAt >= 0 ? entry.href.slice(hashAt) : ''
+    const parsed = new URL(entry.href)
+    location.href = parsed.href
+    location.pathname = parsed.pathname
+    location.search = parsed.search
+    location.hash = parsed.hash
     history.state = entry.state
   }
 
@@ -120,12 +156,73 @@ function stubBrowser(initialRoute = 'golf') {
   }
 }
 
+describe('the tenant in front of the route', () => {
+  it('keeps the tenant across a navigation', () => {
+    stubBrowser('tn_1/golf')
+
+    navigate('golf/ledger?date=2026-08-12')
+
+    expect(window.location.pathname).toBe('/tn_1/golf/ledger')
+    expect(window.location.search).toBe('?date=2026-08-12')
+    expect(currentTenantId()).toBe('tn_1')
+    expect(currentRoute()).toBe('golf/ledger')
+  })
+
+  it('puts the resolved tenant in front of the screen already open', () => {
+    stubBrowser('golf/ledger')
+
+    replaceTenantId('tn_1')
+
+    expect(window.location.pathname).toBe('/tn_1/golf/ledger')
+  })
+
+  it('takes the operator out of a tenant when they switch clubs', () => {
+    stubBrowser('tn_1/golf/ledger')
+
+    replaceTenantId()
+
+    expect(window.location.pathname).toBe('/golf/ledger')
+  })
+})
+
+describe('a link written for the old shape', () => {
+  it('moves the route out of the hash and the tenant into the path', () => {
+    // Bookmarks, and the payment links already sent to customers.
+    stubBrowser('')
+    window.history.replaceState(null, '', '/?tenant=tn_1#/golf/ledger?date=2026-08-12')
+
+    adoptLegacyLocation()
+
+    expect(window.location.pathname).toBe('/tn_1/golf/ledger')
+    expect(currentRouteSearchParams().get('date')).toBe('2026-08-12')
+    expect(currentRouteSearchParams().get('tenant')).toBeNull()
+  })
+
+  it('leaves a payment link tenant-less', () => {
+    stubBrowser('')
+    window.history.replaceState(null, '', '/#/pay/tok_1')
+
+    adoptLegacyLocation()
+
+    expect(window.location.pathname).toBe('/pay/tok_1')
+    expect(currentRoute()).toBe('pay/tok_1')
+  })
+
+  it('does nothing to a location already written the new way', () => {
+    stubBrowser('tn_1/golf/ledger')
+
+    adoptLegacyLocation()
+
+    expect(window.location.pathname).toBe('/tn_1/golf/ledger')
+  })
+})
+
 describe('unsaved-input guard', () => {
   it('cancels a navigate() the guard refuses', () => {
     stubBrowser()
     const unregister = registerNavigationGuard(() => false)
     try {
-      expect(navigate('caddies')).toBe(false)
+      expect(navigate('golf/caddies')).toBe(false)
       expect(currentRoute()).toBe('golf')
     } finally {
       unregister()
@@ -164,7 +261,7 @@ describe('unsaved-input guard', () => {
 
   it('restores the screen when the guard refuses a browser back', () => {
     const browser = stubBrowser()
-    navigate('caddies')
+    navigate('golf/caddies')
     const routeChanges = vi.fn()
     window.addEventListener('courseboard:navigate', routeChanges)
 
@@ -172,8 +269,8 @@ describe('unsaved-input guard', () => {
     try {
       window.history.back()
 
-      expect(currentRoute()).toBe('caddies')
-      expect(window.location.href).toBe(`${ORIGIN}#/caddies`)
+      expect(currentRoute()).toBe('golf/caddies')
+      expect(window.location.href).toBe(`${ORIGIN}/golf/caddies`)
       // The restore is a push, not an undo: the entry left behind stays behind,
       // and the pushed one replaces what was ahead of it.
       expect(browser.entryCount()).toBe(2)
@@ -187,7 +284,7 @@ describe('unsaved-input guard', () => {
 
   it('keeps navigating when the guard accepts a browser back', () => {
     stubBrowser()
-    navigate('caddies')
+    navigate('golf/caddies')
     const unregister = registerNavigationGuard(() => true)
     try {
       window.history.back()
@@ -199,12 +296,12 @@ describe('unsaved-input guard', () => {
 
   it('leaves a restored entry navigable again', () => {
     stubBrowser()
-    navigate('caddies')
+    navigate('golf/caddies')
     let guarded = true
     const unregister = registerNavigationGuard(() => !guarded)
     try {
       window.history.back()
-      expect(currentRoute()).toBe('caddies')
+      expect(currentRoute()).toBe('golf/caddies')
 
       // The operator saves, the screen stops holding anything, and back works.
       guarded = false
@@ -217,7 +314,7 @@ describe('unsaved-input guard', () => {
 
   it('asks once when the in-app back button already confirmed', () => {
     stubBrowser()
-    navigate('caddies')
+    navigate('golf/caddies')
     const guard = vi.fn(() => true)
     const unregister = registerNavigationGuard(guard)
     try {

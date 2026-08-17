@@ -43,6 +43,30 @@ export function currentYearMonth(timeZone = DEFAULT_TIME_ZONE) {
 }
 
 /**
+ * A `YYYY-MM-DD` day, or null when the value is not one.
+ *
+ * The boundary for days that arrive from outside the app — a link somebody
+ * shortened, a hand-edited URL. The calendar check is the point: `2026-02-31`
+ * matches the shape and is still a day no course ever works.
+ */
+export function normalizeIsoDate(candidate: unknown): string | null {
+  if (typeof candidate !== 'string') return null
+  const normalized = candidate.trim().normalize('NFKC')
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized)
+  if (!match) return null
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])]
+  const parsed = new Date(Date.UTC(year, month - 1, day))
+  if (
+    parsed.getUTCFullYear() !== year
+    || parsed.getUTCMonth() !== month - 1
+    || parsed.getUTCDate() !== day
+  ) {
+    return null
+  }
+  return normalized
+}
+
+/**
  * A `YYYY-MM-DD` value written the way the locale writes a date.
  *
  * Parsed by parts on purpose: `new Date('2026-08-10')` is midnight UTC, which

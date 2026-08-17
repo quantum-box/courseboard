@@ -36,8 +36,9 @@ import {
   ResourceError,
 } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
+import { normalizeIsoDate } from '../../../lib/clock'
 import { useRegisterPageReload } from '../../../lib/pageReload'
-import { navigate } from '../../../lib/router'
+import { navigate, useRouteParamState } from '../../../lib/router'
 import { useResource } from '../../../hooks/useResource'
 import type {
   AssignmentCoverage,
@@ -216,10 +217,15 @@ function coverageClass(coverage: AssignmentCoverage) {
 export function TimelinePage() {
   const { t } = useTranslation(['timeline', 'common'])
   const timezone = useTenantTimezone()
-  const [date, setDate] = useState(() => todayIsoDate(timezone))
+  /** In the URL, so a link to a day's tee sheet reopens on that day. */
+  const [date, setDate] = useRouteParamState('date', {
+    fallback: todayIsoDate(timezone),
+    normalize: normalizeIsoDate,
+  })
   const currentMinute = useCurrentMinute(timezone)
   const demoDate = demoDateOrNull()
-  const [courseFilter, setCourseFilter] = useState('all')
+  /** `all`, or the one course the sheet is narrowed to. */
+  const [courseFilter, setCourseFilter] = useRouteParamState('course', { fallback: 'all' })
   const [displayMode, setDisplayMode] = useState<DisplayMode>(readDisplayMode)
   const [boardView, setBoardView] = useState<BoardView>(readBoardView)
   const [pxPerHour, setPxPerHour] = useState(readPxPerHour)

@@ -1,6 +1,6 @@
 import { isDesktopWindowTabOpenClick } from '@tachyon-sdk/native-ui'
 import { invoke, isTauri } from '@tauri-apps/api/core'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 
 const NAVIGATE_EVENT = 'courseboard:navigate'
 const NAVIGATION_STATE_KEY = '__courseboardNavigation'
@@ -49,20 +49,203 @@ function currentNavigationEntry(): NavigationEntryState {
   return initial
 }
 
+/**
+ * A location reads `{base}/{tenantId}/{route}?{query}`.
+ *
+ * The tenant is a path segment rather than a query parameter because it is not
+ * a filter on a screen: it says which club's board the rest of the URL is
+ * about, and everything under it — every route, every id in it — only means
+ * anything inside that tenant.
+ *
+ * Tauri and any `file://` build keep the same shape inside the hash. Their
+ * webview loads `index.html` off disk, so a deep path is a file that is not
+ * there: a reload or a second tab would 404 rather than open the board.
+ */
+function usesHashLocation() {
+  return isTauri() || window.location.protocol === 'file:'
+}
+
+/** Where the SPA is mounted (`/` on Workers, `/ui/` behind axum). */
+function basePath() {
+  const base = import.meta.env.BASE_URL
+  if (!base || !base.startsWith('/')) return '/'
+  return base.endsWith('/') ? base : `${base}/`
+}
+
+/**
+ * Route roots, so the first segment can be told apart from a tenant id.
+ *
+ * A link is allowed to leave the tenant off — `/golf/ledger` opens the tenant
+ * the operator last used — and something has to decide which of the two a
+ * leading `golf` is. Keep in step with the routes `App` renders.
+ */
+const ROUTE_ROOTS = new Set([
+  'golf',
+  'staff',
+  'settings',
+  'cancellation-fees',
+  'course-map',
+  'pay',
+  'download',
+])
+
+/** The whole path, tenant included, with no leading or trailing slash. */
+function currentLocationPath() {
+  if (usesHashLocation()) {
+    return trimSlashes(window.location.hash.replace(/^#/, '').split('?', 1)[0] ?? '')
+  }
+  const path = window.location.pathname
+  const base = basePath()
+  const relative = path.startsWith(base) ? path.slice(base.length) : path
+  return trimSlashes(relative)
+}
+
+function trimSlashes(value: string) {
+  return value.replace(/^\/+/, '').replace(/\/+$/, '')
+}
+
+function splitLocation(path: string) {
+  const segments = trimSlashes(path).split('/').filter(Boolean)
+  const first = segments[0]
+  // `pay` and `download` are the same page for everyone, and a customer opening
+  // a payment link has no tenant of their own to put in front of it.
+  if (!first || ROUTE_ROOTS.has(first)) return { tenantId: null, route: segments.join('/') }
+  return { tenantId: decodeRouteSegment(first), route: segments.slice(1).join('/') }
+}
+
+function decodeRouteSegment(value: string) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+/** The tenant the URL names, or null while the app has yet to resolve one. */
+export function currentTenantId(): string | null {
+  return splitLocation(currentLocationPath()).tenantId
+}
+
 export function currentRoute() {
-  const hashPath = window.location.hash.replace(/^#\/?/, '').split('?', 1)[0] ?? ''
-  const value = hashPath.replace(/\/+$/, '')
-  return value || 'golf'
+  return splitLocation(currentLocationPath()).route || 'golf'
 }
 
 export function currentRouteSearchParams() {
   const params = new URLSearchParams(window.location.search)
+  // Links issued before the route moved out of the hash carry their query
+  // there; the hash wins because it is the one written next to the route.
   const queryIndex = window.location.hash.indexOf('?')
   if (queryIndex >= 0) {
     const hashParams = new URLSearchParams(window.location.hash.slice(queryIndex + 1))
     hashParams.forEach((value, key) => params.set(key, value))
   }
   return params
+}
+
+/** The query as the current location writes it, with no legacy merging. */
+function currentWrittenSearchParams() {
+  if (!usesHashLocation()) return new URLSearchParams(window.location.search)
+  const queryIndex = window.location.hash.indexOf('?')
+  return new URLSearchParams(queryIndex >= 0 ? window.location.hash.slice(queryIndex + 1) : '')
+}
+
+/** A whole URL for a route, so links can be built without navigating. */
+export function routeHref(route: string, query?: URLSearchParams | string) {
+  const tenantId = currentTenantId()
+  const path = [tenantId ? encodeURIComponent(tenantId) : null, trimSlashes(route)]
+    .filter(Boolean)
+    .join('/')
+  const search = query?.toString() ?? ''
+  const suffix = `${path}${search ? `?${search}` : ''}`
+  return usesHashLocation() ? `#/${suffix}` : `${basePath()}${suffix}`
+}
+
+/**
+ * Rewrites the query the current route carries. An empty or null value drops
+ * the parameter.
+ *
+ * A `replaceState`, not a push: changing a filter is the same screen looking
+ * somewhere else, so back keeps meaning "the screen before this one" instead of
+ * turning into a date stepper the operator has to click through.
+ */
+export function replaceRouteSearchParams(updates: Record<string, string | null | undefined>) {
+  const params = currentWrittenSearchParams()
+  for (const [key, value] of Object.entries(updates)) {
+    if (value === null || value === undefined || value === '') params.delete(key)
+    else params.set(key, value)
+  }
+  const next = routeHref(currentRoute(), params)
+  if (currentHref() === next) return
+  window.history.replaceState(historyStateRecord(), '', next)
+  if (unsavedListenersAttached) rememberLocation()
+  // `replaceState` notifies nobody, so the screens reading the query would keep
+  // showing what it said before.
+  window.dispatchEvent(new Event(NAVIGATE_EVENT))
+}
+
+/** What `routeHref` would return for where the app is now. */
+function currentHref() {
+  return usesHashLocation()
+    ? window.location.hash
+    : `${window.location.pathname}${window.location.search}`
+}
+
+/**
+ * Puts a tenant in front of the route the app is already showing.
+ *
+ * A replace, not a push: the tenant was always the one the app resolved — the
+ * URL just did not say so yet — and back should leave the screen rather than
+ * step through the same screen without its tenant.
+ */
+export function replaceTenantId(tenantId?: string) {
+  const path = [tenantId ? encodeURIComponent(tenantId) : null, currentRoute()]
+    .filter(Boolean)
+    .join('/')
+  const params = currentWrittenSearchParams()
+  // Only ever set by the pre-tenant URL shape, and now said by the path.
+  params.delete('tenant')
+  const search = params.toString()
+  const suffix = `${path}${search ? `?${search}` : ''}`
+  const next = usesHashLocation() ? `#/${suffix}` : `${basePath()}${suffix}`
+  if (currentHref() === next) return
+  window.history.replaceState(historyStateRecord(), '', next)
+  if (unsavedListenersAttached) rememberLocation()
+  window.dispatchEvent(new Event(NAVIGATE_EVENT))
+}
+
+/**
+ * Moves a link written for the old shape onto the current one, once, at boot.
+ *
+ * `#/golf/ledger` was the whole app until the tenant moved into the path, and
+ * `?tenant=` was where the tenant lived. Both are still in circulation —
+ * bookmarks, and the payment links already sent to customers — so they are
+ * translated rather than 404'd.
+ */
+export function adoptLegacyLocation() {
+  if (usesHashLocation()) return
+  const hash = window.location.hash
+  const legacyRoute = hash.startsWith('#/') ? hash.slice(2) : ''
+  const search = new URLSearchParams(window.location.search)
+  const legacyTenant = search.get('tenant')
+  if (!legacyRoute && !legacyTenant) return
+
+  const [routePart, queryPart] = legacyRoute.split('?', 2)
+  const params = new URLSearchParams(queryPart ?? '')
+  search.forEach((value, key) => {
+    if (key !== 'tenant' && !params.has(key)) params.set(key, value)
+  })
+  const route = trimSlashes(routePart ?? '') || currentRoute()
+  const { tenantId: routeTenant, route: bareRoute } = splitLocation(route)
+  const tenantId = routeTenant ?? legacyTenant ?? currentTenantId()
+  const path = [tenantId ? encodeURIComponent(tenantId) : null, bareRoute]
+    .filter(Boolean)
+    .join('/')
+  const query = params.toString()
+  window.history.replaceState(
+    historyStateRecord(),
+    '',
+    `${basePath()}${path}${query ? `?${query}` : ''}`,
+  )
 }
 
 type NavigationGuard = () => boolean
@@ -201,11 +384,18 @@ export function useNavigationGuard(guard: NavigationGuard | null | undefined) {
   }, [enabled])
 }
 
-/** False when a guard cancelled the navigation, so callers can stay put. */
+/**
+ * False when a guard cancelled the navigation, so callers can stay put.
+ *
+ * `route` may carry its own query (`golf/caddies/attendance?date=…`) for the
+ * moves that have to keep what the screen is showing; the tenant is never
+ * written by the caller — it is where the app already is.
+ */
 export function navigate(route: string) {
   const normalized = route.replace(/^#?\/?/, '')
-  const nextHash = `#/${normalized}`
-  if (window.location.hash === nextHash) return true
+  const [path, query] = normalized.split('?', 2)
+  const next = routeHref(path ?? '', query)
+  if (currentHref() === next) return true
   if (!confirmNavigation()) return false
 
   const current = currentNavigationEntry()
@@ -221,7 +411,7 @@ export function navigate(route: string) {
   window.history.pushState(
     { [NAVIGATION_STATE_KEY]: { index: nextIndex, maxIndex: nextIndex } },
     '',
-    nextHash,
+    next,
   )
   if (unsavedListenersAttached) rememberLocation()
   window.dispatchEvent(new Event(NAVIGATE_EVENT))
@@ -236,9 +426,14 @@ export function navigateFromClick(event: NavigationClickEvent, route: string) {
   }
 
   event.preventDefault()
-  const normalized = route.replace(/^#?\/?/, '')
+  const tenantId = currentTenantId()
+  const suffix = [tenantId ? encodeURIComponent(tenantId) : null, route.replace(/^#?\/?/, '')]
+    .filter(Boolean)
+    .join('/')
+  // A new webview loads the bundled file, so the route rides in the hash even
+  // when the running window is showing it as a path.
   invoke('create_courseboard_tab', {
-    path: `index.html#/${normalized}`,
+    path: `index.html#/${suffix}`,
     activate: false,
   }).catch(console.error)
 }
@@ -290,4 +485,68 @@ export function useRoute() {
     }
   }, [])
   return route
+}
+
+/**
+ * A filter the screen keeps in the URL rather than in itself.
+ *
+ * What the desk is looking at is a day, not a screen: a link that carries no
+ * date reopens on today, which is the wrong day for everyone it was sent to,
+ * and a reload throws away the day somebody had paged to. Keeping the value in
+ * the query makes reload, a second window and a pasted link show the same
+ * board.
+ *
+ * `fallback` is read once, the way a `useState` initializer is: the tenant
+ * timezone can arrive after the first render, and a "today" that moves
+ * underneath the operator would take the board with it.
+ *
+ * `normalize` rejects what nobody typed on purpose — a truncated link, a
+ * hand-edited URL — and the screen falls back rather than asking Field for a
+ * day that does not exist.
+ */
+export function useRouteParamState(
+  key: string,
+  {
+    fallback,
+    normalize = value => value.trim() || null,
+  }: {
+    fallback: string
+    normalize?: (raw: string) => string | null
+  },
+): [string, Dispatch<SetStateAction<string>>] {
+  const fallbackRef = useRef(fallback)
+  const normalizeRef = useRef(normalize)
+  normalizeRef.current = normalize
+
+  /** Null when the URL says nothing this screen can show. */
+  const readParam = useCallback(() => {
+    const raw = currentRouteSearchParams().get(key)
+    return raw === null ? null : normalizeRef.current(raw)
+  }, [key])
+
+  const [value, setValue] = useState(() => readParam() ?? fallbackRef.current)
+
+  useEffect(() => {
+    replaceRouteSearchParams({ [key]: value })
+  }, [key, value])
+
+  // Back, forward and a pasted URL all change the query without going through
+  // the setter, so the screen follows the URL as well as writing to it.
+  useEffect(() => {
+    // A route the screen survives — one screen's tabs — has to carry the value
+    // with it: `navigate` builds the hash from the route alone, so a bare route
+    // reads here as "no day named" and the screen falls back to today. Those
+    // call sites pass it on the route: `golf/caddies/attendance?date=…`.
+    const onRouteChange = () => setValue(readParam() ?? fallbackRef.current)
+    window.addEventListener('hashchange', onRouteChange)
+    window.addEventListener('popstate', onRouteChange)
+    window.addEventListener(NAVIGATE_EVENT, onRouteChange)
+    return () => {
+      window.removeEventListener('hashchange', onRouteChange)
+      window.removeEventListener('popstate', onRouteChange)
+      window.removeEventListener(NAVIGATE_EVENT, onRouteChange)
+    }
+  }, [key, readParam])
+
+  return [value, setValue]
 }

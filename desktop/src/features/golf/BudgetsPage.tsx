@@ -40,7 +40,8 @@ import {
   Panel,
   ResourceError,
 } from '../../components/Page'
-import { YearMonthPicker, useYearMonthValue } from '../../components/YearMonthPicker'
+import { YearMonthPicker, useRouteYearMonthValue } from '../../components/YearMonthPicker'
+import { useRouteParamState } from '../../lib/router'
 import { yearMonthRange } from '../../lib/yearMonth'
 
 type GolfCourse = {
@@ -158,8 +159,9 @@ export function BudgetsPage() {
     value: yearMonth,
     error: yearMonthError,
     setCandidate: setYearMonth,
-  } = useYearMonthValue(tenantYearMonth)
-  const [courseFilter, setCourseFilter] = useState('all')
+  } = useRouteYearMonthValue('yearMonth', tenantYearMonth)
+  /** `all`, or the one course the month is narrowed to. */
+  const [courseFilter, setCourseFilter] = useRouteParamState('course', { fallback: 'all' })
   const [courses, setCourses] = useState<GolfCourse[]>([])
   const [budgets, setBudgets] = useState<DailyBudget[]>([])
   const [achievements, setAchievements] = useState<DailyBudgetAchievement[]>([])

@@ -22,6 +22,7 @@ import {
 import { resolveTenantSelection } from './tenant-selection'
 import { i18next } from '../i18n'
 import { clearResourceCache } from '../hooks/useResource'
+import { currentTenantId, replaceTenantId } from '../lib/router'
 
 type AuthContextValue = {
   state: AuthState
@@ -43,16 +44,11 @@ type AuthContextValue = {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 function selectedTenant(user: AuthUser, tenants: AuthTenant[]) {
-  const requested = new URLSearchParams(window.location.search).get('tenant')
+  // The tenant is the first path segment; a link that leaves it off asks for
+  // whichever one this operator was last working in.
+  const requested = currentTenantId()
   const saved = localStorage.getItem(`courseboard.auth.tenant.${user.id}`)
   return resolveTenantSelection(tenants, requested, saved)
-}
-
-function replaceRequestedTenant(tenantId?: string) {
-  const url = new URL(window.location.href)
-  if (tenantId) url.searchParams.set('tenant', tenantId)
-  else url.searchParams.delete('tenant')
-  window.history.replaceState(window.history.state, '', url)
 }
 
 function resolveIdentity(state: AuthState) {
@@ -150,7 +146,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     writeLastReadySession(user, tenant)
     // Keep the active tenant visible in the URL so links can be shared and a
     // reload always restores the same tenant, even when it was auto-selected.
-    replaceRequestedTenant(tenant.id)
+    replaceTenantId(tenant.id)
     setState({ status: 'ready', user, tenant })
   }, [bindTenant])
 
@@ -269,7 +265,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (state.status !== 'selecting-tenant' && state.status !== 'forbidden') return
     if (!state.user || !availableTenants.some(available => available.id === tenant.id)) return
     localStorage.setItem(`courseboard.auth.tenant.${state.user.id}`, tenant.id)
-    replaceRequestedTenant(tenant.id)
+    replaceTenantId(tenant.id)
     activateTenant(state.user, tenant)
   }, [activateTenant, availableTenants, state])
 
@@ -280,7 +276,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!currentUser || availableTenants.length === 0) return
     clearResourceCache()
     clearApiAuth()
-    replaceRequestedTenant()
+    replaceTenantId()
     setState({ status: 'selecting-tenant', user: currentUser, tenants: availableTenants })
   }, [availableTenants, clearApiAuth, state])
 
