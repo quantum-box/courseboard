@@ -39,6 +39,7 @@
     - [CourseboardからFieldへのテナント文脈伝播を修正する](src/tasks/completed/v0.1.8/fix-courseboard-field-tenant-context/task.md)
   - [v0.1.6]()
     - [Courseboard human token issuerのCognito統一](src/tasks/completed/v0.1.6/cognito-human-token-issuer/task.md)
+    - [ページごとのメタ情報を整える](src/tasks/completed/v0.1.6/page-metadata-seo/task.md)
   - [v0.1.2]()
     - [courseboard-api Cloud App deployment](src/tasks/completed/v0.1.2/courseboard-api-cloud-app/task.md)
     - [Desktopタブとアプリ内更新](src/tasks/completed/v0.1.2/desktop-tabs-and-updater/task.md)

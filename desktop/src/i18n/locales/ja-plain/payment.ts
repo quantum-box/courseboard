@@ -6,6 +6,9 @@ import type { payment as source } from '../ja/payment'
  * internal course vocabulary. See `ja-plain/common.ts` for the wider policy.
  */
 export const payment: DeepPartial<typeof source> = {
+  meta: {
+    description: 'Course Board から届いたリンクで、キャンセル料を支払います。',
+  },
   unavailable: 'この支払いの画面は、今はご利用いただけません。お手数ですが、ゴルフ場にお問い合わせください。',
   loadFailed: '内容を読み込めませんでした',
   formFailed: '支払いの入力欄を用意できませんでした',

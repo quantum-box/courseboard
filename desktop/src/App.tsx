@@ -38,6 +38,7 @@ import { PaymentPage } from './PaymentPage'
 import { MacOSTabStrip } from './components/MacOSTabStrip'
 import { TenantTimezoneProvider } from './context/TenantTimezoneProvider'
 import { FeatureFlagProvider } from './feature-flags/FeatureFlags'
+import { PageMetadata } from './lib/pageMetadata'
 
 const WS_URL = 'ws://127.0.0.1:9001/ws'
 
@@ -53,27 +54,32 @@ export default function App() {
 function AppContent() {
   const route = useRoute()
 
-  if (route === 'download') return <DownloadPage />
+  if (route === 'download') {
+    return <><PageMetadata route={route} /><DownloadPage /></>
+  }
 
   if (route.startsWith('pay/')) {
-    return <PaymentPage token={route.slice('pay/'.length)} />
+    return <><PageMetadata route={route} /><PaymentPage token={route.slice('pay/'.length)} /></>
   }
 
   const operatorWebUrl = import.meta.env.VITE_COURSEBOARD_OPERATOR_WEB_URL
   if (operatorWebUrl) return <OperatorWebRedirect href={operatorWebUrl} />
 
   return (
-    <AuthProvider>
-      <AuthGate>
-        <FeatureFlagProvider>
-          <TenantTimezoneProvider>
-            <AppShell route={route}>
-              <RouteContent route={route} />
-            </AppShell>
-          </TenantTimezoneProvider>
-        </FeatureFlagProvider>
-      </AuthGate>
-    </AuthProvider>
+    <>
+      <PageMetadata route={route} />
+      <AuthProvider>
+        <AuthGate>
+          <FeatureFlagProvider>
+            <TenantTimezoneProvider>
+              <AppShell route={route}>
+                <RouteContent route={route} />
+              </AppShell>
+            </TenantTimezoneProvider>
+          </FeatureFlagProvider>
+        </AuthGate>
+      </AuthProvider>
+    </>
   )
 }
 

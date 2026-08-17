@@ -1,5 +1,8 @@
 /** Customer-facing payment page and the invoice PDF. */
 export const payment = {
+  meta: {
+    description: 'Course Board から届いたキャンセル料のお支払い手続きを行います。',
+  },
   unavailable: 'この支払いリンクは今は使えません。お手数ですが、ゴルフ場へお問い合わせください。',
   loadFailed: '支払いの情報を読み込めませんでした',
   formFailed: '支払いのフォームを用意できませんでした',

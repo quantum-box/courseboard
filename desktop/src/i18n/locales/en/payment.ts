@@ -2,6 +2,9 @@ import type { DeepPartial } from '../../types'
 import type { payment as source } from '../ja/payment'
 
 export const payment: DeepPartial<typeof source> = {
+  meta: {
+    description: 'Pay a cancellation fee securely from a Course Board payment link.',
+  },
   unavailable: 'This payment link is not available right now. Please contact the golf course.',
   loadFailed: 'Could not load the payment details',
   formFailed: 'Could not prepare the payment form',
