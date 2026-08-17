@@ -2,11 +2,157 @@ actions:
 - context: field_extension_golf
   name: CalculateTax
   description: Calculate golf extension tax for a TACHYON Field reservation
+  global: true
+- context: field_extension_golf
+  name: ListShifts
+  description: Read caddie shift plans, shift rules, and availability deadlines
+  global: true
+- context: field_extension_golf
+  name: ManageShifts
+  description: Create and update caddie shift plans, shift rules, and availability deadlines
+  global: true
+- context: field_extension_golf
+  name: ListSlotOverrides
+  description: Read tee sheet slot overrides
+  global: true
+- context: field_extension_golf
+  name: ManageSlotOverrides
+  description: Create, update, and delete tee sheet slot overrides
+  global: true
+- context: field_extension_golf
+  name: CalculateFees
+  description: Run golf fee and golf-course-tax simulations
+  global: true
+- context: field_extension_golf
+  name: ManageCancellationFees
+  description: Create cancellation fee collections and issue their invoices
+  global: true
+- context: field_extension_golf
+  name: SeedDemoBoard
+  description: Seed demo reservations and rosters onto the tenant board
+  global: true
 policies:
 - name: field-extension:golf:calculator
   description: Allows TACHYON Field core to call the golf extension tax calculation API
   global: true
   actions:
   - action: field_extension_golf:CalculateTax
+    effect: allow
+  action_patterns: []
+- name: field-extension:golf:viewer
+  description: Read-only access to the golf board - tee sheet, reservations, caddies, shifts, and fee simulation
+  global: true
+  actions:
+  - action: field:ListReservations
+    effect: allow
+  - action: field:ListHrm
+    effect: allow
+  - action: field:ListCustomers
+    effect: allow
+  - action: field:ListMembership
+    effect: allow
+  - action: field_extension_golf:ListShifts
+    effect: allow
+  - action: field_extension_golf:ListSlotOverrides
+    effect: allow
+  - action: field_extension_golf:CalculateFees
+    effect: allow
+  action_patterns: []
+- name: field-extension:golf:reception
+  description: Front-desk work - take and change reservations, manage the tee sheet, register customers and memberships
+  global: true
+  actions:
+  - action: field:ListReservations
+    effect: allow
+  - action: field:ManageReservations
+    effect: allow
+  - action: field:ListCustomers
+    effect: allow
+  - action: field:ManageCustomers
+    effect: allow
+  - action: field:ListMembership
+    effect: allow
+  - action: field:RegisterMembership
+    effect: allow
+  - action: field_extension_golf:ListSlotOverrides
+    effect: allow
+  - action: field_extension_golf:ManageSlotOverrides
+    effect: allow
+  - action: field_extension_golf:CalculateFees
+    effect: allow
+  action_patterns: []
+- name: field-extension:golf:caddie-master
+  description: Caddie operations - rosters, assignments, availability, and shift planning
+  global: true
+  actions:
+  - action: field:ListReservations
+    effect: allow
+  - action: field:ManageReservations
+    effect: allow
+  - action: field:ListHrm
+    effect: allow
+  - action: field:ManageHrm
+    effect: allow
+  - action: field_extension_golf:ListShifts
+    effect: allow
+  - action: field_extension_golf:ManageShifts
+    effect: allow
+  - action: field_extension_golf:ListSlotOverrides
+    effect: allow
+  action_patterns: []
+- name: field-extension:golf:accounting
+  description: Golf accounting - settlement and payroll summaries, fee simulation, cancellation fee collection. Reservations stay read-only
+  global: true
+  actions:
+  - action: field:ListReservations
+    effect: allow
+  - action: field:ListHrm
+    effect: allow
+  - action: accounting:CreateInvoice
+    effect: allow
+  - action: field_extension_golf:ListShifts
+    effect: allow
+  - action: field_extension_golf:CalculateFees
+    effect: allow
+  - action: field_extension_golf:ManageCancellationFees
+    effect: allow
+  action_patterns: []
+- name: field-extension:golf:manager
+  description: Full golf operations - everything the golf roles cover. Member management stays with the Field administrator role
+  global: true
+  actions:
+  - action: field:ListReservations
+    effect: allow
+  - action: field:ManageReservations
+    effect: allow
+  - action: field:ListHrm
+    effect: allow
+  - action: field:ManageHrm
+    effect: allow
+  - action: field:ListCustomers
+    effect: allow
+  - action: field:ManageCustomers
+    effect: allow
+  - action: field:ListMembership
+    effect: allow
+  - action: field:ManageMembership
+    effect: allow
+  - action: field:RegisterMembership
+    effect: allow
+  - action: accounting:CreateInvoice
+    effect: allow
+  - action: field_extension_golf:ListShifts
+    effect: allow
+  - action: field_extension_golf:ManageShifts
+    effect: allow
+  - action: field_extension_golf:ListSlotOverrides
+    effect: allow
+  - action: field_extension_golf:ManageSlotOverrides
+    effect: allow
+  - action: field_extension_golf:CalculateFees
+    effect: allow
+  - action: field_extension_golf:ManageCancellationFees
+    effect: allow
+  - action: field_extension_golf:SeedDemoBoard
     effect: allow
   action_patterns: []

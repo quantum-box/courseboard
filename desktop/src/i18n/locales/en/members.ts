@@ -94,6 +94,26 @@ export const members: DeepPartial<typeof source> = {
     },
   },
   policies: {
+    golfManager: {
+      label: 'Course manager',
+      description: 'Can create and update everything in golf operations — reservations, tee sheet, caddies, shifts, customers, memberships, settlement, and cancellation fees. Member management is not included.',
+    },
+    golfReception: {
+      label: 'Front desk',
+      description: 'Can create and update reservations, the tee sheet, customers, and memberships, and run fee simulations. Caddies and shifts are out of reach.',
+    },
+    golfCaddieMaster: {
+      label: 'Caddie master',
+      description: 'Can create and update the caddie roster, assignments, availability, and shifts. Customers and memberships are out of reach.',
+    },
+    golfAccounting: {
+      label: 'Golf accounting',
+      description: 'Can run monthly settlement, payroll summaries, and fee simulations, and collect cancellation fees. Reservations are read-only.',
+    },
+    golfViewer: {
+      label: 'Golf viewer',
+      description: 'Read-only access to the tee sheet, reservations, caddies, and shifts, plus fee simulation. Cannot create or update.',
+    },
     fieldSales: {
       label: 'Sales',
       description: 'Can create and update deals, customers, orders, memberships, and sales tasks. Products and sales analytics are read-only.',

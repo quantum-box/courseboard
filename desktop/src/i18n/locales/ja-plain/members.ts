@@ -95,6 +95,26 @@ export const members: DeepPartial<typeof source> = {
     },
   },
   policies: {
+    golfManager: {
+      label: '支配人',
+      description: 'ゴルフ場の仕事ぜんぶ（予約・ティーシート・キャディ・シフト・お客さま・お金）を入れたり直したりできます。メンバーを決めることはできません。',
+    },
+    golfReception: {
+      label: 'フロント・予約',
+      description: '予約とティーシート、お客さまと会員の登録や書きかえ、料金の計算ができます。キャディとシフトは扱えません。',
+    },
+    golfCaddieMaster: {
+      label: 'キャディマスター',
+      description: 'キャディの名簿・割り当て・出勤・シフトを入れたり直したりできます。お客さまの情報は扱えません。',
+    },
+    golfAccounting: {
+      label: 'ゴルフ経理',
+      description: '月のしめ・給与のまとめ・料金の計算・キャンセル料の請求ができます。予約は見るだけです。',
+    },
+    golfViewer: {
+      label: 'ゴルフ閲覧',
+      description: 'ティーシート・予約・キャディ・シフトを見ることと、料金の計算ができます。入れたり直したりはできません。',
+    },
     fieldSales: {
       label: '営業のしごと',
       description: 'お客さま・注文・会員の登録と書きかえができます。商品と売上のまとめは見るだけです。',

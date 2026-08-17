@@ -546,6 +546,14 @@ const mockIamCustomPolicies = [
   { id: 'pol_caddie_admin', name: 'キャディ管理管理者', description: '名簿・配置・勤怠・給与の作成・更新' },
   { id: 'pol_billing_viewer', name: '経理閲覧者', description: '予算・精算・キャンセル料の閲覧' },
   { id: 'pol_billing_admin', name: '経理管理者', description: '予算・精算・キャンセル料の作成・更新' },
+  // The golf roles from `.tachyon/manifests/tachyonfield-golf-auth.yml`, with
+  // the manifest's English descriptions the way the real catalogue carries
+  // them — the screen is expected to replace both with its own wording.
+  { id: 'pol_golf_manager', name: 'field-extension:golf:manager', description: 'Full golf operations - everything the golf roles cover. Member management stays with the Field administrator role' },
+  { id: 'pol_golf_reception', name: 'field-extension:golf:reception', description: 'Front-desk work - take and change reservations, manage the tee sheet, register customers and memberships' },
+  { id: 'pol_golf_caddie_master', name: 'field-extension:golf:caddie-master', description: 'Caddie operations - rosters, assignments, availability, and shift planning' },
+  { id: 'pol_golf_accounting', name: 'field-extension:golf:accounting', description: 'Golf accounting - settlement and payroll summaries, fee simulation, cancellation fee collection. Reservations stay read-only' },
+  { id: 'pol_golf_viewer', name: 'field-extension:golf:viewer', description: 'Read-only access to the golf board - tee sheet, reservations, caddies, shifts, and fee simulation' },
 ]
 
 const mockIamMembers: Array<{

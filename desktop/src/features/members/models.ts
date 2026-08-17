@@ -189,6 +189,28 @@ const POLICY_TEXT: ReadonlyMap<string, { label: () => string; description: () =>
     label: () => i18next.t('members:policies.fieldSaasApprover.label'),
     description: () => i18next.t('members:policies.fieldSaasApprover.description'),
   }],
+  // The golf roles this repository defines in
+  // `.tachyon/manifests/tachyonfield-golf-auth.yml`.
+  ['field-extension:golf:manager', {
+    label: () => i18next.t('members:policies.golfManager.label'),
+    description: () => i18next.t('members:policies.golfManager.description'),
+  }],
+  ['field-extension:golf:reception', {
+    label: () => i18next.t('members:policies.golfReception.label'),
+    description: () => i18next.t('members:policies.golfReception.description'),
+  }],
+  ['field-extension:golf:caddie-master', {
+    label: () => i18next.t('members:policies.golfCaddieMaster.label'),
+    description: () => i18next.t('members:policies.golfCaddieMaster.description'),
+  }],
+  ['field-extension:golf:accounting', {
+    label: () => i18next.t('members:policies.golfAccounting.label'),
+    description: () => i18next.t('members:policies.golfAccounting.description'),
+  }],
+  ['field-extension:golf:viewer', {
+    label: () => i18next.t('members:policies.golfViewer.label'),
+    description: () => i18next.t('members:policies.golfViewer.description'),
+  }],
 ])
 
 /** What the checklist and badges should print for one catalogue policy. */
