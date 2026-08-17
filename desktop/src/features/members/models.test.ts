@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
   customPolicyNames,
+  domainPolicies,
   inviteResultMessage,
   isAdminSelected,
   memberDisplayName,
   memberPolicyIds,
+  policyIdByName,
   roleBadgeVariant,
   roleLabel,
   rolePermissionSummary,
@@ -12,6 +14,7 @@ import {
   sortMembers,
   togglePolicySelection,
   validateInviteEmail,
+  type ErpCustomPolicy,
   type ErpMember,
 } from './models'
 
@@ -28,11 +31,25 @@ function member(overrides: Partial<ErpMember>): ErpMember {
   }
 }
 
+/**
+ * What the tenant can see: the three basic roles, one domain policy, and the
+ * retired names that are still in the catalogue but must never be offered.
+ */
+const CATALOG: ErpCustomPolicy[] = [
+  { id: 'pol_admin_new', name: 'field:administrator', description: '管理者' },
+  { id: 'pol_operator_new', name: 'field:operator', description: 'スタッフ' },
+  { id: 'pol_reader_new', name: 'field:reader', description: '閲覧者' },
+  { id: 'pol_reservations', name: 'field:reservations', description: '予約担当' },
+  { id: 'pol_old_admin', name: 'field:admin', description: '旧・管理者' },
+  { id: 'pol_old_staff', name: 'field:staff', description: '旧・スタッフ' },
+  { id: 'pol_old_viewer', name: 'field:viewer', description: '旧・閲覧者' },
+]
+
 describe('roleLabel', () => {
   it('maps ERP roles to fieldadmin-consistent labels', () => {
-    expect(roleLabel(member({ role: 'field:admin' }))).toBe('管理者')
-    expect(roleLabel(member({ role: 'field:staff' }))).toBe('スタッフ')
-    expect(roleLabel(member({ role: 'field:viewer' }))).toBe('閲覧者')
+    expect(roleLabel(member({ role: 'field:administrator' }))).toBe('管理者')
+    expect(roleLabel(member({ role: 'field:operator' }))).toBe('スタッフ')
+    expect(roleLabel(member({ role: 'field:reader' }))).toBe('閲覧者')
   })
 
   it('labels owners and unassigned members', () => {
@@ -45,9 +62,9 @@ describe('roleLabel', () => {
 describe('roleBadgeVariant', () => {
   it('distinguishes owner and admin from other members', () => {
     expect(roleBadgeVariant(member({ isOwner: true }))).toBe('accent')
-    expect(roleBadgeVariant(member({ role: 'field:admin' }))).toBe('success')
-    expect(roleBadgeVariant(member({ role: 'field:staff' }))).toBe('warning')
-    expect(roleBadgeVariant(member({ role: 'field:viewer' }))).toBe('neutral')
+    expect(roleBadgeVariant(member({ role: 'field:administrator' }))).toBe('success')
+    expect(roleBadgeVariant(member({ role: 'field:operator' }))).toBe('warning')
+    expect(roleBadgeVariant(member({ role: 'field:reader' }))).toBe('neutral')
     expect(roleBadgeVariant(member({ role: null }))).toBe('neutral')
   })
 })
@@ -55,69 +72,106 @@ describe('roleBadgeVariant', () => {
 describe('rolePermissionSummary', () => {
   it('describes each access level', () => {
     expect(rolePermissionSummary(member({ isOwner: true }))).toContain('AdministratorAccess')
-    expect(rolePermissionSummary(member({ role: 'field:admin' }))).toContain('メンバー')
-    expect(rolePermissionSummary(member({ role: 'field:viewer' }))).toContain('閲覧')
+    expect(rolePermissionSummary(member({ role: 'field:administrator' }))).toContain('メンバー')
+    expect(rolePermissionSummary(member({ role: 'field:reader' }))).toContain('閲覧')
     expect(rolePermissionSummary(member({ role: null }))).toContain('未割り当て')
   })
 })
 
-describe('rolePolicyId / memberPolicyIds', () => {
-  it('maps response roles to their pol_erp_* policy ids', () => {
-    expect(rolePolicyId('field:admin')).toBe('pol_erp_admin')
-    expect(rolePolicyId('field:staff')).toBe('pol_erp_staff')
-    expect(rolePolicyId('field:viewer')).toBe('pol_erp_viewer')
-    expect(rolePolicyId('field:unknown')).toBeNull()
-    expect(rolePolicyId(null)).toBeNull()
+describe('policyIdByName / rolePolicyId', () => {
+  it('resolves ids from the tenant catalogue rather than a constant', () => {
+    expect(rolePolicyId(CATALOG, 'field:administrator')).toBe('pol_admin_new')
+    expect(rolePolicyId(CATALOG, 'field:operator')).toBe('pol_operator_new')
+    expect(rolePolicyId(CATALOG, 'field:reader')).toBe('pol_reader_new')
+    expect(rolePolicyId(CATALOG, 'field:unknown')).toBeNull()
+    expect(rolePolicyId(CATALOG, null)).toBeNull()
   })
 
+  it('answers null for a role this tenant cannot see', () => {
+    // This is what broke: the id was a constant, so a policy that had been
+    // deleted platform-side was still sent and rejected.
+    expect(rolePolicyId([], 'field:operator')).toBeNull()
+    expect(policyIdByName([], 'field:operator')).toBeNull()
+  })
+})
+
+describe('domainPolicies', () => {
+  it('leaves out the basic roles, which are listed separately', () => {
+    expect(domainPolicies(CATALOG).map(policy => policy.id)).toEqual(['pol_reservations'])
+  })
+
+  it('leaves out the retired names, which grant strictly less', () => {
+    const names = domainPolicies(CATALOG).map(policy => policy.name)
+    expect(names).not.toContain('field:admin')
+    expect(names).not.toContain('field:staff')
+    expect(names).not.toContain('field:viewer')
+  })
+})
+
+describe('memberPolicyIds', () => {
   it('builds the flat policy list from a member', () => {
-    expect(memberPolicyIds({ role: 'field:staff', customPolicyIds: ['pol_caddie_viewer'] }))
-      .toEqual(['pol_erp_staff', 'pol_caddie_viewer'])
-    expect(memberPolicyIds({ role: null, customPolicyIds: ['pol_caddie_viewer'] }))
-      .toEqual(['pol_caddie_viewer'])
+    expect(memberPolicyIds(
+      { role: 'field:operator', customPolicyIds: ['pol_reservations'] },
+      CATALOG,
+    )).toEqual(['pol_operator_new', 'pol_reservations'])
+    expect(memberPolicyIds({ role: null, customPolicyIds: ['pol_reservations'] }, CATALOG))
+      .toEqual(['pol_reservations'])
+  })
+
+  it('drops a role the catalogue no longer has instead of sending a dead id', () => {
+    expect(memberPolicyIds(
+      { role: 'field:operator', customPolicyIds: ['pol_reservations'] },
+      [],
+    )).toEqual(['pol_reservations'])
   })
 })
 
 describe('togglePolicySelection', () => {
-  it('keeps the three role policies mutually exclusive', () => {
+  it('keeps the three basic roles mutually exclusive', () => {
     const next = togglePolicySelection(
-      ['pol_erp_staff', 'pol_caddie_viewer'],
-      'pol_erp_viewer',
+      CATALOG,
+      ['pol_operator_new', 'pol_reservations'],
+      'pol_reader_new',
       true,
     )
-    expect(next).toEqual(['pol_caddie_viewer', 'pol_erp_viewer'])
+    expect(next).toEqual(['pol_reservations', 'pol_reader_new'])
   })
 
   it('selecting 管理者 clears every other policy', () => {
     const next = togglePolicySelection(
-      ['pol_erp_staff', 'pol_caddie_viewer'],
-      'pol_erp_admin',
+      CATALOG,
+      ['pol_operator_new', 'pol_reservations'],
+      'pol_admin_new',
       true,
     )
-    expect(next).toEqual(['pol_erp_admin'])
-    expect(isAdminSelected(next)).toBe(true)
+    expect(next).toEqual(['pol_admin_new'])
+    expect(isAdminSelected(CATALOG, next)).toBe(true)
   })
 
   it('toggles domain policies independently', () => {
-    const added = togglePolicySelection(['pol_erp_staff'], 'pol_caddie_viewer', true)
-    expect(added).toEqual(['pol_erp_staff', 'pol_caddie_viewer'])
-    const removed = togglePolicySelection(added, 'pol_caddie_viewer', false)
-    expect(removed).toEqual(['pol_erp_staff'])
+    const added = togglePolicySelection(CATALOG, ['pol_operator_new'], 'pol_reservations', true)
+    expect(added).toEqual(['pol_operator_new', 'pol_reservations'])
+    const removed = togglePolicySelection(CATALOG, added, 'pol_reservations', false)
+    expect(removed).toEqual(['pol_operator_new'])
   })
 
-  it('allows a domain-only selection with no exclusive role', () => {
-    const next = togglePolicySelection([], 'pol_caddie_viewer', true)
-    expect(next).toEqual(['pol_caddie_viewer'])
-    expect(isAdminSelected(next)).toBe(false)
+  it('allows a domain-only selection with no basic role', () => {
+    const next = togglePolicySelection(CATALOG, [], 'pol_reservations', true)
+    expect(next).toEqual(['pol_reservations'])
+    expect(isAdminSelected(CATALOG, next)).toBe(false)
+  })
+
+  it('does not treat an unknown id as the administrator role', () => {
+    expect(isAdminSelected([], ['pol_admin_new'])).toBe(false)
   })
 })
 
 describe('sortMembers', () => {
   it('orders owner, admin, staff, viewer, then unassigned', () => {
     const owner = member({ id: 'us_owner', isOwner: true, name: 'Zオーナー' })
-    const admin = member({ id: 'us_admin', role: 'field:admin', name: 'A管理者' })
-    const staff = member({ id: 'us_staff', role: 'field:staff', name: 'Bスタッフ' })
-    const viewer = member({ id: 'us_viewer', role: 'field:viewer', name: 'C閲覧' })
+    const admin = member({ id: 'us_admin', role: 'field:administrator', name: 'A管理者' })
+    const staff = member({ id: 'us_staff', role: 'field:operator', name: 'Bスタッフ' })
+    const viewer = member({ id: 'us_viewer', role: 'field:reader', name: 'C閲覧' })
     const none = member({ id: 'us_none', role: null, name: 'D未割当' })
     const sorted = sortMembers([none, viewer, staff, admin, owner])
     expect(sorted.map(entry => entry.id)).toEqual([
@@ -180,7 +234,7 @@ describe('inviteResultMessage', () => {
     const message = inviteResultMessage({
       invitationSent: false,
       email: 'existing@example.com',
-      user: member({ name: '既存 花子', role: 'field:staff' }),
+      user: member({ name: '既存 花子', role: 'field:operator' }),
       customPolicyIds: [],
     })
     expect(message).toContain('既存 花子')
