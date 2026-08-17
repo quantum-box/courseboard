@@ -13,12 +13,12 @@ use super::{
     DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
     GenerationSummary, InventoryWatermark, MembershipPlan, MembershipPlanId, MonthlySettlement,
     NewCustomer, NewReservation, PartyDetails, ProductSlot, RecommendationQuery,
-    ReplaceCaddieMemberships, Reservation, ReservationId, ReservationPolicy, ReservationProduct,
-    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
-    SeededReservation, ShiftPolicy, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot,
-    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan,
-    UpsertReservationProduct, WorkedMinutes, YearMonth,
+    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
+    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
+    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
+    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
+    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
+    UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Credentials forwarded from the inbound HTTP request to outbound Field calls.
@@ -314,6 +314,18 @@ pub trait ReservationGateway: Send + Sync {
         reservation_id: &ReservationId,
         service_id: &ReservationServiceId,
         ends_at: DateTime<Utc>,
+    ) -> Result<(), CourseError>;
+
+    /// Change who the booking is for and how many are playing.
+    ///
+    /// Like the plan write and unlike the party write, this leaves
+    /// `customFields` alone: the group detail is not what changed, and Field
+    /// replaces that object wholesale when it is sent.
+    async fn update_reservation_booking(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        reservation_id: &ReservationId,
+        update: &ReservationBookingUpdate,
     ) -> Result<(), CourseError>;
 
     /// Replaces the group detail CourseBoard keeps on one reservation.

@@ -5,7 +5,7 @@ use derive_getters::Getters;
 
 use super::party::PartyDetails;
 use super::product::PlayType;
-use super::{format_tenant_wall_clock, CourseError, CourseId, ReservationId};
+use super::{format_tenant_wall_clock, CourseError, CourseId, CustomerId, ReservationId};
 
 pub const DEFAULT_DAY_START_HOUR: u32 = 6;
 pub const DEFAULT_DAY_END_HOUR: u32 = 18;
@@ -69,6 +69,13 @@ pub struct TeeSheetItem {
     party_size: i32,
     #[getter(skip)]
     party_name: String,
+    /// Who the booking is for in Field's ledger, once the desk has said so.
+    ///
+    /// `party_name` is what the desk typed when it took the call; this is who
+    /// that turned out to be. Carried onto the board so reopening the booking
+    /// shows the link it already has instead of an unidentified name.
+    #[getter(skip)]
+    customer_id: Option<CustomerId>,
     /// The competition, group number, and named players the desk keeps.
     ///
     /// Empty until someone enters them: a reservation arrives from Field with a
@@ -118,6 +125,7 @@ impl TeeSheetItem {
             play_type,
             party_size: party_size.max(1),
             party_name: party_name.into(),
+            customer_id: None,
             party: PartyDetails::default(),
             status,
             holes: if holes > 0 { holes } else { 18 },
@@ -128,6 +136,15 @@ impl TeeSheetItem {
     pub fn with_party(mut self, party: PartyDetails) -> Self {
         self.party = party;
         self
+    }
+
+    pub fn with_customer_id(mut self, customer_id: Option<CustomerId>) -> Self {
+        self.customer_id = customer_id;
+        self
+    }
+
+    pub fn customer_id(&self) -> Option<&CustomerId> {
+        self.customer_id.as_ref()
     }
 
     pub fn party(&self) -> &PartyDetails {

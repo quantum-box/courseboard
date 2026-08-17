@@ -712,7 +712,7 @@ export function LedgerPage() {
         onSaved={(reservationId, party) =>
           setLocalParties(current => ({ ...current, [reservationId]: party }))
         }
-        onPlanChanged={() => ledger.refresh()}
+        onReservationChanged={() => ledger.refresh()}
       />
     </div>
   )

@@ -69,6 +69,7 @@ mod update_caddie_assignment;
 mod update_caddie_shift;
 mod update_course;
 mod update_extension_config;
+mod update_reservation_booking;
 mod update_reservation_party;
 mod update_reservation_policy;
 mod upsert_caddie_availability;
@@ -154,6 +155,9 @@ pub use update_caddie_assignment::UpdateCaddieAssignmentUseCase;
 pub use update_caddie_shift::UpdateCaddieShiftUseCase;
 pub use update_course::UpdateCourseUseCase;
 pub use update_extension_config::UpdateExtensionConfigUseCase;
+pub use update_reservation_booking::{
+    UpdateReservationBookingInput, UpdateReservationBookingUseCase,
+};
 pub use update_reservation_party::UpdateReservationPartyUseCase;
 pub use update_reservation_policy::UpdateReservationPolicyUseCase;
 pub use upsert_caddie_availability::UpsertCaddieAvailabilityUseCase;

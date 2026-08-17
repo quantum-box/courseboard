@@ -224,7 +224,8 @@ fn to_tee_sheet_item(
         holes,
         reservation.notes().map(str::to_string),
     )
-    .with_party(reservation.party().clone()))
+    .with_party(reservation.party().clone())
+    .with_customer_id(reservation.customer_id().cloned()))
 }
 
 #[cfg(test)]
@@ -272,6 +273,15 @@ mod tests {
             _reservation_id: &crate::course::domain::ReservationId,
             _service_id: &crate::course::domain::ReservationServiceId,
             _ends_at: chrono::DateTime<chrono::Utc>,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn update_reservation_booking(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &crate::course::domain::ReservationId,
+            _update: &crate::course::domain::ReservationBookingUpdate,
         ) -> Result<(), CourseError> {
             unimplemented!("not used")
         }

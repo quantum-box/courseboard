@@ -208,6 +208,25 @@ pub struct NewReservation {
     pub seed_key: Option<String>,
 }
 
+/// What the desk can change on a booking it has already taken.
+///
+/// The caller's name and the headcount are entered when the booking is taken
+/// and are corrected constantly afterwards — a group turns up as three, the
+/// call was written down under the wrong name. Neither lives in the golf group
+/// detail: they are the generic booking's own fields, so they are written on
+/// their own rather than folded into the party write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReservationBookingUpdate {
+    pub customer_name: String,
+    /// The ledger entry for the caller, when the desk has identified one.
+    ///
+    /// `None` leaves whatever link the booking already has: Field resolves the
+    /// customer on its own side and offers no way to clear one, so an absent id
+    /// means "not saying" rather than "unlink".
+    pub customer_id: Option<CustomerId>,
+    pub quantity: i32,
+}
+
 /// A booking the seed already wrote, as found on a re-run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeededReservation {
