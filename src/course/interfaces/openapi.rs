@@ -95,6 +95,7 @@ impl Modify for SecurityAddon {
         http_customers::assign_membership_plan,
         http_ops::create_caddie,
         http_ops::update_caddie,
+        http_ops::delete_caddie,
         http_ops::create_caddie_assignment,
         http_ops::get_course_caddie_supply,
         http_ops::list_caddie_reinforcements,

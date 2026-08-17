@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApiError } from '../../api'
 import { clearResourceCache } from '../../hooks/useResource'
 import { i18next } from '../../i18n'
 import { PageReloadProvider } from '../../lib/pageReload'
@@ -23,13 +24,14 @@ const CADDIE_ID = 'caddie_aya'
 
 /**
  * Field resolves a caddie profile's staff link on every write, so once the
- * staff member is deleted the profile can no longer be edited — from this
- * screen or from the caddie screen. The delete flow therefore has to suspend
- * the caddie while the staff member still exists.
+ * staff member is deleted the profile can only be reached by id from this
+ * screen. The delete flow therefore has to take the caddie off the roster
+ * while the staff member still exists.
  */
 let staffDeleted = false
 let calls: string[] = []
-let caddieStandDownFails = false
+let caddieDeleteFails = false
+let caddieAlreadyGone = false
 
 function staffMember() {
   return {
@@ -69,7 +71,8 @@ describe('StaffPage delete path', () => {
     window.history.replaceState({}, '', '/')
     clearResourceCache()
     staffDeleted = false
-    caddieStandDownFails = false
+    caddieDeleteFails = false
+    caddieAlreadyGone = false
     calls = []
     toast.show.mockReset()
 
@@ -86,22 +89,23 @@ describe('StaffPage delete path', () => {
 
     api.course.mockReset()
     api.course.mockImplementation(async (path: string, init?: RequestInit) => {
-      if (path.startsWith('/v1/course/caddie-profiles/') && init?.method === 'PATCH') {
-        calls.push('caddie:patch')
-        if (caddieStandDownFails || staffDeleted) {
+      if (path.startsWith('/v1/course/caddie-profiles/') && init?.method === 'DELETE') {
+        calls.push('caddie:delete')
+        if (caddieAlreadyGone) throw new ApiError('golf caddie profile not found', 404)
+        if (caddieDeleteFails || staffDeleted) {
           throw new Error('NotFoundError: staff member not found')
         }
-        return {}
+        return undefined
       }
       if (path === '/v1/course/caddie-profiles') {
         return {
-          items: [{
+          items: staffDeleted ? [] : [{
             id: CADDIE_ID,
             displayName: '佐藤 彩',
             skillLevel: 'veteran',
             rank: 'A',
             employmentStatus: 'active',
-            staffId: staffDeleted ? null : STAFF_ID,
+            staffId: STAFF_ID,
           }],
         }
       }
@@ -114,28 +118,41 @@ describe('StaffPage delete path', () => {
 
   afterEach(cleanup)
 
-  it('suspends the caddie before deleting, never after', async () => {
+  it('deletes the caddie before the staff member, never after', async () => {
     fireEvent.click(await openConfirmation())
 
     await waitFor(() => expect(calls).toContain('staff:delete'))
-    // The order is the whole point: a caddie suspended after the delete would
-    // be refused by Field and stranded as "出勤できる" on the assignment board.
-    expect(calls).toEqual(['caddie:patch', 'staff:delete'])
+    // The order is the whole point: Field refuses every write to a caddie
+    // whose staff member is already gone, so the other order would strand the
+    // caddie on the assignment board with no way back.
+    expect(calls).toEqual(['caddie:delete', 'staff:delete'])
     expect(toast.show).toHaveBeenCalledWith(
       expect.objectContaining({ tone: 'success' }),
     )
   })
 
-  it('calls the delete off when the caddie cannot be stood down', async () => {
-    caddieStandDownFails = true
+  it('calls the delete off when the caddie cannot be removed', async () => {
+    caddieDeleteFails = true
     fireEvent.click(await openConfirmation())
 
     await waitFor(() => expect(screen.getByText(
-      /キャディ名簿を「止めている」にできなかったので、削除を中止しました/,
+      /キャディ名簿から削除できなかったので、削除を中止しました/,
     )).toBeTruthy())
     // Both records are left as they were, so the operator can retry.
-    expect(calls).toEqual(['caddie:patch'])
+    expect(calls).toEqual(['caddie:delete'])
     expect(staffDeleted).toBe(false)
     expect(toast.show).not.toHaveBeenCalled()
+  })
+
+  it('carries on when the caddie was already deleted elsewhere', async () => {
+    caddieAlreadyGone = true
+    fireEvent.click(await openConfirmation())
+
+    // A 404 means the roster is already where this wanted it, so refusing to
+    // delete the staff member would leave the operator stuck for no reason.
+    await waitFor(() => expect(calls).toEqual(['caddie:delete', 'staff:delete']))
+    expect(toast.show).toHaveBeenCalledWith(
+      expect.objectContaining({ tone: 'success' }),
+    )
   })
 })

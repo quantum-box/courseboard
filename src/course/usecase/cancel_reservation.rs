@@ -281,6 +281,14 @@ mod tests {
             unimplemented!("not used")
         }
 
+        async fn delete_caddie(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _caddie_id: &CaddieId,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+
         async fn list_caddie_assignments(
             &self,
             _credentials: GatewayCredentials<'_>,

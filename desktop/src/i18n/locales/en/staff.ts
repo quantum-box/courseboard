@@ -77,7 +77,7 @@ export const staff = {
       title: 'Remove {{name}} from the roster?',
       description: 'They disappear from the staff roster and from every screen that searches it.',
       warning: 'There is no way to undo this. For leave or retirement, change the status under "Edit basics" instead.',
-      caddieNotice: 'This person holds a caddie duty. Their caddie profile is suspended first. Rounds and ratings are kept.',
+      caddieNotice: 'This person holds a caddie duty. Their caddie profile is removed along with them. Rounds and ratings are kept.',
       keep: 'Keep',
       submit: 'Remove',
       submitting: 'Removing…',
@@ -85,7 +85,7 @@ export const staff = {
     error: {
       forbidden: 'You cannot remove staff. Ask an administrator for the field:ManageHrm permission.',
       notFound: 'This staff member has already been removed. Reload the roster.',
-      caddie: 'The caddie profile could not be suspended, so the removal was called off. Both records are untouched. Change the status from the caddie screen and try again.',
+      caddie: 'The caddie profile could not be removed, so the removal was called off. Both records are untouched. Try again.',
       failed: 'The staff member could not be removed. Try again.',
     },
   },

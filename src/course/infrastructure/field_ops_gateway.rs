@@ -187,6 +187,23 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         Ok(map_caddie(dto, &staff_names))
     }
 
+    async fn delete_caddie(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        caddie_id: &CaddieId,
+    ) -> Result<(), CourseError> {
+        let path = format!("{GOLF}/caddie-profiles/{}", urlencoding_path(caddie_id));
+        field_send_unit(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::DELETE,
+            &path,
+            credentials,
+            None,
+        )
+        .await
+    }
+
     async fn list_caddie_assignments(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -943,7 +960,7 @@ mod tests {
     use axum::{
         extract::OriginalUri,
         http::StatusCode,
-        routing::{get, patch, post},
+        routing::{delete, get, patch, post},
         Json, Router,
     };
 
@@ -1201,6 +1218,56 @@ mod tests {
             error,
             CourseError::UpstreamClient { status: 409, message }
                 if message == "このスタッフは田中さんに既に紐付いています"
+        ));
+    }
+
+    /// Field answers a delete with 204 and no body. Routing the test server on
+    /// `delete` alone also pins the verb: a PATCH would come back 405, not Ok.
+    #[tokio::test]
+    async fn deleting_a_caddie_accepts_an_empty_204_from_field() {
+        let app = Router::new().route(
+            "/v1/erp/extensions/golf-course/caddie-profiles/caddie-1",
+            delete(|| async { StatusCode::NO_CONTENT }),
+        );
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
+
+        gateway
+            .delete_caddie(
+                test_credentials(),
+                &CaddieId::try_new("caddie-1").expect("valid caddie id"),
+            )
+            .await
+            .expect("a 204 from Field means the caddie is gone");
+    }
+
+    /// A caddie somebody else already deleted has to stay a 404 here, so the
+    /// staff delete can tell "already gone" apart from a provider failure.
+    #[tokio::test]
+    async fn deleting_a_missing_caddie_stays_404() {
+        let app = Router::new().route(
+            "/v1/erp/extensions/golf-course/caddie-profiles/caddie-1",
+            delete(|| async {
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(json!({ "message": "golf caddie profile not found" })),
+                )
+            }),
+        );
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
+
+        let error = gateway
+            .delete_caddie(
+                test_credentials(),
+                &CaddieId::try_new("caddie-1").expect("valid caddie id"),
+            )
+            .await
+            .expect_err("a caddie that is not there cannot be deleted");
+
+        assert!(matches!(
+            error,
+            CourseError::UpstreamClient { status: 404, .. }
         ));
     }
 

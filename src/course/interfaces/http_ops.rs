@@ -29,16 +29,17 @@ use crate::course::domain::{
 };
 use crate::course::usecase::{
     AutoAssignCaddiesUseCase, CreateCaddieAssignmentUseCase, CreateCaddieUseCase,
-    DeleteCaddieAvailabilityUseCase, ExportPayrollCsvUseCase, GenerateCaddieShiftsUseCase,
-    GeneratedMonth, GetAttendanceSnapshotUseCase, GetAvailabilityDeadlineUseCase,
-    GetCaddieRankFeesUseCase, GetCaddieSupplyUseCase, GetCourseCaddieSupplyUseCase,
-    GetPayrollSummaryUseCase, GetShiftRulesUseCase, ListAttendancePeriodSnapshotsUseCase,
-    ListCaddieAvailabilitiesUseCase, ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase,
-    ListCaddieRecommendationsUseCase, ListCaddieShiftsUseCase, ListCourseReinforcementsUseCase,
-    ListUnsubmittedCaddiesUseCase, NameCaddieForRound, ReinforcementCandidate,
-    ReplaceCaddieMembershipsUseCase, ReplaceCaddieRankFeesUseCase, UpdateCaddieAssignmentUseCase,
-    UpdateCaddieShiftUseCase, UpdateCaddieUseCase, UpdateShiftRulesUseCase,
-    UpsertAvailabilityDeadlineUseCase, UpsertCaddieAvailabilityUseCase,
+    DeleteCaddieAvailabilityUseCase, DeleteCaddieUseCase, ExportPayrollCsvUseCase,
+    GenerateCaddieShiftsUseCase, GeneratedMonth, GetAttendanceSnapshotUseCase,
+    GetAvailabilityDeadlineUseCase, GetCaddieRankFeesUseCase, GetCaddieSupplyUseCase,
+    GetCourseCaddieSupplyUseCase, GetPayrollSummaryUseCase, GetShiftRulesUseCase,
+    ListAttendancePeriodSnapshotsUseCase, ListCaddieAvailabilitiesUseCase,
+    ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase, ListCaddieRecommendationsUseCase,
+    ListCaddieShiftsUseCase, ListCourseReinforcementsUseCase, ListUnsubmittedCaddiesUseCase,
+    NameCaddieForRound, ReinforcementCandidate, ReplaceCaddieMembershipsUseCase,
+    ReplaceCaddieRankFeesUseCase, UpdateCaddieAssignmentUseCase, UpdateCaddieShiftUseCase,
+    UpdateCaddieUseCase, UpdateShiftRulesUseCase, UpsertAvailabilityDeadlineUseCase,
+    UpsertCaddieAvailabilityUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -213,6 +214,35 @@ pub async fn update_caddie(
         .await
         .map_err(AppError::from)?;
     Ok(Json(CaddieDto::from(&caddie)))
+}
+
+/// DELETE /v1/course/caddie-profiles/:id
+#[utoipa::path(
+    delete,
+    path = "/v1/course/caddie-profiles/{id}",
+    tag = "course-ops",
+    params(("id" = String, Path, description = "Caddie profile ID")),
+    responses(
+        (status = 204, description = "Caddie deleted"),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Caddie not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn delete_caddie(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(caddie_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let caddie_id = CaddieId::try_new(caddie_id).map_err(AppError::from)?;
+    let use_case = DeleteCaddieUseCase::new(ops_gateway(&state));
+    use_case
+        .execute(credentials, &caddie_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
