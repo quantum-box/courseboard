@@ -98,7 +98,7 @@ pub use delete_caddie_availability::DeleteCaddieAvailabilityUseCase;
 pub use delete_course::DeleteCourseUseCase;
 pub use export_monthly_settlement_csv::ExportMonthlySettlementCsvUseCase;
 pub use export_payroll_csv::ExportPayrollCsvUseCase;
-pub use generate_caddie_shifts::{GenerateCaddieShiftsUseCase, GeneratedMonth};
+pub use generate_caddie_shifts::{GenerateCaddieShiftsUseCase, GeneratedMonth, ShiftPlanMode};
 pub use get_attendance_snapshot::GetAttendanceSnapshotUseCase;
 pub use get_caddie_supply::GetCaddieSupplyUseCase;
 pub use get_course_caddie_supply::GetCourseCaddieSupplyUseCase;

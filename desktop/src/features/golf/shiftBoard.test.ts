@@ -3,10 +3,13 @@ import { ja } from '../../i18n/locales/ja'
 import { jaPlain } from '../../i18n/locales/ja-plain'
 import {
   buildShiftRow,
+  draftChangeKeys,
   jstDateOf,
   tenantDateOf,
   monthDates,
+  shiftKey,
   STREAK_WARNING_DAYS,
+  withDraftShifts,
   type ConfirmedShift,
 } from './shiftBoard'
 
@@ -245,6 +248,71 @@ describe('confirmed shifts on the board', () => {
 
     expect(row.cells[0]!.kind).toBe('none')
     expect(row.cells[0]!.confirmed).toBeNull()
+  })
+})
+
+describe('a month planned but not confirmed', () => {
+  function shift(date: string, overrides: Partial<ConfirmedShift> = {}): ConfirmedShift {
+    return {
+      caddieProfileId: CADDIE,
+      date,
+      golfCourseId: 'out',
+      isWorking: true,
+      span: 'full_day',
+      roundsCapacity: 1,
+      origin: 'generated',
+      note: null,
+      ...overrides,
+    }
+  }
+
+  it('draws the plan in place of the days it covers', () => {
+    const shown = withDraftShifts(
+      [shift('2026-07-01', { isWorking: false }), shift('2026-07-02')],
+      [shift('2026-07-01')],
+    )
+
+    expect(shown.filter(entry => entry.date === '2026-07-01')).toEqual([shift('2026-07-01')])
+  })
+
+  it('keeps the confirmed days around the month, which the streak warnings read', () => {
+    const shown = withDraftShifts([shift('2026-06-30')], [shift('2026-07-01')])
+
+    expect(shown.map(entry => entry.date)).toEqual(['2026-06-30', '2026-07-01'])
+  })
+
+  it('replaces another caddie’s day only when the plan covers that day', () => {
+    const other = shift('2026-07-01', { caddieProfileId: 'caddie_b' })
+    const shown = withDraftShifts([other], [shift('2026-07-01')])
+
+    expect(shown).not.toContain(other)
+  })
+
+  it('marks the days the plan would actually change', () => {
+    const changed = draftChangeKeys(
+      [shift('2026-07-01'), shift('2026-07-02'), shift('2026-07-03')],
+      [
+        shift('2026-07-01'),
+        shift('2026-07-02', { isWorking: false }),
+        shift('2026-07-03', { golfCourseId: 'in' }),
+        shift('2026-07-04'),
+      ],
+    )
+
+    expect([...changed].sort()).toEqual([
+      shiftKey({ caddieProfileId: CADDIE, date: '2026-07-02' }),
+      shiftKey({ caddieProfileId: CADDIE, date: '2026-07-03' }),
+      shiftKey({ caddieProfileId: CADDIE, date: '2026-07-04' }),
+    ])
+  })
+
+  it('does not call a day changed just because the run relabelled a hand edit', () => {
+    const changed = draftChangeKeys(
+      [shift('2026-07-01', { origin: 'edited' })],
+      [shift('2026-07-01', { origin: 'generated' })],
+    )
+
+    expect([...changed]).toEqual([])
   })
 })
 

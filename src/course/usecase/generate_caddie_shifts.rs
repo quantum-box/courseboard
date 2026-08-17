@@ -7,6 +7,12 @@
 //! standing on *that* course. So the month is confirmed up front, from the
 //! requests and the main course each caddie belongs to, and the desk edits
 //! what the run could not know.
+//!
+//! Running the month and confirming it are two steps, because a run rewrites a
+//! month of everybody's working days: the desk asks for the plan, reads it, and
+//! only then writes it. [`ShiftPlanMode`] is which of the two this call is —
+//! the planning is identical either way, so what the desk read is what a
+//! confirmation writes.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -15,10 +21,19 @@ use chrono::{NaiveDate, Utc};
 
 use crate::course::domain::{
     plan_month_shifts, tenant_date_at, AvailabilityDeadline, AvailabilityDeadlineGateway,
-    AvailabilityQuery, Caddie, CaddieAvailability, CaddieId, CaddieShiftGateway, CourseError,
-    CourseId, DeadlineWarning, GatewayCredentials, GolfCatalogGateway, GolfOpsGateway,
+    AvailabilityQuery, Caddie, CaddieAvailability, CaddieId, CaddieShift, CaddieShiftGateway,
+    CourseError, CourseId, DeadlineWarning, GatewayCredentials, GolfCatalogGateway, GolfOpsGateway,
     ShiftRequest, ShiftRulesGateway, ShiftSeed, YearMonth, MAX_CONSECUTIVE_WORK_DAYS,
 };
+
+/// Whether a run is being read or being confirmed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ShiftPlanMode {
+    /// Plan the month and write nothing. The desk reads the result first.
+    Preview,
+    /// Plan the month and confirm it.
+    Apply,
+}
 
 /// What one run over a month produced.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +45,7 @@ pub struct GeneratedMonth {
     statutory_rest_days: usize,
     overworked: Vec<String>,
     deadline_warning: Option<DeadlineWarning>,
+    shifts: Vec<CaddieShift>,
 }
 
 impl GeneratedMonth {
@@ -37,8 +53,15 @@ impl GeneratedMonth {
         self.year_month
     }
 
+    /// Days confirmed — or, for a preview, days a confirmation would write.
     pub fn days_written(&self) -> u64 {
         self.days_written
+    }
+
+    /// Every day the run decided, in full. A preview is read from these: the
+    /// board draws them so the desk sees the month before it exists.
+    pub fn shifts(&self) -> &[CaddieShift] {
+        &self.shifts
     }
 
     /// Days left exactly as the desk had pinned them.
@@ -100,6 +123,7 @@ impl GenerateCaddieShiftsUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
         year_month: YearMonth,
+        mode: ShiftPlanMode,
     ) -> Result<GeneratedMonth, CourseError> {
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         let today = tenant_date_at(Utc::now(), &timezone)?;
@@ -149,10 +173,16 @@ impl GenerateCaddieShiftsUseCase {
             &existing,
             &rest_policy,
         );
-        let days_written = self
-            .shifts
-            .save_shifts(credentials.operator_id, plan.shifts())
-            .await?;
+        // A preview writes nothing, so it reports the days a confirmation of
+        // this same plan would write.
+        let days_written = match mode {
+            ShiftPlanMode::Apply => {
+                self.shifts
+                    .save_shifts(credentials.operator_id, plan.shifts())
+                    .await?
+            }
+            ShiftPlanMode::Preview => plan.shifts().len() as u64,
+        };
 
         let deadline = self
             .deadlines
@@ -167,6 +197,7 @@ impl GenerateCaddieShiftsUseCase {
             statutory_rest_days: plan.statutory_rest_days(),
             overworked: plan.overworked().to_vec(),
             deadline_warning: unsubmitted_warning(deadline, today, &seeds, &availabilities),
+            shifts: plan.into_shifts(),
         })
     }
 

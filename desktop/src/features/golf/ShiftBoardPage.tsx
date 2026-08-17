@@ -1,5 +1,5 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
-import { CalendarCheck, Pin, SlidersHorizontal } from 'lucide-react'
+import { CalendarCheck, Pin, SlidersHorizontal, Wand2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -25,9 +25,12 @@ import { showToast } from '../../lib/toast'
 import { CaddieLink } from './CaddieLink'
 import {
   buildShiftRow,
+  draftChangeKeys,
   monthDates,
   paddedRange,
+  shiftKey,
   STREAK_WARNING_DAYS,
+  withDraftShifts,
   type ConfirmedShift,
   type ShiftAssignment,
   type ShiftAvailability,
@@ -80,6 +83,9 @@ type GeneratedMonth = {
   overworked: string[]
   deadlineWarning: { deadlineDate: string; unsubmittedCaddieNames: string[] } | null
 }
+
+/** A month planned but not written: what the run reported, and every day of it. */
+type ShiftPlanPreview = { summary: GeneratedMonth; shifts: ConfirmedShift[] }
 
 /** The one day the desk opened for editing. */
 type ShiftEditTarget = { profile: CaddieProfile; cell: ShiftCell }
@@ -206,7 +212,11 @@ export function ShiftBoardPage() {
     useCallback(() => courseboardApiJson<ShiftRules>(`${COURSE_API}/caddie-shift-rules`), []),
   )
 
+  const [planning, setPlanning] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  // The month the run proposed, held on screen until the desk confirms or
+  // throws it away. Nothing is written while it is here.
+  const [draft, setDraft] = useState<ShiftPlanPreview | null>(null)
   const [lastRun, setLastRun] = useState<GeneratedMonth | null>(null)
   const [editing, setEditing] = useState<ShiftEditTarget | null>(null)
   // The rules are read once a month at most, so they sit behind a button
@@ -230,9 +240,32 @@ export function ShiftBoardPage() {
   ])
   useRegisterPageReload(refresh)
 
-  // The month is confirmed from the requests on file. Re-running it is safe by
-  // design — pinned days are carried through — so this is a plain button
-  // rather than a confirmation the desk has to click past every month.
+  // A run rewrites a month of everybody's working days, so it is planned first
+  // and written second: this asks for the month the requests would produce and
+  // draws it on the board, without touching what is confirmed today.
+  const planMonth = useCallback(async () => {
+    setPlanning(true)
+    try {
+      const preview = await courseboardApiJson<ShiftPlanPreview>(
+        `${COURSE_API}/caddie-shift-plans/${yearMonth}/preview`,
+        { method: 'POST' },
+      )
+      setDraft(preview)
+      setLastRun(null)
+    } catch (error) {
+      showToast({
+        tone: 'danger',
+        title: t('shifts:draft.failed'),
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setPlanning(false)
+    }
+  }, [yearMonth, t])
+
+  // Confirming re-runs the same plan against the same requests and writes it.
+  // Pinned days are carried through either way, so a month confirmed twice
+  // lands on the same result.
   const confirmMonth = useCallback(async () => {
     setConfirming(true)
     try {
@@ -241,6 +274,7 @@ export function ShiftBoardPage() {
         { method: 'POST' },
       )
       setLastRun(run)
+      setDraft(null)
       shiftsResource.refresh()
       showToast({
         tone: 'success',
@@ -292,6 +326,13 @@ export function ShiftBoardPage() {
     deadlineResource.setData(saved)
   }, [yearMonth, deadlineResource.setData])
 
+  // A plan belongs to the month it was made for; moving to another month
+  // leaves nothing to confirm.
+  useEffect(() => {
+    setDraft(null)
+    setLastRun(null)
+  }, [yearMonth])
+
   const showCurrentWeek = useCallback(() => {
     setYearMonth(today(timezone).slice(0, 7))
     setCurrentWeekRequest(request => request + 1)
@@ -329,11 +370,11 @@ export function ShiftBoardPage() {
             <Button
               type="button"
               variant="primary"
-              disabled={confirming}
-              onClick={() => void confirmMonth()}
+              disabled={planning || confirming}
+              onClick={() => void planMonth()}
             >
-              <CalendarCheck />
-              {confirming ? t('shifts:confirm.running') : t('shifts:confirm.action')}
+              <Wand2 />
+              {planning ? t('shifts:draft.running') : t('shifts:draft.action')}
             </Button>
           </div>
         </div>
@@ -348,6 +389,16 @@ export function ShiftBoardPage() {
         onSaveRules={saveRules}
       />
 
+      {draft ? (
+        <DraftPlanNotice
+          draft={draft}
+          rules={rulesResource.data ?? null}
+          confirming={confirming}
+          onConfirm={() => void confirmMonth()}
+          onDiscard={() => setDraft(null)}
+        />
+      ) : null}
+
       {lastRun ? (
         <ConfirmedRunNotice run={lastRun} rules={rulesResource.data ?? null} />
       ) : null}
@@ -361,6 +412,7 @@ export function ShiftBoardPage() {
           availabilities={availabilityResource.data?.items ?? []}
           assignments={assignmentsResource.data?.items ?? []}
           confirmedShifts={shiftsResource.data?.items ?? []}
+          draftShifts={draft?.shifts ?? null}
           courses={coursesResource.data?.items ?? []}
           unsubmittedCaddies={unsubmittedResource.data?.items ?? []}
           loading={loading}
@@ -385,45 +437,34 @@ export function ShiftBoardPage() {
   )
 }
 
-/** What the last run of the month did, kept on screen until the next one. */
-function ConfirmedRunNotice({
-  run,
-  rules,
-}: {
-  run: GeneratedMonth
-  rules: ShiftRules | null
-}) {
+/** Whether a run is worth reading twice: somebody is unplaced or over the limit. */
+function runNeedsAttention(run: GeneratedMonth) {
+  return run.unplaced.length > 0 || run.overworked.length > 0 || Boolean(run.deadlineWarning)
+}
+
+/** What a run did to the month, said the same way whether it was written or not. */
+function RunSummaryLines({ run, rules }: { run: GeneratedMonth; rules: ShiftRules | null }) {
   const { t } = useTranslation(['shifts'])
-  const unplaced = run.unplaced.length > 0
-  const overworked = run.overworked.length > 0
+  const limit = String(rules?.maxConsecutiveWorkDays ?? 6)
   return (
-    <Notice
-      tone={unplaced || overworked || run.deadlineWarning ? 'warning' : 'info'}
-      title={t('shifts:confirm.noticeTitle', { month: run.yearMonth })}
-    >
-      <p>
-        {t('shifts:confirm.noticeBody', {
-          n: String(run.daysWritten),
-          pinned: String(run.pinnedKept),
-        })}
-      </p>
+    <>
       {run.statutoryRestDays > 0 ? (
         <p>
           {t('shifts:confirm.statutoryRest', {
             n: String(run.statutoryRestDays),
-            limit: String(rules?.maxConsecutiveWorkDays ?? 6),
+            limit,
           })}
         </p>
       ) : null}
-      {overworked ? (
+      {run.overworked.length > 0 ? (
         <p>
           {t('shifts:confirm.overworked', {
             names: run.overworked.join('、'),
-            limit: String(rules?.maxConsecutiveWorkDays ?? 6),
+            limit,
           })}
         </p>
       ) : null}
-      {unplaced ? (
+      {run.unplaced.length > 0 ? (
         <p>{t('shifts:confirm.unplaced', { names: run.unplaced.join('、') })}</p>
       ) : null}
       {run.deadlineWarning ? (
@@ -433,6 +474,80 @@ function ConfirmedRunNotice({
           })}
         </p>
       ) : null}
+    </>
+  )
+}
+
+/**
+ * The month the run proposed, waiting to be confirmed.
+ *
+ * A run rewrites a month of everybody's working days, so it is drawn on the
+ * board first and written only when the desk says so. Nothing is saved while
+ * this is on screen — leaving the month, or throwing the plan away, costs
+ * nothing but the run.
+ */
+function DraftPlanNotice({
+  draft,
+  rules,
+  confirming,
+  onConfirm,
+  onDiscard,
+}: {
+  draft: ShiftPlanPreview
+  rules: ShiftRules | null
+  confirming: boolean
+  onConfirm: () => void
+  onDiscard: () => void
+}) {
+  const { t } = useTranslation(['shifts'])
+  const run = draft.summary
+  return (
+    <Notice
+      tone={runNeedsAttention(run) ? 'warning' : 'info'}
+      title={t('shifts:draft.noticeTitle', { month: run.yearMonth })}
+    >
+      <p>
+        {t('shifts:draft.noticeBody', {
+          n: String(run.daysWritten),
+          pinned: String(run.pinnedKept),
+        })}
+      </p>
+      <RunSummaryLines run={run} rules={rules} />
+      <p className="text-muted-foreground">{t('shifts:draft.readOnly')}</p>
+      <div className="shift-draft-actions flex flex-wrap gap-2">
+        <Button type="button" variant="primary" disabled={confirming} onClick={onConfirm}>
+          <CalendarCheck />
+          {confirming ? t('shifts:confirm.running') : t('shifts:draft.apply')}
+        </Button>
+        <Button type="button" variant="secondary" disabled={confirming} onClick={onDiscard}>
+          {t('shifts:draft.discard')}
+        </Button>
+      </div>
+    </Notice>
+  )
+}
+
+/** What the last run of the month did, kept on screen until the next one. */
+function ConfirmedRunNotice({
+  run,
+  rules,
+}: {
+  run: GeneratedMonth
+  rules: ShiftRules | null
+}) {
+  const { t } = useTranslation(['shifts'])
+  return (
+    <Notice
+      tone={runNeedsAttention(run) ? 'warning' : 'info'}
+      title={t('shifts:confirm.noticeTitle', { month: run.yearMonth })}
+    >
+      <p>
+        {t('shifts:confirm.noticeBody', {
+          n: String(run.daysWritten),
+          pinned: String(run.pinnedKept),
+        })}
+      </p>
+      <RunSummaryLines run={run} rules={rules} />
     </Notice>
   )
 }
@@ -666,6 +781,7 @@ function ShiftBoardResults({
   availabilities,
   assignments,
   confirmedShifts,
+  draftShifts,
   courses,
   unsubmittedCaddies,
   loading,
@@ -682,6 +798,8 @@ function ShiftBoardResults({
   availabilities: ShiftAvailability[]
   assignments: ShiftAssignment[]
   confirmedShifts: ConfirmedShift[]
+  /** The month a run proposed, drawn in place of what is confirmed today. */
+  draftShifts: ConfirmedShift[] | null
   courses: GolfCourse[]
   unsubmittedCaddies: UnsubmittedCaddie[]
   loading: boolean
@@ -699,6 +817,16 @@ function ShiftBoardResults({
     () => new Map(courses.map(course => [course.id, course])),
     [courses],
   )
+  // While a plan is on screen the board draws it, not what is confirmed —
+  // that is the whole point of reading it before writing it.
+  const shownShifts = useMemo(
+    () => (draftShifts ? withDraftShifts(confirmedShifts, draftShifts) : confirmedShifts),
+    [confirmedShifts, draftShifts],
+  )
+  const changedDays = useMemo(
+    () => (draftShifts ? draftChangeKeys(confirmedShifts, draftShifts) : null),
+    [confirmedShifts, draftShifts],
+  )
   const rows = useMemo(() => profiles.map(profile => ({
     profile,
     row: buildShiftRow(
@@ -706,10 +834,10 @@ function ShiftBoardResults({
       dates,
       availabilities,
       assignments,
-      confirmedShifts,
+      shownShifts,
       timezone,
     ),
-  })), [profiles, dates, availabilities, assignments, confirmedShifts, timezone])
+  })), [profiles, dates, availabilities, assignments, shownShifts, timezone])
   const longStreakNames = rows
     .filter(entry => entry.row.maxStreak >= STREAK_WARNING_DAYS)
     .map(entry => entry.profile.displayName)
@@ -805,6 +933,9 @@ function ShiftBoardResults({
               <span><i data-kind="unknown" /> {t('shifts:legend.unknown')}</span>
               <span><i data-long-streak="true" /> {t('shifts:streak.warningTitle')}</span>
               <span><i data-pinned="true" /> {t('shifts:legend.pinned')}</span>
+              {draftShifts ? (
+                <span><i data-draft-change="true" /> {t('shifts:draft.legendChanged')}</span>
+              ) : null}
             </div>
             <div className="shift-board-navigation" aria-label={t('shifts:navigation.label')}>
               <Button
@@ -883,11 +1014,15 @@ function ShiftBoardResults({
                           data-kind={cell.kind}
                           data-long-streak={cell.inLongStreak || undefined}
                           data-pinned={cell.confirmed?.origin === 'pinned' || undefined}
+                          data-draft-change={changedDays?.has(
+                            shiftKey({ caddieProfileId: profile.id, date: cell.date }),
+                          ) || undefined}
                           className={isWeekend(cell.date) ? 'shift-board-weekend' : undefined}
                         >
                           <button
                             type="button"
                             className="shift-board-cell-button"
+                            disabled={draftShifts !== null}
                             aria-label={cell.assignments > 1
                               ? t('shifts:cell.ariaWithAssignments', {
                                   name: profile.displayName,
