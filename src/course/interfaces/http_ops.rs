@@ -37,9 +37,9 @@ use crate::course::usecase::{
     ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase, ListCaddieRecommendationsUseCase,
     ListCaddieShiftsUseCase, ListCourseReinforcementsUseCase, ListUnsubmittedCaddiesUseCase,
     NameCaddieForRound, ReinforcementCandidate, ReplaceCaddieMembershipsUseCase,
-    ReplaceCaddieRankFeesUseCase, UpdateCaddieAssignmentUseCase, UpdateCaddieShiftUseCase,
-    UpdateCaddieUseCase, UpdateShiftRulesUseCase, UpsertAvailabilityDeadlineUseCase,
-    UpsertCaddieAvailabilityUseCase,
+    ReplaceCaddieRankFeesUseCase, ShiftPlanMode, UpdateCaddieAssignmentUseCase,
+    UpdateCaddieShiftUseCase, UpdateCaddieUseCase, UpdateShiftRulesUseCase,
+    UpsertAvailabilityDeadlineUseCase, UpsertCaddieAvailabilityUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -1546,6 +1546,16 @@ impl From<GeneratedMonth> for GeneratedMonthDto {
     }
 }
 
+/// A month planned but not written: the summary the desk reads, and every day
+/// it would confirm. The board draws these so the run can be checked before it
+/// replaces a month of everybody's working days.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftPlanPreviewDto {
+    pub summary: GeneratedMonthDto,
+    pub shifts: Vec<CaddieShiftDto>,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateCaddieShiftRequest {
@@ -1596,6 +1606,45 @@ pub async fn list_caddie_shifts(
     }))
 }
 
+/// POST /v1/course/caddie-shift-plans/:year_month/preview
+#[utoipa::path(
+    post,
+    path = "/v1/course/caddie-shift-plans/{year_month}/preview",
+    tag = "course-ops",
+    params(("year_month" = String, Path, description = "YYYY-MM")),
+    responses(
+        (status = 200, description = "The month as the run would confirm it. Nothing was written", body = ShiftPlanPreviewDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn preview_caddie_shifts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(year_month): Path<String>,
+) -> Result<Json<ShiftPlanPreviewDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let year_month = parse_year_month(&year_month)?;
+    let use_case = GenerateCaddieShiftsUseCase::new(
+        catalog_gateway(&state),
+        ops_gateway(&state),
+        state.caddie_shifts(),
+        state.availability_deadlines(),
+        state.shift_rules(),
+    );
+    let planned = use_case
+        .execute(credentials, year_month, ShiftPlanMode::Preview)
+        .await
+        .map_err(AppError::from)?;
+    let shifts = planned.shifts().iter().map(CaddieShiftDto::from).collect();
+    Ok(Json(ShiftPlanPreviewDto {
+        summary: GeneratedMonthDto::from(planned),
+        shifts,
+    }))
+}
+
 /// POST /v1/course/caddie-shift-plans/:year_month
 #[utoipa::path(
     post,
@@ -1625,7 +1674,7 @@ pub async fn generate_caddie_shifts(
         state.shift_rules(),
     );
     let generated = use_case
-        .execute(credentials, year_month)
+        .execute(credentials, year_month, ShiftPlanMode::Apply)
         .await
         .map_err(AppError::from)?;
     Ok(Json(GeneratedMonthDto::from(generated)))

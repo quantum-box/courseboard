@@ -759,6 +759,12 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/caddie-shift-plans/:year_month/preview",
+            post(course::interfaces::http_ops::preview_caddie_shifts).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/caddie-availability-deadlines/:year_month",
             get(course::interfaces::http_ops::get_availability_deadline)
                 .put(course::interfaces::http_ops::upsert_availability_deadline)

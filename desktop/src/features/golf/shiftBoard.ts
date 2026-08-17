@@ -40,6 +40,62 @@ export type ConfirmedShift = {
   note: string | null
 }
 
+/** One caddie's day inside a plan, as `caddieProfileId:date`. */
+export function shiftKey(shift: { caddieProfileId: string; date: string }): string {
+  return `${shift.caddieProfileId}:${shift.date}`
+}
+
+/**
+ * The board as a proposed month would leave it.
+ *
+ * The draft covers every caddie on every day of its month, so those days are
+ * replaced wholesale. Confirmed days outside it are kept: the streak warnings
+ * read a week either side of the month, and dropping them would restart
+ * everybody's run of working days on the 1st.
+ */
+export function withDraftShifts(
+  confirmed: ConfirmedShift[],
+  draft: ConfirmedShift[],
+): ConfirmedShift[] {
+  const draftDates = new Set(draft.map(shift => shift.date))
+  return [...confirmed.filter(shift => !draftDates.has(shift.date)), ...draft]
+}
+
+/**
+ * Whether a proposed day would actually change anything. Origin is left out:
+ * a run rewrites its own days, and re-labelling `edited` as `generated` is not
+ * a change the desk has to look at.
+ */
+export function shiftDiffers(saved: ConfirmedShift | undefined, draft: ConfirmedShift): boolean {
+  if (!saved) return true
+  return saved.isWorking !== draft.isWorking
+    || saved.span !== draft.span
+    || saved.roundsCapacity !== draft.roundsCapacity
+    || (saved.golfCourseId ?? null) !== (draft.golfCourseId ?? null)
+}
+
+/**
+ * Which days a proposed month would change, so the board can mark them.
+ *
+ * A month nobody has confirmed yet has no changes to show — every day would be
+ * marked, which says nothing and covers the board. The marks are for the run
+ * that replaces a month already in use.
+ */
+export function draftChangeKeys(
+  confirmed: ConfirmedShift[],
+  draft: ConfirmedShift[],
+): Set<string> {
+  const draftDates = new Set(draft.map(shift => shift.date))
+  if (!confirmed.some(shift => draftDates.has(shift.date))) return new Set()
+  const saved = new Map(confirmed.map(shift => [shiftKey(shift), shift]))
+  const changed = new Set<string>()
+  for (const shift of draft) {
+    const key = shiftKey(shift)
+    if (shiftDiffers(saved.get(key), shift)) changed.add(key)
+  }
+  return changed
+}
+
 export type ShiftCellKind =
   | 'assigned'
   | 'available'

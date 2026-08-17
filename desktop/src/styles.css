@@ -4122,10 +4122,37 @@ button,
   display: grid;
   align-items: start;
   gap: 2px;
+  min-width: 0;
 }
 
+/* One line per caddie, always. A long name wrapping made its row taller than
+   its neighbours, and a month read across forty rows of uneven height is
+   harder to follow than a name cut short — which the hover card spells out in
+   full anyway.
+   The cut is made on the name itself and nowhere above it: an `overflow:
+   hidden` on an ancestor of the hover card clips the card away with it. */
 .shift-board-profile-name {
-  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.shift-board-profile-name .caddie-link-wrap,
+.shift-board-profile-name .caddie-link {
+  max-width: 100%;
+}
+
+.shift-board-profile-name .caddie-link-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The hovered name has to sit above the rows below it. Every sticky name cell
+   shares one z-index, so without this the card is painted over by whichever
+   row comes next in the table. */
+.shift-board tbody .shift-board-name:hover,
+.shift-board tbody .shift-board-name:focus-within {
+  z-index: 4;
 }
 
 .shift-board-profile-status {
@@ -4267,6 +4294,22 @@ button,
    days still shows the run's own warning underline. */
 .shift-board td[data-pinned] { border-left: 3px solid hsl(var(--nui-primary)); }
 
+/* A day the proposed month would change. An outline rather than a background,
+   so the day still reads as whatever state it is being changed to. */
+.shift-board td[data-draft-change] {
+  outline: 2px dashed hsl(var(--nui-primary) / 70%);
+  outline-offset: -2px;
+}
+
+/* Nothing is written while a plan is on screen, so the cells do not open. */
+.shift-board-cell-button:disabled {
+  cursor: default;
+}
+
+.shift-draft-actions {
+  margin-top: 8px;
+}
+
 .shift-board-legend {
   display: flex;
   min-width: 0;
@@ -4296,6 +4339,7 @@ button,
 .shift-board-legend i[data-kind='unknown'] { background: hsl(var(--nui-warning) / .3); }
 .shift-board-legend i[data-long-streak] { background: hsl(var(--nui-destructive) / .25); }
 .shift-board-legend i[data-pinned] { border-left: 3px solid hsl(var(--nui-primary)); }
+.shift-board-legend i[data-draft-change] { border: 2px dashed hsl(var(--nui-primary) / 70%); }
 
 @media (max-width: 800px) {
   .shift-board-page {
