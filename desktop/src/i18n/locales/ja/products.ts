@@ -12,6 +12,7 @@ export const products = {
     courseHint: 'このプランを売るコースです。同じ内容で売るなら複数選べます。受付枠と営業時間は選んだコースそれぞれのものを使います。',
     courseUnset: 'コースを選んでください',
     courseNone: 'コースがまだ登録されていません。先にコースを作ってください。',
+    courseSelectAll: 'すべて選ぶ / 外す',
     maxPlayers: '1組の人数',
     maxPlayersHint: '1組に入れる人数の上限です。空のままなら予約ルールの設定に従います。受付できる組数はコースの受付枠で決めます。',
     maxPlayersValue: '{{n}}名',

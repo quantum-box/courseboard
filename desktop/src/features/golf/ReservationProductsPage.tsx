@@ -801,24 +801,46 @@ function CourseChecklist({
     return <p className="text-xs text-muted-foreground">{t('editor.courseNone')}</p>
   }
 
+  const allIds = courses.map(course => course.id)
+  const allSelected = allIds.every(id => selected.includes(id))
+  const someSelected = allIds.some(id => selected.includes(id))
+
   return (
     <div className="course-checklist">
-      {courses.map(course => (
-        <label key={course.id} className="course-checklist-item">
+      {/* A plan sold on every course is common enough that ticking them one by
+          one is busywork. One row toggles the lot; it shows the mixed state so
+          it never reads as "nothing is selected" while some course is. */}
+      {courses.length > 1 ? (
+        <label className="course-checklist-item course-checklist-all">
           <input
             type="checkbox"
-            checked={selected.includes(course.id)}
-            onChange={event => onChange(
-              event.target.checked
-                ? courses
-                    .map(item => item.id)
-                    .filter(id => id === course.id || selected.includes(id))
-                : selected.filter(id => id !== course.id),
-            )}
+            checked={allSelected}
+            ref={node => {
+              if (node) {
+                node.indeterminate = someSelected && !allSelected
+              }
+            }}
+            onChange={event => onChange(event.target.checked ? allIds : [])}
           />
-          <span>{courseLabel(course)}</span>
+          <span>{t('editor.courseSelectAll')}</span>
         </label>
-      ))}
+      ) : null}
+      <div className="course-checklist-items">
+        {courses.map(course => (
+          <label key={course.id} className="course-checklist-item">
+            <input
+              type="checkbox"
+              checked={selected.includes(course.id)}
+              onChange={event => onChange(
+                event.target.checked
+                  ? allIds.filter(id => id === course.id || selected.includes(id))
+                  : selected.filter(id => id !== course.id),
+              )}
+            />
+            <span>{courseLabel(course)}</span>
+          </label>
+        ))}
+      </div>
     </div>
   )
 }
