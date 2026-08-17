@@ -30,10 +30,12 @@ import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import {
   customPolicyNames,
+  domainPolicies,
   inviteResultMessage,
   isAdminSelected,
   memberDisplayName,
   memberPolicyIds,
+  policyIdByName,
   roleBadgeVariant,
   roleLabel,
   rolePermissionSummary,
@@ -249,7 +251,7 @@ function RoleChecklist({
   onToggle: (policyId: string, checked: boolean) => void
 }) {
   const { t } = useTranslation(['members'])
-  const adminSelected = isAdminSelected(selected)
+  const adminSelected = isAdminSelected(catalog, selected)
   const renderItem = (policyId: string, label: string, description?: string | null) => {
     const checked = selected.includes(policyId)
     const itemDisabled = disabled || (adminSelected && !checked)
@@ -268,15 +270,25 @@ function RoleChecklist({
       </label>
     )
   }
+  // Only the roles this tenant actually has. A missing one is left out rather
+  // than shown as a checkbox that fails on save.
+  const roles = ROLE_OPTIONS
+    .map(option => ({ option, id: policyIdByName(catalog, option.responseValue) }))
+    .filter((entry): entry is { option: typeof ROLE_OPTIONS[number]; id: string } => entry.id !== null)
+  // The basic roles are listed above, so they are dropped here to keep one
+  // policy from appearing twice in the same checklist.
+  const domain = domainPolicies(catalog)
   return (
     <div className="member-roles-checklist">
-      {ROLE_OPTIONS.map(option => renderItem(
-        option.policyId,
+      {roles.map(({ option, id }) => renderItem(
+        id,
         t(option.labelKey),
         t(option.summaryKey),
       ))}
-      {catalog.length > 0 ? <div className="member-roles-divider" role="separator" /> : null}
-      {catalog.map(policy => renderItem(policy.id, policy.name, policy.description))}
+      {roles.length > 0 && domain.length > 0
+        ? <div className="member-roles-divider" role="separator" />
+        : null}
+      {domain.map(policy => renderItem(policy.id, policy.name, policy.description))}
     </div>
   )
 }
@@ -293,7 +305,7 @@ function EditRolesDialog({
   onSaved: (message: string) => void
 }) {
   const { t } = useTranslation(['members', 'common'])
-  const [selected, setSelected] = useState<string[]>(() => memberPolicyIds(member))
+  const [selected, setSelected] = useState<string[]>(() => memberPolicyIds(member, catalog))
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -336,7 +348,7 @@ function EditRolesDialog({
               selected={selected}
               disabled={saving}
               onToggle={(policyId, checked) => {
-                setSelected(current => togglePolicySelection(current, policyId, checked))
+                setSelected(current => togglePolicySelection(catalog, current, policyId, checked))
               }}
             />
           </div>
@@ -357,7 +369,15 @@ function EditRolesDialog({
   )
 }
 
-const DEFAULT_INVITE_POLICY_IDS = ['pol_erp_staff']
+/**
+ * Everyday access, preselected — but only if this tenant actually has the
+ * policy. A default id that is not in the catalogue would be rejected on
+ * submit, with nothing on screen explaining why.
+ */
+function defaultInvitePolicyIds(catalog: ErpCustomPolicy[]) {
+  const operator = policyIdByName(catalog, 'field:operator')
+  return operator ? [operator] : []
+}
 
 function InviteDialog({
   catalog,
@@ -369,7 +389,7 @@ function InviteDialog({
   const { t } = useTranslation(['members', 'common'])
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
-  const [selected, setSelected] = useState<string[]>(DEFAULT_INVITE_POLICY_IDS)
+  const [selected, setSelected] = useState<string[]>(() => defaultInvitePolicyIds(catalog))
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -396,7 +416,7 @@ function InviteDialog({
         }),
       })
       setEmail('')
-      setSelected(DEFAULT_INVITE_POLICY_IDS)
+      setSelected(defaultInvitePolicyIds(catalog))
       setOpen(false)
       onInvited(inviteResultMessage(response))
     } catch (cause) {
@@ -443,7 +463,7 @@ function InviteDialog({
               selected={selected}
               disabled={submitting}
               onToggle={(policyId, checked) => {
-                setSelected(current => togglePolicySelection(current, policyId, checked))
+                setSelected(current => togglePolicySelection(catalog, current, policyId, checked))
               }}
             />
           </div>

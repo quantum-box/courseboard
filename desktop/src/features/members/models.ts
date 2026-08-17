@@ -2,15 +2,29 @@
  * Tenant member and permission management backed by the Field IAM surface
  * (`/v1/field/iam/users*`) through the courseboard field proxy. Upstream gates
  * every call with the ERP action `field:ManageUsers` (tenant owners pass via
- * the owner bypass). An ERP role is implemented server-side as an exclusive
- * role policy (`pol_erp_admin` / `pol_erp_staff` / `pol_erp_viewer`) plus any
- * attached custom policies — updating a role replaces those attachments.
+ * the owner bypass).
+ *
+ * There is no separate notion of a role: a role *is* a policy. What the server
+ * calls a member's role is one exclusive policy out of the basic three, and
+ * everything else attached is a domain policy. Both go up as one flat list in
+ * `PUT /v1/field/iam/users/{id}/policies`.
+ *
+ * Policy ids are resolved from the tenant's own catalogue by name, never
+ * hard-coded. The ids behind the basic roles have already changed once: the
+ * `pol_erp_*` trio this screen used to send was deleted platform-side
+ * (PLT-3589), which broke inviting and role changes here until this was
+ * rewritten. An id that is not in the catalogue is not offered and never sent.
  */
 
 import { i18next } from '../../i18n'
 
-/** Response role identifiers (`ErpRole::as_str` upstream). */
-export type ErpRole = 'field:admin' | 'field:staff' | 'field:viewer'
+/**
+ * Response role identifiers (`ErpRole::as_str` upstream).
+ *
+ * Renamed from `field:{admin,staff,viewer}` when the roles moved into the
+ * platform-defined manifest.
+ */
+export type ErpRole = 'field:administrator' | 'field:operator' | 'field:reader'
 
 /** Request role identifiers (kebab-case serde variants upstream). */
 export type ErpRoleRequest = 'admin' | 'staff' | 'viewer'
@@ -45,9 +59,11 @@ export type InviteMemberResponse = {
 }
 
 /**
- * The three exclusive roles as policies (`pol_erp_*`), with display labels
- * shared with the fieldadmin UI. Roles and domain policies are managed as one
- * flat policy list via `PUT /v1/field/iam/users/{id}/policies`.
+ * The three basic roles, by policy name, with display labels shared with the
+ * fieldadmin UI.
+ *
+ * Names rather than ids: the catalogue is what says which id a name has in
+ * this tenant, and the ids are not stable across platform changes.
  *
  * Labels are translation keys, not strings: this array is built once at module
  * load, so baking in the text would pin every role name to whatever language
@@ -59,68 +75,111 @@ export type RoleTextKey = `members:roles.${ErpRoleRequest}.${'label' | 'summary'
 export const ROLE_OPTIONS: Array<{
   value: ErpRoleRequest
   responseValue: ErpRole
-  policyId: string
   labelKey: RoleTextKey
   summaryKey: RoleTextKey
 }> = [
   {
     value: 'admin',
-    responseValue: 'field:admin',
-    policyId: 'pol_erp_admin',
+    responseValue: 'field:administrator',
     labelKey: 'members:roles.admin.label',
     summaryKey: 'members:roles.admin.summary',
   },
   {
     value: 'staff',
-    responseValue: 'field:staff',
-    policyId: 'pol_erp_staff',
+    responseValue: 'field:operator',
     labelKey: 'members:roles.staff.label',
     summaryKey: 'members:roles.staff.summary',
   },
   {
     value: 'viewer',
-    responseValue: 'field:viewer',
-    policyId: 'pol_erp_viewer',
+    responseValue: 'field:reader',
     labelKey: 'members:roles.viewer.label',
     summaryKey: 'members:roles.viewer.summary',
   },
 ]
 
-const ROLE_POLICY_IDS = new Set(ROLE_OPTIONS.map(option => option.policyId))
-const ADMIN_POLICY_ID = 'pol_erp_admin'
+const ROLE_POLICY_NAMES: readonly string[] = ROLE_OPTIONS.map(option => option.responseValue)
+const ADMIN_POLICY_NAME: ErpRole = 'field:administrator'
 
-/** The `pol_erp_*` policy id backing a member's exclusive role, if any. */
-export function rolePolicyId(role: ErpRole | string | null | undefined): string | null {
-  const option = ROLE_OPTIONS.find(candidate => candidate.responseValue === role)
-  return option?.policyId ?? null
+/**
+ * The names the basic roles used to have.
+ *
+ * Those policies still exist, but frozen and stripped of `auth:*`,
+ * `customField:*` and `order:*` — a strictly worse version of the role that
+ * replaced them. They stay out of the checklist so nobody grants one by
+ * mistake, while a member who still carries one keeps reading correctly.
+ */
+const RETIRED_POLICY_NAMES: readonly string[] = ['field:admin', 'field:staff', 'field:viewer']
+
+/** The policy id a name has in this tenant, or null when it is not offered. */
+export function policyIdByName(
+  catalog: ErpCustomPolicy[],
+  name: string | null | undefined,
+): string | null {
+  if (!name) return null
+  return catalog.find(policy => policy.name === name)?.id ?? null
 }
 
-/** A member's full ERP policy list (exclusive role policy + domain policies). */
-export function memberPolicyIds(member: Pick<ErpMember, 'role' | 'customPolicyIds'>): string[] {
-  const roleId = rolePolicyId(member.role)
+/** The policy id backing a member's basic role, if the catalogue has it. */
+export function rolePolicyId(
+  catalog: ErpCustomPolicy[],
+  role: ErpRole | string | null | undefined,
+): string | null {
+  const option = ROLE_OPTIONS.find(candidate => candidate.responseValue === role)
+  return option ? policyIdByName(catalog, option.responseValue) : null
+}
+
+/**
+ * The domain policies to offer: the catalogue minus the basic roles, which are
+ * listed separately, and minus the retired names.
+ */
+export function domainPolicies(catalog: ErpCustomPolicy[]): ErpCustomPolicy[] {
+  return catalog.filter(policy =>
+    !ROLE_POLICY_NAMES.includes(policy.name) && !RETIRED_POLICY_NAMES.includes(policy.name),
+  )
+}
+
+/**
+ * A member's full policy list: their basic role plus every domain policy.
+ *
+ * A role whose policy is missing from the catalogue is dropped rather than
+ * guessed at — sending an id the tenant cannot see is what the server rejects.
+ */
+export function memberPolicyIds(
+  member: Pick<ErpMember, 'role' | 'customPolicyIds'>,
+  catalog: ErpCustomPolicy[],
+): string[] {
+  const roleId = rolePolicyId(catalog, member.role)
   return roleId ? [roleId, ...member.customPolicyIds] : [...member.customPolicyIds]
 }
 
-export function isAdminSelected(selected: string[]) {
-  return selected.includes(ADMIN_POLICY_ID)
+export function isAdminSelected(catalog: ErpCustomPolicy[], selected: string[]) {
+  const adminId = policyIdByName(catalog, ADMIN_POLICY_NAME)
+  return adminId !== null && selected.includes(adminId)
 }
 
 /**
  * Toggle one policy in a selection while keeping the invariants the API
  * enforces or that make selections meaningless:
- * - the three role policies are mutually exclusive
+ * - the three basic roles are mutually exclusive
  * - the administrator role already covers everything, so selecting it clears
  *   the rest
  */
 export function togglePolicySelection(
+  catalog: ErpCustomPolicy[],
   selected: string[],
   policyId: string,
   checked: boolean,
 ): string[] {
   if (!checked) return selected.filter(id => id !== policyId)
-  if (policyId === ADMIN_POLICY_ID) return [ADMIN_POLICY_ID]
+  const roleIds = new Set(
+    ROLE_POLICY_NAMES.map(name => policyIdByName(catalog, name)).filter(
+      (id): id is string => id !== null,
+    ),
+  )
+  if (policyId === policyIdByName(catalog, ADMIN_POLICY_NAME)) return [policyId]
   const next = selected.filter(id =>
-    id !== policyId && !(ROLE_POLICY_IDS.has(policyId) && ROLE_POLICY_IDS.has(id)),
+    id !== policyId && !(roleIds.has(policyId) && roleIds.has(id)),
   )
   return [...next, policyId]
 }
@@ -140,9 +199,9 @@ export function roleLabel(member: Pick<ErpMember, 'role' | 'isOwner'>) {
 export function roleBadgeVariant(member: Pick<ErpMember, 'role' | 'isOwner'>) {
   if (member.isOwner) return 'accent' as const
   switch (member.role) {
-    case 'field:admin':
+    case 'field:administrator':
       return 'success' as const
-    case 'field:staff':
+    case 'field:operator':
       return 'warning' as const
     default:
       return 'neutral' as const
@@ -157,9 +216,9 @@ export function rolePermissionSummary(member: Pick<ErpMember, 'role' | 'isOwner'
 }
 
 const ROLE_SORT_ORDER = new Map<string, number>([
-  ['field:admin', 1],
-  ['field:staff', 2],
-  ['field:viewer', 3],
+  ['field:administrator', 1],
+  ['field:operator', 2],
+  ['field:reader', 3],
 ])
 
 function roleSortKey(member: ErpMember) {
