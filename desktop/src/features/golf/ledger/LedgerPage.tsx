@@ -7,7 +7,7 @@ import {
   Maximize2,
   Minimize2,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useTenantTimezone } from '../../../context/TenantTimezoneProvider'
 
@@ -19,8 +19,9 @@ import {
   ResourceError,
 } from '../../../components/Page'
 import { useResource } from '../../../hooks/useResource'
+import { normalizeIsoDate } from '../../../lib/clock'
 import { useRegisterPageReload } from '../../../lib/pageReload'
-import { navigate } from '../../../lib/router'
+import { navigate, useRouteParamState } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { parseLocalDateParts } from '../timeline/timelineLayout'
 import type { TeeReservation } from '../timeline/models'
@@ -30,7 +31,10 @@ import { LedgerBoardSkeleton, SkeletonBar } from './LedgerSkeleton'
 import { arrangeCourses, moveCourse } from './courseOrder'
 import {
   courseIdsParam,
+  courseSelectionParam,
   isCourseShown,
+  normalizeCourseSelection,
+  parseCourseSelection,
   pendingColumnCount,
   readStoredCourseIds,
   resolveSelection,
@@ -145,9 +149,27 @@ export function LedgerPage() {
   const { t } = useTranslation(['ledger', 'timeline', 'common'])
   const timezone = useTenantTimezone()
   const tenantToday = todayIsoDate(timezone)
-  const [date, setDate] = useState(() => tenantToday)
-  /** Empty means every course. Remembered: the desk works the same columns daily. */
-  const [selectedCourseIds, setSelectedCourseIds] = useState(readStoredCourseIds)
+  /** In the URL: the board is a day, and a link to it has to say which one. */
+  const [date, setDate] = useRouteParamState('date', {
+    fallback: tenantToday,
+    normalize: normalizeIsoDate,
+  })
+  /**
+   * Also in the URL: which columns the board is showing is half of what a link
+   * to it means — "the east course tomorrow" is one board, not two facts.
+   *
+   * Empty means every course. The stored pick is only the opening default: the
+   * desk works the same columns daily, but a link that names others wins.
+   */
+  const [courseSelection, setCourseSelection] = useRouteParamState('courses', {
+    fallback: courseSelectionParam(readStoredCourseIds()),
+    normalize: normalizeCourseSelection,
+  })
+  const selectedCourseIds = useMemo(
+    () => parseCourseSelection(courseSelection) ?? [],
+    [courseSelection],
+  )
+  const setSelectedCourseIds = (ids: string[]) => setCourseSelection(courseSelectionParam(ids))
   const [selection, setSelection] = useState<SlotSelection | null>(null)
   const [markLabel, setMarkLabel] = useState('')
   const [savingMarks, setSavingMarks] = useState(false)

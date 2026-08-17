@@ -31,7 +31,7 @@ import {
   Panel,
   ResourceError,
 } from '../../components/Page'
-import { YearMonthPicker, useYearMonthValue } from '../../components/YearMonthPicker'
+import { YearMonthPicker, useRouteYearMonthValue } from '../../components/YearMonthPicker'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { openExternal } from '../../lib/platform'
 
@@ -189,7 +189,7 @@ export function SettlementPage() {
     value: yearMonth,
     error: yearMonthError,
     setCandidate: setYearMonth,
-  } = useYearMonthValue(currentYearMonth(timezone))
+  } = useRouteYearMonthValue('yearMonth', currentYearMonth(timezone))
   const [report, setReport] = useState<GolfMonthlySettlementReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)

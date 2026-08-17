@@ -39,12 +39,17 @@ pub struct CancellationFeeConfig {
 }
 
 impl CancellationFeeConfig {
+    /// Where the payer opens the collection.
+    ///
+    /// A plain path: the UI routes on the URL itself. A base pointing at a file
+    /// (`…/index.html`, a Tauri or `file://` build) has no server to hand that
+    /// path to, so those keep the hash form the UI still reads.
     fn payment_url(&self, token: &str) -> String {
         let base_url = self.public_ui_base_url.trim_end_matches('/');
         if base_url.ends_with(".html") {
             format!("{base_url}#/pay/{token}")
         } else {
-            format!("{base_url}/#/pay/{token}")
+            format!("{base_url}/pay/{token}")
         }
     }
 

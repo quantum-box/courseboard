@@ -53,9 +53,7 @@ export default function App() {
 function AppContent() {
   const route = useRoute()
 
-  if (window.location.pathname.replace(/\/+$/, '') === '/download') {
-    return <DownloadPage />
-  }
+  if (route === 'download') return <DownloadPage />
 
   if (route.startsWith('pay/')) {
     return <PaymentPage token={route.slice('pay/'.length)} />

@@ -17,7 +17,7 @@ import {
 } from '../../components/Page'
 import { SectionErrorBoundary } from '../../components/SectionErrorBoundary'
 import { Sheet } from '../../components/Sheet'
-import { YearMonthPicker, useYearMonthValue } from '../../components/YearMonthPicker'
+import { YearMonthPicker, useRouteYearMonthValue } from '../../components/YearMonthPicker'
 import { useResource } from '../../hooks/useResource'
 import { i18next } from '../../i18n'
 import { useRegisterPageReload } from '../../lib/pageReload'
@@ -137,7 +137,7 @@ export function ShiftBoardPage() {
     value: yearMonth,
     error: yearMonthError,
     setCandidate: setYearMonth,
-  } = useYearMonthValue(currentYearMonth(timezone))
+  } = useRouteYearMonthValue('yearMonth', currentYearMonth(timezone))
   const dates = useMemo(() => monthDates(yearMonth), [yearMonth])
   // Availability participates in consecutive-work warnings too, so both
   // sources need the same padded range around the displayed month.

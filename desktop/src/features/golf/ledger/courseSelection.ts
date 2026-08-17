@@ -81,6 +81,34 @@ export function courseIdsParam(selected: string[]): string | null {
 }
 
 /**
+ * How the picker reads in a link.
+ *
+ * "Every course" is written out rather than left off: an absent parameter is
+ * how a link says nothing about the picker at all, and the desk that picked
+ * the whole club said something.
+ */
+export const ALL_COURSES = 'all'
+
+export function courseSelectionParam(selected: string[]): string {
+    return selected.length === 0 ? ALL_COURSES : selected.join(',')
+}
+
+/** The ids a link asks for, or `null` when it asks for nothing readable. */
+export function parseCourseSelection(raw: string): string[] | null {
+    const value = raw.trim()
+    if (!value) return null
+    if (value === ALL_COURSES) return []
+    const ids = value.split(',').map(id => id.trim()).filter(Boolean)
+    return ids.length > 0 ? ids : null
+}
+
+/** The same value written the one way, so the URL settles instead of drifting. */
+export function normalizeCourseSelection(raw: string): string | null {
+    const ids = parseCourseSelection(raw)
+    return ids === null ? null : courseSelectionParam(ids)
+}
+
+/**
  * Selections compared as sets, so a re-render with the same courses in a
  * different order does not refetch the day.
  */

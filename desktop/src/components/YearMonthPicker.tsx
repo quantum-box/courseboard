@@ -1,4 +1,4 @@
-import { useId, useMemo, useReducer } from 'react'
+import { useCallback, useEffect, useId, useMemo, useReducer } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   initialYearMonthState,
@@ -6,17 +6,47 @@ import {
   yearMonthReducer,
   type YearMonthError,
 } from '../lib/yearMonth'
+import { useRouteParamState } from '../lib/router'
 import { Field, NativeSelect } from './Page'
 
 const FIRST_YEAR = 2000
 const FUTURE_YEAR_WINDOW = 10
 
-export function useYearMonthValue(initialValue: string) {
-  const [state, setCandidate] = useReducer(
+/**
+ * The month a screen is showing, kept in the URL.
+ *
+ * Same reading as the ledger's date: what these screens are about is one month,
+ * so a link that does not name it reopens on the current month for whoever it
+ * was sent to, and a reload throws away the month somebody had paged back to.
+ *
+ * A month arriving from the URL is never an error the operator has to answer
+ * for — nobody typed it — so an unreadable one falls back quietly. The error
+ * state is for what the picker sends back.
+ */
+export function useRouteYearMonthValue(key: string, fallback: string) {
+  const [routeValue, setRouteValue] = useRouteParamState(key, {
+    fallback,
+    normalize: normalizeYearMonth,
+  })
+  const [state, dispatch] = useReducer(
     yearMonthReducer,
-    initialValue,
-    candidate => initialYearMonthState(candidate, initialValue),
+    routeValue,
+    candidate => initialYearMonthState(candidate, fallback),
   )
+
+  // The URL moves without the picker too: back, forward, a pasted link.
+  useEffect(() => {
+    dispatch(routeValue)
+  }, [routeValue])
+
+  const setCandidate = useCallback((candidate: string) => {
+    dispatch(candidate)
+    // Only a readable month reaches the URL; the reducer keeps the last good
+    // one on screen and says why the rest was refused.
+    const next = normalizeYearMonth(candidate)
+    if (next) setRouteValue(next)
+  }, [setRouteValue])
+
   return { ...state, setCandidate }
 }
 

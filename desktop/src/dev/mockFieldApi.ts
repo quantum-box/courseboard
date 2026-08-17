@@ -2743,6 +2743,15 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       : null
     const product = mockProducts.find(item => item.reservationServiceId === reservationServiceId)
     const sequence = `${Date.now()}_${mockTeeReservations.length + 1}`
+    // The booking sheet asks for the group detail while the caller is on the
+    // phone, and the real use case stores it with the booking. Dropping it here
+    // made a freshly booked row read back empty on the fixtures.
+    const party = {
+      ...(body?.competitionName ? { competitionName: String(body.competitionName) } : {}),
+      ...(body?.organizer ? { organizer: String(body.organizer) } : {}),
+      ...(typeof body?.groupNumber === 'number' ? { groupNumber: body.groupNumber } : {}),
+      players: Array.isArray(body?.players) ? body.players : [],
+    }
     const created: MockTeeReservation = {
       id: `res_mock_${sequence}`,
       reservationNumber: `R-MOCK-${sequence}`,
@@ -2757,13 +2766,15 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       partyName: customerName,
       status: 'confirmed',
       holes: product?.holeCount ?? 18,
-      party: { players: [] },
+      party,
       // This is added by the real CourseBoard use case on its outbound Field
       // request, rather than posted by NewReservationEditor.
       prepaymentPolicy: 'none',
     }
     mockTeeReservations.push(created)
     saveMockWrites('teeReservations', mockTeeReservations)
+    mockParties[created.id] = party
+    saveMockWrites('parties', mockParties)
     return hit({ id: created.id })
   }
 

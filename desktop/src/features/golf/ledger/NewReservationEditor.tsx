@@ -67,6 +67,9 @@ export function NewReservationEditor({
   const [customerName, setCustomerName] = useState('')
   const [customerId, setCustomerId] = useState<string | null>(null)
   const [quantity, setQuantity] = useState('4')
+  const [competitionName, setCompetitionName] = useState('')
+  const [organizer, setOrganizer] = useState('')
+  const [groupNumber, setGroupNumber] = useState('')
   const [planId, setPlanId] = useState('')
   const [players, setPlayers] = useState<DraftReservationPlayer[]>(() => reservationPlayerRows(4))
   const [saving, setSaving] = useState(false)
@@ -81,6 +84,9 @@ export function NewReservationEditor({
     setCustomerName('')
     setCustomerId(null)
     setQuantity('4')
+    setCompetitionName('')
+    setOrganizer('')
+    setGroupNumber('')
     setPlayers(reservationPlayerRows(4))
     setConfirmingDiscard(false)
   }, [target])
@@ -111,9 +117,13 @@ export function NewReservationEditor({
 
   // Only what the desk typed counts as work worth guarding; the pre-filled
   // party size and default plan are not something anyone would mourn.
-  const dirty = customerName.trim().length > 0 || players.some(player =>
-    Boolean(player.name.trim() || player.tag.trim() || player.memberNumber.trim()),
-  )
+  const dirty = customerName.trim().length > 0
+    || competitionName.trim().length > 0
+    || organizer.trim().length > 0
+    || groupNumber.trim().length > 0
+    || players.some(player =>
+      Boolean(player.name.trim() || player.tag.trim() || player.memberNumber.trim()),
+    )
   const requestClose = () => {
     if (saving) return
     if (dirty) {
@@ -142,6 +152,8 @@ export function NewReservationEditor({
     && Boolean(target.resourceId)
     && !saving
 
+  const parsedGroupNumber = Number.parseInt(groupNumber, 10)
+
   const save = async () => {
     const plan = selectedPlan
     if (!target.resourceId) return
@@ -160,6 +172,11 @@ export function NewReservationEditor({
           quantity: parsedQuantity,
           customerName: customerName.trim(),
           customerId,
+          competitionName: competitionName.trim() || null,
+          organizer: organizer.trim() || null,
+          groupNumber: Number.isFinite(parsedGroupNumber) && parsedGroupNumber > 0
+            ? parsedGroupNumber
+            : null,
           players: namedPlayers,
         }),
       })
@@ -227,6 +244,35 @@ export function NewReservationEditor({
               max={maxQuantity}
               value={quantity}
               onChange={event => setQuantity(event.target.value)}
+            />
+          </Field>
+        </FormGrid>
+
+        {/* The same group detail the edit sheet holds. Asked for while the
+            caller is still on the phone rather than after the booking exists:
+            a compe name that has to be added afterwards is one the desk has to
+            remember to come back for, and the board reads it off the row. */}
+        <FormGrid columns={2}>
+          <Field label={t('ledger:party.competition')}>
+            <Input
+              value={competitionName}
+              placeholder={t('ledger:party.competitionPlaceholder')}
+              onChange={event => setCompetitionName(event.target.value)}
+            />
+          </Field>
+          <Field label={t('ledger:party.organizer')}>
+            <Input
+              value={organizer}
+              placeholder={t('ledger:party.organizerPlaceholder')}
+              onChange={event => setOrganizer(event.target.value)}
+            />
+          </Field>
+          <Field label={t('ledger:party.groupNumber')}>
+            <Input
+              type="number"
+              min={1}
+              value={groupNumber}
+              onChange={event => setGroupNumber(event.target.value)}
             />
           </Field>
         </FormGrid>
