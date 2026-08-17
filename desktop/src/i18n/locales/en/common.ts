@@ -38,6 +38,9 @@ export const common: DeepPartial<typeof source> = {
   state: {
     loading: 'Loading',
     saved: 'Saved',
+    reloading: 'Reloading…',
+    reloaded: 'Reloaded',
+    reloadFailed: 'Could not reload',
     empty: 'No data',
     emptyRows: 'Nothing to show',
     required: 'Required',

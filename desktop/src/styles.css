@@ -4008,6 +4008,11 @@ button,
 .shift-board-page {
   --shift-board-name-width: 176px;
   --shift-board-streak-width: 64px;
+  /* A calendar convention, kept deliberately quieter than the shift-state
+     colours: blue marks Saturday, red marks Sunday, and the day's actual
+     working/off state still does the heavier semantic work. */
+  --shift-saturday: 211 74% 54%;
+  --shift-sunday: 355 67% 55%;
 }
 
 .shift-board-month-picker {
@@ -4081,7 +4086,11 @@ button,
   top: 0;
   z-index: 3;
   height: 34px;
-  background: hsl(var(--nui-muted) / .5);
+  background: color-mix(
+    in srgb,
+    hsl(var(--nui-muted)) 50%,
+    hsl(var(--nui-background))
+  );
   font-weight: 500;
   color: hsl(var(--nui-muted-foreground));
   padding: 2px;
@@ -4155,6 +4164,13 @@ button,
   z-index: 4;
 }
 
+/* The scroll region necessarily clips overflow. Near its lower edge the
+   profile card therefore opens upward, keeping the last caddies readable. */
+.shift-board tbody tr:nth-last-child(-n + 4) .caddie-preview {
+  top: auto;
+  bottom: calc(100% - 4px);
+}
+
 .shift-board-profile-status {
   color: hsl(var(--nui-muted-foreground));
   font-size: 11px;
@@ -4184,9 +4200,38 @@ button,
   font-weight: 600;
 }
 
-.shift-board td.shift-board-weekend,
-.shift-board thead th.shift-board-weekend {
-  background: hsl(var(--nui-muted) / .35);
+.shift-board td.shift-board-saturday,
+.shift-board td.shift-board-sunday {
+  /* An image layer tints whatever state colour the cell already owns. */
+  background-image: linear-gradient(
+    hsl(var(--shift-day-tint) / .09),
+    hsl(var(--shift-day-tint) / .09)
+  );
+}
+
+.shift-board .shift-board-saturday {
+  --shift-day-tint: var(--shift-saturday);
+}
+
+.shift-board .shift-board-sunday {
+  --shift-day-tint: var(--shift-sunday);
+}
+
+.shift-board thead th.shift-board-saturday,
+.shift-board thead th.shift-board-sunday {
+  /* Mix two opaque colours instead of laying a translucent weekend tint over
+     whatever happens to be behind the sticky header. */
+  background-color: color-mix(
+    in srgb,
+    hsl(var(--shift-day-tint)) 14%,
+    hsl(var(--nui-background))
+  );
+  color: hsl(var(--shift-day-tint));
+}
+
+.shift-board thead th.shift-board-saturday .shift-board-day,
+.shift-board thead th.shift-board-sunday .shift-board-day {
+  color: hsl(var(--shift-day-tint));
 }
 
 .shift-board td[data-kind='assigned'],
@@ -4199,6 +4244,30 @@ button,
 .shift-board td[data-long-streak] {
   background: hsl(var(--nui-destructive) / .16);
   box-shadow: inset 0 -2px 0 hsl(var(--nui-destructive));
+}
+
+/* Employment has stopped, so the whole line recedes instead of adding a
+   second visible label that makes this one row taller than every neighbour. */
+.shift-board tbody tr:is(
+  [data-employment-status='inactive'],
+  [data-employment-status='suspended']
+) > th,
+.shift-board tbody tr:is(
+  [data-employment-status='inactive'],
+  [data-employment-status='suspended']
+) > td {
+  background-color: hsl(var(--nui-muted) / .78);
+  background-image: none;
+  color: hsl(var(--nui-muted-foreground));
+  box-shadow: none;
+}
+
+.shift-board tbody tr:is(
+  [data-employment-status='inactive'],
+  [data-employment-status='suspended']
+) .caddie-link-initial {
+  background: hsl(var(--nui-muted-foreground) / .12);
+  color: hsl(var(--nui-muted-foreground));
 }
 
 .shift-board-mark {
@@ -4279,17 +4348,6 @@ button,
   outline-offset: -2px;
 }
 
-/* Which course the caddie works that day, under the state glyph. */
-.shift-board-course {
-  max-width: 100%;
-  overflow: hidden;
-  font-size: 11px;
-  line-height: 1;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: hsl(var(--nui-muted-foreground));
-}
-
 /* A border rather than a shadow, so a pinned day inside a long run of working
    days still shows the run's own warning underline. */
 .shift-board td[data-pinned] { border-left: 3px solid hsl(var(--nui-primary)); }
@@ -4340,6 +4398,238 @@ button,
 .shift-board-legend i[data-long-streak] { background: hsl(var(--nui-destructive) / .25); }
 .shift-board-legend i[data-pinned] { border-left: 3px solid hsl(var(--nui-primary)); }
 .shift-board-legend i[data-draft-change] { border: 2px dashed hsl(var(--nui-primary) / 70%); }
+
+/* The interactive board is clipped and sticky by design. Printing uses a
+   separate, non-interactive table so every day is present even when the
+   operator had only one week scrolled into view. */
+.shift-board-print {
+  display: none;
+}
+
+/* A monthly proposal needs the whole viewport: 31 days across and the roster
+   down. The dialog still keeps its header and decision footer fixed while the
+   summary and board use the centre as their scroll region. */
+.shift-board-preview-dialog {
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+.shift-board-preview-dialog-body {
+  overscroll-behavior: contain;
+}
+
+.shift-board-preview-dialog .shift-board-scroll {
+  max-height: calc(100dvh - 180px);
+}
+
+@page shift-board {
+  size: A3 landscape;
+  margin: 8mm;
+}
+
+@media print {
+  body:has(> .shift-board-print) {
+    background: #fff !important;
+  }
+
+  body:has(> .shift-board-print) > :not(.shift-board-print) {
+    display: none !important;
+  }
+
+  .shift-board-print {
+    display: block;
+    page: shift-board;
+    width: 100%;
+    color: #202124;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 7.5pt;
+    line-height: 1.15;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .shift-board-print-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 2.5mm;
+    border-bottom: .35mm solid #356d5a;
+    padding-bottom: 1.5mm;
+  }
+
+  .shift-board-print-header h1,
+  .shift-board-print-header p {
+    margin: 0;
+  }
+
+  .shift-board-print-header h1 {
+    font-size: 14pt;
+    line-height: 1.2;
+  }
+
+  .shift-board-print-brand {
+    color: #356d5a;
+    font-size: 7pt;
+    font-weight: 700;
+    letter-spacing: .08em;
+  }
+
+  .shift-board-print-header > p {
+    color: #666;
+    font-size: 7pt;
+  }
+
+  .shift-board-print-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.2mm 3mm;
+    margin-bottom: 2mm;
+    color: #555;
+    font-size: 6.5pt;
+  }
+
+  .shift-board-print-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: .8mm;
+  }
+
+  .shift-board-print-legend i {
+    display: inline-block;
+    width: 3mm;
+    height: 3mm;
+    border: .2mm solid #c7ccd1;
+    border-radius: .5mm;
+  }
+
+  .shift-board-print table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .shift-board-print th,
+  .shift-board-print td {
+    height: 5.4mm;
+    border: .2mm solid #c7ccd1;
+    padding: 0 .5mm;
+    overflow: hidden;
+    text-align: center;
+    vertical-align: middle;
+  }
+
+  .shift-board-print thead th {
+    height: 7.5mm;
+    background: #f1f3f4;
+    font-weight: 600;
+  }
+
+  .shift-board-print thead th span,
+  .shift-board-print thead th small,
+  .shift-board-print td span {
+    display: block;
+    line-height: 1.05;
+  }
+
+  .shift-board-print thead th small {
+    color: #666;
+    font-size: 5.5pt;
+  }
+
+  .shift-board-print .shift-board-print-name {
+    width: 38mm;
+    padding: 0 1.5mm;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .shift-board-print .shift-board-print-streak {
+    width: 11mm;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .shift-board-print td[data-kind='assigned'],
+  .shift-board-print td[data-kind='available'],
+  .shift-board-print-legend i[data-kind='assigned'],
+  .shift-board-print-legend i[data-kind='available'] {
+    background: #e0f0e7;
+  }
+
+  .shift-board-print td[data-kind='off'],
+  .shift-board-print-legend i[data-kind='off'] {
+    background: #edf0f2;
+    color: #666;
+  }
+
+  .shift-board-print td[data-kind='morning'],
+  .shift-board-print td[data-kind='afternoon'],
+  .shift-board-print td[data-kind='light'],
+  .shift-board-print-legend i[data-kind='morning'],
+  .shift-board-print-legend i[data-kind='afternoon'],
+  .shift-board-print-legend i[data-kind='light'] {
+    background: #fff0d9;
+  }
+
+  .shift-board-print td[data-kind='unknown'],
+  .shift-board-print-legend i[data-kind='unknown'] {
+    background: #ffe5bf;
+  }
+
+  .shift-board-print td.shift-board-saturday,
+  .shift-board-print th.shift-board-saturday {
+    background-image: linear-gradient(rgb(51 135 225 / 10%), rgb(51 135 225 / 10%));
+  }
+
+  .shift-board-print td.shift-board-sunday,
+  .shift-board-print th.shift-board-sunday {
+    background-image: linear-gradient(rgb(217 63 76 / 10%), rgb(217 63 76 / 10%));
+  }
+
+  .shift-board-print th.shift-board-saturday {
+    color: #276fbf;
+  }
+
+  .shift-board-print th.shift-board-sunday {
+    color: #bd3341;
+  }
+
+  .shift-board-print td[data-long-streak],
+  .shift-board-print-legend i[data-long-streak] {
+    box-shadow: inset 0 -1mm 0 #d13f4d;
+  }
+
+  .shift-board-print td[data-pinned],
+  .shift-board-print-legend i[data-pinned] {
+    border-left: 1mm solid #356d5a;
+  }
+
+  .shift-board-print td[data-draft-change],
+  .shift-board-print-legend i[data-draft-change] {
+    outline: .6mm dashed #356d5a;
+    outline-offset: -.8mm;
+  }
+
+  .shift-board-print tr:is(
+    [data-employment-status='inactive'],
+    [data-employment-status='suspended']
+  ) > * {
+    background: #eceff1;
+    background-image: none;
+    color: #777;
+  }
+
+  .shift-board-print tr {
+    break-inside: avoid;
+  }
+}
 
 @media (max-width: 800px) {
   .shift-board-page {

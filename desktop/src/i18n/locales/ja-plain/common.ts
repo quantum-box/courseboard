@@ -34,6 +34,9 @@ export const common: DeepPartial<typeof source> = {
   },
   state: {
     loading: '開いています',
+    reloading: '最新の内容を読み込んでいます…',
+    reloaded: '最新の内容を読み込みました',
+    reloadFailed: '最新の内容を読み込めませんでした',
     empty: '中身がありません',
     emptyRows: '表示するものがありません',
     required: '入力が必要',

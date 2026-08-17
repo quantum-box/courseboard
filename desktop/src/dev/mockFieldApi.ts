@@ -1711,14 +1711,14 @@ function weekdayKeyOf(date: string): string {
   return MOCK_WEEK[new Date(`${date}T00:00:00Z`).getUTCDay()] ?? 'mon'
 }
 
-/** The same rules the API applies, kept simple enough to read at a glance. */
 /**
  * The same rules the API applies: at most six working days in a row, with the
  * rest day chosen from the window rather than always taken at the deadline —
  * protected weekdays first, then whichever day fewest colleagues are already
  * off, then the latest such day.
  */
-function planMockMonth(yearMonth: string) {
+function planMockMonth(yearMonth: string, persist = true) {
+  const shifts: MockShift[] = []
   const [year, month] = yearMonth.split('-').map(Number)
   if (!year || !month) {
     return {
@@ -1727,6 +1727,7 @@ function planMockMonth(yearMonth: string) {
       statutoryRestDays: 0,
       unplaced: [] as string[],
       overworked: [] as string[],
+      shifts,
     }
   }
   const first = `${yearMonth}-01`
@@ -1857,7 +1858,7 @@ function planMockMonth(yearMonth: string) {
         && Boolean(caddie.canTwoRounds)
         && Boolean(request?.twoRoundRequest)
         && mockShiftRules.maxRoundsPerDay >= 2
-      storeShift({
+      const shift: MockShift = {
         caddieProfileId: caddie.id,
         date,
         golfCourseId: off ? null : main,
@@ -1868,7 +1869,9 @@ function planMockMonth(yearMonth: string) {
         note: null,
         updatedBy: null,
         updatedAt: null,
-      })
+      }
+      shifts.push(shift)
+      if (persist) storeShift(shift)
       if (!off && !main) unplaced.add(caddie.displayName)
       daysWritten += 1
     }
@@ -1879,6 +1882,7 @@ function planMockMonth(yearMonth: string) {
     statutoryRestDays,
     unplaced: [...unplaced],
     overworked: [...overworked],
+    shifts,
   }
 }
 
@@ -2200,8 +2204,11 @@ function resolveGet(path: string): Json | null | undefined {
   )
   if (deadlineGetMatch) {
     const yearMonth = deadlineGetMatch[1]
-    const deadlineDate = mockAvailabilityDeadlines[yearMonth]
-    return deadlineDate ? { yearMonth, deadlineDate } : null
+    // The real API can return no deadline, but the generic mock resolver uses
+    // null to mean a missing resource. Give every demo month a harmless local
+    // default so the shift board stays browsable without a false 404 notice.
+    const deadlineDate = mockAvailabilityDeadlines[yearMonth] ?? `${yearMonth}-20`
+    return { yearMonth, deadlineDate }
   }
 
   const submissionsMatch = rawPathname.match(
@@ -2852,6 +2859,26 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     mockShiftRules.unfiledRequest = body?.unfiledRequest === 'off' ? 'off' : 'working'
     saveMockWrites('shiftRules', mockShiftRules)
     return hit(mockShiftRulesDto())
+  }
+
+  const shiftPlanPreviewMatch = pathname.match(
+    /^\/v1\/course\/caddie-shift-plans\/([^/]+)\/preview$/,
+  )
+  if (shiftPlanPreviewMatch && method === 'POST') {
+    const yearMonth = decodeURIComponent(shiftPlanPreviewMatch[1] ?? '')
+    const run = planMockMonth(yearMonth, false)
+    return hit({
+      summary: {
+        yearMonth,
+        daysWritten: run.daysWritten,
+        pinnedKept: run.pinnedKept,
+        unplaced: run.unplaced,
+        statutoryRestDays: run.statutoryRestDays,
+        overworked: run.overworked,
+        deadlineWarning: null,
+      },
+      shifts: run.shifts,
+    })
   }
 
   const shiftPlanMatch = pathname.match(/^\/v1\/course\/caddie-shift-plans\/([^/]+)$/)
