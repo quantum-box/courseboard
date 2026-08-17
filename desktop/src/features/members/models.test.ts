@@ -6,11 +6,15 @@ import {
   isAdminSelected,
   memberDisplayName,
   memberPolicyIds,
+  pendingMemberRow,
+  policyDisplay,
   policyIdByName,
+  remainingPendingInvites,
   roleBadgeVariant,
   roleLabel,
   rolePermissionSummary,
   rolePolicyId,
+  selectAllPolicyIds,
   sortMembers,
   togglePolicySelection,
   validateInviteEmail,
@@ -201,6 +205,65 @@ describe('customPolicyNames', () => {
     expect(
       customPolicyNames(member({ customPolicyIds: ['pol_1', 'pol_2', 'pol_x'] }), catalog),
     ).toEqual(['予約担当', '経理担当', 'pol_x'])
+  })
+
+  it('renders a platform policy through its screen wording', () => {
+    expect(
+      customPolicyNames(member({ customPolicyIds: ['pol_reservations'] }), CATALOG),
+    ).toEqual(['予約管理'])
+  })
+})
+
+describe('policyDisplay', () => {
+  it('replaces manifest identifiers with screen wording', () => {
+    const display = policyDisplay({
+      id: 'pol_reservations',
+      name: 'field:reservations',
+      description: 'Manage reservations, resources, and plans',
+    })
+    expect(display.label).toBe('予約管理')
+    expect(display.description).toContain('予約')
+  })
+
+  it('falls back to the raw name and description for unknown policies', () => {
+    expect(policyDisplay({ id: 'pol_x', name: 'キャディ管理', description: '説明文' }))
+      .toEqual({ label: 'キャディ管理', description: '説明文' })
+    expect(policyDisplay({ id: 'pol_y', name: 'field:something-new' }))
+      .toEqual({ label: 'field:something-new', description: null })
+  })
+})
+
+describe('selectAllPolicyIds', () => {
+  it('collapses to the administrator role, which already covers everything', () => {
+    expect(selectAllPolicyIds(CATALOG, ['pol_operator_new', 'pol_reservations']))
+      .toEqual(['pol_admin_new'])
+  })
+
+  it('keeps the current role and adds every domain policy without an administrator entry', () => {
+    const catalog = CATALOG.filter(policy => policy.name !== 'field:administrator')
+    expect(selectAllPolicyIds(catalog, ['pol_operator_new']))
+      .toEqual(['pol_operator_new', 'pol_reservations'])
+    expect(selectAllPolicyIds(catalog, [])).toEqual(['pol_reservations'])
+  })
+})
+
+describe('pending invites', () => {
+  it('builds a read-only roster row for a fresh invitation', () => {
+    const row = pendingMemberRow({ email: 'new@example.com', policyIds: ['pol_reservations'] })
+    expect(row.id).toBe('pending:new@example.com')
+    expect(row.pending).toBe(true)
+    expect(row.isOwner).toBe(false)
+    expect(row.customPolicyIds).toEqual(['pol_reservations'])
+  })
+
+  it('keeps an invite only until its address appears in the roster', () => {
+    const pending = [
+      { email: 'new@example.com', policyIds: [] },
+      { email: 'accepted@example.com', policyIds: [] },
+    ]
+    const users = [member({ id: 'us_a', email: 'Accepted@Example.com' })]
+    expect(remainingPendingInvites(pending, users))
+      .toEqual([{ email: 'new@example.com', policyIds: [] }])
   })
 })
 

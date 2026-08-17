@@ -21,8 +21,18 @@ export const members: DeepPartial<typeof source> = {
   table: {
     name: '名前',
     email: 'メールアドレス',
+    status: 'いまの様子',
     role: 'できること',
     self: 'あなた',
+  },
+  status: {
+    active: '参加している',
+    pending: 'お知らせを送った',
+  },
+  searchPlaceholder: '名前やメールアドレスでさがす',
+  checklist: {
+    selectAll: '全部つける',
+    clearAll: '全部外す',
   },
   action: {
     editRole: '編集',
@@ -64,7 +74,7 @@ export const members: DeepPartial<typeof source> = {
   invite: {
     trigger: 'メンバーを呼ぶ',
     title: 'メンバーを呼ぶ',
-    description: 'すでに登録がある人には、すぐに使えるようにします。登録がない人には、お知らせのメールを送ります。',
+    description: 'すでに登録がある人には、すぐに使えるようにします。登録がない人には、お知らせのメールだけを送ります。相手が受け取ったあとで、できることをこの画面で決め直してください。',
     email: 'メールアドレス',
     emailPlaceholder: 'staff@example.com',
     hint: 'メンバーを決めるには「メンバーを決める」役目が必要です（持ち主と管理者は、はじめから持っています）。',
@@ -82,6 +92,48 @@ export const members: DeepPartial<typeof source> = {
       sentFallback: 'そのアドレス',
       applied: '{{name}} はすでに登録があるので、すぐに使えるようにして、できることもつけました。',
       appliedFallback: 'その人',
+    },
+  },
+  policies: {
+    fieldSales: {
+      label: '営業のしごと',
+      description: 'お客さま・注文・会員の登録と書きかえができます。商品と売上のまとめは見るだけです。',
+    },
+    fieldFinance: {
+      label: 'お金のしごと',
+      description: '請求書・入金・帳簿・経費の登録と書きかえができます。お客さまの情報は見るだけです。',
+    },
+    fieldProcurement: {
+      label: '仕入れと在庫のしごと',
+      description: '在庫・注文・仕入れ先・商品の登録と書きかえができます。売上のまとめは見るだけです。',
+    },
+    fieldReservations: {
+      label: '予約のしごと',
+      description: '予約・枠・プランの登録と書きかえができます。お客さまの情報と売上のまとめは見るだけです。',
+    },
+    fieldHr: {
+      label: 'スタッフのしごと',
+      description: 'スタッフ・シフト・勤怠の登録と書きかえができます。売上のまとめは見るだけです。',
+    },
+    fieldAccountingManager: {
+      label: '経理のまとめ役',
+      description: '帳簿と決算の登録と書きかえ、入金の確認ができます。ほかのお金の情報は見るだけです。',
+    },
+    fieldExpenseApprover: {
+      label: '経費をみとめる役',
+      description: '経費の申請を見て、みとめたり、断ったりできます。申請そのものは作れません。',
+    },
+    fieldPurchaseApprover: {
+      label: '仕入れをみとめる役',
+      description: '仕入れの帳簿の登録と書きかえができます。注文と入荷は見るだけです。',
+    },
+    fieldExtensionManager: {
+      label: '追加機能の係',
+      description: '追加の機能を入れたり、設定を直したりできます。予約は見るだけです。',
+    },
+    fieldSaasApprover: {
+      label: 'SaaS をみとめる役',
+      description: 'SaaS の変更の申請を見て、みとめたり、返したりできます。申請そのものは作れません。',
     },
   },
 }

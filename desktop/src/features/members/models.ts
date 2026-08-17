@@ -26,8 +26,12 @@ import { i18next } from '../../i18n'
  */
 export type ErpRole = 'field:administrator' | 'field:operator' | 'field:reader'
 
-/** Request role identifiers (kebab-case serde variants upstream). */
-export type ErpRoleRequest = 'admin' | 'staff' | 'viewer'
+/**
+ * Key segments for the basic-role wording. The upstream role request enum
+ * (`admin`/`staff`/`viewer`) is no longer sent — everything goes up as
+ * `policyIds` — but the i18n keys keep the same short names.
+ */
+type RoleKeySegment = 'admin' | 'staff' | 'viewer'
 
 export type ErpMember = {
   id: string
@@ -70,28 +74,24 @@ export type InviteMemberResponse = {
  * was active on first import and never follow a language switch. Callers
  * translate `labelKey` / `summaryKey` at render time.
  */
-export type RoleTextKey = `members:roles.${ErpRoleRequest}.${'label' | 'summary'}`
+export type RoleTextKey = `members:roles.${RoleKeySegment}.${'label' | 'summary'}`
 
 export const ROLE_OPTIONS: Array<{
-  value: ErpRoleRequest
   responseValue: ErpRole
   labelKey: RoleTextKey
   summaryKey: RoleTextKey
 }> = [
   {
-    value: 'admin',
     responseValue: 'field:administrator',
     labelKey: 'members:roles.admin.label',
     summaryKey: 'members:roles.admin.summary',
   },
   {
-    value: 'staff',
     responseValue: 'field:operator',
     labelKey: 'members:roles.staff.label',
     summaryKey: 'members:roles.staff.summary',
   },
   {
-    value: 'viewer',
     responseValue: 'field:reader',
     labelKey: 'members:roles.viewer.label',
     summaryKey: 'members:roles.viewer.summary',
@@ -137,6 +137,65 @@ export function domainPolicies(catalog: ErpCustomPolicy[]): ErpCustomPolicy[] {
   return catalog.filter(policy =>
     !ROLE_POLICY_NAMES.includes(policy.name) && !RETIRED_POLICY_NAMES.includes(policy.name),
   )
+}
+
+/**
+ * Reader-facing wording for the policies the platform ships in the Field
+ * catalogue. The catalogue itself only carries the identifier
+ * (`field:reservations`) and an English manifest description, neither of
+ * which the person assigning permissions should have to decode. Resolved per
+ * call so the text follows the active language; a policy this build has no
+ * wording for falls back to its raw name and description, so tenant-defined
+ * policies stay recognizable instead of rendering blank.
+ */
+const POLICY_TEXT: ReadonlyMap<string, { label: () => string; description: () => string }> = new Map([
+  ['field:sales', {
+    label: () => i18next.t('members:policies.fieldSales.label'),
+    description: () => i18next.t('members:policies.fieldSales.description'),
+  }],
+  ['field:finance', {
+    label: () => i18next.t('members:policies.fieldFinance.label'),
+    description: () => i18next.t('members:policies.fieldFinance.description'),
+  }],
+  ['field:procurement', {
+    label: () => i18next.t('members:policies.fieldProcurement.label'),
+    description: () => i18next.t('members:policies.fieldProcurement.description'),
+  }],
+  ['field:reservations', {
+    label: () => i18next.t('members:policies.fieldReservations.label'),
+    description: () => i18next.t('members:policies.fieldReservations.description'),
+  }],
+  ['field:hr', {
+    label: () => i18next.t('members:policies.fieldHr.label'),
+    description: () => i18next.t('members:policies.fieldHr.description'),
+  }],
+  ['field:AccountingManager', {
+    label: () => i18next.t('members:policies.fieldAccountingManager.label'),
+    description: () => i18next.t('members:policies.fieldAccountingManager.description'),
+  }],
+  ['field:ExpenseApprover', {
+    label: () => i18next.t('members:policies.fieldExpenseApprover.label'),
+    description: () => i18next.t('members:policies.fieldExpenseApprover.description'),
+  }],
+  ['field:PurchaseApprover', {
+    label: () => i18next.t('members:policies.fieldPurchaseApprover.label'),
+    description: () => i18next.t('members:policies.fieldPurchaseApprover.description'),
+  }],
+  ['field:ExtensionManager', {
+    label: () => i18next.t('members:policies.fieldExtensionManager.label'),
+    description: () => i18next.t('members:policies.fieldExtensionManager.description'),
+  }],
+  ['field:SaasApprover', {
+    label: () => i18next.t('members:policies.fieldSaasApprover.label'),
+    description: () => i18next.t('members:policies.fieldSaasApprover.description'),
+  }],
+])
+
+/** What the checklist and badges should print for one catalogue policy. */
+export function policyDisplay(policy: ErpCustomPolicy): { label: string; description: string | null } {
+  const known = POLICY_TEXT.get(policy.name)
+  if (!known) return { label: policy.name, description: policy.description ?? null }
+  return { label: known.label(), description: known.description() }
 }
 
 /**
@@ -244,8 +303,71 @@ export function customPolicyNames(
   member: Pick<ErpMember, 'customPolicyIds'>,
   catalog: ErpCustomPolicy[],
 ): string[] {
-  const byId = new Map(catalog.map(policy => [policy.id, policy.name]))
-  return member.customPolicyIds.map(id => byId.get(id) ?? id)
+  const byId = new Map(catalog.map(policy => [policy.id, policy]))
+  return member.customPolicyIds.map(id => {
+    const policy = byId.get(id)
+    return policy ? policyDisplay(policy).label : id
+  })
+}
+
+/**
+ * The strongest selection this catalogue can express. With the administrator
+ * role on offer that is just the role itself — it already covers everything,
+ * and the checklist invariant clears the rest anyway. Without it, the current
+ * basic role is kept and every domain policy is added.
+ */
+export function selectAllPolicyIds(catalog: ErpCustomPolicy[], selected: string[]): string[] {
+  const adminId = policyIdByName(catalog, ADMIN_POLICY_NAME)
+  if (adminId) return [adminId]
+  const roleIds = new Set(
+    ROLE_POLICY_NAMES.map(name => policyIdByName(catalog, name)).filter(
+      (id): id is string => id !== null,
+    ),
+  )
+  const role = selected.find(id => roleIds.has(id))
+  const domain = domainPolicies(catalog).map(policy => policy.id)
+  return role ? [role, ...domain] : domain
+}
+
+/** An invitation sent to an address the roster does not know yet. */
+export type PendingInvite = { email: string; policyIds: string[] }
+
+/** One roster row: a fetched member, or a locally remembered invitation. */
+export type MemberRow = ErpMember & { pending?: boolean }
+
+/**
+ * A local roster row for an invitation the list API cannot see. Upstream only
+ * returns members who exist as users, so a fresh invitation would otherwise
+ * vanish from the screen the moment the list refreshes.
+ */
+export function pendingMemberRow(invite: PendingInvite): MemberRow {
+  return {
+    id: `pending:${invite.email}`,
+    email: invite.email,
+    name: null,
+    role: null,
+    isOwner: false,
+    customPolicyIds: invite.policyIds,
+    tenants: [],
+    pending: true,
+  }
+}
+
+/**
+ * Invitations still outstanding: an invite stays on screen until its address
+ * shows up in the fetched roster, which is the only signal of acceptance the
+ * IAM surface offers.
+ */
+export function remainingPendingInvites(
+  pending: PendingInvite[],
+  users: ErpMember[],
+): PendingInvite[] {
+  const emails = new Set(
+    users
+      .map(user => user.email?.toLowerCase())
+      .filter((email): email is string => Boolean(email)),
+  )
+  return pending.filter(invite => !emails.has(invite.email.toLowerCase()))
 }
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
