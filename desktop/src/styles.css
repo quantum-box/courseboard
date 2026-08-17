@@ -1852,8 +1852,21 @@ button,
 
 .course-checklist {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.course-checklist-items {
+  display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
+}
+
+/* The toggle for the whole list sits above it, told apart from the courses
+   themselves by weight rather than by a rule that would eat a row of height. */
+.course-checklist-all {
+  font-weight: 500;
 }
 
 .course-checklist-item {

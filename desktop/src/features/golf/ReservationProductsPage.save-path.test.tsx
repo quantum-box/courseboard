@@ -142,6 +142,35 @@ describe('ReservationProductsPage save paths', () => {
     expect(writes[0]!.body).not.toHaveProperty('golfCourseId')
   })
 
+  it('ticks and clears every course from the one row above the list', async () => {
+    renderPage()
+    fireEvent.click((await screen.findAllByRole('button', { name: '予約サービスを追加' }))[0]!)
+
+    const dialog = await screen.findByRole('dialog')
+    const selectAll = within(dialog).getByRole('checkbox', { name: 'すべて選ぶ / 外す' })
+    const east = within(dialog).getByRole('checkbox', { name: '東コース' })
+    const west = within(dialog).getByRole('checkbox', { name: '西コース' })
+
+    fireEvent.click(selectAll)
+    expect(east).toHaveProperty('checked', true)
+    expect(west).toHaveProperty('checked', true)
+    expect(selectAll).toHaveProperty('checked', true)
+
+    // One course off leaves the row mixed rather than empty.
+    fireEvent.click(east)
+    expect(selectAll).toHaveProperty('checked', false)
+    expect(selectAll).toHaveProperty('indeterminate', true)
+
+    fireEvent.click(selectAll)
+    expect(east).toHaveProperty('checked', true)
+    expect(west).toHaveProperty('checked', true)
+
+    fireEvent.click(selectAll)
+    expect(east).toHaveProperty('checked', false)
+    expect(west).toHaveProperty('checked', false)
+    expect(selectAll).toHaveProperty('indeterminate', false)
+  })
+
   it('will not save a new plan until it names a course', async () => {
     renderPage()
     fireEvent.click((await screen.findAllByRole('button', { name: '予約サービスを追加' }))[0]!)

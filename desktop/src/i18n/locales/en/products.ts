@@ -15,6 +15,7 @@ export const products: DeepPartial<typeof source> = {
     courseHint: 'The courses this plan is sold on. Pick several when the plan is the same on each; hours and tee times come from whichever course is booked.',
     courseUnset: 'Choose a course',
     courseNone: 'No courses yet. Create one first.',
+    courseSelectAll: 'Select all / none',
     maxPlayers: 'Players per group',
     maxPlayersHint: 'The cap on one group. Leave it empty to follow the reservation policy. How many groups you accept is set on the course.',
     maxPlayersValue: '{{n}} players',

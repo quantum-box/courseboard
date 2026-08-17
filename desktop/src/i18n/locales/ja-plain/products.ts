@@ -16,6 +16,7 @@ export const products: DeepPartial<typeof source> = {
     courseHint: 'このプランを売るコースです。同じ中身で売るなら、いくつでも選べます。開いている時間と枠は、選んだコースそれぞれのものを使います。',
     courseUnset: 'コースを選んでください',
     courseNone: 'コースがまだありません。先にコースを作ってください。',
+    courseSelectAll: 'ぜんぶ選ぶ / 外す',
     maxPlayers: '1組に入れる人数',
     maxPlayersHint: '1つの組に入れる人数の上限です。空のままなら、予約の決まりに従います。受けられる組の数は、コースの側で決めます。',
     maxPlayersValue: '{{n}}人',
