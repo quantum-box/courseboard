@@ -149,7 +149,7 @@ actions:
   global: true
 policies:
 - name: field-extension:golf:viewer
-  description: Read-only access to the golf board - tee sheet, courses, caddies, shifts, budgets, settlement, and fee simulation. Cannot change anything
+  description: Read-only access to the golf board - tee sheet, courses, caddies, shifts, budgets, and fee simulation. Payroll and settlement are not included
   global: true
   actions:
   - action: field:ListReservations

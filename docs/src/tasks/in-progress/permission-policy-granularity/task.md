@@ -63,31 +63,39 @@ extension 所有の policy は extension リポジトリで管理する規約
 > コードは 36 個の action を要求するが、Tachyon Auth に宣言が無い action は
 > 誰にも grant されていないため、先にコードが出ると全 usecase が 403 になる。
 > 逆順（apply が先）は無害で、使われない宣言が増えるだけ。
->
-> 初回の 8 action / 6 policy は 2026-08-18 に apply 済み。**36 action への
-> 拡張分は未適用**（apply しようとした時点で `api.n1.tachy.one` が応答せず、
-> healthz も含めて全滅していたため。ネットワーク側の問題ではない）。復旧後に
-> 下記 plan → apply を実行すること。
 
-**適用手順**（profile `admin` / `--tenant-id tn_01ks18jhh1xvggktfzjx5jqsen`）:
+**適用済み**（2026-08-18、profile `admin` / `--tenant-id tn_01ks18jhh1xvggktfzjx5jqsen`）:
 
 ```bash
 tachyon --profile admin --tenant-id <tenant> auth manifest plan  -f .tachyon/manifests/tachyonfield-golf-auth.yml
 tachyon --profile admin --tenant-id <tenant> auth manifest apply -f .tachyon/manifests/tachyonfield-golf-auth.yml
 ```
 
-- `--prune` は付けない（opt-in。付けなければ追加と更新だけで、既存 policy を消さない）
+- `--prune` は付けない（opt-in。付けなければ既存 policy を消さない）
 - `-f` で golf マニフェストだけを指定する。auto-discovery は `.tachyon/manifests/` の
-  他のファイル（OAuth client、Field 本体マニフェストの古いコピー）も拾う
-- 初回の結果: action 8 件 / policy 6 件を作成、エラー 0。再 plan で action は
-  unchanged（policy は list endpoint が無いため常に register 表示になる）
-- apply 後は、ロールの action 一覧が新しい語彙に入れ替わったことを確認する
-  （policy の中身は plan では見えない）
-- 検証: golf テナント（`tn_01kxd5gdvm9thcbj8c2e8c6yhq`）の
-  `GET /v1/field/iam/users` の `customPolicies` に 5 ロールが載ることを確認した。
+  他のファイル（OAuth client 定義）も拾う
+- 結果: action 37 件、policy 6 件。golf テナント
+  （`tn_01kxd5gdvm9thcbj8c2e8c6yhq`）の `GET /v1/field/iam/users` の
+  `customPolicies` に 5 ロールが載ることを確認した。
   `field-extension:golf:calculator` は載らない。`field:*` action を持たないので
   Field のカタログ条件（`policy_applies_to_field`）から外れる — machine-to-machine
   専用として意図どおり
+
+> **CLI の罠: `apply` は既存 policy を更新しない。**
+> policy は `POST /v1/auth/policies` するだけで、409（already exists）は
+> スキップ扱いになる（tachyon-apps `sdk/cli/src/commands/auth/manifest.rs`）。
+> action は追加されるのに **ロールの中身は古いまま**という、いちばん危険な
+> 中途半端さが起きる。実際に一度これを踏んだ。
+>
+> 見分け方: apply の出力が `N policy(ies) created, M skipped`。skipped なら
+> 反映されていない。`tachyon org policies get <id>` の description が
+> マニフェストと違えば確定。
+>
+> 直し方: `tachyon org policies delete <id>` してから apply し直す。delete は
+> **参照されている policy を拒否する**ので、誰かが持っていれば止まる（＝安全）。
+> ただし policy id は変わる。この画面は id を名前から引くので影響は無い。
+> `PATCH /v1/auth/policies/{id}`（`actionsToAdd` / `actionsToRemove`）は API に
+> あるが CLI からは叩けない。CLI 側の改善は PLT 起票対象。
 
 ### CourseBoard API の action ゲート（`src/course_authz.rs`）
 
