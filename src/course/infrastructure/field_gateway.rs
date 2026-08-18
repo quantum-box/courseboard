@@ -1907,6 +1907,8 @@ mod tests {
                     authorization: "Bearer test-token",
                     operator_id: "operator-test",
                     platform_id: Some("platform-test"),
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
                 },
                 &ResourceId::new("resource-1"),
                 "Europe/Berlin",
@@ -2120,6 +2122,8 @@ mod tests {
                 authorization: "Bearer test-token",
                 operator_id: "operator-test",
                 platform_id: Some("platform-test"),
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                caller_bearer: "Bearer test",
             },
         )
         .build()
@@ -2151,6 +2155,8 @@ mod tests {
                 authorization: "Bearer test-token",
                 operator_id: "operator-test",
                 platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                caller_bearer: "Bearer test",
             },
         )
         .build()

@@ -7,8 +7,8 @@
 use std::sync::Arc;
 
 use crate::course::domain::{
-    CourseError, DeleteSlotOverrides, SlotOverride, SlotOverrideGateway, SlotOverrideQuery,
-    UpsertSlotOverrides,
+    actions, CourseError, DeleteSlotOverrides, GatewayCredentials, SlotOverride,
+    SlotOverrideGateway, SlotOverrideQuery, UpsertSlotOverrides,
 };
 
 pub struct ListSlotOverridesUseCase {
@@ -22,10 +22,12 @@ impl ListSlotOverridesUseCase {
 
     pub async fn execute(
         &self,
-        tenant_id: &str,
+        credentials: GatewayCredentials<'_>,
         query: SlotOverrideQuery,
     ) -> Result<Vec<SlotOverride>, CourseError> {
+        let tenant_id = credentials.operator_id;
         require_tenant(tenant_id)?;
+        credentials.require(actions::LIST_SLOT_OVERRIDES).await?;
         self.marks.list_slot_overrides(tenant_id, &query).await
     }
 }
@@ -41,10 +43,12 @@ impl UpsertSlotOverridesUseCase {
 
     pub async fn execute(
         &self,
-        tenant_id: &str,
+        credentials: GatewayCredentials<'_>,
         command: UpsertSlotOverrides,
     ) -> Result<Vec<SlotOverride>, CourseError> {
+        let tenant_id = credentials.operator_id;
         require_tenant(tenant_id)?;
+        credentials.require(actions::MANAGE_SLOT_OVERRIDES).await?;
         let overrides = command.into_overrides()?;
         self.marks
             .upsert_slot_overrides(tenant_id, &overrides)
@@ -63,10 +67,12 @@ impl DeleteSlotOverridesUseCase {
 
     pub async fn execute(
         &self,
-        tenant_id: &str,
+        credentials: GatewayCredentials<'_>,
         command: DeleteSlotOverrides,
     ) -> Result<u64, CourseError> {
+        let tenant_id = credentials.operator_id;
         require_tenant(tenant_id)?;
+        credentials.require(actions::MANAGE_SLOT_OVERRIDES).await?;
         if command.tee_times.is_empty() {
             return Err(CourseError::BadRequest("at least one tee time is required"));
         }
@@ -86,6 +92,18 @@ fn require_tenant(tenant_id: &str) -> Result<(), CourseError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Credentials for a tenant, with authorization already granted: these
+    /// tests are about what the use case does, not who may run it.
+    fn credentials(tenant_id: &str) -> GatewayCredentials<'_> {
+        GatewayCredentials {
+            authorization: "Bearer test",
+            operator_id: tenant_id,
+            platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
+            caller_bearer: "Bearer test",
+        }
+    }
     use async_trait::async_trait;
     use chrono::NaiveDate;
     use std::sync::Mutex;
@@ -141,7 +159,10 @@ mod tests {
         let marks = Arc::new(RecordingMarks::default());
         let use_case = UpsertSlotOverridesUseCase::new(marks.clone());
         use_case
-            .execute("tenant-1", command(vec!["07:14".into(), "07:21".into()]))
+            .execute(
+                credentials("tenant-1"),
+                command(vec!["07:14".into(), "07:21".into()]),
+            )
             .await
             .unwrap();
         assert_eq!(marks.upserted.lock().unwrap().len(), 2);
@@ -151,7 +172,7 @@ mod tests {
     async fn a_write_with_no_tenant_is_refused_before_it_can_cross_tenants() {
         let use_case = UpsertSlotOverridesUseCase::new(Arc::new(RecordingMarks::default()));
         assert!(use_case
-            .execute("  ", command(vec!["07:14".into()]))
+            .execute(credentials("  "), command(vec!["07:14".into()]))
             .await
             .is_err());
     }
@@ -161,7 +182,7 @@ mod tests {
         let use_case = DeleteSlotOverridesUseCase::new(Arc::new(RecordingMarks::default()));
         let result = use_case
             .execute(
-                "tenant-1",
+                credentials("tenant-1"),
                 DeleteSlotOverrides {
                     course_id: CourseId::new("course-1"),
                     date: NaiveDate::from_ymd_opt(2026, 7, 20).unwrap(),

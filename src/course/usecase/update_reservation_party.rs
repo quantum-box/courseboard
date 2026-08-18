@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, GatewayCredentials, PartyDetails, ReservationGateway, ReservationId,
 };
@@ -25,6 +26,7 @@ impl UpdateReservationPartyUseCase {
         reservation_id: &ReservationId,
         party: PartyDetails,
     ) -> Result<PartyDetails, CourseError> {
+        credentials.require(actions::MANAGE_RESERVATIONS).await?;
         if reservation_id.trim().is_empty() {
             return Err(CourseError::BadRequest("reservation id is required"));
         }

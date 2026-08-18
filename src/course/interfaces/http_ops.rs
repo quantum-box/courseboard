@@ -1087,7 +1087,7 @@ pub async fn get_availability_deadline(
     let year_month = parse_year_month(&year_month)?;
     let use_case = GetAvailabilityDeadlineUseCase::new(state.availability_deadlines());
     let deadline = use_case
-        .execute(credentials.operator_id, year_month)
+        .execute(credentials, year_month)
         .await
         .map_err(AppError::from)?;
     Ok(Json(deadline.map(AvailabilityDeadlineDto::from)))
@@ -1118,7 +1118,7 @@ pub async fn upsert_availability_deadline(
     let deadline = AvailabilityDeadline::try_new(year_month, body.deadline_date);
     let use_case = UpsertAvailabilityDeadlineUseCase::new(state.availability_deadlines());
     let saved = use_case
-        .execute(credentials.operator_id, deadline)
+        .execute(credentials, deadline)
         .await
         .map_err(AppError::from)?;
     Ok(Json(AvailabilityDeadlineDto::from(saved)))
@@ -1598,7 +1598,7 @@ pub async fn list_caddie_shifts(
     let credentials = credentials(&state, &headers)?;
     let use_case = ListCaddieShiftsUseCase::new(state.caddie_shifts());
     let shifts = use_case
-        .execute(credentials.operator_id, params.from, params.to)
+        .execute(credentials, params.from, params.to)
         .await
         .map_err(AppError::from)?;
     Ok(Json(ItemsResponse {
@@ -1943,7 +1943,7 @@ pub async fn get_shift_rules(
     let credentials = credentials(&state, &headers)?;
     let use_case = GetShiftRulesUseCase::new(state.shift_rules());
     let policy = use_case
-        .execute(credentials.operator_id)
+        .execute(credentials)
         .await
         .map_err(AppError::from)?;
     Ok(Json(ShiftRulesDto::from(policy)))
@@ -2000,7 +2000,7 @@ pub async fn update_shift_rules(
         .with_unfiled_request(UnfiledRequest::parse(&body.unfiled_request));
     let use_case = UpdateShiftRulesUseCase::new(state.shift_rules());
     let saved = use_case
-        .execute(credentials.operator_id, policy)
+        .execute(credentials, policy)
         .await
         .map_err(AppError::from)?;
     Ok(Json(ShiftRulesDto::from(saved)))

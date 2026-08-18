@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use chrono::NaiveDate;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     compute_caddie_supply, parse_tenant_timezone, AvailabilityQuery, CaddieAvailability,
     CaddieDayCapacity, CaddieSupply, CourseError, GatewayCredentials, GolfCatalogGateway,
@@ -45,6 +46,7 @@ impl GetCaddieSupplyUseCase {
         date: NaiveDate,
         safety_buffer: Option<i64>,
     ) -> Result<CaddieSupply, CourseError> {
+        credentials.require(actions::LIST_CADDIE_INSIGHTS).await?;
         let roster = self.ops.list_caddie_roster(credentials).await?;
         let availabilities = self
             .ops

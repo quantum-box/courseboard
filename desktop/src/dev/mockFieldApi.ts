@@ -536,16 +536,23 @@ const mockStaff: MockStaffMember[] = [
 /** Tenant members mirroring the Field IAM surface `GET /v1/field/iam/users`. */
 const mockIamCustomPolicies = [
   // The basic roles are part of the catalogue now, not constants the client
-  // holds. The retired names below are still visible upstream, so the fixture
-  // carries one to exercise the screen leaving it out of the checklist.
-  { id: 'pol_role_administrator', name: 'field:administrator', description: 'テナント全体の管理' },
-  { id: 'pol_role_operator', name: 'field:operator', description: '日々の業務操作' },
-  { id: 'pol_role_reader', name: 'field:reader', description: '閲覧のみ' },
-  { id: 'pol_retired_staff', name: 'field:staff', description: '旧スタッフ（廃止）' },
+  // holds. Names match Field's auth manifest, which is what a real tenant's
+  // catalogue returns.
+  { id: 'pol_role_admin', name: 'field:admin', description: 'テナント全体の管理' },
+  { id: 'pol_role_staff', name: 'field:staff', description: '日々の業務操作' },
+  { id: 'pol_role_viewer', name: 'field:viewer', description: '閲覧のみ' },
   { id: 'pol_caddie_viewer', name: 'キャディ管理閲覧者', description: '名簿・配置・勤怠・給与の閲覧' },
   { id: 'pol_caddie_admin', name: 'キャディ管理管理者', description: '名簿・配置・勤怠・給与の作成・更新' },
   { id: 'pol_billing_viewer', name: '経理閲覧者', description: '予算・精算・キャンセル料の閲覧' },
   { id: 'pol_billing_admin', name: '経理管理者', description: '予算・精算・キャンセル料の作成・更新' },
+  // The golf roles from `.tachyon/manifests/tachyonfield-golf-auth.yml`, with
+  // the manifest's English descriptions the way the real catalogue carries
+  // them — the screen is expected to replace both with its own wording.
+  { id: 'pol_golf_manager', name: 'field-extension:golf:manager', description: 'Full golf operations - everything the golf roles cover. Member management stays with the Field administrator role' },
+  { id: 'pol_golf_reception', name: 'field-extension:golf:reception', description: 'Front-desk work - take and change reservations, manage the tee sheet, register customers and memberships' },
+  { id: 'pol_golf_caddie_master', name: 'field-extension:golf:caddie-master', description: 'Caddie operations - rosters, assignments, availability, and shift planning' },
+  { id: 'pol_golf_accounting', name: 'field-extension:golf:accounting', description: 'Golf accounting - settlement and payroll summaries, fee simulation, cancellation fee collection. Reservations stay read-only' },
+  { id: 'pol_golf_viewer', name: 'field-extension:golf:viewer', description: 'Read-only access to the golf board - tee sheet, reservations, caddies, shifts, and fee simulation' },
 ]
 
 const mockIamMembers: Array<{
@@ -570,7 +577,7 @@ const mockIamMembers: Array<{
     id: 'user_front_manager',
     name: '高橋 誠',
     email: 'makoto@example.com',
-    role: 'field:administrator',
+    role: 'field:admin',
     isOwner: false,
     customPolicyIds: ['pol_billing_admin'],
     tenants: ['courseboard_id'],
@@ -579,7 +586,7 @@ const mockIamMembers: Array<{
     id: 'user_front_staff',
     name: '鈴木 里奈',
     email: 'rina@example.com',
-    role: 'field:operator',
+    role: 'field:staff',
     isOwner: false,
     customPolicyIds: ['pol_caddie_viewer', 'pol_billing_viewer'],
     tenants: ['courseboard_id'],
@@ -588,7 +595,7 @@ const mockIamMembers: Array<{
     id: 'user_viewer',
     name: '木村 大地',
     email: 'daichi@example.com',
-    role: 'field:reader',
+    role: 'field:viewer',
     isOwner: false,
     customPolicyIds: [],
     tenants: ['courseboard_id'],
@@ -596,16 +603,16 @@ const mockIamMembers: Array<{
 ]
 
 const IAM_ROLE_BY_REQUEST: Record<string, string> = {
-  admin: 'field:administrator',
-  staff: 'field:operator',
-  viewer: 'field:reader',
+  admin: 'field:admin',
+  staff: 'field:staff',
+  viewer: 'field:viewer',
 }
 
 /** Keyed by catalogue id, the way the real API resolves a role now. */
 const IAM_ROLE_BY_POLICY_ID: Record<string, string> = {
-  pol_role_administrator: 'field:administrator',
-  pol_role_operator: 'field:operator',
-  pol_role_reader: 'field:reader',
+  pol_role_admin: 'field:admin',
+  pol_role_staff: 'field:staff',
+  pol_role_viewer: 'field:viewer',
 }
 
 /** Split a flat policy list into (role, customPolicyIds) like the Field API. */

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     Course, CourseError, GatewayCredentials, GolfCatalogGateway, UpsertCourse,
 };
@@ -20,6 +21,7 @@ impl CreateCourseUseCase {
         credentials: GatewayCredentials<'_>,
         input: UpsertCourse,
     ) -> Result<Course, CourseError> {
+        credentials.require(actions::MANAGE_COURSES).await?;
         self.catalog.create_course(credentials, input).await
     }
 }
@@ -179,6 +181,8 @@ mod tests {
                     authorization: "Bearer t",
                     operator_id: "scc",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
                 },
                 input,
             )

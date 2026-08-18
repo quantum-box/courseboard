@@ -10,6 +10,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     parse_tenant_timezone, rank_caddies, shift_covers_tee_time, tenant_date_at, tenant_day_bounds,
     widen_for_utc_date_filter, AttendanceState, AvailabilityQuery, AvailabilityStatus,
@@ -34,6 +35,13 @@ impl ListCaddieRecommendationsUseCase {
         query: RecommendationQuery,
         timezone: &str,
     ) -> Result<Vec<CaddieRecommendation>, CourseError> {
+        credentials
+            .require(actions::LIST_CADDIE_ASSIGNMENTS)
+            .await?;
+        // The response carries roster detail, rating averages, availability and
+        // attendance — the very things the other read permissions separate.
+        credentials.require(actions::LIST_CADDIES).await?;
+        credentials.require(actions::LIST_CADDIE_INSIGHTS).await?;
         let timezone_id = parse_tenant_timezone(timezone)?;
         // The day being planned, which is also the day attendance is read for.
         let date = tenant_date_at(

@@ -21,14 +21,106 @@ use super::{
     UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
-/// Credentials forwarded from the inbound HTTP request to outbound Field calls.
+/// Answers whether the caller may perform one CourseBoard action.
 ///
-/// Domain/usecase never construct Field URLs; they only pass opaque auth context.
-#[derive(Debug, Clone, Copy)]
+/// The decision is not ours to make: it belongs to the tenant's policies in
+/// Tachyon Auth, which is also where tenant membership and owner privileges
+/// are settled. The port exists so use cases can ask without knowing that.
+#[async_trait]
+pub trait CourseAuthorizer: Send + Sync {
+    /// `Ok(())` when granted. `CourseError::Forbidden` when the policies say
+    /// no, and `Provider` when the answer could not be obtained — never a
+    /// silent pass.
+    async fn require(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        action: &'static str,
+    ) -> Result<(), CourseError>;
+}
+
+/// Credentials forwarded from the inbound HTTP request to outbound Field calls,
+/// plus the authorizer that says what this caller may do with them.
+///
+/// Domain/usecase never construct Field URLs; they only pass opaque auth
+/// context. The authorizer rides along rather than sitting in every use case's
+/// constructor: it is a property of the caller, like the bearer beside it, and
+/// every use case that can act on a tenant already receives this.
+#[derive(Clone, Copy)]
 pub struct GatewayCredentials<'a> {
+    /// What goes upstream to Field. May be a service-account override.
     pub authorization: &'a str,
+    /// Who is asking. Authorization decisions are made about this token, which
+    /// is always the signed-in caller's, never the outbound override.
+    pub caller_bearer: &'a str,
     pub operator_id: &'a str,
     pub platform_id: Option<&'a str>,
+    pub authorizer: &'a dyn CourseAuthorizer,
+}
+
+/// The authorizer on credentials a gateway rebuilt for an outbound call.
+///
+/// A gateway that fans a request out concurrently has to rebuild the context
+/// it was handed, and nothing there can authorize anything — the decision was
+/// already made by the use case that called it. Refusing rather than granting
+/// means that if such a credential is ever handed to a use case by mistake,
+/// the mistake is a 403 and not an open door.
+struct OutboundOnlyAuthorizer;
+
+#[async_trait]
+impl CourseAuthorizer for OutboundOnlyAuthorizer {
+    async fn require(
+        &self,
+        _credentials: GatewayCredentials<'_>,
+        action: &'static str,
+    ) -> Result<(), CourseError> {
+        tracing::error!(
+            action,
+            "outbound-only credentials were asked to authorize; refusing"
+        );
+        Err(CourseError::Forbidden(action))
+    }
+}
+
+static OUTBOUND_ONLY: OutboundOnlyAuthorizer = OutboundOnlyAuthorizer;
+
+impl<'a> GatewayCredentials<'a> {
+    /// Context for an outbound Field call, rebuilt inside a gateway.
+    ///
+    /// Only for gateways. The result cannot authorize; see
+    /// [`OutboundOnlyAuthorizer`].
+    pub fn for_outbound(
+        authorization: &'a str,
+        operator_id: &'a str,
+        platform_id: Option<&'a str>,
+    ) -> Self {
+        Self {
+            authorization,
+            caller_bearer: authorization,
+            operator_id,
+            platform_id,
+            authorizer: &OUTBOUND_ONLY,
+        }
+    }
+
+    /// Refuse unless the tenant's policies grant `action`.
+    ///
+    /// Called at the top of a use case's `execute`, before any gateway work,
+    /// so a refusal costs nothing and leaves nothing half-done.
+    pub async fn require(&self, action: &'static str) -> Result<(), CourseError> {
+        self.authorizer.require(*self, action).await
+    }
+}
+
+/// Hand-written so the bearer never reaches a log line, and so the authorizer
+/// does not have to be `Debug` to be held here.
+impl std::fmt::Debug for GatewayCredentials<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("GatewayCredentials")
+            .field("operator_id", &self.operator_id)
+            .field("platform_id", &self.platform_id)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Port for SDK-backed Field capability discovery.

@@ -7,6 +7,7 @@ pub mod auth;
 pub mod cancellation_fees;
 pub mod config;
 pub mod course;
+pub mod course_authz;
 pub mod demo_seed;
 pub mod feature_flags;
 pub mod field_api;
@@ -21,7 +22,7 @@ use axum::{
     extract::{DefaultBodyLimit, FromRef, State},
     http::{
         header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE},
-        HeaderName, HeaderValue, Method, Request, StatusCode,
+        HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode,
     },
     middleware::{self, Next},
     response::{IntoResponse, Redirect, Response},
@@ -67,6 +68,11 @@ pub struct AppState {
     field_api_config_error: Option<String>,
     feature_flags: Arc<feature_flags::EvaluateFeatureFlags>,
     profile_client: Option<Arc<profile_proxy::ProfileClient>>,
+    course_authorization: Arc<course_authz::CourseAuthorization>,
+    course_authorizer: Arc<dyn course::domain::CourseAuthorizer>,
+    /// Present only when authorization is enforced; the members proxy clears
+    /// it when it changes who may do what.
+    policy_cache: Option<Arc<course_authz::CachingPolicyChecker>>,
 }
 
 impl AppState {
@@ -106,6 +112,9 @@ impl AppState {
             ),
             feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
             profile_client: None,
+            course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
+            course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
+            policy_cache: None,
         }
     }
 
@@ -149,6 +158,9 @@ impl AppState {
             field_api_config_error: None,
             feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
             profile_client: None,
+            course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
+            course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
+            policy_cache: None,
         }
     }
 
@@ -180,6 +192,9 @@ impl AppState {
                 field_api_config_error: None,
                 feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
                 profile_client: None,
+                course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
+                course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
+                policy_cache: None,
             },
             Err(error) => Self {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
@@ -202,6 +217,9 @@ impl AppState {
                 field_api_config_error: Some(error.to_string()),
                 feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
                 profile_client: None,
+                course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
+                course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
+                policy_cache: None,
             },
         }
     }
@@ -259,6 +277,56 @@ impl AppState {
     fn with_profile_client(mut self, profile_client: Option<profile_proxy::ProfileClient>) -> Self {
         self.profile_client = profile_client.map(Arc::new);
         self
+    }
+
+    pub(crate) fn course_authorization(&self) -> Arc<course_authz::CourseAuthorization> {
+        self.course_authorization.clone()
+    }
+
+    pub fn with_course_authorization(
+        mut self,
+        authorization: Arc<course_authz::CourseAuthorization>,
+    ) -> Self {
+        self.course_authorization = authorization;
+        self
+    }
+
+    /// The authorizer use cases require their action from.
+    ///
+    /// Borrowed rather than cloned: it lives on the credentials a request
+    /// carries, which never outlive the request.
+    /// For the action gate, which runs outside the per-route token layers and
+    /// must not hand an unverified bearer to a remote service.
+    pub(crate) fn token_verifier_for_authz(&self) -> &dyn auth::TokenVerifier {
+        self.token_verifier.as_ref()
+    }
+
+    pub(crate) fn course_authorizer(&self) -> &dyn course::domain::CourseAuthorizer {
+        self.course_authorizer.as_ref()
+    }
+
+    pub fn with_course_authorizer(
+        mut self,
+        authorizer: Arc<dyn course::domain::CourseAuthorizer>,
+    ) -> Self {
+        self.course_authorizer = authorizer;
+        self
+    }
+
+    pub fn with_policy_cache(
+        mut self,
+        cache: Option<Arc<course_authz::CachingPolicyChecker>>,
+    ) -> Self {
+        self.policy_cache = cache;
+        self
+    }
+
+    /// Drop every remembered allowance for one tenant, after this app changed
+    /// that tenant's permissions.
+    pub(crate) fn forget_tenant_allowances(&self, operator_id: &str) {
+        if let Some(cache) = &self.policy_cache {
+            cache.invalidate_tenant(operator_id);
+        }
     }
 }
 
@@ -918,7 +986,13 @@ pub fn build_router(state: AppState) -> Router {
         );
     }
     router
-        .with_state(state)
+        .with_state(state.clone())
+        // Innermost of the three: every matched route passes the action gate,
+        // and its refusals still get panic handling and CORS headers.
+        .layer(middleware::from_fn_with_state(
+            state,
+            course_authz::require_course_authorization,
+        ))
         // Inside the CORS layer on purpose: a panic response still needs the
         // CORS headers, otherwise the browser reports an opaque network error
         // ("Failed to fetch") instead of the 500 we just produced.
@@ -1058,12 +1132,48 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
         config.field_api_client_credentials_config(),
         config.field_api_bearer_token(),
     );
+    // One checker behind both gates. The route gate and the use cases share
+    // its cache, so a use case requiring the action its route was gated on
+    // costs no second round trip.
+    let mut policy_cache: Option<Arc<course_authz::CachingPolicyChecker>> = None;
+    let (course_authorization, course_authorizer): (
+        course_authz::CourseAuthorization,
+        Arc<dyn course::domain::CourseAuthorizer>,
+    ) = if config.disable_action_authz {
+        tracing::warn!(
+            "course action authorization is DISABLED via COURSEBOARD_DISABLE_ACTION_AUTHZ; \
+             every CourseBoard route and use case accepts any valid bearer"
+        );
+        (
+            course_authz::CourseAuthorization::disabled(),
+            Arc::new(course::infrastructure::AllowAllAuthorizer),
+        )
+    } else {
+        let checker_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        // One cache in front of one checker, shared by both gates: the route
+        // gate and the use cases ask the same questions, and the second asker
+        // should not pay for the answer again.
+        let checker = Arc::new(course_authz::CachingPolicyChecker::new(Arc::new(
+            course_authz::TachyonPolicyChecker::new(checker_client, &tachyon_api_url),
+        )));
+        policy_cache = Some(checker.clone());
+        (
+            course_authz::CourseAuthorization::new(checker.clone()),
+            Arc::new(course::infrastructure::PolicyCourseAuthorizer::new(checker)),
+        )
+    };
     let state =
         AppState::with_optional_field_api(pool, token_verifier, field_api, cancellation_fee_config)
             .with_feature_flag_evaluator(Arc::new(feature_flags::TachyonFeatureFlagEvaluator::new(
                 &tachyon_api_url,
             )))
-            .with_profile_client(profile_client);
+            .with_profile_client(profile_client)
+            .with_course_authorization(Arc::new(course_authorization))
+            .with_course_authorizer(course_authorizer)
+            .with_policy_cache(policy_cache);
 
     Ok(build_router(state))
 }
@@ -1165,10 +1275,49 @@ async fn require_valid_token(
     Ok(next.run(req).await)
 }
 
+/// Authorize a legacy operator-API call against the tenant named in its body.
+///
+/// These endpoints predate `x-operator-id`: Field core calls them with a
+/// bearer alone and `tenant_id` in the JSON (`docs/m2m-auth.md`). The tenant
+/// that is checked has to be the one the handler will act on, or a caller
+/// could borrow a grant in one tenant to work in another.
+pub(crate) async fn authorize_body_tenant(
+    state: &AppState,
+    headers: &HeaderMap,
+    tenant_id: &str,
+    action: &'static str,
+) -> Result<(), AppError> {
+    let bearer = course::interfaces::http::caller_bearer(headers)?;
+    let credentials = course::domain::GatewayCredentials {
+        authorization: bearer,
+        caller_bearer: bearer,
+        operator_id: tenant_id,
+        platform_id: headers
+            .get("x-platform-id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+        authorizer: state.course_authorizer(),
+    };
+    credentials.require(action).await.map_err(AppError::from)
+}
+
 async fn calculate(
+    State(state): State<AppState>,
     State(rules): State<Arc<MySqlTaxRuleRepository>>,
+    headers: HeaderMap,
     Json(request): Json<CalculateRequest>,
 ) -> Result<Json<CalculateResponse>, AppError> {
+    // `CalculateTax`, not the interactive simulator's action: this is the
+    // machine-to-machine callback, and `field-extension:golf:calculator` is
+    // the only policy a Field-core client is meant to hold.
+    authorize_body_tenant(
+        &state,
+        &headers,
+        &request.tenant_id,
+        course::domain::actions::CALCULATE_TAX,
+    )
+    .await?;
     if request.players.is_empty() {
         return Err(AppError::BadRequest(
             "players must contain at least one player",
@@ -1216,10 +1365,19 @@ async fn calculate(
 }
 
 async fn simulate_range(
+    State(state): State<AppState>,
     State(rules): State<Arc<MySqlTaxRuleRepository>>,
+    headers: HeaderMap,
     Json(request): Json<SimulateRangeRequest>,
 ) -> Result<Json<SimulateRangeResponse>, AppError> {
     request.validate()?;
+    authorize_body_tenant(
+        &state,
+        &headers,
+        &request.tenant_id,
+        course::domain::actions::CALCULATE_TAX,
+    )
+    .await?;
 
     let mut rows = Vec::new();
     let mut green_fee = request.green_fee_range.min;
@@ -1520,6 +1678,16 @@ pub enum AppError {
     Unauthorized,
     #[error("authenticated client is not authorized")]
     Forbidden,
+    /// Refused for want of one named permission. The action is echoed so the
+    /// screen can say which grant is missing instead of just "forbidden".
+    #[error("this operation requires {0}")]
+    ActionForbidden(&'static str),
+    /// The caller may not work in the selected tenant at all. Answered with the
+    /// `x-courseboard-auth-denial: tenant` marker the UI watches for, which
+    /// sends the operator back to tenant selection rather than leaving them on
+    /// a screen reporting a missing permission.
+    #[error("the tenant scope was refused for this caller")]
+    TenantForbidden,
     #[error("{0}")]
     BadRequest(&'static str),
     /// A file whose name does not say which month it covers.
@@ -1564,6 +1732,8 @@ impl IntoResponse for AppError {
         let (status, error) = match self {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
+            AppError::ActionForbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
+            AppError::TenantForbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::MonthRequired(_) => (StatusCode::BAD_REQUEST, "month_required"),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
@@ -1579,11 +1749,19 @@ impl IntoResponse for AppError {
             }
         };
 
+        let tenant_denial = matches!(self, AppError::TenantForbidden);
         let body = Json(ErrorResponse {
             error,
             message: self.to_string(),
         });
-        (status, body).into_response()
+        let mut response = (status, body).into_response();
+        if tenant_denial {
+            response.headers_mut().insert(
+                HeaderName::from_static("x-courseboard-auth-denial"),
+                HeaderValue::from_static("tenant"),
+            );
+        }
+        response
     }
 }
 

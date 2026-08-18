@@ -12,6 +12,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CaddieAssignment, CaddieAssignmentQuery, CourseError, GatewayCredentials, GolfOpsGateway,
     ReservationGateway, ReservationId, UpsertCaddieAssignment,
@@ -39,6 +40,7 @@ impl CancelReservationUseCase {
         reservation_id: &ReservationId,
         reason: Option<&str>,
     ) -> Result<(), CourseError> {
+        credentials.require(actions::MANAGE_RESERVATIONS).await?;
         if reservation_id.trim().is_empty() {
             return Err(CourseError::BadRequest("reservation id is required"));
         }
@@ -480,6 +482,8 @@ mod tests {
             authorization: "Bearer t",
             operator_id: "scc",
             platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
+            caller_bearer: "Bearer test",
         }
     }
 

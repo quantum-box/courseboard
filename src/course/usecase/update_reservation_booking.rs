@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, CustomerId, GatewayCredentials, GolfCatalogGateway, ReservationBookingUpdate,
     ReservationGateway, ReservationId,
@@ -41,6 +42,7 @@ impl UpdateReservationBookingUseCase {
         reservation_id: &ReservationId,
         input: UpdateReservationBookingInput,
     ) -> Result<(), CourseError> {
+        credentials.require(actions::MANAGE_RESERVATIONS).await?;
         if reservation_id.trim().is_empty() {
             return Err(CourseError::BadRequest("reservation id is required"));
         }

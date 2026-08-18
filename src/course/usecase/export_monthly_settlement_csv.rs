@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway,
 };
@@ -27,6 +28,7 @@ impl ExportMonthlySettlementCsvUseCase {
         credentials: GatewayCredentials<'_>,
         year_month: &str,
     ) -> Result<String, CourseError> {
+        credentials.require(actions::LIST_SETTLEMENT).await?;
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         self.commercial
             .export_monthly_settlement_csv(credentials, year_month, &timezone)

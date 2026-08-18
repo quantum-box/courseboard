@@ -14,6 +14,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Duration, Utc};
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     parse_tenant_timezone, shift_covers_tee_time, tenant_date_at, tenant_day_bounds,
     widen_for_utc_date_filter, AvailabilityQuery, CaddieAssignment, CaddieAssignmentQuery,
@@ -53,6 +54,9 @@ impl CreateCaddieAssignmentUseCase {
         input: NameCaddieForRound,
         timezone: &str,
     ) -> Result<CaddieAssignment, CourseError> {
+        credentials
+            .require(actions::MANAGE_CADDIE_ASSIGNMENTS)
+            .await?;
         let timezone_id = parse_tenant_timezone(timezone)?;
         let date = tenant_date_at(input.scheduled_at, timezone)?;
         let window = widen_for_utc_date_filter(date, date);

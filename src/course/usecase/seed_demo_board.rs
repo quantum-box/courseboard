@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use chrono::{Duration, NaiveDate};
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     demo_board, parse_tenant_tee_time, BusinessHours, CourseError, CourseId, CourseOrder,
     GatewayCredentials, GolfCatalogGateway, NewReservation, PlayType, ReservationGateway,
@@ -55,6 +56,7 @@ impl SeedDemoBoardUseCase {
         tenant_id: &str,
         date: NaiveDate,
     ) -> Result<SeedSummary, CourseError> {
+        credentials.require(actions::SEED_DEMO_BOARD).await?;
         if tenant_id.trim().is_empty() {
             return Err(CourseError::BadRequest("tenant id is required"));
         }

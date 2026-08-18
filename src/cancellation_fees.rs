@@ -381,6 +381,7 @@ pub struct ConfirmStripePaymentResponse {
 }
 
 pub async fn create_collection(
+    State(state): State<crate::AppState>,
     State(repository): State<std::sync::Arc<MySqlCancellationFeeRepository>>,
     State(config): State<CancellationFeeConfig>,
     State(http_client): State<reqwest::Client>,
@@ -388,6 +389,16 @@ pub async fn create_collection(
     Json(request): Json<CreateCancellationFeeCollectionRequest>,
 ) -> Result<Json<CreateCancellationFeeCollectionResponse>, AppError> {
     let tenant_id = required_text(&request.tenant_id, "tenant_id is required")?;
+    // Against the tenant in the body, which is the one the invoice and the
+    // local row are written for. Checking the header's tenant instead would
+    // let a grant in one tenant open a collection in another.
+    crate::authorize_body_tenant(
+        &state,
+        &headers,
+        tenant_id,
+        crate::course::domain::actions::MANAGE_CANCELLATION_FEES,
+    )
+    .await?;
     let customer_name = required_text(&request.customer_name, "customer_name is required")?;
     let customer_phone = required_text(&request.customer_phone, "customer_phone is required")?;
     let due_date = required_text(&request.due_date, "due_date is required")?;

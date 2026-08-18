@@ -643,6 +643,12 @@ button,
   gap: 8px;
 }
 
+.member-roles-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .member-roles-checklist label {
   display: flex;
   align-items: flex-start;

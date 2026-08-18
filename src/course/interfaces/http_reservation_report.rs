@@ -177,7 +177,10 @@ fn preview_response(preview: ReservationReportPreview) -> ReservationReportPrevi
     }
 }
 
-fn reservation_report_credentials(headers: &HeaderMap) -> Result<GatewayCredentials<'_>, AppError> {
+fn reservation_report_credentials<'a>(
+    authorizer: &'a dyn crate::course::domain::CourseAuthorizer,
+    headers: &'a HeaderMap,
+) -> Result<GatewayCredentials<'a>, AppError> {
     let platform_id = headers
         .get("x-platform-id")
         .and_then(|value| value.to_str().ok())
@@ -188,8 +191,10 @@ fn reservation_report_credentials(headers: &HeaderMap) -> Result<GatewayCredenti
         // This endpoint processes a user-selected file. Always preserve the
         // verified user's bearer instead of replacing it with a static token.
         authorization: bearer_authorization(headers)?,
+        caller_bearer: super::http::caller_bearer(headers)?,
         operator_id: operator_id(headers)?,
         platform_id: Some(platform_id),
+        authorizer,
     })
 }
 
@@ -382,7 +387,7 @@ pub async fn preview_reservation_report(
     multipart: Multipart,
 ) -> Result<Json<ReservationReportPreviewResponse>, AppError> {
     super::http::bearer_authorization(&headers)?;
-    let credentials = reservation_report_credentials(&headers)?;
+    let credentials = reservation_report_credentials(state.course_authorizer(), &headers)?;
     let upload = read_upload(multipart, false).await?;
     let preview = PreviewReservationReportUseCase::execute_with_fallback(
         credentials,
@@ -417,7 +422,7 @@ pub async fn import_reservation_report(
     multipart: Multipart,
 ) -> Result<Json<ReservationReportImportResponse>, AppError> {
     super::http::bearer_authorization(&headers)?;
-    let credentials = reservation_report_credentials(&headers)?;
+    let credentials = reservation_report_credentials(state.course_authorizer(), &headers)?;
     let upload = read_upload(multipart, true).await?;
     let preview = PreviewReservationReportUseCase::execute_with_fallback(
         credentials,
@@ -501,7 +506,7 @@ pub async fn list_reservation_report_entries(
     Query(query): Query<ReservationReportEntriesQuery>,
 ) -> Result<Json<ReservationReportEntriesResponse>, AppError> {
     super::http::bearer_authorization(&headers)?;
-    let credentials = reservation_report_credentials(&headers)?;
+    let credentials = reservation_report_credentials(state.course_authorizer(), &headers)?;
     let use_case = ListReservationReportEntriesUseCase::new(
         state.reservation_report_gateway(),
         catalog_gateway(&state),
@@ -527,12 +532,14 @@ mod tests {
         headers.insert(AUTHORIZATION, HeaderValue::from_static("Bearer user-token"));
         headers.insert("x-operator-id", HeaderValue::from_static("operator-1"));
         assert!(matches!(
-            reservation_report_credentials(&headers),
+            reservation_report_credentials(&crate::course::infrastructure::ALLOW_ALL, &headers),
             Err(AppError::BadRequest("x-platform-id header is required"))
         ));
 
         headers.insert("x-platform-id", HeaderValue::from_static("platform-1"));
-        let credentials = reservation_report_credentials(&headers).unwrap();
+        let credentials =
+            reservation_report_credentials(&crate::course::infrastructure::ALLOW_ALL, &headers)
+                .unwrap();
         assert_eq!(credentials.authorization, "Bearer user-token");
         assert_eq!(credentials.operator_id, "operator-1");
         assert_eq!(credentials.platform_id, Some("platform-1"));

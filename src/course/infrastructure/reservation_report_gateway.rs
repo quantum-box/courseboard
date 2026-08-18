@@ -609,6 +609,8 @@ mod tests {
             authorization: "Bearer test-token",
             operator_id: "tenant-test",
             platform_id: Some("platform-test"),
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
+            caller_bearer: "Bearer test",
         }
     }
 

@@ -330,11 +330,11 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
                         &client,
                         &base_url,
                         &path,
-                        GatewayCredentials {
-                            authorization: &authorization,
-                            operator_id: &operator_id,
-                            platform_id: platform_id.as_deref(),
-                        },
+                        GatewayCredentials::for_outbound(
+                            &authorization,
+                            &operator_id,
+                            platform_id.as_deref(),
+                        ),
                     )
                     .await?;
                     Ok::<_, CourseError>((
@@ -975,6 +975,8 @@ mod tests {
             authorization: "Bearer test-token",
             operator_id: "operator-test",
             platform_id: Some("platform-test"),
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
+            caller_bearer: "Bearer test",
         }
     }
 

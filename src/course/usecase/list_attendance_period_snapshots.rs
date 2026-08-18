@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use chrono::NaiveDate;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     AttendancePeriodSnapshot, CourseError, GatewayCredentials, GolfOpsGateway,
 };
@@ -23,6 +24,7 @@ impl ListAttendancePeriodSnapshotsUseCase {
         from: NaiveDate,
         to: NaiveDate,
     ) -> Result<Vec<AttendancePeriodSnapshot>, CourseError> {
+        credentials.require(actions::LIST_CADDIE_INSIGHTS).await?;
         self.ops
             .list_attendance_period_snapshots(credentials, from, to)
             .await

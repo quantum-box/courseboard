@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, DailyBudget, DailyBudgetQuery, GatewayCredentials, GolfCommercialGateway,
 };
@@ -20,6 +21,7 @@ impl ListDailyBudgetsUseCase {
         credentials: GatewayCredentials<'_>,
         query: DailyBudgetQuery,
     ) -> Result<Vec<DailyBudget>, CourseError> {
+        credentials.require(actions::LIST_BUDGETS).await?;
         self.commercial.list_daily_budgets(credentials, query).await
     }
 }

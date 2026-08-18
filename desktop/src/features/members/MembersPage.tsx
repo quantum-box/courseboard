@@ -11,7 +11,7 @@ import {
   Input,
 } from '@tachyon-sdk/native-ui'
 import { MailPlus, ShieldCheck, SquarePen, Trash2 } from 'lucide-react'
-import { useCallback, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, fieldApiJson } from '../../api'
 import { useAuth } from '../../auth/AuthProvider'
@@ -35,10 +35,14 @@ import {
   isAdminSelected,
   memberDisplayName,
   memberPolicyIds,
+  pendingMemberRow,
+  policyDisplay,
   policyIdByName,
+  remainingPendingInvites,
   roleBadgeVariant,
   roleLabel,
   rolePermissionSummary,
+  selectAllPolicyIds,
   sortMembers,
   togglePolicySelection,
   validateInviteEmail,
@@ -47,6 +51,8 @@ import {
   type ErpMember,
   type ErpUserListResponse,
   type InviteMemberResponse,
+  type MemberRow,
+  type PendingInvite,
 } from './models'
 
 /** Announcements are toasts, so the page itself never shifts under a message. */
@@ -73,11 +79,27 @@ export function MembersPage() {
 
   const [busyMemberId, setBusyMemberId] = useState<string | null>(null)
   const [editingMember, setEditingMember] = useState<ErpMember | null>(null)
+  // The list API only returns accepted members, so a sent invitation lives
+  // here until its address appears in a fetched roster.
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([])
 
-  const members = useMemo(
-    () => sortMembers(resource.data?.users ?? []),
-    [resource.data],
-  )
+  // Accepted invitations are dropped from state, not merely hidden: an invite
+  // left in the array would come back as an unremovable pending row if that
+  // member were later removed while the screen stayed open.
+  useEffect(() => {
+    const users = resource.data?.users
+    if (!users) return
+    setPendingInvites(current => {
+      const remaining = remainingPendingInvites(current, users)
+      return remaining.length === current.length ? current : remaining
+    })
+  }, [resource.data])
+
+  const members = useMemo<MemberRow[]>(() => {
+    const users = resource.data?.users ?? []
+    const outstanding = remainingPendingInvites(pendingInvites, users)
+    return [...outstanding.map(pendingMemberRow), ...sortMembers(users)]
+  }, [resource.data, pendingInvites])
   const customPolicies = resource.data?.customPolicies ?? []
 
   const removeMember = async (member: ErpMember) => {
@@ -108,7 +130,9 @@ export function MembersPage() {
     {
       key: 'name',
       header: t('members:table.name'),
-      cell: (entry: ErpMember) => (
+      searchValue: (entry: MemberRow) =>
+        [entry.name, entry.email, entry.id].filter(Boolean).join(' '),
+      cell: (entry: MemberRow) => (
         <div className="member-name-cell">
           <strong>{memberDisplayName(entry)}</strong>
           {entry.id === auth.user?.id ? <Badge variant="accent">{t('members:table.self')}</Badge> : null}
@@ -118,13 +142,33 @@ export function MembersPage() {
     {
       key: 'email',
       header: t('members:table.email'),
-      cell: (entry: ErpMember) => entry.email ?? '—',
+      cell: (entry: MemberRow) => entry.email ?? '—',
+    },
+    {
+      key: 'status',
+      header: t('members:table.status'),
+      cell: (entry: MemberRow) => (
+        <Badge variant={entry.pending ? 'warning' : 'success'}>
+          {entry.pending ? t('members:status.pending') : t('members:status.active')}
+        </Badge>
+      ),
     },
     {
       key: 'role',
       header: t('members:table.role'),
-      cell: (entry: ErpMember) => {
+      cell: (entry: MemberRow) => {
         const policyNames = customPolicyNames(entry, customPolicies)
+        // A pending row only knows what the invitation asked for; upstream
+        // has not attached anything yet, so no role badge and no editing.
+        if (entry.pending) {
+          return (
+            <div className="member-role-cell">
+              <span className="member-policy-badges">
+                {policyNames.map(name => <Badge key={name} variant="neutral">{name}</Badge>)}
+              </span>
+            </div>
+          )
+        }
         return (
           <div className="member-role-cell">
             <span className="member-policy-badges">
@@ -156,8 +200,8 @@ export function MembersPage() {
       key: 'actions',
       header: '',
       align: 'right' as const,
-      cell: (entry: ErpMember) => {
-        if (entry.isOwner) return null
+      cell: (entry: MemberRow) => {
+        if (entry.isOwner || entry.pending) return null
         return (
           <Button
             type="button"
@@ -194,8 +238,15 @@ export function MembersPage() {
             <>
               <InviteDialog
                 catalog={customPolicies}
-                onInvited={message => {
-                  setRowFeedback({ tone: 'success', message })
+                onInvited={(response, policyIds) => {
+                  setRowFeedback({ tone: 'success', message: inviteResultMessage(response) })
+                  if (response.invitationSent && response.email) {
+                    const email = response.email
+                    setPendingInvites(current => [
+                      { email, policyIds },
+                      ...current.filter(invite => invite.email !== email),
+                    ])
+                  }
                   resource.refresh()
                 }}
               />
@@ -205,7 +256,10 @@ export function MembersPage() {
           <DataTable
             rows={members}
             columns={columns}
-            rowKey={(entry: ErpMember) => entry.id}
+            rowKey={(entry: MemberRow) => entry.id}
+            searchable
+            searchPlaceholder={t('members:searchPlaceholder')}
+            pageSize={20}
             empty={(
               <EmptyState
                 title={t('members:list.empty.title')}
@@ -244,11 +298,13 @@ function RoleChecklist({
   selected,
   disabled,
   onToggle,
+  onReplace,
 }: {
   catalog: ErpCustomPolicy[]
   selected: string[]
   disabled: boolean
   onToggle: (policyId: string, checked: boolean) => void
+  onReplace: (policyIds: string[]) => void
 }) {
   const { t } = useTranslation(['members'])
   const adminSelected = isAdminSelected(catalog, selected)
@@ -280,6 +336,26 @@ function RoleChecklist({
   const domain = domainPolicies(catalog)
   return (
     <div className="member-roles-checklist">
+      <div className="member-roles-toolbar">
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={disabled}
+          onClick={() => onReplace(selectAllPolicyIds(catalog, selected))}
+        >
+          {t('members:checklist.selectAll')}
+        </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          disabled={disabled}
+          onClick={() => onReplace([])}
+        >
+          {t('members:checklist.clearAll')}
+        </Button>
+      </div>
       {roles.map(({ option, id }) => renderItem(
         id,
         t(option.labelKey),
@@ -288,7 +364,10 @@ function RoleChecklist({
       {roles.length > 0 && domain.length > 0
         ? <div className="member-roles-divider" role="separator" />
         : null}
-      {domain.map(policy => renderItem(policy.id, policy.name, policy.description))}
+      {domain.map(policy => {
+        const text = policyDisplay(policy)
+        return renderItem(policy.id, text.label, text.description)
+      })}
     </div>
   )
 }
@@ -350,6 +429,7 @@ function EditRolesDialog({
               onToggle={(policyId, checked) => {
                 setSelected(current => togglePolicySelection(catalog, current, policyId, checked))
               }}
+              onReplace={setSelected}
             />
           </div>
           {error ? (
@@ -375,8 +455,8 @@ function EditRolesDialog({
  * submit, with nothing on screen explaining why.
  */
 function defaultInvitePolicyIds(catalog: ErpCustomPolicy[]) {
-  const operator = policyIdByName(catalog, 'field:operator')
-  return operator ? [operator] : []
+  const staff = policyIdByName(catalog, 'field:staff')
+  return staff ? [staff] : []
 }
 
 function InviteDialog({
@@ -384,7 +464,7 @@ function InviteDialog({
   onInvited,
 }: {
   catalog: ErpCustomPolicy[]
-  onInvited: (message: string) => void
+  onInvited: (response: InviteMemberResponse, policyIds: string[]) => void
 }) {
   const { t } = useTranslation(['members', 'common'])
   const [open, setOpen] = useState(false)
@@ -418,7 +498,7 @@ function InviteDialog({
       setEmail('')
       setSelected(defaultInvitePolicyIds(catalog))
       setOpen(false)
-      onInvited(inviteResultMessage(response))
+      onInvited(response, selected)
     } catch (cause) {
       setError(errorMessage(cause, t('members:invite.failed')))
     } finally {
@@ -465,6 +545,7 @@ function InviteDialog({
               onToggle={(policyId, checked) => {
                 setSelected(current => togglePolicySelection(catalog, current, policyId, checked))
               }}
+              onReplace={setSelected}
             />
           </div>
           {error ? (

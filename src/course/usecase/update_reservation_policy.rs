@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, GatewayCredentials, GolfCommercialGateway, ReservationPolicy,
     UpdateReservationPolicy,
@@ -21,6 +22,9 @@ impl UpdateReservationPolicyUseCase {
         credentials: GatewayCredentials<'_>,
         input: UpdateReservationPolicy,
     ) -> Result<ReservationPolicy, CourseError> {
+        credentials
+            .require(actions::MANAGE_RESERVATION_POLICY)
+            .await?;
         self.commercial
             .update_reservation_policy(credentials, input)
             .await

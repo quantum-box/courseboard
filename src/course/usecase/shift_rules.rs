@@ -6,7 +6,9 @@
 
 use std::sync::Arc;
 
-use crate::course::domain::{CourseError, ShiftPolicy, ShiftRulesGateway};
+use crate::course::domain::{
+    actions, CourseError, GatewayCredentials, ShiftPolicy, ShiftRulesGateway,
+};
 
 pub struct GetShiftRulesUseCase {
     rules: Arc<dyn ShiftRulesGateway>,
@@ -17,8 +19,12 @@ impl GetShiftRulesUseCase {
         Self { rules }
     }
 
-    pub async fn execute(&self, tenant_id: &str) -> Result<ShiftPolicy, CourseError> {
-        self.rules.get_shift_policy(tenant_id).await
+    pub async fn execute(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<ShiftPolicy, CourseError> {
+        credentials.require(actions::LIST_SHIFTS).await?;
+        self.rules.get_shift_policy(credentials.operator_id).await
     }
 }
 
@@ -33,9 +39,12 @@ impl UpdateShiftRulesUseCase {
 
     pub async fn execute(
         &self,
-        tenant_id: &str,
+        credentials: GatewayCredentials<'_>,
         policy: ShiftPolicy,
     ) -> Result<ShiftPolicy, CourseError> {
-        self.rules.upsert_shift_policy(tenant_id, &policy).await
+        credentials.require(actions::MANAGE_SHIFTS).await?;
+        self.rules
+            .upsert_shift_policy(credentials.operator_id, &policy)
+            .await
     }
 }

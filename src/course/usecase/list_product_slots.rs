@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, GatewayCredentials, GolfCatalogGateway, ProductSlot, ReservationServiceId,
 };
@@ -20,6 +21,7 @@ impl ListProductSlotsUseCase {
         credentials: GatewayCredentials<'_>,
         service_id: &ReservationServiceId,
     ) -> Result<Vec<ProductSlot>, CourseError> {
+        credentials.require(actions::LIST_PRODUCTS).await?;
         if service_id.trim().is_empty() {
             return Err(CourseError::BadRequest(
                 "reservation service id is required",

@@ -10,6 +10,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     parse_tenant_timezone, summarize_payroll_in_timezone, tenant_day_bounds,
     widen_for_utc_date_filter, AttendanceDay, CaddieAssignmentQuery, CourseError,
@@ -31,6 +32,7 @@ impl GetPayrollSummaryUseCase {
         year_month: &str,
         timezone: &str,
     ) -> Result<PayrollSummary, CourseError> {
+        credentials.require(actions::LIST_PAYROLL).await?;
         let period = PayrollPeriod::try_new(year_month)?;
         let timezone_id = parse_tenant_timezone(timezone)?;
         let (from, to) = (period.start_date(), period.end_date());

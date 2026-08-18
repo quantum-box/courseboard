@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, Customer, CustomerGateway, GatewayCredentials, NewCustomer,
 };
@@ -25,6 +26,7 @@ impl CreateCustomerUseCase {
         credentials: GatewayCredentials<'_>,
         input: NewCustomer,
     ) -> Result<Customer, CourseError> {
+        credentials.require(actions::MANAGE_CUSTOMERS).await?;
         self.customers.create_customer(credentials, &input).await
     }
 }
@@ -81,6 +83,8 @@ mod tests {
             authorization: "Bearer token",
             operator_id: "tenant-1",
             platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
+            caller_bearer: "Bearer test",
         }
     }
 

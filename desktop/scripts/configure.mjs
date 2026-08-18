@@ -94,7 +94,10 @@ const AUTHJS_UI_ENV_KEYS = [
   'VITE_AUTH_PROXY_TARGET',
   'VITE_COURSEBOARD_API_BEARER',
 ]
+// Cleared when switching to PKCE: leaving `field:env`'s opt-out behind would
+// run a real-Cognito environment with every authorization check disabled.
 const PKCE_COURSE_API_STATIC_BEARER_KEYS = [
+  'COURSEBOARD_DISABLE_ACTION_AUTHZ',
   'COURSEBOARD_DEV_BEARER_TOKEN',
   'TACHYON_FIELD_API_BEARER_TOKEN',
 ]
@@ -448,6 +451,10 @@ export async function runField(argv = []) {
     DATABASE_URL: 'sqlite:///tmp/courseboard-local.db',
     COURSEBOARD_PUBLIC_UI_BASE_URL: 'http://127.0.0.1:8080/ui/index.html',
     TACHYON_FIELD_API_URL: options.fieldApiUrl,
+    // The CLI JWT this mode runs on is rejected by Tachyon Auth, so the
+    // course action gate would answer 403 on every CourseBoard-local route.
+    // The PKCE mode (real Cognito login) keeps the gate on.
+    COURSEBOARD_DISABLE_ACTION_AUTHZ: 'true',
   })
 
   const uiPath = writeEnvFile(options.uiEnvFile, {

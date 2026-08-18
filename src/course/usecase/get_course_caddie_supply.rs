@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use chrono::NaiveDate;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     compute_course_supply, CaddieShiftGateway, CourseError, CourseId, DayCaddieSupply,
     GatewayCredentials, GolfCatalogGateway, ReservationGateway, TeeSheetQuery, TeeSheetStatus,
@@ -35,7 +36,32 @@ impl GetCourseCaddieSupplyUseCase {
         }
     }
 
+    /// The supply screen: reading how the day is staffed is an insight.
     pub async fn execute(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        date: NaiveDate,
+    ) -> Result<DayCaddieSupply, CourseError> {
+        credentials.require(actions::LIST_CADDIE_INSIGHTS).await?;
+        self.supply(credentials, date).await
+    }
+
+    /// The same figures, for a caller that is booking rather than looking.
+    ///
+    /// Taking a caddie round has to know whether the day has room for it, so
+    /// the guard inside `CreateReservationUseCase` runs this. Requiring the
+    /// insights permission here would mean a front-desk role could take a self
+    /// round but not a caddie one, which is not a distinction anybody asked
+    /// for — the caller has already been authorized to make the booking.
+    pub(crate) async fn for_capacity_guard(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        date: NaiveDate,
+    ) -> Result<DayCaddieSupply, CourseError> {
+        self.supply(credentials, date).await
+    }
+
+    async fn supply(
         &self,
         credentials: GatewayCredentials<'_>,
         date: NaiveDate,

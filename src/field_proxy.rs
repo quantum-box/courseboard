@@ -13,6 +13,7 @@ const MAX_PROXY_BODY_BYTES: usize = 5 * 1024 * 1024;
 /// proxy authenticates the caller first; this handler then forwards only the
 /// Field endpoints needed by Course Board and never exposes an arbitrary URL.
 pub async fn proxy_field_api(
+    State(state): State<crate::AppState>,
     State(client): State<reqwest::Client>,
     State(config): State<CancellationFeeConfig>,
     Path(path): Path<String>,
@@ -58,6 +59,14 @@ pub async fn proxy_field_api(
         Err(_) => return proxy_error(StatusCode::PAYLOAD_TOO_LARGE, "Request body is too large"),
     };
 
+    let requested_method = method.clone();
+    let operator_id = parts
+        .headers
+        .get("x-operator-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
     let mut outbound = client.request(method, url);
     // Default: forward the caller's inbound bearer (browser-pkce login token).
     // Optional TACHYON_FIELD_API_BEARER_TOKEN override remains for admin/service
@@ -103,6 +112,14 @@ pub async fn proxy_field_api(
             StatusCode::BAD_GATEWAY,
             "Field API rejected the authenticated bearer (Tachyon Auth verify_user must accept Tachyon-issued OAuth access tokens; re-login if the session expired)",
         );
+    }
+    // A member's permissions just changed upstream. Remembered allowances for
+    // this tenant describe the old answer, so drop them rather than let an
+    // operator watch a revocation appear to do nothing for a minute.
+    if upstream_status.is_success() && changes_permissions(&requested_method, &normalized_path) {
+        if let Some(operator_id) = operator_id.as_deref() {
+            state.forget_tenant_allowances(operator_id);
+        }
     }
     let status = StatusCode::from_u16(upstream_status.as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
     let content_type = upstream.headers().get(header::CONTENT_TYPE).cloned();
@@ -261,6 +278,19 @@ fn is_staff_member_path(path: &str) -> bool {
         return false;
     };
     !suffix.is_empty() && !suffix.contains('/')
+}
+
+/// Whether a proxied call changes who may do what in the tenant.
+///
+/// The IAM writes this app offers: replacing a member's policies, inviting one,
+/// and removing one. A read never invalidates anything.
+fn changes_permissions(method: &reqwest::Method, path: &str) -> bool {
+    match *method {
+        reqwest::Method::PUT => is_field_iam_user_policies_path(path),
+        reqwest::Method::POST => path == "/v1/field/iam/users/invite",
+        reqwest::Method::DELETE => is_field_iam_user_path(path),
+        _ => false,
+    }
 }
 
 fn is_field_iam_path(path: &str) -> bool {

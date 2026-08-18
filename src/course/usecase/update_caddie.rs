@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     Caddie, CaddieId, CaddiePatch, CourseError, GatewayCredentials, GolfOpsGateway,
 };
@@ -24,6 +25,7 @@ impl UpdateCaddieUseCase {
         caddie_id: &CaddieId,
         patch: CaddiePatch,
     ) -> Result<Caddie, CourseError> {
+        credentials.require(actions::MANAGE_CADDIES).await?;
         let input = if patch.is_complete() {
             patch.into_upsert()?
         } else {
