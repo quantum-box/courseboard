@@ -42,6 +42,32 @@
         "dev"
       ],
       "port": 5173
+    },
+    {
+      "//": "courseboard-mock on 5174, for when another worktree already holds 5173.",
+      "name": "courseboard-mock-5174",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_COURSEBOARD_AUTH_MODE=development",
+        "VITE_COURSEBOARD_API_BEARER=dev-local-token",
+        "VITE_COURSEBOARD_TENANT_ID=courseboard_id",
+        "VITE_COURSEBOARD_MOCK_DATA=true",
+        "VITE_COURSEBOARD_MODE=development",
+        "VITE_COURSEBOARD_BROWSER_CLIENT_ID=",
+        "VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT=",
+        "VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT=",
+        "VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT=",
+        "npm",
+        "--prefix",
+        "desktop",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5174",
+        "--strictPort"
+      ],
+      "port": 5174
     }
   ]
 }

@@ -225,6 +225,10 @@ describe('policyDisplay', () => {
     expect(display.description).toContain('予約')
   })
 
+  it('reads a basic role by its role name, which is how a pending invite lists it', () => {
+    expect(policyDisplay({ id: 'pol_operator_new', name: 'field:operator' }).label).toBe('スタッフ')
+  })
+
   it('falls back to the raw name and description for unknown policies', () => {
     expect(policyDisplay({ id: 'pol_x', name: 'キャディ管理', description: '説明文' }))
       .toEqual({ label: 'キャディ管理', description: '説明文' })

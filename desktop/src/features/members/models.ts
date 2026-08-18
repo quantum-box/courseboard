@@ -215,6 +215,11 @@ const POLICY_TEXT: ReadonlyMap<string, { label: () => string; description: () =>
 
 /** What the checklist and badges should print for one catalogue policy. */
 export function policyDisplay(policy: ErpCustomPolicy): { label: string; description: string | null } {
+  // A basic role reaching here is one badged as a plain policy — a pending
+  // invitation lists what it asked for as one flat set, with no role resolved
+  // yet. It still reads as its role name rather than `field:operator`.
+  const role = ROLE_OPTIONS.find(option => option.responseValue === policy.name)
+  if (role) return { label: i18next.t(role.labelKey), description: i18next.t(role.summaryKey) }
   const known = POLICY_TEXT.get(policy.name)
   if (!known) return { label: policy.name, description: policy.description ?? null }
   return { label: known.label(), description: known.description() }
