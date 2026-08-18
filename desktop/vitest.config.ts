@@ -7,6 +7,8 @@ export default defineConfig({
       'node_modules/**',
       'dist/**',
       'src-tauri/**',
+      // Playwright の E2E は vitest では拾わない
+      'e2e/**',
     ],
   },
 })

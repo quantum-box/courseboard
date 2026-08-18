@@ -84,6 +84,63 @@ jobs:
           # Vite may deduplicate the profile URL with API_BASE_URL during minification.
           grep -R -F -q "https://courseboard-api.txcloud.app" dist
 
+  e2e:
+    name: E2E (Playwright)
+    runs-on: tachyoncloud
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ブラウザのキャッシュキーは @playwright/test の版に紐づける。
+      # 版が上がるとブラウザの revision も変わるため、キーを固定すると
+      # 古いブラウザを引いて起動に失敗する。
+      - name: Resolve Playwright version
+        id: playwright
+        run: |
+          version="$(node -p "require('@playwright/test/package.json').version")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # tachyoncloud の runner image は Playwright を前提にしていないので、
+      # 共有ライブラリごと入れる。ここが sudo 不可で落ちるようなら、
+      # container: mcr.microsoft.com/playwright:v<版>-noble に切り替える。
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      # モックモードの Vite を playwright.config.ts が自前で起動する。
+      # バックエンド・Cognito・DB は要らない。
+      - name: Run E2E
+        run: npm run e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            desktop/e2e/playwright-report/**
+            desktop/e2e/test-results/**
+          if-no-files-found: warn
+          retention-days: 3
+
   desktop_bundle:
     name: Desktop bundle (${{ matrix.platform }})
     # Windows runners are expensive: bundle only after a merge to main.

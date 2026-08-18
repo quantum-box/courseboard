@@ -15,6 +15,9 @@
     "prod-api:vite": "bash scripts/dev.sh prod-api vite",
     "type-check": "tsc -b --noEmit",
     "test": "vitest run",
+    "e2e": "playwright test",
+    "e2e:prod": "E2E_TARGET=prod playwright test",
+    "e2e:report": "playwright show-report e2e/playwright-report",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
@@ -42,6 +45,7 @@
     "three": "^0.169.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tauri-apps/cli": "^2.10.1",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^25.9.1",
