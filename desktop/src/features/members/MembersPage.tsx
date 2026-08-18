@@ -443,8 +443,8 @@ function EditRolesDialog({
  * submit, with nothing on screen explaining why.
  */
 function defaultInvitePolicyIds(catalog: ErpCustomPolicy[]) {
-  const operator = policyIdByName(catalog, 'field:operator')
-  return operator ? [operator] : []
+  const staff = policyIdByName(catalog, 'field:staff')
+  return staff ? [staff] : []
 }
 
 function InviteDialog({

@@ -15,6 +15,23 @@
 
 ## 変更
 
+### 基本ロール名の取り違えを直す（`desktop/src/features/members/models.ts`）
+
+本番テナントのカタログを引いて発覚した既存バグ。`ROLE_OPTIONS` が
+`field:{administrator,operator,reader}` を「改称後の名前」として持ち、実在する
+`field:{admin,staff,viewer}` を「廃止名」として一覧から除外していた。改称は
+Field 側で起きておらず（tachyonfield 全体で `field:administrator` は 0 件、
+manifest の policy 名と `ErpRole::as_str` はどちらも `field:admin` 系）、結果:
+
+- チェックリストに基本ロールが 1 つも出ない
+- **メンバーを保存するとロールが外れる。** `memberPolicyIds` はカタログに無い名前を
+  解決できず id を落とすが、保存は policy 全置換なので、業務ポリシーを 1 つ足した
+  だけでスタッフロールが剥がれる
+- ロールバッジが `field:staff` と生表示、招待の既定 `field:operator` も空振り
+
+名前は Field の auth manifest が持つものに合わせ、`RETIRED_POLICY_NAMES` は前提ごと
+削除した。mock も本番カタログと同じ名前に直し、回帰テストを追加した。
+
 ### メンバー画面（`desktop/src/features/members/`）
 
 - policy 識別子 → 画面の言葉のラベルマップ（Field `members-labels.ts` 方式、
@@ -42,14 +59,23 @@ extension 所有の policy は extension リポジトリで管理する規約
 - `global: true`。ゴルフ場テナントが prod / sandbox platform に分かれているため、
   platform 単位の `shared: true` では届かないテナントが出る
 
-**適用手順**（未実施。change control が必要）:
+**適用済み**（2026-08-18、profile `admin` / `--tenant-id tn_01ks18jhh1xvggktfzjx5jqsen`）:
 
 ```bash
-tachyon --tenant-id <tenant> auth manifest plan -f .tachyon/manifests/tachyonfield-golf-auth.yml
-tachyon --tenant-id <tenant> auth manifest apply -f .tachyon/manifests/tachyonfield-golf-auth.yml
+tachyon --profile admin --tenant-id <tenant> auth manifest plan  -f .tachyon/manifests/tachyonfield-golf-auth.yml
+tachyon --profile admin --tenant-id <tenant> auth manifest apply -f .tachyon/manifests/tachyonfield-golf-auth.yml
 ```
 
-適用後はメンバー画面のカタログに自動で載る（UI 変更不要。ラベルは実装済み）。
+- `--prune` は付けない（opt-in。付けなければ追加と更新だけで、既存 policy を消さない）
+- `-f` で golf マニフェストだけを指定する。auto-discovery は `.tachyon/manifests/` の
+  他のファイル（OAuth client、Field 本体マニフェストの古いコピー）も拾う
+- 結果: action 8 件 / policy 6 件を作成、エラー 0。再 plan で action は unchanged
+  （policy は list endpoint が無いため常に register 表示になる）
+- 検証: golf テナント（`tn_01kxd5gdvm9thcbj8c2e8c6yhq`）の
+  `GET /v1/field/iam/users` の `customPolicies` に 5 ロールが載ることを確認した。
+  `field-extension:golf:calculator` は載らない。`field:*` action を持たないので
+  Field のカタログ条件（`policy_applies_to_field`）から外れる — machine-to-machine
+  専用として意図どおり
 
 ### CourseBoard API の action ゲート（`src/course_authz.rs`）
 

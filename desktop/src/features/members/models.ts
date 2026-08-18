@@ -14,6 +14,10 @@
  * `pol_erp_*` trio this screen used to send was deleted platform-side
  * (PLT-3589), which broke inviting and role changes here until this was
  * rewritten. An id that is not in the catalogue is not offered and never sent.
+ *
+ * Resolving by name only helps while the names are right. Both halves have to
+ * come from upstream: the ids from the tenant's catalogue, the names from
+ * Field's auth manifest.
  */
 
 import { i18next } from '../../i18n'
@@ -21,10 +25,14 @@ import { i18next } from '../../i18n'
 /**
  * Response role identifiers (`ErpRole::as_str` upstream).
  *
- * Renamed from `field:{admin,staff,viewer}` when the roles moved into the
- * platform-defined manifest.
+ * These are the names Field's own auth manifest defines
+ * (`tachyonfield/.tachyon/manifests/tachyonfield-auth.yml`) and the only ones
+ * a tenant's catalogue carries. A `field:{administrator,operator,reader}`
+ * rename was assumed here once and never happened upstream, which left this
+ * screen offering no basic role at all and dropping the one a member already
+ * had — see the note on `ROLE_OPTIONS`.
  */
-export type ErpRole = 'field:administrator' | 'field:operator' | 'field:reader'
+export type ErpRole = 'field:admin' | 'field:staff' | 'field:viewer'
 
 /**
  * Key segments for the basic-role wording. The upstream role request enum
@@ -69,6 +77,14 @@ export type InviteMemberResponse = {
  * Names rather than ids: the catalogue is what says which id a name has in
  * this tenant, and the ids are not stable across platform changes.
  *
+ * The names themselves are not ours to choose. They are the policy names in
+ * Field's auth manifest, and what `role` comes back as on a member. This list
+ * briefly held `field:{administrator,operator,reader}` on the belief that the
+ * roles had been renamed; upstream never renamed anything, so no name here
+ * matched the catalogue. Every basic role vanished from the checklist, and
+ * saving a member dropped the role they had — `memberPolicyIds` cannot resolve
+ * a name the catalogue lacks, and the save replaces the whole set.
+ *
  * Labels are translation keys, not strings: this array is built once at module
  * load, so baking in the text would pin every role name to whatever language
  * was active on first import and never follow a language switch. Callers
@@ -82,34 +98,24 @@ export const ROLE_OPTIONS: Array<{
   summaryKey: RoleTextKey
 }> = [
   {
-    responseValue: 'field:administrator',
+    responseValue: 'field:admin',
     labelKey: 'members:roles.admin.label',
     summaryKey: 'members:roles.admin.summary',
   },
   {
-    responseValue: 'field:operator',
+    responseValue: 'field:staff',
     labelKey: 'members:roles.staff.label',
     summaryKey: 'members:roles.staff.summary',
   },
   {
-    responseValue: 'field:reader',
+    responseValue: 'field:viewer',
     labelKey: 'members:roles.viewer.label',
     summaryKey: 'members:roles.viewer.summary',
   },
 ]
 
 const ROLE_POLICY_NAMES: readonly string[] = ROLE_OPTIONS.map(option => option.responseValue)
-const ADMIN_POLICY_NAME: ErpRole = 'field:administrator'
-
-/**
- * The names the basic roles used to have.
- *
- * Those policies still exist, but frozen and stripped of `auth:*`,
- * `customField:*` and `order:*` — a strictly worse version of the role that
- * replaced them. They stay out of the checklist so nobody grants one by
- * mistake, while a member who still carries one keeps reading correctly.
- */
-const RETIRED_POLICY_NAMES: readonly string[] = ['field:admin', 'field:staff', 'field:viewer']
+const ADMIN_POLICY_NAME: ErpRole = 'field:admin'
 
 /** The policy id a name has in this tenant, or null when it is not offered. */
 export function policyIdByName(
@@ -131,12 +137,10 @@ export function rolePolicyId(
 
 /**
  * The domain policies to offer: the catalogue minus the basic roles, which are
- * listed separately, and minus the retired names.
+ * listed separately.
  */
 export function domainPolicies(catalog: ErpCustomPolicy[]): ErpCustomPolicy[] {
-  return catalog.filter(policy =>
-    !ROLE_POLICY_NAMES.includes(policy.name) && !RETIRED_POLICY_NAMES.includes(policy.name),
-  )
+  return catalog.filter(policy => !ROLE_POLICY_NAMES.includes(policy.name))
 }
 
 /**
@@ -217,7 +221,7 @@ const POLICY_TEXT: ReadonlyMap<string, { label: () => string; description: () =>
 export function policyDisplay(policy: ErpCustomPolicy): { label: string; description: string | null } {
   // A basic role reaching here is one badged as a plain policy — a pending
   // invitation lists what it asked for as one flat set, with no role resolved
-  // yet. It still reads as its role name rather than `field:operator`.
+  // yet. It still reads as its role name rather than `field:staff`.
   const role = ROLE_OPTIONS.find(option => option.responseValue === policy.name)
   if (role) return { label: i18next.t(role.labelKey), description: i18next.t(role.summaryKey) }
   const known = POLICY_TEXT.get(policy.name)
@@ -285,9 +289,9 @@ export function roleLabel(member: Pick<ErpMember, 'role' | 'isOwner'>) {
 export function roleBadgeVariant(member: Pick<ErpMember, 'role' | 'isOwner'>) {
   if (member.isOwner) return 'accent' as const
   switch (member.role) {
-    case 'field:administrator':
+    case 'field:admin':
       return 'success' as const
-    case 'field:operator':
+    case 'field:staff':
       return 'warning' as const
     default:
       return 'neutral' as const
@@ -302,9 +306,9 @@ export function rolePermissionSummary(member: Pick<ErpMember, 'role' | 'isOwner'
 }
 
 const ROLE_SORT_ORDER = new Map<string, number>([
-  ['field:administrator', 1],
-  ['field:operator', 2],
-  ['field:reader', 3],
+  ['field:admin', 1],
+  ['field:staff', 2],
+  ['field:viewer', 3],
 ])
 
 function roleSortKey(member: ErpMember) {
