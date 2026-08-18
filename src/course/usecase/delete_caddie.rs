@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{CaddieId, CourseError, GatewayCredentials, GolfOpsGateway};
 
 pub struct DeleteCaddieUseCase {
@@ -18,6 +19,7 @@ impl DeleteCaddieUseCase {
         credentials: GatewayCredentials<'_>,
         caddie_id: &CaddieId,
     ) -> Result<(), CourseError> {
+        credentials.require(actions::MANAGE_CADDIES).await?;
         self.ops.delete_caddie(credentials, caddie_id).await
     }
 }

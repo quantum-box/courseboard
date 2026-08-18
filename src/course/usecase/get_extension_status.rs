@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, ExtensionStatus, GatewayCredentials, GolfCommercialGateway,
 };
@@ -19,6 +20,7 @@ impl GetExtensionStatusUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<Option<ExtensionStatus>, CourseError> {
+        credentials.require(actions::LIST_EXTENSION_STATUS).await?;
         self.commercial.get_extension_status(credentials).await
     }
 }

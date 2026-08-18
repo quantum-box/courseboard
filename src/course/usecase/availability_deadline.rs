@@ -8,8 +8,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::course::domain::{
-    AvailabilityDeadline, AvailabilityDeadlineGateway, AvailabilityQuery, Caddie, CourseError,
-    GatewayCredentials, GolfOpsGateway, YearMonth,
+    actions, AvailabilityDeadline, AvailabilityDeadlineGateway, AvailabilityQuery, Caddie,
+    CourseError, GatewayCredentials, GolfOpsGateway, YearMonth,
 };
 
 fn require_tenant(tenant_id: &str) -> Result<(), CourseError> {
@@ -30,10 +30,14 @@ impl GetAvailabilityDeadlineUseCase {
 
     pub async fn execute(
         &self,
-        tenant_id: &str,
+        credentials: GatewayCredentials<'_>,
         year_month: YearMonth,
     ) -> Result<Option<AvailabilityDeadline>, CourseError> {
+        let tenant_id = credentials.operator_id;
         require_tenant(tenant_id)?;
+        credentials
+            .require(actions::LIST_CADDIE_AVAILABILITY)
+            .await?;
         self.deadlines.get_deadline(tenant_id, year_month).await
     }
 }
@@ -49,10 +53,14 @@ impl UpsertAvailabilityDeadlineUseCase {
 
     pub async fn execute(
         &self,
-        tenant_id: &str,
+        credentials: GatewayCredentials<'_>,
         deadline: AvailabilityDeadline,
     ) -> Result<AvailabilityDeadline, CourseError> {
+        let tenant_id = credentials.operator_id;
         require_tenant(tenant_id)?;
+        credentials
+            .require(actions::MANAGE_CADDIE_AVAILABILITY)
+            .await?;
         self.deadlines.upsert_deadline(tenant_id, deadline).await
     }
 }
@@ -78,6 +86,9 @@ impl ListUnsubmittedCaddiesUseCase {
         credentials: GatewayCredentials<'_>,
         year_month: YearMonth,
     ) -> Result<Vec<Caddie>, CourseError> {
+        credentials
+            .require(actions::LIST_CADDIE_AVAILABILITY)
+            .await?;
         let (month_start, month_end) = year_month.bounds();
         let (roster, availabilities) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
@@ -153,7 +164,10 @@ mod tests {
             YearMonth::parse("2026-08").unwrap(),
             NaiveDate::from_ymd_opt(2026, 7, 20).unwrap(),
         );
-        assert!(use_case.execute("  ", deadline).await.is_err());
+        assert!(use_case
+            .execute(credentials_for("  "), deadline)
+            .await
+            .is_err());
     }
 
     #[tokio::test]
@@ -166,12 +180,15 @@ mod tests {
             NaiveDate::from_ymd_opt(2026, 7, 20).unwrap(),
         );
         UpsertAvailabilityDeadlineUseCase::new(deadlines.clone())
-            .execute("tenant-1", deadline)
+            .execute(credentials_for("tenant-1"), deadline)
             .await
             .unwrap();
 
         let read = GetAvailabilityDeadlineUseCase::new(deadlines)
-            .execute("tenant-1", YearMonth::parse("2026-08").unwrap())
+            .execute(
+                credentials_for("tenant-1"),
+                YearMonth::parse("2026-08").unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(read, Some(deadline));
@@ -394,10 +411,17 @@ mod tests {
     }
 
     fn credentials() -> GatewayCredentials<'static> {
+        credentials_for("scc")
+    }
+
+    /// Authorization already granted: these tests are about what the use case
+    /// does, not who may run it.
+    fn credentials_for(tenant_id: &str) -> GatewayCredentials<'_> {
         GatewayCredentials {
             authorization: "Bearer t",
-            operator_id: "scc",
+            operator_id: tenant_id,
             platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
         }
     }
 

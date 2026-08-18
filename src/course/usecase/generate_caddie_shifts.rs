@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use chrono::{NaiveDate, Utc};
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     plan_month_shifts, tenant_date_at, AvailabilityDeadline, AvailabilityDeadlineGateway,
     AvailabilityQuery, Caddie, CaddieAvailability, CaddieId, CaddieShift, CaddieShiftGateway,
@@ -125,6 +126,7 @@ impl GenerateCaddieShiftsUseCase {
         year_month: YearMonth,
         mode: ShiftPlanMode,
     ) -> Result<GeneratedMonth, CourseError> {
+        credentials.require(actions::MANAGE_SHIFTS).await?;
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         let today = tenant_date_at(Utc::now(), &timezone)?;
         let (month_start, month_end) = year_month.bounds();

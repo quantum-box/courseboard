@@ -4,7 +4,9 @@ use std::sync::Arc;
 
 use chrono::NaiveDate;
 
-use crate::course::domain::{CaddieShift, CaddieShiftGateway, CourseError};
+use crate::course::domain::{
+    actions, CaddieShift, CaddieShiftGateway, CourseError, GatewayCredentials,
+};
 
 pub struct ListCaddieShiftsUseCase {
     shifts: Arc<dyn CaddieShiftGateway>,
@@ -17,7 +19,7 @@ impl ListCaddieShiftsUseCase {
 
     pub async fn execute(
         &self,
-        tenant_id: &str,
+        credentials: GatewayCredentials<'_>,
         from: NaiveDate,
         to: NaiveDate,
     ) -> Result<Vec<CaddieShift>, CourseError> {
@@ -26,6 +28,9 @@ impl ListCaddieShiftsUseCase {
         if from > to {
             return Err(CourseError::BadRequest("the range starts after it ends"));
         }
-        self.shifts.list_shifts(tenant_id, from, to).await
+        credentials.require(actions::LIST_SHIFTS).await?;
+        self.shifts
+            .list_shifts(credentials.operator_id, from, to)
+            .await
     }
 }

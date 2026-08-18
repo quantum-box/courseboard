@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDate, Utc};
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     tenant_date_at, AvailabilityRule, BookingHorizon, BuiltInventory, CourseError, CourseId,
     GatewayCredentials, GeneratedThroughGateway, GenerationSummary, GolfCatalogGateway,
@@ -71,6 +72,7 @@ impl GetCourseScheduleUseCase {
         credentials: GatewayCredentials<'_>,
         course_id: &CourseId,
     ) -> Result<Vec<AvailabilityRule>, CourseError> {
+        credentials.require(actions::LIST_COURSES).await?;
         let resource_id = resolve_resource(&self.catalog, credentials, course_id).await?;
         self.schedules
             .get_resource_schedule(credentials, &resource_id)
@@ -112,6 +114,7 @@ impl ReplaceCourseScheduleUseCase {
         course_id: &CourseId,
         rules: Vec<AvailabilityRule>,
     ) -> Result<SavedSchedule, CourseError> {
+        credentials.require(actions::MANAGE_COURSES).await?;
         reject_overlaps(&rules)?;
         // Four independent reads of upstream state, none of which depends on
         // another. Run serially they were four round trips the operator waited
@@ -273,6 +276,7 @@ impl GenerateCourseTimeSlotsUseCase {
         to: NaiveDate,
         dry_run: bool,
     ) -> Result<GenerationSummary, CourseError> {
+        credentials.require(actions::MANAGE_COURSES).await?;
         if to < from {
             return Err(CourseError::BadRequest(
                 "the end of the range must not be before its start",
@@ -440,6 +444,7 @@ impl GetBookingHorizonUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<(BookingHorizon, NaiveDate), CourseError> {
+        credentials.require(actions::LIST_COURSES).await?;
         let horizon = self.commercial.get_booking_horizon(credentials).await?;
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         let bookable_through = horizon.last_bookable_date(course_today(Utc::now(), &timezone)?);
@@ -479,6 +484,7 @@ impl SetBookingHorizonUseCase {
         credentials: GatewayCredentials<'_>,
         horizon: BookingHorizon,
     ) -> Result<(BookingHorizon, NaiveDate), CourseError> {
+        credentials.require(actions::MANAGE_COURSES).await?;
         // A named closing date is only meaningful against the club's own today,
         // which the handler cannot know without the tenant's timezone. Checked
         // before the write, so a date nobody can sell to is refused rather than
@@ -1035,6 +1041,7 @@ mod tests {
                     authorization: "Bearer test",
                     operator_id: "tenant-test",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
                 },
                 &course_id,
                 vec![rule(1, "07:00", "12:00")],
@@ -1095,6 +1102,7 @@ mod tests {
                     authorization: "Bearer test",
                     operator_id: "tenant-test",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
                 },
                 &course_id,
                 vec![rule(1, "07:00", "12:00")],
@@ -1173,6 +1181,7 @@ mod tests {
                     authorization: "Bearer test",
                     operator_id: "tenant-test",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
                 },
                 &course_id,
                 vec![rule(1, "07:00", "12:00")],
@@ -1236,6 +1245,7 @@ mod tests {
                     authorization: "Bearer test",
                     operator_id: "tenant-test",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
                 },
                 &course_id,
                 vec![rule(1, "07:00", "12:00")],

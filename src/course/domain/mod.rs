@@ -3,6 +3,7 @@
 //! Field / ERP JSON never enters this module. Gateways reconstitute domain
 //! models; use cases depend on ports and domain types only.
 
+pub mod actions;
 mod availability_deadline;
 mod caddie;
 mod caddie_ops;
@@ -105,11 +106,11 @@ pub use payroll::{
     payroll_csv, summarize_payroll_in_timezone, AttendanceDay, PayrollCandidate, WorkedMinutes,
 };
 pub use ports::{
-    AvailabilityDeadlineGateway, CaddieShiftGateway, CustomerGateway, CustomerReceptionOcrGateway,
-    FieldCapabilitiesGateway, GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway,
-    GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, MembershipGateway, ReservationGateway,
-    ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery,
-    TeeSheetQuery,
+    AvailabilityDeadlineGateway, CaddieShiftGateway, CourseAuthorizer, CustomerGateway,
+    CustomerReceptionOcrGateway, FieldCapabilitiesGateway, GatewayCredentials,
+    GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
+    GolfTaxGateway, MembershipGateway, ReservationGateway, ReservationScheduleGateway,
+    ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{CourseError, GatewayCredentials, GolfCatalogGateway, Resource};
 
 pub struct ListResourcesUseCase {
@@ -17,6 +18,7 @@ impl ListResourcesUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<Resource>, CourseError> {
+        credentials.require(actions::LIST_COURSES).await?;
         self.catalog.list_resources(credentials).await
     }
 }

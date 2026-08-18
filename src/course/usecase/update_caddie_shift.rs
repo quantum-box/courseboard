@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use chrono::NaiveDate;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     AvailabilityQuery, AvailabilityStatus, CaddieId, CaddieShift, CaddieShiftGateway, CourseError,
     CourseId, GatewayCredentials, GolfOpsGateway, ShiftEdit,
@@ -32,6 +33,7 @@ impl UpdateCaddieShiftUseCase {
         edit: ShiftEdit,
         updated_by: Option<String>,
     ) -> Result<CaddieShift, CourseError> {
+        credentials.require(actions::MANAGE_SHIFTS).await?;
         let (memberships, filed) = tokio::try_join!(
             self.ops.list_caddie_memberships(credentials, caddie_id),
             self.ops.list_caddie_availabilities(

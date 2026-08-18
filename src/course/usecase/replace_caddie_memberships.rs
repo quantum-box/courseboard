@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CaddieCourseMembership, CaddieId, CourseError, GatewayCredentials, GolfOpsGateway,
     ReplaceCaddieMemberships,
@@ -22,6 +23,7 @@ impl ReplaceCaddieMembershipsUseCase {
         caddie_id: &CaddieId,
         input: ReplaceCaddieMemberships,
     ) -> Result<Vec<CaddieCourseMembership>, CourseError> {
+        credentials.require(actions::MANAGE_CADDIES).await?;
         self.ops
             .replace_caddie_memberships(credentials, caddie_id, input)
             .await

@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use chrono::NaiveDate;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     format_datetime_in_timezone, format_tenant_wall_clock, parse_tenant_timezone, Course,
     CourseError, CourseId, GatewayCredentials, GolfCatalogGateway, PlayType, Reservation,
@@ -36,6 +37,7 @@ impl GetTeeSheetUseCase {
         credentials: GatewayCredentials<'_>,
         query: TeeSheetQuery,
     ) -> Result<TeeSheet, CourseError> {
+        credentials.require(actions::LIST_TEE_SHEET).await?;
         // Reservations and courses are the board. Resources and products only
         // decorate its rows, so one of them failing must not black out the
         // operator's view of the day — ADR-0005 moved the board onto several
@@ -715,6 +717,7 @@ mod tests {
                     authorization: "Bearer test",
                     operator_id: "scc",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
                 },
                 TeeSheetQuery {
                     date,
@@ -790,6 +793,7 @@ mod tests {
                     authorization: "Bearer test",
                     operator_id: "scc",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
                 },
                 TeeSheetQuery {
                     date: first,
@@ -837,6 +841,7 @@ mod tests {
                     authorization: "Bearer test",
                     operator_id: "scc",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
                 },
                 TeeSheetQuery {
                     date,

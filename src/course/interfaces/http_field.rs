@@ -89,7 +89,11 @@ pub async fn get_client_capabilities(
         state.cancellation_fee_config.field_api_url.as_deref(),
     ));
     let use_case = GetFieldClientCapabilitiesUseCase::new(gateway);
-    let capabilities = use_case.execute(context).await.map_err(AppError::from)?;
+    let credentials = super::http::credentials(&state, &headers)?;
+    let capabilities = use_case
+        .execute(credentials, context)
+        .await
+        .map_err(AppError::from)?;
     Ok(Json(ClientCapabilitiesResponse::from(capabilities)))
 }
 

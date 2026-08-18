@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use chrono::NaiveDate;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     AttendanceSnapshotReport, CourseError, GatewayCredentials, GolfOpsGateway,
 };
@@ -23,6 +24,7 @@ impl GetAttendanceSnapshotUseCase {
         date: Option<NaiveDate>,
         timezone: &str,
     ) -> Result<AttendanceSnapshotReport, CourseError> {
+        credentials.require(actions::LIST_CADDIE_INSIGHTS).await?;
         self.ops
             .get_attendance_snapshot(credentials, date, timezone)
             .await

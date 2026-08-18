@@ -69,6 +69,7 @@ pub struct AppState {
     feature_flags: Arc<feature_flags::EvaluateFeatureFlags>,
     profile_client: Option<Arc<profile_proxy::ProfileClient>>,
     course_authorization: Arc<course_authz::CourseAuthorization>,
+    course_authorizer: Arc<dyn course::domain::CourseAuthorizer>,
 }
 
 impl AppState {
@@ -109,6 +110,7 @@ impl AppState {
             feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
             profile_client: None,
             course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
+            course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
         }
     }
 
@@ -153,6 +155,7 @@ impl AppState {
             feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
             profile_client: None,
             course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
+            course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
         }
     }
 
@@ -185,6 +188,7 @@ impl AppState {
                 feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
                 profile_client: None,
                 course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
+                course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
             },
             Err(error) => Self {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
@@ -208,6 +212,7 @@ impl AppState {
                 feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
                 profile_client: None,
                 course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
+                course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
             },
         }
     }
@@ -276,6 +281,22 @@ impl AppState {
         authorization: Arc<course_authz::CourseAuthorization>,
     ) -> Self {
         self.course_authorization = authorization;
+        self
+    }
+
+    /// The authorizer use cases require their action from.
+    ///
+    /// Borrowed rather than cloned: it lives on the credentials a request
+    /// carries, which never outlive the request.
+    pub(crate) fn course_authorizer(&self) -> &dyn course::domain::CourseAuthorizer {
+        self.course_authorizer.as_ref()
+    }
+
+    pub fn with_course_authorizer(
+        mut self,
+        authorizer: Arc<dyn course::domain::CourseAuthorizer>,
+    ) -> Self {
+        self.course_authorizer = authorizer;
         self
     }
 }
@@ -1082,21 +1103,33 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
         config.field_api_client_credentials_config(),
         config.field_api_bearer_token(),
     );
-    let course_authorization = if config.disable_action_authz {
+    // One checker behind both gates. The route gate and the use cases share
+    // its cache, so a use case requiring the action its route was gated on
+    // costs no second round trip.
+    let (course_authorization, course_authorizer): (
+        course_authz::CourseAuthorization,
+        Arc<dyn course::domain::CourseAuthorizer>,
+    ) = if config.disable_action_authz {
         tracing::warn!(
             "course action authorization is DISABLED via COURSEBOARD_DISABLE_ACTION_AUTHZ; \
-             CourseBoard-local routes accept any valid bearer"
+             every CourseBoard route and use case accepts any valid bearer"
         );
-        course_authz::CourseAuthorization::disabled()
+        (
+            course_authz::CourseAuthorization::disabled(),
+            Arc::new(course::infrastructure::AllowAllAuthorizer),
+        )
     } else {
         let checker_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
-        course_authz::CourseAuthorization::new(Arc::new(course_authz::TachyonPolicyChecker::new(
-            checker_client,
-            &tachyon_api_url,
-        )))
+        let checker: Arc<dyn course_authz::PolicyChecker> = Arc::new(
+            course_authz::TachyonPolicyChecker::new(checker_client, &tachyon_api_url),
+        );
+        (
+            course_authz::CourseAuthorization::new(checker.clone()),
+            Arc::new(course::infrastructure::PolicyCourseAuthorizer::new(checker)),
+        )
     };
     let state =
         AppState::with_optional_field_api(pool, token_verifier, field_api, cancellation_fee_config)
@@ -1104,7 +1137,8 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
                 &tachyon_api_url,
             )))
             .with_profile_client(profile_client)
-            .with_course_authorization(Arc::new(course_authorization));
+            .with_course_authorization(Arc::new(course_authorization))
+            .with_course_authorizer(course_authorizer);
 
     Ok(build_router(state))
 }
@@ -1561,6 +1595,10 @@ pub enum AppError {
     Unauthorized,
     #[error("authenticated client is not authorized")]
     Forbidden,
+    /// Refused for want of one named permission. The action is echoed so the
+    /// screen can say which grant is missing instead of just "forbidden".
+    #[error("this operation requires {0}")]
+    ActionForbidden(&'static str),
     #[error("{0}")]
     BadRequest(&'static str),
     /// A file whose name does not say which month it covers.
@@ -1605,6 +1643,7 @@ impl IntoResponse for AppError {
         let (status, error) = match self {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
+            AppError::ActionForbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::MonthRequired(_) => (StatusCode::BAD_REQUEST, "month_required"),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),

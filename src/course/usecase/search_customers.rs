@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, Customer, CustomerGateway, CustomerSearchQuery, GatewayCredentials,
 };
@@ -25,6 +26,7 @@ impl SearchCustomersUseCase {
         credentials: GatewayCredentials<'_>,
         query: CustomerSearchQuery,
     ) -> Result<Vec<Customer>, CourseError> {
+        credentials.require(actions::LIST_CUSTOMERS).await?;
         self.customers.search_customers(credentials, &query).await
     }
 }
@@ -76,6 +78,7 @@ mod tests {
             authorization: "Bearer token",
             operator_id: "tenant-1",
             platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
         }
     }
 

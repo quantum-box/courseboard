@@ -5,6 +5,11 @@ use thiserror::Error;
 pub enum CourseError {
     #[error("authorization failed")]
     Unauthorized,
+    /// The caller is signed in, but the tenant's policies do not grant the
+    /// action this operation requires. Carries the action so the response can
+    /// name what is missing rather than a bare "forbidden".
+    #[error("this operation requires {0}")]
+    Forbidden(&'static str),
     #[error("{0}")]
     BadRequest(&'static str),
     /// The request was valid, but the selected operational state changed

@@ -5,6 +5,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, CourseId, CourseOrder, GatewayCredentials, GolfCatalogGateway,
 };
@@ -22,6 +23,7 @@ impl GetCourseOrderUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<CourseOrder, CourseError> {
+        credentials.require(actions::LIST_COURSES).await?;
         self.catalog.get_course_order(credentials).await
     }
 }
@@ -45,6 +47,7 @@ impl ReplaceCourseOrderUseCase {
         credentials: GatewayCredentials<'_>,
         ids: Vec<CourseId>,
     ) -> Result<CourseOrder, CourseError> {
+        credentials.require(actions::MANAGE_COURSES).await?;
         let courses = self.catalog.list_courses(credentials).await?;
         let known: Vec<&CourseId> = courses.iter().map(|course| course.id()).collect();
         let order = CourseOrder::new(ids.into_iter().filter(|id| known.contains(&id)));
@@ -202,6 +205,7 @@ mod tests {
             authorization: "Bearer token",
             operator_id: "tenant-1",
             platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
         }
     }
 

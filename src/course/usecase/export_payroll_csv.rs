@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{payroll_csv, CourseError, GatewayCredentials, GolfOpsGateway};
 
 use super::GetPayrollSummaryUseCase;
@@ -29,6 +30,7 @@ impl ExportPayrollCsvUseCase {
         year_month: &str,
         timezone: &str,
     ) -> Result<String, CourseError> {
+        credentials.require(actions::LIST_PAYROLL).await?;
         Ok(payroll_csv(
             &self
                 .summary

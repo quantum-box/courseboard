@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CaddieAvailability, CourseError, GatewayCredentials, GolfOpsGateway, UpsertCaddieAvailability,
 };
@@ -20,6 +21,9 @@ impl UpsertCaddieAvailabilityUseCase {
         credentials: GatewayCredentials<'_>,
         input: UpsertCaddieAvailability,
     ) -> Result<CaddieAvailability, CourseError> {
+        credentials
+            .require(actions::MANAGE_CADDIE_AVAILABILITY)
+            .await?;
         self.ops
             .upsert_caddie_availability(credentials, input)
             .await

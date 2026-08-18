@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use chrono::NaiveDate;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     reinforcements_for, CaddieCapability, CaddieId, CaddieShiftGateway, CourseError, CourseId,
     GatewayCredentials, GolfOpsGateway, ShiftSpan,
@@ -43,6 +44,7 @@ impl ListCourseReinforcementsUseCase {
         course_id: &CourseId,
         date: NaiveDate,
     ) -> Result<Vec<ReinforcementCandidate>, CourseError> {
+        credentials.require(actions::LIST_CADDIE_INSIGHTS).await?;
         let (roster, shifts) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
             self.shifts.list_shifts(credentials.operator_id, date, date),

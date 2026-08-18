@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, GatewayCredentials, GolfCatalogGateway, ReservationProduct,
 };
@@ -19,6 +20,7 @@ impl ListReservationProductsUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<ReservationProduct>, CourseError> {
+        credentials.require(actions::LIST_PRODUCTS).await?;
         self.catalog.list_reservation_products(credentials).await
     }
 }

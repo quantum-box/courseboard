@@ -31,13 +31,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-pub const LIST_SHIFTS: &str = "field_extension_golf:ListShifts";
-pub const MANAGE_SHIFTS: &str = "field_extension_golf:ManageShifts";
-pub const LIST_SLOT_OVERRIDES: &str = "field_extension_golf:ListSlotOverrides";
-pub const MANAGE_SLOT_OVERRIDES: &str = "field_extension_golf:ManageSlotOverrides";
-pub const CALCULATE_FEES: &str = "field_extension_golf:CalculateFees";
-pub const MANAGE_CANCELLATION_FEES: &str = "field_extension_golf:ManageCancellationFees";
-pub const SEED_DEMO_BOARD: &str = "field_extension_golf:SeedDemoBoard";
+use crate::course::domain::actions::{
+    CALCULATE_FEES, LIST_SHIFTS, LIST_SLOT_OVERRIDES, MANAGE_CANCELLATION_FEES, MANAGE_SHIFTS,
+    MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
+};
 
 /// What standing a route needs before its handler runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

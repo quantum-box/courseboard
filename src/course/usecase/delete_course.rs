@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{CourseError, CourseId, GatewayCredentials, GolfCatalogGateway};
 
 pub struct DeleteCourseUseCase {
@@ -18,6 +19,7 @@ impl DeleteCourseUseCase {
         credentials: GatewayCredentials<'_>,
         course_id: &CourseId,
     ) -> Result<(), CourseError> {
+        credentials.require(actions::MANAGE_COURSES).await?;
         self.catalog.delete_course(credentials, course_id).await
     }
 }

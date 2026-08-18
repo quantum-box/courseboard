@@ -107,6 +107,7 @@ pub(crate) fn credentials<'a>(
         authorization,
         operator_id: operator_id(headers)?,
         platform_id: optional_header(headers, "x-platform-id"),
+        authorizer: state.course_authorizer(),
     })
 }
 
@@ -143,6 +144,7 @@ impl From<CourseError> for AppError {
     fn from(value: CourseError) -> Self {
         match value {
             CourseError::Unauthorized => AppError::Unauthorized,
+            CourseError::Forbidden(action) => AppError::ActionForbidden(action),
             CourseError::BadRequest(message) => AppError::BadRequest(message),
             CourseError::Conflict(message) => AppError::Conflict(message),
             CourseError::UpstreamClient { status, message } => match StatusCode::from_u16(status) {
@@ -1118,11 +1120,11 @@ pub async fn list_slot_overrides(
     headers: HeaderMap,
     Query(query): Query<SlotOverrideQueryParams>,
 ) -> Result<Json<ItemsResponse<SlotOverrideDto>>, AppError> {
-    let tenant_id = operator_id(&headers)?.to_string();
+    let credentials = credentials(&state, &headers)?;
     let use_case = ListSlotOverridesUseCase::new(slot_override_gateway(&state));
     let items = use_case
         .execute(
-            &tenant_id,
+            credentials,
             SlotOverrideQuery {
                 date: query.date,
                 course_ids: CourseId::from_optional(query.golf_course_id)
@@ -1155,7 +1157,7 @@ pub async fn upsert_slot_overrides(
     headers: HeaderMap,
     Json(request): Json<UpsertSlotOverridesRequest>,
 ) -> Result<Json<ItemsResponse<SlotOverrideDto>>, AppError> {
-    let tenant_id = operator_id(&headers)?.to_string();
+    let credentials = credentials(&state, &headers)?;
     let command = UpsertSlotOverrides {
         course_id: CourseId::try_new(request.golf_course_id).map_err(AppError::from)?,
         date: request.date,
@@ -1166,7 +1168,7 @@ pub async fn upsert_slot_overrides(
     };
     let use_case = UpsertSlotOverridesUseCase::new(slot_override_gateway(&state));
     let items = use_case
-        .execute(&tenant_id, command)
+        .execute(credentials, command)
         .await
         .map_err(AppError::from)?;
     Ok(Json(ItemsResponse {
@@ -1192,11 +1194,11 @@ pub async fn delete_slot_overrides(
     headers: HeaderMap,
     Json(request): Json<DeleteSlotOverridesRequest>,
 ) -> Result<Json<DeleteSlotOverridesResponse>, AppError> {
-    let tenant_id = operator_id(&headers)?.to_string();
+    let credentials = credentials(&state, &headers)?;
     let use_case = DeleteSlotOverridesUseCase::new(slot_override_gateway(&state));
     let deleted = use_case
         .execute(
-            &tenant_id,
+            credentials,
             DeleteSlotOverrides {
                 course_id: CourseId::try_new(request.golf_course_id).map_err(AppError::from)?,
                 date: request.date,

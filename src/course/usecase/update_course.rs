@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     Course, CourseError, CourseId, GatewayCredentials, GolfCatalogGateway, UpsertCourse,
 };
@@ -21,6 +22,7 @@ impl UpdateCourseUseCase {
         course_id: &CourseId,
         input: UpsertCourse,
     ) -> Result<Course, CourseError> {
+        credentials.require(actions::MANAGE_COURSES).await?;
         self.catalog
             .update_course(credentials, course_id, input)
             .await

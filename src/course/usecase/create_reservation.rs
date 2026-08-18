@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     has_room_for_one_more_caddie_round, parse_tenant_tee_time, reconcile_remaining,
     tenant_day_bounds, CaddieShiftGateway, CourseError, CourseId, CustomerId, GatewayCredentials,
@@ -72,6 +73,7 @@ impl CreateReservationUseCase {
         credentials: GatewayCredentials<'_>,
         input: CreateReservationInput,
     ) -> Result<ReservationId, CourseError> {
+        credentials.require(actions::MANAGE_RESERVATIONS).await?;
         let customer_name = input.customer_name.trim();
         if customer_name.is_empty() {
             return Err(CourseError::BadRequest("customer name is required"));

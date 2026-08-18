@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, GatewayCredentials, GolfCatalogGateway, ReservationProduct,
     UpsertReservationProduct,
@@ -23,6 +24,7 @@ impl UpsertReservationProductUseCase {
         credentials: GatewayCredentials<'_>,
         input: UpsertReservationProduct,
     ) -> Result<ReservationProduct, CourseError> {
+        credentials.require(actions::MANAGE_PRODUCTS).await?;
         // Selling one plan on several courses stores the resources Field places
         // reservations on, and a course only gets a resource when somebody asks
         // for one. Asking here is that somebody: the operator picked the course
@@ -253,6 +255,7 @@ mod tests {
             authorization: "Bearer t",
             operator_id: "scc",
             platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
         }
     }
 

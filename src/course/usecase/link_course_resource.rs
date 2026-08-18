@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, CourseId, GatewayCredentials, GolfCatalogGateway, Resource, ResourceKind,
     SaveCourseResource,
@@ -30,6 +31,7 @@ impl LinkCourseResourceUseCase {
         credentials: GatewayCredentials<'_>,
         course_id: &CourseId,
     ) -> Result<Resource, CourseError> {
+        credentials.require(actions::MANAGE_COURSES).await?;
         ensure_course_resources(
             self.catalog.as_ref(),
             credentials,
@@ -278,6 +280,7 @@ mod tests {
             authorization: "Bearer t",
             operator_id: "scc",
             platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
         }
     }
 

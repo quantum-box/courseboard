@@ -6,6 +6,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{CaddieRankFees, CourseError, GatewayCredentials, GolfOpsGateway};
 
 pub struct GetCaddieRankFeesUseCase {
@@ -21,6 +22,7 @@ impl GetCaddieRankFeesUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<CaddieRankFees, CourseError> {
+        credentials.require(actions::LIST_CADDIE_RANK_FEES).await?;
         self.ops.get_caddie_rank_fees(credentials).await
     }
 }
@@ -39,6 +41,9 @@ impl ReplaceCaddieRankFeesUseCase {
         credentials: GatewayCredentials<'_>,
         fees: CaddieRankFees,
     ) -> Result<CaddieRankFees, CourseError> {
+        credentials
+            .require(actions::MANAGE_CADDIE_RANK_FEES)
+            .await?;
         self.ops.replace_caddie_rank_fees(credentials, &fees).await
     }
 }

@@ -47,8 +47,8 @@ extension 所有の policy は extension リポジトリで管理する規約
 （tachyonfield `docs/tasks/plt-1579-auth-manifest.md`）に従い、このリポジトリの
 マニフェストに定義した。
 
-- action: `field_extension_golf:{ListShifts, ManageShifts, ListSlotOverrides,
-  ManageSlotOverrides, CalculateFees, ManageCancellationFees, SeedDemoBoard}`
+- action: `field_extension_golf:*` を業務単位で 36 件（`src/course/domain/actions.rs`
+  が SSoT。マニフェストとの整合はテストで固定）
 - policy（ロール）: `field-extension:golf:{viewer, reception, caddie-master,
   accounting, manager}`
 - 各ロールは必要な `field:*` / `accounting:*` action を同梱する。理由は2つ:
@@ -94,6 +94,34 @@ tachyonfield の route classifier と同じフェイルクローズド方式。
   生成 env にだけ入る。CLI JWT は tachyon-api が 401 にするため
 - ルートを足すときは `src/course_authz.rs` の `ROUTES` と
   `every_registered_route_is_classified` テストに1行足す
+
+### usecase 層の認可（`src/course/domain/actions.rs`、`ports.rs`）
+
+ルート表だけだと、Field 経由のルートは CourseBoard 側の判定が無く、粒度も Field の
+`field:ManageReservations` 止まりだった（等級料金・予算・extension config が全部同じ
+1 グラント。PLT-3639）。そこで **usecase を強制点にした**。
+
+- `field_extension_golf:*` の action を業務単位で 36 件定義（`domain/actions.rs`）。
+  URL ではなく操作に紐づくので、別ルート・バッチから呼ばれても付いて回る
+- `CourseAuthorizer` ポートを `GatewayCredentials` に載せ、各 usecase の `execute`
+  先頭で `credentials.require(actions::X).await?`。62/68 の usecase が既に
+  credentials を受け取っていたので、コンストラクタは変えずに済む
+- 残り 6 usecase（`tenant_id: &str` だけを取っていたローカル系）は credentials
+  受け取りに揃えた。呼び出し側は元々 `credentials.operator_id` を渡していたので
+  意味は変わらない
+- gateway が並行 fan-out のために再構築する credentials は
+  `GatewayCredentials::for_outbound`。認可には使えず、誤用時は 403（fail closed）
+- ルート表は残す。**新しいルートを足して分類し忘れたら 403** という網は
+  usecase 側では張れない（新しい usecase の require 忘れは開いてしまう）ため、
+  二重にする意味がある。ローカルルートは表と usecase が同じ action を使うので、
+  60 秒キャッシュにより問い合わせは 1 回で済む
+- `actions::ALL` とマニフェストの整合をテストで固定（宣言漏れ・grant 漏れ・
+  コードが要求しない宣言の 3 方向）
+
+**運用上の注意**: 認可はフェイルクローズドなので、**Tachyon Auth が落ちると
+CourseBoard の業務画面も 424 で止まる**。今までローカルルートだけだった影響範囲が
+全 usecase に広がった。可用性を優先するなら、読み取り系だけ猶予を持たせるといった
+緩和を別途決める必要がある。
 
 ## Field 側に残る粒度の課題（PLT 起票対象）
 

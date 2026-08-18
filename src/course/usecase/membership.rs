@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     AssignMembershipPlan, CourseError, CustomerId, CustomerMembership, GatewayCredentials,
     MembershipGateway, MembershipPlan, MembershipPlanId, UpsertMembershipPlan,
@@ -30,6 +31,7 @@ impl ListMembershipPlansUseCase {
         credentials: GatewayCredentials<'_>,
         include_inactive: bool,
     ) -> Result<Vec<MembershipPlan>, CourseError> {
+        credentials.require(actions::LIST_MEMBERSHIP).await?;
         self.memberships
             .list_membership_plans(credentials, include_inactive)
             .await
@@ -50,6 +52,9 @@ impl CreateMembershipPlanUseCase {
         credentials: GatewayCredentials<'_>,
         input: UpsertMembershipPlan,
     ) -> Result<MembershipPlan, CourseError> {
+        credentials
+            .require(actions::MANAGE_MEMBERSHIP_PLANS)
+            .await?;
         self.memberships
             .create_membership_plan(credentials, &input)
             .await
@@ -71,6 +76,9 @@ impl UpdateMembershipPlanUseCase {
         plan_id: &MembershipPlanId,
         input: UpsertMembershipPlan,
     ) -> Result<MembershipPlan, CourseError> {
+        credentials
+            .require(actions::MANAGE_MEMBERSHIP_PLANS)
+            .await?;
         self.memberships
             .update_membership_plan(credentials, plan_id, &input)
             .await
@@ -91,6 +99,7 @@ impl GetCustomerMembershipUseCase {
         credentials: GatewayCredentials<'_>,
         customer_id: &CustomerId,
     ) -> Result<CustomerMembership, CourseError> {
+        credentials.require(actions::LIST_MEMBERSHIP).await?;
         self.memberships
             .get_customer_membership(credentials, customer_id)
             .await
@@ -111,6 +120,7 @@ impl AssignMembershipPlanUseCase {
         credentials: GatewayCredentials<'_>,
         input: AssignMembershipPlan,
     ) -> Result<CustomerMembership, CourseError> {
+        credentials.require(actions::ASSIGN_MEMBERSHIP).await?;
         self.memberships
             .assign_membership_plan(credentials, &input)
             .await
@@ -188,6 +198,7 @@ mod tests {
             authorization: "Bearer token",
             operator_id: "tenant-1",
             platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
         }
     }
 

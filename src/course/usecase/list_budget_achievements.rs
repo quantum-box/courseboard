@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use chrono::NaiveDate;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     BudgetAchievement, CourseError, GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway,
 };
@@ -30,6 +31,7 @@ impl ListBudgetAchievementsUseCase {
         from: NaiveDate,
         to: NaiveDate,
     ) -> Result<Vec<BudgetAchievement>, CourseError> {
+        credentials.require(actions::LIST_BUDGETS).await?;
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         self.commercial
             .list_budget_achievements(credentials, from, to, &timezone)

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{CaddieRoster, CourseError, GatewayCredentials, GolfOpsGateway};
 
 pub struct ListCaddiesUseCase {
@@ -17,6 +18,7 @@ impl ListCaddiesUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<CaddieRoster, CourseError> {
+        credentials.require(actions::LIST_CADDIES).await?;
         self.ops.list_caddie_roster(credentials).await
     }
 }
@@ -347,6 +349,7 @@ mod tests {
                 authorization: "Bearer t",
                 operator_id: "scc",
                 platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
             })
             .await
             .expect("list");
@@ -361,6 +364,7 @@ mod tests {
                     authorization: "Bearer t",
                     operator_id: "scc",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
                 },
                 CaddieAssignmentQuery::default(),
             )
@@ -398,6 +402,7 @@ mod tests {
                     authorization: "Bearer t",
                     operator_id: "scc",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
                 },
                 RecommendationQuery {
                     player_count: Some(4),
@@ -433,6 +438,7 @@ mod tests {
                     authorization: "Bearer t",
                     operator_id: "scc",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
                 },
                 RecommendationQuery {
                     scheduled_at: Some(morning_tee_time()),
@@ -475,6 +481,7 @@ mod tests {
                     authorization: "Bearer t",
                     operator_id: "scc",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
                 },
                 RecommendationQuery {
                     scheduled_at: Some(Utc.with_ymd_and_hms(2026, 8, 7, 22, 0, 0).unwrap()),
@@ -521,6 +528,7 @@ mod tests {
                         authorization: "Bearer t",
                         operator_id: "scc",
                         platform_id: None,
+                        authorizer: &crate::course::infrastructure::ALLOW_ALL,
                     },
                     RecommendationQuery {
                         scheduled_at: Some(at),
@@ -588,6 +596,7 @@ mod tests {
                     authorization: "Bearer t",
                     operator_id: "scc",
                     platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
                 },
                 input,
                 "Asia/Tokyo",

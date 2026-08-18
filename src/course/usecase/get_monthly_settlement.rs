@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     parse_tenant_timezone, Course, CourseError, GatewayCredentials, GolfCatalogGateway,
     GolfCommercialGateway, MonthlySettlement, Reservation, ReservationGateway, ReservationId,
@@ -96,6 +97,7 @@ impl GetMonthlySettlementUseCase {
         credentials: GatewayCredentials<'_>,
         year_month: &str,
     ) -> Result<MonthlySettlementView, CourseError> {
+        credentials.require(actions::LIST_SETTLEMENT).await?;
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         let report = self
             .commercial

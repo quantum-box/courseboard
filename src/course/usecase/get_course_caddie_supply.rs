@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use chrono::NaiveDate;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     compute_course_supply, CaddieShiftGateway, CourseError, CourseId, DayCaddieSupply,
     GatewayCredentials, GolfCatalogGateway, ReservationGateway, TeeSheetQuery, TeeSheetStatus,
@@ -40,6 +41,7 @@ impl GetCourseCaddieSupplyUseCase {
         credentials: GatewayCredentials<'_>,
         date: NaiveDate,
     ) -> Result<DayCaddieSupply, CourseError> {
+        credentials.require(actions::LIST_CADDIE_INSIGHTS).await?;
         let sheet = GetTeeSheetUseCase::new(self.reservations.clone(), self.catalog.clone());
         let (sheet, shifts, courses) = tokio::try_join!(
             sheet.execute(

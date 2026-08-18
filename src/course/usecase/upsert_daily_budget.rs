@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, DailyBudget, GatewayCredentials, GolfCommercialGateway, UpsertDailyBudget,
 };
@@ -20,6 +21,7 @@ impl UpsertDailyBudgetUseCase {
         credentials: GatewayCredentials<'_>,
         input: UpsertDailyBudget,
     ) -> Result<DailyBudget, CourseError> {
+        credentials.require(actions::MANAGE_BUDGETS).await?;
         self.commercial
             .upsert_daily_budget(credentials, input)
             .await

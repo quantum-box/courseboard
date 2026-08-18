@@ -8,6 +8,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, CustomerReceptionOcrGateway, GatewayCredentials, ReceptionDraft, ReceptionSheet,
 };
@@ -26,6 +27,7 @@ impl DraftCustomerReceptionUseCase {
         credentials: GatewayCredentials<'_>,
         sheet: ReceptionSheet,
     ) -> Result<ReceptionDraft, CourseError> {
+        credentials.require(actions::MANAGE_CUSTOMERS).await?;
         self.reader.draft_reception(credentials, sheet).await
     }
 }
@@ -69,6 +71,7 @@ mod tests {
             authorization: "Bearer token",
             operator_id: "tenant-1",
             platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
         }
     }
 

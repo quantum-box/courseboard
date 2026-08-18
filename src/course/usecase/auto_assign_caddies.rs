@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Duration, NaiveDate, Utc};
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     parse_tenant_timezone, plan_caddie_assignments, tenant_date_at, tenant_day_bounds,
     widen_for_utc_date_filter, AttendanceState, AutoAssignResult, AvailabilityDeadline,
@@ -132,6 +133,9 @@ impl AutoAssignCaddiesUseCase {
         date: NaiveDate,
         dry_run: bool,
     ) -> Result<AutoAssignResult, CourseError> {
+        credentials
+            .require(actions::MANAGE_CADDIE_ASSIGNMENTS)
+            .await?;
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         let timezone_id = parse_tenant_timezone(&timezone)?;
         let today = tenant_date_at(Utc::now(), &timezone)?;

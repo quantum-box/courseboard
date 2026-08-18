@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CaddieId, CaddieRating, CourseError, GatewayCredentials, GolfOpsGateway,
 };
@@ -20,6 +21,7 @@ impl ListCaddieRatingsUseCase {
         credentials: GatewayCredentials<'_>,
         caddie_id: Option<&CaddieId>,
     ) -> Result<Vec<CaddieRating>, CourseError> {
+        credentials.require(actions::LIST_CADDIE_INSIGHTS).await?;
         self.ops.list_caddie_ratings(credentials, caddie_id).await
     }
 }

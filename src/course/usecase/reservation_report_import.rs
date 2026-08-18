@@ -10,6 +10,7 @@ use calamine::{open_workbook_from_rs, Data, DataType, Reader, Xlsx};
 use chrono::{Datelike, Duration, NaiveDate};
 use sha2::{Digest, Sha256};
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, CourseId, ExternalReservationReportEntry, GatewayCredentials, GolfCatalogGateway,
     ReservationReport, ReservationReportAnalyzeGateway, ReservationReportDayPart,
@@ -421,6 +422,9 @@ impl PreviewReservationReportUseCase {
         filename: Option<&str>,
         column_mappings: Option<&HashMap<String, String>>,
     ) -> Result<ReservationReportPreview, CourseError> {
+        credentials
+            .require(actions::IMPORT_RESERVATION_REPORTS)
+            .await?;
         if bytes.is_empty() || bytes.len() > MAX_RESERVATION_REPORT_BYTES {
             return parse_reservation_report(bytes, year, filename).map(|report| {
                 ReservationReportPreview {
@@ -850,6 +854,9 @@ impl ImportReservationReportUseCase {
         report: &ReservationReport,
         mappings: &[ReservationReportCourseMapping],
     ) -> Result<ReservationReportUpsertSummary, CourseError> {
+        credentials
+            .require(actions::IMPORT_RESERVATION_REPORTS)
+            .await?;
         if credentials.operator_id.trim().is_empty() {
             return Err(CourseError::BadRequest("tenant id is required"));
         }
@@ -946,6 +953,9 @@ impl ListReservationReportEntriesUseCase {
         from: Option<NaiveDate>,
         to: Option<NaiveDate>,
     ) -> Result<Vec<ExternalReservationReportEntry>, CourseError> {
+        credentials
+            .require(actions::LIST_RESERVATION_REPORTS)
+            .await?;
         if credentials.operator_id.trim().is_empty() {
             return Err(CourseError::BadRequest("tenant id is required"));
         }
@@ -1162,6 +1172,7 @@ mod tests {
                 authorization: "Bearer test",
                 operator_id: "tenant",
                 platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
             },
             &gateway,
             b"%PDF-1.7\nreservation report",
@@ -1202,6 +1213,7 @@ mod tests {
                 authorization: "Bearer test",
                 operator_id: "tenant",
                 platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
             },
             &gateway,
             b"not-an-xlsx",
@@ -1246,6 +1258,7 @@ mod tests {
                 authorization: "Bearer test",
                 operator_id: "tenant",
                 platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
             },
             &gateway,
             b"not-an-xlsx",

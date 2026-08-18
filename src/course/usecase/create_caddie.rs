@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use crate::course::domain::actions;
 use crate::course::domain::{
     Caddie, CourseError, GatewayCredentials, GolfOpsGateway, UpsertCaddie,
 };
@@ -23,6 +24,7 @@ impl CreateCaddieUseCase {
         credentials: GatewayCredentials<'_>,
         mut input: UpsertCaddie,
     ) -> Result<Caddie, CourseError> {
+        credentials.require(actions::MANAGE_CADDIES).await?;
         if !input.has_staff_link() {
             let staff = self
                 .ops
@@ -269,6 +271,7 @@ mod tests {
             authorization: "Bearer test-token",
             operator_id: "operator-test",
             platform_id: Some("platform-test"),
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
         }
     }
 

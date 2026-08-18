@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use chrono::NaiveDate;
 
+use crate::course::domain::actions;
 use crate::course::domain::{CaddieId, CourseError, GatewayCredentials, GolfOpsGateway};
 
 pub struct DeleteCaddieAvailabilityUseCase {
@@ -21,6 +22,9 @@ impl DeleteCaddieAvailabilityUseCase {
         caddie_id: &CaddieId,
         date: NaiveDate,
     ) -> Result<(), CourseError> {
+        credentials
+            .require(actions::MANAGE_CADDIE_AVAILABILITY)
+            .await?;
         self.ops
             .delete_caddie_availability(credentials, caddie_id, date)
             .await
