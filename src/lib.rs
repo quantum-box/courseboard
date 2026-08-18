@@ -70,6 +70,9 @@ pub struct AppState {
     profile_client: Option<Arc<profile_proxy::ProfileClient>>,
     course_authorization: Arc<course_authz::CourseAuthorization>,
     course_authorizer: Arc<dyn course::domain::CourseAuthorizer>,
+    /// Present only when authorization is enforced; the members proxy clears
+    /// it when it changes who may do what.
+    policy_cache: Option<Arc<course_authz::CachingPolicyChecker>>,
 }
 
 impl AppState {
@@ -111,6 +114,7 @@ impl AppState {
             profile_client: None,
             course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
             course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
+            policy_cache: None,
         }
     }
 
@@ -156,6 +160,7 @@ impl AppState {
             profile_client: None,
             course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
             course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
+            policy_cache: None,
         }
     }
 
@@ -189,6 +194,7 @@ impl AppState {
                 profile_client: None,
                 course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
                 course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
+                policy_cache: None,
             },
             Err(error) => Self {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
@@ -213,6 +219,7 @@ impl AppState {
                 profile_client: None,
                 course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
                 course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
+                policy_cache: None,
             },
         }
     }
@@ -298,6 +305,22 @@ impl AppState {
     ) -> Self {
         self.course_authorizer = authorizer;
         self
+    }
+
+    pub fn with_policy_cache(
+        mut self,
+        cache: Option<Arc<course_authz::CachingPolicyChecker>>,
+    ) -> Self {
+        self.policy_cache = cache;
+        self
+    }
+
+    /// Drop every remembered allowance for one tenant, after this app changed
+    /// that tenant's permissions.
+    pub(crate) fn forget_tenant_allowances(&self, operator_id: &str) {
+        if let Some(cache) = &self.policy_cache {
+            cache.invalidate_tenant(operator_id);
+        }
     }
 }
 
@@ -1106,6 +1129,7 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
     // One checker behind both gates. The route gate and the use cases share
     // its cache, so a use case requiring the action its route was gated on
     // costs no second round trip.
+    let mut policy_cache: Option<Arc<course_authz::CachingPolicyChecker>> = None;
     let (course_authorization, course_authorizer): (
         course_authz::CourseAuthorization,
         Arc<dyn course::domain::CourseAuthorizer>,
@@ -1123,9 +1147,13 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
             .timeout(std::time::Duration::from_secs(5))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
-        let checker: Arc<dyn course_authz::PolicyChecker> = Arc::new(
+        // One cache in front of one checker, shared by both gates: the route
+        // gate and the use cases ask the same questions, and the second asker
+        // should not pay for the answer again.
+        let checker = Arc::new(course_authz::CachingPolicyChecker::new(Arc::new(
             course_authz::TachyonPolicyChecker::new(checker_client, &tachyon_api_url),
-        );
+        )));
+        policy_cache = Some(checker.clone());
         (
             course_authz::CourseAuthorization::new(checker.clone()),
             Arc::new(course::infrastructure::PolicyCourseAuthorizer::new(checker)),
@@ -1138,7 +1166,8 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
             )))
             .with_profile_client(profile_client)
             .with_course_authorization(Arc::new(course_authorization))
-            .with_course_authorizer(course_authorizer);
+            .with_course_authorizer(course_authorizer)
+            .with_policy_cache(policy_cache);
 
     Ok(build_router(state))
 }

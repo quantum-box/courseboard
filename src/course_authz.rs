@@ -17,6 +17,7 @@
 //! (`AdministratorAccess`) are evaluated where the policies live, not guessed
 //! here.
 
+use crate::course::domain::actions;
 use crate::AppError;
 use axum::{
     body::Body,
@@ -651,21 +652,136 @@ impl PolicyChecker for TachyonPolicyChecker {
 /// The key holds the whole bearer rather than a hash: a colliding hash would
 /// hand one caller another caller's allowance. Entries are few (per instance,
 /// per minute) and Lambda instances are short-lived.
-type CacheKey = (String, String, &'static str);
+type CacheKey = (String, String, String);
 
+/// How long an allowance is used without asking again.
 const CACHE_TTL: Duration = Duration::from_secs(60);
+
+/// How long a lapsed allowance is still worth something.
+///
+/// Only when Tachyon Auth cannot be reached at all, and only for actions that
+/// read (see [`actions::is_read_only`]). A revocation therefore takes effect
+/// within `CACHE_TTL` normally, and within this window in the worst case: an
+/// outage that starts before the revocation reaches anyone.
+const CACHE_GRACE: Duration = Duration::from_secs(30 * 60);
+
 const CACHE_CAP: usize = 4096;
+
+/// A [`PolicyChecker`] that remembers allowances, and leans on them when the
+/// real one cannot be reached.
+///
+/// One instance is shared by the route gate and by the use cases, so a request
+/// gated on an action its use case also requires is one round trip, not two.
+///
+/// Denials are never cached. A member who has just been granted something
+/// should not have to wait out a TTL, and a denial is cheap to re-ask.
+pub struct CachingPolicyChecker {
+    inner: Arc<dyn PolicyChecker>,
+    entries: Mutex<HashMap<CacheKey, Instant>>,
+}
+
+impl CachingPolicyChecker {
+    pub fn new(inner: Arc<dyn PolicyChecker>) -> Self {
+        Self {
+            inner,
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Forget every allowance held for one tenant.
+    ///
+    /// Called when this app changes who may do what — the members screen
+    /// replacing a member's policies, inviting, or removing them. Without it a
+    /// revoked permission would keep working for up to `CACHE_TTL`, which is
+    /// exactly the moment an operator is watching to see the change take
+    /// effect. The whole tenant goes rather than one member's entries: the key
+    /// is the bearer, and this app never learns which bearer belongs to the
+    /// member whose policies just changed.
+    pub fn invalidate_tenant(&self, operator_id: &str) {
+        let mut entries = self.entries.lock().expect("authz cache poisoned");
+        entries.retain(|(_, tenant, _), _| tenant != operator_id);
+    }
+
+    fn allowance(&self, key: &CacheKey, window: Duration) -> bool {
+        let mut entries = self.entries.lock().expect("authz cache poisoned");
+        match entries.get(key) {
+            Some(granted_at) if granted_at.elapsed() < window => true,
+            Some(granted_at) => {
+                // Past even the grace window, so it can never be used again.
+                if granted_at.elapsed() >= CACHE_GRACE {
+                    entries.remove(key);
+                }
+                false
+            }
+            None => false,
+        }
+    }
+
+    fn remember(&self, key: CacheKey) {
+        let mut entries = self.entries.lock().expect("authz cache poisoned");
+        if entries.len() >= CACHE_CAP {
+            entries.clear();
+        }
+        entries.insert(key, Instant::now());
+    }
+}
+
+#[async_trait::async_trait]
+impl PolicyChecker for CachingPolicyChecker {
+    async fn check(
+        &self,
+        bearer: &str,
+        operator_id: &str,
+        platform_id: Option<&str>,
+        action: &str,
+    ) -> Result<Decision, CheckError> {
+        let key: CacheKey = (
+            bearer.to_string(),
+            operator_id.to_string(),
+            action.to_string(),
+        );
+        if self.allowance(&key, CACHE_TTL) {
+            return Ok(Decision::Allowed);
+        }
+        match self
+            .inner
+            .check(bearer, operator_id, platform_id, action)
+            .await
+        {
+            Ok(Decision::Allowed) => {
+                self.remember(key);
+                Ok(Decision::Allowed)
+            }
+            Ok(Decision::Denied) => Ok(Decision::Denied),
+            // The policy store is unreachable. Someone who was allowed this
+            // read minutes ago keeps it, so a desk mid-shift can still look
+            // things up; everything else, and every write, still refuses.
+            //
+            // Only `Provider`: `Unauthorized` and `TenantRejected` are answers
+            // about this caller, not a failure to get one.
+            Err(CheckError::Provider(message))
+                if actions::is_read_only(action) && self.allowance(&key, CACHE_GRACE) =>
+            {
+                tracing::warn!(
+                    action,
+                    error = %message,
+                    "policy check unavailable; serving a recent allowance for a read"
+                );
+                Ok(Decision::Allowed)
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
 
 pub struct CourseAuthorization {
     checker: Option<Arc<dyn PolicyChecker>>,
-    allowed_cache: Mutex<HashMap<CacheKey, Instant>>,
 }
 
 impl CourseAuthorization {
     pub fn new(checker: Arc<dyn PolicyChecker>) -> Self {
         Self {
             checker: Some(checker),
-            allowed_cache: Mutex::new(HashMap::new()),
         }
     }
 
@@ -674,29 +790,7 @@ impl CourseAuthorization {
     /// `AppState` test constructors; `build_app` always configures the real
     /// checker.
     pub fn disabled() -> Self {
-        Self {
-            checker: None,
-            allowed_cache: Mutex::new(HashMap::new()),
-        }
-    }
-
-    fn cached_allowance(&self, key: &CacheKey) -> bool {
-        let mut cache = self.allowed_cache.lock().expect("authz cache poisoned");
-        if let Some(granted_at) = cache.get(key) {
-            if granted_at.elapsed() < CACHE_TTL {
-                return true;
-            }
-            cache.remove(key);
-        }
-        false
-    }
-
-    fn remember_allowance(&self, key: CacheKey) {
-        let mut cache = self.allowed_cache.lock().expect("authz cache poisoned");
-        if cache.len() >= CACHE_CAP {
-            cache.clear();
-        }
-        cache.insert(key, Instant::now());
+        Self { checker: None }
     }
 }
 
@@ -779,19 +873,11 @@ pub async fn require_course_authorization(
         .map(str::trim)
         .filter(|value| !value.is_empty());
 
-    let cache_key: CacheKey = (bearer.to_string(), operator_id.to_string(), action);
-    if authorization.cached_allowance(&cache_key) {
-        return Ok(next.run(req).await);
-    }
-
     match checker
         .check(bearer, operator_id, platform_id, action)
         .await
     {
-        Ok(Decision::Allowed) => {
-            authorization.remember_allowance(cache_key);
-            Ok(next.run(req).await)
-        }
+        Ok(Decision::Allowed) => Ok(next.run(req).await),
         Ok(Decision::Denied) => Ok(forbidden_response(
             "action",
             format!("this operation requires {action}"),
@@ -1037,6 +1123,188 @@ mod tests {
     }
 }
 
+/// The cache in front of Tachyon Auth: what it remembers, what it refuses to
+/// lean on, and what makes it forget.
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Scripted {
+        answers: Mutex<Vec<Result<Decision, CheckError>>>,
+        calls: AtomicUsize,
+    }
+
+    impl Scripted {
+        fn new(answers: Vec<Result<Decision, CheckError>>) -> Arc<Self> {
+            Arc::new(Self {
+                answers: Mutex::new(answers),
+                calls: AtomicUsize::new(0),
+            })
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl PolicyChecker for Scripted {
+        async fn check(
+            &self,
+            _bearer: &str,
+            _operator_id: &str,
+            _platform_id: Option<&str>,
+            _action: &str,
+        ) -> Result<Decision, CheckError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let mut answers = self.answers.lock().expect("answers");
+            if answers.is_empty() {
+                return Err(CheckError::Provider("no answer scripted".to_string()));
+            }
+            answers.remove(0)
+        }
+    }
+
+    async fn check(cache: &CachingPolicyChecker, action: &str) -> Result<Decision, CheckError> {
+        cache.check("bearer-1", "tn_1", None, action).await
+    }
+
+    #[tokio::test]
+    async fn an_allowance_answers_the_next_asker_without_a_second_round_trip() {
+        let inner = Scripted::new(vec![Ok(Decision::Allowed)]);
+        let cache = CachingPolicyChecker::new(inner.clone());
+        assert!(matches!(
+            check(&cache, actions::LIST_SHIFTS).await,
+            Ok(Decision::Allowed)
+        ));
+        assert!(matches!(
+            check(&cache, actions::LIST_SHIFTS).await,
+            Ok(Decision::Allowed)
+        ));
+        assert_eq!(inner.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_denial_is_asked_again_rather_than_remembered() {
+        // Someone granted a permission a moment ago should not wait out a TTL.
+        let inner = Scripted::new(vec![Ok(Decision::Denied), Ok(Decision::Allowed)]);
+        let cache = CachingPolicyChecker::new(inner.clone());
+        assert!(matches!(
+            check(&cache, actions::LIST_SHIFTS).await,
+            Ok(Decision::Denied)
+        ));
+        assert!(matches!(
+            check(&cache, actions::LIST_SHIFTS).await,
+            Ok(Decision::Allowed)
+        ));
+        assert_eq!(inner.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn an_outage_keeps_a_recent_read_working() {
+        let inner = Scripted::new(vec![
+            Ok(Decision::Allowed),
+            Err(CheckError::Provider("unreachable".to_string())),
+        ]);
+        let cache = CachingPolicyChecker::new(inner.clone());
+        check(&cache, actions::LIST_SHIFTS).await.expect("granted");
+        // Past the fresh window, so the next ask reaches the outage.
+        cache
+            .entries
+            .lock()
+            .unwrap()
+            .values_mut()
+            .for_each(|granted_at| *granted_at -= CACHE_TTL + Duration::from_secs(1));
+        assert!(matches!(
+            check(&cache, actions::LIST_SHIFTS).await,
+            Ok(Decision::Allowed)
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_outage_never_lets_a_write_through() {
+        let inner = Scripted::new(vec![
+            Ok(Decision::Allowed),
+            Err(CheckError::Provider("unreachable".to_string())),
+        ]);
+        let cache = CachingPolicyChecker::new(inner.clone());
+        check(&cache, actions::MANAGE_SHIFTS)
+            .await
+            .expect("granted");
+        cache
+            .entries
+            .lock()
+            .unwrap()
+            .values_mut()
+            .for_each(|granted_at| *granted_at -= CACHE_TTL + Duration::from_secs(1));
+        assert!(matches!(
+            check(&cache, actions::MANAGE_SHIFTS).await,
+            Err(CheckError::Provider(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn an_outage_refuses_a_read_nobody_was_granted() {
+        let inner = Scripted::new(vec![Err(CheckError::Provider("unreachable".to_string()))]);
+        let cache = CachingPolicyChecker::new(inner);
+        assert!(matches!(
+            check(&cache, actions::LIST_SHIFTS).await,
+            Err(CheckError::Provider(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_rejected_identity_is_not_covered_by_an_old_allowance() {
+        // Unauthorized is an answer about the caller, not a failure to get one.
+        let inner = Scripted::new(vec![Ok(Decision::Allowed), Err(CheckError::Unauthorized)]);
+        let cache = CachingPolicyChecker::new(inner);
+        check(&cache, actions::LIST_SHIFTS).await.expect("granted");
+        cache
+            .entries
+            .lock()
+            .unwrap()
+            .values_mut()
+            .for_each(|granted_at| *granted_at -= CACHE_TTL + Duration::from_secs(1));
+        assert!(matches!(
+            check(&cache, actions::LIST_SHIFTS).await,
+            Err(CheckError::Unauthorized)
+        ));
+    }
+
+    #[tokio::test]
+    async fn changing_a_tenants_permissions_forgets_that_tenant_only() {
+        let inner = Scripted::new(vec![
+            Ok(Decision::Allowed),
+            Ok(Decision::Allowed),
+            Ok(Decision::Denied),
+        ]);
+        let cache = CachingPolicyChecker::new(inner.clone());
+        cache
+            .check("bearer-1", "tn_1", None, actions::LIST_SHIFTS)
+            .await
+            .expect("granted");
+        cache
+            .check("bearer-2", "tn_2", None, actions::LIST_SHIFTS)
+            .await
+            .expect("granted");
+
+        cache.invalidate_tenant("tn_1");
+
+        // tn_1 is asked again, and gets the new answer.
+        assert!(matches!(
+            cache
+                .check("bearer-1", "tn_1", None, actions::LIST_SHIFTS)
+                .await,
+            Ok(Decision::Denied)
+        ));
+        // tn_2 was not touched.
+        assert!(matches!(
+            cache
+                .check("bearer-2", "tn_2", None, actions::LIST_SHIFTS)
+                .await,
+            Ok(Decision::Allowed)
+        ));
+        assert_eq!(inner.calls.load(Ordering::SeqCst), 3);
+    }
+}
+
 /// The gate on a real router: a database-backed route behind a scripted
 /// Tachyon answer.
 #[cfg(test)]
@@ -1091,8 +1359,11 @@ mod middleware_tests {
             script,
             calls: AtomicUsize::new(0),
         });
+        // Wired the way `build_app` wires it: the cache in front of the
+        // checker, so these tests see the round trips production would make.
+        let cached = Arc::new(CachingPolicyChecker::new(checker.clone()));
         let state = AppState::new(pool, Arc::new(StaticBearerVerifier::new(TOKEN.to_string())))
-            .with_course_authorization(Arc::new(CourseAuthorization::new(checker.clone())));
+            .with_course_authorization(Arc::new(CourseAuthorization::new(cached)));
         (build_router(state), checker)
     }
 

@@ -110,6 +110,43 @@ pub const LIST_EXTENSION_STATUS: &str = "field_extension_golf:ListExtensionStatu
 /// Filling a tenant's board with demo rounds and rosters.
 pub const SEED_DEMO_BOARD: &str = "field_extension_golf:SeedDemoBoard";
 
+/// The actions that only read.
+///
+/// Listed rather than derived from the `List` prefix: whether an operation
+/// writes is a fact about the operation, and a name is a poor place to keep a
+/// safety property. `CalculateFees` is here because a simulation computes and
+/// stores nothing, despite the verb.
+///
+/// This is what the degraded mode is allowed to serve from a stale allowance
+/// when Tachyon Auth cannot be reached — see `CachingPolicyChecker`. Adding an
+/// action here widens what an outage leaves open, so it is worth being sure.
+pub const READ_ONLY: &[&str] = &[
+    LIST_TEE_SHEET,
+    LIST_SLOT_OVERRIDES,
+    LIST_COURSES,
+    LIST_PRODUCTS,
+    LIST_RESERVATION_POLICY,
+    LIST_CUSTOMERS,
+    LIST_MEMBERSHIP,
+    LIST_CADDIES,
+    LIST_CADDIE_ASSIGNMENTS,
+    LIST_CADDIE_AVAILABILITY,
+    LIST_SHIFTS,
+    LIST_CADDIE_INSIGHTS,
+    LIST_CADDIE_RANK_FEES,
+    LIST_PAYROLL,
+    LIST_SETTLEMENT,
+    LIST_BUDGETS,
+    LIST_RESERVATION_REPORTS,
+    LIST_EXTENSION_STATUS,
+    CALCULATE_FEES,
+];
+
+/// Whether an outage may serve `action` from a stale allowance.
+pub fn is_read_only(action: &str) -> bool {
+    READ_ONLY.contains(&action)
+}
+
 /// Every action above, for the manifest-coverage test.
 pub const ALL: &[&str] = &[
     LIST_TEE_SHEET,

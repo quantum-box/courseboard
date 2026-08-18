@@ -130,10 +130,34 @@ tachyonfield の route classifier と同じフェイルクローズド方式。
 - `actions::ALL` とマニフェストの整合をテストで固定（宣言漏れ・grant 漏れ・
   コードが要求しない宣言の 3 方向）
 
-**運用上の注意**: 認可はフェイルクローズドなので、**Tachyon Auth が落ちると
-CourseBoard の業務画面も 424 で止まる**。今までローカルルートだけだった影響範囲が
-全 usecase に広がった。可用性を優先するなら、読み取り系だけ猶予を持たせるといった
-緩和を別途決める必要がある。
+### 認可基盤が落ちたときの degraded mode（`CachingPolicyChecker`）
+
+認可はフェイルクローズドなので、素朴に作ると Tachyon Auth の停止がそのまま
+CourseBoard の停止になる。ただし **Field の認可も同じ `check_policy` を叩く**
+（tachyonfield `erp_authz.rs`）ので、停止時は Field 経由のルートもどのみち落ちる。
+新たに落ちるようになるのは Field を叩かない操作だけ — シフトルール、シフト表、
+出勤可否の締切、枠の手動開閉、料金シミュレーション、キャンセル料。
+
+そこを次の形で緩和した。
+
+- 許可は 60 秒（`CACHE_TTL`）覚える。**拒否は覚えない** — 権限を付けた直後の人を
+  TTL 分待たせないため
+- 問い合わせが `Provider` エラー（＝答えが得られない）で、かつ **action が読み取り
+  専用**で、かつ **30 分以内（`CACHE_GRACE`）に許可が取れていた**ときだけ、その古い
+  許可で通す。書き込みは常に止まる
+- `Unauthorized` / `TenantRejected` は「この呼び出し元についての答え」なので、
+  古い許可では救済しない
+- 読み取り専用かどうかは `actions::READ_ONLY` の明示リストで決める。名前の
+  `List` 接頭辞から導出しない（安全性を名前に持たせない）。`CalculateFees` は
+  計算だけで何も書かないのでここに入る
+- キャッシュは `CachingPolicyChecker` に置き、**ルート表と usecase が共有する**。
+  同じ action を両方が要求しても問い合わせは 1 回
+- メンバー画面が権限を変えたら（`PUT .../policies` / 招待 / 削除の成功時）、
+  proxy がそのテナントの許可を捨てる。キーは bearer なので個人単位では消せず、
+  テナント単位で捨てる
+
+最悪ケースの露出は「停止が始まる前に剥奪された人が、読み取りだけ最大 30 分続けられる」。
+書き込みと、停止中に初めて触る人は通らない。
 
 ## Field 側に残る粒度の課題（PLT 起票対象）
 
@@ -151,7 +175,7 @@ CourseBoard の業務画面も 424 で止まる**。今までローカルルー�
 
 ## 動作確認
 
-- `cargo test`（647 件）/ `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo test`（654 件）/ `cargo clippy --all-targets --all-features -- -D warnings`
   / `cd desktop && npm run type-check && vitest run`（714 件）すべて通過
 - 実環境確認は prod Field API → local courseboard API → local UI
   （`desktop/README.md`）。マニフェスト適用前は golf ロールがカタログに無いので、
