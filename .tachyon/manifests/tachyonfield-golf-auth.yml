@@ -147,10 +147,6 @@ actions:
   name: SeedDemoBoard
   description: Filling a tenant's board with demo rounds and rosters.
   global: true
-- context: field_extension_golf
-  name: CalculateTax
-  description: Calculate golf extension tax for a TACHYON Field reservation
-  global: true
 policies:
 - name: field-extension:golf:viewer
   description: Read-only access to the golf board - tee sheet, courses, caddies, shifts, budgets, and fee simulation. Payroll and settlement are not included
