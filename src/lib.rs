@@ -7,6 +7,7 @@ pub mod auth;
 pub mod cancellation_fees;
 pub mod config;
 pub mod course;
+pub mod course_authz;
 pub mod demo_seed;
 pub mod feature_flags;
 pub mod field_api;
@@ -67,6 +68,7 @@ pub struct AppState {
     field_api_config_error: Option<String>,
     feature_flags: Arc<feature_flags::EvaluateFeatureFlags>,
     profile_client: Option<Arc<profile_proxy::ProfileClient>>,
+    course_authorization: Arc<course_authz::CourseAuthorization>,
 }
 
 impl AppState {
@@ -106,6 +108,7 @@ impl AppState {
             ),
             feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
             profile_client: None,
+            course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
         }
     }
 
@@ -149,6 +152,7 @@ impl AppState {
             field_api_config_error: None,
             feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
             profile_client: None,
+            course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
         }
     }
 
@@ -180,6 +184,7 @@ impl AppState {
                 field_api_config_error: None,
                 feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
                 profile_client: None,
+                course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
             },
             Err(error) => Self {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
@@ -202,6 +207,7 @@ impl AppState {
                 field_api_config_error: Some(error.to_string()),
                 feature_flags: Arc::new(feature_flags::EvaluateFeatureFlags::unavailable()),
                 profile_client: None,
+                course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
             },
         }
     }
@@ -258,6 +264,18 @@ impl AppState {
 
     fn with_profile_client(mut self, profile_client: Option<profile_proxy::ProfileClient>) -> Self {
         self.profile_client = profile_client.map(Arc::new);
+        self
+    }
+
+    pub(crate) fn course_authorization(&self) -> Arc<course_authz::CourseAuthorization> {
+        self.course_authorization.clone()
+    }
+
+    pub fn with_course_authorization(
+        mut self,
+        authorization: Arc<course_authz::CourseAuthorization>,
+    ) -> Self {
+        self.course_authorization = authorization;
         self
     }
 }
@@ -918,7 +936,13 @@ pub fn build_router(state: AppState) -> Router {
         );
     }
     router
-        .with_state(state)
+        .with_state(state.clone())
+        // Innermost of the three: every matched route passes the action gate,
+        // and its refusals still get panic handling and CORS headers.
+        .layer(middleware::from_fn_with_state(
+            state,
+            course_authz::require_course_authorization,
+        ))
         // Inside the CORS layer on purpose: a panic response still needs the
         // CORS headers, otherwise the browser reports an opaque network error
         // ("Failed to fetch") instead of the 500 we just produced.
@@ -1058,12 +1082,29 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
         config.field_api_client_credentials_config(),
         config.field_api_bearer_token(),
     );
+    let course_authorization = if config.disable_action_authz {
+        tracing::warn!(
+            "course action authorization is DISABLED via COURSEBOARD_DISABLE_ACTION_AUTHZ; \
+             CourseBoard-local routes accept any valid bearer"
+        );
+        course_authz::CourseAuthorization::disabled()
+    } else {
+        let checker_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+        course_authz::CourseAuthorization::new(Arc::new(course_authz::TachyonPolicyChecker::new(
+            checker_client,
+            &tachyon_api_url,
+        )))
+    };
     let state =
         AppState::with_optional_field_api(pool, token_verifier, field_api, cancellation_fee_config)
             .with_feature_flag_evaluator(Arc::new(feature_flags::TachyonFeatureFlagEvaluator::new(
                 &tachyon_api_url,
             )))
-            .with_profile_client(profile_client);
+            .with_profile_client(profile_client)
+            .with_course_authorization(Arc::new(course_authorization));
 
     Ok(build_router(state))
 }

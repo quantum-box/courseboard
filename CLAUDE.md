@@ -48,6 +48,7 @@ mise run courseboard:vite       # :5173 Vite
 - 認証は inbound の Cognito access token を OIDC 検証し、**同じ bearer をそのまま Field へ転送**する。`/v1/course/*` は `x-operator-id`（= テナント ID、必須）と `x-platform-id`（prod / sandbox の不一致で Field が 403）を要求する。
 - 上流起因の失敗は 5xx ではなく **424 `provider_error`**。Cloudflare が origin の 5xx を CORS ヘッダの無い HTML に差し替え、ブラウザに "Failed to fetch" しか届かないため。
 - 設定は `src/config.rs` の `RuntimeConfig` に集約。module から `env::var` を直接呼ばない。
+- 認可はフェイルクローズド。新しいルートを足したら `src/course_authz.rs` の `ROUTES`（と同ファイルのルート網羅テスト）に分類を足す。未分類の登録済みルートは 403 になる。CourseBoard ローカル DB を触るルートは `field_extension_golf:*` action、Field を呼ぶルートは `UpstreamEnforced`。
 - UI の fetch は `desktop/src/api.ts` 経由。Tachyon platform API を直接叩かない（ADR-0004、CI が bundle を検査）。
 - `README.md` / `.env.example` の SQLite 記述は古い。実体は MySQL/TiDB。
 

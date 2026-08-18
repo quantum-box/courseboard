@@ -98,6 +98,21 @@ pub struct RuntimeConfig {
     )]
     pub multi_course_product_writes: bool,
 
+    /// Opt-out for CourseBoard's own action authorization gate.
+    ///
+    /// The gate asks Tachyon Auth for the `field_extension_golf:*` action
+    /// behind each CourseBoard-local route. The `field:env` local shortcut
+    /// runs on a CLI JWT that Tachyon Auth rejects, which would turn every
+    /// gated route into a 403 — this switch exists for that mode and nothing
+    /// else. Production never sets it.
+    #[arg(
+        long,
+        env = "COURSEBOARD_DISABLE_ACTION_AUTHZ",
+        default_value_t = false,
+        action = clap::ArgAction::Set,
+    )]
+    pub disable_action_authz: bool,
+
     #[arg(long, env = "TWILIO_ACCOUNT_SID")]
     pub twilio_account_sid: Option<String>,
     #[arg(long, env = "TWILIO_AUTH_TOKEN")]
@@ -240,6 +255,7 @@ impl Default for RuntimeConfig {
             field_api_scope: None,
             field_api_audience: None,
             multi_course_product_writes: DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
+            disable_action_authz: false,
             twilio_account_sid: None,
             twilio_auth_token: None,
             twilio_messaging_service_sid: None,

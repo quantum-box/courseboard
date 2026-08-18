@@ -1,0 +1,1224 @@
+//! Action-based authorization for CourseBoard's own surface.
+//!
+//! Routes that proxy Field carry Field's own authorization: the user's bearer
+//! goes upstream and Field answers 403 by ERP action. Routes that live on
+//! CourseBoard's database (shift rules, slot overrides, tax simulation,
+//! cancellation-fee collections, demo seeding) had no gate at all beyond token
+//! validity — any signed-in user of any tenant could write another tenant's
+//! shift rules by picking the `x-operator-id` header.
+//!
+//! The model mirrors tachyonfield's route classifier: every protected route is
+//! classified here, an unlisted one refuses rather than passes, and the
+//! actions come from this repository's auth manifest
+//! (`.tachyon/manifests/tachyonfield-golf-auth.yml`, context
+//! `field_extension_golf`). The decision itself is Tachyon Auth's — CourseBoard
+//! sends the caller's own bearer to `POST /v1/auth/policies/check` under the
+//! request's tenant scope, so tenant membership and owner privileges
+//! (`AdministratorAccess`) are evaluated where the policies live, not guessed
+//! here.
+
+use crate::AppError;
+use axum::{
+    body::Body,
+    extract::State,
+    http::{header::AUTHORIZATION, HeaderName, HeaderValue, Method, Request, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
+    Json,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+pub const LIST_SHIFTS: &str = "field_extension_golf:ListShifts";
+pub const MANAGE_SHIFTS: &str = "field_extension_golf:ManageShifts";
+pub const LIST_SLOT_OVERRIDES: &str = "field_extension_golf:ListSlotOverrides";
+pub const MANAGE_SLOT_OVERRIDES: &str = "field_extension_golf:ManageSlotOverrides";
+pub const CALCULATE_FEES: &str = "field_extension_golf:CalculateFees";
+pub const MANAGE_CANCELLATION_FEES: &str = "field_extension_golf:ManageCancellationFees";
+pub const SEED_DEMO_BOARD: &str = "field_extension_golf:SeedDemoBoard";
+
+/// What standing a route needs before its handler runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteAuthorization {
+    /// No bearer at all: health, static UI, the public cancellation-fee flow.
+    Public,
+    /// A valid bearer is enough. The route talks to a platform service that
+    /// authorizes the caller itself (`/v1/me`, feature flags), or discloses
+    /// nothing tenant-scoped (`/admin` redirect).
+    AuthenticatedOnly,
+    /// The handler forwards the caller's bearer to Field, whose route
+    /// classifier enforces the ERP action. Gating here again would only add a
+    /// second round-trip to the same policy store.
+    UpstreamEnforced,
+    /// The handler reads or writes CourseBoard's own database; Tachyon Auth is
+    /// asked for this action before it runs.
+    Action(&'static str),
+}
+
+/// Method + path pattern + the standing it needs.
+///
+/// Method `*` matches every method registered on the path — used for
+/// upstream-enforced groups where Field distinguishes read from write itself.
+/// Pattern segments starting with `:` match one segment; a trailing `*`
+/// matches the rest of the path.
+const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
+    // ─── CourseBoard-local: golf actions ─────────────────────────────────
+    (
+        "POST",
+        "/calculate",
+        RouteAuthorization::Action(CALCULATE_FEES),
+    ),
+    (
+        "POST",
+        "/simulate/range",
+        RouteAuthorization::Action(CALCULATE_FEES),
+    ),
+    (
+        "POST",
+        "/v1/course/simulator/calculate",
+        RouteAuthorization::Action(CALCULATE_FEES),
+    ),
+    (
+        "POST",
+        "/v1/course/simulator/simulate/range",
+        RouteAuthorization::Action(CALCULATE_FEES),
+    ),
+    (
+        "POST",
+        "/cancellation-fee-collections",
+        RouteAuthorization::Action(MANAGE_CANCELLATION_FEES),
+    ),
+    (
+        "GET",
+        "/v1/course/slot-overrides",
+        RouteAuthorization::Action(LIST_SLOT_OVERRIDES),
+    ),
+    (
+        "PUT",
+        "/v1/course/slot-overrides",
+        RouteAuthorization::Action(MANAGE_SLOT_OVERRIDES),
+    ),
+    (
+        "DELETE",
+        "/v1/course/slot-overrides",
+        RouteAuthorization::Action(MANAGE_SLOT_OVERRIDES),
+    ),
+    (
+        "GET",
+        "/v1/course/caddie-shift-rules",
+        RouteAuthorization::Action(LIST_SHIFTS),
+    ),
+    (
+        "PUT",
+        "/v1/course/caddie-shift-rules",
+        RouteAuthorization::Action(MANAGE_SHIFTS),
+    ),
+    (
+        "GET",
+        "/v1/course/caddie-shifts",
+        RouteAuthorization::Action(LIST_SHIFTS),
+    ),
+    (
+        "PUT",
+        "/v1/course/caddie-shifts/:caddie_profile_id/:date",
+        RouteAuthorization::Action(MANAGE_SHIFTS),
+    ),
+    (
+        "POST",
+        "/v1/course/caddie-shift-plans/:year_month",
+        RouteAuthorization::Action(MANAGE_SHIFTS),
+    ),
+    (
+        "POST",
+        "/v1/course/caddie-shift-plans/:year_month/preview",
+        RouteAuthorization::Action(MANAGE_SHIFTS),
+    ),
+    (
+        "GET",
+        "/v1/course/caddie-availability-deadlines/:year_month",
+        RouteAuthorization::Action(LIST_SHIFTS),
+    ),
+    (
+        "PUT",
+        "/v1/course/caddie-availability-deadlines/:year_month",
+        RouteAuthorization::Action(MANAGE_SHIFTS),
+    ),
+    (
+        "POST",
+        "/v1/course/demo-seed",
+        RouteAuthorization::Action(SEED_DEMO_BOARD),
+    ),
+    // ─── Bearer-only ─────────────────────────────────────────────────────
+    ("GET", "/admin", RouteAuthorization::AuthenticatedOnly),
+    ("GET", "/v1/me", RouteAuthorization::AuthenticatedOnly),
+    (
+        "POST",
+        "/v1/course/feature-flags/evaluate",
+        RouteAuthorization::AuthenticatedOnly,
+    ),
+    // ─── Field-enforced ──────────────────────────────────────────────────
+    ("*", "/admin/caddies", RouteAuthorization::UpstreamEnforced),
+    (
+        "*",
+        "/admin/caddies/:id",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    ("*", "/admin/shifts", RouteAuthorization::UpstreamEnforced),
+    (
+        "*",
+        "/admin/shifts/:id",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/admin/shifts/:id/cancel",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/admin/reservations",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/admin/reservations/:reservation_id/assign",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/admin/reservations/:reservation_id/unassign",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    ("*", "/admin/dispatch", RouteAuthorization::UpstreamEnforced),
+    ("*", "/field-api/*", RouteAuthorization::UpstreamEnforced),
+    (
+        "*",
+        "/v1/field/client-capabilities",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/tee-sheet",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/tee-ledger",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservations",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservations/:reservation_id",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservations/:reservation_id/cancel",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservations/:reservation_id/party",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservations/:reservation_id/plan",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/course-order",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/courses",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/courses/:id",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/courses/:id/resource",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/courses/:id/schedule",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/courses/:id/time-slots/generate",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/booking-horizon",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/resources",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservation-products",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservation-products/:service_id",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservation-products/:service_id/slots",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/customers",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/customers/reception-draft",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/customers/:customer_id",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/customers/:customer_id/membership",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/membership-plans",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/membership-plans/:plan_id",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservation-report-imports",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservation-report-imports/preview",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservation-report-entries",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-profiles",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-profiles/:id",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-profiles/:id/courses",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-assignments",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-assignments/:id",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-availabilities",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-availabilities/:caddie_id/:date",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-availability-submissions/:year_month",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-recommendations",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-attendance-snapshot",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-attendance-snapshots",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-supply",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-auto-assignments",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-course-supply",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-reinforcements",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-ratings",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-rank-fees",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-payroll-summary",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/caddie-payroll-summary/export.csv",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/reservation-policy",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/daily-budgets",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/daily-budgets/achievement",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/daily-budgets/import",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/monthly-settlement",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/monthly-settlement/export.csv",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/extension-status",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/config",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+];
+
+/// Prefixes that are public by construction: the SPA's own assets and flows
+/// that authenticate some other way (the signed cancellation-fee link).
+const PUBLIC_PREFIXES: &[&str] = &["/ui", "/swagger-ui", "/public/"];
+const PUBLIC_EXACT: &[&str] = &["/", "/healthz", "/openapi.json"];
+
+/// Namespaces where an unlisted route refuses instead of passing. Everything
+/// CourseBoard registers behind a bearer lives under one of these.
+const PROTECTED_PREFIXES: &[&str] = &[
+    "/v1/",
+    "/admin",
+    "/calculate",
+    "/simulate",
+    "/cancellation-fee-collections",
+    "/field-api",
+];
+
+fn pattern_matches(pattern: &str, path: &str) -> bool {
+    let mut pattern_segments = pattern.split('/').filter(|s| !s.is_empty());
+    let mut path_segments = path.split('/').filter(|s| !s.is_empty()).peekable();
+    loop {
+        match (pattern_segments.next(), path_segments.next()) {
+            (None, None) => return true,
+            (Some("*"), _) => return true,
+            (Some(pattern_segment), Some(path_segment)) => {
+                if !pattern_segment.starts_with(':') && pattern_segment != path_segment {
+                    return false;
+                }
+            }
+            _ => return false,
+        }
+    }
+}
+
+/// `None` when the route is not classified: the caller must refuse.
+pub fn classify(method: &Method, path: &str) -> Option<RouteAuthorization> {
+    for (route_method, pattern, authorization) in ROUTES {
+        if (*route_method == "*" || *route_method == method.as_str())
+            && pattern_matches(pattern, path)
+        {
+            return Some(*authorization);
+        }
+    }
+    if PUBLIC_EXACT.contains(&path)
+        || PUBLIC_PREFIXES
+            .iter()
+            .any(|prefix| path.starts_with(prefix))
+    {
+        return Some(RouteAuthorization::Public);
+    }
+    if PROTECTED_PREFIXES
+        .iter()
+        .any(|prefix| path.starts_with(prefix))
+    {
+        // Fail closed: a protected route someone registers without
+        // classifying must not ship open the way the local routes once did.
+        return None;
+    }
+    // Anything else is an unregistered path on its way to a plain 404.
+    Some(RouteAuthorization::Public)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Decision {
+    Allowed,
+    Denied,
+}
+
+#[derive(Debug)]
+pub enum CheckError {
+    /// Tachyon Auth did not accept the bearer.
+    Unauthorized,
+    /// Tachyon Auth refused the tenant scope for this caller.
+    TenantRejected,
+    /// The provider could not answer; authorization stays closed.
+    Provider(String),
+}
+
+/// The question CourseBoard asks Tachyon Auth, kept as a trait so tests can
+/// script the answer without a network.
+#[async_trait::async_trait]
+pub trait PolicyChecker: Send + Sync {
+    async fn check(
+        &self,
+        bearer: &str,
+        operator_id: &str,
+        platform_id: Option<&str>,
+        action: &str,
+    ) -> Result<Decision, CheckError>;
+}
+
+#[derive(Serialize)]
+struct CheckRequest<'a> {
+    actions: [&'a str; 1],
+}
+
+#[derive(Deserialize)]
+struct CheckResponse {
+    results: Vec<CheckOutcome>,
+}
+
+#[derive(Deserialize)]
+struct CheckOutcome {
+    action: String,
+    allowed: bool,
+}
+
+/// `POST {tachyon-api}/v1/auth/policies/check` with the caller's own bearer,
+/// the same call and headers the feature-flag evaluator already makes.
+pub struct TachyonPolicyChecker {
+    client: reqwest::Client,
+    check_url: Option<reqwest::Url>,
+}
+
+impl TachyonPolicyChecker {
+    pub fn new(client: reqwest::Client, tachyon_api_base_url: &str) -> Self {
+        let check_url = reqwest::Url::parse(tachyon_api_base_url.trim())
+            .ok()
+            .and_then(|base| base.join("/v1/auth/policies/check").ok());
+        if check_url.is_none() {
+            tracing::error!(
+                base_url = %tachyon_api_base_url,
+                "tachyon api base URL is invalid; course action authorization will refuse"
+            );
+        }
+        Self { client, check_url }
+    }
+}
+
+#[async_trait::async_trait]
+impl PolicyChecker for TachyonPolicyChecker {
+    async fn check(
+        &self,
+        bearer: &str,
+        operator_id: &str,
+        platform_id: Option<&str>,
+        action: &str,
+    ) -> Result<Decision, CheckError> {
+        let Some(check_url) = &self.check_url else {
+            return Err(CheckError::Provider(
+                "tachyon api base URL is invalid".to_string(),
+            ));
+        };
+        let mut request = self
+            .client
+            .post(check_url.clone())
+            .header(AUTHORIZATION, format!("Bearer {bearer}"))
+            .header("x-operator-id", operator_id)
+            .json(&CheckRequest { actions: [action] });
+        if let Some(platform_id) = platform_id {
+            request = request.header("x-platform-id", platform_id);
+        }
+        let response = request.send().await.map_err(|error| {
+            CheckError::Provider(format!("policy check request failed: {error}"))
+        })?;
+        match response.status() {
+            StatusCode::UNAUTHORIZED => return Err(CheckError::Unauthorized),
+            StatusCode::FORBIDDEN => return Err(CheckError::TenantRejected),
+            status if !status.is_success() => {
+                return Err(CheckError::Provider(format!(
+                    "policy check answered {status}"
+                )))
+            }
+            _ => {}
+        }
+        let payload: CheckResponse = response.json().await.map_err(|error| {
+            CheckError::Provider(format!("policy check decode failed: {error}"))
+        })?;
+        let allowed = payload
+            .results
+            .iter()
+            .any(|outcome| outcome.action == action && outcome.allowed);
+        Ok(if allowed {
+            Decision::Allowed
+        } else {
+            Decision::Denied
+        })
+    }
+}
+
+/// One tenant-scoped allowance, remembered briefly.
+///
+/// The key holds the whole bearer rather than a hash: a colliding hash would
+/// hand one caller another caller's allowance. Entries are few (per instance,
+/// per minute) and Lambda instances are short-lived.
+type CacheKey = (String, String, &'static str);
+
+const CACHE_TTL: Duration = Duration::from_secs(60);
+const CACHE_CAP: usize = 4096;
+
+pub struct CourseAuthorization {
+    checker: Option<Arc<dyn PolicyChecker>>,
+    allowed_cache: Mutex<HashMap<CacheKey, Instant>>,
+}
+
+impl CourseAuthorization {
+    pub fn new(checker: Arc<dyn PolicyChecker>) -> Self {
+        Self {
+            checker: Some(checker),
+            allowed_cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// No checker at all. The explicit opt-out for local development
+    /// (`COURSEBOARD_DISABLE_ACTION_AUTHZ`) and the default of the plain
+    /// `AppState` test constructors; `build_app` always configures the real
+    /// checker.
+    pub fn disabled() -> Self {
+        Self {
+            checker: None,
+            allowed_cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn cached_allowance(&self, key: &CacheKey) -> bool {
+        let mut cache = self.allowed_cache.lock().expect("authz cache poisoned");
+        if let Some(granted_at) = cache.get(key) {
+            if granted_at.elapsed() < CACHE_TTL {
+                return true;
+            }
+            cache.remove(key);
+        }
+        false
+    }
+
+    fn remember_allowance(&self, key: CacheKey) {
+        let mut cache = self.allowed_cache.lock().expect("authz cache poisoned");
+        if cache.len() >= CACHE_CAP {
+            cache.clear();
+        }
+        cache.insert(key, Instant::now());
+    }
+}
+
+const DENIAL_HEADER: &str = "x-courseboard-auth-denial";
+
+fn forbidden_response(denial: &'static str, message: String) -> Response {
+    let mut response = (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({ "error": "forbidden", "message": message })),
+    )
+        .into_response();
+    response.headers_mut().insert(
+        HeaderName::from_static(DENIAL_HEADER),
+        HeaderValue::from_static(denial),
+    );
+    response
+}
+
+fn bearer_from(req: &Request<Body>) -> Option<&str> {
+    let value = req.headers().get(AUTHORIZATION).or_else(|| {
+        req.headers().get(HeaderName::from_static(
+            crate::COURSEBOARD_AUTHORIZATION_HEADER,
+        ))
+    })?;
+    let token = value.to_str().ok()?.strip_prefix("Bearer ")?.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token)
+    }
+}
+
+pub async fn require_course_authorization(
+    State(state): State<crate::AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Result<Response, AppError> {
+    let action = match classify(req.method(), req.uri().path()) {
+        Some(RouteAuthorization::Action(action)) => action,
+        Some(_) => return Ok(next.run(req).await),
+        None => {
+            // A registered-but-unclassified route. Refusing beats shipping it
+            // open; the error names the fix.
+            tracing::error!(
+                method = %req.method(),
+                path = %req.uri().path(),
+                "route is not classified in course_authz::ROUTES; refusing"
+            );
+            return Err(AppError::Forbidden);
+        }
+    };
+
+    let authorization = state.course_authorization();
+    let Some(checker) = authorization.checker.clone() else {
+        tracing::debug!(action, "course action authorization is disabled");
+        return Ok(next.run(req).await);
+    };
+
+    let Some(bearer) = bearer_from(&req) else {
+        return Err(AppError::Unauthorized);
+    };
+    let Some(operator_id) = req
+        .headers()
+        .get("x-operator-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        // Tenant scope is what the decision is about; a request without one
+        // has no tenant to be authorized in.
+        return Ok(forbidden_response(
+            "tenant",
+            "x-operator-id is required for this operation".to_string(),
+        ));
+    };
+    let platform_id = req
+        .headers()
+        .get("x-platform-id")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let cache_key: CacheKey = (bearer.to_string(), operator_id.to_string(), action);
+    if authorization.cached_allowance(&cache_key) {
+        return Ok(next.run(req).await);
+    }
+
+    match checker
+        .check(bearer, operator_id, platform_id, action)
+        .await
+    {
+        Ok(Decision::Allowed) => {
+            authorization.remember_allowance(cache_key);
+            Ok(next.run(req).await)
+        }
+        Ok(Decision::Denied) => Ok(forbidden_response(
+            "action",
+            format!("this operation requires {action}"),
+        )),
+        Err(CheckError::Unauthorized) => Err(AppError::Unauthorized),
+        Err(CheckError::TenantRejected) => Ok(forbidden_response(
+            "tenant",
+            "the tenant scope was refused for this caller".to_string(),
+        )),
+        Err(CheckError::Provider(message)) => {
+            tracing::warn!(action, error = %message, "policy check unavailable; refusing");
+            Err(AppError::Provider(message))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn get(path: &str) -> Option<RouteAuthorization> {
+        classify(&Method::GET, path)
+    }
+
+    #[test]
+    fn local_routes_carry_golf_actions() {
+        assert_eq!(
+            classify(&Method::POST, "/calculate"),
+            Some(RouteAuthorization::Action(CALCULATE_FEES))
+        );
+        assert_eq!(
+            classify(&Method::PUT, "/v1/course/caddie-shift-rules"),
+            Some(RouteAuthorization::Action(MANAGE_SHIFTS))
+        );
+        assert_eq!(
+            get("/v1/course/caddie-shift-rules"),
+            Some(RouteAuthorization::Action(LIST_SHIFTS))
+        );
+        assert_eq!(
+            classify(&Method::DELETE, "/v1/course/slot-overrides"),
+            Some(RouteAuthorization::Action(MANAGE_SLOT_OVERRIDES))
+        );
+        assert_eq!(
+            classify(&Method::PUT, "/v1/course/caddie-shifts/cp_1/2026-08-18"),
+            Some(RouteAuthorization::Action(MANAGE_SHIFTS))
+        );
+        assert_eq!(
+            classify(
+                &Method::POST,
+                "/v1/course/caddie-shift-plans/2026-09/preview"
+            ),
+            Some(RouteAuthorization::Action(MANAGE_SHIFTS))
+        );
+        assert_eq!(
+            classify(&Method::POST, "/cancellation-fee-collections"),
+            Some(RouteAuthorization::Action(MANAGE_CANCELLATION_FEES))
+        );
+        assert_eq!(
+            classify(&Method::POST, "/v1/course/demo-seed"),
+            Some(RouteAuthorization::Action(SEED_DEMO_BOARD))
+        );
+    }
+
+    #[test]
+    fn field_backed_routes_defer_to_upstream() {
+        assert_eq!(
+            get("/v1/course/tee-sheet"),
+            Some(RouteAuthorization::UpstreamEnforced)
+        );
+        assert_eq!(
+            classify(&Method::POST, "/v1/course/reservations"),
+            Some(RouteAuthorization::UpstreamEnforced)
+        );
+        assert_eq!(
+            classify(&Method::PATCH, "/v1/course/reservations/res_1/party"),
+            Some(RouteAuthorization::UpstreamEnforced)
+        );
+        assert_eq!(
+            classify(&Method::PUT, "/field-api/v1/field/iam/users/us_1/policies"),
+            Some(RouteAuthorization::UpstreamEnforced)
+        );
+        assert_eq!(
+            get("/admin/dispatch"),
+            Some(RouteAuthorization::UpstreamEnforced)
+        );
+        assert_eq!(
+            get("/v1/course/caddie-payroll-summary/export.csv"),
+            Some(RouteAuthorization::UpstreamEnforced)
+        );
+    }
+
+    #[test]
+    fn public_and_bearer_only_routes_stay_reachable() {
+        assert_eq!(get("/healthz"), Some(RouteAuthorization::Public));
+        assert_eq!(get("/"), Some(RouteAuthorization::Public));
+        assert_eq!(get("/ui/index.html"), Some(RouteAuthorization::Public));
+        assert_eq!(
+            get("/public/cancellation-fees/token123"),
+            Some(RouteAuthorization::Public)
+        );
+        assert_eq!(get("/v1/me"), Some(RouteAuthorization::AuthenticatedOnly));
+        assert_eq!(get("/admin"), Some(RouteAuthorization::AuthenticatedOnly));
+        assert_eq!(
+            classify(&Method::POST, "/v1/course/feature-flags/evaluate"),
+            Some(RouteAuthorization::AuthenticatedOnly)
+        );
+    }
+
+    #[test]
+    fn unclassified_protected_paths_fail_closed() {
+        assert_eq!(get("/v1/course/some-new-surface"), None);
+        assert_eq!(classify(&Method::POST, "/v1/anything"), None);
+        assert_eq!(get("/admin/new-page"), None);
+        // Paths outside the protected namespaces are ordinary 404s.
+        assert_eq!(get("/robots.txt"), Some(RouteAuthorization::Public));
+    }
+
+    /// Every path string registered in `build_router` must classify. The list
+    /// is maintained by hand the same way the router is; a route added there
+    /// without a line here fails closed at runtime *and* fails this test.
+    #[test]
+    fn every_registered_route_is_classified() {
+        const REGISTERED: &[(&str, &str)] = &[
+            ("GET", "/"),
+            ("GET", "/healthz"),
+            ("GET", "/admin"),
+            ("GET", "/admin/caddies"),
+            ("POST", "/admin/caddies"),
+            ("POST", "/admin/caddies/cd_1"),
+            ("POST", "/admin/shifts"),
+            ("POST", "/admin/shifts/sh_1"),
+            ("POST", "/admin/shifts/sh_1/cancel"),
+            ("GET", "/admin/reservations"),
+            ("POST", "/admin/reservations/res_1/assign"),
+            ("POST", "/admin/reservations/res_1/unassign"),
+            ("GET", "/admin/dispatch"),
+            ("POST", "/calculate"),
+            ("POST", "/simulate/range"),
+            ("POST", "/cancellation-fee-collections"),
+            ("GET", "/public/cancellation-fees/token"),
+            ("POST", "/public/cancellation-fees/token/confirm"),
+            (
+                "POST",
+                "/public/cancellation-fees/token/stripe-payment-intent",
+            ),
+            ("GET", "/field-api/v1/field/iam/users"),
+            ("GET", "/v1/me"),
+            ("GET", "/v1/field/client-capabilities"),
+            ("POST", "/v1/course/feature-flags/evaluate"),
+            ("GET", "/v1/course/tee-sheet"),
+            ("GET", "/v1/course/tee-ledger"),
+            ("POST", "/v1/course/reservations"),
+            ("PATCH", "/v1/course/reservations/res_1"),
+            ("POST", "/v1/course/reservations/res_1/cancel"),
+            ("PATCH", "/v1/course/reservations/res_1/party"),
+            ("PATCH", "/v1/course/reservations/res_1/plan"),
+            ("GET", "/v1/course/slot-overrides"),
+            ("PUT", "/v1/course/slot-overrides"),
+            ("DELETE", "/v1/course/slot-overrides"),
+            ("GET", "/v1/course/course-order"),
+            ("PUT", "/v1/course/course-order"),
+            ("GET", "/v1/course/courses"),
+            ("POST", "/v1/course/courses"),
+            ("PATCH", "/v1/course/courses/c_1"),
+            ("DELETE", "/v1/course/courses/c_1"),
+            ("POST", "/v1/course/courses/c_1/resource"),
+            ("GET", "/v1/course/courses/c_1/schedule"),
+            ("PUT", "/v1/course/courses/c_1/schedule"),
+            ("POST", "/v1/course/courses/c_1/time-slots/generate"),
+            ("GET", "/v1/course/booking-horizon"),
+            ("PUT", "/v1/course/booking-horizon"),
+            ("GET", "/v1/course/resources"),
+            ("GET", "/v1/course/reservation-products"),
+            ("POST", "/v1/course/reservation-products/svc_1"),
+            ("GET", "/v1/course/reservation-products/svc_1/slots"),
+            ("PUT", "/v1/course/reservation-products/svc_1/slots"),
+            ("GET", "/v1/course/customers"),
+            ("POST", "/v1/course/customers"),
+            ("POST", "/v1/course/customers/reception-draft"),
+            ("GET", "/v1/course/customers/cus_1"),
+            ("GET", "/v1/course/customers/cus_1/membership"),
+            ("POST", "/v1/course/customers/cus_1/membership"),
+            ("GET", "/v1/course/membership-plans"),
+            ("POST", "/v1/course/membership-plans"),
+            ("PATCH", "/v1/course/membership-plans/pl_1"),
+            ("POST", "/v1/course/reservation-report-imports"),
+            ("POST", "/v1/course/reservation-report-imports/preview"),
+            ("GET", "/v1/course/reservation-report-entries"),
+            ("GET", "/v1/course/caddie-profiles"),
+            ("POST", "/v1/course/caddie-profiles"),
+            ("PATCH", "/v1/course/caddie-profiles/cp_1"),
+            ("DELETE", "/v1/course/caddie-profiles/cp_1"),
+            ("GET", "/v1/course/caddie-profiles/cp_1/courses"),
+            ("PUT", "/v1/course/caddie-profiles/cp_1/courses"),
+            ("GET", "/v1/course/caddie-assignments"),
+            ("POST", "/v1/course/caddie-assignments"),
+            ("PATCH", "/v1/course/caddie-assignments/ca_1"),
+            ("GET", "/v1/course/caddie-availabilities"),
+            ("POST", "/v1/course/caddie-availabilities"),
+            ("DELETE", "/v1/course/caddie-availabilities/cp_1/2026-08-18"),
+            ("GET", "/v1/course/caddie-availability-deadlines/2026-09"),
+            ("PUT", "/v1/course/caddie-availability-deadlines/2026-09"),
+            ("GET", "/v1/course/caddie-availability-submissions/2026-09"),
+            ("GET", "/v1/course/caddie-recommendations"),
+            ("GET", "/v1/course/caddie-attendance-snapshot"),
+            ("GET", "/v1/course/caddie-attendance-snapshots"),
+            ("GET", "/v1/course/caddie-supply"),
+            ("POST", "/v1/course/caddie-auto-assignments"),
+            ("GET", "/v1/course/caddie-course-supply"),
+            ("GET", "/v1/course/caddie-reinforcements"),
+            ("GET", "/v1/course/caddie-ratings"),
+            ("GET", "/v1/course/caddie-rank-fees"),
+            ("PUT", "/v1/course/caddie-rank-fees"),
+            ("GET", "/v1/course/caddie-payroll-summary"),
+            ("GET", "/v1/course/caddie-payroll-summary/export.csv"),
+            ("GET", "/v1/course/caddie-shift-rules"),
+            ("PUT", "/v1/course/caddie-shift-rules"),
+            ("GET", "/v1/course/caddie-shifts"),
+            ("PUT", "/v1/course/caddie-shifts/cp_1/2026-08-18"),
+            ("POST", "/v1/course/caddie-shift-plans/2026-09"),
+            ("POST", "/v1/course/caddie-shift-plans/2026-09/preview"),
+            ("GET", "/v1/course/reservation-policy"),
+            ("PATCH", "/v1/course/reservation-policy"),
+            ("GET", "/v1/course/daily-budgets"),
+            ("POST", "/v1/course/daily-budgets"),
+            ("GET", "/v1/course/daily-budgets/achievement"),
+            ("POST", "/v1/course/daily-budgets/import"),
+            ("GET", "/v1/course/monthly-settlement"),
+            ("GET", "/v1/course/monthly-settlement/export.csv"),
+            ("GET", "/v1/course/extension-status"),
+            ("PATCH", "/v1/course/config"),
+            ("POST", "/v1/course/demo-seed"),
+            ("POST", "/v1/course/simulator/calculate"),
+            ("POST", "/v1/course/simulator/simulate/range"),
+        ];
+        for (method, path) in REGISTERED {
+            let method: Method = method.parse().expect("valid method");
+            assert!(
+                classify(&method, path).is_some(),
+                "{method} {path} is registered but not classified",
+            );
+        }
+    }
+}
+
+/// The gate on a real router: a database-backed route behind a scripted
+/// Tachyon answer.
+#[cfg(test)]
+mod middleware_tests {
+    use super::*;
+    use crate::auth::StaticBearerVerifier;
+    use crate::{build_router, AppState};
+    use axum::Router;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tower::ServiceExt;
+
+    const TOKEN: &str = "gate-test-token";
+    const TENANT: &str = "tn_gate_test";
+
+    #[derive(Clone, Copy)]
+    enum Script {
+        Allow,
+        Deny,
+        Unauthorized,
+        TenantRejected,
+        ProviderDown,
+    }
+
+    struct ScriptedChecker {
+        script: Script,
+        calls: AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl PolicyChecker for ScriptedChecker {
+        async fn check(
+            &self,
+            _bearer: &str,
+            _operator_id: &str,
+            _platform_id: Option<&str>,
+            _action: &str,
+        ) -> Result<Decision, CheckError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            match self.script {
+                Script::Allow => Ok(Decision::Allowed),
+                Script::Deny => Ok(Decision::Denied),
+                Script::Unauthorized => Err(CheckError::Unauthorized),
+                Script::TenantRejected => Err(CheckError::TenantRejected),
+                Script::ProviderDown => Err(CheckError::Provider("scripted outage".to_string())),
+            }
+        }
+    }
+
+    async fn gated_app(script: Script) -> (Router, Arc<ScriptedChecker>) {
+        let pool = crate::test_support::test_pool().await;
+        let checker = Arc::new(ScriptedChecker {
+            script,
+            calls: AtomicUsize::new(0),
+        });
+        let state = AppState::new(pool, Arc::new(StaticBearerVerifier::new(TOKEN.to_string())))
+            .with_course_authorization(Arc::new(CourseAuthorization::new(checker.clone())));
+        (build_router(state), checker)
+    }
+
+    fn shift_rules_request(operator: Option<&str>) -> Request<Body> {
+        let mut builder = Request::builder()
+            .method(Method::GET)
+            .uri("/v1/course/caddie-shift-rules")
+            .header(AUTHORIZATION, format!("Bearer {TOKEN}"));
+        if let Some(operator) = operator {
+            builder = builder.header("x-operator-id", operator);
+        }
+        builder.body(Body::empty()).expect("request builds")
+    }
+
+    #[tokio::test]
+    async fn a_denied_action_answers_403_with_the_action_denial_marker() {
+        let (app, checker) = gated_app(Script::Deny).await;
+        let response = app
+            .oneshot(shift_rules_request(Some(TENANT)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response.headers().get(DENIAL_HEADER),
+            Some(&HeaderValue::from_static("action"))
+        );
+        assert_eq!(checker.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn an_allowed_action_passes_and_the_allowance_is_remembered() {
+        let (app, checker) = gated_app(Script::Allow).await;
+        let first = app
+            .clone()
+            .oneshot(shift_rules_request(Some(TENANT)))
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let second = app
+            .oneshot(shift_rules_request(Some(TENANT)))
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::OK);
+        // The second request rides the cached allowance instead of asking again.
+        assert_eq!(checker.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_request_without_a_tenant_scope_is_refused_before_any_check() {
+        let (app, checker) = gated_app(Script::Allow).await;
+        let response = app.oneshot(shift_rules_request(None)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response.headers().get(DENIAL_HEADER),
+            Some(&HeaderValue::from_static("tenant"))
+        );
+        assert_eq!(checker.calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_rejected_tenant_scope_carries_the_tenant_denial_marker() {
+        let (app, _) = gated_app(Script::TenantRejected).await;
+        let response = app
+            .oneshot(shift_rules_request(Some(TENANT)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        assert_eq!(
+            response.headers().get(DENIAL_HEADER),
+            Some(&HeaderValue::from_static("tenant"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_bearer_tachyon_rejects_is_a_401() {
+        let (app, _) = gated_app(Script::Unauthorized).await;
+        let response = app
+            .oneshot(shift_rules_request(Some(TENANT)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_policy_store_refuses_with_424_not_a_pass() {
+        let (app, _) = gated_app(Script::ProviderDown).await;
+        let response = app
+            .oneshot(shift_rules_request(Some(TENANT)))
+            .await
+            .unwrap();
+        // Fail closed, as 424 so the browser sees a JSON error rather than a
+        // Cloudflare-mangled 5xx.
+        assert_eq!(response.status(), StatusCode::FAILED_DEPENDENCY);
+    }
+
+    #[tokio::test]
+    async fn the_disabled_gate_lets_a_valid_bearer_through() {
+        // The plain constructors default to the disabled gate; this is what the
+        // rest of the test suite (and the CLI-JWT local mode) relies on.
+        let pool = crate::test_support::test_pool().await;
+        let state = AppState::new(pool, Arc::new(StaticBearerVerifier::new(TOKEN.to_string())));
+        let app = build_router(state);
+        let response = app
+            .oneshot(shift_rules_request(Some(TENANT)))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn public_routes_stay_open_with_the_gate_enforcing() {
+        let (app, checker) = gated_app(Script::Deny).await;
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/healthz")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(checker.calls.load(Ordering::SeqCst), 0);
+    }
+}

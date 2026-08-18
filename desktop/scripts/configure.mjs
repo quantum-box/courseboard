@@ -448,6 +448,10 @@ export async function runField(argv = []) {
     DATABASE_URL: 'sqlite:///tmp/courseboard-local.db',
     COURSEBOARD_PUBLIC_UI_BASE_URL: 'http://127.0.0.1:8080/ui/index.html',
     TACHYON_FIELD_API_URL: options.fieldApiUrl,
+    // The CLI JWT this mode runs on is rejected by Tachyon Auth, so the
+    // course action gate would answer 403 on every CourseBoard-local route.
+    // The PKCE mode (real Cognito login) keeps the gate on.
+    COURSEBOARD_DISABLE_ACTION_AUTHZ: 'true',
   })
 
   const uiPath = writeEnvFile(options.uiEnvFile, {
