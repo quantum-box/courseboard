@@ -352,6 +352,14 @@ Extension-owned Tachyon Auth actions and policies はこの repository で管理
 `POST /calculate` を呼べる TACHYON Field core M2M client に
 `field-extension:golf:calculator` を attach します。
 
+TACHYON Field 本体の汎用 auth manifest（`field:*` / `accounting:*` などの action と
+`field:admin` などの global policy）は tachyonfield repository が単独で所有します。
+この repository に copy を置かないでください。`tachyon reconcile` と
+`tachyon manifest apply` は `-f` 省略時に `.tachyon/manifests` 配下を全て discovery して
+apply 対象にするため、古い copy が残っていると global な action と policy を過去の定義へ
+巻き戻します。Field 側の権限を確認したいときは
+`quantum-box/tachyonfield` の `.tachyon/manifests/tachyonfield-auth.yml` を直接参照します。
+
 ## Local Development
 
 サービスを起動します。
