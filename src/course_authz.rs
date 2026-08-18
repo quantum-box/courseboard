@@ -33,8 +33,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::course::domain::actions::{
-    CALCULATE_FEES, LIST_SHIFTS, LIST_SLOT_OVERRIDES, MANAGE_CANCELLATION_FEES, MANAGE_SHIFTS,
-    MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
+    CALCULATE_FEES, LIST_CADDIE_AVAILABILITY, LIST_SHIFTS, LIST_SLOT_OVERRIDES,
+    MANAGE_CADDIE_AVAILABILITY, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
 };
 
 /// What standing a route needs before its handler runs.
@@ -53,6 +53,14 @@ pub enum RouteAuthorization {
     /// The handler reads or writes CourseBoard's own database; Tachyon Auth is
     /// asked for this action before it runs.
     Action(&'static str),
+    /// The handler asks for itself, because the tenant it acts on is in the
+    /// request body rather than `x-operator-id`.
+    ///
+    /// The legacy operator API (`docs/m2m-auth.md`) is called by Field core
+    /// with a bearer alone and `tenant_id` in the JSON. Gating those here would
+    /// refuse every one of them for a missing header, and would authorize the
+    /// wrong tenant when a caller's header and body disagree.
+    HandlerEnforced,
 }
 
 /// Method + path pattern + the standing it needs.
@@ -63,15 +71,11 @@ pub enum RouteAuthorization {
 /// matches the rest of the path.
 const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     // ─── CourseBoard-local: golf actions ─────────────────────────────────
-    (
-        "POST",
-        "/calculate",
-        RouteAuthorization::Action(CALCULATE_FEES),
-    ),
+    ("POST", "/calculate", RouteAuthorization::HandlerEnforced),
     (
         "POST",
         "/simulate/range",
-        RouteAuthorization::Action(CALCULATE_FEES),
+        RouteAuthorization::HandlerEnforced,
     ),
     (
         "POST",
@@ -86,7 +90,7 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     (
         "POST",
         "/cancellation-fee-collections",
-        RouteAuthorization::Action(MANAGE_CANCELLATION_FEES),
+        RouteAuthorization::HandlerEnforced,
     ),
     (
         "GET",
@@ -136,12 +140,12 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     (
         "GET",
         "/v1/course/caddie-availability-deadlines/:year_month",
-        RouteAuthorization::Action(LIST_SHIFTS),
+        RouteAuthorization::Action(LIST_CADDIE_AVAILABILITY),
     ),
     (
         "PUT",
         "/v1/course/caddie-availability-deadlines/:year_month",
-        RouteAuthorization::Action(MANAGE_SHIFTS),
+        RouteAuthorization::Action(MANAGE_CADDIE_AVAILABILITY),
     ),
     (
         "POST",
@@ -503,6 +507,13 @@ fn pattern_matches(pattern: &str, path: &str) -> bool {
 
 /// `None` when the route is not classified: the caller must refuse.
 pub fn classify(method: &Method, path: &str) -> Option<RouteAuthorization> {
+    // Axum answers HEAD from the GET handler, so it needs the GET standing.
+    // Left out, every HEAD on a gated route reads as unclassified and refuses.
+    let method = if method == Method::HEAD {
+        &Method::GET
+    } else {
+        method
+    };
     for (route_method, pattern, authorization) in ROUTES {
         if (*route_method == "*" || *route_method == method.as_str())
             && pattern_matches(pattern, path)
@@ -652,7 +663,12 @@ impl PolicyChecker for TachyonPolicyChecker {
 /// The key holds the whole bearer rather than a hash: a colliding hash would
 /// hand one caller another caller's allowance. Entries are few (per instance,
 /// per minute) and Lambda instances are short-lived.
-type CacheKey = (String, String, String);
+///
+/// The platform scope is part of the key, not an afterthought: the same tenant
+/// id exists under both the production and sandbox platforms, and an allowance
+/// obtained under one must not answer for the other. Local action routes make
+/// no Field call afterwards that would catch the mismatch.
+type CacheKey = (String, String, Option<String>, String);
 
 /// How long an allowance is used without asking again.
 const CACHE_TTL: Duration = Duration::from_secs(60);
@@ -699,7 +715,7 @@ impl CachingPolicyChecker {
     /// member whose policies just changed.
     pub fn invalidate_tenant(&self, operator_id: &str) {
         let mut entries = self.entries.lock().expect("authz cache poisoned");
-        entries.retain(|(_, tenant, _), _| tenant != operator_id);
+        entries.retain(|(_, tenant, _, _), _| tenant != operator_id);
     }
 
     fn allowance(&self, key: &CacheKey, window: Duration) -> bool {
@@ -738,6 +754,7 @@ impl PolicyChecker for CachingPolicyChecker {
         let key: CacheKey = (
             bearer.to_string(),
             operator_id.to_string(),
+            platform_id.map(str::to_owned),
             action.to_string(),
         );
         if self.allowance(&key, CACHE_TTL) {
@@ -852,6 +869,13 @@ pub async fn require_course_authorization(
     let Some(bearer) = bearer_from(&req) else {
         return Err(AppError::Unauthorized);
     };
+    // Verify locally before spending an outbound request. This layer wraps the
+    // per-route token layers, so without this any nonempty bearer would reach
+    // Tachyon — an unauthenticated caller could aim traffic at the policy
+    // endpoint through us, and wait out the checker timeout doing it.
+    if state.token_verifier_for_authz().verify(bearer).is_err() {
+        return Err(AppError::Unauthorized);
+    }
     let Some(operator_id) = req
         .headers()
         .get("x-operator-id")
@@ -905,10 +929,6 @@ mod tests {
     #[test]
     fn local_routes_carry_golf_actions() {
         assert_eq!(
-            classify(&Method::POST, "/calculate"),
-            Some(RouteAuthorization::Action(CALCULATE_FEES))
-        );
-        assert_eq!(
             classify(&Method::PUT, "/v1/course/caddie-shift-rules"),
             Some(RouteAuthorization::Action(MANAGE_SHIFTS))
         );
@@ -931,9 +951,14 @@ mod tests {
             ),
             Some(RouteAuthorization::Action(MANAGE_SHIFTS))
         );
+        // Its tenant is in the body, so the handler asks rather than the gate.
         assert_eq!(
             classify(&Method::POST, "/cancellation-fee-collections"),
-            Some(RouteAuthorization::Action(MANAGE_CANCELLATION_FEES))
+            Some(RouteAuthorization::HandlerEnforced)
+        );
+        assert_eq!(
+            classify(&Method::POST, "/calculate"),
+            Some(RouteAuthorization::HandlerEnforced)
         );
         assert_eq!(
             classify(&Method::POST, "/v1/course/demo-seed"),
@@ -983,6 +1008,24 @@ mod tests {
         assert_eq!(
             classify(&Method::POST, "/v1/course/feature-flags/evaluate"),
             Some(RouteAuthorization::AuthenticatedOnly)
+        );
+    }
+
+    #[test]
+    fn head_is_classified_like_the_get_it_is_served_from() {
+        // Axum answers HEAD from the GET handler; classifying it separately
+        // would refuse every one of them.
+        assert_eq!(
+            classify(&Method::HEAD, "/v1/course/caddie-shift-rules"),
+            Some(RouteAuthorization::Action(LIST_SHIFTS))
+        );
+        assert_eq!(
+            classify(&Method::HEAD, "/v1/course/slot-overrides"),
+            Some(RouteAuthorization::Action(LIST_SLOT_OVERRIDES))
+        );
+        assert_eq!(
+            classify(&Method::HEAD, "/healthz"),
+            Some(RouteAuthorization::Public)
         );
     }
 
@@ -1179,6 +1222,28 @@ mod cache_tests {
             Ok(Decision::Allowed)
         ));
         assert_eq!(inner.calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn an_allowance_does_not_answer_for_another_platform() {
+        // The same tenant id exists under production and sandbox. A local
+        // action route makes no Field call afterwards that would catch the
+        // mismatch, so the allowance must not carry across.
+        let inner = Scripted::new(vec![Ok(Decision::Allowed), Ok(Decision::Denied)]);
+        let cache = CachingPolicyChecker::new(inner.clone());
+        assert!(matches!(
+            cache
+                .check("bearer-1", "tn_1", Some("platform-a"), actions::LIST_SHIFTS)
+                .await,
+            Ok(Decision::Allowed)
+        ));
+        assert!(matches!(
+            cache
+                .check("bearer-1", "tn_1", Some("platform-b"), actions::LIST_SHIFTS)
+                .await,
+            Ok(Decision::Denied)
+        ));
+        assert_eq!(inner.calls.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]

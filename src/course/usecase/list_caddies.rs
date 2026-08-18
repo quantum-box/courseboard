@@ -347,6 +347,7 @@ mod tests {
         let listed = ListCaddiesUseCase::new(ops.clone())
             .execute(GatewayCredentials {
                 authorization: "Bearer t",
+                caller_bearer: "Bearer t",
                 operator_id: "scc",
                 platform_id: None,
                 authorizer: &crate::course::infrastructure::ALLOW_ALL,
@@ -365,6 +366,7 @@ mod tests {
                     operator_id: "scc",
                     platform_id: None,
                     authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
                 },
                 CaddieAssignmentQuery::default(),
             )
@@ -403,6 +405,7 @@ mod tests {
                     operator_id: "scc",
                     platform_id: None,
                     authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
                 },
                 RecommendationQuery {
                     player_count: Some(4),
@@ -439,6 +442,7 @@ mod tests {
                     operator_id: "scc",
                     platform_id: None,
                     authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
                 },
                 RecommendationQuery {
                     scheduled_at: Some(morning_tee_time()),
@@ -482,6 +486,7 @@ mod tests {
                     operator_id: "scc",
                     platform_id: None,
                     authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
                 },
                 RecommendationQuery {
                     scheduled_at: Some(Utc.with_ymd_and_hms(2026, 8, 7, 22, 0, 0).unwrap()),
@@ -529,6 +534,7 @@ mod tests {
                         operator_id: "scc",
                         platform_id: None,
                         authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                        caller_bearer: "Bearer test",
                     },
                     RecommendationQuery {
                         scheduled_at: Some(at),
@@ -597,6 +603,7 @@ mod tests {
                     operator_id: "scc",
                     platform_id: None,
                     authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
                 },
                 input,
                 "Asia/Tokyo",

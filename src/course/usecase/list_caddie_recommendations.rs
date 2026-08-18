@@ -38,6 +38,10 @@ impl ListCaddieRecommendationsUseCase {
         credentials
             .require(actions::LIST_CADDIE_ASSIGNMENTS)
             .await?;
+        // The response carries roster detail, rating averages, availability and
+        // attendance — the very things the other read permissions separate.
+        credentials.require(actions::LIST_CADDIES).await?;
+        credentials.require(actions::LIST_CADDIE_INSIGHTS).await?;
         let timezone_id = parse_tenant_timezone(timezone)?;
         // The day being planned, which is also the day attendance is read for.
         let date = tenant_date_at(

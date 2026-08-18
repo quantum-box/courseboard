@@ -105,6 +105,10 @@ pub(crate) fn credentials<'a>(
     };
     Ok(GatewayCredentials {
         authorization,
+        // Never the override: `TACHYON_FIELD_API_BEARER_TOKEN` is a service
+        // account, and authorizing as it would give every signed-in user its
+        // privileges on the routes that use it.
+        caller_bearer: caller_bearer(headers)?,
         operator_id: operator_id(headers)?,
         platform_id: optional_header(headers, "x-platform-id"),
         authorizer: state.course_authorizer(),
@@ -117,6 +121,27 @@ fn optional_header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
         .and_then(|value| value.to_str().ok())
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+/// The bearer the signed-in caller presented, wherever it arrived.
+///
+/// Cloudflare strips `Authorization` on some paths, so the app also accepts
+/// `x-courseboard-authorization`. Authorization decisions must be made about
+/// this token and no other — see `credentials`.
+pub(crate) fn caller_bearer(headers: &HeaderMap) -> Result<&str, AppError> {
+    let value = headers
+        .get(AUTHORIZATION)
+        .or_else(|| {
+            headers.get(axum::http::HeaderName::from_static(
+                crate::COURSEBOARD_AUTHORIZATION_HEADER,
+            ))
+        })
+        .and_then(|value| value.to_str().ok())
+        .ok_or(AppError::Unauthorized)?;
+    if !value.starts_with("Bearer ") || value["Bearer ".len()..].trim().is_empty() {
+        return Err(AppError::Unauthorized);
+    }
+    Ok(value)
 }
 
 pub(crate) fn bearer_authorization(headers: &HeaderMap) -> Result<&str, AppError> {
@@ -145,6 +170,7 @@ impl From<CourseError> for AppError {
         match value {
             CourseError::Unauthorized => AppError::Unauthorized,
             CourseError::Forbidden(action) => AppError::ActionForbidden(action),
+            CourseError::TenantForbidden => AppError::TenantForbidden,
             CourseError::BadRequest(message) => AppError::BadRequest(message),
             CourseError::Conflict(message) => AppError::Conflict(message),
             CourseError::UpstreamClient { status, message } => match StatusCode::from_u16(status) {

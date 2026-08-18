@@ -11,7 +11,7 @@ import {
   Input,
 } from '@tachyon-sdk/native-ui'
 import { MailPlus, ShieldCheck, SquarePen, Trash2 } from 'lucide-react'
-import { useCallback, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, fieldApiJson } from '../../api'
 import { useAuth } from '../../auth/AuthProvider'
@@ -82,6 +82,18 @@ export function MembersPage() {
   // The list API only returns accepted members, so a sent invitation lives
   // here until its address appears in a fetched roster.
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([])
+
+  // Accepted invitations are dropped from state, not merely hidden: an invite
+  // left in the array would come back as an unremovable pending row if that
+  // member were later removed while the screen stayed open.
+  useEffect(() => {
+    const users = resource.data?.users
+    if (!users) return
+    setPendingInvites(current => {
+      const remaining = remainingPendingInvites(current, users)
+      return remaining.length === current.length ? current : remaining
+    })
+  }, [resource.data])
 
   const members = useMemo<MemberRow[]>(() => {
     const users = resource.data?.users ?? []

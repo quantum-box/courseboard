@@ -10,6 +10,11 @@ pub enum CourseError {
     /// name what is missing rather than a bare "forbidden".
     #[error("this operation requires {0}")]
     Forbidden(&'static str),
+    /// The policy store refused the tenant scope itself, not one action. The
+    /// screen has to tell these apart: this one means "you cannot work in this
+    /// tenant", which sends the operator back to tenant selection.
+    #[error("the tenant scope was refused for this caller")]
+    TenantForbidden,
     #[error("{0}")]
     BadRequest(&'static str),
     /// The request was valid, but the selected operational state changed

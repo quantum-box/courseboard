@@ -140,6 +140,10 @@ actions:
   description: Reading which parts of the golf extension this tenant has switched on.
   global: true
 - context: field_extension_golf
+  name: CalculateTax
+  description: Held by `field-extension:golf:calculator` alone; no member role grants it, and no screen requires it.
+  global: true
+- context: field_extension_golf
   name: SeedDemoBoard
   description: Filling a tenant's board with demo rounds and rosters.
   global: true
@@ -287,7 +291,13 @@ policies:
   actions:
   - action: field:ListReservations
     effect: allow
+  - action: field:ManageReservations
+    effect: allow
   - action: field:ListHrm
+    effect: allow
+  - action: field:ListCustomers
+    effect: allow
+  - action: field:ListMembership
     effect: allow
   - action: accounting:CreateInvoice
     effect: allow

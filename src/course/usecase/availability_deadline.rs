@@ -422,6 +422,7 @@ mod tests {
             operator_id: tenant_id,
             platform_id: None,
             authorizer: &crate::course::infrastructure::ALLOW_ALL,
+            caller_bearer: "Bearer test",
         }
     }
 

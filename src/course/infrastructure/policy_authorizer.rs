@@ -31,7 +31,7 @@ impl CourseAuthorizer for PolicyCourseAuthorizer {
         action: &'static str,
     ) -> Result<(), CourseError> {
         let bearer = credentials
-            .authorization
+            .caller_bearer
             .strip_prefix("Bearer ")
             .unwrap_or(credentials.authorization)
             .trim();
@@ -48,7 +48,7 @@ impl CourseAuthorizer for PolicyCourseAuthorizer {
             Ok(Decision::Allowed) => Ok(()),
             Ok(Decision::Denied) => Err(CourseError::Forbidden(action)),
             Err(CheckError::Unauthorized) => Err(CourseError::Unauthorized),
-            Err(CheckError::TenantRejected) => Err(CourseError::Forbidden(action)),
+            Err(CheckError::TenantRejected) => Err(CourseError::TenantForbidden),
             // Fail closed, and as a provider error so the desk is told the
             // check could not be made rather than that they lack the right.
             Err(CheckError::Provider(message)) => Err(CourseError::Provider(message)),

@@ -78,6 +78,10 @@ impl GetTeeLedgerUseCase {
         query: TeeLedgerQuery,
     ) -> Result<TeeLedger, CourseError> {
         credentials.require(actions::LIST_TEE_SHEET).await?;
+        // The ledger draws the desk's manual open/close marks alongside the
+        // bookings, which is the same local data the slot-override route
+        // protects.
+        credentials.require(actions::LIST_SLOT_OVERRIDES).await?;
         // Reservations and courses are the board; everything else decorates it.
         // ADR-0005 put the board on several independent Field endpoints and any
         // of them can be down alone, so one failure must degrade the ledger

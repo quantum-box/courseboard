@@ -89,7 +89,18 @@ pub async fn get_client_capabilities(
         state.cancellation_fee_config.field_api_url.as_deref(),
     ));
     let use_case = GetFieldClientCapabilitiesUseCase::new(gateway);
-    let credentials = super::http::credentials(&state, &headers)?;
+    // Not `http::credentials`: that reads `Authorization` only, and this route
+    // is one of the paths where Cloudflare leaves just the first-party header.
+    let bearer = super::http::caller_bearer(&headers)?;
+    let operator = context.operator_id().to_string();
+    let platform = context.platform_id().to_string();
+    let credentials = crate::course::domain::GatewayCredentials {
+        authorization: bearer,
+        caller_bearer: bearer,
+        operator_id: &operator,
+        platform_id: Some(&platform),
+        authorizer: state.course_authorizer(),
+    };
     let capabilities = use_case
         .execute(credentials, context)
         .await

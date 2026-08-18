@@ -206,6 +206,7 @@ mod tests {
             operator_id: "tenant-1",
             platform_id: None,
             authorizer: &crate::course::infrastructure::ALLOW_ALL,
+            caller_bearer: "Bearer test",
         }
     }
 

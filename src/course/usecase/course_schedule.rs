@@ -344,6 +344,11 @@ impl ExtendCourseInventoryUseCase {
         credentials: GatewayCredentials<'_>,
         tenant_id: &str,
     ) -> Result<Vec<CourseId>, CourseError> {
+        // Writes Field time slots and the local watermark, so it is gated like
+        // any other course change. The ledger swallows the refusal and still
+        // draws the day: a reader simply does not move the far edge of the
+        // book.
+        credentials.require(actions::MANAGE_COURSES).await?;
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         let today = course_today(Utc::now(), &timezone)?;
         let stored = self.watermarks.list_watermarks(tenant_id).await?;
@@ -1042,6 +1047,7 @@ mod tests {
                     operator_id: "tenant-test",
                     platform_id: None,
                     authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
                 },
                 &course_id,
                 vec![rule(1, "07:00", "12:00")],
@@ -1103,6 +1109,7 @@ mod tests {
                     operator_id: "tenant-test",
                     platform_id: None,
                     authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
                 },
                 &course_id,
                 vec![rule(1, "07:00", "12:00")],
@@ -1182,6 +1189,7 @@ mod tests {
                     operator_id: "tenant-test",
                     platform_id: None,
                     authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
                 },
                 &course_id,
                 vec![rule(1, "07:00", "12:00")],
@@ -1246,6 +1254,7 @@ mod tests {
                     operator_id: "tenant-test",
                     platform_id: None,
                     authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
                 },
                 &course_id,
                 vec![rule(1, "07:00", "12:00")],

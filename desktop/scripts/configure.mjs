@@ -94,7 +94,10 @@ const AUTHJS_UI_ENV_KEYS = [
   'VITE_AUTH_PROXY_TARGET',
   'VITE_COURSEBOARD_API_BEARER',
 ]
+// Cleared when switching to PKCE: leaving `field:env`'s opt-out behind would
+// run a real-Cognito environment with every authorization check disabled.
 const PKCE_COURSE_API_STATIC_BEARER_KEYS = [
+  'COURSEBOARD_DISABLE_ACTION_AUTHZ',
   'COURSEBOARD_DEV_BEARER_TOKEN',
   'TACHYON_FIELD_API_BEARER_TOKEN',
 ]

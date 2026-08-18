@@ -107,6 +107,12 @@ pub const IMPORT_RESERVATION_REPORTS: &str = "field_extension_golf:ImportReserva
 /// Reading which parts of the golf extension this tenant has switched on.
 pub const LIST_EXTENSION_STATUS: &str = "field_extension_golf:ListExtensionStatus";
 
+/// The machine-to-machine tax callback Field core makes into this app.
+///
+/// Held by `field-extension:golf:calculator` alone; no member role grants it,
+/// and no screen requires it.
+pub const CALCULATE_TAX: &str = "field_extension_golf:CalculateTax";
+
 /// Filling a tenant's board with demo rounds and rosters.
 pub const SEED_DEMO_BOARD: &str = "field_extension_golf:SeedDemoBoard";
 

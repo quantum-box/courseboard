@@ -191,6 +191,7 @@ fn reservation_report_credentials<'a>(
         // This endpoint processes a user-selected file. Always preserve the
         // verified user's bearer instead of replacing it with a static token.
         authorization: bearer_authorization(headers)?,
+        caller_bearer: super::http::caller_bearer(headers)?,
         operator_id: operator_id(headers)?,
         platform_id: Some(platform_id),
         authorizer,

@@ -22,7 +22,7 @@ use axum::{
     extract::{DefaultBodyLimit, FromRef, State},
     http::{
         header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE},
-        HeaderName, HeaderValue, Method, Request, StatusCode,
+        HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode,
     },
     middleware::{self, Next},
     response::{IntoResponse, Redirect, Response},
@@ -295,6 +295,12 @@ impl AppState {
     ///
     /// Borrowed rather than cloned: it lives on the credentials a request
     /// carries, which never outlive the request.
+    /// For the action gate, which runs outside the per-route token layers and
+    /// must not hand an unverified bearer to a remote service.
+    pub(crate) fn token_verifier_for_authz(&self) -> &dyn auth::TokenVerifier {
+        self.token_verifier.as_ref()
+    }
+
     pub(crate) fn course_authorizer(&self) -> &dyn course::domain::CourseAuthorizer {
         self.course_authorizer.as_ref()
     }
@@ -1269,10 +1275,49 @@ async fn require_valid_token(
     Ok(next.run(req).await)
 }
 
+/// Authorize a legacy operator-API call against the tenant named in its body.
+///
+/// These endpoints predate `x-operator-id`: Field core calls them with a
+/// bearer alone and `tenant_id` in the JSON (`docs/m2m-auth.md`). The tenant
+/// that is checked has to be the one the handler will act on, or a caller
+/// could borrow a grant in one tenant to work in another.
+pub(crate) async fn authorize_body_tenant(
+    state: &AppState,
+    headers: &HeaderMap,
+    tenant_id: &str,
+    action: &'static str,
+) -> Result<(), AppError> {
+    let bearer = course::interfaces::http::caller_bearer(headers)?;
+    let credentials = course::domain::GatewayCredentials {
+        authorization: bearer,
+        caller_bearer: bearer,
+        operator_id: tenant_id,
+        platform_id: headers
+            .get("x-platform-id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            .filter(|value| !value.is_empty()),
+        authorizer: state.course_authorizer(),
+    };
+    credentials.require(action).await.map_err(AppError::from)
+}
+
 async fn calculate(
+    State(state): State<AppState>,
     State(rules): State<Arc<MySqlTaxRuleRepository>>,
+    headers: HeaderMap,
     Json(request): Json<CalculateRequest>,
 ) -> Result<Json<CalculateResponse>, AppError> {
+    // `CalculateTax`, not the interactive simulator's action: this is the
+    // machine-to-machine callback, and `field-extension:golf:calculator` is
+    // the only policy a Field-core client is meant to hold.
+    authorize_body_tenant(
+        &state,
+        &headers,
+        &request.tenant_id,
+        course::domain::actions::CALCULATE_TAX,
+    )
+    .await?;
     if request.players.is_empty() {
         return Err(AppError::BadRequest(
             "players must contain at least one player",
@@ -1320,10 +1365,19 @@ async fn calculate(
 }
 
 async fn simulate_range(
+    State(state): State<AppState>,
     State(rules): State<Arc<MySqlTaxRuleRepository>>,
+    headers: HeaderMap,
     Json(request): Json<SimulateRangeRequest>,
 ) -> Result<Json<SimulateRangeResponse>, AppError> {
     request.validate()?;
+    authorize_body_tenant(
+        &state,
+        &headers,
+        &request.tenant_id,
+        course::domain::actions::CALCULATE_TAX,
+    )
+    .await?;
 
     let mut rows = Vec::new();
     let mut green_fee = request.green_fee_range.min;
@@ -1628,6 +1682,12 @@ pub enum AppError {
     /// screen can say which grant is missing instead of just "forbidden".
     #[error("this operation requires {0}")]
     ActionForbidden(&'static str),
+    /// The caller may not work in the selected tenant at all. Answered with the
+    /// `x-courseboard-auth-denial: tenant` marker the UI watches for, which
+    /// sends the operator back to tenant selection rather than leaving them on
+    /// a screen reporting a missing permission.
+    #[error("the tenant scope was refused for this caller")]
+    TenantForbidden,
     #[error("{0}")]
     BadRequest(&'static str),
     /// A file whose name does not say which month it covers.
@@ -1673,6 +1733,7 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized"),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::ActionForbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
+            AppError::TenantForbidden => (StatusCode::FORBIDDEN, "forbidden"),
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::MonthRequired(_) => (StatusCode::BAD_REQUEST, "month_required"),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
@@ -1688,11 +1749,19 @@ impl IntoResponse for AppError {
             }
         };
 
+        let tenant_denial = matches!(self, AppError::TenantForbidden);
         let body = Json(ErrorResponse {
             error,
             message: self.to_string(),
         });
-        (status, body).into_response()
+        let mut response = (status, body).into_response();
+        if tenant_denial {
+            response.headers_mut().insert(
+                HeaderName::from_static("x-courseboard-auth-denial"),
+                HeaderValue::from_static("tenant"),
+            );
+        }
+        response
     }
 }
 

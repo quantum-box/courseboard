@@ -47,7 +47,11 @@ pub trait CourseAuthorizer: Send + Sync {
 /// every use case that can act on a tenant already receives this.
 #[derive(Clone, Copy)]
 pub struct GatewayCredentials<'a> {
+    /// What goes upstream to Field. May be a service-account override.
     pub authorization: &'a str,
+    /// Who is asking. Authorization decisions are made about this token, which
+    /// is always the signed-in caller's, never the outbound override.
+    pub caller_bearer: &'a str,
     pub operator_id: &'a str,
     pub platform_id: Option<&'a str>,
     pub authorizer: &'a dyn CourseAuthorizer,
@@ -91,6 +95,7 @@ impl<'a> GatewayCredentials<'a> {
     ) -> Self {
         Self {
             authorization,
+            caller_bearer: authorization,
             operator_id,
             platform_id,
             authorizer: &OUTBOUND_ONLY,

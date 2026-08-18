@@ -189,7 +189,7 @@ impl CreateReservationUseCase {
             self.reservations.clone(),
             self.catalog.clone(),
         )
-        .execute(credentials, input.date)
+        .for_capacity_guard(credentials, input.date)
         .await?;
         if has_room_for_one_more_caddie_round(&supply, &input.golf_course_id) {
             return Ok(());
