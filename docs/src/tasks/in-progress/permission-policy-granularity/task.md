@@ -59,7 +59,17 @@ extension 所有の policy は extension リポジトリで管理する規約
 - `global: true`。ゴルフ場テナントが prod / sandbox platform に分かれているため、
   platform 単位の `shared: true` では届かないテナントが出る
 
-**適用済み**（2026-08-18、profile `admin` / `--tenant-id tn_01ks18jhh1xvggktfzjx5jqsen`）:
+> **デプロイ順序（必須）**: このマニフェストを **apply してからコードを出す**。
+> コードは 36 個の action を要求するが、Tachyon Auth に宣言が無い action は
+> 誰にも grant されていないため、先にコードが出ると全 usecase が 403 になる。
+> 逆順（apply が先）は無害で、使われない宣言が増えるだけ。
+>
+> 初回の 8 action / 6 policy は 2026-08-18 に apply 済み。**36 action への
+> 拡張分は未適用**（apply しようとした時点で `api.n1.tachy.one` が応答せず、
+> healthz も含めて全滅していたため。ネットワーク側の問題ではない）。復旧後に
+> 下記 plan → apply を実行すること。
+
+**適用手順**（profile `admin` / `--tenant-id tn_01ks18jhh1xvggktfzjx5jqsen`）:
 
 ```bash
 tachyon --profile admin --tenant-id <tenant> auth manifest plan  -f .tachyon/manifests/tachyonfield-golf-auth.yml
@@ -69,8 +79,10 @@ tachyon --profile admin --tenant-id <tenant> auth manifest apply -f .tachyon/man
 - `--prune` は付けない（opt-in。付けなければ追加と更新だけで、既存 policy を消さない）
 - `-f` で golf マニフェストだけを指定する。auto-discovery は `.tachyon/manifests/` の
   他のファイル（OAuth client、Field 本体マニフェストの古いコピー）も拾う
-- 結果: action 8 件 / policy 6 件を作成、エラー 0。再 plan で action は unchanged
-  （policy は list endpoint が無いため常に register 表示になる）
+- 初回の結果: action 8 件 / policy 6 件を作成、エラー 0。再 plan で action は
+  unchanged（policy は list endpoint が無いため常に register 表示になる）
+- apply 後は、ロールの action 一覧が新しい語彙に入れ替わったことを確認する
+  （policy の中身は plan では見えない）
 - 検証: golf テナント（`tn_01kxd5gdvm9thcbj8c2e8c6yhq`）の
   `GET /v1/field/iam/users` の `customPolicies` に 5 ロールが載ることを確認した。
   `field-extension:golf:calculator` は載らない。`field:*` action を持たないので
@@ -139,8 +151,8 @@ CourseBoard の業務画面も 424 で止まる**。今までローカルルー�
 
 ## 動作確認
 
-- `cargo test`（644 件）/ `cargo clippy -D warnings` / `cd desktop && npm run
-  type-check && vitest run src/features/members src/i18n` すべて通過
+- `cargo test`（647 件）/ `cargo clippy --all-targets --all-features -- -D warnings`
+  / `cd desktop && npm run type-check && vitest run`（714 件）すべて通過
 - 実環境確認は prod Field API → local courseboard API → local UI
   （`desktop/README.md`）。マニフェスト適用前は golf ロールがカタログに無いので、
   チェックリストには Field 汎用 policy だけが並ぶ
