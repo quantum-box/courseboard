@@ -137,6 +137,25 @@ export const cancellationFees = {
       create: '請求書を作れませんでした',
       noPaymentLink: '支払いリンクが作られていません。請求の画面からやり直してください。',
       deliveryPartial: '支払いリンクはできましたが、選んだメールか SMS を送れませんでした。請求の画面から送り直せます。',
+      deliveryFailed: '支払いリンクはできましたが、{{channel}}を送れませんでした。{{reason}}',
+    },
+  },
+  delivery: {
+    channel: {
+      email: 'メール',
+      sms: 'SMS',
+    },
+    failedTitle: '{{channel}}を送れませんでした',
+    retryHint: '直したあと、この画面の「リンクを作って送り直す」で送り直せます。',
+    reason: {
+      permissionDenied:
+        'このアカウントに送信の権限がありません。管理者に「メンバーと権限」から権限を付けてもらってください。',
+      billingNotReady: '送信の支払い設定か残高が足りません。テナントの請求設定を確認してください。',
+      missingDestination: '送り先が登録されていません。送り先を入れて作り直してください。',
+      invalidDestination: '送り先の形が正しくありません。番号やアドレスを直してから送り直してください。',
+      providerError: '送信元でエラーが起きました。少し待ってから送り直してください。',
+      unknown:
+        '理由が分かりません。送る権限・残高・送り先のどれかです。続くときは管理者に連絡してください。',
     },
   },
   detail: {

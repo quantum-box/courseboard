@@ -141,6 +141,26 @@ export const cancellationFees: DeepPartial<typeof source> = {
       noPaymentLink: 'No payment link was issued. Try again from the invoice page.',
       deliveryPartial:
         'The payment link was created, but the email or SMS could not be sent. You can resend from the invoice page.',
+      deliveryFailed: 'The payment link was created, but the {{channel}} could not be sent. {{reason}}',
+    },
+  },
+  delivery: {
+    channel: {
+      email: 'email',
+      sms: 'SMS',
+    },
+    failedTitle: 'Could not send the {{channel}}',
+    retryHint: 'Once that is fixed, use "Issue link and resend" on this page to send it again.',
+    reason: {
+      permissionDenied:
+        'This account is not allowed to send it. Ask an administrator to grant the permission from Members and permissions.',
+      billingNotReady:
+        'Sending is not billable yet: the billing setup or the remaining credit is short. Check the tenant billing settings.',
+      missingDestination: 'No destination was stored. Add one and create the invoice again.',
+      invalidDestination: 'The destination is not in a valid form. Correct the number or address, then resend.',
+      providerError: 'The sender reported an error. Wait a moment and resend.',
+      unknown:
+        'The reason is unknown. It is the send permission, the remaining credit, or the destination. Contact an administrator if it keeps happening.',
     },
   },
   detail: {

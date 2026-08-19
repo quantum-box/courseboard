@@ -66,6 +66,16 @@ type InvoiceData = {
   paymentLinkStatus?: 'Pending' | 'Ready' | 'Failed' | null
   emailDeliveryStatus?: 'Pending' | 'Sent' | 'Failed' | null
   smsDeliveryStatus?: 'Pending' | 'Sent' | 'Failed' | null
+  /**
+   * Why the send failed, per channel (PLT-3707). Field records the status but
+   * used to drop the reason, so an operator saw `Failed` and nothing else —
+   * and the three causes need three different fixes (an admin grants the send
+   * permission, the tenant tops up SMS credit, or the destination is wrong).
+   * Absent while Field has not shipped the field yet; the copy falls back to
+   * naming all three.
+   */
+  emailDeliveryFailureCode?: string | null
+  smsDeliveryFailureCode?: string | null
   notes?: string | null
   sentAt?: string | null
   paidAt?: string | null
@@ -746,6 +756,15 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
           value={invoice.smsDeliveryStatus ?? t('cancellationFees:detail.metrics.unspecified')}
         />
       </MetricGrid>
+      {deliveryFailures(invoice).map(failure => (
+        <Notice
+          key={failure.channel}
+          tone="danger"
+          title={t('cancellationFees:delivery.failedTitle', { channel: failure.label })}
+        >
+          {failure.reason} {t('cancellationFees:delivery.retryHint')}
+        </Notice>
+      ))}
       <Panel
         title={t('cancellationFees:detail.payment.title')}
         actions={(
@@ -927,13 +946,87 @@ function summarize(invoices: InvoiceData[]) {
   }, { count: 0, unpaid: 0, overdue: 0, paid: 0 })
 }
 
+export type DeliveryChannel = 'email' | 'sms'
+
+/**
+ * Failure codes Field returns per channel, mapped to the i18n key that names
+ * the fix (PLT-3707).
+ *
+ * Matched case-insensitively: the codes are `paymentLinkFailureCode`-style
+ * PascalCase on the wire, and a snake_case spelling has to keep reading as the
+ * same cause rather than falling through to `unknown`.
+ */
+const DELIVERY_FAILURE_REASONS: Record<string, string> = {
+  permissiondenied: 'permissionDenied',
+  billingnotready: 'billingNotReady',
+  missingdestination: 'missingDestination',
+  invaliddestination: 'invalidDestination',
+  providerrequestfailed: 'providerError',
+}
+
+function deliveryFailureReason(code?: string | null) {
+  const normalized = code?.trim().toLowerCase().replace(/_/g, '')
+  const key = (normalized && DELIVERY_FAILURE_REASONS[normalized]) ?? 'unknown'
+  return i18next.t(`cancellationFees:delivery.reason.${key}` as 'cancellationFees:delivery.reason.unknown')
+}
+
+export function deliveryChannelLabel(channel: DeliveryChannel) {
+  return i18next.t(`cancellationFees:delivery.channel.${channel}` as 'cancellationFees:delivery.channel.sms')
+}
+
+/**
+ * The channels whose send failed, each with what to do about it.
+ *
+ * Empty for an invoice that never asked for that channel: a `null` status is
+ * "not requested", which is not a failure to report.
+ */
+export function deliveryFailures(
+  invoice: Pick<InvoiceData,
+    'emailDeliveryStatus' | 'smsDeliveryStatus'
+    | 'emailDeliveryFailureCode' | 'smsDeliveryFailureCode'>,
+) {
+  const channels: { channel: DeliveryChannel; failed: boolean; code?: string | null }[] = [
+    {
+      channel: 'email',
+      failed: invoice.emailDeliveryStatus === 'Failed',
+      code: invoice.emailDeliveryFailureCode,
+    },
+    {
+      channel: 'sms',
+      failed: invoice.smsDeliveryStatus === 'Failed',
+      code: invoice.smsDeliveryFailureCode,
+    },
+  ]
+  return channels
+    .filter(entry => entry.failed)
+    .map(entry => ({
+      channel: entry.channel,
+      label: deliveryChannelLabel(entry.channel),
+      reason: deliveryFailureReason(entry.code),
+    }))
+}
+
 export function fulfillmentIssue(
   invoice: Pick<InvoiceData,
-    'status' | 'paymentLinkStatus' | 'paymentLinkUrl' | 'emailDeliveryStatus' | 'smsDeliveryStatus'>,
+    'status' | 'paymentLinkStatus' | 'paymentLinkUrl' | 'emailDeliveryStatus' | 'smsDeliveryStatus'
+    | 'emailDeliveryFailureCode' | 'smsDeliveryFailureCode'>,
   delivery: { sendEmail: boolean; sendSms: boolean },
 ) {
   if (invoice.paymentLinkStatus !== 'Ready' || !invoice.paymentLinkUrl) {
     return i18next.t('cancellationFees:new.error.noPaymentLink')
+  }
+  // Name the channel and the fix when the send actually failed. `deliveryPartial`
+  // below stays for the states that are not a failure yet — a delivery still
+  // Pending, or an invoice Field left short of `Sent`.
+  const failures = deliveryFailures(invoice)
+    .filter(failure => (failure.channel === 'email' ? delivery.sendEmail : delivery.sendSms))
+  if (failures.length > 0) {
+    return failures
+      .map(failure => i18next.t('cancellationFees:new.error.deliveryFailed', {
+        channel: failure.label,
+        reason: failure.reason,
+      }))
+      .join(' ')
   }
   const selectedDeliveriesSent =
     (!delivery.sendEmail || invoice.emailDeliveryStatus === 'Sent')

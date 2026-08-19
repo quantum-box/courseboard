@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   cancellationFeeInvoiceRequestBody,
+  deliveryFailures,
   fulfillmentIssue,
   invoiceBillTo,
   normalizePhone,
@@ -88,6 +89,37 @@ describe('cancellation fee fulfillment', () => {
       { ...sentInvoice, smsDeliveryStatus: 'Failed' },
       { sendEmail: false, sendSms: true },
     )).toContain('SMS')
+  })
+
+  it('names the fix when Field says why the send failed', () => {
+    const issue = fulfillmentIssue(
+      { ...sentInvoice, smsDeliveryStatus: 'Failed', smsDeliveryFailureCode: 'PermissionDenied' },
+      { sendEmail: false, sendSms: true },
+    )
+    expect(issue).toContain('SMS')
+    expect(issue).toContain('権限')
+  })
+
+  it('reads a snake_case failure code as the same cause', () => {
+    expect(deliveryFailures({
+      emailDeliveryStatus: null,
+      smsDeliveryStatus: 'Failed',
+      smsDeliveryFailureCode: 'billing_not_ready',
+    })).toEqual([
+      { channel: 'sms', label: 'SMS', reason: expect.stringContaining('残高') },
+    ])
+  })
+
+  it('falls back to all three causes while Field sends no code', () => {
+    const [failure] = deliveryFailures({
+      emailDeliveryStatus: null,
+      smsDeliveryStatus: 'Failed',
+    })
+    expect(failure?.reason).toContain('送り先')
+  })
+
+  it('reports nothing for a channel the invoice never asked for', () => {
+    expect(deliveryFailures({ emailDeliveryStatus: null, smsDeliveryStatus: 'Sent' })).toEqual([])
   })
 })
 
