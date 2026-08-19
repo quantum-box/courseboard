@@ -167,6 +167,31 @@ CourseBoard の停止になる。ただし **Field の認可も同じ `check_pol
 最悪ケースの露出は「停止が始まる前に剥奪された人が、読み取りだけ最大 30 分続けられる」。
 書き込みと、停止中に初めて触る人は通らない。
 
+### キャンセル料の送信 action の取りこぼし（2026-08-19 追加）
+
+「キャンセル料の SMS が送れない」の調査で分かった、上のゴルフ業務ロールの穴。
+`field-extension:golf:{accounting, manager}` は `accounting:CreateInvoice` しか
+持っておらず、キャンセル料の画面が実際に使う残り 3 つが抜けていた。
+
+- `accounting:ListInvoices` — 一覧と詳細（`GET /v1/invoices*`）
+- `accounting:SendReminder` — 送信と送り直し（`POST /v1/invoices/{id}/fulfill`、
+  `.../payment-link/resend`）
+- `notification:SendSms` — 送信の SMS 側。Field は利用者本人の bearer を
+  `POST {tachyon-api}/v1/notifications/sms` に転送し、そこで別途評価される
+  （tachyon-apps `apps/tachyon-api/src/email_endpoint.rs`）
+
+この action はプラットフォームでは `AdministratorAccess` にしか入っていないため、
+**オーナー以外は SMS が必ず失敗する**。メール側は同じエンドポイント群のうち
+認可も課金チェックも持たない唯一の経路なので、「メールは届くのに SMS だけ落ちる」
+という形で表面化する。本番（デモテナント）の 2026-08-04 の失敗 3 件は Sentry の
+`money_path_authz_denied` と時刻が一致し、これで確定した。
+
+> **ロールアウト**: マニフェストを編集しただけでは本番の policy は変わらない。
+> 上に書いたとおり `apply` は既存 policy を 409 skip するので、
+> `tachyon org policies delete <id>` → `apply` の順が要る（delete は参照中の
+> policy を拒否するので、先に誰かから外す必要がある）。本番の権限を動かす操作
+> なので、実行はレビュー後に人が行う。
+
 ## Field 側に残る粒度の課題（PLT 起票対象）
 
 1. **給与ゲートの非対称**: tachyonfield は

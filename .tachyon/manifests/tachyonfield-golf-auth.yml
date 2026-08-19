@@ -297,6 +297,20 @@ policies:
     effect: allow
   - action: accounting:CreateInvoice
     effect: allow
+  # Everything the cancellation-fee screens do, not just the create. The list
+  # and the detail are `GET /v1/invoices*` (`accounting:ListInvoices`), the
+  # send and the resend are `POST .../fulfill` (`accounting:SendReminder`), and
+  # the SMS leg of that send is evaluated against the operator's own bearer at
+  # `POST /v1/notifications/sms` (`notification:SendSms`). Granting the create
+  # alone left this role able to write a cancellation fee it could then neither
+  # open nor send — and the SMS failed while the email went out, because email
+  # is the one channel with no permission gate.
+  - action: accounting:ListInvoices
+    effect: allow
+  - action: accounting:SendReminder
+    effect: allow
+  - action: notification:SendSms
+    effect: allow
   - action: field_extension_golf:ListTeeSheet
     effect: allow
   - action: field_extension_golf:ListCourses
@@ -361,6 +375,14 @@ policies:
   - action: field:RegisterMembership
     effect: allow
   - action: accounting:CreateInvoice
+    effect: allow
+  # Same set as `field-extension:golf:accounting`: this role covers everything
+  # the golf roles cover, so it has to reach the cancellation fee it creates.
+  - action: accounting:ListInvoices
+    effect: allow
+  - action: accounting:SendReminder
+    effect: allow
+  - action: notification:SendSms
     effect: allow
   - action: field_extension_golf:AssignMembership
     effect: allow
