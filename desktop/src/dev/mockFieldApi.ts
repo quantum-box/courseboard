@@ -1245,6 +1245,42 @@ const mockInvoices = [
     createdAt: NOW,
     updatedAt: NOW,
   },
+  // The state operators actually report: the payment link is ready, the email
+  // never ran, and the SMS was refused upstream. Kept as a fixture so the
+  // failure copy — which names the fix, not just `Failed` — has somewhere to
+  // render without a live tenant that is missing the send permission.
+  {
+    id: 'inv_mock_002',
+    tenantId: 'courseboard_id',
+    invoiceNumber: 'CF-2026-0002',
+    clientId: 'client_mock_2',
+    clientName: 'Hanako Suzuki',
+    clientEmail: null,
+    clientPhone: '+819087654321',
+    lineItems: [
+      {
+        description: 'キャンセル料 (西コース / 2026-07-12)',
+        quantity: 1,
+        unitPrice: 5500,
+        amount: 5500,
+      },
+    ],
+    dueDate: '2026-07-25',
+    status: 'SendFailed',
+    currency: 'JPY',
+    subtotalAmount: 5500,
+    taxAmount: 0,
+    totalAmount: 5500,
+    paymentLinkUrl: 'https://example.com/pay/mock-2',
+    paymentLinkStatus: 'Ready',
+    emailDeliveryStatus: null,
+    smsDeliveryStatus: 'Failed',
+    smsDeliveryFailureCode: 'PermissionDenied',
+    notes: '[courseboard:cancellation-fee] mock invoice',
+    sentAt: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+  },
 ]
 
 function items<T>(values: T[]) {

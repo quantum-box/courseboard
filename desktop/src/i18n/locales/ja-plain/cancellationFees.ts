@@ -127,6 +127,25 @@ export const cancellationFees: DeepPartial<typeof source> = {
       noPaymentLink: '支払い用のリンクができていません。請求書の画面からやり直してください。',
       deliveryPartial:
         '支払い用のリンクはできましたが、メールかショートメールを送れませんでした。請求書の画面から、もう一度送れます。',
+      deliveryFailed: '支払い用のリンクはできましたが、{{channel}}を送れませんでした。{{reason}}',
+    },
+  },
+  delivery: {
+    channel: {
+      email: 'メール',
+      sms: 'ショートメール',
+    },
+    failedTitle: '{{channel}}を送れませんでした',
+    retryHint: '直したあと、この画面の「リンクを作って、もう一度送る」でもう一度送れます。',
+    reason: {
+      permissionDenied:
+        'このアカウントには、送る権限がありません。管理者の人に、「メンバーと権限」の画面で権限を付けてもらってください。',
+      billingNotReady: 'お金の設定か、残りの分が足りません。会社の請求の設定を見てください。',
+      missingDestination: '送り先が入っていません。送り先を入れて、作り直してください。',
+      invalidDestination: '送り先の形がちがいます。番号やアドレスを直してから、もう一度送ってください。',
+      providerError: '送るところでエラーが出ました。少し待ってから、もう一度送ってください。',
+      unknown:
+        '理由が分かりません。送る権限か、残りの分か、送り先のどれかです。何度も続くときは、管理者の人に伝えてください。',
     },
   },
   detail: {
