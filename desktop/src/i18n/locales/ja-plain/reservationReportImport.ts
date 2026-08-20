@@ -3,10 +3,10 @@ import type { reservationReportImport as source } from '../ja/reservationReportI
 
 export const reservationReportImport: DeepPartial<typeof source> = {
   title: '予約表を読み込む',
-  description: '前の予約システムから出した日ごとの組数を、コースごとに確かめて保存します。',
+  description: '前の予約システムから出した施設ごとの日々の組数を確かめて保存します。',
   intro: {
     title: '日ごとの予約表を読み込む',
-    body: 'Excel、CSV、PDFの表を選び、表の年とCourseBoardのコースを決めてから保存します。',
+    body: 'Excel、CSV、PDFの表を選び、表の年を決めます。施設をCourseBoardのコースに結びつけず保存することもできます。',
   },
   step: {
     choose: '表を選びます',
@@ -41,11 +41,11 @@ export const reservationReportImport: DeepPartial<typeof source> = {
     importing: '保存しています…',
     startOver: '別の表を選ぶ',
     reload: '保存した月を更新する',
+    registerCourse: 'この名前でコースを登録する',
   },
   notice: {
     individualTitle: '一人ひとりの予約は作りません',
     individualBody: 'この表にあるのは、1日の組数だけです。予約者、人数、スタート時刻がないため、予約台帳の細かい予約は作らず、合計だけを保存します。',
-    mappingRequired: '表のすべての施設を、別々のCourseBoardコースに結びつけてください。',
     mappingDuplicate: '1つのCourseBoardコースを、2つ以上の施設に結びつけることはできません。',
     noRows: '保存できる日ごとの数がありません。表の年と内容を確かめてください。',
     previewFailed: '表を読み込めませんでした。ファイルを確かめて、もう一度試してください。',
@@ -53,10 +53,11 @@ export const reservationReportImport: DeepPartial<typeof source> = {
   },
   mapping: {
     title: '表の列とCourseBoardのコースを結びつける',
-    description: '表の列が何の項目かを確かめてから、施設ごとの保存先コースを選びます。',
+    description: '表の列を確かめます。施設と同じ意味のコースがあるときだけ選び、ないときは結びつけずに保存できます。',
     source: '表に書かれた施設',
     selected: '選びました',
-    unselected: 'コースを選んでください',
+    unselected: 'コースに結びつけず保存する',
+    unlinked: 'コースに結びつけていません',
     suggested: '名前が同じ候補',
     columnTitle: '列の対応を確かめる',
     columnDescription: 'AIなどが選んだ候補です。違うときは列を選び直して、内容を確かめてください。',
@@ -93,6 +94,12 @@ export const reservationReportImport: DeepPartial<typeof source> = {
       caddieAttachedGroupCount: 'キャディ付きの組数',
     },
   },
+  unlinked: {
+    confirmTitle: 'コースに結びつけない施設があります',
+    confirmDescription: '施設ごとの合計として保存します。コースごとの合計には使いません。',
+    savedTitle: 'コースに結びつけていない施設も保存しました',
+    savedDescription: '施設ごとの合計には入っています。本当にコースの登録が足りないときだけ、名前を入れた登録画面を開けます。',
+  },
   review: {
     title: 'たしかめてほしい日があります',
     description: 'キャディが付く組の数が、ぜんぶの組の数より多くなっています。入れるのは止まりません。ここに出ている日だけ、あとで元の表と見くらべてください。',
@@ -128,6 +135,8 @@ export const reservationReportImport: DeepPartial<typeof source> = {
     empty: 'この月には保存した集計がありません。',
     date: '日付',
     facility: '施設',
+    courseLink: 'CourseBoardのコース',
+    unlinked: 'コースに結びつけていません',
     dayPart: '時間帯',
     groups: '組数',
     caddie: 'キャディ付き',

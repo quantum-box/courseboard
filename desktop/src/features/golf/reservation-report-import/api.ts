@@ -21,7 +21,16 @@ function reportForm(
   const form = new FormData()
   form.append('file', file, file.name)
   form.append('year', String(year))
-  if (mappings) form.append('courseMappings', JSON.stringify(mappings))
+  if (mappings) {
+    // Omit blank choices from the wire mapping. Their absence explicitly means
+    // "store this source facility without a CourseBoard course link".
+    const selectedMappings = Object.fromEntries(
+      Object.entries(mappings)
+        .map(([sourceCourseKey, golfCourseId]) => [sourceCourseKey, golfCourseId.trim()] as const)
+        .filter(([, golfCourseId]) => golfCourseId.length > 0),
+    )
+    form.append('courseMappings', JSON.stringify(selectedMappings))
+  }
   if (normalizedFingerprint) form.append('normalizedFingerprint', normalizedFingerprint)
   if (columnMappings) form.append('columnMappings', JSON.stringify(columnMappings))
   return form
@@ -59,8 +68,10 @@ export function listReservationReportEntries(from: string, to: string) {
 }
 
 export function mappingPayload(mappings: Record<string, string>): ReservationReportCourseMapping[] {
-  return Object.entries(mappings).map(([sourceCourseKey, golfCourseId]) => ({
-    sourceCourseKey,
-    golfCourseId,
-  }))
+  return Object.entries(mappings)
+    .filter(([, golfCourseId]) => golfCourseId.trim().length > 0)
+    .map(([sourceCourseKey, golfCourseId]) => ({
+      sourceCourseKey,
+      golfCourseId: golfCourseId.trim(),
+    }))
 }

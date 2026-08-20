@@ -126,7 +126,8 @@ pub struct ReservationReportEntryDto {
     pub id: String,
     pub source_course_key: String,
     pub source_course_name: String,
-    pub golf_course_id: String,
+    /// Null when the source facility has no honest one-course mapping.
+    pub golf_course_id: Option<String>,
     pub date: NaiveDate,
     pub day_part: String,
     pub group_count: i64,
@@ -268,7 +269,7 @@ fn entry_response(entry: &ExternalReservationReportEntry) -> ReservationReportEn
         id: entry.id().unwrap_or_default().to_string(),
         source_course_key: entry.source_course_key().to_string(),
         source_course_name: entry.source_course_name().to_string(),
-        golf_course_id: entry.golf_course_id().to_string(),
+        golf_course_id: entry.golf_course_id().map(ToString::to_string),
         date: entry.date(),
         day_part: entry.day_part().as_str().to_string(),
         group_count: entry.group_count(),
@@ -287,10 +288,7 @@ struct UploadedReservationReport {
     normalized_fingerprint: Option<String>,
 }
 
-async fn read_upload(
-    mut multipart: Multipart,
-    require_mappings: bool,
-) -> Result<UploadedReservationReport, AppError> {
+async fn read_upload(mut multipart: Multipart) -> Result<UploadedReservationReport, AppError> {
     let mut bytes = None;
     let mut filename = None;
     let mut year = None;
@@ -356,9 +354,6 @@ async fn read_upload(
     }
     let bytes = bytes.ok_or(AppError::BadRequest("file is required"))?;
     let year = year.ok_or(AppError::BadRequest("year is required"))?;
-    if require_mappings && mappings.is_none() {
-        return Err(AppError::BadRequest("courseMappings is required"));
-    }
     Ok(UploadedReservationReport {
         bytes,
         filename,
@@ -388,7 +383,7 @@ pub async fn preview_reservation_report(
 ) -> Result<Json<ReservationReportPreviewResponse>, AppError> {
     super::http::bearer_authorization(&headers)?;
     let credentials = reservation_report_credentials(state.course_authorizer(), &headers)?;
-    let upload = read_upload(multipart, false).await?;
+    let upload = read_upload(multipart).await?;
     let preview = PreviewReservationReportUseCase::execute_with_fallback(
         credentials,
         state.reservation_report_gateway().as_ref(),
@@ -423,7 +418,7 @@ pub async fn import_reservation_report(
 ) -> Result<Json<ReservationReportImportResponse>, AppError> {
     super::http::bearer_authorization(&headers)?;
     let credentials = reservation_report_credentials(state.course_authorizer(), &headers)?;
-    let upload = read_upload(multipart, true).await?;
+    let upload = read_upload(multipart).await?;
     let preview = PreviewReservationReportUseCase::execute_with_fallback(
         credentials,
         state.reservation_report_gateway().as_ref(),
@@ -525,6 +520,33 @@ mod tests {
     use axum::http::{header::AUTHORIZATION, HeaderValue};
 
     use super::*;
+
+    #[test]
+    fn unlinked_entry_response_keeps_the_facility_and_uses_null_course_id() {
+        let row = crate::course::domain::ReservationReportRow::new(
+            "facility-a",
+            "Facility A",
+            NaiveDate::from_ymd_opt(2026, 8, 20).unwrap(),
+            crate::course::domain::ReservationReportDayPart::Morning,
+            6,
+            2,
+        )
+        .unwrap();
+        let entry = ExternalReservationReportEntry::new(
+            &row,
+            Option::<crate::course::domain::CourseId>::None,
+            "synthetic-hash",
+        )
+        .with_persistence_metadata("unlinked:facility-a:2026-08-20:morning", None);
+
+        let dto = entry_response(&entry);
+        assert_eq!(dto.source_course_key, "facility-a");
+        assert_eq!(dto.source_course_name, "Facility A");
+        assert_eq!(dto.golf_course_id, None);
+        assert_eq!(dto.group_count, 6);
+        let json = serde_json::to_value(dto).expect("entry response serializes");
+        assert!(json["golfCourseId"].is_null());
+    }
 
     #[test]
     fn import_credentials_preserve_user_bearer_and_require_platform() {

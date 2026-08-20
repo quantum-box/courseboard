@@ -16,7 +16,7 @@ use super::field_gateway::{
     field_send_json, field_send_multipart, field_send_unit, normalize_base_url, urlencoding_path,
 };
 use crate::course::domain::{
-    Course, CourseError, ExternalReservationReportEntry, GatewayCredentials,
+    Course, CourseError, CourseId, ExternalReservationReportEntry, GatewayCredentials,
     ReservationReportAnalyzeGateway, ReservationReportDayPart, ReservationReportEntryQuery,
     ReservationReportGateway, ReservationReportUpsertSummary, TabularAnalyzeMapping,
     TabularAnalyzeMappingField, TabularAnalyzeResult, TabularAnalyzeRow,
@@ -27,6 +27,7 @@ const CONFIG_PATH: &str = "/v1/erp/extensions/golf_course/config";
 const TABULAR_ANALYZE_PATH: &str = "/v1/erp/extensions/golf-course/tabular/analyze";
 const REPORT_KEY: &str = "courseBoardReservationReport";
 const COURSES_KEY: &str = "courses";
+const UNLINKED_FACILITIES_KEY: &str = "unlinkedFacilities";
 const ROWS_KEY: &str = "rows";
 
 const TABULAR_TARGET_SCHEMA: &str = r#"[
@@ -193,11 +194,17 @@ impl ReservationReportGateway for FieldReservationReportGateway {
             ));
         }
         let mut grouped: BTreeMap<&str, Vec<&ExternalReservationReportEntry>> = BTreeMap::new();
+        let mut unlinked_grouped: BTreeMap<&str, Vec<&ExternalReservationReportEntry>> =
+            BTreeMap::new();
         for entry in entries {
-            grouped
-                .entry(entry.golf_course_id().as_str())
-                .or_default()
-                .push(entry);
+            if let Some(course_id) = entry.golf_course_id() {
+                grouped.entry(course_id.as_str()).or_default().push(entry);
+            } else {
+                unlinked_grouped
+                    .entry(entry.source_course_key())
+                    .or_default()
+                    .push(entry);
+            }
         }
 
         let source_keys: std::collections::HashSet<&str> = entries
@@ -219,7 +226,54 @@ impl ReservationReportGateway for FieldReservationReportGateway {
             })
             .transpose()?
             .unwrap_or_default();
+        let mut unlinked_reports = report_root
+            .remove(UNLINKED_FACILITIES_KEY)
+            .map(|value| {
+                value.as_object().cloned().ok_or(CourseError::Provider(
+                    "reservation report unlinked facilities config is not an object".into(),
+                ))
+            })
+            .transpose()?
+            .unwrap_or_default();
         let mut summary = ReservationReportUpsertSummary::default();
+
+        // A source facility may have been linked to a course that is now
+        // inactive or no longer returned by the catalog. Remove its old rows
+        // from every non-target bucket before rebuilding the current target;
+        // otherwise list filtering could hide a stale duplicate indefinitely.
+        let target_course_ids = grouped
+            .keys()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        for (course_id, report_value) in &mut course_reports {
+            if target_course_ids.contains(course_id.as_str()) {
+                continue;
+            }
+            let mut report = report_object(Some(report_value))?;
+            let mut row_map = report
+                .remove(ROWS_KEY)
+                .map(|rows| {
+                    rows.as_object().cloned().ok_or(CourseError::Provider(
+                        "reservation report rows config is not an object".into(),
+                    ))
+                })
+                .transpose()?
+                .unwrap_or_default();
+            row_map.retain(|_, value| {
+                !value
+                    .get("sourceCourseKey")
+                    .and_then(Value::as_str)
+                    .is_some_and(|key| source_keys.contains(key))
+            });
+            report.insert(ROWS_KEY.into(), Value::Object(row_map));
+            *report_value = Value::Object(report);
+        }
+        course_reports.retain(|_, report| {
+            !report
+                .get(ROWS_KEY)
+                .and_then(Value::as_object)
+                .is_some_and(Map::is_empty)
+        });
 
         // Clean and rebuild every active course in memory, then commit the
         // tenant config once so a multi-course import cannot partially persist.
@@ -298,7 +352,74 @@ impl ReservationReportGateway for FieldReservationReportGateway {
             }
         }
 
+        // An unlinked facility is not a course and must not be placed under a
+        // synthetic course id. Replace the imported source facilities in their
+        // own namespace so they remain readable even when the catalog is empty.
+        for source_key in &source_keys {
+            let previous_report = unlinked_reports.remove(*source_key);
+            let Some(target_entries) = unlinked_grouped.get(*source_key) else {
+                continue;
+            };
+            let mut report = report_object(previous_report.as_ref())?;
+            let original_row_map = report
+                .remove(ROWS_KEY)
+                .map(|rows| {
+                    rows.as_object().cloned().ok_or(CourseError::Provider(
+                        "reservation report rows config is not an object".into(),
+                    ))
+                })
+                .transpose()?
+                .unwrap_or_default();
+            let mut row_map = Map::new();
+            for entry in target_entries {
+                let key = row_key(entry.date(), entry.day_part());
+                let previous = original_row_map.get(&key).cloned();
+                if previous
+                    .as_ref()
+                    .is_some_and(|value| row_matches_entry(value, entry))
+                {
+                    summary.unchanged_count += 1;
+                    row_map.insert(key, previous.expect("unchanged row exists"));
+                } else {
+                    row_map.insert(key, entry_value(entry, Utc::now()));
+                    if previous.is_some() {
+                        summary.updated_count += 1;
+                    } else {
+                        summary.created_count += 1;
+                    }
+                }
+            }
+            if row_map != original_row_map {
+                let first = target_entries
+                    .first()
+                    .expect("an unlinked source group always contains an entry");
+                report.insert(
+                    "sourceSystem".into(),
+                    Value::String(first.source_system().into()),
+                );
+                report.insert(
+                    "sourceCourseKey".into(),
+                    Value::String(first.source_course_key().into()),
+                );
+                report.insert(
+                    "sourceCourseName".into(),
+                    Value::String(first.source_course_name().into()),
+                );
+                report.insert(
+                    "sourceFileSha256".into(),
+                    Value::String(first.source_file_sha256().into()),
+                );
+                report.insert("updatedAt".into(), Value::String(Utc::now().to_rfc3339()));
+            }
+            report.insert(ROWS_KEY.into(), Value::Object(row_map));
+            unlinked_reports.insert((*source_key).to_string(), Value::Object(report));
+        }
+
         report_root.insert(COURSES_KEY.into(), Value::Object(course_reports));
+        report_root.insert(
+            UNLINKED_FACILITIES_KEY.into(),
+            Value::Object(unlinked_reports),
+        );
         next.insert(REPORT_KEY.into(), Value::Object(report_root));
         let next = Value::Object(next);
         if next != current {
@@ -328,50 +449,37 @@ impl ReservationReportGateway for FieldReservationReportGateway {
                 ));
             }
         };
+        let unlinked_reports = match report_root.get(UNLINKED_FACILITIES_KEY) {
+            None | Some(Value::Null) => None,
+            Some(Value::Object(reports)) => Some(reports),
+            Some(_) => {
+                return Err(CourseError::Provider(
+                    "reservation report unlinked facilities config is not an object".into(),
+                ));
+            }
+        };
         let mut entries = Vec::new();
         for course in courses.iter().filter(|course| course.is_active()) {
             let Some(report) = course_reports.and_then(|reports| reports.get(course.id().as_str()))
             else {
                 continue;
             };
-            let Some(rows) = report.get(ROWS_KEY).and_then(Value::as_object) else {
-                return Err(CourseError::Provider(
-                    "reservation report rows config is not an object".into(),
-                ));
-            };
-            for (key, value) in rows {
-                let (date, day_part) = parse_row_key(key)?;
-                if query.from.is_some_and(|from| date < from)
-                    || query.to.is_some_and(|to| date > to)
-                {
-                    continue;
-                }
-                let source_course_key = required_string(value, "sourceCourseKey")?;
-                let source_course_name = required_string(value, "sourceCourseName")?;
-                let source_file_sha256 = required_string(value, "sourceFileSha256")?;
-                let group_count = required_i64(value, "groupCount")?;
-                let caddie_count = required_i64(value, "caddieAttachedGroupCount")?;
-                let updated_at = value
-                    .get("updatedAt")
-                    .and_then(Value::as_str)
-                    .and_then(|raw| raw.parse::<DateTime<Utc>>().ok());
-                let entry = ExternalReservationReportEntry::reconstitute(
-                    format!("{}:{key}", course.id()),
-                    source_course_key,
-                    source_course_name,
-                    course.id().clone(),
-                    date,
-                    day_part,
-                    group_count,
-                    caddie_count,
-                    source_file_sha256,
-                    updated_at,
-                )
-                .map_err(|_| {
-                    CourseError::Provider("reservation report row values are invalid".into())
-                })?;
-                entries.push(entry);
-            }
+            append_report_entries(
+                report,
+                course.id().as_str(),
+                Some(course.id().clone()),
+                query,
+                &mut entries,
+            )?;
+        }
+        for (source_key, report) in unlinked_reports.into_iter().flatten() {
+            append_report_entries(
+                report,
+                &format!("unlinked:{source_key}"),
+                None,
+                query,
+                &mut entries,
+            )?;
         }
         entries.sort_by_key(|entry| {
             (
@@ -525,7 +633,7 @@ fn entry_value(entry: &ExternalReservationReportEntry, updated_at: DateTime<Utc>
         "sourceSystem": entry.source_system(),
         "sourceCourseKey": entry.source_course_key(),
         "sourceCourseName": entry.source_course_name(),
-        "golfCourseId": entry.golf_course_id().as_str(),
+        "golfCourseId": entry.golf_course_id().map(|course_id| course_id.as_str()),
         "date": entry.date().to_string(),
         "dayPart": entry.day_part().as_str(),
         "groupCount": entry.group_count(),
@@ -540,7 +648,7 @@ fn row_matches_entry(value: &Value, entry: &ExternalReservationReportEntry) -> b
         && value.get("sourceCourseKey").and_then(Value::as_str) == Some(entry.source_course_key())
         && value.get("sourceCourseName").and_then(Value::as_str) == Some(entry.source_course_name())
         && value.get("golfCourseId").and_then(Value::as_str)
-            == Some(entry.golf_course_id().as_str())
+            == entry.golf_course_id().map(|course_id| course_id.as_str())
         && value.get("date").and_then(Value::as_str) == Some(entry.date().to_string().as_str())
         && value.get("dayPart").and_then(Value::as_str) == Some(entry.day_part().as_str())
         && value.get("groupCount").and_then(Value::as_i64) == Some(entry.group_count())
@@ -549,6 +657,50 @@ fn row_matches_entry(value: &Value, entry: &ExternalReservationReportEntry) -> b
             .and_then(Value::as_i64)
             == Some(entry.caddie_attached_group_count())
         && value.get("sourceFileSha256").and_then(Value::as_str) == Some(entry.source_file_sha256())
+}
+
+fn append_report_entries(
+    report: &Value,
+    id_prefix: &str,
+    golf_course_id: Option<CourseId>,
+    query: ReservationReportEntryQuery,
+    entries: &mut Vec<ExternalReservationReportEntry>,
+) -> Result<(), CourseError> {
+    let Some(rows) = report.get(ROWS_KEY).and_then(Value::as_object) else {
+        return Err(CourseError::Provider(
+            "reservation report rows config is not an object".into(),
+        ));
+    };
+    for (key, value) in rows {
+        let (date, day_part) = parse_row_key(key)?;
+        if query.from.is_some_and(|from| date < from) || query.to.is_some_and(|to| date > to) {
+            continue;
+        }
+        let source_course_key = required_string(value, "sourceCourseKey")?;
+        let source_course_name = required_string(value, "sourceCourseName")?;
+        let source_file_sha256 = required_string(value, "sourceFileSha256")?;
+        let group_count = required_i64(value, "groupCount")?;
+        let caddie_count = required_i64(value, "caddieAttachedGroupCount")?;
+        let updated_at = value
+            .get("updatedAt")
+            .and_then(Value::as_str)
+            .and_then(|raw| raw.parse::<DateTime<Utc>>().ok());
+        let entry = ExternalReservationReportEntry::reconstitute(
+            format!("{id_prefix}:{key}"),
+            source_course_key,
+            source_course_name,
+            golf_course_id.clone(),
+            date,
+            day_part,
+            group_count,
+            caddie_count,
+            source_file_sha256,
+            updated_at,
+        )
+        .map_err(|_| CourseError::Provider("reservation report row values are invalid".into()))?;
+        entries.push(entry);
+    }
+    Ok(())
 }
 
 fn row_key(date: NaiveDate, day_part: ReservationReportDayPart) -> String {
@@ -735,7 +887,24 @@ mod tests {
         ExternalReservationReportEntry::new(&row, CourseId::new("course-1"), "hash")
     }
 
-    fn active_course(id: &str) -> Course {
+    fn unlinked_entry(
+        source_course_key: &str,
+        day_part: ReservationReportDayPart,
+        group_count: i64,
+    ) -> ExternalReservationReportEntry {
+        let row = ReservationReportRow::new(
+            source_course_key,
+            format!("{source_course_key} facility"),
+            NaiveDate::from_ymd_opt(2026, 8, 20).unwrap(),
+            day_part,
+            group_count,
+            1,
+        )
+        .unwrap();
+        ExternalReservationReportEntry::new(&row, Option::<CourseId>::None, "synthetic-hash")
+    }
+
+    fn course(id: &str, is_active: bool) -> Course {
         Course::reconstitute(
             id,
             "テストコース",
@@ -743,12 +912,20 @@ mod tests {
             18,
             "Asia/Tokyo",
             10,
-            true,
+            is_active,
             None,
             None,
             None,
             None,
         )
+    }
+
+    fn active_course(id: &str) -> Course {
+        course(id, true)
+    }
+
+    fn inactive_course(id: &str) -> Course {
+        course(id, false)
     }
 
     #[test]
@@ -763,6 +940,195 @@ mod tests {
             "2026-07-01:morning"
         );
         assert!(row_matches_entry(&value, &entry()));
+
+        let unlinked = unlinked_entry("facility-a", ReservationReportDayPart::Morning, 3);
+        let value = entry_value(&unlinked, Utc::now());
+        assert!(value["golfCourseId"].is_null());
+        assert!(row_matches_entry(&value, &unlinked));
+    }
+
+    #[tokio::test]
+    async fn unlinked_facilities_round_trip_without_a_course_and_do_not_collide() {
+        let state = Arc::new(ConfigState::default());
+        let app = Router::new()
+            .route(CONFIG_PATH, get(get_config).patch(patch_config))
+            .with_state(state.clone());
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldReservationReportGateway::new(reqwest::Client::new(), Some(&base_url));
+        let first = unlinked_entry("facility-a", ReservationReportDayPart::Morning, 3);
+        let second = unlinked_entry("facility-b", ReservationReportDayPart::Morning, 5);
+
+        let created = gateway
+            .upsert_entries(test_credentials(), &[first.clone(), second.clone()], &[])
+            .await
+            .expect("unlinked import");
+        assert_eq!(created.created_count, 2);
+        assert_eq!(created.updated_count, 0);
+        assert_eq!(created.unchanged_count, 0);
+
+        let stored = state.tenant.lock().expect("tenant lock").clone();
+        let first_row = &stored[REPORT_KEY][UNLINKED_FACILITIES_KEY]["facility-a"][ROWS_KEY]
+            ["2026-08-20:morning"];
+        let second_row = &stored[REPORT_KEY][UNLINKED_FACILITIES_KEY]["facility-b"][ROWS_KEY]
+            ["2026-08-20:morning"];
+        assert_eq!(first_row["groupCount"], 3);
+        assert_eq!(second_row["groupCount"], 5);
+        assert!(first_row["golfCourseId"].is_null());
+        assert!(second_row["golfCourseId"].is_null());
+
+        let unchanged = gateway
+            .upsert_entries(test_credentials(), &[first, second], &[])
+            .await
+            .expect("idempotent unlinked import");
+        assert_eq!(unchanged.created_count, 0);
+        assert_eq!(unchanged.updated_count, 0);
+        assert_eq!(unchanged.unchanged_count, 2);
+        assert_eq!(state.patches.lock().expect("patch lock").len(), 1);
+
+        let listed = gateway
+            .list_entries(
+                test_credentials(),
+                &[],
+                ReservationReportEntryQuery {
+                    from: None,
+                    to: None,
+                },
+            )
+            .await
+            .expect("list unlinked entries without a course catalog");
+        assert_eq!(listed.len(), 2);
+        assert_eq!(
+            listed.iter().map(|entry| entry.group_count()).sum::<i64>(),
+            8
+        );
+        assert!(listed.iter().all(|entry| entry.golf_course_id().is_none()));
+    }
+
+    #[tokio::test]
+    async fn linked_and_unlinked_remaps_remove_the_previous_copy() {
+        let state = Arc::new(ConfigState::default());
+        let app = Router::new()
+            .route(CONFIG_PATH, get(get_config).patch(patch_config))
+            .with_state(state.clone());
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldReservationReportGateway::new(reqwest::Client::new(), Some(&base_url));
+        let linked = entry();
+
+        gateway
+            .upsert_entries(
+                test_credentials(),
+                std::slice::from_ref(&linked),
+                &[active_course("course-1")],
+            )
+            .await
+            .expect("linked import");
+        let linked_to_second_course = ExternalReservationReportEntry::reconstitute(
+            "",
+            linked.source_course_key(),
+            linked.source_course_name(),
+            CourseId::new("course-2"),
+            linked.date(),
+            linked.day_part(),
+            linked.group_count(),
+            linked.caddie_attached_group_count(),
+            linked.source_file_sha256(),
+            None,
+        )
+        .expect("second course remap");
+        let to_second_course = gateway
+            .upsert_entries(
+                test_credentials(),
+                std::slice::from_ref(&linked_to_second_course),
+                &[inactive_course("course-1"), active_course("course-2")],
+            )
+            .await
+            .expect("remap from an inactive course");
+        assert_eq!(to_second_course.created_count, 1);
+        let stored = state.tenant.lock().expect("tenant lock").clone();
+        assert!(stored[REPORT_KEY][COURSES_KEY].get("course-1").is_none());
+        assert!(stored[REPORT_KEY][COURSES_KEY]["course-2"][ROWS_KEY].is_object());
+        drop(stored);
+
+        let unlinked = ExternalReservationReportEntry::reconstitute(
+            "",
+            linked.source_course_key(),
+            linked.source_course_name(),
+            Option::<CourseId>::None,
+            linked.date(),
+            linked.day_part(),
+            linked.group_count(),
+            linked.caddie_attached_group_count(),
+            linked.source_file_sha256(),
+            None,
+        )
+        .expect("unlinked remap");
+        let to_unlinked = gateway
+            .upsert_entries(
+                test_credentials(),
+                std::slice::from_ref(&unlinked),
+                &[inactive_course("course-1"), inactive_course("course-2")],
+            )
+            .await
+            .expect("remap to unlinked");
+        assert_eq!(to_unlinked.created_count, 1);
+        let stored = state.tenant.lock().expect("tenant lock").clone();
+        assert!(stored[REPORT_KEY][COURSES_KEY]
+            .as_object()
+            .unwrap()
+            .is_empty());
+        assert!(
+            stored[REPORT_KEY][UNLINKED_FACILITIES_KEY][linked.source_course_key()][ROWS_KEY]
+                .is_object()
+        );
+        drop(stored);
+
+        let listed = gateway
+            .list_entries(
+                test_credentials(),
+                &[inactive_course("course-1"), inactive_course("course-2")],
+                ReservationReportEntryQuery {
+                    from: None,
+                    to: None,
+                },
+            )
+            .await
+            .expect("list remapped unlinked row");
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].golf_course_id().is_none());
+
+        let to_linked = gateway
+            .upsert_entries(
+                test_credentials(),
+                std::slice::from_ref(&linked),
+                &[active_course("course-1"), inactive_course("course-2")],
+            )
+            .await
+            .expect("remap back to linked");
+        assert_eq!(to_linked.created_count, 1);
+        let stored = state.tenant.lock().expect("tenant lock").clone();
+        assert!(stored[REPORT_KEY][UNLINKED_FACILITIES_KEY]
+            .as_object()
+            .unwrap()
+            .is_empty());
+        assert!(stored[REPORT_KEY][COURSES_KEY]["course-1"][ROWS_KEY].is_object());
+        drop(stored);
+
+        let listed = gateway
+            .list_entries(
+                test_credentials(),
+                &[active_course("course-1")],
+                ReservationReportEntryQuery {
+                    from: None,
+                    to: None,
+                },
+            )
+            .await
+            .expect("list remapped linked row");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            listed[0].golf_course_id().map(|id| id.as_str()),
+            Some("course-1")
+        );
     }
 
     #[tokio::test]
@@ -903,7 +1269,10 @@ mod tests {
             .await
             .expect("list after remap");
         assert_eq!(listed_after_remap.len(), 1);
-        assert_eq!(listed_after_remap[0].golf_course_id().as_str(), "course-2");
+        assert_eq!(
+            listed_after_remap[0].golf_course_id().map(|id| id.as_str()),
+            Some("course-2")
+        );
     }
 
     #[tokio::test]
@@ -952,6 +1321,10 @@ mod tests {
             (
                 json!({ REPORT_KEY: { COURSES_KEY: [] } }),
                 "reservation report courses config is not an object",
+            ),
+            (
+                json!({ REPORT_KEY: { UNLINKED_FACILITIES_KEY: [] } }),
+                "reservation report unlinked facilities config is not an object",
             ),
         ];
 

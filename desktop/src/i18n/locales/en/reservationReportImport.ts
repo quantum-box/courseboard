@@ -3,10 +3,10 @@ import type { reservationReportImport as source } from '../ja/reservationReportI
 
 export const reservationReportImport: DeepPartial<typeof source> = {
   title: 'Bring in a booking report',
-  description: 'Review daily group counts from the existing booking system by course, then save them.',
+  description: 'Review and save daily group counts for each source facility from the existing booking system.',
   intro: {
     title: 'Bring in the daily booking report',
-    body: 'Choose an Excel, CSV, or PDF file, set its year, map each facility to a CourseBoard course, then save it.',
+    body: 'Choose an Excel, CSV, or PDF file and set its year. A facility can also be saved without linking it to a CourseBoard course.',
   },
   step: {
     choose: 'Choose the report',
@@ -41,11 +41,11 @@ export const reservationReportImport: DeepPartial<typeof source> = {
     importing: 'Saving…',
     startOver: 'Choose another report',
     reload: 'Refresh saved months',
+    registerCourse: 'Register a course with this name',
   },
   notice: {
     individualTitle: 'Individual bookings are not created',
     individualBody: 'This report contains daily group counts only. It has no player, party-size, or start-time details, so only the aggregate values are saved—not booking ledger details.',
-    mappingRequired: 'Map every facility to a different CourseBoard course.',
     mappingDuplicate: 'A CourseBoard course cannot be mapped to more than one facility.',
     noRows: 'There are no daily values to save. Check the report year and file.',
     previewFailed: 'The report could not be read. Check the file and try again.',
@@ -53,10 +53,11 @@ export const reservationReportImport: DeepPartial<typeof source> = {
   },
   mapping: {
     title: 'Map file columns and CourseBoard courses',
-    description: 'First confirm which file column supplies each CourseBoard field, then choose a destination course for every facility.',
+    description: 'First confirm the file columns. Choose a course only when it correctly represents the facility; otherwise leave it unlinked.',
     source: 'Report facility',
     selected: 'Selected',
-    unselected: 'Choose a course',
+    unselected: 'Save without a course link',
+    unlinked: 'Not linked',
     suggested: 'Name match suggested',
     columnTitle: 'Review the column mapping',
     columnDescription: 'These are candidates from known names or AI. Change the source column when needed, then explicitly approve the mapping.',
@@ -93,6 +94,12 @@ export const reservationReportImport: DeepPartial<typeof source> = {
       caddieAttachedGroupCount: 'Groups with caddie',
     },
   },
+  unlinked: {
+    confirmTitle: 'Some facilities are not linked to a course',
+    confirmDescription: 'They will be saved as facility-level aggregates and will not be used in course-level totals.',
+    savedTitle: 'Unlinked facilities were saved too',
+    savedDescription: 'They remain in facility-level totals. If a course is genuinely missing, open the registration form with its name filled in.',
+  },
   review: {
     title: 'Some half-days are worth a look',
     description: 'More caddie-attached groups than groups. Nothing is held up — just compare these half-days against the original report.',
@@ -128,6 +135,8 @@ export const reservationReportImport: DeepPartial<typeof source> = {
     empty: 'Nothing has been saved for this month.',
     date: 'Date',
     facility: 'Facility',
+    courseLink: 'CourseBoard course',
+    unlinked: 'Not linked',
     dayPart: 'Day part',
     groups: 'Groups',
     caddie: 'With caddie',

@@ -103,14 +103,16 @@ fn hash_fingerprint_part(hasher: &mut Sha256, value: &str) {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReservationReportCourseMapping {
     pub source_course_key: String,
-    pub golf_course_id: CourseId,
+    pub golf_course_id: Option<CourseId>,
 }
 
 impl ReservationReportCourseMapping {
     pub fn new(source_course_key: impl Into<String>, golf_course_id: impl Into<String>) -> Self {
+        let golf_course_id = golf_course_id.into();
         Self {
             source_course_key: source_course_key.into(),
-            golf_course_id: CourseId::new(golf_course_id),
+            golf_course_id: (!golf_course_id.trim().is_empty())
+                .then(|| CourseId::new(golf_course_id)),
         }
     }
 }
@@ -871,7 +873,11 @@ impl ImportReservationReportUseCase {
             .map(|course| course.id().as_str())
             .collect();
         for mapping in mappings {
-            if !active_course_ids.contains(mapping.golf_course_id.as_str()) {
+            if mapping
+                .golf_course_id
+                .as_ref()
+                .is_some_and(|course_id| !active_course_ids.contains(course_id.as_str()))
+            {
                 return Err(CourseError::BadRequest(
                     "course mapping must target an active course",
                 ));
@@ -887,49 +893,47 @@ fn mapped_entries(
     report: &ReservationReport,
     mappings: &[ReservationReportCourseMapping],
 ) -> Result<Vec<ExternalReservationReportEntry>, CourseError> {
-    if mappings.len() != report.facilities().len() {
-        return Err(CourseError::BadRequest(
-            "every source facility must have exactly one course mapping",
-        ));
-    }
     let mut by_key = HashMap::new();
     let mut course_ids = HashSet::new();
     for mapping in mappings {
         let key = mapping.source_course_key.trim();
-        let course_id = mapping.golf_course_id.as_str().trim();
-        if key.is_empty() || course_id.is_empty() {
-            return Err(CourseError::BadRequest("course mappings cannot be empty"));
+        if key.is_empty() {
+            return Err(CourseError::BadRequest(
+                "course mapping source facility cannot be empty",
+            ));
+        }
+        if !report
+            .facilities()
+            .iter()
+            .any(|facility| facility.source_course_key() == key)
+        {
+            return Err(CourseError::BadRequest("course mapping is unknown"));
         }
         if by_key
             .insert(key.to_string(), mapping.golf_course_id.clone())
             .is_some()
-            || !course_ids.insert(course_id.to_string())
         {
             return Err(CourseError::BadRequest(
                 "source facilities and courses must be mapped uniquely",
             ));
         }
-    }
-    for facility in report.facilities() {
-        if !by_key.contains_key(facility.source_course_key()) {
-            return Err(CourseError::BadRequest(
-                "every source facility must have exactly one course mapping",
-            ));
+        if let Some(course_id) = mapping.golf_course_id.as_ref() {
+            if !course_ids.insert(course_id.to_string()) {
+                return Err(CourseError::BadRequest(
+                    "source facilities and courses must be mapped uniquely",
+                ));
+            }
         }
     }
     report
         .rows()
         .iter()
         .map(|row| {
-            let course_id = by_key
-                .get(row.source_course_key())
-                .ok_or(CourseError::BadRequest("course mapping is unknown"))?;
-            Ok(ExternalReservationReportEntry::new(
-                row,
-                course_id.clone(),
-                report.source_file_sha256(),
+            let course_id = by_key.get(row.source_course_key()).cloned().flatten();
+            Ok(
+                ExternalReservationReportEntry::new(row, course_id, report.source_file_sha256())
+                    .with_source_system(report.source_system()),
             )
-            .with_source_system(report.source_system()))
         })
         .collect()
 }
@@ -976,10 +980,16 @@ impl ListReservationReportEntriesUseCase {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
+    use axum::{routing::get, Json, Router};
+
     use super::*;
     use crate::course::domain::{
-        TabularAnalyzeMapping, TabularAnalyzeMappingField, TabularAnalyzeRow,
+        Course, ReservationReportEntryQuery, ReservationReportGateway, TabularAnalyzeMapping,
+        TabularAnalyzeMappingField, TabularAnalyzeRow,
     };
+    use crate::course::infrastructure::FieldGolfCatalogGateway;
 
     fn tabular_analysis(rows: Vec<TabularAnalyzeRow>) -> TabularAnalyzeResult {
         let fields = TARGET_FIELDS
@@ -1055,7 +1065,7 @@ mod tests {
     }
 
     #[test]
-    fn mappings_must_cover_each_facility_and_use_distinct_courses() {
+    fn course_mapping_is_optional_but_unknown_and_duplicate_mappings_are_rejected() {
         let row = ReservationReportRow::new(
             "真駒内",
             "真駒内\n36H",
@@ -1071,10 +1081,24 @@ mod tests {
             vec![row],
         )
         .unwrap();
-        assert!(mapped_entries(&report, &[]).is_err());
-        let duplicate = vec![
+        let unlinked = mapped_entries(&report, &[]).expect("unlinked facility is valid");
+        assert!(unlinked[0].golf_course_id().is_none());
+
+        let explicit_unlinked = mapped_entries(
+            &report,
+            &[ReservationReportCourseMapping::new("真駒内", "")],
+        )
+        .expect("an empty selection is an unlinked facility");
+        assert!(explicit_unlinked[0].golf_course_id().is_none());
+
+        let unknown = vec![
             ReservationReportCourseMapping::new("真駒内", "course-1"),
             ReservationReportCourseMapping::new("extra", "course-1"),
+        ];
+        assert!(mapped_entries(&report, &unknown).is_err());
+        let duplicate = vec![
+            ReservationReportCourseMapping::new("真駒内", "course-1"),
+            ReservationReportCourseMapping::new("真駒内", "course-2"),
         ];
         assert!(mapped_entries(&report, &duplicate).is_err());
         let entries = mapped_entries(
@@ -1082,7 +1106,104 @@ mod tests {
             &[ReservationReportCourseMapping::new("真駒内", "course-1")],
         )
         .unwrap();
-        assert_eq!(entries[0].golf_course_id().as_str(), "course-1");
+        assert_eq!(
+            entries[0].golf_course_id().map(|id| id.as_str()),
+            Some("course-1")
+        );
+    }
+
+    #[derive(Default)]
+    struct CapturingReservationReportGateway {
+        entries: Mutex<Vec<ExternalReservationReportEntry>>,
+    }
+
+    #[async_trait::async_trait]
+    impl ReservationReportGateway for CapturingReservationReportGateway {
+        async fn upsert_entries(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            entries: &[ExternalReservationReportEntry],
+            _courses: &[Course],
+        ) -> Result<ReservationReportUpsertSummary, CourseError> {
+            *self.entries.lock().expect("entries lock") = entries.to_vec();
+            Ok(ReservationReportUpsertSummary {
+                created_count: entries.len() as i64,
+                ..Default::default()
+            })
+        }
+
+        async fn list_entries(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _courses: &[Course],
+            _query: ReservationReportEntryQuery,
+        ) -> Result<Vec<ExternalReservationReportEntry>, CourseError> {
+            Ok(self.entries.lock().expect("entries lock").clone())
+        }
+    }
+
+    #[tokio::test]
+    async fn importing_an_unlinked_facility_does_not_create_a_course_from_its_name() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind catalog stub");
+        let address = listener.local_addr().expect("catalog stub address");
+        // Deliberately expose only the list operation. Any attempt to create a
+        // course as an upload side effect makes this use case fail the test.
+        let app = Router::new().route(
+            "/v1/erp/extensions/golf-course/courses",
+            get(|| async { Json(serde_json::json!({ "items": [] })) }),
+        );
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve catalog stub");
+        });
+
+        let gateway = Arc::new(CapturingReservationReportGateway::default());
+        let catalog = Arc::new(FieldGolfCatalogGateway::new(
+            reqwest::Client::new(),
+            Some(&format!("http://{address}")),
+        ));
+        let use_case = ImportReservationReportUseCase::new(gateway.clone(), catalog);
+        let row = ReservationReportRow::new(
+            "facility-without-course",
+            "Facility without a CourseBoard course",
+            NaiveDate::from_ymd_opt(2026, 8, 20).unwrap(),
+            ReservationReportDayPart::Morning,
+            7,
+            2,
+        )
+        .unwrap();
+        let report = ReservationReport::new(
+            "synthetic-hash",
+            vec![ReservationReportFacility::new(
+                "facility-without-course",
+                "Facility without a CourseBoard course",
+            )],
+            vec![row],
+        )
+        .unwrap();
+
+        let summary = use_case
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer test",
+                    caller_bearer: "Bearer test",
+                    operator_id: "tenant-test",
+                    platform_id: Some("platform-test"),
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                },
+                &report,
+                &[],
+            )
+            .await
+            .expect("unlinked import succeeds without catalog mutation");
+        assert_eq!(summary.created_count, 1);
+        let stored = gateway.entries.lock().expect("entries lock");
+        assert_eq!(stored.len(), 1);
+        assert!(stored[0].golf_course_id().is_none());
+        assert_eq!(stored[0].source_course_key(), "facility-without-course");
     }
 
     #[test]
