@@ -57,6 +57,7 @@ function renderPage() {
 describe('CoursesPage save paths', () => {
   beforeEach(async () => {
     await i18next.changeLanguage('ja')
+    window.history.replaceState({}, '', '/golf/courses')
     clearResourceCache()
     storedCourses = [storedCourse('course-existing', {
       name: '既存コース',
@@ -113,6 +114,18 @@ describe('CoursesPage save paths', () => {
       '更新',
       '操作',
     ])
+  })
+
+  it('opens a new course form with the facility name passed by the import screen', async () => {
+    const params = new URLSearchParams({ courseName: '未登録施設A' })
+    window.history.replaceState({}, '', `/golf/courses?${params.toString()}`)
+
+    renderPage()
+
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole<HTMLInputElement>('textbox', { name: /コース名/ }).value)
+      .toBe('未登録施設A')
+    expect(postBodies).toEqual([])
   })
 
   it('creates a course through the real Sheet and reads it back', async () => {

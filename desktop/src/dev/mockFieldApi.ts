@@ -133,7 +133,7 @@ type MockReservationReportEntry = {
   id: string
   sourceCourseKey: string
   sourceCourseName: string
-  golfCourseId: string
+  golfCourseId: string | null
   date: string
   dayPart: 'morning' | 'afternoon'
   groupCount: number
@@ -2687,8 +2687,10 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     const rows = mockReservationReportRows(year)
     const selectedCourses = new Set<string>()
     for (const facility of MOCK_RESERVATION_REPORT_FACILITIES) {
-      const golfCourseId = mappings[facility.sourceCourseKey]
-      if (!golfCourseId) return error(400, 'every source facility must be mapped')
+      const golfCourseId = mappings[facility.sourceCourseKey]?.trim()
+      // Missing is intentional: preserve the facility aggregate without
+      // inventing a CourseBoard course.
+      if (!golfCourseId) continue
       if (selectedCourses.has(golfCourseId)) return error(400, 'course mappings must be unique')
       selectedCourses.add(golfCourseId)
     }
@@ -2696,7 +2698,7 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     let updatedCount = 0
     let unchangedCount = 0
     for (const row of rows) {
-      const golfCourseId = mappings[row.sourceCourseKey]!
+      const golfCourseId = mappings[row.sourceCourseKey]?.trim() || null
       const key = `${row.sourceCourseKey}:${row.date}:${row.dayPart}`
       const index = mockReservationReportEntries.findIndex(entry => (
         `${entry.sourceCourseKey}:${entry.date}:${entry.dayPart}` === key

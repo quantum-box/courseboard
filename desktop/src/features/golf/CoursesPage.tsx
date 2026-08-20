@@ -8,7 +8,7 @@ import {
   Save,
   Trash2,
 } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { courseboardApiJson } from '../../api'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
@@ -29,7 +29,7 @@ import {
   type DataTableColumn,
 } from '../../components/Page'
 import { Sheet } from '../../components/Sheet'
-import { navigate } from '../../lib/router'
+import { currentRouteSearchParams, navigate, replaceRouteSearchParams } from '../../lib/router'
 import { useResource } from '../../hooks/useResource'
 import {
   courseToDraft,
@@ -79,6 +79,11 @@ function validateCourse(draft: GolfCourseDraft) {
   return null
 }
 
+function requestedCourseNameFromRoute() {
+  if (typeof window === 'undefined') return ''
+  return currentRouteSearchParams().get('courseName')?.trim() ?? ''
+}
+
 export function CoursesPage() {
   const { t } = useTranslation(['courses', 'common', 'nav'])
   const timezone = useTenantTimezone()
@@ -88,11 +93,21 @@ export function CoursesPage() {
     { cacheKey: 'courses:list' },
   )
   const courses = coursesResource.data?.items ?? []
-  const [editor, setEditor] = useState<EditorState>(null)
-  const [draft, setDraft] = useState<GolfCourseDraft>(emptyCourseDraft)
+  const requestedCourseName = requestedCourseNameFromRoute()
+  const [editor, setEditor] = useState<EditorState>(() => (
+    requestedCourseName ? { mode: 'create' } : null
+  ))
+  const [draft, setDraft] = useState<GolfCourseDraft>(() => ({
+    ...emptyCourseDraft(),
+    name: requestedCourseName,
+  }))
   const [saving, setSaving] = useState(false)
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [mutationError, setMutationError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (requestedCourseName) replaceRouteSearchParams({ courseName: null })
+  }, [requestedCourseName])
 
   /** Every finished mutation reports in the same place: bottom right. */
   function saved(message: string) {

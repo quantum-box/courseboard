@@ -1,9 +1,9 @@
 export const reservationReportImport = {
   title: '予約表をとりこむ',
-  description: '既存の予約システムから出した日別の組数を、コースごとに確認して保存します。',
+  description: '既存の予約システムから出した施設ごとの日別組数を確認して保存します。',
   intro: {
     title: '日別予約表をとりこむ',
-    body: 'Excel、CSV、PDFの表を選び、対象年とCourseBoardのコースを対応させてから保存します。',
+    body: 'Excel、CSV、PDFの表を選び、対象年を確認します。施設はCourseBoardのコースに紐づけず保存することもできます。',
   },
   step: {
     choose: '表を選ぶ',
@@ -38,11 +38,11 @@ export const reservationReportImport = {
     importing: '保存中…',
     startOver: '別の表を読み込む',
     reload: '取込済みの月を更新',
+    registerCourse: 'この名前でコースを登録',
   },
   notice: {
     individualTitle: '個別の予約は作りません',
     individualBody: 'この表にあるのは日ごとの組数だけです。予約者、人数、スタート時刻の情報はないため、予約台帳の明細は作らず集計値だけを保存します。',
-    mappingRequired: 'すべての施設を、別々のCourseBoardコースに対応させてください。',
     mappingDuplicate: '同じCourseBoardコースを複数の施設に対応させることはできません。',
     noRows: '保存できる日別の組数がありません。対象年と表の内容を確認してください。',
     previewFailed: '表を読み込めませんでした。ファイルを確認して、もう一度試してください。',
@@ -50,10 +50,11 @@ export const reservationReportImport = {
   },
   mapping: {
     title: '表の列とCourseBoardのコースを対応させる',
-    description: '最初に表の列がCourseBoardのどの項目になるかを確認し、次に施設ごとの保存先コースを選びます。',
+    description: '最初に表の列を確認します。施設に正しく対応するコースがある場合だけ選び、ない場合は未紐づけのまま保存できます。',
     source: '表の施設',
     selected: '選択済み',
-    unselected: 'コースを選んでください',
+    unselected: '紐づけずに保存',
+    unlinked: '未紐づけ',
     suggested: '名前が一致した候補',
     columnTitle: '列の対応を確認する',
     columnDescription: 'AIまたは既知の列名による候補です。違う場合は元の列を選び直し、対応内容を承認してください。',
@@ -90,6 +91,12 @@ export const reservationReportImport = {
       caddieAttachedGroupCount: 'キャディ付きの組数',
     },
   },
+  unlinked: {
+    confirmTitle: 'コースに紐づけない施設があります',
+    confirmDescription: '施設単位の集計として保存します。コース別の集計には使われません。',
+    savedTitle: '未紐づけの施設も保存しました',
+    savedDescription: '施設単位の集計には含まれています。本当に未登録のコースが必要な場合だけ、名前を引き継いで登録画面を開けます。',
+  },
   review: {
     title: '確認が必要な日があります',
     description: 'キャディ付きの組数が全体の組数を超えています。取り込みは止まりません。ここに出ている日だけ、あとで元の予約表と見比べてください。',
@@ -125,6 +132,8 @@ export const reservationReportImport = {
     empty: 'この月には保存済みの集計がありません。',
     date: '日付',
     facility: '施設',
+    courseLink: 'CourseBoardコース',
+    unlinked: '未紐づけ',
     dayPart: '時間帯',
     groups: '組数',
     caddie: 'キャ付',

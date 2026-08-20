@@ -96,7 +96,8 @@ export type ReservationReportImportResult = {
 
 export type ReservationReportEntry = ReservationReportRow & {
   id: string
-  golfCourseId: string
+  /** Null means the source facility is intentionally stored without a course link. */
+  golfCourseId: string | null
   sourceFileSha256: string
   updatedAt: string
 }
@@ -126,7 +127,7 @@ export type ReservationReportMonthRow = {
 
 export type MappingValidation =
   | { valid: true }
-  | { valid: false; reason: 'missing' | 'duplicate'; sourceCourseKey?: string }
+  | { valid: false; reason: 'duplicate' }
 
 export type ColumnMappingValidation =
   | { valid: true }
@@ -212,7 +213,9 @@ export function validateCourseMappings(
   const selected = new Set<string>()
   for (const facility of facilities) {
     const courseId = mappings[facility.sourceCourseKey]?.trim()
-    if (!courseId) return { valid: false, reason: 'missing', sourceCourseKey: facility.sourceCourseKey }
+    // An empty selection is meaningful: the facility-level aggregate is kept
+    // without guessing at a CourseBoard course.
+    if (!courseId) continue
     if (selected.has(courseId)) return { valid: false, reason: 'duplicate' }
     selected.add(courseId)
   }

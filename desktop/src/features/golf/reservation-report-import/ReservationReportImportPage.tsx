@@ -1,5 +1,5 @@
 import { Badge, Button } from '@tachyon-sdk/native-ui'
-import { ArrowLeft, ArrowRight, CheckCircle2, FileSpreadsheet, RefreshCw, Upload, X } from 'lucide-react'
+import { ArrowLeft, ArrowRight, CheckCircle2, FileSpreadsheet, Plus, RefreshCw, Upload, X } from 'lucide-react'
 import {
   type ChangeEvent,
   type FormEvent,
@@ -15,6 +15,7 @@ import { currentYearMonth } from '../../../lib/clock'
 import { yearMonthRange } from '../../../lib/yearMonth'
 import { showToast } from '../../../lib/toast'
 import { useRegisterPageReload } from '../../../lib/pageReload'
+import { navigate } from '../../../lib/router'
 import {
   Field,
   LoadingState,
@@ -73,6 +74,11 @@ function localeForDate(locale: string) {
   return locale === 'en' ? 'en-US' : 'ja-JP'
 }
 
+function courseRegistrationRoute(sourceCourseName: string) {
+  const params = new URLSearchParams({ courseName: sourceCourseName })
+  return `golf/courses?${params.toString()}`
+}
+
 export function ReservationReportImportPage() {
   const { t, i18n } = useTranslation(['reservationReportImport', 'common'])
   const [stage, setStage] = useState<ImportStage>('choose')
@@ -86,7 +92,7 @@ export function ReservationReportImportPage() {
   const [columnMappingError, setColumnMappingError] = useState<'missing' | 'duplicate' | 'unknown' | 'unapproved' | 'reparse' | null>(null)
   const [previewMonth, setPreviewMonth] = useState(currentYearMonth())
   const [previewError, setPreviewError] = useState<string | null>(null)
-  const [mappingError, setMappingError] = useState<'missing' | 'duplicate' | null>(null)
+  const [mappingError, setMappingError] = useState<'duplicate' | null>(null)
   const [importError, setImportError] = useState<string | null>(null)
   const [previewing, setPreviewing] = useState(false)
   const [mappingPreviewing, setMappingPreviewing] = useState(false)
@@ -166,6 +172,10 @@ export function ReservationReportImportPage() {
   const courseNames = useMemo(
     () => new Map(courses.map(course => [course.id, course.shortName?.trim() || course.name] as const)),
     [courses],
+  )
+  const unlinkedFacilities = useMemo(
+    () => preview?.facilities.filter(facility => !mappings[facility.sourceCourseKey]?.trim()) ?? [],
+    [mappings, preview],
   )
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -502,18 +512,28 @@ export function ReservationReportImportPage() {
                       ))}
                     </NativeSelect>
                   </Field>
-                  {selected ? <Badge variant="success">{t('reservationReportImport:mapping.selected')}</Badge> : null}
+                  {selected ? (
+                    <Badge variant="success">{t('reservationReportImport:mapping.selected')}</Badge>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="warning">{t('reservationReportImport:mapping.unlinked')}</Badge>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => navigate(courseRegistrationRoute(facility.sourceCourseName))}
+                      >
+                        <Plus /> {t('reservationReportImport:action.registerCourse')}
+                      </Button>
+                    </div>
+                  )}
                 </div>
               )
             })}
           </div>
           {mappingError ? (
-            <Notice tone="danger" title={mappingError === 'duplicate'
-              ? t('reservationReportImport:notice.mappingDuplicate')
-              : t('reservationReportImport:notice.mappingRequired')}>
-              {mappingError === 'duplicate'
-                ? t('reservationReportImport:notice.mappingDuplicate')
-                : t('reservationReportImport:notice.mappingRequired')}
+            <Notice tone="danger" title={t('reservationReportImport:notice.mappingDuplicate')}>
+              {t('reservationReportImport:notice.mappingDuplicate')}
             </Notice>
           ) : null}
           <div className="reservation-report-form-actions">
@@ -542,6 +562,7 @@ export function ReservationReportImportPage() {
           </div>
           <MonthlyPreviewTable rows={previewRows} locale={localeForDate(i18n.language)} />
           {previewTotals ? <ReportTotals totals={previewTotals} /> : null}
+          <UnlinkedFacilitiesNotice facilities={unlinkedFacilities} saved={false} />
           <ReviewNotice
             rows={preview.review ?? []}
             locale={localeForDate(i18n.language)}
@@ -567,6 +588,7 @@ export function ReservationReportImportPage() {
         <Panel title={t('reservationReportImport:result.title')} description={t('reservationReportImport:result.description')} className="reservation-report-panel">
           <div className="reservation-report-result-heading"><CheckCircle2 aria-hidden="true" /><strong>{t('reservationReportImport:result.title')}</strong></div>
           <ResultStats result={result} month={resultMonth} locale={localeForDate(i18n.language)} />
+          <UnlinkedFacilitiesNotice facilities={unlinkedFacilities} saved />
           <ReviewNotice
             rows={preview?.review ?? []}
             locale={localeForDate(i18n.language)}
@@ -803,6 +825,40 @@ function ResultStats({
   )
 }
 
+function UnlinkedFacilitiesNotice({
+  facilities,
+  saved,
+}: {
+  facilities: ReservationReportPreview['facilities']
+  saved: boolean
+}) {
+  const { t } = useTranslation('reservationReportImport')
+  if (!facilities.length) return null
+  return (
+    <Notice
+      tone="warning"
+      title={t(saved ? 'unlinked.savedTitle' : 'unlinked.confirmTitle')}
+    >
+      <p>{t(saved ? 'unlinked.savedDescription' : 'unlinked.confirmDescription')}</p>
+      <ul className="reservation-report-review-list">
+        {facilities.map(facility => (
+          <li key={facility.sourceCourseKey}>
+            <strong>{facility.sourceCourseName}</strong>{' '}
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => navigate(courseRegistrationRoute(facility.sourceCourseName))}
+            >
+              <Plus /> {t('action.registerCourse')}
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </Notice>
+  )
+}
+
 function SavedEntriesPanel({
   month,
   entries,
@@ -854,6 +910,7 @@ function SavedEntriesPanel({
               <tr>
                 <th>{t('list.date')}</th>
                 <th>{t('list.facility')}</th>
+                <th>{t('list.courseLink')}</th>
                 <th>{t('list.dayPart')}</th>
                 <th>{t('list.groups')}</th>
                 <th>{t('list.caddie')}</th>
@@ -863,7 +920,24 @@ function SavedEntriesPanel({
               {entries.map(entry => (
                 <tr key={entry.id}>
                   <td>{formatReportDate(entry.date, locale)}</td>
-                  <td>{courseNames.get(entry.golfCourseId) ?? entry.sourceCourseName}</td>
+                  <td>{entry.sourceCourseName}</td>
+                  <td>
+                    {entry.golfCourseId ? (
+                      courseNames.get(entry.golfCourseId) ?? entry.golfCourseId
+                    ) : (
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="warning">{t('list.unlinked')}</Badge>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => navigate(courseRegistrationRoute(entry.sourceCourseName))}
+                        >
+                          <Plus /> {t('action.registerCourse')}
+                        </Button>
+                      </div>
+                    )}
+                  </td>
                   <td>{entry.dayPart === 'morning' ? t('list.morning') : t('list.afternoon')}</td>
                   <td className="align-right">{entry.groupCount}</td>
                   <td className="align-right">{entry.caddieAttachedGroupCount}</td>

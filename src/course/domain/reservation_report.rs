@@ -472,13 +472,18 @@ pub struct ReservationReportTotals {
     pub caddie_attached_group_count: i64,
 }
 
-/// A row after the user has mapped its source facility to a CourseBoard course.
+/// A row imported from an external facility-level report.
+///
+/// The optional CourseBoard course is only a link to the course master.  Some
+/// reports aggregate several IN/OUT courses into one source facility, so the
+/// source facility remains the row identity when no honest one-course link
+/// exists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternalReservationReportEntry {
     id: Option<String>,
     source_course_key: String,
     source_course_name: String,
-    golf_course_id: CourseId,
+    golf_course_id: Option<CourseId>,
     date: NaiveDate,
     day_part: ReservationReportDayPart,
     group_count: i64,
@@ -491,14 +496,14 @@ pub struct ExternalReservationReportEntry {
 impl ExternalReservationReportEntry {
     pub fn new(
         row: &ReservationReportRow,
-        golf_course_id: CourseId,
+        golf_course_id: impl Into<Option<CourseId>>,
         source_file_sha256: impl Into<String>,
     ) -> Self {
         Self {
             id: None,
             source_course_key: row.source_course_key().to_string(),
             source_course_name: row.source_course_name().to_string(),
-            golf_course_id,
+            golf_course_id: golf_course_id.into(),
             date: row.date(),
             day_part: row.day_part(),
             group_count: row.group_count(),
@@ -514,7 +519,7 @@ impl ExternalReservationReportEntry {
         id: impl Into<String>,
         source_course_key: impl Into<String>,
         source_course_name: impl Into<String>,
-        golf_course_id: CourseId,
+        golf_course_id: impl Into<Option<CourseId>>,
         date: NaiveDate,
         day_part: ReservationReportDayPart,
         group_count: i64,
@@ -534,7 +539,7 @@ impl ExternalReservationReportEntry {
             id: Some(id.into()),
             source_course_key: row.source_course_key().to_string(),
             source_course_name: row.source_course_name().to_string(),
-            golf_course_id,
+            golf_course_id: golf_course_id.into(),
             date,
             day_part,
             group_count,
@@ -554,8 +559,8 @@ impl ExternalReservationReportEntry {
     pub fn source_course_name(&self) -> &str {
         &self.source_course_name
     }
-    pub fn golf_course_id(&self) -> &CourseId {
-        &self.golf_course_id
+    pub fn golf_course_id(&self) -> Option<&CourseId> {
+        self.golf_course_id.as_ref()
     }
     pub fn date(&self) -> NaiveDate {
         self.date

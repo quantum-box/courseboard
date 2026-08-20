@@ -169,7 +169,7 @@ describe('mockFieldApi', () => {
     expect((extensionStatus.data as { extensionKey: string }).extensionKey).toBe('golf_course')
   })
 
-  it('previews and upserts the three-course reservation report fixture idempotently', () => {
+  it('previews and upserts the reservation report with an optional course link idempotently', () => {
     vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
     if (typeof sessionStorage !== 'undefined') {
@@ -239,7 +239,6 @@ describe('mockFieldApi', () => {
     firstImportForm.append('courseMappings', JSON.stringify({
       真駒内: 'course_east',
       滝の: 'course_west',
-      羊ケ丘: 'course_hill',
     }))
     firstImportForm.append('columnMappings', JSON.stringify(approvedColumns))
     firstImportForm.append('normalizedFingerprint', 'mock-user-normalized-fingerprint')
@@ -262,7 +261,9 @@ describe('mockFieldApi', () => {
     const saved = resolveMockFieldApiJson('/v1/course/reservation-report-entries?from=2026-07-01&to=2026-07-31')
     expect(saved.kind).toBe('hit')
     if (saved.kind !== 'hit') return
-    expect((saved.data as { items: unknown[] }).items).toHaveLength(186)
+    const savedItems = (saved.data as { items: Array<{ golfCourseId: string | null }> }).items
+    expect(savedItems).toHaveLength(186)
+    expect(savedItems.some(item => item.golfCourseId === null)).toBe(true)
   })
 
   it('creates and cancels a reservation through the course-api contract', () => {

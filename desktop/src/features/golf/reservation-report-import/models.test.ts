@@ -65,12 +65,12 @@ describe('reservation report pure helpers', () => {
     )).toEqual({ '真駒内': 'course-makomanai' })
   })
 
-  it('rejects missing and duplicated mapping choices', () => {
+  it('allows an unlinked facility and rejects duplicated mapping choices', () => {
     const facilities = [
       { sourceCourseKey: 'east', sourceCourseName: '東' },
       { sourceCourseKey: 'west', sourceCourseName: '西' },
     ]
-    expect(validateCourseMappings(facilities, {})).toMatchObject({ valid: false, reason: 'missing' })
+    expect(validateCourseMappings(facilities, {})).toEqual({ valid: true })
     expect(validateCourseMappings(facilities, { east: 'course-1', west: 'course-1' })).toEqual({
       valid: false,
       reason: 'duplicate',
