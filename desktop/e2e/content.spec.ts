@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 import { MOCK_FIXTURE_DATE } from './routes'
 
 /**
@@ -306,5 +306,94 @@ test.describe('設定', () => {
     await page.getByRole('button', { name: '高橋 誠 のロールを編集' }).click()
     await expect(page.getByRole('dialog')).toBeVisible()
     await page.keyboard.press('Escape')
+  })
+})
+
+test.describe('予約表のとりこみ（通し）', () => {
+  /**
+   * 表を選ぶところから保存結果まで。コースに紐づけない施設があっても
+   * 止まらずに保存できることが主眼で、ここが通らないと「対応するコースが
+   * 無いゴルフ場は取り込めない」に逆戻りする。
+   *
+   * モックは実ファイルと同じ合計（186 行・6,314 組・キャディ付き 2,476 組）を
+   * 返すので、画面に出る数字がそのまま期待値になる。
+   */
+  const REPORT = {
+    name: 'daily-reservations.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    // 中身は読まれない。モックが固定の集計を返す。
+    buffer: Buffer.from('PK'),
+  }
+
+  async function chooseReport(page: Page) {
+    await page.goto('/golf/reservation-report-import')
+    await page.locator('input[type="file"]').setInputFiles(REPORT)
+    await page.getByLabel('対象年', { exact: false }).selectOption('2026')
+    await page.getByRole('button', { name: '内容を確認する' }).click()
+    await expect(page.getByRole('button', { name: '月間表へ進む' })).toBeVisible()
+  }
+
+  async function approveColumnsAndSave(page: Page) {
+    await page.getByRole('checkbox', { name: 'この列の対応を確認しました' }).check()
+    await page.getByRole('button', { name: '月間表へ進む' }).click()
+    await page.getByRole('button', { name: 'この内容を保存する' }).click()
+    await expect(page.getByText('保存しました').first()).toBeVisible()
+  }
+
+  test('選んだファイルが空の状態と見分けられる', async ({ page }) => {
+    await page.goto('/golf/reservation-report-import')
+    await expect(page.getByText('まだ選んでいません。')).toBeVisible()
+
+    await page.locator('input[type="file"]').setInputFiles(REPORT)
+
+    await expect(page.getByText(REPORT.name)).toBeVisible()
+    await expect(page.getByText('まだ選んでいません。')).toBeHidden()
+    await expect(page.getByRole('button', { name: '別のファイルを選ぶ', exact: true })).toBeVisible()
+
+    // 取り消しは意図的な操作なので、未入力エラーではなく手つかずの状態へ戻る
+    await page.getByRole('button', { name: '選択を取り消す', exact: true }).click()
+    await expect(page.getByText('まだ選んでいません。')).toBeVisible()
+    await expect(page.getByText('表ファイルを選んでください。')).toBeHidden()
+  })
+
+  test('施設をコースに紐づけないまま保存できる', async ({ page }) => {
+    await chooseReport(page)
+
+    // 施設名はホール数の接尾と一緒に読み取られる
+    await expect(page.getByText('真駒内 36H')).toBeVisible()
+    await expect(page.getByText('滝の 27H')).toBeVisible()
+    await expect(page.getByText('羊ケ丘 18H')).toBeVisible()
+
+    // 名前の合うコースが無い施設は、勝手に作らずコース登録へ送る
+    await expect(
+      page.getByRole('button', { name: 'この名前でコースを登録' }).first(),
+    ).toBeVisible()
+
+    await approveColumnsAndSave(page)
+
+    await expect(page.getByText('未紐づけの施設も保存しました')).toBeVisible()
+
+    const totals = page.locator('.reservation-report-result-grid')
+    await expect(totals).toContainText('186')
+    await expect(totals).toContainText(/6,?314/)
+    await expect(totals).toContainText(/2,?476/)
+  })
+
+  test('同じ表をもう一度入れても行が増えない', async ({ page }) => {
+    await chooseReport(page)
+    await approveColumnsAndSave(page)
+
+    await chooseReport(page)
+    await approveColumnsAndSave(page)
+
+    // 施設・日付・時間帯が揃うので二重には積まれない。倍の 372 行になったら
+    // 冪等性が壊れている。
+    const created = page.locator('.reservation-report-result-grid > div').first()
+    await expect(created).toContainText('新しく保存した行')
+    await expect(created.locator('strong')).toHaveText('0')
+
+    const totals = page.locator('.reservation-report-result-grid')
+    await expect(totals).toContainText('186')
+    await expect(totals).not.toContainText('372')
   })
 })
