@@ -360,6 +360,29 @@ apply 対象にするため、古い copy が残っていると global な actio
 巻き戻します。Field 側の権限を確認したいときは
 `quantum-box/tachyonfield` の `.tachyon/manifests/tachyonfield-auth.yml` を直接参照します。
 
+### Feature flags
+
+CourseBoard が出し分けに使うフラグはこの repository で宣言します。
+
+- `.tachyon/manifests/courseboard-flags.yml`（本番 platform `tn_01hjjn348rn3t49zz6hvmfq67p`）
+- `.tachyon/manifests/courseboard-flags-sandbox.yml`（サンドボックス platform `tn_01hjryxysgey07h5jz5wagqj0m`）
+
+フラグは host / platform テナントに置いたものだけが評価されます。利用者テナント
+（Operator）に置いたものは tachyon-apps 側が読み込んだうえで捨てるため、置き場は
+その上の platform になります。本番 platform は CourseBoard 専用ではなく他社の
+Operator も配下にいるので、出し先を絞るときは管理画面
+（`/v1beta/{tenant_id}/feature-flags`）で TenantTargeting を設定します。manifest に
+`evaluationStrategy` は書けません。
+
+`enabled` はどちらの manifest にも書いていません。書くと apply のたびに宣言値へ
+上書きされ、管理画面のトグルが次の apply で戻ります。新規作成時は `false` なので、
+**画面をフラグで包むより先に apply して ON にしてください。** 順序を逆にすると、その
+画面はフラグが立つまで 404 になります。
+
+なお `tachyon manifest apply` は `-f` 省略時に `.tachyon/manifests` 配下を全て
+discovery します。golf auth だけを流したいときは `-f` でファイルを指定してください。
+指定しないと platform テナントのフラグにも書き込みます。
+
 ## Local Development
 
 サービスを起動します。

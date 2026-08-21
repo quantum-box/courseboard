@@ -1,0 +1,25 @@
+# CourseBoard が所有するフィーチャーフラグ（サンドボックス）。
+#
+# フラグは host / platform テナントに置いたものだけが評価される。Operator に
+# 置いたものは tachyon-apps 側が読み込んだうえで捨てる（"Operator-level feature
+# flags are ignored; migrate them to platform or host"）。したがって置き場は
+# 利用者テナントではなく、その上の platform になる。
+#
+# tn_01hjryxysgey07h5jz5wagqj0m は Tachyon Dev の platform。この配下にいるのは
+# 「札幌カントリー倶楽部デモ用アカウント」で、本番の倶楽部は別 platform
+# (tn_01hjjn348rn3t49zz6hvmfq67p) にいる。プラットフォームが物理的に分かれて
+# いるので、ここで ON にしても本番には一切届かない。
+#
+# enabled は書かない。書くと apply のたびに宣言値へ上書きされ、管理画面での
+# トグルが次の apply で戻ってしまう。新規作成時は false で、以後の ON/OFF は
+# 管理画面 (/v1beta/{tenant_id}/feature-flags) を正とする。
+apiVersion: apps.tachy.one/v1alpha
+kind: FeatureFlags
+metadata:
+  name: courseboard-flags-sandbox
+  tenantId: tn_01hjryxysgey07h5jz5wagqj0m
+spec:
+  flags:
+    - key: feature.courseboard.reservation-report-import
+      name: "予約表のとりこみ"
+      description: "既存の予約システムから出した日別予約表を取り込む画面を出す"

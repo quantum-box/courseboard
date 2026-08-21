@@ -13,6 +13,7 @@ import { evaluateFeatureFlags, resolveFeatureFlagValues } from './feature-flags-
 
 export const FEATURE_FLAG_KEYS = Object.freeze({
   evaluationSmoke: 'feature.courseboard.flag-evaluation-smoke',
+  reservationReportImport: 'feature.courseboard.reservation-report-import',
 })
 
 const FEATURE_FLAG_REFRESH_INTERVAL_MS = 60_000
