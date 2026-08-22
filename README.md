@@ -362,6 +362,8 @@ apply 対象にするため、古い copy が残っていると global な actio
 
 ### Feature flags
 
+判断の記録は [ADR-0009](docs/src/architecture/decisions/ADR-0009-feature-flags-on-the-platform-tenant.md) にあります。
+
 CourseBoard が出し分けに使うフラグはこの repository で宣言します。
 
 - `.tachyon/manifests/courseboard-flags.yml`（本番 platform `tn_01hjjn348rn3t49zz6hvmfq67p`）

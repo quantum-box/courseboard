@@ -38,7 +38,8 @@ import { DownloadPage } from './DownloadPage'
 import { PaymentPage } from './PaymentPage'
 import { MacOSTabStrip } from './components/MacOSTabStrip'
 import { TenantTimezoneProvider } from './context/TenantTimezoneProvider'
-import { FEATURE_FLAG_KEYS, FeatureFlagProvider, useFeatureFlag } from './feature-flags/FeatureFlags'
+import { FeatureFlagProvider } from './feature-flags/FeatureFlags'
+import { useRouteGate } from './feature-flags/gated-routes'
 import { PageMetadata } from './lib/pageMetadata'
 
 const WS_URL = 'ws://127.0.0.1:9001/ws'
@@ -93,9 +94,8 @@ function OperatorWebRedirect({ href }: { href: string }) {
 }
 
 function RouteContent({ route }: { route: string }) {
-  // Flag lookups are hooks, so they run for every route rather than beside the
-  // branch that needs them.
-  const reportImport = useFeatureFlag(FEATURE_FLAG_KEYS.reservationReportImport)
+  // Hooks run for every route rather than beside the branch that needs them.
+  const reportImportGate = useRouteGate('golf/reservation-report-import')
   if (route === 'golf') return <GolfHomePage />
   if (route === 'golf/courses') return <CoursesPage />
   if (route.startsWith('golf/courses/')) {
@@ -118,8 +118,8 @@ function RouteContent({ route }: { route: string }) {
     // link answers the same way an unknown route does, rather than showing an
     // import that the desk is not meant to have yet. The wait is held on the
     // loader so the page does not flash 404 before the first evaluation lands.
-    if (reportImport.isLoading) return <LoadingState />
-    if (!reportImport.enabled) return <NotFoundPage />
+    if (reportImportGate === 'loading') return <LoadingState />
+    if (reportImportGate === 'hidden') return <NotFoundPage />
     return <ReservationReportImportPage />
   }
   if (route === 'golf/timeline') return <TimelinePage />

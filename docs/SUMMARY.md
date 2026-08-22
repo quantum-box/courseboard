@@ -10,6 +10,8 @@
   - [ADR-0005: ゴルフドメイン知識はCourseBoardが所有する](src/architecture/decisions/ADR-0005-golf-domain-ownership.md)
   - [ADR-0006: 日次サマリは集約需要として扱いダミー予約を作らない](src/architecture/decisions/ADR-0006-aggregate-caddie-demand-without-dummy-reservations.md)
   - [ADR-0007: 外部予約帳票の集計をField extension configへ暫定保存する](src/architecture/decisions/ADR-0007-external-reservation-report-snapshots.md)
+  - [ADR-0008: URLを `/{tenantId}/{route}?{filters}` にする](src/architecture/decisions/ADR-0008-tenant-scoped-path-routing.md)
+  - [ADR-0009: CourseBoardのフィーチャーフラグはplatformテナントに置く](src/architecture/decisions/ADR-0009-feature-flags-on-the-platform-tenant.md)
 
 # Business
 

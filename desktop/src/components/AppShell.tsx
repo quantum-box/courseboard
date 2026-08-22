@@ -82,7 +82,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../auth/AuthProvider'
 import { formatTenantWorkspaceLabel, tenantWorkspaceLabel } from '../auth/tenant-label'
-import { FEATURE_FLAG_KEYS, useFeatureFlag } from '../feature-flags/FeatureFlags'
+import { useHiddenRoutes } from '../feature-flags/gated-routes'
 import { i18next, LOCALES, LOCALE_LABELS, currentLocale, setLocale } from '../i18n'
 import { PageReloadProvider, usePageReload } from '../lib/pageReload'
 import { navigate, navigateFromClick } from '../lib/router'
@@ -387,11 +387,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   // A route the tenant's flag has not turned on is left out of the sidebar the
   // same way it is left out of the router. Pinning it earlier does not bring it
   // back, so the pinned list is filtered by the same set.
-  const reportImport = useFeatureFlag(FEATURE_FLAG_KEYS.reservationReportImport)
-  const flaggedOffRoutes = useMemo(
-    () => new Set<string>(reportImport.enabled ? [] : ['golf/reservation-report-import']),
-    [reportImport.enabled],
-  )
+  const flaggedOffRoutes = useHiddenRoutes()
 
   const pinnedItems = useMemo(
     () => pinnedRoutes
@@ -975,7 +971,8 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
           <CommandEmpty>{t('nav:command.empty')}</CommandEmpty>
           {navigationSections.map(section => (
             <CommandGroup key={section.id} heading={t(`nav:sections.${section.id}`)}>
-              {section.items.map(item => (
+              {/* ⌘K も画面への入口なので、フラグが降りたルートはここからも外す。 */}
+              {section.items.filter(item => !flaggedOffRoutes.has(item.route)).map(item => (
                 <CommandNavigationItem
                   key={item.route}
                   item={item}

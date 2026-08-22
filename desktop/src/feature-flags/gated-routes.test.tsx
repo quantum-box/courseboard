@@ -1,12 +1,14 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, render, waitFor } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { i18next } from '../i18n'
 import { PageReloadProvider } from '../lib/pageReload'
 import { AppShell } from '../components/AppShell'
+import { GolfHomePage } from '../features/golf/GolfHomePage'
 import { FEATURE_FLAG_KEYS, FeatureFlagProvider } from './FeatureFlags'
+import { ROUTE_FEATURE_FLAGS, routeGateFrom } from './gated-routes'
 
 const api = vi.hoisted(() => ({ json: vi.fn() }))
 
@@ -28,12 +30,24 @@ vi.mock('../auth/AuthProvider', () => ({
   }),
 }))
 
+const IMPORT_ROUTE = 'golf/reservation-report-import'
+const IMPORT_LABEL = /予約表をとりこむ/
+
 /** Answer the evaluate call with one verdict for every key it is asked about. */
 function flagsAnswer(enabled: boolean) {
   api.json.mockImplementation(async (path: string, init?: { body?: string }) => {
     if (path === '/v1/course/feature-flags/evaluate') {
       const keys = (JSON.parse(init?.body ?? '{}') as { keys?: string[] }).keys ?? []
       return { values: keys.map(key => ({ key, enabled })) }
+    }
+    return { items: [] }
+  })
+}
+
+function flagsUnavailable() {
+  api.json.mockImplementation(async (path: string) => {
+    if (path === '/v1/course/feature-flags/evaluate') {
+      throw new Error('provider_error')
     }
     return { items: [] }
   })
@@ -56,19 +70,17 @@ function stubMatchMedia() {
   })
 }
 
-function renderShell() {
+function renderWith(children: React.ReactNode) {
   render(
     <I18nextProvider i18n={i18next}>
       <PageReloadProvider>
-        <FeatureFlagProvider>
-          <AppShell route="golf">
-            <div />
-          </AppShell>
-        </FeatureFlagProvider>
+        <FeatureFlagProvider>{children}</FeatureFlagProvider>
       </PageReloadProvider>
     </I18nextProvider>,
   )
 }
+
+const shell = <AppShell route="golf"><div /></AppShell>
 
 describe('フラグで出し分ける画面', () => {
   beforeEach(async () => {
@@ -80,42 +92,107 @@ describe('フラグで出し分ける画面', () => {
 
   afterEach(cleanup)
 
-  it('キーが登録されている', () => {
-    expect(FEATURE_FLAG_KEYS.reservationReportImport)
-      .toBe('feature.courseboard.reservation-report-import')
+  it('ルートとフラグの対応表は 1 つ', () => {
+    expect(ROUTE_FEATURE_FLAGS[IMPORT_ROUTE])
+      .toBe(FEATURE_FLAG_KEYS.reservationReportImport)
   })
 
-  it('フラグが立っているテナントではサイドバーに出る', async () => {
-    flagsAnswer(true)
-    renderShell()
+  describe('サイドバー', () => {
+    it('フラグが立っていれば出る', async () => {
+      flagsAnswer(true)
+      renderWith(shell)
 
-    await waitFor(() => {
-      expect(document.body.innerHTML).toContain('予約表をとりこむ')
+      await waitFor(() => {
+        expect(screen.getAllByRole('button', { name: IMPORT_LABEL }).length).toBeGreaterThan(0)
+      })
+    })
+
+    it('フラグが降りていれば出さない', async () => {
+      flagsAnswer(false)
+      renderWith(shell)
+
+      await waitFor(() => expect(api.json).toHaveBeenCalled())
+      await waitFor(() => {
+        expect(screen.queryAllByRole('button', { name: IMPORT_LABEL })).toHaveLength(0)
+      })
+    })
+
+    it('ピン留めしてあっても、フラグが降りていれば出さない', async () => {
+      localStorage.setItem('courseboard.sidebar.pinned', JSON.stringify([IMPORT_ROUTE]))
+      flagsAnswer(false)
+      renderWith(shell)
+
+      await waitFor(() => expect(api.json).toHaveBeenCalled())
+      await waitFor(() => {
+        expect(screen.queryAllByRole('button', { name: IMPORT_LABEL })).toHaveLength(0)
+      })
     })
   })
 
-  it('フラグが降りていないテナントでは出さない', async () => {
-    flagsAnswer(false)
-    renderShell()
+  // CLAUDE.md いわく、上流が落ちても画面は使えるままにする。フラグは認可では
+  // なく出し分けの switch なので、評価できなかっただけで入口を消さない。
+  it('評価が失敗しても入口を消さない', async () => {
+    flagsUnavailable()
+    renderWith(shell)
 
-    // 評価が返ってから確かめる。返る前は読み込み中でどのみち出ていない。
     await waitFor(() => expect(api.json).toHaveBeenCalled())
     await waitFor(() => {
-      expect(document.body.innerHTML).not.toContain('予約表をとりこむ')
+      expect(screen.getAllByRole('button', { name: IMPORT_LABEL }).length).toBeGreaterThan(0)
     })
   })
 
-  it('ピン留めしてあっても、フラグが降りていれば出さない', async () => {
-    localStorage.setItem(
-      'courseboard.sidebar.pinned',
-      JSON.stringify(['golf/reservation-report-import']),
-    )
-    flagsAnswer(false)
-    renderShell()
+  describe('ホーム画面のタイル', () => {
+    it('フラグが立っていれば出る', async () => {
+      flagsAnswer(true)
+      renderWith(<GolfHomePage />)
 
-    await waitFor(() => expect(api.json).toHaveBeenCalled())
-    await waitFor(() => {
-      expect(document.body.innerHTML).not.toContain('予約表をとりこむ')
+      await waitFor(() => {
+        expect(screen.getAllByRole('button', { name: IMPORT_LABEL }).length).toBeGreaterThan(0)
+      })
     })
+
+    // サイドバーだけ塞いでタイルを残すと、押した先が 404 になる。
+    it('フラグが降りていれば出さない', async () => {
+      flagsAnswer(false)
+      renderWith(<GolfHomePage />)
+
+      await waitFor(() => expect(api.json).toHaveBeenCalled())
+      await waitFor(() => {
+        expect(screen.queryAllByRole('button', { name: IMPORT_LABEL })).toHaveLength(0)
+      })
+    })
+  })
+})
+
+describe('routeGateFrom', () => {
+  const state = (over: Partial<{ enabled: boolean; error: boolean; isLoading: boolean }> = {}) => ({
+    enabled: false,
+    error: false,
+    isLoading: false,
+    ...over,
+  })
+
+  it('フラグを持たないルートは常に出す', () => {
+    expect(routeGateFrom(undefined, state())).toBe('visible')
+  })
+
+  it('評価が返るまでは待つ', () => {
+    expect(routeGateFrom('feature.courseboard.x', state({ isLoading: true }))).toBe('loading')
+  })
+
+  it('フラグが立っていれば出す', () => {
+    expect(routeGateFrom('feature.courseboard.x', state({ enabled: true }))).toBe('visible')
+  })
+
+  it('フラグが降りていれば隠す', () => {
+    expect(routeGateFrom('feature.courseboard.x', state())).toBe('hidden')
+  })
+
+  // 上流が落ちただけで画面が消えると、受付には理由が何も見えない。
+  // フラグは認可ではなく出し分けの switch なので、答えが得られないときは残す。
+  it('評価できなかったときは隠さない', () => {
+    expect(routeGateFrom('feature.courseboard.x', state({ error: true }))).toBe('visible')
+    expect(routeGateFrom('feature.courseboard.x', state({ error: true, isLoading: true })))
+      .toBe('visible')
   })
 })

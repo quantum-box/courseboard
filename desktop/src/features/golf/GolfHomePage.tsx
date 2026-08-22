@@ -1,6 +1,7 @@
 import { ChevronRight } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { golfNavigation, navDescription, navLabel } from '../../components/AppShell'
+import { useHiddenRoutes } from '../../feature-flags/gated-routes'
 import { Panel } from '../../components/Page'
 import { navigateFromClick } from '../../lib/router'
 
@@ -36,8 +37,13 @@ function FeatureTile({
 
 export function GolfHomePage() {
   const { t } = useTranslation(['home', 'common'])
-  const featured = homeNavigation.filter(item => FEATURED_ROUTES.has(item.route))
-  const otherFeatures = homeNavigation.filter(item => !FEATURED_ROUTES.has(item.route))
+  // The tiles are a way into a screen, so a route the tenant's flag has not
+  // turned on has to leave here too. Filtering only the sidebar leaves a tile
+  // that walks straight into a 404.
+  const hiddenRoutes = useHiddenRoutes()
+  const visible = homeNavigation.filter(item => !hiddenRoutes.has(item.route))
+  const featured = visible.filter(item => FEATURED_ROUTES.has(item.route))
+  const otherFeatures = visible.filter(item => !FEATURED_ROUTES.has(item.route))
 
   return (
     <div className="page-stack home-page">
