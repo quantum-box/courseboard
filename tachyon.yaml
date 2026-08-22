@@ -91,12 +91,14 @@ spec:
                     path: /healthz
             timeoutSeconds: 900
       production:
-        # TEMPORARY (PLT-3438): requiredReleaseChecks を一時解除している。
-        # production-migrations environment と environment-scoped secret
-        # TACHYON_COURSEBOARD_PROD_DATABASE_URL が未配線のため、有効なままだと
-        # fail-closed で本番 deploy が一切通らず、障害対応の deploy 能力を失う。
-        # ★secret 投入後に必ず再有効化すること (PLT-3438 の完了条件)。
-        # 解除中は PLT-3433 が入れた migration gate が本番 deploy を守らない。
+        # PLT-3433 migration gate: production deploys are refused until
+        # the migration gate run for the same commit is green. The
+        # production-migrations environment secret
+        # TACHYON_COURSEBOARD_PROD_DATABASE_URL was wired on 2026-08-22
+        # (PLT-3438 / PLT-3807), re-enabling this fail-closed check.
+        requiredReleaseChecks:
+          - repository: quantum-box/courseboard
+            name: CourseBoard production migration gate
       watchPaths:
         - Cargo.toml
         - Cargo.lock
