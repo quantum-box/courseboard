@@ -70,7 +70,9 @@ spec:
       # (ReuseExisting) and never rotates the stored credential.
       databases:
         - name: tidb_courseboard_prod
-          cluster: txcloud
+          # Moved from txcloud on 2026-08-22 (PLT-3819). Explicit until the
+          # platform default (tachyon-cloud-apps) rolls out.
+          cluster: tachyon-cloud-apps
           provider: tidb
           user: courseboard_api
       auth:
