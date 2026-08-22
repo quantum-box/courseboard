@@ -62,6 +62,17 @@ spec:
       rootDirectory: ""
       framework: cargo_lambda
       deploymentTarget: lambda
+      # PLT-3819: declare the production database as a managed resource.
+      # Apply provisions the fixed-name database and the db-scoped SQL
+      # user on the txcloud cluster and materializes the DSN at the
+      # canonical databaseRef path, replacing the PLT-2750 one-shot
+      # bootstrap. Both already exist, so this reconciles as a no-op
+      # (ReuseExisting) and never rotates the stored credential.
+      databases:
+        - name: tidb_courseboard_prod
+          cluster: txcloud
+          provider: tidb
+          user: courseboard_api
       auth:
         enabled: false
       readinessProof:
