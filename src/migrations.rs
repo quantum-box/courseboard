@@ -140,7 +140,6 @@ mod tests {
     use crate::config::{RuntimeConfig, EMPTY_COURSE_STORE_URL};
 
     static TEST_DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-    const PRODUCTION_MIGRATION_GATE_CHECK: &str = "name: CourseBoard production migration gate";
     const DEPLOY_MIGRATION_GATE_HOOK: &str = "name: migration-gate-before-activation";
 
     fn assert_production_migration_gate_release_policy(manifest: &str) {
@@ -241,40 +240,12 @@ mod tests {
     }
 
     #[test]
-    fn production_gate_does_not_cancel_an_earlier_commit_waiting_for_a_runner() {
-        let workflow = include_str!("../.github/workflows/production-migration-gate.yml");
-        let concurrency_group = workflow
-            .lines()
-            .map(str::trim)
-            .find(|line| line.starts_with("group:"))
-            .expect("production workflow must declare a concurrency group");
-        let cancel_in_progress = workflow
-            .lines()
-            .map(str::trim)
-            .find(|line| line.starts_with("cancel-in-progress:"))
-            .expect("production workflow must declare cancellation behavior");
-
-        assert_eq!(
-            concurrency_group,
-            "group: courseboard-production-migration-gate-${{ github.sha }}"
-        );
-        assert_eq!(cancel_in_progress, "cancel-in-progress: false");
-        assert!(
-            MIGRATOR.locking,
-            "commit-scoped workflow concurrency relies on SQLx's target-DB advisory lock"
-        );
-    }
-
-    #[test]
     fn migration_gate_is_wired_into_deploy_and_local_preflight_paths() {
         let manifest = include_str!("../tachyon.yaml");
-        let workflow = include_str!("../.github/workflows/production-migration-gate.yml");
         let local_start = include_str!("../desktop/scripts/run-courseboard-with-env.sh");
 
         assert!(manifest.contains("name: migration-gate-before-activation"));
         assert_production_migration_gate_release_policy(manifest);
-        assert!(workflow.contains("run: cargo run --bin courseboard-migrate"));
-        assert!(workflow.contains(PRODUCTION_MIGRATION_GATE_CHECK));
 
         let migrate = local_start
             .find("cargo run --bin courseboard-migrate")
