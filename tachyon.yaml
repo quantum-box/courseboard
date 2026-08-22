@@ -102,14 +102,14 @@ spec:
                     path: /healthz
             timeoutSeconds: 900
       production:
-        # PLT-3433 migration gate: production deploys are refused until
-        # the migration gate run for the same commit is green. The
-        # production-migrations environment secret
-        # TACHYON_COURSEBOARD_PROD_DATABASE_URL was wired on 2026-08-22
-        # (PLT-3438 / PLT-3807), re-enabling this fail-closed check.
-        requiredReleaseChecks:
-          - repository: quantum-box/courseboard
-            name: CourseBoard production migration gate
+        # PLT-3819: the production database moved to the PrivateLink-only
+        # tachyon-cloud-apps cluster, which the GitHub-hosted gate runners
+        # cannot reach, so the Actions-based release check is retired.
+        # Migration safety is enforced by the migration-gate-before-activation
+        # lambdaInvoke hook above: it validates and applies migrations in-VPC
+        # against the candidate before promotion, and a failure discards the
+        # candidate while the serving Lambda keeps running (the PLT-3433
+        # protection).
       watchPaths:
         - Cargo.toml
         - Cargo.lock
