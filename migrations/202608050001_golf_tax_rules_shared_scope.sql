@@ -29,7 +29,14 @@ ALTER TABLE golf_tax_rules
 -- the full rate — twice what they owe.
 ALTER TABLE golf_tax_rules
     ADD COLUMN senior_reduced_min_age BIGINT NULL,
-    ADD COLUMN senior_reduced_percent BIGINT NULL,
+    ADD COLUMN senior_reduced_percent BIGINT NULL;
+
+-- Kept as a separate ALTER: TiDB serverless validates CHECK expressions
+-- against the pre-ALTER schema, so bundling the constraint with the
+-- columns it references fails a fresh replay with 1054 Unknown column
+-- (PLT-3825). Applied databases carry the updated checksum for this
+-- file out-of-band.
+ALTER TABLE golf_tax_rules
     ADD CONSTRAINT chk_golf_tax_rules_reduced_percent
         CHECK (senior_reduced_percent IS NULL
                OR (senior_reduced_percent > 0 AND senior_reduced_percent < 100));
