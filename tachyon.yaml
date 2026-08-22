@@ -62,6 +62,19 @@ spec:
       rootDirectory: ""
       framework: cargo_lambda
       deploymentTarget: lambda
+      # PLT-3819: declare the production database as a managed resource.
+      # Apply provisions the fixed-name database and the db-scoped SQL
+      # user on the txcloud cluster and materializes the DSN at the
+      # canonical databaseRef path, replacing the PLT-2750 one-shot
+      # bootstrap. Both already exist, so this reconciles as a no-op
+      # (ReuseExisting) and never rotates the stored credential.
+      databases:
+        - name: tidb_courseboard_prod
+          # Moved from txcloud on 2026-08-22 (PLT-3819). Explicit until the
+          # platform default (tachyon-cloud-apps) rolls out.
+          cluster: tachyon-cloud-apps
+          provider: tidb
+          user: courseboard_api
       auth:
         enabled: false
       readinessProof:
@@ -91,12 +104,14 @@ spec:
                     path: /healthz
             timeoutSeconds: 900
       production:
-        # TEMPORARY (PLT-3438): requiredReleaseChecks を一時解除している。
-        # production-migrations environment と environment-scoped secret
-        # TACHYON_COURSEBOARD_PROD_DATABASE_URL が未配線のため、有効なままだと
-        # fail-closed で本番 deploy が一切通らず、障害対応の deploy 能力を失う。
-        # ★secret 投入後に必ず再有効化すること (PLT-3438 の完了条件)。
-        # 解除中は PLT-3433 が入れた migration gate が本番 deploy を守らない。
+        # PLT-3819: the production database moved to the PrivateLink-only
+        # tachyon-cloud-apps cluster, which the GitHub-hosted gate runners
+        # cannot reach, so the Actions-based release check is retired.
+        # Migration safety is enforced by the migration-gate-before-activation
+        # lambdaInvoke hook above: it validates and applies migrations in-VPC
+        # against the candidate before promotion, and a failure discards the
+        # candidate while the serving Lambda keeps running (the PLT-3433
+        # protection).
       watchPaths:
         - Cargo.toml
         - Cargo.lock

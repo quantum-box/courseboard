@@ -140,21 +140,20 @@ mod tests {
     use crate::config::{RuntimeConfig, EMPTY_COURSE_STORE_URL};
 
     static TEST_DATABASE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
-    const PRODUCTION_MIGRATION_GATE_CHECK: &str = "name: CourseBoard production migration gate";
-    const TEMPORARY_RELEASE_CHECK_EXCEPTION: &str = "TEMPORARY (PLT-3438)";
+    const DEPLOY_MIGRATION_GATE_HOOK: &str = "name: migration-gate-before-activation";
 
     fn assert_production_migration_gate_release_policy(manifest: &str) {
-        let gate_is_wired = manifest.contains(PRODUCTION_MIGRATION_GATE_CHECK);
-        let temporary_exception_is_documented =
-            manifest.contains(TEMPORARY_RELEASE_CHECK_EXCEPTION);
-
-        // PLT-3438 temporarily permits deploys while the production migration
-        // credential is being wired. Once that is complete, this marker must be
-        // removed together with restoring the release check. Requiring one of
-        // these two explicit states keeps a silent removal fail-closed.
+        // PLT-3819: the production database lives on the PrivateLink-only
+        // tachyon-cloud-apps cluster, so the Actions-based release check
+        // cannot reach it and the deploy-time lambdaInvoke hook is the
+        // migration gate. The hook validates and applies migrations in-VPC
+        // against the candidate before promotion; a failure discards the
+        // candidate while the serving Lambda keeps running (the PLT-3433
+        // protection). Removing the hook silently must stay fail-closed.
         assert!(
-            gate_is_wired || temporary_exception_is_documented,
-            "production migration gate must be wired or explicitly exempted with {TEMPORARY_RELEASE_CHECK_EXCEPTION}"
+            manifest.contains(DEPLOY_MIGRATION_GATE_HOOK),
+            "the {DEPLOY_MIGRATION_GATE_HOOK} deploy hook is the production \
+             migration gate and must stay wired"
         );
     }
 
@@ -241,40 +240,12 @@ mod tests {
     }
 
     #[test]
-    fn production_gate_does_not_cancel_an_earlier_commit_waiting_for_a_runner() {
-        let workflow = include_str!("../.github/workflows/production-migration-gate.yml");
-        let concurrency_group = workflow
-            .lines()
-            .map(str::trim)
-            .find(|line| line.starts_with("group:"))
-            .expect("production workflow must declare a concurrency group");
-        let cancel_in_progress = workflow
-            .lines()
-            .map(str::trim)
-            .find(|line| line.starts_with("cancel-in-progress:"))
-            .expect("production workflow must declare cancellation behavior");
-
-        assert_eq!(
-            concurrency_group,
-            "group: courseboard-production-migration-gate-${{ github.sha }}"
-        );
-        assert_eq!(cancel_in_progress, "cancel-in-progress: false");
-        assert!(
-            MIGRATOR.locking,
-            "commit-scoped workflow concurrency relies on SQLx's target-DB advisory lock"
-        );
-    }
-
-    #[test]
     fn migration_gate_is_wired_into_deploy_and_local_preflight_paths() {
         let manifest = include_str!("../tachyon.yaml");
-        let workflow = include_str!("../.github/workflows/production-migration-gate.yml");
         let local_start = include_str!("../desktop/scripts/run-courseboard-with-env.sh");
 
         assert!(manifest.contains("name: migration-gate-before-activation"));
         assert_production_migration_gate_release_policy(manifest);
-        assert!(workflow.contains("run: cargo run --bin courseboard-migrate"));
-        assert!(workflow.contains(PRODUCTION_MIGRATION_GATE_CHECK));
 
         let migrate = local_start
             .find("cargo run --bin courseboard-migrate")
@@ -286,15 +257,8 @@ mod tests {
     }
 
     #[test]
-    fn documented_temporary_release_check_exception_is_allowed() {
-        assert_production_migration_gate_release_policy(
-            "production:\n  # TEMPORARY (PLT-3438): requiredReleaseChecks is disabled",
-        );
-    }
-
-    #[test]
-    #[should_panic(expected = "production migration gate must be wired or explicitly exempted")]
-    fn silent_release_check_removal_is_rejected() {
+    #[should_panic(expected = "deploy hook is the production migration gate")]
+    fn silent_migration_gate_hook_removal_is_rejected() {
         assert_production_migration_gate_release_policy("production:\n  watchPaths: []");
     }
 
