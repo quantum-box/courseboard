@@ -10,6 +10,8 @@ use thiserror::Error;
 
 pub(crate) static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
+// PLT-3825 probe: touching an API watch path allocates a fresh per-PR database
+// so the existing migration sequence can be observed without deleting evidence.
 /// Connects to the configured database, validates the complete applied
 /// migration history, and applies pending migrations.
 ///
