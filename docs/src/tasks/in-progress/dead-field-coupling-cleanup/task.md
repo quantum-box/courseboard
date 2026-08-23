@@ -32,6 +32,10 @@ extension 撤退の調査で、**もう誰も使っていないのに残って�
 
 ※ これは [月次精算と予算達成率をCourseBoardで計算する](../phase1-settlement-achievement/task.md) の後始末と重なる。どちらか片方でやる。
 
+## 進捗（2026-08-23）
+
+1〜3 とも実施済み。allowlist の extension 4 行を削除（拒否側のテストに反転）、`tenants` テーブルを DROP する migration を追加、`GolfOpsGateway` から `list_caddie_recommendations` / `auto_assign_caddies` と対応 DTO を削除。開発モックの逆マップは**意図的に残した**: mock モードの配置画面がまだその 2 パスを mock の extension handler で受けており、解体すると「UI の挙動を変えない」の完了条件に反する。mock の fixture を CourseBoard パスへ付け替えるときに一緒に解体する（[phase1-settlement-achievement](../phase1-settlement-achievement/task.md) の後始末側）。
+
 ## 完了条件
 
 - `/field-api/*` の許可リストに extension path が無い。

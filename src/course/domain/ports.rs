@@ -5,21 +5,20 @@ use chrono::{DateTime, NaiveDate, Utc};
 
 use super::{
     AssignMembershipPlan, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
-    AutoAssignResult, AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon,
-    BudgetAchievement, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
-    CaddieCourseMembership, CaddieId, CaddieRankFees, CaddieRating, CaddieRecommendation,
-    CaddieRoster, CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder, Customer,
-    CustomerId, CustomerMembership, CustomerSearchQuery, DailyBudget, DailyBudgetQuery,
-    DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
-    GenerationSummary, GolfPricingSettings, InventoryWatermark, MembershipPlan, MembershipPlanId,
-    MonthlySettlement, NewCustomer, NewReservation, PartyDetails, PlayerTagOptions, ProductSlot,
-    ReceptionDraft, ReceptionSheet, RecommendationQuery, ReplaceCaddieMemberships, Reservation,
-    ReservationBookingUpdate, ReservationId, ReservationPolicy, ReservationProduct,
-    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
-    SeededReservation, ShiftPolicy, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot,
-    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan,
-    UpsertReservationProduct, WorkedMinutes, YearMonth,
+    AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, BudgetAchievement,
+    Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
+    CaddieId, CaddieRankFees, CaddieRating, CaddieRoster, CaddieShift, CaddieStaff, Course,
+    CourseError, CourseId, CourseOrder, Customer, CustomerId, CustomerMembership,
+    CustomerSearchQuery, DailyBudget, DailyBudgetQuery, DeleteSlotOverrides, ExtensionStatus,
+    FieldClientCapabilities, FieldRequestContext, GenerationSummary, GolfPricingSettings,
+    InventoryWatermark, MembershipPlan, MembershipPlanId, MonthlySettlement, NewCustomer,
+    NewReservation, PartyDetails, PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet,
+    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
+    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
+    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
+    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
+    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
+    UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -877,12 +876,6 @@ pub trait GolfOpsGateway: Send + Sync {
         date: NaiveDate,
     ) -> Result<(), CourseError>;
 
-    async fn list_caddie_recommendations(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        query: RecommendationQuery,
-    ) -> Result<Vec<CaddieRecommendation>, CourseError>;
-
     async fn get_attendance_snapshot(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -906,13 +899,6 @@ pub trait GolfOpsGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         year_month: &str,
     ) -> Result<std::collections::HashMap<String, WorkedMinutes>, CourseError>;
-
-    async fn auto_assign_caddies(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        date: NaiveDate,
-        dry_run: bool,
-    ) -> Result<AutoAssignResult, CourseError>;
 
     /// What one round pays at each rank.
     ///

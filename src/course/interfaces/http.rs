@@ -49,11 +49,14 @@ use crate::{AppError, AppState};
 
 pub(crate) fn catalog_gateway(state: &AppState) -> Arc<FieldGolfCatalogGateway> {
     let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
-    Arc::new(FieldGolfCatalogGateway::with_multi_course_product_writes(
-        state.http_client.clone(),
-        field_api_url,
-        state.cancellation_fee_config.multi_course_product_writes,
-    ))
+    Arc::new(
+        FieldGolfCatalogGateway::with_multi_course_product_writes(
+            state.http_client.clone(),
+            field_api_url,
+            state.cancellation_fee_config.multi_course_product_writes,
+        )
+        .with_product_settings(state.product_settings()),
+    )
 }
 
 pub(crate) fn ops_gateway(state: &AppState) -> Arc<FieldGolfOpsGateway> {

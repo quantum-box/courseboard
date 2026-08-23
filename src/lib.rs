@@ -33,9 +33,10 @@ use cancellation_fees::{CancellationFeeConfig, MySqlCancellationFeeRepository};
 use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
-    FieldReservationReportGateway, MySqlAvailabilityDeadlineRepository,
-    MySqlCaddieRankFeeRepository, MySqlCaddieShiftRepository, MySqlCourseOrderRepository,
-    MySqlGeneratedThroughRepository, MySqlPlayerTagOptionsRepository,
+    FieldReservationReportGateway, MigratingReservationReportGateway,
+    MySqlAvailabilityDeadlineRepository, MySqlCaddieRankFeeRepository, MySqlCaddieShiftRepository,
+    MySqlCourseOrderRepository, MySqlGeneratedThroughRepository,
+    MySqlGolfProductSettingsRepository, MySqlPlayerTagOptionsRepository,
     MySqlPricingSettingsRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
@@ -61,12 +62,13 @@ pub struct AppState {
     course_order: Arc<MySqlCourseOrderRepository>,
     caddie_rank_fees: Arc<MySqlCaddieRankFeeRepository>,
     pricing_settings: Arc<MySqlPricingSettingsRepository>,
+    product_settings: Arc<MySqlGolfProductSettingsRepository>,
     player_tag_options: Arc<MySqlPlayerTagOptionsRepository>,
     generated_through: Arc<MySqlGeneratedThroughRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
     shift_rules: Arc<MySqlShiftRulesRepository>,
-    reservation_report_gateway: Arc<FieldReservationReportGateway>,
+    reservation_report_gateway: Arc<MigratingReservationReportGateway>,
     cancellation_fee_config: CancellationFeeConfig,
     http_client: reqwest::Client,
     token_verifier: Arc<dyn TokenVerifier>,
@@ -102,6 +104,7 @@ impl AppState {
             course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
             caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
             pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+            product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
@@ -109,9 +112,12 @@ impl AppState {
             )),
             caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
             shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
-            reservation_report_gateway: Arc::new(FieldReservationReportGateway::new(
-                reqwest::Client::new(),
-                cancellation_fee_config.field_api_url.as_deref(),
+            reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
+                pool.clone(),
+                Arc::new(FieldReservationReportGateway::new(
+                    reqwest::Client::new(),
+                    cancellation_fee_config.field_api_url.as_deref(),
+                )),
             )),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
@@ -154,6 +160,7 @@ impl AppState {
             course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
             caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
             pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+            product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
@@ -161,9 +168,12 @@ impl AppState {
             )),
             caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
             shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
-            reservation_report_gateway: Arc::new(FieldReservationReportGateway::new(
-                reqwest::Client::new(),
-                cancellation_fee_config.field_api_url.as_deref(),
+            reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
+                pool.clone(),
+                Arc::new(FieldReservationReportGateway::new(
+                    reqwest::Client::new(),
+                    cancellation_fee_config.field_api_url.as_deref(),
+                )),
             )),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
@@ -192,6 +202,7 @@ impl AppState {
                 course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
                 caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+                product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
@@ -199,9 +210,12 @@ impl AppState {
                 )),
                 caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
                 shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
-                reservation_report_gateway: Arc::new(FieldReservationReportGateway::new(
-                    reqwest::Client::new(),
-                    cancellation_fee_config.field_api_url.as_deref(),
+                reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
+                    pool.clone(),
+                    Arc::new(FieldReservationReportGateway::new(
+                        reqwest::Client::new(),
+                        cancellation_fee_config.field_api_url.as_deref(),
+                    )),
                 )),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
@@ -221,6 +235,7 @@ impl AppState {
                 course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
                 caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+                product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
@@ -228,9 +243,12 @@ impl AppState {
                 )),
                 caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
                 shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
-                reservation_report_gateway: Arc::new(FieldReservationReportGateway::new(
-                    reqwest::Client::new(),
-                    cancellation_fee_config.field_api_url.as_deref(),
+                reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
+                    pool.clone(),
+                    Arc::new(FieldReservationReportGateway::new(
+                        reqwest::Client::new(),
+                        cancellation_fee_config.field_api_url.as_deref(),
+                    )),
                 )),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
@@ -313,8 +331,12 @@ impl AppState {
 
     /// CourseBoard-interpreted daily reservation counts persisted through
     /// Field's scoped extension config.
-    pub fn reservation_report_gateway(&self) -> Arc<FieldReservationReportGateway> {
+    pub fn reservation_report_gateway(&self) -> Arc<MigratingReservationReportGateway> {
         self.reservation_report_gateway.clone()
+    }
+
+    pub(crate) fn product_settings(&self) -> Arc<MySqlGolfProductSettingsRepository> {
+        self.product_settings.clone()
     }
 
     fn with_profile_client(mut self, profile_client: Option<profile_proxy::ProfileClient>) -> Self {
@@ -1187,7 +1209,8 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
         &course_gateway_url,
         Some(&tachyon_api_url),
     )
-    .context("courseboard profile proxy configuration is invalid")?;
+    .context("courseboard profile proxy configuration is invalid")?
+    .map(|client| client.with_tenant_source(config.tenant_source()));
     let field_api = FieldApiClient::from_config(
         config.field_api_base_url(),
         config.field_api_client_credentials_config(),

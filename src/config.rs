@@ -113,6 +113,16 @@ pub struct RuntimeConfig {
     )]
     pub disable_action_authz: bool,
 
+    /// Which source `/v1/me` uses to list the caller's tenants (ADR-0011).
+    ///
+    /// `extension` keeps the current Field `/v1/erp/me` extension filter.
+    /// `compare` still serves the extension answer but also runs the
+    /// policy-based path in the background and logs the difference — run it
+    /// in production for at least one business week before switching.
+    /// `policy` serves the `check-tenants` policy answer.
+    #[arg(long, env = "COURSEBOARD_TENANT_SOURCE", default_value = "extension")]
+    pub tenant_source: String,
+
     #[arg(long, env = "TWILIO_ACCOUNT_SID")]
     pub twilio_account_sid: Option<String>,
     #[arg(long, env = "TWILIO_AUTH_TOKEN")]
@@ -228,6 +238,35 @@ impl RuntimeConfig {
     pub fn dev_bearer_token(&self) -> Option<String> {
         non_empty(self.dev_bearer_token.as_deref())
     }
+
+    /// Unknown values fall back to the extension source: a typo in an env var
+    /// must not silently change where sign-in tenant lists come from.
+    pub fn tenant_source(&self) -> TenantSource {
+        match self.tenant_source.trim() {
+            "" | "extension" => TenantSource::Extension,
+            "compare" => TenantSource::Compare,
+            "policy" => TenantSource::Policy,
+            other => {
+                tracing::warn!(
+                    value = other,
+                    "COURSEBOARD_TENANT_SOURCE is not one of extension|compare|policy; \
+                     using extension"
+                );
+                TenantSource::Extension
+            }
+        }
+    }
+}
+
+/// Where `/v1/me` gets the caller's tenant list from (ADR-0011).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TenantSource {
+    /// Field `/v1/erp/me` filtered by the golf extension flag (current).
+    Extension,
+    /// Serve the extension answer, run the policy path too, log the diff.
+    Compare,
+    /// Platform `/v1/me` + `check-tenants` policy filter (target).
+    Policy,
 }
 
 impl Default for RuntimeConfig {
@@ -256,6 +295,7 @@ impl Default for RuntimeConfig {
             field_api_audience: None,
             multi_course_product_writes: DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
             disable_action_authz: false,
+            tenant_source: "extension".to_string(),
             twilio_account_sid: None,
             twilio_auth_token: None,
             twilio_messaging_service_sid: None,

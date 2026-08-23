@@ -159,6 +159,39 @@ impl FieldReservationReportGateway {
         }
     }
 
+    /// Remove the legacy report key from the tenant config after the local
+    /// table has been seeded and verified. This key alone gets an explicit
+    /// deletion (ADR-0009): it dominates the config's size and rides the hot
+    /// path payload on every extension-status read. Returns whether a write
+    /// happened, and verifies by reading back.
+    pub async fn delete_report_config_key(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<bool, CourseError> {
+        let current = self
+            .read_scope_config(credentials, "tenant", None)
+            .await?
+            .unwrap_or_else(|| json!({}));
+        let mut next = object_config(&current)?;
+        if next.remove(REPORT_KEY).is_none() {
+            return Ok(false);
+        }
+        self.write_tenant_config(credentials, &Value::Object(next))
+            .await?;
+        let after = self
+            .read_scope_config(credentials, "tenant", None)
+            .await?
+            .unwrap_or_else(|| json!({}));
+        if after.get(REPORT_KEY).is_some_and(|value| !value.is_null()) {
+            return Err(CourseError::Provider(
+                "reservation report config key reappeared after deletion; another writer \
+                 may have raced this cleanup — re-run it"
+                    .into(),
+            ));
+        }
+        Ok(true)
+    }
+
     async fn write_tenant_config(
         &self,
         credentials: GatewayCredentials<'_>,

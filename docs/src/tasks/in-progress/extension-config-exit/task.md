@@ -40,6 +40,8 @@ Field の extension config に、CourseBoard の設定・業務ルール値・�
 
 9 系統で唯一、一回限りの移送が要る。`bin/` にコマンドを足し、seed → 検証 → 切替 → legacy 削除の一方向。dual-write はしない。**この key は切替後に config から明示的に消す。**
 
+実装済み（2026-08-23）: `golf_reservation_report_rows` テーブル、`MigratingReservationReportGateway`（ローカルが正。未 seed のテナントだけ legacy を読み、**最初のインポートの直前に legacy 全量を自動 seed** する）、`courseboard-migrate-reservation-reports` コマンド（seed → 全行照合 → `COURSEBOARD_MIGRATE_DELETE_CONFIG_KEY=1` で legacy key 削除）。残りは本番テナントごとのコマンド実行と key 削除という運用手順だけ。
+
 ### 4. 撤退までの暫定対応
 
 - **商品枠の書き込みを照合つきの経路へ**（第0波、S）。今は読んで書くだけの生 PATCH で、Field 側の枠取り込みが同じ配列を書く。**現時点で最も確実に失われる経路。**

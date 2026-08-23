@@ -42,6 +42,10 @@ path = "bin/lambda.rs"
 name = "courseboard-migrate"
 path = "bin/migrate.rs"
 
+[[bin]]
+name = "courseboard-migrate-reservation-reports"
+path = "bin/migrate_reservation_reports.rs"
+
 [dev-dependencies]
 base64 = "0.22"
 http-body-util = "0.1"

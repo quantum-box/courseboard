@@ -434,6 +434,11 @@ pub struct FieldGolfCatalogGateway {
     base_url: String,
     /// Whether a plan may be stored against more than one course (SCC-3).
     multi_course_product_writes: bool,
+    /// CourseBoard's own store for the golf keys of a product (play type,
+    /// hole count, group cap, course scope). When attached, reads prefer it
+    /// and every save mirrors what the config write stored into it — the
+    /// transitional step of splitting golf keys out of the config (ADR-0009).
+    product_settings: Option<std::sync::Arc<super::MySqlGolfProductSettingsRepository>>,
 }
 
 impl FieldGolfCatalogGateway {
@@ -454,7 +459,16 @@ impl FieldGolfCatalogGateway {
             client,
             base_url: normalize_base_url(field_api_url),
             multi_course_product_writes,
+            product_settings: None,
         }
+    }
+
+    pub fn with_product_settings(
+        mut self,
+        product_settings: std::sync::Arc<super::MySqlGolfProductSettingsRepository>,
+    ) -> Self {
+        self.product_settings = Some(product_settings);
+        self
     }
 
     async fn read_config(&self, credentials: GatewayCredentials<'_>) -> Result<Value, CourseError> {
@@ -749,9 +763,23 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<ReservationProduct>, CourseError> {
-        Ok(generic_product_config::read_products(
-            &self.read_config(credentials).await?,
-        ))
+        let products = generic_product_config::read_products(&self.read_config(credentials).await?);
+        let Some(repository) = &self.product_settings else {
+            return Ok(products);
+        };
+        // CourseBoard's own rows are the source of truth for the golf keys; a
+        // product without a row (saved before this table existed) falls back
+        // to the copies still riding on the config.
+        let local = repository.get_all(credentials.operator_id).await?;
+        Ok(products
+            .into_iter()
+            .map(
+                |product| match local.get(product.reservation_service_id().as_str()) {
+                    Some(settings) => settings.apply_to(&product),
+                    None => product,
+                },
+            )
+            .collect())
     }
 
     async fn upsert_reservation_product(
@@ -796,12 +824,26 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
                 |config| generic_product_config::upsert_product(config, &input, write_mode),
             )
             .await?;
-        generic_product_config::read_products(&stored)
+        let product = generic_product_config::read_products(&stored)
             .into_iter()
             .find(|product| product.reservation_service_id() == &input.reservation_service_id)
             .ok_or(CourseError::Provider(
                 "the saved plan was not returned by the extension config".into(),
-            ))
+            ))?;
+        if let Some(repository) = &self.product_settings {
+            // Mirror what the config write actually stored — never the raw
+            // input — so the local rows can only ever equal the config copy.
+            // A failure here surfaces to the operator; the config is already
+            // saved, and retrying the save converges the two stores.
+            repository
+                .replace(
+                    credentials.operator_id,
+                    product.reservation_service_id().as_str(),
+                    &super::GolfProductSettings::from_product(&product),
+                )
+                .await?;
+        }
+        Ok(product)
     }
 
     async fn list_product_slots(
