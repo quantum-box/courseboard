@@ -29,12 +29,16 @@ export const ledger = {
     failed: 'Could not save the column order',
   },
   source: {
-    inventory: 'From generated slots',
-    schedule: 'From the weekly schedule',
+    /**
+     * Booking hours are the weekly rule; start slots are the dated inventory
+     * built from it. Only a column drawn from the latter counts capacity.
+     */
+    inventory: 'From start slots',
+    schedule: 'From booking hours',
     openingHours: 'From opening hours',
     bookingsOnly: 'Bookings only',
-    derivedNotice: 'No slots have been generated for this course, so how many groups are left is unknown.',
-    openCourseSetup: 'Open this course’s booking slots',
+    derivedNotice: 'No start slots have been built for this course, so how many groups are left is unknown.',
+    openCourseSetup: 'Open this course’s booking hours',
   },
   head: {
     time: 'Time',
@@ -55,7 +59,7 @@ export const ledger = {
     capacityUnknown: 'Capacity unknown',
     closed: 'Closed',
     special: 'Special rate',
-    retired: 'No slot',
+    retired: 'No start slot',
   },
   legend: {
     label: 'What the colours mean',
@@ -64,13 +68,13 @@ export const ledger = {
     full: 'Full',
     closed: 'Closed',
     special: 'Special rate',
-    retired: 'No slot',
+    retired: 'No start slot',
   },
   now: 'Now',
   empty: {
-    title: 'No slots for this day',
-    description: 'Set the course a weekly schedule, or generate its slots, and the tee times appear here.',
-    toSchedule: 'Go to the weekly schedule',
+    title: 'No start slots for this day',
+    description: 'Set the course’s booking hours and the day’s start slots are built, putting the tee times here.',
+    toSchedule: 'Go to booking hours',
   },
   partial: {
     title: 'Some detail could not be loaded',
@@ -129,15 +133,15 @@ export const ledger = {
     blockLabel: {
       full: 'Full',
       stopped: 'Bookings stopped',
-      missingInventory: 'No booking slot at this time',
-      missingResource: 'Course booking slots not configured',
+      missingInventory: 'No start slot at this time',
+      missingResource: 'Nowhere to put booking hours',
       notSellable: 'Bookings not accepted',
     },
     block: {
       full: 'This time is full. Choose another time.',
       stopped: 'Bookings have been stopped for this time.',
-      missingInventory: 'There is no bookable slot at this time. Generate booking slots first.',
-      missingResource: 'This course is not linked to booking slots. Configure its booking slots first.',
+      missingInventory: 'There is no start slot at this time. Set the course’s booking hours first.',
+      missingResource: 'This course has nowhere to put booking hours. Set them up on the course first.',
       notSellable: 'Bookings are not accepted at this time. Choose another time.',
     },
     customerName: 'Customer name',

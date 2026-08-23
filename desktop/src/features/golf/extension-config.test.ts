@@ -41,7 +41,7 @@ describe('golf extension config form', () => {
   it('rejects values outside the supported operating range', () => {
     const draft = golfExtensionConfigToDraft({})
     expect(() => buildGolfExtensionConfig({ ...draft, maxPlayersPerTeeTime: '10' }, {}))
-      .toThrow('1枠の人数は 1〜4 人')
+      .toThrow('1スタート枠の人数は 1〜4 人')
   })
 })
 

@@ -1,7 +1,7 @@
 export const timeline = {
   title: 'タイムライン',
   description: '予約とキャディの割当を、同じ時間の並びで見ます。',
-  tileDescription: '予約の枠ごとに、割当のようすをタイルで見ます。',
+  tileDescription: 'スタート枠ごとに、割当のようすをタイルで見ます。',
   loading: 'タイムラインを読み込んでいます…',
   reload: '読み直す',
   toDispatch: '配置へ',
@@ -121,7 +121,7 @@ export const timeline = {
   },
   tiles: {
     title: '予約のタイル',
-    description: '予約の枠ごとの割当のようす',
+    description: 'スタート枠ごとの割当のようす',
     groups: '{{n}} 組',
     meta: '{{size}}名 · {{playType}} · {{holes}}H',
     caddieNotRequired: 'キャディは不要',
