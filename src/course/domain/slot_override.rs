@@ -129,6 +129,21 @@ impl SlotOverride {
     }
 }
 
+/// Whether the desk has shut this tee time.
+///
+/// Wall clocks are compared, not instants, for the same reason the mark stores
+/// one: a schedule regeneration rebuilds the slot rows under new ids, and the
+/// mark has to keep pointing at the 07:14 row across it.
+///
+/// The caller is expected to have narrowed `marks` to one course and one date
+/// already — the query that loads them takes both.
+pub fn is_tee_time_closed(marks: &[SlotOverride], tee_time: &str) -> Result<bool, CourseError> {
+    let wanted = normalize_clock(tee_time.to_string())?;
+    Ok(marks
+        .iter()
+        .any(|mark| mark.is_closed() && mark.tee_time() == wanted))
+}
+
 /// Which marks to load for one ledger day.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotOverrideQuery {

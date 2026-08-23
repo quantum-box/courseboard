@@ -141,7 +141,7 @@ export const settings: DeepPartial<typeof source> = {
   validation: {
     duration: 'Enter a default duration between 30 and 720 minutes.',
     holes: 'Choose 9 or 18 default holes.',
-    maxPlayers: 'Enter 1 to 4 players per slot.',
+    maxPlayers: 'Enter 1 to 4 players per start slot.',
     memberDeposit: 'Enter a member deposit between 0 and 100%.',
     guestDeposit: 'Enter a guest deposit between 0 and 100%.',
     prefecture: 'Pick a prefecture whose tax schedule we hold.',

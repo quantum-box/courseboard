@@ -2775,7 +2775,7 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
 
     const course = mockCourses.find(item => item.id === golfCourseId && item.isActive)
     if (!course || resourceId !== mockReservationResourceId(course.id)) {
-      return error(400, '選択したコースと予約枠が一致しません。台帳を読み込み直してください')
+      return error(400, '選択したコースとスタート枠が一致しません。台帳を読み込み直してください')
     }
 
     // Match CreateReservationUseCase: a missing/inactive generated row and a

@@ -81,6 +81,7 @@ import { useResource } from '../../hooks/useResource'
 import { normalizeIsoDate } from '../../lib/clock'
 import { navigate, useNavigationGuard, useRouteParamState } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
+import type { CourseCaddieSupply, DayCaddieSupply } from './caddieCourseSupply'
 import { Sheet } from '../../components/Sheet'
 import { CaddieLink } from './CaddieLink'
 import {
@@ -1081,23 +1082,6 @@ function DailySupplyPanel({ date }: { date: string }) {
       ) : null}
     </Panel>
   )
-}
-
-/** One course's caddie day, as the balance board reads it. */
-type CourseCaddieSupply = {
-  golfCourseId: string
-  courseName: string
-  workingCaddies: number
-  roundsCapacity: number
-  caddieAttachedGroups: number
-  movableCaddies: number
-  shortfall: number
-}
-
-type DayCaddieSupply = {
-  date: string
-  courses: CourseCaddieSupply[]
-  unplacedCaddies: number
 }
 
 type Reinforcement = {

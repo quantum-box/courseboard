@@ -10,6 +10,9 @@ export const ledger = {
     playersValue: '{{n}} 名',
     open: '空き枠',
     openValue: '{{n}} 枠',
+    /** スタート枠が無い列は数えられないので、合計から外したことを言う。 */
+    openUnknown: '分かりません',
+    openPartial: '{{count}} コース分は数えられません',
     breakdown: 'セルフ {{self}} 組 · キャディ付き {{caddie}} 組',
   },
   courses: {
@@ -22,6 +25,11 @@ export const ledger = {
     totals: '{{groups}}組{{players}}人（セルフ{{self}}組）',
     interval: '{{n}}分間隔',
     open: '空き {{n}} 枠',
+    /** キャディ付きで売れた組数と、その日のキャディが受けられる組数。 */
+    caddie: 'キャディ {{booked}}/{{capacity}}',
+    caddieSpare: 'あと {{n}} 組',
+    caddieOver: '{{n}} 組オーバー',
+    caddieHint: '出勤 {{caddies}}人で {{capacity}}組まで受けられます。いま {{booked}}組。',
   },
   order: {
     moveLeft: '{{name}}を左へ',
@@ -30,12 +38,17 @@ export const ledger = {
     failed: '並び順を保存できませんでした',
   },
   source: {
-    inventory: '受付枠から',
-    schedule: '週の予定から',
+    /**
+     * 「受付枠」は毎週の決めごと、「スタート枠」はそこから日ごとに作られた実体。
+     * 在庫のある列だけがスタート枠から引けていて、それ以外は受付枠や営業時間から
+     * 時刻を割り出しているだけなので、名前でその差が読めるようにしている。
+     */
+    inventory: 'スタート枠から',
+    schedule: '受付枠から',
     openingHours: '営業時間から',
     bookingsOnly: '予約のみ',
     /** Shown when the rows were derived rather than generated. */
-    derivedNotice: 'この列は受付枠が作られていないため、空き数は分かりません。',
+    derivedNotice: 'この列はスタート枠が作られていないため、空き数は分かりません。',
     /** Sends the desk to the course screen that links the resource and builds the slots. */
     openCourseSetup: 'このコースの受付枠を開く',
   },
@@ -58,7 +71,7 @@ export const ledger = {
     capacityUnknown: '枠数 未設定',
     closed: '売り止め',
     special: '特別料金',
-    retired: '受付枠なし',
+    retired: 'スタート枠なし',
   },
   legend: {
     label: '色の意味',
@@ -67,13 +80,13 @@ export const ledger = {
     full: '満枠',
     closed: '売り止め',
     special: '特別料金',
-    retired: '受付枠なし',
+    retired: 'スタート枠なし',
   },
   now: '今',
   empty: {
     title: 'この日の枠がありません',
-    description: 'コースの週の予定を作るか、受付枠を作ると、ここに時刻の行が並びます。',
-    toSchedule: '週の予定へ',
+    description: 'コースの受付枠を決めると、日ごとのスタート枠が作られ、ここに時刻の行が並びます。',
+    toSchedule: '受付枠へ',
   },
   partial: {
     title: '一部の情報が取れていません',
@@ -131,15 +144,15 @@ export const ledger = {
     blockLabel: {
       full: '満枠',
       stopped: '受付停止中',
-      missingInventory: 'この時刻の予約枠なし',
-      missingResource: 'コースの予約枠が未設定',
+      missingInventory: 'この時刻のスタート枠なし',
+      missingResource: '受付枠の置き場が未設定',
       notSellable: '予約受付なし',
     },
     block: {
       full: 'この時刻は満枠です。別の時刻を選んでください。',
       stopped: 'この時刻は予約の受付を停止しています。',
-      missingInventory: 'この時刻には予約に使う枠がありません。先に予約枠を作ってください。',
-      missingResource: 'このコースは予約枠と結び付いていません。先にコースの予約枠を設定してください。',
+      missingInventory: 'この時刻にはスタート枠がありません。先にコースの受付枠を決めてください。',
+      missingResource: 'このコースには受付枠の置き場がありません。先にコースの受付枠を設定してください。',
       notSellable: 'この時刻は予約の受付対象ではありません。別の時刻を選んでください。',
     },
     customerName: '予約者名',

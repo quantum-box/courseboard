@@ -130,7 +130,7 @@ export const members = {
     },
     fieldReservations: {
       label: '予約管理',
-      description: '予約・枠・プランを登録・更新できます。顧客と売上分析は閲覧のみ。',
+      description: '予約・受付枠・プランを登録・更新できます。顧客と売上分析は閲覧のみ。',
     },
     fieldHr: {
       label: '人事・労務',

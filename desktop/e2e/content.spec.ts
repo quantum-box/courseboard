@@ -228,7 +228,7 @@ test.describe('予約ルール', () => {
   test('設定ずみのポリシーが表示される', async ({ page }) => {
     await page.goto('/golf/policy')
     await expect(page.getByText('設定ずみ').first()).toBeVisible()
-    await expect(page.getByRole('heading', { name: '予約枠の基本' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '予約の基本' })).toBeVisible()
     await expect(page.getByRole('heading', { name: '前払い（デポジット）' })).toBeVisible()
     await expect(page.getByRole('button', { name: '予約ルールを保存' })).toBeVisible()
   })
