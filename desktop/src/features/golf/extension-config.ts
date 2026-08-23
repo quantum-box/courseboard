@@ -7,53 +7,31 @@ import { i18next } from '../../i18n'
  */
 export const PREFECTURES: readonly string[] = ['hokkaido']
 
+/**
+ * The two keys the pricing screen owns in the extension config.
+ *
+ * This form used to carry seven more — holes, party size, cart policy,
+ * deposits, a public product name — and wrote defaults for all of them on
+ * every save, even for a club that had never set any. Nothing read those
+ * copies: the real values live in Field's reservation policy, edited on the
+ * policy screen. Writing a second, unread copy of a booking rule is exactly
+ * what ADR-0009 retires, so the form now touches only what it shows.
+ */
 export type GolfExtensionConfigDraft = {
-  cartPolicy: 'optional' | 'required' | 'unavailable'
-  defaultDurationMinutes: string
-  defaultHoles: string
-  maxPlayersPerTeeTime: string
-  memberDepositPercent: string
-  guestDepositPercent: string
-  publicProductName: string
-  publicProductDescription: string
   /** Which prefecture's golf course tax schedule applies. */
   prefecture: string
   /** The grade the prefecture assigned this course. */
   taxGrade: string
 }
 
-function numberValue(value: unknown, fallback: number) {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback
-}
-
 function stringValue(value: unknown, fallback = '') {
   return typeof value === 'string' ? value : fallback
-}
-
-function objectValue(value: unknown) {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {}
 }
 
 export function golfExtensionConfigToDraft(
   config: Record<string, unknown>,
 ): GolfExtensionConfigDraft {
-  const pricing = objectValue(config.memberGuestPricing)
-  const rawCartPolicy = stringValue(config.cartPolicy, 'optional')
-  const cartPolicy = ['optional', 'required', 'unavailable'].includes(rawCartPolicy)
-    ? rawCartPolicy as GolfExtensionConfigDraft['cartPolicy']
-    : 'optional'
-
   return {
-    cartPolicy,
-    defaultDurationMinutes: String(numberValue(config.defaultDurationMinutes, 60)),
-    defaultHoles: String(numberValue(config.defaultHoles, 18)),
-    maxPlayersPerTeeTime: String(numberValue(config.maxPlayersPerTeeTime, 4)),
-    memberDepositPercent: String(numberValue(pricing.memberDepositRatio, 0.3) * 100),
-    guestDepositPercent: String(numberValue(pricing.guestDepositRatio, 0.3) * 100),
-    publicProductName: stringValue(config.publicProductName),
-    publicProductDescription: stringValue(config.publicProductDescription),
     prefecture: stringValue(config.prefecture),
     taxGrade: stringValue(config.taxGrade),
   }
@@ -63,38 +41,7 @@ export function buildGolfExtensionConfig(
   draft: GolfExtensionConfigDraft,
   original: Record<string, unknown>,
 ): Record<string, unknown> {
-  const defaultDurationMinutes = Number(draft.defaultDurationMinutes)
-  const defaultHoles = Number(draft.defaultHoles)
-  const maxPlayersPerTeeTime = Number(draft.maxPlayersPerTeeTime)
-  const memberDepositPercent = Number(draft.memberDepositPercent)
-  const guestDepositPercent = Number(draft.guestDepositPercent)
   const errors: string[] = []
-
-  if (!Number.isInteger(defaultDurationMinutes) || defaultDurationMinutes < 30 || defaultDurationMinutes > 720) {
-    errors.push(i18next.t('settings:validation.duration'))
-  }
-  if (![9, 18].includes(defaultHoles)) {
-    errors.push(i18next.t('settings:validation.holes'))
-  }
-  if (!Number.isInteger(maxPlayersPerTeeTime) || maxPlayersPerTeeTime < 1 || maxPlayersPerTeeTime > 4) {
-    errors.push(i18next.t('settings:validation.maxPlayers'))
-  }
-  if (
-    draft.memberDepositPercent.trim() === ''
-    || !Number.isFinite(memberDepositPercent)
-    || memberDepositPercent < 0
-    || memberDepositPercent > 100
-  ) {
-    errors.push(i18next.t('settings:validation.memberDeposit'))
-  }
-  if (
-    draft.guestDepositPercent.trim() === ''
-    || !Number.isFinite(guestDepositPercent)
-    || guestDepositPercent < 0
-    || guestDepositPercent > 100
-  ) {
-    errors.push(i18next.t('settings:validation.guestDeposit'))
-  }
   // The prefecture decides the tax schedule, so a typo here is a wrong tax
   // rather than a failed lookup. Only known keys are accepted.
   const prefecture = draft.prefecture.trim()
@@ -110,20 +57,5 @@ export function buildGolfExtensionConfig(
   }
   if (errors.length > 0) throw new Error(errors.join(' / '))
 
-  return {
-    ...original,
-    cartPolicy: draft.cartPolicy,
-    defaultDurationMinutes,
-    defaultHoles,
-    maxPlayersPerTeeTime,
-    memberGuestPricing: {
-      ...objectValue(original.memberGuestPricing),
-      guestDepositRatio: guestDepositPercent / 100,
-      memberDepositRatio: memberDepositPercent / 100,
-    },
-    prefecture,
-    publicProductDescription: draft.publicProductDescription.trim(),
-    publicProductName: draft.publicProductName.trim(),
-    taxGrade,
-  }
+  return { ...original, prefecture, taxGrade }
 }

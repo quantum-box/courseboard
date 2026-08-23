@@ -141,11 +141,6 @@ export const settings: DeepPartial<typeof source> = {
     },
   },
   validation: {
-    duration: 'ふつうのかかる時間は 30〜720 分で入れてください。',
-    holes: 'ふつうのホールの数は 9 か 18 を選んでください。',
-    maxPlayers: '1つの スタート枠の人数は 1〜4 人で入れてください。',
-    memberDeposit: '会員が先に払う割合は 0〜100% で入れてください。',
-    guestDeposit: '会員以外が先に払う割合は 0〜100% で入れてください。',
     prefecture: '税の表を用意している都道府県から選んでください。',
     taxGrade: '等級は、英数字とハイフンで32文字までです。',
     gradeNeedsPrefecture: '先に都道府県を選んでください。',
