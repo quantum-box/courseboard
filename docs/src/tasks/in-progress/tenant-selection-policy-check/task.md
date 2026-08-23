@@ -17,6 +17,8 @@ CourseBoard の `/v1/me` は Field の `/v1/erp/me?extensionKey=golf_course` を
 
 ## やること
 
+進捗（2026-08-23）: 手順 1（寛容化）と手順 2（`COURSEBOARD_TENANT_SOURCE=compare|policy` のフラグ実装、代表 action の共通性テスト含む）は実装済み。残りは手順 0 の curl 確認、手順 3 の本番 compare 運用（1 営業週）、手順 4 の切替と Field 外し、手順 5 の UI 文言。
+
 ### 0. 着手前に確認する
 
 **Cognito の access token で `check-tenants` が通るか。** このエンドポイントは呼び出し元が人間のユーザーであることを要求する。sandbox に curl 1 本で確認できる。通らないと設計の前提が崩れるので、コードを 1 行も書く前にやる。

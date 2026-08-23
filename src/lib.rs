@@ -1187,7 +1187,8 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
         &course_gateway_url,
         Some(&tachyon_api_url),
     )
-    .context("courseboard profile proxy configuration is invalid")?;
+    .context("courseboard profile proxy configuration is invalid")?
+    .map(|client| client.with_tenant_source(config.tenant_source()));
     let field_api = FieldApiClient::from_config(
         config.field_api_base_url(),
         config.field_api_client_credentials_config(),
