@@ -37,7 +37,7 @@ export const settings = {
       description: 'ゴルフ用の機能が有効になっているか、施設の設定を確かめてください。',
     },
     title: 'ゴルフ機能の設定',
-    description: '施設ぜんたいで使う通貨・タイムゾーン・プレイヤー区分です。',
+    description: '施設ぜんたいで使うタイムゾーンと、予約入力のプレイヤー区分です。',
     enabled: '使えます',
     disabled: '止まっています',
     invalid: '設定に問題あり',
@@ -53,8 +53,6 @@ export const settings = {
     invalidConfig: {
       title: 'いまの設定に問題があります',
     },
-    currency: 'ふだん使う通貨',
-    currencyHint: '最終更新 {{updated}} · ISO 4217',
     timezone: 'タイムゾーン',
     timezoneHint: '例: Asia/Tokyo',
     playerTags: 'プレイヤー区分',
@@ -69,8 +67,6 @@ export const settings = {
       description: '施設のゴルフ機能設定を反映しました。',
     },
     validation: {
-      currencyRequired: '通貨を選んでください。',
-      currencyFormat: '通貨は ISO 4217 の3文字コードで入力してください。',
       timezoneRequired: 'タイムゾーンを入力してください。',
       timezoneFormat: 'タイムゾーンは「Asia/Tokyo」のような地域名の形で入力してください。「JST」などの略称は使えません。',
       playerTagsTooMany: 'プレイヤー区分は {{max}} 件までです。',

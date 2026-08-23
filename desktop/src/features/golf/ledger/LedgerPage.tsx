@@ -26,7 +26,6 @@ import { showToast } from '../../../lib/toast'
 import { caddieSupplyByCourse, type DayCaddieSupply } from '../caddieCourseSupply'
 import { parseLocalDateParts } from '../timeline/timelineLayout'
 import type { TeeReservation } from '../timeline/models'
-import { playerTagOptionsFromConfig } from '../playerTagOptions'
 import { LedgerBoard, type SlotSelection } from './LedgerBoard'
 import { LedgerBoardSkeleton, SkeletonBar } from './LedgerSkeleton'
 import { arrangeCourses, moveCourse } from './courseOrder'
@@ -233,12 +232,10 @@ export function LedgerPage() {
     { cacheKey: 'reservation-products:list' },
   )
 
-  const extensionResource = useResource(
-    () => courseboardApiJson<{ configJson?: Record<string, unknown> | null } | null>(
-      `${COURSE_API}/extension-status`,
-    ),
+  const playerTagResource = useResource(
+    () => courseboardApiJson<{ items: string[] }>(`${COURSE_API}/player-tag-options`),
     [],
-    { cacheKey: 'course:extension-status' },
+    { cacheKey: 'course:player-tag-options' },
   )
 
   /**
@@ -261,7 +258,7 @@ export function LedgerPage() {
     coursesResource.refresh()
     orderResource.refresh()
     productsResource.refresh()
-    extensionResource.refresh()
+    playerTagResource.refresh()
     caddieSupplyResource.refresh()
   }
   useRegisterPageReload(refreshAll)
@@ -349,7 +346,7 @@ export function LedgerPage() {
     golfCourseId: product.golfCourseId,
     maxPlayersPerGroup: product.maxPlayersPerGroup,
   }))
-  const playerTagOptions = playerTagOptionsFromConfig(extensionResource.data?.configJson)
+  const playerTagOptions = playerTagResource.data?.items ?? []
 
   const selectedBookingTarget = selectedReservationTarget(columns, selection)
   const selectedBookingBlock = selectedBookingTarget

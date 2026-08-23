@@ -1,25 +1,14 @@
 import { describe, expect, it } from 'vitest'
+import { normalizedPlayerTagOptions, validatePlayerTagOptions } from './playerTagOptions'
 
-import {
-  normalizedPlayerTagOptions,
-  playerTagOptionDraftFromConfig,
-  playerTagOptionsFromConfig,
-  validatePlayerTagOptions,
-} from './playerTagOptions'
-
-describe('player tag options', () => {
-  it('reads ordered tenant choices and ignores unsafe values in daily entry', () => {
-    const config = { playerTagOptions: [' 共通 ', 42, '', '優待', '共通'] }
-    expect(playerTagOptionsFromConfig(config)).toEqual(['共通', '優待'])
+// Reading the categories out of the extension config moved to the API with
+// the storage itself; what remains here is the form's own hygiene.
+describe('player category form hygiene', () => {
+  it('normalizes whitespace and drops the rows left empty', () => {
+    expect(normalizedPlayerTagOptions([' 共通 ', '', '優待'])).toEqual(['共通', '優待'])
   })
 
-  it('keeps invalid draft values visible so settings can correct them', () => {
-    const config = { playerTagOptions: ['共通', '共通'] }
-    expect(playerTagOptionDraftFromConfig(config)).toEqual(['共通', '共通'])
-    expect(validatePlayerTagOptions(playerTagOptionDraftFromConfig(config))).toBe('duplicate')
-  })
-
-  it('trims saved choices and drops blank rows', () => {
-    expect(normalizedPlayerTagOptions([' 共通 ', ' ', '優待'])).toEqual(['共通', '優待'])
+  it('flags a duplicate the operator typed twice', () => {
+    expect(validatePlayerTagOptions(['共通', ' 共通 '])).toBe('duplicate')
   })
 })

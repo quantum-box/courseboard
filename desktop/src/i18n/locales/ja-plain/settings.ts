@@ -41,7 +41,7 @@ export const settings: DeepPartial<typeof source> = {
     },
     title: 'ゴルフ用の機能の設定',
     description:
-      'このゴルフ場ぜんたいで使う、お金の単位・時刻の基準・プレイヤーの くぶんです。',
+      'このゴルフ場ぜんたいで使う、時刻の基準と、予約で選ぶ プレイヤーの くぶんです。',
     enabled: '使えます',
     disabled: '止まっています',
     invalid: '設定に問題があります',
@@ -57,8 +57,6 @@ export const settings: DeepPartial<typeof source> = {
     invalidConfig: {
       title: '今の設定に問題があります',
     },
-    currency: 'お金の単位',
-    currencyHint: '最後に直した日 {{updated}}',
     timezone: '時刻の基準（タイムゾーン）',
     timezoneHint: '日本のゴルフ場なら Asia/Tokyo です',
     playerTags: 'プレイヤーの くぶん',
@@ -73,8 +71,6 @@ export const settings: DeepPartial<typeof source> = {
       description: 'ゴルフ用の機能の設定を 新しくしました。',
     },
     validation: {
-      currencyRequired: 'お金の単位を選んでください。',
-      currencyFormat: 'お金の単位は、JPY のような3文字で入れてください。',
       timezoneRequired: '時刻の基準を入れてください。',
       timezoneFormat: '時刻の基準は「Asia/Tokyo」のように、地域の名前で入れてください。「JST」のような短い書き方は使えません。',
       playerTagsTooMany: 'プレイヤーの くぶんは {{max}} こまでです。',
