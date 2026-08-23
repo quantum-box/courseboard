@@ -21,6 +21,10 @@ export const ledger = {
     totals: '{{groups}} groups / {{players}} players ({{self}} self)',
     interval: 'every {{n}} min',
     open: '{{n}} open',
+    caddie: 'Caddie {{booked}}/{{capacity}}',
+    caddieSpare: '{{n}} left',
+    caddieOver: '{{n}} over',
+    caddieHint: '{{caddies}} caddies on today, taking up to {{capacity}} groups. {{booked}} sold.',
   },
   order: {
     moveLeft: 'Move {{name}} left',

@@ -1,5 +1,6 @@
 import { i18next } from '../../../i18n'
 
+import type { CourseCaddieSupply } from '../caddieCourseSupply'
 import type { TeeReservation } from '../timeline/models'
 import type { LedgerColumn, LedgerSlot, SlotGridSource } from './models'
 
@@ -239,4 +240,44 @@ export function observedIntervalMinutes(column: LedgerColumn): number | null {
  */
 export function knowsRemainingCapacity(column: LedgerColumn): boolean {
   return column.gridSource === 'inventory'
+}
+
+/**
+ * Whether this course has a caddie limit worth stating.
+ *
+ * Shifts are confirmed a month at a time, and a month nobody confirmed leaves
+ * every course at zero. `キャディ 0/0` on such a day reads as a limit the club
+ * set, when in fact nobody has decided yet — the same reason a derived column
+ * says nothing about open slots rather than saying zero.
+ *
+ * Groups already sold with a caddie are the exception: capacity of zero
+ * against bookings that exist is precisely what the desk needs to see, so that
+ * course keeps its line even though the shifts are missing.
+ */
+export function knowsCaddieCapacity(
+  supply: CourseCaddieSupply | null | undefined,
+): supply is CourseCaddieSupply {
+  if (!supply) return false
+  return supply.roundsCapacity > 0 || supply.caddieAttachedGroups > 0
+}
+
+/** `キャディ 8/12` — groups sold against what today's caddies can take. */
+export function formatCaddieCapacity(supply: CourseCaddieSupply): string {
+  return i18next.t('ledger:column.caddie', {
+    booked: String(supply.caddieAttachedGroups),
+    capacity: String(supply.roundsCapacity),
+  })
+}
+
+/**
+ * The line beside the ratio: what is left, or how far past the limit it went.
+ *
+ * The two are worth spelling out rather than leaving the desk to subtract the
+ * ratio in their head, since the answer decides whether the next caddie-side
+ * booking can be taken at all.
+ */
+export function formatCaddieShortfall(supply: CourseCaddieSupply): string {
+  return supply.shortfall < 0
+    ? i18next.t('ledger:column.caddieOver', { n: String(-supply.shortfall) })
+    : i18next.t('ledger:column.caddieSpare', { n: String(supply.shortfall) })
 }

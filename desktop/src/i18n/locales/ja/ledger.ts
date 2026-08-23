@@ -22,6 +22,11 @@ export const ledger = {
     totals: '{{groups}}組{{players}}人（セルフ{{self}}組）',
     interval: '{{n}}分間隔',
     open: '空き {{n}} 枠',
+    /** キャディ付きで売れた組数と、その日のキャディが受けられる組数。 */
+    caddie: 'キャディ {{booked}}/{{capacity}}',
+    caddieSpare: 'あと {{n}} 組',
+    caddieOver: '{{n}} 組オーバー',
+    caddieHint: '出勤 {{caddies}}人で {{capacity}}組まで受けられます。いま {{booked}}組。',
   },
   order: {
     moveLeft: '{{name}}を左へ',

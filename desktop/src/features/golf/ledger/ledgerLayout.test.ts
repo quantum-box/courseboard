@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
+import type { CourseCaddieSupply } from '../caddieCourseSupply'
 import type { TeeReservation } from '../timeline/models'
 import type { LedgerColumn, LedgerSlot } from './models'
 import {
   currentSlotTeeTime,
   DEFAULT_SEAT_COLUMNS,
   MAX_SEAT_COLUMNS,
+  formatCaddieCapacity,
+  formatCaddieShortfall,
   groupTitle,
+  knowsCaddieCapacity,
   knowsRemainingCapacity,
   observedIntervalMinutes,
   remainingGroups,
@@ -324,3 +328,64 @@ describe('knowsRemainingCapacity', () => {
     } as unknown as LedgerColumn
   }
 })
+
+describe('knowsCaddieCapacity', () => {
+  it('says nothing about a course whose month was never confirmed', () => {
+    // Every field arrives at zero when no shift rows exist, and "0/0" would
+    // read as a limit somebody set.
+    const unconfirmed = supply({
+      workingCaddies: 0,
+      roundsCapacity: 0,
+      caddieAttachedGroups: 0,
+      movableCaddies: 0,
+      shortfall: 0,
+    })
+    expect(knowsCaddieCapacity(unconfirmed)).toBe(false)
+  })
+
+  it('speaks up when groups are sold against no confirmed shifts', () => {
+    // Capacity nobody set, bookings that do exist: the one case where zero
+    // capacity is worth printing.
+    const oversold = supply({ roundsCapacity: 0, caddieAttachedGroups: 3, shortfall: -3 })
+    expect(knowsCaddieCapacity(oversold)).toBe(true)
+  })
+
+  it('is quiet while the lookup is still out', () => {
+    expect(knowsCaddieCapacity(null)).toBe(false)
+    expect(knowsCaddieCapacity(undefined)).toBe(false)
+  })
+})
+
+describe('formatCaddieCapacity', () => {
+  it('reads sold over what the day can take', () => {
+    const line = formatCaddieCapacity(supply({ roundsCapacity: 12, caddieAttachedGroups: 8 }))
+    expect(line).toContain('8')
+    expect(line).toContain('12')
+  })
+})
+
+describe('formatCaddieShortfall', () => {
+  it('spells out the groups still sellable rather than leaving a subtraction', () => {
+    expect(formatCaddieShortfall(supply({ shortfall: 4 }))).toContain('4')
+  })
+
+  it('states the overshoot as a positive count, not a minus sign', () => {
+    // "-2 組" beside a ratio is read as a tally, not as a warning.
+    const line = formatCaddieShortfall(supply({ shortfall: -2 }))
+    expect(line).toContain('2')
+    expect(line).not.toContain('-')
+  })
+})
+
+function supply(overrides: Partial<CourseCaddieSupply> = {}): CourseCaddieSupply {
+  return {
+    golfCourseId: 'course-1',
+    courseName: '空沼IN',
+    workingCaddies: 7,
+    roundsCapacity: 12,
+    caddieAttachedGroups: 8,
+    movableCaddies: 2,
+    shortfall: 4,
+    ...overrides,
+  }
+}

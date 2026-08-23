@@ -21,6 +21,10 @@ export const ledger = {
     totals: '{{groups}}組{{players}}人（セルフ{{self}}組）',
     interval: '{{n}}分おき',
     open: 'あき {{n}} 枠',
+    caddie: 'キャディ {{booked}}/{{capacity}}',
+    caddieSpare: 'あと {{n}} 組',
+    caddieOver: '{{n}} 組 おおい',
+    caddieHint: 'しゅっきん {{caddies}}人で {{capacity}}組まで うけられます。いま {{booked}}組。',
   },
   order: {
     moveLeft: '{{name}}を ひだりへ',

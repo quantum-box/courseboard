@@ -3,13 +3,17 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Fragment, type MouseEvent as ReactMouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import type { CourseCaddieSupply } from '../caddieCourseSupply'
 import type { TeeReservation } from '../timeline/models'
 import type { SlotContextTarget } from './SlotContextMenu'
 import {
   currentSlotTeeTime,
+  formatCaddieCapacity,
+  formatCaddieShortfall,
   formatColumnTotals,
   formatGridSource,
   groupTitle,
+  knowsCaddieCapacity,
   knowsRemainingCapacity,
   observedIntervalMinutes,
   remainingGroups,
@@ -39,6 +43,7 @@ export type SlotSelection = {
  */
 export function LedgerBoard({
   columns,
+  caddieSupply,
   nowMinutes,
   selection,
   selectedReservationId,
@@ -50,6 +55,8 @@ export function LedgerBoard({
   onOpenCourseSetup,
 }: {
   columns: LedgerColumn[]
+  /** Today's caddie room per course. Empty when the lookup has not landed. */
+  caddieSupply: Map<string, CourseCaddieSupply>
   /** Minutes past midnight in the course's clock, or null on another day. */
   nowMinutes: number | null
   selection: SlotSelection | null
@@ -67,6 +74,7 @@ export function LedgerBoard({
         <LedgerColumnTable
           key={column.golfCourseId}
           column={column}
+          caddieSupply={caddieSupply.get(column.golfCourseId) ?? null}
           nowMinutes={nowMinutes}
           canMoveLeft={index > 0}
           canMoveRight={index < columns.length - 1}
@@ -88,6 +96,7 @@ export function LedgerBoard({
 
 function LedgerColumnTable({
   column,
+  caddieSupply,
   nowMinutes,
   canMoveLeft,
   canMoveRight,
@@ -101,6 +110,7 @@ function LedgerColumnTable({
   onOpenCourseSetup,
 }: {
   column: LedgerColumn
+  caddieSupply: CourseCaddieSupply | null
   nowMinutes: number | null
   canMoveLeft: boolean
   canMoveRight: boolean
@@ -190,6 +200,30 @@ function LedgerColumnTable({
           ) : null}
           {knowsRemainingCapacity(column) ? (
             <span>{t('ledger:column.open', { n: String(column.openSlotCount) })}</span>
+          ) : null}
+          {/* Open slots say what the course can start; this says how many of
+              those it can still staff. The desk was reading one number here
+              and the other on the caddie screen, which is two places to look
+              before answering the phone. */}
+          {knowsCaddieCapacity(caddieSupply) ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className={
+                    caddieSupply.shortfall < 0 ? 'ledger-column-oversold' : undefined
+                  }
+                >
+                  {formatCaddieCapacity(caddieSupply)} · {formatCaddieShortfall(caddieSupply)}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                {t('ledger:column.caddieHint', {
+                  caddies: String(caddieSupply.workingCaddies),
+                  capacity: String(caddieSupply.roundsCapacity),
+                  booked: String(caddieSupply.caddieAttachedGroups),
+                })}
+              </TooltipContent>
+            </Tooltip>
           ) : null}
         </p>
         {/* The notice used to state the problem and stop there, leaving the desk
