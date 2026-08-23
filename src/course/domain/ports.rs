@@ -277,6 +277,27 @@ pub trait AvailabilityDeadlineGateway: Send + Sync {
     ) -> Result<AvailabilityDeadline, CourseError>;
 }
 
+/// Port for the order courses are laid out in on the ledger board.
+///
+/// Keyed by tenant id rather than credentials because this is CourseBoard's own
+/// storage. It used to live in the golf extension's config object on Field,
+/// which has no version to compare against and is now gated behind the
+/// permission that also enables and disables extensions — neither of which is
+/// the real reason to move it. How a club likes its board arranged is not
+/// something Field should have a column for (ADR-0009, ADR-0010).
+#[async_trait]
+pub trait CourseOrderGateway: Send + Sync {
+    /// Never absent: a tenant that has arranged nothing reads back as empty,
+    /// and the board falls back to the course list's own order.
+    async fn get_course_order(&self, tenant_id: &str) -> Result<CourseOrder, CourseError>;
+
+    async fn replace_course_order(
+        &self,
+        tenant_id: &str,
+        order: &CourseOrder,
+    ) -> Result<CourseOrder, CourseError>;
+}
+
 /// Port for the club's own shift-planning rules.
 ///
 /// The law fixes one ceiling; the rest — which weekdays to keep clear, how many

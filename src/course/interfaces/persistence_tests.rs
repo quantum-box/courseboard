@@ -477,19 +477,21 @@ async fn a_column_order_written_through_the_api_is_still_there_for_the_next_requ
 }
 
 #[tokio::test]
-async fn arranging_the_board_does_not_take_the_plans_stored_beside_it() {
-    // Field replaces the extension config wholesale. Everything the storefront
-    // reads lives in the same object.
-    let tenant = tenant_for("arranging_the_board_does_not_take_the_pl");
+async fn arranging_the_board_does_not_touch_fields_config_at_all() {
+    // The arrangement is CourseBoard's own table now (ADR-0009). It used to be
+    // merged into the same wholesale-replaced object the storefront reads, so
+    // arranging the board and editing a plan could undo one another.
+    let tenant = tenant_for("arranging_the_board_does_not_touch_field");
     let field = field_with_courses();
-    *field.config.lock().unwrap() = json!({
+    let before = json!({
         "reservationProducts": [{ "id": "plan-1", "enabled": true }],
         "defaultHoles": 18,
     });
+    *field.config.lock().unwrap() = before.clone();
     let url = spawn_field(field.clone()).await;
     let pool = crate::test_support::test_pool().await;
 
-    call(
+    let (status, body) = call(
         &router(&pool, &url),
         &tenant,
         "PUT",
@@ -497,11 +499,12 @@ async fn arranging_the_board_does_not_take_the_plans_stored_beside_it() {
         Some(json!({ "golfCourseIds": ["course-a"] })),
     )
     .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["golfCourseIds"], json!(["course-a"]));
 
-    let stored = field.config.lock().unwrap().clone();
-    assert_eq!(stored["reservationProducts"][0]["id"], json!("plan-1"));
-    assert_eq!(stored["defaultHoles"], json!(18));
-    assert_eq!(stored["golfCourseOrder"], json!(["course-a"]));
+    // Not "the other keys survived" — the object is not written to at all, so
+    // there is no window for a concurrent editor to lose anything.
+    assert_eq!(field.config.lock().unwrap().clone(), before);
 }
 
 #[tokio::test]
@@ -1358,13 +1361,13 @@ async fn clearing_a_mark_persists_as_cleared() {
 
 #[tokio::test]
 async fn a_write_that_another_writer_overwrote_is_applied_again_rather_than_lost() {
-    // Plans and the column order live in the same object, are edited from
-    // different screens, and Field offers no version to compare against. Without
-    // the retry the operator is told the board was arranged when it was not.
+    // Everything still left in the extension config shares one object that
+    // Field replaces wholesale, with no version to compare against. Without the
+    // retry the operator is told the plan was saved when it was not.
     let tenant = tenant_for("a_write_that_another_writer_overwrote_is");
     let field = field_with_courses();
     *field.config.lock().unwrap() = json!({});
-    *field.clobber_with.lock().unwrap() = json!({ "reservationProducts": [{ "id": "plan-1" }] });
+    *field.clobber_with.lock().unwrap() = json!({ "somebodyElsesKey": { "kept": true } });
     *field.clobber_config_writes.lock().unwrap() = 1;
     let url = spawn_field(field.clone()).await;
     let pool = crate::test_support::test_pool().await;
@@ -1372,19 +1375,23 @@ async fn a_write_that_another_writer_overwrote_is_applied_again_rather_than_lost
     let (status, body) = call(
         &router(&pool, &url),
         &tenant,
-        "PUT",
-        "/v1/course/course-order",
-        Some(json!({ "golfCourseIds": ["course-a"] })),
+        "POST",
+        "/v1/course/reservation-products/season-pass",
+        Some(json!({
+            "displayName": "シーズンパス",
+            "playType": "caddie",
+            "golfCourseIds": ["course-a"],
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["golfCourseIds"], json!(["course-a"]));
+    assert_eq!(body["displayName"], json!("シーズンパス"));
 
     // Both survive: ours because it was applied again, theirs because the retry
     // merged onto what they wrote rather than onto the value we first read.
     let stored = field.config.lock().unwrap().clone();
-    assert_eq!(stored["golfCourseOrder"], json!(["course-a"]));
-    assert_eq!(stored["reservationProducts"][0]["id"], json!("plan-1"));
+    assert_eq!(stored["reservationProducts"][0]["id"], json!("season-pass"));
+    assert_eq!(stored["somebodyElsesKey"], json!({ "kept": true }));
 }
 
 #[tokio::test]
@@ -1439,7 +1446,7 @@ async fn a_week_of_slots_overwritten_by_another_writer_is_applied_again_rather_t
 #[tokio::test]
 async fn a_write_that_can_never_land_is_reported_instead_of_claimed() {
     // A save that cannot be made to stick has to fail loudly. Reporting success
-    // here would leave the operator believing a board they cannot see.
+    // here would leave the operator believing in a plan nobody can book.
     let tenant = tenant_for("a_write_that_can_never_land_is_reported_");
     let field = field_with_courses();
     *field.config.lock().unwrap() = json!({});
@@ -1451,18 +1458,18 @@ async fn a_write_that_can_never_land_is_reported_instead_of_claimed() {
     let (status, _) = call(
         &router(&pool, &url),
         &tenant,
-        "PUT",
-        "/v1/course/course-order",
-        Some(json!({ "golfCourseIds": ["course-a"] })),
+        "POST",
+        "/v1/course/reservation-products/season-pass",
+        Some(json!({
+            "displayName": "シーズンパス",
+            "playType": "caddie",
+            "golfCourseIds": ["course-a"],
+        })),
     )
     .await;
     assert_ne!(status, StatusCode::OK);
-    assert!(field
-        .config
-        .lock()
-        .unwrap()
-        .get("golfCourseOrder")
-        .is_none());
+    let stored = field.config.lock().unwrap().clone();
+    assert_eq!(stored["reservationProducts"], json!([]));
 }
 
 #[tokio::test]

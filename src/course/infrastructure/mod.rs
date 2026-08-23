@@ -7,6 +7,7 @@ mod booking_horizon_config;
 mod caddie_rank_fee_config;
 mod caddie_shift_repository;
 mod course_order_config;
+mod course_order_repository;
 mod field_commercial_gateway;
 mod field_customer_gateway;
 mod field_customer_reception_gateway;
@@ -25,6 +26,7 @@ mod tax_rule_gateway;
 
 pub use availability_deadline_repository::MySqlAvailabilityDeadlineRepository;
 pub use caddie_shift_repository::MySqlCaddieShiftRepository;
+pub use course_order_repository::MySqlCourseOrderRepository;
 pub use field_commercial_gateway::FieldGolfCommercialGateway;
 pub use field_customer_gateway::FieldCustomerGateway;
 pub use field_customer_reception_gateway::FieldCustomerReceptionGateway;

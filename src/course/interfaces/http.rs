@@ -26,8 +26,8 @@ use crate::course::domain::{
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
-    FieldReservationGateway, MySqlGeneratedThroughRepository, MySqlSlotOverrideRepository,
-    PartyPlayerInput,
+    FieldReservationGateway, MySqlCourseOrderRepository, MySqlGeneratedThroughRepository,
+    MySqlSlotOverrideRepository, PartyPlayerInput,
 };
 use crate::course::usecase::{
     CancelReservationUseCase, ChangeReservationPlanUseCase, CreateCourseUseCase,
@@ -74,6 +74,11 @@ pub(crate) fn reservation_gateway(state: &AppState) -> Arc<FieldReservationGatew
 /// Desk marks live in CourseBoard's own MySQL, not in Field.
 pub(crate) fn slot_override_gateway(state: &AppState) -> Arc<MySqlSlotOverrideRepository> {
     state.slot_overrides()
+}
+
+/// So does the board's column order (ADR-0009).
+pub(crate) fn course_order_gateway(state: &AppState) -> Arc<MySqlCourseOrderRepository> {
+    state.course_order()
 }
 
 pub(crate) fn generated_through_gateway(state: &AppState) -> Arc<MySqlGeneratedThroughRepository> {
@@ -583,6 +588,7 @@ pub async fn get_tee_ledger(
         catalog_gateway(&state),
         catalog_gateway(&state),
         slot_override_gateway(&state),
+        course_order_gateway(&state),
     );
     let ledger = use_case
         .execute(
@@ -714,7 +720,7 @@ pub async fn get_course_order(
     headers: HeaderMap,
 ) -> Result<Json<CourseOrderResponse>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let order = GetCourseOrderUseCase::new(catalog_gateway(&state))
+    let order = GetCourseOrderUseCase::new(catalog_gateway(&state), course_order_gateway(&state))
         .execute(credentials)
         .await
         .map_err(AppError::from)?;
@@ -746,10 +752,11 @@ pub async fn replace_course_order(
         .into_iter()
         .filter_map(|id| CourseId::from_optional(Some(id)))
         .collect();
-    let order = ReplaceCourseOrderUseCase::new(catalog_gateway(&state))
-        .execute(credentials, ids)
-        .await
-        .map_err(AppError::from)?;
+    let order =
+        ReplaceCourseOrderUseCase::new(catalog_gateway(&state), course_order_gateway(&state))
+            .execute(credentials, ids)
+            .await
+            .map_err(AppError::from)?;
     Ok(Json(CourseOrderResponse::from(order)))
 }
 
