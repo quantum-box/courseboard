@@ -18,9 +18,11 @@ use crate::course::domain::actions;
 use crate::course::domain::{
     parse_tenant_timezone, shift_covers_tee_time, tenant_date_at, tenant_day_bounds,
     widen_for_utc_date_filter, AvailabilityQuery, CaddieAssignment, CaddieAssignmentQuery,
-    CaddieId, CourseError, GatewayCredentials, GolfOpsGateway, ReservationId,
+    CaddieId, CaddieRankFeeGateway, CourseError, GatewayCredentials, GolfOpsGateway, ReservationId,
     UpsertCaddieAssignment,
 };
+
+use super::caddie_rank_fees::read_caddie_rank_fees;
 
 /// How long the new round holds its caddie when the caller does not say.
 const DEFAULT_ROUND_MINUTES: i64 = 270;
@@ -41,11 +43,12 @@ pub struct NameCaddieForRound {
 
 pub struct CreateCaddieAssignmentUseCase {
     ops: Arc<dyn GolfOpsGateway>,
+    rank_fees: Arc<dyn CaddieRankFeeGateway>,
 }
 
 impl CreateCaddieAssignmentUseCase {
-    pub fn new(ops: Arc<dyn GolfOpsGateway>) -> Self {
-        Self { ops }
+    pub fn new(ops: Arc<dyn GolfOpsGateway>, rank_fees: Arc<dyn CaddieRankFeeGateway>) -> Self {
+        Self { ops, rank_fees }
     }
 
     pub async fn execute(
@@ -81,7 +84,7 @@ impl CreateCaddieAssignmentUseCase {
                     date: None,
                 },
             ),
-            self.ops.get_caddie_rank_fees(credentials),
+            read_caddie_rank_fees(self.ops.as_ref(), self.rank_fees.as_ref(), credentials),
         )?;
 
         let caddie = roster

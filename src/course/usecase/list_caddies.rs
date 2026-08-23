@@ -38,6 +38,7 @@ mod tests {
         CaddieSkillLevel, CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships,
         ReservationId, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
+    use crate::course::usecase::caddie_rank_fees::UnsetRankFees;
     use crate::course::usecase::{
         CreateCaddieAssignmentUseCase, ListCaddieAssignmentsUseCase,
         ListCaddieRecommendationsUseCase, NameCaddieForRound,
@@ -596,7 +597,9 @@ mod tests {
         ops: Arc<FakeOps>,
         input: NameCaddieForRound,
     ) -> Result<CaddieAssignment, CourseError> {
-        CreateCaddieAssignmentUseCase::new(ops)
+        // Unset, so these tests keep reading the fee table from the same place
+        // they always did: the migration fallback in `read_caddie_rank_fees`.
+        CreateCaddieAssignmentUseCase::new(ops, Arc::new(UnsetRankFees))
             .execute(
                 GatewayCredentials {
                     authorization: "Bearer t",

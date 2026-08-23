@@ -33,9 +33,9 @@ use cancellation_fees::{CancellationFeeConfig, MySqlCancellationFeeRepository};
 use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
-    FieldReservationReportGateway, MySqlAvailabilityDeadlineRepository, MySqlCaddieShiftRepository,
-    MySqlCourseOrderRepository, MySqlGeneratedThroughRepository, MySqlShiftRulesRepository,
-    MySqlSlotOverrideRepository,
+    FieldReservationReportGateway, MySqlAvailabilityDeadlineRepository,
+    MySqlCaddieRankFeeRepository, MySqlCaddieShiftRepository, MySqlCourseOrderRepository,
+    MySqlGeneratedThroughRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -58,6 +58,7 @@ pub struct AppState {
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
     course_order: Arc<MySqlCourseOrderRepository>,
+    caddie_rank_fees: Arc<MySqlCaddieRankFeeRepository>,
     generated_through: Arc<MySqlGeneratedThroughRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
@@ -96,6 +97,7 @@ impl AppState {
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
             course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
+            caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -145,6 +147,7 @@ impl AppState {
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
             course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
+            caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -180,6 +183,7 @@ impl AppState {
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
                 course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
+                caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -206,6 +210,7 @@ impl AppState {
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
                 course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
+                caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -243,6 +248,11 @@ impl AppState {
     /// CourseBoard-owned arrangement of the ledger board's columns.
     pub fn course_order(&self) -> Arc<MySqlCourseOrderRepository> {
         self.course_order.clone()
+    }
+
+    /// CourseBoard-owned table of what a round pays at each caddie rank.
+    pub fn caddie_rank_fees(&self) -> Arc<MySqlCaddieRankFeeRepository> {
+        self.caddie_rank_fees.clone()
     }
 
     /// CourseBoard-owned record of how far each course has been built.

@@ -33,9 +33,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::course::domain::actions::{
-    CALCULATE_FEES, LIST_CADDIE_AVAILABILITY, LIST_COURSES, LIST_SHIFTS, LIST_SLOT_OVERRIDES,
-    MANAGE_CADDIE_AVAILABILITY, MANAGE_COURSES, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES,
-    SEED_DEMO_BOARD,
+    CALCULATE_FEES, LIST_CADDIE_AVAILABILITY, LIST_CADDIE_RANK_FEES, LIST_COURSES, LIST_SHIFTS,
+    LIST_SLOT_OVERRIDES, MANAGE_CADDIE_AVAILABILITY, MANAGE_CADDIE_RANK_FEES, MANAGE_COURSES,
+    MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
 };
 
 /// What standing a route needs before its handler runs.
@@ -424,10 +424,18 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/caddie-ratings",
         RouteAuthorization::UpstreamEnforced,
     ),
+    // The fee table is CourseBoard's own row now (ADR-0009). Field no longer
+    // answers for it, and it decides what people are paid, so the check has to
+    // happen here.
     (
-        "*",
+        "GET",
         "/v1/course/caddie-rank-fees",
-        RouteAuthorization::UpstreamEnforced,
+        RouteAuthorization::Action(LIST_CADDIE_RANK_FEES),
+    ),
+    (
+        "PUT",
+        "/v1/course/caddie-rank-fees",
+        RouteAuthorization::Action(MANAGE_CADDIE_RANK_FEES),
     ),
     (
         "*",

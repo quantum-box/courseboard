@@ -26,8 +26,8 @@ use crate::course::domain::{
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
-    FieldReservationGateway, MySqlCourseOrderRepository, MySqlGeneratedThroughRepository,
-    MySqlSlotOverrideRepository, PartyPlayerInput,
+    FieldReservationGateway, MySqlCaddieRankFeeRepository, MySqlCourseOrderRepository,
+    MySqlGeneratedThroughRepository, MySqlSlotOverrideRepository, PartyPlayerInput,
 };
 use crate::course::usecase::{
     CancelReservationUseCase, ChangeReservationPlanUseCase, CreateCourseUseCase,
@@ -79,6 +79,11 @@ pub(crate) fn slot_override_gateway(state: &AppState) -> Arc<MySqlSlotOverrideRe
 /// So does the board's column order (ADR-0009).
 pub(crate) fn course_order_gateway(state: &AppState) -> Arc<MySqlCourseOrderRepository> {
     state.course_order()
+}
+
+/// And what a round pays at each caddie rank.
+pub(crate) fn caddie_rank_fee_gateway(state: &AppState) -> Arc<MySqlCaddieRankFeeRepository> {
+    state.caddie_rank_fees()
 }
 
 pub(crate) fn generated_through_gateway(state: &AppState) -> Arc<MySqlGeneratedThroughRepository> {

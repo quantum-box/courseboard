@@ -5,6 +5,7 @@
 mod availability_deadline_repository;
 mod booking_horizon_config;
 mod caddie_rank_fee_config;
+mod caddie_rank_fee_repository;
 mod caddie_shift_repository;
 mod course_order_config;
 mod course_order_repository;
@@ -25,6 +26,7 @@ mod slot_override_repository;
 mod tax_rule_gateway;
 
 pub use availability_deadline_repository::MySqlAvailabilityDeadlineRepository;
+pub use caddie_rank_fee_repository::MySqlCaddieRankFeeRepository;
 pub use caddie_shift_repository::MySqlCaddieShiftRepository;
 pub use course_order_repository::MySqlCourseOrderRepository;
 pub use field_commercial_gateway::FieldGolfCommercialGateway;

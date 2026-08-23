@@ -13,17 +13,21 @@ use std::sync::Arc;
 use crate::course::domain::actions;
 use crate::course::domain::{
     parse_tenant_timezone, summarize_payroll_in_timezone, tenant_day_bounds,
-    widen_for_utc_date_filter, AttendanceDay, CaddieAssignmentQuery, CourseError,
-    GatewayCredentials, GolfOpsGateway, PayrollCandidate, PayrollPeriod, PayrollSummary,
+    widen_for_utc_date_filter, AttendanceDay, CaddieAssignmentQuery, CaddieRankFeeGateway,
+    CourseError, GatewayCredentials, GolfOpsGateway, PayrollCandidate, PayrollPeriod,
+    PayrollSummary,
 };
+
+use super::caddie_rank_fees::read_caddie_rank_fees;
 
 pub struct GetPayrollSummaryUseCase {
     ops: Arc<dyn GolfOpsGateway>,
+    rank_fees: Arc<dyn CaddieRankFeeGateway>,
 }
 
 impl GetPayrollSummaryUseCase {
-    pub fn new(ops: Arc<dyn GolfOpsGateway>) -> Self {
-        Self { ops }
+    pub fn new(ops: Arc<dyn GolfOpsGateway>, rank_fees: Arc<dyn CaddieRankFeeGateway>) -> Self {
+        Self { ops, rank_fees }
     }
 
     pub async fn execute(
@@ -54,7 +58,7 @@ impl GetPayrollSummaryUseCase {
             self.ops
                 .list_attendance_period_snapshots(credentials, from, to),
             self.ops.list_worked_minutes(credentials, year_month),
-            self.ops.get_caddie_rank_fees(credentials),
+            read_caddie_rank_fees(self.ops.as_ref(), self.rank_fees.as_ref(), credentials),
         )?;
 
         let candidates: Vec<PayrollCandidate> = roster

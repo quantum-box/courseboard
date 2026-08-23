@@ -277,6 +277,27 @@ pub trait AvailabilityDeadlineGateway: Send + Sync {
     ) -> Result<AvailabilityDeadline, CourseError>;
 }
 
+/// Port for what a round pays a caddie at each rank.
+///
+/// Keyed by tenant id because this is CourseBoard's own storage. Reading
+/// returns `None` rather than the defaults so a caller can tell "nobody has set
+/// this" from "somebody set it to what the defaults happen to be" — the
+/// migration off the extension config depends on that distinction, and so would
+/// any later question about whether a club has ever priced its ranks.
+#[async_trait]
+pub trait CaddieRankFeeGateway: Send + Sync {
+    async fn get_caddie_rank_fees(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Option<CaddieRankFees>, CourseError>;
+
+    async fn replace_caddie_rank_fees(
+        &self,
+        tenant_id: &str,
+        fees: &CaddieRankFees,
+    ) -> Result<CaddieRankFees, CourseError>;
+}
+
 /// Port for the order courses are laid out in on the ledger board.
 ///
 /// Keyed by tenant id rather than credentials because this is CourseBoard's own
