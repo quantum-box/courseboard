@@ -35,16 +35,35 @@ platformの配下にいた。CourseBoard専用のplatformは存在しない。
 
 ## Decision
 
-CourseBoardのフラグは、`kind: FeatureFlags` manifestとして本リポジトリで宣言し、
-**Tachyonのplatformテナントへapplyする**。本番とサンドボックスで2本持つ。
+CourseBoardのフラグは**Tachyonのplatformテナントに置く**。本番とサンドボックスの
+2つのplatformが対象になる。
 
-- 宣言（キー・表示名・説明）はリポジトリが正。`.tachyon/manifests/courseboard-flags*.yml`
-- ON/OFFと出し先の絞り込みは管理画面が正。manifestに `evaluationStrategy` は書けない
-- `enabled` はmanifestに書かない。書くとapplyのたびに宣言値へ上書きされ、
-  管理画面のトグルが次のapplyで戻る
+- 置き場はplatform。Operatorに置いたものは評価されない
+- 実体・ON/OFF・出し先の絞り込みは、いずれも**管理画面が正**
 - 本番platformは他社Operatorも配下にいる共有空間なので、出し先を絞るときは
   管理画面で `TenantTargeting` を設定する
 - 接頭辞は `feature.courseboard.` に固定する（CourseBoard側のAPIがそれ以外を拒否する）
+
+### リポジトリのmanifestでは宣言しない
+
+当初は `kind: FeatureFlags` manifestをこのリポジトリに置き、platformテナントへ
+applyする形にした。**これは成立しないことが分かったので取り下げる。**
+
+`save_manifest` / `apply_manifest` は、manifestの `tenantId` とapplyするrequestの
+scopeが一致することを要求し、不一致はforbiddenになる。cross-tenant bypassは
+system userのみで、CLIは1実行1scopeしか持てない。したがって:
+
+- FeatureFlagsだけplatformを指すmixed-scope manifestをOperator scopeでapply
+  → **FeatureFlags側がforbidden**
+- ファイル全体をplatform scopeでapply
+  → **同じリポジトリのCloudApp / OAuth clientがforbidden**
+
+どちらにも倒せない。かといってOperatorに置けば上のとおり評価されない。
+**appが自分のmanifestから評価に乗るフラグを宣言する経路は、現時点で存在しない。**
+
+これはCourseBoard側の工夫では閉じられず、platform側のcontract変更が要る
+（PLT-3418）。それまでフラグの実体は管理画面で作る。contractが入った時点で、
+宣言をリポジトリへ移すかどうかを改めて判断する。
 
 画面側は、ルートとフラグの対応表を1箇所に持ち、画面への入口すべてがそれを読む。
 
@@ -72,13 +91,13 @@ CourseBoardのフラグは、`kind: FeatureFlags` manifestとして本リポジ�
 
 **Negative**
 
-- **applyが先、デプロイが後**という順序に依存する。`enabled` を書かないので
-  新規作成時はfalseであり、画面をフラグで包むコードを先に出すとその画面は404になる
+- **フラグ作成が先、デプロイが後**という順序に依存する。新規作成時はOFFなので、
+  画面をフラグで包むコードを先に出すとその画面は404になる
+- **フラグの宣言がコードレビューを通らない。** 管理画面で作る以上、キーも説明も
+  リポジトリに残らず、誰がいつ何を作ったかはTachyon側の記録にしかない。
+  PLT-3418が解けるまでの負債として引き受ける
 - 本番platformは共有空間で、置いたフラグは配下の全Operatorから見える。
   読むのはCourseBoardだけなので他社アプリの挙動は変わらないが、こちらの私物ではない
-- `tachyon manifest apply` は `-f` 省略時に `.tachyon/manifests` 配下を全て
-  discoveryする。golf authだけ流すつもりでplatformテナントのフラグにも書き込む
-  事故が起こりうる
 - 反映に最大60秒かかる（キャッシュのTTLと複数タスク構成）。Kill Switch用途では
   この遅延が前提になる
 - モックモードは全フラグをONで返すため、E2EはOFF側を見ない。両方の分岐は
@@ -101,5 +120,5 @@ Fieldへゴルフの都合を持ち込むことになる。
 
 - ADR-0005: ゴルフドメインの所有
 - `desktop/src/feature-flags/gated-routes.ts` — ルートとフラグの対応表
-- `.tachyon/manifests/courseboard-flags-prod.yml` / `courseboard-flags-sandbox.yml`
+- PLT-3418 — appが自分のmanifestから評価に乗るフラグを宣言するcontractが無い件
 - tachyon-apps `docs/src/tachyon-apps/feature-flag/iac-manifest.md`
