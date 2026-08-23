@@ -28,6 +28,15 @@ pub async fn run_migration_gate(database_url: &str) -> anyhow::Result<()> {
 
     let result = run_migrations(&pool).await;
     pool.close().await;
+    if let Err(error) = &result {
+        // The deploy hook surfaces only `FunctionError: Unhandled`, and the
+        // Lambda runtime logs the returned error under a target this binary's
+        // subscriber filters out. Without this line the first run against a
+        // fresh preview database leaves no trace of the SQL error, and every
+        // later run degrades to the far less useful "partially applied"
+        // (PLT-3849).
+        tracing::error!(error = %error, "migration gate rejected this deployment");
+    }
     result.map_err(Into::into)
 }
 
