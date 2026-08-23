@@ -20,11 +20,13 @@ use crate::course::domain::{
     parse_tenant_timezone, plan_caddie_assignments, tenant_date_at, tenant_day_bounds,
     widen_for_utc_date_filter, AttendanceState, AutoAssignResult, AvailabilityDeadline,
     AvailabilityDeadlineGateway, AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery,
-    CaddiePlacement, CaddieRoster, CaddieShift, CaddieShiftGateway, CourseError, DeadlineWarning,
-    GatewayCredentials, GolfCatalogGateway, GolfOpsGateway, PlanOptions, PlannableCaddie,
-    PlannableRound, ReservationGateway, TeeSheetItem, TeeSheetQuery, UpsertCaddieAssignment,
-    YearMonth,
+    CaddiePlacement, CaddieRankFeeGateway, CaddieRoster, CaddieShift, CaddieShiftGateway,
+    CourseError, DeadlineWarning, GatewayCredentials, GolfCatalogGateway, GolfOpsGateway,
+    PlanOptions, PlannableCaddie, PlannableRound, ReservationGateway, TeeSheetItem, TeeSheetQuery,
+    UpsertCaddieAssignment, YearMonth,
 };
+
+use super::caddie_rank_fees::read_caddie_rank_fees;
 use crate::course::usecase::GetTeeSheetUseCase;
 
 /// What a freshly planned assignment is written as.
@@ -56,6 +58,7 @@ pub struct AutoAssignCaddiesUseCase {
     catalog: Arc<dyn GolfCatalogGateway>,
     deadlines: Arc<dyn AvailabilityDeadlineGateway>,
     shifts: Arc<dyn CaddieShiftGateway>,
+    rank_fees: Arc<dyn CaddieRankFeeGateway>,
 }
 
 impl AutoAssignCaddiesUseCase {
@@ -65,6 +68,7 @@ impl AutoAssignCaddiesUseCase {
         catalog: Arc<dyn GolfCatalogGateway>,
         deadlines: Arc<dyn AvailabilityDeadlineGateway>,
         shifts: Arc<dyn CaddieShiftGateway>,
+        rank_fees: Arc<dyn CaddieRankFeeGateway>,
     ) -> Self {
         Self {
             ops,
@@ -72,6 +76,7 @@ impl AutoAssignCaddiesUseCase {
             catalog,
             deadlines,
             shifts,
+            rank_fees,
         }
     }
 
@@ -302,7 +307,8 @@ impl AutoAssignCaddiesUseCase {
         // What each round pays, so Field's own record of it agrees with the
         // payroll sheet rather than reading 0 for every caddie who is simply
         // paid by their rank.
-        let rank_fees = self.ops.get_caddie_rank_fees(credentials).await?;
+        let rank_fees =
+            read_caddie_rank_fees(self.ops.as_ref(), self.rank_fees.as_ref(), credentials).await?;
         let fees: HashMap<&str, (i64, String)> = roster
             .caddies()
             .iter()

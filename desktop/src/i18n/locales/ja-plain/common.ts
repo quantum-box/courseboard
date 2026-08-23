@@ -87,6 +87,8 @@ export const common: DeepPartial<typeof source> = {
     sectionUnavailableTitle: 'この部分を表示できません',
     sectionUnavailableDescription:
       '選んだ内容を確かめて、もう一度やってください。ほかの部分はそのまま使えます。',
+    timezoneFallback:
+      '施設の時間の設定を読めませんでした。日付と時刻は {{timezone}} として出しています。',
   },
   external: {
     notAllowed: 'このリンクは開けない決まりになっています。',

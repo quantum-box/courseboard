@@ -1,10 +1,18 @@
 # /v1/me proxyとextension連動テナント選択
 
+> **Superseded (2026-08-23)。** 後継は
+> [テナント選択をポリシーで行う](../../../in-progress/tenant-selection-policy-check/task.md)。
+> extension の有効判定による絞り込みは
+> [ADR-0011](../../../../architecture/decisions/ADR-0011-policy-based-tenant-selection.md)
+> でポリシーベースに置き換わり、`/v1/erp/me` proxy と `extensionKey` パラメータは廃止する。
+> 本 taskdoc が解いた「選択後に Field 依存機能が全滅する」問題は残っており、解き方だけが変わる。
+> 未完の確認項目は後継へ引き継ぐ。
+
 ## Links
 
 - [PLT-2771](https://linear.app/issue/PLT-2771)
 - [設計](./design.md)
-- [ADR-0004](../../../architecture/decisions/ADR-0004-ui-platform-api-access-via-courseboard-api.md)
+- [ADR-0004](../../../../architecture/decisions/ADR-0004-ui-platform-api-access-via-courseboard-api.md)
 
 ## 概要
 

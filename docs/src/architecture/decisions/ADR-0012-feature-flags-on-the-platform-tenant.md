@@ -1,4 +1,4 @@
-# ADR-0009: CourseBoardのフィーチャーフラグはplatformテナントに置く
+# ADR-0012: CourseBoardのフィーチャーフラグはplatformテナントに置く
 
 ## Status
 
@@ -101,5 +101,5 @@ Fieldへゴルフの都合を持ち込むことになる。
 
 - ADR-0005: ゴルフドメインの所有
 - `desktop/src/feature-flags/gated-routes.ts` — ルートとフラグの対応表
-- `.tachyon/manifests/courseboard-flags.yml` / `courseboard-flags-sandbox.yml`
+- `.tachyon/manifests/courseboard-flags-prod.yml` / `courseboard-flags-sandbox.yml`
 - tachyon-apps `docs/src/tachyon-apps/feature-flag/iac-manifest.md`

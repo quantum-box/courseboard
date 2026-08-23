@@ -382,6 +382,12 @@ impl ReservationProduct {
         self.max_players_per_group
     }
 
+    /// Whether a course constraint was stored at all — see `is_sold_on` for
+    /// why "declared but empty" and "never declared" must stay distinct.
+    pub fn course_scope_declared(&self) -> bool {
+        self.course_scope_declared
+    }
+
     pub fn requires_caddie(&self) -> bool {
         self.play_type.requires_caddie()
     }

@@ -4,7 +4,7 @@ import type { timeline as source } from '../ja/timeline'
 export const timeline: DeepPartial<typeof source> = {
   title: 'Timeline',
   description: 'See bookings and caddie assignments on one shared time axis.',
-  tileDescription: 'See assignment status per booking slot as tiles.',
+  tileDescription: 'See assignment status per start slot as tiles.',
   loading: 'Loading the timeline…',
   reload: 'Reload',
   toDispatch: 'Go to assignments',
@@ -123,7 +123,7 @@ export const timeline: DeepPartial<typeof source> = {
   },
   tiles: {
     title: 'Booking tiles',
-    description: 'Assignment status per booking slot',
+    description: 'Assignment status per start slot',
     groups: '{{n}} groups',
     meta: '{{size}} players · {{playType}} · {{holes}}H',
     caddieNotRequired: 'No caddie needed',

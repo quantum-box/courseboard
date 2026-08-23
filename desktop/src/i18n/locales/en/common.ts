@@ -97,6 +97,8 @@ export const common: DeepPartial<typeof source> = {
     sectionUnavailableTitle: 'This section could not be displayed',
     sectionUnavailableDescription:
       'Check the input and try again. You can continue using the rest of the page.',
+    timezoneFallback:
+      'Could not load this club\'s time zone. Dates and times are shown in {{timezone}}.',
   },
   external: {
     invalidUrl: 'That link is not valid.',

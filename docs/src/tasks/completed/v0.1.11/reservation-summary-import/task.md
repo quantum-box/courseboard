@@ -8,11 +8,11 @@ Linear: PLT-3247（仕様確定）/ PLT-3248（取り込み）/ PLT-3249（冪�
 
 - この taskdoc の実装（#198、#222）— CourseBoard の DB に `golf_reservation_day_summaries`
   と `golf_reservation_course_links` を作り、xlsx を CourseBoard 側の calamine で解析した。
-- [reservation-report-import](../../completed/v0.1.11/../v0.1.10/reservation-report-import/task.md)（#212）—
+- [reservation-report-import](../../v0.1.10/reservation-report-import/task.md)（#212）—
   Field の汎用 tabular analyze に CSV / Excel / PDF を解析させ、集計を Field の
   extension config に置いた。
 
-**残したのは後者。** [ADR-0007](../../../architecture/decisions/ADR-0007-external-reservation-report-snapshots.md)
+**残したのは後者。** [ADR-0007](../../../../architecture/decisions/ADR-0007-external-reservation-report-snapshots.md)
 が保存先を決めており、その Alternatives Considered は前者の形（CourseBoard に専用テーブル）を
 「ADR-0005 の物理移送禁止に反する」として明示的に不採用にしている。
 

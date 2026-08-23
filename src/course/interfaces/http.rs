@@ -26,8 +26,9 @@ use crate::course::domain::{
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
-    FieldReservationGateway, MySqlGeneratedThroughRepository, MySqlSlotOverrideRepository,
-    PartyPlayerInput,
+    FieldReservationGateway, MySqlCaddieRankFeeRepository, MySqlCourseOrderRepository,
+    MySqlGeneratedThroughRepository, MySqlPlayerTagOptionsRepository,
+    MySqlPricingSettingsRepository, MySqlSlotOverrideRepository, PartyPlayerInput,
 };
 use crate::course::usecase::{
     CancelReservationUseCase, ChangeReservationPlanUseCase, CreateCourseUseCase,
@@ -48,11 +49,14 @@ use crate::{AppError, AppState};
 
 pub(crate) fn catalog_gateway(state: &AppState) -> Arc<FieldGolfCatalogGateway> {
     let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
-    Arc::new(FieldGolfCatalogGateway::with_multi_course_product_writes(
-        state.http_client.clone(),
-        field_api_url,
-        state.cancellation_fee_config.multi_course_product_writes,
-    ))
+    Arc::new(
+        FieldGolfCatalogGateway::with_multi_course_product_writes(
+            state.http_client.clone(),
+            field_api_url,
+            state.cancellation_fee_config.multi_course_product_writes,
+        )
+        .with_product_settings(state.product_settings()),
+    )
 }
 
 pub(crate) fn ops_gateway(state: &AppState) -> Arc<FieldGolfOpsGateway> {
@@ -74,6 +78,26 @@ pub(crate) fn reservation_gateway(state: &AppState) -> Arc<FieldReservationGatew
 /// Desk marks live in CourseBoard's own MySQL, not in Field.
 pub(crate) fn slot_override_gateway(state: &AppState) -> Arc<MySqlSlotOverrideRepository> {
     state.slot_overrides()
+}
+
+/// So does the board's column order (ADR-0009).
+pub(crate) fn course_order_gateway(state: &AppState) -> Arc<MySqlCourseOrderRepository> {
+    state.course_order()
+}
+
+/// And what a round pays at each caddie rank.
+pub(crate) fn caddie_rank_fee_gateway(state: &AppState) -> Arc<MySqlCaddieRankFeeRepository> {
+    state.caddie_rank_fees()
+}
+
+/// And the pricing inputs the simulator runs on.
+pub(crate) fn pricing_settings_gateway(state: &AppState) -> Arc<MySqlPricingSettingsRepository> {
+    state.pricing_settings()
+}
+
+/// And the booking form's visitor categories.
+pub(crate) fn player_tag_options_gateway(state: &AppState) -> Arc<MySqlPlayerTagOptionsRepository> {
+    state.player_tag_options()
 }
 
 pub(crate) fn generated_through_gateway(state: &AppState) -> Arc<MySqlGeneratedThroughRepository> {
@@ -583,6 +607,7 @@ pub async fn get_tee_ledger(
         catalog_gateway(&state),
         catalog_gateway(&state),
         slot_override_gateway(&state),
+        course_order_gateway(&state),
     );
     let ledger = use_case
         .execute(
@@ -714,7 +739,7 @@ pub async fn get_course_order(
     headers: HeaderMap,
 ) -> Result<Json<CourseOrderResponse>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let order = GetCourseOrderUseCase::new(catalog_gateway(&state))
+    let order = GetCourseOrderUseCase::new(catalog_gateway(&state), course_order_gateway(&state))
         .execute(credentials)
         .await
         .map_err(AppError::from)?;
@@ -746,10 +771,11 @@ pub async fn replace_course_order(
         .into_iter()
         .filter_map(|id| CourseId::from_optional(Some(id)))
         .collect();
-    let order = ReplaceCourseOrderUseCase::new(catalog_gateway(&state))
-        .execute(credentials, ids)
-        .await
-        .map_err(AppError::from)?;
+    let order =
+        ReplaceCourseOrderUseCase::new(catalog_gateway(&state), course_order_gateway(&state))
+            .execute(credentials, ids)
+            .await
+            .map_err(AppError::from)?;
     Ok(Json(CourseOrderResponse::from(order)))
 }
 
@@ -824,6 +850,7 @@ pub async fn create_reservation(
         catalog.clone(),
         catalog,
         state.caddie_shifts(),
+        slot_override_gateway(&state),
     );
     let party = party_from_request(
         request.competition_name,

@@ -33,8 +33,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::course::domain::actions::{
-    CALCULATE_FEES, LIST_CADDIE_AVAILABILITY, LIST_SHIFTS, LIST_SLOT_OVERRIDES,
-    MANAGE_CADDIE_AVAILABILITY, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
+    CALCULATE_FEES, LIST_CADDIE_AVAILABILITY, LIST_CADDIE_RANK_FEES, LIST_COURSES, LIST_SHIFTS,
+    LIST_SLOT_OVERRIDES, LIST_TEE_SHEET, MANAGE_CADDIE_AVAILABILITY, MANAGE_CADDIE_RANK_FEES,
+    MANAGE_COURSES, MANAGE_RESERVATION_POLICY, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES,
+    SEED_DEMO_BOARD,
 };
 
 /// What standing a route needs before its handler runs.
@@ -86,6 +88,32 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "POST",
         "/v1/course/simulator/simulate/range",
         RouteAuthorization::Action(CALCULATE_FEES),
+    ),
+    // The simulator's inputs are CourseBoard's own row (ADR-0009). Reading them
+    // rides the same action as reading a quote; changing them is changing the
+    // club's pricing rules, whichever store they sit in.
+    (
+        "GET",
+        "/v1/course/pricing-settings",
+        RouteAuthorization::Action(CALCULATE_FEES),
+    ),
+    (
+        "PUT",
+        "/v1/course/pricing-settings",
+        RouteAuthorization::Action(MANAGE_RESERVATION_POLICY),
+    ),
+    // The booking form's visitor categories, CourseBoard's own rows
+    // (ADR-0009). Read wherever the tee board is read; arranged where the
+    // club's booking rules are arranged.
+    (
+        "GET",
+        "/v1/course/player-tag-options",
+        RouteAuthorization::Action(LIST_TEE_SHEET),
+    ),
+    (
+        "PUT",
+        "/v1/course/player-tag-options",
+        RouteAuthorization::Action(MANAGE_RESERVATION_POLICY),
     ),
     (
         "POST",
@@ -235,10 +263,18 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/reservations/:reservation_id/plan",
         RouteAuthorization::UpstreamEnforced,
     ),
+    // The arrangement is CourseBoard's own table now (ADR-0009), so Field no
+    // longer answers for these. Both still read the course list from Field to
+    // resolve ids, but that call cannot stand in for authorizing this one.
     (
-        "*",
+        "GET",
         "/v1/course/course-order",
-        RouteAuthorization::UpstreamEnforced,
+        RouteAuthorization::Action(LIST_COURSES),
+    ),
+    (
+        "PUT",
+        "/v1/course/course-order",
+        RouteAuthorization::Action(MANAGE_COURSES),
     ),
     (
         "*",
@@ -415,10 +451,18 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/caddie-ratings",
         RouteAuthorization::UpstreamEnforced,
     ),
+    // The fee table is CourseBoard's own row now (ADR-0009). Field no longer
+    // answers for it, and it decides what people are paid, so the check has to
+    // happen here.
     (
-        "*",
+        "GET",
         "/v1/course/caddie-rank-fees",
-        RouteAuthorization::UpstreamEnforced,
+        RouteAuthorization::Action(LIST_CADDIE_RANK_FEES),
+    ),
+    (
+        "PUT",
+        "/v1/course/caddie-rank-fees",
+        RouteAuthorization::Action(MANAGE_CADDIE_RANK_FEES),
     ),
     (
         "*",
@@ -1155,6 +1199,10 @@ mod tests {
             ("POST", "/v1/course/demo-seed"),
             ("POST", "/v1/course/simulator/calculate"),
             ("POST", "/v1/course/simulator/simulate/range"),
+            ("GET", "/v1/course/pricing-settings"),
+            ("PUT", "/v1/course/pricing-settings"),
+            ("GET", "/v1/course/player-tag-options"),
+            ("PUT", "/v1/course/player-tag-options"),
         ];
         for (method, path) in REGISTERED {
             let method: Method = method.parse().expect("valid method");

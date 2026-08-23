@@ -1,0 +1,12 @@
+-- Drop the vestigial local `tenants` table.
+--
+-- The first migration created it and inserted one demo row ('scc'); nothing
+-- ever wrote to it again, and no CourseBoard code selects from it. Its foreign
+-- keys were already removed by 202608050001 because real tenant ids could
+-- never be inserted, so the references never matched and fee calculation
+-- returned 400 for every tenant.
+--
+-- Tenant membership is not CourseBoard's to record: which tenants exist and
+-- who may see them is answered by the platform's policy check (ADR-0011), and
+-- the idea of reusing this table for tenant selection died with that decision.
+DROP TABLE IF EXISTS tenants;

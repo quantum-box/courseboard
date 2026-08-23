@@ -5,17 +5,17 @@ use chrono::{DateTime, NaiveDate, Utc};
 
 use super::{
     AssignMembershipPlan, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
-    AutoAssignResult, AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon,
-    BudgetAchievement, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
-    CaddieCourseMembership, CaddieId, CaddieRankFees, CaddieRating, CaddieRecommendation,
-    CaddieRoster, CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder, Customer,
-    CustomerId, CustomerMembership, CustomerSearchQuery, DailyBudget, DailyBudgetQuery,
-    DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
-    GenerationSummary, InventoryWatermark, MembershipPlan, MembershipPlanId, MonthlySettlement,
-    NewCustomer, NewReservation, PartyDetails, ProductSlot, ReceptionDraft, ReceptionSheet,
-    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate,
-    ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
-    ResourceId, ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
+    AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, BudgetAchievement,
+    Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
+    CaddieId, CaddieRankFees, CaddieRating, CaddieRoster, CaddieShift, CaddieStaff, Course,
+    CourseError, CourseId, CourseOrder, Customer, CustomerId, CustomerMembership,
+    CustomerSearchQuery, DailyBudget, DailyBudgetQuery, DeleteSlotOverrides, ExtensionStatus,
+    FieldClientCapabilities, FieldRequestContext, GenerationSummary, GolfPricingSettings,
+    InventoryWatermark, MembershipPlan, MembershipPlanId, MonthlySettlement, NewCustomer,
+    NewReservation, PartyDetails, PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet,
+    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
+    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
+    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
     SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
     UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
     UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
@@ -275,6 +275,87 @@ pub trait AvailabilityDeadlineGateway: Send + Sync {
         tenant_id: &str,
         deadline: AvailabilityDeadline,
     ) -> Result<AvailabilityDeadline, CourseError>;
+}
+
+/// Port for what a round pays a caddie at each rank.
+///
+/// Keyed by tenant id because this is CourseBoard's own storage. Reading
+/// returns `None` rather than the defaults so a caller can tell "nobody has set
+/// this" from "somebody set it to what the defaults happen to be" — the
+/// migration off the extension config depends on that distinction, and so would
+/// any later question about whether a club has ever priced its ranks.
+#[async_trait]
+pub trait CaddieRankFeeGateway: Send + Sync {
+    async fn get_caddie_rank_fees(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Option<CaddieRankFees>, CourseError>;
+
+    async fn replace_caddie_rank_fees(
+        &self,
+        tenant_id: &str,
+        fees: &CaddieRankFees,
+    ) -> Result<CaddieRankFees, CourseError>;
+}
+
+/// Port for the booking form's visitor categories.
+///
+/// Keyed by tenant id because this is CourseBoard's own storage. Empty doubles
+/// as unset, which is what sends the reader to the extension config the list
+/// migrated from — the same trade the course order made.
+#[async_trait]
+pub trait PlayerTagOptionsGateway: Send + Sync {
+    async fn get_player_tag_options(
+        &self,
+        tenant_id: &str,
+    ) -> Result<PlayerTagOptions, CourseError>;
+
+    async fn replace_player_tag_options(
+        &self,
+        tenant_id: &str,
+        options: &PlayerTagOptions,
+    ) -> Result<PlayerTagOptions, CourseError>;
+}
+
+/// Port for the course's pricing inputs: the tax-schedule key and the cost
+/// assumptions behind the revenue projection.
+///
+/// Keyed by tenant id because this is CourseBoard's own storage. `None` means
+/// nobody has saved here yet, which is what sends the reader looking in the
+/// extension config the settings migrated from.
+#[async_trait]
+pub trait PricingSettingsGateway: Send + Sync {
+    async fn get_pricing_settings(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Option<GolfPricingSettings>, CourseError>;
+
+    async fn replace_pricing_settings(
+        &self,
+        tenant_id: &str,
+        settings: &GolfPricingSettings,
+    ) -> Result<GolfPricingSettings, CourseError>;
+}
+
+/// Port for the order courses are laid out in on the ledger board.
+///
+/// Keyed by tenant id rather than credentials because this is CourseBoard's own
+/// storage. It used to live in the golf extension's config object on Field,
+/// which has no version to compare against and is now gated behind the
+/// permission that also enables and disables extensions — neither of which is
+/// the real reason to move it. How a club likes its board arranged is not
+/// something Field should have a column for (ADR-0009, ADR-0010).
+#[async_trait]
+pub trait CourseOrderGateway: Send + Sync {
+    /// Never absent: a tenant that has arranged nothing reads back as empty,
+    /// and the board falls back to the course list's own order.
+    async fn get_course_order(&self, tenant_id: &str) -> Result<CourseOrder, CourseError>;
+
+    async fn replace_course_order(
+        &self,
+        tenant_id: &str,
+        order: &CourseOrder,
+    ) -> Result<CourseOrder, CourseError>;
 }
 
 /// Port for the club's own shift-planning rules.
@@ -795,12 +876,6 @@ pub trait GolfOpsGateway: Send + Sync {
         date: NaiveDate,
     ) -> Result<(), CourseError>;
 
-    async fn list_caddie_recommendations(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        query: RecommendationQuery,
-    ) -> Result<Vec<CaddieRecommendation>, CourseError>;
-
     async fn get_attendance_snapshot(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -824,13 +899,6 @@ pub trait GolfOpsGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         year_month: &str,
     ) -> Result<std::collections::HashMap<String, WorkedMinutes>, CourseError>;
-
-    async fn auto_assign_caddies(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        date: NaiveDate,
-        dry_run: bool,
-    ) -> Result<AutoAssignResult, CourseError>;
 
     /// What one round pays at each rank.
     ///

@@ -1026,6 +1026,15 @@ button,
   overflow-wrap: anywhere;
 }
 
+/*
+ * Wraps a notice that sits above the whole app shell, for a setting that every
+ * screen depends on. Page-level notices live inside the page body instead; this
+ * one has to be visible no matter which route is open.
+ */
+.page-banner {
+  padding: 8px 12px 0;
+}
+
 .notice-info { border-left-color: hsl(var(--nui-primary)); background: hsl(var(--nui-selected)); }
 .notice-success { border-left-color: hsl(var(--nui-success)); background: hsl(var(--nui-success) / .08); }
 .notice-warning { border-left-color: hsl(var(--nui-warning)); background: hsl(var(--nui-warning) / .08); }
@@ -5090,6 +5099,13 @@ button,
   margin: 0;
   color: hsl(var(--nui-muted-foreground));
   font-size: 11px;
+}
+
+/* Sold past what the day's caddies can take. The rest of the meta line is grey
+ * on purpose — this is the one item there that the desk has to act on. */
+.ledger-column-oversold {
+  color: hsl(var(--nui-destructive));
+  font-weight: 600;
 }
 
 .ledger-column-derived {

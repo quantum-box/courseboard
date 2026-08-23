@@ -1,5 +1,6 @@
 import { i18next } from '../../../i18n'
 
+import type { CourseCaddieSupply } from '../caddieCourseSupply'
 import type { TeeReservation } from '../timeline/models'
 import type { LedgerColumn, LedgerSlot, SlotGridSource } from './models'
 
@@ -163,17 +164,35 @@ export function sortSlots(slots: LedgerSlot[]): LedgerSlot[] {
  * `openSlots` counts rows the desk could still sell, which is what the header
  * on the paper ledger tracks — not rows that merely have no booking, since a
  * closed row has no booking either.
+ *
+ * Only columns that can actually count are added up. A derived column knows
+ * which of its rows carry no booking, but not how many groups those rows hold,
+ * and adding that in produced a day total stated with confidence over columns
+ * whose own headers said the number was unknown — one club read "空き枠 106 枠"
+ * on a day it could not sell a single tee time. `uncountedCourses` carries how
+ * many were left out so the total can say so rather than quietly shrink.
  */
 export function summarizeLedger(columns: LedgerColumn[]) {
   return columns.reduce(
-    (total, column) => ({
-      groups: total.groups + column.groupCount,
-      players: total.players + column.playerCount,
-      selfGroups: total.selfGroups + column.selfGroupCount,
-      caddieGroups: total.caddieGroups + column.caddieGroupCount,
-      openSlots: total.openSlots + column.openSlotCount,
-    }),
-    { groups: 0, players: 0, selfGroups: 0, caddieGroups: 0, openSlots: 0 },
+    (total, column) => {
+      const counted = knowsRemainingCapacity(column)
+      return {
+        groups: total.groups + column.groupCount,
+        players: total.players + column.playerCount,
+        selfGroups: total.selfGroups + column.selfGroupCount,
+        caddieGroups: total.caddieGroups + column.caddieGroupCount,
+        openSlots: counted ? total.openSlots + column.openSlotCount : total.openSlots,
+        uncountedCourses: counted ? total.uncountedCourses : total.uncountedCourses + 1,
+      }
+    },
+    {
+      groups: 0,
+      players: 0,
+      selfGroups: 0,
+      caddieGroups: 0,
+      openSlots: 0,
+      uncountedCourses: 0,
+    },
   )
 }
 
@@ -239,4 +258,44 @@ export function observedIntervalMinutes(column: LedgerColumn): number | null {
  */
 export function knowsRemainingCapacity(column: LedgerColumn): boolean {
   return column.gridSource === 'inventory'
+}
+
+/**
+ * Whether this course has a caddie limit worth stating.
+ *
+ * Shifts are confirmed a month at a time, and a month nobody confirmed leaves
+ * every course at zero. `キャディ 0/0` on such a day reads as a limit the club
+ * set, when in fact nobody has decided yet — the same reason a derived column
+ * says nothing about open slots rather than saying zero.
+ *
+ * Groups already sold with a caddie are the exception: capacity of zero
+ * against bookings that exist is precisely what the desk needs to see, so that
+ * course keeps its line even though the shifts are missing.
+ */
+export function knowsCaddieCapacity(
+  supply: CourseCaddieSupply | null | undefined,
+): supply is CourseCaddieSupply {
+  if (!supply) return false
+  return supply.roundsCapacity > 0 || supply.caddieAttachedGroups > 0
+}
+
+/** `キャディ 8/12` — groups sold against what today's caddies can take. */
+export function formatCaddieCapacity(supply: CourseCaddieSupply): string {
+  return i18next.t('ledger:column.caddie', {
+    booked: String(supply.caddieAttachedGroups),
+    capacity: String(supply.roundsCapacity),
+  })
+}
+
+/**
+ * The line beside the ratio: what is left, or how far past the limit it went.
+ *
+ * The two are worth spelling out rather than leaving the desk to subtract the
+ * ratio in their head, since the answer decides whether the next caddie-side
+ * booking can be taken at all.
+ */
+export function formatCaddieShortfall(supply: CourseCaddieSupply): string {
+  return supply.shortfall < 0
+    ? i18next.t('ledger:column.caddieOver', { n: String(-supply.shortfall) })
+    : i18next.t('ledger:column.caddieSpare', { n: String(supply.shortfall) })
 }

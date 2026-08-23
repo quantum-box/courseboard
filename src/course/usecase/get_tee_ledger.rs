@@ -16,11 +16,13 @@ use crate::course::domain::actions;
 use crate::course::domain::{
     courseboard_weekday, derive_slot_times_from_hours, derive_slot_times_from_rules,
     parse_tenant_timezone, tenant_day_bounds, Course, CourseError, CourseId, CourseOrder,
-    GatewayCredentials, GolfCatalogGateway, LedgerColumn, LedgerSlot, ReservationScheduleGateway,
-    Resource, ResourceId, ResourceKind, ResourceTimeSlot, SlotGridSource, SlotOverride,
-    SlotOverrideGateway, SlotOverrideQuery, TeeLedger, TeeLedgerQuery, TeeSheetItem,
+    CourseOrderGateway, GatewayCredentials, GolfCatalogGateway, LedgerColumn, LedgerSlot,
+    ReservationScheduleGateway, Resource, ResourceId, ResourceKind, ResourceTimeSlot,
+    SlotGridSource, SlotOverride, SlotOverrideGateway, SlotOverrideQuery, TeeLedger,
+    TeeLedgerQuery, TeeSheetItem,
 };
 
+use super::course_order::read_course_order;
 use super::get_tee_sheet::build_tee_sheet;
 
 /// The tee times a course sells on one day, and how much is known about them.
@@ -54,6 +56,7 @@ pub struct GetTeeLedgerUseCase {
     catalog: Arc<dyn GolfCatalogGateway>,
     schedules: Arc<dyn ReservationScheduleGateway>,
     marks: Arc<dyn SlotOverrideGateway>,
+    course_order: Arc<dyn CourseOrderGateway>,
 }
 
 impl GetTeeLedgerUseCase {
@@ -62,12 +65,14 @@ impl GetTeeLedgerUseCase {
         catalog: Arc<dyn GolfCatalogGateway>,
         schedules: Arc<dyn ReservationScheduleGateway>,
         marks: Arc<dyn SlotOverrideGateway>,
+        course_order: Arc<dyn CourseOrderGateway>,
     ) -> Self {
         Self {
             reservations,
             catalog,
             schedules,
             marks,
+            course_order,
         }
     }
 
@@ -100,7 +105,11 @@ impl GetTeeLedgerUseCase {
             self.catalog.get_tenant_timezone(credentials),
             self.catalog.list_resources(credentials),
             self.catalog.list_reservation_products(credentials),
-            self.catalog.get_course_order(credentials),
+            read_course_order(
+                self.catalog.as_ref(),
+                self.course_order.as_ref(),
+                credentials,
+            ),
             self.marks.list_slot_overrides(tenant_id, &mark_query),
         );
         let reservations = reservations?;

@@ -24,6 +24,7 @@ mod ids;
 mod membership;
 mod party;
 mod payroll;
+mod player_tags;
 mod ports;
 mod pricing_settings;
 mod product;
@@ -105,12 +106,14 @@ pub use party::{PartyDetails, PartyPlayer, MAX_PARTY_PLAYERS, PARTY_CUSTOM_FIELD
 pub use payroll::{
     payroll_csv, summarize_payroll_in_timezone, AttendanceDay, PayrollCandidate, WorkedMinutes,
 };
+pub use player_tags::{PlayerTagOptions, MAX_PLAYER_TAG_LENGTH, MAX_PLAYER_TAG_OPTIONS};
 pub use ports::{
-    AvailabilityDeadlineGateway, CaddieShiftGateway, CourseAuthorizer, CustomerGateway,
-    CustomerReceptionOcrGateway, FieldCapabilitiesGateway, GatewayCredentials,
-    GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
-    GolfTaxGateway, MembershipGateway, ReservationGateway, ReservationScheduleGateway,
-    ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
+    AvailabilityDeadlineGateway, CaddieRankFeeGateway, CaddieShiftGateway, CourseAuthorizer,
+    CourseOrderGateway, CustomerGateway, CustomerReceptionOcrGateway, FieldCapabilitiesGateway,
+    GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
+    GolfOpsGateway, GolfTaxGateway, MembershipGateway, PlayerTagOptionsGateway,
+    PricingSettingsGateway, ReservationGateway, ReservationScheduleGateway, ShiftRulesGateway,
+    SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{
@@ -138,7 +141,8 @@ pub use simulator::{
     TaxRuleSnapshot, DEFAULT_PLAYER_AGE,
 };
 pub use slot_override::{
-    DeleteSlotOverrides, SlotOverride, SlotOverrideKind, SlotOverrideQuery, UpsertSlotOverrides,
+    is_tee_time_closed, DeleteSlotOverrides, SlotOverride, SlotOverrideKind, SlotOverrideQuery,
+    UpsertSlotOverrides,
 };
 pub(crate) use tee_ledger::reconcile_remaining;
 pub use tee_ledger::{

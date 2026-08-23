@@ -56,6 +56,8 @@ mod list_product_slots;
 mod list_reservation_products;
 mod list_resources;
 mod membership;
+mod player_tag_options;
+mod pricing_settings;
 mod quote_golf_fee;
 mod replace_caddie_memberships;
 mod replace_product_slots;
@@ -136,6 +138,8 @@ pub use membership::{
     AssignMembershipPlanUseCase, CreateMembershipPlanUseCase, GetCustomerMembershipUseCase,
     ListMembershipPlansUseCase, UpdateMembershipPlanUseCase,
 };
+pub use player_tag_options::{GetPlayerTagOptionsUseCase, ReplacePlayerTagOptionsUseCase};
+pub use pricing_settings::{GetPricingSettingsUseCase, ReplacePricingSettingsUseCase};
 pub use quote_golf_fee::QuoteGolfFeeUseCase;
 pub use replace_caddie_memberships::ReplaceCaddieMembershipsUseCase;
 pub use replace_product_slots::ReplaceProductSlotsUseCase;

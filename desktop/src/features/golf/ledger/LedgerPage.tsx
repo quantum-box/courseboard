@@ -23,9 +23,9 @@ import { normalizeIsoDate } from '../../../lib/clock'
 import { useRegisterPageReload } from '../../../lib/pageReload'
 import { navigate, useRouteParamState } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
+import { caddieSupplyByCourse, type DayCaddieSupply } from '../caddieCourseSupply'
 import { parseLocalDateParts } from '../timeline/timelineLayout'
 import type { TeeReservation } from '../timeline/models'
-import { playerTagOptionsFromConfig } from '../playerTagOptions'
 import { LedgerBoard, type SlotSelection } from './LedgerBoard'
 import { LedgerBoardSkeleton, SkeletonBar } from './LedgerSkeleton'
 import { arrangeCourses, moveCourse } from './courseOrder'
@@ -232,12 +232,25 @@ export function LedgerPage() {
     { cacheKey: 'reservation-products:list' },
   )
 
-  const extensionResource = useResource(
-    () => courseboardApiJson<{ configJson?: Record<string, unknown> | null } | null>(
-      `${COURSE_API}/extension-status`,
-    ),
+  const playerTagResource = useResource(
+    () => courseboardApiJson<{ items: string[] }>(`${COURSE_API}/player-tag-options`),
     [],
-    { cacheKey: 'course:extension-status' },
+    { cacheKey: 'course:player-tag-options' },
+  )
+
+  /**
+   * How many caddie-side groups each course can still take today.
+   *
+   * Not filtered by the course chips: the board draws whichever columns are
+   * shown from one day-wide answer, and refetching when the desk hides a
+   * column would buy nothing.
+   */
+  const caddieSupplyResource = useResource(
+    () => courseboardApiJson<DayCaddieSupply>(
+      `${COURSE_API}/caddie-course-supply?date=${encodeURIComponent(date)}`,
+    ),
+    [date],
+    { cacheKey: `caddie-course-supply:${date}` },
   )
 
   const refreshAll = () => {
@@ -245,7 +258,8 @@ export function LedgerPage() {
     coursesResource.refresh()
     orderResource.refresh()
     productsResource.refresh()
-    extensionResource.refresh()
+    playerTagResource.refresh()
+    caddieSupplyResource.refresh()
   }
   useRegisterPageReload(refreshAll)
 
@@ -292,6 +306,14 @@ export function LedgerPage() {
   }))
   const unavailable = ledger.data?.unavailable ?? []
   const totals = summarizeLedger(columns)
+  // A failed lookup leaves the map empty, which drops the caddie line from the
+  // headers and leaves the rest of the board untouched. The shift board is the
+  // screen that owns this number; the ledger only borrows it, so a bad day
+  // upstream must not stop the desk taking bookings.
+  const caddieSupply = useMemo(
+    () => caddieSupplyByCourse(caddieSupplyResource.data),
+    [caddieSupplyResource.data],
+  )
   const courseOptions: CourseOption[] = (coursesResource.data?.items ?? [])
     .filter(course => course.isActive !== false)
     .map(course => ({ id: course.id, name: course.name }))
@@ -324,7 +346,7 @@ export function LedgerPage() {
     golfCourseId: product.golfCourseId,
     maxPlayersPerGroup: product.maxPlayersPerGroup,
   }))
-  const playerTagOptions = playerTagOptionsFromConfig(extensionResource.data?.configJson)
+  const playerTagOptions = playerTagResource.data?.items ?? []
 
   const selectedBookingTarget = selectedReservationTarget(columns, selection)
   const selectedBookingBlock = selectedBookingTarget
@@ -556,12 +578,25 @@ export function LedgerPage() {
               <strong>{t('ledger:summary.playersValue', { n: String(totals.players) })}</strong>
             )}
           </div>
+          {/* The columns that cannot count say so in their own headers, so the
+              day total must not quietly speak for them. With none of them
+              countable there is no number to give; with some, the figure is
+              real but partial and says which part it left out. */}
           <div className="ledger-summary-item">
             <span>{t('ledger:summary.open')}</span>
             {boardPending ? (
               <SkeletonBar width="5ch" height={14} />
+            ) : columns.length > 0 && totals.uncountedCourses === columns.length ? (
+              <strong>{t('ledger:summary.openUnknown')}</strong>
             ) : (
-              <strong>{t('ledger:summary.openValue', { n: String(totals.openSlots) })}</strong>
+              <>
+                <strong>{t('ledger:summary.openValue', { n: String(totals.openSlots) })}</strong>
+                {totals.uncountedCourses > 0 ? (
+                  <small>
+                    {t('ledger:summary.openPartial', { count: totals.uncountedCourses })}
+                  </small>
+                ) : null}
+              </>
             )}
           </div>
         </div>
@@ -651,6 +686,7 @@ export function LedgerPage() {
         ) : (
           <LedgerBoard
             columns={columns}
+            caddieSupply={caddieSupply}
             nowMinutes={nowMinutes}
             selection={selection}
             selectedReservationId={editingReservationId}

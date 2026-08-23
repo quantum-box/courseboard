@@ -362,11 +362,11 @@ apply 対象にするため、古い copy が残っていると global な actio
 
 ### Feature flags
 
-判断の記録は [ADR-0009](docs/src/architecture/decisions/ADR-0009-feature-flags-on-the-platform-tenant.md) にあります。
+判断の記録は [ADR-0012](docs/src/architecture/decisions/ADR-0012-feature-flags-on-the-platform-tenant.md) にあります。
 
 CourseBoard が出し分けに使うフラグはこの repository で宣言します。
 
-- `.tachyon/manifests/courseboard-flags.yml`（本番 platform `tn_01hjjn348rn3t49zz6hvmfq67p`）
+- `.tachyon/manifests/courseboard-flags-prod.yml`（本番 platform `tn_01hjjn348rn3t49zz6hvmfq67p`）
 - `.tachyon/manifests/courseboard-flags-sandbox.yml`（サンドボックス platform `tn_01hjryxysgey07h5jz5wagqj0m`）
 
 フラグは host / platform テナントに置いたものだけが評価されます。利用者テナント

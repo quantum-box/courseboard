@@ -12,7 +12,7 @@ export const courses = {
   editor: {
     createTitle: 'コースを追加',
     editTitle: 'コースを直す',
-    description: '予約枠をつくるときの基本の条件です。',
+    description: 'スタート枠をつくるときの基本の条件です。',
   },
   field: {
     name: 'コース名',

@@ -10,33 +10,117 @@ use axum::{extract::State, http::HeaderMap, Json};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use super::http::{commercial_gateway, credentials, operator_id};
+use super::http::{commercial_gateway, credentials, operator_id, pricing_settings_gateway};
 
 use super::openapi::ErrorBody;
 use crate::course::domain::{
-    FeeQuote, FeeQuoteRequest, PlayerTaxLine, RangeRow, RangeSimulation, RangeSimulationRequest,
+    FeeQuote, FeeQuoteRequest, GolfPricingSettings, PlayerTaxLine, RangeRow, RangeSimulation,
+    RangeSimulationRequest,
 };
 use crate::course::infrastructure::CourseboardTaxGateway;
 use crate::course::usecase::{
-    GetExtensionStatusUseCase, QuoteGolfFeeUseCase, SimulateGreenFeeRangeUseCase,
+    GetPricingSettingsUseCase, QuoteGolfFeeUseCase, ReplacePricingSettingsUseCase,
+    SimulateGreenFeeRangeUseCase,
 };
 
 /// The course's own pricing inputs, or the product defaults when it has not
-/// filled them in. A missing extension config must not stop a quote; the
-/// prefecture check inside the use case is what refuses.
+/// filled them in. Unset must not stop a quote; the prefecture check inside
+/// the use case is what refuses.
 async fn pricing_settings(
     state: &AppState,
     headers: &HeaderMap,
-) -> Result<crate::course::domain::GolfPricingSettings, AppError> {
-    let status = GetExtensionStatusUseCase::new(commercial_gateway(state))
+) -> Result<GolfPricingSettings, AppError> {
+    GetPricingSettingsUseCase::new(commercial_gateway(state), pricing_settings_gateway(state))
         .execute(credentials(state, headers)?)
         .await
+        .map_err(AppError::from)
+}
+
+// ─── Pricing settings ─────────────────────────────────────────────────────────
+
+/// The pricing inputs as the settings panel edits them.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PricingSettingsDto {
+    pub prefecture: Option<String>,
+    pub tax_grade: Option<String>,
+    pub taxable_ratio: f64,
+    pub price_elasticity: f64,
+    pub fixed_cost_per_day: i64,
+    pub variable_cost_per_visitor: i64,
+}
+
+impl From<&GolfPricingSettings> for PricingSettingsDto {
+    fn from(value: &GolfPricingSettings) -> Self {
+        Self {
+            prefecture: value.prefecture.clone(),
+            tax_grade: value.tax_grade.clone(),
+            taxable_ratio: value.taxable_ratio,
+            price_elasticity: value.price_elasticity,
+            fixed_cost_per_day: value.fixed_cost,
+            variable_cost_per_visitor: value.variable_cost_per_visitor,
+        }
+    }
+}
+
+/// GET /v1/course/pricing-settings
+#[utoipa::path(
+    get,
+    path = "/v1/course/pricing-settings",
+    tag = "course",
+    responses(
+        (status = 200, description = "Effective pricing inputs", body = PricingSettingsDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_pricing_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<PricingSettingsDto>, AppError> {
+    let settings = pricing_settings(&state, &headers).await?;
+    Ok(Json(PricingSettingsDto::from(&settings)))
+}
+
+/// PUT /v1/course/pricing-settings
+///
+/// Whole-object on purpose: the panel edits two of the six fields, but sending
+/// everything it fetched means a cost assumption somebody set by hand in the
+/// old config survives the first save after the move instead of silently
+/// reverting to the defaults.
+#[utoipa::path(
+    put,
+    path = "/v1/course/pricing-settings",
+    tag = "course",
+    request_body = PricingSettingsDto,
+    responses(
+        (status = 200, description = "Pricing inputs replaced", body = PricingSettingsDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replace_pricing_settings(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<PricingSettingsDto>,
+) -> Result<Json<PricingSettingsDto>, AppError> {
+    let settings = GolfPricingSettings::try_new(
+        body.prefecture,
+        body.tax_grade,
+        body.taxable_ratio,
+        body.price_elasticity,
+        body.fixed_cost_per_day,
+        body.variable_cost_per_visitor,
+    )
+    .map_err(AppError::from)?;
+    let stored = ReplacePricingSettingsUseCase::new(pricing_settings_gateway(&state))
+        .execute(credentials(&state, &headers)?, settings)
+        .await
         .map_err(AppError::from)?;
-    Ok(status
-        .as_ref()
-        .and_then(|item| item.config_json())
-        .map(crate::course::domain::GolfPricingSettings::from_config)
-        .unwrap_or_default())
+    Ok(Json(PricingSettingsDto::from(&stored)))
 }
 use crate::{AppError, AppState};
 
