@@ -23,6 +23,7 @@ mod player_tag_options_repository;
 mod policy_authorizer;
 mod pricing_settings_repository;
 mod reservation_report_gateway;
+mod reservation_report_repository;
 mod shift_rules_repository;
 mod slot_override_repository;
 mod tax_rule_gateway;
@@ -46,6 +47,9 @@ pub use player_tag_options_repository::MySqlPlayerTagOptionsRepository;
 pub use policy_authorizer::{AllowAllAuthorizer, PolicyCourseAuthorizer, ALLOW_ALL};
 pub use pricing_settings_repository::MySqlPricingSettingsRepository;
 pub use reservation_report_gateway::FieldReservationReportGateway;
+pub use reservation_report_repository::{
+    MigratingReservationReportGateway, MySqlReservationReportRepository,
+};
 pub use shift_rules_repository::MySqlShiftRulesRepository;
 pub use slot_override_repository::MySqlSlotOverrideRepository;
 pub use tax_rule_gateway::CourseboardTaxGateway;

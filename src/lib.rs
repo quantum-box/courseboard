@@ -33,9 +33,9 @@ use cancellation_fees::{CancellationFeeConfig, MySqlCancellationFeeRepository};
 use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
-    FieldReservationReportGateway, MySqlAvailabilityDeadlineRepository,
-    MySqlCaddieRankFeeRepository, MySqlCaddieShiftRepository, MySqlCourseOrderRepository,
-    MySqlGeneratedThroughRepository, MySqlPlayerTagOptionsRepository,
+    FieldReservationReportGateway, MigratingReservationReportGateway,
+    MySqlAvailabilityDeadlineRepository, MySqlCaddieRankFeeRepository, MySqlCaddieShiftRepository,
+    MySqlCourseOrderRepository, MySqlGeneratedThroughRepository, MySqlPlayerTagOptionsRepository,
     MySqlPricingSettingsRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
@@ -66,7 +66,7 @@ pub struct AppState {
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
     shift_rules: Arc<MySqlShiftRulesRepository>,
-    reservation_report_gateway: Arc<FieldReservationReportGateway>,
+    reservation_report_gateway: Arc<MigratingReservationReportGateway>,
     cancellation_fee_config: CancellationFeeConfig,
     http_client: reqwest::Client,
     token_verifier: Arc<dyn TokenVerifier>,
@@ -109,9 +109,12 @@ impl AppState {
             )),
             caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
             shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
-            reservation_report_gateway: Arc::new(FieldReservationReportGateway::new(
-                reqwest::Client::new(),
-                cancellation_fee_config.field_api_url.as_deref(),
+            reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
+                pool.clone(),
+                Arc::new(FieldReservationReportGateway::new(
+                    reqwest::Client::new(),
+                    cancellation_fee_config.field_api_url.as_deref(),
+                )),
             )),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
@@ -161,9 +164,12 @@ impl AppState {
             )),
             caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
             shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
-            reservation_report_gateway: Arc::new(FieldReservationReportGateway::new(
-                reqwest::Client::new(),
-                cancellation_fee_config.field_api_url.as_deref(),
+            reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
+                pool.clone(),
+                Arc::new(FieldReservationReportGateway::new(
+                    reqwest::Client::new(),
+                    cancellation_fee_config.field_api_url.as_deref(),
+                )),
             )),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
@@ -199,9 +205,12 @@ impl AppState {
                 )),
                 caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
                 shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
-                reservation_report_gateway: Arc::new(FieldReservationReportGateway::new(
-                    reqwest::Client::new(),
-                    cancellation_fee_config.field_api_url.as_deref(),
+                reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
+                    pool.clone(),
+                    Arc::new(FieldReservationReportGateway::new(
+                        reqwest::Client::new(),
+                        cancellation_fee_config.field_api_url.as_deref(),
+                    )),
                 )),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
@@ -228,9 +237,12 @@ impl AppState {
                 )),
                 caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
                 shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
-                reservation_report_gateway: Arc::new(FieldReservationReportGateway::new(
-                    reqwest::Client::new(),
-                    cancellation_fee_config.field_api_url.as_deref(),
+                reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
+                    pool.clone(),
+                    Arc::new(FieldReservationReportGateway::new(
+                        reqwest::Client::new(),
+                        cancellation_fee_config.field_api_url.as_deref(),
+                    )),
                 )),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
@@ -313,7 +325,7 @@ impl AppState {
 
     /// CourseBoard-interpreted daily reservation counts persisted through
     /// Field's scoped extension config.
-    pub fn reservation_report_gateway(&self) -> Arc<FieldReservationReportGateway> {
+    pub fn reservation_report_gateway(&self) -> Arc<MigratingReservationReportGateway> {
         self.reservation_report_gateway.clone()
     }
 
