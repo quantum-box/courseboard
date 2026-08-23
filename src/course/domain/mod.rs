@@ -24,6 +24,7 @@ mod ids;
 mod membership;
 mod party;
 mod payroll;
+mod player_tags;
 mod ports;
 mod pricing_settings;
 mod product;
@@ -105,13 +106,14 @@ pub use party::{PartyDetails, PartyPlayer, MAX_PARTY_PLAYERS, PARTY_CUSTOM_FIELD
 pub use payroll::{
     payroll_csv, summarize_payroll_in_timezone, AttendanceDay, PayrollCandidate, WorkedMinutes,
 };
+pub use player_tags::{PlayerTagOptions, MAX_PLAYER_TAG_LENGTH, MAX_PLAYER_TAG_OPTIONS};
 pub use ports::{
     AvailabilityDeadlineGateway, CaddieRankFeeGateway, CaddieShiftGateway, CourseAuthorizer,
     CourseOrderGateway, CustomerGateway, CustomerReceptionOcrGateway, FieldCapabilitiesGateway,
     GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
-    GolfOpsGateway, GolfTaxGateway, MembershipGateway, PricingSettingsGateway, ReservationGateway,
-    ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery,
-    TeeSheetQuery,
+    GolfOpsGateway, GolfTaxGateway, MembershipGateway, PlayerTagOptionsGateway,
+    PricingSettingsGateway, ReservationGateway, ReservationScheduleGateway, ShiftRulesGateway,
+    SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{

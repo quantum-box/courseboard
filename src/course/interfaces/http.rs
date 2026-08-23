@@ -27,8 +27,8 @@ use crate::course::domain::{
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
     FieldReservationGateway, MySqlCaddieRankFeeRepository, MySqlCourseOrderRepository,
-    MySqlGeneratedThroughRepository, MySqlPricingSettingsRepository, MySqlSlotOverrideRepository,
-    PartyPlayerInput,
+    MySqlGeneratedThroughRepository, MySqlPlayerTagOptionsRepository,
+    MySqlPricingSettingsRepository, MySqlSlotOverrideRepository, PartyPlayerInput,
 };
 use crate::course::usecase::{
     CancelReservationUseCase, ChangeReservationPlanUseCase, CreateCourseUseCase,
@@ -90,6 +90,11 @@ pub(crate) fn caddie_rank_fee_gateway(state: &AppState) -> Arc<MySqlCaddieRankFe
 /// And the pricing inputs the simulator runs on.
 pub(crate) fn pricing_settings_gateway(state: &AppState) -> Arc<MySqlPricingSettingsRepository> {
     state.pricing_settings()
+}
+
+/// And the booking form's visitor categories.
+pub(crate) fn player_tag_options_gateway(state: &AppState) -> Arc<MySqlPlayerTagOptionsRepository> {
+    state.player_tag_options()
 }
 
 pub(crate) fn generated_through_gateway(state: &AppState) -> Arc<MySqlGeneratedThroughRepository> {

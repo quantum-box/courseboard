@@ -667,6 +667,9 @@ mockReservationReportEntries = loadMockWrites('reservationReportEntries', [])
 /** The club's column order, as arranged during the session. */
 const mockCourseOrder: string[] = loadMockWrites<string[]>('courseOrder', [])
 
+/** The booking form's visitor categories, as the settings screen arranges them. */
+const mockPlayerTagOptions: string[] = loadMockWrites<string[]>('playerTagOptions', ['共通', '優待', 'WEB'])
+
 /** The simulator's pricing inputs, as the tax panel sets them. */
 const mockPricingSettings = loadMockWrites<{
   prefecture: string | null
@@ -1594,6 +1597,8 @@ function normalizeMockPath(pathname: string): string {
     || pathname === '/v1/course/caddie-rank-fees'
     // Pricing inputs are CourseBoard's own row (ADR-0009).
     || pathname === '/v1/course/pricing-settings'
+    // So are the booking form's visitor categories.
+    || pathname === '/v1/course/player-tag-options'
     || pathname.startsWith('/v1/course/caddie-shifts/')
     || pathname.startsWith('/v1/course/caddie-shift-plans/')
     // The customer ledger and the memberships against it live in Field's own
@@ -2408,6 +2413,8 @@ function resolveGet(path: string): Json | null | undefined {
 
   if (pathname === '/v1/course/pricing-settings') return { ...mockPricingSettings }
 
+  if (pathname === '/v1/course/player-tag-options') return { items: [...mockPlayerTagOptions] }
+
   if (pathname === '/v1/erp/extensions/golf-course/caddie-payroll-summary') {
     const yearMonth = url.searchParams.get('yearMonth') ?? TODAY.slice(0, 7)
     const [year, month] = yearMonth.split('-').map(Number)
@@ -2883,6 +2890,20 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     mockCourseOrder.splice(0, mockCourseOrder.length, ...ids.filter(id => known.includes(id)))
     saveMockWrites('courseOrder', mockCourseOrder)
     return hit({ golfCourseIds: [...mockCourseOrder] })
+  }
+
+  if (pathname === '/v1/course/player-tag-options' && method === 'PUT') {
+    const values = Array.isArray(body?.items) ? (body.items as unknown[]) : []
+    const labels = values
+      .filter((value): value is string => typeof value === 'string')
+      .map(value => value.trim())
+      .filter(Boolean)
+    if (new Set(labels).size !== labels.length) {
+      return error(400, 'the same player category appears twice')
+    }
+    mockPlayerTagOptions.splice(0, mockPlayerTagOptions.length, ...labels)
+    saveMockWrites('playerTagOptions', mockPlayerTagOptions)
+    return hit({ items: [...mockPlayerTagOptions] })
   }
 
   if (pathname === '/v1/course/pricing-settings' && method === 'PUT') {

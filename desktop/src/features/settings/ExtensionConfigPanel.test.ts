@@ -6,28 +6,34 @@ import {
   validateExtensionConfig,
 } from './ExtensionConfigPanel'
 
-describe('golf extension player categories', () => {
-  it('writes normalized choices without replacing config owned by another feature', () => {
+describe('the settings panel over its two stores', () => {
+  it('writes only the timezone into the config, leaving every other key alone', () => {
+    // The visitor categories moved to CourseBoard's own table and the currency
+    // was retired, but their stale copies must survive a timezone save: the
+    // categories' migration fallback still reads the config on tenants that
+    // have not saved locally yet.
     const original = {
       defaultCurrency: 'JPY',
       timezone: 'Asia/Tokyo',
       reservationProducts: [{ id: 'plan-1' }],
       playerTagOptions: ['旧区分'],
     }
-    const draft = {
-      ...configDraftFromJson(original),
-      playerTagOptions: [' 共通 ', '', '優待'],
-    }
+    const draft = { ...configDraftFromJson(original), timezone: 'Asia/Taipei' }
 
     expect(buildConfigJson(draft, original)).toEqual({
       defaultCurrency: 'JPY',
-      timezone: 'Asia/Tokyo',
+      timezone: 'Asia/Taipei',
       reservationProducts: [{ id: 'plan-1' }],
-      playerTagOptions: ['共通', '優待'],
+      playerTagOptions: ['旧区分'],
     })
   })
 
-  it('rejects duplicate choices before replacing the shared config', () => {
+  it('shows the categories from their own store, not from the config copy', () => {
+    const draft = configDraftFromJson({ playerTagOptions: ['旧区分'] }, ['共通', '優待'])
+    expect(draft.playerTagOptions).toEqual(['共通', '優待'])
+  })
+
+  it('rejects duplicate categories before anything is written', () => {
     const draft = {
       ...configDraftFromJson(null),
       playerTagOptions: ['共通', ' 共通 '],

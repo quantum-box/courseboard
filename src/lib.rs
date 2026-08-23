@@ -35,8 +35,8 @@ use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, Tax
 use course::infrastructure::{
     FieldReservationReportGateway, MySqlAvailabilityDeadlineRepository,
     MySqlCaddieRankFeeRepository, MySqlCaddieShiftRepository, MySqlCourseOrderRepository,
-    MySqlGeneratedThroughRepository, MySqlPricingSettingsRepository, MySqlShiftRulesRepository,
-    MySqlSlotOverrideRepository,
+    MySqlGeneratedThroughRepository, MySqlPlayerTagOptionsRepository,
+    MySqlPricingSettingsRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -61,6 +61,7 @@ pub struct AppState {
     course_order: Arc<MySqlCourseOrderRepository>,
     caddie_rank_fees: Arc<MySqlCaddieRankFeeRepository>,
     pricing_settings: Arc<MySqlPricingSettingsRepository>,
+    player_tag_options: Arc<MySqlPlayerTagOptionsRepository>,
     generated_through: Arc<MySqlGeneratedThroughRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
@@ -101,6 +102,7 @@ impl AppState {
             course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
             caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
             pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+            player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -152,6 +154,7 @@ impl AppState {
             course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
             caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
             pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+            player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -189,6 +192,7 @@ impl AppState {
                 course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
                 caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+                player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -217,6 +221,7 @@ impl AppState {
                 course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
                 caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+                player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -265,6 +270,11 @@ impl AppState {
     /// assumptions behind the revenue projection.
     pub fn pricing_settings(&self) -> Arc<MySqlPricingSettingsRepository> {
         self.pricing_settings.clone()
+    }
+
+    /// CourseBoard-owned visitor categories for the booking form.
+    pub fn player_tag_options(&self) -> Arc<MySqlPlayerTagOptionsRepository> {
+        self.player_tag_options.clone()
     }
 
     /// CourseBoard-owned record of how far each course has been built.
@@ -965,6 +975,15 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/course/pricing-settings",
             get(course::interfaces::http_simulator::get_pricing_settings)
                 .put(course::interfaces::http_simulator::replace_pricing_settings)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/player-tag-options",
+            get(course::interfaces::http_commercial::get_player_tag_options)
+                .put(course::interfaces::http_commercial::replace_player_tag_options)
                 .route_layer(middleware::from_fn_with_state(
                     state.clone(),
                     require_valid_token,

@@ -40,7 +40,7 @@ export const settings: DeepPartial<typeof source> = {
       description: 'Check that the golf features are enabled for this course.',
     },
     title: 'Golf feature settings',
-    description: 'Currency, time zone, and player categories used across this facility.',
+    description: 'The time zone used across this facility, and the player categories offered during booking.',
     enabled: 'Enabled',
     disabled: 'Disabled',
     invalid: 'Configuration problem',
@@ -56,8 +56,6 @@ export const settings: DeepPartial<typeof source> = {
     invalidConfig: {
       title: 'The current settings have a problem',
     },
-    currency: 'Default currency',
-    currencyHint: 'Last updated {{updated}} · ISO 4217',
     timezone: 'Time zone',
     timezoneHint: 'e.g. Asia/Tokyo',
     playerTags: 'Player categories',
@@ -72,8 +70,6 @@ export const settings: DeepPartial<typeof source> = {
       description: 'The golf feature settings were applied.',
     },
     validation: {
-      currencyRequired: 'Choose a currency.',
-      currencyFormat: 'Enter the currency as a 3-letter ISO 4217 code.',
       timezoneRequired: 'Enter a time zone.',
       timezoneFormat: 'Enter an IANA time zone name such as Asia/Tokyo. Abbreviations like JST are not accepted.',
       playerTagsTooMany: 'Add no more than {{max}} player categories.',
