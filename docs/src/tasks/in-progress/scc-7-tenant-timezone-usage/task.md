@@ -1,5 +1,11 @@
 # tenant timezone を全計算経路で使う
 
+> **(2026-08-23 追記)** SoR である extension config は
+> [ADR-0010](../../../architecture/decisions/ADR-0010-courseboard-is-not-a-field-extension.md)
+> により CourseBoard が使わなくなる。行き先は Field の汎用テナント属性で、起票して待つ。
+> 読み手は全部同じ port を経由しているので、差し替えは gateway 1 箇所で済む。
+> **本 taskdoc を進めるほど読み手が増えるため、Field への起票を先に出しておく。**
+
 ## 目的
 
 SCC-6 で course から tenant extension config へ移した timezone を、予約、運用、集計、storefront の実際の日境界と時刻解釈に使う。availability rule 自身の timezone と予約 snapshot は履歴・slot generation の contract なので維持する。
