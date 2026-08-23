@@ -164,17 +164,35 @@ export function sortSlots(slots: LedgerSlot[]): LedgerSlot[] {
  * `openSlots` counts rows the desk could still sell, which is what the header
  * on the paper ledger tracks — not rows that merely have no booking, since a
  * closed row has no booking either.
+ *
+ * Only columns that can actually count are added up. A derived column knows
+ * which of its rows carry no booking, but not how many groups those rows hold,
+ * and adding that in produced a day total stated with confidence over columns
+ * whose own headers said the number was unknown — one club read "空き枠 106 枠"
+ * on a day it could not sell a single tee time. `uncountedCourses` carries how
+ * many were left out so the total can say so rather than quietly shrink.
  */
 export function summarizeLedger(columns: LedgerColumn[]) {
   return columns.reduce(
-    (total, column) => ({
-      groups: total.groups + column.groupCount,
-      players: total.players + column.playerCount,
-      selfGroups: total.selfGroups + column.selfGroupCount,
-      caddieGroups: total.caddieGroups + column.caddieGroupCount,
-      openSlots: total.openSlots + column.openSlotCount,
-    }),
-    { groups: 0, players: 0, selfGroups: 0, caddieGroups: 0, openSlots: 0 },
+    (total, column) => {
+      const counted = knowsRemainingCapacity(column)
+      return {
+        groups: total.groups + column.groupCount,
+        players: total.players + column.playerCount,
+        selfGroups: total.selfGroups + column.selfGroupCount,
+        caddieGroups: total.caddieGroups + column.caddieGroupCount,
+        openSlots: counted ? total.openSlots + column.openSlotCount : total.openSlots,
+        uncountedCourses: counted ? total.uncountedCourses : total.uncountedCourses + 1,
+      }
+    },
+    {
+      groups: 0,
+      players: 0,
+      selfGroups: 0,
+      caddieGroups: 0,
+      openSlots: 0,
+      uncountedCourses: 0,
+    },
   )
 }
 

@@ -10,6 +10,9 @@ export const ledger = {
     playersValue: '{{n}} 名',
     open: '空き枠',
     openValue: '{{n}} 枠',
+    /** スタート枠が無い列は数えられないので、合計から外したことを言う。 */
+    openUnknown: '分かりません',
+    openPartial: '{{count}} コース分は数えられません',
     breakdown: 'セルフ {{self}} 組 · キャディ付き {{caddie}} 組',
   },
   courses: {

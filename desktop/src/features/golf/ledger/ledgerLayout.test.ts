@@ -258,6 +258,7 @@ describe('summarizeLedger', () => {
       selfGroups: 22,
       caddieGroups: 22,
       openSlots: 13,
+      uncountedCourses: 0,
     })
   })
 
@@ -268,7 +269,32 @@ describe('summarizeLedger', () => {
       selfGroups: 0,
       caddieGroups: 0,
       openSlots: 0,
+      uncountedCourses: 0,
     })
+  })
+
+  it('leaves out the open slots of a column that cannot count them', () => {
+    // A club whose courses had no generated inventory read "空き枠 106 枠" on a
+    // day it could not sell one tee time — every column header said the count
+    // was unknown while the day total spoke for them anyway.
+    const total = summarizeLedger([
+      column({ gridSource: 'inventory', groupCount: 3, openSlotCount: 4 }),
+      column({ gridSource: 'schedule', groupCount: 2, openSlotCount: 53 }),
+    ])
+    expect(total.openSlots).toBe(4)
+    expect(total.uncountedCourses).toBe(1)
+    // Bookings and players are counted from the rows themselves, so those stay
+    // whole across both columns.
+    expect(total.groups).toBe(5)
+  })
+
+  it('counts nothing when no column can count, and says how many were skipped', () => {
+    const total = summarizeLedger([
+      column({ gridSource: 'schedule', openSlotCount: 53 }),
+      column({ gridSource: 'opening_hours', openSlotCount: 53 }),
+    ])
+    expect(total.openSlots).toBe(0)
+    expect(total.uncountedCourses).toBe(2)
   })
 })
 

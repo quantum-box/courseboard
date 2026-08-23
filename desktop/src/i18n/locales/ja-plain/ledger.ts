@@ -10,6 +10,8 @@ export const ledger = {
     playersValue: '{{n}} 人',
     open: 'あきの枠',
     openValue: '{{n}} 枠',
+    openUnknown: 'わかりません',
+    openPartial: '{{count}} コースぶんは かぞえられません',
     breakdown: 'セルフ {{self}} 組 · キャディつき {{caddie}} 組',
   },
   courses: {

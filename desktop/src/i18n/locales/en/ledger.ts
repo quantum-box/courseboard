@@ -10,6 +10,8 @@ export const ledger = {
     playersValue: '{{n}}',
     open: 'Open',
     openValue: '{{n}} slots',
+    openUnknown: 'Unknown',
+    openPartial: '{{count}} course(s) not counted',
     breakdown: '{{self}} self · {{caddie}} with caddie',
   },
   courses: {

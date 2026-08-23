@@ -581,12 +581,25 @@ export function LedgerPage() {
               <strong>{t('ledger:summary.playersValue', { n: String(totals.players) })}</strong>
             )}
           </div>
+          {/* The columns that cannot count say so in their own headers, so the
+              day total must not quietly speak for them. With none of them
+              countable there is no number to give; with some, the figure is
+              real but partial and says which part it left out. */}
           <div className="ledger-summary-item">
             <span>{t('ledger:summary.open')}</span>
             {boardPending ? (
               <SkeletonBar width="5ch" height={14} />
+            ) : columns.length > 0 && totals.uncountedCourses === columns.length ? (
+              <strong>{t('ledger:summary.openUnknown')}</strong>
             ) : (
-              <strong>{t('ledger:summary.openValue', { n: String(totals.openSlots) })}</strong>
+              <>
+                <strong>{t('ledger:summary.openValue', { n: String(totals.openSlots) })}</strong>
+                {totals.uncountedCourses > 0 ? (
+                  <small>
+                    {t('ledger:summary.openPartial', { count: totals.uncountedCourses })}
+                  </small>
+                ) : null}
+              </>
             )}
           </div>
         </div>
