@@ -27,7 +27,7 @@ CourseBoard の `/v1/me` は Field の `/v1/erp/me?extensionKey=golf_course` を
 - しかし同じユーザー・同じ action・同じテナントで、**単発の `check` は許可、`check-tenants` は許可テナントゼロ**と答えが食い違う。確認に使ったテナントは `tn_01kxd5gdvm9thcbj8c2e8c6yhq`、action は `field_extension_golf:ListTeeSheet`。`check` 側は同 action で守られたルート（`GET /v1/course/player-tag-options`）が 200 を返すことで確認した。
 - 対象ユーザーは当該テナントの **OWNER で `customPolicyIds` は空**。つまり付与は owner 由来の暗黙のもので、**`check-tenants` はそれを数えていない**と考えられる。
 
-design.md の「`check-tenants` は素の `check` より厳密に強い」という前提はこの実測と矛盾する。切替を進める前に、**Field / Tachyon Auth 側でどちらが正なのかを確定させる**（起票済み）。要求の形が誤っている可能性も完全には排除できていないが、形が誤っていれば 400 になるはずで、返ってきたのは 200 と既知の項目名だった。
+design.md の「`check-tenants` は素の `check` より厳密に強い」という前提はこの実測と矛盾する。切替を進める前に、**Field / Tachyon Auth 側でどちらが正なのかを確定させる**（PLT-3860）。**この回答が出るまで第4波の切替は保留**。要求の形が誤っている可能性も完全には排除できていないが、形が誤っていれば 400 になるはずで、返ってきたのは 200 と既知の項目名だった。
 
 なお、この食い違いを**「付与ゼロ」と誤読しない**ための修正を実装に入れた。応答が既知の項目名を1つも含まなければ、空ではなく失敗として扱い、絞らずに `partial` を立てる。契約が変わったときに全テナントが全員から消えるのが最悪の壊れ方で、それだけは避ける。
 
