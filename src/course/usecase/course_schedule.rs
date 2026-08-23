@@ -578,11 +578,10 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        BudgetAchievement, Course, CourseOrder, DailyBudget, DailyBudgetQuery, ExtensionStatus,
-        MonthlySettlement, ProductSlot, ReservationPolicy, ReservationProduct,
-        ReservationServiceId, Resource, ResourceTimeSlot, SaveCourseResource,
-        UpdateExtensionConfig, UpdateReservationPolicy, UpsertCourse, UpsertDailyBudget,
-        UpsertReservationProduct,
+        Course, CourseOrder, DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement,
+        ProductSlot, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
+        ResourceTimeSlot, SaveCourseResource, UpdateExtensionConfig, UpdateReservationPolicy,
+        UpsertCourse, UpsertDailyBudget, UpsertReservationProduct,
     };
     use std::collections::HashMap;
 
@@ -926,16 +925,6 @@ mod tests {
             _credentials: GatewayCredentials<'_>,
             _csv: &str,
         ) -> Result<Vec<DailyBudget>, CourseError> {
-            unimplemented!("not used")
-        }
-
-        async fn list_budget_achievements(
-            &self,
-            _credentials: GatewayCredentials<'_>,
-            _from: NaiveDate,
-            _to: NaiveDate,
-            _timezone: &str,
-        ) -> Result<Vec<BudgetAchievement>, CourseError> {
             unimplemented!("not used")
         }
 
