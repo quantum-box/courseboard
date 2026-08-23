@@ -98,6 +98,8 @@ export const common = {
     sectionUnavailableTitle: 'この部分を表示できません',
     sectionUnavailableDescription:
       '入力内容を確認して、もう一度お試しください。ほかの部分は引き続き使えます。',
+    timezoneFallback:
+      '施設のタイムゾーン設定を読み込めませんでした。日付と時刻は {{timezone}} として表示しています。',
   },
   external: {
     invalidUrl: 'リンクの形が正しくありません。',

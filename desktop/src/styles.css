@@ -1026,6 +1026,15 @@ button,
   overflow-wrap: anywhere;
 }
 
+/*
+ * Wraps a notice that sits above the whole app shell, for a setting that every
+ * screen depends on. Page-level notices live inside the page body instead; this
+ * one has to be visible no matter which route is open.
+ */
+.page-banner {
+  padding: 8px 12px 0;
+}
+
 .notice-info { border-left-color: hsl(var(--nui-primary)); background: hsl(var(--nui-selected)); }
 .notice-success { border-left-color: hsl(var(--nui-success)); background: hsl(var(--nui-success) / .08); }
 .notice-warning { border-left-color: hsl(var(--nui-warning)); background: hsl(var(--nui-warning) / .08); }

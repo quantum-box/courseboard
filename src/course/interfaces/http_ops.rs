@@ -14,8 +14,8 @@ use utoipa::{IntoParams, ToSchema};
 use super::openapi::ErrorBody;
 
 use super::http::{
-    catalog_gateway, credentials, ops_gateway, reservation_gateway, CaddieAssignmentDto, CaddieDto,
-    ItemsResponse,
+    caddie_rank_fee_gateway, catalog_gateway, credentials, ops_gateway, reservation_gateway,
+    CaddieAssignmentDto, CaddieDto, ItemsResponse,
 };
 use crate::course::domain::{
     parse_weekday, weekday_key, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
@@ -308,7 +308,8 @@ pub async fn create_caddie_assignment(
         .get_tenant_timezone(credentials)
         .await
         .map_err(AppError::from)?;
-    let use_case = CreateCaddieAssignmentUseCase::new(ops_gateway(&state));
+    let use_case =
+        CreateCaddieAssignmentUseCase::new(ops_gateway(&state), caddie_rank_fee_gateway(&state));
     let assignment = use_case
         .execute(
             credentials,
@@ -1031,6 +1032,7 @@ pub async fn auto_assign_caddies(
         catalog_gateway(&state),
         state.availability_deadlines(),
         state.caddie_shifts(),
+        caddie_rank_fee_gateway(&state),
     );
     let result = use_case
         .execute(credentials, body.date, body.dry_run)
@@ -1277,7 +1279,7 @@ pub async fn get_caddie_rank_fees(
     headers: HeaderMap,
 ) -> Result<Json<CaddieRankFeesDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let fees = GetCaddieRankFeesUseCase::new(ops_gateway(&state))
+    let fees = GetCaddieRankFeesUseCase::new(ops_gateway(&state), caddie_rank_fee_gateway(&state))
         .execute(credentials)
         .await
         .map_err(AppError::from)?;
@@ -1307,7 +1309,7 @@ pub async fn replace_caddie_rank_fees(
     let fees =
         CaddieRankFees::try_new(request.a, request.b, request.c, request.d, request.currency)
             .map_err(AppError::from)?;
-    let stored = ReplaceCaddieRankFeesUseCase::new(ops_gateway(&state))
+    let stored = ReplaceCaddieRankFeesUseCase::new(caddie_rank_fee_gateway(&state))
         .execute(credentials, fees)
         .await
         .map_err(AppError::from)?;
@@ -1345,7 +1347,8 @@ pub async fn get_payroll_summary(
         .get_tenant_timezone(credentials)
         .await
         .map_err(AppError::from)?;
-    let use_case = GetPayrollSummaryUseCase::new(ops_gateway(&state));
+    let use_case =
+        GetPayrollSummaryUseCase::new(ops_gateway(&state), caddie_rank_fee_gateway(&state));
     let summary = use_case
         .execute(credentials, &query.year_month, &timezone)
         .await
@@ -1376,7 +1379,8 @@ pub async fn export_payroll_csv(
         .get_tenant_timezone(credentials)
         .await
         .map_err(AppError::from)?;
-    let use_case = ExportPayrollCsvUseCase::new(ops_gateway(&state));
+    let use_case =
+        ExportPayrollCsvUseCase::new(ops_gateway(&state), caddie_rank_fee_gateway(&state));
     let csv = use_case
         .execute(credentials, &query.year_month, &timezone)
         .await

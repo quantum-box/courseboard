@@ -106,11 +106,12 @@ pub use payroll::{
     payroll_csv, summarize_payroll_in_timezone, AttendanceDay, PayrollCandidate, WorkedMinutes,
 };
 pub use ports::{
-    AvailabilityDeadlineGateway, CaddieShiftGateway, CourseAuthorizer, CustomerGateway,
-    CustomerReceptionOcrGateway, FieldCapabilitiesGateway, GatewayCredentials,
-    GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
-    GolfTaxGateway, MembershipGateway, ReservationGateway, ReservationScheduleGateway,
-    ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
+    AvailabilityDeadlineGateway, CaddieRankFeeGateway, CaddieShiftGateway, CourseAuthorizer,
+    CourseOrderGateway, CustomerGateway, CustomerReceptionOcrGateway, FieldCapabilitiesGateway,
+    GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
+    GolfOpsGateway, GolfTaxGateway, MembershipGateway, ReservationGateway,
+    ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery,
+    TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{

@@ -7,16 +7,51 @@ use std::sync::Arc;
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    CourseError, CourseId, CourseOrder, GatewayCredentials, GolfCatalogGateway,
+    CourseError, CourseId, CourseOrder, CourseOrderGateway, GatewayCredentials, GolfCatalogGateway,
 };
+
+/// Read the arrangement, falling back to where it used to be kept.
+///
+/// Until each tenant has saved once, a board arranged before the move still
+/// sits in Field's extension config. Reading it back keeps those clubs looking
+/// at the board they left.
+///
+/// The two cases are indistinguishable when somebody deliberately clears the
+/// arrangement: the old value returns until they save a non-empty one. Telling
+/// them apart would mean carrying a "cleared" flag on a column order forever to
+/// serve one migration. Drop this fallback, and the config key with it, once
+/// the tenants have been through here.
+///
+/// Shared with the ledger so the board and the settings screen never disagree
+/// about which arrangement is in force.
+pub(crate) async fn read_course_order(
+    catalog: &dyn GolfCatalogGateway,
+    course_order: &dyn CourseOrderGateway,
+    credentials: GatewayCredentials<'_>,
+) -> Result<CourseOrder, CourseError> {
+    let stored = course_order
+        .get_course_order(credentials.operator_id)
+        .await?;
+    if !stored.is_empty() {
+        return Ok(stored);
+    }
+    catalog.get_course_order(credentials).await
+}
 
 pub struct GetCourseOrderUseCase {
     catalog: Arc<dyn GolfCatalogGateway>,
+    course_order: Arc<dyn CourseOrderGateway>,
 }
 
 impl GetCourseOrderUseCase {
-    pub fn new(catalog: Arc<dyn GolfCatalogGateway>) -> Self {
-        Self { catalog }
+    pub fn new(
+        catalog: Arc<dyn GolfCatalogGateway>,
+        course_order: Arc<dyn CourseOrderGateway>,
+    ) -> Self {
+        Self {
+            catalog,
+            course_order,
+        }
     }
 
     pub async fn execute(
@@ -24,17 +59,29 @@ impl GetCourseOrderUseCase {
         credentials: GatewayCredentials<'_>,
     ) -> Result<CourseOrder, CourseError> {
         credentials.require(actions::LIST_COURSES).await?;
-        self.catalog.get_course_order(credentials).await
+        read_course_order(
+            self.catalog.as_ref(),
+            self.course_order.as_ref(),
+            credentials,
+        )
+        .await
     }
 }
 
 pub struct ReplaceCourseOrderUseCase {
     catalog: Arc<dyn GolfCatalogGateway>,
+    course_order: Arc<dyn CourseOrderGateway>,
 }
 
 impl ReplaceCourseOrderUseCase {
-    pub fn new(catalog: Arc<dyn GolfCatalogGateway>) -> Self {
-        Self { catalog }
+    pub fn new(
+        catalog: Arc<dyn GolfCatalogGateway>,
+        course_order: Arc<dyn CourseOrderGateway>,
+    ) -> Self {
+        Self {
+            catalog,
+            course_order,
+        }
     }
 
     /// Store the arrangement, keeping only ids that name a course.
@@ -42,6 +89,9 @@ impl ReplaceCourseOrderUseCase {
     /// A stale id is dropped rather than refused: the board is arranged from a
     /// list the browser is holding, and a course deleted in another tab must not
     /// make the whole save fail.
+    ///
+    /// The courses themselves still come from Field, which owns them. Only the
+    /// arrangement is ours (ADR-0009).
     pub async fn execute(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -51,7 +101,9 @@ impl ReplaceCourseOrderUseCase {
         let courses = self.catalog.list_courses(credentials).await?;
         let known: Vec<&CourseId> = courses.iter().map(|course| course.id()).collect();
         let order = CourseOrder::new(ids.into_iter().filter(|id| known.contains(&id)));
-        self.catalog.replace_course_order(credentials, &order).await
+        self.course_order
+            .replace_course_order(credentials.operator_id, &order)
+            .await
     }
 }
 
@@ -200,6 +252,32 @@ mod tests {
         }
     }
 
+    /// CourseBoard's own storage for the arrangement.
+    #[derive(Default)]
+    struct FakeCourseOrder {
+        saved: Mutex<Option<CourseOrder>>,
+    }
+
+    #[async_trait]
+    impl CourseOrderGateway for FakeCourseOrder {
+        async fn get_course_order(&self, _tenant_id: &str) -> Result<CourseOrder, CourseError> {
+            Ok(self.saved.lock().unwrap().clone().unwrap_or_default())
+        }
+
+        async fn replace_course_order(
+            &self,
+            _tenant_id: &str,
+            order: &CourseOrder,
+        ) -> Result<CourseOrder, CourseError> {
+            *self.saved.lock().unwrap() = Some(order.clone());
+            Ok(order.clone())
+        }
+    }
+
+    fn order_of(ids: &[&str]) -> CourseOrder {
+        CourseOrder::new(ids.iter().map(|id| CourseId::new(*id)))
+    }
+
     fn credentials() -> GatewayCredentials<'static> {
         GatewayCredentials {
             authorization: "Bearer token",
@@ -216,7 +294,8 @@ mod tests {
             courses: vec![course("a"), course("b"), course("c")],
             saved: Mutex::new(None),
         });
-        let stored = ReplaceCourseOrderUseCase::new(catalog.clone())
+        let course_order = Arc::new(FakeCourseOrder::default());
+        let stored = ReplaceCourseOrderUseCase::new(catalog.clone(), course_order.clone())
             .execute(
                 credentials(),
                 vec![CourseId::new("c"), CourseId::new("a"), CourseId::new("b")],
@@ -227,6 +306,8 @@ mod tests {
             stored.ids(),
             &[CourseId::new("c"), CourseId::new("a"), CourseId::new("b")]
         );
+        // Written to our own storage, not back into Field's shared config.
+        assert!(catalog.saved.lock().unwrap().is_none());
     }
 
     #[tokio::test]
@@ -236,7 +317,7 @@ mod tests {
             courses: vec![course("a")],
             saved: Mutex::new(None),
         });
-        let stored = ReplaceCourseOrderUseCase::new(catalog)
+        let stored = ReplaceCourseOrderUseCase::new(catalog, Arc::new(FakeCourseOrder::default()))
             .execute(
                 credentials(),
                 vec![CourseId::new("gone"), CourseId::new("a")],
@@ -252,18 +333,55 @@ mod tests {
             courses: vec![course("a")],
             saved: Mutex::new(None),
         });
-        ReplaceCourseOrderUseCase::new(catalog.clone())
+        let course_order = Arc::new(FakeCourseOrder::default());
+        ReplaceCourseOrderUseCase::new(catalog.clone(), course_order.clone())
             .execute(credentials(), vec![CourseId::new("a")])
             .await
             .unwrap();
-        ReplaceCourseOrderUseCase::new(catalog.clone())
+        ReplaceCourseOrderUseCase::new(catalog.clone(), course_order.clone())
             .execute(credentials(), Vec::new())
             .await
             .unwrap();
-        let read = GetCourseOrderUseCase::new(catalog)
+        let read = GetCourseOrderUseCase::new(catalog, course_order)
             .execute(credentials())
             .await
             .unwrap();
         assert!(read.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_board_arranged_before_the_move_is_still_shown_until_it_is_saved_again() {
+        // Migration fallback. A club that has not touched the board since the
+        // move would otherwise find it silently reshuffled into list order.
+        let catalog = Arc::new(FakeCatalog {
+            courses: vec![course("a"), course("b")],
+            saved: Mutex::new(Some(order_of(&["b", "a"]))),
+        });
+        let read = GetCourseOrderUseCase::new(catalog, Arc::new(FakeCourseOrder::default()))
+            .execute(credentials())
+            .await
+            .unwrap();
+        assert_eq!(read.ids(), &[CourseId::new("b"), CourseId::new("a")]);
+    }
+
+    #[tokio::test]
+    async fn once_arranged_here_the_old_config_no_longer_decides_the_board() {
+        // The fallback has to stop as soon as there is an arrangement of our
+        // own, or a save would appear to work and then be undone on reload.
+        let catalog = Arc::new(FakeCatalog {
+            courses: vec![course("a"), course("b")],
+            saved: Mutex::new(Some(order_of(&["b", "a"]))),
+        });
+        let course_order = Arc::new(FakeCourseOrder::default());
+        ReplaceCourseOrderUseCase::new(catalog.clone(), course_order.clone())
+            .execute(credentials(), vec![CourseId::new("a"), CourseId::new("b")])
+            .await
+            .unwrap();
+
+        let read = GetCourseOrderUseCase::new(catalog, course_order)
+            .execute(credentials())
+            .await
+            .unwrap();
+        assert_eq!(read.ids(), &[CourseId::new("a"), CourseId::new("b")]);
     }
 }

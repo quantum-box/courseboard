@@ -2,7 +2,16 @@
 
 ## Status
 
-Proposed (2026-07-24)
+Accepted (2026-08-22、2026-07-24 に Proposed)
+
+実装済みで、`dist` に platform API の直参照が混入していないかを
+CI が機械的に検査している。
+
+**部分的に置き換えられている。** テナントをどう絞り込むかについての
+Context / Decision / Consequences は
+[ADR-0011](./ADR-0011-policy-based-tenant-selection.md) が置き換える。
+「UI のアクセス先を Cognito と courseboard-api の 2 つに限定し、
+platform API を UI から直接叩かない」という中核の決定は有効である。
 
 ## Context
 
@@ -16,6 +25,14 @@ UIの接続先が3つ（Cognito、courseboard-api、tachyon-api）に分散し�
 `golf_course extension is not enabled` (400) で全滅することを確認した。
 extensionの正はfield DBの`tenant_extensions`にしか無く、UIが直接
 tachyon-apiを呼ぶ構成ではこの情報でテナントを絞り込めない。
+
+（2026-08-23 追記）この「extensionの有効・無効こそが絞り込みの軸である」
+という前提は、その後の調査で成立しないと分かった。CourseBoardの認可は
+Tachyon Authの独立した名前空間で動いており、Field側の認可経路も
+extension有効判定を見ていない。テナントがCourseBoardを使えるかは
+ポリシーの付与で表現できる（[ADR-0011](./ADR-0011-policy-based-tenant-selection.md)）。
+本ADRが解いた「選択後に全滅する」問題は残っており、
+解き方だけが変わる。
 
 ## Decision
 
@@ -50,5 +67,7 @@ field-apiが担い、courseboard-apiはextension未有効テナントを除外�
 
 - [ADR-0002: React SPAとcourseboard-apiを独立配信する](ADR-0002-react-spa-courseboard-api-boundary.md)
 - [ADR-0003: Courseboardの人間ユーザーtoken issuerをCognitoに統一する](ADR-0003-cognito-human-token-issuer.md)
+- [ADR-0010: CourseBoardはFieldのextensionを使わない](ADR-0010-courseboard-is-not-a-field-extension.md)
+- [ADR-0011: テナント選択はポリシーで行う](ADR-0011-policy-based-tenant-selection.md)
 - [設計](../../tasks/in-progress/v1-me-proxy-extension-filter/design.md)
 - [PLT-2771](https://linear.app/issue/PLT-2771)

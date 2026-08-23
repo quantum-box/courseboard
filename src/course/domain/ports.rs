@@ -277,6 +277,48 @@ pub trait AvailabilityDeadlineGateway: Send + Sync {
     ) -> Result<AvailabilityDeadline, CourseError>;
 }
 
+/// Port for what a round pays a caddie at each rank.
+///
+/// Keyed by tenant id because this is CourseBoard's own storage. Reading
+/// returns `None` rather than the defaults so a caller can tell "nobody has set
+/// this" from "somebody set it to what the defaults happen to be" — the
+/// migration off the extension config depends on that distinction, and so would
+/// any later question about whether a club has ever priced its ranks.
+#[async_trait]
+pub trait CaddieRankFeeGateway: Send + Sync {
+    async fn get_caddie_rank_fees(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Option<CaddieRankFees>, CourseError>;
+
+    async fn replace_caddie_rank_fees(
+        &self,
+        tenant_id: &str,
+        fees: &CaddieRankFees,
+    ) -> Result<CaddieRankFees, CourseError>;
+}
+
+/// Port for the order courses are laid out in on the ledger board.
+///
+/// Keyed by tenant id rather than credentials because this is CourseBoard's own
+/// storage. It used to live in the golf extension's config object on Field,
+/// which has no version to compare against and is now gated behind the
+/// permission that also enables and disables extensions — neither of which is
+/// the real reason to move it. How a club likes its board arranged is not
+/// something Field should have a column for (ADR-0009, ADR-0010).
+#[async_trait]
+pub trait CourseOrderGateway: Send + Sync {
+    /// Never absent: a tenant that has arranged nothing reads back as empty,
+    /// and the board falls back to the course list's own order.
+    async fn get_course_order(&self, tenant_id: &str) -> Result<CourseOrder, CourseError>;
+
+    async fn replace_course_order(
+        &self,
+        tenant_id: &str,
+        order: &CourseOrder,
+    ) -> Result<CourseOrder, CourseError>;
+}
+
 /// Port for the club's own shift-planning rules.
 ///
 /// The law fixes one ceiling; the rest — which weekdays to keep clear, how many
