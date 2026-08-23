@@ -11,17 +11,19 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    has_room_for_one_more_caddie_round, parse_tenant_tee_time, reconcile_remaining,
-    tenant_day_bounds, CaddieShiftGateway, CourseError, CourseId, CustomerId, GatewayCredentials,
-    GolfCatalogGateway, GolfCommercialGateway, NewReservation, PartyDetails, Reservation,
-    ReservationGateway, ReservationId, ReservationProduct, ReservationScheduleGateway, Resource,
-    ResourceId, ResourceKind, ResourceTimeSlot,
+    has_room_for_one_more_caddie_round, is_tee_time_closed, parse_tenant_tee_time,
+    reconcile_remaining, tenant_day_bounds, CaddieShiftGateway, CourseError, CourseId, CustomerId,
+    GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway, NewReservation, PartyDetails,
+    Reservation, ReservationGateway, ReservationId, ReservationProduct, ReservationScheduleGateway,
+    Resource, ResourceId, ResourceKind, ResourceTimeSlot, SlotOverrideGateway, SlotOverrideQuery,
 };
 use crate::course::usecase::GetCourseCaddieSupplyUseCase;
 
 /// A round is a day's work at most; anything longer is a typo or an attack.
 const MAX_DURATION_MINUTES: i64 = 24 * 60;
 const SLOT_FILLED_MESSAGE: &str = "この枠はちょうど埋まりました";
+const SLOT_CLOSED_MESSAGE: &str =
+    "この時刻は売り止めです。売り止めを解除するか、別の時刻を選んでください";
 
 pub struct CreateReservationInput {
     pub golf_course_id: CourseId,
@@ -49,6 +51,7 @@ pub struct CreateReservationUseCase {
     catalog: Arc<dyn GolfCatalogGateway>,
     schedules: Arc<dyn ReservationScheduleGateway>,
     shifts: Arc<dyn CaddieShiftGateway>,
+    marks: Arc<dyn SlotOverrideGateway>,
 }
 
 impl CreateReservationUseCase {
@@ -58,6 +61,7 @@ impl CreateReservationUseCase {
         catalog: Arc<dyn GolfCatalogGateway>,
         schedules: Arc<dyn ReservationScheduleGateway>,
         shifts: Arc<dyn CaddieShiftGateway>,
+        marks: Arc<dyn SlotOverrideGateway>,
     ) -> Self {
         Self {
             reservations,
@@ -65,6 +69,7 @@ impl CreateReservationUseCase {
             catalog,
             schedules,
             shifts,
+            marks,
         }
     }
 
@@ -94,6 +99,8 @@ impl CreateReservationUseCase {
             .await?;
         validate_product_course(product.as_ref(), &input.golf_course_id)?;
 
+        self.refuse_a_tee_time_the_desk_shut(credentials, &input)
+            .await?;
         self.refuse_a_round_the_course_cannot_walk(credentials, &input, product.as_ref())
             .await?;
 
@@ -155,6 +162,38 @@ impl CreateReservationUseCase {
             .map_err(normalize_inventory_conflict)
     }
 
+    /// Refuse a tee time the desk has marked closed.
+    ///
+    /// The mark is CourseBoard's own record and Field knows nothing about it,
+    /// so nothing upstream refuses this booking. The rule used to be enforced
+    /// only by the ledger's own code, which made 売り止め a convention of one
+    /// screen rather than a property of the tee time — anything arriving at the
+    /// API another way sold the slot regardless.
+    ///
+    /// A read that fails refuses the booking rather than waving it through. The
+    /// table is local and ours, so if it cannot be read then one unsold tee
+    /// time is the smaller of the club's problems; a group standing on a slot
+    /// somebody deliberately shut is not something the desk can undo by
+    /// looking at the board.
+    async fn refuse_a_tee_time_the_desk_shut(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &CreateReservationInput,
+    ) -> Result<(), CourseError> {
+        let query = SlotOverrideQuery {
+            date: input.date,
+            course_ids: vec![input.golf_course_id.clone()],
+        };
+        let marks = self
+            .marks
+            .list_slot_overrides(credentials.operator_id, &query)
+            .await?;
+        if is_tee_time_closed(&marks, &input.tee_time)? {
+            return Err(CourseError::BadRequest(SLOT_CLOSED_MESSAGE));
+        }
+        Ok(())
+    }
+
     /// Stop a caddie-attached round being sold onto a course that has no
     /// caddie left to walk it.
     ///
@@ -199,20 +238,23 @@ impl CreateReservationUseCase {
         ))
     }
 
+    /// The plan the desk picked, if it named one.
+    ///
+    /// Naming none is allowed: the desk takes calls faster than it can decide
+    /// what to sell, and a booking refused for want of a plan is a tee time
+    /// nobody sold. A name that matches nothing is a different thing — the
+    /// ledger the caller is working from is stale, or nobody is working from
+    /// one at all.
     async fn product_for_service(
         &self,
         credentials: GatewayCredentials<'_>,
         service_id: Option<&str>,
     ) -> Result<Option<ReservationProduct>, CourseError> {
-        let Some(service_id) = service_id else {
+        let Some(service_id) = service_id.map(str::trim).filter(|id| !id.is_empty()) else {
             return Ok(None);
         };
-        Ok(self
-            .catalog
-            .list_reservation_products(credentials)
-            .await?
-            .into_iter()
-            .find(|product| product.reservation_service_id().as_str() == service_id))
+        let products = self.catalog.list_reservation_products(credentials).await?;
+        find_named_product(products, service_id).map(Some)
     }
 
     /// The reservation type every Field booking needs.
@@ -287,6 +329,26 @@ fn validate_course_resource(
     Ok(())
 }
 
+/// Resolve a named plan, refusing a name that matches nothing.
+///
+/// Answering "no plan" to a name the catalog does not carry looked harmless,
+/// but the plan is what [`validate_product_course`] checks the course against
+/// and what decides whether the round needs a caddie. A booking naming a plan
+/// that does not exist was therefore taking the path of a booking that named
+/// none, skipping both — a stale ledger could sell a course its plan was never
+/// scoped to.
+fn find_named_product(
+    products: Vec<ReservationProduct>,
+    service_id: &str,
+) -> Result<ReservationProduct, CourseError> {
+    products
+        .into_iter()
+        .find(|product| product.reservation_service_id().as_str() == service_id)
+        .ok_or(CourseError::BadRequest(
+            "選んだプレー商品が見つかりません。台帳を読み込み直してから、もう一度お試しください",
+        ))
+}
+
 fn ensure_slot_available(
     slots: &[ResourceTimeSlot],
     reservations: &[Reservation],
@@ -350,6 +412,7 @@ fn normalize_inventory_conflict(error: CourseError) -> CourseError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::course::domain::{SlotOverride, SlotOverrideKind};
 
     fn resource(course_id: &str, reservation_resource_id: &str) -> Resource {
         Resource::reconstitute(
@@ -514,6 +577,59 @@ mod tests {
             &ResourceId::new("inventory-1"),
         )
         .is_ok());
+    }
+
+    fn mark(tee_time: &str, kind: SlotOverrideKind) -> SlotOverride {
+        SlotOverride::try_new(
+            CourseId::new("course-1"),
+            NaiveDate::from_ymd_opt(2026, 8, 12).unwrap(),
+            tee_time,
+            kind,
+            None,
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_plan_the_catalog_does_not_carry_is_refused_rather_than_read_as_no_plan() {
+        let catalog = vec![product(vec!["course-east"])];
+        assert!(find_named_product(catalog.clone(), "service-1").is_ok());
+        // Reading this as "no plan" skipped the course check the named plan
+        // would have gone through, so a stale ledger could sell a course the
+        // plan was never scoped to.
+        assert!(matches!(
+            find_named_product(catalog, "service-gone"),
+            Err(CourseError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn a_closed_tee_time_is_refused_however_the_booking_arrived() {
+        let marks = vec![mark("07:14", SlotOverrideKind::Closed)];
+        assert!(is_tee_time_closed(&marks, "07:14").unwrap());
+        // The rows either side of a closed one stay on sale: the desk shuts a
+        // tee time, not the morning around it.
+        assert!(!is_tee_time_closed(&marks, "07:07").unwrap());
+    }
+
+    #[test]
+    fn a_special_rate_slot_still_sells() {
+        // The mark says what it costs, not whether it may be sold. Treating the
+        // two alike would take the course's busiest rows off the board.
+        let marks = vec![mark("07:14", SlotOverrideKind::SpecialRate)];
+        assert!(!is_tee_time_closed(&marks, "07:14").unwrap());
+    }
+
+    #[test]
+    fn a_tee_time_that_is_not_a_clock_is_refused_rather_than_read_as_unmarked() {
+        // Answering "not closed" to something that cannot be compared would let
+        // a malformed tee time walk straight past the mark.
+        let marks = vec![mark("07:14", SlotOverrideKind::Closed)];
+        assert!(matches!(
+            is_tee_time_closed(&marks, "7:14"),
+            Err(CourseError::BadRequest(_))
+        ));
     }
 
     #[test]

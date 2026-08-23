@@ -138,7 +138,8 @@ pub use simulator::{
     TaxRuleSnapshot, DEFAULT_PLAYER_AGE,
 };
 pub use slot_override::{
-    DeleteSlotOverrides, SlotOverride, SlotOverrideKind, SlotOverrideQuery, UpsertSlotOverrides,
+    is_tee_time_closed, DeleteSlotOverrides, SlotOverride, SlotOverrideKind, SlotOverrideQuery,
+    UpsertSlotOverrides,
 };
 pub(crate) use tee_ledger::reconcile_remaining;
 pub use tee_ledger::{
