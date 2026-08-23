@@ -17,6 +17,19 @@ Field 側の変更なしで進められる。同時デプロイも要らない�
 
 ## やること
 
+### 0. 下ごしらえ（実装済み・2026-08-23）
+
+予約の金額を CourseBoard 側へ通す部分は済んでいる。**Field の予約 API は
+`priceAmount` / `depositAmount` / `paidAmount` / `currency` / `paymentStatus` /
+`invoiceId` / `cancelledAt` を返しており**（tachyonfield の
+`packages/reservation/src/lib.rs` の `Reservation` を確認）、CourseBoard 側が
+復号していなかっただけだった。`ReservationBilling` にまとめて
+`Reservation::with_billing` で載せる形にしたので、**`reconstitute` の引数は
+増えず呼び出し 6 箇所は無改修**。金額を持たない予約（この列ができる前のもの、
+テストの素材）は 0 に落ちて失敗しない。
+
+つまり達成率の実績側に必要な素材は**もう手元にある**。残りは集計そのもの。
+
 ### 1. 予算達成率
 
 **これを最初の 1 本にする。** Field 側の実装が既に純粋関数でテスト付きで、そのまま持ってこられる。新しい Field API を 1 本も必要としない。`src/course/domain/payroll.rs` が完全に同型のお手本になる。
