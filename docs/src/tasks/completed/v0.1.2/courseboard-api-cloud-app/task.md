@@ -28,7 +28,7 @@ CourseBoardのRust APIは現行リポジトリで`course-api`として拡張さ�
 
 - [設計](design.md)
 - Linear issue: 未作成
-- [ADR-0001: production Cognito client allowlist](../../../architecture/decisions/ADR-0001-production-cognito-client-allowlist.md)
+- [ADR-0001: production Cognito client allowlist](../../../../architecture/decisions/ADR-0001-production-cognito-client-allowlist.md)
 
 ## 実装フェーズ
 
