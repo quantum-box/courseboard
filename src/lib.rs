@@ -34,9 +34,9 @@ use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
     FieldReservationReportGateway, MigratingReservationReportGateway,
-    MySqlGolfProductSettingsRepository,
     MySqlAvailabilityDeadlineRepository, MySqlCaddieRankFeeRepository, MySqlCaddieShiftRepository,
-    MySqlCourseOrderRepository, MySqlGeneratedThroughRepository, MySqlPlayerTagOptionsRepository,
+    MySqlCourseOrderRepository, MySqlGeneratedThroughRepository,
+    MySqlGolfProductSettingsRepository, MySqlPlayerTagOptionsRepository,
     MySqlPricingSettingsRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};

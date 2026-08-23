@@ -44,9 +44,10 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AvailabilityQuery, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
-        CaddieCourseMembership, CaddieId, CaddieRank, CaddieRankFees, CaddieRating,
-        CaddieRoster, CaddieSkillLevel, CaddieStaff, ReplaceCaddieMemberships, UpsertCaddieAssignment, UpsertCaddieAvailability,
+        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AvailabilityQuery,
+        CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
+        CaddieId, CaddieRank, CaddieRankFees, CaddieRating, CaddieRoster, CaddieSkillLevel,
+        CaddieStaff, ReplaceCaddieMemberships, UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
 
     #[derive(Default)]

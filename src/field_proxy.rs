@@ -463,7 +463,10 @@ mod tests {
             "/v1/erp/reservations/res_1/billing-invoice"
         ));
         assert!(is_allowed_route(&Method::GET, "/v1/erp/reservation-types"));
-        assert!(!is_allowed_route(&Method::POST, "/v1/erp/reservation-types"));
+        assert!(!is_allowed_route(
+            &Method::POST,
+            "/v1/erp/reservation-types"
+        ));
     }
 
     #[test]

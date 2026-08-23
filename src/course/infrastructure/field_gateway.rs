@@ -763,8 +763,7 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<ReservationProduct>, CourseError> {
-        let products =
-            generic_product_config::read_products(&self.read_config(credentials).await?);
+        let products = generic_product_config::read_products(&self.read_config(credentials).await?);
         let Some(repository) = &self.product_settings else {
             return Ok(products);
         };
@@ -774,12 +773,12 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         let local = repository.get_all(credentials.operator_id).await?;
         Ok(products
             .into_iter()
-            .map(|product| {
-                match local.get(product.reservation_service_id().as_str()) {
+            .map(
+                |product| match local.get(product.reservation_service_id().as_str()) {
                     Some(settings) => settings.apply_to(&product),
                     None => product,
-                }
-            })
+                },
+            )
             .collect())
     }
 

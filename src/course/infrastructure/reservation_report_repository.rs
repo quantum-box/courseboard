@@ -449,7 +449,10 @@ impl ReservationReportGateway for MigratingReservationReportGateway {
         query: ReservationReportEntryQuery,
     ) -> Result<Vec<ExternalReservationReportEntry>, CourseError> {
         if self.local.has_rows(credentials.operator_id).await? {
-            return self.local.list(credentials.operator_id, courses, query).await;
+            return self
+                .local
+                .list(credentials.operator_id, courses, query)
+                .await;
         }
         self.legacy.list_entries(credentials, courses, query).await
     }
@@ -540,21 +543,35 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            (created.created_count, created.updated_count, created.unchanged_count),
+            (
+                created.created_count,
+                created.updated_count,
+                created.unchanged_count
+            ),
             (1, 0, 0)
         );
 
         // The same file again: unchanged, and the timestamp survives.
-        let listed_before = repository.list(&tenant, &courses, unbounded()).await.unwrap();
+        let listed_before = repository
+            .list(&tenant, &courses, unbounded())
+            .await
+            .unwrap();
         let unchanged = repository
             .upsert(&tenant, std::slice::from_ref(&first), &courses)
             .await
             .unwrap();
         assert_eq!(
-            (unchanged.created_count, unchanged.updated_count, unchanged.unchanged_count),
+            (
+                unchanged.created_count,
+                unchanged.updated_count,
+                unchanged.unchanged_count
+            ),
             (0, 0, 1)
         );
-        let listed_after = repository.list(&tenant, &courses, unbounded()).await.unwrap();
+        let listed_after = repository
+            .list(&tenant, &courses, unbounded())
+            .await
+            .unwrap();
         assert_eq!(listed_before[0].updated_at(), listed_after[0].updated_at());
 
         // A corrected count on the same half-day is an update.
@@ -565,12 +582,22 @@ mod tests {
             ReservationReportDayPart::Morning,
             5,
         );
-        let updated = repository.upsert(&tenant, &[corrected], &courses).await.unwrap();
+        let updated = repository
+            .upsert(&tenant, &[corrected], &courses)
+            .await
+            .unwrap();
         assert_eq!(
-            (updated.created_count, updated.updated_count, updated.unchanged_count),
+            (
+                updated.created_count,
+                updated.updated_count,
+                updated.unchanged_count
+            ),
             (0, 1, 0)
         );
-        let listed = repository.list(&tenant, &courses, unbounded()).await.unwrap();
+        let listed = repository
+            .list(&tenant, &courses, unbounded())
+            .await
+            .unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].group_count(), 5);
         assert_eq!(
@@ -691,7 +718,10 @@ mod tests {
             .await
             .unwrap();
 
-        let listed = repository.list(&tenant, &courses, unbounded()).await.unwrap();
+        let listed = repository
+            .list(&tenant, &courses, unbounded())
+            .await
+            .unwrap();
         assert_eq!(listed.len(), 2);
     }
 

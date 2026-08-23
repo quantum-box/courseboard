@@ -124,10 +124,10 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
-        CaddieId, CaddieRank, CaddieRankFees, CaddieRating, CaddieRoster,
-        CaddieSkillLevel, CaddieStaff, ReplaceCaddieMemberships, UpsertCaddie,
-        UpsertCaddieAssignment, UpsertCaddieAvailability,
+        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, CaddieAssignment,
+        CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRank,
+        CaddieRankFees, CaddieRating, CaddieRoster, CaddieSkillLevel, CaddieStaff,
+        ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
 
     struct FakeDeadlines {

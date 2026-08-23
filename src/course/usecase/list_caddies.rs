@@ -31,11 +31,12 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AvailabilityQuery, AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery,
-        CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRank, CaddieRankFees,
-        CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift, CaddieShiftGateway,
-        CaddieSkillLevel, CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships,
-        ReservationId, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AvailabilityQuery,
+        AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
+        CaddieCourseMembership, CaddieId, CaddieRank, CaddieRankFees, CaddieRating,
+        CaddieRecommendation, CaddieRoster, CaddieShift, CaddieShiftGateway, CaddieSkillLevel,
+        CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships, ReservationId, UpsertCaddie,
+        UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
     use crate::course::usecase::caddie_rank_fees::UnsetRankFees;
     use crate::course::usecase::{

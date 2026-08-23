@@ -18,11 +18,11 @@ use super::field_gateway::{
 };
 use crate::course::domain::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshot, AttendanceSnapshotReport,
-    AvailabilityQuery,
-    AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
-    CaddieCourseMembership, CaddieId, CaddieRankFees, CaddieRating, CaddieRoster, CaddieStaff, CourseError, GatewayCredentials, GolfOpsGateway,
-    ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, WorkedMinutes,
+    AvailabilityQuery, AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery,
+    CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRankFees, CaddieRating,
+    CaddieRoster, CaddieStaff, CourseError, GatewayCredentials, GolfOpsGateway,
+    ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    WorkedMinutes,
 };
 
 const GOLF: &str = "/v1/erp/extensions/golf-course";

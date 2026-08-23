@@ -119,9 +119,11 @@ async fn main() -> anyhow::Result<()> {
         .map_err(|error| anyhow::anyhow!("read the legacy config rows: {error}"))?;
     tracing::info!(rows = legacy_entries.len(), "legacy config rows read");
 
-    if local.has_rows(&tenant_id).await.map_err(|error| {
-        anyhow::anyhow!("check whether the tenant is already seeded: {error}")
-    })? {
+    if local
+        .has_rows(&tenant_id)
+        .await
+        .map_err(|error| anyhow::anyhow!("check whether the tenant is already seeded: {error}"))?
+    {
         tracing::info!("tenant already has local rows; skipping the seed and verifying");
     } else if legacy_entries.is_empty() {
         tracing::info!("nothing to migrate: the legacy store holds no rows for this tenant");
@@ -146,7 +148,10 @@ async fn main() -> anyhow::Result<()> {
         .collect();
     if !missing.is_empty() {
         for entry in missing.iter().take(10) {
-            tracing::error!(row = fingerprint(entry), "legacy row is not readable locally");
+            tracing::error!(
+                row = fingerprint(entry),
+                "legacy row is not readable locally"
+            );
         }
         bail!(
             "{} of {} legacy rows are not readable locally; the legacy config key was NOT touched",

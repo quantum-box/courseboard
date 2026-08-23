@@ -56,7 +56,9 @@ impl GolfProductSettings {
         if self.course_scope_declared {
             ReservationProduct::reconstitute_with_course_ids(
                 product.id().as_str().to_string(),
-                product.tenant_id().map(|tenant| tenant.as_str().to_string()),
+                product
+                    .tenant_id()
+                    .map(|tenant| tenant.as_str().to_string()),
                 product.reservation_service_id().as_str().to_string(),
                 product.display_name().map(str::to_string),
                 self.play_type,
@@ -68,7 +70,9 @@ impl GolfProductSettings {
         } else {
             ReservationProduct::reconstitute(
                 product.id().as_str().to_string(),
-                product.tenant_id().map(|tenant| tenant.as_str().to_string()),
+                product
+                    .tenant_id()
+                    .map(|tenant| tenant.as_str().to_string()),
                 product.reservation_service_id().as_str().to_string(),
                 product.display_name().map(str::to_string),
                 self.play_type,
@@ -107,8 +111,7 @@ impl MySqlGolfProductSettingsRepository {
         .fetch_all(&self.pool)
         .await
         .map_err(provider)?;
-        let mut settings: HashMap<String, GolfProductSettings> =
-            HashMap::with_capacity(rows.len());
+        let mut settings: HashMap<String, GolfProductSettings> = HashMap::with_capacity(rows.len());
         for row in &rows {
             let service_id: String = row.try_get("reservation_service_id").map_err(provider)?;
             let play_type: String = row.try_get("play_type").map_err(provider)?;
@@ -243,11 +246,7 @@ mod tests {
     use super::*;
     use crate::test_support::{test_pool, test_tenant};
 
-    fn settings(
-        play_type: PlayType,
-        declared: bool,
-        courses: &[&str],
-    ) -> GolfProductSettings {
+    fn settings(play_type: PlayType, declared: bool, courses: &[&str]) -> GolfProductSettings {
         GolfProductSettings {
             play_type,
             hole_count: 18,

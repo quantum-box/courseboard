@@ -140,9 +140,8 @@ mod tests {
     use crate::course::domain::{
         AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, Caddie,
         CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRankFees, CaddieRating,
-        CaddieRoster, CaddieStaff, NewReservation, PartyDetails,
-        ReplaceCaddieMemberships, Reservation, SeededReservation,
-        UpsertCaddie, UpsertCaddieAvailability,
+        CaddieRoster, CaddieStaff, NewReservation, PartyDetails, ReplaceCaddieMemberships,
+        Reservation, SeededReservation, UpsertCaddie, UpsertCaddieAvailability,
     };
 
     struct FakeReservations {

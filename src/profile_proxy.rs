@@ -1387,26 +1387,28 @@ mod tests {
             )
             .route(
                 CHECK_TENANTS_PATH,
-                axum::routing::post(move |headers: HeaderMap, Json(body): Json<serde_json::Value>| {
-                    let table = table.clone();
-                    let recorded = recorded.clone();
-                    async move {
-                        assert!(headers.get("x-operator-id").is_none());
-                        assert!(headers.get("x-platform-id").is_none());
-                        assert_eq!(body["action"].as_str(), Some(REPRESENTATIVE_ACTION));
-                        let platform_id = body["platformId"].as_str().unwrap().to_string();
-                        recorded.lock().unwrap().push(body);
-                        match table.iter().find(|(id, _)| *id == platform_id) {
-                            Some((_, Some(allowed))) => {
-                                Json(json!({"allowedTenantIds": allowed})).into_response()
+                axum::routing::post(
+                    move |headers: HeaderMap, Json(body): Json<serde_json::Value>| {
+                        let table = table.clone();
+                        let recorded = recorded.clone();
+                        async move {
+                            assert!(headers.get("x-operator-id").is_none());
+                            assert!(headers.get("x-platform-id").is_none());
+                            assert_eq!(body["action"].as_str(), Some(REPRESENTATIVE_ACTION));
+                            let platform_id = body["platformId"].as_str().unwrap().to_string();
+                            recorded.lock().unwrap().push(body);
+                            match table.iter().find(|(id, _)| *id == platform_id) {
+                                Some((_, Some(allowed))) => {
+                                    Json(json!({"allowedTenantIds": allowed})).into_response()
+                                }
+                                Some((_, None)) => {
+                                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                                }
+                                None => panic!("unexpected platform {platform_id}"),
                             }
-                            Some((_, None)) => {
-                                StatusCode::INTERNAL_SERVER_ERROR.into_response()
-                            }
-                            None => panic!("unexpected platform {platform_id}"),
                         }
-                    }
-                }),
+                    },
+                ),
             );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -1444,7 +1446,10 @@ mod tests {
             ]),
             vec![
                 // Answer order deliberately differs from /v1/me order.
-                (platform_a.clone(), Some(vec![tenant_3.clone(), tenant_1.clone()])),
+                (
+                    platform_a.clone(),
+                    Some(vec![tenant_3.clone(), tenant_1.clone()]),
+                ),
                 (platform_b.clone(), Some(vec![])),
             ],
         )
