@@ -119,7 +119,9 @@ pub use pricing_settings::GolfPricingSettings;
 pub use product::{
     DurationMinutes, PlayType, ProductSlot, ReservationProduct, UpsertReservationProduct,
 };
-pub use reservation::{NewReservation, Reservation, ReservationBookingUpdate, SeededReservation};
+pub use reservation::{
+    NewReservation, Reservation, ReservationBilling, ReservationBookingUpdate, SeededReservation,
+};
 pub use reservation_report::{
     ExternalReservationReportEntry, ReservationReport, ReservationReportAnalyzeGateway,
     ReservationReportDayPart, ReservationReportEntryQuery, ReservationReportFacility,
