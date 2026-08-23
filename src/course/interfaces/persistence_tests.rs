@@ -1388,6 +1388,55 @@ async fn a_write_that_another_writer_overwrote_is_applied_again_rather_than_lost
 }
 
 #[tokio::test]
+async fn a_week_of_slots_overwritten_by_another_writer_is_applied_again_rather_than_lost() {
+    // Slots are stored inside the plan they belong to, in the same shared
+    // object, and Field's own slot import rewrites that array too. This path
+    // used to write without reading back, so the desk was told the week was
+    // saved while the other writer had already replaced it.
+    let tenant = tenant_for("a_week_of_slots_overwritten_by_another_");
+    let field = field_with_courses();
+    *field.config.lock().unwrap() = json!({
+        "reservationProducts": [{ "id": "weekday-standard", "name": "平日スタンダード" }],
+    });
+    // What the other writer leaves behind: the plan is still there, so our
+    // retry has something to attach slots to, plus a key only they wrote.
+    *field.clobber_with.lock().unwrap() = json!({
+        "reservationProducts": [{ "id": "weekday-standard", "name": "平日スタンダード" }],
+        "golfCourseOrder": ["course-b"],
+    });
+    *field.clobber_config_writes.lock().unwrap() = 1;
+    let url = spawn_field(field.clone()).await;
+    let pool = unused_pool();
+
+    let (status, body) = call(
+        &router(&pool, &url),
+        &tenant,
+        "PUT",
+        "/v1/course/reservation-products/weekday-standard/slots",
+        Some(json!({
+            "slots": [{
+                "weekday": 1,
+                "startTime": "07:00",
+                "endTime": "12:00",
+                "maxGroups": 6,
+                "maxPlayers": 24,
+            }],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    // Read back from what Field stored, not from the value we sent: after a
+    // retry those are different objects.
+    assert_eq!(body["items"][0]["startTime"], json!("07:00"));
+
+    let stored = field.config.lock().unwrap().clone();
+    let slot = &stored["reservationProducts"][0]["slots"][0];
+    assert_eq!(slot["startTime"], json!("07:00"));
+    assert_eq!(slot["maxGroups"], json!(6));
+    assert_eq!(stored["golfCourseOrder"], json!(["course-b"]));
+}
+
+#[tokio::test]
 async fn a_write_that_can_never_land_is_reported_instead_of_claimed() {
     // A save that cannot be made to stick has to fail loudly. Reporting success
     // here would leave the operator believing a board they cannot see.

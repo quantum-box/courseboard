@@ -818,10 +818,24 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         service_id: &ReservationServiceId,
         slots: Vec<ProductSlot>,
     ) -> Result<Vec<ProductSlot>, CourseError> {
-        let config = self.read_config(credentials).await?;
-        let next = generic_product_config::replace_slots(&config, service_id, &slots);
-        write_extension_config(&self.client, &self.base_url, credentials, &next).await?;
-        generic_product_config::read_slots(&next, service_id)
+        // Slots live inside the same `reservationProducts` array as the plans,
+        // and Field's own slot import rewrites that array too. A bare PATCH
+        // here reported success while dropping whichever write landed second,
+        // so this takes the same write-and-verify path as the plan editor.
+        let stored = self
+            .write_config_key(
+                credentials,
+                generic_product_config::PRODUCTS_KEY,
+                |config| {
+                    Ok(generic_product_config::replace_slots(
+                        config, service_id, &slots,
+                    ))
+                },
+            )
+            .await?;
+        // Read back from what Field stored rather than from the value we sent:
+        // after a retry the two are not the same object.
+        generic_product_config::read_slots(&stored, service_id)
     }
 }
 
