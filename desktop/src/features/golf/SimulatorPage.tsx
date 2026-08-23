@@ -2,15 +2,16 @@ import { Button, Input } from '@tachyon-sdk/native-ui'
 import { Calculator, LineChart } from 'lucide-react'
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { courseboardApiJson, courseboardApiText, yen } from '../../api'
+import { courseboardApiJson, yen } from '../../api'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { today } from '../../lib/clock'
 import {
   PREFECTURES,
-  buildGolfExtensionConfig,
-  golfExtensionConfigToDraft,
-  type GolfExtensionConfigDraft,
-} from './extension-config'
+  buildPricingSettings,
+  pricingSettingsToDraft,
+  type PricingSettings,
+  type PricingSettingsDraft,
+} from './pricing-settings'
 import { Notice } from '../../components/Page'
 import {
   DataTable,
@@ -97,8 +98,8 @@ function optionalNumber(value: FormDataEntryValue | null) {
  */
 function TaxSettingsPanel() {
   const { t } = useTranslation(['simulator', 'common'])
-  const [draft, setDraft] = useState<GolfExtensionConfigDraft | null>(null)
-  const [original, setOriginal] = useState<Record<string, unknown>>({})
+  const [draft, setDraft] = useState<PricingSettingsDraft | null>(null)
+  const [settings, setSettings] = useState<PricingSettings | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -106,12 +107,9 @@ function TaxSettingsPanel() {
   useEffect(() => {
     void (async () => {
       try {
-        const status = await courseboardApiJson<{ configJson?: Record<string, unknown> | null }>(
-          '/v1/course/extension-status',
-        )
-        const config = status.configJson ?? {}
-        setOriginal(config)
-        setDraft(golfExtensionConfigToDraft(config))
+        const current = await courseboardApiJson<PricingSettings>('/v1/course/pricing-settings')
+        setSettings(current)
+        setDraft(pricingSettingsToDraft(current))
       } catch (reason) {
         setError(errorMessage(reason))
       }
@@ -120,17 +118,18 @@ function TaxSettingsPanel() {
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!draft) return
+    if (!draft || !settings) return
     setSaving(true)
     setError(null)
     setSaved(false)
     try {
-      const configJson = buildGolfExtensionConfig(draft, original)
-      await courseboardApiText('/v1/course/config', {
-        method: 'PATCH',
-        body: JSON.stringify({ scopeType: 'tenant', configJson }),
+      const stored = await courseboardApiJson<PricingSettings>('/v1/course/pricing-settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(buildPricingSettings(draft, settings)),
       })
-      setOriginal(configJson)
+      setSettings(stored)
+      setDraft(pricingSettingsToDraft(stored))
       setSaved(true)
     } catch (reason) {
       setError(errorMessage(reason))

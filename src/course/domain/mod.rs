@@ -109,7 +109,7 @@ pub use ports::{
     AvailabilityDeadlineGateway, CaddieRankFeeGateway, CaddieShiftGateway, CourseAuthorizer,
     CourseOrderGateway, CustomerGateway, CustomerReceptionOcrGateway, FieldCapabilitiesGateway,
     GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
-    GolfOpsGateway, GolfTaxGateway, MembershipGateway, ReservationGateway,
+    GolfOpsGateway, GolfTaxGateway, MembershipGateway, PricingSettingsGateway, ReservationGateway,
     ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery,
     TeeSheetQuery,
 };

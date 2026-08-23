@@ -667,6 +667,23 @@ mockReservationReportEntries = loadMockWrites('reservationReportEntries', [])
 /** The club's column order, as arranged during the session. */
 const mockCourseOrder: string[] = loadMockWrites<string[]>('courseOrder', [])
 
+/** The simulator's pricing inputs, as the tax panel sets them. */
+const mockPricingSettings = loadMockWrites<{
+  prefecture: string | null
+  taxGrade: string | null
+  taxableRatio: number
+  priceElasticity: number
+  fixedCostPerDay: number
+  variableCostPerVisitor: number
+}>('pricingSettings', {
+  prefecture: 'hokkaido',
+  taxGrade: null,
+  taxableRatio: 0.85,
+  priceElasticity: -1.2,
+  fixedCostPerDay: 300000,
+  variableCostPerVisitor: 1500,
+})
+
 /** What one round pays at each rank, as the payroll screen sets it. */
 const mockRankFees = loadMockWrites<{
   a: number
@@ -1575,6 +1592,8 @@ function normalizeMockPath(pathname: string): string {
     // Rank fees are a golf pay rule, kept in the extension config rather than
     // behind a Field endpoint of their own.
     || pathname === '/v1/course/caddie-rank-fees'
+    // Pricing inputs are CourseBoard's own row (ADR-0009).
+    || pathname === '/v1/course/pricing-settings'
     || pathname.startsWith('/v1/course/caddie-shifts/')
     || pathname.startsWith('/v1/course/caddie-shift-plans/')
     // The customer ledger and the memberships against it live in Field's own
@@ -2387,6 +2406,8 @@ function resolveGet(path: string): Json | null | undefined {
 
   if (pathname === '/v1/course/caddie-rank-fees') return mockRankFees
 
+  if (pathname === '/v1/course/pricing-settings') return { ...mockPricingSettings }
+
   if (pathname === '/v1/erp/extensions/golf-course/caddie-payroll-summary') {
     const yearMonth = url.searchParams.get('yearMonth') ?? TODAY.slice(0, 7)
     const [year, month] = yearMonth.split('-').map(Number)
@@ -2862,6 +2883,27 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     mockCourseOrder.splice(0, mockCourseOrder.length, ...ids.filter(id => known.includes(id)))
     saveMockWrites('courseOrder', mockCourseOrder)
     return hit({ golfCourseIds: [...mockCourseOrder] })
+  }
+
+  if (pathname === '/v1/course/pricing-settings' && method === 'PUT') {
+    const ratio = Number(body?.taxableRatio)
+    if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) {
+      return error(400, 'the taxable share must be between 0 and 1')
+    }
+    Object.assign(mockPricingSettings, {
+      prefecture: typeof body?.prefecture === 'string' && body.prefecture.trim() !== ''
+        ? body.prefecture.trim()
+        : null,
+      taxGrade: typeof body?.taxGrade === 'string' && body.taxGrade.trim() !== ''
+        ? body.taxGrade.trim()
+        : null,
+      taxableRatio: ratio,
+      priceElasticity: Number(body?.priceElasticity),
+      fixedCostPerDay: Number(body?.fixedCostPerDay),
+      variableCostPerVisitor: Number(body?.variableCostPerVisitor),
+    })
+    saveMockWrites('pricingSettings', mockPricingSettings)
+    return hit({ ...mockPricingSettings })
   }
 
   if (pathname === '/v1/course/caddie-rank-fees' && method === 'PUT') {

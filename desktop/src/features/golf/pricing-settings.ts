@@ -8,39 +8,38 @@ import { i18next } from '../../i18n'
 export const PREFECTURES: readonly string[] = ['hokkaido']
 
 /**
- * The two keys the pricing screen owns in the extension config.
- *
- * This form used to carry seven more — holes, party size, cart policy,
- * deposits, a public product name — and wrote defaults for all of them on
- * every save, even for a club that had never set any. Nothing read those
- * copies: the real values live in Field's reservation policy, edited on the
- * policy screen. Writing a second, unread copy of a booking rule is exactly
- * what ADR-0009 retires, so the form now touches only what it shows.
+ * The simulator's pricing inputs, as `/v1/course/pricing-settings` serves
+ * them. The panel edits two fields; the rest ride along so a cost assumption
+ * somebody set by hand survives the save instead of reverting to defaults.
  */
-export type GolfExtensionConfigDraft = {
+export type PricingSettings = {
+  prefecture: string | null
+  taxGrade: string | null
+  taxableRatio: number
+  priceElasticity: number
+  fixedCostPerDay: number
+  variableCostPerVisitor: number
+}
+
+export type PricingSettingsDraft = {
   /** Which prefecture's golf course tax schedule applies. */
   prefecture: string
   /** The grade the prefecture assigned this course. */
   taxGrade: string
 }
 
-function stringValue(value: unknown, fallback = '') {
-  return typeof value === 'string' ? value : fallback
-}
-
-export function golfExtensionConfigToDraft(
-  config: Record<string, unknown>,
-): GolfExtensionConfigDraft {
+export function pricingSettingsToDraft(settings: PricingSettings): PricingSettingsDraft {
   return {
-    prefecture: stringValue(config.prefecture),
-    taxGrade: stringValue(config.taxGrade),
+    prefecture: settings.prefecture ?? '',
+    taxGrade: settings.taxGrade ?? '',
   }
 }
 
-export function buildGolfExtensionConfig(
-  draft: GolfExtensionConfigDraft,
-  original: Record<string, unknown>,
-): Record<string, unknown> {
+/** Validate the edited fields and rebuild the whole object the API expects. */
+export function buildPricingSettings(
+  draft: PricingSettingsDraft,
+  settings: PricingSettings,
+): PricingSettings {
   const errors: string[] = []
   // The prefecture decides the tax schedule, so a typo here is a wrong tax
   // rather than a failed lookup. Only known keys are accepted.
@@ -57,5 +56,9 @@ export function buildGolfExtensionConfig(
   }
   if (errors.length > 0) throw new Error(errors.join(' / '))
 
-  return { ...original, prefecture, taxGrade }
+  return {
+    ...settings,
+    prefecture: prefecture === '' ? null : prefecture,
+    taxGrade: taxGrade === '' ? null : taxGrade,
+  }
 }
