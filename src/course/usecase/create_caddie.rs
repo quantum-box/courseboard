@@ -44,11 +44,9 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-        AvailabilityQuery, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
+        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AvailabilityQuery, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
         CaddieCourseMembership, CaddieId, CaddieRank, CaddieRankFees, CaddieRating,
-        CaddieRecommendation, CaddieRoster, CaddieSkillLevel, CaddieStaff, RecommendationQuery,
-        ReplaceCaddieMemberships, UpsertCaddieAssignment, UpsertCaddieAvailability,
+        CaddieRoster, CaddieSkillLevel, CaddieStaff, ReplaceCaddieMemberships, UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
 
     #[derive(Default)]
@@ -197,14 +195,6 @@ mod tests {
             Ok(())
         }
 
-        async fn list_caddie_recommendations(
-            &self,
-            _credentials: GatewayCredentials<'_>,
-            _query: RecommendationQuery,
-        ) -> Result<Vec<CaddieRecommendation>, CourseError> {
-            Ok(vec![])
-        }
-
         async fn get_attendance_snapshot(
             &self,
             _credentials: GatewayCredentials<'_>,
@@ -221,15 +211,6 @@ mod tests {
             _to: NaiveDate,
         ) -> Result<Vec<AttendancePeriodSnapshot>, CourseError> {
             Ok(vec![])
-        }
-
-        async fn auto_assign_caddies(
-            &self,
-            _credentials: GatewayCredentials<'_>,
-            _date: NaiveDate,
-            _dry_run: bool,
-        ) -> Result<AutoAssignResult, CourseError> {
-            Err(CourseError::BadRequest("not used in test"))
         }
 
         async fn get_caddie_rank_fees(

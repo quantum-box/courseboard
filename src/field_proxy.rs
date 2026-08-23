@@ -172,11 +172,10 @@ fn is_allowed_path(path: &str) -> bool {
         return false;
     }
 
-    path == "/v1/erp/extensions/status"
-        || path == "/v1/erp/extensions/golf_course/config"
-        || is_non_empty_subpath(path, "/v1/erp/extensions/golf-course")
-        || path == "/v1/erp/extensions/golf-course"
-        || path == "/v1/erp/staff"
+    // No extension path is proxied: the UI reaches extension status and config
+    // through CourseBoard's own routes only, and CourseBoard is not a Field
+    // extension (ADR-0010).
+    path == "/v1/erp/staff"
         || is_non_empty_subpath(path, "/v1/erp/staff")
         || path == "/v1/erp/reservation-types"
         || is_field_iam_path(path)
@@ -190,21 +189,8 @@ fn is_allowed_route(method: &Method, path: &str) -> bool {
         return false;
     }
 
-    if path == "/v1/erp/extensions/status" || path == "/v1/erp/reservation-types" {
+    if path == "/v1/erp/reservation-types" {
         return method == Method::GET;
-    }
-    if path == "/v1/erp/extensions/golf_course/config" {
-        return method == Method::GET || method == Method::PATCH;
-    }
-    if path == "/v1/erp/extensions/golf-course" {
-        return method == Method::GET;
-    }
-    if is_non_empty_subpath(path, "/v1/erp/extensions/golf-course") {
-        return method == Method::GET
-            || method == Method::POST
-            || method == Method::PATCH
-            || method == Method::PUT
-            || method == Method::DELETE;
     }
     if path == "/v1/erp/staff" {
         return method == Method::GET || method == Method::POST;
@@ -369,8 +355,11 @@ mod tests {
 
     #[test]
     fn allows_only_courseboard_field_surfaces() {
-        assert!(is_allowed_path("/v1/erp/extensions/golf-course/courses"));
-        assert!(is_allowed_path("/v1/erp/extensions/status"));
+        // The extension surface is gone entirely: no CourseBoard screen calls
+        // Field's extension paths (ADR-0010), so the proxy refuses them.
+        assert!(!is_allowed_path("/v1/erp/extensions/golf-course/courses"));
+        assert!(!is_allowed_path("/v1/erp/extensions/status"));
+        assert!(!is_allowed_path("/v1/erp/extensions/golf_course/config"));
         assert!(is_allowed_path("/v1/erp/staff/staff_1/clock-in"));
         assert!(is_allowed_path(
             "/v1/erp/reservations/res_1/billing-invoice"
@@ -413,7 +402,7 @@ mod tests {
             &Method::POST,
             "/v1/invoices/inv_1/fulfill"
         ));
-        assert!(is_allowed_route(
+        assert!(!is_allowed_route(
             &Method::PATCH,
             "/v1/erp/extensions/golf-course/courses/course_1"
         ));
@@ -473,10 +462,8 @@ mod tests {
             &Method::GET,
             "/v1/erp/reservations/res_1/billing-invoice"
         ));
-        assert!(!is_allowed_route(
-            &Method::TRACE,
-            "/v1/erp/extensions/golf-course/courses"
-        ));
+        assert!(is_allowed_route(&Method::GET, "/v1/erp/reservation-types"));
+        assert!(!is_allowed_route(&Method::POST, "/v1/erp/reservation-types"));
     }
 
     #[test]

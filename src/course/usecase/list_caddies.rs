@@ -31,8 +31,7 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-        AvailabilityQuery, AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery,
+        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AvailabilityQuery, AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery,
         CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRank, CaddieRankFees,
         CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift, CaddieShiftGateway,
         CaddieSkillLevel, CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships,
@@ -227,14 +226,6 @@ mod tests {
             Ok(())
         }
 
-        async fn list_caddie_recommendations(
-            &self,
-            _credentials: GatewayCredentials<'_>,
-            _query: RecommendationQuery,
-        ) -> Result<Vec<CaddieRecommendation>, CourseError> {
-            Ok(vec![])
-        }
-
         async fn get_attendance_snapshot(
             &self,
             _credentials: GatewayCredentials<'_>,
@@ -254,15 +245,6 @@ mod tests {
             _to: NaiveDate,
         ) -> Result<Vec<AttendancePeriodSnapshot>, CourseError> {
             Ok(vec![])
-        }
-
-        async fn auto_assign_caddies(
-            &self,
-            _credentials: GatewayCredentials<'_>,
-            _date: NaiveDate,
-            dry_run: bool,
-        ) -> Result<AutoAssignResult, CourseError> {
-            Ok(AutoAssignResult::new(dry_run, vec![], vec![]))
         }
 
         async fn get_caddie_rank_fees(
