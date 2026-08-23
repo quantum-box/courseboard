@@ -2,7 +2,23 @@
 
 ## Status
 
-Accepted (2026-08-11)
+Superseded (2026-08-23)。実装は移行が済むまで残る。
+
+置き換えたのは[ADR-0009](./ADR-0009-extension-config-is-not-a-data-store.md)と
+[ADR-0010](./ADR-0010-courseboard-is-not-a-field-extension.md)。本ADRの
+Decisionは「専用の汎用snapshot capabilityがまだないため、既存extension configを
+暫定gatewayとして利用する」だったが、CourseBoardがextensionそのものを
+使わなくなるため、この暫定措置は成り立たない。
+
+行き先は**CourseBoardローカルDB**になった。Field側の汎用capability（PLT-3574）
+を待つ案も検討したが、集計の中身が「組数」と「キャディ付き組数」であり、
+キャディはゴルフの語彙でFieldが汎用として持つ意味が薄い。加えてこのkeyは
+config全体の大きさを支配しており（コース数×日数×午前午後）、台帳やティーシートを
+開くたびにconfig全体として転送されている。PLT-3574のcutover中はconfig write全体が
+423で止まるため、CourseBoardの他の設定保存も巻き添えになる。
+
+移行はdual-write / dual-readを行わず、一回限りの移送でseed・検証・切替・
+legacy削除を順に行う一方向とする。この点だけはPLT-3574が採った形と同じ。
 
 ## Context
 
@@ -53,11 +69,17 @@ CourseBoardで確認するためには、このゴルフ固有集計を保持す
 
 - 組数分のField予約を作る: 不明な予約者、人数、時刻を捏造するため不採用。
 - CourseBoard DBへ専用テーブルを作る: 一意制約は強いがADR-0005の物理移送禁止に反するため不採用。
+  **（2026-08-23 追記）この却下理由はADR-0009が解いた。** Fieldにある
+  データをCourseBoardへ運ぶ「物理移送」と、Fieldが持つべきでない知識を
+  最初からCourseBoard側で持ち直すことは別物である。本ADRの対象は後者に
+  あたるため、この選択肢が採用に変わった。
 - UIのlocal storageだけに保持する: tenant共有、監査、再現性を満たさないため不採用。
 
 ## References
 
 - [ADR-0005](./ADR-0005-golf-domain-ownership.md)
+- [ADR-0009: extension configを運用データの保存先にしない](./ADR-0009-extension-config-is-not-a-data-store.md)
+- [PLT-3574](https://linear.app/issue/PLT-3574)
 - [taskdoc](../../tasks/completed/v0.1.10/reservation-report-import/task.md)
 - [設計](../../tasks/completed/v0.1.10/reservation-report-import/design.md)
 - [保存スコープ修正](../../tasks/completed/v0.1.11/fix-reservation-report-tenant-scope/task.md)
