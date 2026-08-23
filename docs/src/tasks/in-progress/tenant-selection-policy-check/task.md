@@ -19,7 +19,20 @@ CourseBoard の `/v1/me` は Field の `/v1/erp/me?extensionKey=golf_course` を
 
 進捗（2026-08-23）: 手順 1（寛容化）と手順 2（`COURSEBOARD_TENANT_SOURCE=compare|policy` のフラグ実装、代表 action の共通性テスト含む）は実装済み。残りは手順 0 の curl 確認、手順 3 の本番 compare 運用（1 営業週）、手順 4 の切替と Field 外し、手順 5 の UI 文言。
 
-### 0. 着手前に確認する
+### 0. 着手前に確認する（実測済み・**前提が崩れた**）
+
+2026-08-23 に compare モードを本番 platform に対して実際に走らせた結果、**このまま `policy` へ切り替えてはいけない**ことが分かった。
+
+- `check-tenants` は Cognito ではなく CLI の**ユーザー**トークンで **200 を返す**（呼び出し元がユーザーであることの要求は満たせている）。応答も既知の項目名を含む正しい形。
+- しかし同じユーザー・同じ action・同じテナントで、**単発の `check` は許可、`check-tenants` は許可テナントゼロ**と答えが食い違う。確認に使ったテナントは `tn_01kxd5gdvm9thcbj8c2e8c6yhq`、action は `field_extension_golf:ListTeeSheet`。`check` 側は同 action で守られたルート（`GET /v1/course/player-tag-options`）が 200 を返すことで確認した。
+- 対象ユーザーは当該テナントの **OWNER で `customPolicyIds` は空**。つまり付与は owner 由来の暗黙のもので、**`check-tenants` はそれを数えていない**と考えられる。
+
+design.md の「`check-tenants` は素の `check` より厳密に強い」という前提はこの実測と矛盾する。切替を進める前に、**Field / Tachyon Auth 側でどちらが正なのかを確定させる**（PLT-3860）。**この回答が出るまで第4波の切替は保留**。要求の形が誤っている可能性も完全には排除できていないが、形が誤っていれば 400 になるはずで、返ってきたのは 200 と既知の項目名だった。
+
+なお、この食い違いを**「付与ゼロ」と誤読しない**ための修正を実装に入れた。応答が既知の項目名を1つも含まなければ、空ではなく失敗として扱い、絞らずに `partial` を立てる。契約が変わったときに全テナントが全員から消えるのが最悪の壊れ方で、それだけは避ける。
+
+#### 元の確認事項
+
 
 **Cognito の access token で `check-tenants` が通るか。** このエンドポイントは呼び出し元が人間のユーザーであることを要求する。sandbox に curl 1 本で確認できる。通らないと設計の前提が崩れるので、コードを 1 行も書く前にやる。
 

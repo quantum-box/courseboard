@@ -8,6 +8,7 @@ use axum::{
 };
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 use utoipa::ToSchema;
 
@@ -350,11 +351,21 @@ impl ProfileClient {
         if !status.is_success() {
             return Err(format!("answered {status}"));
         }
-        let wire: CheckTenantsResponse = response
+        let body: Value = response
             .json()
             .await
             .map_err(|error| format!("decode failed: {error}"))?;
-        Ok(wire.allowed_tenant_ids())
+        let wire: CheckTenantsResponse = serde_json::from_value(body.clone())
+            .map_err(|error| format!("decode failed: {error}"))?;
+        // Name the keys we did get, so a changed contract is diagnosable from
+        // the log instead of looking like "this user holds nothing anywhere".
+        wire.allowed_tenant_ids().ok_or_else(|| {
+            let keys = body
+                .as_object()
+                .map(|object| object.keys().cloned().collect::<Vec<_>>().join(", "))
+                .unwrap_or_else(|| "not an object".to_string());
+            format!("answer carried no known allowed-tenant field; keys were [{keys}]")
+        })
     }
 
     /// Compare mode: the extension answer was already served; run the policy
@@ -621,14 +632,21 @@ struct CheckTenantsResponse {
 }
 
 impl CheckTenantsResponse {
-    fn allowed_tenant_ids(self) -> Vec<String> {
-        self.allowed_tenant_ids
-            .or(self.allowed_tenants)
-            .or(self.tenant_ids)
-            .unwrap_or_default()
-            .into_iter()
-            .map(AllowedTenantWire::into_id)
-            .collect()
+    /// `None` when the answer carried none of the known field names.
+    ///
+    /// That case must not read as "no tenant is allowed": the two are
+    /// indistinguishable in the data but opposite in consequence — a contract
+    /// mismatch would hide every tenant from every operator, while the caller
+    /// treats an outright failure as "list them unfiltered and say so".
+    fn allowed_tenant_ids(self) -> Option<Vec<String>> {
+        Some(
+            self.allowed_tenant_ids
+                .or(self.allowed_tenants)
+                .or(self.tenant_ids)?
+                .into_iter()
+                .map(AllowedTenantWire::into_id)
+                .collect(),
+        )
     }
 }
 
@@ -1482,6 +1500,59 @@ mod tests {
             .find(|body| body["platformId"] == json!(platform_a))
             .unwrap();
         assert_eq!(for_a["tenantIds"], json!([tenant_1, tenant_3]));
+    }
+
+    /// An answer whose shape we do not recognise must not read as "this user
+    /// holds nothing anywhere". Empty and unrecognised are identical in the
+    /// data and opposite in consequence: the first is a real answer, the
+    /// second would hide every tenant from every operator if the contract
+    /// ever changed under us.
+    #[tokio::test]
+    async fn an_unrecognised_check_tenants_answer_degrades_instead_of_hiding_everything() {
+        use axum::Json;
+        let platform = tenant_id('p');
+        let tenant = tenant_id('a');
+        let me_body = json!({
+            "user": {"id": "us_fixture", "username": "courseboard-user"},
+            "tenants": [platform_me_tenant(&tenant, Some(&platform))],
+        });
+        let app = Router::new()
+            .route(
+                PLATFORM_PROFILE_PATH,
+                get(move || {
+                    let me_body = me_body.clone();
+                    async move { Json(me_body) }
+                }),
+            )
+            .route(
+                CHECK_TENANTS_PATH,
+                // 200, but shaped like the single-tenant check endpoint.
+                axum::routing::post(|| async {
+                    Json(json!({"results": [{"action": REPRESENTATIVE_ACTION, "allowed": true}]}))
+                }),
+            );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let client = ProfileClient::with_timeout("http://field.invalid", Duration::from_secs(1))
+            .unwrap()
+            .with_operators_base(&format!("http://{address}"))
+            .unwrap()
+            .with_tenant_source(TenantSource::Policy);
+
+        let profile = client.get_profile("Bearer accepted-fixture").await.unwrap();
+
+        assert_eq!(
+            profile
+                .tenants
+                .iter()
+                .map(|tenant| tenant.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![tenant.as_str()]
+        );
+        assert_eq!(profile.partial, Some(true));
     }
 
     #[tokio::test]
