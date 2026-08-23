@@ -34,6 +34,7 @@ use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
     FieldReservationReportGateway, MigratingReservationReportGateway,
+    MySqlGolfProductSettingsRepository,
     MySqlAvailabilityDeadlineRepository, MySqlCaddieRankFeeRepository, MySqlCaddieShiftRepository,
     MySqlCourseOrderRepository, MySqlGeneratedThroughRepository, MySqlPlayerTagOptionsRepository,
     MySqlPricingSettingsRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
@@ -61,6 +62,7 @@ pub struct AppState {
     course_order: Arc<MySqlCourseOrderRepository>,
     caddie_rank_fees: Arc<MySqlCaddieRankFeeRepository>,
     pricing_settings: Arc<MySqlPricingSettingsRepository>,
+    product_settings: Arc<MySqlGolfProductSettingsRepository>,
     player_tag_options: Arc<MySqlPlayerTagOptionsRepository>,
     generated_through: Arc<MySqlGeneratedThroughRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
@@ -102,6 +104,7 @@ impl AppState {
             course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
             caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
             pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+            product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
@@ -157,6 +160,7 @@ impl AppState {
             course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
             caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
             pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+            product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
@@ -198,6 +202,7 @@ impl AppState {
                 course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
                 caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+                product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
@@ -230,6 +235,7 @@ impl AppState {
                 course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
                 caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+                product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
@@ -327,6 +333,10 @@ impl AppState {
     /// Field's scoped extension config.
     pub fn reservation_report_gateway(&self) -> Arc<MigratingReservationReportGateway> {
         self.reservation_report_gateway.clone()
+    }
+
+    pub(crate) fn product_settings(&self) -> Arc<MySqlGolfProductSettingsRepository> {
+        self.product_settings.clone()
     }
 
     fn with_profile_client(mut self, profile_client: Option<profile_proxy::ProfileClient>) -> Self {

@@ -22,6 +22,7 @@ mod party_custom_fields;
 mod player_tag_options_repository;
 mod policy_authorizer;
 mod pricing_settings_repository;
+mod product_settings_repository;
 mod reservation_report_gateway;
 mod reservation_report_repository;
 mod shift_rules_repository;
@@ -46,6 +47,7 @@ pub use party_custom_fields::{party_from_request, PartyPlayerInput};
 pub use player_tag_options_repository::MySqlPlayerTagOptionsRepository;
 pub use policy_authorizer::{AllowAllAuthorizer, PolicyCourseAuthorizer, ALLOW_ALL};
 pub use pricing_settings_repository::MySqlPricingSettingsRepository;
+pub use product_settings_repository::{GolfProductSettings, MySqlGolfProductSettingsRepository};
 pub use reservation_report_gateway::FieldReservationReportGateway;
 pub use reservation_report_repository::{
     MigratingReservationReportGateway, MySqlReservationReportRepository,

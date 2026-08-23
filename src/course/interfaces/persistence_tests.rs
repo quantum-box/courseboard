@@ -635,7 +635,10 @@ async fn editing_a_plan_preserves_its_unknown_extension_config_keys() {
         "futureTenantKey": { "keep": true },
     });
     let url = spawn_field(field.clone()).await;
-    let pool = unused_pool();
+    // The golf keys of a plan now also persist in CourseBoard's own table, so
+    // this boundary test needs the real test database (the plan editor writes
+    // both stores on every save).
+    let pool = crate::test_support::test_pool().await;
 
     // The typed read intentionally exposes only CourseBoard's known fields.
     let (status, before) = call(
