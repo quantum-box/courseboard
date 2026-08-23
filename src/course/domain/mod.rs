@@ -5,6 +5,7 @@
 
 pub mod actions;
 mod availability_deadline;
+mod budget_achievement;
 mod caddie;
 mod caddie_ops;
 mod caddie_plan;
@@ -39,6 +40,7 @@ mod tee_sheet;
 mod tenant_timezone;
 
 pub use availability_deadline::{AvailabilityDeadline, YearMonth};
+pub use budget_achievement::{build_budget_achievements, daily_actuals, DailyActual};
 pub use caddie::{
     AssignmentRole, AssignmentStatus, Caddie, CaddieAssignment, CaddieRank, CaddieRoster,
     CaddieSkillLevel, CaddieStaff, CaddieUpstreamIdentity,

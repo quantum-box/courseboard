@@ -11,20 +11,13 @@ use super::field_gateway::{
     normalize_base_url, read_extension_config, write_extension_config_key,
 };
 use crate::course::domain::{
-    BookingHorizon, BudgetAchievement, CourseError, DailyBudget, DailyBudgetQuery, ExtensionStatus,
+    BookingHorizon, CourseError, DailyBudget, DailyBudgetQuery, ExtensionStatus,
     GatewayCredentials, GolfCommercialGateway, MonthlySettlement, ReservationId, ReservationPolicy,
     SettlementPeriod, UnpaidCancellationItem, UpdateExtensionConfig, UpdateReservationPolicy,
     UpsertDailyBudget,
 };
 
 const GOLF: &str = "/v1/erp/extensions/golf-course";
-
-fn budget_achievement_path(from: NaiveDate, to: NaiveDate, timezone: &str) -> String {
-    format!(
-        "{GOLF}/daily-budgets/achievement?from={from}&to={to}&timezone={}",
-        urlencoding_query(timezone)
-    )
-}
 
 fn monthly_settlement_path(year_month: &str, timezone: &str, export: bool) -> String {
     let suffix = if export {
@@ -176,19 +169,6 @@ impl GolfCommercialGateway for FieldGolfCommercialGateway {
         items.items.into_iter().map(map_budget).collect()
     }
 
-    async fn list_budget_achievements(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        from: NaiveDate,
-        to: NaiveDate,
-        timezone: &str,
-    ) -> Result<Vec<BudgetAchievement>, CourseError> {
-        let path = budget_achievement_path(from, to, timezone);
-        let items: Vec<FieldAchievementDto> =
-            field_get_items(&self.client, &self.base_url, &path, credentials).await?;
-        Ok(items.into_iter().map(map_achievement).collect())
-    }
-
     async fn get_monthly_settlement(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -328,21 +308,6 @@ fn map_budget(value: FieldBudgetDto) -> Result<DailyBudget, CourseError> {
     )
 }
 
-fn map_achievement(value: FieldAchievementDto) -> BudgetAchievement {
-    BudgetAchievement::reconstitute(
-        value.date,
-        value.target_revenue,
-        value.actual_revenue,
-        value.revenue_achievement_rate,
-        value.target_average_spend,
-        value.actual_average_spend,
-        value.target_caddy_attached_ratio,
-        value.actual_caddy_attached_ratio,
-        value.reservation_count,
-        value.player_count,
-    )
-}
-
 fn map_settlement(value: FieldSettlementDto) -> MonthlySettlement {
     let unpaid = value
         .drilldown
@@ -454,24 +419,6 @@ struct FieldBudgetDto {
     target_caddy_attached_ratio: f64,
     #[serde(default)]
     updated_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldAchievementDto {
-    date: NaiveDate,
-    target_revenue: i64,
-    actual_revenue: i64,
-    #[serde(default)]
-    revenue_achievement_rate: Option<f64>,
-    target_average_spend: i64,
-    #[serde(default)]
-    actual_average_spend: Option<i64>,
-    target_caddy_attached_ratio: f64,
-    #[serde(default)]
-    actual_caddy_attached_ratio: Option<f64>,
-    reservation_count: i64,
-    player_count: i64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -592,8 +539,10 @@ mod timezone_contract_tests {
     fn aggregate_requests_forward_the_tenant_timezone() {
         let from = NaiveDate::from_ymd_opt(2026, 3, 1).unwrap();
         let to = NaiveDate::from_ymd_opt(2026, 3, 31).unwrap();
-        assert!(budget_achievement_path(from, to, "Europe/Berlin")
-            .ends_with("timezone=Europe%2FBerlin"));
+        // The achievement route is gone: that day is added up here now. The
+        // settlement is the last aggregate Field still works out, so this is
+        // what remains to pin.
+        let _ = (from, to);
         assert!(monthly_settlement_path("2026-03", "Europe/Berlin", false)
             .ends_with("yearMonth=2026-03&timezone=Europe%2FBerlin"));
         assert!(monthly_settlement_path("2026-03", "Europe/Berlin", true)

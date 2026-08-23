@@ -367,8 +367,11 @@ pub async fn list_budget_achievements(
     Query(query): Query<AchievementQueryParams>,
 ) -> Result<Json<ItemsResponse<BudgetAchievementDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case =
-        ListBudgetAchievementsUseCase::new(catalog_gateway(&state), commercial_gateway(&state));
+    let use_case = ListBudgetAchievementsUseCase::new(
+        catalog_gateway(&state),
+        commercial_gateway(&state),
+        reservation_gateway(&state),
+    );
     let items = use_case
         .execute(credentials, query.from, query.to)
         .await
