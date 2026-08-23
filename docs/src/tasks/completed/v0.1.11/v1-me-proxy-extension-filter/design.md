@@ -4,8 +4,8 @@
 
 - [PLT-2771](https://linear.app/issue/PLT-2771)
 - [taskdoc](./task.md)
-- [ADR-0002: React SPAとcourseboard-apiを独立配信する](../../../architecture/decisions/ADR-0002-react-spa-courseboard-api-boundary.md)
-- [ADR-0004: UIのplatform APIアクセスはcourseboard-apiを経由する](../../../architecture/decisions/ADR-0004-ui-platform-api-access-via-courseboard-api.md)
+- [ADR-0002: React SPAとcourseboard-apiを独立配信する](../../../../architecture/decisions/ADR-0002-react-spa-courseboard-api-boundary.md)
+- [ADR-0004: UIのplatform APIアクセスはcourseboard-apiを経由する](../../../../architecture/decisions/ADR-0004-ui-platform-api-access-via-courseboard-api.md)
 
 ## Context
 

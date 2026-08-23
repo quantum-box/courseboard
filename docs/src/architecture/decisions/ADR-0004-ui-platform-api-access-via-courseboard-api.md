@@ -69,5 +69,5 @@ field-apiが担い、courseboard-apiはextension未有効テナントを除外�
 - [ADR-0003: Courseboardの人間ユーザーtoken issuerをCognitoに統一する](ADR-0003-cognito-human-token-issuer.md)
 - [ADR-0010: CourseBoardはFieldのextensionを使わない](ADR-0010-courseboard-is-not-a-field-extension.md)
 - [ADR-0011: テナント選択はポリシーで行う](ADR-0011-policy-based-tenant-selection.md)
-- [設計](../../tasks/in-progress/v1-me-proxy-extension-filter/design.md)
+- [設計](../../tasks/completed/v0.1.11/v1-me-proxy-extension-filter/design.md)
 - [PLT-2771](https://linear.app/issue/PLT-2771)

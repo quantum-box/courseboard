@@ -2,7 +2,7 @@
 
 親: [CourseBoardをField extensionから切り離す](../courseboard-extension-exit/task.md)。
 決定は [ADR-0011](../../../architecture/decisions/ADR-0011-policy-based-tenant-selection.md)。
-[/v1/me proxyとextension連動テナント選択](../v1-me-proxy-extension-filter/task.md) を置き換える。
+[/v1/me proxyとextension連動テナント選択](../../completed/v0.1.11/v1-me-proxy-extension-filter/task.md) を置き換える。
 
 ## 現状
 

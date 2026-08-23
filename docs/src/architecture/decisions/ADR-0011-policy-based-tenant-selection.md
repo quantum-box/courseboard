@@ -103,4 +103,4 @@ Field コアの action（`field:ListReservations`）は、CourseBoard を
 - [ADR-0004: UIのplatform APIアクセスはcourseboard-apiを経由する](./ADR-0004-ui-platform-api-access-via-courseboard-api.md)
 - [ADR-0010: CourseBoardはFieldのextensionを使わない](./ADR-0010-courseboard-is-not-a-field-extension.md)
 - [テナント選択をポリシーで行う](../../tasks/in-progress/tenant-selection-policy-check/task.md)
-- [メンバーへの policy 単位の権限付与](../../tasks/in-progress/permission-policy-granularity/task.md)
+- [メンバーへの policy 単位の権限付与](../../tasks/completed/v0.1.11/permission-policy-granularity/task.md)
