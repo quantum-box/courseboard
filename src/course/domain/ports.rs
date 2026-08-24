@@ -5,20 +5,20 @@ use chrono::{DateTime, NaiveDate, Utc};
 
 use super::{
     AssignMembershipPlan, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
-    AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, BudgetAchievement,
-    Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
-    CaddieId, CaddieRankFees, CaddieRating, CaddieRoster, CaddieShift, CaddieStaff, Course,
-    CourseError, CourseId, CourseOrder, Customer, CustomerId, CustomerMembership,
-    CustomerSearchQuery, DailyBudget, DailyBudgetQuery, DeleteSlotOverrides, ExtensionStatus,
-    FieldClientCapabilities, FieldRequestContext, GenerationSummary, GolfPricingSettings,
-    InventoryWatermark, MembershipPlan, MembershipPlanId, MonthlySettlement, NewCustomer,
-    NewReservation, PartyDetails, PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet,
-    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
-    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
-    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
-    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
-    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
-    UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
+    AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, Caddie,
+    CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
+    CaddieRankFees, CaddieRating, CaddieRoster, CaddieShift, CaddieStaff, Course, CourseError,
+    CourseId, CourseOrder, Customer, CustomerId, CustomerMembership, CustomerSearchQuery,
+    DailyBudget, DailyBudgetQuery, DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities,
+    FieldRequestContext, GenerationSummary, GolfPricingSettings, InventoryWatermark,
+    MembershipPlan, MembershipPlanId, MonthlySettlement, NewCustomer, NewReservation, PartyDetails,
+    PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet, ReplaceCaddieMemberships,
+    Reservation, ReservationBookingUpdate, ReservationId, ReservationPolicy, ReservationProduct,
+    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
+    SeededReservation, ShiftPolicy, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot,
+    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
+    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan,
+    UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -954,14 +954,6 @@ pub trait GolfCommercialGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         csv: &str,
     ) -> Result<Vec<DailyBudget>, CourseError>;
-
-    async fn list_budget_achievements(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        from: NaiveDate,
-        to: NaiveDate,
-        timezone: &str,
-    ) -> Result<Vec<BudgetAchievement>, CourseError>;
 
     async fn get_monthly_settlement(
         &self,

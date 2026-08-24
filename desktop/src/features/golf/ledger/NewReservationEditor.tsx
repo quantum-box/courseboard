@@ -7,10 +7,11 @@ import { Field, FormGrid, Notice } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import { showToast } from '../../../lib/toast'
 import { CustomerPicker } from '../customers/CustomerPicker'
+import type { CourseCaddieSupply } from '../caddieCourseSupply'
 import { plansForCourse, type BookablePlan } from './bookablePlan'
 import { unregisteredNames, type UnregisteredName } from './unregisteredNames'
 import { DiscardGuard } from './DiscardGuard'
-import { MAX_PARTY_PLAYERS } from './ledgerLayout'
+import { caddieRoundsSoldOut, MAX_PARTY_PLAYERS } from './ledgerLayout'
 import {
   hasUnnamedReservationPlayer,
   linkedReservationPlayerCount,
@@ -49,6 +50,7 @@ export function NewReservationEditor({
   playerTagOptions,
   onClose,
   onCreated,
+  caddieSupply = null,
 }: {
   target: NewReservationTarget | null
   date: string
@@ -62,6 +64,11 @@ export function NewReservationEditor({
    * in without an identity, ask about them once this sheet has closed.
    */
   onCreated: (booking?: CreatedBooking) => void
+  /**
+   * Today's caddie room on the course being booked, or null when the lookup
+   * has not landed. Absent means the caddie plans stay selectable.
+   */
+  caddieSupply?: CourseCaddieSupply | null
 }) {
   const { t } = useTranslation(['ledger'])
   const [customerName, setCustomerName] = useState('')
@@ -91,14 +98,24 @@ export function NewReservationEditor({
     setConfirmingDiscard(false)
   }, [target])
 
+  // Today's caddies are already spoken for, so a caddie round cannot be sold
+  // on this course. Self-play still can, which is why this narrows the plan
+  // list rather than closing the sheet.
+  const caddieSoldOut = caddieRoundsSoldOut(caddieSupply)
+  const sellablePlans = coursePlans.filter(
+    plan => !(caddieSoldOut && plan.playType === 'caddie'),
+  )
+
   // The plans list loads on its own clock, so the sheet can open before it
   // arrives. Picking the default once it does — and not overwriting a plan the
   // desk already chose — keeps a caddie round from being sent as self-play.
-  const defaultPlanId = coursePlans[0]?.reservationServiceId ?? ''
+  // The default comes from the sellable ones: opening on a plan the desk is
+  // not allowed to book would put the sheet in a state Save refuses.
+  const defaultPlanId = sellablePlans[0]?.reservationServiceId ?? ''
   useEffect(() => {
     if (!target) return
     setPlanId(current =>
-      coursePlans.some(plan => plan.reservationServiceId === current) ? current : defaultPlanId,
+      sellablePlans.some(plan => plan.reservationServiceId === current) ? current : defaultPlanId,
     )
   }, [target, defaultPlanId])
 
@@ -144,11 +161,16 @@ export function NewReservationEditor({
   // caddie split — can say what it was sold as. The list always has one
   // picked, so this only bites when the course sells nothing at all.
   const missingPlan = !planId
+  // The picker disables the caddie rows, but the state can still hold one: the
+  // supply lands on its own clock, so a plan chosen a moment before the last
+  // caddie round sold would otherwise sail through Save.
+  const planSoldOut = caddieSoldOut && selectedPlan?.playType === 'caddie'
   const canSave = customerName.trim().length > 0
     && validQuantity
     && !hasUnnamedPlayer
     && !hasTooManyPlayers
     && !missingPlan
+    && !planSoldOut
     && Boolean(target.resourceId)
     && !saving
 
@@ -291,7 +313,17 @@ export function NewReservationEditor({
           value={planId}
           name="courseboard-new-reservation-plan"
           onChange={setPlanId}
+          caddieSoldOut={caddieSoldOut}
         />
+
+        {/* The picker greys the caddie rows out, but a course that sells
+            nothing else leaves the desk staring at a list it cannot use. Say
+            what to do about it: the tee time is free, the caddie room is not. */}
+        {caddieSoldOut && sellablePlans.length === 0 ? (
+          <Notice tone="warning" title={t('ledger:newReservation.caddieSoldOutTitle')}>
+            {t('ledger:newReservation.caddieSoldOutBody', { course: target.courseName })}
+          </Notice>
+        ) : null}
 
         {hasUnnamedPlayer ? (
           <Notice tone="danger">{t('ledger:party.emptyPlayerName')}</Notice>

@@ -54,15 +54,30 @@ export default defineConfig({
   ],
   // ローカル既定: モックモードの Vite を自動起動（バックエンド・Cognito 不要）。
   // すでに :5173 が起動していればそれを使う（勝手に殺さない）。
+  //
+  // CI だけビルド済みの成果物を配る。dev server はページを開くたびに必要な
+  // モジュールを変換して返すが、このアプリはルートを遅延ロードしていないので
+  // 1 ページ目でアプリ全体の変換が走る。並列のワーカーが一斉に冷えたサーバーへ
+  // 来ると変換待ちで navigation が 30 秒を超え、重いルート（シフト表・台帳・
+  // タイムライン）から順に落ちる。リトライだけ通っていたのは変換キャッシュが
+  // 温まった後だから。preview は静的配信なので、この待ち自体が無くなる。
+  // ローカルは編集して即やり直したいので dev server のまま。
   webServer: manageLocalServer
     ? {
-        command: 'npm run dev',
+        command: process.env.CI
+          ? 'npm run build && npm run preview -- --port 5173 --strictPort'
+          : 'npm run dev',
         url: baseURL,
         // ローカルは起動済みの dev server を殺さず再利用する。CI は必ず自前で起動する
         reuseExistingServer: !process.env.CI,
-        timeout: 60_000,
+        // ビルドを挟むぶん CI は起動が遅い
+        timeout: process.env.CI ? 180_000 : 60_000,
         env: {
           ...process.env,
+          // ビルドの既定 base は Tauri の file:// 向けの相対パス。HTTP で配ると
+          // /golf/ledger のような 2 階層のリンクが /golf/assets/... を取りに行って
+          // 404 になり、真っ白なまま title が既定のままになる。
+          VITE_BASE_PATH: '/',
           VITE_COURSEBOARD_AUTH_MODE: 'development',
           VITE_COURSEBOARD_API_BEARER: 'local-dev-token',
           VITE_COURSEBOARD_TENANT_ID: 'courseboard_id',

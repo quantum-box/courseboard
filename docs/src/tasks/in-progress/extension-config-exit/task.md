@@ -42,6 +42,8 @@ Field の extension config に、CourseBoard の設定・業務ルール値・�
 
 実装済み（2026-08-23）: `golf_reservation_report_rows` テーブル、`MigratingReservationReportGateway`（ローカルが正。未 seed のテナントだけ legacy を読み、**最初のインポートの直前に legacy 全量を自動 seed** する）、`courseboard-migrate-reservation-reports` コマンド（seed → 全行照合 → `COURSEBOARD_MIGRATE_DELETE_CONFIG_KEY=1` で legacy key 削除）。残りは本番テナントごとのコマンド実行と key 削除という運用手順だけ。
 
+**未解決: 移送コマンドが本番 DB に届かない。** 本番 TiDB は PrivateLink 経由でしか繋がらず（Lambda は VPC 内なので届く）、`courseboard-migrate-reservation-reports` を手元から実行できない。**データの移送自体は困らない**——ゲートウェイが最初のインポートの直前に自動 seed するので、Lambda の中で完結する。届かないのは**照合と legacy key の削除**だけ。key を消すには migration gate と同じく `lambdaInvoke` フックから走らせる形にするか、同等の入口を用意する必要がある。急ぎではない（key が残っていても動作は正しく、hot path のペイロードが太いままなだけ）が、「コマンドを実行すれば終わる」と思って放置すると終わらない類のもの。
+
 ### 4. 撤退までの暫定対応
 
 - **商品枠の書き込みを照合つきの経路へ**（第0波、S）。今は読んで書くだけの生 PATCH で、Field 側の枠取り込みが同じ配列を書く。**現時点で最も確実に失われる経路。**

@@ -18,10 +18,10 @@ use crate::course::domain::{
     field_day_of_week_to_courseboard, AvailabilityRule, Caddie, CaddieAssignment, CaddieRank,
     CaddieSkillLevel, CaddieUpstreamIdentity, Course, CourseError, CourseId, CourseOrder,
     CustomerId, GatewayCredentials, GenerationSummary, GolfCatalogGateway, NewReservation,
-    PartyDetails, ProductSlot, Reservation, ReservationBookingUpdate, ReservationGateway,
-    ReservationId, ReservationProduct, ReservationScheduleGateway, ReservationServiceId, Resource,
-    ResourceId, ResourceKind, ResourceTimeSlot, SaveCourseResource, SeededReservation,
-    UpsertCourse, UpsertReservationProduct, SEED_KEY_FIELD,
+    PartyDetails, ProductSlot, Reservation, ReservationBilling, ReservationBookingUpdate,
+    ReservationGateway, ReservationId, ReservationProduct, ReservationScheduleGateway,
+    ReservationServiceId, Resource, ResourceId, ResourceKind, ResourceTimeSlot, SaveCourseResource,
+    SeededReservation, UpsertCourse, UpsertReservationProduct, SEED_KEY_FIELD,
 };
 use crate::course::infrastructure::course_order_config;
 use crate::course::infrastructure::generic_product_config;
@@ -1241,6 +1241,15 @@ fn map_reservation(value: FieldReservationDto) -> Reservation {
     )
     .with_party(party)
     .with_customer_id(CustomerId::from_optional(value.customer_id))
+    .with_billing(ReservationBilling {
+        price_amount: value.price_amount,
+        deposit_amount: value.deposit_amount,
+        paid_amount: value.paid_amount,
+        currency: value.currency,
+        payment_status: value.payment_status,
+        invoice_id: value.invoice_id,
+        cancelled_at: value.cancelled_at,
+    })
 }
 
 fn map_course(value: FieldGolfCourseDto) -> Course {
@@ -1424,6 +1433,23 @@ struct FieldReservationDto {
     custom_fields_json: Option<Value>,
     #[serde(default)]
     notes: Option<String>,
+    // Field records the money against the booking; CourseBoard used to drop it
+    // on the floor and ask Field to add the day up instead. Reading it here is
+    // what lets the takings be worked out on this side (ADR-0005 Phase 1).
+    #[serde(default)]
+    price_amount: i64,
+    #[serde(default)]
+    deposit_amount: i64,
+    #[serde(default)]
+    paid_amount: i64,
+    #[serde(default)]
+    currency: Option<String>,
+    #[serde(default)]
+    payment_status: Option<String>,
+    #[serde(default)]
+    invoice_id: Option<String>,
+    #[serde(default)]
+    cancelled_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1854,6 +1880,58 @@ mod tests {
     use axum::{extract::State, routing::get, Json, Router};
 
     use super::*;
+
+    /// The takings have to be workable out on this side, which means the
+    /// money Field records against a booking must survive the decode. A
+    /// booking that carries none of it still decodes — Field omits the keys
+    /// for bookings taken before they existed, and a missing amount is zero,
+    /// not a failure.
+    #[test]
+    fn a_bookings_money_survives_the_decode_and_its_absence_is_not_a_failure() {
+        let with_money: FieldReservationDto = serde_json::from_value(serde_json::json!({
+            "id": "res_1",
+            "reservationNumber": "R-1",
+            "status": "confirmed",
+            "startsAt": "2026-07-18T00:00:00Z",
+            "endsAt": "2026-07-18T04:00:00Z",
+            "quantity": 4,
+            "priceAmount": 48000,
+            "depositAmount": 10000,
+            "paidAmount": 48000,
+            "currency": "JPY",
+            "paymentStatus": "paid",
+            "invoiceId": "inv_1",
+            "cancelledAt": "2026-07-17T09:00:00Z",
+        }))
+        .expect("decode a booking that carries money");
+
+        let reservation = map_reservation(with_money);
+        let billing = reservation.billing();
+        assert_eq!(billing.price_amount, 48_000);
+        assert_eq!(billing.deposit_amount, 10_000);
+        assert_eq!(billing.paid_amount, 48_000);
+        assert_eq!(billing.currency.as_deref(), Some("JPY"));
+        assert_eq!(billing.payment_status.as_deref(), Some("paid"));
+        assert_eq!(billing.invoice_id.as_deref(), Some("inv_1"));
+        // Cancelled bookings are kept out of takings even when money was
+        // collected: that money settles as a cancellation fee instead.
+        assert!(billing.is_cancelled());
+
+        let without_money: FieldReservationDto = serde_json::from_value(serde_json::json!({
+            "id": "res_2",
+            "reservationNumber": "R-2",
+            "status": "confirmed",
+            "startsAt": "2026-07-18T00:00:00Z",
+            "endsAt": "2026-07-18T04:00:00Z",
+            "quantity": 4,
+        }))
+        .expect("decode a booking with no money recorded");
+
+        let billing = map_reservation(without_money).billing().clone();
+        assert_eq!(billing.price_amount, 0);
+        assert_eq!(billing.invoice_id, None);
+        assert!(!billing.is_cancelled());
+    }
 
     #[derive(Clone, Default)]
     struct ScheduleServerState {

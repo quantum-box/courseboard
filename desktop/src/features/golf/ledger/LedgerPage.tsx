@@ -743,6 +743,7 @@ export function LedgerPage() {
         plans={bookablePlans}
         plansLoading={productsResource.loading}
         playerTagOptions={playerTagOptions}
+        caddieSupply={bookingTarget ? caddieSupply.get(bookingTarget.golfCourseId) ?? null : null}
         onClose={() => setBookingTarget(null)}
         onCreated={booking => {
           void ledger.refresh()

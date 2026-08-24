@@ -4,6 +4,15 @@
 
 Accepted (2026-08-23)
 
+**前提の一部が実測で崩れている（2026-08-23）。** 下の Context にある
+「平のポリシーチェックより厳密に強い」は Field のコードの主張で、実際に
+本番の platform へ問い合わせた結果はこれと矛盾した。同じユーザー・同じ
+action・同じテナントで、素の `check` は許可、`check-tenants` は許可ゼロを
+返す（対象ユーザーはそのテナントの OWNER で、付与は owner 由来の暗黙の
+もの）。決定そのもの（extension 有効判定をやめてポリシーで絞る）は維持
+するが、**切替は PLT-3860 の回答が出るまで保留**する。観測条件は
+[tenant-selection-policy-check](../../tasks/in-progress/tenant-selection-policy-check/task.md) に記録した。
+
 [ADR-0004](./ADR-0004-ui-platform-api-access-via-courseboard-api.md) のうち
 テナントの絞り込み方に関する部分を置き換える。ADR-0004 の中核である
 「UI のアクセス先を Cognito と courseboard-api の 2 つに限定する」は有効。

@@ -15,7 +15,7 @@ Cloud App ID、Auth audience、Auth policy は、deployment / registry / auth po
 - `tachyon.yaml` を通じて Tachyon Compute Cloud App としてデプロイします。
 - TACHYON Field core は `POST /calculate` を呼び、この app は税額計算結果だけを返します。
 - キャンセル料徴収では Course Board が Field API に Field invoice を作成し、公開 payment URL を SMS で送ります。
-- 税率、免除ルール、キャンセル料 collection は tenant scope で SQLite に保存します。
+- 税率、免除ルール、キャンセル料 collection は tenant scope で CourseBoard 自身の DB に保存します。実体は TiDB（MySQL 互換）です。
 - Tachyon Auth M2M 認証は OAuth2 client credentials を前提にします。
   operator endpoint は Tachyon Auth / Auth Platform の OIDC discovery と JWKS で検証できる JWT access token を要求します。
 
@@ -400,7 +400,7 @@ verifier を使えます。
 ```bash
 cargo run -- \
   --dev-bearer-token=local-dev-token \
-  --database-url=sqlite:///tmp/courseboard-local.db \
+  --database-url=mysql://root@127.0.0.1:4000/courseboard \
   --public-ui-base-url=http://127.0.0.1:8080/ui/index.html
 ```
 
@@ -418,8 +418,15 @@ cp .env.example .env
 cargo run
 ```
 
-デフォルト DB は `sqlite://courseboard.db` です。必要に応じて
-`DATABASE_URL` を上書きします。
+`DATABASE_URL` に既定値はありません。未設定だと起動しないので、`.env` か
+`--database-url` で必ず渡します。受け付けるのは MySQL 互換の URL だけです
+（`sqlite://` は `DATABASE_URL must be a valid MySQL URL` で落ちます）。
+
+手元の TiDB は次で立ちます。CI も同じ image を使っています。
+
+```bash
+docker run --rm -d -p 4000:4000 --name courseboard-tidb pingcap/tidb:v8.5.7
+```
 
 ```bash
 cargo run -- \
@@ -428,7 +435,7 @@ cargo run -- \
   --expected-client-id=tachyonfield-core \
   --tachyon-field-api-url=https://tachyon-field-api.txcloud.app \
   --field-api-bearer-token='<field-api-access-token>' \
-  --database-url=sqlite://data/courseboard.db
+  --database-url=mysql://root@127.0.0.1:4000/courseboard
 ```
 
 税額計算 API の例:

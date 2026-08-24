@@ -10,6 +10,7 @@ import {
   formatCaddieCapacity,
   formatCaddieShortfall,
   groupTitle,
+  caddieRoundsSoldOut,
   knowsCaddieCapacity,
   knowsRemainingCapacity,
   observedIntervalMinutes,
@@ -379,6 +380,41 @@ describe('knowsCaddieCapacity', () => {
   it('is quiet while the lookup is still out', () => {
     expect(knowsCaddieCapacity(null)).toBe(false)
     expect(knowsCaddieCapacity(undefined)).toBe(false)
+  })
+})
+
+describe('caddieRoundsSoldOut', () => {
+  it('refuses another caddie round once the day is spoken for', () => {
+    expect(caddieRoundsSoldOut(supply({ roundsCapacity: 8, caddieAttachedGroups: 8, shortfall: 0 })))
+      .toBe(true)
+  })
+
+  it('stays refused once the day went past its limit', () => {
+    expect(caddieRoundsSoldOut(supply({ roundsCapacity: 4, caddieAttachedGroups: 6, shortfall: -2 })))
+      .toBe(true)
+  })
+
+  it('allows one while rounds remain', () => {
+    expect(caddieRoundsSoldOut(supply({ roundsCapacity: 10, caddieAttachedGroups: 4, shortfall: 6 })))
+      .toBe(false)
+  })
+
+  it('allows one when the month was never confirmed', () => {
+    // Zero against zero is nobody having decided, not the club refusing. The
+    // desk keeps its caddie rounds rather than losing them to missing shifts.
+    const unconfirmed = supply({
+      workingCaddies: 0,
+      roundsCapacity: 0,
+      caddieAttachedGroups: 0,
+      movableCaddies: 0,
+      shortfall: 0,
+    })
+    expect(caddieRoundsSoldOut(unconfirmed)).toBe(false)
+  })
+
+  it('allows one while the lookup is still out', () => {
+    expect(caddieRoundsSoldOut(null)).toBe(false)
+    expect(caddieRoundsSoldOut(undefined)).toBe(false)
   })
 })
 

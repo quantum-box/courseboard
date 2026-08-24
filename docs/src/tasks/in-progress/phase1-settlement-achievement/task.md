@@ -17,7 +17,30 @@ Field 側の変更なしで進められる。同時デプロイも要らない�
 
 ## やること
 
-### 1. 予算達成率
+### 0. 下ごしらえ（実装済み・2026-08-23）
+
+予約の金額を CourseBoard 側へ通す部分は済んでいる。**Field の予約 API は
+`priceAmount` / `depositAmount` / `paidAmount` / `currency` / `paymentStatus` /
+`invoiceId` / `cancelledAt` を返しており**（tachyonfield の
+`packages/reservation/src/lib.rs` の `Reservation` を確認）、CourseBoard 側が
+復号していなかっただけだった。`ReservationBilling` にまとめて
+`Reservation::with_billing` で載せる形にしたので、**`reconstitute` の引数は
+増えず呼び出し 6 箇所は無改修**。金額を持たない予約（この列ができる前のもの、
+テストの素材）は 0 に落ちて失敗しない。
+
+つまり達成率の実績側に必要な素材は**もう手元にある**。残りは集計そのもの。
+
+### 1. 予算達成率（実装済み・2026-08-23）
+
+`src/course/domain/budget_achievement.rs` に純粋関数 2 本（日次実績の畳み込みと、予算との突き合わせ）。usecase は Field 委譲をやめ、予算・予約・商品を取って自前で計算する。Field の達成率ルートへの経路（port・Field 実装・path builder・DTO・mapper）は削除済み。
+
+**Field の実装と算術を意図的に一致させた**（`packages/reservation/src/golf_achievement.rs` と `sqlx_golf_settlement_repository.rs` を読んで移植）。実績は `price_amount` の合計、`status NOT IN ('cancelled','rejected')`、テナント TZ でのローカル日付、`play_type=caddie` の件数。平均は整数除算のまま。丸めを変えると差分が「本物の変化」と見分けられなくなる。
+
+**期間フィルタは Rust 側で切っている。** Field の予約一覧に期間指定が無い（PLT-3858）ため全件取得しており、台帳やティーシートと同じ制約を共有する。起票が通ったら差し替える。
+
+残: 本番/sandbox の実データで新旧の差分ゼロを確認する作業（taskdoc の方針どおり flag は持たせていない）。
+
+### 1b. 元の記述
 
 **これを最初の 1 本にする。** Field 側の実装が既に純粋関数でテスト付きで、そのまま持ってこられる。新しい Field API を 1 本も必要としない。`src/course/domain/payroll.rs` が完全に同型のお手本になる。
 

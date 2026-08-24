@@ -162,6 +162,12 @@ export const ledger = {
     save: '予約を入れる',
     saving: '登録しています…',
     saved: '予約を入れました',
+    caddieSoldOut: 'キャディが埋まっています',
+    caddieSoldOutTitle: '本日のキャディはすべて埋まっています',
+    caddieSoldOutBody:
+      '{{course}} の本日のキャディは、確定しているシフトでは受けられる組数に達しています。'
+      + 'セルフのプレー商品があれば選べます。キャディ付きで受けたいときは、'
+      + 'シフト表でキャディを追加してください。',
     noPlanTitle: 'プレー商品がありません',
     noPlanBody:
       '{{course}} で売れるプレー商品がまだありません。プレー商品を作ってから予約を入れてください。',
