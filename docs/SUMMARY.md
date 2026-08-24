@@ -14,6 +14,7 @@
   - [ADR-0009: extension configを運用データの保存先にしない](src/architecture/decisions/ADR-0009-extension-config-is-not-a-data-store.md)
   - [ADR-0010: CourseBoardはFieldのextensionを使わない独立Cloud Appである](src/architecture/decisions/ADR-0010-courseboard-is-not-a-field-extension.md)
   - [ADR-0011: テナント選択はextension有効判定ではなくポリシーで行う](src/architecture/decisions/ADR-0011-policy-based-tenant-selection.md)
+  - [ADR-0013: ひとつの操作を抽象と具体へ分解し、両方へ書く](src/architecture/decisions/ADR-0013-split-one-action-into-abstract-and-concrete.md)
 
 # Business
 
