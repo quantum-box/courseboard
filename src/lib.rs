@@ -1956,6 +1956,7 @@ pub(crate) mod test_support {
 mod tests {
     use super::*;
     use crate::auth::{AuthConfig, Jwk, Jwks, OidcJwtVerifier};
+    use crate::config::SettlementSource;
     use axum::{
         http::{header::CONTENT_TYPE, HeaderMap, Method},
         routing::{get, post},
@@ -2226,6 +2227,7 @@ mod tests {
             twilio_messaging_service_sid: None,
             twilio_from_number: None,
             multi_course_product_writes: true,
+            settlement_source: SettlementSource::Field,
         }
     }
 

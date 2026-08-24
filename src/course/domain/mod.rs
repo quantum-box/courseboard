@@ -33,6 +33,7 @@ mod reservation;
 mod reservation_report;
 mod resource;
 mod schedule;
+mod settlement;
 mod simulator;
 mod slot_override;
 mod tee_ledger;
@@ -137,6 +138,11 @@ pub use schedule::{
     courseboard_weekday_to_field, field_day_of_week_to_courseboard, AvailabilityRule,
     BookingHorizon, BuiltInventory, CourseSchedule, GenerationSummary, InventoryWatermark,
     SavedSchedule,
+};
+pub use settlement::{
+    caddie_fee_totals, drilldown_reservation_ids, merge_settlement, reservation_totals,
+    settlement_csv, settlement_reservation_lines, CaddieFeeTotals, ReservationTotals,
+    SettlementReservationLine, SettlementWindow,
 };
 pub use simulator::{
     party_tax, prepare_fee_quote, prepare_range_simulation, project_row, quote_fee,

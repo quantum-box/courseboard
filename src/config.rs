@@ -123,6 +123,20 @@ pub struct RuntimeConfig {
     #[arg(long, env = "COURSEBOARD_TENANT_SOURCE", default_value = "extension")]
     pub tenant_source: String,
 
+    /// Who works out the monthly close (ADR-0005 Phase 1).
+    ///
+    /// `field` keeps serving what Field adds up. `compare` still serves
+    /// Field's answer but works the month out here as well and logs the
+    /// difference — run it over a whole close before switching, because a
+    /// rounding or timezone slip in a figure that reaches accounting shows up
+    /// as numbers that quietly fail to agree rather than as an error.
+    /// `courseboard` serves the local answer.
+    ///
+    /// Unlike the budget achievement rates, this one gets a switch: those are
+    /// rates and counts on a screen, and this is money on its way to a ledger.
+    #[arg(long, env = "COURSEBOARD_SETTLEMENT_SOURCE", default_value = "field")]
+    pub settlement_source: String,
+
     #[arg(long, env = "TWILIO_ACCOUNT_SID")]
     pub twilio_account_sid: Option<String>,
     #[arg(long, env = "TWILIO_AUTH_TOKEN")]
@@ -188,6 +202,7 @@ impl RuntimeConfig {
             twilio_messaging_service_sid: non_empty(self.twilio_messaging_service_sid.as_deref()),
             twilio_from_number: non_empty(self.twilio_from_number.as_deref()),
             multi_course_product_writes: self.multi_course_product_writes,
+            settlement_source: self.settlement_source(),
         }
     }
 
@@ -256,6 +271,33 @@ impl RuntimeConfig {
             }
         }
     }
+
+    pub fn settlement_source(&self) -> SettlementSource {
+        match self.settlement_source.trim() {
+            "" | "field" => SettlementSource::Field,
+            "compare" => SettlementSource::Compare,
+            "courseboard" => SettlementSource::Courseboard,
+            other => {
+                tracing::warn!(
+                    value = other,
+                    "COURSEBOARD_SETTLEMENT_SOURCE is not one of field|compare|courseboard; \
+                     using field"
+                );
+                SettlementSource::Field
+            }
+        }
+    }
+}
+
+/// Who adds up the monthly close (ADR-0005 Phase 1).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettlementSource {
+    /// Field's aggregate, relayed (current).
+    Field,
+    /// Serve Field's answer, work the month out here too, log the difference.
+    Compare,
+    /// Serve CourseBoard's own answer (target).
+    Courseboard,
 }
 
 /// Where `/v1/me` gets the caller's tenant list from (ADR-0011).
@@ -296,6 +338,7 @@ impl Default for RuntimeConfig {
             multi_course_product_writes: DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
             disable_action_authz: false,
             tenant_source: "extension".to_string(),
+            settlement_source: "field".to_string(),
             twilio_account_sid: None,
             twilio_auth_token: None,
             twilio_messaging_service_sid: None,
@@ -328,6 +371,31 @@ fn parse_csv_set(value: Option<&str>) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A close that reaches accounting must never move because a value was
+    /// mistyped: anything unrecognised leaves Field in charge.
+    #[test]
+    fn an_unreadable_settlement_source_leaves_the_close_with_field() {
+        let source = |value: &str| {
+            RuntimeConfig {
+                settlement_source: value.to_string(),
+                ..RuntimeConfig::default()
+            }
+            .settlement_source()
+        };
+
+        assert_eq!(source("courseboard"), SettlementSource::Courseboard);
+        assert_eq!(source(" compare "), SettlementSource::Compare);
+        assert_eq!(source(""), SettlementSource::Field);
+        assert_eq!(source("on"), SettlementSource::Field);
+        assert_eq!(source("true"), SettlementSource::Field);
+        assert_eq!(
+            RuntimeConfig::default()
+                .cancellation_fee_config()
+                .settlement_source,
+            SettlementSource::Field
+        );
+    }
 
     #[test]
     fn field_api_url_prefers_primary_env_name_then_aliases_then_default() {

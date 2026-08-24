@@ -27,6 +27,7 @@ use tower::ServiceExt;
 
 use crate::auth::StaticBearerVerifier;
 use crate::cancellation_fees::CancellationFeeConfig;
+use crate::config::SettlementSource;
 use sqlx::{
     mysql::{MySqlConnectOptions, MySqlPoolOptions},
     MySqlPool,
@@ -67,6 +68,11 @@ struct FieldState {
     /// does — so a test can tell "never written" from "written back the same".
     reservation_service_id: Mutex<Option<String>>,
     reservation_ends_at: Mutex<Option<String>>,
+    /// The month Field would close, so a test can watch which blocks of it
+    /// CourseBoard replaces and which it relays (ADR-0005 Phase 1).
+    settlement: Mutex<Value>,
+    /// The caddie rounds the month's fees are stamped on.
+    caddie_assignments: Mutex<Vec<Value>>,
 }
 
 async fn extension_status(State(state): State<Arc<FieldState>>) -> Json<Value> {
@@ -222,6 +228,14 @@ async fn list_reservations(State(state): State<Arc<FieldState>>) -> Json<Value> 
     Json(json!({ "items": items }))
 }
 
+async fn get_monthly_settlement(State(state): State<Arc<FieldState>>) -> Json<Value> {
+    Json(state.settlement.lock().unwrap().clone())
+}
+
+async fn list_caddie_assignments(State(state): State<Arc<FieldState>>) -> Json<Value> {
+    Json(json!({ "items": state.caddie_assignments.lock().unwrap().clone() }))
+}
+
 async fn list_reservation_types() -> Json<Value> {
     Json(json!({ "items": [{ "id": "type-1", "name": "Round" }] }))
 }
@@ -314,6 +328,14 @@ async fn spawn_field(state: Arc<FieldState>) -> String {
             "/v1/erp/extensions/golf-course/courses/:id",
             patch(update_course),
         )
+        .route(
+            "/v1/erp/extensions/golf-course/monthly-settlement",
+            get(get_monthly_settlement),
+        )
+        .route(
+            "/v1/erp/extensions/golf-course/caddie-assignments",
+            get(list_caddie_assignments),
+        )
         .route("/v1/erp/reservation-types", get(list_reservation_types))
         .route(
             "/v1/erp/extensions/golf-course/resources",
@@ -354,7 +376,15 @@ async fn spawn_field(state: Arc<FieldState>) -> String {
 /// contention. The pool is the storage these tests are checking, not the state
 /// they are trying to drop.
 fn router(pool: &MySqlPool, field_url: &str) -> Router {
-    router_with_multi_course_writes(pool, field_url, true)
+    router_with(pool, field_url, true, SettlementSource::Field)
+}
+
+fn router_with_settlement_source(
+    pool: &MySqlPool,
+    field_url: &str,
+    settlement_source: SettlementSource,
+) -> Router {
+    router_with(pool, field_url, true, settlement_source)
 }
 
 /// This route persists only through Field; a lazy pool makes that boundary
@@ -373,6 +403,20 @@ fn router_with_multi_course_writes(
     field_url: &str,
     multi_course_product_writes: bool,
 ) -> Router {
+    router_with(
+        pool,
+        field_url,
+        multi_course_product_writes,
+        SettlementSource::Field,
+    )
+}
+
+fn router_with(
+    pool: &MySqlPool,
+    field_url: &str,
+    multi_course_product_writes: bool,
+    settlement_source: SettlementSource,
+) -> Router {
     // The `/v1/course/*` gateways build their own Field client from the config
     // URL; the admin-UI Field client this state can also hold is not on their
     // path, so it stays unset.
@@ -389,6 +433,7 @@ fn router_with_multi_course_writes(
             twilio_messaging_service_sid: None,
             twilio_from_number: None,
             multi_course_product_writes,
+            settlement_source,
         },
     ))
 }
@@ -1665,4 +1710,187 @@ async fn a_tenant_with_no_reservation_type_is_told_what_to_do_rather_than_half_s
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+// ─── Monthly settlement ───────────────────────────────────────────────────────
+
+/// A month Field has worked out, with figures nothing here would produce by
+/// accident: if a block survives into the answer, it was relayed on purpose.
+fn field_settlement() -> Value {
+    json!({
+        "period": { "yearMonth": "2026-08", "startDate": "2026-08-01", "endDate": "2026-08-31" },
+        "reservations": {
+            "grossAmount": 111_111,
+            "collectedAmount": 111_111,
+            "refundedAmount": 111_111,
+            "paymentPendingAmount": 111_111,
+            "reservationCount": 111
+        },
+        "caddieFees": { "total": 222_222, "assignmentCount": 222, "currency": "USD" },
+        "cancellations": { "feeOutstandingAmount": 4_000, "count": 1 },
+        "square": { "paymentsTotal": 12, "refundsTotal": 3, "unreconciledLines": 7, "warning": null },
+        "drilldown": {
+            "reservationIds": ["res-field-only"],
+            "unpaidCancellationReservationIds": ["res-cancelled"],
+            "unpaidCancellationItems": [{
+                "reservationId": "res-cancelled",
+                "reservationNumber": "R-C",
+                "cancellationFeeAmount": 4_000,
+                "checkoutUrl": null,
+                "linkIssued": false,
+                "paymentStatus": "fee_due",
+                "invoiceId": null
+            }]
+        }
+    })
+}
+
+/// A booking priced the way Field returns one, starting at `starts_at` in UTC.
+fn priced_booking(id: &str, starts_at: &str, price: i64, paid: i64) -> Value {
+    json!({
+        "id": id,
+        "reservationNumber": format!("R-{id}"),
+        "status": "confirmed",
+        "startsAt": starts_at,
+        "endsAt": starts_at,
+        "quantity": 4,
+        "priceAmount": price,
+        "paidAmount": paid,
+        "currency": "JPY",
+        "paymentStatus": "paid",
+    })
+}
+
+fn field_for_settlement() -> Arc<FieldState> {
+    let state = field_with_courses();
+    *state.settlement.lock().unwrap() = field_settlement();
+    *state.caddie_assignments.lock().unwrap() = vec![
+        json!({
+            "id": "asg-1", "caddieProfileId": "caddie-1",
+            "scheduledAt": "2026-08-10T00:00:00Z", "status": "completed",
+            "assignmentRole": "primary", "feeAmount": 5_000, "feeCurrency": "JPY"
+        }),
+        // A round the club called off: not walked, so not owed.
+        json!({
+            "id": "asg-2", "caddieProfileId": "caddie-1",
+            "scheduledAt": "2026-08-11T00:00:00Z", "status": "cancelled",
+            "assignmentRole": "primary", "feeAmount": 9_999, "feeCurrency": "JPY"
+        }),
+    ];
+    *state.created.lock().unwrap() = vec![
+        priced_booking("res-aug", "2026-08-10T00:00:00Z", 48_000, 20_000),
+        // 15:00 UTC on the last of August is September in Tokyo. A month cut
+        // in UTC would take this one, and the close would be wrong by 99,000.
+        priced_booking("res-sep", "2026-08-31T15:00:00Z", 99_000, 0),
+    ];
+    state
+}
+
+#[tokio::test]
+async fn the_close_adds_up_the_bookings_and_the_rounds_here_and_relays_the_rest() {
+    let tenant = tenant_for("the_close_adds_up_the_bookings_and_the_r");
+    let field = field_for_settlement();
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    let (status, body) = call(
+        &router_with_settlement_source(&pool, &url, SettlementSource::Courseboard),
+        &tenant,
+        "GET",
+        "/v1/course/monthly-settlement?yearMonth=2026-08",
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    // The bookings and the rounds are worked out here (ADR-0005 Phase 1), so
+    // none of Field's placeholder figures survive into these two blocks.
+    assert_eq!(body["reservations"]["grossAmount"], json!(48_000));
+    assert_eq!(body["reservations"]["collectedAmount"], json!(20_000));
+    assert_eq!(body["reservations"]["paymentPendingAmount"], json!(28_000));
+    assert_eq!(body["reservations"]["reservationCount"], json!(1));
+    assert_eq!(body["caddieFees"]["total"], json!(5_000));
+    assert_eq!(body["caddieFees"]["assignmentCount"], json!(1));
+    assert_eq!(body["caddieFees"]["currency"], json!("JPY"));
+    // The drill-down names the bookings this month, not the one Field listed.
+    assert_eq!(body["drilldown"]["reservationIds"], json!(["res-aug"]));
+
+    // What is outstanding on cancellations and the Square reconciliation are
+    // still Field's: CourseBoard cannot read either yet, and reporting zero
+    // would say the month was fully settled when it does not know.
+    assert_eq!(body["cancellations"]["feeOutstandingAmount"], json!(4_000));
+    assert_eq!(body["cancellations"]["count"], json!(1));
+    assert_eq!(body["square"]["unreconciledLines"], json!(7));
+    assert_eq!(
+        body["drilldown"]["unpaidCancellationItems"][0]["reservationId"],
+        json!("res-cancelled")
+    );
+}
+
+#[tokio::test]
+async fn compare_mode_still_serves_fields_month_while_it_watches_ours() {
+    let tenant = tenant_for("compare_mode_still_serves_fields_month_w");
+    let field = field_for_settlement();
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    let (status, body) = call(
+        &router_with_settlement_source(&pool, &url, SettlementSource::Compare),
+        &tenant,
+        "GET",
+        "/v1/course/monthly-settlement?yearMonth=2026-08",
+        None,
+    )
+    .await;
+
+    // Compare mode observes; it must not change the month an operator is
+    // reading, or a close would move before anyone agreed it should.
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["reservations"]["grossAmount"], json!(111_111));
+    assert_eq!(body["caddieFees"]["total"], json!(222_222));
+}
+
+#[tokio::test]
+async fn the_export_is_built_here_once_the_close_is_and_keeps_upstreams_columns() {
+    let tenant = tenant_for("the_export_is_built_here_once_the_close_");
+    let field = field_for_settlement();
+    let url = spawn_field(field.clone()).await;
+    let pool = crate::test_support::test_pool().await;
+
+    let request = Request::builder()
+        .method("GET")
+        .uri("/v1/course/monthly-settlement/export.csv?yearMonth=2026-08")
+        .header("authorization", format!("Bearer {TOKEN}"))
+        .header("x-operator-id", &tenant)
+        .body(Body::empty())
+        .expect("build request");
+    let response = router_with_settlement_source(&pool, &url, SettlementSource::Courseboard)
+        .oneshot(request)
+        .await
+        .expect("router call");
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("collect body")
+        .to_bytes();
+    let csv = String::from_utf8(bytes.to_vec()).expect("utf-8 csv");
+    let rows: Vec<&str> = csv.lines().collect();
+
+    // Header strings and column order are Field's: accounting may be reading
+    // this file with a script.
+    assert_eq!(rows[0], "section,year_month,metric,amount,count,currency");
+    assert_eq!(rows[1], "summary,2026-08,reservations_gross,48000,1,");
+    assert_eq!(rows[5], "summary,2026-08,caddie_fees_total,5000,1,JPY");
+    assert_eq!(
+        rows[6],
+        "summary,2026-08,cancellation_fee_outstanding,4000,1,"
+    );
+    assert_eq!(
+        rows[10],
+        "reservation_id,reservation_number,status,payment_status,price_amount,paid_amount,currency"
+    );
+    assert_eq!(rows[11], "res-aug,R-res-aug,confirmed,paid,48000,20000,JPY");
+    assert_eq!(rows.len(), 12);
 }

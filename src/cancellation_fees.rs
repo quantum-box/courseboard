@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, MySqlPool};
 
 use crate::{
-    course::infrastructure::DEFAULT_MULTI_COURSE_PRODUCT_WRITES, field_api::DEFAULT_FIELD_API_URL,
-    AppError,
+    config::SettlementSource, course::infrastructure::DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
+    field_api::DEFAULT_FIELD_API_URL, AppError,
 };
 
 #[derive(Clone)]
@@ -36,6 +36,13 @@ pub struct CancellationFeeConfig {
     /// rollback has to happen in: CourseBoard stops writing before Field goes
     /// back to a version that would ignore the eligibility.
     pub multi_course_product_writes: bool,
+    /// Who adds up the monthly close (ADR-0005 Phase 1).
+    ///
+    /// The close reaches accounting, so it moves behind a switch rather than
+    /// all at once: `compare` serves Field's answer and logs where the local
+    /// one differs, and only a whole close shown to agree justifies
+    /// `courseboard`.
+    pub settlement_source: SettlementSource,
 }
 
 impl CancellationFeeConfig {
@@ -72,6 +79,7 @@ impl Default for CancellationFeeConfig {
             twilio_messaging_service_sid: None,
             twilio_from_number: None,
             multi_course_product_writes: DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
+            settlement_source: SettlementSource::Field,
         }
     }
 }
