@@ -5512,6 +5512,29 @@ button,
   background: hsl(var(--nui-muted) / .6);
 }
 
+/* A caddie round the club cannot staff today. Dimmed rather than removed: the
+ * desk needs to see that the plan exists and why it is out of reach, so it can
+ * say "no caddie today" on the phone instead of "that plan is gone". */
+.ledger-plan-option.is-sold-out {
+  cursor: not-allowed;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.ledger-plan-option.is-sold-out:hover {
+  background: none;
+}
+
+.ledger-plan-option.is-sold-out .ledger-plan-label {
+  text-decoration: line-through;
+}
+
+.ledger-plan-sold-out {
+  flex: none;
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--nui-muted-foreground));
+}
+
 .ledger-plan-option.is-selected {
   background: hsl(var(--nui-primary) / 12%);
   font-weight: 600;

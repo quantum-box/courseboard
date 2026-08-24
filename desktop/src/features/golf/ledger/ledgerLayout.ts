@@ -279,6 +279,23 @@ export function knowsCaddieCapacity(
   return supply.roundsCapacity > 0 || supply.caddieAttachedGroups > 0
 }
 
+/**
+ * Whether this course has run out of caddie rounds for the day.
+ *
+ * Only a course whose caddie capacity is known can refuse one. A month nobody
+ * has confirmed leaves every course at zero, and a lookup that never landed
+ * leaves the course absent from the map — neither is the club saying it has no
+ * caddies. Both keep the caddie plans selectable: a desk that cannot sell a
+ * caddie round because an upstream call failed is worse off than one that
+ * oversells by a group and sorts it out with the caddie master.
+ */
+export function caddieRoundsSoldOut(
+  supply: CourseCaddieSupply | null | undefined,
+): boolean {
+  if (!knowsCaddieCapacity(supply)) return false
+  return supply.shortfall <= 0
+}
+
 /** `キャディ 8/12` — groups sold against what today's caddies can take. */
 export function formatCaddieCapacity(supply: CourseCaddieSupply): string {
   return i18next.t('ledger:column.caddie', {
