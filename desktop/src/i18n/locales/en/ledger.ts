@@ -86,6 +86,11 @@ export const ledger = {
     title: 'Some detail could not be loaded',
     description: 'The ledger is drawn, but remaining capacity and desk marks may be missing.',
   },
+  inventoryGap: {
+    title: 'The booking window and start slots do not match',
+    missing: '{{course}} is configured through {{date}}, but no start slots have been built yet.',
+    behind: '{{course}} is configured through {{date}}, but start slots have only been built through {{generatedThrough}}.',
+  },
   marks: {
     title: 'Slot marks',
     selectHint:

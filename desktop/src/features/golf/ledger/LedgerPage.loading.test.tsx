@@ -19,7 +19,7 @@ vi.mock('../../../api', async importOriginal => {
 
 vi.mock('../../../lib/toast', () => ({ showToast: vi.fn() }))
 
-const ledgerBody: TeeLedgerResponse = {
+let ledgerBody: TeeLedgerResponse = {
   date: '2026-07-20',
   timezone: 'Asia/Tokyo',
   columns: [
@@ -51,10 +51,42 @@ const ledgerBody: TeeLedgerResponse = {
 
 /** Held open so the page can be inspected while the day is still on the way. */
 let releaseLedger: (() => void) | null = null
+let generatedThrough: string | null = null
 
-beforeEach(() => {
+beforeEach(async () => {
+  await i18next.changeLanguage('ja')
   clearResourceCache()
   releaseLedger = null
+  generatedThrough = null
+  ledgerBody = {
+    date: '2026-07-20',
+    timezone: 'Asia/Tokyo',
+    columns: [
+      {
+        golfCourseId: 'course-east',
+        courseName: '東コース',
+        gridSource: 'inventory',
+        groupCount: 0,
+        playerCount: 0,
+        selfGroupCount: 0,
+        caddieGroupCount: 0,
+        openSlotCount: 1,
+        slots: [
+          {
+            teeTime: '07:00',
+            capacity: 2,
+            availableGroups: 2,
+            bookedGroups: 0,
+            playerCount: 0,
+            isActive: true,
+            isSellable: true,
+            items: [],
+          },
+        ],
+      },
+    ],
+    unavailable: [],
+  }
   api.json.mockImplementation((path: string) => {
     if (path.startsWith('/v1/course/tee-ledger')) {
       return new Promise(resolve => {
@@ -68,6 +100,12 @@ beforeEach(() => {
       return Promise.resolve({ golfCourseIds: ['course-east'] })
     }
     if (path.startsWith('/v1/course/reservation-products')) return Promise.resolve({ items: [] })
+    if (path.startsWith('/v1/course/booking-horizon')) {
+      return Promise.resolve({
+        bookableThrough: '2027-02-19',
+        generatedThrough: { 'course-east': generatedThrough },
+      })
+    }
     if (path.startsWith('/v1/course/extension-status')) return Promise.resolve(null)
     throw new Error(`unexpected request: ${path}`)
   })
@@ -119,5 +157,38 @@ describe('LedgerPage while the day is still loading', () => {
     })
     expect(screen.getByRole('region', { name: '東コース' })).toBeTruthy()
     expect(screen.getByText('07:00')).toBeTruthy()
+  })
+
+  it('warns when weekly hours exist but the course has no generated inventory', async () => {
+    ledgerBody = {
+      ...ledgerBody,
+      columns: ledgerBody.columns.map(column => ({
+        ...column,
+        gridSource: 'schedule',
+        openSlotCount: 0,
+        slots: column.slots.map(slot => ({
+          ...slot,
+          capacity: null,
+          availableGroups: null,
+          isSellable: false,
+        })),
+      })),
+    }
+    renderPage()
+    releaseLedger?.()
+
+    expect(await screen.findByText(
+      '東コースは2027年2月19日まで受ける設定ですが、スタート枠はまだ作られていません。',
+    )).toBeTruthy()
+  })
+
+  it('warns when generated inventory stops before the configured edge', async () => {
+    generatedThrough = '2027-02-01'
+    renderPage()
+    releaseLedger?.()
+
+    expect(await screen.findByText(
+      '東コースは2027年2月19日まで受ける設定ですが、スタート枠は2027年2月1日までしか作られていません。',
+    )).toBeTruthy()
   })
 })

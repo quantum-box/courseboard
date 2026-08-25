@@ -89,8 +89,9 @@ pub use cancel_reservation::CancelReservationUseCase;
 pub use change_reservation_plan::ChangeReservationPlanUseCase;
 pub use course_order::{GetCourseOrderUseCase, ReplaceCourseOrderUseCase};
 pub use course_schedule::{
-    ExtendCourseInventoryUseCase, GenerateCourseTimeSlotsUseCase, GetBookingHorizonUseCase,
-    GetCourseScheduleUseCase, ReplaceCourseScheduleUseCase, SetBookingHorizonUseCase,
+    BookingHorizonStatus, ExtendCourseInventoryUseCase, GenerateCourseTimeSlotsUseCase,
+    GetBookingHorizonUseCase, GetCourseScheduleUseCase, ReplaceCourseScheduleUseCase,
+    SetBookingHorizonUseCase,
 };
 pub use create_caddie::CreateCaddieUseCase;
 pub use create_caddie_assignment::{CreateCaddieAssignmentUseCase, NameCaddieForRound};

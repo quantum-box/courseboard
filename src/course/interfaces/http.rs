@@ -2,7 +2,7 @@
 //!
 //! Handlers stay thin: parse request → call use case → map domain → response DTO.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
     extract::{Path, Query, State},
@@ -31,8 +31,8 @@ use crate::course::infrastructure::{
     MySqlPricingSettingsRepository, MySqlSlotOverrideRepository, PartyPlayerInput,
 };
 use crate::course::usecase::{
-    CancelReservationUseCase, ChangeReservationPlanUseCase, CreateCourseUseCase,
-    CreateReservationInput, CreateReservationUseCase, DeleteCourseUseCase,
+    BookingHorizonStatus, CancelReservationUseCase, ChangeReservationPlanUseCase,
+    CreateCourseUseCase, CreateReservationInput, CreateReservationUseCase, DeleteCourseUseCase,
     DeleteSlotOverridesUseCase, ExtendCourseInventoryUseCase, GenerateCourseTimeSlotsUseCase,
     GetBookingHorizonUseCase, GetCourseOrderUseCase, GetCourseScheduleUseCase, GetTeeLedgerUseCase,
     GetTeeSheetUseCase, LinkCourseResourceUseCase, ListCaddieAssignmentsUseCase,
@@ -1791,6 +1791,30 @@ impl BookingHorizonDto {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BookingHorizonStatusDto {
+    #[serde(flatten)]
+    pub horizon: BookingHorizonDto,
+    /// Per-course far edge of dated inventory. A `null` value is intentional:
+    /// that course has no recorded successful build and must not be presented
+    /// as reaching the configured booking horizon.
+    pub generated_through: BTreeMap<String, Option<NaiveDate>>,
+}
+
+impl From<BookingHorizonStatus> for BookingHorizonStatusDto {
+    fn from(status: BookingHorizonStatus) -> Self {
+        Self {
+            horizon: BookingHorizonDto::new(status.horizon, status.bookable_through),
+            generated_through: status
+                .generated_through
+                .into_iter()
+                .map(|(course_id, generated)| (course_id.into_inner(), generated))
+                .collect(),
+        }
+    }
+}
+
 /// Exactly one of the two is sent; the other says which shape was not chosen.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1819,7 +1843,7 @@ impl SetBookingHorizonRequest {
     path = "/v1/course/booking-horizon",
     tag = "course",
     responses(
-        (status = 200, description = "How far ahead the book is open", body = BookingHorizonDto),
+        (status = 200, description = "Configured and generated booking horizons", body = BookingHorizonStatusDto),
         (status = 401, description = "Unauthorized", body = ErrorBody),
         (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
@@ -1828,14 +1852,17 @@ impl SetBookingHorizonRequest {
 pub async fn get_booking_horizon(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<BookingHorizonDto>, AppError> {
+) -> Result<Json<BookingHorizonStatusDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let (horizon, bookable_through) =
-        GetBookingHorizonUseCase::new(catalog_gateway(&state), commercial_gateway(&state))
-            .execute(credentials)
-            .await
-            .map_err(AppError::from)?;
-    Ok(Json(BookingHorizonDto::new(horizon, bookable_through)))
+    let status = GetBookingHorizonUseCase::new(
+        catalog_gateway(&state),
+        commercial_gateway(&state),
+        generated_through_gateway(&state),
+    )
+    .execute(credentials)
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(BookingHorizonStatusDto::from(status)))
 }
 
 /// PUT /v1/course/booking-horizon
@@ -2380,6 +2407,33 @@ mod tests {
             object.insert("isNew".into(), serde_json::json!(is_new));
         }
         serde_json::from_value(value).expect("schedule rule request")
+    }
+
+    #[test]
+    fn booking_horizon_serializes_a_never_built_course_as_null() {
+        let dto = BookingHorizonStatusDto::from(BookingHorizonStatus {
+            horizon: BookingHorizon::try_days(180).expect("valid horizon"),
+            bookable_through: NaiveDate::from_ymd_opt(2027, 2, 19).expect("valid date"),
+            generated_through: [
+                (
+                    CourseId::new("course-built"),
+                    Some(NaiveDate::from_ymd_opt(2027, 2, 19).expect("valid date")),
+                ),
+                (CourseId::new("course-empty"), None),
+            ]
+            .into_iter()
+            .collect(),
+        });
+
+        let json = serde_json::to_value(dto).expect("serialize booking horizon");
+        assert_eq!(
+            json["generatedThrough"]["course-built"],
+            serde_json::json!("2027-02-19")
+        );
+        assert_eq!(
+            json["generatedThrough"]["course-empty"],
+            serde_json::Value::Null
+        );
     }
 
     #[test]

@@ -6,7 +6,7 @@
 //! writing a schedule onto the wrong resource would sell another course's tee
 //! times.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, NaiveDate, Utc};
 
@@ -432,28 +432,60 @@ impl ExtendCourseInventoryUseCase {
 pub struct GetBookingHorizonUseCase {
     catalog: Arc<dyn GolfCatalogGateway>,
     commercial: Arc<dyn GolfCommercialGateway>,
+    watermarks: Arc<dyn GeneratedThroughGateway>,
+}
+
+/// The configured far edge beside the dated inventory each course has actually built.
+pub struct BookingHorizonStatus {
+    pub horizon: BookingHorizon,
+    pub bookable_through: NaiveDate,
+    /// Every course is present. `None` means no successful build has ever
+    /// recorded a watermark; it must not be replaced with the configured edge.
+    pub generated_through: HashMap<CourseId, Option<NaiveDate>>,
 }
 
 impl GetBookingHorizonUseCase {
     pub fn new(
         catalog: Arc<dyn GolfCatalogGateway>,
         commercial: Arc<dyn GolfCommercialGateway>,
+        watermarks: Arc<dyn GeneratedThroughGateway>,
     ) -> Self {
         Self {
             catalog,
             commercial,
+            watermarks,
         }
     }
 
     pub async fn execute(
         &self,
         credentials: GatewayCredentials<'_>,
-    ) -> Result<(BookingHorizon, NaiveDate), CourseError> {
+    ) -> Result<BookingHorizonStatus, CourseError> {
         credentials.require(actions::LIST_COURSES).await?;
-        let horizon = self.commercial.get_booking_horizon(credentials).await?;
-        let timezone = self.catalog.get_tenant_timezone(credentials).await?;
+        let (horizon, timezone, courses, watermarks) = tokio::join!(
+            self.commercial.get_booking_horizon(credentials),
+            self.catalog.get_tenant_timezone(credentials),
+            self.catalog.list_courses(credentials),
+            self.watermarks.list_watermarks(credentials.operator_id),
+        );
+        let horizon = horizon?;
+        let timezone = timezone?;
         let bookable_through = horizon.last_bookable_date(course_today(Utc::now(), &timezone)?);
-        Ok((horizon, bookable_through))
+        let watermarks = watermarks?;
+        let generated_through = courses?
+            .into_iter()
+            .map(|course| {
+                let generated = watermarks
+                    .get(course.id())
+                    .map(|watermark| watermark.generated_through);
+                (course.id().clone(), generated)
+            })
+            .collect();
+        Ok(BookingHorizonStatus {
+            horizon,
+            bookable_through,
+            generated_through,
+        })
     }
 }
 
@@ -964,6 +996,7 @@ mod tests {
 
     #[derive(Default)]
     struct FakeWatermarks {
+        stored: Mutex<HashMap<CourseId, InventoryWatermark>>,
         written: Mutex<Vec<(CourseId, InventoryWatermark)>>,
     }
 
@@ -973,7 +1006,7 @@ mod tests {
             &self,
             _tenant_id: &str,
         ) -> Result<HashMap<CourseId, InventoryWatermark>, CourseError> {
-            unimplemented!("not used")
+            Ok(self.stored.lock().expect("lock").clone())
         }
 
         async fn set_watermark(
@@ -986,8 +1019,86 @@ mod tests {
                 .lock()
                 .expect("lock")
                 .push((course_id.clone(), watermark));
+            self.stored
+                .lock()
+                .expect("lock")
+                .insert(course_id.clone(), watermark);
             Ok(())
         }
+    }
+
+    #[tokio::test]
+    async fn booking_horizon_keeps_a_missing_watermark_distinct_from_the_target() {
+        let built_course = CourseId::new("course-built");
+        let empty_course = CourseId::new("course-empty");
+        let catalog = Arc::new(FakeCatalog {
+            tenant_timezone: "Asia/Tokyo".into(),
+            courses: vec![
+                Course::reconstitute(
+                    built_course.clone(),
+                    "Built",
+                    None,
+                    18,
+                    "Asia/Tokyo",
+                    8,
+                    true,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                Course::reconstitute(
+                    empty_course.clone(),
+                    "Empty",
+                    None,
+                    18,
+                    "Asia/Tokyo",
+                    8,
+                    true,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            ],
+            ..FakeCatalog::default()
+        });
+        let watermarks = Arc::new(FakeWatermarks::default());
+        watermarks.stored.lock().expect("lock").insert(
+            built_course.clone(),
+            InventoryWatermark {
+                generated_through: date("2026-10-31"),
+                checked_on: date("2026-08-25"),
+            },
+        );
+        let use_case = GetBookingHorizonUseCase::new(
+            catalog,
+            Arc::new(FakeCommercial {
+                horizon: Some(BookingHorizon::try_days(180).expect("valid horizon")),
+            }),
+            watermarks,
+        );
+
+        let status = use_case
+            .execute(GatewayCredentials {
+                authorization: "Bearer test",
+                operator_id: "tenant-test",
+                platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                caller_bearer: "Bearer test",
+            })
+            .await
+            .expect("booking horizon");
+
+        assert_eq!(
+            status.generated_through.get(&built_course),
+            Some(&Some(date("2026-10-31")))
+        );
+        assert_eq!(
+            status.generated_through.get(&empty_course),
+            Some(&None),
+            "a course with no inventory must stay null instead of borrowing the target date"
+        );
     }
 
     #[tokio::test]

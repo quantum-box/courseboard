@@ -92,6 +92,11 @@ export const ledger = {
     title: '一部の情報が取れていません',
     description: '台帳は出ていますが、空き数や売り止めなど一部は表示できていません。',
   },
+  inventoryGap: {
+    title: '予約を受ける設定とスタート枠が一致していません',
+    missing: '{{course}}は{{date}}まで受ける設定ですが、スタート枠はまだ作られていません。',
+    behind: '{{course}}は{{date}}まで受ける設定ですが、スタート枠は{{generatedThrough}}までしか作られていません。',
+  },
   marks: {
     title: '枠の設定',
     selectHint: '空きをクリックするとすぐ予約を入れられます。時刻をクリックすると枠の設定、Shift を押しながらで範囲。',

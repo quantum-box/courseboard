@@ -7,6 +7,7 @@ import {
   horizonDraftFrom,
   horizonIssue,
   horizonPayload,
+  inventoryHorizonGap,
   sameHorizon,
 } from './bookingHorizon'
 
@@ -15,7 +16,12 @@ const today = '2026-08-11'
 describe('reading what the club has stored', () => {
   it('opens on the day count a rolling club keeps', () => {
     expect(
-      horizonDraftFrom({ mode: 'days', days: 180, through: null, bookableThrough: '2027-02-07' }),
+      horizonDraftFrom({
+        mode: 'days',
+        days: 180,
+        through: null,
+        bookableThrough: '2027-02-07',
+      }),
     ).toEqual({ mode: 'days', days: '180', through: '' })
   })
 
@@ -28,6 +34,26 @@ describe('reading what the club has stored', () => {
         bookableThrough: '2026-11-30',
       }),
     ).toEqual({ mode: 'through', days: '', through: '2026-11-30' })
+  })
+})
+
+describe('comparing configured and generated inventory edges', () => {
+  it('keeps a missing generated edge distinct', () => {
+    expect(inventoryHorizonGap('2027-02-19', null)).toEqual({
+      bookableThrough: '2027-02-19',
+      generatedThrough: null,
+    })
+  })
+
+  it('reports inventory that stops before the configured edge', () => {
+    expect(inventoryHorizonGap('2027-02-19', '2027-02-01')).toEqual({
+      bookableThrough: '2027-02-19',
+      generatedThrough: '2027-02-01',
+    })
+  })
+
+  it('has no gap once generated inventory reaches the configured edge', () => {
+    expect(inventoryHorizonGap('2027-02-19', '2027-02-19')).toBeNull()
   })
 })
 
