@@ -190,6 +190,7 @@ impl Modify for SecurityAddon {
             http::GenerationSummaryDto,
             http::SavedScheduleDto,
             http::BookingHorizonDto,
+            http::BookingHorizonStatusDto,
             http::SetBookingHorizonRequest,
             http::ProductSlotDto,
             http::ReplaceProductSlotsRequest,

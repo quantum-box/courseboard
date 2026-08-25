@@ -82,6 +82,11 @@ export const ledger = {
     title: 'いちぶの じょうほうが とれていません',
     description: '台帳は 出ていますが、あきの数や うりどめなど いちぶは 出せていません。',
   },
+  inventoryGap: {
+    title: '予約を受ける日と、スタート枠の日が合っていません',
+    missing: '{{course}}は{{date}}まで予約を受ける決まりですが、スタート枠はまだありません。',
+    behind: '{{course}}は{{date}}まで予約を受ける決まりですが、スタート枠は{{generatedThrough}}までしかありません。',
+  },
   marks: {
     title: '枠の せってい',
     selectHint:

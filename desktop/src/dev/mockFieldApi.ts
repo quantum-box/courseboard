@@ -290,11 +290,15 @@ function mockBookableThrough(horizon = mockBookingHorizon) {
 }
 
 function mockHorizonResponse(horizon = mockBookingHorizon) {
+  const bookableThrough = mockBookableThrough(horizon)
   return {
     mode: horizon.mode,
     days: horizon.mode === 'days' ? horizon.days : null,
     through: horizon.mode === 'through' ? horizon.through : null,
-    bookableThrough: mockBookableThrough(horizon),
+    bookableThrough,
+    generatedThrough: Object.fromEntries(
+      Object.keys(mockSchedulesByCourse).map(courseId => [courseId, bookableThrough]),
+    ),
   }
 }
 

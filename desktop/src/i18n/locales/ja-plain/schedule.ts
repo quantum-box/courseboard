@@ -11,6 +11,11 @@ export const schedule: DeepPartial<typeof source> = {
     through: '今、予約を受けられるのは {{date}} までです。',
     change: '何日先まで受けるかを、変える',
   },
+  inventoryGap: {
+    title: '予約を受ける日と、スタート枠の日が合っていません',
+    missing: '{{date}}まで予約を受ける決まりですが、スタート枠はまだありません。',
+    behind: '{{date}}まで予約を受ける決まりですが、スタート枠は{{generatedThrough}}までしかありません。',
+  },
   week: {
     badge: '毎週の決めごと',
     title: '予約を受ける時間',
