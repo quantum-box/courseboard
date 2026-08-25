@@ -197,6 +197,9 @@ impl From<CourseError> for AppError {
             CourseError::TenantForbidden => AppError::TenantForbidden,
             CourseError::BadRequest(message) => AppError::BadRequest(message),
             CourseError::Conflict(message) => AppError::Conflict(message),
+            CourseError::UpstreamClient { status: 401, .. } => {
+                AppError::UpstreamAuthenticationExpired
+            }
             CourseError::UpstreamClient { status, message } => match StatusCode::from_u16(status) {
                 Ok(status) if status.is_client_error() => {
                     AppError::UpstreamClient { status, message }

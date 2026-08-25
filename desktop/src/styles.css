@@ -2514,6 +2514,14 @@ button,
   background: hsl(var(--nui-background));
 }
 
+.auth-shell-session-expired {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: clamp(24px, 6vw, 76px);
+  background: hsl(var(--nui-muted));
+}
+
 .auth-brand-panel {
   display: flex;
   min-height: 100%;

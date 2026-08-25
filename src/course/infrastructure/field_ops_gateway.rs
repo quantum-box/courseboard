@@ -815,6 +815,26 @@ mod tests {
         }
     }
 
+    fn caddie_update() -> UpsertCaddie {
+        UpsertCaddie::try_new(
+            "佐藤さん",
+            "regular",
+            "D",
+            12_000,
+            Some("JPY".to_string()),
+            Some("staff-1".to_string()),
+            Some("staff_member".to_string()),
+            Some("staff-1".to_string()),
+            true,
+            Some("active".to_string()),
+            Some(1),
+            None,
+            None,
+            None,
+        )
+        .expect("valid caddie update")
+    }
+
     #[test]
     fn attendance_snapshot_forwards_the_tenant_timezone() {
         let date = NaiveDate::from_ymd_opt(2026, 3, 29).unwrap();
@@ -1024,29 +1044,11 @@ mod tests {
         );
         let base_url = spawn_field_server(app).await;
         let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
-        let input = UpsertCaddie::try_new(
-            "佐藤さん",
-            "regular",
-            "D",
-            12_000,
-            Some("JPY".to_string()),
-            Some("staff-1".to_string()),
-            Some("staff_member".to_string()),
-            Some("staff-1".to_string()),
-            true,
-            Some("active".to_string()),
-            Some(1),
-            None,
-            None,
-            None,
-        )
-        .expect("valid caddie update");
-
         let error = gateway
             .update_caddie(
                 test_credentials(),
                 &CaddieId::try_new("caddie-1").expect("valid caddie id"),
-                input,
+                caddie_update(),
             )
             .await
             .expect_err("a duplicate staff link must remain a conflict");
@@ -1109,65 +1111,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn field_auth_denials_remain_403_through_the_caddie_gateway() {
-        let app = Router::new()
-            .route(
-                "/v1/erp/extensions/golf-course/caddie-profiles/unauthorized",
-                patch(|| async {
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        Json(json!({ "message": "Field bearer was rejected" })),
-                    )
-                }),
-            )
-            .route(
-                "/v1/erp/extensions/golf-course/caddie-profiles/forbidden",
-                patch(|| async {
-                    (
-                        StatusCode::FORBIDDEN,
-                        Json(json!({ "message": "Field tenant policy denied this operation" })),
-                    )
-                }),
-            );
+    async fn field_authentication_expiry_remains_401_through_the_caddie_gateway() {
+        let app = Router::new().route(
+            "/v1/erp/extensions/golf-course/caddie-profiles/expired",
+            patch(|| async {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({ "message": "Field authentication expired" })),
+                )
+            }),
+        );
         let base_url = spawn_field_server(app).await;
         let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
-
-        for (caddie_id, expected_message) in [
-            ("unauthorized", "Field bearer was rejected"),
-            ("forbidden", "Field tenant policy denied this operation"),
-        ] {
-            let input = UpsertCaddie::try_new(
-                "佐藤さん",
-                "regular",
-                "D",
-                12_000,
-                Some("JPY".to_string()),
-                Some("staff-1".to_string()),
-                Some("staff_member".to_string()),
-                Some("staff-1".to_string()),
-                true,
-                Some("active".to_string()),
-                Some(1),
-                None,
-                None,
-                None,
+        let error = gateway
+            .update_caddie(
+                test_credentials(),
+                &CaddieId::try_new("expired").expect("valid caddie id"),
+                caddie_update(),
             )
-            .expect("valid caddie update");
-            let error = gateway
-                .update_caddie(
-                    test_credentials(),
-                    &CaddieId::try_new(caddie_id).expect("valid caddie id"),
-                    input,
-                )
-                .await
-                .expect_err("Field auth denial must not become a success");
+            .await
+            .expect_err("expired Field authentication must not become a success");
 
-            assert!(matches!(
-                error,
-                CourseError::UpstreamClient { status: 403, message }
-                    if message == expected_message
-            ));
-        }
+        assert!(matches!(
+            error,
+            CourseError::UpstreamClient { status: 401, message }
+                if message == "Field authentication expired"
+        ));
+    }
+
+    #[tokio::test]
+    async fn field_permission_denial_remains_403_through_the_caddie_gateway() {
+        let app = Router::new().route(
+            "/v1/erp/extensions/golf-course/caddie-profiles/forbidden",
+            patch(|| async {
+                (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({ "message": "Field tenant policy denied this operation" })),
+                )
+            }),
+        );
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
+        let error = gateway
+            .update_caddie(
+                test_credentials(),
+                &CaddieId::try_new("forbidden").expect("valid caddie id"),
+                caddie_update(),
+            )
+            .await
+            .expect_err("Field permission denial must not become a success");
+
+        assert!(matches!(
+            error,
+            CourseError::UpstreamClient { status: 403, message }
+                if message == "Field tenant policy denied this operation"
+        ));
     }
 
     #[tokio::test]

@@ -1825,21 +1825,13 @@ fn map_field_request_error_with_timeout(error: reqwest::Error, timeout: Duration
 }
 
 /// Preserve every sanitized Field 4xx as an operator-correctable response;
-/// transport failures and 5xx responses remain provider failures.
+/// transport failures and 5xx responses remain provider failures. Authentication
+/// and authorization stay distinct: Field 401 remains 401, while a real policy
+/// denial remains 403.
 pub(crate) fn map_field_status_error(status: reqwest::StatusCode, message: &str) -> CourseError {
     if status.is_client_error() {
-        // A Field 401 describes the forwarded bearer/tenant at the provider
-        // boundary, not the operator's CourseBoard session. Keep the historical
-        // 403 normalization so the browser does not refresh or sign out a valid
-        // CourseBoard login. Both statuses still stay below 500, avoiding
-        // Cloudflare's CORS-less origin 5xx replacement page.
-        let downstream_status = if status == reqwest::StatusCode::UNAUTHORIZED {
-            reqwest::StatusCode::FORBIDDEN
-        } else {
-            status
-        };
         return CourseError::UpstreamClient {
-            status: downstream_status.as_u16(),
+            status: status.as_u16(),
             message: field_error_message(message).unwrap_or_else(|| status.to_string()),
         };
     }
@@ -2118,7 +2110,19 @@ mod tests {
     }
 
     #[test]
-    fn upstream_4xx_keeps_its_status_and_sanitized_message() {
+    fn upstream_authentication_expiry_stays_401() {
+        let unauthorized = map_field_status_error(
+            reqwest::StatusCode::UNAUTHORIZED,
+            "{\"error\":\"unauthorized\",\"message\":\"Field authentication expired\"}",
+        );
+        assert!(
+            matches!(unauthorized, CourseError::UpstreamClient { status: 401, message }
+            if message == "Field authentication expired")
+        );
+    }
+
+    #[test]
+    fn upstream_permission_denial_stays_403() {
         let denied = map_field_status_error(
             reqwest::StatusCode::FORBIDDEN,
             "{\"code\":\"FORBIDDEN\",\"message\":\"tenant policy check denied\"}",
@@ -2127,13 +2131,10 @@ mod tests {
             matches!(denied, CourseError::UpstreamClient { status: 403, message }
             if message == "tenant policy check denied")
         );
+    }
 
-        let unauthorized = map_field_status_error(reqwest::StatusCode::UNAUTHORIZED, "expired");
-        assert!(
-            matches!(unauthorized, CourseError::UpstreamClient { status: 403, message }
-            if message == "expired")
-        );
-
+    #[test]
+    fn upstream_conflict_keeps_its_status_and_sanitized_message() {
         let conflict = map_field_status_error(
             reqwest::StatusCode::CONFLICT,
             "{\"error\":\"staff_already_linked\",\"message\":\"このスタッフは田中さんに既に紐付いています\"}",

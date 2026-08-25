@@ -15,7 +15,10 @@ import {
   TenantSelectionScreen,
 } from './AuthScreens'
 
-export function AuthGate({ children }: { children: ReactNode }) {
+export function AuthGate({ children, renderExpiredSession }: {
+  children: ReactNode
+  renderExpiredSession?: (screen: ReactNode) => ReactNode
+}) {
   const { t } = useTranslation('auth')
   const auth = useAuth()
   const view = resolveAuthGateView(auth.state)
@@ -32,14 +35,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
   } else if (view.kind === 'loading') {
     content = <AuthLoadingScreen authorizing={view.authorizing} />
   } else if (view.kind === 'sign-in') {
-    content = (
+    const withinAppShell = view.reason === 'expired' && Boolean(renderExpiredSession)
+    const screen = (
       <SignInScreen
         reason={view.reason}
+        withinAppShell={withinAppShell}
         passwordSignInAvailable={auth.passwordSignInAvailable}
         onSignIn={provider => { void auth.signIn(provider) }}
         onPasswordSignIn={(username, password) => { void auth.signInWithPassword(username, password) }}
       />
     )
+    content = withinAppShell && renderExpiredSession
+      ? renderExpiredSession(screen)
+      : screen
   } else if (view.kind === 'select-tenant') {
     content = (
       <TenantSelectionScreen
