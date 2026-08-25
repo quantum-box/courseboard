@@ -91,11 +91,18 @@ export function AuthSessionToast({ message, onDismiss, sticky = false }: {
   )
 }
 
-export function SignInScreen({ reason, passwordSignInAvailable, onSignIn, onPasswordSignIn }: {
+export function SignInScreen({
+  reason,
+  passwordSignInAvailable,
+  onSignIn,
+  onPasswordSignIn,
+  withinAppShell = false,
+}: {
   reason?: AuthReason
   passwordSignInAvailable: boolean
   onSignIn(provider?: 'Google'): void
   onPasswordSignIn(username: string, password: string): void
+  withinAppShell?: boolean
 }) {
   const { t } = useTranslation('auth')
   const [username, setUsername] = useState('')
@@ -105,8 +112,7 @@ export function SignInScreen({ reason, passwordSignInAvailable, onSignIn, onPass
     onPasswordSignIn(username.trim(), password)
   }
 
-  return (
-    <AuthFrame>
+  const card = (
       <div className="auth-card">
         <span className="auth-kicker">{t('signIn.kicker')}</span>
         <h2>{t('signIn.title')}</h2>
@@ -163,8 +169,11 @@ export function SignInScreen({ reason, passwordSignInAvailable, onSignIn, onPass
         )}
         <p className="auth-legal">{t('signIn.legal')}</p>
       </div>
-    </AuthFrame>
   )
+
+  return withinAppShell
+    ? <section className="auth-shell-session-expired">{card}</section>
+    : <AuthFrame>{card}</AuthFrame>
 }
 
 export function TenantSelectionScreen({ tenants, onSelect, onSignOut }: {

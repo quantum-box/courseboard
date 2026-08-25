@@ -208,6 +208,16 @@ export function shouldSoftSignOutOn401(input: {
   return !input.refreshProducedToken
 }
 
+async function isUpstreamAuthenticationExpired(response: Response) {
+  if (response.ok) return false
+  try {
+    const body = await response.clone().json() as { error?: unknown }
+    return body.error === 'upstream_authentication_expired'
+  } catch {
+    return false
+  }
+}
+
 async function accessTokenForProtectedRequest() {
   const context = apiAuthContext
   if (!context) {
@@ -244,6 +254,7 @@ async function protectedFetch(
     headers: requestHeaders(init, token),
   })
 
+  const upstreamAuthenticationExpired = await isUpstreamAuthenticationExpired(response)
   if (response.status === 401) {
     if (!retried && apiAuthContext) {
       const refreshed = await apiAuthContext.getAccessToken(true)
@@ -254,12 +265,16 @@ async function protectedFetch(
         refreshProducedToken: false,
       })) {
         apiAuthContext.onUnauthorized()
+        return response
       }
     }
     // Already retried with a refreshed token (or no auth context): surface the
-    // 401 to the caller without treating it as session expiry.
+    // generic 401 to the caller without treating it as session expiry. An
+    // explicit upstream authentication-expiry code is safe to sign out.
   }
-  if (
+  if (upstreamAuthenticationExpired) {
+    apiAuthContext?.onUnauthorized()
+  } else if (
     response.status === 403
     && response.headers.get('x-courseboard-auth-denial') === 'tenant'
   ) {

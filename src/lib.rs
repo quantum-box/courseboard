@@ -1785,6 +1785,8 @@ pub enum AppError {
     Conflict(&'static str),
     #[error("{message}")]
     UpstreamClient { status: StatusCode, message: String },
+    #[error("Field authentication expired; sign in again")]
+    UpstreamAuthenticationExpired,
     #[error("tax rule was not found for tenant, prefecture, and green fee")]
     RuleNotFound,
     #[error("{0}")]
@@ -1822,6 +1824,9 @@ impl IntoResponse for AppError {
             AppError::MonthRequired(_) => (StatusCode::BAD_REQUEST, "month_required"),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             AppError::UpstreamClient { status, .. } => (status, "upstream_client_error"),
+            AppError::UpstreamAuthenticationExpired => {
+                (StatusCode::UNAUTHORIZED, "upstream_authentication_expired")
+            }
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),
             AppError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
             // Cloudflare swaps origin 5xx bodies for its own CORS-less error
@@ -2132,10 +2137,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn normalized_field_auth_denials_stay_below_500_at_the_http_boundary() {
+    async fn field_authentication_expiry_is_an_explicit_401_at_the_http_boundary() {
+        let response = AppError::from(crate::course::domain::CourseError::UpstreamClient {
+            status: 401,
+            message: "UnauthorizedError: upstream auth rejected the request".to_string(),
+        })
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect authentication expiry body")
+            .to_bytes();
+        let body: serde_json::Value =
+            serde_json::from_slice(&body).expect("decode authentication expiry body");
+        assert_eq!(body["error"], "upstream_authentication_expired");
+        assert_eq!(
+            body["message"],
+            "Field authentication expired; sign in again"
+        );
+    }
+
+    #[tokio::test]
+    async fn field_permission_denial_stays_403_at_the_http_boundary() {
         let response = AppError::UpstreamClient {
             status: StatusCode::FORBIDDEN,
-            message: "Field bearer was rejected".to_string(),
+            message: "Field tenant policy denied this operation".to_string(),
         }
         .into_response();
 
@@ -2149,7 +2178,7 @@ mod tests {
             .to_bytes();
         let body: serde_json::Value = serde_json::from_slice(&body).expect("decode denial body");
         assert_eq!(body["error"], "upstream_client_error");
-        assert_eq!(body["message"], "Field bearer was rejected");
+        assert_eq!(body["message"], "Field tenant policy denied this operation");
     }
 
     #[tokio::test]
