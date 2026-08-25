@@ -102,6 +102,7 @@ import {
   caddieCreatePayload,
   exactStaffMatch,
   resolveStaffId,
+  staffLinkBroken,
   staffSuggestions,
 } from './caddieRegistration'
 import {
@@ -640,7 +641,12 @@ export function CaddiesPage({
   )
   const staffResource = useMemo<ResourceValue<ListResponse<StaffMember>>>(
     () => ({
-      data: profilesResource.data ? { items: profilesResource.data.staff ?? [] } : null,
+      // `null` when the roster came back without a staff index at all, which
+      // is not the same as coming back with nobody in it. Consumers that only
+      // list staff read both as an empty list; the roster's broken-link check
+      // needs the difference, or a missing index would mark every caddie as
+      // pointing at somebody who is gone.
+      data: profilesResource.data?.staff ? { items: profilesResource.data.staff } : null,
       error: profilesResource.error,
       loading: profilesResource.loading,
       refresh: profilesResource.refresh,
@@ -1966,6 +1972,12 @@ function ProfilesView({
   const [skill, setSkill] = useState('all')
   const [link, setLink] = useState('all')
   const profiles = profilesResource.data?.items ?? []
+  // Only a staff list that arrived can tell us a link points at nobody. While
+  // the lookup is out or failed there is no list to check against, and an
+  // empty one would read as "Field has no staff" — every caddie broken at once.
+  const staffIds = staffResource.data
+    ? new Set(staffResource.data.items.map(member => member.id))
+    : null
   const normalizedQuery = query.trim().toLocaleLowerCase('ja')
   const filtered = profiles.filter(profile => {
     const staffId = resolveStaffId(profile)
@@ -1975,12 +1987,19 @@ function ProfilesView({
       || staffId?.toLocaleLowerCase('ja').includes(normalizedQuery)
     const statusMatches = status === 'all' || employmentStatusCode(profile.employmentStatus) === status
     const skillMatches = skill === 'all' || profile.skillLevel === skill
+    const broken = staffLinkBroken(profile, staffIds)
     const linkMatches = link === 'all'
-      || (link === 'linked' ? Boolean(staffId) : !staffId)
+      || (link === 'broken'
+        ? broken
+        : link === 'linked' ? Boolean(staffId) && !broken : !staffId)
     return queryMatches && statusMatches && skillMatches && linkMatches
   })
   const selected = profiles.find(profile => profile.id === selectedProfileId) ?? null
   const unlinked = profiles.filter(profile => !resolveStaffId(profile)).length
+  // Counted apart from `unlinked`: that one looks for a missing id, and these
+  // caddies have one. Folding them together would hide the difference between
+  // "nobody was ever behind this" and "the person behind it is gone".
+  const brokenLinks = profiles.filter(profile => staffLinkBroken(profile, staffIds)).length
 
   // The roster is a list *or* a detail, never both: the old split view squeezed
   // the detail into a third of the width, which is what made it unreadable.
@@ -2063,13 +2082,21 @@ function ProfilesView({
       key: 'link',
       header: t('caddies:roster.table.link'),
       mobileLabel: t('caddies:roster.table.link'),
-      cell: profile => (
-        <span className={resolveStaffId(profile) ? 'text-success' : 'text-warning'}>
-          {resolveStaffId(profile)
-            ? t('caddies:roster.linked')
-            : t('caddies:roster.notLinked')}
-        </span>
-      ),
+      cell: profile => {
+        // Three states, not two. A caddie holding an id Field cannot resolve
+        // is not linked, and saying so is the whole point: it reads as healthy
+        // otherwise, and the desk has no way to spot it.
+        if (staffLinkBroken(profile, staffIds)) {
+          return <span className="text-danger">{t('caddies:roster.linkBroken')}</span>
+        }
+        return (
+          <span className={resolveStaffId(profile) ? 'text-success' : 'text-warning'}>
+            {resolveStaffId(profile)
+              ? t('caddies:roster.linked')
+              : t('caddies:roster.notLinked')}
+          </span>
+        )
+      },
     },
   ]
 
@@ -2077,6 +2104,22 @@ function ProfilesView({
     <div className="space-y-4">
       {staffResource.error ? (
         <ResourceError error={staffResource.error} onRetry={staffResource.refresh} />
+      ) : null}
+      {/* Ahead of the unlinked notice: a caddie nobody was ever behind is a
+          setup step somebody skipped, but a caddie whose staff record has gone
+          is a link that used to work and silently stopped. */}
+      {brokenLinks > 0 ? (
+        <Notice
+          tone="danger"
+          title={t('caddies:roster.brokenLinkWarning.title', { n: String(brokenLinks) })}
+          actions={(
+            <Button type="button" size="sm" variant="secondary" onClick={() => setLink('broken')}>
+              {t('caddies:roster.brokenLinkWarning.showOnly')}
+            </Button>
+          )}
+        >
+          {t('caddies:roster.brokenLinkWarning.description')}
+        </Notice>
       ) : null}
       {unlinked > 0 ? (
         <Notice
@@ -2140,6 +2183,7 @@ function ProfilesView({
             <option value="all">{t('caddies:roster.filter.allLinks')}</option>
             <option value="linked">{t('caddies:roster.filter.linked')}</option>
             <option value="unlinked">{t('caddies:roster.filter.unlinked')}</option>
+            <option value="broken">{t('caddies:roster.filter.broken')}</option>
           </NativeSelect>
         </div>
 

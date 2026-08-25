@@ -255,6 +255,15 @@ export const caddies = {
       allLinks: 'すべて',
       linked: '紐づけずみ',
       unlinked: 'まだ紐づけていない',
+      broken: 'リンクが切れている',
+    },
+    brokenLinkWarning: {
+      title: '{{n}}人の紐づけ先が社員名簿にいません',
+      description:
+        '紐づけた社員が退職や削除で社員名簿から消えると、キャディ側の紐づけだけが残ります。'
+        + '出勤や給与の集計はその社員を引けないため、この人たちは集計から漏れます。'
+        + '社員名簿で紐づけ直すか、キャディを止めてください。',
+      showOnly: 'リンクが切れている人だけ表示',
     },
     unlinkedWarning: {
       title: '{{n}}人のスタッフ紐づけが終わっていません',
@@ -269,6 +278,7 @@ export const caddies = {
     },
     rank: '{{rank}}ランク · ',
     linked: 'スタッフと紐づけずみ',
+    linkBroken: '社員名簿に見つかりません',
     notLinked: 'まだ紐づけていません',
     backToList: '名簿へ戻る',
     table: {

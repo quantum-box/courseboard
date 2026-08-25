@@ -252,6 +252,16 @@ export const caddies: DeepPartial<typeof source> = {
       allLinks: 'All',
       linked: 'Linked',
       unlinked: 'Not linked',
+      broken: 'Link is broken',
+    },
+    brokenLinkWarning: {
+      title: '{{n}} caddies point at staff who are no longer on the roster',
+      description:
+        'A staff member removed from the staff roster leaves the caddie side of '
+        + 'the link behind. Attendance and payroll cannot resolve that staff '
+        + 'member, so these caddies drop out of both. Re-link them on the staff '
+        + 'roster, or stand the caddie down.',
+      showOnly: 'Show only broken links',
     },
     unlinkedWarning: {
       title: '{{n}} caddies still need a staff link',
@@ -266,6 +276,7 @@ export const caddies: DeepPartial<typeof source> = {
     },
     rank: 'Rank {{rank}} · ',
     linked: 'Linked to staff',
+    linkBroken: 'Not on the staff roster',
     notLinked: 'Not linked yet',
     backToList: 'Back to the roster',
     table: {

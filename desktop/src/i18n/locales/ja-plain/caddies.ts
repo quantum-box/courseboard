@@ -243,6 +243,15 @@ export const caddies: DeepPartial<typeof source> = {
       allLinks: 'すべて',
       linked: '結びついている',
       unlinked: 'まだ結びついていない',
+      broken: '結びつきが切れている',
+    },
+    brokenLinkWarning: {
+      title: '{{n}}人の結びつき先が、社員名簿に いません',
+      description:
+        '結びつけた社員が いなくなると、キャディ側の 結びつきだけが のこります。'
+        + '出勤や 給料の 集計は その社員を さがせないので、この人たちは 集計から もれます。'
+        + '社員名簿で 結びつけ直すか、キャディを 止めて ください。',
+      showOnly: '結びつきが 切れている人だけ 見る',
     },
     unlinkedWarning: {
       title: '{{n}}人が、社員情報と結びついていません',
@@ -256,6 +265,7 @@ export const caddies: DeepPartial<typeof source> = {
       descriptionNoMatch: 'さがす言葉や、しぼり込みを変えてみてください。',
     },
     linked: '社員情報と結びついています',
+    linkBroken: '社員名簿に 見つかりません',
     notLinked: 'まだ結びついていません',
     backToList: '名簿に戻る',
     table: {

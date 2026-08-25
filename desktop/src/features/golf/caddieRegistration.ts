@@ -121,3 +121,26 @@ export function caddieCreatePayload(draft: CaddieCreateDraft) {
     maxRoundsPerDay: 2,
   }
 }
+
+/**
+ * Whether a caddie points at a staff member Field no longer has.
+ *
+ * A profile keeps the id it was linked with, and Field deleting the staff on
+ * the other end does not reach back to clear it. `resolveStaffId` reads the id
+ * as proof of a link, so a caddie whose staff record is gone looks exactly like
+ * one that is fine — the roster calls it linked and the unlinked warning counts
+ * it as healthy, because that warning only looks for a missing id.
+ *
+ * Only a staff list that actually arrived can contradict a link. Pass `null`
+ * while the lookup is out or failed: an empty list for that reason would
+ * condemn every caddie on the roster at once.
+ */
+export function staffLinkBroken(
+  profile: CaddieStaffLink,
+  staffIds: ReadonlySet<string> | null,
+): boolean {
+  if (!staffIds) return false
+  const staffId = resolveStaffId(profile)
+  if (!staffId) return false
+  return !staffIds.has(staffId)
+}
