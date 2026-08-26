@@ -36,6 +36,9 @@ pub struct CancellationFeeConfig {
     /// rollback has to happen in: CourseBoard stops writing before Field goes
     /// back to a version that would ignore the eligibility.
     pub multi_course_product_writes: bool,
+    /// Whether confirmed shifts are mirrored into Field's HRM (ADR-0013).
+    /// Off unless the environment sets it; see `config.rs` for why.
+    pub field_shift_writeback: bool,
 }
 
 impl CancellationFeeConfig {
@@ -72,6 +75,7 @@ impl Default for CancellationFeeConfig {
             twilio_messaging_service_sid: None,
             twilio_from_number: None,
             multi_course_product_writes: DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
+            field_shift_writeback: false,
         }
     }
 }

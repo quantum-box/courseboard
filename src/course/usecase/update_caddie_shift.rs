@@ -25,7 +25,10 @@ pub struct UpdateCaddieShiftUseCase {
     ops: Arc<dyn GolfOpsGateway>,
     shifts: Arc<dyn CaddieShiftGateway>,
     rules: Arc<dyn ShiftRulesGateway>,
-    mirror: Arc<MirrorShiftToField>,
+    /// `None` when the Field write-back is switched off, which is the
+    /// default. The day is then confirmed in CourseBoard alone, exactly as it
+    /// was before the write-back existed.
+    mirror: Option<Arc<MirrorShiftToField>>,
 }
 
 impl UpdateCaddieShiftUseCase {
@@ -33,7 +36,7 @@ impl UpdateCaddieShiftUseCase {
         ops: Arc<dyn GolfOpsGateway>,
         shifts: Arc<dyn CaddieShiftGateway>,
         rules: Arc<dyn ShiftRulesGateway>,
-        mirror: Arc<MirrorShiftToField>,
+        mirror: Option<Arc<MirrorShiftToField>>,
     ) -> Self {
         Self {
             ops,
@@ -52,7 +55,7 @@ impl UpdateCaddieShiftUseCase {
         updated_by: Option<String>,
     ) -> Result<CaddieShift, CourseError> {
         credentials.require(actions::MANAGE_SHIFTS).await?;
-        let (memberships, filed, roster, links, defaults) = tokio::try_join!(
+        let (memberships, filed) = tokio::try_join!(
             self.ops.list_caddie_memberships(credentials, caddie_id),
             self.ops.list_caddie_availabilities(
                 credentials,
@@ -63,14 +66,6 @@ impl UpdateCaddieShiftUseCase {
                     date: Some(date),
                 },
             ),
-            // The staff member the day is filed under in Field. Read from the
-            // roster because that is where the link between a caddie profile
-            // and an HRM staff record lives.
-            self.ops.list_caddie_roster(credentials),
-            self.shifts
-                .field_shift_links(credentials.operator_id, date, date),
-            self.rules
-                .get_default_working_hours(credentials.operator_id),
         )?;
 
         // Main and sub together: both are places this caddie can work, which
@@ -85,6 +80,27 @@ impl UpdateCaddieShiftUseCase {
             .map(|availability| availability.status());
 
         let shift = edit.apply(caddie_id.clone(), date, &workable, filed_status, updated_by)?;
+
+        let Some(mirror) = self.mirror.as_ref() else {
+            // Write-back off: CourseBoard's own tables and nothing else. The
+            // reads below are skipped rather than made and discarded, so the
+            // edit costs exactly what it did before this existed.
+            self.shifts
+                .save_shifts(credentials.operator_id, std::slice::from_ref(&shift))
+                .await?;
+            return Ok(shift);
+        };
+
+        let (roster, links, defaults) = tokio::try_join!(
+            // The staff member the day is filed under in Field. Read from the
+            // roster because that is where the link between a caddie profile
+            // and an HRM staff record lives.
+            self.ops.list_caddie_roster(credentials),
+            self.shifts
+                .field_shift_links(credentials.operator_id, date, date),
+            self.rules
+                .get_default_working_hours(credentials.operator_id),
+        )?;
 
         // Only a staff member Field still has counts as a link. Field soft-
         // deletes staff and a deleted one stops resolving, so a profile that
@@ -108,12 +124,10 @@ impl UpdateCaddieShiftUseCase {
 
         // Field first (ADR-0013 rule 4). If this fails nothing is written
         // anywhere, which is the one outcome that leaves no new drift behind.
-        let hours = self
-            .mirror
+        let hours = mirror
             .opening_hours(credentials, shift.course_id().cloned())
             .await?;
-        let link = self
-            .mirror
+        let link = mirror
             .execute(credentials, staff_id, &shift, existing, defaults, &hours)
             .await?;
 

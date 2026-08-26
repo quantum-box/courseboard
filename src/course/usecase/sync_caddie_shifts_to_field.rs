@@ -49,6 +49,16 @@ pub struct FieldSyncProgress {
 }
 
 impl FieldSyncProgress {
+    fn nothing_to_do() -> Self {
+        Self {
+            filed: 0,
+            withdrawn: 0,
+            unlinkable: 0,
+            failed: 0,
+            remaining: 0,
+        }
+    }
+
     /// Working days Field was told about.
     pub fn filed(&self) -> u64 {
         self.filed
@@ -93,7 +103,10 @@ pub struct SyncCaddieShiftsToFieldUseCase {
     ops: Arc<dyn GolfOpsGateway>,
     shifts: Arc<dyn CaddieShiftGateway>,
     rules: Arc<dyn ShiftRulesGateway>,
-    mirror: Arc<MirrorShiftToField>,
+    /// `None` when the Field write-back is switched off, which is the
+    /// default. Every call then answers "nothing to do", so the screen's
+    /// loop ends on the first one and no badge is shown.
+    mirror: Option<Arc<MirrorShiftToField>>,
 }
 
 impl SyncCaddieShiftsToFieldUseCase {
@@ -101,7 +114,7 @@ impl SyncCaddieShiftsToFieldUseCase {
         ops: Arc<dyn GolfOpsGateway>,
         shifts: Arc<dyn CaddieShiftGateway>,
         rules: Arc<dyn ShiftRulesGateway>,
-        mirror: Arc<MirrorShiftToField>,
+        mirror: Option<Arc<MirrorShiftToField>>,
     ) -> Self {
         Self {
             ops,
@@ -121,6 +134,12 @@ impl SyncCaddieShiftsToFieldUseCase {
         year_month: YearMonth,
     ) -> Result<u64, CourseError> {
         credentials.require(actions::MANAGE_SHIFTS).await?;
+        if self.mirror.is_none() {
+            // Nothing is behind when nothing is being sent. Answering the true
+            // count here would badge every month with days the app has been
+            // told not to push.
+            return Ok(0);
+        }
         let (month_start, month_end) = year_month.bounds();
         self.shifts
             .count_unsynced(credentials.operator_id, month_start, month_end)
@@ -141,6 +160,9 @@ impl SyncCaddieShiftsToFieldUseCase {
         resend: bool,
     ) -> Result<FieldSyncProgress, CourseError> {
         credentials.require(actions::MANAGE_SHIFTS).await?;
+        let Some(mirror) = self.mirror.as_ref() else {
+            return Ok(FieldSyncProgress::nothing_to_do());
+        };
         let (month_start, month_end) = year_month.bounds();
         if resend {
             self.shifts
@@ -153,13 +175,7 @@ impl SyncCaddieShiftsToFieldUseCase {
             .unsynced_shifts(credentials.operator_id, month_start, month_end, BATCH)
             .await?;
         if batch.is_empty() {
-            return Ok(FieldSyncProgress {
-                filed: 0,
-                withdrawn: 0,
-                unlinkable: 0,
-                failed: 0,
-                remaining: 0,
-            });
+            return Ok(FieldSyncProgress::nothing_to_do());
         }
 
         // Read once for the whole batch: the staff links, the club's fallback
@@ -170,8 +186,7 @@ impl SyncCaddieShiftsToFieldUseCase {
             self.rules
                 .get_default_working_hours(credentials.operator_id),
         )?;
-        let hours = self
-            .mirror
+        let hours = mirror
             .opening_hours(
                 credentials,
                 batch
@@ -213,8 +228,7 @@ impl SyncCaddieShiftsToFieldUseCase {
                     .get(entry.shift.caddie_id().as_str())
                     .copied();
                 async move {
-                    let pushed = self
-                        .mirror
+                    let pushed = mirror
                         .execute(
                             credentials,
                             staff_id,
@@ -947,11 +961,11 @@ mod tests {
             }),
             shifts.clone(),
             Arc::new(FakeRules),
-            Arc::new(MirrorShiftToField::new(
+            Some(Arc::new(MirrorShiftToField::new(
                 staff_shifts.clone(),
                 catalog.clone(),
                 catalog,
-            )),
+            ))),
         );
         (staff_shifts, shifts, use_case)
     }
@@ -1092,11 +1106,11 @@ mod tests {
             }),
             shifts.clone(),
             Arc::new(FakeRules),
-            Arc::new(MirrorShiftToField::new(
+            Some(Arc::new(MirrorShiftToField::new(
                 staff_shifts.clone(),
                 catalog.clone(),
                 catalog,
-            )),
+            ))),
         );
 
         let progress = use_case
@@ -1136,11 +1150,11 @@ mod tests {
             }),
             shifts.clone(),
             Arc::new(FakeRules),
-            Arc::new(MirrorShiftToField::new(
+            Some(Arc::new(MirrorShiftToField::new(
                 staff_shifts.clone(),
                 catalog.clone(),
                 catalog,
-            )),
+            ))),
         );
 
         let progress = use_case
@@ -1172,11 +1186,11 @@ mod tests {
             }),
             shifts.clone(),
             Arc::new(FakeRules),
-            Arc::new(MirrorShiftToField::new(
+            Some(Arc::new(MirrorShiftToField::new(
                 staff_shifts.clone(),
                 catalog.clone(),
                 catalog,
-            )),
+            ))),
         );
 
         let progress = use_case
@@ -1187,5 +1201,42 @@ mod tests {
         assert_eq!(progress.failed(), 1);
         assert_eq!(progress.filed(), 0);
         assert!(shifts.saved_links.lock().expect("lock").is_empty());
+    }
+    #[tokio::test]
+    async fn with_the_write_back_off_field_is_never_asked_and_the_month_reads_as_caught_up() {
+        // The default. The screen's loop has to end on the first call, and no
+        // month may badge days the app has been told not to push.
+        let staff_shifts = Arc::new(RecordingStaffShifts::default());
+        let roster = vec![caddie("caddie-1", Some("stf_1"))];
+        let shifts = Arc::new(FakeShifts {
+            remaining: Mutex::new(30),
+            queue: Mutex::new(vec![entry("caddie-1", 9, true, None)]),
+            ..FakeShifts::default()
+        });
+        let use_case = SyncCaddieShiftsToFieldUseCase::new(
+            Arc::new(FakeOps {
+                roster: CaddieRoster::new(roster.clone(), staff_for(&roster)),
+            }),
+            shifts.clone(),
+            Arc::new(FakeRules),
+            None,
+        );
+
+        let progress = use_case
+            .execute(credentials(), YearMonth::parse("2026-09").unwrap(), false)
+            .await
+            .unwrap();
+
+        assert!(progress.done());
+        assert_eq!(progress.remaining(), 0);
+        assert!(staff_shifts.filed.lock().expect("lock").is_empty());
+        assert!(shifts.saved_links.lock().expect("lock").is_empty());
+        assert_eq!(
+            use_case
+                .behind(credentials(), YearMonth::parse("2026-09").unwrap())
+                .await
+                .unwrap(),
+            0
+        );
     }
 }

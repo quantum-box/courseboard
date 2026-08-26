@@ -73,17 +73,24 @@ pub(crate) fn ops_gateway(state: &AppState) -> Arc<FieldGolfOpsGateway> {
 /// course-to-resource question and the schedule behind that resource, and
 /// building a second one would open a second connection pool for the same
 /// upstream.
-pub(crate) fn shift_mirror(state: &AppState) -> Arc<MirrorShiftToField> {
+/// `None` when the write-back is switched off, which is the default. The use
+/// cases then behave the way they did before it existed: CourseBoard writes
+/// its own tables and tells Field nothing. See `config.rs` for why that is the
+/// default rather than the exception.
+pub(crate) fn shift_mirror(state: &AppState) -> Option<Arc<MirrorShiftToField>> {
+    if !state.cancellation_fee_config.field_shift_writeback {
+        return None;
+    }
     let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
     let catalog = catalog_gateway(state);
-    Arc::new(MirrorShiftToField::new(
+    Some(Arc::new(MirrorShiftToField::new(
         Arc::new(FieldStaffShiftGateway::new(
             state.http_client.clone(),
             field_api_url,
         )),
         catalog.clone(),
         catalog,
-    ))
+    )))
 }
 
 pub(crate) fn reservation_gateway(state: &AppState) -> Arc<FieldReservationGateway> {
