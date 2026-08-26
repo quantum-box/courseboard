@@ -116,11 +116,13 @@ impl ShiftRulesGateway for MySqlShiftRulesRepository {
         let end: u16 = row.try_get("default_work_end_minutes").map_err(provider)?;
         let midday: u16 = row.try_get("default_midday_minutes").map_err(provider)?;
 
-        // The CHECK constraint keeps these in order, so a row that fails to
-        // describe a day has been edited around it — by hand, or on a replica
-        // that never got the constraint. Falling back beats refusing: the
-        // club's own default is the same answer a tenant with no row gets,
-        // whereas an error here stops a month from reaching Field at all.
+        // Nothing upstream guarantees these describe a day. The migration adds
+        // a CHECK, but TiDB ships with `tidb_enable_check_constraint` off and
+        // accepts the clause without applying it — verified against v8.5.7,
+        // which is what production runs. So this branch is load-bearing rather
+        // than defensive: the club's own default is the same answer a tenant
+        // with no row gets, whereas an error here stops a month from reaching
+        // Field at all.
         let stored = ShiftHours::try_new(start, end)
             .and_then(|day| DefaultWorkingHours::try_new(day, midday));
         match stored {

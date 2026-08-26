@@ -41,6 +41,12 @@ ALTER TABLE golf_shift_rules
 -- The order is what the domain requires to split a day at all: a handover
 -- outside the working day leaves one half empty, and an end before the start
 -- leaves no day to divide.
+--
+-- Documentation more than enforcement: TiDB ships with
+-- `tidb_enable_check_constraint` off and accepts the clause without applying
+-- it (checked against v8.5.7). It is kept because it states the invariant
+-- where the columns are defined, and a target that does enforce it would be
+-- right to. The reader falls back to the club default rather than trusting it.
 ALTER TABLE golf_shift_rules
     ADD CONSTRAINT chk_golf_shift_rules_working_hours
         CHECK (default_work_start_minutes < default_midday_minutes
