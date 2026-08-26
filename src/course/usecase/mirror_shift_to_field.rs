@@ -23,7 +23,7 @@
 //! So a Field failure fails the edit. The desk sees an error and tries again,
 //! rather than quietly building more of the drift.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::NaiveDate;
@@ -75,6 +75,7 @@ impl MirrorShiftToField {
         shift: &CaddieShift,
         existing: Option<&str>,
         defaults: DefaultWorkingHours,
+        hours: &CourseOpeningHours,
     ) -> Result<FieldShiftLink, CourseError> {
         let link = |field_shift_id| {
             FieldShiftLink::new(shift.caddie_id().clone(), shift.date(), field_shift_id)
@@ -101,7 +102,7 @@ impl MirrorShiftToField {
             return Ok(link(existing.map(str::to_string)));
         };
 
-        match self.intent_for(credentials, shift, defaults).await? {
+        match Self::intent_for(shift, defaults, hours)? {
             FieldShiftIntent::File(hours) => {
                 let filed = self
                     .staff_shifts
@@ -134,20 +135,72 @@ impl MirrorShiftToField {
         }
     }
 
-    async fn intent_for(
+    /// Read each course's weekly schedule once, for reuse across a batch.
+    ///
+    /// Confirming a month pushes the whole roster, and every one of those days
+    /// asks the same handful of courses the same question. Asking Field once
+    /// per day would turn one upstream call per shift into three.
+    pub async fn opening_hours(
         &self,
         credentials: GatewayCredentials<'_>,
+        courses: impl IntoIterator<Item = CourseId>,
+    ) -> Result<CourseOpeningHours, CourseError> {
+        let wanted: HashSet<CourseId> = courses.into_iter().collect();
+        if wanted.is_empty() {
+            return Ok(CourseOpeningHours::default());
+        }
+        let resources = self.catalog.list_resources(credentials).await?;
+        let by_course: HashMap<CourseId, ResourceId> = resources
+            .iter()
+            .filter(|resource| resource.is_active())
+            .filter(|resource| resource.kind() == ResourceKind::Course)
+            .filter_map(|resource| {
+                let course_id = resource.golf_course_id()?;
+                wanted.get(course_id).map(|course_id| {
+                    (
+                        course_id.clone(),
+                        resource
+                            .reservation_resource_id()
+                            .cloned()
+                            .unwrap_or_else(|| resource.id().clone()),
+                    )
+                })
+            })
+            .collect();
+
+        // A course with no reservation resource is simply absent, and a day
+        // placed there falls back to the club's own hours. The schedule
+        // screens refuse that course because they have nothing to draw; a
+        // caddie standing on it is at work either way.
+        let pairs: Vec<(CourseId, ResourceId)> = by_course.into_iter().collect();
+        let mut rules_by_course = HashMap::new();
+        for group in pairs.chunks(SCHEDULE_READS) {
+            let read = group.iter().map(|(course_id, resource_id)| async move {
+                let rules = self
+                    .schedules
+                    .get_resource_schedule(credentials, resource_id)
+                    .await?;
+                Ok::<_, CourseError>((course_id.clone(), rules))
+            });
+            for (course_id, rules) in futures::future::try_join_all(read).await? {
+                rules_by_course.insert(course_id, rules);
+            }
+        }
+        Ok(CourseOpeningHours {
+            by_course: rules_by_course,
+        })
+    }
+
+    fn intent_for(
         shift: &CaddieShift,
         defaults: DefaultWorkingHours,
+        hours: &CourseOpeningHours,
     ) -> Result<FieldShiftIntent, CourseError> {
         if !shift.is_working() {
             return Ok(FieldShiftIntent::Withdraw);
         }
         let bands = match shift.course_id() {
-            Some(course_id) => {
-                self.opening_bands(credentials, course_id, shift.date())
-                    .await?
-            }
+            Some(course_id) => hours.bands_for(course_id, shift.date()),
             // Confirmed but placed nowhere. Somebody is working; where is not
             // settled yet, so the club's own hours are the only honest answer.
             None => Vec::new(),
@@ -158,46 +211,28 @@ impl MirrorShiftToField {
             defaults,
         )?))
     }
+}
 
-    /// The course's opening bands on the weekday this day falls on.
+/// How many courses' schedules are read from Field at once.
+const SCHEDULE_READS: usize = 8;
+
+/// Each course's weekly reception schedule, read once and asked many times.
+#[derive(Debug, Default, Clone)]
+pub struct CourseOpeningHours {
+    by_course: HashMap<CourseId, Vec<AvailabilityRule>>,
+}
+
+impl CourseOpeningHours {
+    /// The bands that course opens on the weekday this date falls on.
     ///
     /// Empty for a course with no reservation resource behind it, and for a
     /// weekday it does not open. Both send the caller to the club default,
-    /// which is why neither is an error — unlike the schedule screens, which
-    /// refuse a course with no resource because there is nothing to show.
-    async fn opening_bands(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        course_id: &CourseId,
-        date: NaiveDate,
-    ) -> Result<Vec<OpeningBand>, CourseError> {
-        let Some(resource_id) = self.resource_for(credentials, course_id).await? else {
-            return Ok(Vec::new());
-        };
-        let rules = self
-            .schedules
-            .get_resource_schedule(credentials, &resource_id)
-            .await?;
-        Ok(bands_on(&rules, courseboard_weekday(date)))
-    }
-
-    async fn resource_for(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        course_id: &CourseId,
-    ) -> Result<Option<ResourceId>, CourseError> {
-        let resources = self.catalog.list_resources(credentials).await?;
-        Ok(resources
-            .into_iter()
-            .filter(|resource| resource.is_active())
-            .filter(|resource| resource.kind() == ResourceKind::Course)
-            .find(|resource| resource.golf_course_id() == Some(course_id))
-            .map(|resource| {
-                resource
-                    .reservation_resource_id()
-                    .cloned()
-                    .unwrap_or_else(|| resource.id().clone())
-            }))
+    /// which is why neither is an error.
+    fn bands_for(&self, course_id: &CourseId, date: NaiveDate) -> Vec<OpeningBand> {
+        self.by_course
+            .get(course_id)
+            .map(|rules| bands_on(rules, courseboard_weekday(date)))
+            .unwrap_or_default()
     }
 }
 
@@ -554,7 +589,9 @@ mod tests {
         )
     }
 
-    fn mirror(rules: Vec<AvailabilityRule>) -> (Arc<FakeStaffShifts>, MirrorShiftToField) {
+    async fn mirror(
+        rules: Vec<AvailabilityRule>,
+    ) -> (Arc<FakeStaffShifts>, MirrorShiftToField, CourseOpeningHours) {
         let staff_shifts = Arc::new(FakeStaffShifts::default());
         let catalog = Arc::new(FakeCourseSchedule {
             resources: vec![Resource::reconstitute(
@@ -569,7 +606,11 @@ mod tests {
         });
         let mirror =
             MirrorShiftToField::new(staff_shifts.clone(), catalog.clone(), catalog.clone());
-        (staff_shifts, mirror)
+        let hours = mirror
+            .opening_hours(credentials(), [CourseId::new("out")])
+            .await
+            .expect("the course schedule is readable");
+        (staff_shifts, mirror, hours)
     }
 
     fn calls(staff_shifts: &FakeStaffShifts) -> Vec<FieldCall> {
@@ -578,8 +619,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_working_day_reaches_field_with_the_courses_own_hours() {
-        let (staff_shifts, mirror) =
-            mirror(vec![rule(2, "07:00", "12:00"), rule(2, "13:00", "16:00")]);
+        let (staff_shifts, mirror, hours) =
+            mirror(vec![rule(2, "07:00", "12:00"), rule(2, "13:00", "16:00")]).await;
 
         let link = mirror
             .execute(
@@ -588,6 +629,7 @@ mod tests {
                 &confirmed(Some("out"), ShiftSpan::Morning, true),
                 None,
                 defaults(),
+                &hours,
             )
             .await
             .unwrap();
@@ -607,7 +649,7 @@ mod tests {
 
     #[tokio::test]
     async fn editing_a_day_moves_the_shift_field_already_holds_rather_than_adding_one() {
-        let (staff_shifts, mirror) = mirror(vec![rule(2, "07:00", "16:00")]);
+        let (staff_shifts, mirror, hours) = mirror(vec![rule(2, "07:00", "16:00")]).await;
 
         let link = mirror
             .execute(
@@ -616,6 +658,7 @@ mod tests {
                 &confirmed(Some("out"), ShiftSpan::FullDay, true),
                 Some("shift_a"),
                 defaults(),
+                &hours,
             )
             .await
             .unwrap();
@@ -635,7 +678,7 @@ mod tests {
 
     #[tokio::test]
     async fn turning_a_day_off_withdraws_it_from_field_and_forgets_the_shift() {
-        let (staff_shifts, mirror) = mirror(vec![rule(2, "07:00", "16:00")]);
+        let (staff_shifts, mirror, hours) = mirror(vec![rule(2, "07:00", "16:00")]).await;
 
         let link = mirror
             .execute(
@@ -644,6 +687,7 @@ mod tests {
                 &confirmed(None, ShiftSpan::FullDay, false),
                 Some("shift_a"),
                 defaults(),
+                &hours,
             )
             .await
             .unwrap();
@@ -660,7 +704,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_day_off_field_never_held_asks_field_for_nothing() {
-        let (staff_shifts, mirror) = mirror(vec![rule(2, "07:00", "16:00")]);
+        let (staff_shifts, mirror, hours) = mirror(vec![rule(2, "07:00", "16:00")]).await;
 
         mirror
             .execute(
@@ -669,6 +713,7 @@ mod tests {
                 &confirmed(None, ShiftSpan::FullDay, false),
                 None,
                 defaults(),
+                &hours,
             )
             .await
             .unwrap();
@@ -678,7 +723,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_shift_placed_on_no_course_is_filed_with_the_clubs_own_day() {
-        let (staff_shifts, mirror) = mirror(vec![rule(2, "05:00", "20:00")]);
+        let (staff_shifts, mirror, hours) = mirror(vec![rule(2, "05:00", "20:00")]).await;
 
         mirror
             .execute(
@@ -687,6 +732,7 @@ mod tests {
                 &confirmed(None, ShiftSpan::FullDay, true),
                 None,
                 defaults(),
+                &hours,
             )
             .await
             .unwrap();
@@ -707,7 +753,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_caddie_with_no_staff_record_files_nothing_and_keeps_the_shift_named() {
-        let (staff_shifts, mirror) = mirror(vec![rule(2, "07:00", "16:00")]);
+        let (staff_shifts, mirror, hours) = mirror(vec![rule(2, "07:00", "16:00")]).await;
 
         let link = mirror
             .execute(
@@ -716,6 +762,7 @@ mod tests {
                 &confirmed(Some("out"), ShiftSpan::FullDay, true),
                 Some("shift_a"),
                 defaults(),
+                &hours,
             )
             .await
             .unwrap();

@@ -36,7 +36,7 @@ mod tests {
         CaddieCourseMembership, CaddieId, CaddieRank, CaddieRankFees, CaddieRating,
         CaddieRecommendation, CaddieRoster, CaddieShift, CaddieShiftGateway, CaddieSkillLevel,
         CaddieStaff, FieldShiftLink, RecommendationQuery, ReplaceCaddieMemberships, ReservationId,
-        UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+        UnsyncedShift, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
     use crate::course::usecase::caddie_rank_fees::UnsetRankFees;
     use crate::course::usecase::{
@@ -92,6 +92,34 @@ mod tests {
             _links: &[FieldShiftLink],
         ) -> Result<(), CourseError> {
             Ok(())
+        }
+
+        async fn unsynced_shifts(
+            &self,
+            _tenant_id: &str,
+            _from: chrono::NaiveDate,
+            _to: chrono::NaiveDate,
+            _limit: u32,
+        ) -> Result<Vec<UnsyncedShift>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn mark_month_unsynced(
+            &self,
+            _tenant_id: &str,
+            _from: chrono::NaiveDate,
+            _to: chrono::NaiveDate,
+        ) -> Result<(), CourseError> {
+            Ok(())
+        }
+
+        async fn count_unsynced(
+            &self,
+            _tenant_id: &str,
+            _from: chrono::NaiveDate,
+            _to: chrono::NaiveDate,
+        ) -> Result<u64, CourseError> {
+            Ok(0)
         }
     }
 

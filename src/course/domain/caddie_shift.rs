@@ -930,6 +930,19 @@ impl FieldShiftLink {
     }
 }
 
+/// A confirmed day Field has not been told about since it last changed.
+///
+/// Carries the shift itself because the hours to file are derived from it, and
+/// the link because a day Field already holds is moved rather than filed
+/// twice. Read in batches: one CourseBoard operation — confirming a month —
+/// leaves the whole roster behind at once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnsyncedShift {
+    pub shift: CaddieShift,
+    /// What a previous write filed for this caddie and day, if any.
+    pub field_shift_id: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

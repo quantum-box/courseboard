@@ -12,7 +12,7 @@ use sqlx::{MySqlPool, Row};
 
 use crate::course::domain::{
     CaddieId, CaddieShift, CaddieShiftGateway, CourseError, CourseId, FieldShiftLink, ShiftOrigin,
-    ShiftSpan,
+    ShiftSpan, UnsyncedShift,
 };
 
 /// Rows per statement when a whole month is written. A month of a full roster
@@ -224,7 +224,8 @@ impl CaddieShiftGateway for MySqlCaddieShiftRepository {
             let statement = format!(
                 r#"
                 UPDATE golf_caddie_shifts
-                SET field_shift_id = CASE {cases} END
+                SET field_shift_id = CASE {cases} END,
+                    field_synced_at = CURRENT_TIMESTAMP(6)
                 WHERE tenant_id = ?
                   AND (caddie_id, shift_date) IN ({pairs})
                 "#
@@ -245,7 +246,104 @@ impl CaddieShiftGateway for MySqlCaddieShiftRepository {
         transaction.commit().await.map_err(provider)?;
         Ok(())
     }
+
+    async fn unsynced_shifts(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+        limit: u32,
+    ) -> Result<Vec<UnsyncedShift>, CourseError> {
+        let statement = format!(
+            r#"
+            SELECT {COLUMNS}, field_shift_id
+            FROM golf_caddie_shifts
+            WHERE tenant_id = ?
+              AND shift_date BETWEEN ? AND ?
+              AND {BEHIND_FIELD}
+            ORDER BY shift_date, caddie_id
+            LIMIT ?
+            "#
+        );
+        let rows = sqlx::query(&statement)
+            .bind(tenant_id)
+            .bind(from)
+            .bind(to)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(provider)?;
+
+        rows.iter()
+            .map(|row| {
+                Ok(UnsyncedShift {
+                    shift: to_shift(row)?,
+                    field_shift_id: row.try_get("field_shift_id").map_err(provider)?,
+                })
+            })
+            .collect()
+    }
+
+    async fn mark_month_unsynced(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<(), CourseError> {
+        // The shift ids are kept. They are what stops the re-send from filing
+        // a second shift on a day Field already holds — clearing them here
+        // would turn a repair into a duplication.
+        sqlx::query(
+            r#"
+            UPDATE golf_caddie_shifts
+            SET field_synced_at = NULL
+            WHERE tenant_id = ?
+              AND shift_date BETWEEN ? AND ?
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(from)
+        .bind(to)
+        .execute(&self.pool)
+        .await
+        .map_err(provider)?;
+        Ok(())
+    }
+
+    async fn count_unsynced(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<u64, CourseError> {
+        let statement = format!(
+            r#"
+            SELECT COUNT(*) AS behind
+            FROM golf_caddie_shifts
+            WHERE tenant_id = ?
+              AND shift_date BETWEEN ? AND ?
+              AND {BEHIND_FIELD}
+            "#
+        );
+        let row = sqlx::query(&statement)
+            .bind(tenant_id)
+            .bind(from)
+            .bind(to)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(provider)?;
+        let behind: i64 = row.try_get("behind").map_err(provider)?;
+        Ok(behind.max(0) as u64)
+    }
 }
+
+/// A day Field has not been told about since it last changed.
+///
+/// Never `field_shift_id IS NULL`: a day off is deliberately unrepresented in
+/// Field, and reading "no shift there" as "behind" would keep every rest day
+/// in the queue forever. What settles it is whether the stamp is newer than
+/// the last edit.
+const BEHIND_FIELD: &str = "(field_synced_at IS NULL OR field_synced_at < updated_at)";
 
 #[cfg(test)]
 mod tests {
@@ -656,6 +754,231 @@ mod tests {
                 .unwrap()
                 .len(),
             links.len()
+        );
+    }
+    #[tokio::test]
+    async fn a_freshly_confirmed_month_is_entirely_behind_field() {
+        let repository = MySqlCaddieShiftRepository::new(test_pool().await);
+        let tenant = test_tenant("shift-behind-fresh");
+        repository
+            .save_shifts(
+                &tenant,
+                &[
+                    shift("caddie-1", 10, Some("out"), ShiftOrigin::Generated),
+                    shift("caddie-2", 10, None, ShiftOrigin::Generated),
+                ],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repository
+                .count_unsynced(&tenant, date(1), date(30))
+                .await
+                .unwrap(),
+            2
+        );
+        let batch = repository
+            .unsynced_shifts(&tenant, date(1), date(30), 10)
+            .await
+            .unwrap();
+        assert_eq!(batch.len(), 2);
+        assert!(batch.iter().all(|entry| entry.field_shift_id.is_none()));
+    }
+
+    #[tokio::test]
+    async fn a_day_told_to_field_drops_out_of_the_queue() {
+        let repository = MySqlCaddieShiftRepository::new(test_pool().await);
+        let tenant = test_tenant("shift-behind-caught-up");
+        repository
+            .save_shifts(
+                &tenant,
+                &[shift("caddie-1", 11, Some("out"), ShiftOrigin::Generated)],
+            )
+            .await
+            .unwrap();
+
+        repository
+            .set_field_shift_links(
+                &tenant,
+                &[FieldShiftLink::new(
+                    CaddieId::new("caddie-1"),
+                    date(11),
+                    Some("shift_a".to_string()),
+                )],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repository
+                .count_unsynced(&tenant, date(1), date(30))
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn a_day_off_that_field_never_held_still_leaves_the_queue() {
+        // Stamped with no shift id. Reading "no id" as "behind" would keep
+        // every rest day in the queue and the push would never finish.
+        let repository = MySqlCaddieShiftRepository::new(test_pool().await);
+        let tenant = test_tenant("shift-behind-day-off");
+        repository
+            .save_shifts(
+                &tenant,
+                &[shift("caddie-1", 12, None, ShiftOrigin::Generated)],
+            )
+            .await
+            .unwrap();
+
+        repository
+            .set_field_shift_links(
+                &tenant,
+                &[FieldShiftLink::new(
+                    CaddieId::new("caddie-1"),
+                    date(12),
+                    None,
+                )],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repository
+                .count_unsynced(&tenant, date(1), date(30))
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn changing_a_day_after_it_reached_field_puts_it_back_in_the_queue() {
+        // The whole reason the mark is a timestamp: this day already has a
+        // shift id, and Field is holding the previous version of it.
+        let repository = MySqlCaddieShiftRepository::new(test_pool().await);
+        let tenant = test_tenant("shift-behind-changed");
+        repository
+            .save_shifts(
+                &tenant,
+                &[shift("caddie-1", 13, Some("out"), ShiftOrigin::Generated)],
+            )
+            .await
+            .unwrap();
+        repository
+            .set_field_shift_links(
+                &tenant,
+                &[FieldShiftLink::new(
+                    CaddieId::new("caddie-1"),
+                    date(13),
+                    Some("shift_a".to_string()),
+                )],
+            )
+            .await
+            .unwrap();
+
+        repository
+            .save_shifts(
+                &tenant,
+                &[shift("caddie-1", 13, Some("in"), ShiftOrigin::Edited)],
+            )
+            .await
+            .unwrap();
+
+        let batch = repository
+            .unsynced_shifts(&tenant, date(13), date(13), 10)
+            .await
+            .unwrap();
+        assert_eq!(batch.len(), 1);
+        // The id rides along, so the push moves that shift rather than adding
+        // a second one to the same day.
+        assert_eq!(batch[0].field_shift_id.as_deref(), Some("shift_a"));
+    }
+
+    #[tokio::test]
+    async fn the_queue_is_read_a_batch_at_a_time_oldest_first() {
+        let repository = MySqlCaddieShiftRepository::new(test_pool().await);
+        let tenant = test_tenant("shift-behind-batched");
+        repository
+            .save_shifts(
+                &tenant,
+                &[
+                    shift("caddie-1", 16, Some("out"), ShiftOrigin::Generated),
+                    shift("caddie-1", 14, Some("out"), ShiftOrigin::Generated),
+                    shift("caddie-1", 15, Some("out"), ShiftOrigin::Generated),
+                ],
+            )
+            .await
+            .unwrap();
+
+        let batch = repository
+            .unsynced_shifts(&tenant, date(1), date(30), 2)
+            .await
+            .unwrap();
+
+        assert_eq!(batch.len(), 2);
+        assert_eq!(batch[0].shift.date(), date(14));
+        assert_eq!(batch[1].shift.date(), date(15));
+    }
+
+    #[tokio::test]
+    async fn re_sending_a_month_queues_it_again_without_losing_the_shift_ids() {
+        // Clearing the ids here would turn a repair into a second shift on
+        // every day Field already holds.
+        let repository = MySqlCaddieShiftRepository::new(test_pool().await);
+        let tenant = test_tenant("shift-behind-resend");
+        repository
+            .save_shifts(
+                &tenant,
+                &[shift("caddie-1", 17, Some("out"), ShiftOrigin::Generated)],
+            )
+            .await
+            .unwrap();
+        repository
+            .set_field_shift_links(
+                &tenant,
+                &[FieldShiftLink::new(
+                    CaddieId::new("caddie-1"),
+                    date(17),
+                    Some("shift_a".to_string()),
+                )],
+            )
+            .await
+            .unwrap();
+
+        repository
+            .mark_month_unsynced(&tenant, date(1), date(30))
+            .await
+            .unwrap();
+
+        let batch = repository
+            .unsynced_shifts(&tenant, date(17), date(17), 10)
+            .await
+            .unwrap();
+        assert_eq!(batch.len(), 1);
+        assert_eq!(batch[0].field_shift_id.as_deref(), Some("shift_a"));
+    }
+
+    #[tokio::test]
+    async fn one_tenants_queue_is_invisible_to_another() {
+        let repository = MySqlCaddieShiftRepository::new(test_pool().await);
+        let mine = test_tenant("shift-behind-mine");
+        repository
+            .save_shifts(
+                &mine,
+                &[shift("caddie-1", 18, Some("out"), ShiftOrigin::Generated)],
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repository
+                .count_unsynced(&test_tenant("shift-behind-theirs"), date(1), date(30))
+                .await
+                .unwrap(),
+            0
         );
     }
 }

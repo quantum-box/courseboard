@@ -68,6 +68,7 @@ mod seed_demo_board;
 mod shift_rules;
 mod simulate_green_fee_range;
 mod slot_overrides;
+mod sync_caddie_shifts_to_field;
 mod update_caddie;
 mod update_caddie_assignment;
 mod update_caddie_shift;
@@ -159,6 +160,7 @@ pub use simulate_green_fee_range::SimulateGreenFeeRangeUseCase;
 pub use slot_overrides::{
     DeleteSlotOverridesUseCase, ListSlotOverridesUseCase, UpsertSlotOverridesUseCase,
 };
+pub use sync_caddie_shifts_to_field::{FieldSyncProgress, SyncCaddieShiftsToFieldUseCase};
 pub use update_caddie::UpdateCaddieUseCase;
 pub use update_caddie_assignment::UpdateCaddieAssignmentUseCase;
 pub use update_caddie_shift::UpdateCaddieShiftUseCase;

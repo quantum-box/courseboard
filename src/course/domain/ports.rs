@@ -16,9 +16,10 @@ use super::{
     ReceptionSheet, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
     ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
     ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
-    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
-    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
-    UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
+    SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
+    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes,
+    YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -434,6 +435,48 @@ pub trait CaddieShiftGateway: Send + Sync {
         to: NaiveDate,
     ) -> Result<Vec<FieldShiftLink>, CourseError>;
 
+    /// Confirmed days Field has not been told about since they last changed,
+    /// oldest first, at most `limit` of them.
+    ///
+    /// Confirming a month rewrites the whole roster in one operation, and the
+    /// thousand-odd upstream calls that implies do not belong in the request a
+    /// person is waiting on. So the push runs afterwards, and asks this for
+    /// one batch at a time until nothing is left.
+    ///
+    /// Behind, not merely unsent: a day re-confirmed with different hours
+    /// already carries a `field_shift_id`, and Field still holds the previous
+    /// version of it.
+    async fn unsynced_shifts(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+        limit: u32,
+    ) -> Result<Vec<UnsyncedShift>, CourseError>;
+
+    /// Treat every day in the window as behind again.
+    ///
+    /// The push stamps a day it could not file — a caddie with no staff record
+    /// — so the queue can empty. Closing that gap on the roster changes
+    /// nothing about the confirmed day, so nothing puts those days back by
+    /// itself; this does. Also how a month deleted on Field's side is
+    /// recovered.
+    async fn mark_month_unsynced(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<(), CourseError>;
+
+    /// How many days in the window are still behind. What the screen counts
+    /// down, and how the push knows it is finished.
+    async fn count_unsynced(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<u64, CourseError>;
+
     /// Record what Field now holds for these days.
     ///
     /// Written after the Field call rather than before it, so an id is only
@@ -444,6 +487,11 @@ pub trait CaddieShiftGateway: Send + Sync {
     /// Days with no confirmed shift row are skipped rather than created: the
     /// link describes a day the desk already decided, and inventing a row here
     /// would confirm work nobody planned.
+    ///
+    /// Also stamps the day as caught up with Field, which is what takes it out
+    /// of [`unsynced_shifts`](Self::unsynced_shifts). A day Field holds nothing
+    /// for by design — an off day — is stamped too, with no id: otherwise every
+    /// pass would pick it up, find nothing to do, and never finish.
     async fn set_field_shift_links(
         &self,
         tenant_id: &str,

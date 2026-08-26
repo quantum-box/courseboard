@@ -98,9 +98,13 @@ impl UpdateCaddieShiftUseCase {
 
         // Field first (ADR-0013 rule 4). If this fails nothing is written
         // anywhere, which is the one outcome that leaves no new drift behind.
+        let hours = self
+            .mirror
+            .opening_hours(credentials, shift.course_id().cloned())
+            .await?;
         let link = self
             .mirror
-            .execute(credentials, staff_id, &shift, existing, defaults)
+            .execute(credentials, staff_id, &shift, existing, defaults, &hours)
             .await?;
 
         self.shifts
