@@ -409,6 +409,58 @@ pub trait CaddieShiftGateway: Send + Sync {
     ) -> Result<Option<CaddieShift>, CourseError>;
 }
 
+/// Port for the generic side of a shift: that somebody is at work, and when.
+///
+/// Field's HRM already models this, so CourseBoard does not get to model it
+/// twice (ADR-0013). The port is deliberately free of golf: a staff member, a
+/// date, hours, and a note. Which course the caddie stands at and how many
+/// rounds they can take never crosses it — that is golf's own, and Field has
+/// no column for it by design.
+///
+/// Nothing here decides *whether* a shift should exist. The caller has already
+/// confirmed the month; this only mirrors the working part of it.
+#[async_trait]
+pub trait StaffShiftGateway: Send + Sync {
+    /// File a working day, or move the one already filed.
+    ///
+    /// `field_shift_id` is what a previous write filed for the same staff
+    /// member and date, if any. Passing it updates that shift; passing `None`
+    /// creates one. The id is only ever one this app stored itself, so a shift
+    /// belonging to another tenant is never named — Field's own ownership
+    /// check is a backstop, not the thing being relied on (PLT-3945).
+    async fn upsert_shift(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        staff_id: &str,
+        field_shift_id: Option<&str>,
+        shift: StaffShiftInput,
+    ) -> Result<String, CourseError>;
+
+    /// Withdraw a day: the caddie is not working it after all.
+    ///
+    /// A shift Field no longer has is not an error. The desk turning a day off
+    /// twice, or a retry after a delete that did land, both arrive here — and
+    /// both leave Field in the state the caller asked for.
+    async fn delete_shift(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        staff_id: &str,
+        field_shift_id: &str,
+    ) -> Result<(), CourseError>;
+}
+
+/// The generic shift Field is asked to hold. No golf in it, on purpose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaffShiftInput {
+    pub date: NaiveDate,
+    /// `HH:MM`, derived from the course's schedule where it has one.
+    pub start_time: String,
+    pub end_time: String,
+    /// Field's own vocabulary for the kind of day, left to the caller.
+    pub shift_type: Option<String>,
+    pub notes: Option<String>,
+}
+
 /// Port for the generic reservation schedule and the inventory it generates.
 ///
 /// Field owns these as resource-level APIs; a golf course reaches them through
