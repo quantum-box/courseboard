@@ -121,6 +121,7 @@ export const shifts: DeepPartial<typeof source> = {
     failed: 'The working days could not be sent to Field. Use "Re-send to Field" later',
     behind: '{{n}} days this month have not reached Field yet',
     unlinkable: '{{n}} days belong to caddies with no staff record, so they were not sent. Fix the roster, then re-send',
+    someFailed: 'Field would not take {{n}} days. Try "Re-send to Field" later',
     resend: 'Re-send to Field',
   },
   editor: {

@@ -125,8 +125,10 @@ type FieldSyncProgress = {
   filed: number
   /** Days withdrawn from Field because they are no longer worked. */
   withdrawn: number
-  /** Days whose caddie has no staff record, so there is nobody to file under. */
+  /** Days whose caddie has no usable staff record, so there is nobody to file under. */
   unlinkable: number
+  /** Days Field refused or could not answer for. */
+  failed: number
   /** Days still behind. Call again while this is above zero. */
   remaining: number
   done: boolean
@@ -428,6 +430,7 @@ export function ShiftBoardPage() {
   const pushMonthToField = useCallback(async (resend = false) => {
     let filed = 0
     let unlinkable = 0
+    let failed = 0
     try {
       // The loop stops on the server saying it is done, and also on the queue
       // failing to shrink. Trusting `done` alone means one unexpected answer
@@ -442,6 +445,7 @@ export function ShiftBoardPage() {
         )
         filed += progress.filed ?? 0
         unlinkable += progress.unlinkable ?? 0
+        failed += progress.failed ?? 0
         const remaining = Number.isFinite(progress.remaining) ? progress.remaining : 0
         setFieldSyncRemaining(remaining)
         if (progress.done || remaining === 0 || remaining >= previous) break
@@ -456,6 +460,12 @@ export function ShiftBoardPage() {
         showToast({
           tone: 'warning',
           message: t('shifts:fieldSync.unlinkable', { n: String(unlinkable) }),
+        })
+      }
+      if (failed > 0) {
+        showToast({
+          tone: 'danger',
+          message: t('shifts:fieldSync.someFailed', { n: String(failed) }),
         })
       }
     } catch (error) {

@@ -86,11 +86,21 @@ impl UpdateCaddieShiftUseCase {
 
         let shift = edit.apply(caddie_id.clone(), date, &workable, filed_status, updated_by)?;
 
+        // Only a staff member Field still has counts as a link. Field soft-
+        // deletes staff and a deleted one stops resolving, so a profile that
+        // still names it would have every write refused (PLT-3588) — and the
+        // profile keeps the id, because deleting the staff on Field's own
+        // screens does not reach back to clear it.
+        //
+        // The edit goes through either way. The desk cannot close that gap
+        // from this screen, and refusing would leave tomorrow's roster
+        // unfixable because somebody deleted a staff record.
         let staff_id = roster
             .caddies()
             .iter()
             .find(|caddie| caddie.id() == caddie_id)
-            .and_then(|caddie| caddie.staff_id());
+            .and_then(|caddie| caddie.staff_id())
+            .filter(|staff_id| roster.staff().iter().any(|member| member.id() == *staff_id));
         let existing = links
             .iter()
             .find(|link| &link.caddie_id == caddie_id && link.date == date)

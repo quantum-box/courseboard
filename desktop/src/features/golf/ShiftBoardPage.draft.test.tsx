@@ -108,7 +108,7 @@ beforeEach(() => {
     if (path.endsWith('/field-sync')) {
       // The board pushes the confirmed month to Field afterwards. Answering
       // "nothing left" keeps these tests about the plan, not the push.
-      return { filed: 0, withdrawn: 0, unlinkable: 0, remaining: 0, done: true }
+      return { filed: 0, withdrawn: 0, unlinkable: 0, failed: 0, remaining: 0, done: true }
     }
     if (path.startsWith('/v1/course/caddie-shift-plans/') && init?.method === 'POST') {
       return {

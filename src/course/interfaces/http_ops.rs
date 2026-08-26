@@ -1693,8 +1693,12 @@ pub struct FieldSyncProgressDto {
     /// Days withdrawn from Field because they are no longer worked.
     pub withdrawn: u64,
     /// Days that cannot reach Field: the caddie has no staff record to file
-    /// them under. Fix the roster, then re-send the month.
+    /// them under, or names one Field no longer has. Fix the roster, then
+    /// re-send the month.
     pub unlinkable: u64,
+    /// Days Field refused or could not answer for. Unlike `unlinkable`,
+    /// nothing about the roster explains these.
+    pub failed: u64,
     /// Days still behind. Call again while this is above zero.
     pub remaining: u64,
     pub done: bool,
@@ -1706,6 +1710,7 @@ impl From<FieldSyncProgress> for FieldSyncProgressDto {
             filed: value.filed(),
             withdrawn: value.withdrawn(),
             unlinkable: value.unlinkable(),
+            failed: value.failed(),
             remaining: value.remaining(),
             done: value.done(),
         }

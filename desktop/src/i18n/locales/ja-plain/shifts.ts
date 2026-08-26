@@ -112,6 +112,7 @@ export const shifts: DeepPartial<typeof source> = {
     failed: '出勤の予定をFieldへ送れませんでした。あとで「Fieldへ送り直す」を押してください',
     behind: 'この月のうち{{n}}日分が、まだFieldに届いていません',
     unlinkable: '{{n}}日分は、社員の名簿とつながっていない人のぶんなので送れませんでした。名簿を直してから送り直してください',
+    someFailed: '{{n}}日分をFieldが受け取ってくれませんでした。すこし時間をおいて「Fieldへ送り直す」を押してください',
     resend: 'Fieldへ送り直す',
   },
   editor: {

@@ -118,6 +118,7 @@ export const shifts = {
     failed: '勤務予定をFieldへ送れませんでした。あとで「Fieldへ再送」を押してください',
     behind: 'この月のうち{{n}}日分が、まだFieldへ届いていません',
     unlinkable: '{{n}}日分は、社員名簿に紐づいていないキャディのため送れませんでした。名簿を直してから再送してください',
+    someFailed: '{{n}}日分をFieldが受け付けませんでした。時間をおいて「Fieldへ再送」を試してください',
     resend: 'Fieldへ再送',
   },
   editor: {

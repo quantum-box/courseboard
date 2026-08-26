@@ -2979,7 +2979,7 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   const fieldSyncMatch = pathname.match(/^\/v1\/course\/caddie-shift-plans\/([^/]+)\/field-sync$/)
   if (fieldSyncMatch) {
     if (method === 'POST') {
-      return hit({ filed: 0, withdrawn: 0, unlinkable: 0, remaining: 0, done: true })
+      return hit({ filed: 0, withdrawn: 0, unlinkable: 0, failed: 0, remaining: 0, done: true })
     }
     return hit({ remaining: 0 })
   }
