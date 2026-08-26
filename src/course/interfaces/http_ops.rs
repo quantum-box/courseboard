@@ -15,7 +15,7 @@ use super::openapi::ErrorBody;
 
 use super::http::{
     caddie_rank_fee_gateway, catalog_gateway, credentials, ops_gateway, reservation_gateway,
-    CaddieAssignmentDto, CaddieDto, ItemsResponse,
+    shift_mirror, CaddieAssignmentDto, CaddieDto, ItemsResponse,
 };
 use crate::course::domain::{
     parse_weekday, weekday_key, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
@@ -1718,7 +1718,12 @@ pub async fn update_caddie_shift(
         pinned: body.pinned,
         note: body.note,
     };
-    let use_case = UpdateCaddieShiftUseCase::new(ops_gateway(&state), state.caddie_shifts());
+    let use_case = UpdateCaddieShiftUseCase::new(
+        ops_gateway(&state),
+        state.caddie_shifts(),
+        state.shift_rules(),
+        shift_mirror(&state),
+    );
     let shift = use_case
         .execute(credentials, &caddie_id, date, edit, body.updated_by)
         .await

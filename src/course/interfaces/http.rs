@@ -26,8 +26,8 @@ use crate::course::domain::{
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
-    FieldReservationGateway, MySqlCaddieRankFeeRepository, MySqlCourseOrderRepository,
-    MySqlGeneratedThroughRepository, MySqlPlayerTagOptionsRepository,
+    FieldReservationGateway, FieldStaffShiftGateway, MySqlCaddieRankFeeRepository,
+    MySqlCourseOrderRepository, MySqlGeneratedThroughRepository, MySqlPlayerTagOptionsRepository,
     MySqlPricingSettingsRepository, MySqlSlotOverrideRepository, PartyPlayerInput,
 };
 use crate::course::usecase::{
@@ -38,10 +38,10 @@ use crate::course::usecase::{
     GetTeeSheetUseCase, LinkCourseResourceUseCase, ListCaddieAssignmentsUseCase,
     ListCaddiesUseCase, ListCoursesUseCase, ListProductSlotsUseCase,
     ListReservationProductsUseCase, ListResourcesUseCase, ListSlotOverridesUseCase,
-    ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase,
-    SeedDemoBoardUseCase, SetBookingHorizonUseCase, UpdateCourseUseCase,
-    UpdateReservationBookingInput, UpdateReservationBookingUseCase, UpdateReservationPartyUseCase,
-    UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
+    MirrorShiftToField, ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase,
+    ReplaceProductSlotsUseCase, SeedDemoBoardUseCase, SetBookingHorizonUseCase,
+    UpdateCourseUseCase, UpdateReservationBookingInput, UpdateReservationBookingUseCase,
+    UpdateReservationPartyUseCase, UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -64,6 +64,25 @@ pub(crate) fn ops_gateway(state: &AppState) -> Arc<FieldGolfOpsGateway> {
     Arc::new(FieldGolfOpsGateway::new(
         state.http_client.clone(),
         field_api_url,
+    ))
+}
+
+/// The generic half of a confirmed shift, written to Field's HRM.
+///
+/// The catalog gateway is handed over twice on purpose: it answers both the
+/// course-to-resource question and the schedule behind that resource, and
+/// building a second one would open a second connection pool for the same
+/// upstream.
+pub(crate) fn shift_mirror(state: &AppState) -> Arc<MirrorShiftToField> {
+    let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
+    let catalog = catalog_gateway(state);
+    Arc::new(MirrorShiftToField::new(
+        Arc::new(FieldStaffShiftGateway::new(
+            state.http_client.clone(),
+            field_api_url,
+        )),
+        catalog.clone(),
+        catalog,
     ))
 }
 
