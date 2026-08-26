@@ -115,7 +115,35 @@ impl DefaultWorkingHours {
             midday_minutes,
         })
     }
+
+    /// What a club that has said nothing works: 07:00-17:00, handing over at
+    /// noon.
+    ///
+    /// The same numbers the `golf_shift_rules` columns default to, so a tenant
+    /// with no row and a tenant with a freshly inserted one answer alike. A
+    /// club whose courses have a reception schedule never reaches these.
+    pub fn club_default() -> Self {
+        Self {
+            full_day: ShiftHours {
+                start_minutes: DEFAULT_WORK_START_MINUTES,
+                end_minutes: DEFAULT_WORK_END_MINUTES,
+            },
+            midday_minutes: DEFAULT_MIDDAY_MINUTES,
+        }
+    }
+
+    pub fn full_day(&self) -> ShiftHours {
+        self.full_day
+    }
+
+    pub fn midday_minutes(&self) -> u16 {
+        self.midday_minutes
+    }
 }
+
+const DEFAULT_WORK_START_MINUTES: u16 = 7 * 60;
+const DEFAULT_WORK_END_MINUTES: u16 = 17 * 60;
+const DEFAULT_MIDDAY_MINUTES: u16 = 12 * 60;
 
 /// The hours a span covers on one day at one course.
 ///

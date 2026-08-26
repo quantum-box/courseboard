@@ -9,16 +9,16 @@ use super::{
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
     CaddieRankFees, CaddieRating, CaddieRoster, CaddieShift, CaddieStaff, Course, CourseError,
     CourseId, CourseOrder, Customer, CustomerId, CustomerMembership, CustomerSearchQuery,
-    DailyBudget, DailyBudgetQuery, DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities,
-    FieldRequestContext, GenerationSummary, GolfPricingSettings, InventoryWatermark,
-    MembershipPlan, MembershipPlanId, MonthlySettlement, NewCustomer, NewReservation, PartyDetails,
-    PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet, ReplaceCaddieMemberships,
-    Reservation, ReservationBookingUpdate, ReservationId, ReservationPolicy, ReservationProduct,
-    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
-    SeededReservation, ShiftPolicy, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot,
-    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan,
-    UpsertReservationProduct, WorkedMinutes, YearMonth,
+    DailyBudget, DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus,
+    FieldClientCapabilities, FieldRequestContext, FieldShiftLink, GenerationSummary,
+    GolfPricingSettings, InventoryWatermark, MembershipPlan, MembershipPlanId, MonthlySettlement,
+    NewCustomer, NewReservation, PartyDetails, PlayerTagOptions, ProductSlot, ReceptionDraft,
+    ReceptionSheet, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
+    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
+    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
+    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
+    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
+    UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -376,6 +376,19 @@ pub trait ShiftRulesGateway: Send + Sync {
         tenant_id: &str,
         policy: &ShiftPolicy,
     ) -> Result<ShiftPolicy, CourseError>;
+
+    /// The hours to file for a day the course schedule cannot answer for — a
+    /// shift placed on no course, and a weekday the course stays shut.
+    ///
+    /// Read separately from the policy above rather than carried on it: the
+    /// planner that needs the rest-day rules has no use for clock times, and
+    /// the write-through that needs the times does not plan anything. Never
+    /// absent — a tenant that has set nothing gets
+    /// [`DefaultWorkingHours::club_default`].
+    async fn get_default_working_hours(
+        &self,
+        tenant_id: &str,
+    ) -> Result<DefaultWorkingHours, CourseError>;
 }
 
 /// Port for the confirmed shifts a month was planned into.
@@ -407,6 +420,35 @@ pub trait CaddieShiftGateway: Send + Sync {
         caddie_id: &CaddieId,
         date: NaiveDate,
     ) -> Result<Option<CaddieShift>, CourseError>;
+
+    /// Which Field shift each day in the window was written through to.
+    ///
+    /// Only days that have one appear. A day absent from the answer has never
+    /// reached Field, or was withdrawn from it — both ordinary, and the
+    /// write-through treats them the same way: there is nothing to update, so
+    /// it files afresh.
+    async fn field_shift_links(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<FieldShiftLink>, CourseError>;
+
+    /// Record what Field now holds for these days.
+    ///
+    /// Written after the Field call rather than before it, so an id is only
+    /// ever stored for a shift Field acknowledged. A day whose link is `None`
+    /// is cleared, which is how a day turned off stops naming a shift that no
+    /// longer exists.
+    ///
+    /// Days with no confirmed shift row are skipped rather than created: the
+    /// link describes a day the desk already decided, and inventing a row here
+    /// would confirm work nobody planned.
+    async fn set_field_shift_links(
+        &self,
+        tenant_id: &str,
+        links: &[FieldShiftLink],
+    ) -> Result<(), CourseError>;
 }
 
 /// Port for the generic side of a shift: that somebody is at work, and when.

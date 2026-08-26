@@ -63,8 +63,8 @@ pub use caddie_ranking::{
     rank_caddies, AttendanceState, RankedCaddie, RankingCandidate, RankingOptions,
 };
 pub use caddie_shift::{
-    parse_weekday, plan_month_shifts, weekday_key, CaddieShift, MonthShiftPlan, ShiftEdit,
-    ShiftOrigin, ShiftPolicy, ShiftRequest, ShiftSeed, ShiftSpan, UnfiledRequest,
+    parse_weekday, plan_month_shifts, weekday_key, CaddieShift, FieldShiftLink, MonthShiftPlan,
+    ShiftEdit, ShiftOrigin, ShiftPolicy, ShiftRequest, ShiftSeed, ShiftSpan, UnfiledRequest,
     MAX_CONSECUTIVE_WORK_DAYS, MAX_ROUNDS_PER_SHIFT,
 };
 pub use commercial::{
