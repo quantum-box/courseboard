@@ -85,9 +85,16 @@ export function YearMonthPicker({
   // month, last month — and they used to exist on only one of the five screens.
   // The dropdowns are for the jump nobody wants to click twelve times, so they
   // sit behind the label rather than beside it.
+  // `className` is the caller's layout for the field, not for the control: the
+  // screens pass `sm:w-56` / `sm:w-64` to size the labelled block. The control
+  // itself is content-width, which takes two things — `.field` is a grid, so a
+  // child stretches across the column unless told not to (and `inline-flex`
+  // would be blockified back to `flex` there anyway), and `w-fit` covers the
+  // callers that place it outside a field. Without both, the box ran to the
+  // full 256px and left a gap after the forward arrow.
   const control = (
     <div
-      className={`flex items-center gap-1 rounded-md border border-border bg-background p-1 ${className}`}
+      className="flex w-fit justify-self-start items-center gap-1 rounded-md border border-border bg-background p-1"
       role="group"
       aria-label={label}
       aria-describedby={error ? errorId : undefined}
@@ -164,11 +171,11 @@ export function YearMonthPicker({
   ) : null
 
   if (hideLabel) {
-    return <>{control}{message}</>
+    return <div className={className}>{control}{message}</div>
   }
 
   return (
-    <Field requirement="none" label={label}>
+    <Field requirement="none" label={label} className={className}>
       {control}
       {message}
     </Field>
