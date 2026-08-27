@@ -10,8 +10,6 @@
 //! survives that round trip is genuinely persisted; one that lived in a cache or
 //! a struct field would not.
 
-#![cfg(test)]
-
 use std::sync::{Arc, Mutex};
 
 use axum::{
