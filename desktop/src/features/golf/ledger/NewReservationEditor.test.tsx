@@ -115,4 +115,23 @@ describe('the ledger new-booking sheet', () => {
       groupNumber: null,
     })
   })
+
+  it('keeps the caddie plan selectable and saveable regardless of supply', () => {
+    // Caddie supply no longer guards the plan list at all (SCC-27): the sheet
+    // takes no `caddieSupply` prop any more, so this only has to show the
+    // caddie plan is a plain, always-enabled choice.
+    renderEditor()
+
+    const caddie = screen.getByRole('radio', { name: /キャディ付き/ }) as HTMLInputElement
+    expect(caddie.disabled).toBe(false)
+    expect(caddie.checked).toBe(true)
+
+    fireEvent.change(input(i18next.t('ledger:newReservation.customerName')), {
+      target: { value: '本田' },
+    })
+    const save = screen.getByRole('button', {
+      name: i18next.t('ledger:newReservation.save'),
+    }) as HTMLButtonElement
+    expect(save.disabled).toBe(false)
+  })
 })

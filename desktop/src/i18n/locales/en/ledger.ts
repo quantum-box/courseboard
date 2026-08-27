@@ -66,6 +66,7 @@ export const ledger = {
     closed: 'Closed',
     special: 'Special rate',
     retired: 'No start slot',
+    unassignedCaddie: 'Unassigned',
   },
   legend: {
     label: 'What the colours mean',
@@ -162,12 +163,6 @@ export const ledger = {
     save: 'Book',
     saving: 'Booking…',
     saved: 'Booked',
-    caddieSoldOut: 'No caddie left',
-    caddieSoldOutTitle: "Today's caddies are all spoken for",
-    caddieSoldOutBody:
-      'The confirmed shifts for {{course}} already cover as many groups as '
-      + "today's caddies can take. Self-play plans are still bookable. To take "
-      + 'this round with a caddie, add one on the shift board first.',
     noPlanTitle: 'No plan to book under',
     noPlanBody:
       '{{course}} sells no plan yet. Create a plan before booking this tee time.',

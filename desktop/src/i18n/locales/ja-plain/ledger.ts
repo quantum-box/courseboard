@@ -62,6 +62,7 @@ export const ledger = {
     closed: 'うりどめ',
     special: 'とくべつな りょうきん',
     retired: 'スタート枠が ありません',
+    unassignedCaddie: '未割り当て',
   },
   legend: {
     label: '色の いみ',
@@ -158,12 +159,6 @@ export const ledger = {
     save: '予約を 入れる',
     saving: '入れて います…',
     saved: '予約を 入れました',
-    caddieSoldOut: 'キャディが いっぱいです',
-    caddieSoldOutTitle: 'きょうの キャディは いっぱいです',
-    caddieSoldOutBody:
-      '{{course}} の きょうの キャディは、うけられる くみすうに たっしています。'
-      + 'セルフの しょうひんが あれば えらべます。キャディつきで うけたい ときは、'
-      + 'シフトひょうで キャディを ふやして ください。',
     noPlanTitle: 'プレーの しょうひんが ありません',
     noPlanBody:
       '{{course}} で 売れる プレーの しょうひんが まだ ありません。しょうひんを 作ってから 予約を 入れてください。',

@@ -1,9 +1,10 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@tachyon-sdk/native-ui'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
-import { Fragment, type MouseEvent as ReactMouseEvent } from 'react'
+import { Fragment, useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { CourseCaddieSupply } from '../caddieCourseSupply'
+import type { CoverageAssignment } from '../caddieRoundCoverage'
 import type { TeeReservation } from '../timeline/models'
 import type { SlotContextTarget } from './SlotContextMenu'
 import {
@@ -20,6 +21,8 @@ import {
   seatCells,
   seatColumnCount,
   slotTone,
+  unassignedCaddieReservationIds,
+  type ResourceStatus,
   type SeatCell,
 } from './ledgerLayout'
 import type { LedgerColumn, LedgerSlot } from './models'
@@ -44,6 +47,8 @@ export type SlotSelection = {
 export function LedgerBoard({
   columns,
   caddieSupply,
+  shiftsConfirmed,
+  assignments,
   nowMinutes,
   selection,
   selectedReservationId,
@@ -57,6 +62,12 @@ export function LedgerBoard({
   columns: LedgerColumn[]
   /** Today's caddie room per course. Empty when the lookup has not landed. */
   caddieSupply: Map<string, CourseCaddieSupply>
+  /** Whether the day has at least one confirmed caddie shift (day-wide, not
+   *  per course). `unknown`/`failed` states are folded to `false` by the
+   *  caller so this component only ever sees a plain boolean. */
+  shiftsConfirmed: boolean
+  /** Today's caddie assignments. Only `loaded` yields an unassigned badge. */
+  assignments: ResourceStatus<{ items: CoverageAssignment[] }>
   /** Minutes past midnight in the course's clock, or null on another day. */
   nowMinutes: number | null
   selection: SlotSelection | null
@@ -68,6 +79,10 @@ export function LedgerBoard({
   onMoveColumn: (golfCourseId: string, delta: -1 | 1) => void
   onOpenCourseSetup: (golfCourseId: string) => void
 }) {
+  const unassignedIds = useMemo(
+    () => unassignedCaddieReservationIds(columns, assignments),
+    [columns, assignments],
+  )
   return (
     <div className="ledger-board">
       {columns.map((column, index) => (
@@ -75,6 +90,8 @@ export function LedgerBoard({
           key={column.golfCourseId}
           column={column}
           caddieSupply={caddieSupply.get(column.golfCourseId) ?? null}
+          shiftsConfirmed={shiftsConfirmed}
+          unassignedIds={unassignedIds}
           nowMinutes={nowMinutes}
           canMoveLeft={index > 0}
           canMoveRight={index < columns.length - 1}
@@ -97,6 +114,8 @@ export function LedgerBoard({
 function LedgerColumnTable({
   column,
   caddieSupply,
+  shiftsConfirmed,
+  unassignedIds,
   nowMinutes,
   canMoveLeft,
   canMoveRight,
@@ -111,6 +130,8 @@ function LedgerColumnTable({
 }: {
   column: LedgerColumn
   caddieSupply: CourseCaddieSupply | null
+  shiftsConfirmed: boolean
+  unassignedIds: Set<string>
   nowMinutes: number | null
   canMoveLeft: boolean
   canMoveRight: boolean
@@ -267,6 +288,8 @@ function LedgerColumnTable({
                 column={column}
                 slot={slot}
                 seatColumns={seatColumns}
+                shiftsConfirmed={shiftsConfirmed}
+                unassignedIds={unassignedIds}
                 isNow={slot.teeTime === nowTeeTime}
                 isSelected={selected.has(slot.teeTime)}
                 selectedReservationId={selectedReservationId}
@@ -287,6 +310,8 @@ function SlotRows({
   column,
   slot,
   seatColumns,
+  shiftsConfirmed,
+  unassignedIds,
   isNow,
   isSelected,
   selectedReservationId,
@@ -298,6 +323,8 @@ function SlotRows({
   column: LedgerColumn
   slot: LedgerSlot
   seatColumns: number
+  shiftsConfirmed: boolean
+  unassignedIds: Set<string>
   isNow: boolean
   isSelected: boolean
   selectedReservationId: string | null
@@ -405,6 +432,8 @@ function SlotRows({
           <GroupCell
             item={item}
             isSelected={selectedReservationId === item.id}
+            shiftsConfirmed={shiftsConfirmed}
+            unassignedIds={unassignedIds}
             onSelect={() => onSelectReservation(item.id)}
           />
           {seatCells(item, seatColumns).map((cell, seatIndex) => (
@@ -468,16 +497,26 @@ function SlotEmptyLabel({
 function GroupCell({
   item,
   isSelected,
+  shiftsConfirmed,
+  unassignedIds,
   onSelect,
 }: {
   item: TeeReservation
   isSelected: boolean
+  shiftsConfirmed: boolean
+  unassignedIds: Set<string>
   onSelect: () => void
 }) {
   const { t } = useTranslation(['ledger'])
   const organizer = item.party?.organizer?.trim()
+  const isUnassignedCaddie =
+    item.playType === 'caddie' && shiftsConfirmed && unassignedIds.has(item.id)
   return (
-    <td className={`ledger-cell-group${isSelected ? ' is-selected' : ''}`}>
+    <td
+      className={`ledger-cell-group${isSelected ? ' is-selected' : ''}${
+        isUnassignedCaddie ? ' is-unassigned-caddie' : ''
+      }`}
+    >
       <button type="button" className="ledger-group-button" onClick={onSelect}>
         <span className={`ledger-play-type ledger-play-type-${item.playType}`}>
           {item.playType === 'caddie' ? 'C' : 'S'}
@@ -485,6 +524,11 @@ function GroupCell({
         <span className="ledger-group-text">
           <strong>{groupTitle(item)}</strong>
           {organizer ? <small>{t('ledger:cell.organizer', { name: organizer })}</small> : null}
+          {isUnassignedCaddie ? (
+            <small className="ledger-unassigned-badge">
+              {t('ledger:cell.unassignedCaddie')}
+            </small>
+          ) : null}
         </span>
       </button>
     </td>

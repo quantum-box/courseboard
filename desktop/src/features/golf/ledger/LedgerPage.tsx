@@ -47,7 +47,12 @@ import {
   writeStoredCourseIds,
   type CourseOption,
 } from './courseSelection'
-import { summarizeLedger, teeTimesBetween } from './ledgerLayout'
+import {
+  dayHasConfirmedShifts,
+  resourceStatus,
+  summarizeLedger,
+  teeTimesBetween,
+} from './ledgerLayout'
 import type { PartyDetails, SlotMarkKind, TeeLedgerResponse } from './models'
 import {
   blockFixRoute,
@@ -264,6 +269,26 @@ export function LedgerPage() {
     { cacheKey: `caddie-course-supply:${date}` },
   )
 
+  /** Today's caddie assignments, joined against the board to find rounds
+   *  nobody is covering (SCC-27). */
+  const caddieAssignmentsResource = useResource(
+    () => courseboardApiJson<ListResponse<{ reservationId?: string | null; status: string }>>(
+      `${COURSE_API}/caddie-assignments?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`,
+    ),
+    [date],
+    { cacheKey: `caddie-assignments:${date}` },
+  )
+
+  /** Whether the day has at least one confirmed caddie shift (day-wide, not
+   *  per course — SCC-27). Only the presence of rows matters here. */
+  const caddieShiftsResource = useResource(
+    () => courseboardApiJson<ListResponse<unknown>>(
+      `${COURSE_API}/caddie-shifts?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`,
+    ),
+    [date],
+    { cacheKey: `caddie-shifts:${date}:${date}` },
+  )
+
   const refreshAll = () => {
     ledger.refresh()
     coursesResource.refresh()
@@ -272,6 +297,8 @@ export function LedgerPage() {
     productsResource.refresh()
     playerTagResource.refresh()
     caddieSupplyResource.refresh()
+    caddieAssignmentsResource.refresh()
+    caddieShiftsResource.refresh()
   }
   useRegisterPageReload(refreshAll)
 
@@ -741,6 +768,8 @@ export function LedgerPage() {
           <LedgerBoard
             columns={columns}
             caddieSupply={caddieSupply}
+            shiftsConfirmed={dayHasConfirmedShifts(resourceStatus(caddieShiftsResource))}
+            assignments={resourceStatus(caddieAssignmentsResource)}
             nowMinutes={nowMinutes}
             selection={selection}
             selectedReservationId={editingReservationId}
@@ -797,7 +826,6 @@ export function LedgerPage() {
         plans={bookablePlans}
         plansLoading={productsResource.loading}
         playerTagOptions={playerTagOptions}
-        caddieSupply={bookingTarget ? caddieSupply.get(bookingTarget.golfCourseId) ?? null : null}
         onClose={() => setBookingTarget(null)}
         onCreated={booking => {
           void ledger.refresh()

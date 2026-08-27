@@ -1,20 +1,22 @@
 import { describe, expect, it } from 'vitest'
 
 import type { CourseCaddieSupply } from '../caddieCourseSupply'
+import type { CoverageAssignment } from '../caddieRoundCoverage'
 import type { TeeReservation } from '../timeline/models'
 import type { LedgerColumn, LedgerSlot } from './models'
 import {
   currentSlotTeeTime,
   DEFAULT_SEAT_COLUMNS,
   MAX_SEAT_COLUMNS,
+  dayHasConfirmedShifts,
   formatCaddieCapacity,
   formatCaddieShortfall,
   groupTitle,
-  caddieRoundsSoldOut,
   knowsCaddieCapacity,
   knowsRemainingCapacity,
   observedIntervalMinutes,
   remainingGroups,
+  resourceStatus,
   seatCells,
   seatColumnCount,
   slotTone,
@@ -22,6 +24,8 @@ import {
   summarizeLedger,
   teeTimeMinutes,
   teeTimesBetween,
+  unassignedCaddieReservationIds,
+  type ResourceStatus,
 } from './ledgerLayout'
 
 function reservation(overrides: Partial<TeeReservation> = {}): TeeReservation {
@@ -383,38 +387,93 @@ describe('knowsCaddieCapacity', () => {
   })
 })
 
-describe('caddieRoundsSoldOut', () => {
-  it('refuses another caddie round once the day is spoken for', () => {
-    expect(caddieRoundsSoldOut(supply({ roundsCapacity: 8, caddieAttachedGroups: 8, shortfall: 0 })))
-      .toBe(true)
+describe('resourceStatus', () => {
+  it('is unknown while the load has not landed', () => {
+    expect(resourceStatus({ data: null, error: null, loading: true })).toEqual({ kind: 'unknown' })
   })
 
-  it('stays refused once the day went past its limit', () => {
-    expect(caddieRoundsSoldOut(supply({ roundsCapacity: 4, caddieAttachedGroups: 6, shortfall: -2 })))
-      .toBe(true)
+  it('is failed once the loader threw', () => {
+    expect(resourceStatus({ data: null, error: new Error('boom'), loading: false }))
+      .toEqual({ kind: 'failed' })
   })
 
-  it('allows one while rounds remain', () => {
-    expect(caddieRoundsSoldOut(supply({ roundsCapacity: 10, caddieAttachedGroups: 4, shortfall: 6 })))
-      .toBe(false)
+  it('is loaded once data has arrived', () => {
+    expect(resourceStatus({ data: { items: [] }, error: null, loading: false }))
+      .toEqual({ kind: 'loaded', value: { items: [] } })
   })
 
-  it('allows one when the month was never confirmed', () => {
-    // Zero against zero is nobody having decided, not the club refusing. The
-    // desk keeps its caddie rounds rather than losing them to missing shifts.
-    const unconfirmed = supply({
-      workingCaddies: 0,
-      roundsCapacity: 0,
-      caddieAttachedGroups: 0,
-      movableCaddies: 0,
-      shortfall: 0,
+  it('prefers failed over data left over from before the error', () => {
+    // A revalidation that fails keeps the last good page on screen, but the
+    // status itself must still say the read is not to be trusted.
+    expect(resourceStatus({ data: { items: [] }, error: new Error('boom'), loading: false }))
+      .toEqual({ kind: 'failed' })
+  })
+})
+
+describe('dayHasConfirmedShifts', () => {
+  it('is true once at least one shift is confirmed', () => {
+    expect(dayHasConfirmedShifts({ kind: 'loaded', value: { items: [{}] } })).toBe(true)
+  })
+
+  it('is false on a day with zero confirmed shifts', () => {
+    expect(dayHasConfirmedShifts({ kind: 'loaded', value: { items: [] } })).toBe(false)
+  })
+
+  it('is false while the lookup is unknown or failed', () => {
+    expect(dayHasConfirmedShifts({ kind: 'unknown' })).toBe(false)
+    expect(dayHasConfirmedShifts({ kind: 'failed' })).toBe(false)
+  })
+})
+
+describe('unassignedCaddieReservationIds', () => {
+  function coverageColumn(golfCourseId: string, items: TeeReservation[]): LedgerColumn {
+    return column({ golfCourseId, slots: [slot({ items })] })
+  }
+
+  it('includes a caddie round with no assignment covering it', () => {
+    const columns = [coverageColumn('course-1', [reservation({ id: 'r1', playType: 'caddie' })])]
+    const ids = unassignedCaddieReservationIds(columns, {
+      kind: 'loaded',
+      value: { items: [] },
     })
-    expect(caddieRoundsSoldOut(unconfirmed)).toBe(false)
+    expect(ids.has('r1')).toBe(true)
   })
 
-  it('allows one while the lookup is still out', () => {
-    expect(caddieRoundsSoldOut(null)).toBe(false)
-    expect(caddieRoundsSoldOut(undefined)).toBe(false)
+  it('leaves out a self-play round regardless of assignments', () => {
+    const columns = [coverageColumn('course-1', [reservation({ id: 'r1', playType: 'self' })])]
+    const ids = unassignedCaddieReservationIds(columns, {
+      kind: 'loaded',
+      value: { items: [] },
+    })
+    expect(ids.has('r1')).toBe(false)
+  })
+
+  it('treats a cancelled assignment as no coverage at all', () => {
+    const columns = [coverageColumn('course-1', [reservation({ id: 'r1', playType: 'caddie' })])]
+    const ids = unassignedCaddieReservationIds(columns, {
+      kind: 'loaded',
+      value: { items: [{ reservationId: 'r1', status: 'cancelled' }] },
+    })
+    expect(ids.has('r1')).toBe(true)
+  })
+
+  it('gathers rounds across more than one column into a single set', () => {
+    const columns = [
+      coverageColumn('course-1', [reservation({ id: 'r1', playType: 'caddie' })]),
+      coverageColumn('course-2', [reservation({ id: 'r2', playType: 'caddie' })]),
+    ]
+    const assignments: ResourceStatus<{ items: CoverageAssignment[] }> = {
+      kind: 'loaded',
+      value: { items: [{ reservationId: 'r1', status: 'assigned' }] },
+    }
+    const ids = unassignedCaddieReservationIds(columns, assignments)
+    expect(ids).toEqual(new Set(['r2']))
+  })
+
+  it('returns an empty set when the assignment lookup is unknown or failed', () => {
+    const columns = [coverageColumn('course-1', [reservation({ id: 'r1', playType: 'caddie' })])]
+    expect(unassignedCaddieReservationIds(columns, { kind: 'unknown' })).toEqual(new Set())
+    expect(unassignedCaddieReservationIds(columns, { kind: 'failed' })).toEqual(new Set())
   })
 })
 
