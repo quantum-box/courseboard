@@ -4457,6 +4457,18 @@ button,
 }
 
 @media print {
+  /* The page name has to start at the root, not at the table.
+     A named page begins a new page box wherever the name changes, so declaring
+     it only on `.shift-board-print` put the default page first — and every
+     other child of body is hidden, so that page came out blank. One sheet of
+     nothing, every time, ahead of the board.
+     Naming the page on the element that owns the whole printed document means
+     there is no change to break on. */
+  html:has(> body > .shift-board-print),
+  body:has(> .shift-board-print) {
+    page: shift-board;
+  }
+
   body:has(> .shift-board-print) {
     background: #fff !important;
   }
@@ -4467,7 +4479,6 @@ button,
 
   .shift-board-print {
     display: block;
-    page: shift-board;
     width: 100%;
     color: #202124;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;

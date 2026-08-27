@@ -133,6 +133,8 @@ export const common: DeepPartial<typeof source> = {
     thisMonth: 'This month',
     prevMonth: 'Previous month',
     nextMonth: 'Next month',
+    pickMonth: 'Pick a month',
+    yearMonth: '{{year}}-{{month}}',
     prevDay: 'Previous day',
     nextDay: 'Next day',
   },

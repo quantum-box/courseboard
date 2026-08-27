@@ -14,8 +14,6 @@ import {
   ArrowLeft,
   CalendarDays,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   ClipboardCheck,
   Clock,
   Download,
@@ -3189,11 +3187,6 @@ function monthBounds(yearMonth: string) {
   }
 }
 
-function shiftMonth(yearMonth: string, amount: number) {
-  const [year, month] = yearMonth.split('-').map(Number)
-  const shifted = new Date(year, month - 1 + amount, 1)
-  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, '0')}`
-}
 
 function calendarCells(year: number, month: number) {
   const start = new Date(year, month - 1, 1).getDay()
@@ -3288,11 +3281,6 @@ export function AvailabilityCalendar({
     setSelection(emptyCalendarDateSelection())
     setEditorOpen(false)
   }, [profile.id, yearMonth])
-
-  function changeMonth(amount: number) {
-    if (!confirmDiscard()) return
-    setYearMonth(value => shiftMonth(value ?? tenantToday!.slice(0, 7), amount))
-  }
 
   function loadEditorValues(date: string | null) {
     const record = date ? records.get(date) : undefined
@@ -3422,16 +3410,21 @@ export function AvailabilityCalendar({
       title={t('caddies:calendar.title')}
       description={t('caddies:calendar.description')}
       actions={(
-        <div className="flex items-center gap-1 rounded-md border border-border bg-background p-1">
-          <Button type="button" variant="ghost" size="icon" className="min-h-9 min-w-9" aria-label={t('caddies:calendar.prevMonth')} onClick={() => changeMonth(-1)}><ChevronLeft /></Button>
-          <span className="min-w-24 text-center text-sm font-medium">
-            {t('caddies:calendar.monthLabel', {
-              year: String(bounds.year),
-              month: String(bounds.month),
-            })}
-          </span>
-          <Button type="button" variant="ghost" size="icon" className="min-h-9 min-w-9" aria-label={t('caddies:calendar.nextMonth')} onClick={() => changeMonth(1)}><ChevronRight /></Button>
-        </div>
+        // The same control the other four month screens use. It grew the
+        // dropdown this one was missing, and they grew the arrows this one
+        // already had.
+        <YearMonthPicker
+          hideLabel
+          label={t('caddies:calendar.title')}
+          value={yearMonth ?? ''}
+          error={null}
+          // The month change still has to clear unsaved edits first; the old
+          // arrows did that and the picker must not lose it.
+          onChange={candidate => {
+            if (!confirmDiscard()) return
+            setYearMonth(candidate)
+          }}
+        />
       )}
     >
       {loading ? <LoadingState label={t('caddies:calendar.loading')} /> : null}
