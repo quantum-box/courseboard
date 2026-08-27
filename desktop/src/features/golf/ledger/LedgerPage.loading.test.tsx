@@ -1,13 +1,13 @@
 /* @vitest-environment jsdom */
 
 import { TooltipProvider } from '@tachyon-sdk/native-ui'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearResourceCache } from '../../../hooks/useResource'
 import { i18next } from '../../../i18n'
 import { today } from '../../../lib/clock'
-import { PageReloadProvider } from '../../../lib/pageReload'
+import { PageReloadProvider, usePageReload } from '../../../lib/pageReload'
 import { LedgerPage } from './LedgerPage'
 import type { TeeLedgerResponse } from './models'
 
@@ -58,12 +58,23 @@ let ledgerBody: TeeLedgerResponse = {
 /** Held open so the page can be inspected while the day is still on the way. */
 let releaseLedger: (() => void) | null = null
 let generatedThrough: string | null = null
+let supplyFailure = false
+let supplyGetCount = 0
+let triggerReload: (() => false | Promise<void>) | null = null
+
+function ReloadBridge() {
+  triggerReload = usePageReload().triggerPageReload
+  return null
+}
 
 beforeEach(async () => {
   await i18next.changeLanguage('ja')
   clearResourceCache()
   releaseLedger = null
   generatedThrough = null
+  supplyFailure = false
+  supplyGetCount = 0
+  triggerReload = null
   ledgerBody = {
     date: '2026-07-20',
     timezone: 'Asia/Tokyo',
@@ -112,6 +123,28 @@ beforeEach(async () => {
         generatedThrough: { 'course-east': generatedThrough },
       })
     }
+    if (path.startsWith('/v1/course/caddie-course-supply')) {
+      supplyGetCount += 1
+      return supplyFailure
+        ? Promise.reject(new Error('provider_error'))
+        : Promise.resolve({
+            date: todayDate,
+            courses: [{
+              golfCourseId: 'course-east',
+              courseName: '東コース',
+              workingCaddies: 1,
+              roundsCapacity: 1,
+              caddieAttachedGroups: 2,
+              movableCaddies: 1,
+              shortfall: -1,
+              effectiveRoundsCapacity: 1,
+              effectiveCaddieAttachedGroups: 1,
+              effectiveShortfall: 0,
+              unbackedAssignedGroups: 1,
+            }],
+            unplacedCaddies: 0,
+          })
+    }
     if (path.startsWith('/v1/course/extension-status')) return Promise.resolve(null)
     if (path.startsWith('/v1/course/caddie-assignments')) return Promise.resolve({ items: [] })
     if (path.startsWith('/v1/course/caddie-shifts')) return Promise.resolve({ items: [] })
@@ -129,6 +162,7 @@ function renderPage() {
     <I18nextProvider i18n={i18next}>
       <TooltipProvider>
         <PageReloadProvider>
+          <ReloadBridge />
           <LedgerPage />
         </PageReloadProvider>
       </TooltipProvider>
@@ -232,5 +266,50 @@ describe('LedgerPage while the day is still loading', () => {
     expect(await screen.findByText(
       '東コースは2027年2月19日まで受ける設定ですが、スタート枠は2027年2月1日までしか作られていません。',
     )).toBeTruthy()
+  })
+})
+
+describe('LedgerPage caddie supply failures', () => {
+  beforeEach(async () => {
+    await i18next.changeLanguage('ja')
+  })
+
+  it('shows retry and no caddie numbers when supply fails initially', async () => {
+    supplyFailure = true
+    renderPage()
+    releaseLedger?.()
+
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: i18next.t('common:action.retry') }),
+    ).toBeTruthy())
+    expect(screen.queryByText(/キャディ 1\/1/)).toBeNull()
+    expect(screen.queryByText(
+      i18next.t('ledger:caddieSupply.unbackedAssignedGroups', { n: '1' }),
+    )).toBeNull()
+  })
+
+  it('hides stale numbers and anomalies after a refresh fails', async () => {
+    renderPage()
+    releaseLedger?.()
+
+    await waitFor(() => expect(screen.getByText(/キャディ 1\/1/)).toBeTruthy())
+    expect(screen.getByText(
+      i18next.t('ledger:caddieSupply.unbackedAssignedGroups', { n: '1' }),
+    )).toBeTruthy()
+
+    supplyFailure = true
+    act(() => {
+      void triggerReload?.()
+    })
+
+    await waitFor(() => expect(screen.getByRole(
+      'button',
+      { name: i18next.t('common:action.retry') },
+    )).toBeTruthy())
+    expect(supplyGetCount).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByText(/キャディ 1\/1/)).toBeNull()
+    expect(screen.queryByText(
+      i18next.t('ledger:caddieSupply.unbackedAssignedGroups', { n: '1' }),
+    )).toBeNull()
   })
 })

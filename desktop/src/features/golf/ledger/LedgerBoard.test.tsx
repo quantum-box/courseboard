@@ -6,6 +6,7 @@ import { I18nextProvider } from 'react-i18next'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { i18next } from '../../../i18n'
+import type { CourseCaddieSupply } from '../caddieCourseSupply'
 import type { CoverageAssignment } from '../caddieRoundCoverage'
 import type { TeeReservation } from '../timeline/models'
 import { LedgerBoard } from './LedgerBoard'
@@ -63,18 +64,20 @@ function renderBoard({
   shiftsConfirmed,
   assignments,
   selectedReservationId = null,
+  caddieSupply = new Map(),
 }: {
   item: TeeReservation
   shiftsConfirmed: boolean
   assignments: ResourceStatus<{ items: CoverageAssignment[] }>
   selectedReservationId?: string | null
+  caddieSupply?: Map<string, CourseCaddieSupply>
 }) {
   return render(
     <I18nextProvider i18n={i18next}>
       <TooltipProvider>
         <LedgerBoard
           columns={columns(item)}
-          caddieSupply={new Map()}
+          caddieSupply={caddieSupply}
           shiftsConfirmed={shiftsConfirmed}
           assignments={assignments}
           nowMinutes={null}
@@ -174,5 +177,65 @@ describe('LedgerBoard unassigned-caddie badge', () => {
     const cell = container.querySelector('.ledger-cell-group')
     expect(cell?.classList.contains('is-selected')).toBe(true)
     expect(cell?.classList.contains('is-unassigned-caddie')).toBe(true)
+  })
+})
+
+describe('LedgerBoard caddie supply header', () => {
+  it('uses effective values so a backed assignment clears the raw overage', () => {
+    renderBoard({
+      item: reservation(),
+      shiftsConfirmed: true,
+      assignments: { kind: 'loaded', value: { items: [] } },
+      caddieSupply: new Map([['course-1', {
+        golfCourseId: 'course-1',
+        courseName: '空沼IN',
+        workingCaddies: 3,
+        roundsCapacity: 1,
+        caddieAttachedGroups: 2,
+        movableCaddies: 1,
+        shortfall: -1,
+        effectiveRoundsCapacity: 2,
+        effectiveCaddieAttachedGroups: 1,
+        effectiveShortfall: 1,
+      }]]),
+    })
+
+    expect(screen.getByText(/キャディ 1\/2/)).toBeTruthy()
+    expect(screen.getByText(/あと 1 組/)).toBeTruthy()
+    expect(screen.queryByText(/1 組オーバー/)).toBeNull()
+  })
+
+  it('keeps non-zero anomalies visible beside the effective header', () => {
+    renderBoard({
+      item: reservation(),
+      shiftsConfirmed: true,
+      assignments: { kind: 'loaded', value: { items: [] } },
+      caddieSupply: new Map([['course-1', {
+        golfCourseId: 'course-1',
+        courseName: '空沼IN',
+        workingCaddies: 0,
+        roundsCapacity: 0,
+        caddieAttachedGroups: 1,
+        movableCaddies: 0,
+        shortfall: -1,
+        effectiveRoundsCapacity: 0,
+        effectiveCaddieAttachedGroups: 0,
+        effectiveShortfall: 0,
+        unbackedAssignedGroups: 1,
+        capacityExceededAssignedGroups: 2,
+        courseMismatchAssignedGroups: 3,
+      }]]),
+    })
+
+    const anomalies = document.querySelector('.ledger-column-caddie-anomalies')
+    expect(anomalies?.textContent).toContain(
+      i18next.t('ledger:caddieSupply.unbackedAssignedGroups', { n: '1' }),
+    )
+    expect(anomalies?.textContent).toContain(
+      i18next.t('ledger:caddieSupply.capacityExceededAssignedGroups', { n: '2' }),
+    )
+    expect(anomalies?.textContent).toContain(
+      i18next.t('ledger:caddieSupply.courseMismatchAssignedGroups', { n: '3' }),
+    )
   })
 })
