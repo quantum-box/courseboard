@@ -22,27 +22,12 @@ pub struct GetCourseCaddieSupplyUseCase {
     shifts: Arc<dyn CaddieShiftGateway>,
     reservations: Arc<dyn ReservationGateway>,
     catalog: Arc<dyn GolfCatalogGateway>,
-    /// Only the screen needs this; see `for_capacity_guard`.
-    ops: Option<Arc<dyn GolfOpsGateway>>,
+    ops: Arc<dyn GolfOpsGateway>,
 }
 
 impl GetCourseCaddieSupplyUseCase {
-    /// For the booking guard, which counts per course and needs no roster.
-    pub fn new(
-        shifts: Arc<dyn CaddieShiftGateway>,
-        reservations: Arc<dyn ReservationGateway>,
-        catalog: Arc<dyn GolfCatalogGateway>,
-    ) -> Self {
-        Self {
-            shifts,
-            reservations,
-            catalog,
-            ops: None,
-        }
-    }
-
-    /// For the screen, which also shows how many caddies are placed nowhere
-    /// and therefore has to know who is still on the roster.
+    /// Constructs the supply reader for the screen, including unplaced caddies.
+    /// The roster is required to exclude shifts whose caddie no longer exists.
     pub fn with_roster(
         shifts: Arc<dyn CaddieShiftGateway>,
         reservations: Arc<dyn ReservationGateway>,
@@ -53,7 +38,7 @@ impl GetCourseCaddieSupplyUseCase {
             shifts,
             reservations,
             catalog,
-            ops: Some(ops),
+            ops,
         }
     }
 
@@ -71,47 +56,23 @@ impl GetCourseCaddieSupplyUseCase {
         // because a stray shift carries no course and lands in nobody's
         // column; the "placed nowhere" count does not, and read 9 on a roster
         // of 8. So the screen counts against the roster.
-        let known = match self.ops.as_ref() {
-            Some(ops) => Some(
-                ops.list_caddie_roster(credentials)
-                    .await?
-                    .caddies()
-                    .iter()
-                    .map(|caddie| caddie.id().to_string())
-                    .collect::<HashSet<String>>(),
-            ),
-            None => None,
-        };
-        self.supply(credentials, date, known.as_ref()).await
-    }
-
-    /// The same figures, for a caller that is booking rather than looking.
-    ///
-    /// No roster read here, and none needed: the guard asks whether one course
-    /// has room, and that is counted from shifts placed on it. A shift whose
-    /// caddie is gone carries no course, so it cannot reach those numbers.
-    ///
-    /// Taking a caddie round has to know whether the day has room for it, so
-    /// the guard inside `CreateReservationUseCase` runs this. Requiring the
-    /// insights permission here would mean a front-desk role could take a self
-    /// round but not a caddie one, which is not a distinction anybody asked
-    /// for — the caller has already been authorized to make the booking.
-    pub(crate) async fn for_capacity_guard(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        date: NaiveDate,
-    ) -> Result<DayCaddieSupply, CourseError> {
-        self.supply(credentials, date, None).await
+        let known = self
+            .ops
+            .list_caddie_roster(credentials)
+            .await?
+            .caddies()
+            .iter()
+            .map(|caddie| caddie.id().to_string())
+            .collect::<HashSet<String>>();
+        self.supply(credentials, date, &known).await
     }
 
     /// `known_caddies` drops shifts whose caddie is no longer on the roster.
-    /// `None` keeps every shift, which is right for the guard and wrong only
-    /// for the count the screen shows.
     async fn supply(
         &self,
         credentials: GatewayCredentials<'_>,
         date: NaiveDate,
-        known_caddies: Option<&HashSet<String>>,
+        known_caddies: &HashSet<String>,
     ) -> Result<DayCaddieSupply, CourseError> {
         let sheet = GetTeeSheetUseCase::new(self.reservations.clone(), self.catalog.clone());
         let (sheet, shifts, courses) = tokio::try_join!(
@@ -127,13 +88,10 @@ impl GetCourseCaddieSupplyUseCase {
             self.catalog.list_courses(credentials),
         )?;
 
-        let shifts: Vec<CaddieShift> = match known_caddies {
-            Some(known) => shifts
-                .into_iter()
-                .filter(|shift| known.contains(shift.caddie_id().as_str()))
-                .collect(),
-            None => shifts,
-        };
+        let shifts: Vec<CaddieShift> = shifts
+            .into_iter()
+            .filter(|shift| known_caddies.contains(shift.caddie_id().as_str()))
+            .collect();
 
         let demand = caddie_attached_by_course(&sheet);
         Ok(compute_course_supply(

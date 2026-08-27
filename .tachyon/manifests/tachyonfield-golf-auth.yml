@@ -196,7 +196,7 @@ policies:
     effect: allow
   action_patterns: []
 - name: field-extension:golf:reception
-  description: Front-desk work - take and change bookings, run the tee sheet, register customers and put them on a plan. No caddie roster, pricing, or payroll
+  description: Front-desk work - take and change bookings, run the tee sheet, register customers and put them on a plan. No caddie roster administration, pricing, or payroll; reads caddie shift planning for the tee ledger
   global: true
   actions:
   - action: field:ListReservations
@@ -234,6 +234,10 @@ policies:
   - action: field_extension_golf:AssignMembership
     effect: allow
   - action: field_extension_golf:ListCaddieAssignments
+    effect: allow
+  # SCC-27: ListShifts covers the three endpoints used by the ledger:
+  # caddie-shifts, caddie-shift-rules, and caddie-shift-plans/:year_month/field-sync.
+  - action: field_extension_golf:ListShifts
     effect: allow
   - action: field_extension_golf:ListExtensionStatus
     effect: allow
