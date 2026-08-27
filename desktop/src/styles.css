@@ -5827,6 +5827,149 @@ button,
   margin: 0;
 }
 
+/* Settings rows that read as a table: a heading strip, then one row per thing
+   the club configures. Matches `.membership-plan-row` — same row padding and
+   the same divider — so the panels on this page look like one page rather than
+   three separate forms. */
+.settings-rows {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-rows__head,
+.settings-rows__row {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.settings-rows__row {
+  border-bottom: 1px solid hsl(var(--nui-border) / .6);
+}
+
+.settings-rows__head {
+  padding-bottom: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+/* The heading strip names the columns once. The per-input labels stay in the
+   DOM for anything reading the form aloud — they are only taken off screen. */
+.settings-rows__row .field-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.settings-rows__name {
+  font-weight: 600;
+}
+
+.settings-rows__rank {
+  font-size: 12px;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+/* Per-panel column shapes. Each keeps its own template; the chrome above is
+   shared so they line up as one page. */
+.membership-discount-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.4fr) minmax(120px, 1fr) minmax(100px, 1fr);
+}
+
+.membership-window-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(90px, auto) minmax(90px, auto);
+}
+
+.membership-window-row__days {
+  display: flex;
+  gap: 6px;
+}
+
+.membership-window-day {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.customer-grade-row {
+  display: grid;
+  grid-template-columns: 24px minmax(120px, 1.2fr) repeat(3, minmax(100px, 1fr)) auto;
+}
+
+/* Stacked. Kept after the per-panel rules above, because those set `display`
+   on the same elements at the same specificity — a narrow-screen rule placed
+   before them would simply lose. */
+@media (max-width: 900px) {
+  .settings-rows__head {
+    display: none;
+  }
+
+  /* No heading strip above to carry the meaning, so the labels come back. */
+  .settings-rows__row .field-label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+  }
+
+  .settings-rows__row {
+    padding: 12px 0;
+  }
+
+  .membership-discount-row,
+  .membership-window-row,
+  .customer-grade-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .settings-rows__name,
+  .settings-rows__rank,
+  .membership-window-row__days {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Visit history status. Colour carries the reading at a glance — a cancelled
+   round and a played one are scanned down a column, not read one by one — but
+   the word is always there, so nothing depends on the colour alone. */
+.visit-kind {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.visit-kind-visited {
+  font-weight: 600;
+}
+
+.visit-kind-upcoming {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.visit-kind-no-show {
+  color: hsl(var(--nui-destructive));
+  font-weight: 600;
+}
+
+.visit-kind-cancelled {
+  color: hsl(var(--nui-muted-foreground));
+  text-decoration: line-through;
+}
+
 .customer-ledger-actions {
   display: flex;
   justify-content: flex-end;

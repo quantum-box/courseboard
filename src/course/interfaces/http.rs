@@ -845,6 +845,10 @@ pub struct CreateReservationRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreatedReservationDto {
     pub id: String,
+    /// Things the desk should know about the booking that was just written.
+    /// Never a refusal — the tee time is sold either way. Empty is normal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// POST /v1/course/reservations
@@ -879,6 +883,8 @@ pub async fn create_reservation(
         catalog.clone(),
         catalog,
         slot_override_gateway(&state),
+        super::http_customers::membership_gateway(&state),
+        state.membership_play_windows(),
     );
     let party = party_from_request(
         request.competition_name,
@@ -887,7 +893,7 @@ pub async fn create_reservation(
         request.players.into_iter().map(Into::into).collect(),
     )
     .map_err(AppError::from)?;
-    let id = use_case
+    let created = use_case
         .execute(
             credentials,
             CreateReservationInput {
@@ -910,7 +916,10 @@ pub async fn create_reservation(
         )
         .await
         .map_err(AppError::from)?;
-    Ok(Json(CreatedReservationDto { id: id.to_string() }))
+    Ok(Json(CreatedReservationDto {
+        id: created.id.to_string(),
+        warnings: created.warnings.iter().map(|w| w.to_string()).collect(),
+    }))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

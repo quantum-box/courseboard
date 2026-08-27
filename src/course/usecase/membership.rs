@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::course::domain::actions;
 use crate::course::domain::{
     AssignMembershipPlan, CourseError, CustomerId, CustomerMembership, GatewayCredentials,
-    MembershipGateway, MembershipPlan, MembershipPlanId, UpsertMembershipPlan,
+    MembershipGateway, MembershipPlan, MembershipPlanId, SetMemberNumber, UpsertMembershipPlan,
 };
 
 pub struct ListMembershipPlansUseCase {
@@ -127,6 +127,31 @@ impl AssignMembershipPlanUseCase {
     }
 }
 
+/// Recording, changing, or withdrawing a member's number.
+///
+/// Guarded by the same action as granting a plan: both are the desk saying
+/// something official about somebody's standing with the club.
+pub struct SetMemberNumberUseCase {
+    memberships: Arc<dyn MembershipGateway>,
+}
+
+impl SetMemberNumberUseCase {
+    pub fn new(memberships: Arc<dyn MembershipGateway>) -> Self {
+        Self { memberships }
+    }
+
+    pub async fn execute(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: SetMemberNumber,
+    ) -> Result<CustomerMembership, CourseError> {
+        credentials.require(actions::ASSIGN_MEMBERSHIP).await?;
+        self.memberships
+            .set_member_number(credentials, &input)
+            .await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,10 +163,21 @@ mod tests {
         plans: Vec<MembershipPlan>,
         assigned: Mutex<Vec<AssignMembershipPlan>>,
         listed_including_inactive: Mutex<Vec<bool>>,
+        numbered: Mutex<Vec<SetMemberNumber>>,
     }
 
     #[async_trait]
     impl MembershipGateway for StubMemberships {
+        async fn set_member_number(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            input: &SetMemberNumber,
+        ) -> Result<CustomerMembership, CourseError> {
+            self.numbered.lock().unwrap().push(input.clone());
+            Ok(CustomerMembership::visitor(input.customer_id.clone())
+                .with_member_number(input.member_number.clone()))
+        }
+
         async fn list_membership_plans(
             &self,
             _credentials: GatewayCredentials<'_>,
@@ -255,5 +291,45 @@ mod tests {
         assert!(membership.is_member());
         assert_eq!(membership.plan_name(), Some("正会員"));
         assert_eq!(gateway.assigned.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_member_number_reaches_the_registry_trimmed() {
+        let gateway = Arc::new(StubMemberships::default());
+        let membership = SetMemberNumberUseCase::new(gateway.clone())
+            .execute(
+                credentials(),
+                SetMemberNumber::try_new(CustomerId::new("cus_1"), Some("  A-1024  ".into()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(membership.member_number(), Some("A-1024"));
+        assert_eq!(
+            gateway.numbered.lock().unwrap()[0].member_number.as_deref(),
+            Some("A-1024")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_blank_member_number_withdraws_it_rather_than_storing_an_empty_string() {
+        // A member numbered by mistake has to be un-numbered, and an empty
+        // string on file reads as a member whose number is blank.
+        let gateway = Arc::new(StubMemberships::default());
+        let membership = SetMemberNumberUseCase::new(gateway.clone())
+            .execute(
+                credentials(),
+                SetMemberNumber::try_new(CustomerId::new("cus_1"), Some("   ".into())).unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(membership.member_number(), None);
+        assert_eq!(gateway.numbered.lock().unwrap()[0].member_number, None);
+    }
+
+    #[test]
+    fn a_member_number_longer_than_a_number_is_refused() {
+        let long = "9".repeat(41);
+        assert!(SetMemberNumber::try_new(CustomerId::new("cus_1"), Some(long)).is_err());
     }
 }

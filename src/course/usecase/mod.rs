@@ -20,6 +20,7 @@ mod create_caddie_assignment;
 mod create_course;
 mod create_customer;
 mod create_reservation;
+mod customer_grade_rules;
 mod delete_caddie;
 mod delete_caddie_availability;
 mod delete_course;
@@ -31,6 +32,7 @@ mod get_attendance_snapshot;
 mod get_caddie_supply;
 mod get_course_caddie_supply;
 mod get_customer;
+mod get_customer_visits;
 mod get_extension_status;
 mod get_field_client_capabilities;
 mod get_monthly_settlement;
@@ -100,6 +102,7 @@ pub use create_caddie_assignment::{CreateCaddieAssignmentUseCase, NameCaddieForR
 pub use create_course::CreateCourseUseCase;
 pub use create_customer::CreateCustomerUseCase;
 pub use create_reservation::{CreateReservationInput, CreateReservationUseCase};
+pub use customer_grade_rules::{GetCustomerGradeRulesUseCase, ReplaceCustomerGradeRulesUseCase};
 pub use delete_caddie::DeleteCaddieUseCase;
 pub use delete_caddie_availability::DeleteCaddieAvailabilityUseCase;
 pub use delete_course::DeleteCourseUseCase;
@@ -111,6 +114,7 @@ pub use get_attendance_snapshot::GetAttendanceSnapshotUseCase;
 pub use get_caddie_supply::GetCaddieSupplyUseCase;
 pub use get_course_caddie_supply::GetCourseCaddieSupplyUseCase;
 pub use get_customer::GetCustomerUseCase;
+pub use get_customer_visits::{CustomerVisitReport, GetCustomerVisitsUseCase};
 pub use get_extension_status::GetExtensionStatusUseCase;
 pub use get_field_client_capabilities::GetFieldClientCapabilitiesUseCase;
 pub use get_monthly_settlement::{
@@ -139,7 +143,7 @@ pub use list_reservation_products::ListReservationProductsUseCase;
 pub use list_resources::ListResourcesUseCase;
 pub use membership::{
     AssignMembershipPlanUseCase, CreateMembershipPlanUseCase, GetCustomerMembershipUseCase,
-    ListMembershipPlansUseCase, UpdateMembershipPlanUseCase,
+    ListMembershipPlansUseCase, SetMemberNumberUseCase, UpdateMembershipPlanUseCase,
 };
 pub use mirror_shift_to_field::{links_by_day, MirrorShiftToField};
 pub use player_tag_options::{GetPlayerTagOptionsUseCase, ReplacePlayerTagOptionsUseCase};
