@@ -5358,7 +5358,11 @@ button,
   outline-offset: -2px;
 }
 
-.ledger-unassigned-badge {
+/* `.ledger-group-text small` below sets every <small> in the group cell to
+ * the muted colour, and its element+class selector otherwise outranks a
+ * bare `.ledger-unassigned-badge` regardless of source order — scoped under
+ * `.ledger-group-text` too so this one wins on specificity, not luck. */
+.ledger-group-text .ledger-unassigned-badge {
   display: block;
   color: hsl(var(--nui-destructive));
   font-size: 10px;
