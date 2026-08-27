@@ -878,7 +878,6 @@ pub async fn create_reservation(
         commercial_gateway(&state),
         catalog.clone(),
         catalog,
-        state.caddie_shifts(),
         slot_override_gateway(&state),
     );
     let party = party_from_request(

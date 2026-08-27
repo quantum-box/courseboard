@@ -75,8 +75,8 @@ pub use commercial::{
 pub use course::{BusinessHours, Course, HoleCount, StartIntervalMinutes, UpsertCourse};
 pub use course_order::CourseOrder;
 pub use course_supply::{
-    compute_course_supply, has_room_for_one_more_caddie_round, reinforcements_for,
-    CaddieCapability, CourseCaddieSupply, DayCaddieSupply, Reinforcement,
+    compute_course_supply, reinforcements_for, CaddieCapability, CourseCaddieSupply,
+    DayCaddieSupply, Reinforcement,
 };
 pub use customer::{
     Customer, CustomerSearchQuery, NewCustomer, DEFAULT_CUSTOMER_SEARCH_LIMIT,

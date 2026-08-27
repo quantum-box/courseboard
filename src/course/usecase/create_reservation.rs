@@ -11,13 +11,12 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    has_room_for_one_more_caddie_round, is_tee_time_closed, parse_tenant_tee_time,
-    reconcile_remaining, tenant_day_bounds, CaddieShiftGateway, CourseError, CourseId, CustomerId,
-    GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway, NewReservation, PartyDetails,
-    Reservation, ReservationGateway, ReservationId, ReservationProduct, ReservationScheduleGateway,
-    Resource, ResourceId, ResourceKind, ResourceTimeSlot, SlotOverrideGateway, SlotOverrideQuery,
+    is_tee_time_closed, parse_tenant_tee_time, reconcile_remaining, tenant_day_bounds, CourseError,
+    CourseId, CustomerId, GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway,
+    NewReservation, PartyDetails, Reservation, ReservationGateway, ReservationId,
+    ReservationProduct, ReservationScheduleGateway, Resource, ResourceId, ResourceKind,
+    ResourceTimeSlot, SlotOverrideGateway, SlotOverrideQuery,
 };
-use crate::course::usecase::GetCourseCaddieSupplyUseCase;
 
 /// A round is a day's work at most; anything longer is a typo or an attack.
 const MAX_DURATION_MINUTES: i64 = 24 * 60;
@@ -50,7 +49,6 @@ pub struct CreateReservationUseCase {
     commercial: Arc<dyn GolfCommercialGateway>,
     catalog: Arc<dyn GolfCatalogGateway>,
     schedules: Arc<dyn ReservationScheduleGateway>,
-    shifts: Arc<dyn CaddieShiftGateway>,
     marks: Arc<dyn SlotOverrideGateway>,
 }
 
@@ -60,7 +58,6 @@ impl CreateReservationUseCase {
         commercial: Arc<dyn GolfCommercialGateway>,
         catalog: Arc<dyn GolfCatalogGateway>,
         schedules: Arc<dyn ReservationScheduleGateway>,
-        shifts: Arc<dyn CaddieShiftGateway>,
         marks: Arc<dyn SlotOverrideGateway>,
     ) -> Self {
         Self {
@@ -68,7 +65,6 @@ impl CreateReservationUseCase {
             commercial,
             catalog,
             schedules,
-            shifts,
             marks,
         }
     }
@@ -100,8 +96,6 @@ impl CreateReservationUseCase {
         validate_product_course(product.as_ref(), &input.golf_course_id)?;
 
         self.refuse_a_tee_time_the_desk_shut(credentials, &input)
-            .await?;
-        self.refuse_a_round_the_course_cannot_walk(credentials, &input, product.as_ref())
             .await?;
 
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
@@ -192,50 +186,6 @@ impl CreateReservationUseCase {
             return Err(CourseError::BadRequest(SLOT_CLOSED_MESSAGE));
         }
         Ok(())
-    }
-
-    /// Stop a caddie-attached round being sold onto a course that has no
-    /// caddie left to walk it.
-    ///
-    /// Only once the month is confirmed: before that nothing says who stands
-    /// where, and refusing every booking for want of a plan would be worse
-    /// than the overbooking this prevents. A self-play round is never
-    /// affected, and neither is a booking whose plan cannot be identified —
-    /// the guard is for the case it can prove.
-    async fn refuse_a_round_the_course_cannot_walk(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        input: &CreateReservationInput,
-        product: Option<&ReservationProduct>,
-    ) -> Result<(), CourseError> {
-        let needs_caddie = product
-            .map(|product| product.play_type().requires_caddie())
-            .unwrap_or(false);
-        if !needs_caddie {
-            return Ok(());
-        }
-
-        let confirmed = self
-            .shifts
-            .list_shifts(credentials.operator_id, input.date, input.date)
-            .await?;
-        if confirmed.is_empty() {
-            return Ok(());
-        }
-
-        let supply = GetCourseCaddieSupplyUseCase::new(
-            self.shifts.clone(),
-            self.reservations.clone(),
-            self.catalog.clone(),
-        )
-        .for_capacity_guard(credentials, input.date)
-        .await?;
-        if has_room_for_one_more_caddie_round(&supply, &input.golf_course_id) {
-            return Ok(());
-        }
-        Err(CourseError::BadRequest(
-            "この日はこのコースのキャディがふさがっています。他のコースから応援を回すか、セルフでの受付をご検討ください",
-        ))
     }
 
     /// The plan the desk picked, if it named one.
@@ -412,7 +362,17 @@ fn normalize_inventory_conflict(error: CourseError) -> CourseError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::course::domain::{SlotOverride, SlotOverrideKind};
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+
+    use crate::course::domain::{
+        AvailabilityRule, BookingHorizon, Course, CourseOrder, DailyBudget, DailyBudgetQuery,
+        DeleteSlotOverrides, ExtensionStatus, GenerationSummary, MonthlySettlement, PlayType,
+        ProductSlot, ReservationBookingUpdate, ReservationPolicy, ReservationServiceId,
+        SaveCourseResource, SeededReservation, SlotOverride, SlotOverrideKind,
+        UpdateExtensionConfig, UpdateReservationPolicy, UpsertCourse, UpsertDailyBudget,
+        UpsertReservationProduct,
+    };
 
     fn resource(course_id: &str, reservation_resource_id: &str) -> Resource {
         Resource::reconstitute(
@@ -639,5 +599,445 @@ mod tests {
             message: "この時間帯は空きがありません（受付枠が埋まっています）".into(),
         });
         assert!(matches!(error, CourseError::Conflict(SLOT_FILLED_MESSAGE)));
+    }
+
+    #[derive(Default)]
+    struct RecordingReservationGateway {
+        created: Mutex<Vec<NewReservation>>,
+    }
+
+    #[async_trait]
+    impl ReservationGateway for RecordingReservationGateway {
+        async fn list_reservations(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<Reservation>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn get_reservation(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &ReservationId,
+        ) -> Result<Reservation, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn update_reservation_plan(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &ReservationId,
+            _service_id: &ReservationServiceId,
+            _ends_at: DateTime<Utc>,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn update_reservation_booking(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &ReservationId,
+            _update: &ReservationBookingUpdate,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn update_reservation_party(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &ReservationId,
+            _party: &PartyDetails,
+        ) -> Result<PartyDetails, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn list_reservation_type_ids(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<String>, CourseError> {
+            Ok(vec!["reservation-type-1".to_string()])
+        }
+
+        async fn list_seeded_reservations(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<SeededReservation>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn create_reservation(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            input: &NewReservation,
+        ) -> Result<ReservationId, CourseError> {
+            self.created.lock().expect("lock").push(input.clone());
+            Ok(ReservationId::new("reservation-created"))
+        }
+
+        async fn cancel_reservation(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &ReservationId,
+            _reason: Option<&str>,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn replace_reservation(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _reservation_id: &ReservationId,
+            _input: &NewReservation,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+    }
+
+    fn caddie_product() -> ReservationProduct {
+        ReservationProduct::reconstitute_with_course_ids(
+            "product-caddie-1",
+            None,
+            "service-1",
+            Some("キャディ付き".to_string()),
+            PlayType::Caddie,
+            18,
+            240,
+            vec!["course-1".to_string()],
+            None,
+        )
+    }
+
+    struct BookingCatalogGateway;
+
+    #[async_trait]
+    impl GolfCatalogGateway for BookingCatalogGateway {
+        async fn get_tenant_timezone(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<String, CourseError> {
+            Ok("Asia/Tokyo".to_string())
+        }
+
+        async fn list_courses(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<Course>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn create_course(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpsertCourse,
+        ) -> Result<Course, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn update_course(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _course_id: &CourseId,
+            _input: UpsertCourse,
+        ) -> Result<Course, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn delete_course(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _course_id: &CourseId,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn list_resources(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<Resource>, CourseError> {
+            Ok(vec![resource("course-1", "inventory-1")])
+        }
+
+        async fn create_reservation_resource(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _name: &str,
+        ) -> Result<ResourceId, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn save_course_resource(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: SaveCourseResource,
+        ) -> Result<Resource, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn get_course_order(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<CourseOrder, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn replace_course_order(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _order: &CourseOrder,
+        ) -> Result<CourseOrder, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn list_reservation_products(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<ReservationProduct>, CourseError> {
+            Ok(vec![caddie_product()])
+        }
+
+        async fn upsert_reservation_product(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpsertReservationProduct,
+        ) -> Result<ReservationProduct, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn list_product_slots(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _service_id: &ReservationServiceId,
+        ) -> Result<Vec<ProductSlot>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn replace_product_slots(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _service_id: &ReservationServiceId,
+            _slots: Vec<ProductSlot>,
+        ) -> Result<Vec<ProductSlot>, CourseError> {
+            unimplemented!("not used")
+        }
+    }
+
+    struct NoReservationPolicyGateway;
+
+    #[async_trait]
+    impl GolfCommercialGateway for NoReservationPolicyGateway {
+        async fn get_reservation_policy(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<ReservationPolicy, CourseError> {
+            Err(CourseError::NotFound("reservation policy"))
+        }
+
+        async fn update_reservation_policy(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpdateReservationPolicy,
+        ) -> Result<ReservationPolicy, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn list_daily_budgets(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _query: DailyBudgetQuery,
+        ) -> Result<Vec<DailyBudget>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn upsert_daily_budget(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpsertDailyBudget,
+        ) -> Result<DailyBudget, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn import_daily_budgets_csv(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _csv: &str,
+        ) -> Result<Vec<DailyBudget>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn get_monthly_settlement(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _year_month: &str,
+            _timezone: &str,
+        ) -> Result<MonthlySettlement, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn export_monthly_settlement_csv(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _year_month: &str,
+            _timezone: &str,
+        ) -> Result<String, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn get_extension_status(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Option<ExtensionStatus>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn update_extension_config(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpdateExtensionConfig,
+        ) -> Result<(), CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn get_booking_horizon(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<BookingHorizon, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn set_booking_horizon(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _horizon: &BookingHorizon,
+        ) -> Result<BookingHorizon, CourseError> {
+            unimplemented!("not used")
+        }
+    }
+
+    struct OpenReservationScheduleGateway;
+
+    #[async_trait]
+    impl ReservationScheduleGateway for OpenReservationScheduleGateway {
+        async fn get_resource_schedule(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _resource_id: &ResourceId,
+        ) -> Result<Vec<AvailabilityRule>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn replace_resource_schedule(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _resource_id: &ResourceId,
+            _timezone: &str,
+            _rules: &[AvailabilityRule],
+        ) -> Result<Vec<AvailabilityRule>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn generate_resource_time_slots(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _resource_id: &ResourceId,
+            _from: NaiveDate,
+            _to: NaiveDate,
+            _dry_run: bool,
+        ) -> Result<GenerationSummary, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn list_resource_time_slots(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _resource_id: &ResourceId,
+            _from: DateTime<Utc>,
+            _to: DateTime<Utc>,
+        ) -> Result<Vec<ResourceTimeSlot>, CourseError> {
+            Ok(vec![slot(1, 1)])
+        }
+    }
+
+    struct EmptySlotOverrideGateway;
+
+    #[async_trait]
+    impl SlotOverrideGateway for EmptySlotOverrideGateway {
+        async fn list_slot_overrides(
+            &self,
+            _tenant_id: &str,
+            _query: &SlotOverrideQuery,
+        ) -> Result<Vec<SlotOverride>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn upsert_slot_overrides(
+            &self,
+            _tenant_id: &str,
+            _overrides: &[SlotOverride],
+        ) -> Result<Vec<SlotOverride>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn delete_slot_overrides(
+            &self,
+            _tenant_id: &str,
+            _command: &DeleteSlotOverrides,
+        ) -> Result<u64, CourseError> {
+            unimplemented!("not used")
+        }
+    }
+
+    fn booking_credentials() -> GatewayCredentials<'static> {
+        GatewayCredentials {
+            authorization: "Bearer token",
+            caller_bearer: "Bearer test",
+            operator_id: "tenant-1",
+            platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
+        }
+    }
+
+    fn caddie_booking_input() -> CreateReservationInput {
+        CreateReservationInput {
+            golf_course_id: CourseId::new("course-1"),
+            reservation_resource_id: ResourceId::new("inventory-1"),
+            reservation_service_id: Some("service-1".to_string()),
+            date: NaiveDate::from_ymd_opt(2026, 8, 12).expect("date"),
+            tee_time: "07:30".to_string(),
+            duration_minutes: 240,
+            quantity: 4,
+            customer_name: "予約者".to_string(),
+            customer_id: None,
+            party: PartyDetails::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_caddie_booking_reaches_field_without_a_caddie_supply_guard() {
+        // The constructor signature is structural evidence: no caddie-supply
+        // gateway can enter this path. It cannot detect a guard reintroduced
+        // through a different data source, so the fixture assertion below
+        // keeps this regression focused on a caddie booking.
+        assert_eq!(caddie_product().play_type(), PlayType::Caddie);
+        let reservations = std::sync::Arc::new(RecordingReservationGateway::default());
+        let use_case = CreateReservationUseCase::new(
+            reservations.clone(),
+            std::sync::Arc::new(NoReservationPolicyGateway),
+            std::sync::Arc::new(BookingCatalogGateway),
+            std::sync::Arc::new(OpenReservationScheduleGateway),
+            std::sync::Arc::new(EmptySlotOverrideGateway),
+        );
+
+        let created = use_case
+            .execute(booking_credentials(), caddie_booking_input())
+            .await
+            .expect("caddie booking should be created");
+
+        assert_eq!(created, ReservationId::new("reservation-created"));
+        let created_inputs = reservations.created.lock().expect("lock");
+        assert_eq!(created_inputs.len(), 1);
+        assert_eq!(
+            created_inputs[0].reservation_service_id.as_deref(),
+            Some("service-1")
+        );
     }
 }

@@ -210,20 +210,6 @@ pub fn reinforcements_for<'a>(
     candidates
 }
 
-/// Whether one more caddie-attached group can be sold onto this course today.
-///
-/// A course the day knows nothing about is never blocked: the guard exists to
-/// stop a course being sold past the caddies standing on it, not to refuse
-/// bookings because a course is missing from the catalogue.
-pub fn has_room_for_one_more_caddie_round(supply: &DayCaddieSupply, course_id: &CourseId) -> bool {
-    supply
-        .courses()
-        .iter()
-        .find(|course| course.course_id() == course_id)
-        .map(|course| course.shortfall() > 0)
-        .unwrap_or(true)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -493,60 +479,5 @@ mod reinforcement_tests {
         let candidates = reinforcements_for(&CourseId::new("in"), date(), &shifts, &capability);
 
         assert!(candidates.is_empty());
-    }
-}
-
-#[cfg(test)]
-mod room_tests {
-    use super::*;
-    use crate::course::domain::{CaddieId, ShiftOrigin, ShiftSpan};
-
-    fn date() -> NaiveDate {
-        NaiveDate::from_ymd_opt(2026, 9, 12).unwrap()
-    }
-
-    fn supply(rounds: i32, booked: i64) -> DayCaddieSupply {
-        let shift = CaddieShift::reconstitute(
-            CaddieId::new("a"),
-            date(),
-            Some(CourseId::new("out")),
-            true,
-            ShiftSpan::FullDay,
-            rounds,
-            ShiftOrigin::Generated,
-            None,
-            None,
-            None,
-        );
-        compute_course_supply(
-            date(),
-            vec![(CourseId::new("out"), "OUT".to_string())],
-            &[shift],
-            &HashMap::from([(CourseId::new("out"), booked)]),
-        )
-    }
-
-    #[test]
-    fn a_course_with_a_round_still_uncovered_can_take_one_more() {
-        assert!(has_room_for_one_more_caddie_round(
-            &supply(2, 1),
-            &CourseId::new("out")
-        ));
-    }
-
-    #[test]
-    fn a_course_already_sold_to_its_last_caddie_cannot() {
-        assert!(!has_room_for_one_more_caddie_round(
-            &supply(2, 2),
-            &CourseId::new("out")
-        ));
-    }
-
-    #[test]
-    fn a_course_the_day_knows_nothing_about_is_not_blocked() {
-        assert!(has_room_for_one_more_caddie_round(
-            &supply(2, 2),
-            &CourseId::new("west")
-        ));
     }
 }
