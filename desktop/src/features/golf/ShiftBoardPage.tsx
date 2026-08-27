@@ -366,6 +366,11 @@ export function ShiftBoardPage() {
   const [confirming, setConfirming] = useState(false)
   const [fieldSyncing, setFieldSyncing] = useState(false)
   const [fieldSyncRemaining, setFieldSyncRemaining] = useState(0)
+  // Days Field refused. They are stamped as dealt with so the queue can empty,
+  // which means `remaining` reaches zero with them still unsent — and the
+  // re-send button, keyed on `remaining` alone, would disappear along with the
+  // only way to recover them. Kept until a later pass actually sends them.
+  const [fieldSyncFailed, setFieldSyncFailed] = useState(0)
   // The month the run proposed, held on screen until the desk confirms or
   // throws it away. Nothing is written while it is here.
   const [draft, setDraft] = useState<ShiftPlanPreview | null>(null)
@@ -431,6 +436,7 @@ export function ShiftBoardPage() {
     let filed = 0
     let unlinkable = 0
     let failed = 0
+    setFieldSyncFailed(0)
     try {
       // The loop stops on the server saying it is done, and also on the queue
       // failing to shrink. Trusting `done` alone means one unexpected answer
@@ -446,6 +452,7 @@ export function ShiftBoardPage() {
         filed += progress.filed ?? 0
         unlinkable += progress.unlinkable ?? 0
         failed += progress.failed ?? 0
+        setFieldSyncFailed(failed)
         const remaining = Number.isFinite(progress.remaining) ? progress.remaining : 0
         setFieldSyncRemaining(remaining)
         if (progress.done || remaining === 0 || remaining >= previous) break
@@ -559,6 +566,7 @@ export function ShiftBoardPage() {
     setDraft(null)
     setLastRun(null)
     setFieldSyncRemaining(0)
+    setFieldSyncFailed(0)
   }, [yearMonth])
 
   // A push that died half way leaves days Field was never told about, and
@@ -710,7 +718,7 @@ export function ShiftBoardPage() {
               <SlidersHorizontal />
               {t('shifts:rules.open')}
             </Button>
-            {(fieldSyncing || fieldSyncRemaining > 0) && (
+            {(fieldSyncing || fieldSyncRemaining > 0 || fieldSyncFailed > 0) && (
               <Button
                 type="button"
                 variant="secondary"
@@ -719,7 +727,9 @@ export function ShiftBoardPage() {
               >
                 {fieldSyncing
                   ? t('shifts:fieldSync.running', { n: String(fieldSyncRemaining) })
-                  : t('shifts:fieldSync.resend')}
+                  : fieldSyncRemaining > 0
+                    ? t('shifts:fieldSync.resend')
+                    : t('shifts:fieldSync.resendFailed', { n: String(fieldSyncFailed) })}
               </Button>
             )}
             <Button

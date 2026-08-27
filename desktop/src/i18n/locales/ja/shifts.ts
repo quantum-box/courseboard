@@ -120,6 +120,7 @@ export const shifts = {
     unlinkable: '{{n}}日分は、社員名簿に紐づいていないキャディのため送れませんでした。名簿を直してから再送してください',
     someFailed: '{{n}}日分をFieldが受け付けませんでした。時間をおいて「Fieldへ再送」を試してください',
     resend: 'Fieldへ再送',
+    resendFailed: '{{n}}日分をFieldへ再送',
   },
   editor: {
     title: '確定シフトを変える',

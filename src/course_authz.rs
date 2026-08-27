@@ -165,6 +165,18 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/caddie-shift-plans/:year_month/preview",
         RouteAuthorization::Action(MANAGE_SHIFTS),
     ),
+    // Reading how far a month has reached Field is reading the shift board;
+    // pushing it is changing what Field holds.
+    (
+        "GET",
+        "/v1/course/caddie-shift-plans/:year_month/field-sync",
+        RouteAuthorization::Action(LIST_SHIFTS),
+    ),
+    (
+        "POST",
+        "/v1/course/caddie-shift-plans/:year_month/field-sync",
+        RouteAuthorization::Action(MANAGE_SHIFTS),
+    ),
     (
         "GET",
         "/v1/course/caddie-availability-deadlines/:year_month",
@@ -1085,6 +1097,50 @@ mod tests {
     /// Every path string registered in `build_router` must classify. The list
     /// is maintained by hand the same way the router is; a route added there
     /// without a line here fails closed at runtime *and* fails this test.
+    /// Every path the router actually declares is in `ROUTES`.
+    ///
+    /// The list-based test below cannot catch a route that is in neither list,
+    /// which is exactly how `field-sync` reached production returning 403 to
+    /// its own UI. This one reads `lib.rs` instead of a copy of it, so a new
+    /// `.route(...)` that nobody classified fails here rather than in front of
+    /// a customer.
+    ///
+    /// Source introspection rather than asking axum, which does not expose its
+    /// route table. The same shape as the migration-hook test next door.
+    #[test]
+    fn every_route_the_router_declares_is_in_the_table() {
+        const ROUTER: &str = include_str!("lib.rs");
+
+        // `.route(` puts the path on the following line, so scrape the string
+        // literals rather than the call. `/v1/course/` prefixed literals in
+        // this file are route paths and nothing else.
+        let declared: Vec<String> = ROUTER
+            .lines()
+            .map(str::trim)
+            .filter_map(|line| line.strip_prefix('"'))
+            .filter_map(|rest| rest.split('"').next())
+            .filter(|path| path.starts_with("/v1/course/"))
+            .map(str::to_string)
+            .collect();
+        assert!(
+            declared.len() > 40,
+            "the scrape found {} course routes, so the shape of lib.rs changed and this test \
+             stopped checking anything",
+            declared.len()
+        );
+
+        let classified: Vec<&str> = ROUTES.iter().map(|(_, path, _)| *path).collect();
+        let missing: Vec<&String> = declared
+            .iter()
+            .filter(|path| !classified.contains(&path.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these routes are declared in lib.rs but not classified in ROUTES, so they fall \
+             through to a 403 for every caller: {missing:?}"
+        );
+    }
+
     #[test]
     fn every_registered_route_is_classified() {
         const REGISTERED: &[(&str, &str)] = &[
@@ -1186,6 +1242,8 @@ mod tests {
             ("PUT", "/v1/course/caddie-shifts/cp_1/2026-08-18"),
             ("POST", "/v1/course/caddie-shift-plans/2026-09"),
             ("POST", "/v1/course/caddie-shift-plans/2026-09/preview"),
+            ("GET", "/v1/course/caddie-shift-plans/2026-09/field-sync"),
+            ("POST", "/v1/course/caddie-shift-plans/2026-09/field-sync"),
             ("GET", "/v1/course/reservation-policy"),
             ("PATCH", "/v1/course/reservation-policy"),
             ("GET", "/v1/course/daily-budgets"),
