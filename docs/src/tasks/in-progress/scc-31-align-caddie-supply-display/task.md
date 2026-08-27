@@ -94,10 +94,16 @@ SCC-27 の検証中に発見した表示の不具合。予約にキャディを�
    - 警告対象は assignment を新規作成する全経路とする（手動配置の候補リスト・確定に
      加え、自動配置の preview にも同じ警告を出す。実行はブロックしない）。
 8. 台帳の主要利用者である受付ロール（`field-extension:golf:reception`）は現状
-   `ListCaddieInsights` が無く supply API を読めない（403）。本タスクで supply API を
-   過不足表示の唯一の正とする以上、受付への公開方針（既存 action の付与か、台帳用の
-   より狭い read action の新設か）を design.md で決定し、認可テスト
-   （受付ポリシーで 200、権限無しポリシーで 403）を受け入れ条件に含める。
+   `ListCaddieInsights` が無く supply API を読めない（403）。さらに調査の結果、
+   CourseBoard 側の action 付与だけでは解消せず、supply 集計が内部で Field の
+   roster（`GET /v1/erp/staff`）を利用者本人の bearer で読むため `field:ListHrm`
+   相当の Field 側権限も必要になる（review-sol-design-2.md 高1）。
+   **受付への公開は本タスクのスコープから外し、後続タスクとして起票する**
+   （CTO 承認済み）。本タスクは supply API を現に読めるロールでの計算不整合の解消に
+   集中し、受付の現状（ヘッダ非表示）は変えない。したがって supply API の認可は
+   既存の `ListCaddieInsights` 要求を変更せず、新 action の宣言・付与や既存 policy の
+   更新は行わない。既に supply を読めるロールが本変更で 403 に後退しないことを
+   受け入れ条件とする。
 9. PR は backend / frontend の 2 本に分割し、backend を先行してマージする。
    互換条件: 新規 field は additive とし frontend では optional として扱う。
    既存 field（`roundsCapacity` / `caddieAttachedGroups` / `shortfall`）の意味を
@@ -116,10 +122,8 @@ SCC-27 の検証中に発見した表示の不具合。予約にキャディを�
 - backend: 推薦 DTO（`list_caddie_recommendations` 系）と自動配置の
   `AutoAssignPlanItem` / `AutoAssignPlanItemDto` へ additive / optional な
   `shiftPlacementStatus` を追加し、planner が候補選択時の `CaddiePlacement` を結果へ
-  引き継ぐ。認可（確定事項 8）の細粒度 action は usecase 冒頭の `require(...)` と
-  manifest で扱い、既存 endpoint（`GET /v1/course/caddie-course-supply`）は現在の
-  `UpstreamEnforced` 分類を維持する。`src/course_authz.rs` の ROUTES 登録が必要に
-  なるのは新しい path を追加する場合のみ。
+  引き継ぐ。認可は確定事項 8 のとおり変更しない（既存 `ListCaddieInsights` 要求と
+  `UpstreamEnforced` 分類を維持。新 action・新 path は追加しない）。
 - frontend: `desktop/src/features/golf/ledger/ledgerLayout.ts` の
   `formatCaddieCapacity` / `formatCaddieShortfall` と `LedgerBoard.tsx` の列ヘッダ
   表示を新しい集計値に追随させ、`unbackedAssignedGroups` 等の異常 count を
@@ -132,7 +136,8 @@ SCC-27 の検証中に発見した表示の不具合。予約にキャディを�
 - テスト: fake gateway による `GetCourseCaddieSupplyUseCase` テストを新設し、
   正常 join・取消 alias（cancelled/canceled/大文字/空白）・重複 row・capacity 2・
   別コース・未確定/未配置・UTC 日付境界・assignment 取得失敗を必須ケースとする。
-  DTO serialization、受付ロールの認可、frontend の新旧 DTO 互換も検証する。
+  DTO serialization、既存 `ListCaddieInsights` 保有ロールが supply を引き続き読めて
+  403 に後退しないこと、frontend の新旧 DTO 互換も検証する。
   手動配置・自動配置 preview の警告描画（`unconfirmed` / `unplaced` / `on_course`）と
   警告が実行をブロックしないことは component test で検証する。
 
@@ -143,8 +148,6 @@ SCC-27 の検証中に発見した表示の不具合。予約にキャディを�
 - caddie-course-supply レスポンス DTO のフィールド設計（additive）と互換表
   （backend 新旧 × frontend 新旧）の作成。
 - coverage 判定の実現方式（DTO canonical 化 vs frontend helper 正規化）の選定。
-- 受付ロールへの公開方式（既存 `ListCaddieInsights` 付与の影響範囲確認 vs
-  台帳用の狭い read action 新設）の選定。
 - 警告 UI の具体形（候補リスト内の明示・確定時の確認表示・自動配置 preview での
   表示形）、文言、i18n キー設計。
 - 配置取得失敗時の方式選定（424 か `dataStatus: incomplete` か）と frontend の
@@ -173,7 +176,8 @@ SCC-27 の検証中に発見した表示の不具合。予約にキャディを�
     かつ配置はブロックされないこと。
   - shift に裏付けられない配置が `unbackedAssignedGroups` 等として永続表示される
     こと。
-  - 受付ロールで台帳ヘッダの過不足が表示されること。
+  - 既に supply API を読めるロール（manager 等）で 403 への後退がないこと
+    （受付ロールの公開は後続タスク。本タスクでは受付の表示は変わらない）。
 - リポジトリ規約: CLAUDE.md（AGENTS.md）参照。コミットは日本語 conventional commits。
   UI の fetch は `desktop/src/api.ts` 経由のみ（ADR-0004）。認可はフェイル
   クローズドで、新ルート追加時は `src/course_authz.rs` の ROUTES 登録が必須。
