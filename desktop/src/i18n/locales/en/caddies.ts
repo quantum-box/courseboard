@@ -82,6 +82,17 @@ export const caddies: DeepPartial<typeof source> = {
     clockedOut: 'Clocked out',
     notLinked: 'No staff link',
   },
+  shiftPlacement: {
+    unconfirmed: 'Shift not confirmed for that day',
+    unplaced: 'No course assigned',
+  },
+  assignment: {
+    shiftPlacementWarning: {
+      title: 'Check the shift placement',
+      body: '{{name}} is {{status}}. The assignment can still be made, but it will remain visible as a supply anomaly.',
+      confirm: 'Assign this caddie anyway?',
+    },
+  },
   duration: '{{hours}}h {{minutes}}m',
   rounds: '{{n}}R',
   people: '{{n}}',
@@ -137,6 +148,12 @@ export const caddies: DeepPartial<typeof source> = {
       title: 'Past the shift-request deadline ({{deadline}})',
       body: '{{names}} have not filed a shift request for this month. Check before assigning.',
       confirmExecute: '{{names}} have not filed a shift request yet. Commit these assignments anyway?',
+    },
+    shiftPlacementWarning: {
+      title: 'Check the shift placement',
+      body: 'Some assignments have an unconfirmed shift or no course placement. They can still be committed, but will remain visible as supply anomalies.',
+      confirm: 'Commit the auto-assignments anyway?',
+      item: '{{name}}: {{status}}',
     },
   },
   recommendations: {

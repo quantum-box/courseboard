@@ -2080,6 +2080,54 @@ function caddieAttachedByCourse(date: string): Map<string, number> {
   return demand
 }
 
+/** The canonical status the CourseBoard API adds without changing raw status. */
+function mockAssignmentCanonicalStatus(status: unknown): string {
+  const normalized = String(status ?? '').trim().toLowerCase()
+  if (normalized === 'assigned'
+    || normalized === 'in_progress'
+    || normalized === 'completed') {
+    return normalized
+  }
+  if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled'
+  return 'other'
+}
+
+/**
+ * The real supply endpoint owns the assignment join. These are fixed response
+ * examples only: one ordinary course and one course with an unbacked
+ * assignment, so the development screen exercises both additive contracts
+ * without copying the backend's aggregation algorithm here.
+ */
+const mockSupplyAdditiveExamples: Record<string, {
+  assignedGroups: number
+  backedAssignedGroups: number
+  unbackedAssignedGroups: number
+  capacityExceededAssignedGroups: number
+  courseMismatchAssignedGroups: number
+}> = {
+  course_east: {
+    assignedGroups: 0,
+    backedAssignedGroups: 0,
+    unbackedAssignedGroups: 0,
+    capacityExceededAssignedGroups: 0,
+    courseMismatchAssignedGroups: 0,
+  },
+  course_west: {
+    assignedGroups: 1,
+    backedAssignedGroups: 0,
+    unbackedAssignedGroups: 1,
+    capacityExceededAssignedGroups: 0,
+    courseMismatchAssignedGroups: 0,
+  },
+  course_hill: {
+    assignedGroups: 2,
+    backedAssignedGroups: 1,
+    unbackedAssignedGroups: 0,
+    capacityExceededAssignedGroups: 1,
+    courseMismatchAssignedGroups: 1,
+  },
+}
+
 function mockCourseSupply(date: string) {
   const working = mockShifts.filter(shift => shift.date === date && shift.isWorking)
   const demand = caddieAttachedByCourse(date)
@@ -2089,6 +2137,13 @@ function mockCourseSupply(date: string) {
       const placed = working.filter(shift => shift.golfCourseId === course.id)
       const roundsCapacity = placed.reduce((total, shift) => total + shift.roundsCapacity, 0)
       const caddieAttachedGroups = demand.get(course.id) ?? 0
+      const additive = mockSupplyAdditiveExamples[course.id] ?? {
+        assignedGroups: 0,
+        backedAssignedGroups: 0,
+        unbackedAssignedGroups: 0,
+        capacityExceededAssignedGroups: 0,
+        courseMismatchAssignedGroups: 0,
+      }
       return {
         golfCourseId: course.id,
         courseName: course.name,
@@ -2097,6 +2152,10 @@ function mockCourseSupply(date: string) {
         caddieAttachedGroups,
         movableCaddies: placed.filter(shift => shift.origin !== 'pinned').length,
         shortfall: roundsCapacity - caddieAttachedGroups,
+        ...additive,
+        effectiveRoundsCapacity: roundsCapacity,
+        effectiveCaddieAttachedGroups: caddieAttachedGroups,
+        effectiveShortfall: roundsCapacity - caddieAttachedGroups,
       }
     }),
     unplacedCaddies: working.filter(shift => shift.golfCourseId === null).length,
@@ -2431,7 +2490,10 @@ function resolveGet(path: string): Json | null | undefined {
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-assignments') {
-    return items(mockAssignments.map(item => ({ ...item })))
+    return items(mockAssignments.map(item => ({
+      ...item,
+      canonicalStatus: mockAssignmentCanonicalStatus(item.status),
+    })))
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-recommendations') {
@@ -2445,6 +2507,7 @@ function resolveGet(path: string): Json | null | undefined {
         roundsAssigned: 1,
         remainingRounds: 1,
         attendanceStatus: 'working',
+        shiftPlacementStatus: 'unconfirmed',
         recommendationScore: 161,
         recommendedRole: 'primary',
         pairingDisplayName: null,
@@ -3715,8 +3778,37 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   if (pathname === '/v1/erp/extensions/golf-course/caddie-auto-assignments' && method === 'POST') {
     return hit({
       dryRun: Boolean(body?.dryRun),
-      assigned: [],
-      skipped: [{ reservationId: 'res_mock', reason: 'Mock mode does not auto-assign' }],
+      assigned: [
+        {
+          reservationId: 'res_mock_4',
+          scheduledAt: `${TODAY}T08:00:00+09:00`,
+          caddieProfileId: 'caddie_mika',
+          caddieDisplayName: '田中 美香',
+          rationale: ['on_duty'],
+          shiftPlacementStatus: 'unconfirmed',
+        },
+        {
+          reservationId: 'res_mock_8',
+          scheduledAt: `${TODAY}T09:30:00+09:00`,
+          caddieProfileId: 'caddie_hiro',
+          caddieDisplayName: '中村 浩',
+          rationale: ['on_duty'],
+          shiftPlacementStatus: 'unplaced',
+        },
+        {
+          reservationId: 'res_mock_11',
+          scheduledAt: `${TODAY}T13:00:00+09:00`,
+          caddieProfileId: 'caddie_aya',
+          caddieDisplayName: '佐藤 彩',
+          rationale: ['on_duty'],
+          shiftPlacementStatus: 'on_course',
+        },
+      ],
+      skipped: [],
+      deadlineWarning: {
+        deadlineDate: `${TODAY.slice(0, 7)}-20`,
+        unsubmittedCaddieNames: ['田中 美香'],
+      },
     })
   }
 
