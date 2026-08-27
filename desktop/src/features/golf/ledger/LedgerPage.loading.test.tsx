@@ -113,16 +113,8 @@ beforeEach(async () => {
       })
     }
     if (path.startsWith('/v1/course/extension-status')) return Promise.resolve(null)
-    if (path.startsWith('/v1/course/caddie-assignments')) {
-      expect(path).toContain(`from=${todayDate}`)
-      expect(path).toContain(`to=${todayDate}`)
-      return Promise.resolve({ items: [] })
-    }
-    if (path.startsWith('/v1/course/caddie-shifts')) {
-      expect(path).toContain(`from=${todayDate}`)
-      expect(path).toContain(`to=${todayDate}`)
-      return Promise.resolve({ items: [] })
-    }
+    if (path.startsWith('/v1/course/caddie-assignments')) return Promise.resolve({ items: [] })
+    if (path.startsWith('/v1/course/caddie-shifts')) return Promise.resolve({ items: [] })
     throw new Error(`unexpected request: ${path}`)
   })
 })
@@ -173,6 +165,40 @@ describe('LedgerPage while the day is still loading', () => {
     })
     expect(screen.getByRole('region', { name: '東コース' })).toBeTruthy()
     expect(screen.getByText('07:00')).toBeTruthy()
+  })
+
+  it("requests the day's caddie assignments and confirmed shifts for a matching from/to range", async () => {
+    // useResource swallows a thrown assertion into its own `error` state, so
+    // asserting inside the mock (as this test used to) never fails the test
+    // even if the fetch it is supposed to check is deleted entirely. The
+    // check has to run against the mock's call log, outside the loader.
+    renderPage()
+    releaseLedger?.()
+
+    await waitFor(() => {
+      expect(
+        api.json.mock.calls.some(
+          call => typeof call[0] === 'string' && call[0].startsWith('/v1/course/caddie-assignments'),
+        ),
+      ).toBe(true)
+      expect(
+        api.json.mock.calls.some(
+          call => typeof call[0] === 'string' && call[0].startsWith('/v1/course/caddie-shifts'),
+        ),
+      ).toBe(true)
+    })
+
+    const assignmentsPath = api.json.mock.calls
+      .map(call => call[0])
+      .find((path): path is string => typeof path === 'string' && path.startsWith('/v1/course/caddie-assignments'))
+    const shiftsPath = api.json.mock.calls
+      .map(call => call[0])
+      .find((path): path is string => typeof path === 'string' && path.startsWith('/v1/course/caddie-shifts'))
+
+    expect(assignmentsPath).toContain(`from=${todayDate}`)
+    expect(assignmentsPath).toContain(`to=${todayDate}`)
+    expect(shiftsPath).toContain(`from=${todayDate}`)
+    expect(shiftsPath).toContain(`to=${todayDate}`)
   })
 
   it('warns when weekly hours exist but the course has no generated inventory', async () => {
