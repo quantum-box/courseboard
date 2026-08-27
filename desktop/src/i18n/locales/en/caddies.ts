@@ -259,8 +259,8 @@ export const caddies: DeepPartial<typeof source> = {
       description:
         'A staff member removed from the staff roster leaves the caddie side of '
         + 'the link behind. Attendance and payroll cannot resolve that staff '
-        + 'member, so these caddies drop out of both. Re-link them on the staff '
-        + 'roster, or stand the caddie down.',
+        + 'member, so these caddies drop out of both. Open the name and use '
+        + '"Pick a staff member" to fix it.',
       showOnly: 'Show only broken links',
     },
     unlinkedWarning: {
@@ -368,6 +368,11 @@ export const caddies: DeepPartial<typeof source> = {
     },
   },
   staff: {
+    linkBroken: {
+      title: 'The linked staff member is gone',
+      description: 'The staff record this caddie pointed at is no longer on the roster. Attendance cannot be recorded and payroll will leave them out. Pick the current staff member, or register a new one and link it.',
+    },
+    relinkAction: 'Pick a staff member',
     title: 'Staff & attendance',
     description: 'Manage the staff link and today’s clock-ins.',
     attendanceUnknown: 'Attendance unavailable',
