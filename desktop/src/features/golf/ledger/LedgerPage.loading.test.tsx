@@ -6,9 +6,15 @@ import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearResourceCache } from '../../../hooks/useResource'
 import { i18next } from '../../../i18n'
+import { today } from '../../../lib/clock'
 import { PageReloadProvider } from '../../../lib/pageReload'
 import { LedgerPage } from './LedgerPage'
 import type { TeeLedgerResponse } from './models'
+
+// The page defaults to today's date on the tenant's clock (no date is fixed
+// via the URL in this test), so the expected query params follow suit rather
+// than a hard-coded day.
+const todayDate = today()
 
 const api = vi.hoisted(() => ({ json: vi.fn() }))
 
@@ -107,6 +113,16 @@ beforeEach(async () => {
       })
     }
     if (path.startsWith('/v1/course/extension-status')) return Promise.resolve(null)
+    if (path.startsWith('/v1/course/caddie-assignments')) {
+      expect(path).toContain(`from=${todayDate}`)
+      expect(path).toContain(`to=${todayDate}`)
+      return Promise.resolve({ items: [] })
+    }
+    if (path.startsWith('/v1/course/caddie-shifts')) {
+      expect(path).toContain(`from=${todayDate}`)
+      expect(path).toContain(`to=${todayDate}`)
+      return Promise.resolve({ items: [] })
+    }
     throw new Error(`unexpected request: ${path}`)
   })
 })

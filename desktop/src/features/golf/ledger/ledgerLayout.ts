@@ -1,6 +1,7 @@
 import { i18next } from '../../../i18n'
 
 import type { CourseCaddieSupply } from '../caddieCourseSupply'
+import { unassignedCaddieRounds, type CoverageAssignment } from '../caddieRoundCoverage'
 import type { TeeReservation } from '../timeline/models'
 import type { LedgerColumn, LedgerSlot, SlotGridSource } from './models'
 
@@ -280,20 +281,56 @@ export function knowsCaddieCapacity(
 }
 
 /**
- * Whether this course has run out of caddie rounds for the day.
+ * A `useResource` read, told apart from a value that was actually loaded.
  *
- * Only a course whose caddie capacity is known can refuse one. A month nobody
- * has confirmed leaves every course at zero, and a lookup that never landed
- * leaves the course absent from the map — neither is the club saying it has no
- * caddies. Both keep the caddie plans selectable: a desk that cannot sell a
- * caddie round because an upstream call failed is worse off than one that
- * oversells by a group and sorts it out with the caddie master.
+ * `data: T | null` collapses "still loading" and "failed" into the same shape
+ * as "loaded nothing", which is exactly the collapse that must not happen for
+ * the unassigned-caddie badge (SCC-27): a lookup that has not landed yet is
+ * not the same fact as "no shifts are confirmed" or "no caddie is assigned".
  */
-export function caddieRoundsSoldOut(
-  supply: CourseCaddieSupply | null | undefined,
+export type ResourceStatus<T> =
+  | { kind: 'unknown' }
+  | { kind: 'failed' }
+  | { kind: 'loaded'; value: T }
+
+/** Takes a `useResource` result as-is, so data/error are never quietly dropped. */
+export function resourceStatus<T>(resource: {
+  data: T | null
+  error: unknown
+  loading: boolean
+}): ResourceStatus<T> {
+  if (resource.error) return { kind: 'failed' }
+  if (resource.data === null) return { kind: 'unknown' }
+  return { kind: 'loaded', value: resource.data }
+}
+
+/**
+ * Whether the day has at least one confirmed caddie shift.
+ *
+ * `unknown`/`failed` read as `false` — the safe side for a badge that must
+ * never claim a shift is missing merely because the lookup has not answered.
+ */
+export function dayHasConfirmedShifts(
+  shifts: ResourceStatus<{ items: unknown[] }>,
 ): boolean {
-  if (!knowsCaddieCapacity(supply)) return false
-  return supply.shortfall <= 0
+  return shifts.kind === 'loaded' && shifts.value.items.length > 0
+}
+
+/**
+ * The reservation IDs on the board with a caddie-attached round nobody is
+ * covering, gathered across every column into one set.
+ *
+ * Returns an empty set when the assignment lookup has not landed or failed —
+ * "unknown" must not be read as "nobody is assigned", or a slow request would
+ * paint the whole board red for a moment on every load.
+ */
+export function unassignedCaddieReservationIds(
+  columns: LedgerColumn[],
+  assignments: ResourceStatus<{ items: CoverageAssignment[] }>,
+): Set<string> {
+  if (assignments.kind !== 'loaded') return new Set()
+  const rows = columns.flatMap(column => column.slots.flatMap(slot => slot.items))
+  return new Set(unassignedCaddieRounds(rows, assignments.value.items).map(row => row.id))
 }
 
 /** `キャディ 8/12` — groups sold against what today's caddies can take. */

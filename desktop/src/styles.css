@@ -5348,6 +5348,23 @@ button,
   box-shadow: inset 0 0 0 2px hsl(var(--nui-primary) / 45%);
 }
 
+/* A caddie-attached round with nobody covering it, on a day the shifts are
+ * already confirmed (SCC-27). `.is-selected` uses `box-shadow`, so this uses
+ * `outline` instead — the same property would have one declaration win over
+ * the other and hide whichever state came second, but the two properties
+ * paint independently and both stay visible on a selected, unassigned row. */
+.ledger-cell-group.is-unassigned-caddie {
+  outline: 2px solid hsl(var(--nui-destructive) / 65%);
+  outline-offset: -2px;
+}
+
+.ledger-unassigned-badge {
+  display: block;
+  color: hsl(var(--nui-destructive));
+  font-size: 10px;
+  font-weight: 700;
+}
+
 .ledger-group-text {
   display: grid;
   gap: 1px;
@@ -5529,29 +5546,6 @@ button,
 
 .ledger-plan-option:hover {
   background: hsl(var(--nui-muted) / .6);
-}
-
-/* A caddie round the club cannot staff today. Dimmed rather than removed: the
- * desk needs to see that the plan exists and why it is out of reach, so it can
- * say "no caddie today" on the phone instead of "that plan is gone". */
-.ledger-plan-option.is-sold-out {
-  cursor: not-allowed;
-  color: hsl(var(--nui-muted-foreground));
-}
-
-.ledger-plan-option.is-sold-out:hover {
-  background: none;
-}
-
-.ledger-plan-option.is-sold-out .ledger-plan-label {
-  text-decoration: line-through;
-}
-
-.ledger-plan-sold-out {
-  flex: none;
-  font-size: 11px;
-  font-weight: 600;
-  color: hsl(var(--nui-muted-foreground));
 }
 
 .ledger-plan-option.is-selected {
