@@ -2315,6 +2315,10 @@ pub struct CaddieAssignmentDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_minutes: Option<i32>,
     pub status: String,
+    /// Canonicalized by CourseBoard's AssignmentStatus parser. The raw status
+    /// above remains untouched for compatibility with existing consumers.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub canonical_status: Option<String>,
     pub assignment_role: String,
     pub fee_amount: i64,
     pub fee_currency: String,
@@ -2332,6 +2336,7 @@ impl From<&CaddieAssignment> for CaddieAssignmentDto {
             scheduled_at: value.scheduled_at(),
             duration_minutes: value.duration_minutes(),
             status: value.status_label().to_string(),
+            canonical_status: Some(value.status().as_str().to_string()),
             assignment_role: value.role_label().to_string(),
             fee_amount: value.fee_amount(),
             fee_currency: value.fee_currency().to_string(),
@@ -2418,6 +2423,7 @@ pub async fn list_caddie_assignments(
 mod tests {
     use super::*;
     use crate::course::domain::PlayType;
+    use chrono::TimeZone;
 
     fn schedule_rule_request(id: Option<&str>, is_new: Option<bool>) -> ReplaceAvailabilityRuleDto {
         let mut value = serde_json::json!({
@@ -2631,5 +2637,57 @@ mod tests {
             params(Some("course-a,course-a"), Some("course-a")).course_ids(),
             vec![CourseId::new("course-a")]
         );
+    }
+
+    #[test]
+    fn assignment_dto_preserves_raw_status_and_emits_the_canonical_status() {
+        let cases = [
+            (" assigned ", "assigned"),
+            ("CHECKED_IN", "in_progress"),
+            (" completed ", "completed"),
+            ("CANCELED", "cancelled"),
+            ("unknown", "other"),
+        ];
+        for (raw, canonical) in cases {
+            let assignment = CaddieAssignment::reconstitute(
+                "assignment-1",
+                "caddie-1",
+                Some("reservation-1".into()),
+                None,
+                Utc.with_ymd_and_hms(2026, 9, 12, 1, 0, 0).unwrap(),
+                None,
+                raw,
+                "primary",
+                0,
+                "JPY",
+                None,
+            )
+            .expect("valid assignment");
+            let dto = CaddieAssignmentDto::from(&assignment);
+
+            assert_eq!(dto.status, raw);
+            assert_eq!(dto.canonical_status.as_deref(), Some(canonical));
+            let json = serde_json::to_value(dto).expect("serialize assignment");
+            assert_eq!(json["status"], raw);
+            assert_eq!(json["canonicalStatus"], canonical);
+        }
+    }
+
+    #[test]
+    fn assignment_dto_without_canonical_status_remains_deserializable() {
+        let old_json = serde_json::json!({
+            "id": "assignment-1",
+            "caddieProfileId": "caddie-1",
+            "reservationId": "reservation-1",
+            "scheduledAt": "2026-09-12T01:00:00Z",
+            "status": "assigned",
+            "assignmentRole": "primary",
+            "feeAmount": 0,
+            "feeCurrency": "JPY"
+        });
+
+        let dto: CaddieAssignmentDto =
+            serde_json::from_value(old_json).expect("decode old assignment");
+        assert_eq!(dto.canonical_status, None);
     }
 }
