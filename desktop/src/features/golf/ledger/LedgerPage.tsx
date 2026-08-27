@@ -26,6 +26,7 @@ import { showToast } from '../../../lib/toast'
 import { caddieSupplyByCourse, type DayCaddieSupply } from '../caddieCourseSupply'
 import type { CoverageAssignment } from '../caddieRoundCoverage'
 import {
+  addDays,
   inventoryHorizonGap,
   type BookingHorizonStatusResponse,
   type InventoryHorizonGap,
@@ -271,10 +272,13 @@ export function LedgerPage() {
   )
 
   /** Today's caddie assignments, joined against the board to find rounds
-   *  nobody is covering (SCC-27). */
+   *  nobody is covering (SCC-27). The provider filters by UTC calendar day, so
+   *  a morning round in a tenant east of UTC lands on the previous UTC date;
+   *  the window is widened a day each way and the reservation-id join keeps
+   *  only this board's rounds. */
   const caddieAssignmentsResource = useResource(
     () => courseboardApiJson<ListResponse<CoverageAssignment>>(
-      `${COURSE_API}/caddie-assignments?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`,
+      `${COURSE_API}/caddie-assignments?from=${encodeURIComponent(addDays(date, -1))}&to=${encodeURIComponent(addDays(date, 1))}`,
     ),
     [date],
     { cacheKey: `caddie-assignments:${date}` },

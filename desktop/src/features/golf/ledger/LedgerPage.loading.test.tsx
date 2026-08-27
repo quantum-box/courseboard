@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearResourceCache } from '../../../hooks/useResource'
 import { i18next } from '../../../i18n'
 import { today } from '../../../lib/clock'
+import { addDays } from '../bookingHorizon'
 import { PageReloadProvider, usePageReload } from '../../../lib/pageReload'
 import { LedgerPage } from './LedgerPage'
 import type { TeeLedgerResponse } from './models'
@@ -229,8 +230,11 @@ describe('LedgerPage while the day is still loading', () => {
       .map(call => call[0])
       .find((path): path is string => typeof path === 'string' && path.startsWith('/v1/course/caddie-shifts'))
 
-    expect(assignmentsPath).toContain(`from=${todayDate}`)
-    expect(assignmentsPath).toContain(`to=${todayDate}`)
+    // The assignment window is widened a day each way: the provider filters by
+    // UTC calendar day, so a morning round east of UTC lands on the previous
+    // UTC date and an exact-day query would miss it (SCC-31).
+    expect(assignmentsPath).toContain(`from=${addDays(todayDate, -1)}`)
+    expect(assignmentsPath).toContain(`to=${addDays(todayDate, 1)}`)
     expect(shiftsPath).toContain(`from=${todayDate}`)
     expect(shiftsPath).toContain(`to=${todayDate}`)
   })
