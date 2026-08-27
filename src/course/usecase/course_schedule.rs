@@ -1153,12 +1153,15 @@ mod tests {
         let schedules = Arc::new(FakeSchedules::default());
         let watermarks = Arc::new(FakeWatermarks::default());
         // The built one was already checked today, which is what used to make
-        // the whole run exit before reaching its neighbour.
+        // the whole run exit before reaching its neighbour. Its inventory must
+        // reach the 180-day horizon as of the day the test runs, so the date
+        // is computed rather than pinned to the day the test was written.
+        let today = course_today(Utc::now(), "Asia/Tokyo").expect("today");
         watermarks.stored.lock().expect("lock").insert(
             built.clone(),
             InventoryWatermark {
-                generated_through: date("2027-02-23"),
-                checked_on: course_today(Utc::now(), "Asia/Tokyo").expect("today"),
+                generated_through: today + chrono::Duration::days(180),
+                checked_on: today,
             },
         );
 
