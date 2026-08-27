@@ -7,13 +7,14 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    is_tee_time_closed, parse_tenant_tee_time, reconcile_remaining, tenant_day_bounds, CourseError,
-    CourseId, CustomerId, GatewayCredentials, GolfCatalogGateway, GolfCommercialGateway,
-    NewReservation, PartyDetails, Reservation, ReservationGateway, ReservationId,
+    is_tee_time_closed, parse_tenant_tee_time, parse_tenant_timezone, reconcile_remaining,
+    tenant_day_bounds, CourseError, CourseId, CustomerId, GatewayCredentials, GolfCatalogGateway,
+    GolfCommercialGateway, MembershipGateway, MembershipPlayWindowsGateway, NewReservation,
+    PartyDetails, PlayWindowBreach, Reservation, ReservationGateway, ReservationId,
     ReservationProduct, ReservationScheduleGateway, Resource, ResourceId, ResourceKind,
     ResourceTimeSlot, SlotOverrideGateway, SlotOverrideQuery,
 };
@@ -44,21 +45,42 @@ pub struct CreateReservationInput {
     pub party: PartyDetails,
 }
 
+/// A booking that was written, and anything the desk should know about it.
+///
+/// Warnings never stop the write. The desk takes exceptions every week — a
+/// 平日会員 playing Saturday at visitor rates — and refusing would push them
+/// into Field's admin to make the booking, which is the outcome CourseBoard
+/// exists to avoid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CreatedReservation {
+    pub id: ReservationId,
+    /// `member_play_window_day` or `member_play_window_time` when the booking
+    /// falls outside the customer's membership. Empty is the normal case.
+    pub warnings: Vec<&'static str>,
+}
+
 pub struct CreateReservationUseCase {
     reservations: Arc<dyn ReservationGateway>,
     commercial: Arc<dyn GolfCommercialGateway>,
     catalog: Arc<dyn GolfCatalogGateway>,
     schedules: Arc<dyn ReservationScheduleGateway>,
     marks: Arc<dyn SlotOverrideGateway>,
+    memberships: Arc<dyn MembershipGateway>,
+    play_windows: Arc<dyn MembershipPlayWindowsGateway>,
 }
 
 impl CreateReservationUseCase {
+    // Seven ports, because writing a booking touches seven things: the
+    // booking, the catalogue, the schedule, the desk's own marks, and the
+    // member's standing. Grouping them into a struct would only move the list.
     pub fn new(
         reservations: Arc<dyn ReservationGateway>,
         commercial: Arc<dyn GolfCommercialGateway>,
         catalog: Arc<dyn GolfCatalogGateway>,
         schedules: Arc<dyn ReservationScheduleGateway>,
         marks: Arc<dyn SlotOverrideGateway>,
+        memberships: Arc<dyn MembershipGateway>,
+        play_windows: Arc<dyn MembershipPlayWindowsGateway>,
     ) -> Self {
         Self {
             reservations,
@@ -66,6 +88,8 @@ impl CreateReservationUseCase {
             catalog,
             schedules,
             marks,
+            memberships,
+            play_windows,
         }
     }
 
@@ -73,7 +97,7 @@ impl CreateReservationUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
         input: CreateReservationInput,
-    ) -> Result<ReservationId, CourseError> {
+    ) -> Result<CreatedReservation, CourseError> {
         credentials.require(actions::MANAGE_RESERVATIONS).await?;
         let customer_name = input.customer_name.trim();
         if customer_name.is_empty() {
@@ -131,6 +155,9 @@ impl CreateReservationUseCase {
         )?;
 
         let reservation_type_id = self.reservation_type_id(credentials).await?;
+        // Kept before the move into `NewReservation`: the membership check
+        // below needs the course's own clock to read the weekday.
+        let course_timezone = timezone.clone();
         let new_reservation = NewReservation {
             reservation_type_id,
             reservation_service_id: input.reservation_service_id,
@@ -150,10 +177,74 @@ impl CreateReservationUseCase {
             seed_key: None,
         };
 
-        self.reservations
+        let customer_id = new_reservation.customer_id.clone();
+        let id = self
+            .reservations
             .create_reservation(credentials, &new_reservation)
             .await
-            .map_err(normalize_inventory_conflict)
+            .map_err(normalize_inventory_conflict)?;
+
+        // Checked after the write, deliberately. The booking is not in question
+        // — only whether the desk should be told something about it — and a
+        // membership read that fails must not lose a tee time that is already
+        // sold.
+        let warnings = self
+            .member_play_window_warnings(
+                credentials,
+                customer_id.as_ref(),
+                starts_at,
+                &course_timezone,
+            )
+            .await;
+        Ok(CreatedReservation { id, warnings })
+    }
+
+    /// Whether this booking falls outside the customer's membership window.
+    ///
+    /// Answers with no warning on any failure. This is advice; an unreachable
+    /// membership registry is not a reason to put a scare on a booking that is
+    /// already written, nor to fail the request that wrote it.
+    async fn member_play_window_warnings(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: Option<&CustomerId>,
+        starts_at: DateTime<Utc>,
+        timezone: &str,
+    ) -> Vec<&'static str> {
+        let Some(customer_id) = customer_id else {
+            return Vec::new();
+        };
+        let Ok(windows) = self
+            .play_windows
+            .get_membership_play_windows(credentials.operator_id)
+            .await
+        else {
+            return Vec::new();
+        };
+        if windows.is_empty() {
+            return Vec::new();
+        }
+        let Ok(membership) = self
+            .memberships
+            .get_customer_membership(credentials, customer_id)
+            .await
+        else {
+            return Vec::new();
+        };
+        let Some(plan) = membership.plan() else {
+            return Vec::new();
+        };
+        // The course's own day and clock. A 07:00 JST Saturday round is Friday
+        // in UTC, and judging it there would clear a 平日会員 for a weekend.
+        let Ok(zone) = parse_tenant_timezone(timezone) else {
+            return Vec::new();
+        };
+        let local = starts_at.with_timezone(&zone);
+        match windows.breach_for(Some(plan.id()), local.weekday(), local.time()) {
+            Some(PlayWindowBreach::Day) => vec!["member_play_window_day"],
+            Some(PlayWindowBreach::Time) => vec!["member_play_window_time"],
+            None => Vec::new(),
+        }
     }
 
     /// Refuse a tee time the desk has marked closed.
@@ -608,6 +699,16 @@ mod tests {
 
     #[async_trait]
     impl ReservationGateway for RecordingReservationGateway {
+        async fn list_customer_reservations(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _customer_id: &CustomerId,
+            _limit: u32,
+            _offset: u32,
+        ) -> Result<Vec<Reservation>, CourseError> {
+            unreachable!("booking a tee time never reads a customer's history")
+        }
+
         async fn list_reservations(
             &self,
             _credentials: GatewayCredentials<'_>,
@@ -1011,6 +1112,84 @@ mod tests {
         }
     }
 
+    /// Never consulted: this booking carries nobody from the ledger, so there
+    /// is no membership to check a playing window against.
+    struct UnreadMembershipGateway;
+
+    #[async_trait]
+    impl crate::course::domain::MembershipGateway for UnreadMembershipGateway {
+        async fn list_membership_plans(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _include_inactive: bool,
+        ) -> Result<Vec<crate::course::domain::MembershipPlan>, CourseError> {
+            unreachable!("booking a tee time never lists the plans")
+        }
+
+        async fn create_membership_plan(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: &crate::course::domain::UpsertMembershipPlan,
+        ) -> Result<crate::course::domain::MembershipPlan, CourseError> {
+            unreachable!("booking a tee time never sells a plan")
+        }
+
+        async fn update_membership_plan(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _plan_id: &crate::course::domain::MembershipPlanId,
+            _input: &crate::course::domain::UpsertMembershipPlan,
+        ) -> Result<crate::course::domain::MembershipPlan, CourseError> {
+            unreachable!("booking a tee time never edits a plan")
+        }
+
+        async fn get_customer_membership(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _customer_id: &CustomerId,
+        ) -> Result<crate::course::domain::CustomerMembership, CourseError> {
+            unreachable!("this booking has no customer to read a membership for")
+        }
+
+        async fn assign_membership_plan(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: &crate::course::domain::AssignMembershipPlan,
+        ) -> Result<crate::course::domain::CustomerMembership, CourseError> {
+            unreachable!("booking a tee time never grants a membership")
+        }
+
+        async fn set_member_number(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: &crate::course::domain::SetMemberNumber,
+        ) -> Result<crate::course::domain::CustomerMembership, CourseError> {
+            unreachable!("booking a tee time never numbers a member")
+        }
+    }
+
+    /// A club that restricts no membership: the ordinary case, and the one
+    /// where a booking must go through without a word about playing windows.
+    struct NoPlayWindowsGateway;
+
+    #[async_trait]
+    impl MembershipPlayWindowsGateway for NoPlayWindowsGateway {
+        async fn get_membership_play_windows(
+            &self,
+            _tenant_id: &str,
+        ) -> Result<crate::course::domain::MembershipPlayWindows, CourseError> {
+            Ok(crate::course::domain::MembershipPlayWindows::default())
+        }
+
+        async fn replace_membership_play_windows(
+            &self,
+            _tenant_id: &str,
+            _windows: &crate::course::domain::MembershipPlayWindows,
+        ) -> Result<crate::course::domain::MembershipPlayWindows, CourseError> {
+            unreachable!("booking a tee time never writes the playing windows")
+        }
+    }
+
     #[tokio::test]
     async fn a_caddie_booking_reaches_field_without_a_caddie_supply_guard() {
         // The constructor signature is structural evidence: no caddie-supply
@@ -1025,6 +1204,8 @@ mod tests {
             std::sync::Arc::new(BookingCatalogGateway),
             std::sync::Arc::new(OpenReservationScheduleGateway),
             std::sync::Arc::new(EmptySlotOverrideGateway),
+            std::sync::Arc::new(UnreadMembershipGateway),
+            std::sync::Arc::new(NoPlayWindowsGateway),
         );
 
         let created = use_case
@@ -1032,7 +1213,9 @@ mod tests {
             .await
             .expect("caddie booking should be created");
 
-        assert_eq!(created, ReservationId::new("reservation-created"));
+        assert_eq!(created.id, ReservationId::new("reservation-created"));
+        // A booking with nobody from the ledger on it has nothing to warn about.
+        assert!(created.warnings.is_empty());
         let created_inputs = reservations.created.lock().expect("lock");
         assert_eq!(created_inputs.len(), 1);
         assert_eq!(

@@ -22,6 +22,12 @@ export type CustomerMembership = {
   isMember: boolean
   plan?: MembershipPlan | null
   startedOn?: string | null
+  /**
+   * The club's own number for this member, held as a Field credential rather
+   * than as free text on a booking. Absent for a visitor, and for a member the
+   * club has not numbered.
+   */
+  memberNumber?: string | null
 }
 
 export type MembershipPlanList = {
@@ -32,6 +38,10 @@ export const membershipPlansPath = '/v1/course/membership-plans'
 
 export function membershipPath(customerId: string): string {
   return `/v1/course/customers/${encodeURIComponent(customerId)}/membership`
+}
+
+export function memberNumberPath(customerId: string): string {
+  return `/v1/course/customers/${encodeURIComponent(customerId)}/member-number`
 }
 
 /** A plan row being edited. Numbers are strings while the desk is typing. */

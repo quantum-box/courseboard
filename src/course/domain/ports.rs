@@ -8,15 +8,16 @@ use super::{
     AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, Caddie,
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
     CaddieRankFees, CaddieRating, CaddieRoster, CaddieShift, CaddieStaff, Course, CourseError,
-    CourseId, CourseOrder, Customer, CustomerId, CustomerMembership, CustomerSearchQuery,
-    DailyBudget, DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus,
-    FieldClientCapabilities, FieldRequestContext, FieldShiftLink, GenerationSummary,
-    GolfPricingSettings, InventoryWatermark, MembershipPlan, MembershipPlanId, MonthlySettlement,
-    NewCustomer, NewReservation, PartyDetails, PlayerTagOptions, ProductSlot, ReceptionDraft,
-    ReceptionSheet, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
+    CourseId, CourseOrder, Customer, CustomerGradeRules, CustomerId, CustomerMembership,
+    CustomerSearchQuery, DailyBudget, DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides,
+    ExtensionStatus, FieldClientCapabilities, FieldRequestContext, FieldShiftLink,
+    GenerationSummary, GolfPricingSettings, InventoryWatermark, MembershipDiscounts,
+    MembershipPlan, MembershipPlanId, MembershipPlayWindows, MonthlySettlement, NewCustomer,
+    NewReservation, PartyDetails, PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet,
+    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
     ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
-    ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
-    SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
+    ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber, ShiftPolicy,
+    SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
     UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
     UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes,
     YearMonth,
@@ -304,6 +305,48 @@ pub trait CaddieRankFeeGateway: Send + Sync {
 /// Keyed by tenant id because this is CourseBoard's own storage. Empty doubles
 /// as unset, which is what sends the reader to the extension config the list
 /// migrated from — the same trade the course order made.
+#[async_trait]
+pub trait CustomerGradeRulesGateway: Send + Sync {
+    async fn get_customer_grade_rules(
+        &self,
+        tenant_id: &str,
+    ) -> Result<CustomerGradeRules, CourseError>;
+
+    async fn replace_customer_grade_rules(
+        &self,
+        tenant_id: &str,
+        rules: &CustomerGradeRules,
+    ) -> Result<CustomerGradeRules, CourseError>;
+}
+
+#[async_trait]
+pub trait MembershipDiscountsGateway: Send + Sync {
+    async fn get_membership_discounts(
+        &self,
+        tenant_id: &str,
+    ) -> Result<MembershipDiscounts, CourseError>;
+
+    async fn replace_membership_discounts(
+        &self,
+        tenant_id: &str,
+        discounts: &MembershipDiscounts,
+    ) -> Result<MembershipDiscounts, CourseError>;
+}
+
+#[async_trait]
+pub trait MembershipPlayWindowsGateway: Send + Sync {
+    async fn get_membership_play_windows(
+        &self,
+        tenant_id: &str,
+    ) -> Result<MembershipPlayWindows, CourseError>;
+
+    async fn replace_membership_play_windows(
+        &self,
+        tenant_id: &str,
+        windows: &MembershipPlayWindows,
+    ) -> Result<MembershipPlayWindows, CourseError>;
+}
+
 #[async_trait]
 pub trait PlayerTagOptionsGateway: Send + Sync {
     async fn get_player_tag_options(
@@ -607,6 +650,27 @@ pub trait ReservationGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<Reservation>, CourseError>;
 
+    /// One person's bookings, newest first.
+    ///
+    /// Filtered upstream rather than here: the tenant's reservation table is
+    /// years of play and the desk wants one customer out of it. Only the
+    /// booking's own customer matches — Field records one per reservation and
+    /// cannot be asked about `golfParty.players[].customerId` — so this answers
+    /// "rounds they booked", not "rounds they played in".
+    ///
+    /// Paged, because the caller needs the whole history and not a screenful:
+    /// how often somebody plays and what they are worth are lifetime figures,
+    /// and a page of them is a different number wearing the same label. Field
+    /// answers with no total, so the caller reads until a page comes back
+    /// short.
+    async fn list_customer_reservations(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Reservation>, CourseError>;
+
     /// One booking by id.
     ///
     /// Listing the day to find a single row is what the tee sheet does; a case
@@ -803,6 +867,17 @@ pub trait MembershipGateway: Send + Sync {
         &self,
         credentials: GatewayCredentials<'_>,
         input: &AssignMembershipPlan,
+    ) -> Result<CustomerMembership, CourseError>;
+
+    /// Record, change, or withdraw the club's number for a member.
+    ///
+    /// Separate from assigning a plan: a club numbers people at a different
+    /// moment from when it sells them the membership, and renumbers without
+    /// the membership changing at all.
+    async fn set_member_number(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &SetMemberNumber,
     ) -> Result<CustomerMembership, CourseError>;
 }
 

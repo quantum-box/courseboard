@@ -26,6 +26,7 @@ export const simulator: DeepPartial<typeof source> = {
     description: 'プレー料金を入れると、等級と税、合計金額がわかります。',
     field: {
       greenFee: 'プレー料金',
+      membership: '会員の種類',
       numHoles: '回るホールの数',
       cartFee: 'カート代（入れなくてもよい）',
       caddyFee: 'キャディ代（入れなくてもよい）',
@@ -33,10 +34,15 @@ export const simulator: DeepPartial<typeof source> = {
     submit: '計算する',
     submitting: '計算しています',
     prompt: '金額を入れて計算してください。',
+    membership: {
+      visitor: '会員ではない人',
+    },
     metric: {
       taxRate: '税の割合',
       taxAmount: '税の金額',
       total: '合計',
+      memberDiscount: '会員のわりびき',
+      memberGreenFee: 'ひいたあと {{fee}}',
     },
     table: {
       player: 'プレーする人',

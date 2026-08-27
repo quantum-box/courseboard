@@ -33,10 +33,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::course::domain::actions::{
-    CALCULATE_FEES, LIST_CADDIE_AVAILABILITY, LIST_CADDIE_RANK_FEES, LIST_COURSES, LIST_SHIFTS,
-    LIST_SLOT_OVERRIDES, LIST_TEE_SHEET, MANAGE_CADDIE_AVAILABILITY, MANAGE_CADDIE_RANK_FEES,
-    MANAGE_COURSES, MANAGE_RESERVATION_POLICY, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES,
-    SEED_DEMO_BOARD,
+    CALCULATE_FEES, LIST_CADDIE_AVAILABILITY, LIST_CADDIE_RANK_FEES, LIST_COURSES, LIST_CUSTOMERS,
+    LIST_MEMBERSHIP, LIST_SHIFTS, LIST_SLOT_OVERRIDES, LIST_TEE_SHEET, MANAGE_CADDIE_AVAILABILITY,
+    MANAGE_CADDIE_RANK_FEES, MANAGE_COURSES, MANAGE_CUSTOMERS, MANAGE_MEMBERSHIP_PLANS,
+    MANAGE_RESERVATION_POLICY, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
 };
 
 /// What standing a route needs before its handler runs.
@@ -355,8 +355,54 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     ),
     (
         "*",
+        "/v1/course/customers/:customer_id/visits",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/customers/:customer_id/member-number",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
         "/v1/course/customers/:customer_id/membership",
         RouteAuthorization::UpstreamEnforced,
+    ),
+    // CourseBoard's own rows (ADR-0009), so the gate is here rather than at
+    // Field: read wherever a customer is read, arranged where customers are
+    // managed. Deciding what makes somebody a good customer is a decision
+    // about customers, not about bookings.
+    (
+        "GET",
+        "/v1/course/customer-grade-rules",
+        RouteAuthorization::Action(LIST_CUSTOMERS),
+    ),
+    (
+        "PUT",
+        "/v1/course/customer-grade-rules",
+        RouteAuthorization::Action(MANAGE_CUSTOMERS),
+    ),
+    // What a membership takes off the green fee: CourseBoard's own rows, so
+    // the gate is here rather than at Field.
+    (
+        "GET",
+        "/v1/course/membership-discounts",
+        RouteAuthorization::Action(LIST_MEMBERSHIP),
+    ),
+    (
+        "PUT",
+        "/v1/course/membership-discounts",
+        RouteAuthorization::Action(MANAGE_MEMBERSHIP_PLANS),
+    ),
+    (
+        "GET",
+        "/v1/course/membership-play-windows",
+        RouteAuthorization::Action(LIST_MEMBERSHIP),
+    ),
+    (
+        "PUT",
+        "/v1/course/membership-play-windows",
+        RouteAuthorization::Action(MANAGE_MEMBERSHIP_PLANS),
     ),
     (
         "*",
@@ -1201,8 +1247,16 @@ mod tests {
             ("POST", "/v1/course/customers"),
             ("POST", "/v1/course/customers/reception-draft"),
             ("GET", "/v1/course/customers/cus_1"),
+            ("GET", "/v1/course/customers/cus_1/visits"),
+            ("PUT", "/v1/course/customers/cus_1/member-number"),
             ("GET", "/v1/course/customers/cus_1/membership"),
             ("POST", "/v1/course/customers/cus_1/membership"),
+            ("GET", "/v1/course/customer-grade-rules"),
+            ("PUT", "/v1/course/customer-grade-rules"),
+            ("GET", "/v1/course/membership-discounts"),
+            ("PUT", "/v1/course/membership-discounts"),
+            ("GET", "/v1/course/membership-play-windows"),
+            ("PUT", "/v1/course/membership-play-windows"),
             ("GET", "/v1/course/membership-plans"),
             ("POST", "/v1/course/membership-plans"),
             ("PATCH", "/v1/course/membership-plans/pl_1"),

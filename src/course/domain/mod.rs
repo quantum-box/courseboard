@@ -17,12 +17,16 @@ mod course;
 mod course_order;
 mod course_supply;
 mod customer;
+mod customer_grade;
 mod customer_reception;
+mod customer_visits;
 mod demo_board;
 mod error;
 mod field_capabilities;
 mod ids;
 mod membership;
+mod membership_play_window;
+mod membership_pricing;
 mod party;
 mod payroll;
 mod player_tags;
@@ -82,11 +86,19 @@ pub use customer::{
     Customer, CustomerSearchQuery, NewCustomer, DEFAULT_CUSTOMER_SEARCH_LIMIT,
     MAX_CUSTOMER_SEARCH_LIMIT,
 };
+pub use customer_grade::{
+    CustomerGradeRule, CustomerGradeRules, CustomerGradeVerdict, MAX_GRADE_RULES,
+};
 pub use customer_reception::{
     reception_sheet_schema, ReceptionDraft, ReceptionDraftRow, ReceptionOcrColumn,
     ReceptionOcrField, ReceptionSheet, ReceptionSheetMediaType, MAX_RECEPTION_ROWS,
     MAX_RECEPTION_SHEET_BYTES, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL,
     RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
+};
+pub use customer_visits::{
+    CustomerVisit, CustomerVisitHistory, CustomerVisitSummary, VisitKind,
+    DEFAULT_VISIT_HISTORY_LIMIT, MAX_VISIT_HISTORY_LIMIT, MAX_VISIT_HISTORY_ROWS,
+    VISIT_HISTORY_PAGE,
 };
 pub use demo_board::{
     demo_board, seed_tee_time, DemoBoard, SeedCourse, SeedGroup, SeedMark, SEED_DURATION_MINUTES,
@@ -103,8 +115,14 @@ pub use ids::{
     ResourceId, TenantId,
 };
 pub use membership::{
-    AssignMembershipPlan, CustomerMembership, MembershipPlan, UpsertMembershipPlan,
+    AssignMembershipPlan, CustomerMembership, MembershipPlan, SetMemberNumber,
+    UpsertMembershipPlan, MEMBER_NUMBER_CREDENTIAL_KIND,
 };
+pub use membership_play_window::{
+    format_play_time, parse_play_time, MembershipPlayWindow, MembershipPlayWindows,
+    PlayWindowBreach, PlayableDays,
+};
+pub use membership_pricing::{MemberDiscount, MembershipDiscount, MembershipDiscounts};
 pub use party::{PartyDetails, PartyPlayer, MAX_PARTY_PLAYERS, PARTY_CUSTOM_FIELD_KEY};
 pub use payroll::{
     payroll_csv, summarize_payroll_in_timezone, AttendanceDay, PayrollCandidate, WorkedMinutes,
@@ -112,9 +130,10 @@ pub use payroll::{
 pub use player_tags::{PlayerTagOptions, MAX_PLAYER_TAG_LENGTH, MAX_PLAYER_TAG_OPTIONS};
 pub use ports::{
     AvailabilityDeadlineGateway, CaddieRankFeeGateway, CaddieShiftGateway, CourseAuthorizer,
-    CourseOrderGateway, CustomerGateway, CustomerReceptionOcrGateway, FieldCapabilitiesGateway,
-    GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
-    GolfOpsGateway, GolfTaxGateway, MembershipGateway, PlayerTagOptionsGateway,
+    CourseOrderGateway, CustomerGateway, CustomerGradeRulesGateway, CustomerReceptionOcrGateway,
+    FieldCapabilitiesGateway, GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway,
+    GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, MembershipDiscountsGateway,
+    MembershipGateway, MembershipPlayWindowsGateway, PlayerTagOptionsGateway,
     PricingSettingsGateway, ReservationGateway, ReservationScheduleGateway, ShiftRulesGateway,
     SlotOverrideGateway, StaffShiftGateway, StaffShiftInput, TeeLedgerQuery, TeeSheetQuery,
 };

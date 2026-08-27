@@ -3,6 +3,9 @@ import { useTranslation } from 'react-i18next'
 import { Panel } from '../../components/Page'
 import { navDescription, navLabel, settingsNavigation } from '../../components/AppShell'
 import { navigateFromClick } from '../../lib/router'
+import { CustomerGradesPanel } from './CustomerGradesPanel'
+import { MembershipDiscountsPanel } from './MembershipDiscountsPanel'
+import { MembershipPlayWindowsPanel } from './MembershipPlayWindowsPanel'
 import { ExtensionConfigPanel } from './ExtensionConfigPanel'
 import { MembershipPlansPanel } from './MembershipPlansPanel'
 
@@ -48,6 +51,12 @@ export function SettingsPage() {
       </Panel>
 
       <MembershipPlansPanel />
+
+      <MembershipDiscountsPanel />
+
+      <MembershipPlayWindowsPanel />
+
+      <CustomerGradesPanel />
 
       <ExtensionConfigPanel />
     </div>

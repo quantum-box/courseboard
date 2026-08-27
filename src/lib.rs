@@ -35,8 +35,9 @@ use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, Tax
 use course::infrastructure::{
     FieldReservationReportGateway, MigratingReservationReportGateway,
     MySqlAvailabilityDeadlineRepository, MySqlCaddieRankFeeRepository, MySqlCaddieShiftRepository,
-    MySqlCourseOrderRepository, MySqlGeneratedThroughRepository,
-    MySqlGolfProductSettingsRepository, MySqlPlayerTagOptionsRepository,
+    MySqlCourseOrderRepository, MySqlCustomerGradeRulesRepository, MySqlGeneratedThroughRepository,
+    MySqlGolfProductSettingsRepository, MySqlMembershipDiscountsRepository,
+    MySqlMembershipPlayWindowsRepository, MySqlPlayerTagOptionsRepository,
     MySqlPricingSettingsRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
@@ -64,6 +65,9 @@ pub struct AppState {
     pricing_settings: Arc<MySqlPricingSettingsRepository>,
     product_settings: Arc<MySqlGolfProductSettingsRepository>,
     player_tag_options: Arc<MySqlPlayerTagOptionsRepository>,
+    customer_grade_rules: Arc<MySqlCustomerGradeRulesRepository>,
+    membership_discounts: Arc<MySqlMembershipDiscountsRepository>,
+    membership_play_windows: Arc<MySqlMembershipPlayWindowsRepository>,
     generated_through: Arc<MySqlGeneratedThroughRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
@@ -106,6 +110,11 @@ impl AppState {
             pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
             product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
+            customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(pool.clone())),
+            membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(pool.clone())),
+            membership_play_windows: Arc::new(MySqlMembershipPlayWindowsRepository::new(
+                pool.clone(),
+            )),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -162,6 +171,11 @@ impl AppState {
             pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
             product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
+            customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(pool.clone())),
+            membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(pool.clone())),
+            membership_play_windows: Arc::new(MySqlMembershipPlayWindowsRepository::new(
+                pool.clone(),
+            )),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
@@ -204,6 +218,15 @@ impl AppState {
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
                 product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
+                customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(
+                    pool.clone(),
+                )),
+                membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(
+                    pool.clone(),
+                )),
+                membership_play_windows: Arc::new(MySqlMembershipPlayWindowsRepository::new(
+                    pool.clone(),
+                )),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -237,6 +260,15 @@ impl AppState {
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
                 product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
+                customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(
+                    pool.clone(),
+                )),
+                membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(
+                    pool.clone(),
+                )),
+                membership_play_windows: Arc::new(MySqlMembershipPlayWindowsRepository::new(
+                    pool.clone(),
+                )),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
@@ -307,6 +339,12 @@ impl AppState {
 
     /// CourseBoard-owned confirmed shifts, including which course each caddie
     /// works. Field holds the request; the placement is ours (ADR-0005).
+    /// CourseBoard-owned playing windows: when each membership may be used.
+    /// Advisory only — the booking is written either way.
+    pub fn membership_play_windows(&self) -> Arc<MySqlMembershipPlayWindowsRepository> {
+        self.membership_play_windows.clone()
+    }
+
     pub fn caddie_shifts(&self) -> Arc<MySqlCaddieShiftRepository> {
         self.caddie_shifts.clone()
     }
@@ -588,9 +626,48 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/customers/:customer_id/visits",
+            get(course::interfaces::http_customers::get_customer_visits).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/customers/:customer_id/member-number",
+            put(course::interfaces::http_customers::set_member_number).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/customers/:customer_id/membership",
             get(course::interfaces::http_customers::get_customer_membership)
                 .post(course::interfaces::http_customers::assign_membership_plan)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/customer-grade-rules",
+            get(course::interfaces::http_customers::get_customer_grade_rules)
+                .put(course::interfaces::http_customers::replace_customer_grade_rules)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/membership-discounts",
+            get(course::interfaces::http_customers::get_membership_discounts)
+                .put(course::interfaces::http_customers::replace_membership_discounts)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/membership-play-windows",
+            get(course::interfaces::http_customers::get_membership_play_windows)
+                .put(course::interfaces::http_customers::replace_membership_play_windows)
                 .route_layer(middleware::from_fn_with_state(
                     state.clone(),
                     require_valid_token,
