@@ -17,10 +17,10 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    parse_tenant_timezone, plan_caddie_assignments, tenant_date_at, tenant_day_bounds,
-    widen_for_utc_date_filter, AttendanceState, AutoAssignResult, AvailabilityDeadline,
-    AvailabilityDeadlineGateway, AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery,
-    CaddiePlacement, CaddieRankFeeGateway, CaddieRoster, CaddieShift, CaddieShiftGateway,
+    parse_tenant_timezone, placement_for_shift, plan_caddie_assignments, tenant_date_at,
+    tenant_day_bounds, widen_for_utc_date_filter, AttendanceState, AutoAssignResult,
+    AvailabilityDeadline, AvailabilityDeadlineGateway, AvailabilityQuery, AvailabilityStatus,
+    CaddieAssignmentQuery, CaddieRankFeeGateway, CaddieRoster, CaddieShift, CaddieShiftGateway,
     CourseError, DeadlineWarning, GatewayCredentials, GolfCatalogGateway, GolfOpsGateway,
     PlanOptions, PlannableCaddie, PlannableRound, ReservationGateway, TeeSheetItem, TeeSheetQuery,
     UpsertCaddieAssignment, YearMonth,
@@ -35,17 +35,6 @@ const PRIMARY_ROLE: &str = "primary";
 
 /// The tee-sheet carries its start as the offset-bearing string the screens
 /// render; the planner needs the instant behind it.
-/// How the planner should read a caddie's day.
-fn placement_for(shift: Option<&CaddieShift>) -> CaddiePlacement {
-    match shift {
-        Some(shift) => match shift.course_id() {
-            Some(course_id) => CaddiePlacement::On(course_id.clone()),
-            None => CaddiePlacement::Unplaced,
-        },
-        None => CaddiePlacement::Unconfirmed,
-    }
-}
-
 fn round_starts_at(item: &TeeSheetItem) -> Result<DateTime<Utc>, CourseError> {
     DateTime::parse_from_rfc3339(item.tee_time())
         .map(|value| value.with_timezone(&Utc))
@@ -260,7 +249,7 @@ impl AutoAssignCaddiesUseCase {
                     .filter(|assignment| assignment.caddie_id().as_str() == id)
                     .collect();
                 PlannableCaddie {
-                    placement: placement_for(shift_by_caddie.get(id).copied()),
+                    placement: placement_for_shift(shift_by_caddie.get(id).copied()),
                     caddie_id: id.to_string(),
                     display_name: caddie.display_name().to_string(),
                     skill_level: caddie.skill_level(),

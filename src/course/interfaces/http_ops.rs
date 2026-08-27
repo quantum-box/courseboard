@@ -638,6 +638,10 @@ pub struct RecommendationDto {
     pub remaining_rounds: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attendance_status: Option<String>,
+    /// Where the confirmed shift puts the caddie for the requested day.
+    /// Optional so an older backend response remains readable by a newer SPA.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub shift_placement_status: Option<String>,
     pub recommendation_score: i32,
     pub recommended_role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -656,6 +660,7 @@ impl From<&CaddieRecommendation> for RecommendationDto {
             rounds_assigned: value.rounds_assigned(),
             remaining_rounds: value.remaining_rounds(),
             attendance_status: value.attendance_status().map(str::to_string),
+            shift_placement_status: Some(value.placement().status().to_string()),
             recommendation_score: value.recommendation_score(),
             recommended_role: value.recommended_role().to_string(),
             pairing_display_name: value.pairing_display_name().map(str::to_string),
@@ -947,6 +952,10 @@ pub struct AutoAssignPlanItemDto {
     pub caddie_profile_id: String,
     pub caddie_display_name: String,
     pub rationale: Vec<String>,
+    /// Where the confirmed shift puts the selected caddie for the day.
+    /// Optional so an older auto-assignment response remains readable.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub shift_placement_status: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -988,6 +997,7 @@ impl From<AutoAssignResult> for AutoAssignResultDto {
                     caddie_profile_id: item.caddie_id().to_string(),
                     caddie_display_name: item.caddie_display_name().to_string(),
                     rationale: item.rationale().to_vec(),
+                    shift_placement_status: Some(item.placement().status().to_string()),
                 })
                 .collect(),
             skipped: value
@@ -1871,6 +1881,24 @@ pub struct CourseCaddieSupplyDto {
     pub movable_caddies: i64,
     /// Rounds still coverable. Negative means the course is short.
     pub shortfall: i64,
+    /// Assignment coverage and effective values are additive to the raw fields
+    /// above. Defaults keep old JSON payloads deserializable during rollout.
+    #[serde(default)]
+    pub assigned_groups: i64,
+    #[serde(default)]
+    pub backed_assigned_groups: i64,
+    #[serde(default)]
+    pub unbacked_assigned_groups: i64,
+    #[serde(default)]
+    pub capacity_exceeded_assigned_groups: i64,
+    #[serde(default)]
+    pub course_mismatch_assigned_groups: i64,
+    #[serde(default)]
+    pub effective_rounds_capacity: i64,
+    #[serde(default)]
+    pub effective_caddie_attached_groups: i64,
+    #[serde(default)]
+    pub effective_shortfall: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -1897,6 +1925,14 @@ impl From<DayCaddieSupply> for DayCaddieSupplyDto {
                     caddie_attached_groups: course.caddie_attached_groups(),
                     movable_caddies: course.movable_caddies(),
                     shortfall: course.shortfall(),
+                    assigned_groups: course.assigned_groups(),
+                    backed_assigned_groups: course.backed_assigned_groups(),
+                    unbacked_assigned_groups: course.unbacked_assigned_groups(),
+                    capacity_exceeded_assigned_groups: course.capacity_exceeded_assigned_groups(),
+                    course_mismatch_assigned_groups: course.course_mismatch_assigned_groups(),
+                    effective_rounds_capacity: course.effective_rounds_capacity(),
+                    effective_caddie_attached_groups: course.effective_caddie_attached_groups(),
+                    effective_shortfall: course.effective_shortfall(),
                 })
                 .collect(),
             unplaced_caddies: value.unplaced_caddies(),
@@ -2140,4 +2176,126 @@ pub async fn update_shift_rules(
         .await
         .map_err(AppError::from)?;
     Ok(Json(ShiftRulesDto::from(saved)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+
+    use crate::course::domain::{
+        apply_assignment_coverage, compute_course_supply, AutoAssignPlanItem, AutoAssignResult,
+        CaddiePlacement, CaddieRecommendation, CaddieShift, CaddieSkillLevel, CourseId,
+        ShiftOrigin, ShiftSpan,
+    };
+
+    fn date() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 9, 12).expect("test date")
+    }
+
+    #[test]
+    fn caddie_supply_dto_serializes_additive_values_and_reads_old_json() {
+        let shift = CaddieShift::reconstitute(
+            "caddie-1",
+            date(),
+            Some(CourseId::new("out")),
+            true,
+            ShiftSpan::FullDay,
+            1,
+            ShiftOrigin::Generated,
+            None,
+            None,
+            None,
+        );
+        let mut supply = compute_course_supply(
+            date(),
+            vec![(CourseId::new("out"), "OUT".to_string())],
+            std::slice::from_ref(&shift),
+            &std::collections::HashMap::from([(CourseId::new("out"), 1)]),
+        );
+        apply_assignment_coverage(
+            &mut supply,
+            std::slice::from_ref(&shift),
+            &[crate::course::domain::AssignedCoverage::new(
+                "reservation-1",
+                "out",
+                "caddie-1",
+                "assignment-1",
+            )],
+        );
+
+        let dto = DayCaddieSupplyDto::from(supply);
+        let json = serde_json::to_value(&dto).expect("serialize supply");
+        assert_eq!(json["courses"][0]["assignedGroups"], 1);
+        assert_eq!(json["courses"][0]["backedAssignedGroups"], 1);
+        assert_eq!(json["courses"][0]["effectiveRoundsCapacity"], 0);
+        assert_eq!(json["courses"][0]["effectiveCaddieAttachedGroups"], 0);
+        assert_eq!(json["courses"][0]["effectiveShortfall"], 0);
+
+        let old_json = serde_json::json!({
+            "date": date(),
+            "courses": [{
+                "golfCourseId": "out",
+                "courseName": "OUT",
+                "workingCaddies": 1,
+                "roundsCapacity": 1,
+                "caddieAttachedGroups": 1,
+                "movableCaddies": 1,
+                "shortfall": 0
+            }],
+            "unplacedCaddies": 0
+        });
+        let decoded: DayCaddieSupplyDto =
+            serde_json::from_value(old_json).expect("decode old supply");
+        assert_eq!(decoded.courses[0].assigned_groups, 0);
+        assert_eq!(decoded.courses[0].effective_shortfall, 0);
+    }
+
+    #[test]
+    fn recommendation_and_auto_assign_dtos_serialize_shift_placement_status() {
+        let recommendation = CaddieRecommendation::reconstitute_with_placement(
+            "caddie-1",
+            "Sato",
+            CaddieSkillLevel::Regular,
+            None,
+            0,
+            0,
+            Some(2),
+            None,
+            10,
+            "primary",
+            None,
+            Vec::new(),
+            CaddiePlacement::On(CourseId::new("out")),
+        );
+        let recommendation_json = serde_json::to_value(RecommendationDto::from(&recommendation))
+            .expect("serialize recommendation");
+        assert_eq!(recommendation_json["shiftPlacementStatus"], "on_course");
+        let mut old_recommendation = recommendation_json.clone();
+        old_recommendation
+            .as_object_mut()
+            .expect("recommendation object")
+            .remove("shiftPlacementStatus");
+        let _: RecommendationDto =
+            serde_json::from_value(old_recommendation).expect("decode old recommendation");
+
+        let item = AutoAssignPlanItem::reconstitute_with_placement(
+            "reservation-1",
+            Utc.with_ymd_and_hms(2026, 9, 12, 1, 0, 0).unwrap(),
+            "caddie-1",
+            "Sato",
+            Vec::new(),
+            CaddiePlacement::Unplaced,
+        );
+        let result = AutoAssignResult::new(true, vec![item], Vec::new());
+        let auto_json = serde_json::to_value(AutoAssignResultDto::from(result))
+            .expect("serialize auto assignment");
+        assert_eq!(auto_json["assigned"][0]["shiftPlacementStatus"], "unplaced");
+        let mut old_auto = auto_json;
+        old_auto["assigned"][0]
+            .as_object_mut()
+            .expect("auto item object")
+            .remove("shiftPlacementStatus");
+        let _: AutoAssignResultDto = serde_json::from_value(old_auto).expect("decode old auto");
+    }
 }

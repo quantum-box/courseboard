@@ -6,8 +6,8 @@ use chrono::{DateTime, NaiveDate, Utc};
 use derive_getters::Getters;
 
 use super::{
-    AssignmentId, AvailabilityId, Caddie, CaddieId, CaddieRank, CaddieSkillLevel, CourseError,
-    CourseId, MembershipId, RatingId, ReservationId,
+    AssignmentId, AvailabilityId, Caddie, CaddieId, CaddiePlacement, CaddieRank, CaddieSkillLevel,
+    CourseError, CourseId, MembershipId, RatingId, ReservationId,
 };
 
 /// Input for creating or updating a caddie profile.
@@ -510,6 +510,9 @@ pub struct CaddieRecommendation {
     remaining_rounds: Option<i64>,
     #[getter(skip)]
     attendance_status: Option<String>,
+    /// Confirmed shift placement for the recommendation day.
+    #[getter(skip)]
+    placement: CaddiePlacement,
     recommendation_score: i32,
     #[getter(skip)]
     recommended_role: String,
@@ -535,6 +538,39 @@ impl CaddieRecommendation {
         pairing_display_name: Option<String>,
         rationale: Vec<String>,
     ) -> Self {
+        Self::reconstitute_with_placement(
+            caddie_id,
+            display_name,
+            skill_level,
+            rating_average,
+            rating_count,
+            rounds_assigned,
+            remaining_rounds,
+            attendance_status,
+            recommendation_score,
+            recommended_role,
+            pairing_display_name,
+            rationale,
+            CaddiePlacement::Unconfirmed,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn reconstitute_with_placement(
+        caddie_id: impl Into<CaddieId>,
+        display_name: impl Into<String>,
+        skill_level: CaddieSkillLevel,
+        rating_average: Option<f64>,
+        rating_count: i64,
+        rounds_assigned: i64,
+        remaining_rounds: Option<i64>,
+        attendance_status: Option<String>,
+        recommendation_score: i32,
+        recommended_role: impl Into<String>,
+        pairing_display_name: Option<String>,
+        rationale: Vec<String>,
+        placement: CaddiePlacement,
+    ) -> Self {
         Self {
             caddie_id: caddie_id.into(),
             display_name: display_name.into(),
@@ -544,6 +580,7 @@ impl CaddieRecommendation {
             rounds_assigned: rounds_assigned.max(0),
             remaining_rounds: remaining_rounds.map(|value| value.max(0)),
             attendance_status,
+            placement,
             recommendation_score,
             recommended_role: recommended_role.into(),
             pairing_display_name,
@@ -565,6 +602,10 @@ impl CaddieRecommendation {
 
     pub fn attendance_status(&self) -> Option<&str> {
         self.attendance_status.as_deref()
+    }
+
+    pub fn placement(&self) -> &CaddiePlacement {
+        &self.placement
     }
 
     pub fn pairing_display_name(&self) -> Option<&str> {
@@ -920,6 +961,9 @@ pub struct AutoAssignPlanItem {
     caddie_display_name: String,
     #[getter(skip)]
     rationale: Vec<String>,
+    /// Confirmed shift placement of the selected caddie.
+    #[getter(skip)]
+    placement: CaddiePlacement,
 }
 
 impl AutoAssignPlanItem {
@@ -939,6 +983,10 @@ impl AutoAssignPlanItem {
         &self.rationale
     }
 
+    pub fn placement(&self) -> &CaddiePlacement {
+        &self.placement
+    }
+
     pub fn reconstitute(
         reservation_id: impl Into<ReservationId>,
         scheduled_at: DateTime<Utc>,
@@ -946,12 +994,31 @@ impl AutoAssignPlanItem {
         caddie_display_name: impl Into<String>,
         rationale: Vec<String>,
     ) -> Self {
+        Self::reconstitute_with_placement(
+            reservation_id,
+            scheduled_at,
+            caddie_id,
+            caddie_display_name,
+            rationale,
+            CaddiePlacement::Unconfirmed,
+        )
+    }
+
+    pub fn reconstitute_with_placement(
+        reservation_id: impl Into<ReservationId>,
+        scheduled_at: DateTime<Utc>,
+        caddie_id: impl Into<CaddieId>,
+        caddie_display_name: impl Into<String>,
+        rationale: Vec<String>,
+        placement: CaddiePlacement,
+    ) -> Self {
         Self {
             reservation_id: reservation_id.into(),
             scheduled_at,
             caddie_id: caddie_id.into(),
             caddie_display_name: caddie_display_name.into(),
             rationale,
+            placement,
         }
     }
 }

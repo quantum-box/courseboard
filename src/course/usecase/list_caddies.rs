@@ -33,10 +33,11 @@ mod tests {
     use crate::course::domain::{
         AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AvailabilityQuery,
         AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
-        CaddieCourseMembership, CaddieId, CaddieRank, CaddieRankFees, CaddieRating,
-        CaddieRecommendation, CaddieRoster, CaddieShift, CaddieShiftGateway, CaddieSkillLevel,
-        CaddieStaff, FieldShiftLink, RecommendationQuery, ReplaceCaddieMemberships, ReservationId,
-        UnsyncedShift, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+        CaddieCourseMembership, CaddieId, CaddiePlacement, CaddieRank, CaddieRankFees,
+        CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift, CaddieShiftGateway,
+        CaddieSkillLevel, CaddieStaff, FieldShiftLink, RecommendationQuery,
+        ReplaceCaddieMemberships, ReservationId, UnsyncedShift, UpsertCaddie,
+        UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
     use crate::course::usecase::caddie_rank_fees::UnsetRankFees;
     use crate::course::usecase::{
@@ -484,6 +485,7 @@ mod tests {
 
         assert_eq!(ranked[0].remaining_rounds(), Some(1));
         assert_eq!(ranked[0].attendance_status(), Some("not_clocked"));
+        assert_eq!(ranked[0].placement(), &CaddiePlacement::Unconfirmed);
     }
 
     #[tokio::test]

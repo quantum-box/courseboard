@@ -59,8 +59,8 @@ pub use caddie_ops::{
     ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 pub use caddie_plan::{
-    plan_caddie_assignments, shift_covers_tee_time, skip_reason, CaddiePlacement, PlanOptions,
-    PlannableCaddie, PlannableRound,
+    placement_for_shift, plan_caddie_assignments, shift_covers_tee_time, skip_reason,
+    CaddiePlacement, PlanOptions, PlannableCaddie, PlannableRound,
 };
 pub use caddie_rank_fee::CaddieRankFees;
 pub use caddie_ranking::{
@@ -79,8 +79,8 @@ pub use commercial::{
 pub use course::{BusinessHours, Course, HoleCount, StartIntervalMinutes, UpsertCourse};
 pub use course_order::CourseOrder;
 pub use course_supply::{
-    compute_course_supply, reinforcements_for, CaddieCapability, CourseCaddieSupply,
-    DayCaddieSupply, Reinforcement,
+    apply_assignment_coverage, compute_course_supply, reinforcements_for, AssignedCoverage,
+    CaddieCapability, CourseCaddieSupply, DayCaddieSupply, Reinforcement,
 };
 pub use customer::{
     Customer, CustomerSearchQuery, NewCustomer, DEFAULT_CUSTOMER_SEARCH_LIMIT,

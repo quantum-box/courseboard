@@ -12,11 +12,11 @@ use std::sync::Arc;
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    parse_tenant_timezone, rank_caddies, shift_covers_tee_time, tenant_date_at, tenant_day_bounds,
-    widen_for_utc_date_filter, AttendanceState, AvailabilityQuery, AvailabilityStatus,
-    CaddieAssignmentQuery, CaddiePlacement, CaddieRecommendation, CaddieShift, CaddieShiftGateway,
-    CourseError, GatewayCredentials, GolfOpsGateway, RankingCandidate, RankingOptions,
-    RecommendationQuery,
+    parse_tenant_timezone, placement_for_shift, rank_caddies, shift_covers_tee_time,
+    tenant_date_at, tenant_day_bounds, widen_for_utc_date_filter, AttendanceState,
+    AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery, CaddiePlacement,
+    CaddieRecommendation, CaddieShift, CaddieShiftGateway, CourseError, GatewayCredentials,
+    GolfOpsGateway, RankingCandidate, RankingOptions, RecommendationQuery,
 };
 
 pub struct ListCaddieRecommendationsUseCase {
@@ -84,6 +84,16 @@ impl ListCaddieRecommendationsUseCase {
             .filter(|shift| shift.date() == date)
             .map(|shift| (shift.caddie_id().as_str(), shift))
             .collect();
+        let placement_by_caddie: HashMap<String, CaddiePlacement> = roster
+            .caddies()
+            .iter()
+            .map(|caddie| {
+                (
+                    caddie.id().to_string(),
+                    placement_for_shift(shift_by_caddie.get(caddie.id().as_str()).copied()),
+                )
+            })
+            .collect();
 
         let mut rating_totals: HashMap<String, (f64, i64)> = HashMap::new();
         for rating in &ratings {
@@ -141,14 +151,9 @@ impl ListCaddieRecommendationsUseCase {
                     .unwrap_or(true)
             })
             .filter(|caddie| {
-                let placement = match shift_by_caddie.get(caddie.id().as_str()) {
-                    Some(shift) => match shift.course_id() {
-                        Some(course_id) => CaddiePlacement::On(course_id.clone()),
-                        None => CaddiePlacement::Unplaced,
-                    },
-                    None => CaddiePlacement::Unconfirmed,
-                };
-                placement.covers(query.golf_course_id.as_ref())
+                placement_by_caddie
+                    .get(caddie.id().as_str())
+                    .is_some_and(|placement| placement.covers(query.golf_course_id.as_ref()))
             })
             // Same for somebody who filed for the day off. Asked about a
             // specific tee time, a half-day request is judged too; asked about
@@ -193,7 +198,11 @@ impl ListCaddieRecommendationsUseCase {
         Ok(ranked
             .into_iter()
             .map(|item| {
-                CaddieRecommendation::reconstitute(
+                let placement = placement_by_caddie
+                    .get(item.caddie_id.as_str())
+                    .cloned()
+                    .unwrap_or(CaddiePlacement::Unconfirmed);
+                CaddieRecommendation::reconstitute_with_placement(
                     item.caddie_id,
                     item.display_name,
                     item.skill_level,
@@ -206,6 +215,7 @@ impl ListCaddieRecommendationsUseCase {
                     item.recommended_role,
                     item.pairing_display_name,
                     item.reasons,
+                    placement,
                 )
             })
             .collect())
