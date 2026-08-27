@@ -5120,6 +5120,13 @@ button,
   font-size: 11px;
 }
 
+.ledger-column-caddie-anomalies {
+  margin: 0;
+  color: hsl(var(--nui-warning-foreground, var(--nui-muted-foreground)));
+  font-size: 11px;
+  line-height: 15px;
+}
+
 /* Sold past what the day's caddies can take. The rest of the meta line is grey
  * on purpose — this is the one item there that the desk has to act on. */
 .ledger-column-oversold {

@@ -1,5 +1,10 @@
 /** The parts of a caddie assignment this module needs to tell coverage apart. */
-export type CoverageAssignment = { reservationId?: string | null; status: string }
+export type CoverageAssignment = {
+  reservationId?: string | null
+  status: string
+  /** Canonical CourseBoard status; absent on older API responses. */
+  canonicalStatus?: string | null
+}
 
 /** The parts of a bookable round this module needs to tell coverage apart. */
 export type CoverableRound = { id: string; playType: string; status?: string }
@@ -9,7 +14,11 @@ export type CoverableRound = { id: string; playType: string; status?: string }
  * completed round was staffed, and re-offering it would double-book it.
  */
 export function holdsTheRound(assignment: CoverageAssignment): boolean {
-  return assignment.status !== 'cancelled'
+  if (assignment.canonicalStatus !== undefined && assignment.canonicalStatus !== null) {
+    return assignment.canonicalStatus !== 'cancelled'
+  }
+  const raw = assignment.status.trim().toLowerCase()
+  return raw !== 'cancelled' && raw !== 'canceled'
 }
 
 /** Whether a round is a group somebody is still going to play. */

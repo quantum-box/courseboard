@@ -24,6 +24,7 @@ import { useRegisterPageReload } from '../../../lib/pageReload'
 import { navigate, useRouteParamState } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { caddieSupplyByCourse, type DayCaddieSupply } from '../caddieCourseSupply'
+import type { CoverageAssignment } from '../caddieRoundCoverage'
 import {
   inventoryHorizonGap,
   type BookingHorizonStatusResponse,
@@ -272,7 +273,7 @@ export function LedgerPage() {
   /** Today's caddie assignments, joined against the board to find rounds
    *  nobody is covering (SCC-27). */
   const caddieAssignmentsResource = useResource(
-    () => courseboardApiJson<ListResponse<{ reservationId?: string | null; status: string }>>(
+    () => courseboardApiJson<ListResponse<CoverageAssignment>>(
       `${COURSE_API}/caddie-assignments?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`,
     ),
     [date],
@@ -364,13 +365,14 @@ export function LedgerPage() {
     : []
   const unavailable = ledger.data?.unavailable ?? []
   const totals = summarizeLedger(columns)
-  // A failed lookup leaves the map empty, which drops the caddie line from the
-  // headers and leaves the rest of the board untouched. The shift board is the
-  // screen that owns this number; the ledger only borrows it, so a bad day
-  // upstream must not stop the desk taking bookings.
+  // A failed lookup leaves the map empty, which drops the caddie line and all
+  // anomaly counts from the headers while leaving the rest of the board
+  // untouched. The shift board owns this number; the ledger only borrows it.
   const caddieSupply = useMemo(
-    () => caddieSupplyByCourse(caddieSupplyResource.data),
-    [caddieSupplyResource.data],
+    () => caddieSupplyResource.error
+      ? new Map<string, DayCaddieSupply['courses'][number]>()
+      : caddieSupplyByCourse(caddieSupplyResource.data),
+    [caddieSupplyResource.data, caddieSupplyResource.error],
   )
   const courseOptions: CourseOption[] = (coursesResource.data?.items ?? [])
     .filter(course => course.isActive !== false)
@@ -556,6 +558,12 @@ export function LedgerPage() {
   return (
     <div className={`page-stack ledger-page${boardOnly ? ' is-board-only' : ''}`}>
       {ledger.error ? <ResourceError error={ledger.error} onRetry={refreshAll} /> : null}
+      {caddieSupplyResource.error ? (
+        <ResourceError
+          error={caddieSupplyResource.error}
+          onRetry={caddieSupplyResource.refresh}
+        />
+      ) : null}
       {inventoryGaps.length > 0 && !boardOnly ? (
         <Notice tone="warning" title={t('ledger:inventoryGap.title')}>
           <ul>
