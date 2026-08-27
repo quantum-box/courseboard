@@ -5,15 +5,16 @@
 //! already holds. The difference is what the desk balances by moving somebody
 //! from a course with room to one that is short.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::NaiveDate;
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    compute_course_supply, CaddieShiftGateway, CourseError, CourseId, DayCaddieSupply,
-    GatewayCredentials, GolfCatalogGateway, ReservationGateway, TeeSheetQuery, TeeSheetStatus,
+    compute_course_supply, CaddieShift, CaddieShiftGateway, CourseError, CourseId, DayCaddieSupply,
+    GatewayCredentials, GolfCatalogGateway, GolfOpsGateway, ReservationGateway, TeeSheetQuery,
+    TeeSheetStatus,
 };
 use crate::course::usecase::GetTeeSheetUseCase;
 
@@ -21,9 +22,12 @@ pub struct GetCourseCaddieSupplyUseCase {
     shifts: Arc<dyn CaddieShiftGateway>,
     reservations: Arc<dyn ReservationGateway>,
     catalog: Arc<dyn GolfCatalogGateway>,
+    /// Only the screen needs this; see `for_capacity_guard`.
+    ops: Option<Arc<dyn GolfOpsGateway>>,
 }
 
 impl GetCourseCaddieSupplyUseCase {
+    /// For the booking guard, which counts per course and needs no roster.
     pub fn new(
         shifts: Arc<dyn CaddieShiftGateway>,
         reservations: Arc<dyn ReservationGateway>,
@@ -33,6 +37,23 @@ impl GetCourseCaddieSupplyUseCase {
             shifts,
             reservations,
             catalog,
+            ops: None,
+        }
+    }
+
+    /// For the screen, which also shows how many caddies are placed nowhere
+    /// and therefore has to know who is still on the roster.
+    pub fn with_roster(
+        shifts: Arc<dyn CaddieShiftGateway>,
+        reservations: Arc<dyn ReservationGateway>,
+        catalog: Arc<dyn GolfCatalogGateway>,
+        ops: Arc<dyn GolfOpsGateway>,
+    ) -> Self {
+        Self {
+            shifts,
+            reservations,
+            catalog,
+            ops: Some(ops),
         }
     }
 
@@ -43,10 +64,32 @@ impl GetCourseCaddieSupplyUseCase {
         date: NaiveDate,
     ) -> Result<DayCaddieSupply, CourseError> {
         credentials.require(actions::LIST_CADDIE_INSIGHTS).await?;
-        self.supply(credentials, date).await
+        // A confirmed shift outlives the caddie it names. Deleting a caddie
+        // removes their profile upstream but leaves `golf_caddie_shifts`
+        // untouched — this side keeps golf's own columns keyed by an id the
+        // other side may drop (ADR-0013). The per-course numbers survive that,
+        // because a stray shift carries no course and lands in nobody's
+        // column; the "placed nowhere" count does not, and read 9 on a roster
+        // of 8. So the screen counts against the roster.
+        let known = match self.ops.as_ref() {
+            Some(ops) => Some(
+                ops.list_caddie_roster(credentials)
+                    .await?
+                    .caddies()
+                    .iter()
+                    .map(|caddie| caddie.id().to_string())
+                    .collect::<HashSet<String>>(),
+            ),
+            None => None,
+        };
+        self.supply(credentials, date, known.as_ref()).await
     }
 
     /// The same figures, for a caller that is booking rather than looking.
+    ///
+    /// No roster read here, and none needed: the guard asks whether one course
+    /// has room, and that is counted from shifts placed on it. A shift whose
+    /// caddie is gone carries no course, so it cannot reach those numbers.
     ///
     /// Taking a caddie round has to know whether the day has room for it, so
     /// the guard inside `CreateReservationUseCase` runs this. Requiring the
@@ -58,13 +101,17 @@ impl GetCourseCaddieSupplyUseCase {
         credentials: GatewayCredentials<'_>,
         date: NaiveDate,
     ) -> Result<DayCaddieSupply, CourseError> {
-        self.supply(credentials, date).await
+        self.supply(credentials, date, None).await
     }
 
+    /// `known_caddies` drops shifts whose caddie is no longer on the roster.
+    /// `None` keeps every shift, which is right for the guard and wrong only
+    /// for the count the screen shows.
     async fn supply(
         &self,
         credentials: GatewayCredentials<'_>,
         date: NaiveDate,
+        known_caddies: Option<&HashSet<String>>,
     ) -> Result<DayCaddieSupply, CourseError> {
         let sheet = GetTeeSheetUseCase::new(self.reservations.clone(), self.catalog.clone());
         let (sheet, shifts, courses) = tokio::try_join!(
@@ -79,6 +126,14 @@ impl GetCourseCaddieSupplyUseCase {
             self.shifts.list_shifts(credentials.operator_id, date, date),
             self.catalog.list_courses(credentials),
         )?;
+
+        let shifts: Vec<CaddieShift> = match known_caddies {
+            Some(known) => shifts
+                .into_iter()
+                .filter(|shift| known.contains(shift.caddie_id().as_str()))
+                .collect(),
+            None => shifts,
+        };
 
         let demand = caddie_attached_by_course(&sheet);
         Ok(compute_course_supply(

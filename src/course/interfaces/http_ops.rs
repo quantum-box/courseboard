@@ -1924,10 +1924,11 @@ pub async fn get_course_caddie_supply(
     Query(params): Query<SupplyQueryParams>,
 ) -> Result<Json<DayCaddieSupplyDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = GetCourseCaddieSupplyUseCase::new(
+    let use_case = GetCourseCaddieSupplyUseCase::with_roster(
         state.caddie_shifts(),
         reservation_gateway(&state),
         catalog_gateway(&state),
+        ops_gateway(&state),
     );
     let supply = use_case
         .execute(credentials, params.date)
