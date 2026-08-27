@@ -892,6 +892,15 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/caddie-shift-plans/:year_month/field-sync",
+            get(course::interfaces::http_ops::get_field_sync_status)
+                .post(course::interfaces::http_ops::sync_caddie_shifts_to_field)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/v1/course/caddie-shift-plans/:year_month/preview",
             post(course::interfaces::http_ops::preview_caddie_shifts).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
@@ -2255,6 +2264,7 @@ mod tests {
             twilio_messaging_service_sid: None,
             twilio_from_number: None,
             multi_course_product_writes: true,
+            field_shift_writeback: false,
         }
     }
 

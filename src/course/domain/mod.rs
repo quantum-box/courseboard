@@ -33,6 +33,7 @@ mod reservation;
 mod reservation_report;
 mod resource;
 mod schedule;
+mod shift_hours;
 mod simulator;
 mod slot_override;
 mod tee_ledger;
@@ -62,9 +63,9 @@ pub use caddie_ranking::{
     rank_caddies, AttendanceState, RankedCaddie, RankingCandidate, RankingOptions,
 };
 pub use caddie_shift::{
-    parse_weekday, plan_month_shifts, weekday_key, CaddieShift, MonthShiftPlan, ShiftEdit,
-    ShiftOrigin, ShiftPolicy, ShiftRequest, ShiftSeed, ShiftSpan, UnfiledRequest,
-    MAX_CONSECUTIVE_WORK_DAYS, MAX_ROUNDS_PER_SHIFT,
+    parse_weekday, plan_month_shifts, weekday_key, CaddieShift, FieldShiftLink, MonthShiftPlan,
+    ShiftEdit, ShiftOrigin, ShiftPolicy, ShiftRequest, ShiftSeed, ShiftSpan, UnfiledRequest,
+    UnsyncedShift, MAX_CONSECUTIVE_WORK_DAYS, MAX_ROUNDS_PER_SHIFT,
 };
 pub use commercial::{
     BudgetAchievement, DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement,
@@ -115,7 +116,7 @@ pub use ports::{
     GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
     GolfOpsGateway, GolfTaxGateway, MembershipGateway, PlayerTagOptionsGateway,
     PricingSettingsGateway, ReservationGateway, ReservationScheduleGateway, ShiftRulesGateway,
-    SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
+    SlotOverrideGateway, StaffShiftGateway, StaffShiftInput, TeeLedgerQuery, TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{
@@ -138,6 +139,7 @@ pub use schedule::{
     BookingHorizon, BuiltInventory, CourseSchedule, GenerationSummary, InventoryWatermark,
     SavedSchedule,
 };
+pub use shift_hours::{hours_for_span, DefaultWorkingHours, OpeningBand, ShiftHours};
 pub use simulator::{
     party_tax, prepare_fee_quote, prepare_range_simulation, project_row, quote_fee,
     summarize_range, FeeQuote, FeeQuoteInput, FeeQuoteRequest, PartyTax, PlayerTaxLine, RangeRow,

@@ -35,8 +35,8 @@ mod tests {
         AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
         CaddieCourseMembership, CaddieId, CaddieRank, CaddieRankFees, CaddieRating,
         CaddieRecommendation, CaddieRoster, CaddieShift, CaddieShiftGateway, CaddieSkillLevel,
-        CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships, ReservationId, UpsertCaddie,
-        UpsertCaddieAssignment, UpsertCaddieAvailability,
+        CaddieStaff, FieldShiftLink, RecommendationQuery, ReplaceCaddieMemberships, ReservationId,
+        UnsyncedShift, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
     use crate::course::usecase::caddie_rank_fees::UnsetRankFees;
     use crate::course::usecase::{
@@ -75,6 +75,51 @@ mod tests {
             _date: chrono::NaiveDate,
         ) -> Result<Option<CaddieShift>, CourseError> {
             Ok(None)
+        }
+
+        async fn field_shift_links(
+            &self,
+            _tenant_id: &str,
+            _from: chrono::NaiveDate,
+            _to: chrono::NaiveDate,
+        ) -> Result<Vec<FieldShiftLink>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn set_field_shift_links(
+            &self,
+            _tenant_id: &str,
+            _links: &[FieldShiftLink],
+        ) -> Result<(), CourseError> {
+            Ok(())
+        }
+
+        async fn unsynced_shifts(
+            &self,
+            _tenant_id: &str,
+            _from: chrono::NaiveDate,
+            _to: chrono::NaiveDate,
+            _limit: u32,
+        ) -> Result<Vec<UnsyncedShift>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn mark_month_unsynced(
+            &self,
+            _tenant_id: &str,
+            _from: chrono::NaiveDate,
+            _to: chrono::NaiveDate,
+        ) -> Result<(), CourseError> {
+            Ok(())
+        }
+
+        async fn count_unsynced(
+            &self,
+            _tenant_id: &str,
+            _from: chrono::NaiveDate,
+            _to: chrono::NaiveDate,
+        ) -> Result<u64, CourseError> {
+            Ok(0)
         }
     }
 

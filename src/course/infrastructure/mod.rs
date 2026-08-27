@@ -16,6 +16,7 @@ mod field_gateway;
 mod field_membership_gateway;
 mod field_ops_gateway;
 mod field_sdk_capabilities_gateway;
+mod field_staff_shift_gateway;
 mod generated_through_repository;
 mod generic_product_config;
 mod party_custom_fields;
@@ -42,6 +43,7 @@ pub use field_gateway::{
 pub use field_membership_gateway::FieldMembershipGateway;
 pub use field_ops_gateway::FieldGolfOpsGateway;
 pub use field_sdk_capabilities_gateway::FieldSdkCapabilitiesGateway;
+pub use field_staff_shift_gateway::FieldStaffShiftGateway;
 pub use generated_through_repository::MySqlGeneratedThroughRepository;
 pub use party_custom_fields::{party_from_request, PartyPlayerInput};
 pub use player_tag_options_repository::MySqlPlayerTagOptionsRepository;

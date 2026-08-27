@@ -105,6 +105,8 @@ impl Modify for SecurityAddon {
         http_ops::update_shift_rules,
         http_ops::list_caddie_shifts,
         http_ops::generate_caddie_shifts,
+        http_ops::sync_caddie_shifts_to_field,
+        http_ops::get_field_sync_status,
         http_ops::preview_caddie_shifts,
         http_ops::update_caddie_shift,
         http_ops::update_caddie_assignment,

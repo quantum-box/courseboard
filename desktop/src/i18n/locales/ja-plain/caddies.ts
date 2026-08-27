@@ -250,7 +250,7 @@ export const caddies: DeepPartial<typeof source> = {
       description:
         '結びつけた社員が いなくなると、キャディ側の 結びつきだけが のこります。'
         + '出勤や 給料の 集計は その社員を さがせないので、この人たちは 集計から もれます。'
-        + '社員名簿で 結びつけ直すか、キャディを 止めて ください。',
+        + '名前を ひらいて「社員を 選びなおす」で 直して ください。',
       showOnly: '結びつきが 切れている人だけ 見る',
     },
     unlinkedWarning: {
@@ -357,6 +357,11 @@ export const caddies: DeepPartial<typeof source> = {
     },
   },
   staff: {
+    linkBroken: {
+      title: 'つないでいた社員が見つかりません',
+      description: 'つないでいた社員が名簿から消えています。このままだと出勤をつけられず、給与にも入りません。いまの社員を選び直すか、新しく登録してつないでください。',
+    },
+    relinkAction: '社員を選びなおす',
     title: '社員情報と出勤',
     description: '勤怠に使う社員情報との結びつけと、今日の出勤の記録をまとめます。',
     attendanceUnknown: '今日の記録がありません',

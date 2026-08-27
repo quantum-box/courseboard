@@ -359,12 +359,6 @@ function punchClock(staffId: string, direction: 'in' | 'out', businessDate: stri
   )
 }
 
-function previousYearMonth(timezone: string) {
-  const [year, month] = currentYearMonth(timezone).split('-').map(Number)
-  const previous = new Date(Date.UTC(year!, month! - 2, 1))
-  return previous.toISOString().slice(0, 7)
-}
-
 function formatMoney(amount: number, currency = 'JPY') {
   return new Intl.NumberFormat('ja-JP', {
     style: 'currency',
@@ -2804,6 +2798,11 @@ function StaffManagementPanel({
   const [busy, setBusy] = useState(false)
   const staffId = resolveStaffId(profile)
   const linkedStaff = staff.find(item => item.id === staffId)
+  // The roster calls this out and this screen used to not: an id Field cannot
+  // resolve still reads as linked here, and the name fell back to the caddie's
+  // own, so the panel looked healthy. Clocking in and payroll both fail on it,
+  // which is why it gets the same treatment as never having been linked.
+  const linkBroken = staffLinkBroken(profile, staffError ? null : new Set(staff.map(item => item.id)))
   // Clocking in is closed while the caddie is on leave or suspended; clocking
   // out stays open so an ongoing shift can always be closed.
   const clockInBlockedReason = clockInBlocked(profile)
@@ -2843,7 +2842,19 @@ function StaffManagementPanel({
       actions={<Link2 className="size-5 text-primary" aria-hidden="true" />}
     >
       {staffError ? <ResourceError error={staffError} /> : null}
-      {staffId ? (
+      {linkBroken ? (
+        <Notice
+          tone="danger"
+          title={t('caddies:staff.linkBroken.title')}
+          actions={(
+            <Button type="button" variant="primary" size="sm" className="min-h-9" onClick={() => setLinkOpen(true)}>
+              <Link2 /> {t('caddies:staff.relinkAction')}
+            </Button>
+          )}
+        >
+          {t('caddies:staff.linkBroken.description')}
+        </Notice>
+      ) : staffId ? (
         <div className="space-y-4">
           <div className="rounded-lg border border-border bg-background p-3">
             <div className="flex flex-wrap items-start justify-between gap-2">
@@ -3645,7 +3656,14 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
     value: yearMonth,
     error: yearMonthError,
     setCandidate: setYearMonth,
-  } = useRouteYearMonthValue('yearMonth', previousYearMonth(timezone))
+    // The month the screen opens on is the one it is standing in. It used to
+    // be the month before, on the reasoning that payroll closes a finished
+    // month — but closing is a deliberate act and the operator changes the
+    // month to do it, whereas opening the screen on the 27th and being shown
+    // the 1st to the 31st of *last* month reads as stale data. Nothing was
+    // written down for the old default, so it was a default rather than a
+    // decision.
+  } = useRouteYearMonthValue('yearMonth', currentYearMonth(timezone))
   const [downloading, setDownloading] = useState(false)
   const [editingFees, setEditingFees] = useState(false)
   const feesResource = useResource(

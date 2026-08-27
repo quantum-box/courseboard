@@ -15,7 +15,7 @@ use super::openapi::ErrorBody;
 
 use super::http::{
     caddie_rank_fee_gateway, catalog_gateway, credentials, ops_gateway, reservation_gateway,
-    CaddieAssignmentDto, CaddieDto, ItemsResponse,
+    shift_mirror, CaddieAssignmentDto, CaddieDto, ItemsResponse,
 };
 use crate::course::domain::{
     parse_weekday, weekday_key, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
@@ -30,16 +30,16 @@ use crate::course::domain::{
 use crate::course::usecase::{
     AutoAssignCaddiesUseCase, CreateCaddieAssignmentUseCase, CreateCaddieUseCase,
     DeleteCaddieAvailabilityUseCase, DeleteCaddieUseCase, ExportPayrollCsvUseCase,
-    GenerateCaddieShiftsUseCase, GeneratedMonth, GetAttendanceSnapshotUseCase,
+    FieldSyncProgress, GenerateCaddieShiftsUseCase, GeneratedMonth, GetAttendanceSnapshotUseCase,
     GetAvailabilityDeadlineUseCase, GetCaddieRankFeesUseCase, GetCaddieSupplyUseCase,
     GetCourseCaddieSupplyUseCase, GetPayrollSummaryUseCase, GetShiftRulesUseCase,
     ListAttendancePeriodSnapshotsUseCase, ListCaddieAvailabilitiesUseCase,
     ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase, ListCaddieRecommendationsUseCase,
     ListCaddieShiftsUseCase, ListCourseReinforcementsUseCase, ListUnsubmittedCaddiesUseCase,
     NameCaddieForRound, ReinforcementCandidate, ReplaceCaddieMembershipsUseCase,
-    ReplaceCaddieRankFeesUseCase, ShiftPlanMode, UpdateCaddieAssignmentUseCase,
-    UpdateCaddieShiftUseCase, UpdateCaddieUseCase, UpdateShiftRulesUseCase,
-    UpsertAvailabilityDeadlineUseCase, UpsertCaddieAvailabilityUseCase,
+    ReplaceCaddieRankFeesUseCase, ShiftPlanMode, SyncCaddieShiftsToFieldUseCase,
+    UpdateCaddieAssignmentUseCase, UpdateCaddieShiftUseCase, UpdateCaddieUseCase,
+    UpdateShiftRulesUseCase, UpsertAvailabilityDeadlineUseCase, UpsertCaddieAvailabilityUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -1684,6 +1684,132 @@ pub async fn generate_caddie_shifts(
     Ok(Json(GeneratedMonthDto::from(generated)))
 }
 
+/// One batch of a confirmed month, pushed to Field.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldSyncProgressDto {
+    /// Working days Field was told about by this call.
+    pub filed: u64,
+    /// Days withdrawn from Field because they are no longer worked.
+    pub withdrawn: u64,
+    /// Days that cannot reach Field: the caddie has no staff record to file
+    /// them under, or names one Field no longer has. Fix the roster, then
+    /// re-send the month.
+    pub unlinkable: u64,
+    /// Days Field refused or could not answer for. Unlike `unlinkable`,
+    /// nothing about the roster explains these.
+    pub failed: u64,
+    /// Days still behind. Call again while this is above zero.
+    pub remaining: u64,
+    pub done: bool,
+}
+
+impl From<FieldSyncProgress> for FieldSyncProgressDto {
+    fn from(value: FieldSyncProgress) -> Self {
+        Self {
+            filed: value.filed(),
+            withdrawn: value.withdrawn(),
+            unlinkable: value.unlinkable(),
+            failed: value.failed(),
+            remaining: value.remaining(),
+            done: value.done(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldSyncQuery {
+    /// Start the month over, ignoring what was pushed before. For a month
+    /// stuck behind a roster gap, or one deleted on Field's side.
+    #[serde(default)]
+    pub resend: bool,
+}
+
+/// How much of a month has not reached Field.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldSyncStatusDto {
+    /// Days still behind. Zero means Field has the month as confirmed.
+    pub remaining: u64,
+}
+
+/// GET /v1/course/caddie-shift-plans/:year_month/field-sync
+///
+/// What the board shows on load. A push that died half way leaves days
+/// behind, and nothing else on the screen would say so.
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-shift-plans/{year_month}/field-sync",
+    tag = "course-ops",
+    params(("year_month" = String, Path, description = "YYYY-MM")),
+    responses(
+        (status = 200, description = "Days this month that have not reached Field", body = FieldSyncStatusDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_field_sync_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(year_month): Path<String>,
+) -> Result<Json<FieldSyncStatusDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let year_month = parse_year_month(&year_month)?;
+    let use_case = SyncCaddieShiftsToFieldUseCase::new(
+        ops_gateway(&state),
+        state.caddie_shifts(),
+        state.shift_rules(),
+        shift_mirror(&state),
+    );
+    let remaining = use_case
+        .behind(credentials, year_month)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(FieldSyncStatusDto { remaining }))
+}
+
+/// POST /v1/course/caddie-shift-plans/:year_month/field-sync
+///
+/// Confirming a month writes CourseBoard's own tables and returns at once;
+/// the roster's thousand-odd days reach Field through here, a batch per call.
+/// The caller repeats while `remaining` is above zero.
+#[utoipa::path(
+    post,
+    path = "/v1/course/caddie-shift-plans/{year_month}/field-sync",
+    tag = "course-ops",
+    params(("year_month" = String, Path, description = "YYYY-MM"), FieldSyncQuery),
+    responses(
+        (status = 200, description = "What this batch did, and what is left", body = FieldSyncProgressDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn sync_caddie_shifts_to_field(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(year_month): Path<String>,
+    Query(query): Query<FieldSyncQuery>,
+) -> Result<Json<FieldSyncProgressDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let year_month = parse_year_month(&year_month)?;
+    let use_case = SyncCaddieShiftsToFieldUseCase::new(
+        ops_gateway(&state),
+        state.caddie_shifts(),
+        state.shift_rules(),
+        shift_mirror(&state),
+    );
+    let progress = use_case
+        .execute(credentials, year_month, query.resend)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(FieldSyncProgressDto::from(progress)))
+}
+
 /// PUT /v1/course/caddie-shifts/:caddie_profile_id/:date
 #[utoipa::path(
     put,
@@ -1718,7 +1844,12 @@ pub async fn update_caddie_shift(
         pinned: body.pinned,
         note: body.note,
     };
-    let use_case = UpdateCaddieShiftUseCase::new(ops_gateway(&state), state.caddie_shifts());
+    let use_case = UpdateCaddieShiftUseCase::new(
+        ops_gateway(&state),
+        state.caddie_shifts(),
+        state.shift_rules(),
+        shift_mirror(&state),
+    );
     let shift = use_case
         .execute(credentials, &caddie_id, date, edit, body.updated_by)
         .await
@@ -1793,10 +1924,11 @@ pub async fn get_course_caddie_supply(
     Query(params): Query<SupplyQueryParams>,
 ) -> Result<Json<DayCaddieSupplyDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = GetCourseCaddieSupplyUseCase::new(
+    let use_case = GetCourseCaddieSupplyUseCase::with_roster(
         state.caddie_shifts(),
         reservation_gateway(&state),
         catalog_gateway(&state),
+        ops_gateway(&state),
     );
     let supply = use_case
         .execute(credentials, params.date)

@@ -7,7 +7,9 @@
 use async_trait::async_trait;
 use sqlx::{MySqlPool, Row};
 
-use crate::course::domain::{CourseError, ShiftPolicy, ShiftRulesGateway, UnfiledRequest};
+use crate::course::domain::{
+    CourseError, DefaultWorkingHours, ShiftHours, ShiftPolicy, ShiftRulesGateway, UnfiledRequest,
+};
 
 pub struct MySqlShiftRulesRepository {
     pool: MySqlPool,
@@ -87,6 +89,56 @@ impl ShiftRulesGateway for MySqlShiftRulesRepository {
         .await
         .map_err(provider)?;
         Ok(policy.clone())
+    }
+
+    async fn get_default_working_hours(
+        &self,
+        tenant_id: &str,
+    ) -> Result<DefaultWorkingHours, CourseError> {
+        let row = sqlx::query(
+            r#"
+            SELECT default_work_start_minutes, default_work_end_minutes, default_midday_minutes
+            FROM golf_shift_rules
+            WHERE tenant_id = ?
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(provider)?;
+
+        let Some(row) = row else {
+            return Ok(DefaultWorkingHours::club_default());
+        };
+        let start: u16 = row
+            .try_get("default_work_start_minutes")
+            .map_err(provider)?;
+        let end: u16 = row.try_get("default_work_end_minutes").map_err(provider)?;
+        let midday: u16 = row.try_get("default_midday_minutes").map_err(provider)?;
+
+        // Nothing upstream guarantees these describe a day. The migration adds
+        // a CHECK, but TiDB ships with `tidb_enable_check_constraint` off and
+        // accepts the clause without applying it — verified against v8.5.7,
+        // which is what production runs. So this branch is load-bearing rather
+        // than defensive: the club's own default is the same answer a tenant
+        // with no row gets, whereas an error here stops a month from reaching
+        // Field at all.
+        let stored = ShiftHours::try_new(start, end)
+            .and_then(|day| DefaultWorkingHours::try_new(day, midday));
+        match stored {
+            Ok(hours) => Ok(hours),
+            Err(error) => {
+                tracing::warn!(
+                    tenant_id,
+                    start,
+                    end,
+                    midday,
+                    %error,
+                    "stored working hours do not describe a day; using the club default"
+                );
+                Ok(DefaultWorkingHours::club_default())
+            }
+        }
     }
 }
 
@@ -213,5 +265,91 @@ mod tests {
             .unwrap();
 
         assert_eq!(policy.weekdays(), [Weekday::Sat, Weekday::Sun]);
+    }
+    #[tokio::test]
+    async fn a_tenant_that_never_set_hours_works_the_club_default_day() {
+        let repository = MySqlShiftRulesRepository::new(test_pool().await);
+
+        let hours = repository
+            .get_default_working_hours(&test_tenant("hours-unset"))
+            .await
+            .unwrap();
+
+        assert_eq!(hours, DefaultWorkingHours::club_default());
+        assert_eq!(hours.full_day().start(), "07:00");
+        assert_eq!(hours.full_day().end(), "17:00");
+        assert_eq!(hours.midday_minutes(), 12 * 60);
+    }
+
+    #[tokio::test]
+    async fn a_tenant_with_rules_but_no_hours_of_its_own_reads_the_same_day() {
+        // The columns default to the club default, so inserting a policy row
+        // must not change what hours the tenant works.
+        let repository = MySqlShiftRulesRepository::new(test_pool().await);
+        let tenant = test_tenant("hours-policy-only");
+        repository
+            .upsert_shift_policy(&tenant, &ShiftPolicy::new([Weekday::Sat]))
+            .await
+            .unwrap();
+
+        let hours = repository.get_default_working_hours(&tenant).await.unwrap();
+
+        assert_eq!(hours, DefaultWorkingHours::club_default());
+    }
+
+    #[tokio::test]
+    async fn a_club_that_starts_at_six_is_filed_as_starting_at_six() {
+        let repository = MySqlShiftRulesRepository::new(test_pool().await);
+        let tenant = test_tenant("hours-early");
+        repository
+            .upsert_shift_policy(&tenant, &ShiftPolicy::default())
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"
+            UPDATE golf_shift_rules
+            SET default_work_start_minutes = ?, default_work_end_minutes = ?,
+                default_midday_minutes = ?
+            WHERE tenant_id = ?
+            "#,
+        )
+        .bind(6 * 60)
+        .bind(16 * 60)
+        .bind(11 * 60 + 30)
+        .bind(&tenant)
+        .execute(&repository.pool)
+        .await
+        .unwrap();
+
+        let hours = repository.get_default_working_hours(&tenant).await.unwrap();
+
+        assert_eq!(hours.full_day().start(), "06:00");
+        assert_eq!(hours.full_day().end(), "16:00");
+        assert_eq!(hours.midday_minutes(), 11 * 60 + 30);
+    }
+
+    #[tokio::test]
+    async fn one_tenants_hours_are_invisible_to_another() {
+        let repository = MySqlShiftRulesRepository::new(test_pool().await);
+        let mine = test_tenant("hours-isolation-a");
+        repository
+            .upsert_shift_policy(&mine, &ShiftPolicy::default())
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE golf_shift_rules SET default_work_start_minutes = ? WHERE tenant_id = ?",
+        )
+        .bind(5 * 60)
+        .bind(&mine)
+        .execute(&repository.pool)
+        .await
+        .unwrap();
+
+        let hours = repository
+            .get_default_working_hours(&test_tenant("hours-isolation-b"))
+            .await
+            .unwrap();
+
+        assert_eq!(hours, DefaultWorkingHours::club_default());
     }
 }

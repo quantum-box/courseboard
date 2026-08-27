@@ -56,6 +56,7 @@ mod list_product_slots;
 mod list_reservation_products;
 mod list_resources;
 mod membership;
+mod mirror_shift_to_field;
 mod player_tag_options;
 mod pricing_settings;
 mod quote_golf_fee;
@@ -67,6 +68,7 @@ mod seed_demo_board;
 mod shift_rules;
 mod simulate_green_fee_range;
 mod slot_overrides;
+mod sync_caddie_shifts_to_field;
 mod update_caddie;
 mod update_caddie_assignment;
 mod update_caddie_shift;
@@ -139,6 +141,7 @@ pub use membership::{
     AssignMembershipPlanUseCase, CreateMembershipPlanUseCase, GetCustomerMembershipUseCase,
     ListMembershipPlansUseCase, UpdateMembershipPlanUseCase,
 };
+pub use mirror_shift_to_field::{links_by_day, MirrorShiftToField};
 pub use player_tag_options::{GetPlayerTagOptionsUseCase, ReplacePlayerTagOptionsUseCase};
 pub use pricing_settings::{GetPricingSettingsUseCase, ReplacePricingSettingsUseCase};
 pub use quote_golf_fee::QuoteGolfFeeUseCase;
@@ -157,6 +160,7 @@ pub use simulate_green_fee_range::SimulateGreenFeeRangeUseCase;
 pub use slot_overrides::{
     DeleteSlotOverridesUseCase, ListSlotOverridesUseCase, UpsertSlotOverridesUseCase,
 };
+pub use sync_caddie_shifts_to_field::{FieldSyncProgress, SyncCaddieShiftsToFieldUseCase};
 pub use update_caddie::UpdateCaddieUseCase;
 pub use update_caddie_assignment::UpdateCaddieAssignmentUseCase;
 pub use update_caddie_shift::UpdateCaddieShiftUseCase;

@@ -112,6 +112,15 @@ export const shifts = {
     unplaced: '{{names}} はメインのコースが決まっていないため、どのコースにも配置していません。',
     unsubmitted: '{{names}} は休み希望が届かないまま出勤として確定しています。',
   },
+  fieldSync: {
+    running: '勤務予定をFieldへ送っています（残り{{n}}日分）',
+    done: '{{n}}日分の勤務をFieldへ送りました',
+    failed: '勤務予定をFieldへ送れませんでした。あとで「Fieldへ再送」を押してください',
+    behind: 'この月のうち{{n}}日分が、まだFieldへ届いていません',
+    unlinkable: '{{n}}日分は、社員名簿に紐づいていないキャディのため送れませんでした。名簿を直してから再送してください',
+    someFailed: '{{n}}日分をFieldが受け付けませんでした。時間をおいて「Fieldへ再送」を試してください',
+    resend: 'Fieldへ再送',
+  },
   editor: {
     title: '確定シフトを変える',
     subject: '{{name}} · {{date}}',

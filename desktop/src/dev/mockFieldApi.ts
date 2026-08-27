@@ -2973,6 +2973,17 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     return hit(mockShiftRulesDto())
   }
 
+  // The board pushes a confirmed month to Field afterwards. There is no Field
+  // here, so the mock answers "already caught up" and the loop ends on the
+  // first call.
+  const fieldSyncMatch = pathname.match(/^\/v1\/course\/caddie-shift-plans\/([^/]+)\/field-sync$/)
+  if (fieldSyncMatch) {
+    if (method === 'POST') {
+      return hit({ filed: 0, withdrawn: 0, unlinkable: 0, failed: 0, remaining: 0, done: true })
+    }
+    return hit({ remaining: 0 })
+  }
+
   const shiftPlanPreviewMatch = pathname.match(
     /^\/v1\/course\/caddie-shift-plans\/([^/]+)\/preview$/,
   )

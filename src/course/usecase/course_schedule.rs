@@ -14,7 +14,7 @@ use crate::course::domain::actions;
 use crate::course::domain::{
     tenant_date_at, AvailabilityRule, BookingHorizon, BuiltInventory, CourseError, CourseId,
     GatewayCredentials, GeneratedThroughGateway, GenerationSummary, GolfCatalogGateway,
-    GolfCommercialGateway, InventoryWatermark, ReservationScheduleGateway, ResourceId,
+    GolfCommercialGateway, InventoryWatermark, ReservationScheduleGateway, Resource, ResourceId,
     ResourceKind, SavedSchedule,
 };
 
@@ -352,36 +352,54 @@ impl ExtendCourseInventoryUseCase {
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         let today = course_today(Utc::now(), &timezone)?;
         let stored = self.watermarks.list_watermarks(tenant_id).await?;
-        // A course with no row has never been built, and building it first is
-        // the job of saving its schedule, not of this. So a tenant whose known
-        // courses were all checked today has nothing to do, and pays one query.
-        if !stored.is_empty()
-            && stored
-                .values()
-                .all(|watermark| watermark.checked_on >= today)
+        let resources = self.catalog.list_resources(credentials).await?;
+        let courses: Vec<(&Resource, CourseId)> = resources
+            .iter()
+            .filter(|resource| resource.is_active())
+            .filter(|resource| resource.kind() == ResourceKind::Course)
+            .filter_map(|resource| {
+                resource
+                    .golf_course_id()
+                    .cloned()
+                    .map(|course_id| (resource, course_id))
+            })
+            .collect();
+
+        // Nothing to do when every course has been built and checked today,
+        // which is the answer on almost every call. The membership test is
+        // what makes it safe: a course missing from `stored` has never been
+        // built, and no number of *other* courses being current says anything
+        // about it.
+        if !courses.is_empty()
+            && courses.iter().all(|(_, course_id)| {
+                stored
+                    .get(course_id)
+                    .is_some_and(|watermark| watermark.checked_on >= today)
+            })
         {
             return Ok(Vec::new());
         }
 
         let horizon = self.commercial.get_booking_horizon(credentials).await?;
         let bookable_through = horizon.last_bookable_date(today);
-        let resources = self.catalog.list_resources(credentials).await?;
 
         let mut extended = Vec::new();
-        for resource in resources
-            .iter()
-            .filter(|resource| resource.is_active())
-            .filter(|resource| resource.kind() == ResourceKind::Course)
-        {
-            let Some(course_id) = resource.golf_course_id().cloned() else {
-                continue;
-            };
-            let Some(watermark) = stored.get(&course_id).copied() else {
-                continue;
-            };
-            let Some((from, to)) =
-                top_up_range(Some(watermark.generated_through), today, bookable_through)
-            else {
+        for (resource, course_id) in courses {
+            // A course with no watermark has never been built. It used to be
+            // skipped here, on the reasoning that the first build belongs to
+            // saving the schedule — but saving needs a change to save, and a
+            // course whose week is already right has none. That left the only
+            // exit closed: the ledger warned that the schedule and the tee
+            // times disagreed, the schedule page said to save, and saving was
+            // impossible. Two courses sat like that for weeks.
+            //
+            // `top_up_range` already answers "build from today" for `None`, so
+            // the fix is to ask it rather than to skip.
+            let Some((from, to)) = top_up_range(
+                stored.get(&course_id).map(|mark| mark.generated_through),
+                today,
+                bookable_through,
+            ) else {
                 continue;
             };
             let resource_id = resource
@@ -1098,6 +1116,87 @@ mod tests {
             status.generated_through.get(&empty_course),
             Some(&None),
             "a course with no inventory must stay null instead of borrowing the target date"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_course_that_was_never_built_is_built_by_the_ledger_read() {
+        // The regression this fixes: a course whose week is already right has
+        // no change to save, so saving could not build it, and this use case
+        // used to skip anything missing from the watermarks. The ledger warned
+        // that the two disagreed and offered no way out. Two live courses sat
+        // like that for weeks.
+        let built = CourseId::new("course-built");
+        let never_built = CourseId::new("course-never-built");
+        let catalog = Arc::new(FakeCatalog {
+            tenant_timezone: "Asia/Tokyo".into(),
+            resources: vec![
+                Resource::reconstitute(
+                    "res-built",
+                    "Built",
+                    Some("resv-built".to_string()),
+                    Some(built.to_string()),
+                    ResourceKind::Course,
+                    true,
+                ),
+                Resource::reconstitute(
+                    "res-never",
+                    "Never built",
+                    Some("resv-never".to_string()),
+                    Some(never_built.to_string()),
+                    ResourceKind::Course,
+                    true,
+                ),
+            ],
+            ..FakeCatalog::default()
+        });
+        let schedules = Arc::new(FakeSchedules::default());
+        let watermarks = Arc::new(FakeWatermarks::default());
+        // The built one was already checked today, which is what used to make
+        // the whole run exit before reaching its neighbour.
+        watermarks.stored.lock().expect("lock").insert(
+            built.clone(),
+            InventoryWatermark {
+                generated_through: date("2027-02-23"),
+                checked_on: course_today(Utc::now(), "Asia/Tokyo").expect("today"),
+            },
+        );
+
+        let extended = ExtendCourseInventoryUseCase::new(
+            catalog.clone(),
+            schedules.clone(),
+            Arc::new(FakeCommercial {
+                horizon: Some(BookingHorizon::try_days(180).expect("valid horizon")),
+            }),
+            watermarks.clone(),
+        )
+        .execute(
+            GatewayCredentials {
+                authorization: "Bearer test",
+                operator_id: "tenant-test",
+                platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                caller_bearer: "Bearer test",
+            },
+            "tenant-test",
+        )
+        .await
+        .expect("extend");
+
+        assert_eq!(extended, vec![never_built.clone()]);
+        assert_eq!(
+            schedules.generated.lock().expect("lock").len(),
+            1,
+            "only the course that was behind should be built"
+        );
+        assert!(
+            watermarks
+                .written
+                .lock()
+                .expect("lock")
+                .iter()
+                .any(|(course_id, _)| course_id == &never_built),
+            "the first build has to record a watermark, or it repeats every read"
         );
     }
 
