@@ -3,12 +3,16 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Fragment, useMemo, type MouseEvent as ReactMouseEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import type { CourseCaddieSupply } from '../caddieCourseSupply'
+import {
+  effectiveSupply,
+  type CourseCaddieSupply,
+} from '../caddieCourseSupply'
 import type { CoverageAssignment } from '../caddieRoundCoverage'
 import type { TeeReservation } from '../timeline/models'
 import type { SlotContextTarget } from './SlotContextMenu'
 import {
   currentSlotTeeTime,
+  caddieSupplyAnomalies,
   formatCaddieCapacity,
   formatCaddieShortfall,
   formatColumnTotals,
@@ -152,6 +156,8 @@ function LedgerColumnTable({
   const nowTeeTime = currentSlotTeeTime(column.slots, nowMinutes)
   const selected = new Set(selectedTeeTimes)
   const derived = column.gridSource !== 'inventory'
+  const effectiveCaddieSupply = caddieSupply ? effectiveSupply(caddieSupply) : null
+  const caddieAnomalies = caddieSupplyAnomalies(caddieSupply)
 
   return (
     <section className="ledger-column" aria-label={column.courseName}>
@@ -226,12 +232,12 @@ function LedgerColumnTable({
               those it can still staff. The desk was reading one number here
               and the other on the caddie screen, which is two places to look
               before answering the phone. */}
-          {knowsCaddieCapacity(caddieSupply) ? (
+          {knowsCaddieCapacity(caddieSupply) && effectiveCaddieSupply ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <span
                   className={
-                    caddieSupply.shortfall < 0 ? 'ledger-column-oversold' : undefined
+                    effectiveCaddieSupply.shortfall < 0 ? 'ledger-column-oversold' : undefined
                   }
                 >
                   {formatCaddieCapacity(caddieSupply)} · {formatCaddieShortfall(caddieSupply)}
@@ -240,13 +246,23 @@ function LedgerColumnTable({
               <TooltipContent side="bottom">
                 {t('ledger:column.caddieHint', {
                   caddies: String(caddieSupply.workingCaddies),
-                  capacity: String(caddieSupply.roundsCapacity),
-                  booked: String(caddieSupply.caddieAttachedGroups),
+                  capacity: String(effectiveCaddieSupply.roundsCapacity),
+                  booked: String(effectiveCaddieSupply.caddieAttachedGroups),
                 })}
               </TooltipContent>
             </Tooltip>
           ) : null}
         </p>
+        {caddieAnomalies.length > 0 ? (
+          <p className="ledger-column-caddie-anomalies">
+            {caddieAnomalies.map((anomaly, index) => (
+              <Fragment key={anomaly.key}>
+                {index > 0 ? ' · ' : null}
+                {t(`ledger:caddieSupply.${anomaly.key}`, { n: String(anomaly.count) })}
+              </Fragment>
+            ))}
+          </p>
+        ) : null}
         {/* The notice used to state the problem and stop there, leaving the desk
             to work out that the answer lives on the course's own screen. It is
             two clicks from here, so the notice carries the way there. */}

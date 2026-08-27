@@ -1,6 +1,6 @@
 import { i18next } from '../../../i18n'
 
-import type { CourseCaddieSupply } from '../caddieCourseSupply'
+import { effectiveSupply, type CourseCaddieSupply } from '../caddieCourseSupply'
 import { unassignedCaddieRounds, type CoverageAssignment } from '../caddieRoundCoverage'
 import type { TeeReservation } from '../timeline/models'
 import type { LedgerColumn, LedgerSlot, SlotGridSource } from './models'
@@ -277,7 +277,33 @@ export function knowsCaddieCapacity(
   supply: CourseCaddieSupply | null | undefined,
 ): supply is CourseCaddieSupply {
   if (!supply) return false
-  return supply.roundsCapacity > 0 || supply.caddieAttachedGroups > 0
+  const effective = effectiveSupply(supply)
+  return effective.roundsCapacity > 0 || effective.caddieAttachedGroups > 0
+}
+
+export type CaddieSupplyAnomalyKey =
+  | 'unbackedAssignedGroups'
+  | 'capacityExceededAssignedGroups'
+  | 'courseMismatchAssignedGroups'
+
+export type CaddieSupplyAnomaly = {
+  key: CaddieSupplyAnomalyKey
+  count: number
+}
+
+/** Return only additive anomaly counts that need to stay visible in the header. */
+export function caddieSupplyAnomalies(
+  supply: CourseCaddieSupply | null | undefined,
+): CaddieSupplyAnomaly[] {
+  if (!supply) return []
+  const entries: [CaddieSupplyAnomalyKey, number | undefined][] = [
+    ['unbackedAssignedGroups', supply.unbackedAssignedGroups],
+    ['capacityExceededAssignedGroups', supply.capacityExceededAssignedGroups],
+    ['courseMismatchAssignedGroups', supply.courseMismatchAssignedGroups],
+  ]
+  return entries.flatMap(([key, count]) =>
+    typeof count === 'number' && count !== 0 ? [{ key, count }] : [],
+  )
 }
 
 /**
@@ -335,9 +361,10 @@ export function unassignedCaddieReservationIds(
 
 /** `キャディ 8/12` — groups sold against what today's caddies can take. */
 export function formatCaddieCapacity(supply: CourseCaddieSupply): string {
+  const effective = effectiveSupply(supply)
   return i18next.t('ledger:column.caddie', {
-    booked: String(supply.caddieAttachedGroups),
-    capacity: String(supply.roundsCapacity),
+    booked: String(effective.caddieAttachedGroups),
+    capacity: String(effective.roundsCapacity),
   })
 }
 
@@ -349,7 +376,8 @@ export function formatCaddieCapacity(supply: CourseCaddieSupply): string {
  * booking can be taken at all.
  */
 export function formatCaddieShortfall(supply: CourseCaddieSupply): string {
-  return supply.shortfall < 0
-    ? i18next.t('ledger:column.caddieOver', { n: String(-supply.shortfall) })
-    : i18next.t('ledger:column.caddieSpare', { n: String(supply.shortfall) })
+  const effective = effectiveSupply(supply)
+  return effective.shortfall < 0
+    ? i18next.t('ledger:column.caddieOver', { n: String(-effective.shortfall) })
+    : i18next.t('ledger:column.caddieSpare', { n: String(effective.shortfall) })
 }

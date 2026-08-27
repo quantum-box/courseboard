@@ -80,6 +80,7 @@ import { normalizeIsoDate } from '../../lib/clock'
 import { navigate, useNavigationGuard, useRouteParamState } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
 import type { CourseCaddieSupply, DayCaddieSupply } from './caddieCourseSupply'
+import { placementWarningStatus, type ShiftPlacementStatus } from './caddiePlacement'
 import { Sheet } from '../../components/Sheet'
 import { CaddieLink } from './CaddieLink'
 import {
@@ -177,6 +178,7 @@ type CaddieAssignment = {
   roundReference?: string | null
   scheduledAt: string
   status: string
+  canonicalStatus?: string | null
   assignmentRole: string
   feeAmount: number
   feeCurrency: string
@@ -190,6 +192,7 @@ type CaddieRecommendation = RecommendationForExplanation & {
   caddieProfileId: string
   displayName: string
   recommendedRole: string
+  shiftPlacementStatus?: ShiftPlacementStatus | null
 }
 
 type AttendanceSnapshot = {
@@ -261,6 +264,7 @@ type AutoAssignPlanItem = {
   caddieProfileId: string
   caddieDisplayName: string
   rationale: string[]
+  shiftPlacementStatus?: ShiftPlacementStatus | null
 }
 
 type DeadlineWarning = {
@@ -1350,7 +1354,7 @@ function ReinforcementSheet({
   )
 }
 
-function AutoAssignPanel({
+export function AutoAssignPanel({
   date,
   attendance,
   onChanged,
@@ -1375,6 +1379,10 @@ function AutoAssignPanel({
   // Surfaced before the plan is committed, not used to filter it: the morning
   // plan is drawn up before anyone has clocked in.
   const offDuty = offDutyCandidates(plan?.assigned ?? [], attendance)
+  const placementWarnings = plan?.assigned.flatMap(item => {
+    const status = placementWarningStatus(item.shiftPlacementStatus)
+    return status ? [{ item, status }] : []
+  }) ?? []
 
   async function run(dryRun: boolean) {
     setBusy(dryRun ? 'preview' : 'execute')
@@ -1426,14 +1434,29 @@ function AutoAssignPanel({
           className="flex-1"
           disabled={busy !== null || !plan || plan.assigned.length === 0}
           onClick={() => {
-            if (
-              plan?.deadlineWarning
-              && !window.confirm(
+            const confirmations: string[] = []
+            if (plan?.deadlineWarning) {
+              confirmations.push(
                 t('caddies:autoAssign.deadlineWarning.confirmExecute', {
                   names: plan.deadlineWarning.unsubmittedCaddieNames.join('、'),
                 }),
               )
-            ) {
+            }
+            if (placementWarnings.length > 0) {
+              const placementItems = placementWarnings
+                .map(({ item, status }) => t('caddies:autoAssign.shiftPlacementWarning.item', {
+                  name: item.caddieDisplayName,
+                  status: t(`caddies:shiftPlacement.${status}`),
+                }))
+                .join('\n')
+              confirmations.push([
+                t('caddies:autoAssign.shiftPlacementWarning.title'),
+                t('caddies:autoAssign.shiftPlacementWarning.body'),
+                placementItems,
+                t('caddies:autoAssign.shiftPlacementWarning.confirm'),
+              ].join('\n\n'))
+            }
+            if (confirmations.length > 0 && !window.confirm(confirmations.join('\n\n'))) {
               return
             }
             void run(false)
@@ -1468,6 +1491,24 @@ function AutoAssignPanel({
               </p>
             </Notice>
           ) : null}
+          {placementWarnings.length > 0 ? (
+            <Notice
+              tone="warning"
+              title={t('caddies:autoAssign.shiftPlacementWarning.title')}
+            >
+              <p>{t('caddies:autoAssign.shiftPlacementWarning.body')}</p>
+              <ul className="mt-1 list-inside list-disc space-y-1">
+                {placementWarnings.map(({ item, status }) => (
+                  <li key={`${item.reservationId}-${item.caddieProfileId}`}>
+                    {t('caddies:autoAssign.shiftPlacementWarning.item', {
+                      name: item.caddieDisplayName,
+                      status: t(`caddies:shiftPlacement.${status}`),
+                    })}
+                  </li>
+                ))}
+              </ul>
+            </Notice>
+          ) : null}
           {plan.assigned.length === 0 ? (
             <EmptyState
               title={t('caddies:autoAssign.empty.title')}
@@ -1484,7 +1525,17 @@ function AutoAssignPanel({
                         {formatDateTime(item.scheduledAt, timezone)}
                       </p>
                     </div>
-                    <Badge variant="accent">{t('caddies:autoAssign.candidate')}</Badge>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="accent">{t('caddies:autoAssign.candidate')}</Badge>
+                      {(() => {
+                        const placement = placementWarningStatus(item.shiftPlacementStatus)
+                        return placement ? (
+                          <Badge variant="warning">
+                            {t(`caddies:shiftPlacement.${placement}`)}
+                          </Badge>
+                        ) : null
+                      })()}
+                    </div>
                   </div>
                   <RationaleText rationale={item.rationale} />
                 </div>
@@ -1561,9 +1612,19 @@ function RecommendationsPanel({
                   const status = item.attendanceStatus
                     ?? attendance.get(item.caddieProfileId) as RecommendationAttendanceStatus | undefined
                   const reason = offDutyReason(status)
-                  return reason ? (
-                    <Badge variant="warning">{t(`caddies:offDuty.${reason}`)}</Badge>
-                  ) : null
+                  const placement = placementWarningStatus(item.shiftPlacementStatus)
+                  return (
+                    <>
+                      {reason ? (
+                        <Badge variant="warning">{t(`caddies:offDuty.${reason}`)}</Badge>
+                      ) : null}
+                      {placement ? (
+                        <Badge variant="warning">
+                          {t(`caddies:shiftPlacement.${placement}`)}
+                        </Badge>
+                      ) : null}
+                    </>
+                  )
                 })()}
               </div>
               <RecommendationExplanation

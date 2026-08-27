@@ -28,6 +28,11 @@ export const ledger = {
     caddieOver: '{{n}} over',
     caddieHint: '{{caddies}} caddies on today, taking up to {{capacity}} groups. {{booked}} sold.',
   },
+  caddieSupply: {
+    unbackedAssignedGroups: 'Shift not confirmed for {{n}} group(s)',
+    capacityExceededAssignedGroups: '{{n}} group(s) exceed shift capacity',
+    courseMismatchAssignedGroups: '{{n}} group(s) have a course mismatch',
+  },
   order: {
     moveLeft: 'Move {{name}} left',
     moveRight: 'Move {{name}} right',

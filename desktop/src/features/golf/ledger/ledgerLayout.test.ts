@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
-import type { CourseCaddieSupply } from '../caddieCourseSupply'
+import { effectiveSupply, type CourseCaddieSupply } from '../caddieCourseSupply'
 import type { CoverageAssignment } from '../caddieRoundCoverage'
 import type { TeeReservation } from '../timeline/models'
 import type { LedgerColumn, LedgerSlot } from './models'
 import {
   currentSlotTeeTime,
+  caddieSupplyAnomalies,
   DEFAULT_SEAT_COLUMNS,
   MAX_SEAT_COLUMNS,
   dayHasConfirmedShifts,
@@ -385,6 +386,59 @@ describe('knowsCaddieCapacity', () => {
     expect(knowsCaddieCapacity(null)).toBe(false)
     expect(knowsCaddieCapacity(undefined)).toBe(false)
   })
+
+  it('uses the effective values when the new contract is complete', () => {
+    expect(knowsCaddieCapacity(supply({
+      roundsCapacity: 12,
+      caddieAttachedGroups: 8,
+      effectiveRoundsCapacity: 0,
+      effectiveCaddieAttachedGroups: 0,
+      effectiveShortfall: 0,
+    }))).toBe(false)
+  })
+})
+
+describe('effectiveSupply', () => {
+  it('uses all three effective values together', () => {
+    expect(effectiveSupply(supply({
+      effectiveRoundsCapacity: 5,
+      effectiveCaddieAttachedGroups: 3,
+      effectiveShortfall: 2,
+    }))).toEqual({
+      roundsCapacity: 5,
+      caddieAttachedGroups: 3,
+      shortfall: 2,
+    })
+  })
+
+  it('falls back to the raw contract when any effective value is absent', () => {
+    expect(effectiveSupply(supply({
+      effectiveRoundsCapacity: 5,
+      effectiveCaddieAttachedGroups: 3,
+    }))).toEqual({
+      roundsCapacity: 12,
+      caddieAttachedGroups: 8,
+      shortfall: 4,
+    })
+  })
+})
+
+describe('caddieSupplyAnomalies', () => {
+  it('returns only non-zero additive anomaly counts in stable order', () => {
+    expect(caddieSupplyAnomalies(supply({
+      unbackedAssignedGroups: 2,
+      capacityExceededAssignedGroups: 0,
+      courseMismatchAssignedGroups: 1,
+    }))).toEqual([
+      { key: 'unbackedAssignedGroups', count: 2 },
+      { key: 'courseMismatchAssignedGroups', count: 1 },
+    ])
+  })
+
+  it('returns no anomalies for the old DTO shape', () => {
+    expect(caddieSupplyAnomalies(supply())).toEqual([])
+    expect(caddieSupplyAnomalies(null)).toEqual([])
+  })
 })
 
 describe('resourceStatus', () => {
@@ -483,6 +537,20 @@ describe('formatCaddieCapacity', () => {
     expect(line).toContain('8')
     expect(line).toContain('12')
   })
+
+  it('shows effective booked and capacity values when supplied', () => {
+    const line = formatCaddieCapacity(supply({
+      roundsCapacity: 12,
+      caddieAttachedGroups: 8,
+      effectiveRoundsCapacity: 5,
+      effectiveCaddieAttachedGroups: 3,
+      effectiveShortfall: 2,
+    }))
+    expect(line).toContain('3')
+    expect(line).toContain('5')
+    expect(line).not.toContain('8')
+    expect(line).not.toContain('12')
+  })
 })
 
 describe('formatCaddieShortfall', () => {
@@ -495,6 +563,17 @@ describe('formatCaddieShortfall', () => {
     const line = formatCaddieShortfall(supply({ shortfall: -2 }))
     expect(line).toContain('2')
     expect(line).not.toContain('-')
+  })
+
+  it('uses effective shortfall rather than the raw overage', () => {
+    const line = formatCaddieShortfall(supply({
+      shortfall: -2,
+      effectiveRoundsCapacity: 2,
+      effectiveCaddieAttachedGroups: 1,
+      effectiveShortfall: 1,
+    }))
+    expect(line).toContain('1')
+    expect(line).not.toContain('2')
   })
 })
 

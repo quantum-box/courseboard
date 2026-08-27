@@ -84,6 +84,17 @@ export const caddies = {
     clockedOut: '退勤済み',
     notLinked: 'スタッフ未紐付け',
   },
+  shiftPlacement: {
+    unconfirmed: '当日のシフトが未確定',
+    unplaced: 'コース未割付',
+  },
+  assignment: {
+    shiftPlacementWarning: {
+      title: 'シフト配置を確認してください',
+      body: '{{name}}は{{status}}です。配置はできますが、供給異常として表示されます。',
+      confirm: 'このキャディを配置しますか？',
+    },
+  },
   duration: '{{hours}}時間{{minutes}}分',
   rounds: '{{n}}R',
   people: '{{n}}人',
@@ -139,6 +150,12 @@ export const caddies = {
       title: '休み希望の締切（{{deadline}}）を過ぎています',
       body: '{{names}} はこの月の休み希望がまだ届いていません。割り当てる前に確かめてください。',
       confirmExecute: '{{names}} の休み希望がまだ届いていません。このまま自動配置を決めますか？',
+    },
+    shiftPlacementWarning: {
+      title: 'シフト配置を確認してください',
+      body: '確定シフトのコースが未割付の配置、または当日のシフトが未確定の配置があります。配置はできますが、供給異常として表示されます。',
+      confirm: 'この内容で自動配置を実行しますか？',
+      item: '{{name}}：{{status}}',
     },
   },
   recommendations: {

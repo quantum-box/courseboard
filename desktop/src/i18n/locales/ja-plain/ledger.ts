@@ -28,6 +28,11 @@ export const ledger = {
     caddieOver: '{{n}} 組 おおい',
     caddieHint: 'しゅっきん {{caddies}}人で {{capacity}}組まで うけられます。いま {{booked}}組。',
   },
+  caddieSupply: {
+    unbackedAssignedGroups: 'その日のシフトがまだ決まっていない組 {{n}}組',
+    capacityExceededAssignedGroups: 'シフトの人数では足りない組 {{n}}組',
+    courseMismatchAssignedGroups: 'シフトのコースと予約のコースがちがう組 {{n}}組',
+  },
   order: {
     moveLeft: '{{name}}を ひだりへ',
     moveRight: '{{name}}を みぎへ',

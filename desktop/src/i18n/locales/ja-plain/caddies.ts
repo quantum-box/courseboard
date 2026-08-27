@@ -78,6 +78,17 @@ export const caddies: DeepPartial<typeof source> = {
     clockedOut: 'もう退勤しました',
     notLinked: 'スタッフとつながっていません',
   },
+  shiftPlacement: {
+    unconfirmed: 'その日のシフトがまだ決まっていません',
+    unplaced: 'コースがまだ決まっていません',
+  },
+  assignment: {
+    shiftPlacementWarning: {
+      title: 'シフトの状態を確かめてください',
+      body: '{{name}}は{{status}}です。配置はできますが、供給の異常として表示されます。',
+      confirm: 'このキャディを配置しますか？',
+    },
+  },
   rounds: '{{n}}ラウンド',
   operationDate: '見たい日',
   dispatch: {
@@ -130,6 +141,12 @@ export const caddies: DeepPartial<typeof source> = {
       title: '休みの希望を出す締め切り（{{deadline}}）を過ぎています',
       body: '{{names}} は、この月の休みの希望がまだ届いていません。決める前に確かめてください。',
       confirmExecute: '{{names}} の休みの希望がまだ届いていません。このまま決めますか？',
+    },
+    shiftPlacementWarning: {
+      title: 'シフトの状態を確かめてください',
+      body: 'その日のシフトがまだ決まっていない人や、コースがまだ決まっていない人を含む配置があります。配置はできますが、供給の異常として表示されます。',
+      confirm: 'この内容で自動配置を実行しますか？',
+      item: '{{name}}：{{status}}',
     },
   },
   recommendations: {

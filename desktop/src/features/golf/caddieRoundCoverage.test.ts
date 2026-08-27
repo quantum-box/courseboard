@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { unassignedCaddieRounds } from './caddieRoundCoverage'
+import { holdsTheRound, unassignedCaddieRounds } from './caddieRoundCoverage'
 
 function round(id: string, playType: string, status?: string) {
   return {
@@ -54,5 +54,19 @@ describe('unassignedCaddieRounds', () => {
       unassignedCaddieRounds([round('r1', 'caddie')], [{ reservationId: null, status: 'assigned' }])
         .map(item => item.id),
     ).toEqual(['r1'])
+  })
+})
+
+describe('holdsTheRound status normalization', () => {
+  it.each([
+    ['raw cancelled', { status: 'cancelled' }, false],
+    ['raw canceled', { status: 'canceled' }, false],
+    ['raw padded and uppercase cancelled', { status: '  CANCELLED  ' }, false],
+    ['raw unknown', { status: 'awaiting_review' }, true],
+    ['canonical cancelled', { status: 'assigned', canonicalStatus: 'cancelled' }, false],
+    ['canonical overrides raw cancellation', { status: 'cancelled', canonicalStatus: 'assigned' }, true],
+    ['canonical unknown remains coverage', { status: 'cancelled', canonicalStatus: 'other' }, true],
+  ])('%s', (_label, assignment, expected) => {
+    expect(holdsTheRound(assignment)).toBe(expected)
   })
 })
