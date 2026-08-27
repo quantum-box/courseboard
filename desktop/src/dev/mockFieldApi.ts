@@ -1319,6 +1319,110 @@ function items<T>(values: T[]) {
  * frozen fixture would let the forms be looked at but not walked through.
  * A reload starts clean, same as the rest of this file.
  */
+/**
+ * One person's play, for the mock ledger.
+ *
+ * Keyed by customer so the screen shows a regular, a first-timer, and somebody
+ * whose history is longer than one page — the three readings the panel has to
+ * get right, and the ones a single sample row would never exercise.
+ */
+function mockVisitHistory(customerId: string) {
+  const rows = mockVisitRows(customerId)
+  const played = rows.filter(row => row.kind === 'visited')
+  const priced = played.filter(row => row.amount > 0)
+  const pricedPlayers = priced.reduce((total, row) => total + row.players, 0)
+  const totalAmount = played.reduce((total, row) => total + row.amount, 0)
+  // Never truncated: the server pages a customer's history to the end, so a
+  // partial read is the rare failure the unit tests cover rather than what a
+  // desk sees.
+  const truncated = false
+  return {
+    items: rows,
+    summary: {
+      visits: played.length,
+      players: played.reduce((total, row) => total + row.players, 0),
+      totalAmount,
+      unpricedVisits: played.length - priced.length,
+      spendPerPlayer: pricedPlayers > 0 ? Math.floor(totalAmount / pricedPlayers) : null,
+      cancelled: rows.filter(row => row.kind === 'cancelled').length,
+      noShows: rows.filter(row => row.kind === 'no_show').length,
+      upcoming: rows.filter(row => row.kind === 'upcoming').length,
+      // Withheld while truncated, exactly as the server withholds it: the
+      // oldest row read is not the first round played.
+      firstVisitAt: truncated ? null : (played.at(-1)?.startsAt ?? null),
+      lastVisitAt: played[0]?.startsAt ?? null,
+    },
+    truncated,
+    ...mockGrade(played.length, pricedPlayers > 0 ? Math.floor(totalAmount / pricedPlayers) : null, truncated),
+  }
+}
+
+/** The same four-way verdict the server answers with. */
+function mockGrade(visits: number, spendPerPlayer: number | null, truncated: boolean) {
+  if (mockGradeRules.length === 0) return { grade: 'not_configured' }
+  if (truncated) return { grade: 'unknown' }
+  const reached = mockGradeRules.find(
+    rule =>
+      visits >= rule.minVisits
+      && (rule.minSpendPerPlayer == null
+        || (spendPerPlayer != null && spendPerPlayer >= rule.minSpendPerPlayer)),
+  )
+  return reached ? { grade: 'graded', gradeName: reached.name } : { grade: 'below_lowest' }
+}
+
+const mockGradeRules: Array<{
+  name: string
+  minVisits: number
+  minSpendPerPlayer?: number | null
+  minTotalAmount?: number | null
+}> = [
+  { name: 'ゴールド', minVisits: 24, minSpendPerPlayer: 15_000 },
+  { name: 'シルバー', minVisits: 12 },
+  { name: 'ブロンズ', minVisits: 2 },
+]
+
+function mockVisitRows(customerId: string) {
+  const visit = (
+    id: string,
+    startsAt: string,
+    kind: string,
+    players: number,
+    amount: number,
+    courseId = 'course_east',
+  ) => ({
+    reservationId: `res_${id}`,
+    reservationNumber: `R-2026-${id}`,
+    startsAt,
+    courseId,
+    players,
+    amount,
+    currency: 'JPY',
+    kind,
+    status: kind === 'visited' ? 'completed' : kind,
+  })
+
+  if (customerId === 'cus_honda') {
+    // The regular: books ahead, plays monthly, cancels once in a while.
+    return [
+      visit('0812', '2026-08-12T00:00:00Z', 'upcoming', 4, 62_000),
+      visit('0704', '2026-07-04T00:00:00Z', 'visited', 4, 58_000, 'course_west'),
+      visit('0620', '2026-06-20T00:00:00Z', 'cancelled', 4, 0),
+      visit('0530', '2026-05-30T00:00:00Z', 'visited', 3, 42_000),
+      // Booked before CourseBoard carried the amount across: the row the
+      // spend-per-player metric has to leave out rather than average in.
+      visit('0418', '2026-04-18T00:00:00Z', 'visited', 4, 0),
+    ]
+  }
+  if (customerId === 'cus_masuda') {
+    return [
+      visit('0711', '2026-07-11T00:00:00Z', 'no_show', 2, 28_000),
+      visit('0509', '2026-05-09T00:00:00Z', 'visited', 2, 30_000),
+    ]
+  }
+  // Everybody else is the first-time visitor, which is most of the ledger.
+  return []
+}
+
 const mockCustomers: Array<Record<string, unknown>> = [
   {
     id: 'cus_honda',
@@ -1370,17 +1474,22 @@ const mockMembershipAssignments = new Map<string, string>([
   ['cus_tsuji', 'plan_shareholder'],
 ])
 
+/** Member numbers, as the credential registry would hold them. */
+const mockMemberNumbers = new Map<string, string>([['cus_honda', 'A-1024']])
+
 function mockMembershipOf(customerId: string) {
   const planId = mockMembershipAssignments.get(customerId)
   const plan = planId
     ? mockMembershipPlans.find(candidate => candidate.id === planId)
     : undefined
+  const memberNumber = mockMemberNumbers.get(customerId)
   return {
     customerId,
     // Mirrors the server: whether someone is a member is decided in one place
     // and reported, never re-derived by the client from the plan's presence.
     isMember: Boolean(plan),
     ...(plan ? { plan, startedOn: '2026-04-01' } : {}),
+    ...(memberNumber ? { memberNumber } : {}),
   }
 }
 
@@ -1601,8 +1710,11 @@ function normalizeMockPath(pathname: string): string {
     || pathname === '/v1/course/caddie-rank-fees'
     // Pricing inputs are CourseBoard's own row (ADR-0009).
     || pathname === '/v1/course/pricing-settings'
-    // So are the booking form's visitor categories.
+    // So are the booking form's visitor categories, and the grade ladder.
     || pathname === '/v1/course/player-tag-options'
+    || pathname === '/v1/course/customer-grade-rules'
+    || pathname === '/v1/course/membership-discounts'
+    || pathname === '/v1/course/membership-play-windows'
     || pathname.startsWith('/v1/course/caddie-shifts/')
     || pathname.startsWith('/v1/course/caddie-shift-plans/')
     // The customer ledger and the memberships against it live in Field's own
@@ -2046,6 +2158,29 @@ function resolveGet(path: string): Json | null | undefined {
   if (pathname === '/v1/course/membership-plans') {
     const includeInactive = url.searchParams.get('includeInactive') === 'true'
     return items(mockMembershipPlans.filter(plan => includeInactive || plan.active === true))
+  }
+
+  if (pathname === '/v1/course/customer-grade-rules') {
+    return items(mockGradeRules)
+  }
+
+  if (pathname === '/v1/course/membership-play-windows') {
+    return items([
+      // 平日会員: Monday to Friday, mornings only.
+      { planId: 'plan_weekday', days: [true, true, true, true, true, false, false], from: '06:00', to: '12:00' },
+    ])
+  }
+
+  if (pathname === '/v1/course/membership-discounts') {
+    return items([
+      { planId: 'plan_full', kind: 'yen', value: 5000 },
+      { planId: 'plan_weekday', kind: 'percent', value: 20 },
+    ])
+  }
+
+  const customerVisitsMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)\/visits$/)
+  if (customerVisitsMatch) {
+    return mockVisitHistory(decodeURIComponent(customerVisitsMatch[1] ?? ''))
   }
 
   const customerMembershipMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)\/membership$/)
@@ -2600,6 +2735,16 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     if (typeof body?.active === 'boolean') plan.active = body.active
     if (typeof body?.sortOrder === 'number') plan.sortOrder = body.sortOrder
     return hit(plan)
+  }
+
+  const memberNumberMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)\/member-number$/)
+  if (memberNumberMatch && method === 'PUT') {
+    const customerId = decodeURIComponent(memberNumberMatch[1] ?? '')
+    const next = String((body as { memberNumber?: unknown })?.memberNumber ?? '').trim()
+    // Blank withdraws it, exactly as the server does.
+    if (next) mockMemberNumbers.set(customerId, next)
+    else mockMemberNumbers.delete(customerId)
+    return hit(mockMembershipOf(customerId))
   }
 
   const membershipGrantMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)\/membership$/)

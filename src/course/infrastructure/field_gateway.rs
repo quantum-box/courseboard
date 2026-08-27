@@ -87,6 +87,22 @@ impl ReservationGateway for FieldReservationGateway {
         Ok(items.into_iter().map(map_reservation).collect())
     }
 
+    async fn list_customer_reservations(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Reservation>, CourseError> {
+        let path = format!(
+            "/v1/erp/reservations?customerId={}&limit={limit}&offset={offset}",
+            urlencoding_path(customer_id.as_str())
+        );
+        let items: Vec<FieldReservationDto> =
+            field_get_items(&self.client, &self.base_url, &path, credentials).await?;
+        Ok(items.into_iter().map(map_reservation).collect())
+    }
+
     async fn get_reservation(
         &self,
         credentials: GatewayCredentials<'_>,

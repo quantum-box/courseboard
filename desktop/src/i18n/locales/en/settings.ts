@@ -8,6 +8,66 @@ export const settings: DeepPartial<typeof source> = {
     title: 'Initial setup',
     description: 'Set these up once; you will rarely open them day to day.',
   },
+  playWindows: {
+    title: 'Membership playing days',
+    description:
+      'Which days and hours each membership may be played. For plans like a weekday-only membership.',
+    hint: 'A booking outside the window still saves. The desk is warned afterwards, never stopped.',
+    noPlans: 'No memberships on sale. Create one first.',
+    saved: 'Playing days saved',
+    failed: 'Could not save the playing days',
+    field: {
+      from: 'From',
+      to: 'To',
+    },
+    day: {
+      mon: 'Mon',
+      tue: 'Tue',
+      wed: 'Wed',
+      thu: 'Thu',
+      fri: 'Fri',
+      sat: 'Sat',
+      sun: 'Sun',
+    },
+  },
+  discounts: {
+    title: 'Member discounts',
+    description:
+      'What each membership takes off the green fee. Left at zero, a plan discounts nothing.',
+    hint: 'Taken off before tax. A lower green fee can fall into a lower golf course tax bracket.',
+    noPlans: 'No memberships on sale. Create one first.',
+    saved: 'Member discounts saved',
+    failed: 'Could not save the member discounts',
+    field: {
+      kind: 'Type',
+      value: 'Amount',
+    },
+    kind: {
+      yen: 'Yen off',
+      percent: 'Percent off',
+    },
+  },
+  grades: {
+    title: 'Customer grades',
+    description:
+      'How regulars are ranked, from how often they come and what they spend. Separate from membership \u2014 visitors get a grade too.',
+    hint: 'Read top down; the first rung whose every threshold is met is the one awarded. A blank box asks nothing.',
+    duplicate: 'Two rungs share a name. Give each rung its own.',
+    empty: 'No rungs yet. Add one and a grade appears on the customer page.',
+    add: 'Add a rung',
+    remove: 'Remove this rung',
+    saved: 'Customer grades saved',
+    failed: 'Could not save the customer grades',
+    field: {
+      name: 'Name',
+      minVisits: 'Rounds played (min)',
+      minSpendPerPlayer: 'Spend per player (min)',
+      minTotalAmount: 'Lifetime takings (min)',
+    },
+    placeholder: {
+      name: 'Gold',
+    },
+  },
   membership: {
     title: 'Memberships',
     description: 'The memberships this course sells. Anyone not holding one is a visitor.',
