@@ -186,7 +186,17 @@ button,
 }
 
 /* A persistent, non-modal heads-up: floats over the workspace, never blocks
-   input, and never pushes the layout it sits above.
+   input, and never pushes the layout it sits above. Not built on the shared
+   `showToast`/`Toaster` (sonner) — that system is deliberately transient and
+   non-interactive (see the doc comment in `lib/toast.ts` and the
+   `.courseboard-toaster` rule below: "status text, not controls"), which is
+   the opposite of what a stay-until-acted-on reload prompt needs. It shares
+   that system's design instead, on the two axes that matter here:
+     - same tokens as a sonner toast (`--nui-popover`/`-foreground`,
+       `--nui-border`, `--nui-shadow-overlay`, `--nui-primary` for the action
+       button) so it visually reads as the same family of notice.
+     - the same "never intercept the next click" technique: `pointer-events:
+       none` on the card itself, `auto` only on the two buttons that need it.
    `position: absolute` inside `.app-workspace` (not `fixed` to the viewport):
    the sidebar is a sibling flex item beside that column, so anchoring here
    keeps the banner inside the content area at every sidebar width — expanded,
@@ -213,6 +223,7 @@ button,
   background: hsl(var(--nui-popover));
   color: hsl(var(--nui-popover-foreground));
   box-shadow: var(--nui-shadow-overlay);
+  pointer-events: none;
 }
 
 .new-version-banner-message {
@@ -241,6 +252,7 @@ button,
   font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .new-version-banner-reload svg {
@@ -261,6 +273,7 @@ button,
   background: transparent;
   color: hsl(var(--nui-muted-foreground));
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .new-version-banner-dismiss:hover,

@@ -114,6 +114,66 @@ CourseBoard の SPA は Cloudflare Workers Static Assets（`desktop/wrangler.tom
 - i18n: `common:newVersion.*` を ja / ja-plain / en の 3 ロケールへ同期追加
   （`src/i18n/completeness.test.ts` の既存カバレッジで検証される）。
 
+### 既存トースト基盤との共通化の検討（CTO 指摘への対応）
+
+CTO から、「予約を入れました」「再読み込みしました」等を出している既存の
+`showToast`（`desktop/src/lib/toast.ts`、`@tachyon-sdk/native-ui` 経由で
+[sonner](https://sonner.emilkowal.ski/) を使う `Toaster`）を新バージョン
+バナーでも再利用できないか調査するよう指摘があった。
+
+**調査結果**
+
+- sonner 自体（`node_modules/sonner` の型定義）は `duration: Infinity`
+  （自動で消えない）・`action: { label, onClick }`（ボタン付き）・
+  `closeButton`（× で手動で消す）・`id` 指定での差し替えをすべて
+  ネイティブにサポートしている。API だけ見れば「ユーザーが操作するまで
+  消えない持続表示 + アクションボタン付き」は可能。
+- しかし `lib/toast.ts` の冒頭のコメントが明言している通り、この
+  アプリの `showToast` は **意図的に** 「以前はページ上部に固定され、
+  手動で閉じるまで残るバナーだったが、それをやめてトーストにした
+  （画面の上に一言かぶさって、すぐ引っ込む）」という設計変更の結果物で
+  ある。今回作りたいものはまさにその「手動で閉じるまで残るバナー」であり、
+  沿革的に見ても「トーストをやめた理由」そのものに正面から反する。
+- 加えて `desktop/src/styles.css` は
+  `.courseboard-toaster, .courseboard-toaster [data-sonner-toast] { pointer-events: none; }`
+  で **全てのトーストから意図的にポインタイベントを剥奪**しており、
+  コメントも「Notifications are status text, not controls. They must never
+  intercept the next click **even if a timer is paused while the page is in
+  the background**」と明記している。まさに「バックグラウンドでタイマーが
+  止まったまま残る」＝今回の「検知後は自動で消えず、ずっと残る」通知が
+  想定する状況そのものを名指しして禁止している。現状どのトーストも
+  action ボタンを持たない（`ToastMessage` 型に `action` フィールドが
+  無い）のはこの制約と整合している。
+
+**判断: 採用しない（sonner の `Toaster` には乗せない）。ただし配置レイヤーと
+ビジュアルトークンは寄せる。**
+
+- 独自コンポーネント（`NewVersionBanner.tsx` / `.new-version-banner`）を
+  維持する。理由は上記の通り、既存トーストの「操作を持たないステータス
+  テキスト」という設計契約と、今回要求される「操作ボタン付きで消えない」
+  性質が正面から矛盾するため。1 件のためにこの契約へ例外を作ると、
+  そのために外された `pointer-events: none` がサイトワイドの
+  hover-to-pause・swipe-to-dismiss 挙動まで変えてしまい、影響範囲が
+  新バージョン通知 1 件を超える。
+- 代わりに、CTO が指摘した 2 点は寄せた:
+  - **ビジュアルトークン**: `.new-version-banner` はカードに
+    `--nui-popover` / `-foreground` / `--nui-border` / `--nui-shadow-overlay`
+    を、再読み込みボタンに `--nui-primary` / `-foreground` を使っており、
+    これは sonner 側の `Toaster`（`node_modules/@tachyon-sdk/native-ui` の
+    `toast.tsx`）が `actionButton` に当てている
+    `bg-primary text-primary-foreground` などと同じトークン。実装時点で
+    すでに一致していたため変更は不要だった。
+  - **配置レイヤー（操作を奪わない手法）**: `.courseboard-toaster` が使う
+    「コンテナは `pointer-events: none`、個々のトーストだけ有効」という
+    手法をそのまま踏襲する形に変更した。`.new-version-banner` 自体を
+    `pointer-events: none` にし、`.new-version-banner-reload` /
+    `.new-version-banner-dismiss` の 2 つのボタンだけ `pointer-events: auto`
+    で戻す。これにより、右クリックメニューや Sheet と万一見た目上
+    重なっても、ボタンの実クリック領域以外はすべてクリックが素通りする。
+    前回まで「z-index を全ての操作系オーバーレイより下に保つ」という
+    数値の綱引きだけで守っていたところに、トースト層と同じ独立した
+    安全策を重ねたことになる（z-index の調整自体は維持）。
+
 ## ポーリング間隔・負荷配慮
 
 - 既定 5 分間隔（`NEW_VERSION_POLL_INTERVAL_MS`）。
@@ -159,7 +219,9 @@ platform API（tachyon-api / field-api）・courseboard-api への直接アク�
   `cache: 'no-store'` が渡ること・`visibilitychange` の間隔制御・
   Tauri/`file:` 時のポーリング無効化。
 - `desktop/src/components/NewVersionBanner.test.tsx`: バナーの表示・
-  再読み込みボタン・閉じるボタンの挙動。
+  再読み込みボタン・閉じるボタンの挙動に加え、両ボタンが CSS の
+  `pointer-events: auto` 対象となるクラス名を保持し続けていること
+  （リネームすると CSS のクリック可能例外が外れて無反応になる回帰の防止）。
 - `desktop/src/components/AppShell.layout.test.tsx`（新規）: 認証済みで
   `AppShell` をフル描画し、バナーが `.app-workspace`（コンテンツ列）の
   内側に入っていること、`.app-shell` の直接の子ではなくなっていることを

@@ -52,4 +52,18 @@ describe('NewVersionBanner', () => {
 
     expect(screen.queryByRole('status')).toBeNull()
   })
+
+  it('keeps the reload/dismiss controls on the class names styles.css targets for pointer-events', () => {
+    // The card itself is pointer-events: none in styles.css, mirroring the
+    // shared toast layer's "never intercept the next click" rule — only
+    // these two classes get pointer-events: auto back. Renaming either class
+    // without updating the CSS would silently make the button unclickable.
+    mockedUseNewVersionAvailable.mockReturnValue(true)
+    render(<NewVersionBanner />)
+
+    expect(screen.getByRole('button', { name: '再読み込み' }).className)
+      .toContain('new-version-banner-reload')
+    expect(screen.getByRole('button', { name: '閉じる' }).className)
+      .toContain('new-version-banner-dismiss')
+  })
 })
