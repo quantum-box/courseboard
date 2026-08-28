@@ -94,7 +94,7 @@ CourseBoard の SPA は Cloudflare Workers Static Assets（`desktop/wrangler.tom
     バナー側が上に乗って操作を奪うことがないようにする。
   - `bottom: calc(16px + env(safe-area-inset-bottom))` でホームインジケータ等の
     セーフエリアを避ける（`.sticky-submit` のモバイル用調整と同じ考え方）。
-- 文言: 「新しいバージョンがあります。再読み込みしてください。」+
+- 文言: 「新しいバージョンが公開されました。再読み込みすると最新の画面になります。」+
   再読み込みボタン（`window.location.reload()`）+ 閉じるボタン（今回のセッション
   中だけ非表示。ポーリングの検知状態自体は保持するので、次にタブを見せたときの
   UX に影響しない）。

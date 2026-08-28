@@ -152,7 +152,7 @@ export const common: DeepPartial<typeof source> = {
     label: 'Operation results',
   },
   newVersion: {
-    message: 'A new version is available. Please reload the page.',
+    message: 'A new version has been published. Reload to see the latest screen.',
     reload: 'Reload',
     dismiss: 'Close',
   },

@@ -28,7 +28,7 @@ describe('NewVersionBanner', () => {
     render(<NewVersionBanner />)
 
     expect(screen.getByRole('status').textContent).toContain(
-      '新しいバージョンがあります。再読み込みしてください。',
+      '新しいバージョンが公開されました。再読み込みすると最新の画面になります。',
     )
   })
 
