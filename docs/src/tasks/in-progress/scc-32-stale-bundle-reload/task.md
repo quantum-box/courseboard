@@ -27,6 +27,31 @@ CourseBoard の SPA は Cloudflare Workers Static Assets（`desktop/wrangler.tom
   （Workers では `/`、axum 埋め込みでは `/ui/` = `BASE_URL`）への GET は
   常にそのデプロイの `index.html` を返す。これは既存の SPA フォールバック
   設定そのものなので、検知のために新しいサーバ側の仕組みを何も追加しない。
+- 1 回の不一致では判定しない。ベースラインと異なる `src` が **2 回連続**で
+  観測されたときだけ新バージョンありと確定する（間に一致が挟まったら
+  カウントをリセット）。フェッチ 1 回に 10 秒のタイムアウト（`AbortController`）
+  を設け、応答が返らない場合も次のポーリングへ確実に進む。
+
+#### 前提（レビュー指摘への対応）: 部分配信・ロールバック時の誤検知
+
+単発の不一致判定は、ローリング配信の途中で一部のエッジ/インスタンスだけが
+新しい `index.html` を返している状態や、デプロイのロールバックで新→旧に
+戻る瞬間を「新バージョンが出た」と誤検知し、しかもバナーは一度出ると
+消えない（`detected` フラグで以降のポーリングを止める設計）ため、誤検知が
+そのまま固定表示され続ける問題があった。2 回連続一致を要求することで、
+1 回限りの揺れは吸収できる。
+
+この対策が有効なのは、**現行の Cloudflare Workers Static Assets がアセット
+一式を単一デプロイとして原子的に切り替える**（同じデプロイの `index.html` と
+その `<script type="module">` が指すハッシュ付きファイルは常に同じ組で
+配信される）という前提があるため。将来 axum 埋め込み配信を複数インスタンス
+（ロードバランサ配下）へスケールする場合、インスタンスごとに古い/新しい
+ビルドが混在したまま長時間並存し得る。その場合は「`src` が変わった」だけ
+では新旧の順序を判別できない（ロールバックで旧 `src` に戻ったのか、複数
+インスタンスが単に別デプロイを指しているのか区別がつかない）ため、
+単調増加するデプロイ識別子（ビルド時刻・デプロイ連番など）を `index.html`
+または専用エンドポイントに埋め込み、「新しい」を "異なる" ではなく
+"より新しい" で判定する方式に変更する必要がある。
 
 ### 検討した代替案と不採用の理由
 
@@ -55,9 +80,20 @@ CourseBoard の SPA は Cloudflare Workers Static Assets（`desktop/wrangler.tom
 
 ## UI
 
-- 非モーダルの浮動バナー（画面右下、`position: fixed`）。操作の妨げにならないよう
+- 非モーダルの浮動バナー（画面左下、`position: fixed`）。操作の妨げにならないよう
   クリックを奪わず、既存の `main` 領域のレイアウトを一切動かさない
   （`components/AppShell.tsx` の `Toaster` と同じ思想）。
+  - 右下ではなく左下: `Sheet`（`components/Sheet.tsx`、native-ui の
+    `Dialog` を右アンカーに寄せたもの）は画面右側全体を覆い、その中の
+    `.sticky-submit` は Sheet の下端に張り付く。右下固定だとバナーが
+    Sheet の送信バーの真上に重なるため、既存の「ページ再読み込み」トースト
+    （`AppShell.tsx` の `position: 'bottom-left'`）と同じ左下に統一した。
+  - `z-index: 30`。台帳の右クリックメニュー（`.ledger-context-menu`、60）・
+    盤面のみ表示（`.ledger-page.is-board-only`、40）・`Sheet`/`Dialog`
+    （native-ui の `z-50`）のいずれよりも低くし、それらが開いている間は
+    バナー側が上に乗って操作を奪うことがないようにする。
+  - `bottom: calc(16px + env(safe-area-inset-bottom))` でホームインジケータ等の
+    セーフエリアを避ける（`.sticky-submit` のモバイル用調整と同じ考え方）。
 - 文言: 「新しいバージョンがあります。再読み込みしてください。」+
   再読み込みボタン（`window.location.reload()`）+ 閉じるボタン（今回のセッション
   中だけ非表示。ポーリングの検知状態自体は保持するので、次にタブを見せたときの
@@ -76,6 +112,10 @@ CourseBoard の SPA は Cloudflare Workers Static Assets（`desktop/wrangler.tom
   繰り返す意味がないため）。
 - フェッチ失敗（オフライン等）は「新バージョンあり」と誤判定しない。次回の
   ポーリングまで静かに待つ。
+- フェッチ 1 回に 10 秒（`CHECK_TIMEOUT_MS`）のタイムアウトを `AbortController`
+  で設ける。応答が返らない・ハングしたコネクションが `checking` フラグを
+  永久に立てたままにしないため。アンマウント時も進行中のリクエストを
+  `abort()` する（画面遷移後にバックグラウンドで応答が返り続けることを防ぐ）。
 
 ## 実装ファイル
 
@@ -99,10 +139,14 @@ platform API（tachyon-api / field-api）・courseboard-api への直接アク�
 
 ## テスト
 
-- `desktop/src/lib/newVersion.test.ts`（新規）: バージョン差分検知・
-  変化なし・フェッチ失敗時の非検知・Tauri/`file:` 時のポーリング無効化。
-- `desktop/src/components/NewVersionBanner.test.tsx`（新規、必要なら）:
-  バナーの表示・再読み込みボタン・閉じるボタンの挙動。
+- `desktop/src/lib/newVersion.test.ts`: バージョン差分検知（2 回連続一致で
+  確定・間に一致が挟まるとリセット）・変化なし・フェッチ失敗時の非検知・
+  タイムアウトで `AbortController` が中断し `checking` が固定されないこと・
+  アンマウント時に進行中リクエストを中断すること・`fetch` に `basePath()` と
+  `cache: 'no-store'` が渡ること・`visibilitychange` の間隔制御・
+  Tauri/`file:` 時のポーリング無効化。
+- `desktop/src/components/NewVersionBanner.test.tsx`: バナーの表示・
+  再読み込みボタン・閉じるボタンの挙動。
 - `desktop/src/i18n/completeness.test.ts`: 既存テストが 3 ロケール同期を検証。
 - `npm run type-check` / `npm run test` を通す。
 
