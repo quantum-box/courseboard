@@ -187,6 +187,11 @@ button,
 
 /* A persistent, non-modal heads-up: floats over the workspace, never blocks
    input, and never pushes the layout it sits above.
+   `position: absolute` inside `.app-workspace` (not `fixed` to the viewport):
+   the sidebar is a sibling flex item beside that column, so anchoring here
+   keeps the banner inside the content area at every sidebar width — expanded,
+   resized, or collapsed to an overlay — instead of a fixed viewport offset
+   that would sit partly underneath the sidebar and hide the message text.
    Bottom-left, not bottom-right: Sheets/dialogs (native-ui z-50) anchor to the
    right edge and stick their submit bar to their own bottom, so a right-side
    banner would sit on top of it. z-index stays below every real interactive
@@ -194,12 +199,12 @@ button,
    board-only takeover (40), and any open Sheet/dialog (50, native-ui) — so
    those still cover it instead of the other way around. */
 .new-version-banner {
-  position: fixed;
+  position: absolute;
   z-index: 30;
   left: 16px;
   bottom: calc(16px + env(safe-area-inset-bottom));
   display: flex;
-  max-width: min(360px, calc(100vw - 32px));
+  max-width: min(360px, calc(100% - 32px));
   align-items: center;
   gap: 10px;
   border: 1px solid hsl(var(--nui-border));
@@ -488,6 +493,7 @@ button,
 }
 
 .app-workspace {
+  position: relative;
   display: flex;
   min-width: 0;
   min-height: 0;

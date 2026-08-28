@@ -80,8 +80,8 @@ CourseBoard の SPA は Cloudflare Workers Static Assets（`desktop/wrangler.tom
 
 ## UI
 
-- 非モーダルの浮動バナー（画面左下、`position: fixed`）。操作の妨げにならないよう
-  クリックを奪わず、既存の `main` 領域のレイアウトを一切動かさない
+- 非モーダルの浮動バナー（画面左下、コンテンツ領域基準）。操作の妨げにならない
+  ようクリックを奪わず、既存の `main` 領域のレイアウトを一切動かさない
   （`components/AppShell.tsx` の `Toaster` と同じ思想）。
   - 右下ではなく左下: `Sheet`（`components/Sheet.tsx`、native-ui の
     `Dialog` を右アンカーに寄せたもの）は画面右側全体を覆い、その中の
@@ -94,6 +94,19 @@ CourseBoard の SPA は Cloudflare Workers Static Assets（`desktop/wrangler.tom
     バナー側が上に乗って操作を奪うことがないようにする。
   - `bottom: calc(16px + env(safe-area-inset-bottom))` でホームインジケータ等の
     セーフエリアを避ける（`.sticky-submit` のモバイル用調整と同じ考え方）。
+  - **配置の基準（実機確認で修正）**: 当初 `position: fixed; left: 16px`
+    でビューポート基準に置いていたところ、サイドバー（既定 240px、最大
+    400px、リサイズ可）の下に本文が潜り、再読み込みボタンと閉じるボタン
+    だけが見える状態になった（CTO の実機確認で発覚）。サイドバーは
+    `.app-shell` の中で `.app-workspace`（コンテンツ列）と並ぶ flex item
+    のため、ビューポート基準の固定オフセットはサイドバー幅の分だけ本文と
+    重なる。`.new-version-banner` の JSX を `.app-shell` 直下から
+    `.app-workspace` の内側（`workspace-body` の直後）へ移し、CSS も
+    `position: fixed` → `position: absolute`（`.app-workspace` に
+    `position: relative` を付与してその内側を基準にする）に変更した。
+    サイドバーの幅・折りたたみ・オーバーレイ表示のどの状態でも
+    `.app-workspace` はサイドバーの外側の残り幅を占めるだけなので、
+    サイドバーの状態を個別に分岐する必要がない。
 - 文言: 「新しいバージョンが公開されました。再読み込みすると最新の画面になります。」+
   再読み込みボタン（`window.location.reload()`）+ 閉じるボタン（今回のセッション
   中だけ非表示。ポーリングの検知状態自体は保持するので、次にタブを見せたときの
@@ -147,6 +160,10 @@ platform API（tachyon-api / field-api）・courseboard-api への直接アク�
   Tauri/`file:` 時のポーリング無効化。
 - `desktop/src/components/NewVersionBanner.test.tsx`: バナーの表示・
   再読み込みボタン・閉じるボタンの挙動。
+- `desktop/src/components/AppShell.layout.test.tsx`（新規）: 認証済みで
+  `AppShell` をフル描画し、バナーが `.app-workspace`（コンテンツ列）の
+  内側に入っていること、`.app-shell` の直接の子ではなくなっていることを
+  DOM 構造で検証する（サイドバーへの重なり回帰の防止）。
 - `desktop/src/i18n/completeness.test.ts`: 既存テストが 3 ロケール同期を検証。
 - `npm run type-check` / `npm run test` を通す。
 

@@ -930,6 +930,10 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
             <main className="workspace-content">{children}</main>
             <WorkspaceHelpPanel route={route} open={helpOpen} onClose={() => setHelpOpen(false)} />
           </div>
+          {/* Anchored inside the workspace column (not the app shell) so its
+              left offset is relative to the content area, not the viewport —
+              the sidebar sits beside this column and would otherwise cover it. */}
+          <NewVersionBanner />
         </div>
         {/* Transient messages never capture the pointer or cover bottom actions. */}
         <Toaster
@@ -944,7 +948,6 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
           }}
           containerAriaLabel={t('common:notification.label')}
         />
-        <NewVersionBanner />
       </div>
 
 
