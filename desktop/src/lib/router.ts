@@ -66,7 +66,7 @@ function usesHashLocation() {
 }
 
 /** Where the SPA is mounted (`/` on Workers, `/ui/` behind axum). */
-function basePath() {
+export function basePath() {
   const base = import.meta.env.BASE_URL
   if (!base || !base.startsWith('/')) return '/'
   return base.endsWith('/') ? base : `${base}/`

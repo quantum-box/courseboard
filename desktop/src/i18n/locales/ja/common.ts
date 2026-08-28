@@ -152,4 +152,9 @@ export const common = {
   notification: {
     label: '操作結果のお知らせ',
   },
+  newVersion: {
+    message: '新しいバージョンが公開されました。再読み込みすると最新の画面になります。',
+    reload: '再読み込み',
+    dismiss: '閉じる',
+  },
 } as const
