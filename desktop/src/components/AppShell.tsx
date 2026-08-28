@@ -88,6 +88,7 @@ import { navigate, navigateFromClick } from '../lib/router'
 import { isPageRefreshShortcut } from '../lib/shortcuts'
 import { showToast } from '../lib/toast'
 import { CourseBoardBrand } from './CourseBoardBrand'
+import { NewVersionBanner } from './NewVersionBanner'
 import { WorkspaceHelpPanel } from './WorkspaceHelp'
 
 /** Routes that carry a translated label under the `nav:items` namespace. */
@@ -943,6 +944,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
           }}
           containerAriaLabel={t('common:notification.label')}
         />
+        <NewVersionBanner />
       </div>
 
 

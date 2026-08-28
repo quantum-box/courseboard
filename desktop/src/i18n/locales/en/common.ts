@@ -151,4 +151,9 @@ export const common: DeepPartial<typeof source> = {
   notification: {
     label: 'Operation results',
   },
+  newVersion: {
+    message: 'A new version is available. Please reload the page.',
+    reload: 'Reload',
+    dismiss: 'Close',
+  },
 }
