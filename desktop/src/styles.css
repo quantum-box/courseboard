@@ -186,12 +186,18 @@ button,
 }
 
 /* A persistent, non-modal heads-up: floats over the workspace, never blocks
-   input, and never pushes the layout it sits above. */
+   input, and never pushes the layout it sits above.
+   Bottom-left, not bottom-right: Sheets/dialogs (native-ui z-50) anchor to the
+   right edge and stick their submit bar to their own bottom, so a right-side
+   banner would sit on top of it. z-index stays below every real interactive
+   overlay it could coincide with — the ledger right-click menu (60), the
+   board-only takeover (40), and any open Sheet/dialog (50, native-ui) — so
+   those still cover it instead of the other way around. */
 .new-version-banner {
   position: fixed;
-  z-index: 70;
-  right: 16px;
-  bottom: 16px;
+  z-index: 30;
+  left: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
   display: flex;
   max-width: min(360px, calc(100vw - 32px));
   align-items: center;
