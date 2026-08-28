@@ -311,11 +311,12 @@ impl ReservationGateway for FieldReservationGateway {
         // Field's cancel takes no body today. The reason is sent anyway so the
         // desk's words land the moment Field can keep them (PLT-3297); an
         // endpoint that ignores unknown fields drops it, which is the same
-        // outcome as not sending it.
-        let body = reason
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| json!({ "reason": value }));
+        // outcome as not sending it. The body is always present, though: with
+        // no reason this used to skip the body entirely, which also skipped
+        // `Content-Type: application/json` — and Field's endpoint requires
+        // that header on every request, empty reason or not.
+        let trimmed_reason = reason.map(str::trim).filter(|value| !value.is_empty());
+        let body = json!({ "reason": trimmed_reason });
         // Status only, no decode: a cancel that answers 204 has done the work,
         // and failing to parse an empty body would report the booking as still
         // live and invite the desk to cancel it a second time.
@@ -325,7 +326,7 @@ impl ReservationGateway for FieldReservationGateway {
             reqwest::Method::POST,
             &path,
             credentials,
-            body.as_ref(),
+            Some(&body),
         )
         .await
     }
@@ -2077,6 +2078,68 @@ mod tests {
         }
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].capacity(), 2);
+
+        server.abort();
+    }
+
+    #[derive(Clone, Default)]
+    struct CancelServerState {
+        bodies: Arc<Mutex<Vec<Value>>>,
+    }
+
+    async fn cancel_endpoint(
+        State(state): State<CancelServerState>,
+        Json(body): Json<Value>,
+    ) -> axum::http::StatusCode {
+        state.bodies.lock().expect("bodies lock").push(body);
+        axum::http::StatusCode::NO_CONTENT
+    }
+
+    /// Field's cancel endpoint uses the same `Json<_>` extractor as any other
+    /// write, which rejects a request that arrives with no
+    /// `Content-Type: application/json` — reason or no reason. A cancel with a
+    /// blank reason used to skip the body (and the header riding on it)
+    /// entirely, so this pins the body always being sent.
+    #[tokio::test]
+    async fn cancelling_with_no_reason_still_carries_a_json_content_type() {
+        let state = CancelServerState::default();
+        let app = Router::new()
+            .route(
+                "/v1/erp/reservations/res_1/cancel",
+                axum::routing::post(cancel_endpoint),
+            )
+            .with_state(state.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock Field");
+        let address = listener.local_addr().expect("mock Field address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve mock Field");
+        });
+
+        let gateway = FieldReservationGateway::new(
+            reqwest::Client::new(),
+            Some(&format!("http://{address}")),
+        );
+        gateway
+            .cancel_reservation(
+                GatewayCredentials {
+                    authorization: "Bearer test-token",
+                    operator_id: "operator-test",
+                    platform_id: Some("platform-test"),
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
+                },
+                &ReservationId::new("res_1"),
+                None,
+            )
+            .await
+            .expect("cancel with no reason");
+
+        assert_eq!(
+            state.bodies.lock().expect("bodies lock").as_slice(),
+            [json!({ "reason": null })]
+        );
 
         server.abort();
     }
