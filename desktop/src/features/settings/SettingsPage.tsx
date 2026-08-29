@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { Panel } from '../../components/Page'
 import { navDescription, navLabel, settingsNavigation } from '../../components/AppShell'
 import { navigateFromClick } from '../../lib/router'
+import { CaddieDutiesPanel } from './CaddieDutiesPanel'
 import { CustomerGradesPanel } from './CustomerGradesPanel'
 import { MembershipDiscountsPanel } from './MembershipDiscountsPanel'
 import { MembershipPlayWindowsPanel } from './MembershipPlayWindowsPanel'
@@ -57,6 +58,8 @@ export function SettingsPage() {
       <MembershipPlayWindowsPanel />
 
       <CustomerGradesPanel />
+
+      <CaddieDutiesPanel />
 
       <ExtensionConfigPanel />
     </div>

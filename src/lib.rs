@@ -34,11 +34,12 @@ use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
     FieldReservationReportGateway, MigratingReservationReportGateway,
-    MySqlAvailabilityDeadlineRepository, MySqlCaddieRankFeeRepository, MySqlCaddieShiftRepository,
-    MySqlCourseOrderRepository, MySqlCustomerGradeRulesRepository, MySqlGeneratedThroughRepository,
-    MySqlGolfProductSettingsRepository, MySqlMembershipDiscountsRepository,
-    MySqlMembershipPlayWindowsRepository, MySqlPlayerTagOptionsRepository,
-    MySqlPricingSettingsRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
+    MySqlAvailabilityDeadlineRepository, MySqlCaddieDutyRepository, MySqlCaddieRankFeeRepository,
+    MySqlCaddieShiftRepository, MySqlCourseOrderRepository, MySqlCustomerGradeRulesRepository,
+    MySqlGeneratedThroughRepository, MySqlGolfProductSettingsRepository,
+    MySqlMembershipDiscountsRepository, MySqlMembershipPlayWindowsRepository,
+    MySqlPlayerTagOptionsRepository, MySqlPricingSettingsRepository, MySqlShiftRulesRepository,
+    MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -62,6 +63,7 @@ pub struct AppState {
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
     course_order: Arc<MySqlCourseOrderRepository>,
     caddie_rank_fees: Arc<MySqlCaddieRankFeeRepository>,
+    caddie_duties: Arc<MySqlCaddieDutyRepository>,
     pricing_settings: Arc<MySqlPricingSettingsRepository>,
     product_settings: Arc<MySqlGolfProductSettingsRepository>,
     player_tag_options: Arc<MySqlPlayerTagOptionsRepository>,
@@ -107,6 +109,7 @@ impl AppState {
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
             course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
             caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
+            caddie_duties: Arc::new(MySqlCaddieDutyRepository::new(pool.clone())),
             pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
             product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
@@ -168,6 +171,7 @@ impl AppState {
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
             course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
             caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
+            caddie_duties: Arc::new(MySqlCaddieDutyRepository::new(pool.clone())),
             pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
             product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
@@ -215,6 +219,7 @@ impl AppState {
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
                 course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
                 caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
+                caddie_duties: Arc::new(MySqlCaddieDutyRepository::new(pool.clone())),
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
                 product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
@@ -257,6 +262,7 @@ impl AppState {
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
                 course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
                 caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
+                caddie_duties: Arc::new(MySqlCaddieDutyRepository::new(pool.clone())),
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
                 product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
@@ -320,6 +326,13 @@ impl AppState {
     /// assumptions behind the revenue projection.
     pub fn pricing_settings(&self) -> Arc<MySqlPricingSettingsRepository> {
         self.pricing_settings.clone()
+    }
+
+    /// CourseBoard-owned list of non-round caddie work, and the days caddies
+    /// are put on it. Field's HRM knows somebody is at work; that this club
+    /// sent them to the practice range is golf's own (ADR-0005).
+    pub fn caddie_duties(&self) -> Arc<MySqlCaddieDutyRepository> {
+        self.caddie_duties.clone()
     }
 
     /// CourseBoard-owned visitor categories for the booking form.
@@ -938,6 +951,36 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/course/caddie-reinforcements",
             get(course::interfaces::http_ops::list_caddie_reinforcements).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-assignments/:assignment_id/reassignment",
+            put(course::interfaces::http_ops::reassign_caddie_assignment).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-duties",
+            get(course::interfaces::http_ops::get_caddie_duties)
+                .put(course::interfaces::http_ops::replace_caddie_duties)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/caddie-duty-assignments",
+            get(course::interfaces::http_ops::list_caddie_duty_assignments)
+                .post(course::interfaces::http_ops::assign_caddie_duty)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/caddie-duty-assignments/:duty_id",
+            delete(course::interfaces::http_ops::clear_caddie_duty).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
         )

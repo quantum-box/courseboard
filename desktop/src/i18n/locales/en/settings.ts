@@ -47,6 +47,23 @@ export const settings: DeepPartial<typeof source> = {
       percent: 'Percent off',
     },
   },
+  caddieDuties: {
+    title: 'Caddie duties',
+    description:
+      'The jobs a caddie is put on when they have no round. The dispatch screen picks from this list. Renaming one leaves the days already filed under the old name alone.',
+    field: {
+      label: 'Job',
+    },
+    placeholder: 'e.g. Course upkeep',
+    add: 'Add a job',
+    remove: 'Remove this job',
+    empty: 'No jobs yet. Add one and the dispatch screen can put a caddie on it.',
+    duplicate: 'The same job appears twice. Remove one of them.',
+    tooLong: 'A job name is at most {{max}} characters.',
+    tooMany: 'At most {{max}} jobs.',
+    saved: 'Jobs saved',
+    failed: 'Could not save the jobs',
+  },
   grades: {
     title: 'Customer grades',
     description:

@@ -33,10 +33,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::course::domain::actions::{
-    CALCULATE_FEES, LIST_CADDIE_AVAILABILITY, LIST_CADDIE_RANK_FEES, LIST_COURSES, LIST_CUSTOMERS,
-    LIST_MEMBERSHIP, LIST_SHIFTS, LIST_SLOT_OVERRIDES, LIST_TEE_SHEET, MANAGE_CADDIE_AVAILABILITY,
-    MANAGE_CADDIE_RANK_FEES, MANAGE_COURSES, MANAGE_CUSTOMERS, MANAGE_MEMBERSHIP_PLANS,
-    MANAGE_RESERVATION_POLICY, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
+    CALCULATE_FEES, LIST_CADDIE_ASSIGNMENTS, LIST_CADDIE_AVAILABILITY, LIST_CADDIE_RANK_FEES,
+    LIST_COURSES, LIST_CUSTOMERS, LIST_MEMBERSHIP, LIST_SHIFTS, LIST_SLOT_OVERRIDES,
+    LIST_TEE_SHEET, MANAGE_CADDIE_ASSIGNMENTS, MANAGE_CADDIE_AVAILABILITY, MANAGE_CADDIE_RANK_FEES,
+    MANAGE_COURSES, MANAGE_CUSTOMERS, MANAGE_MEMBERSHIP_PLANS, MANAGE_RESERVATION_POLICY,
+    MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
 };
 
 /// What standing a route needs before its handler runs.
@@ -134,6 +135,41 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "DELETE",
         "/v1/course/slot-overrides",
         RouteAuthorization::Action(MANAGE_SLOT_OVERRIDES),
+    ),
+    // Moving a round already placed: the same permission as putting one there.
+    (
+        "PUT",
+        "/v1/course/caddie-assignments/:assignment_id/reassignment",
+        RouteAuthorization::Action(MANAGE_CADDIE_ASSIGNMENTS),
+    ),
+    // Non-round work is a decision about today's board, taken on the dispatch
+    // screen by the people who put caddies on groups — so it is guarded by the
+    // dispatch permissions rather than the shift ones. The club's list of jobs
+    // travels with the days filed against it.
+    (
+        "GET",
+        "/v1/course/caddie-duties",
+        RouteAuthorization::Action(LIST_CADDIE_ASSIGNMENTS),
+    ),
+    (
+        "PUT",
+        "/v1/course/caddie-duties",
+        RouteAuthorization::Action(MANAGE_CADDIE_ASSIGNMENTS),
+    ),
+    (
+        "GET",
+        "/v1/course/caddie-duty-assignments",
+        RouteAuthorization::Action(LIST_CADDIE_ASSIGNMENTS),
+    ),
+    (
+        "POST",
+        "/v1/course/caddie-duty-assignments",
+        RouteAuthorization::Action(MANAGE_CADDIE_ASSIGNMENTS),
+    ),
+    (
+        "DELETE",
+        "/v1/course/caddie-duty-assignments/:duty_id",
+        RouteAuthorization::Action(MANAGE_CADDIE_ASSIGNMENTS),
     ),
     (
         "GET",
@@ -1292,6 +1328,15 @@ mod tests {
             ("GET", "/v1/course/caddie-payroll-summary/export.csv"),
             ("GET", "/v1/course/caddie-shift-rules"),
             ("PUT", "/v1/course/caddie-shift-rules"),
+            ("PUT", "/v1/course/caddie-assignments/a_1/reassignment"),
+            ("GET", "/v1/course/caddie-duties"),
+            ("PUT", "/v1/course/caddie-duties"),
+            ("GET", "/v1/course/caddie-duty-assignments"),
+            ("PUT", "/v1/course/caddie-duty-assignments/cp_1/2026-08-29"),
+            (
+                "DELETE",
+                "/v1/course/caddie-duty-assignments/cp_1/2026-08-29",
+            ),
             ("GET", "/v1/course/caddie-shifts"),
             ("PUT", "/v1/course/caddie-shifts/cp_1/2026-08-18"),
             ("POST", "/v1/course/caddie-shift-plans/2026-09"),

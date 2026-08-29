@@ -22,6 +22,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Shuffle,
   Sparkles,
   Star,
   UserPlus,
@@ -82,6 +83,8 @@ import { caddieLoadPlan } from './caddieLoadPlan'
 import type { CourseCaddieSupply, DayCaddieSupply } from './caddieCourseSupply'
 import { placementWarningStatus, type ShiftPlacementStatus } from './caddiePlacement'
 import { Sheet } from '../../components/Sheet'
+import { CaddieDutiesPanel } from './CaddieDutyBoard'
+import { ReassignRoundSheet } from './ReassignRoundSheet'
 import { CaddieLink } from './CaddieLink'
 import {
   employmentLabel,
@@ -936,6 +939,15 @@ function DispatchView({
         setFlash={setFlash}
       />
 
+      {/* Read after the groups still missing somebody and the automatic run:
+          who is left over is only known once the day has been staffed. */}
+      <CaddieDutiesPanel
+        date={date}
+        profiles={profiles}
+        assignments={dayAssignments}
+        onChanged={onChanged}
+      />
+
       <section className="app-section space-y-3">
         <h2 className="section-title">{t('caddies:dispatch.boardTitle')}</h2>
         {orphaned.length > 0 ? (
@@ -952,6 +964,8 @@ function DispatchView({
             assignments={dayAssignments}
             profiles={profiles}
             orphanedIds={orphanedIds}
+            date={date}
+            rounds={teeSheet.data?.items ?? []}
             onChanged={onChanged}
             setFlash={setFlash}
           />
@@ -1817,6 +1831,8 @@ function AssignmentsTable({
   assignments,
   profiles,
   orphanedIds = EMPTY_ORPHANS,
+  date,
+  rounds,
   onChanged,
   setFlash,
 }: {
@@ -1828,12 +1844,20 @@ function AssignmentsTable({
    * fetched, so it says nothing rather than guessing.
    */
   orphanedIds?: Set<string>
+  /**
+   * The day board's own date and tee sheet. A caddie's history spans months of
+   * tee sheets nobody fetched, so moving a round is offered only where the day
+   * is actually on the screen.
+   */
+  date?: string
+  rounds?: TeeSheetRow[]
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
   const timezone = useTenantTimezone()
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [moving, setMoving] = useState<CaddieAssignment | null>(null)
   const profileNames = useMemo(
     () => new Map(profiles.map(profile => [profile.id, profile.displayName])),
     [profiles],
@@ -1946,9 +1970,22 @@ function AssignmentsTable({
             <XCircle /> {t('caddies:assignments.cancel')}
           </Button>
         )
+        const move = date && rounds && !orphanedIds.has(row.id) ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="min-h-9"
+            disabled={busyId === row.id}
+            onClick={() => setMoving(row)}
+          >
+            <Shuffle /> {t('caddies:reassign.action')}
+          </Button>
+        ) : null
         if (row.status === 'assigned') {
           return (
             <div className="flex justify-end gap-2">
+              {move}
               <Button
                 type="button"
                 size="sm"
@@ -1974,20 +2011,36 @@ function AssignmentsTable({
   ]
 
   return (
-    <DataTable
-      rows={sorted}
-      columns={columns}
-      rowKey={row => row.id}
-      // A club-sized day is fifty-odd rounds, and the whole lot laid out below
-      // the work pushes everything else off the screen.
-      pageSize={20}
-      empty={(
-        <EmptyState
-          title={t('caddies:assignments.empty.title')}
-          description={t('caddies:assignments.empty.description')}
+    <>
+      <DataTable
+        rows={sorted}
+        columns={columns}
+        rowKey={row => row.id}
+        // A club-sized day is fifty-odd rounds, and the whole lot laid out
+        // below the work pushes everything else off the screen.
+        pageSize={20}
+        empty={(
+          <EmptyState
+            title={t('caddies:assignments.empty.title')}
+            description={t('caddies:assignments.empty.description')}
+          />
+        )}
+      />
+      {date && rounds ? (
+        <ReassignRoundSheet
+          assignment={moving}
+          date={date}
+          rounds={rounds}
+          assignments={assignments}
+          caddieNames={profileNames}
+          onClose={() => setMoving(null)}
+          onMoveDone={() => {
+            setMoving(null)
+            onChanged()
+          }}
         />
-      )}
-    />
+      ) : null}
+    </>
   )
 }
 

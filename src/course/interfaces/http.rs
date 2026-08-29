@@ -26,9 +26,10 @@ use crate::course::domain::{
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
-    FieldReservationGateway, FieldStaffShiftGateway, MySqlCaddieRankFeeRepository,
-    MySqlCourseOrderRepository, MySqlGeneratedThroughRepository, MySqlPlayerTagOptionsRepository,
-    MySqlPricingSettingsRepository, MySqlSlotOverrideRepository, PartyPlayerInput,
+    FieldReservationGateway, FieldStaffShiftGateway, MySqlCaddieDutyRepository,
+    MySqlCaddieRankFeeRepository, MySqlCourseOrderRepository, MySqlGeneratedThroughRepository,
+    MySqlPlayerTagOptionsRepository, MySqlPricingSettingsRepository, MySqlSlotOverrideRepository,
+    PartyPlayerInput,
 };
 use crate::course::usecase::{
     BookingHorizonStatus, CancelReservationUseCase, ChangeReservationPlanUseCase,
@@ -114,6 +115,11 @@ pub(crate) fn course_order_gateway(state: &AppState) -> Arc<MySqlCourseOrderRepo
 /// And what a round pays at each caddie rank.
 pub(crate) fn caddie_rank_fee_gateway(state: &AppState) -> Arc<MySqlCaddieRankFeeRepository> {
     state.caddie_rank_fees()
+}
+
+/// And the jobs a caddie is put on when they are not walking a round.
+pub(crate) fn caddie_duty_gateway(state: &AppState) -> Arc<MySqlCaddieDutyRepository> {
+    state.caddie_duties()
 }
 
 /// And the pricing inputs the simulator runs on.

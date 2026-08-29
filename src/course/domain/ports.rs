@@ -6,21 +6,21 @@ use chrono::{DateTime, NaiveDate, Utc};
 use super::{
     AssignMembershipPlan, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
     AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, Caddie,
-    CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership, CaddieId,
-    CaddieRankFees, CaddieRating, CaddieRoster, CaddieShift, CaddieStaff, Course, CourseError,
-    CourseId, CourseOrder, Customer, CustomerGradeRules, CustomerId, CustomerMembership,
-    CustomerSearchQuery, DailyBudget, DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides,
-    ExtensionStatus, FieldClientCapabilities, FieldRequestContext, FieldShiftLink,
-    GenerationSummary, GolfPricingSettings, InventoryWatermark, MembershipDiscounts,
-    MembershipPlan, MembershipPlanId, MembershipPlayWindows, MonthlySettlement, NewCustomer,
-    NewReservation, PartyDetails, PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet,
-    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
-    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
-    ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber, ShiftPolicy,
-    SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
-    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
-    UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes,
-    YearMonth,
+    CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
+    CaddieDutyAssignment, CaddieDutyOptions, CaddieId, CaddieRankFees, CaddieRating, CaddieRoster,
+    CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder, Customer,
+    CustomerGradeRules, CustomerId, CustomerMembership, CustomerSearchQuery, DailyBudget,
+    DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus,
+    FieldClientCapabilities, FieldRequestContext, FieldShiftLink, GenerationSummary,
+    GolfPricingSettings, InventoryWatermark, MembershipDiscounts, MembershipPlan, MembershipPlanId,
+    MembershipPlayWindows, MonthlySettlement, NewCustomer, NewReservation, PartyDetails,
+    PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet, ReplaceCaddieMemberships,
+    Reservation, ReservationBookingUpdate, ReservationId, ReservationPolicy, ReservationProduct,
+    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
+    SeededReservation, SetMemberNumber, ShiftPolicy, SlotOverride, SlotOverrideQuery,
+    TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
+    UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -345,6 +345,47 @@ pub trait MembershipPlayWindowsGateway: Send + Sync {
         tenant_id: &str,
         windows: &MembershipPlayWindows,
     ) -> Result<MembershipPlayWindows, CourseError>;
+}
+
+/// Port for the jobs a caddie is put on when they are not walking a round, and
+/// the days they are put on them.
+///
+/// CourseBoard's own rows (ADR-0009): Field's HRM models that a staff member is
+/// at work, not that this club sent them to the practice range.
+#[async_trait]
+pub trait CaddieDutyGateway: Send + Sync {
+    async fn get_duty_options(&self, tenant_id: &str) -> Result<CaddieDutyOptions, CourseError>;
+
+    async fn replace_duty_options(
+        &self,
+        tenant_id: &str,
+        options: &CaddieDutyOptions,
+    ) -> Result<CaddieDutyOptions, CourseError>;
+
+    /// Every day filed in the window, oldest first.
+    async fn list_duty_assignments(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<CaddieDutyAssignment>, CourseError>;
+
+    /// File one stretch of a day, and answer with the row as it now stands —
+    /// the id included, which is how the desk clears this one and not the
+    /// other job the same caddie is on that afternoon.
+    async fn save_duty_assignment(
+        &self,
+        tenant_id: &str,
+        assignment: &CaddieDutyAssignment,
+    ) -> Result<CaddieDutyAssignment, CourseError>;
+
+    /// Take one filed job back off. `false` when there was nothing there,
+    /// which the desk reads as already done rather than as a failure.
+    async fn delete_duty_assignment(
+        &self,
+        tenant_id: &str,
+        duty_id: i64,
+    ) -> Result<bool, CourseError>;
 }
 
 #[async_trait]

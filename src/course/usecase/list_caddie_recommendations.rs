@@ -12,21 +12,35 @@ use std::sync::Arc;
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    parse_tenant_timezone, placement_for_shift, rank_caddies, shift_covers_tee_time,
-    tenant_date_at, tenant_day_bounds, widen_for_utc_date_filter, AttendanceState,
-    AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery, CaddiePlacement,
-    CaddieRecommendation, CaddieShift, CaddieShiftGateway, CourseError, GatewayCredentials,
-    GolfOpsGateway, RankingCandidate, RankingOptions, RecommendationQuery,
+    duty_blocks_round, parse_tenant_timezone, placement_for_shift, rank_caddies,
+    shift_covers_tee_time, tenant_date_at, tenant_day_bounds, widen_for_utc_date_filter,
+    AttendanceState, AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery,
+    CaddieDutyGateway, CaddiePlacement, CaddieRecommendation, CaddieShift, CaddieShiftGateway,
+    CourseError, GatewayCredentials, GolfOpsGateway, RankingCandidate, RankingOptions,
+    RecommendationQuery,
 };
+
+/// How long a round holds its caddie when the candidate list is asked without
+/// one — the same default the hand-placed rounds carry.
+const DEFAULT_ROUND_MINUTES: i64 = 270;
 
 pub struct ListCaddieRecommendationsUseCase {
     ops: Arc<dyn GolfOpsGateway>,
     shifts: Arc<dyn CaddieShiftGateway>,
+    duties: Arc<dyn CaddieDutyGateway>,
 }
 
 impl ListCaddieRecommendationsUseCase {
-    pub fn new(ops: Arc<dyn GolfOpsGateway>, shifts: Arc<dyn CaddieShiftGateway>) -> Self {
-        Self { ops, shifts }
+    pub fn new(
+        ops: Arc<dyn GolfOpsGateway>,
+        shifts: Arc<dyn CaddieShiftGateway>,
+        duties: Arc<dyn CaddieDutyGateway>,
+    ) -> Self {
+        Self {
+            ops,
+            shifts,
+            duties,
+        }
     }
 
     pub async fn execute(
@@ -50,7 +64,7 @@ impl ListCaddieRecommendationsUseCase {
         )?;
 
         let window = widen_for_utc_date_filter(date, date);
-        let (roster, ratings, assignments, attendance, availabilities, confirmed) = tokio::try_join!(
+        let (roster, ratings, assignments, attendance, availabilities, confirmed, duty_days) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
             self.ops.list_caddie_ratings(credentials, None),
             self.ops.list_caddie_assignments(
@@ -74,7 +88,26 @@ impl ListCaddieRecommendationsUseCase {
                 },
             ),
             self.shifts.list_shifts(credentials.operator_id, date, date),
+            self.duties
+                .list_duty_assignments(credentials.operator_id, date, date),
         )?;
+
+        // Somebody the desk sent to the practice range is not a low-ranked
+        // candidate for that group but a wrong one. Asked about a specific tee
+        // time, only the jobs covering those hours count; asked about the day
+        // as a whole, a window cannot be judged and the caddie stays in — the
+        // same reading the half-day requests get.
+        let blocked_by_duty = |caddie_id: &str| match query.scheduled_at {
+            Some(scheduled_at) => duty_blocks_round(
+                &duty_days,
+                caddie_id,
+                date,
+                scheduled_at,
+                DEFAULT_ROUND_MINUTES,
+                timezone_id,
+            ),
+            None => false,
+        };
 
         // Who stands where today. A day the month was never confirmed for
         // leaves this empty, and the ranking then offers the whole roster as
@@ -150,6 +183,7 @@ impl ListCaddieRecommendationsUseCase {
                     .map(|shift| shift.is_working())
                     .unwrap_or(true)
             })
+            .filter(|caddie| !blocked_by_duty(caddie.id().as_str()))
             .filter(|caddie| {
                 placement_by_caddie
                     .get(caddie.id().as_str())

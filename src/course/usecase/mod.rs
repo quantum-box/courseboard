@@ -10,7 +10,9 @@
 
 mod auto_assign_caddies;
 mod availability_deadline;
+mod caddie_duties;
 mod caddie_rank_fees;
+mod caddie_round_guards;
 mod cancel_reservation;
 mod change_reservation_plan;
 mod course_order;
@@ -62,6 +64,7 @@ mod mirror_shift_to_field;
 mod player_tag_options;
 mod pricing_settings;
 mod quote_golf_fee;
+mod reassign_caddie_assignment;
 mod replace_caddie_memberships;
 mod replace_product_slots;
 mod reservation_report_import;
@@ -87,6 +90,10 @@ pub use auto_assign_caddies::AutoAssignCaddiesUseCase;
 pub use availability_deadline::{
     GetAvailabilityDeadlineUseCase, ListUnsubmittedCaddiesUseCase,
     UpsertAvailabilityDeadlineUseCase,
+};
+pub use caddie_duties::{
+    AssignCaddieDutyUseCase, ClearCaddieDutyUseCase, GetCaddieDutyOptionsUseCase,
+    ListCaddieDutyAssignmentsUseCase, ReplaceCaddieDutyOptionsUseCase,
 };
 pub use caddie_rank_fees::{GetCaddieRankFeesUseCase, ReplaceCaddieRankFeesUseCase};
 pub use cancel_reservation::CancelReservationUseCase;
@@ -149,6 +156,7 @@ pub use mirror_shift_to_field::{links_by_day, MirrorShiftToField};
 pub use player_tag_options::{GetPlayerTagOptionsUseCase, ReplacePlayerTagOptionsUseCase};
 pub use pricing_settings::{GetPricingSettingsUseCase, ReplacePricingSettingsUseCase};
 pub use quote_golf_fee::QuoteGolfFeeUseCase;
+pub use reassign_caddie_assignment::{MoveTheRound, ReassignCaddieAssignmentUseCase};
 pub use replace_caddie_memberships::ReplaceCaddieMembershipsUseCase;
 pub use replace_product_slots::ReplaceProductSlotsUseCase;
 pub use reservation_report_import::{
