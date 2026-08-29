@@ -5,7 +5,7 @@ use clap::Parser;
 use crate::{
     auth::{AuthConfig, AuthConfigError},
     cancellation_fees::CancellationFeeConfig,
-    course::infrastructure::DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
+    course::infrastructure::{DEFAULT_FIELD_GENERIC_PATHS, DEFAULT_MULTI_COURSE_PRODUCT_WRITES},
     field_api::{ClientCredentialsConfig, DEFAULT_FIELD_API_URL},
 };
 
@@ -120,6 +120,28 @@ pub struct RuntimeConfig {
     )]
     pub field_shift_writeback: bool,
 
+    /// Switch from Field's golf extension aliases to its generic paths
+    /// (ADR-0010 / SCC-19).
+    ///
+    /// **Off by default.** The generic table analyzer requires
+    /// `field:PreviewBridgeRun`, and the golf policies only gain it when
+    /// `tachyonfield-golf-auth.yml` is applied to this environment. Turning it
+    /// on first makes every reservation report import fail with 403, so the
+    /// order is: apply the auth manifest, deploy with this off, then flip it.
+    ///
+    /// Rolling back is this switch alone — Field keeps serving both paths, so
+    /// nothing has to be reverted or redeployed there.
+    ///
+    /// One switch covers every bundle that moves off the extension paths.
+    /// Later bundles join it rather than adding their own.
+    #[arg(
+        long,
+        env = "COURSEBOARD_FIELD_GENERIC_PATHS",
+        default_value_t = DEFAULT_FIELD_GENERIC_PATHS,
+        action = clap::ArgAction::Set,
+    )]
+    pub field_generic_paths: bool,
+
     /// Opt-out for CourseBoard's own action authorization gate.
     ///
     /// The gate asks Tachyon Auth for the `field_extension_golf:*` action
@@ -211,6 +233,7 @@ impl RuntimeConfig {
             twilio_from_number: non_empty(self.twilio_from_number.as_deref()),
             multi_course_product_writes: self.multi_course_product_writes,
             field_shift_writeback: self.field_shift_writeback,
+            field_generic_paths: self.field_generic_paths,
         }
     }
 
@@ -318,6 +341,7 @@ impl Default for RuntimeConfig {
             field_api_audience: None,
             multi_course_product_writes: DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
             field_shift_writeback: false,
+            field_generic_paths: DEFAULT_FIELD_GENERIC_PATHS,
             disable_action_authz: false,
             tenant_source: "extension".to_string(),
             twilio_account_sid: None,
