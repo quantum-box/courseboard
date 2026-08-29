@@ -152,6 +152,14 @@ spec:
         # $internal_service_ref:... placeholder that Url::parse rejects).
         - name: TACHYON_FIELD_API_URL
           value: https://tachyon-field-api.txcloud.app
+        # SCC-19 / ADR-0010. Sends the reservation report import to Field's
+        # generic `/v1/bridge/tabular/analyze` instead of the golf extension
+        # alias. Safe only because the golf policies now carry
+        # `field:PreviewBridgeRun` (applied 2026-08-29); without that grant the
+        # import 403s. Set back to "false" to roll back — Field serves both
+        # paths, so nothing has to change there.
+        - name: COURSEBOARD_FIELD_GENERIC_PATHS
+          value: "true"
       environments:
         production:
           envVars:
@@ -171,6 +179,14 @@ spec:
               value: 5oafg9ptonbjumdh1pc7khirp1
             - name: TACHYON_FIELD_API_URL
               value: https://tachyon-field-api.txcloud.app
+            # SCC-19 / ADR-0010. Sends the reservation report import to Field's
+            # generic `/v1/bridge/tabular/analyze` instead of the golf extension
+            # alias. Safe only because the golf policies now carry
+            # `field:PreviewBridgeRun` (applied 2026-08-29); without that grant the
+            # import 403s. Set back to "false" to roll back — Field serves both
+            # paths, so nothing has to change there.
+            - name: COURSEBOARD_FIELD_GENERIC_PATHS
+              value: "true"
         preview:
           # Tachyon provisions an isolated database and scoped user for each PR.
           # DATABASE_URL is injected from the matching PR-scoped secret.
