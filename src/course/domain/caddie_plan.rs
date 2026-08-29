@@ -32,7 +32,8 @@ const DEFAULT_ROUND_MINUTES: i64 = 270;
 
 /// Local noon, as minutes from midnight: the line a morning-only or
 /// afternoon-only shift request is read against.
-const MIDDAY_MINUTES: i64 = 12 * 60;
+/// Local noon, the line half-day requests and duty windows are read against.
+pub(crate) const MIDDAY_MINUTES: i64 = 12 * 60;
 
 /// Reasons this module adds to the ranker's vocabulary.
 ///

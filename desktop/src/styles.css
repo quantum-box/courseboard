@@ -6019,6 +6019,12 @@ button,
   grid-template-columns: 24px minmax(120px, 1.2fr) repeat(3, minmax(100px, 1fr)) auto;
 }
 
+/* One job name per row, so the list reads as the pick list it becomes. */
+.caddie-duty-row {
+  display: grid;
+  grid-template-columns: 24px minmax(160px, 1fr) auto;
+}
+
 /* Stacked. Kept after the per-panel rules above, because those set `display`
    on the same elements at the same specificity — a narrow-screen rule placed
    before them would simply lose. */
@@ -6046,6 +6052,10 @@ button,
   .membership-window-row,
   .customer-grade-row {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .caddie-duty-row {
+    grid-template-columns: 24px 1fr auto;
   }
 
   .settings-rows__name,

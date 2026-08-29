@@ -12,9 +12,10 @@ use chrono::{DateTime, NaiveDate, Utc};
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    apply_assignment_coverage, compute_course_supply, widen_for_utc_date_filter, AssignedCoverage,
-    CaddieShift, CaddieShiftGateway, CourseError, CourseId, DayCaddieSupply, GatewayCredentials,
-    GolfCatalogGateway, GolfOpsGateway, ReservationGateway, TeeSheetQuery, TeeSheetStatus,
+    apply_assignment_coverage, compute_course_supply, free_rounds, widen_for_utc_date_filter,
+    AssignedCoverage, CaddieDutyGateway, CaddieShift, CaddieShiftGateway, CourseError, CourseId,
+    DayCaddieSupply, GatewayCredentials, GolfCatalogGateway, GolfOpsGateway, ReservationGateway,
+    TeeSheetQuery, TeeSheetStatus,
 };
 use crate::course::usecase::GetTeeSheetUseCase;
 
@@ -23,6 +24,7 @@ pub struct GetCourseCaddieSupplyUseCase {
     reservations: Arc<dyn ReservationGateway>,
     catalog: Arc<dyn GolfCatalogGateway>,
     ops: Arc<dyn GolfOpsGateway>,
+    duties: Arc<dyn CaddieDutyGateway>,
 }
 
 impl GetCourseCaddieSupplyUseCase {
@@ -33,12 +35,14 @@ impl GetCourseCaddieSupplyUseCase {
         reservations: Arc<dyn ReservationGateway>,
         catalog: Arc<dyn GolfCatalogGateway>,
         ops: Arc<dyn GolfOpsGateway>,
+        duties: Arc<dyn CaddieDutyGateway>,
     ) -> Self {
         Self {
             shifts,
             reservations,
             catalog,
             ops,
+            duties,
         }
     }
 
@@ -77,7 +81,7 @@ impl GetCourseCaddieSupplyUseCase {
         let timezone = self.catalog.get_tenant_timezone(credentials).await?;
         let sheet = GetTeeSheetUseCase::new(self.reservations.clone(), self.catalog.clone());
         let window = widen_for_utc_date_filter(date, date);
-        let (sheet, shifts, courses, assignments) = tokio::try_join!(
+        let (sheet, shifts, courses, assignments, duty_days) = tokio::try_join!(
             sheet.execute(
                 credentials,
                 TeeSheetQuery {
@@ -97,11 +101,26 @@ impl GetCourseCaddieSupplyUseCase {
                     reservation_id: None,
                 },
             ),
+            self.duties
+                .list_duty_assignments(credentials.operator_id, date, date),
         )?;
 
+        // Other work is spent in halves here, because this count is in rounds:
+        // a caddie on the range until noon can still walk one afternoon group,
+        // so their day is capped at one rather than dropped. A day covered
+        // front and back leaves nothing, and the shift goes — they stop adding
+        // to their course's capacity and stop showing up as somebody left to
+        // place.
         let shifts: Vec<CaddieShift> = shifts
             .into_iter()
             .filter(|shift| known_caddies.contains(shift.caddie_id().as_str()))
+            .filter_map(|shift| {
+                let free = free_rounds(&duty_days, shift.caddie_id().as_str(), date);
+                if free == 0 {
+                    return None;
+                }
+                Some(cap_rounds(shift, free))
+            })
             .collect();
 
         let attached_reservations = caddie_attached_reservations(&sheet)?;
@@ -148,6 +167,28 @@ impl GetCourseCaddieSupplyUseCase {
 /// A cancelled row asks nothing of anybody; a completed one was walked, and
 /// counting it is what keeps a finished morning from reading as spare
 /// capacity somebody could be moved away from.
+/// The same confirmed day, with its rounds capped at what the other work left.
+///
+/// Rebuilt rather than mutated: a shift is what the month confirmed, and this
+/// cap belongs to the day's arithmetic rather than to the stored row.
+fn cap_rounds(shift: CaddieShift, free_rounds: i32) -> CaddieShift {
+    if shift.rounds_capacity() <= free_rounds {
+        return shift;
+    }
+    CaddieShift::reconstitute(
+        shift.caddie_id().clone(),
+        shift.date(),
+        shift.course_id().cloned(),
+        shift.is_working(),
+        shift.span(),
+        free_rounds,
+        shift.origin(),
+        shift.note().map(str::to_string),
+        shift.updated_by().map(str::to_string),
+        shift.updated_at(),
+    )
+}
+
 fn caddie_attached_reservations(
     sheet: &crate::course::domain::TeeSheet,
 ) -> Result<HashMap<crate::course::domain::ReservationId, AttachedReservation>, CourseError> {
@@ -195,6 +236,8 @@ struct AttachedReservation {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::course::usecase::caddie_duties::test_double::FakeCaddieDuties;
     use async_trait::async_trait;
     use chrono::{Duration, TimeZone, Utc};
     use std::sync::{Arc, Mutex};
@@ -818,7 +861,129 @@ mod tests {
                 products: vec![caddie_product()],
             }),
             ops,
+            FakeCaddieDuties::none(),
         )
+    }
+
+    fn use_case_with_duties(
+        shifts: Vec<CaddieShift>,
+        reservations: Vec<Reservation>,
+        ops: Arc<FakeOps>,
+        duties: Vec<CaddieDutyAssignment>,
+    ) -> GetCourseCaddieSupplyUseCase {
+        GetCourseCaddieSupplyUseCase::with_roster(
+            Arc::new(FakeShifts { shifts }),
+            Arc::new(FakeReservations { reservations }),
+            Arc::new(FakeCatalog {
+                timezone: DEFAULT_TIMEZONE.to_string(),
+                courses: vec![course("out"), course("in")],
+                products: vec![caddie_product()],
+            }),
+            ops,
+            FakeCaddieDuties::with_assignments(duties),
+        )
+    }
+
+    fn unplaced_shift(caddie_id: &str) -> CaddieShift {
+        CaddieShift::reconstitute(
+            CaddieId::new(caddie_id),
+            date(),
+            None,
+            true,
+            ShiftSpan::FullDay,
+            1,
+            ShiftOrigin::Generated,
+            None,
+            None,
+            None,
+        )
+    }
+
+    fn duty(caddie_id: &str) -> CaddieDutyAssignment {
+        duty_over(caddie_id, DutyWindow::all_day())
+    }
+
+    fn duty_over(caddie_id: &str, window: DutyWindow) -> CaddieDutyAssignment {
+        CaddieDutyAssignment::reconstitute(
+            Some(1),
+            CaddieId::new(caddie_id),
+            date(),
+            window,
+            "コース整備".to_string(),
+            None,
+            None,
+        )
+    }
+
+    fn hours(from: i32, to: i32) -> DutyWindow {
+        DutyWindow::try_new(from * 60, to * 60).expect("window")
+    }
+
+    #[tokio::test]
+    async fn a_caddie_on_other_work_covers_nothing_and_is_not_left_to_place() {
+        let ops = ops(vec![caddie("a"), caddie("b")], Vec::new());
+        let use_case = use_case_with_duties(
+            vec![shift("a", "out", 2), unplaced_shift("b")],
+            Vec::new(),
+            Arc::clone(&ops),
+            vec![duty("a"), duty("b")],
+        );
+
+        let supply = use_case
+            .execute(credentials(), date())
+            .await
+            .expect("supply succeeds");
+        let out = &supply.courses()[0];
+        assert_eq!(out.working_caddies(), 0);
+        assert_eq!(out.rounds_capacity(), 0);
+        assert_eq!(supply.unplaced_caddies(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_morning_job_leaves_one_round_of_a_two_round_day() {
+        // The count is in rounds, so half a day of other work costs one of
+        // them rather than the whole shift.
+        let ops = ops(vec![caddie("a")], Vec::new());
+        let use_case = use_case_with_duties(
+            vec![shift("a", "out", 2)],
+            Vec::new(),
+            Arc::clone(&ops),
+            vec![duty_over("a", hours(8, 12))],
+        );
+
+        let supply = use_case
+            .execute(credentials(), date())
+            .await
+            .expect("supply succeeds");
+        let out = &supply.courses()[0];
+        assert_eq!(out.working_caddies(), 1);
+        assert_eq!(out.rounds_capacity(), 1);
+    }
+
+    #[tokio::test]
+    async fn other_work_filed_for_another_day_leaves_todays_capacity_alone() {
+        let ops = ops(vec![caddie("a")], Vec::new());
+        let elsewhere = CaddieDutyAssignment::reconstitute(
+            Some(1),
+            CaddieId::new("a"),
+            date() + Duration::days(1),
+            DutyWindow::all_day(),
+            "コース整備".to_string(),
+            None,
+            None,
+        );
+        let use_case = use_case_with_duties(
+            vec![shift("a", "out", 2)],
+            Vec::new(),
+            Arc::clone(&ops),
+            vec![elsewhere],
+        );
+
+        let supply = use_case
+            .execute(credentials(), date())
+            .await
+            .expect("supply succeeds");
+        assert_eq!(supply.courses()[0].rounds_capacity(), 2);
     }
 
     fn ops(caddies: Vec<Caddie>, assignments: Vec<CaddieAssignment>) -> Arc<FakeOps> {

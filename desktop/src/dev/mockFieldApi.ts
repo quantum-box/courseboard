@@ -674,6 +674,38 @@ const mockCourseOrder: string[] = loadMockWrites<string[]>('courseOrder', [])
 /** The booking form's visitor categories, as the settings screen arranges them. */
 const mockPlayerTagOptions: string[] = loadMockWrites<string[]>('playerTagOptions', ['共通', '優待', 'WEB'])
 
+/** The jobs a caddie is put on when they have no round, as settings arranges them. */
+const mockCaddieDuties: string[] = loadMockWrites<string[]>('caddieDuties', [
+  'コース整備',
+  '練習場',
+  'フロント補助',
+])
+
+type MockCaddieDuty = {
+  id: string
+  caddieProfileId: string
+  date: string
+  dutyLabel: string
+  /** `HH:MM` in the club's own clock; `00:00`–`24:00` is the whole day. */
+  startTime: string
+  endTime: string
+  allDay: boolean
+  note: string | null
+  updatedBy: string | null
+}
+
+/** `09:00` → `540`, so the mock can refuse overlaps the way the API does. */
+function dutyMinutes(value: string): number {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim())
+  return match ? Number(match[1]) * 60 + Number(match[2]) : 0
+}
+
+/** The days already filed against those jobs. */
+const mockCaddieDutyAssignments: MockCaddieDuty[] = loadMockWrites<MockCaddieDuty[]>(
+  'caddieDutyAssignments',
+  [],
+)
+
 /** The simulator's pricing inputs, as the tax panel sets them. */
 const mockPricingSettings = loadMockWrites<{
   prefecture: string | null
@@ -1712,6 +1744,13 @@ function normalizeMockPath(pathname: string): string {
     || pathname === '/v1/course/pricing-settings'
     // So are the booking form's visitor categories, and the grade ladder.
     || pathname === '/v1/course/player-tag-options'
+    // Moving a round is CourseBoard's own operation: Field has no endpoint
+    // that applies the day's checks, which is the whole point of it.
+    || pathname.match(/^\/v1\/course\/caddie-assignments\/[^/]+\/reassignment$/) !== null
+    // Non-round caddie work is CourseBoard's own row (ADR-0009).
+    || pathname === '/v1/course/caddie-duties'
+    || pathname === '/v1/course/caddie-duty-assignments'
+    || pathname.startsWith('/v1/course/caddie-duty-assignments/')
     || pathname === '/v1/course/customer-grade-rules'
     || pathname === '/v1/course/membership-discounts'
     || pathname === '/v1/course/membership-play-windows'
@@ -2617,6 +2656,20 @@ function resolveGet(path: string): Json | null | undefined {
 
   if (pathname === '/v1/course/player-tag-options') return { items: [...mockPlayerTagOptions] }
 
+  if (pathname === '/v1/course/caddie-duties') return { items: [...mockCaddieDuties] }
+
+  if (rawPathname === '/v1/course/caddie-duty-assignments') {
+    const from = url.searchParams.get('from') ?? TODAY
+    const to = url.searchParams.get('to') ?? from
+    return items(
+      mockCaddieDutyAssignments
+        .filter(duty => duty.date >= from && duty.date <= to)
+        .sort((left, right) => left.date.localeCompare(right.date)
+          || dutyMinutes(left.startTime) - dutyMinutes(right.startTime)
+          || left.caddieProfileId.localeCompare(right.caddieProfileId)),
+    )
+  }
+
   if (pathname === '/v1/erp/extensions/golf-course/caddie-payroll-summary') {
     const yearMonth = url.searchParams.get('yearMonth') ?? TODAY.slice(0, 7)
     const [year, month] = yearMonth.split('-').map(Number)
@@ -3116,6 +3169,109 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     mockPlayerTagOptions.splice(0, mockPlayerTagOptions.length, ...labels)
     saveMockWrites('playerTagOptions', mockPlayerTagOptions)
     return hit({ items: [...mockPlayerTagOptions] })
+  }
+
+  const reassignMatch = pathname.match(
+    /^\/v1\/course\/caddie-assignments\/([^/]+)\/reassignment$/,
+  )
+  if (reassignMatch && method === 'PUT') {
+    const assignmentId = decodeURIComponent(reassignMatch[1] ?? '')
+    const index = mockAssignments.findIndex(item => item.id === assignmentId)
+    if (index < 0) return error(404, `Mock assignment ${assignmentId} was not found`)
+    const current = mockAssignments[index]!
+    const caddieProfileId = String(body?.caddieProfileId ?? current.caddieProfileId)
+    const reservationId = String(body?.reservationId ?? current.reservationId)
+    const scheduledAt = String(body?.scheduledAt ?? current.scheduledAt)
+    // The API refuses a group somebody else is on; the mock refuses it too, so
+    // the message can be seen without a backend.
+    const taken = mockAssignments.some(
+      item =>
+        item.id !== assignmentId
+        && item.reservationId === reservationId
+        && item.status !== 'cancelled',
+    )
+    if (taken) {
+      return error(400, 'this group already has a caddie; release that assignment first')
+    }
+    const updated = {
+      ...current,
+      caddieProfileId,
+      reservationId,
+      scheduledAt,
+      // The label belongs to the group the row was filed against, so a move
+      // to another group leaves it behind — the same as the API does.
+      roundReference:
+        reservationId === current.reservationId ? current.roundReference : '',
+    }
+    mockAssignments[index] = updated as typeof current
+    return hit(updated)
+  }
+
+  if (pathname === '/v1/course/caddie-duties' && method === 'PUT') {
+    const values = Array.isArray(body?.items) ? (body.items as unknown[]) : []
+    const labels = values
+      .filter((value): value is string => typeof value === 'string')
+      .map(value => value.trim())
+      .filter(Boolean)
+    if (new Set(labels).size !== labels.length) {
+      return error(400, 'the same caddie duty appears twice')
+    }
+    mockCaddieDuties.splice(0, mockCaddieDuties.length, ...labels)
+    saveMockWrites('caddieDuties', mockCaddieDuties)
+    return hit({ items: [...mockCaddieDuties] })
+  }
+
+  if (pathname === '/v1/course/caddie-duty-assignments' && method === 'POST') {
+    const caddieProfileId = String(body?.caddieProfileId ?? '')
+    const date = String(body?.date ?? TODAY)
+    const dutyLabel = String(body?.dutyLabel ?? '').trim()
+    const startTime = body?.startTime == null ? '00:00' : String(body.startTime)
+    const endTime = body?.endTime == null ? '24:00' : String(body.endTime)
+    // The API refuses a job the club never arranged, and hours already spoken
+    // for; the mock refuses them too, so the messages can be seen without a
+    // backend.
+    if (!mockCaddieDuties.includes(dutyLabel)) {
+      return error(400, 'that is not one of this club\u2019s duties; add it to the list first')
+    }
+    if (dutyMinutes(endTime) <= dutyMinutes(startTime)) {
+      return error(400, 'the work ends before it starts')
+    }
+    const clashes = mockCaddieDutyAssignments.some(
+      duty =>
+        duty.caddieProfileId === caddieProfileId
+        && duty.date === date
+        && dutyMinutes(duty.startTime) !== dutyMinutes(startTime)
+        && dutyMinutes(duty.startTime) < dutyMinutes(endTime)
+        && dutyMinutes(startTime) < dutyMinutes(duty.endTime),
+    )
+    if (clashes) {
+      return error(400, 'this caddie is already on other work over those hours')
+    }
+    const stored: MockCaddieDuty = {
+      id: `duty_${caddieProfileId}_${date}_${dutyMinutes(startTime)}`,
+      caddieProfileId,
+      date,
+      dutyLabel,
+      startTime,
+      endTime,
+      allDay: startTime === '00:00' && endTime === '24:00',
+      note: body?.note == null ? null : String(body.note),
+      updatedBy: body?.updatedBy == null ? null : String(body.updatedBy),
+    }
+    const at = mockCaddieDutyAssignments.findIndex(duty => duty.id === stored.id)
+    if (at >= 0) mockCaddieDutyAssignments.splice(at, 1, stored)
+    else mockCaddieDutyAssignments.push(stored)
+    saveMockWrites('caddieDutyAssignments', mockCaddieDutyAssignments)
+    return hit(stored)
+  }
+
+  const dutyIdMatch = pathname.match(/^\/v1\/course\/caddie-duty-assignments\/([^/]+)$/)
+  if (dutyIdMatch && method === 'DELETE') {
+    const dutyId = decodeURIComponent(dutyIdMatch[1] ?? '')
+    const at = mockCaddieDutyAssignments.findIndex(duty => duty.id === dutyId)
+    if (at >= 0) mockCaddieDutyAssignments.splice(at, 1)
+    saveMockWrites('caddieDutyAssignments', mockCaddieDutyAssignments)
+    return hit(null)
   }
 
   if (pathname === '/v1/course/pricing-settings' && method === 'PUT') {

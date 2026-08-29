@@ -45,6 +45,22 @@ export const settings: DeepPartial<typeof source> = {
       percent: '％引き',
     },
   },
+  caddieDuties: {
+    title: 'キャディのべつの仕事',
+    description: 'ラウンドがない日に、キャディにたのむ仕事のしゅるいです。配置の画面では、ここに入れたものからえらびます。',
+    field: {
+      label: '仕事のしゅるい',
+    },
+    placeholder: 'れい: コースの手入れ',
+    add: 'しゅるいをふやす',
+    remove: 'このしゅるいを消す',
+    empty: 'まだしゅるいがありません。ふやすと、配置の画面でたのめるようになります。',
+    duplicate: 'おなじしゅるいが2つあります。どちらかを消してください。',
+    tooLong: 'しゅるいの名前は{{max}}文字までです。',
+    tooMany: 'しゅるいは{{max}}こまでです。',
+    saved: 'ほぞんしました',
+    failed: 'ほぞんできませんでした',
+  },
   grades: {
     title: 'お客さまのランク',
     description: '来た回数とお金から、常連さんをどう分けるかの決まりです。会員かどうかとは別です。',

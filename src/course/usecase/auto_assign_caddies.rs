@@ -17,13 +17,14 @@ use chrono::{DateTime, Duration, NaiveDate, Utc};
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    parse_tenant_timezone, placement_for_shift, plan_caddie_assignments, tenant_date_at,
-    tenant_day_bounds, widen_for_utc_date_filter, AttendanceState, AutoAssignResult,
-    AvailabilityDeadline, AvailabilityDeadlineGateway, AvailabilityQuery, AvailabilityStatus,
-    CaddieAssignmentQuery, CaddieRankFeeGateway, CaddieRoster, CaddieShift, CaddieShiftGateway,
-    CourseError, DeadlineWarning, GatewayCredentials, GolfCatalogGateway, GolfOpsGateway,
-    PlanOptions, PlannableCaddie, PlannableRound, ReservationGateway, TeeSheetItem, TeeSheetQuery,
-    UpsertCaddieAssignment, YearMonth,
+    duty_windows_for, parse_tenant_timezone, placement_for_shift, plan_caddie_assignments,
+    tenant_date_at, tenant_day_bounds, widen_for_utc_date_filter, AttendanceState,
+    AutoAssignResult, AvailabilityDeadline, AvailabilityDeadlineGateway, AvailabilityQuery,
+    AvailabilityStatus, CaddieAssignmentQuery, CaddieDutyGateway, CaddieRankFeeGateway,
+    CaddieRoster, CaddieShift, CaddieShiftGateway, CourseError, DeadlineWarning,
+    GatewayCredentials, GolfCatalogGateway, GolfOpsGateway, PlanOptions, PlannableCaddie,
+    PlannableRound, ReservationGateway, TeeSheetItem, TeeSheetQuery, UpsertCaddieAssignment,
+    YearMonth,
 };
 
 use super::caddie_rank_fees::read_caddie_rank_fees;
@@ -48,9 +49,11 @@ pub struct AutoAssignCaddiesUseCase {
     deadlines: Arc<dyn AvailabilityDeadlineGateway>,
     shifts: Arc<dyn CaddieShiftGateway>,
     rank_fees: Arc<dyn CaddieRankFeeGateway>,
+    duties: Arc<dyn CaddieDutyGateway>,
 }
 
 impl AutoAssignCaddiesUseCase {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ops: Arc<dyn GolfOpsGateway>,
         reservations: Arc<dyn ReservationGateway>,
@@ -58,6 +61,7 @@ impl AutoAssignCaddiesUseCase {
         deadlines: Arc<dyn AvailabilityDeadlineGateway>,
         shifts: Arc<dyn CaddieShiftGateway>,
         rank_fees: Arc<dyn CaddieRankFeeGateway>,
+        duties: Arc<dyn CaddieDutyGateway>,
     ) -> Self {
         Self {
             ops,
@@ -66,6 +70,7 @@ impl AutoAssignCaddiesUseCase {
             deadlines,
             shifts,
             rank_fees,
+            duties,
         }
     }
 
@@ -145,7 +150,7 @@ impl AutoAssignCaddiesUseCase {
             )
             .await?;
 
-        let (roster, assignments, attendance, availabilities, confirmed) = tokio::try_join!(
+        let (roster, assignments, attendance, availabilities, confirmed, duty_days) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
             self.ops.list_caddie_assignments(
                 credentials,
@@ -168,7 +173,15 @@ impl AutoAssignCaddiesUseCase {
                 },
             ),
             self.shifts.list_shifts(credentials.operator_id, date, date),
+            self.duties
+                .list_duty_assignments(credentials.operator_id, date, date),
         )?;
+
+        // The hours the desk has put people on other work for go in below as
+        // stretches the caddie is already busy — the same thing the planner
+        // does with a round they are out on, so somebody on the range until
+        // noon is still planned into the afternoon groups.
+        let (day_start, day_end) = tenant_day_bounds(date, date, &timezone)?;
 
         // Where the confirmed month put each caddie. A day nobody confirmed
         // leaves this empty, and the plan then behaves exactly as it did
@@ -179,7 +192,6 @@ impl AutoAssignCaddiesUseCase {
             .map(|shift| (shift.caddie_id().as_str(), shift))
             .collect();
 
-        let (day_start, day_end) = tenant_day_bounds(date, date, &timezone)?;
         let live: Vec<_> = assignments
             .iter()
             .filter(|assignment| assignment.holds_the_round())
@@ -230,51 +242,62 @@ impl AutoAssignCaddiesUseCase {
             .map(|row| (row.caddie_id().as_str(), row.status()))
             .collect();
 
-        let caddies: Vec<PlannableCaddie> = roster
-            .caddies()
-            .iter()
-            .filter(|caddie| caddie.is_assignable())
-            // A day confirmed as off is not a candidate, whatever the request
-            // behind it said — the desk may have changed it either way.
-            .filter(|caddie| {
-                shift_by_caddie
-                    .get(caddie.id().as_str())
-                    .map(|shift| shift.is_working())
-                    .unwrap_or(true)
-            })
-            .map(|caddie| {
-                let id = caddie.id().as_str();
-                let committed: Vec<_> = live
-                    .iter()
-                    .filter(|assignment| assignment.caddie_id().as_str() == id)
-                    .collect();
-                PlannableCaddie {
-                    placement: placement_for_shift(shift_by_caddie.get(id).copied()),
-                    caddie_id: id.to_string(),
-                    display_name: caddie.display_name().to_string(),
-                    skill_level: caddie.skill_level(),
-                    rating_average: caddie.rating_average(),
-                    rating_count: caddie.rating_count(),
-                    max_rounds_per_day: caddie.max_rounds_per_day(),
-                    rounds_assigned_today: committed.len() as i64,
-                    attendance: attendance_by_caddie
-                        .get(id)
-                        .copied()
-                        .unwrap_or(AttendanceState::NotClocked),
-                    availability: availability_by_caddie.get(id).copied(),
-                    busy: committed
+        let caddies: Vec<PlannableCaddie> =
+            roster
+                .caddies()
+                .iter()
+                .filter(|caddie| caddie.is_assignable())
+                // A day confirmed as off is not a candidate, whatever the request
+                // behind it said — the desk may have changed it either way.
+                .filter(|caddie| {
+                    shift_by_caddie
+                        .get(caddie.id().as_str())
+                        .map(|shift| shift.is_working())
+                        .unwrap_or(true)
+                })
+                .map(|caddie| {
+                    let id = caddie.id().as_str();
+                    let committed: Vec<_> = live
                         .iter()
-                        .map(|assignment| {
-                            let start = assignment.scheduled_at();
-                            (
-                                start,
-                                start + Duration::minutes(assignment.occupied_minutes()),
-                            )
-                        })
-                        .collect(),
-                }
-            })
-            .collect();
+                        .filter(|assignment| assignment.caddie_id().as_str() == id)
+                        .collect();
+                    PlannableCaddie {
+                        placement: placement_for_shift(shift_by_caddie.get(id).copied()),
+                        caddie_id: id.to_string(),
+                        display_name: caddie.display_name().to_string(),
+                        skill_level: caddie.skill_level(),
+                        rating_average: caddie.rating_average(),
+                        rating_count: caddie.rating_count(),
+                        max_rounds_per_day: caddie.max_rounds_per_day(),
+                        rounds_assigned_today: committed.len() as i64,
+                        attendance: attendance_by_caddie
+                            .get(id)
+                            .copied()
+                            .unwrap_or(AttendanceState::NotClocked),
+                        availability: availability_by_caddie.get(id).copied(),
+                        busy: committed
+                            .iter()
+                            .map(|assignment| {
+                                let start = assignment.scheduled_at();
+                                (
+                                    start,
+                                    start + Duration::minutes(assignment.occupied_minutes()),
+                                )
+                            })
+                            .chain(duty_windows_for(&duty_days, id, date).into_iter().map(
+                                |window| {
+                                    (
+                                        day_start
+                                            + Duration::minutes(i64::from(window.start_minute())),
+                                        day_start
+                                            + Duration::minutes(i64::from(window.end_minute())),
+                                    )
+                                },
+                            ))
+                            .collect(),
+                    }
+                })
+                .collect();
 
         let plan = plan_caddie_assignments(
             &rounds,

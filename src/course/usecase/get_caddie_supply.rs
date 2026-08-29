@@ -7,10 +7,42 @@ use chrono::NaiveDate;
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    compute_caddie_supply, parse_tenant_timezone, AvailabilityQuery, CaddieAvailability,
-    CaddieDayCapacity, CaddieSupply, CourseError, GatewayCredentials, GolfCatalogGateway,
-    GolfOpsGateway, ReservationGateway,
+    compute_caddie_supply, free_halves, parse_tenant_timezone, AvailabilityQuery,
+    AvailabilityStatus, CaddieAvailability, CaddieDayCapacity, CaddieDutyGateway, CaddieSupply,
+    CourseError, GatewayCredentials, GolfCatalogGateway, GolfOpsGateway, ReservationGateway,
 };
+
+/// What the caddie is left free for once the other work is taken off.
+///
+/// `None` means nothing is left and they are not counted at all. Both halves
+/// free returns the filed request untouched, which is the ordinary day.
+fn narrowed_by_duty(
+    filed: Option<AvailabilityStatus>,
+    free: (bool, bool),
+) -> Option<Option<AvailabilityStatus>> {
+    let (morning, afternoon) = free;
+    if !morning && !afternoon {
+        return None;
+    }
+    if morning && afternoon {
+        return Some(filed);
+    }
+    let half = if morning {
+        AvailabilityStatus::MorningOnly
+    } else {
+        AvailabilityStatus::AfternoonOnly
+    };
+    match filed {
+        // Already off, or already narrowed to the half the job just took.
+        Some(AvailabilityStatus::Unavailable) => Some(filed),
+        Some(AvailabilityStatus::MorningOnly) if !morning => None,
+        Some(AvailabilityStatus::AfternoonOnly) if !afternoon => None,
+        Some(AvailabilityStatus::MorningOnly) | Some(AvailabilityStatus::AfternoonOnly) => {
+            Some(filed)
+        }
+        _ => Some(Some(half)),
+    }
+}
 
 /// Reservation states that already consume a caddie-attached tee slot.
 const ACTIVE_STATUSES: [&str; 3] = ["requested", "payment_pending", "confirmed"];
@@ -25,6 +57,7 @@ pub struct GetCaddieSupplyUseCase {
     ops: Arc<dyn GolfOpsGateway>,
     catalog: Arc<dyn GolfCatalogGateway>,
     reservations: Arc<dyn ReservationGateway>,
+    duties: Arc<dyn CaddieDutyGateway>,
 }
 
 impl GetCaddieSupplyUseCase {
@@ -32,11 +65,13 @@ impl GetCaddieSupplyUseCase {
         ops: Arc<dyn GolfOpsGateway>,
         catalog: Arc<dyn GolfCatalogGateway>,
         reservations: Arc<dyn ReservationGateway>,
+        duties: Arc<dyn CaddieDutyGateway>,
     ) -> Self {
         Self {
             ops,
             catalog,
             reservations,
+            duties,
         }
     }
 
@@ -65,16 +100,29 @@ impl GetCaddieSupplyUseCase {
             .map(|availability| (availability.caddie_id().as_str(), availability))
             .collect();
 
-        let capacities = roster.caddies().iter().map(|caddie| {
+        // Other work narrows what a caddie is free for, exactly as a half-day
+        // request does — so it is read as one. A morning job leaves an
+        // afternoon caddie; a day covered front and back leaves nobody, and
+        // the day has that much less to sell.
+        let duty_days = self
+            .duties
+            .list_duty_assignments(credentials.operator_id, date, date)
+            .await?;
+
+        let capacities = roster.caddies().iter().filter_map(|caddie| {
             let availability = availability_by_caddie.get(caddie.id().as_str());
-            CaddieDayCapacity {
+            let status = narrowed_by_duty(
+                availability.map(|value| value.status()),
+                free_halves(&duty_days, caddie.id().as_str(), date),
+            )?;
+            Some(CaddieDayCapacity {
                 active: caddie.is_active(),
-                status: availability.map(|value| value.status()),
+                status,
                 can_two_rounds: caddie.can_two_rounds(),
                 two_round_request: availability
                     .map(|value| value.two_round_request())
                     .unwrap_or(false),
-            }
+            })
         });
 
         let products = self.catalog.list_reservation_products(credentials).await?;
