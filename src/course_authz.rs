@@ -1332,11 +1332,8 @@ mod tests {
             ("GET", "/v1/course/caddie-duties"),
             ("PUT", "/v1/course/caddie-duties"),
             ("GET", "/v1/course/caddie-duty-assignments"),
-            ("PUT", "/v1/course/caddie-duty-assignments/cp_1/2026-08-29"),
-            (
-                "DELETE",
-                "/v1/course/caddie-duty-assignments/cp_1/2026-08-29",
-            ),
+            ("POST", "/v1/course/caddie-duty-assignments"),
+            ("DELETE", "/v1/course/caddie-duty-assignments/7"),
             ("GET", "/v1/course/caddie-shifts"),
             ("PUT", "/v1/course/caddie-shifts/cp_1/2026-08-18"),
             ("POST", "/v1/course/caddie-shift-plans/2026-09"),

@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    duty_blocks_round, parse_tenant_timezone, placement_for_shift, rank_caddies,
+    duty_blocks_round, free_rounds, parse_tenant_timezone, placement_for_shift, rank_caddies,
     shift_covers_tee_time, tenant_date_at, tenant_day_bounds, widen_for_utc_date_filter,
     AttendanceState, AvailabilityQuery, AvailabilityStatus, CaddieAssignmentQuery,
     CaddieDutyGateway, CaddiePlacement, CaddieRecommendation, CaddieShift, CaddieShiftGateway,
@@ -94,9 +94,10 @@ impl ListCaddieRecommendationsUseCase {
 
         // Somebody the desk sent to the practice range is not a low-ranked
         // candidate for that group but a wrong one. Asked about a specific tee
-        // time, only the jobs covering those hours count; asked about the day
-        // as a whole, a window cannot be judged and the caddie stays in — the
-        // same reading the half-day requests get.
+        // time, only the jobs covering those hours count. Asked about the day
+        // as a whole, a window cannot be judged against a tee time there is
+        // none of — but a day taken front and back can be, and that caddie has
+        // nothing left to offer whichever group is meant.
         let blocked_by_duty = |caddie_id: &str| match query.scheduled_at {
             Some(scheduled_at) => duty_blocks_round(
                 &duty_days,
@@ -106,7 +107,7 @@ impl ListCaddieRecommendationsUseCase {
                 DEFAULT_ROUND_MINUTES,
                 timezone_id,
             ),
-            None => false,
+            None => free_rounds(&duty_days, caddie_id, date) == 0,
         };
 
         // Who stands where today. A day the month was never confirmed for
