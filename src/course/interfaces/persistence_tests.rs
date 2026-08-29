@@ -391,6 +391,9 @@ fn router_with_multi_course_writes(
             // write-back, and turning it on would point these at a Field that
             // is not part of this harness.
             field_shift_writeback: false,
+            // Same reasoning: the harness serves the extension aliases these
+            // gateways call today, so the generic paths stay off here.
+            field_generic_paths: false,
         },
     ))
 }

@@ -123,9 +123,10 @@ impl AppState {
             shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
             reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
                 pool.clone(),
-                Arc::new(FieldReservationReportGateway::new(
+                Arc::new(FieldReservationReportGateway::with_generic_paths(
                     reqwest::Client::new(),
                     cancellation_fee_config.field_api_url.as_deref(),
+                    cancellation_fee_config.field_generic_paths,
                 )),
             )),
             cancellation_fee_config,
@@ -184,9 +185,10 @@ impl AppState {
             shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
             reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
                 pool.clone(),
-                Arc::new(FieldReservationReportGateway::new(
+                Arc::new(FieldReservationReportGateway::with_generic_paths(
                     reqwest::Client::new(),
                     cancellation_fee_config.field_api_url.as_deref(),
+                    cancellation_fee_config.field_generic_paths,
                 )),
             )),
             cancellation_fee_config,
@@ -235,9 +237,10 @@ impl AppState {
                 shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
                 reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
                     pool.clone(),
-                    Arc::new(FieldReservationReportGateway::new(
+                    Arc::new(FieldReservationReportGateway::with_generic_paths(
                         reqwest::Client::new(),
                         cancellation_fee_config.field_api_url.as_deref(),
+                        cancellation_fee_config.field_generic_paths,
                     )),
                 )),
                 cancellation_fee_config,
@@ -277,9 +280,10 @@ impl AppState {
                 shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
                 reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
                     pool.clone(),
-                    Arc::new(FieldReservationReportGateway::new(
+                    Arc::new(FieldReservationReportGateway::with_generic_paths(
                         reqwest::Client::new(),
                         cancellation_fee_config.field_api_url.as_deref(),
+                        cancellation_fee_config.field_generic_paths,
                     )),
                 )),
                 cancellation_fee_config,
@@ -2342,6 +2346,7 @@ mod tests {
             twilio_from_number: None,
             multi_course_product_writes: true,
             field_shift_writeback: false,
+            field_generic_paths: false,
         }
     }
 

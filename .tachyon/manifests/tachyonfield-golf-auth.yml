@@ -299,6 +299,15 @@ policies:
     effect: allow
   - action: field:ListMembership
     effect: allow
+  # Field's generic table analyzer, used by the reservation report import
+  # (SCC-19). Only the two roles that carry `ImportReservationReports` get it,
+  # so the permission to import and the permission to analyse stay in step.
+  # Analysing parses the file and proposes column mappings; it writes nothing.
+  # Granting this is what lets the import call `/v1/bridge/tabular/analyze`
+  # instead of the golf extension alias (ADR-0010). Apply this before turning
+  # `COURSEBOARD_FIELD_GENERIC_PATHS` on, or the import 403s.
+  - action: field:PreviewBridgeRun
+    effect: allow
   - action: accounting:CreateInvoice
     effect: allow
   # Everything the cancellation-fee screens do, not just the create. The list
@@ -377,6 +386,15 @@ policies:
   - action: field:ManageMembership
     effect: allow
   - action: field:RegisterMembership
+    effect: allow
+  # Field's generic table analyzer, used by the reservation report import
+  # (SCC-19). Only the two roles that carry `ImportReservationReports` get it,
+  # so the permission to import and the permission to analyse stay in step.
+  # Analysing parses the file and proposes column mappings; it writes nothing.
+  # Granting this is what lets the import call `/v1/bridge/tabular/analyze`
+  # instead of the golf extension alias (ADR-0010). Apply this before turning
+  # `COURSEBOARD_FIELD_GENERIC_PATHS` on, or the import 403s.
+  - action: field:PreviewBridgeRun
     effect: allow
   - action: accounting:CreateInvoice
     effect: allow

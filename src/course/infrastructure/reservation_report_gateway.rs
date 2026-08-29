@@ -24,7 +24,27 @@ use crate::course::domain::{
 };
 
 const CONFIG_PATH: &str = "/v1/erp/extensions/golf_course/config";
-const TABULAR_ANALYZE_PATH: &str = "/v1/erp/extensions/golf-course/tabular/analyze";
+/// Field's generic table analyzer.
+const BRIDGE_TABULAR_ANALYZE_PATH: &str = "/v1/bridge/tabular/analyze";
+/// The authorization-compatible alias of the same analyzer under the golf
+/// extension. Field runs one implementation behind both paths and only the
+/// required action differs: the alias takes `field:ManageReservations`, the
+/// generic path takes `field:PreviewBridgeRun`.
+const EXTENSION_TABULAR_ANALYZE_PATH: &str = "/v1/erp/extensions/golf-course/tabular/analyze";
+
+/// Whether Field's generic paths are called instead of the golf extension
+/// aliases (ADR-0010, SCC-19).
+///
+/// Off by default because the switch is not ours to make alone: the generic
+/// analyzer requires `field:PreviewBridgeRun`, which the golf policies only
+/// gain once `tachyonfield-golf-auth.yml` is applied to the environment being
+/// deployed to. Turning this on before that apply lands makes every reservation
+/// report import fail with 403.
+///
+/// One flag covers every bundle that moves off `/v1/erp/extensions/golf-course/*`.
+/// Later bundles join this switch rather than adding their own — a flag per
+/// bundle cannot be operated.
+pub const DEFAULT_FIELD_GENERIC_PATHS: bool = false;
 const REPORT_KEY: &str = "courseBoardReservationReport";
 const COURSES_KEY: &str = "courses";
 const UNLINKED_FACILITIES_KEY: &str = "unlinkedFacilities";
@@ -122,13 +142,33 @@ fn default_tabular_source_type() -> String {
 pub struct FieldReservationReportGateway {
     client: reqwest::Client,
     base_url: String,
+    field_generic_paths: bool,
 }
 
 impl FieldReservationReportGateway {
     pub fn new(client: reqwest::Client, field_api_url: Option<&str>) -> Self {
+        Self::with_generic_paths(client, field_api_url, DEFAULT_FIELD_GENERIC_PATHS)
+    }
+
+    pub fn with_generic_paths(
+        client: reqwest::Client,
+        field_api_url: Option<&str>,
+        field_generic_paths: bool,
+    ) -> Self {
         Self {
             client,
             base_url: normalize_base_url(field_api_url),
+            field_generic_paths,
+        }
+    }
+
+    /// The only place this gateway decides between a generic path and an
+    /// extension alias. Everything else names a path constant directly.
+    fn tabular_analyze_path(&self) -> &'static str {
+        if self.field_generic_paths {
+            BRIDGE_TABULAR_ANALYZE_PATH
+        } else {
+            EXTENSION_TABULAR_ANALYZE_PATH
         }
     }
 
@@ -564,7 +604,7 @@ impl ReservationReportAnalyzeGateway for FieldReservationReportGateway {
             &self.client,
             &self.base_url,
             Method::POST,
-            TABULAR_ANALYZE_PATH,
+            self.tabular_analyze_path(),
             credentials,
             form,
         )
@@ -1394,8 +1434,14 @@ mod tests {
 
     #[tokio::test]
     async fn tabular_analyze_forwards_multipart_and_maps_the_response() {
+        // The literal path, not the constant: naming the constant here would
+        // let a path change pass silently, which is the one thing this test is
+        // holding down.
         let app = Router::new()
-            .route(TABULAR_ANALYZE_PATH, post(analyze_tabular))
+            .route(
+                "/v1/erp/extensions/golf-course/tabular/analyze",
+                post(analyze_tabular),
+            )
             .with_state(Arc::new(ConfigState::default()));
         let base_url = spawn_field_server(app).await;
         let gateway = FieldReservationReportGateway::new(reqwest::Client::new(), Some(&base_url));
@@ -1414,5 +1460,45 @@ mod tests {
         assert_eq!(result.mapping().mode(), "ai");
         assert_eq!(result.mapping().fields().len(), 5);
         assert_eq!(result.warnings(), &["check the mapped columns"]);
+    }
+
+    /// With the flag on the same request goes to Field's generic analyzer.
+    ///
+    /// The test Field only serves the generic path, so an unswitched gateway
+    /// gets a 404 here rather than a quietly different answer.
+    #[tokio::test]
+    async fn tabular_analyze_uses_the_generic_bridge_path_when_generic_paths_are_on() {
+        let app = Router::new()
+            .route("/v1/bridge/tabular/analyze", post(analyze_tabular))
+            .with_state(Arc::new(ConfigState::default()));
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldReservationReportGateway::with_generic_paths(
+            reqwest::Client::new(),
+            Some(&base_url),
+            true,
+        );
+        let result = gateway
+            .analyze_tabular(
+                test_credentials(),
+                b"facility,date,part,groups,caddie",
+                Some("report.csv"),
+                2026,
+            )
+            .await
+            .expect("tabular analysis over the generic path");
+        assert_eq!(result.headers().len(), 5);
+        assert_eq!(result.mapping().fields().len(), 5);
+    }
+
+    /// The default stays on the extension alias until the golf policies carry
+    /// `field:PreviewBridgeRun`, so a deploy that lands before the auth apply
+    /// keeps importing.
+    #[test]
+    fn the_extension_alias_is_still_the_default() {
+        let gateway = FieldReservationReportGateway::new(reqwest::Client::new(), None);
+        assert_eq!(
+            gateway.tabular_analyze_path(),
+            "/v1/erp/extensions/golf-course/tabular/analyze"
+        );
     }
 }
