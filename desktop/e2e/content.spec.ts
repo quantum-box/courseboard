@@ -286,8 +286,6 @@ test.describe('コースマップ', () => {
 test.describe('設定', () => {
   test('設定ハブから詳細へ行き来できる', async ({ page }) => {
     await page.goto('/settings')
-    await expect(page.getByRole('heading', { name: '会員種別' })).toBeVisible()
-    await expect(page.getByText('販売終了').first()).toBeVisible()
 
     await page.getByText('システム連携の詳細').first().click()
     await expect(page).toHaveURL(/settings\/advanced/)
@@ -295,6 +293,34 @@ test.describe('設定', () => {
 
     await page.getByRole('button', { name: '設定へ戻る' }).click()
     await expect(page).toHaveURL(/settings$/)
+  })
+
+  /**
+   * マスタはハブの下に積まれたフォームではなく自分のルートを持つ。
+   * ハブに一覧が出ないこと自体が直したかったところなので、リンクから
+   * たどり着いた先に表があることまで見る。
+   */
+  test('ハブのリンクからマスタの表へ入れる', async ({ page }) => {
+    await page.goto('/settings')
+    await expect(page.getByRole('heading', { name: 'マスタ' })).toBeVisible()
+
+    await page.getByText('このコースが売っている会員の種類').click()
+    await expect(page).toHaveURL(/settings\/membership-plans/)
+    await expect(page.getByRole('table')).toBeVisible()
+    await expect(page.getByText('販売終了').first()).toBeVisible()
+
+    await page.getByRole('button', { name: '設定へ戻る' }).click()
+    await expect(page).toHaveURL(/settings$/)
+  })
+
+  test('キャディの別業務は行から編集シートが開く', async ({ page }) => {
+    await page.goto('/settings/caddie-duties')
+
+    await page.getByRole('cell', { name: 'コース整備' }).click()
+    const sheet = page.getByRole('dialog')
+    await expect(sheet).toBeVisible()
+    await expect(sheet.getByRole('textbox')).toHaveValue('コース整備')
+    await page.keyboard.press('Escape')
   })
 
   test('メンバー一覧とロール編集ダイアログ', async ({ page }) => {
