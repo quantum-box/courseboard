@@ -5,6 +5,10 @@ export const settings = {
     title: '最初に決める設定',
     description: '最初に一度そろえれば、ふだんはほとんど開きません。',
   },
+  masters: {
+    title: 'マスタ',
+    description: 'ふだんの画面で選ぶ選択肢を、ここでそろえます。',
+  },
   playWindows: {
     title: '会員のプレー可能日',
     description:
@@ -14,6 +18,9 @@ export const settings = {
     saved: 'プレー可能日を保存しました',
     failed: 'プレー可能日を保存できませんでした',
     field: {
+      plan: '会員種別',
+      days: 'プレーできる曜日',
+      hours: '時間帯',
       from: '開始',
       to: '終了',
     },
@@ -26,6 +33,12 @@ export const settings = {
       sat: '土',
       sun: '日',
     },
+    linkDescription: '会員種別ごとに、プレーできる曜日と時間帯',
+    emptyTitle: '会員種別がありません',
+    editTitle: 'プレー可能日を決める',
+    noRestriction: '制限なし',
+    anyTime: '終日',
+    daysHint: 'すべて選ぶか、ひとつも選ばないと、曜日の制限なしになります。',
   },
   discounts: {
     title: '会員割引',
@@ -35,6 +48,7 @@ export const settings = {
     saved: '会員割引を保存しました',
     failed: '会員割引を保存できませんでした',
     field: {
+      plan: '会員種別',
       kind: '引き方',
       value: '割引額',
     },
@@ -42,6 +56,12 @@ export const settings = {
       yen: '円引き',
       percent: '％引き',
     },
+    linkDescription: '会員種別ごとの、グリーンフィーからの割引',
+    emptyTitle: '会員種別がありません',
+    editTitle: '会員割引を決める',
+    none: '割引なし',
+    valueYen: '{{value}} 円引き',
+    valuePercent: '{{value}}％引き',
   },
   caddieDuties: {
     title: 'キャディの別業務',
@@ -58,6 +78,13 @@ export const settings = {
     tooMany: '業務種別は{{max}}件までです。',
     saved: '業務種別を保存しました',
     failed: '業務種別を保存できませんでした',
+    linkDescription: 'ラウンドが付かない日に、キャディへ頼む業務の種類',
+    emptyTitle: '業務種別がありません',
+    addTitle: '業務種別を追加する',
+    editTitle: '業務種別を直す',
+    rank: '順',
+    moveUp: '上へ動かす',
+    moveDown: '下へ動かす',
   },
   grades: {
     title: '顧客グレード',
@@ -79,6 +106,14 @@ export const settings = {
     placeholder: {
       name: 'ゴールド',
     },
+    linkDescription: '来場回数と客単価から、常連をどう格付けするか',
+    emptyTitle: '段がありません',
+    addTitle: '段を足す',
+    editTitle: '段を直す',
+    sheetHint: '空欄の項目は条件になりません。',
+    rank: '段',
+    moveUp: '上へ動かす',
+    moveDown: '下へ動かす',
   },
   membership: {
     title: '会員種別',
@@ -104,6 +139,12 @@ export const settings = {
       feeInvalid: '年会費は 0 以上の整数で入れてください。',
       validDaysInvalid: '有効日数は 1 以上の整数で入れてください。',
     },
+    linkDescription: 'このコースが売っている会員の種類',
+    emptyTitle: '会員種別がありません',
+    addTitle: '会員種別を追加する',
+    editTitle: '会員種別を直す',
+    status: '状態',
+    selling: '販売中',
   },
   extension: {
     loading: '拡張のようすを確かめています',

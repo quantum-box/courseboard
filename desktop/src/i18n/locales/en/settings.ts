@@ -8,6 +8,10 @@ export const settings: DeepPartial<typeof source> = {
     title: 'Initial setup',
     description: 'Set these up once; you will rarely open them day to day.',
   },
+  masters: {
+    title: 'Master data',
+    description: 'The lists the day-to-day screens pick from.',
+  },
   playWindows: {
     title: 'Membership playing days',
     description:
@@ -17,6 +21,9 @@ export const settings: DeepPartial<typeof source> = {
     saved: 'Playing days saved',
     failed: 'Could not save the playing days',
     field: {
+      plan: 'Membership',
+      days: 'Days',
+      hours: 'Hours',
       from: 'From',
       to: 'To',
     },
@@ -29,6 +36,12 @@ export const settings: DeepPartial<typeof source> = {
       sat: 'Sat',
       sun: 'Sun',
     },
+    linkDescription: 'Which days and hours each membership may be played',
+    emptyTitle: 'No memberships',
+    editTitle: 'Set the playing days',
+    noRestriction: 'No restriction',
+    anyTime: 'Any time',
+    daysHint: 'All seven, or none, means no restriction on the day.',
   },
   discounts: {
     title: 'Member discounts',
@@ -39,6 +52,7 @@ export const settings: DeepPartial<typeof source> = {
     saved: 'Member discounts saved',
     failed: 'Could not save the member discounts',
     field: {
+      plan: 'Membership',
       kind: 'Type',
       value: 'Amount',
     },
@@ -46,6 +60,12 @@ export const settings: DeepPartial<typeof source> = {
       yen: 'Yen off',
       percent: 'Percent off',
     },
+    linkDescription: 'What each membership takes off the green fee',
+    emptyTitle: 'No memberships',
+    editTitle: 'Set the discount',
+    none: 'No discount',
+    valueYen: '{{value}} JPY off',
+    valuePercent: '{{value}}% off',
   },
   caddieDuties: {
     title: 'Caddie duties',
@@ -63,6 +83,13 @@ export const settings: DeepPartial<typeof source> = {
     tooMany: 'At most {{max}} jobs.',
     saved: 'Jobs saved',
     failed: 'Could not save the jobs',
+    linkDescription: 'The jobs a caddie is put on when they have no round',
+    emptyTitle: 'No jobs',
+    addTitle: 'Add a job',
+    editTitle: 'Rename the job',
+    rank: '#',
+    moveUp: 'Move up',
+    moveDown: 'Move down',
   },
   grades: {
     title: 'Customer grades',
@@ -84,6 +111,14 @@ export const settings: DeepPartial<typeof source> = {
     placeholder: {
       name: 'Gold',
     },
+    linkDescription: 'How regulars are ranked, from visits and spend',
+    emptyTitle: 'No rungs',
+    addTitle: 'Add a rung',
+    editTitle: 'Edit the rung',
+    sheetHint: 'A blank box asks nothing.',
+    rank: 'Rung',
+    moveUp: 'Move up',
+    moveDown: 'Move down',
   },
   membership: {
     title: 'Memberships',
@@ -109,6 +144,12 @@ export const settings: DeepPartial<typeof source> = {
       feeInvalid: 'The fee must be a whole number of 0 or more.',
       validDaysInvalid: 'The validity must be a whole number of 1 or more.',
     },
+    linkDescription: 'The memberships this course sells',
+    emptyTitle: 'No memberships',
+    addTitle: 'Add a membership',
+    editTitle: 'Edit the membership',
+    status: 'Status',
+    selling: 'On sale',
   },
   extension: {
     loading: 'Checking the extension',
