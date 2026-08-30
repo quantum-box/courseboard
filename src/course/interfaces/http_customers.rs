@@ -926,7 +926,9 @@ pub struct ReceptionDraftDto {
         (status = 200, description = "Rows read off the sheet", body = ReceptionDraftDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
-        (status = 424, description = "Upstream provider error", body = ErrorBody),
+        (status = 402, description = "The reader is unavailable until upstream billing is linked and funded (`reception_reader_billing_unsatisfied`)", body = ErrorBody),
+        (status = 424, description = "Upstream provider error, including a reader that is down (`reception_reader_unavailable`)", body = ErrorBody),
+        (status = 429, description = "The reader is rate limited upstream (`reception_reader_rate_limited`)", body = ErrorBody),
     ),
     security(("bearer_auth" = []))
 )]

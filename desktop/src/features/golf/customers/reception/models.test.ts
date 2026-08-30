@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ApiError } from '../../../../api'
 import {
   blankRow,
   canRegister,
@@ -11,6 +12,7 @@ import {
   pendingRows,
   prepareReceptionSheet,
   previewKind,
+  receptionReadFailure,
   rowsFromDraft,
   savedCount,
   sniffSheetBytes,
@@ -239,5 +241,37 @@ describe('previewKind', () => {
   it('frames a PDF and shows an image directly', () => {
     expect(previewKind(file('application/pdf'))).toBe('pdf')
     expect(previewKind(file('image/png'))).toBe('image')
+  })
+})
+
+describe('receptionReadFailure', () => {
+  function apiError(status: number, code: string) {
+    return new ApiError('server-authored English', status, { error: code, message: 'x' })
+  }
+
+  /**
+   * The incident this exists for. An upstream reader out of credit used to
+   * reach the desk as an empty draft plus the same sentence a blurry photo
+   * gets, so the sheet was photographed again and again.
+   */
+  it('tells an upstream billing failure apart from an unreadable sheet', () => {
+    expect(receptionReadFailure(apiError(402, 'reception_reader_billing_unsatisfied')))
+      .toBe('billing')
+  })
+
+  it('recognises the two other reader failures', () => {
+    expect(receptionReadFailure(apiError(429, 'reception_reader_rate_limited')))
+      .toBe('rateLimited')
+    expect(receptionReadFailure(apiError(424, 'reception_reader_unavailable')))
+      .toBe('unavailable')
+  })
+
+  /** Everything else keeps the shared error copy rather than inventing one. */
+  it('claims nothing it was not told', () => {
+    expect(receptionReadFailure(apiError(400, 'bad_request'))).toBeNull()
+    expect(receptionReadFailure(apiError(424, 'provider_error'))).toBeNull()
+    expect(receptionReadFailure(new ApiError('Request failed with 402', 402))).toBeNull()
+    expect(receptionReadFailure(new Error('offline'))).toBeNull()
+    expect(receptionReadFailure(null)).toBeNull()
   })
 })

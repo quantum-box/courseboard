@@ -1784,6 +1784,23 @@ pub(crate) async fn field_send_raw(
         .map_err(|error| map_field_body_error(&method, path_and_query, error))
 }
 
+/// A Field response that was not a success, before it is flattened.
+///
+/// `map_field_status_error` keeps the status of a 4xx and drops it from a 5xx,
+/// and neither keeps Field's `code`. That is enough for a screen that only has
+/// to say "the save did not go through", and not enough for one that has to
+/// say *why* — which is what the reception desk needs now that Field
+/// distinguishes an OCR provider that is down from a document it could not
+/// read (PLT-4033).
+pub(crate) struct FieldStatusFailure<'a> {
+    pub status: reqwest::StatusCode,
+    /// Field's own error code, e.g. `PAYMENT_REQUIRED`. Absent on the older
+    /// endpoints that answer in plain text.
+    pub code: Option<String>,
+    /// The response body as it arrived, for the default mapping to sanitize.
+    pub body: &'a str,
+}
+
 /// Send a multipart request to a Field endpoint while preserving the same
 /// forwarded bearer/operator/platform headers used by JSON gateways.
 pub(crate) async fn field_send_multipart<T: for<'de> Deserialize<'de>>(
@@ -1794,6 +1811,38 @@ pub(crate) async fn field_send_multipart<T: for<'de> Deserialize<'de>>(
     credentials: GatewayCredentials<'_>,
     form: reqwest::multipart::Form,
 ) -> Result<T, CourseError> {
+    field_send_multipart_classified(
+        client,
+        base_url,
+        method,
+        path_and_query,
+        credentials,
+        form,
+        |_| None,
+    )
+    .await
+}
+
+/// The same send, with the caller given first refusal on the failure.
+///
+/// `classify` answers `None` for anything it does not recognise, which falls
+/// back to the shared mapping. Recognising selectively is the point: a 400 is
+/// a request the gateway built wrong and a 401 is the caller's own bearer, and
+/// a gateway that claimed those as its own domain failure would send the
+/// operator off to fix something that is not broken.
+pub(crate) async fn field_send_multipart_classified<T, F>(
+    client: &reqwest::Client,
+    base_url: &str,
+    method: reqwest::Method,
+    path_and_query: &str,
+    credentials: GatewayCredentials<'_>,
+    form: reqwest::multipart::Form,
+    classify: F,
+) -> Result<T, CourseError>
+where
+    T: for<'de> Deserialize<'de>,
+    F: FnOnce(&FieldStatusFailure<'_>) -> Option<CourseError>,
+{
     if is_empty_course_store(base_url) {
         return Err(empty_course_store_error());
     }
@@ -1806,8 +1855,15 @@ pub(crate) async fn field_send_multipart<T: for<'de> Deserialize<'de>>(
         .map_err(|error| map_field_request_error_with_timeout(error, TABULAR_ANALYZE_TIMEOUT))?;
     let status = response.status();
     if !status.is_success() {
-        let message = response.text().await.unwrap_or_default();
-        return Err(map_field_status_error(status, &message));
+        let body = response.text().await.unwrap_or_default();
+        let failure = FieldStatusFailure {
+            status,
+            code: field_error_code(&body),
+            body: &body,
+        };
+        return Err(
+            classify(&failure).unwrap_or_else(|| map_field_status_error(status, failure.body))
+        );
     }
     response.json().await.map_err(|error| {
         map_field_body_error_with_timeout(&method, path_and_query, error, TABULAR_ANALYZE_TIMEOUT)
@@ -1858,6 +1914,24 @@ pub(crate) fn map_field_status_error(status: reqwest::StatusCode, message: &str)
         };
     }
     CourseError::Provider(format!("Field API returned {status}: {message}"))
+}
+
+/// Field's machine-readable error code, when the body carries one.
+///
+/// Read separately from the message because the two answer different
+/// questions: the message is prose a screen may show, the code is what a
+/// gateway may branch on. Only the code is stable enough to branch on — Field
+/// rewords its messages freely, and CourseBoard writes its own operator copy
+/// anyway.
+pub(crate) fn field_error_code(body: &str) -> Option<String> {
+    let value = serde_json::from_str::<Value>(body.trim()).ok()?;
+    value
+        .get("code")
+        .or_else(|| value.get("error").and_then(|error| error.get("code")))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|code| !code.is_empty())
+        .map(str::to_string)
 }
 
 /// Field's public 4xx payload is sanitized at its API boundary. Prefer its

@@ -268,6 +268,57 @@ fn normalize(value: Option<String>) -> Option<String> {
         .filter(|text| !text.is_empty())
 }
 
+/// Why no read happened at all, when the sheet is not the reason.
+///
+/// Field used to answer an upstream failure with a 200, an empty draft and the
+/// same sentence a blurry photo gets, so a desk whose provider had run out of
+/// credit photographed a perfectly good sheet over and over. Field now answers
+/// with a status of its own (PLT-4033); this type is what keeps that
+/// distinction alive on the way to the screen, because none of these is fixed
+/// by pointing the camera again.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum ReceptionReaderFailure {
+    /// Upstream billing is not satisfied. Deliberately one case rather than
+    /// two: the provider answers 402 both for a billing account that was never
+    /// linked and for one whose balance has run out, Field copies no provider
+    /// body (it can echo the document), so nothing on this side can tell them
+    /// apart — and naming only one of the two remedies sends the operator to
+    /// the wrong half of the same billing screen.
+    #[error("document reading is unavailable until upstream billing is linked and funded")]
+    BillingUnsatisfied,
+    /// Upstream is rate limiting. The only one of the three that answers to
+    /// waiting.
+    #[error("document reading is rate limited upstream")]
+    RateLimited,
+    /// The reader is down, unreachable, or not configured. Field also lands an
+    /// upstream 401/403 here rather than forwarding it: the desk's own session
+    /// is fine, and forwarding it would sign a working operator out.
+    #[error("the document reader is unavailable upstream")]
+    Unavailable,
+}
+
+impl ReceptionReaderFailure {
+    /// Classifies one of Field's OCR failures, or leaves the response alone.
+    ///
+    /// `None` for every other status on purpose. A 400 is a request this
+    /// gateway built wrong and a 401 is the caller's own bearer — neither is
+    /// the reader failing, and dressing them up as one would tell the desk to
+    /// go and check the billing screen over a bug or an expired session.
+    ///
+    /// Both the status and Field's `code` are accepted for a case because the
+    /// two are written at different layers upstream and only the pair is worth
+    /// trusting: the code is what Field's OCR handler decided, the status is
+    /// what survives a proxy.
+    pub fn classify(status: u16, code: Option<&str>) -> Option<Self> {
+        match (status, code) {
+            (402, _) | (_, Some("PAYMENT_REQUIRED")) => Some(Self::BillingUnsatisfied),
+            (429, _) | (_, Some("TOO_MANY_REQUESTS")) => Some(Self::RateLimited),
+            (503, _) | (_, Some("SERVICE_UNAVAILABLE")) => Some(Self::Unavailable),
+            _ => None,
+        }
+    }
+}
+
 /// What came back from one sheet: rows to check, and anything the reader could
 /// not do.
 ///

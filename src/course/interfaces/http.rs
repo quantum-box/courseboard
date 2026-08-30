@@ -241,6 +241,7 @@ impl From<CourseError> for AppError {
                     "Field API returned invalid client status {status}: {message}"
                 )),
             },
+            CourseError::ReceptionReaderFailed(failure) => AppError::ReceptionReaderFailed(failure),
             CourseError::NotFound(message) => AppError::NotFound(message),
             CourseError::Provider(message) => AppError::Provider(message),
         }

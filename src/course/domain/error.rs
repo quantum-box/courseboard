@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use super::customer_reception::ReceptionReaderFailure;
+
 /// Errors raised by course domain use cases and gateway ports.
 #[derive(Debug, Error)]
 pub enum CourseError {
@@ -27,6 +29,13 @@ pub enum CourseError {
     /// can tell a correctable input/conflict from a provider outage.
     #[error("{message}")]
     UpstreamClient { status: u16, message: String },
+    /// The document reader upstream refused the call itself, rather than
+    /// reading a sheet and failing to make it out. Its own variant because the
+    /// screen has to tell those apart: this one is not answered by
+    /// re-photographing the paper, and the desk was doing exactly that for as
+    /// long as Field folded both into one 200 (PLT-4033).
+    #[error("{0}")]
+    ReceptionReaderFailed(ReceptionReaderFailure),
     #[error("{0}")]
     NotFound(&'static str),
     #[error("external provider error: {0}")]
