@@ -71,7 +71,7 @@ export const customers = {
   visits: {
     title: '来場履歴',
     description:
-      'この顧客の名前で取った予約です。ほかの人の組にプレイヤーとして入った回は入りません。',
+      'この顧客の名前で取った予約と、ほかの人の組で受付をした回です。',
     column: {
       date: '日付',
       kind: '状態',
@@ -80,6 +80,8 @@ export const customers = {
       amount: '金額',
       reservationNumber: '予約番号',
     },
+    asGuest: '同伴',
+    checkedIn: '受付済',
     kind: {
       visited: '来場',
       upcoming: '予定',
@@ -103,9 +105,20 @@ export const customers = {
     truncated:
       '直近{{count}}件だけを読んでいます。上の集計もこの{{count}}件の範囲で、通算ではありません。',
     empty: {
-      title: 'この顧客の名前で取った予約はありません',
+      title: 'この顧客の来場の記録はありません',
       description:
-        'はじめての来場か、ほかの人の名前で予約されている可能性があります。組のプレイヤーとして入った回はここに出ません。',
+        'はじめての来場か、ほかの人の名前で予約され受付もされていない可能性があります。',
+    },
+  },
+  registration: {
+    unrecorded: '台帳に入れた記録は残っていません。',
+    from: '{{date}} に{{source}}から登録',
+    fromSheetRow: '{{date}} に受付用紙の{{row}}行目から登録',
+    by: '（{{operator}}）',
+    source: {
+      manual: '顧客台帳の入力',
+      reception_sheet: '受付用紙',
+      ledger: '予約の名前',
     },
   },
   detail: {

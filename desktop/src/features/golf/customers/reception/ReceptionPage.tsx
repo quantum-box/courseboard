@@ -112,7 +112,13 @@ export function ReceptionPage() {
     if (!canRegister(row)) return
     updateRow(row.key, { status: 'saving', error: undefined })
     try {
-      const created = await registerReceptionRow(row)
+      // The row's position on screen is its line on the paper — rows are added
+      // to the end, never reordered — so it is what makes the entry traceable
+      // back to the sheet once the sheet is gone.
+      const created = await registerReceptionRow(
+        row,
+        rows.findIndex(candidate => candidate.key === row.key),
+      )
       updateRow(row.key, { status: 'saved', customerId: created.id })
     } catch (error) {
       updateRow(row.key, { status: 'pending', error: resourceErrorText(error) })

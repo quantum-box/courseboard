@@ -219,6 +219,18 @@ export const ledger = {
     registerFailed: 'Could not add this customer',
     linkedPlayers: '{{linked}} of the {{named}} named players are in the customer ledger.',
   },
+  checkin: {
+    title: 'Check-in',
+    noNames: 'Add the group\u2019s names to check them in here.',
+    unsaved: 'Save the changes above first. Check-ins are recorded against the saved roster.',
+    unlinked: '(no ledger entry chosen)',
+    at: 'checked in {{time}}',
+    allDone: 'Everyone in this group is checked in.',
+    submit: 'Check in ({{count}})',
+    saving: 'Checking in\u2026',
+    saved: 'Check-in recorded',
+    failed: 'Could not record the check-in',
+  },
   party: {
     title: 'Booking detail',
     description: 'The name it is booked under, the headcount, the competition, and the players by name.',

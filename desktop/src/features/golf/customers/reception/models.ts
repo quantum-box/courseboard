@@ -204,12 +204,17 @@ export function isCorrected(row: ReceptionRow, key: ReceptionFieldKey) {
   return row.read[key].length > 0 && text(row[key]) !== row.read[key]
 }
 
-export function customerPayload(row: ReceptionRow) {
+export function customerPayload(row: ReceptionRow, sourceRowIndex?: number) {
   return {
     name: text(row.name),
     nameKana: text(row.nameKana) || null,
     phone: text(row.phone) || null,
     email: text(row.email) || null,
+    // Kept so a duplicate found next week can be traced back to the sheet it
+    // was read off. The sheet itself is never stored, so this line number is
+    // the only pointer at the paper the desk still has.
+    source: 'reception_sheet' as const,
+    sourceRowIndex,
   }
 }
 

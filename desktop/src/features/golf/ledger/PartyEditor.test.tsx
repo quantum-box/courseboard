@@ -103,10 +103,11 @@ describe('the ledger booking sheet', () => {
     fireEvent.click(screen.getByText(i18next.t('ledger:party.save')))
 
     await waitFor(() => expect(props.onClose).toHaveBeenCalled())
-    // The membership lookup the picker makes for a linked customer is not one
-    // of the writes, so the saved calls are read off the reservation paths.
-    const writes = api.json.mock.calls.filter(call =>
-      (call[0] as string).startsWith('/v1/course/reservations/'),
+    // The membership lookup the picker makes for a linked customer, and the
+    // check-in list the sheet reads on open, are not writes — so the saved
+    // calls are the ones that carry a method.
+    const writes = api.json.mock.calls.filter(
+      call => (call[0] as string).startsWith('/v1/course/reservations/') && call[1]?.method,
     )
     expect(writes.map(call => call[0] as string)).toEqual([
       '/v1/course/reservations/rsv-1',
@@ -132,8 +133,8 @@ describe('the ledger booking sheet', () => {
     await waitFor(() => expect(props.onClose).toHaveBeenCalled())
     expect(
       api.json.mock.calls
-        .map(call => call[0] as string)
-        .filter(path => path.startsWith('/v1/course/reservations/')),
+        .filter(call => (call[0] as string).startsWith('/v1/course/reservations/') && call[1]?.method)
+        .map(call => call[0] as string),
     ).toEqual(['/v1/course/reservations/rsv-1/party'])
   })
 

@@ -224,6 +224,18 @@ export const ledger = {
     registerFailed: '顧客台帳に登録できませんでした',
     linkedPlayers: '名前を入れた {{named}} 名のうち {{linked}} 名が顧客台帳に紐付いています。',
   },
+  checkin: {
+    title: '受付',
+    noNames: '組の名前を入れると、ここで受付ができます。',
+    unsaved: '上の変更を保存してから受付してください。受付は保存された組の名前に対して記録します。',
+    unlinked: '（台帳の顧客が未選択）',
+    at: '{{time}} 受付',
+    allDone: 'この組は全員受付ずみです。',
+    submit: '受付する（{{count}}人）',
+    saving: '受付しています…',
+    saved: '受付を記録しました',
+    failed: '受付を記録できませんでした',
+  },
   party: {
     title: '予約の中身',
     description: '予約者名・人数・コンペ名・組番号・プレイヤーの名前を直します。',

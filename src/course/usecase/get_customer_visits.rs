@@ -10,6 +10,7 @@
 //! nothing here, so the screen has to say whose bookings these are rather than
 //! let an empty table read as "never been".
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
@@ -17,9 +18,18 @@ use chrono::{DateTime, Utc};
 use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, CustomerGradeRulesGateway, CustomerGradeVerdict, CustomerId, CustomerVisitHistory,
-    GatewayCredentials, ReservationGateway, DEFAULT_VISIT_HISTORY_LIMIT, MAX_VISIT_HISTORY_LIMIT,
-    MAX_VISIT_HISTORY_ROWS, VISIT_HISTORY_PAGE,
+    GatewayCredentials, Reservation, ReservationGateway, VisitCheckinGateway,
+    DEFAULT_VISIT_HISTORY_LIMIT, MAX_VISIT_HISTORY_LIMIT, MAX_VISIT_HISTORY_ROWS,
+    VISIT_HISTORY_PAGE,
 };
+
+/// How many rounds played in other people's groups are looked up upstream.
+///
+/// Each one costs a call, because a check-in stores the booking it belonged to
+/// and nothing else about it. Somebody who plays only as a guest reaches this
+/// after years of it, and when they do the history says it is partial rather
+/// than quietly stopping.
+const MAX_GUEST_VISIT_LOOKUPS: usize = 100;
 
 /// A customer's play, and what the club's ladder makes of it.
 pub struct CustomerVisitReport {
@@ -30,16 +40,19 @@ pub struct CustomerVisitReport {
 pub struct GetCustomerVisitsUseCase {
     reservations: Arc<dyn ReservationGateway>,
     grades: Arc<dyn CustomerGradeRulesGateway>,
+    checkins: Arc<dyn VisitCheckinGateway>,
 }
 
 impl GetCustomerVisitsUseCase {
     pub fn new(
         reservations: Arc<dyn ReservationGateway>,
         grades: Arc<dyn CustomerGradeRulesGateway>,
+        checkins: Arc<dyn VisitCheckinGateway>,
     ) -> Self {
         Self {
             reservations,
             grades,
+            checkins,
         }
     }
 
@@ -83,7 +96,43 @@ impl GetCustomerVisitsUseCase {
             }
         }
 
-        let history = CustomerVisitHistory::build(reservations, now, display_limit, truncated);
+        // What the desk actually saw. Two things a booking cannot say: which of
+        // their own rounds somebody was really at, and which rounds they played
+        // in a colleague's group. Only the second needs upstream work.
+        let seen = self
+            .checkins
+            .list_customer_checkins(credentials.operator_id, customer_id)
+            .await?;
+        let booked_ids: HashSet<String> = reservations
+            .iter()
+            .map(|reservation| reservation.id().to_string())
+            .collect();
+        let mut attended = HashSet::new();
+        let mut guest_ids = Vec::new();
+        for checkin in &seen {
+            let id = checkin.reservation_id.to_string();
+            if booked_ids.contains(&id) {
+                attended.insert(id);
+            } else if !guest_ids.contains(&id) {
+                guest_ids.push(id);
+            }
+        }
+
+        let mut guest_truncated = false;
+        if guest_ids.len() > MAX_GUEST_VISIT_LOOKUPS {
+            guest_ids.truncate(MAX_GUEST_VISIT_LOOKUPS);
+            guest_truncated = true;
+        }
+        let guest_reservations = self.load_guest_reservations(credentials, &guest_ids).await;
+
+        let history = CustomerVisitHistory::build_with_checkins(
+            reservations,
+            guest_reservations,
+            &attended,
+            now,
+            display_limit,
+            truncated || guest_truncated,
+        );
         // Judged here rather than on the screen: the ladder is the club's rule
         // and the figures are ours, so the verdict is one decision in one
         // place — the same discipline `CustomerMembership::is_member` keeps.
@@ -93,6 +142,41 @@ impl GetCustomerVisitsUseCase {
             .await?;
         let grade = ladder.grade_for(history.summary(), history.truncated());
         Ok(CustomerVisitReport { history, grade })
+    }
+
+    /// Reads the bookings behind rounds played as somebody's guest.
+    ///
+    /// Concurrent because these are independent reads of one screen's worth of
+    /// history, and serial calls would make a guest-heavy page take as long as
+    /// its longest chain. A booking that cannot be read is dropped rather than
+    /// failing the page: the customer's own history is the larger part of it,
+    /// and losing all of it over one unreadable row helps nobody.
+    async fn load_guest_reservations(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        guest_ids: &[String],
+    ) -> Vec<Reservation> {
+        let fetched = futures::future::join_all(guest_ids.iter().map(|id| async move {
+            let reservation_id = crate::course::domain::ReservationId::new(id.clone());
+            self.reservations
+                .get_reservation(credentials, &reservation_id)
+                .await
+        }))
+        .await;
+
+        fetched
+            .into_iter()
+            .filter_map(|result| match result {
+                Ok(reservation) => Some(reservation),
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "a round played as a guest could not be read and was left off the history"
+                    );
+                    None
+                }
+            })
+            .collect()
     }
 }
 
@@ -106,6 +190,7 @@ mod tests {
     use crate::course::domain::{
         CustomerGradeRules, NewReservation, PartyDetails, Reservation, ReservationBilling,
         ReservationBookingUpdate, ReservationId, ReservationServiceId, SeededReservation,
+        VisitCheckin, VisitKind,
     };
 
     fn at(year: i32, month: u32, day: u32) -> DateTime<Utc> {
@@ -137,6 +222,9 @@ mod tests {
     struct StubReservations {
         asked: Mutex<Vec<(String, u32, u32)>>,
         answer: Vec<Reservation>,
+        /// Bookings this person only attended, looked up one at a time because
+        /// a check-in stores the booking it belonged to and nothing else.
+        guest: Vec<Reservation>,
     }
 
     #[async_trait]
@@ -172,9 +260,13 @@ mod tests {
         async fn get_reservation(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _reservation_id: &ReservationId,
+            reservation_id: &ReservationId,
         ) -> Result<Reservation, CourseError> {
-            unreachable!("not used by this use case")
+            self.guest
+                .iter()
+                .find(|reservation| reservation.id() == reservation_id)
+                .cloned()
+                .ok_or(CourseError::NotFound("reservation"))
         }
 
         async fn update_reservation_plan(
@@ -269,6 +361,56 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct StubCheckins {
+        answer: Vec<VisitCheckin>,
+    }
+
+    #[async_trait]
+    impl VisitCheckinGateway for StubCheckins {
+        async fn record_visit_checkins(
+            &self,
+            _tenant_id: &str,
+            _request: &crate::course::domain::VisitCheckinRequest,
+            _checked_in_by: Option<&str>,
+        ) -> Result<Vec<VisitCheckin>, CourseError> {
+            unreachable!("reading a customer never checks anybody in")
+        }
+
+        async fn list_customer_checkins(
+            &self,
+            _tenant_id: &str,
+            _customer_id: &CustomerId,
+        ) -> Result<Vec<VisitCheckin>, CourseError> {
+            Ok(self.answer.clone())
+        }
+
+        async fn list_reservation_checkins(
+            &self,
+            _tenant_id: &str,
+            _reservation_id: &ReservationId,
+        ) -> Result<Vec<VisitCheckin>, CourseError> {
+            unreachable!("not used by this use case")
+        }
+    }
+
+    fn nobody_seen() -> Arc<StubCheckins> {
+        Arc::new(StubCheckins::default())
+    }
+
+    fn seen(reservation_id: &str, played_on: (i32, u32, u32)) -> VisitCheckin {
+        VisitCheckin {
+            reservation_id: ReservationId::new(reservation_id),
+            player_index: 1,
+            customer_id: Some(CustomerId::new("cus_1")),
+            player_name: "本田 康彦".to_string(),
+            played_on: chrono::NaiveDate::from_ymd_opt(played_on.0, played_on.1, played_on.2)
+                .unwrap(),
+            checked_in_at: at(played_on.0, played_on.1, played_on.2),
+            checked_in_by: Some("user-1".to_string()),
+        }
+    }
+
     fn no_ladder() -> Arc<StubGrades> {
         Arc::new(StubGrades::default())
     }
@@ -292,7 +434,7 @@ mod tests {
             answer: vec![booking("r1", at(2026, 6, 1), 40_000)],
             ..StubReservations::default()
         });
-        let report = GetCustomerVisitsUseCase::new(gateway.clone(), no_ladder())
+        let report = GetCustomerVisitsUseCase::new(gateway.clone(), no_ladder(), nobody_seen())
             .execute(
                 credentials(),
                 &CustomerId::new("cus_1"),
@@ -316,7 +458,7 @@ mod tests {
             answer: vec![booking("r1", at(2026, 6, 1), 40_000)],
             ..StubReservations::default()
         });
-        GetCustomerVisitsUseCase::new(gateway.clone(), no_ladder())
+        GetCustomerVisitsUseCase::new(gateway.clone(), no_ladder(), nobody_seen())
             .execute(
                 credentials(),
                 &CustomerId::new("cus_1"),
@@ -345,7 +487,7 @@ mod tests {
             answer,
             ..StubReservations::default()
         });
-        let report = GetCustomerVisitsUseCase::new(gateway.clone(), no_ladder())
+        let report = GetCustomerVisitsUseCase::new(gateway.clone(), no_ladder(), nobody_seen())
             .execute(
                 credentials(),
                 &CustomerId::new("cus_1"),
@@ -387,7 +529,7 @@ mod tests {
             answer,
             ..StubReservations::default()
         });
-        let report = GetCustomerVisitsUseCase::new(gateway, no_ladder())
+        let report = GetCustomerVisitsUseCase::new(gateway, no_ladder(), nobody_seen())
             .execute(
                 credentials(),
                 &CustomerId::new("cus_1"),
@@ -421,7 +563,7 @@ mod tests {
             answer,
             ..StubReservations::default()
         });
-        let report = GetCustomerVisitsUseCase::new(gateway, no_ladder())
+        let report = GetCustomerVisitsUseCase::new(gateway, no_ladder(), nobody_seen())
             .execute(
                 credentials(),
                 &CustomerId::new("cus_1"),
@@ -439,7 +581,7 @@ mod tests {
         // Not an error: most of the ledger is visitors who came once, and a
         // page that failed for them would fail on the common case.
         let gateway = Arc::new(StubReservations::default());
-        let report = GetCustomerVisitsUseCase::new(gateway, no_ladder())
+        let report = GetCustomerVisitsUseCase::new(gateway, no_ladder(), nobody_seen())
             .execute(
                 credentials(),
                 &CustomerId::new("cus_1"),
@@ -450,5 +592,114 @@ mod tests {
             .unwrap();
         assert!(report.history.visits().is_empty());
         assert_eq!(report.history.summary().visits, 0);
+    }
+
+    #[tokio::test]
+    async fn a_round_played_in_somebody_elses_group_reaches_the_history() {
+        // The hole this exists for. Field records one customer per reservation,
+        // so a person who only ever plays as a colleague's guest has no
+        // bookings of their own and reads as somebody who has never been.
+        let gateway = Arc::new(StubReservations {
+            answer: Vec::new(),
+            guest: vec![booking("r_host", at(2026, 6, 1), 80_000)],
+            ..StubReservations::default()
+        });
+        let checkins = Arc::new(StubCheckins {
+            answer: vec![seen("r_host", (2026, 6, 1))],
+        });
+        let report = GetCustomerVisitsUseCase::new(gateway, no_ladder(), checkins)
+            .execute(
+                credentials(),
+                &CustomerId::new("cus_1"),
+                None,
+                at(2026, 8, 27),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(report.history.summary().visits, 1);
+        assert_eq!(report.history.visits().len(), 1);
+        assert!(!report.history.visits()[0].booked());
+        assert!(report.history.visits()[0].checked_in());
+    }
+
+    #[tokio::test]
+    async fn a_guest_round_adds_a_visit_but_not_somebody_elses_takings() {
+        // The money and the seats on that booking belong to whoever booked it.
+        // Splitting either between the group would be inventing a number, and
+        // it would land in the grade the club sorts people by.
+        let gateway = Arc::new(StubReservations {
+            answer: Vec::new(),
+            guest: vec![booking("r_host", at(2026, 6, 1), 80_000)],
+            ..StubReservations::default()
+        });
+        let checkins = Arc::new(StubCheckins {
+            answer: vec![seen("r_host", (2026, 6, 1))],
+        });
+        let report = GetCustomerVisitsUseCase::new(gateway, no_ladder(), checkins)
+            .execute(
+                credentials(),
+                &CustomerId::new("cus_1"),
+                None,
+                at(2026, 8, 27),
+            )
+            .await
+            .unwrap();
+
+        let summary = report.history.summary();
+        assert_eq!(summary.visits, 1);
+        assert_eq!(summary.total_amount, 0);
+        assert_eq!(summary.players, 0);
+        assert_eq!(summary.spend_per_player, None);
+        // Said out loud rather than left to drag the average towards zero.
+        assert_eq!(summary.unpriced_visits, 1);
+    }
+
+    #[tokio::test]
+    async fn a_check_in_turns_their_own_booking_from_an_inference_into_a_record() {
+        let gateway = Arc::new(StubReservations {
+            answer: vec![booking("r1", at(2026, 6, 1), 40_000)],
+            ..StubReservations::default()
+        });
+        let checkins = Arc::new(StubCheckins {
+            answer: vec![seen("r1", (2026, 6, 1))],
+        });
+        let report = GetCustomerVisitsUseCase::new(gateway, no_ladder(), checkins)
+            .execute(
+                credentials(),
+                &CustomerId::new("cus_1"),
+                None,
+                at(2026, 8, 27),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(report.history.summary().visits, 1);
+        assert!(report.history.visits()[0].checked_in());
+        assert!(report.history.visits()[0].booked());
+    }
+
+    #[tokio::test]
+    async fn a_booking_nobody_checked_in_is_still_read_as_played() {
+        // Absence cannot demote: every round played before the desk started
+        // checking people in has no row, and reading those as "never came"
+        // would empty the ledger's history on the day this shipped.
+        let gateway = Arc::new(StubReservations {
+            answer: vec![booking("r1", at(2026, 6, 1), 40_000)],
+            ..StubReservations::default()
+        });
+        let report = GetCustomerVisitsUseCase::new(gateway, no_ladder(), nobody_seen())
+            .execute(
+                credentials(),
+                &CustomerId::new("cus_1"),
+                None,
+                at(2026, 8, 27),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(report.history.summary().visits, 1);
+        assert_eq!(report.history.visits()[0].kind(), VisitKind::Visited);
+        assert!(!report.history.visits()[0].checked_in());
     }
 }

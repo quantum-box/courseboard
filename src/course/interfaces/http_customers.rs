@@ -12,7 +12,7 @@ use std::sync::Arc;
 use axum::{
     extract::{Multipart, Path, Query, State},
     http::HeaderMap,
-    Json,
+    Extension, Json,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -23,22 +23,24 @@ use super::openapi::ErrorBody;
 
 use crate::course::domain::{
     AssignMembershipPlan, Customer, CustomerGradeRule, CustomerGradeRules, CustomerId,
-    CustomerMembership, CustomerSearchQuery, CustomerVisit, MemberDiscount, MembershipDiscount,
-    MembershipDiscounts, MembershipDiscountsGateway, MembershipPlan, MembershipPlanId,
-    MembershipPlayWindow, MembershipPlayWindows, MembershipPlayWindowsGateway, NewCustomer,
-    PlayableDays, ReceptionDraftRow, ReceptionSheet, SetMemberNumber, UpsertMembershipPlan,
+    CustomerMembership, CustomerRegistration, CustomerRegistrationSource, CustomerSearchQuery,
+    CustomerVisit, MemberDiscount, MembershipDiscount, MembershipDiscounts,
+    MembershipDiscountsGateway, MembershipPlan, MembershipPlanId, MembershipPlayWindow,
+    MembershipPlayWindows, MembershipPlayWindowsGateway, NewCustomer, PlayableDays,
+    ReceptionDraftRow, ReceptionSheet, SetMemberNumber, UpsertMembershipPlan,
 };
 use crate::course::infrastructure::{
     FieldCustomerGateway, FieldCustomerReceptionGateway, FieldMembershipGateway,
 };
 use crate::course::usecase::{
     AssignMembershipPlanUseCase, CreateCustomerUseCase, CreateMembershipPlanUseCase,
-    CustomerVisitReport, DraftCustomerReceptionUseCase, GetCustomerGradeRulesUseCase,
-    GetCustomerMembershipUseCase, GetCustomerUseCase, GetCustomerVisitsUseCase,
-    ListMembershipPlansUseCase, ReplaceCustomerGradeRulesUseCase, SearchCustomersUseCase,
-    SetMemberNumberUseCase, UpdateMembershipPlanUseCase,
+    CustomerProvenance, CustomerVisitReport, DraftCustomerReceptionUseCase,
+    GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase, GetCustomerRegistrationUseCase,
+    GetCustomerUseCase, GetCustomerVisitsUseCase, ListMembershipPlansUseCase,
+    ReplaceCustomerGradeRulesUseCase, SearchCustomersUseCase, SetMemberNumberUseCase,
+    UpdateMembershipPlanUseCase,
 };
-use crate::{AppError, AppState};
+use crate::{AppError, AppState, CallerPrincipal};
 
 fn customer_gateway(state: &AppState) -> Arc<FieldCustomerGateway> {
     let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
@@ -155,6 +157,16 @@ pub struct CreateCustomerRequest {
     pub email: Option<String>,
     #[serde(default)]
     pub phone: Option<String>,
+    /// Which screen this came from: `manual`, `reception_sheet`, or `ledger`.
+    ///
+    /// Absent means typed at the counter, which is what every caller written
+    /// before this field existed was doing.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Which line of the reception sheet, zero-based. Ignored unless `source`
+    /// says a sheet.
+    #[serde(default)]
+    pub source_row_index: Option<u32>,
 }
 
 /// GET /v1/course/customers/{customer_id}
@@ -209,9 +221,14 @@ pub async fn get_customer(
 pub async fn create_customer(
     State(state): State<AppState>,
     headers: HeaderMap,
+    principal: Option<Extension<CallerPrincipal>>,
     Json(request): Json<CreateCustomerRequest>,
 ) -> Result<Json<CustomerDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let source = match request.source.as_deref() {
+        Some(value) => CustomerRegistrationSource::parse(value).map_err(AppError::from)?,
+        None => CustomerRegistrationSource::Manual,
+    };
     let input = NewCustomer::try_new(
         request.name,
         request.name_kana,
@@ -219,10 +236,21 @@ pub async fn create_customer(
         request.phone,
     )
     .map_err(AppError::from)?;
-    let created = CreateCustomerUseCase::new(customer_gateway(&state))
-        .execute(credentials, input)
-        .await
-        .map_err(AppError::from)?;
+    let created = CreateCustomerUseCase::new(
+        customer_gateway(&state),
+        state.customer_registrations.clone(),
+    )
+    .execute(
+        credentials,
+        input,
+        CustomerProvenance {
+            source,
+            registered_by: principal.and_then(|Extension(caller)| caller.subject),
+            source_row_index: request.source_row_index,
+        },
+    )
+    .await
+    .map_err(AppError::from)?;
     Ok(Json(CustomerDto::from(&created)))
 }
 
@@ -247,6 +275,13 @@ pub struct CustomerVisitDto {
     /// Field's own status. Worth showing only for `other`, where `kind` has
     /// nothing to say.
     pub status: String,
+    /// Whether the booking is in this person's own name. False for a round
+    /// they played in somebody else's group, where the money and the headcount
+    /// belong to whoever booked it and are reported as zero here.
+    pub booked: bool,
+    /// Whether the desk recorded them arriving, as opposed to the tee time
+    /// having passed on a booking nobody cancelled.
+    pub checked_in: bool,
 }
 
 impl From<&CustomerVisit> for CustomerVisitDto {
@@ -261,6 +296,8 @@ impl From<&CustomerVisit> for CustomerVisitDto {
             currency: value.currency().map(str::to_string),
             kind: value.kind().as_str().to_string(),
             status: value.status().to_string(),
+            booked: value.booked(),
+            checked_in: value.checked_in(),
         }
     }
 }
@@ -375,11 +412,72 @@ pub async fn get_customer_visits(
     let report = GetCustomerVisitsUseCase::new(
         reservation_gateway(&state),
         state.customer_grade_rules.clone(),
+        state.visit_checkins.clone(),
     )
     .execute(credentials, &customer_id, params.limit, Utc::now())
     .await
     .map_err(AppError::from)?;
     Ok(Json(CustomerVisitHistoryDto::from(&report)))
+}
+
+// ─── Registration provenance ─────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerRegistrationDto {
+    /// `manual`, `reception_sheet`, or `ledger`.
+    pub source: String,
+    /// The signed-in caller who created the entry. Absent on a token that
+    /// carried no subject.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registered_by: Option<String>,
+    /// Zero-based line of the reception sheet. Only ever set for a sheet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_row_index: Option<u32>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<&CustomerRegistration> for CustomerRegistrationDto {
+    fn from(value: &CustomerRegistration) -> Self {
+        Self {
+            source: value.source.as_str().to_string(),
+            registered_by: value.registered_by.clone(),
+            source_row_index: value.source_row_index,
+            created_at: value.created_at,
+        }
+    }
+}
+
+/// GET /v1/course/customers/{customer_id}/registration
+///
+/// How this entry got into the ledger. `null` for everybody registered before
+/// CourseBoard started keeping it — most of the ledger, for a long while — so
+/// the screen says "not recorded" rather than treating it as a failure.
+#[utoipa::path(
+    get,
+    path = "/v1/course/customers/{customer_id}/registration",
+    tag = "course",
+    params(("customer_id" = String, Path, description = "Customer id")),
+    responses(
+        (status = 200, description = "How the entry was created", body = Option<CustomerRegistrationDto>),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_customer_registration(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(customer_id): Path<String>,
+) -> Result<Json<Option<CustomerRegistrationDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let customer_id = CustomerId::try_new(customer_id).map_err(AppError::from)?;
+    let found = GetCustomerRegistrationUseCase::new(state.customer_registrations.clone())
+        .execute(credentials, &customer_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(found.as_ref().map(CustomerRegistrationDto::from)))
 }
 
 // ─── Customer grades ──────────────────────────────────────────────────────────

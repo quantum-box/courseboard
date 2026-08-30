@@ -12,6 +12,8 @@
 //! empty history here, and the screen has to say that rather than let an empty
 //! table read as "never been".
 
+use std::collections::HashSet;
+
 use chrono::{DateTime, Utc};
 
 use super::{CourseId, Reservation, ReservationId};
@@ -98,6 +100,17 @@ pub struct CustomerVisit {
     /// `kind` cannot speak for.
     status: String,
     kind: VisitKind,
+    /// Whether this booking is in this person's own name.
+    ///
+    /// False for a round they played in somebody else's group, which only
+    /// exists here because the desk checked them in — Field cannot be asked
+    /// about `golfParty.players[].customerId`. The money and the headcount on
+    /// such a round belong to whoever booked it, so they are left off.
+    booked: bool,
+    /// Whether somebody was seen at the desk, as opposed to the tee time
+    /// having passed on a booking nobody cancelled. Both read as a round
+    /// played; only one of them is a record of it.
+    checked_in: bool,
 }
 
 impl CustomerVisit {
@@ -112,6 +125,32 @@ impl CustomerVisit {
             currency: reservation.billing().currency.clone(),
             status: reservation.status().to_string(),
             kind: classify(reservation, now),
+            booked: true,
+            checked_in: false,
+        }
+    }
+
+    /// A round this person played in somebody else's group.
+    ///
+    /// Built from the check-in rather than from the booking's own customer,
+    /// because the booking's customer is somebody else. What is dropped is
+    /// deliberate: the takings and the headcount are the booker's, and
+    /// splitting either between the group would be inventing a number.
+    pub fn as_guest(reservation: &Reservation) -> Self {
+        Self {
+            id: reservation.id().clone(),
+            reservation_number: reservation.reservation_number().to_string(),
+            starts_at: reservation.starts_at(),
+            course_id: reservation.golf_course_id().cloned(),
+            players: 0,
+            amount: 0,
+            currency: None,
+            status: reservation.status().to_string(),
+            // Somebody stood at the desk. That is not a thing the clock can
+            // take back, so it is not re-derived from the booking's status.
+            kind: VisitKind::Visited,
+            booked: false,
+            checked_in: true,
         }
     }
 
@@ -149,6 +188,32 @@ impl CustomerVisit {
 
     pub fn kind(&self) -> VisitKind {
         self.kind
+    }
+
+    /// Whether the booking is in this person's own name.
+    pub fn booked(&self) -> bool {
+        self.booked
+    }
+
+    /// Whether the desk recorded them arriving, rather than the clock implying
+    /// it.
+    pub fn checked_in(&self) -> bool {
+        self.checked_in
+    }
+
+    /// Marks a booking of their own as one they were actually seen at.
+    ///
+    /// Only ever upgrades. A booking with no check-in stays as the clock reads
+    /// it, because every round played before the desk started checking people
+    /// in has no row and would otherwise be demoted to "never came".
+    pub fn confirm_attended(&mut self) {
+        self.checked_in = true;
+        if matches!(
+            self.kind,
+            VisitKind::Upcoming | VisitKind::Other | VisitKind::NoShow
+        ) {
+            self.kind = VisitKind::Visited;
+        }
     }
 }
 
@@ -218,10 +283,43 @@ impl CustomerVisitHistory {
         display_limit: u32,
         truncated: bool,
     ) -> Self {
+        Self::build_with_checkins(
+            reservations,
+            Vec::new(),
+            &HashSet::new(),
+            now,
+            display_limit,
+            truncated,
+        )
+    }
+
+    /// Build from the bookings this person took, plus what the desk saw.
+    ///
+    /// Two separate corrections to a history read from bookings alone.
+    /// `attended` names their own bookings somebody was checked in against, so
+    /// those stop being an inference. `guest_reservations` are rounds they
+    /// played in other people's groups, which no query against Field can find:
+    /// it records one customer per reservation, and the rest of the group is
+    /// in CourseBoard's own `golfParty`.
+    pub fn build_with_checkins(
+        reservations: Vec<Reservation>,
+        guest_reservations: Vec<Reservation>,
+        attended: &HashSet<String>,
+        now: DateTime<Utc>,
+        display_limit: u32,
+        truncated: bool,
+    ) -> Self {
         let display_limit = display_limit.clamp(1, MAX_VISIT_HISTORY_LIMIT) as usize;
         let mut all: Vec<CustomerVisit> = reservations
             .iter()
-            .map(|reservation| CustomerVisit::from_reservation(reservation, now))
+            .map(|reservation| {
+                let mut visit = CustomerVisit::from_reservation(reservation, now);
+                if attended.contains(reservation.id().as_str()) {
+                    visit.confirm_attended();
+                }
+                visit
+            })
+            .chain(guest_reservations.iter().map(CustomerVisit::as_guest))
             .collect();
         // Field orders by start time descending, but a history that silently
         // depended on upstream ordering would reorder itself the day that
@@ -260,7 +358,12 @@ fn summarize(visits: &[CustomerVisit], truncated: bool) -> CustomerVisitSummary 
         match visit.kind {
             VisitKind::Visited => {
                 summary.visits += 1;
-                summary.players += i64::from(visit.players.max(0));
+                // A round played in somebody else's group adds to how often
+                // this person comes and to nothing else: the seats and the
+                // takings are the booker's.
+                if visit.booked {
+                    summary.players += i64::from(visit.players.max(0));
+                }
                 summary.total_amount += visit.amount;
                 if visit.amount > 0 {
                     priced_players += i64::from(visit.players.max(0));

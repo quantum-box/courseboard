@@ -21,6 +21,21 @@ export type CustomerVisit = {
   kind: VisitKind
   /** Field's own status, worth showing only when `kind` is `other`. */
   status: string
+  /**
+   * Whether the booking is in this person's own name.
+   *
+   * False for a round they played in somebody else's group. Field records one
+   * customer per reservation, so such a round only exists here because the desk
+   * checked them in — and its money and headcount belong to whoever booked it,
+   * which is why both come back as zero.
+   */
+  booked: boolean
+  /**
+   * Whether the desk recorded them arriving, as opposed to the tee time having
+   * passed on a booking nobody cancelled. Everything from before check-ins were
+   * kept is the latter, which is not a sign that nobody came.
+   */
+  checkedIn: boolean
 }
 
 export type CustomerVisitSummary = {
