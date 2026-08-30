@@ -93,7 +93,7 @@ export function NewReservationEditor({
 
   // The plans list loads on its own clock, so the sheet can open before it
   // arrives. Picking the default once it does — and not overwriting a plan the
-  // desk already chose — keeps a caddie round from being sent as self-play.
+  // desk already chose.
   const defaultPlanId = coursePlans[0]?.reservationServiceId ?? ''
   useEffect(() => {
     if (!target) return
@@ -159,7 +159,7 @@ export function NewReservationEditor({
     if (!target.resourceId) return
     setSaving(true)
     try {
-      const created = await courseboardApiJson<{ id: string }>('/v1/course/reservations', {
+      const created = await courseboardApiJson<{ id: string; warnings?: string[] }>('/v1/course/reservations', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -181,6 +181,25 @@ export function NewReservationEditor({
         }),
       })
       showToast({ tone: 'success', message: t('ledger:newReservation.saved') })
+      // After the success, and as a warning rather than an error: the tee time
+      // is sold. The desk takes these exceptions every week — a 平日会員 playing
+      // Saturday at visitor rates — so this tells them, and nothing more.
+      for (const warning of created.warnings ?? []) {
+        // Mapped rather than interpolated: an unknown warning from a newer
+        // server must not render its own key at the desk.
+        const message =
+          warning === 'member_play_window_day'
+            ? t('ledger:newReservation.warning.member_play_window_day')
+            : warning === 'member_play_window_time'
+              ? t('ledger:newReservation.warning.member_play_window_time')
+              : null
+        if (!message) continue
+        showToast({
+          tone: 'warning',
+          title: t('ledger:newReservation.memberWindowTitle'),
+          message,
+        })
+      }
       // Close first, and report the unregistered names to the page rather than
       // holding them here. The booking is done, and it has to *look* done —
       // a prompt over a still-open booking form reads as "the booking is not

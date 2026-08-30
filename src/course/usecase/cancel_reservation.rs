@@ -150,6 +150,16 @@ mod tests {
 
     #[async_trait]
     impl ReservationGateway for FakeReservations {
+        async fn list_customer_reservations(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _customer_id: &crate::course::domain::CustomerId,
+            _limit: u32,
+            _offset: u32,
+        ) -> Result<Vec<Reservation>, CourseError> {
+            unreachable!("not used by this test")
+        }
+
         async fn list_reservations(
             &self,
             _credentials: GatewayCredentials<'_>,

@@ -11,8 +11,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, MySqlPool};
 
 use crate::{
-    config::SettlementSource, course::infrastructure::DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
-    field_api::DEFAULT_FIELD_API_URL, AppError,
+    config::SettlementSource,
+    course::infrastructure::{DEFAULT_FIELD_GENERIC_PATHS, DEFAULT_MULTI_COURSE_PRODUCT_WRITES},
+    field_api::DEFAULT_FIELD_API_URL,
+    AppError,
 };
 
 #[derive(Clone)]
@@ -43,6 +45,12 @@ pub struct CancellationFeeConfig {
     /// one differs, and only a whole close shown to agree justifies
     /// `courseboard`.
     pub settlement_source: SettlementSource,
+    /// Whether confirmed shifts are mirrored into Field's HRM (ADR-0013).
+    /// Off unless the environment sets it; see `config.rs` for why.
+    pub field_shift_writeback: bool,
+    /// Whether Field's generic paths replace the golf extension aliases
+    /// (ADR-0010). Off unless the environment sets it; see `config.rs` for why.
+    pub field_generic_paths: bool,
 }
 
 impl CancellationFeeConfig {
@@ -80,6 +88,8 @@ impl Default for CancellationFeeConfig {
             twilio_from_number: None,
             multi_course_product_writes: DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
             settlement_source: SettlementSource::Field,
+            field_shift_writeback: false,
+            field_generic_paths: DEFAULT_FIELD_GENERIC_PATHS,
         }
     }
 }

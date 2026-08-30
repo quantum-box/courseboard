@@ -66,3 +66,14 @@ export function yearMonthDates(candidate: unknown): string[] {
     `${range.value}-${String(index + 1).padStart(2, '0')}`
   ))
 }
+
+/**
+ * The month `amount` months away, as `YYYY-MM`.
+ *
+ * Day 1 on purpose: stepping from the 31st would skip February.
+ */
+export function shiftYearMonth(candidate: string, amount: number): string {
+  const [year, month] = candidate.split('-').map(Number)
+  const shifted = new Date(year ?? 1970, (month ?? 1) - 1 + amount, 1)
+  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, '0')}`
+}

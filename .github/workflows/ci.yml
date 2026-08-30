@@ -143,7 +143,7 @@ jobs:
 
   desktop_bundle:
     name: Desktop bundle (${{ matrix.platform }})
-    # Windows runners are expensive: bundle only after a merge to main.
+    # Bundle only after a merge to main; PRs do not need a release bundle.
     if: github.event_name == 'push'
     needs: frontend
     strategy:
@@ -154,9 +154,13 @@ jobs:
           # 4 GiB では runner ごと落ちる。ADR-0027 の heavy Rust job 扱い。
           - platform: linux-x64
             os: tachyoncloud-4vcpu
+          # GitHub-hosted Windows runners bill at twice the Linux rate, and this
+          # leg cost $15 of the org's $59 Windows spend in 2026-08 while only
+          # re-proving what desktop-release.yml already builds. Disabled here;
+          # restore the entry below to bring post-merge coverage back.
           # ADR-0027 例外: Windows 固有 job は GitHub-hosted matrix を維持する。
-          - platform: windows-x64
-            os: windows-latest
+          # - platform: windows-x64
+          #   os: windows-latest
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -177,7 +181,7 @@ jobs:
       # host key が入っていない。CARGO_NET_GIT_FETCH_WITH_CLI により cargo は git を
       # 呼ぶため、photon の取得が Host key verification failed で落ちる。
       # ssh-keyscan の TOFU ではなく、TLS 検証を通る meta API の公開鍵を使う。
-      # Windows は GitHub-hosted のままで host key を持つので対象外。
+      # runner.os ガードは Windows leg を復帰させたときのために残す。
       - name: Trust github.com SSH host key
         if: runner.os == 'Linux'
         shell: bash

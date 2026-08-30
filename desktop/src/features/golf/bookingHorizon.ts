@@ -23,6 +23,30 @@ export type BookingHorizonResponse = {
   bookableThrough: string
 }
 
+export type BookingHorizonStatusResponse = BookingHorizonResponse & {
+  /** Per-course dated inventory edge. `null` means no build was recorded. */
+  generatedThrough: Record<string, string | null>
+}
+
+export type InventoryHorizonGap = {
+  bookableThrough: string
+  generatedThrough: string | null
+}
+
+/**
+ * The policy edge is only a target. It is truthful to call the book open to
+ * that date once the course's generated inventory reaches it.
+ */
+export function inventoryHorizonGap(
+  bookableThrough: string,
+  generatedThrough: string | null | undefined,
+): InventoryHorizonGap | null {
+  const actual = generatedThrough ?? null
+  return actual === null || actual < bookableThrough
+    ? { bookableThrough, generatedThrough: actual }
+    : null
+}
+
 export type HorizonIssue = 'days' | 'through'
 
 export const HORIZON_MIN_DAYS = 1

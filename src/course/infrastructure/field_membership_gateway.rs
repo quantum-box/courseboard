@@ -10,7 +10,8 @@ use serde_json::{json, Map, Value};
 
 use crate::course::domain::{
     AssignMembershipPlan, CourseError, CustomerId, CustomerMembership, GatewayCredentials,
-    MembershipGateway, MembershipPlan, MembershipPlanId, UpsertMembershipPlan,
+    MembershipGateway, MembershipPlan, MembershipPlanId, SetMemberNumber, UpsertMembershipPlan,
+    MEMBER_NUMBER_CREDENTIAL_KIND,
 };
 
 use super::field_gateway::{field_send_json, normalize_base_url, urlencoding_path};
@@ -27,6 +28,40 @@ impl FieldMembershipGateway {
             client,
             base_url: normalize_base_url(field_api_url),
         }
+    }
+}
+
+impl FieldMembershipGateway {
+    /// Update one credential in place. `archive` withdraws it; Field keeps the
+    /// row so a renumbering stays auditable.
+    async fn write_credential(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        credential_id: &str,
+        label: Option<&str>,
+        archive: bool,
+    ) -> Result<(), CourseError> {
+        let path = format!(
+            "/v1/erp/membership/credentials/{}",
+            urlencoding_path(credential_id)
+        );
+        let mut body = Map::new();
+        if let Some(label) = label {
+            body.insert("label".into(), json!(label));
+        }
+        if archive {
+            body.insert("archived".into(), json!(true));
+        }
+        let _: Value = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::PUT,
+            &path,
+            credentials,
+            Some(&Value::Object(body)),
+        )
+        .await?;
+        Ok(())
     }
 }
 
@@ -120,6 +155,67 @@ impl MembershipGateway for FieldMembershipGateway {
         Ok(map_membership(customer_id, view))
     }
 
+    async fn set_member_number(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &SetMemberNumber,
+    ) -> Result<CustomerMembership, CourseError> {
+        let view_path = format!(
+            "/v1/erp/membership/customers/{}",
+            urlencoding_path(input.customer_id.as_str())
+        );
+        // Read first, because Field has no upsert here: numbering somebody a
+        // second time without archiving the first would leave two live member
+        // numbers on one person, and which one the desk sees would be luck.
+        let view: FieldMembershipViewDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::GET,
+            &view_path,
+            credentials,
+            None,
+        )
+        .await?;
+        let existing = find_member_number(&view.credentials).map(|found| found.id.clone());
+
+        match (existing, input.member_number.as_deref()) {
+            // Renumbering: update in place, so the credential keeps its
+            // identity and history rather than accumulating archived copies.
+            (Some(id), Some(number)) => {
+                self.write_credential(credentials, &id, Some(number), false)
+                    .await?;
+            }
+            // Clearing: archived rather than deleted, matching how Field
+            // treats a withdrawn credential everywhere else.
+            (Some(id), None) => {
+                self.write_credential(credentials, &id, None, true).await?;
+            }
+            (None, Some(number)) => {
+                let path = format!(
+                    "/v1/erp/membership/customers/{}/credentials",
+                    urlencoding_path(input.customer_id.as_str())
+                );
+                let _: Value = field_send_json(
+                    &self.client,
+                    &self.base_url,
+                    reqwest::Method::POST,
+                    &path,
+                    credentials,
+                    Some(&json!({
+                        "kind": MEMBER_NUMBER_CREDENTIAL_KIND,
+                        "label": number,
+                    })),
+                )
+                .await?;
+            }
+            // Clearing a number nobody has is what the desk asked for.
+            (None, None) => {}
+        }
+
+        self.get_customer_membership(credentials, &input.customer_id)
+            .await
+    }
+
     async fn assign_membership_plan(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -190,6 +286,21 @@ struct FieldMembershipViewDto {
     active_plan: Option<FieldMembershipPlanDto>,
     #[serde(default)]
     active_assignment: Option<FieldMembershipAssignmentDto>,
+    /// Every credential Field holds for this customer, of every kind. Golf's
+    /// member number is one of them, picked out by `kind`.
+    #[serde(default)]
+    credentials: Vec<FieldCustomerCredentialDto>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldCustomerCredentialDto {
+    id: String,
+    kind: String,
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    archived: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -212,11 +323,26 @@ fn map_plan(dto: FieldMembershipPlanDto) -> MembershipPlan {
 }
 
 fn map_membership(customer_id: &CustomerId, view: FieldMembershipViewDto) -> CustomerMembership {
+    let member_number = find_member_number(&view.credentials).map(|found| found.label.clone());
     CustomerMembership::reconstitute(
         customer_id.clone(),
         view.active_plan.map(map_plan),
         view.active_assignment.and_then(|value| value.started_on),
     )
+    .with_member_number(member_number)
+}
+
+/// The live member-number credential, if the club has issued one.
+///
+/// Archived ones are skipped: Field archives rather than deletes, so a member
+/// who was renumbered still has the old credential on file, and taking the
+/// first match would print a number the club has already withdrawn.
+fn find_member_number(
+    credentials: &[FieldCustomerCredentialDto],
+) -> Option<&FieldCustomerCredentialDto> {
+    credentials
+        .iter()
+        .find(|credential| !credential.archived && credential.kind == MEMBER_NUMBER_CREDENTIAL_KIND)
 }
 
 fn create_plan_body(input: &UpsertMembershipPlan) -> Value {

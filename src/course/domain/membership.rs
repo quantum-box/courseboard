@@ -25,6 +25,18 @@ use super::{CourseError, CustomerId, MembershipPlanId};
 
 const MAX_TEXT_LENGTH: usize = 120;
 
+/// What golf calls the credential a member number is stored as.
+///
+/// Field's credential registry is generic — a clinic keeps vaccination
+/// certificates in the same table — so the `kind` string is where golf's
+/// meaning goes. Named here rather than spelled inline at the gateway, because
+/// a typo would silently create a second, invisible kind of member number.
+pub const MEMBER_NUMBER_CREDENTIAL_KIND: &str = "member_number";
+
+/// Longest member number the desk can record. Club numbering is short; a
+/// longer value is somebody typing a name into the wrong box.
+const MAX_MEMBER_NUMBER_LENGTH: usize = 40;
+
 /// A membership a course sells, as the desk configures it.
 #[derive(Debug, Clone, PartialEq, Eq, Getters)]
 pub struct MembershipPlan {
@@ -139,6 +151,11 @@ pub struct CustomerMembership {
     plan: Option<MembershipPlan>,
     /// When the current membership started, as Field recorded it.
     started_on: Option<String>,
+    /// The club's own number for this member, held as a Field credential
+    /// rather than as free text on a booking. A member keeps one number across
+    /// every round they play; the free-text `golfParty.players[].memberNumber`
+    /// stays only for rows nobody has linked to the ledger yet.
+    member_number: Option<String>,
 }
 
 impl CustomerMembership {
@@ -151,7 +168,19 @@ impl CustomerMembership {
             customer_id: customer_id.into(),
             plan,
             started_on,
+            member_number: None,
         }
+    }
+
+    pub fn with_member_number(mut self, member_number: Option<String>) -> Self {
+        self.member_number = member_number
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        self
+    }
+
+    pub fn member_number(&self) -> Option<&str> {
+        self.member_number.as_deref()
     }
 
     /// Nobody has an assignment, so this customer is a visitor.
@@ -184,6 +213,43 @@ impl CustomerMembership {
     /// caller decides how to word "not a member" in the operator's language.
     pub fn plan_name(&self) -> Option<&str> {
         self.plan.as_ref().map(MembershipPlan::name)
+    }
+}
+
+/// Recording the club's number for a member.
+///
+/// Separate from granting a plan: a club numbers people at a different moment
+/// from when it sells them the membership, and often renumbers without the
+/// membership changing at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetMemberNumber {
+    pub customer_id: CustomerId,
+    /// `None` clears the number. A member who was numbered by mistake has to
+    /// be un-numbered, and a blank string stored as the number would read as a
+    /// member whose number is the empty string.
+    pub member_number: Option<String>,
+}
+
+impl SetMemberNumber {
+    pub fn try_new(
+        customer_id: CustomerId,
+        member_number: Option<String>,
+    ) -> Result<Self, CourseError> {
+        let member_number = member_number
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        if member_number
+            .as_deref()
+            .is_some_and(|value| value.chars().count() > MAX_MEMBER_NUMBER_LENGTH)
+        {
+            return Err(CourseError::BadRequest(
+                "a member number must be at most 40 characters",
+            ));
+        }
+        Ok(Self {
+            customer_id,
+            member_number,
+        })
     }
 }
 

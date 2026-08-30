@@ -1,5 +1,7 @@
 /** 受付用紙を読み取って顧客台帳に入れるまでの、画面側の型と判断。 */
 
+import { heifToJpeg } from './heif'
+
 /**
  * What the desk may pick.
  *
@@ -74,45 +76,53 @@ export function fileValidationError(file: File | null): 'required' | 'size' | 't
 }
 
 /**
- * True for a photo taken on an iPhone, however it reached the desk.
+ * What the file actually is, read from its first bytes.
  *
- * By type or by extension: a HEIC that arrived over AirDrop, a share sheet, or
- * a file server frequently has an empty `type`, and the extension is then the
- * only thing that says what it is.
+ * The name and the MIME type are both unreliable here in ways that decide
+ * whether the sheet can be read at all. A phone photo shared through an app
+ * often arrives as a JPEG still called `.heic`, and a HEIC arriving over
+ * AirDrop or a file server frequently carries no MIME type at all. Sending the
+ * first to a HEIC decoder fails on a file that was always readable; refusing
+ * the second turns a photo the desk is holding into "choose another file".
  */
-export function isHeifFile(file: File) {
-  const type = file.type.toLowerCase()
-  const name = file.name.toLowerCase()
-  return (
-    type === 'image/heic'
-    || type === 'image/heif'
-    || name.endsWith('.heic')
-    || name.endsWith('.heif')
-  )
+export type SheetBytes = 'image/jpeg' | 'image/png' | 'application/pdf' | 'heif' | 'unknown'
+
+export async function sniffSheetBytes(file: File): Promise<SheetBytes> {
+  const head = new Uint8Array(await file.slice(0, 12).arrayBuffer())
+  if (startsWith(head, [0xff, 0xd8, 0xff])) return 'image/jpeg'
+  if (startsWith(head, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'image/png'
+  if (startsWith(head, [0x25, 0x50, 0x44, 0x46])) return 'application/pdf'
+  // Every HEIC, HEIF and AVIF is an ISO base media file, and they all name the
+  // box at offset 4 the same way. The brand that follows says which one it is,
+  // and the decoder handles all of them, so the box is enough.
+  if (String.fromCharCode(...head.slice(4, 8)) === 'ftyp') return 'heif'
+  return 'unknown'
+}
+
+function startsWith(bytes: Uint8Array, magic: number[]) {
+  return magic.every((byte, index) => bytes[index] === byte)
 }
 
 /**
- * The file as it will be uploaded: HEIC becomes JPEG, everything else is passed
- * through untouched.
+ * The file as it will be uploaded: a phone photo becomes JPEG, everything the
+ * reader already takes is passed through.
  *
- * Converted in the browser rather than upstream, the same way Field's own
- * receipt OCR handles it. The decoder is a large dependency, so it is imported
- * only when a HEIC is actually picked — a desk working from scans never
- * downloads it.
+ * Routed on the bytes rather than on the name, so a JPEG the phone called
+ * `.heic` is uploaded as the JPEG it already is instead of being handed to a
+ * decoder that refuses it.
  *
  * The preview uses the converted file too: browsers other than Safari cannot
  * paint a HEIC, and a blank pane beside the rows defeats the whole screen.
  */
 export async function prepareReceptionSheet(file: File): Promise<File> {
-  if (!isHeifFile(file)) return file
-  const { default: heic2any } = await import('heic2any')
-  const converted = await heic2any({ blob: file, quality: 0.92, toType: 'image/jpeg' })
-  const jpeg = Array.isArray(converted) ? converted[0] : converted
-  if (!jpeg) throw new Error('heic2any returned no image')
-  return new File([jpeg], 'document.jpg', {
-    lastModified: file.lastModified,
-    type: 'image/jpeg',
-  })
+  const bytes = await sniffSheetBytes(file)
+  if (bytes === 'heif') return heifToJpeg(file)
+  // Nothing recognisable to go on: leave it alone and let the validation below
+  // answer on the file's own type, the way it did before anything was sniffed.
+  if (bytes === 'unknown' || bytes === file.type) return file
+  // Readable bytes under a wrong label. Re-labelling is the whole conversion —
+  // the size check and the reader both go by the type, not by the name.
+  return new File([file], file.name, { lastModified: file.lastModified, type: bytes })
 }
 
 /**

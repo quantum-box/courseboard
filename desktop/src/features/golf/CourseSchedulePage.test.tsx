@@ -45,6 +45,7 @@ type FieldRule = {
 const courseId = 'golfcrs-ui-roundtrip'
 let fieldRules: FieldRule[] = []
 let putBodies: Array<{ rules: UiRule[] }> = []
+let generatedThrough: string | null = '2026-11-08'
 
 function fieldRule(overrides: Partial<FieldRule> = {}): FieldRule {
   return {
@@ -105,6 +106,7 @@ describe('CourseSchedulePage save path', () => {
     clearResourceCache()
     fieldRules = [fieldRule()]
     putBodies = []
+    generatedThrough = '2026-11-08'
     api.json.mockReset()
     toast.show.mockReset()
     api.json.mockImplementation(async (path: string, init?: RequestInit) => {
@@ -133,7 +135,11 @@ describe('CourseSchedulePage save path', () => {
         }
       }
       if (path === '/v1/course/booking-horizon') {
-        return { days: 90, bookableThrough: '2026-11-08' }
+        return {
+          days: 90,
+          bookableThrough: '2026-11-08',
+          generatedThrough: { [courseId]: generatedThrough },
+        }
       }
       if (path === `/v1/course/courses/${courseId}/schedule` && init?.method === 'PUT') {
         const body = JSON.parse(String(init.body)) as { rules: UiRule[] }
@@ -155,6 +161,37 @@ describe('CourseSchedulePage save path', () => {
   afterEach(() => {
     cleanup()
     clearResourceCache()
+  })
+
+  it('does not claim bookings are open when weekly hours exist but no inventory was built', async () => {
+    generatedThrough = null
+    renderPage()
+
+    expect(await screen.findByText(
+      '2026年11月8日まで受ける設定ですが、スタート枠はまだ作られていません。',
+    )).toBeTruthy()
+    expect(screen.queryByText(/いま予約を受けられるのは/)).toBeNull()
+  })
+
+  it('warns instead of claiming the target date when inventory stops before it', async () => {
+    generatedThrough = '2026-10-31'
+    renderPage()
+
+    expect(await screen.findByText(
+      '2026年11月8日まで受ける設定ですが、スタート枠は2026年10月31日までしか作られていません。',
+    )).toBeTruthy()
+    expect(screen.queryByText(/いま予約を受けられるのは/)).toBeNull()
+  })
+
+  it('states the configured date only after generated inventory reaches it', async () => {
+    renderPage()
+
+    expect(await screen.findByText(
+      'いま予約を受けられるのは 2026年11月8日 までです。',
+    )).toBeTruthy()
+    expect(screen.queryByText(
+      '予約を受ける設定とスタート枠が一致していません',
+    )).toBeNull()
   })
 
   it('sends the persisted id and keeps both kinds of Field-owned date fields', async () => {

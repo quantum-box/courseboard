@@ -10,6 +10,11 @@ export const schedule: DeepPartial<typeof source> = {
     through: 'Bookings are open through {{date}}.',
     change: 'Change how far ahead you sell',
   },
+  inventoryGap: {
+    title: 'The booking window and start slots do not match',
+    missing: 'Bookings are configured through {{date}}, but no start slots have been built yet.',
+    behind: 'Bookings are configured through {{date}}, but start slots have only been built through {{generatedThrough}}.',
+  },
   week: {
     badge: 'Weekly rule',
     title: 'Hours you take bookings in',

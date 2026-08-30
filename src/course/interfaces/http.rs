@@ -2,7 +2,7 @@
 //!
 //! Handlers stay thin: parse request → call use case → map domain → response DTO.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
     extract::{Path, Query, State},
@@ -26,22 +26,23 @@ use crate::course::domain::{
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
-    FieldReservationGateway, MySqlCaddieRankFeeRepository, MySqlCourseOrderRepository,
-    MySqlGeneratedThroughRepository, MySqlPlayerTagOptionsRepository,
-    MySqlPricingSettingsRepository, MySqlSlotOverrideRepository, PartyPlayerInput,
+    FieldReservationGateway, FieldStaffShiftGateway, MySqlCaddieDutyRepository,
+    MySqlCaddieRankFeeRepository, MySqlCourseOrderRepository, MySqlGeneratedThroughRepository,
+    MySqlPlayerTagOptionsRepository, MySqlPricingSettingsRepository, MySqlSlotOverrideRepository,
+    PartyPlayerInput,
 };
 use crate::course::usecase::{
-    CancelReservationUseCase, ChangeReservationPlanUseCase, CreateCourseUseCase,
-    CreateReservationInput, CreateReservationUseCase, DeleteCourseUseCase,
+    BookingHorizonStatus, CancelReservationUseCase, ChangeReservationPlanUseCase,
+    CreateCourseUseCase, CreateReservationInput, CreateReservationUseCase, DeleteCourseUseCase,
     DeleteSlotOverridesUseCase, ExtendCourseInventoryUseCase, GenerateCourseTimeSlotsUseCase,
     GetBookingHorizonUseCase, GetCourseOrderUseCase, GetCourseScheduleUseCase, GetTeeLedgerUseCase,
     GetTeeSheetUseCase, LinkCourseResourceUseCase, ListCaddieAssignmentsUseCase,
     ListCaddiesUseCase, ListCoursesUseCase, ListProductSlotsUseCase,
     ListReservationProductsUseCase, ListResourcesUseCase, ListSlotOverridesUseCase,
-    ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase,
-    SeedDemoBoardUseCase, SetBookingHorizonUseCase, UpdateCourseUseCase,
-    UpdateReservationBookingInput, UpdateReservationBookingUseCase, UpdateReservationPartyUseCase,
-    UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
+    MirrorShiftToField, ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase,
+    ReplaceProductSlotsUseCase, SeedDemoBoardUseCase, SetBookingHorizonUseCase,
+    UpdateCourseUseCase, UpdateReservationBookingInput, UpdateReservationBookingUseCase,
+    UpdateReservationPartyUseCase, UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -67,6 +68,32 @@ pub(crate) fn ops_gateway(state: &AppState) -> Arc<FieldGolfOpsGateway> {
     ))
 }
 
+/// The generic half of a confirmed shift, written to Field's HRM.
+///
+/// The catalog gateway is handed over twice on purpose: it answers both the
+/// course-to-resource question and the schedule behind that resource, and
+/// building a second one would open a second connection pool for the same
+/// upstream.
+/// `None` when the write-back is switched off, which is the default. The use
+/// cases then behave the way they did before it existed: CourseBoard writes
+/// its own tables and tells Field nothing. See `config.rs` for why that is the
+/// default rather than the exception.
+pub(crate) fn shift_mirror(state: &AppState) -> Option<Arc<MirrorShiftToField>> {
+    if !state.cancellation_fee_config.field_shift_writeback {
+        return None;
+    }
+    let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
+    let catalog = catalog_gateway(state);
+    Some(Arc::new(MirrorShiftToField::new(
+        Arc::new(FieldStaffShiftGateway::new(
+            state.http_client.clone(),
+            field_api_url,
+        )),
+        catalog.clone(),
+        catalog,
+    )))
+}
+
 pub(crate) fn reservation_gateway(state: &AppState) -> Arc<FieldReservationGateway> {
     let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
     Arc::new(FieldReservationGateway::new(
@@ -88,6 +115,11 @@ pub(crate) fn course_order_gateway(state: &AppState) -> Arc<MySqlCourseOrderRepo
 /// And what a round pays at each caddie rank.
 pub(crate) fn caddie_rank_fee_gateway(state: &AppState) -> Arc<MySqlCaddieRankFeeRepository> {
     state.caddie_rank_fees()
+}
+
+/// And the jobs a caddie is put on when they are not walking a round.
+pub(crate) fn caddie_duty_gateway(state: &AppState) -> Arc<MySqlCaddieDutyRepository> {
+    state.caddie_duties()
 }
 
 /// And the pricing inputs the simulator runs on.
@@ -197,6 +229,9 @@ impl From<CourseError> for AppError {
             CourseError::TenantForbidden => AppError::TenantForbidden,
             CourseError::BadRequest(message) => AppError::BadRequest(message),
             CourseError::Conflict(message) => AppError::Conflict(message),
+            CourseError::UpstreamClient { status: 401, .. } => {
+                AppError::UpstreamAuthenticationExpired
+            }
             CourseError::UpstreamClient { status, message } => match StatusCode::from_u16(status) {
                 Ok(status) if status.is_client_error() => {
                     AppError::UpstreamClient { status, message }
@@ -816,6 +851,10 @@ pub struct CreateReservationRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreatedReservationDto {
     pub id: String,
+    /// Things the desk should know about the booking that was just written.
+    /// Never a refusal — the tee time is sold either way. Empty is normal.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 /// POST /v1/course/reservations
@@ -849,8 +888,9 @@ pub async fn create_reservation(
         commercial_gateway(&state),
         catalog.clone(),
         catalog,
-        state.caddie_shifts(),
         slot_override_gateway(&state),
+        super::http_customers::membership_gateway(&state),
+        state.membership_play_windows(),
     );
     let party = party_from_request(
         request.competition_name,
@@ -859,7 +899,7 @@ pub async fn create_reservation(
         request.players.into_iter().map(Into::into).collect(),
     )
     .map_err(AppError::from)?;
-    let id = use_case
+    let created = use_case
         .execute(
             credentials,
             CreateReservationInput {
@@ -882,7 +922,10 @@ pub async fn create_reservation(
         )
         .await
         .map_err(AppError::from)?;
-    Ok(Json(CreatedReservationDto { id: id.to_string() }))
+    Ok(Json(CreatedReservationDto {
+        id: created.id.to_string(),
+        warnings: created.warnings.iter().map(|w| w.to_string()).collect(),
+    }))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -1791,6 +1834,30 @@ impl BookingHorizonDto {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BookingHorizonStatusDto {
+    #[serde(flatten)]
+    pub horizon: BookingHorizonDto,
+    /// Per-course far edge of dated inventory. A `null` value is intentional:
+    /// that course has no recorded successful build and must not be presented
+    /// as reaching the configured booking horizon.
+    pub generated_through: BTreeMap<String, Option<NaiveDate>>,
+}
+
+impl From<BookingHorizonStatus> for BookingHorizonStatusDto {
+    fn from(status: BookingHorizonStatus) -> Self {
+        Self {
+            horizon: BookingHorizonDto::new(status.horizon, status.bookable_through),
+            generated_through: status
+                .generated_through
+                .into_iter()
+                .map(|(course_id, generated)| (course_id.into_inner(), generated))
+                .collect(),
+        }
+    }
+}
+
 /// Exactly one of the two is sent; the other says which shape was not chosen.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1819,7 +1886,7 @@ impl SetBookingHorizonRequest {
     path = "/v1/course/booking-horizon",
     tag = "course",
     responses(
-        (status = 200, description = "How far ahead the book is open", body = BookingHorizonDto),
+        (status = 200, description = "Configured and generated booking horizons", body = BookingHorizonStatusDto),
         (status = 401, description = "Unauthorized", body = ErrorBody),
         (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
@@ -1828,14 +1895,17 @@ impl SetBookingHorizonRequest {
 pub async fn get_booking_horizon(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<BookingHorizonDto>, AppError> {
+) -> Result<Json<BookingHorizonStatusDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let (horizon, bookable_through) =
-        GetBookingHorizonUseCase::new(catalog_gateway(&state), commercial_gateway(&state))
-            .execute(credentials)
-            .await
-            .map_err(AppError::from)?;
-    Ok(Json(BookingHorizonDto::new(horizon, bookable_through)))
+    let status = GetBookingHorizonUseCase::new(
+        catalog_gateway(&state),
+        commercial_gateway(&state),
+        generated_through_gateway(&state),
+    )
+    .execute(credentials)
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(BookingHorizonStatusDto::from(status)))
 }
 
 /// PUT /v1/course/booking-horizon
@@ -2260,6 +2330,10 @@ pub struct CaddieAssignmentDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_minutes: Option<i32>,
     pub status: String,
+    /// Canonicalized by CourseBoard's AssignmentStatus parser. The raw status
+    /// above remains untouched for compatibility with existing consumers.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub canonical_status: Option<String>,
     pub assignment_role: String,
     pub fee_amount: i64,
     pub fee_currency: String,
@@ -2277,6 +2351,7 @@ impl From<&CaddieAssignment> for CaddieAssignmentDto {
             scheduled_at: value.scheduled_at(),
             duration_minutes: value.duration_minutes(),
             status: value.status_label().to_string(),
+            canonical_status: Some(value.status().as_str().to_string()),
             assignment_role: value.role_label().to_string(),
             fee_amount: value.fee_amount(),
             fee_currency: value.fee_currency().to_string(),
@@ -2363,6 +2438,7 @@ pub async fn list_caddie_assignments(
 mod tests {
     use super::*;
     use crate::course::domain::PlayType;
+    use chrono::TimeZone;
 
     fn schedule_rule_request(id: Option<&str>, is_new: Option<bool>) -> ReplaceAvailabilityRuleDto {
         let mut value = serde_json::json!({
@@ -2380,6 +2456,33 @@ mod tests {
             object.insert("isNew".into(), serde_json::json!(is_new));
         }
         serde_json::from_value(value).expect("schedule rule request")
+    }
+
+    #[test]
+    fn booking_horizon_serializes_a_never_built_course_as_null() {
+        let dto = BookingHorizonStatusDto::from(BookingHorizonStatus {
+            horizon: BookingHorizon::try_days(180).expect("valid horizon"),
+            bookable_through: NaiveDate::from_ymd_opt(2027, 2, 19).expect("valid date"),
+            generated_through: [
+                (
+                    CourseId::new("course-built"),
+                    Some(NaiveDate::from_ymd_opt(2027, 2, 19).expect("valid date")),
+                ),
+                (CourseId::new("course-empty"), None),
+            ]
+            .into_iter()
+            .collect(),
+        });
+
+        let json = serde_json::to_value(dto).expect("serialize booking horizon");
+        assert_eq!(
+            json["generatedThrough"]["course-built"],
+            serde_json::json!("2027-02-19")
+        );
+        assert_eq!(
+            json["generatedThrough"]["course-empty"],
+            serde_json::Value::Null
+        );
     }
 
     #[test]
@@ -2549,5 +2652,57 @@ mod tests {
             params(Some("course-a,course-a"), Some("course-a")).course_ids(),
             vec![CourseId::new("course-a")]
         );
+    }
+
+    #[test]
+    fn assignment_dto_preserves_raw_status_and_emits_the_canonical_status() {
+        let cases = [
+            (" assigned ", "assigned"),
+            ("CHECKED_IN", "in_progress"),
+            (" completed ", "completed"),
+            ("CANCELED", "cancelled"),
+            ("unknown", "other"),
+        ];
+        for (raw, canonical) in cases {
+            let assignment = CaddieAssignment::reconstitute(
+                "assignment-1",
+                "caddie-1",
+                Some("reservation-1".into()),
+                None,
+                Utc.with_ymd_and_hms(2026, 9, 12, 1, 0, 0).unwrap(),
+                None,
+                raw,
+                "primary",
+                0,
+                "JPY",
+                None,
+            )
+            .expect("valid assignment");
+            let dto = CaddieAssignmentDto::from(&assignment);
+
+            assert_eq!(dto.status, raw);
+            assert_eq!(dto.canonical_status.as_deref(), Some(canonical));
+            let json = serde_json::to_value(dto).expect("serialize assignment");
+            assert_eq!(json["status"], raw);
+            assert_eq!(json["canonicalStatus"], canonical);
+        }
+    }
+
+    #[test]
+    fn assignment_dto_without_canonical_status_remains_deserializable() {
+        let old_json = serde_json::json!({
+            "id": "assignment-1",
+            "caddieProfileId": "caddie-1",
+            "reservationId": "reservation-1",
+            "scheduledAt": "2026-09-12T01:00:00Z",
+            "status": "assigned",
+            "assignmentRole": "primary",
+            "feeAmount": 0,
+            "feeCurrency": "JPY"
+        });
+
+        let dto: CaddieAssignmentDto =
+            serde_json::from_value(old_json).expect("decode old assignment");
+        assert_eq!(dto.canonical_status, None);
     }
 }

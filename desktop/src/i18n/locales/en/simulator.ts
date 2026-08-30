@@ -28,6 +28,7 @@ export const simulator: DeepPartial<typeof source> = {
       'Calculate the course grade and golf course tax from the green fee, including optional cart and caddy fees.',
     field: {
       greenFee: 'Green fee',
+      membership: 'Membership',
       numHoles: 'Holes',
       cartFee: 'Cart fee (optional)',
       caddyFee: 'Caddy fee (optional)',
@@ -40,11 +41,16 @@ export const simulator: DeepPartial<typeof source> = {
     submitting: 'Calculating',
     prompt: 'Enter the fees to calculate.',
     empty: 'No tax breakdown.',
+    membership: {
+      visitor: 'Visitor',
+    },
     metric: {
       grade: 'Grade',
       taxRate: 'Tax rate',
       taxAmount: 'Tax',
       total: 'Total',
+      memberDiscount: 'Member discount',
+      memberGreenFee: '{{fee}} after discount',
     },
     table: {
       player: 'Player',
