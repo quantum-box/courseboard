@@ -9,7 +9,9 @@
 use std::sync::Arc;
 
 use crate::course::domain::actions;
-use crate::course::domain::{payroll_csv, CourseError, GatewayCredentials, GolfOpsGateway};
+use crate::course::domain::{
+    payroll_csv, CaddieRankFeeGateway, CourseError, GatewayCredentials, GolfOpsGateway,
+};
 
 use super::GetPayrollSummaryUseCase;
 
@@ -18,9 +20,9 @@ pub struct ExportPayrollCsvUseCase {
 }
 
 impl ExportPayrollCsvUseCase {
-    pub fn new(ops: Arc<dyn GolfOpsGateway>) -> Self {
+    pub fn new(ops: Arc<dyn GolfOpsGateway>, rank_fees: Arc<dyn CaddieRankFeeGateway>) -> Self {
         Self {
-            summary: GetPayrollSummaryUseCase::new(ops),
+            summary: GetPayrollSummaryUseCase::new(ops, rank_fees),
         }
     }
 

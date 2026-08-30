@@ -11,6 +11,8 @@
 
 use serde_json::Value;
 
+use crate::course::domain::CourseError;
+
 /// Assumed until the operator says otherwise. Kept so an existing tenant's
 /// projection reads the same after this change as it did before; each is a
 /// placeholder for a real number the course knows and we do not.
@@ -75,7 +77,73 @@ fn whole(config: &Value, key: &str, fallback: i64) -> i64 {
         .unwrap_or(fallback)
 }
 
+fn shaped(value: Option<String>, what: &'static str) -> Result<Option<String>, CourseError> {
+    let Some(value) = value else { return Ok(None) };
+    let value = value.trim().to_string();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if value.len() > 32
+        || !value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(CourseError::BadRequest(what));
+    }
+    Ok(Some(value))
+}
+
 impl GolfPricingSettings {
+    /// Validate an explicit save, refusing what `from_config` would only
+    /// tolerate.
+    ///
+    /// The config reader forgives, because a half-broken bag somebody else
+    /// wrote must still let the screen open. A save is different: the operator
+    /// is standing in front of the form, so a value that cannot be right is a
+    /// thing to say no to, not to quietly clamp into a price.
+    pub fn try_new(
+        prefecture: Option<String>,
+        tax_grade: Option<String>,
+        taxable_ratio: f64,
+        price_elasticity: f64,
+        fixed_cost: i64,
+        variable_cost_per_visitor: i64,
+    ) -> Result<Self, CourseError> {
+        let prefecture = shaped(
+            prefecture,
+            "a prefecture is letters, digits and hyphens, up to 32 characters",
+        )?;
+        let tax_grade = shaped(
+            tax_grade,
+            "a tax grade is letters, digits and hyphens, up to 32 characters",
+        )?;
+        // A grade only means something inside the prefecture that assigned it.
+        if tax_grade.is_some() && prefecture.is_none() {
+            return Err(CourseError::BadRequest(
+                "choose the prefecture before entering its grade",
+            ));
+        }
+        if !taxable_ratio.is_finite() || !(0.0..=1.0).contains(&taxable_ratio) {
+            return Err(CourseError::BadRequest(
+                "the taxable share must be between 0 and 1",
+            ));
+        }
+        if !price_elasticity.is_finite() {
+            return Err(CourseError::BadRequest("the elasticity must be a number"));
+        }
+        if fixed_cost < 0 || variable_cost_per_visitor < 0 {
+            return Err(CourseError::BadRequest("a cost cannot be negative"));
+        }
+        Ok(Self {
+            prefecture,
+            tax_grade,
+            taxable_ratio,
+            price_elasticity,
+            fixed_cost,
+            variable_cost_per_visitor,
+        })
+    }
+
     /// Read the settings out of the extension config, falling back per field.
     ///
     /// A missing or unreadable field takes the default rather than failing the

@@ -1,5 +1,14 @@
 # SCC-6 テナント timezone
 
+> **(2026-08-23 追記)** ここで SoR に定めた extension config は、
+> [ADR-0010](../../../architecture/decisions/ADR-0010-courseboard-is-not-a-field-extension.md)
+> により CourseBoard が使わなくなる。ただし timezone は業種非依存で Field の
+> 公開ストアフロントも同じ値を読んでいるため、CourseBoard ローカル DB へは動かさず、
+> **Field に汎用のテナント属性を起票して待つ**
+> （[ADR-0009](../../../architecture/decisions/ADR-0009-extension-config-is-not-a-data-store.md)）。
+> 「tenant 単位で 1 つ持ち、コース master のものは使わない」という本 taskdoc の
+> 決定自体は変わらない。
+
 ## Decision
 
 ゴルフ extension の tenant config `configJson.timezone` を CourseBoard の timezone の

@@ -19,13 +19,20 @@ import {
   ResourceError,
 } from '../../../components/Page'
 import { useResource } from '../../../hooks/useResource'
-import { normalizeIsoDate } from '../../../lib/clock'
+import { formatCourseDate, normalizeIsoDate } from '../../../lib/clock'
 import { useRegisterPageReload } from '../../../lib/pageReload'
 import { navigate, useRouteParamState } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
+import { caddieSupplyByCourse, type DayCaddieSupply } from '../caddieCourseSupply'
+import type { CoverageAssignment } from '../caddieRoundCoverage'
+import {
+  addDays,
+  inventoryHorizonGap,
+  type BookingHorizonStatusResponse,
+  type InventoryHorizonGap,
+} from '../bookingHorizon'
 import { parseLocalDateParts } from '../timeline/timelineLayout'
 import type { TeeReservation } from '../timeline/models'
-import { playerTagOptionsFromConfig } from '../playerTagOptions'
 import { LedgerBoard, type SlotSelection } from './LedgerBoard'
 import { LedgerBoardSkeleton, SkeletonBar } from './LedgerSkeleton'
 import { arrangeCourses, moveCourse } from './courseOrder'
@@ -42,7 +49,12 @@ import {
   writeStoredCourseIds,
   type CourseOption,
 } from './courseSelection'
-import { summarizeLedger, teeTimesBetween } from './ledgerLayout'
+import {
+  dayHasConfirmedShifts,
+  resourceStatus,
+  summarizeLedger,
+  teeTimesBetween,
+} from './ledgerLayout'
 import type { PartyDetails, SlotMarkKind, TeeLedgerResponse } from './models'
 import {
   blockFixRoute,
@@ -146,7 +158,7 @@ function DateControls({
 }
 
 export function LedgerPage() {
-  const { t } = useTranslation(['ledger', 'timeline', 'common'])
+  const { t, i18n } = useTranslation(['ledger', 'timeline', 'common'])
   const timezone = useTenantTimezone()
   const tenantToday = todayIsoDate(timezone)
   /** In the URL: the board is a day, and a link to it has to say which one. */
@@ -209,6 +221,12 @@ export function LedgerPage() {
     { cacheKey: 'courses:list' },
   )
 
+  const horizonResource = useResource(
+    () => courseboardApiJson<BookingHorizonStatusResponse>(`${COURSE_API}/booking-horizon`),
+    [],
+    { cacheKey: 'course:booking-horizon' },
+  )
+
   const orderResource = useResource(
     () => courseboardApiJson<{ golfCourseIds: string[] }>(`${COURSE_API}/course-order`),
     [],
@@ -232,20 +250,60 @@ export function LedgerPage() {
     { cacheKey: 'reservation-products:list' },
   )
 
-  const extensionResource = useResource(
-    () => courseboardApiJson<{ configJson?: Record<string, unknown> | null } | null>(
-      `${COURSE_API}/extension-status`,
-    ),
+  const playerTagResource = useResource(
+    () => courseboardApiJson<{ items: string[] }>(`${COURSE_API}/player-tag-options`),
     [],
-    { cacheKey: 'course:extension-status' },
+    { cacheKey: 'course:player-tag-options' },
+  )
+
+  /**
+   * How many caddie-side groups each course can still take today.
+   *
+   * Not filtered by the course chips: the board draws whichever columns are
+   * shown from one day-wide answer, and refetching when the desk hides a
+   * column would buy nothing.
+   */
+  const caddieSupplyResource = useResource(
+    () => courseboardApiJson<DayCaddieSupply>(
+      `${COURSE_API}/caddie-course-supply?date=${encodeURIComponent(date)}`,
+    ),
+    [date],
+    { cacheKey: `caddie-course-supply:${date}` },
+  )
+
+  /** Today's caddie assignments, joined against the board to find rounds
+   *  nobody is covering (SCC-27). The provider filters by UTC calendar day, so
+   *  a morning round in a tenant east of UTC lands on the previous UTC date;
+   *  the window is widened a day each way and the reservation-id join keeps
+   *  only this board's rounds. */
+  const caddieAssignmentsResource = useResource(
+    () => courseboardApiJson<ListResponse<CoverageAssignment>>(
+      `${COURSE_API}/caddie-assignments?from=${encodeURIComponent(addDays(date, -1))}&to=${encodeURIComponent(addDays(date, 1))}`,
+    ),
+    [date],
+    { cacheKey: `caddie-assignments:${date}` },
+  )
+
+  /** Whether the day has at least one confirmed caddie shift (day-wide, not
+   *  per course — SCC-27). Only the presence of rows matters here. */
+  const caddieShiftsResource = useResource(
+    () => courseboardApiJson<ListResponse<unknown>>(
+      `${COURSE_API}/caddie-shifts?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`,
+    ),
+    [date],
+    { cacheKey: `caddie-shifts:${date}:${date}` },
   )
 
   const refreshAll = () => {
     ledger.refresh()
     coursesResource.refresh()
+    horizonResource.refresh()
     orderResource.refresh()
     productsResource.refresh()
-    extensionResource.refresh()
+    playerTagResource.refresh()
+    caddieSupplyResource.refresh()
+    caddieAssignmentsResource.refresh()
+    caddieShiftsResource.refresh()
   }
   useRegisterPageReload(refreshAll)
 
@@ -290,8 +348,36 @@ export function LedgerPage() {
       ),
     })),
   }))
+  const bookingHorizon = horizonResource.data
+  const inventoryGaps: Array<{
+    golfCourseId: string
+    courseName: string
+    gap: InventoryHorizonGap
+  }> = bookingHorizon
+    ? columns.flatMap(column => {
+        const gap = inventoryHorizonGap(
+          bookingHorizon.bookableThrough,
+          bookingHorizon.generatedThrough?.[column.golfCourseId],
+        )
+        if (gap?.generatedThrough === null && column.gridSource !== 'schedule') return []
+        return gap ? [{
+          golfCourseId: column.golfCourseId,
+          courseName: column.courseName,
+          gap,
+        }] : []
+      })
+    : []
   const unavailable = ledger.data?.unavailable ?? []
   const totals = summarizeLedger(columns)
+  // A failed lookup leaves the map empty, which drops the caddie line and all
+  // anomaly counts from the headers while leaving the rest of the board
+  // untouched. The shift board owns this number; the ledger only borrows it.
+  const caddieSupply = useMemo(
+    () => caddieSupplyResource.error
+      ? new Map<string, DayCaddieSupply['courses'][number]>()
+      : caddieSupplyByCourse(caddieSupplyResource.data),
+    [caddieSupplyResource.data, caddieSupplyResource.error],
+  )
   const courseOptions: CourseOption[] = (coursesResource.data?.items ?? [])
     .filter(course => course.isActive !== false)
     .map(course => ({ id: course.id, name: course.name }))
@@ -324,7 +410,7 @@ export function LedgerPage() {
     golfCourseId: product.golfCourseId,
     maxPlayersPerGroup: product.maxPlayersPerGroup,
   }))
-  const playerTagOptions = playerTagOptionsFromConfig(extensionResource.data?.configJson)
+  const playerTagOptions = playerTagResource.data?.items ?? []
 
   const selectedBookingTarget = selectedReservationTarget(columns, selection)
   const selectedBookingBlock = selectedBookingTarget
@@ -476,6 +562,35 @@ export function LedgerPage() {
   return (
     <div className={`page-stack ledger-page${boardOnly ? ' is-board-only' : ''}`}>
       {ledger.error ? <ResourceError error={ledger.error} onRetry={refreshAll} /> : null}
+      {caddieSupplyResource.error ? (
+        <ResourceError
+          error={caddieSupplyResource.error}
+          onRetry={caddieSupplyResource.refresh}
+        />
+      ) : null}
+      {inventoryGaps.length > 0 && !boardOnly ? (
+        <Notice tone="warning" title={t('ledger:inventoryGap.title')}>
+          <ul>
+            {inventoryGaps.map(({ golfCourseId, courseName, gap }) => (
+              <li key={golfCourseId}>
+                {gap.generatedThrough === null
+                  ? t('ledger:inventoryGap.missing', {
+                      course: courseName,
+                      date: formatCourseDate(gap.bookableThrough, i18n.language),
+                    })
+                  : t('ledger:inventoryGap.behind', {
+                      course: courseName,
+                      date: formatCourseDate(gap.bookableThrough, i18n.language),
+                      generatedThrough: formatCourseDate(
+                        gap.generatedThrough,
+                        i18n.language,
+                      ),
+                    })}
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      ) : null}
       {unavailable.length > 0 && !boardOnly ? (
         <Notice tone="warning" title={t('ledger:partial.title')}>
           {t('ledger:partial.description')}
@@ -556,12 +671,25 @@ export function LedgerPage() {
               <strong>{t('ledger:summary.playersValue', { n: String(totals.players) })}</strong>
             )}
           </div>
+          {/* The columns that cannot count say so in their own headers, so the
+              day total must not quietly speak for them. With none of them
+              countable there is no number to give; with some, the figure is
+              real but partial and says which part it left out. */}
           <div className="ledger-summary-item">
             <span>{t('ledger:summary.open')}</span>
             {boardPending ? (
               <SkeletonBar width="5ch" height={14} />
+            ) : columns.length > 0 && totals.uncountedCourses === columns.length ? (
+              <strong>{t('ledger:summary.openUnknown')}</strong>
             ) : (
-              <strong>{t('ledger:summary.openValue', { n: String(totals.openSlots) })}</strong>
+              <>
+                <strong>{t('ledger:summary.openValue', { n: String(totals.openSlots) })}</strong>
+                {totals.uncountedCourses > 0 ? (
+                  <small>
+                    {t('ledger:summary.openPartial', { count: totals.uncountedCourses })}
+                  </small>
+                ) : null}
+              </>
             )}
           </div>
         </div>
@@ -651,6 +779,9 @@ export function LedgerPage() {
         ) : (
           <LedgerBoard
             columns={columns}
+            caddieSupply={caddieSupply}
+            shiftsConfirmed={dayHasConfirmedShifts(resourceStatus(caddieShiftsResource))}
+            assignments={resourceStatus(caddieAssignmentsResource)}
             nowMinutes={nowMinutes}
             selection={selection}
             selectedReservationId={editingReservationId}

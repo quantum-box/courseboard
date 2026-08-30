@@ -15,17 +15,19 @@ use super::openapi::ErrorBody;
 use serde_json::Value;
 
 use super::http::{
-    catalog_gateway, commercial_gateway, credentials, reservation_gateway, ItemsResponse,
+    catalog_gateway, commercial_gateway, credentials, player_tag_options_gateway,
+    reservation_gateway, ItemsResponse,
 };
 use crate::course::domain::{
-    BudgetAchievement, CourseId, DailyBudget, DailyBudgetQuery, ExtensionStatus, ReservationPolicy,
-    UpdateExtensionConfig, UpdateReservationPolicy, UpsertDailyBudget,
+    BudgetAchievement, CourseId, DailyBudget, DailyBudgetQuery, ExtensionStatus, PlayerTagOptions,
+    ReservationPolicy, UpdateExtensionConfig, UpdateReservationPolicy, UpsertDailyBudget,
 };
 use crate::course::usecase::{
     ExportMonthlySettlementCsvUseCase, GetExtensionStatusUseCase, GetMonthlySettlementUseCase,
-    GetReservationPolicyUseCase, ImportDailyBudgetsCsvUseCase, ListBudgetAchievementsUseCase,
-    ListDailyBudgetsUseCase, MonthlySettlementView, UpdateExtensionConfigUseCase,
-    UpdateReservationPolicyUseCase, UpsertDailyBudgetUseCase,
+    GetPlayerTagOptionsUseCase, GetReservationPolicyUseCase, ImportDailyBudgetsCsvUseCase,
+    ListBudgetAchievementsUseCase, ListDailyBudgetsUseCase, MonthlySettlementView,
+    ReplacePlayerTagOptionsUseCase, UpdateExtensionConfigUseCase, UpdateReservationPolicyUseCase,
+    UpsertDailyBudgetUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -365,8 +367,11 @@ pub async fn list_budget_achievements(
     Query(query): Query<AchievementQueryParams>,
 ) -> Result<Json<ItemsResponse<BudgetAchievementDto>>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case =
-        ListBudgetAchievementsUseCase::new(catalog_gateway(&state), commercial_gateway(&state));
+    let use_case = ListBudgetAchievementsUseCase::new(
+        catalog_gateway(&state),
+        commercial_gateway(&state),
+        reservation_gateway(&state),
+    );
     let items = use_case
         .execute(credentials, query.from, query.to)
         .await
@@ -721,4 +726,70 @@ pub async fn update_extension_config(
         .await
         .map_err(AppError::from)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ─── Player tag options ───────────────────────────────────────────────────────
+
+/// The visitor categories offered when a booking is entered.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerTagOptionsDto {
+    pub items: Vec<String>,
+}
+
+/// GET /v1/course/player-tag-options
+#[utoipa::path(
+    get,
+    path = "/v1/course/player-tag-options",
+    tag = "course",
+    responses(
+        (status = 200, description = "The visitor categories in display order", body = PlayerTagOptionsDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_player_tag_options(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<PlayerTagOptionsDto>, AppError> {
+    let options = GetPlayerTagOptionsUseCase::new(
+        commercial_gateway(&state),
+        player_tag_options_gateway(&state),
+    )
+    .execute(credentials(&state, &headers)?)
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(PlayerTagOptionsDto {
+        items: options.options().to_vec(),
+    }))
+}
+
+/// PUT /v1/course/player-tag-options
+#[utoipa::path(
+    put,
+    path = "/v1/course/player-tag-options",
+    tag = "course",
+    request_body = PlayerTagOptionsDto,
+    responses(
+        (status = 200, description = "The visitor categories replaced", body = PlayerTagOptionsDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replace_player_tag_options(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<PlayerTagOptionsDto>,
+) -> Result<Json<PlayerTagOptionsDto>, AppError> {
+    let options = PlayerTagOptions::try_new(body.items).map_err(AppError::from)?;
+    let stored = ReplacePlayerTagOptionsUseCase::new(player_tag_options_gateway(&state))
+        .execute(credentials(&state, &headers)?, options)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(PlayerTagOptionsDto {
+        items: stored.options().to_vec(),
+    }))
 }

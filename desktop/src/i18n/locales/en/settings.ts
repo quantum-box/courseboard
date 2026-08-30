@@ -8,6 +8,83 @@ export const settings: DeepPartial<typeof source> = {
     title: 'Initial setup',
     description: 'Set these up once; you will rarely open them day to day.',
   },
+  playWindows: {
+    title: 'Membership playing days',
+    description:
+      'Which days and hours each membership may be played. For plans like a weekday-only membership.',
+    hint: 'A booking outside the window still saves. The desk is warned afterwards, never stopped.',
+    noPlans: 'No memberships on sale. Create one first.',
+    saved: 'Playing days saved',
+    failed: 'Could not save the playing days',
+    field: {
+      from: 'From',
+      to: 'To',
+    },
+    day: {
+      mon: 'Mon',
+      tue: 'Tue',
+      wed: 'Wed',
+      thu: 'Thu',
+      fri: 'Fri',
+      sat: 'Sat',
+      sun: 'Sun',
+    },
+  },
+  discounts: {
+    title: 'Member discounts',
+    description:
+      'What each membership takes off the green fee. Left at zero, a plan discounts nothing.',
+    hint: 'Taken off before tax. A lower green fee can fall into a lower golf course tax bracket.',
+    noPlans: 'No memberships on sale. Create one first.',
+    saved: 'Member discounts saved',
+    failed: 'Could not save the member discounts',
+    field: {
+      kind: 'Type',
+      value: 'Amount',
+    },
+    kind: {
+      yen: 'Yen off',
+      percent: 'Percent off',
+    },
+  },
+  caddieDuties: {
+    title: 'Caddie duties',
+    description:
+      'The jobs a caddie is put on when they have no round. The dispatch screen picks from this list. Renaming one leaves the days already filed under the old name alone.',
+    field: {
+      label: 'Job',
+    },
+    placeholder: 'e.g. Course upkeep',
+    add: 'Add a job',
+    remove: 'Remove this job',
+    empty: 'No jobs yet. Add one and the dispatch screen can put a caddie on it.',
+    duplicate: 'The same job appears twice. Remove one of them.',
+    tooLong: 'A job name is at most {{max}} characters.',
+    tooMany: 'At most {{max}} jobs.',
+    saved: 'Jobs saved',
+    failed: 'Could not save the jobs',
+  },
+  grades: {
+    title: 'Customer grades',
+    description:
+      'How regulars are ranked, from how often they come and what they spend. Separate from membership \u2014 visitors get a grade too.',
+    hint: 'Read top down; the first rung whose every threshold is met is the one awarded. A blank box asks nothing.',
+    duplicate: 'Two rungs share a name. Give each rung its own.',
+    empty: 'No rungs yet. Add one and a grade appears on the customer page.',
+    add: 'Add a rung',
+    remove: 'Remove this rung',
+    saved: 'Customer grades saved',
+    failed: 'Could not save the customer grades',
+    field: {
+      name: 'Name',
+      minVisits: 'Rounds played (min)',
+      minSpendPerPlayer: 'Spend per player (min)',
+      minTotalAmount: 'Lifetime takings (min)',
+    },
+    placeholder: {
+      name: 'Gold',
+    },
+  },
   membership: {
     title: 'Memberships',
     description: 'The memberships this course sells. Anyone not holding one is a visitor.',
@@ -40,7 +117,7 @@ export const settings: DeepPartial<typeof source> = {
       description: 'Check that the golf features are enabled for this course.',
     },
     title: 'Golf feature settings',
-    description: 'Currency, time zone, and player categories used across this facility.',
+    description: 'The time zone used across this facility, and the player categories offered during booking.',
     enabled: 'Enabled',
     disabled: 'Disabled',
     invalid: 'Configuration problem',
@@ -56,8 +133,6 @@ export const settings: DeepPartial<typeof source> = {
     invalidConfig: {
       title: 'The current settings have a problem',
     },
-    currency: 'Default currency',
-    currencyHint: 'Last updated {{updated}} · ISO 4217',
     timezone: 'Time zone',
     timezoneHint: 'e.g. Asia/Tokyo',
     playerTags: 'Player categories',
@@ -72,8 +147,6 @@ export const settings: DeepPartial<typeof source> = {
       description: 'The golf feature settings were applied.',
     },
     validation: {
-      currencyRequired: 'Choose a currency.',
-      currencyFormat: 'Enter the currency as a 3-letter ISO 4217 code.',
       timezoneRequired: 'Enter a time zone.',
       timezoneFormat: 'Enter an IANA time zone name such as Asia/Tokyo. Abbreviations like JST are not accepted.',
       playerTagsTooMany: 'Add no more than {{max}} player categories.',
@@ -139,11 +212,6 @@ export const settings: DeepPartial<typeof source> = {
     },
   },
   validation: {
-    duration: 'Enter a default duration between 30 and 720 minutes.',
-    holes: 'Choose 9 or 18 default holes.',
-    maxPlayers: 'Enter 1 to 4 players per slot.',
-    memberDeposit: 'Enter a member deposit between 0 and 100%.',
-    guestDeposit: 'Enter a guest deposit between 0 and 100%.',
     prefecture: 'Pick a prefecture whose tax schedule we hold.',
     taxGrade: 'A grade is letters, digits and hyphens, up to 32 characters.',
     gradeNeedsPrefecture: 'Choose the prefecture before entering a grade.',

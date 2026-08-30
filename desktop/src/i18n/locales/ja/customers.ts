@@ -68,6 +68,46 @@ export const customers = {
       alt: '受付用紙のスキャン画像',
     },
   },
+  visits: {
+    title: '来場履歴',
+    description:
+      'この顧客の名前で取った予約です。ほかの人の組にプレイヤーとして入った回は入りません。',
+    column: {
+      date: '日付',
+      kind: '状態',
+      course: 'コース',
+      players: '人数',
+      amount: '金額',
+      reservationNumber: '予約番号',
+    },
+    kind: {
+      visited: '来場',
+      upcoming: '予定',
+      no_show: 'ノーショー',
+      cancelled: 'キャンセル',
+    },
+    metric: {
+      grade: '顧客グレード',
+      grade_below_lowest: 'いちばん下の条件に届いていません',
+      grade_unknown: '通算の来場が読めていないため判定できません',
+      visits: '来場回数',
+      lastVisit: '直近 {{date}}',
+      spendPerPlayer: '客単価',
+      unpriced: '金額の記録がない{{count}}回を除く',
+      frequency: '年間の来場回数',
+      frequencyUnknown: '2回以上・1か月以上の間隔がないと出せません',
+      frequencyTruncated: '通算の来場が読めていないため出せません',
+      cancelled: 'キャンセル',
+      noShows: 'ノーショー{{count}}回',
+    },
+    truncated:
+      '直近{{count}}件だけを読んでいます。上の集計もこの{{count}}件の範囲で、通算ではありません。',
+    empty: {
+      title: 'この顧客の名前で取った予約はありません',
+      description:
+        'はじめての来場か、ほかの人の名前で予約されている可能性があります。組のプレイヤーとして入った回はここに出ません。',
+    },
+  },
   detail: {
     description: '台帳に入っている内容です。',
     back: '顧客台帳にもどる',

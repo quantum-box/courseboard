@@ -5,7 +5,9 @@
 
 pub mod actions;
 mod availability_deadline;
+mod budget_achievement;
 mod caddie;
+mod caddie_duty;
 mod caddie_ops;
 mod caddie_plan;
 mod caddie_rank_fee;
@@ -16,14 +18,19 @@ mod course;
 mod course_order;
 mod course_supply;
 mod customer;
+mod customer_grade;
 mod customer_reception;
+mod customer_visits;
 mod demo_board;
 mod error;
 mod field_capabilities;
 mod ids;
 mod membership;
+mod membership_play_window;
+mod membership_pricing;
 mod party;
 mod payroll;
+mod player_tags;
 mod ports;
 mod pricing_settings;
 mod product;
@@ -31,6 +38,7 @@ mod reservation;
 mod reservation_report;
 mod resource;
 mod schedule;
+mod shift_hours;
 mod simulator;
 mod slot_override;
 mod tee_ledger;
@@ -38,9 +46,15 @@ mod tee_sheet;
 mod tenant_timezone;
 
 pub use availability_deadline::{AvailabilityDeadline, YearMonth};
+pub use budget_achievement::{build_budget_achievements, daily_actuals, DailyActual};
 pub use caddie::{
     AssignmentRole, AssignmentStatus, Caddie, CaddieAssignment, CaddieRank, CaddieRoster,
     CaddieSkillLevel, CaddieStaff, CaddieUpstreamIdentity,
+};
+pub use caddie_duty::{
+    caddies_off_the_day, duty_blocks_round, duty_windows_for, free_halves, free_rounds,
+    round_minutes, CaddieDutyAssignment, CaddieDutyOptions, DutyWindow, MAX_CADDIE_DUTIES,
+    MAX_CADDIE_DUTY_LENGTH, MAX_CADDIE_DUTY_NOTE_LENGTH, MINUTES_IN_DAY,
 };
 pub use caddie_ops::{
     compute_caddie_supply, AttendancePeriodSnapshot, AttendanceSnapshot, AttendanceSnapshotReport,
@@ -51,17 +65,17 @@ pub use caddie_ops::{
     ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
 };
 pub use caddie_plan::{
-    plan_caddie_assignments, shift_covers_tee_time, skip_reason, CaddiePlacement, PlanOptions,
-    PlannableCaddie, PlannableRound,
+    placement_for_shift, plan_caddie_assignments, shift_covers_tee_time, skip_reason,
+    CaddiePlacement, PlanOptions, PlannableCaddie, PlannableRound,
 };
 pub use caddie_rank_fee::CaddieRankFees;
 pub use caddie_ranking::{
     rank_caddies, AttendanceState, RankedCaddie, RankingCandidate, RankingOptions,
 };
 pub use caddie_shift::{
-    parse_weekday, plan_month_shifts, weekday_key, CaddieShift, MonthShiftPlan, ShiftEdit,
-    ShiftOrigin, ShiftPolicy, ShiftRequest, ShiftSeed, ShiftSpan, UnfiledRequest,
-    MAX_CONSECUTIVE_WORK_DAYS, MAX_ROUNDS_PER_SHIFT,
+    parse_weekday, plan_month_shifts, weekday_key, CaddieShift, FieldShiftLink, MonthShiftPlan,
+    ShiftEdit, ShiftOrigin, ShiftPolicy, ShiftRequest, ShiftSeed, ShiftSpan, UnfiledRequest,
+    UnsyncedShift, MAX_CONSECUTIVE_WORK_DAYS, MAX_ROUNDS_PER_SHIFT,
 };
 pub use commercial::{
     BudgetAchievement, DailyBudget, DailyBudgetQuery, ExtensionStatus, MonthlySettlement,
@@ -71,18 +85,26 @@ pub use commercial::{
 pub use course::{BusinessHours, Course, HoleCount, StartIntervalMinutes, UpsertCourse};
 pub use course_order::CourseOrder;
 pub use course_supply::{
-    compute_course_supply, has_room_for_one_more_caddie_round, reinforcements_for,
+    apply_assignment_coverage, compute_course_supply, reinforcements_for, AssignedCoverage,
     CaddieCapability, CourseCaddieSupply, DayCaddieSupply, Reinforcement,
 };
 pub use customer::{
     Customer, CustomerSearchQuery, NewCustomer, DEFAULT_CUSTOMER_SEARCH_LIMIT,
     MAX_CUSTOMER_SEARCH_LIMIT,
 };
+pub use customer_grade::{
+    CustomerGradeRule, CustomerGradeRules, CustomerGradeVerdict, MAX_GRADE_RULES,
+};
 pub use customer_reception::{
     reception_sheet_schema, ReceptionDraft, ReceptionDraftRow, ReceptionOcrColumn,
     ReceptionOcrField, ReceptionSheet, ReceptionSheetMediaType, MAX_RECEPTION_ROWS,
     MAX_RECEPTION_SHEET_BYTES, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL,
     RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
+};
+pub use customer_visits::{
+    CustomerVisit, CustomerVisitHistory, CustomerVisitSummary, VisitKind,
+    DEFAULT_VISIT_HISTORY_LIMIT, MAX_VISIT_HISTORY_LIMIT, MAX_VISIT_HISTORY_ROWS,
+    VISIT_HISTORY_PAGE,
 };
 pub use demo_board::{
     demo_board, seed_tee_time, DemoBoard, SeedCourse, SeedGroup, SeedMark, SEED_DURATION_MINUTES,
@@ -99,24 +121,36 @@ pub use ids::{
     ResourceId, TenantId,
 };
 pub use membership::{
-    AssignMembershipPlan, CustomerMembership, MembershipPlan, UpsertMembershipPlan,
+    AssignMembershipPlan, CustomerMembership, MembershipPlan, SetMemberNumber,
+    UpsertMembershipPlan, MEMBER_NUMBER_CREDENTIAL_KIND,
 };
+pub use membership_play_window::{
+    format_play_time, parse_play_time, MembershipPlayWindow, MembershipPlayWindows,
+    PlayWindowBreach, PlayableDays,
+};
+pub use membership_pricing::{MemberDiscount, MembershipDiscount, MembershipDiscounts};
 pub use party::{PartyDetails, PartyPlayer, MAX_PARTY_PLAYERS, PARTY_CUSTOM_FIELD_KEY};
 pub use payroll::{
     payroll_csv, summarize_payroll_in_timezone, AttendanceDay, PayrollCandidate, WorkedMinutes,
 };
+pub use player_tags::{PlayerTagOptions, MAX_PLAYER_TAG_LENGTH, MAX_PLAYER_TAG_OPTIONS};
 pub use ports::{
-    AvailabilityDeadlineGateway, CaddieShiftGateway, CourseAuthorizer, CustomerGateway,
+    AvailabilityDeadlineGateway, CaddieDutyGateway, CaddieRankFeeGateway, CaddieShiftGateway,
+    CourseAuthorizer, CourseOrderGateway, CustomerGateway, CustomerGradeRulesGateway,
     CustomerReceptionOcrGateway, FieldCapabilitiesGateway, GatewayCredentials,
     GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
-    GolfTaxGateway, MembershipGateway, ReservationGateway, ReservationScheduleGateway,
-    ShiftRulesGateway, SlotOverrideGateway, TeeLedgerQuery, TeeSheetQuery,
+    GolfTaxGateway, MembershipDiscountsGateway, MembershipGateway, MembershipPlayWindowsGateway,
+    PlayerTagOptionsGateway, PricingSettingsGateway, ReservationGateway,
+    ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, StaffShiftGateway,
+    StaffShiftInput, TeeLedgerQuery, TeeSheetQuery,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{
     DurationMinutes, PlayType, ProductSlot, ReservationProduct, UpsertReservationProduct,
 };
-pub use reservation::{NewReservation, Reservation, ReservationBookingUpdate, SeededReservation};
+pub use reservation::{
+    NewReservation, Reservation, ReservationBilling, ReservationBookingUpdate, SeededReservation,
+};
 pub use reservation_report::{
     ExternalReservationReportEntry, ReservationReport, ReservationReportAnalyzeGateway,
     ReservationReportDayPart, ReservationReportEntryQuery, ReservationReportFacility,
@@ -131,6 +165,7 @@ pub use schedule::{
     BookingHorizon, BuiltInventory, CourseSchedule, GenerationSummary, InventoryWatermark,
     SavedSchedule,
 };
+pub use shift_hours::{hours_for_span, DefaultWorkingHours, OpeningBand, ShiftHours};
 pub use simulator::{
     party_tax, prepare_fee_quote, prepare_range_simulation, project_row, quote_fee,
     summarize_range, FeeQuote, FeeQuoteInput, FeeQuoteRequest, PartyTax, PlayerTaxLine, RangeRow,
@@ -138,7 +173,8 @@ pub use simulator::{
     TaxRuleSnapshot, DEFAULT_PLAYER_AGE,
 };
 pub use slot_override::{
-    DeleteSlotOverrides, SlotOverride, SlotOverrideKind, SlotOverrideQuery, UpsertSlotOverrides,
+    is_tee_time_closed, DeleteSlotOverrides, SlotOverride, SlotOverrideKind, SlotOverrideQuery,
+    UpsertSlotOverrides,
 };
 pub(crate) use tee_ledger::reconcile_remaining;
 pub use tee_ledger::{

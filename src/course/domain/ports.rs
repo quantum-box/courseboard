@@ -5,20 +5,22 @@ use chrono::{DateTime, NaiveDate, Utc};
 
 use super::{
     AssignMembershipPlan, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
-    AutoAssignResult, AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon,
-    BudgetAchievement, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
-    CaddieCourseMembership, CaddieId, CaddieRankFees, CaddieRating, CaddieRecommendation,
-    CaddieRoster, CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder, Customer,
-    CustomerId, CustomerMembership, CustomerSearchQuery, DailyBudget, DailyBudgetQuery,
-    DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
-    GenerationSummary, InventoryWatermark, MembershipPlan, MembershipPlanId, MonthlySettlement,
-    NewCustomer, NewReservation, PartyDetails, ProductSlot, ReceptionDraft, ReceptionSheet,
-    RecommendationQuery, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate,
-    ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
-    ResourceId, ResourceTimeSlot, SaveCourseResource, SeededReservation, ShiftPolicy, SlotOverride,
-    SlotOverrideQuery, TaxRuleSnapshot, UpdateExtensionConfig, UpdateReservationPolicy,
-    UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse,
-    UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
+    AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, Caddie,
+    CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
+    CaddieDutyAssignment, CaddieDutyOptions, CaddieId, CaddieRankFees, CaddieRating, CaddieRoster,
+    CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder, Customer,
+    CustomerGradeRules, CustomerId, CustomerMembership, CustomerSearchQuery, DailyBudget,
+    DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus,
+    FieldClientCapabilities, FieldRequestContext, FieldShiftLink, GenerationSummary,
+    GolfPricingSettings, InventoryWatermark, MembershipDiscounts, MembershipPlan, MembershipPlanId,
+    MembershipPlayWindows, MonthlySettlement, NewCustomer, NewReservation, PartyDetails,
+    PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet, ReplaceCaddieMemberships,
+    Reservation, ReservationBookingUpdate, ReservationId, ReservationPolicy, ReservationProduct,
+    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
+    SeededReservation, SetMemberNumber, ShiftPolicy, SlotOverride, SlotOverrideQuery,
+    TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
+    UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -277,6 +279,170 @@ pub trait AvailabilityDeadlineGateway: Send + Sync {
     ) -> Result<AvailabilityDeadline, CourseError>;
 }
 
+/// Port for what a round pays a caddie at each rank.
+///
+/// Keyed by tenant id because this is CourseBoard's own storage. Reading
+/// returns `None` rather than the defaults so a caller can tell "nobody has set
+/// this" from "somebody set it to what the defaults happen to be" — the
+/// migration off the extension config depends on that distinction, and so would
+/// any later question about whether a club has ever priced its ranks.
+#[async_trait]
+pub trait CaddieRankFeeGateway: Send + Sync {
+    async fn get_caddie_rank_fees(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Option<CaddieRankFees>, CourseError>;
+
+    async fn replace_caddie_rank_fees(
+        &self,
+        tenant_id: &str,
+        fees: &CaddieRankFees,
+    ) -> Result<CaddieRankFees, CourseError>;
+}
+
+/// Port for the booking form's visitor categories.
+///
+/// Keyed by tenant id because this is CourseBoard's own storage. Empty doubles
+/// as unset, which is what sends the reader to the extension config the list
+/// migrated from — the same trade the course order made.
+#[async_trait]
+pub trait CustomerGradeRulesGateway: Send + Sync {
+    async fn get_customer_grade_rules(
+        &self,
+        tenant_id: &str,
+    ) -> Result<CustomerGradeRules, CourseError>;
+
+    async fn replace_customer_grade_rules(
+        &self,
+        tenant_id: &str,
+        rules: &CustomerGradeRules,
+    ) -> Result<CustomerGradeRules, CourseError>;
+}
+
+#[async_trait]
+pub trait MembershipDiscountsGateway: Send + Sync {
+    async fn get_membership_discounts(
+        &self,
+        tenant_id: &str,
+    ) -> Result<MembershipDiscounts, CourseError>;
+
+    async fn replace_membership_discounts(
+        &self,
+        tenant_id: &str,
+        discounts: &MembershipDiscounts,
+    ) -> Result<MembershipDiscounts, CourseError>;
+}
+
+#[async_trait]
+pub trait MembershipPlayWindowsGateway: Send + Sync {
+    async fn get_membership_play_windows(
+        &self,
+        tenant_id: &str,
+    ) -> Result<MembershipPlayWindows, CourseError>;
+
+    async fn replace_membership_play_windows(
+        &self,
+        tenant_id: &str,
+        windows: &MembershipPlayWindows,
+    ) -> Result<MembershipPlayWindows, CourseError>;
+}
+
+/// Port for the jobs a caddie is put on when they are not walking a round, and
+/// the days they are put on them.
+///
+/// CourseBoard's own rows (ADR-0009): Field's HRM models that a staff member is
+/// at work, not that this club sent them to the practice range.
+#[async_trait]
+pub trait CaddieDutyGateway: Send + Sync {
+    async fn get_duty_options(&self, tenant_id: &str) -> Result<CaddieDutyOptions, CourseError>;
+
+    async fn replace_duty_options(
+        &self,
+        tenant_id: &str,
+        options: &CaddieDutyOptions,
+    ) -> Result<CaddieDutyOptions, CourseError>;
+
+    /// Every day filed in the window, oldest first.
+    async fn list_duty_assignments(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<CaddieDutyAssignment>, CourseError>;
+
+    /// File one stretch of a day, and answer with the row as it now stands —
+    /// the id included, which is how the desk clears this one and not the
+    /// other job the same caddie is on that afternoon.
+    async fn save_duty_assignment(
+        &self,
+        tenant_id: &str,
+        assignment: &CaddieDutyAssignment,
+    ) -> Result<CaddieDutyAssignment, CourseError>;
+
+    /// Take one filed job back off. `false` when there was nothing there,
+    /// which the desk reads as already done rather than as a failure.
+    async fn delete_duty_assignment(
+        &self,
+        tenant_id: &str,
+        duty_id: i64,
+    ) -> Result<bool, CourseError>;
+}
+
+#[async_trait]
+pub trait PlayerTagOptionsGateway: Send + Sync {
+    async fn get_player_tag_options(
+        &self,
+        tenant_id: &str,
+    ) -> Result<PlayerTagOptions, CourseError>;
+
+    async fn replace_player_tag_options(
+        &self,
+        tenant_id: &str,
+        options: &PlayerTagOptions,
+    ) -> Result<PlayerTagOptions, CourseError>;
+}
+
+/// Port for the course's pricing inputs: the tax-schedule key and the cost
+/// assumptions behind the revenue projection.
+///
+/// Keyed by tenant id because this is CourseBoard's own storage. `None` means
+/// nobody has saved here yet, which is what sends the reader looking in the
+/// extension config the settings migrated from.
+#[async_trait]
+pub trait PricingSettingsGateway: Send + Sync {
+    async fn get_pricing_settings(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Option<GolfPricingSettings>, CourseError>;
+
+    async fn replace_pricing_settings(
+        &self,
+        tenant_id: &str,
+        settings: &GolfPricingSettings,
+    ) -> Result<GolfPricingSettings, CourseError>;
+}
+
+/// Port for the order courses are laid out in on the ledger board.
+///
+/// Keyed by tenant id rather than credentials because this is CourseBoard's own
+/// storage. It used to live in the golf extension's config object on Field,
+/// which has no version to compare against and is now gated behind the
+/// permission that also enables and disables extensions — neither of which is
+/// the real reason to move it. How a club likes its board arranged is not
+/// something Field should have a column for (ADR-0009, ADR-0010).
+#[async_trait]
+pub trait CourseOrderGateway: Send + Sync {
+    /// Never absent: a tenant that has arranged nothing reads back as empty,
+    /// and the board falls back to the course list's own order.
+    async fn get_course_order(&self, tenant_id: &str) -> Result<CourseOrder, CourseError>;
+
+    async fn replace_course_order(
+        &self,
+        tenant_id: &str,
+        order: &CourseOrder,
+    ) -> Result<CourseOrder, CourseError>;
+}
+
 /// Port for the club's own shift-planning rules.
 ///
 /// The law fixes one ceiling; the rest — which weekdays to keep clear, how many
@@ -295,6 +461,19 @@ pub trait ShiftRulesGateway: Send + Sync {
         tenant_id: &str,
         policy: &ShiftPolicy,
     ) -> Result<ShiftPolicy, CourseError>;
+
+    /// The hours to file for a day the course schedule cannot answer for — a
+    /// shift placed on no course, and a weekday the course stays shut.
+    ///
+    /// Read separately from the policy above rather than carried on it: the
+    /// planner that needs the rest-day rules has no use for clock times, and
+    /// the write-through that needs the times does not plan anything. Never
+    /// absent — a tenant that has set nothing gets
+    /// [`DefaultWorkingHours::club_default`].
+    async fn get_default_working_hours(
+        &self,
+        tenant_id: &str,
+    ) -> Result<DefaultWorkingHours, CourseError>;
 }
 
 /// Port for the confirmed shifts a month was planned into.
@@ -326,6 +505,134 @@ pub trait CaddieShiftGateway: Send + Sync {
         caddie_id: &CaddieId,
         date: NaiveDate,
     ) -> Result<Option<CaddieShift>, CourseError>;
+
+    /// Which Field shift each day in the window was written through to.
+    ///
+    /// Only days that have one appear. A day absent from the answer has never
+    /// reached Field, or was withdrawn from it — both ordinary, and the
+    /// write-through treats them the same way: there is nothing to update, so
+    /// it files afresh.
+    async fn field_shift_links(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<Vec<FieldShiftLink>, CourseError>;
+
+    /// Confirmed days Field has not been told about since they last changed,
+    /// oldest first, at most `limit` of them.
+    ///
+    /// Confirming a month rewrites the whole roster in one operation, and the
+    /// thousand-odd upstream calls that implies do not belong in the request a
+    /// person is waiting on. So the push runs afterwards, and asks this for
+    /// one batch at a time until nothing is left.
+    ///
+    /// Behind, not merely unsent: a day re-confirmed with different hours
+    /// already carries a `field_shift_id`, and Field still holds the previous
+    /// version of it.
+    async fn unsynced_shifts(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+        limit: u32,
+    ) -> Result<Vec<UnsyncedShift>, CourseError>;
+
+    /// Treat every day in the window as behind again.
+    ///
+    /// The push stamps a day it could not file — a caddie with no staff record
+    /// — so the queue can empty. Closing that gap on the roster changes
+    /// nothing about the confirmed day, so nothing puts those days back by
+    /// itself; this does. Also how a month deleted on Field's side is
+    /// recovered.
+    async fn mark_month_unsynced(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<(), CourseError>;
+
+    /// How many days in the window are still behind. What the screen counts
+    /// down, and how the push knows it is finished.
+    async fn count_unsynced(
+        &self,
+        tenant_id: &str,
+        from: NaiveDate,
+        to: NaiveDate,
+    ) -> Result<u64, CourseError>;
+
+    /// Record what Field now holds for these days.
+    ///
+    /// Written after the Field call rather than before it, so an id is only
+    /// ever stored for a shift Field acknowledged. A day whose link is `None`
+    /// is cleared, which is how a day turned off stops naming a shift that no
+    /// longer exists.
+    ///
+    /// Days with no confirmed shift row are skipped rather than created: the
+    /// link describes a day the desk already decided, and inventing a row here
+    /// would confirm work nobody planned.
+    ///
+    /// Also stamps the day as caught up with Field, which is what takes it out
+    /// of [`unsynced_shifts`](Self::unsynced_shifts). A day Field holds nothing
+    /// for by design — an off day — is stamped too, with no id: otherwise every
+    /// pass would pick it up, find nothing to do, and never finish.
+    async fn set_field_shift_links(
+        &self,
+        tenant_id: &str,
+        links: &[FieldShiftLink],
+    ) -> Result<(), CourseError>;
+}
+
+/// Port for the generic side of a shift: that somebody is at work, and when.
+///
+/// Field's HRM already models this, so CourseBoard does not get to model it
+/// twice (ADR-0013). The port is deliberately free of golf: a staff member, a
+/// date, hours, and a note. Which course the caddie stands at and how many
+/// rounds they can take never crosses it — that is golf's own, and Field has
+/// no column for it by design.
+///
+/// Nothing here decides *whether* a shift should exist. The caller has already
+/// confirmed the month; this only mirrors the working part of it.
+#[async_trait]
+pub trait StaffShiftGateway: Send + Sync {
+    /// File a working day, or move the one already filed.
+    ///
+    /// `field_shift_id` is what a previous write filed for the same staff
+    /// member and date, if any. Passing it updates that shift; passing `None`
+    /// creates one. The id is only ever one this app stored itself, so a shift
+    /// belonging to another tenant is never named — Field's own ownership
+    /// check is a backstop, not the thing being relied on (PLT-3945).
+    async fn upsert_shift(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        staff_id: &str,
+        field_shift_id: Option<&str>,
+        shift: StaffShiftInput,
+    ) -> Result<String, CourseError>;
+
+    /// Withdraw a day: the caddie is not working it after all.
+    ///
+    /// A shift Field no longer has is not an error. The desk turning a day off
+    /// twice, or a retry after a delete that did land, both arrive here — and
+    /// both leave Field in the state the caller asked for.
+    async fn delete_shift(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        staff_id: &str,
+        field_shift_id: &str,
+    ) -> Result<(), CourseError>;
+}
+
+/// The generic shift Field is asked to hold. No golf in it, on purpose.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaffShiftInput {
+    pub date: NaiveDate,
+    /// `HH:MM`, derived from the course's schedule where it has one.
+    pub start_time: String,
+    pub end_time: String,
+    /// Field's own vocabulary for the kind of day, left to the caller.
+    pub shift_type: Option<String>,
+    pub notes: Option<String>,
 }
 
 /// Port for the generic reservation schedule and the inventory it generates.
@@ -382,6 +689,27 @@ pub trait ReservationGateway: Send + Sync {
     async fn list_reservations(
         &self,
         credentials: GatewayCredentials<'_>,
+    ) -> Result<Vec<Reservation>, CourseError>;
+
+    /// One person's bookings, newest first.
+    ///
+    /// Filtered upstream rather than here: the tenant's reservation table is
+    /// years of play and the desk wants one customer out of it. Only the
+    /// booking's own customer matches — Field records one per reservation and
+    /// cannot be asked about `golfParty.players[].customerId` — so this answers
+    /// "rounds they booked", not "rounds they played in".
+    ///
+    /// Paged, because the caller needs the whole history and not a screenful:
+    /// how often somebody plays and what they are worth are lifetime figures,
+    /// and a page of them is a different number wearing the same label. Field
+    /// answers with no total, so the caller reads until a page comes back
+    /// short.
+    async fn list_customer_reservations(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+        limit: u32,
+        offset: u32,
     ) -> Result<Vec<Reservation>, CourseError>;
 
     /// One booking by id.
@@ -580,6 +908,17 @@ pub trait MembershipGateway: Send + Sync {
         &self,
         credentials: GatewayCredentials<'_>,
         input: &AssignMembershipPlan,
+    ) -> Result<CustomerMembership, CourseError>;
+
+    /// Record, change, or withdraw the club's number for a member.
+    ///
+    /// Separate from assigning a plan: a club numbers people at a different
+    /// moment from when it sells them the membership, and renumbers without
+    /// the membership changing at all.
+    async fn set_member_number(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &SetMemberNumber,
     ) -> Result<CustomerMembership, CourseError>;
 }
 
@@ -795,12 +1134,6 @@ pub trait GolfOpsGateway: Send + Sync {
         date: NaiveDate,
     ) -> Result<(), CourseError>;
 
-    async fn list_caddie_recommendations(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        query: RecommendationQuery,
-    ) -> Result<Vec<CaddieRecommendation>, CourseError>;
-
     async fn get_attendance_snapshot(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -824,13 +1157,6 @@ pub trait GolfOpsGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         year_month: &str,
     ) -> Result<std::collections::HashMap<String, WorkedMinutes>, CourseError>;
-
-    async fn auto_assign_caddies(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        date: NaiveDate,
-        dry_run: bool,
-    ) -> Result<AutoAssignResult, CourseError>;
 
     /// What one round pays at each rank.
     ///
@@ -886,14 +1212,6 @@ pub trait GolfCommercialGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         csv: &str,
     ) -> Result<Vec<DailyBudget>, CourseError>;
-
-    async fn list_budget_achievements(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        from: NaiveDate,
-        to: NaiveDate,
-        timezone: &str,
-    ) -> Result<Vec<BudgetAchievement>, CourseError>;
 
     async fn get_monthly_settlement(
         &self,

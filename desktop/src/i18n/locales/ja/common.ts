@@ -98,6 +98,8 @@ export const common = {
     sectionUnavailableTitle: 'この部分を表示できません',
     sectionUnavailableDescription:
       '入力内容を確認して、もう一度お試しください。ほかの部分は引き続き使えます。',
+    timezoneFallback:
+      '施設のタイムゾーン設定を読み込めませんでした。日付と時刻は {{timezone}} として表示しています。',
   },
   external: {
     invalidUrl: 'リンクの形が正しくありません。',
@@ -132,6 +134,8 @@ export const common = {
     thisMonth: '今月',
     prevMonth: '前の月',
     nextMonth: '次の月',
+    pickMonth: '月を選ぶ',
+    yearMonth: '{{year}}年{{month}}月',
     prevDay: '前の日',
     nextDay: '次の日',
   },
@@ -147,5 +151,10 @@ export const common = {
   },
   notification: {
     label: '操作結果のお知らせ',
+  },
+  newVersion: {
+    message: '新しいバージョンが公開されました。再読み込みすると最新の画面になります。',
+    reload: '再読み込み',
+    dismiss: '閉じる',
   },
 } as const

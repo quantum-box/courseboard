@@ -185,6 +185,109 @@ button,
   font-size: 16px;
 }
 
+/* A persistent, non-modal heads-up: floats over the workspace, never blocks
+   input, and never pushes the layout it sits above. Not built on the shared
+   `showToast`/`Toaster` (sonner) — that system is deliberately transient and
+   non-interactive (see the doc comment in `lib/toast.ts` and the
+   `.courseboard-toaster` rule below: "status text, not controls"), which is
+   the opposite of what a stay-until-acted-on reload prompt needs. It shares
+   that system's design instead, on the two axes that matter here:
+     - same tokens as a sonner toast (`--nui-popover`/`-foreground`,
+       `--nui-border`, `--nui-shadow-overlay`, `--nui-primary` for the action
+       button) so it visually reads as the same family of notice.
+     - the same "never intercept the next click" technique: `pointer-events:
+       none` on the card itself, `auto` only on the two buttons that need it.
+   `position: absolute` inside `.app-workspace` (not `fixed` to the viewport):
+   the sidebar is a sibling flex item beside that column, so anchoring here
+   keeps the banner inside the content area at every sidebar width — expanded,
+   resized, or collapsed to an overlay — instead of a fixed viewport offset
+   that would sit partly underneath the sidebar and hide the message text.
+   Bottom-left, not bottom-right: Sheets/dialogs (native-ui z-50) anchor to the
+   right edge and stick their submit bar to their own bottom, so a right-side
+   banner would sit on top of it. z-index stays below every real interactive
+   overlay it could coincide with — the ledger right-click menu (60), the
+   board-only takeover (40), and any open Sheet/dialog (50, native-ui) — so
+   those still cover it instead of the other way around. */
+.new-version-banner {
+  position: absolute;
+  z-index: 30;
+  left: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  display: flex;
+  max-width: min(360px, calc(100% - 32px));
+  align-items: center;
+  gap: 10px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-lg);
+  padding: 10px 12px;
+  background: hsl(var(--nui-popover));
+  color: hsl(var(--nui-popover-foreground));
+  box-shadow: var(--nui-shadow-overlay);
+  pointer-events: none;
+}
+
+.new-version-banner-message {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.new-version-banner-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.new-version-banner-reload {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--nui-radius-md);
+  padding: 6px 10px;
+  background: hsl(var(--nui-primary));
+  color: hsl(var(--nui-primary-foreground));
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.new-version-banner-reload svg {
+  width: 14px;
+  height: 14px;
+}
+
+.new-version-banner-dismiss {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--nui-radius-md);
+  padding: 0;
+  background: transparent;
+  color: hsl(var(--nui-muted-foreground));
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.new-version-banner-dismiss:hover,
+.new-version-banner-dismiss:focus-visible {
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-foreground));
+  outline: none;
+}
+
+.new-version-banner-dismiss svg {
+  width: 14px;
+  height: 14px;
+}
+
 .desktop-sidebar {
   position: relative;
   z-index: 40;
@@ -403,6 +506,7 @@ button,
 }
 
 .app-workspace {
+  position: relative;
   display: flex;
   min-width: 0;
   min-height: 0;
@@ -1024,6 +1128,15 @@ button,
   line-height: 1.5;
   opacity: .75;
   overflow-wrap: anywhere;
+}
+
+/*
+ * Wraps a notice that sits above the whole app shell, for a setting that every
+ * screen depends on. Page-level notices live inside the page body instead; this
+ * one has to be visible no matter which route is open.
+ */
+.page-banner {
+  padding: 8px 12px 0;
 }
 
 .notice-info { border-left-color: hsl(var(--nui-primary)); background: hsl(var(--nui-selected)); }
@@ -2503,6 +2616,14 @@ button,
   min-height: 100dvh;
   grid-template-columns: minmax(320px, .92fr) minmax(420px, 1.08fr);
   background: hsl(var(--nui-background));
+}
+
+.auth-shell-session-expired {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: clamp(24px, 6vw, 76px);
+  background: hsl(var(--nui-muted));
 }
 
 .auth-brand-panel {
@@ -4440,6 +4561,18 @@ button,
 }
 
 @media print {
+  /* The page name has to start at the root, not at the table.
+     A named page begins a new page box wherever the name changes, so declaring
+     it only on `.shift-board-print` put the default page first — and every
+     other child of body is hidden, so that page came out blank. One sheet of
+     nothing, every time, ahead of the board.
+     Naming the page on the element that owns the whole printed document means
+     there is no change to break on. */
+  html:has(> body > .shift-board-print),
+  body:has(> .shift-board-print) {
+    page: shift-board;
+  }
+
   body:has(> .shift-board-print) {
     background: #fff !important;
   }
@@ -4450,7 +4583,6 @@ button,
 
   .shift-board-print {
     display: block;
-    page: shift-board;
     width: 100%;
     color: #202124;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
@@ -5092,6 +5224,20 @@ button,
   font-size: 11px;
 }
 
+.ledger-column-caddie-anomalies {
+  margin: 0;
+  color: hsl(var(--nui-warning-foreground, var(--nui-muted-foreground)));
+  font-size: 11px;
+  line-height: 15px;
+}
+
+/* Sold past what the day's caddies can take. The rest of the meta line is grey
+ * on purpose — this is the one item there that the desk has to act on. */
+.ledger-column-oversold {
+  color: hsl(var(--nui-destructive));
+  font-weight: 600;
+}
+
 .ledger-column-derived {
   margin: 0;
   color: hsl(var(--nui-warning-foreground, var(--nui-muted-foreground)));
@@ -5311,6 +5457,27 @@ button,
 
 .ledger-cell-group.is-selected {
   box-shadow: inset 0 0 0 2px hsl(var(--nui-primary) / 45%);
+}
+
+/* A caddie-attached round with nobody covering it, on a day the shifts are
+ * already confirmed (SCC-27). `.is-selected` uses `box-shadow`, so this uses
+ * `outline` instead — the same property would have one declaration win over
+ * the other and hide whichever state came second, but the two properties
+ * paint independently and both stay visible on a selected, unassigned row. */
+.ledger-cell-group.is-unassigned-caddie {
+  outline: 2px solid hsl(var(--nui-destructive) / 65%);
+  outline-offset: -2px;
+}
+
+/* `.ledger-group-text small` below sets every <small> in the group cell to
+ * the muted colour, and its element+class selector otherwise outranks a
+ * bare `.ledger-unassigned-badge` regardless of source order — scoped under
+ * `.ledger-group-text` too so this one wins on specificity, not luck. */
+.ledger-group-text .ledger-unassigned-badge {
+  display: block;
+  color: hsl(var(--nui-destructive));
+  font-size: 10px;
+  font-weight: 700;
 }
 
 .ledger-group-text {
@@ -5769,6 +5936,159 @@ button,
 
 .customer-ledger-detail dd {
   margin: 0;
+}
+
+/* Settings rows that read as a table: a heading strip, then one row per thing
+   the club configures. Matches `.membership-plan-row` — same row padding and
+   the same divider — so the panels on this page look like one page rather than
+   three separate forms. */
+.settings-rows {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-rows__head,
+.settings-rows__row {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.settings-rows__row {
+  border-bottom: 1px solid hsl(var(--nui-border) / .6);
+}
+
+.settings-rows__head {
+  padding-bottom: 2px;
+  font-size: 12px;
+  font-weight: 500;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+/* The heading strip names the columns once. The per-input labels stay in the
+   DOM for anything reading the form aloud — they are only taken off screen. */
+.settings-rows__row .field-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.settings-rows__name {
+  font-weight: 600;
+}
+
+.settings-rows__rank {
+  font-size: 12px;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+/* Per-panel column shapes. Each keeps its own template; the chrome above is
+   shared so they line up as one page. */
+.membership-discount-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 1.4fr) minmax(120px, 1fr) minmax(100px, 1fr);
+}
+
+.membership-window-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(90px, auto) minmax(90px, auto);
+}
+
+.membership-window-row__days {
+  display: flex;
+  gap: 6px;
+}
+
+.membership-window-day {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.customer-grade-row {
+  display: grid;
+  grid-template-columns: 24px minmax(120px, 1.2fr) repeat(3, minmax(100px, 1fr)) auto;
+}
+
+/* One job name per row, so the list reads as the pick list it becomes. */
+.caddie-duty-row {
+  display: grid;
+  grid-template-columns: 24px minmax(160px, 1fr) auto;
+}
+
+/* Stacked. Kept after the per-panel rules above, because those set `display`
+   on the same elements at the same specificity — a narrow-screen rule placed
+   before them would simply lose. */
+@media (max-width: 900px) {
+  .settings-rows__head {
+    display: none;
+  }
+
+  /* No heading strip above to carry the meaning, so the labels come back. */
+  .settings-rows__row .field-label {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+  }
+
+  .settings-rows__row {
+    padding: 12px 0;
+  }
+
+  .membership-discount-row,
+  .membership-window-row,
+  .customer-grade-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .caddie-duty-row {
+    grid-template-columns: 24px 1fr auto;
+  }
+
+  .settings-rows__name,
+  .settings-rows__rank,
+  .membership-window-row__days {
+    grid-column: 1 / -1;
+  }
+}
+
+/* Visit history status. Colour carries the reading at a glance — a cancelled
+   round and a played one are scanned down a column, not read one by one — but
+   the word is always there, so nothing depends on the colour alone. */
+.visit-kind {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.visit-kind-visited {
+  font-weight: 600;
+}
+
+.visit-kind-upcoming {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.visit-kind-no-show {
+  color: hsl(var(--nui-destructive));
+  font-weight: 600;
+}
+
+.visit-kind-cancelled {
+  color: hsl(var(--nui-muted-foreground));
+  text-decoration: line-through;
 }
 
 .customer-ledger-actions {

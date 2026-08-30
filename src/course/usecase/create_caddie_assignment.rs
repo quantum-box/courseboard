@@ -12,18 +12,17 @@
 
 use std::sync::Arc;
 
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    parse_tenant_timezone, shift_covers_tee_time, tenant_date_at, tenant_day_bounds,
-    widen_for_utc_date_filter, AvailabilityQuery, CaddieAssignment, CaddieAssignmentQuery,
-    CaddieId, CourseError, GatewayCredentials, GolfOpsGateway, ReservationId,
-    UpsertCaddieAssignment,
+    parse_tenant_timezone, tenant_date_at, widen_for_utc_date_filter, AvailabilityQuery,
+    CaddieAssignment, CaddieAssignmentQuery, CaddieDutyGateway, CaddieId, CaddieRankFeeGateway,
+    CourseError, GatewayCredentials, GolfOpsGateway, ReservationId, UpsertCaddieAssignment,
 };
 
-/// How long the new round holds its caddie when the caller does not say.
-const DEFAULT_ROUND_MINUTES: i64 = 270;
+use super::caddie_rank_fees::read_caddie_rank_fees;
+use super::caddie_round_guards::{check_round_can_be_walked, live_rounds_on, PlacedRound};
 
 const ASSIGNED_STATUS: &str = "assigned";
 const PRIMARY_ROLE: &str = "primary";
@@ -41,11 +40,21 @@ pub struct NameCaddieForRound {
 
 pub struct CreateCaddieAssignmentUseCase {
     ops: Arc<dyn GolfOpsGateway>,
+    rank_fees: Arc<dyn CaddieRankFeeGateway>,
+    duties: Arc<dyn CaddieDutyGateway>,
 }
 
 impl CreateCaddieAssignmentUseCase {
-    pub fn new(ops: Arc<dyn GolfOpsGateway>) -> Self {
-        Self { ops }
+    pub fn new(
+        ops: Arc<dyn GolfOpsGateway>,
+        rank_fees: Arc<dyn CaddieRankFeeGateway>,
+        duties: Arc<dyn CaddieDutyGateway>,
+    ) -> Self {
+        Self {
+            ops,
+            rank_fees,
+            duties,
+        }
     }
 
     pub async fn execute(
@@ -61,7 +70,7 @@ impl CreateCaddieAssignmentUseCase {
         let date = tenant_date_at(input.scheduled_at, timezone)?;
         let window = widen_for_utc_date_filter(date, date);
 
-        let (roster, assignments, availabilities, rank_fees) = tokio::try_join!(
+        let (roster, assignments, availabilities, rank_fees, on_duty) = tokio::try_join!(
             self.ops.list_caddie_roster(credentials),
             self.ops.list_caddie_assignments(
                 credentials,
@@ -81,73 +90,27 @@ impl CreateCaddieAssignmentUseCase {
                     date: None,
                 },
             ),
-            self.ops.get_caddie_rank_fees(credentials),
+            read_caddie_rank_fees(self.ops.as_ref(), self.rank_fees.as_ref(), credentials),
+            self.duties
+                .list_duty_assignments(credentials.operator_id, date, date),
         )?;
 
-        let caddie = roster
-            .caddies()
-            .iter()
-            .find(|caddie| caddie.id() == &input.caddie_id)
-            .ok_or(CourseError::NotFound("caddie"))?;
-        if !caddie.is_assignable() {
-            return Err(CourseError::BadRequest(
-                "this caddie is not taking rounds; set them back to active on the roster first",
-            ));
-        }
-
-        if !shift_covers_tee_time(
-            availabilities
-                .iter()
-                .find(|row| row.caddie_id() == &input.caddie_id)
-                .map(|row| row.status()),
-            Some(input.scheduled_at),
+        let live = live_rounds_on(&assignments, date, timezone)?;
+        let caddie = check_round_can_be_walked(
+            &roster,
+            &live,
+            &availabilities,
+            &on_duty,
+            &PlacedRound {
+                caddie_id: &input.caddie_id,
+                reservation_id: &input.reservation_id,
+                scheduled_at: input.scheduled_at,
+                date,
+                duration_minutes: input.duration_minutes,
+                moving: None,
+            },
             timezone_id,
-        ) {
-            return Err(CourseError::BadRequest(
-                "this caddie's shift for the day does not cover that tee time",
-            ));
-        }
-
-        let (day_start, day_end) = tenant_day_bounds(date, date, timezone)?;
-        let live: Vec<&CaddieAssignment> = assignments
-            .iter()
-            .filter(|assignment| assignment.holds_the_round())
-            .filter(|assignment| {
-                let at = assignment.scheduled_at();
-                day_start <= at && at < day_end
-            })
-            .collect();
-
-        if live
-            .iter()
-            .any(|assignment| assignment.covers_reservation(&input.reservation_id))
-        {
-            return Err(CourseError::BadRequest(
-                "this group already has a caddie; cancel that assignment before naming another",
-            ));
-        }
-
-        let ends_at = input.scheduled_at
-            + Duration::minutes(
-                input
-                    .duration_minutes
-                    .filter(|value| *value > 0)
-                    .map(i64::from)
-                    .unwrap_or(DEFAULT_ROUND_MINUTES),
-            );
-        if live.iter().any(|assignment| {
-            assignment.caddie_id() == &input.caddie_id
-                && overlaps(
-                    input.scheduled_at,
-                    ends_at,
-                    assignment.scheduled_at(),
-                    assignment.scheduled_at() + Duration::minutes(assignment.occupied_minutes()),
-                )
-        }) {
-            return Err(CourseError::BadRequest(
-                "this caddie is already out on a round that overlaps that tee time",
-            ));
-        }
+        )?;
 
         self.ops
             .create_caddie_assignment(
@@ -176,13 +139,4 @@ impl CreateCaddieAssignmentUseCase {
             )
             .await
     }
-}
-
-fn overlaps(
-    left_start: DateTime<Utc>,
-    left_end: DateTime<Utc>,
-    right_start: DateTime<Utc>,
-    right_end: DateTime<Utc>,
-) -> bool {
-    left_start < right_end && right_start < left_end
 }

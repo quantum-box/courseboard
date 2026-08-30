@@ -99,19 +99,15 @@ pub async fn proxy_field_api(
         }
     };
     let upstream_status = upstream.status();
-    // Inbound bearer was already validated by require_valid_token. A Field 401
-    // means Field rejected a token Course Board trusts (issuer/audience/client
-    // mismatch on the Field side) — do not pass 401 through, or the UI soft
-    // sign-out treats it as an expired Course Board session.
+    // Field has rejected the forwarded authentication, not the action. Keep it
+    // separate from a real 403 policy denial so the UI can enter the re-login
+    // flow without logging out an operator who merely lacks one permission.
     if upstream_status == reqwest::StatusCode::UNAUTHORIZED {
         tracing::warn!(
             %normalized_path,
-            "Field API rejected an already-authenticated bearer; mapping to 502"
+            "Field API rejected the forwarded authentication"
         );
-        return proxy_error(
-            StatusCode::BAD_GATEWAY,
-            "Field API rejected the authenticated bearer (Tachyon Auth verify_user must accept Tachyon-issued OAuth access tokens; re-login if the session expired)",
-        );
+        return proxy_authentication_expired("Field authentication expired; sign in again");
     }
     // A member's permissions just changed upstream. Remembered allowances for
     // this tenant describe the old answer, so drop them rather than let an
@@ -167,16 +163,24 @@ fn proxy_error(status: StatusCode, message: &'static str) -> Response<Body> {
         .into_response()
 }
 
+fn proxy_authentication_expired(message: &'static str) -> Response<Body> {
+    (
+        StatusCode::UNAUTHORIZED,
+        [(header::CONTENT_TYPE, "application/json")],
+        format!(r#"{{"error":"upstream_authentication_expired","message":"{message}"}}"#),
+    )
+        .into_response()
+}
+
 fn is_allowed_path(path: &str) -> bool {
     if !has_safe_segments(path) {
         return false;
     }
 
-    path == "/v1/erp/extensions/status"
-        || path == "/v1/erp/extensions/golf_course/config"
-        || is_non_empty_subpath(path, "/v1/erp/extensions/golf-course")
-        || path == "/v1/erp/extensions/golf-course"
-        || path == "/v1/erp/staff"
+    // No extension path is proxied: the UI reaches extension status and config
+    // through CourseBoard's own routes only, and CourseBoard is not a Field
+    // extension (ADR-0010).
+    path == "/v1/erp/staff"
         || is_non_empty_subpath(path, "/v1/erp/staff")
         || path == "/v1/erp/reservation-types"
         || is_field_iam_path(path)
@@ -190,21 +194,8 @@ fn is_allowed_route(method: &Method, path: &str) -> bool {
         return false;
     }
 
-    if path == "/v1/erp/extensions/status" || path == "/v1/erp/reservation-types" {
+    if path == "/v1/erp/reservation-types" {
         return method == Method::GET;
-    }
-    if path == "/v1/erp/extensions/golf_course/config" {
-        return method == Method::GET || method == Method::PATCH;
-    }
-    if path == "/v1/erp/extensions/golf-course" {
-        return method == Method::GET;
-    }
-    if is_non_empty_subpath(path, "/v1/erp/extensions/golf-course") {
-        return method == Method::GET
-            || method == Method::POST
-            || method == Method::PATCH
-            || method == Method::PUT
-            || method == Method::DELETE;
     }
     if path == "/v1/erp/staff" {
         return method == Method::GET || method == Method::POST;
@@ -363,14 +354,36 @@ fn is_invoice_path(path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use axum::http::{header, HeaderMap, HeaderValue, Method};
+    use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
+    use http_body_util::BodyExt;
 
-    use super::{is_allowed_path, is_allowed_route, outbound_authorization};
+    use super::{
+        is_allowed_path, is_allowed_route, outbound_authorization, proxy_authentication_expired,
+    };
+
+    #[tokio::test]
+    async fn field_authentication_expiry_has_a_distinct_401_contract() {
+        let response = proxy_authentication_expired("Field authentication expired; sign in again");
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect authentication expiry body")
+            .to_bytes();
+        let body: serde_json::Value =
+            serde_json::from_slice(&body).expect("decode authentication expiry body");
+        assert_eq!(body["error"], "upstream_authentication_expired");
+    }
 
     #[test]
     fn allows_only_courseboard_field_surfaces() {
-        assert!(is_allowed_path("/v1/erp/extensions/golf-course/courses"));
-        assert!(is_allowed_path("/v1/erp/extensions/status"));
+        // The extension surface is gone entirely: no CourseBoard screen calls
+        // Field's extension paths (ADR-0010), so the proxy refuses them.
+        assert!(!is_allowed_path("/v1/erp/extensions/golf-course/courses"));
+        assert!(!is_allowed_path("/v1/erp/extensions/status"));
+        assert!(!is_allowed_path("/v1/erp/extensions/golf_course/config"));
         assert!(is_allowed_path("/v1/erp/staff/staff_1/clock-in"));
         assert!(is_allowed_path(
             "/v1/erp/reservations/res_1/billing-invoice"
@@ -413,7 +426,7 @@ mod tests {
             &Method::POST,
             "/v1/invoices/inv_1/fulfill"
         ));
-        assert!(is_allowed_route(
+        assert!(!is_allowed_route(
             &Method::PATCH,
             "/v1/erp/extensions/golf-course/courses/course_1"
         ));
@@ -473,9 +486,10 @@ mod tests {
             &Method::GET,
             "/v1/erp/reservations/res_1/billing-invoice"
         ));
+        assert!(is_allowed_route(&Method::GET, "/v1/erp/reservation-types"));
         assert!(!is_allowed_route(
-            &Method::TRACE,
-            "/v1/erp/extensions/golf-course/courses"
+            &Method::POST,
+            "/v1/erp/reservation-types"
         ));
     }
 

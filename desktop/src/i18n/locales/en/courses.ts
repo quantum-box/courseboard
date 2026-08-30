@@ -16,7 +16,7 @@ export const courses: DeepPartial<typeof source> = {
   editor: {
     createTitle: 'Add a course',
     editTitle: 'Edit course',
-    description: 'The basics used to generate booking slots.',
+    description: 'The basics used to build start slots.',
   },
   field: {
     name: 'Course name',

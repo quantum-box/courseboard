@@ -5,7 +5,7 @@ use clap::Parser;
 use crate::{
     auth::{AuthConfig, AuthConfigError},
     cancellation_fees::CancellationFeeConfig,
-    course::infrastructure::DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
+    course::infrastructure::{DEFAULT_FIELD_GENERIC_PATHS, DEFAULT_MULTI_COURSE_PRODUCT_WRITES},
     field_api::{ClientCredentialsConfig, DEFAULT_FIELD_API_URL},
 };
 
@@ -98,6 +98,50 @@ pub struct RuntimeConfig {
     )]
     pub multi_course_product_writes: bool,
 
+    /// Kill switch for mirroring confirmed shifts into Field's HRM
+    /// (ADR-0013 / PLT-3835).
+    ///
+    /// **Off by default**, unlike the switch above. A confirmed shift is also
+    /// a fact Field holds — that this staff member is at work — and writing it
+    /// there is what the whole feature is for. But turning it on changes how
+    /// two existing screens fail: editing one day starts to depend on Field
+    /// answering, and confirming a month starts a push afterwards that can
+    /// report days it could not send.
+    ///
+    /// Neither of those is visible on a CourseBoard screen when it is off, so
+    /// the default is the behaviour that shipped before: CourseBoard writes
+    /// its own tables and nothing else. Turn it on once the environment has
+    /// been rehearsed against the Field it will actually talk to.
+    #[arg(
+        long,
+        env = "COURSEBOARD_FIELD_SHIFT_WRITEBACK",
+        default_value_t = false,
+        action = clap::ArgAction::Set,
+    )]
+    pub field_shift_writeback: bool,
+
+    /// Switch from Field's golf extension aliases to its generic paths
+    /// (ADR-0010 / SCC-19).
+    ///
+    /// **Off by default.** The generic table analyzer requires
+    /// `field:PreviewBridgeRun`, and the golf policies only gain it when
+    /// `tachyonfield-golf-auth.yml` is applied to this environment. Turning it
+    /// on first makes every reservation report import fail with 403, so the
+    /// order is: apply the auth manifest, deploy with this off, then flip it.
+    ///
+    /// Rolling back is this switch alone — Field keeps serving both paths, so
+    /// nothing has to be reverted or redeployed there.
+    ///
+    /// One switch covers every bundle that moves off the extension paths.
+    /// Later bundles join it rather than adding their own.
+    #[arg(
+        long,
+        env = "COURSEBOARD_FIELD_GENERIC_PATHS",
+        default_value_t = DEFAULT_FIELD_GENERIC_PATHS,
+        action = clap::ArgAction::Set,
+    )]
+    pub field_generic_paths: bool,
+
     /// Opt-out for CourseBoard's own action authorization gate.
     ///
     /// The gate asks Tachyon Auth for the `field_extension_golf:*` action
@@ -112,6 +156,16 @@ pub struct RuntimeConfig {
         action = clap::ArgAction::Set,
     )]
     pub disable_action_authz: bool,
+
+    /// Which source `/v1/me` uses to list the caller's tenants (ADR-0011).
+    ///
+    /// `extension` keeps the current Field `/v1/erp/me` extension filter.
+    /// `compare` still serves the extension answer but also runs the
+    /// policy-based path in the background and logs the difference — run it
+    /// in production for at least one business week before switching.
+    /// `policy` serves the `check-tenants` policy answer.
+    #[arg(long, env = "COURSEBOARD_TENANT_SOURCE", default_value = "extension")]
+    pub tenant_source: String,
 
     #[arg(long, env = "TWILIO_ACCOUNT_SID")]
     pub twilio_account_sid: Option<String>,
@@ -178,6 +232,8 @@ impl RuntimeConfig {
             twilio_messaging_service_sid: non_empty(self.twilio_messaging_service_sid.as_deref()),
             twilio_from_number: non_empty(self.twilio_from_number.as_deref()),
             multi_course_product_writes: self.multi_course_product_writes,
+            field_shift_writeback: self.field_shift_writeback,
+            field_generic_paths: self.field_generic_paths,
         }
     }
 
@@ -228,6 +284,35 @@ impl RuntimeConfig {
     pub fn dev_bearer_token(&self) -> Option<String> {
         non_empty(self.dev_bearer_token.as_deref())
     }
+
+    /// Unknown values fall back to the extension source: a typo in an env var
+    /// must not silently change where sign-in tenant lists come from.
+    pub fn tenant_source(&self) -> TenantSource {
+        match self.tenant_source.trim() {
+            "" | "extension" => TenantSource::Extension,
+            "compare" => TenantSource::Compare,
+            "policy" => TenantSource::Policy,
+            other => {
+                tracing::warn!(
+                    value = other,
+                    "COURSEBOARD_TENANT_SOURCE is not one of extension|compare|policy; \
+                     using extension"
+                );
+                TenantSource::Extension
+            }
+        }
+    }
+}
+
+/// Where `/v1/me` gets the caller's tenant list from (ADR-0011).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TenantSource {
+    /// Field `/v1/erp/me` filtered by the golf extension flag (current).
+    Extension,
+    /// Serve the extension answer, run the policy path too, log the diff.
+    Compare,
+    /// Platform `/v1/me` + `check-tenants` policy filter (target).
+    Policy,
 }
 
 impl Default for RuntimeConfig {
@@ -255,7 +340,10 @@ impl Default for RuntimeConfig {
             field_api_scope: None,
             field_api_audience: None,
             multi_course_product_writes: DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
+            field_shift_writeback: false,
+            field_generic_paths: DEFAULT_FIELD_GENERIC_PATHS,
             disable_action_authz: false,
+            tenant_source: "extension".to_string(),
             twilio_account_sid: None,
             twilio_auth_token: None,
             twilio_messaging_service_sid: None,

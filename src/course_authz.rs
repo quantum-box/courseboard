@@ -33,8 +33,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::course::domain::actions::{
-    CALCULATE_FEES, LIST_CADDIE_AVAILABILITY, LIST_SHIFTS, LIST_SLOT_OVERRIDES,
-    MANAGE_CADDIE_AVAILABILITY, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
+    CALCULATE_FEES, LIST_CADDIE_ASSIGNMENTS, LIST_CADDIE_AVAILABILITY, LIST_CADDIE_RANK_FEES,
+    LIST_COURSES, LIST_CUSTOMERS, LIST_MEMBERSHIP, LIST_SHIFTS, LIST_SLOT_OVERRIDES,
+    LIST_TEE_SHEET, MANAGE_CADDIE_ASSIGNMENTS, MANAGE_CADDIE_AVAILABILITY, MANAGE_CADDIE_RANK_FEES,
+    MANAGE_COURSES, MANAGE_CUSTOMERS, MANAGE_MEMBERSHIP_PLANS, MANAGE_RESERVATION_POLICY,
+    MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
 };
 
 /// What standing a route needs before its handler runs.
@@ -87,6 +90,32 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/simulator/simulate/range",
         RouteAuthorization::Action(CALCULATE_FEES),
     ),
+    // The simulator's inputs are CourseBoard's own row (ADR-0009). Reading them
+    // rides the same action as reading a quote; changing them is changing the
+    // club's pricing rules, whichever store they sit in.
+    (
+        "GET",
+        "/v1/course/pricing-settings",
+        RouteAuthorization::Action(CALCULATE_FEES),
+    ),
+    (
+        "PUT",
+        "/v1/course/pricing-settings",
+        RouteAuthorization::Action(MANAGE_RESERVATION_POLICY),
+    ),
+    // The booking form's visitor categories, CourseBoard's own rows
+    // (ADR-0009). Read wherever the tee board is read; arranged where the
+    // club's booking rules are arranged.
+    (
+        "GET",
+        "/v1/course/player-tag-options",
+        RouteAuthorization::Action(LIST_TEE_SHEET),
+    ),
+    (
+        "PUT",
+        "/v1/course/player-tag-options",
+        RouteAuthorization::Action(MANAGE_RESERVATION_POLICY),
+    ),
     (
         "POST",
         "/cancellation-fee-collections",
@@ -106,6 +135,41 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "DELETE",
         "/v1/course/slot-overrides",
         RouteAuthorization::Action(MANAGE_SLOT_OVERRIDES),
+    ),
+    // Moving a round already placed: the same permission as putting one there.
+    (
+        "PUT",
+        "/v1/course/caddie-assignments/:assignment_id/reassignment",
+        RouteAuthorization::Action(MANAGE_CADDIE_ASSIGNMENTS),
+    ),
+    // Non-round work is a decision about today's board, taken on the dispatch
+    // screen by the people who put caddies on groups — so it is guarded by the
+    // dispatch permissions rather than the shift ones. The club's list of jobs
+    // travels with the days filed against it.
+    (
+        "GET",
+        "/v1/course/caddie-duties",
+        RouteAuthorization::Action(LIST_CADDIE_ASSIGNMENTS),
+    ),
+    (
+        "PUT",
+        "/v1/course/caddie-duties",
+        RouteAuthorization::Action(MANAGE_CADDIE_ASSIGNMENTS),
+    ),
+    (
+        "GET",
+        "/v1/course/caddie-duty-assignments",
+        RouteAuthorization::Action(LIST_CADDIE_ASSIGNMENTS),
+    ),
+    (
+        "POST",
+        "/v1/course/caddie-duty-assignments",
+        RouteAuthorization::Action(MANAGE_CADDIE_ASSIGNMENTS),
+    ),
+    (
+        "DELETE",
+        "/v1/course/caddie-duty-assignments/:duty_id",
+        RouteAuthorization::Action(MANAGE_CADDIE_ASSIGNMENTS),
     ),
     (
         "GET",
@@ -135,6 +199,18 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     (
         "POST",
         "/v1/course/caddie-shift-plans/:year_month/preview",
+        RouteAuthorization::Action(MANAGE_SHIFTS),
+    ),
+    // Reading how far a month has reached Field is reading the shift board;
+    // pushing it is changing what Field holds.
+    (
+        "GET",
+        "/v1/course/caddie-shift-plans/:year_month/field-sync",
+        RouteAuthorization::Action(LIST_SHIFTS),
+    ),
+    (
+        "POST",
+        "/v1/course/caddie-shift-plans/:year_month/field-sync",
         RouteAuthorization::Action(MANAGE_SHIFTS),
     ),
     (
@@ -235,10 +311,18 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/reservations/:reservation_id/plan",
         RouteAuthorization::UpstreamEnforced,
     ),
+    // The arrangement is CourseBoard's own table now (ADR-0009), so Field no
+    // longer answers for these. Both still read the course list from Field to
+    // resolve ids, but that call cannot stand in for authorizing this one.
     (
-        "*",
+        "GET",
         "/v1/course/course-order",
-        RouteAuthorization::UpstreamEnforced,
+        RouteAuthorization::Action(LIST_COURSES),
+    ),
+    (
+        "PUT",
+        "/v1/course/course-order",
+        RouteAuthorization::Action(MANAGE_COURSES),
     ),
     (
         "*",
@@ -307,8 +391,54 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     ),
     (
         "*",
+        "/v1/course/customers/:customer_id/visits",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/customers/:customer_id/member-number",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
         "/v1/course/customers/:customer_id/membership",
         RouteAuthorization::UpstreamEnforced,
+    ),
+    // CourseBoard's own rows (ADR-0009), so the gate is here rather than at
+    // Field: read wherever a customer is read, arranged where customers are
+    // managed. Deciding what makes somebody a good customer is a decision
+    // about customers, not about bookings.
+    (
+        "GET",
+        "/v1/course/customer-grade-rules",
+        RouteAuthorization::Action(LIST_CUSTOMERS),
+    ),
+    (
+        "PUT",
+        "/v1/course/customer-grade-rules",
+        RouteAuthorization::Action(MANAGE_CUSTOMERS),
+    ),
+    // What a membership takes off the green fee: CourseBoard's own rows, so
+    // the gate is here rather than at Field.
+    (
+        "GET",
+        "/v1/course/membership-discounts",
+        RouteAuthorization::Action(LIST_MEMBERSHIP),
+    ),
+    (
+        "PUT",
+        "/v1/course/membership-discounts",
+        RouteAuthorization::Action(MANAGE_MEMBERSHIP_PLANS),
+    ),
+    (
+        "GET",
+        "/v1/course/membership-play-windows",
+        RouteAuthorization::Action(LIST_MEMBERSHIP),
+    ),
+    (
+        "PUT",
+        "/v1/course/membership-play-windows",
+        RouteAuthorization::Action(MANAGE_MEMBERSHIP_PLANS),
     ),
     (
         "*",
@@ -415,10 +545,18 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/caddie-ratings",
         RouteAuthorization::UpstreamEnforced,
     ),
+    // The fee table is CourseBoard's own row now (ADR-0009). Field no longer
+    // answers for it, and it decides what people are paid, so the check has to
+    // happen here.
     (
-        "*",
+        "GET",
         "/v1/course/caddie-rank-fees",
-        RouteAuthorization::UpstreamEnforced,
+        RouteAuthorization::Action(LIST_CADDIE_RANK_FEES),
+    ),
+    (
+        "PUT",
+        "/v1/course/caddie-rank-fees",
+        RouteAuthorization::Action(MANAGE_CADDIE_RANK_FEES),
     ),
     (
         "*",
@@ -1041,6 +1179,50 @@ mod tests {
     /// Every path string registered in `build_router` must classify. The list
     /// is maintained by hand the same way the router is; a route added there
     /// without a line here fails closed at runtime *and* fails this test.
+    /// Every path the router actually declares is in `ROUTES`.
+    ///
+    /// The list-based test below cannot catch a route that is in neither list,
+    /// which is exactly how `field-sync` reached production returning 403 to
+    /// its own UI. This one reads `lib.rs` instead of a copy of it, so a new
+    /// `.route(...)` that nobody classified fails here rather than in front of
+    /// a customer.
+    ///
+    /// Source introspection rather than asking axum, which does not expose its
+    /// route table. The same shape as the migration-hook test next door.
+    #[test]
+    fn every_route_the_router_declares_is_in_the_table() {
+        const ROUTER: &str = include_str!("lib.rs");
+
+        // `.route(` puts the path on the following line, so scrape the string
+        // literals rather than the call. `/v1/course/` prefixed literals in
+        // this file are route paths and nothing else.
+        let declared: Vec<String> = ROUTER
+            .lines()
+            .map(str::trim)
+            .filter_map(|line| line.strip_prefix('"'))
+            .filter_map(|rest| rest.split('"').next())
+            .filter(|path| path.starts_with("/v1/course/"))
+            .map(str::to_string)
+            .collect();
+        assert!(
+            declared.len() > 40,
+            "the scrape found {} course routes, so the shape of lib.rs changed and this test \
+             stopped checking anything",
+            declared.len()
+        );
+
+        let classified: Vec<&str> = ROUTES.iter().map(|(_, path, _)| *path).collect();
+        let missing: Vec<&String> = declared
+            .iter()
+            .filter(|path| !classified.contains(&path.as_str()))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "these routes are declared in lib.rs but not classified in ROUTES, so they fall \
+             through to a 403 for every caller: {missing:?}"
+        );
+    }
+
     #[test]
     fn every_registered_route_is_classified() {
         const REGISTERED: &[(&str, &str)] = &[
@@ -1101,8 +1283,16 @@ mod tests {
             ("POST", "/v1/course/customers"),
             ("POST", "/v1/course/customers/reception-draft"),
             ("GET", "/v1/course/customers/cus_1"),
+            ("GET", "/v1/course/customers/cus_1/visits"),
+            ("PUT", "/v1/course/customers/cus_1/member-number"),
             ("GET", "/v1/course/customers/cus_1/membership"),
             ("POST", "/v1/course/customers/cus_1/membership"),
+            ("GET", "/v1/course/customer-grade-rules"),
+            ("PUT", "/v1/course/customer-grade-rules"),
+            ("GET", "/v1/course/membership-discounts"),
+            ("PUT", "/v1/course/membership-discounts"),
+            ("GET", "/v1/course/membership-play-windows"),
+            ("PUT", "/v1/course/membership-play-windows"),
             ("GET", "/v1/course/membership-plans"),
             ("POST", "/v1/course/membership-plans"),
             ("PATCH", "/v1/course/membership-plans/pl_1"),
@@ -1138,10 +1328,18 @@ mod tests {
             ("GET", "/v1/course/caddie-payroll-summary/export.csv"),
             ("GET", "/v1/course/caddie-shift-rules"),
             ("PUT", "/v1/course/caddie-shift-rules"),
+            ("PUT", "/v1/course/caddie-assignments/a_1/reassignment"),
+            ("GET", "/v1/course/caddie-duties"),
+            ("PUT", "/v1/course/caddie-duties"),
+            ("GET", "/v1/course/caddie-duty-assignments"),
+            ("POST", "/v1/course/caddie-duty-assignments"),
+            ("DELETE", "/v1/course/caddie-duty-assignments/7"),
             ("GET", "/v1/course/caddie-shifts"),
             ("PUT", "/v1/course/caddie-shifts/cp_1/2026-08-18"),
             ("POST", "/v1/course/caddie-shift-plans/2026-09"),
             ("POST", "/v1/course/caddie-shift-plans/2026-09/preview"),
+            ("GET", "/v1/course/caddie-shift-plans/2026-09/field-sync"),
+            ("POST", "/v1/course/caddie-shift-plans/2026-09/field-sync"),
             ("GET", "/v1/course/reservation-policy"),
             ("PATCH", "/v1/course/reservation-policy"),
             ("GET", "/v1/course/daily-budgets"),
@@ -1155,6 +1353,10 @@ mod tests {
             ("POST", "/v1/course/demo-seed"),
             ("POST", "/v1/course/simulator/calculate"),
             ("POST", "/v1/course/simulator/simulate/range"),
+            ("GET", "/v1/course/pricing-settings"),
+            ("PUT", "/v1/course/pricing-settings"),
+            ("GET", "/v1/course/player-tag-options"),
+            ("PUT", "/v1/course/player-tag-options"),
         ];
         for (method, path) in REGISTERED {
             let method: Method = method.parse().expect("valid method");

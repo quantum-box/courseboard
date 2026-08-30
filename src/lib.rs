@@ -33,8 +33,13 @@ use cancellation_fees::{CancellationFeeConfig, MySqlCancellationFeeRepository};
 use config::RuntimeConfig;
 use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
 use course::infrastructure::{
-    FieldReservationReportGateway, MySqlAvailabilityDeadlineRepository, MySqlCaddieShiftRepository,
-    MySqlGeneratedThroughRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
+    FieldReservationReportGateway, MigratingReservationReportGateway,
+    MySqlAvailabilityDeadlineRepository, MySqlCaddieDutyRepository, MySqlCaddieRankFeeRepository,
+    MySqlCaddieShiftRepository, MySqlCourseOrderRepository, MySqlCustomerGradeRulesRepository,
+    MySqlGeneratedThroughRepository, MySqlGolfProductSettingsRepository,
+    MySqlMembershipDiscountsRepository, MySqlMembershipPlayWindowsRepository,
+    MySqlPlayerTagOptionsRepository, MySqlPricingSettingsRepository, MySqlShiftRulesRepository,
+    MySqlSlotOverrideRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -56,11 +61,20 @@ pub struct AppState {
     rules: Arc<MySqlTaxRuleRepository>,
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
+    course_order: Arc<MySqlCourseOrderRepository>,
+    caddie_rank_fees: Arc<MySqlCaddieRankFeeRepository>,
+    caddie_duties: Arc<MySqlCaddieDutyRepository>,
+    pricing_settings: Arc<MySqlPricingSettingsRepository>,
+    product_settings: Arc<MySqlGolfProductSettingsRepository>,
+    player_tag_options: Arc<MySqlPlayerTagOptionsRepository>,
+    customer_grade_rules: Arc<MySqlCustomerGradeRulesRepository>,
+    membership_discounts: Arc<MySqlMembershipDiscountsRepository>,
+    membership_play_windows: Arc<MySqlMembershipPlayWindowsRepository>,
     generated_through: Arc<MySqlGeneratedThroughRepository>,
     availability_deadlines: Arc<MySqlAvailabilityDeadlineRepository>,
     caddie_shifts: Arc<MySqlCaddieShiftRepository>,
     shift_rules: Arc<MySqlShiftRulesRepository>,
-    reservation_report_gateway: Arc<FieldReservationReportGateway>,
+    reservation_report_gateway: Arc<MigratingReservationReportGateway>,
     cancellation_fee_config: CancellationFeeConfig,
     http_client: reqwest::Client,
     token_verifier: Arc<dyn TokenVerifier>,
@@ -93,15 +107,30 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+            course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
+            caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
+            caddie_duties: Arc::new(MySqlCaddieDutyRepository::new(pool.clone())),
+            pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+            product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
+            player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
+            customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(pool.clone())),
+            membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(pool.clone())),
+            membership_play_windows: Arc::new(MySqlMembershipPlayWindowsRepository::new(
+                pool.clone(),
+            )),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
             )),
             caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
             shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
-            reservation_report_gateway: Arc::new(FieldReservationReportGateway::new(
-                reqwest::Client::new(),
-                cancellation_fee_config.field_api_url.as_deref(),
+            reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
+                pool.clone(),
+                Arc::new(FieldReservationReportGateway::with_generic_paths(
+                    reqwest::Client::new(),
+                    cancellation_fee_config.field_api_url.as_deref(),
+                    cancellation_fee_config.field_generic_paths,
+                )),
             )),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
@@ -141,15 +170,30 @@ impl AppState {
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+            course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
+            caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
+            caddie_duties: Arc::new(MySqlCaddieDutyRepository::new(pool.clone())),
+            pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+            product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
+            player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
+            customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(pool.clone())),
+            membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(pool.clone())),
+            membership_play_windows: Arc::new(MySqlMembershipPlayWindowsRepository::new(
+                pool.clone(),
+            )),
             generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
             availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                 pool.clone(),
             )),
             caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
             shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
-            reservation_report_gateway: Arc::new(FieldReservationReportGateway::new(
-                reqwest::Client::new(),
-                cancellation_fee_config.field_api_url.as_deref(),
+            reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
+                pool.clone(),
+                Arc::new(FieldReservationReportGateway::with_generic_paths(
+                    reqwest::Client::new(),
+                    cancellation_fee_config.field_api_url.as_deref(),
+                    cancellation_fee_config.field_generic_paths,
+                )),
             )),
             cancellation_fee_config,
             http_client: reqwest::Client::new(),
@@ -175,15 +219,34 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+                course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
+                caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
+                caddie_duties: Arc::new(MySqlCaddieDutyRepository::new(pool.clone())),
+                pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+                product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
+                player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
+                customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(
+                    pool.clone(),
+                )),
+                membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(
+                    pool.clone(),
+                )),
+                membership_play_windows: Arc::new(MySqlMembershipPlayWindowsRepository::new(
+                    pool.clone(),
+                )),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
                 )),
                 caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
                 shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
-                reservation_report_gateway: Arc::new(FieldReservationReportGateway::new(
-                    reqwest::Client::new(),
-                    cancellation_fee_config.field_api_url.as_deref(),
+                reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
+                    pool.clone(),
+                    Arc::new(FieldReservationReportGateway::with_generic_paths(
+                        reqwest::Client::new(),
+                        cancellation_fee_config.field_api_url.as_deref(),
+                        cancellation_fee_config.field_generic_paths,
+                    )),
                 )),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
@@ -200,15 +263,34 @@ impl AppState {
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
+                course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
+                caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
+                caddie_duties: Arc::new(MySqlCaddieDutyRepository::new(pool.clone())),
+                pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
+                product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
+                player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
+                customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(
+                    pool.clone(),
+                )),
+                membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(
+                    pool.clone(),
+                )),
+                membership_play_windows: Arc::new(MySqlMembershipPlayWindowsRepository::new(
+                    pool.clone(),
+                )),
                 generated_through: Arc::new(MySqlGeneratedThroughRepository::new(pool.clone())),
                 availability_deadlines: Arc::new(MySqlAvailabilityDeadlineRepository::new(
                     pool.clone(),
                 )),
                 caddie_shifts: Arc::new(MySqlCaddieShiftRepository::new(pool.clone())),
                 shift_rules: Arc::new(MySqlShiftRulesRepository::new(pool.clone())),
-                reservation_report_gateway: Arc::new(FieldReservationReportGateway::new(
-                    reqwest::Client::new(),
-                    cancellation_fee_config.field_api_url.as_deref(),
+                reservation_report_gateway: Arc::new(MigratingReservationReportGateway::new(
+                    pool.clone(),
+                    Arc::new(FieldReservationReportGateway::with_generic_paths(
+                        reqwest::Client::new(),
+                        cancellation_fee_config.field_api_url.as_deref(),
+                        cancellation_fee_config.field_generic_paths,
+                    )),
                 )),
                 cancellation_fee_config,
                 http_client: reqwest::Client::new(),
@@ -234,6 +316,34 @@ impl AppState {
         self.slot_overrides.clone()
     }
 
+    /// CourseBoard-owned arrangement of the ledger board's columns.
+    pub fn course_order(&self) -> Arc<MySqlCourseOrderRepository> {
+        self.course_order.clone()
+    }
+
+    /// CourseBoard-owned table of what a round pays at each caddie rank.
+    pub fn caddie_rank_fees(&self) -> Arc<MySqlCaddieRankFeeRepository> {
+        self.caddie_rank_fees.clone()
+    }
+
+    /// CourseBoard-owned pricing inputs: the tax-schedule key and the cost
+    /// assumptions behind the revenue projection.
+    pub fn pricing_settings(&self) -> Arc<MySqlPricingSettingsRepository> {
+        self.pricing_settings.clone()
+    }
+
+    /// CourseBoard-owned list of non-round caddie work, and the days caddies
+    /// are put on it. Field's HRM knows somebody is at work; that this club
+    /// sent them to the practice range is golf's own (ADR-0005).
+    pub fn caddie_duties(&self) -> Arc<MySqlCaddieDutyRepository> {
+        self.caddie_duties.clone()
+    }
+
+    /// CourseBoard-owned visitor categories for the booking form.
+    pub fn player_tag_options(&self) -> Arc<MySqlPlayerTagOptionsRepository> {
+        self.player_tag_options.clone()
+    }
+
     /// CourseBoard-owned record of how far each course has been built.
     pub fn generated_through(&self) -> Arc<MySqlGeneratedThroughRepository> {
         self.generated_through.clone()
@@ -246,6 +356,12 @@ impl AppState {
 
     /// CourseBoard-owned confirmed shifts, including which course each caddie
     /// works. Field holds the request; the placement is ours (ADR-0005).
+    /// CourseBoard-owned playing windows: when each membership may be used.
+    /// Advisory only — the booking is written either way.
+    pub fn membership_play_windows(&self) -> Arc<MySqlMembershipPlayWindowsRepository> {
+        self.membership_play_windows.clone()
+    }
+
     pub fn caddie_shifts(&self) -> Arc<MySqlCaddieShiftRepository> {
         self.caddie_shifts.clone()
     }
@@ -270,8 +386,12 @@ impl AppState {
 
     /// CourseBoard-interpreted daily reservation counts persisted through
     /// Field's scoped extension config.
-    pub fn reservation_report_gateway(&self) -> Arc<FieldReservationReportGateway> {
+    pub fn reservation_report_gateway(&self) -> Arc<MigratingReservationReportGateway> {
         self.reservation_report_gateway.clone()
+    }
+
+    pub(crate) fn product_settings(&self) -> Arc<MySqlGolfProductSettingsRepository> {
+        self.product_settings.clone()
     }
 
     fn with_profile_client(mut self, profile_client: Option<profile_proxy::ProfileClient>) -> Self {
@@ -523,9 +643,48 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/customers/:customer_id/visits",
+            get(course::interfaces::http_customers::get_customer_visits).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/customers/:customer_id/member-number",
+            put(course::interfaces::http_customers::set_member_number).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/customers/:customer_id/membership",
             get(course::interfaces::http_customers::get_customer_membership)
                 .post(course::interfaces::http_customers::assign_membership_plan)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/customer-grade-rules",
+            get(course::interfaces::http_customers::get_customer_grade_rules)
+                .put(course::interfaces::http_customers::replace_customer_grade_rules)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/membership-discounts",
+            get(course::interfaces::http_customers::get_membership_discounts)
+                .put(course::interfaces::http_customers::replace_membership_discounts)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/membership-play-windows",
+            get(course::interfaces::http_customers::get_membership_play_windows)
+                .put(course::interfaces::http_customers::replace_membership_play_windows)
                 .route_layer(middleware::from_fn_with_state(
                     state.clone(),
                     require_valid_token,
@@ -800,6 +959,36 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/caddie-assignments/:assignment_id/reassignment",
+            put(course::interfaces::http_ops::reassign_caddie_assignment).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/caddie-duties",
+            get(course::interfaces::http_ops::get_caddie_duties)
+                .put(course::interfaces::http_ops::replace_caddie_duties)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/caddie-duty-assignments",
+            get(course::interfaces::http_ops::list_caddie_duty_assignments)
+                .post(course::interfaces::http_ops::assign_caddie_duty)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/caddie-duty-assignments/:duty_id",
+            delete(course::interfaces::http_ops::clear_caddie_duty).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/caddie-shift-rules",
             get(course::interfaces::http_ops::get_shift_rules)
                 .put(course::interfaces::http_ops::update_shift_rules)
@@ -825,6 +1014,15 @@ pub fn build_router(state: AppState) -> Router {
             post(course::interfaces::http_ops::generate_caddie_shifts).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
+        )
+        .route(
+            "/v1/course/caddie-shift-plans/:year_month/field-sync",
+            get(course::interfaces::http_ops::get_field_sync_status)
+                .post(course::interfaces::http_ops::sync_caddie_shifts_to_field)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
         )
         .route(
             "/v1/course/caddie-shift-plans/:year_month/preview",
@@ -927,6 +1125,24 @@ pub fn build_router(state: AppState) -> Router {
             post(course::interfaces::http_simulator::simulate_range).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
+        )
+        .route(
+            "/v1/course/pricing-settings",
+            get(course::interfaces::http_simulator::get_pricing_settings)
+                .put(course::interfaces::http_simulator::replace_pricing_settings)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/player-tag-options",
+            get(course::interfaces::http_commercial::get_player_tag_options)
+                .put(course::interfaces::http_commercial::replace_player_tag_options)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
         )
         .route(
             "/v1/course/extension-status",
@@ -1126,7 +1342,8 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
         &course_gateway_url,
         Some(&tachyon_api_url),
     )
-    .context("courseboard profile proxy configuration is invalid")?;
+    .context("courseboard profile proxy configuration is invalid")?
+    .map(|client| client.with_tenant_source(config.tenant_source()));
     let field_api = FieldApiClient::from_config(
         config.field_api_base_url(),
         config.field_api_client_credentials_config(),
@@ -1701,6 +1918,8 @@ pub enum AppError {
     Conflict(&'static str),
     #[error("{message}")]
     UpstreamClient { status: StatusCode, message: String },
+    #[error("Field authentication expired; sign in again")]
+    UpstreamAuthenticationExpired,
     #[error("tax rule was not found for tenant, prefecture, and green fee")]
     RuleNotFound,
     #[error("{0}")]
@@ -1738,6 +1957,9 @@ impl IntoResponse for AppError {
             AppError::MonthRequired(_) => (StatusCode::BAD_REQUEST, "month_required"),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             AppError::UpstreamClient { status, .. } => (status, "upstream_client_error"),
+            AppError::UpstreamAuthenticationExpired => {
+                (StatusCode::UNAUTHORIZED, "upstream_authentication_expired")
+            }
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),
             AppError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
             // Cloudflare swaps origin 5xx bodies for its own CORS-less error
@@ -2048,10 +2270,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn normalized_field_auth_denials_stay_below_500_at_the_http_boundary() {
+    async fn field_authentication_expiry_is_an_explicit_401_at_the_http_boundary() {
+        let response = AppError::from(crate::course::domain::CourseError::UpstreamClient {
+            status: 401,
+            message: "UnauthorizedError: upstream auth rejected the request".to_string(),
+        })
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        let body = response
+            .into_body()
+            .collect()
+            .await
+            .expect("collect authentication expiry body")
+            .to_bytes();
+        let body: serde_json::Value =
+            serde_json::from_slice(&body).expect("decode authentication expiry body");
+        assert_eq!(body["error"], "upstream_authentication_expired");
+        assert_eq!(
+            body["message"],
+            "Field authentication expired; sign in again"
+        );
+    }
+
+    #[tokio::test]
+    async fn field_permission_denial_stays_403_at_the_http_boundary() {
         let response = AppError::UpstreamClient {
             status: StatusCode::FORBIDDEN,
-            message: "Field bearer was rejected".to_string(),
+            message: "Field tenant policy denied this operation".to_string(),
         }
         .into_response();
 
@@ -2065,7 +2311,7 @@ mod tests {
             .to_bytes();
         let body: serde_json::Value = serde_json::from_slice(&body).expect("decode denial body");
         assert_eq!(body["error"], "upstream_client_error");
-        assert_eq!(body["message"], "Field bearer was rejected");
+        assert_eq!(body["message"], "Field tenant policy denied this operation");
     }
 
     #[tokio::test]
@@ -2142,6 +2388,8 @@ mod tests {
             twilio_messaging_service_sid: None,
             twilio_from_number: None,
             multi_course_product_writes: true,
+            field_shift_writeback: false,
+            field_generic_paths: false,
         }
     }
 

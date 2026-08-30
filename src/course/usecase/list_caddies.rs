@@ -26,21 +26,27 @@ impl ListCaddiesUseCase {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::course::domain::{CaddieDutyAssignment, DutyWindow};
+    use crate::course::usecase::caddie_duties::test_double::FakeCaddieDuties;
     use async_trait::async_trait;
     use chrono::{NaiveDate, TimeZone, Utc};
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AutoAssignResult,
-        AvailabilityQuery, AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery,
-        CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRank, CaddieRankFees,
+        AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport, AvailabilityQuery,
+        AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
+        CaddieCourseMembership, CaddieId, CaddiePlacement, CaddieRank, CaddieRankFees,
         CaddieRating, CaddieRecommendation, CaddieRoster, CaddieShift, CaddieShiftGateway,
-        CaddieSkillLevel, CaddieStaff, RecommendationQuery, ReplaceCaddieMemberships,
-        ReservationId, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+        CaddieSkillLevel, CaddieStaff, FieldShiftLink, RecommendationQuery,
+        ReplaceCaddieMemberships, ReservationId, UnsyncedShift, UpsertCaddie,
+        UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
+    use crate::course::usecase::caddie_rank_fees::UnsetRankFees;
     use crate::course::usecase::{
         CreateCaddieAssignmentUseCase, ListCaddieAssignmentsUseCase,
-        ListCaddieRecommendationsUseCase, NameCaddieForRound,
+        ListCaddieRecommendationsUseCase, MoveTheRound, NameCaddieForRound,
+        ReassignCaddieAssignmentUseCase,
     };
 
     /// The ranking tests predate confirmed shifts and are about who is
@@ -74,6 +80,51 @@ mod tests {
             _date: chrono::NaiveDate,
         ) -> Result<Option<CaddieShift>, CourseError> {
             Ok(None)
+        }
+
+        async fn field_shift_links(
+            &self,
+            _tenant_id: &str,
+            _from: chrono::NaiveDate,
+            _to: chrono::NaiveDate,
+        ) -> Result<Vec<FieldShiftLink>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn set_field_shift_links(
+            &self,
+            _tenant_id: &str,
+            _links: &[FieldShiftLink],
+        ) -> Result<(), CourseError> {
+            Ok(())
+        }
+
+        async fn unsynced_shifts(
+            &self,
+            _tenant_id: &str,
+            _from: chrono::NaiveDate,
+            _to: chrono::NaiveDate,
+            _limit: u32,
+        ) -> Result<Vec<UnsyncedShift>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn mark_month_unsynced(
+            &self,
+            _tenant_id: &str,
+            _from: chrono::NaiveDate,
+            _to: chrono::NaiveDate,
+        ) -> Result<(), CourseError> {
+            Ok(())
+        }
+
+        async fn count_unsynced(
+            &self,
+            _tenant_id: &str,
+            _from: chrono::NaiveDate,
+            _to: chrono::NaiveDate,
+        ) -> Result<u64, CourseError> {
+            Ok(0)
         }
     }
 
@@ -169,10 +220,22 @@ mod tests {
         async fn update_caddie_assignment(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _assignment_id: &AssignmentId,
-            _input: UpsertCaddieAssignment,
+            assignment_id: &AssignmentId,
+            input: UpsertCaddieAssignment,
         ) -> Result<CaddieAssignment, CourseError> {
-            Err(CourseError::BadRequest("not used in test"))
+            CaddieAssignment::reconstitute(
+                assignment_id.as_str(),
+                input.caddie_id.as_str(),
+                input.reservation_id.map(|id| id.as_str().to_string()),
+                input.round_reference,
+                input.scheduled_at,
+                None,
+                input.status.unwrap_or_else(|| "assigned".into()),
+                input.assignment_role.unwrap_or_else(|| "primary".into()),
+                input.fee_amount.unwrap_or_default(),
+                input.fee_currency.unwrap_or_else(|| "JPY".into()),
+                input.notes,
+            )
         }
 
         async fn list_caddie_memberships(
@@ -226,14 +289,6 @@ mod tests {
             Ok(())
         }
 
-        async fn list_caddie_recommendations(
-            &self,
-            _credentials: GatewayCredentials<'_>,
-            _query: RecommendationQuery,
-        ) -> Result<Vec<CaddieRecommendation>, CourseError> {
-            Ok(vec![])
-        }
-
         async fn get_attendance_snapshot(
             &self,
             _credentials: GatewayCredentials<'_>,
@@ -253,15 +308,6 @@ mod tests {
             _to: NaiveDate,
         ) -> Result<Vec<AttendancePeriodSnapshot>, CourseError> {
             Ok(vec![])
-        }
-
-        async fn auto_assign_caddies(
-            &self,
-            _credentials: GatewayCredentials<'_>,
-            _date: NaiveDate,
-            dry_run: bool,
-        ) -> Result<AutoAssignResult, CourseError> {
-            Ok(AutoAssignResult::new(dry_run, vec![], vec![]))
         }
 
         async fn get_caddie_rank_fees(
@@ -377,28 +423,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_suspended_caddie_is_never_offered_as_a_candidate() {
-        // Ranking orders the people who could work today. A retired or
-        // suspended profile cannot take the round at all, so putting one in the
-        // list is not a weak suggestion but a wrong one — and a veteran who
-        // left outscores the juniors still on the roster.
-        let working = caddie(
-            "caddie_working",
+    async fn a_caddie_on_other_work_is_never_offered_as_a_candidate() {
+        // Filing other work is what takes somebody out of the day's supply, so
+        // the ranking must not go on offering them: the desk would name a
+        // caddie the board has already said is unavailable.
+        let sent_to_the_range = caddie(
+            "caddie_duty",
+            "Ito",
+            true,
+            "active",
+            CaddieSkillLevel::Veteran,
+        );
+        let free = caddie(
+            "caddie_free",
             "Sato",
             true,
             "active",
             CaddieSkillLevel::Regular,
         );
-        let retired = caddie(
-            "caddie_retired",
-            "Retired",
-            false,
-            "suspended",
-            CaddieSkillLevel::Veteran,
-        );
-        let ops = Arc::new(FakeOps::with(vec![working, retired]));
+        let ops = Arc::new(FakeOps::with(vec![sent_to_the_range, free]));
+        let today =
+            crate::course::domain::tenant_date_at(chrono::Utc::now(), "Asia/Tokyo").expect("today");
+        let duties = FakeCaddieDuties::with_assignments(vec![CaddieDutyAssignment::reconstitute(
+            Some(1),
+            CaddieId::new("caddie_duty"),
+            today,
+            DutyWindow::all_day(),
+            "コース整備".to_string(),
+            None,
+            None,
+        )]);
 
-        let ranked = ListCaddieRecommendationsUseCase::new(ops, Arc::new(NoShifts))
+        let ranked = ListCaddieRecommendationsUseCase::new(ops, Arc::new(NoShifts), duties)
             .execute(
                 GatewayCredentials {
                     authorization: "Bearer t",
@@ -422,6 +478,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_suspended_caddie_is_never_offered_as_a_candidate() {
+        // Ranking orders the people who could work today. A retired or
+        // suspended profile cannot take the round at all, so putting one in the
+        // list is not a weak suggestion but a wrong one — and a veteran who
+        // left outscores the juniors still on the roster.
+        let working = caddie(
+            "caddie_working",
+            "Sato",
+            true,
+            "active",
+            CaddieSkillLevel::Regular,
+        );
+        let retired = caddie(
+            "caddie_retired",
+            "Retired",
+            false,
+            "suspended",
+            CaddieSkillLevel::Veteran,
+        );
+        let ops = Arc::new(FakeOps::with(vec![working, retired]));
+
+        let ranked = ListCaddieRecommendationsUseCase::new(
+            ops,
+            Arc::new(NoShifts),
+            FakeCaddieDuties::none(),
+        )
+        .execute(
+            GatewayCredentials {
+                authorization: "Bearer t",
+                operator_id: "scc",
+                platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                caller_bearer: "Bearer test",
+            },
+            RecommendationQuery {
+                player_count: Some(4),
+                include_rookie_pairing: true,
+                ..RecommendationQuery::default()
+            },
+            "Asia/Tokyo",
+        )
+        .await
+        .expect("recommendations");
+
+        let names: Vec<&str> = ranked.iter().map(|item| item.display_name()).collect();
+        assert_eq!(names, vec!["Sato"]);
+    }
+
+    #[tokio::test]
     async fn recommendation_exposes_the_capacity_and_attendance_used_for_its_order() {
         let ops = Arc::new(FakeOps::with(vec![caddie(
             "cad_1",
@@ -435,26 +540,31 @@ mod tests {
             .expect("lock")
             .push(standing_assignment("cad_1", "rsv_other"));
 
-        let ranked = ListCaddieRecommendationsUseCase::new(ops, Arc::new(NoShifts))
-            .execute(
-                GatewayCredentials {
-                    authorization: "Bearer t",
-                    operator_id: "scc",
-                    platform_id: None,
-                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
-                    caller_bearer: "Bearer test",
-                },
-                RecommendationQuery {
-                    scheduled_at: Some(morning_tee_time()),
-                    ..RecommendationQuery::default()
-                },
-                "Asia/Tokyo",
-            )
-            .await
-            .expect("recommendations");
+        let ranked = ListCaddieRecommendationsUseCase::new(
+            ops,
+            Arc::new(NoShifts),
+            FakeCaddieDuties::none(),
+        )
+        .execute(
+            GatewayCredentials {
+                authorization: "Bearer t",
+                operator_id: "scc",
+                platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                caller_bearer: "Bearer test",
+            },
+            RecommendationQuery {
+                scheduled_at: Some(morning_tee_time()),
+                ..RecommendationQuery::default()
+            },
+            "Asia/Tokyo",
+        )
+        .await
+        .expect("recommendations");
 
         assert_eq!(ranked[0].remaining_rounds(), Some(1));
         assert_eq!(ranked[0].attendance_status(), Some("not_clocked"));
+        assert_eq!(ranked[0].placement(), &CaddiePlacement::Unconfirmed);
     }
 
     #[tokio::test]
@@ -479,23 +589,27 @@ mod tests {
                 None,
             ));
 
-        let ranked = ListCaddieRecommendationsUseCase::new(ops, Arc::new(NoShifts))
-            .execute(
-                GatewayCredentials {
-                    authorization: "Bearer t",
-                    operator_id: "scc",
-                    platform_id: None,
-                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
-                    caller_bearer: "Bearer test",
-                },
-                RecommendationQuery {
-                    scheduled_at: Some(Utc.with_ymd_and_hms(2026, 8, 7, 22, 0, 0).unwrap()),
-                    ..RecommendationQuery::default()
-                },
-                "Asia/Tokyo",
-            )
-            .await
-            .expect("recommendations");
+        let ranked = ListCaddieRecommendationsUseCase::new(
+            ops,
+            Arc::new(NoShifts),
+            FakeCaddieDuties::none(),
+        )
+        .execute(
+            GatewayCredentials {
+                authorization: "Bearer t",
+                operator_id: "scc",
+                platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                caller_bearer: "Bearer test",
+            },
+            RecommendationQuery {
+                scheduled_at: Some(Utc.with_ymd_and_hms(2026, 8, 7, 22, 0, 0).unwrap()),
+                ..RecommendationQuery::default()
+            },
+            "Asia/Tokyo",
+        )
+        .await
+        .expect("recommendations");
 
         let names: Vec<&str> = ranked.iter().map(|item| item.display_name()).collect();
         assert_eq!(names, vec!["On"]);
@@ -527,7 +641,7 @@ mod tests {
             ));
 
         async fn ask(ops: Arc<FakeOps>, at: chrono::DateTime<Utc>) -> Vec<CaddieRecommendation> {
-            ListCaddieRecommendationsUseCase::new(ops, Arc::new(NoShifts))
+            ListCaddieRecommendationsUseCase::new(ops, Arc::new(NoShifts), FakeCaddieDuties::none())
                 .execute(
                     GatewayCredentials {
                         authorization: "Bearer t",
@@ -596,7 +710,9 @@ mod tests {
         ops: Arc<FakeOps>,
         input: NameCaddieForRound,
     ) -> Result<CaddieAssignment, CourseError> {
-        CreateCaddieAssignmentUseCase::new(ops)
+        // Unset, so these tests keep reading the fee table from the same place
+        // they always did: the migration fallback in `read_caddie_rank_fees`.
+        CreateCaddieAssignmentUseCase::new(ops, Arc::new(UnsetRankFees), FakeCaddieDuties::none())
             .execute(
                 GatewayCredentials {
                     authorization: "Bearer t",
@@ -609,6 +725,276 @@ mod tests {
                 "Asia/Tokyo",
             )
             .await
+    }
+
+    /// The day the hand-placed tests work: 2026-08-08 in Asia/Tokyo.
+    fn board_date() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 8, 8).expect("date")
+    }
+
+    async fn move_round(
+        ops: Arc<FakeOps>,
+        duties: Arc<FakeCaddieDuties>,
+        input: MoveTheRound,
+    ) -> Result<CaddieAssignment, CourseError> {
+        ReassignCaddieAssignmentUseCase::new(ops, Arc::new(UnsetRankFees), duties)
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer t",
+                    operator_id: "scc",
+                    platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
+                },
+                input,
+                "Asia/Tokyo",
+            )
+            .await
+    }
+
+    fn move_of(assignment_id: &str) -> MoveTheRound {
+        MoveTheRound {
+            assignment_id: AssignmentId::new(assignment_id),
+            date: board_date(),
+            caddie_id: None,
+            reservation_id: None,
+            scheduled_at: None,
+            duration_minutes: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn a_group_can_be_handed_to_another_caddie_without_losing_the_round() {
+        let ops = Arc::new(FakeOps::with(vec![
+            caddie("cad_1", "Sato", true, "active", CaddieSkillLevel::Regular),
+            caddie("cad_2", "Tanaka", true, "active", CaddieSkillLevel::Regular),
+        ]));
+        ops.assignments
+            .lock()
+            .expect("lock")
+            .push(standing_assignment("cad_1", "rsv_1"));
+
+        let moved = move_round(
+            ops,
+            FakeCaddieDuties::none(),
+            MoveTheRound {
+                caddie_id: Some(CaddieId::new("cad_2")),
+                ..move_of("assign_existing")
+            },
+        )
+        .await
+        .expect("moved");
+        assert_eq!(moved.id().as_str(), "assign_existing");
+        assert_eq!(moved.caddie_id().as_str(), "cad_2");
+        assert_eq!(moved.reservation_id().map(|id| id.as_str()), Some("rsv_1"));
+    }
+
+    #[tokio::test]
+    async fn a_caddie_can_be_moved_to_another_group_they_are_not_already_holding() {
+        let ops = Arc::new(FakeOps::with(vec![caddie(
+            "cad_1",
+            "Sato",
+            true,
+            "active",
+            CaddieSkillLevel::Regular,
+        )]));
+        ops.assignments
+            .lock()
+            .expect("lock")
+            .push(standing_assignment("cad_1", "rsv_1"));
+
+        let moved = move_round(
+            ops,
+            FakeCaddieDuties::none(),
+            MoveTheRound {
+                reservation_id: Some(ReservationId::new("rsv_2")),
+                ..move_of("assign_existing")
+            },
+        )
+        .await
+        .expect("moved");
+        assert_eq!(moved.reservation_id().map(|id| id.as_str()), Some("rsv_2"));
+    }
+
+    #[tokio::test]
+    async fn the_round_label_stays_with_the_group_it_belonged_to() {
+        // `standing_assignment` carries none, so this one is built with a
+        // label: the day board prints it in place of the booking, and a label
+        // that followed the caddie to another group would name the wrong one.
+        let ops = Arc::new(FakeOps::with(vec![caddie(
+            "cad_1",
+            "Sato",
+            true,
+            "active",
+            CaddieSkillLevel::Regular,
+        )]));
+        ops.assignments.lock().expect("lock").push(
+            CaddieAssignment::reconstitute(
+                "assign_existing",
+                "cad_1",
+                Some("rsv_1".into()),
+                Some("R-2026-0100".into()),
+                morning_tee_time(),
+                Some(270),
+                "assigned",
+                "primary",
+                8_000,
+                "JPY",
+                None,
+            )
+            .expect("assignment"),
+        );
+
+        let handed_over = move_round(
+            Arc::clone(&ops),
+            FakeCaddieDuties::none(),
+            move_of("assign_existing"),
+        )
+        .await
+        .expect("kept");
+        assert_eq!(handed_over.round_reference(), Some("R-2026-0100"));
+
+        let moved = move_round(
+            ops,
+            FakeCaddieDuties::none(),
+            MoveTheRound {
+                reservation_id: Some(ReservationId::new("rsv_2")),
+                ..move_of("assign_existing")
+            },
+        )
+        .await
+        .expect("moved");
+        assert_eq!(moved.round_reference(), None);
+    }
+
+    #[tokio::test]
+    async fn moving_onto_a_group_that_already_has_a_caddie_is_refused() {
+        // The same state the planner refuses to create. Reached by moving
+        // rather than by naming, it is no less wrong.
+        let ops = Arc::new(FakeOps::with(vec![
+            caddie("cad_1", "Sato", true, "active", CaddieSkillLevel::Regular),
+            caddie("cad_2", "Tanaka", true, "active", CaddieSkillLevel::Regular),
+        ]));
+        {
+            let mut assignments = ops.assignments.lock().expect("lock");
+            assignments.push(standing_assignment("cad_1", "rsv_1"));
+            assignments.push(
+                CaddieAssignment::reconstitute(
+                    "assign_other",
+                    "cad_2",
+                    Some("rsv_2".into()),
+                    None,
+                    morning_tee_time(),
+                    Some(270),
+                    "assigned",
+                    "primary",
+                    8_000,
+                    "JPY",
+                    None,
+                )
+                .expect("assignment"),
+            );
+        }
+
+        let refused = move_round(
+            ops,
+            FakeCaddieDuties::none(),
+            MoveTheRound {
+                reservation_id: Some(ReservationId::new("rsv_2")),
+                ..move_of("assign_existing")
+            },
+        )
+        .await;
+        assert!(matches!(refused, Err(CourseError::BadRequest(message))
+            if message.contains("already has a caddie")));
+    }
+
+    #[tokio::test]
+    async fn a_caddie_on_other_work_cannot_be_handed_a_group_by_moving_one() {
+        let ops = Arc::new(FakeOps::with(vec![
+            caddie("cad_1", "Sato", true, "active", CaddieSkillLevel::Regular),
+            caddie("cad_2", "Tanaka", true, "active", CaddieSkillLevel::Regular),
+        ]));
+        ops.assignments
+            .lock()
+            .expect("lock")
+            .push(standing_assignment("cad_1", "rsv_1"));
+        let duties = FakeCaddieDuties::with_assignments(vec![CaddieDutyAssignment::reconstitute(
+            Some(1),
+            CaddieId::new("cad_2"),
+            board_date(),
+            DutyWindow::all_day(),
+            "コース整備".to_string(),
+            None,
+            None,
+        )]);
+
+        let refused = move_round(
+            ops,
+            duties,
+            MoveTheRound {
+                caddie_id: Some(CaddieId::new("cad_2")),
+                ..move_of("assign_existing")
+            },
+        )
+        .await;
+        assert!(matches!(refused, Err(CourseError::BadRequest(message))
+            if message.contains("on other work")));
+    }
+
+    #[tokio::test]
+    async fn a_move_that_would_leave_the_day_is_refused() {
+        let ops = Arc::new(FakeOps::with(vec![caddie(
+            "cad_1",
+            "Sato",
+            true,
+            "active",
+            CaddieSkillLevel::Regular,
+        )]));
+        ops.assignments
+            .lock()
+            .expect("lock")
+            .push(standing_assignment("cad_1", "rsv_1"));
+
+        let refused = move_round(
+            ops,
+            FakeCaddieDuties::none(),
+            MoveTheRound {
+                reservation_id: Some(ReservationId::new("rsv_2")),
+                // 07:00 JST the next morning.
+                scheduled_at: Some(Utc.with_ymd_and_hms(2026, 8, 8, 22, 0, 0).unwrap()),
+                ..move_of("assign_existing")
+            },
+        )
+        .await;
+        assert!(matches!(refused, Err(CourseError::BadRequest(message))
+            if message.contains("same day")));
+    }
+
+    #[tokio::test]
+    async fn a_round_that_is_not_on_the_day_being_worked_is_not_found() {
+        let ops = Arc::new(FakeOps::with(vec![caddie(
+            "cad_1",
+            "Sato",
+            true,
+            "active",
+            CaddieSkillLevel::Regular,
+        )]));
+        ops.assignments
+            .lock()
+            .expect("lock")
+            .push(standing_assignment("cad_1", "rsv_1"));
+
+        let refused = move_round(
+            ops,
+            FakeCaddieDuties::none(),
+            MoveTheRound {
+                date: NaiveDate::from_ymd_opt(2026, 8, 9).expect("date"),
+                ..move_of("assign_existing")
+            },
+        )
+        .await;
+        assert!(matches!(refused, Err(CourseError::NotFound("assignment"))));
     }
 
     #[tokio::test]
@@ -629,6 +1015,112 @@ mod tests {
             written.reservation_id().map(|id| id.as_str()),
             Some("rsv_1")
         );
+    }
+
+    #[tokio::test]
+    async fn a_caddie_on_other_work_cannot_be_named_for_a_round() {
+        // The day's supply has already stopped counting them, so naming them
+        // here would put somebody on a group the board says cannot be walked.
+        // Taking them off the other work is the decision the desk has to make.
+        let ops = Arc::new(FakeOps::with(vec![caddie(
+            "cad_1",
+            "Sato",
+            true,
+            "active",
+            CaddieSkillLevel::Regular,
+        )]));
+        let duties = FakeCaddieDuties::with_assignments(vec![CaddieDutyAssignment::reconstitute(
+            Some(1),
+            CaddieId::new("cad_1"),
+            NaiveDate::from_ymd_opt(2026, 8, 8).expect("date"),
+            DutyWindow::all_day(),
+            "コース整備".to_string(),
+            None,
+            None,
+        )]);
+
+        let refused = CreateCaddieAssignmentUseCase::new(ops, Arc::new(UnsetRankFees), duties)
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer t",
+                    operator_id: "scc",
+                    platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
+                },
+                name_caddie("cad_1", "rsv_1"),
+                "Asia/Tokyo",
+            )
+            .await;
+        assert!(matches!(refused, Err(CourseError::BadRequest(message))
+            if message.contains("on other work")));
+    }
+
+    #[tokio::test]
+    async fn other_work_only_refuses_the_rounds_it_actually_covers() {
+        // 07:00 JST is inside a job that runs to noon; the same caddie is
+        // still the right answer for the afternoon group.
+        let ops = Arc::new(FakeOps::with(vec![caddie(
+            "cad_1",
+            "Sato",
+            true,
+            "active",
+            CaddieSkillLevel::Regular,
+        )]));
+        let morning_job = CaddieDutyAssignment::reconstitute(
+            Some(1),
+            CaddieId::new("cad_1"),
+            board_date(),
+            DutyWindow::try_new(8 * 60, 12 * 60).expect("window"),
+            "コース整備".to_string(),
+            None,
+            None,
+        );
+
+        let refused = CreateCaddieAssignmentUseCase::new(
+            ops.clone(),
+            Arc::new(UnsetRankFees),
+            FakeCaddieDuties::with_assignments(vec![morning_job.clone()]),
+        )
+        .execute(
+            GatewayCredentials {
+                authorization: "Bearer t",
+                operator_id: "scc",
+                platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                caller_bearer: "Bearer test",
+            },
+            name_caddie("cad_1", "rsv_1"),
+            "Asia/Tokyo",
+        )
+        .await;
+        assert!(matches!(refused, Err(CourseError::BadRequest(message))
+            if message.contains("on other work over those hours")));
+
+        // 13:00 JST, clear of the job.
+        let afternoon = NameCaddieForRound {
+            scheduled_at: Utc.with_ymd_and_hms(2026, 8, 8, 4, 0, 0).unwrap(),
+            ..name_caddie("cad_1", "rsv_2")
+        };
+        let written = CreateCaddieAssignmentUseCase::new(
+            ops,
+            Arc::new(UnsetRankFees),
+            FakeCaddieDuties::with_assignments(vec![morning_job]),
+        )
+        .execute(
+            GatewayCredentials {
+                authorization: "Bearer t",
+                operator_id: "scc",
+                platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                caller_bearer: "Bearer test",
+            },
+            afternoon,
+            "Asia/Tokyo",
+        )
+        .await
+        .expect("named");
+        assert_eq!(written.caddie_id().as_str(), "cad_1");
     }
 
     #[tokio::test]

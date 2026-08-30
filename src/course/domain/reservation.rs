@@ -42,6 +42,37 @@ pub struct Reservation {
     party: PartyDetails,
     #[getter(skip)]
     notes: Option<String>,
+    /// What Field's ledger says this booking is worth and how much of it has
+    /// been collected. Kept as one value because the parts are only ever read
+    /// together, and because a booking without them (one CourseBoard built
+    /// itself, or a fixture) should not have to name six zeroes.
+    #[getter(skip)]
+    billing: ReservationBilling,
+}
+
+/// The money side of a booking, as Field records it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ReservationBilling {
+    pub price_amount: i64,
+    pub deposit_amount: i64,
+    pub paid_amount: i64,
+    pub currency: Option<String>,
+    /// Field's own payment state string, passed through rather than parsed:
+    /// CourseBoard has no golf meaning to add to it.
+    pub payment_status: Option<String>,
+    pub invoice_id: Option<String>,
+    /// Set only once the booking is cancelled. This is what distinguishes a
+    /// cancellation from a booking that merely has no money against it.
+    pub cancelled_at: Option<DateTime<Utc>>,
+}
+
+impl ReservationBilling {
+    /// Whether the booking counts towards takings: cancelled bookings are
+    /// excluded from revenue even when money was collected, because their
+    /// money is settled as a cancellation fee instead.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled_at.is_some()
+    }
 }
 
 impl Reservation {
@@ -75,6 +106,7 @@ impl Reservation {
             party: PartyDetails::default(),
             customer_id: None,
             notes,
+            billing: ReservationBilling::default(),
         }
     }
 
@@ -86,6 +118,15 @@ impl Reservation {
     pub fn with_customer_id(mut self, customer_id: Option<CustomerId>) -> Self {
         self.customer_id = customer_id;
         self
+    }
+
+    pub fn with_billing(mut self, billing: ReservationBilling) -> Self {
+        self.billing = billing;
+        self
+    }
+
+    pub fn billing(&self) -> &ReservationBilling {
+        &self.billing
     }
 
     pub fn party(&self) -> &PartyDetails {

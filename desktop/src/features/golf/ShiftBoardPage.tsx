@@ -119,6 +119,24 @@ type GeneratedMonth = {
   deadlineWarning: { deadlineDate: string; unsubmittedCaddieNames: string[] } | null
 }
 
+/** One batch of a confirmed month, told to Field. */
+type FieldSyncProgress = {
+  /** Working days Field was told about by this call. */
+  filed: number
+  /** Days withdrawn from Field because they are no longer worked. */
+  withdrawn: number
+  /** Days whose caddie has no usable staff record, so there is nobody to file under. */
+  unlinkable: number
+  /** Days Field refused or could not answer for. */
+  failed: number
+  /** Days still behind. Call again while this is above zero. */
+  remaining: number
+  done: boolean
+}
+
+/** How much of a month has not reached Field. */
+type FieldSyncStatus = { remaining: number }
+
 /** A month planned but not written: what the run reported, and every day of it. */
 type ShiftPlanPreview = { summary: GeneratedMonth; shifts: ConfirmedShift[] }
 
@@ -346,6 +364,13 @@ export function ShiftBoardPage() {
 
   const [planning, setPlanning] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [fieldSyncing, setFieldSyncing] = useState(false)
+  const [fieldSyncRemaining, setFieldSyncRemaining] = useState(0)
+  // Days Field refused. They are stamped as dealt with so the queue can empty,
+  // which means `remaining` reaches zero with them still unsent — and the
+  // re-send button, keyed on `remaining` alone, would disappear along with the
+  // only way to recover them. Kept until a later pass actually sends them.
+  const [fieldSyncFailed, setFieldSyncFailed] = useState(0)
   // The month the run proposed, held on screen until the desk confirms or
   // throws it away. Nothing is written while it is here.
   const [draft, setDraft] = useState<ShiftPlanPreview | null>(null)
@@ -399,6 +424,71 @@ export function ShiftBoardPage() {
     }
   }, [yearMonth, t])
 
+  // A confirmed day is also a fact Field's HRM holds — that this caddie is at
+  // work, and between which times. Confirming writes CourseBoard's own tables
+  // and returns at once; the roster's thousand-odd days go to Field here, a
+  // batch per call, until nothing is left.
+  //
+  // Kept out of the confirm request on purpose: it would hold the button for
+  // half a minute, and Field being unreachable would stop a club confirming a
+  // month whose plan has nothing to do with Field.
+  const pushMonthToField = useCallback(async (resend = false) => {
+    let filed = 0
+    let unlinkable = 0
+    let failed = 0
+    setFieldSyncFailed(0)
+    try {
+      // The loop stops on the server saying it is done, and also on the queue
+      // failing to shrink. Trusting `done` alone means one unexpected answer
+      // spins the browser forever, which is a worse failure than stopping
+      // early with days still behind — those are recorded, and the re-send
+      // button picks them up.
+      let previous = Number.POSITIVE_INFINITY
+      for (;;) {
+        const progress = await courseboardApiJson<FieldSyncProgress>(
+          `${COURSE_API}/caddie-shift-plans/${yearMonth}/field-sync${resend ? '?resend=true' : ''}`,
+          { method: 'POST' },
+        )
+        filed += progress.filed ?? 0
+        unlinkable += progress.unlinkable ?? 0
+        failed += progress.failed ?? 0
+        setFieldSyncFailed(failed)
+        const remaining = Number.isFinite(progress.remaining) ? progress.remaining : 0
+        setFieldSyncRemaining(remaining)
+        if (progress.done || remaining === 0 || remaining >= previous) break
+        previous = remaining
+        // Only the first call may re-send; the rest continue the same queue.
+        resend = false
+      }
+      if (filed > 0) {
+        showToast({ tone: 'success', message: t('shifts:fieldSync.done', { n: String(filed) }) })
+      }
+      if (unlinkable > 0) {
+        showToast({
+          tone: 'warning',
+          message: t('shifts:fieldSync.unlinkable', { n: String(unlinkable) }),
+        })
+      }
+      if (failed > 0) {
+        showToast({
+          tone: 'danger',
+          message: t('shifts:fieldSync.someFailed', { n: String(failed) }),
+        })
+      }
+    } catch (error) {
+      // The month is confirmed either way. What is left behind is days Field
+      // has not been told about, and the queue remembers exactly which — so
+      // this reports rather than rolls anything back.
+      showToast({
+        tone: 'danger',
+        title: t('shifts:fieldSync.failed'),
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setFieldSyncing(false)
+    }
+  }, [yearMonth, t])
+
   // Confirming re-runs the same plan against the same requests and writes it.
   // Pinned days are carried through either way, so a month confirmed twice
   // lands on the same result.
@@ -416,6 +506,9 @@ export function ShiftBoardPage() {
         tone: 'success',
         message: t('shifts:confirm.done', { n: String(run.daysWritten) }),
       })
+      setFieldSyncing(true)
+      setFieldSyncRemaining(run.daysWritten)
+      void pushMonthToField()
     } catch (error) {
       showToast({
         tone: 'danger',
@@ -425,7 +518,12 @@ export function ShiftBoardPage() {
     } finally {
       setConfirming(false)
     }
-  }, [yearMonth, shiftsResource.refresh, t])
+  }, [yearMonth, shiftsResource.refresh, pushMonthToField, t])
+
+  const resendMonthToField = useCallback(() => {
+    setFieldSyncing(true)
+    void pushMonthToField(true)
+  }, [pushMonthToField])
 
   // Every rule goes back in one body, so a screen that changed one field
   // never silently resets the others to their defaults.
@@ -467,6 +565,25 @@ export function ShiftBoardPage() {
   useEffect(() => {
     setDraft(null)
     setLastRun(null)
+    setFieldSyncRemaining(0)
+    setFieldSyncFailed(0)
+  }, [yearMonth])
+
+  // A push that died half way leaves days Field was never told about, and
+  // nothing else on this screen would say so. Asked once per month opened;
+  // a failure here is not worth a toast, since the board still reads.
+  useEffect(() => {
+    let cancelled = false
+    void courseboardApiJson<FieldSyncStatus>(
+      `${COURSE_API}/caddie-shift-plans/${yearMonth}/field-sync`,
+    )
+      .then((status) => {
+        if (!cancelled) setFieldSyncRemaining(status.remaining)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [yearMonth])
 
   const exportFileStem = useCallback((source: ShiftPrintSource) => t(
@@ -601,6 +718,20 @@ export function ShiftBoardPage() {
               <SlidersHorizontal />
               {t('shifts:rules.open')}
             </Button>
+            {(fieldSyncing || fieldSyncRemaining > 0 || fieldSyncFailed > 0) && (
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={fieldSyncing}
+                onClick={resendMonthToField}
+              >
+                {fieldSyncing
+                  ? t('shifts:fieldSync.running', { n: String(fieldSyncRemaining) })
+                  : fieldSyncRemaining > 0
+                    ? t('shifts:fieldSync.resend')
+                    : t('shifts:fieldSync.resendFailed', { n: String(fieldSyncFailed) })}
+              </Button>
+            )}
             <Button
               type="button"
               variant="primary"

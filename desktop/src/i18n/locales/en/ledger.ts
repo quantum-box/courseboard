@@ -10,6 +10,8 @@ export const ledger = {
     playersValue: '{{n}}',
     open: 'Open',
     openValue: '{{n}} slots',
+    openUnknown: 'Unknown',
+    openPartial: '{{count}} course(s) not counted',
     breakdown: '{{self}} self · {{caddie}} with caddie',
   },
   courses: {
@@ -21,6 +23,15 @@ export const ledger = {
     totals: '{{groups}} groups / {{players}} players ({{self}} self)',
     interval: 'every {{n}} min',
     open: '{{n}} open',
+    caddie: 'Caddie {{booked}}/{{capacity}}',
+    caddieSpare: '{{n}} left',
+    caddieOver: '{{n}} over',
+    caddieHint: '{{caddies}} caddies on today, taking up to {{capacity}} groups. {{booked}} sold.',
+  },
+  caddieSupply: {
+    unbackedAssignedGroups: 'Shift not confirmed for {{n}} group(s)',
+    capacityExceededAssignedGroups: '{{n}} group(s) exceed shift capacity',
+    courseMismatchAssignedGroups: '{{n}} group(s) have a course mismatch',
   },
   order: {
     moveLeft: 'Move {{name}} left',
@@ -29,12 +40,16 @@ export const ledger = {
     failed: 'Could not save the column order',
   },
   source: {
-    inventory: 'From generated slots',
-    schedule: 'From the weekly schedule',
+    /**
+     * Booking hours are the weekly rule; start slots are the dated inventory
+     * built from it. Only a column drawn from the latter counts capacity.
+     */
+    inventory: 'From start slots',
+    schedule: 'From booking hours',
     openingHours: 'From opening hours',
     bookingsOnly: 'Bookings only',
-    derivedNotice: 'No slots have been generated for this course, so how many groups are left is unknown.',
-    openCourseSetup: 'Open this course’s booking slots',
+    derivedNotice: 'No start slots have been built for this course, so how many groups are left is unknown.',
+    openCourseSetup: 'Open this course’s booking hours',
   },
   head: {
     time: 'Time',
@@ -55,7 +70,8 @@ export const ledger = {
     capacityUnknown: 'Capacity unknown',
     closed: 'Closed',
     special: 'Special rate',
-    retired: 'No slot',
+    retired: 'No start slot',
+    unassignedCaddie: 'Unassigned',
   },
   legend: {
     label: 'What the colours mean',
@@ -64,17 +80,22 @@ export const ledger = {
     full: 'Full',
     closed: 'Closed',
     special: 'Special rate',
-    retired: 'No slot',
+    retired: 'No start slot',
   },
   now: 'Now',
   empty: {
-    title: 'No slots for this day',
-    description: 'Set the course a weekly schedule, or generate its slots, and the tee times appear here.',
-    toSchedule: 'Go to the weekly schedule',
+    title: 'No start slots for this day',
+    description: 'Set the course’s booking hours and the day’s start slots are built, putting the tee times here.',
+    toSchedule: 'Go to booking hours',
   },
   partial: {
     title: 'Some detail could not be loaded',
     description: 'The ledger is drawn, but remaining capacity and desk marks may be missing.',
+  },
+  inventoryGap: {
+    title: 'The booking window and start slots do not match',
+    missing: '{{course}} is configured through {{date}}, but no start slots have been built yet.',
+    behind: '{{course}} is configured through {{date}}, but start slots have only been built through {{generatedThrough}}.',
   },
   marks: {
     title: 'Slot marks',
@@ -122,6 +143,11 @@ export const ledger = {
     exit: 'Show controls',
   },
   newReservation: {
+    memberWindowTitle: 'Outside this membership\u2019s playing window',
+    warning: {
+      member_play_window_day: 'This membership is not playable on this day. The booking was saved.',
+      member_play_window_time: 'This membership is not playable at this hour. The booking was saved.',
+    },
     title: 'Book this tee time',
     description: 'Booking {{course}} at {{time}}.',
     open: 'Book this tee time',
@@ -129,15 +155,15 @@ export const ledger = {
     blockLabel: {
       full: 'Full',
       stopped: 'Bookings stopped',
-      missingInventory: 'No booking slot at this time',
-      missingResource: 'Course booking slots not configured',
+      missingInventory: 'No start slot at this time',
+      missingResource: 'Nowhere to put booking hours',
       notSellable: 'Bookings not accepted',
     },
     block: {
       full: 'This time is full. Choose another time.',
       stopped: 'Bookings have been stopped for this time.',
-      missingInventory: 'There is no bookable slot at this time. Generate booking slots first.',
-      missingResource: 'This course is not linked to booking slots. Configure its booking slots first.',
+      missingInventory: 'There is no start slot at this time. Set the course’s booking hours first.',
+      missingResource: 'This course has nowhere to put booking hours. Set them up on the course first.',
       notSellable: 'Bookings are not accepted at this time. Choose another time.',
     },
     customerName: 'Customer name',
@@ -175,6 +201,13 @@ export const ledger = {
     grantMembership: 'Make a member',
     changeMembership: 'Change membership',
     choosePlan: 'Choose a membership',
+    memberNumberAdd: 'Add a member number',
+    memberNumberValue: 'Member no. {{number}}',
+    memberNumberPlaceholder: 'e.g. A-1024',
+    memberNumberSave: 'Save',
+    memberNumberCancel: 'Cancel',
+    memberNumberSaved: 'Member number saved',
+    memberNumberFailed: 'Could not save the member number',
     membershipGranted: 'Membership recorded',
     membershipGrantFailed: 'Could not record the membership',
     searching: 'Searching the ledger…',

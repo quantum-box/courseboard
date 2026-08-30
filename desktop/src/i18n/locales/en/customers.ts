@@ -70,6 +70,46 @@ export const customers: DeepPartial<typeof source> = {
       alt: 'Scanned reception sheet',
     },
   },
+  visits: {
+    title: 'Visit history',
+    description:
+      'Bookings taken in this name. Rounds played as a player in somebody else\u2019s group are not here.',
+    column: {
+      date: 'Date',
+      kind: 'Status',
+      course: 'Course',
+      players: 'Players',
+      amount: 'Amount',
+      reservationNumber: 'Reservation',
+    },
+    kind: {
+      visited: 'Played',
+      upcoming: 'Booked',
+      no_show: 'No-show',
+      cancelled: 'Cancelled',
+    },
+    metric: {
+      grade: 'Customer grade',
+      grade_below_lowest: 'Has not reached the lowest rung',
+      grade_unknown: 'Needs the whole history, which was not read',
+      visits: 'Rounds played',
+      lastVisit: 'Last {{date}}',
+      spendPerPlayer: 'Spend per player',
+      unpriced: 'Excludes {{count}} with no amount recorded',
+      frequency: 'Rounds per year',
+      frequencyUnknown: 'Needs two visits at least a month apart',
+      frequencyTruncated: 'Needs the whole history, which was not read',
+      cancelled: 'Cancelled',
+      noShows: '{{count}} no-shows',
+    },
+    truncated:
+      'Showing the most recent {{count}}. The figures above cover those {{count}} only, not a lifetime.',
+    empty: {
+      title: 'No bookings taken in this name',
+      description:
+        'A first-time visitor, or booked under somebody else\u2019s name. Rounds played in another group do not appear here.',
+    },
+  },
   detail: {
     description: 'What the ledger holds for this person.',
     back: 'Back to the customer ledger',

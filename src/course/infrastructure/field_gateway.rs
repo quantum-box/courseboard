@@ -18,10 +18,10 @@ use crate::course::domain::{
     field_day_of_week_to_courseboard, AvailabilityRule, Caddie, CaddieAssignment, CaddieRank,
     CaddieSkillLevel, CaddieUpstreamIdentity, Course, CourseError, CourseId, CourseOrder,
     CustomerId, GatewayCredentials, GenerationSummary, GolfCatalogGateway, NewReservation,
-    PartyDetails, ProductSlot, Reservation, ReservationBookingUpdate, ReservationGateway,
-    ReservationId, ReservationProduct, ReservationScheduleGateway, ReservationServiceId, Resource,
-    ResourceId, ResourceKind, ResourceTimeSlot, SaveCourseResource, SeededReservation,
-    UpsertCourse, UpsertReservationProduct, SEED_KEY_FIELD,
+    PartyDetails, ProductSlot, Reservation, ReservationBilling, ReservationBookingUpdate,
+    ReservationGateway, ReservationId, ReservationProduct, ReservationScheduleGateway,
+    ReservationServiceId, Resource, ResourceId, ResourceKind, ResourceTimeSlot, SaveCourseResource,
+    SeededReservation, UpsertCourse, UpsertReservationProduct, SEED_KEY_FIELD,
 };
 use crate::course::infrastructure::course_order_config;
 use crate::course::infrastructure::generic_product_config;
@@ -82,6 +82,22 @@ impl ReservationGateway for FieldReservationGateway {
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<Reservation>, CourseError> {
         let path = format!("/v1/erp/reservations?limit={RESERVATION_LIST_LIMIT}");
+        let items: Vec<FieldReservationDto> =
+            field_get_items(&self.client, &self.base_url, &path, credentials).await?;
+        Ok(items.into_iter().map(map_reservation).collect())
+    }
+
+    async fn list_customer_reservations(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Reservation>, CourseError> {
+        let path = format!(
+            "/v1/erp/reservations?customerId={}&limit={limit}&offset={offset}",
+            urlencoding_path(customer_id.as_str())
+        );
         let items: Vec<FieldReservationDto> =
             field_get_items(&self.client, &self.base_url, &path, credentials).await?;
         Ok(items.into_iter().map(map_reservation).collect())
@@ -295,11 +311,17 @@ impl ReservationGateway for FieldReservationGateway {
         // Field's cancel takes no body today. The reason is sent anyway so the
         // desk's words land the moment Field can keep them (PLT-3297); an
         // endpoint that ignores unknown fields drops it, which is the same
-        // outcome as not sending it.
-        let body = reason
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| json!({ "reason": value }));
+        // outcome as not sending it. A JSON object is sent either way, though
+        // — `{}` when there is no reason, never nothing at all — because
+        // Field's endpoint runs the same `Json<_>` extractor that requires
+        // `Content-Type: application/json` regardless of whether the body has
+        // anything in it, and reqwest only sets that header when `.json(..)`
+        // is actually called with something.
+        let trimmed_reason = reason.map(str::trim).filter(|value| !value.is_empty());
+        let body = match trimmed_reason {
+            Some(reason) => json!({ "reason": reason }),
+            None => json!({}),
+        };
         // Status only, no decode: a cancel that answers 204 has done the work,
         // and failing to parse an empty body would report the booking as still
         // live and invite the desk to cancel it a second time.
@@ -309,7 +331,7 @@ impl ReservationGateway for FieldReservationGateway {
             reqwest::Method::POST,
             &path,
             credentials,
-            body.as_ref(),
+            Some(&body),
         )
         .await
     }
@@ -434,6 +456,11 @@ pub struct FieldGolfCatalogGateway {
     base_url: String,
     /// Whether a plan may be stored against more than one course (SCC-3).
     multi_course_product_writes: bool,
+    /// CourseBoard's own store for the golf keys of a product (play type,
+    /// hole count, group cap, course scope). When attached, reads prefer it
+    /// and every save mirrors what the config write stored into it — the
+    /// transitional step of splitting golf keys out of the config (ADR-0009).
+    product_settings: Option<std::sync::Arc<super::MySqlGolfProductSettingsRepository>>,
 }
 
 impl FieldGolfCatalogGateway {
@@ -454,7 +481,16 @@ impl FieldGolfCatalogGateway {
             client,
             base_url: normalize_base_url(field_api_url),
             multi_course_product_writes,
+            product_settings: None,
         }
+    }
+
+    pub fn with_product_settings(
+        mut self,
+        product_settings: std::sync::Arc<super::MySqlGolfProductSettingsRepository>,
+    ) -> Self {
+        self.product_settings = Some(product_settings);
+        self
     }
 
     async fn read_config(&self, credentials: GatewayCredentials<'_>) -> Result<Value, CourseError> {
@@ -749,9 +785,23 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<Vec<ReservationProduct>, CourseError> {
-        Ok(generic_product_config::read_products(
-            &self.read_config(credentials).await?,
-        ))
+        let products = generic_product_config::read_products(&self.read_config(credentials).await?);
+        let Some(repository) = &self.product_settings else {
+            return Ok(products);
+        };
+        // CourseBoard's own rows are the source of truth for the golf keys; a
+        // product without a row (saved before this table existed) falls back
+        // to the copies still riding on the config.
+        let local = repository.get_all(credentials.operator_id).await?;
+        Ok(products
+            .into_iter()
+            .map(
+                |product| match local.get(product.reservation_service_id().as_str()) {
+                    Some(settings) => settings.apply_to(&product),
+                    None => product,
+                },
+            )
+            .collect())
     }
 
     async fn upsert_reservation_product(
@@ -796,12 +846,26 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
                 |config| generic_product_config::upsert_product(config, &input, write_mode),
             )
             .await?;
-        generic_product_config::read_products(&stored)
+        let product = generic_product_config::read_products(&stored)
             .into_iter()
             .find(|product| product.reservation_service_id() == &input.reservation_service_id)
             .ok_or(CourseError::Provider(
                 "the saved plan was not returned by the extension config".into(),
-            ))
+            ))?;
+        if let Some(repository) = &self.product_settings {
+            // Mirror what the config write actually stored — never the raw
+            // input — so the local rows can only ever equal the config copy.
+            // A failure here surfaces to the operator; the config is already
+            // saved, and retrying the save converges the two stores.
+            repository
+                .replace(
+                    credentials.operator_id,
+                    product.reservation_service_id().as_str(),
+                    &super::GolfProductSettings::from_product(&product),
+                )
+                .await?;
+        }
+        Ok(product)
     }
 
     async fn list_product_slots(
@@ -818,10 +882,24 @@ impl GolfCatalogGateway for FieldGolfCatalogGateway {
         service_id: &ReservationServiceId,
         slots: Vec<ProductSlot>,
     ) -> Result<Vec<ProductSlot>, CourseError> {
-        let config = self.read_config(credentials).await?;
-        let next = generic_product_config::replace_slots(&config, service_id, &slots);
-        write_extension_config(&self.client, &self.base_url, credentials, &next).await?;
-        generic_product_config::read_slots(&next, service_id)
+        // Slots live inside the same `reservationProducts` array as the plans,
+        // and Field's own slot import rewrites that array too. A bare PATCH
+        // here reported success while dropping whichever write landed second,
+        // so this takes the same write-and-verify path as the plan editor.
+        let stored = self
+            .write_config_key(
+                credentials,
+                generic_product_config::PRODUCTS_KEY,
+                |config| {
+                    Ok(generic_product_config::replace_slots(
+                        config, service_id, &slots,
+                    ))
+                },
+            )
+            .await?;
+        // Read back from what Field stored rather than from the value we sent:
+        // after a retry the two are not the same object.
+        generic_product_config::read_slots(&stored, service_id)
     }
 }
 
@@ -1185,6 +1263,15 @@ fn map_reservation(value: FieldReservationDto) -> Reservation {
     )
     .with_party(party)
     .with_customer_id(CustomerId::from_optional(value.customer_id))
+    .with_billing(ReservationBilling {
+        price_amount: value.price_amount,
+        deposit_amount: value.deposit_amount,
+        paid_amount: value.paid_amount,
+        currency: value.currency,
+        payment_status: value.payment_status,
+        invoice_id: value.invoice_id,
+        cancelled_at: value.cancelled_at,
+    })
 }
 
 fn map_course(value: FieldGolfCourseDto) -> Course {
@@ -1368,6 +1455,23 @@ struct FieldReservationDto {
     custom_fields_json: Option<Value>,
     #[serde(default)]
     notes: Option<String>,
+    // Field records the money against the booking; CourseBoard used to drop it
+    // on the floor and ask Field to add the day up instead. Reading it here is
+    // what lets the takings be worked out on this side (ADR-0005 Phase 1).
+    #[serde(default)]
+    price_amount: i64,
+    #[serde(default)]
+    deposit_amount: i64,
+    #[serde(default)]
+    paid_amount: i64,
+    #[serde(default)]
+    currency: Option<String>,
+    #[serde(default)]
+    payment_status: Option<String>,
+    #[serde(default)]
+    invoice_id: Option<String>,
+    #[serde(default)]
+    cancelled_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1743,21 +1847,13 @@ fn map_field_request_error_with_timeout(error: reqwest::Error, timeout: Duration
 }
 
 /// Preserve every sanitized Field 4xx as an operator-correctable response;
-/// transport failures and 5xx responses remain provider failures.
+/// transport failures and 5xx responses remain provider failures. Authentication
+/// and authorization stay distinct: Field 401 remains 401, while a real policy
+/// denial remains 403.
 pub(crate) fn map_field_status_error(status: reqwest::StatusCode, message: &str) -> CourseError {
     if status.is_client_error() {
-        // A Field 401 describes the forwarded bearer/tenant at the provider
-        // boundary, not the operator's CourseBoard session. Keep the historical
-        // 403 normalization so the browser does not refresh or sign out a valid
-        // CourseBoard login. Both statuses still stay below 500, avoiding
-        // Cloudflare's CORS-less origin 5xx replacement page.
-        let downstream_status = if status == reqwest::StatusCode::UNAUTHORIZED {
-            reqwest::StatusCode::FORBIDDEN
-        } else {
-            status
-        };
         return CourseError::UpstreamClient {
-            status: downstream_status.as_u16(),
+            status: status.as_u16(),
             message: field_error_message(message).unwrap_or_else(|| status.to_string()),
         };
     }
@@ -1798,6 +1894,58 @@ mod tests {
     use axum::{extract::State, routing::get, Json, Router};
 
     use super::*;
+
+    /// The takings have to be workable out on this side, which means the
+    /// money Field records against a booking must survive the decode. A
+    /// booking that carries none of it still decodes — Field omits the keys
+    /// for bookings taken before they existed, and a missing amount is zero,
+    /// not a failure.
+    #[test]
+    fn a_bookings_money_survives_the_decode_and_its_absence_is_not_a_failure() {
+        let with_money: FieldReservationDto = serde_json::from_value(serde_json::json!({
+            "id": "res_1",
+            "reservationNumber": "R-1",
+            "status": "confirmed",
+            "startsAt": "2026-07-18T00:00:00Z",
+            "endsAt": "2026-07-18T04:00:00Z",
+            "quantity": 4,
+            "priceAmount": 48000,
+            "depositAmount": 10000,
+            "paidAmount": 48000,
+            "currency": "JPY",
+            "paymentStatus": "paid",
+            "invoiceId": "inv_1",
+            "cancelledAt": "2026-07-17T09:00:00Z",
+        }))
+        .expect("decode a booking that carries money");
+
+        let reservation = map_reservation(with_money);
+        let billing = reservation.billing();
+        assert_eq!(billing.price_amount, 48_000);
+        assert_eq!(billing.deposit_amount, 10_000);
+        assert_eq!(billing.paid_amount, 48_000);
+        assert_eq!(billing.currency.as_deref(), Some("JPY"));
+        assert_eq!(billing.payment_status.as_deref(), Some("paid"));
+        assert_eq!(billing.invoice_id.as_deref(), Some("inv_1"));
+        // Cancelled bookings are kept out of takings even when money was
+        // collected: that money settles as a cancellation fee instead.
+        assert!(billing.is_cancelled());
+
+        let without_money: FieldReservationDto = serde_json::from_value(serde_json::json!({
+            "id": "res_2",
+            "reservationNumber": "R-2",
+            "status": "confirmed",
+            "startsAt": "2026-07-18T00:00:00Z",
+            "endsAt": "2026-07-18T04:00:00Z",
+            "quantity": 4,
+        }))
+        .expect("decode a booking with no money recorded");
+
+        let billing = map_reservation(without_money).billing().clone();
+        assert_eq!(billing.price_amount, 0);
+        assert_eq!(billing.invoice_id, None);
+        assert!(!billing.is_cancelled());
+    }
 
     #[derive(Clone, Default)]
     struct ScheduleServerState {
@@ -1939,6 +2087,79 @@ mod tests {
         server.abort();
     }
 
+    #[derive(Clone, Default)]
+    struct CancelServerState {
+        bodies: Arc<Mutex<Vec<Value>>>,
+    }
+
+    async fn cancel_endpoint(
+        State(state): State<CancelServerState>,
+        Json(body): Json<Value>,
+    ) -> axum::http::StatusCode {
+        state.bodies.lock().expect("bodies lock").push(body);
+        axum::http::StatusCode::NO_CONTENT
+    }
+
+    /// Field's cancel endpoint uses the same `Json<_>` extractor as any other
+    /// write, which rejects a request that arrives with no
+    /// `Content-Type: application/json` — reason or no reason. A cancel with a
+    /// blank reason used to skip the body (and the header riding on it)
+    /// entirely, so this pins what actually reaches Field for each shape of
+    /// reason the desk can type (or not).
+    #[tokio::test]
+    async fn cancel_reservation_always_sends_a_json_body_to_field() {
+        for (reason, expected) in [
+            (None, json!({})),
+            (Some("   "), json!({})),
+            (
+                Some("電話でキャンセル"),
+                json!({ "reason": "電話でキャンセル" }),
+            ),
+        ] {
+            let state = CancelServerState::default();
+            let app = Router::new()
+                .route(
+                    "/v1/erp/reservations/res_1/cancel",
+                    axum::routing::post(cancel_endpoint),
+                )
+                .with_state(state.clone());
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind mock Field");
+            let address = listener.local_addr().expect("mock Field address");
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.expect("serve mock Field");
+            });
+
+            let gateway = FieldReservationGateway::new(
+                reqwest::Client::new(),
+                Some(&format!("http://{address}")),
+            );
+            gateway
+                .cancel_reservation(
+                    GatewayCredentials {
+                        authorization: "Bearer test-token",
+                        operator_id: "operator-test",
+                        platform_id: Some("platform-test"),
+                        authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                        caller_bearer: "Bearer test",
+                    },
+                    &ReservationId::new("res_1"),
+                    reason,
+                )
+                .await
+                .unwrap_or_else(|error| panic!("cancel with reason {reason:?}: {error}"));
+
+            assert_eq!(
+                state.bodies.lock().expect("bodies lock").as_slice(),
+                [expected],
+                "reason {reason:?}",
+            );
+
+            server.abort();
+        }
+    }
+
     #[test]
     fn a_booking_the_desk_did_not_identify_carries_no_customer_id_at_all() {
         let body = new_reservation_body(&desk_reservation(), true);
@@ -1984,7 +2205,19 @@ mod tests {
     }
 
     #[test]
-    fn upstream_4xx_keeps_its_status_and_sanitized_message() {
+    fn upstream_authentication_expiry_stays_401() {
+        let unauthorized = map_field_status_error(
+            reqwest::StatusCode::UNAUTHORIZED,
+            "{\"error\":\"unauthorized\",\"message\":\"Field authentication expired\"}",
+        );
+        assert!(
+            matches!(unauthorized, CourseError::UpstreamClient { status: 401, message }
+            if message == "Field authentication expired")
+        );
+    }
+
+    #[test]
+    fn upstream_permission_denial_stays_403() {
         let denied = map_field_status_error(
             reqwest::StatusCode::FORBIDDEN,
             "{\"code\":\"FORBIDDEN\",\"message\":\"tenant policy check denied\"}",
@@ -1993,13 +2226,10 @@ mod tests {
             matches!(denied, CourseError::UpstreamClient { status: 403, message }
             if message == "tenant policy check denied")
         );
+    }
 
-        let unauthorized = map_field_status_error(reqwest::StatusCode::UNAUTHORIZED, "expired");
-        assert!(
-            matches!(unauthorized, CourseError::UpstreamClient { status: 403, message }
-            if message == "expired")
-        );
-
+    #[test]
+    fn upstream_conflict_keeps_its_status_and_sanitized_message() {
         let conflict = map_field_status_error(
             reqwest::StatusCode::CONFLICT,
             "{\"error\":\"staff_already_linked\",\"message\":\"このスタッフは田中さんに既に紐付いています\"}",

@@ -1,5 +1,7 @@
 import { i18next } from '../../../i18n'
 
+import { effectiveSupply, type CourseCaddieSupply } from '../caddieCourseSupply'
+import { unassignedCaddieRounds, type CoverageAssignment } from '../caddieRoundCoverage'
 import type { TeeReservation } from '../timeline/models'
 import type { LedgerColumn, LedgerSlot, SlotGridSource } from './models'
 
@@ -163,17 +165,35 @@ export function sortSlots(slots: LedgerSlot[]): LedgerSlot[] {
  * `openSlots` counts rows the desk could still sell, which is what the header
  * on the paper ledger tracks — not rows that merely have no booking, since a
  * closed row has no booking either.
+ *
+ * Only columns that can actually count are added up. A derived column knows
+ * which of its rows carry no booking, but not how many groups those rows hold,
+ * and adding that in produced a day total stated with confidence over columns
+ * whose own headers said the number was unknown — one club read "空き枠 106 枠"
+ * on a day it could not sell a single tee time. `uncountedCourses` carries how
+ * many were left out so the total can say so rather than quietly shrink.
  */
 export function summarizeLedger(columns: LedgerColumn[]) {
   return columns.reduce(
-    (total, column) => ({
-      groups: total.groups + column.groupCount,
-      players: total.players + column.playerCount,
-      selfGroups: total.selfGroups + column.selfGroupCount,
-      caddieGroups: total.caddieGroups + column.caddieGroupCount,
-      openSlots: total.openSlots + column.openSlotCount,
-    }),
-    { groups: 0, players: 0, selfGroups: 0, caddieGroups: 0, openSlots: 0 },
+    (total, column) => {
+      const counted = knowsRemainingCapacity(column)
+      return {
+        groups: total.groups + column.groupCount,
+        players: total.players + column.playerCount,
+        selfGroups: total.selfGroups + column.selfGroupCount,
+        caddieGroups: total.caddieGroups + column.caddieGroupCount,
+        openSlots: counted ? total.openSlots + column.openSlotCount : total.openSlots,
+        uncountedCourses: counted ? total.uncountedCourses : total.uncountedCourses + 1,
+      }
+    },
+    {
+      groups: 0,
+      players: 0,
+      selfGroups: 0,
+      caddieGroups: 0,
+      openSlots: 0,
+      uncountedCourses: 0,
+    },
   )
 }
 
@@ -239,4 +259,125 @@ export function observedIntervalMinutes(column: LedgerColumn): number | null {
  */
 export function knowsRemainingCapacity(column: LedgerColumn): boolean {
   return column.gridSource === 'inventory'
+}
+
+/**
+ * Whether this course has a caddie limit worth stating.
+ *
+ * Shifts are confirmed a month at a time, and a month nobody confirmed leaves
+ * every course at zero. `キャディ 0/0` on such a day reads as a limit the club
+ * set, when in fact nobody has decided yet — the same reason a derived column
+ * says nothing about open slots rather than saying zero.
+ *
+ * Groups already sold with a caddie are the exception: capacity of zero
+ * against bookings that exist is precisely what the desk needs to see, so that
+ * course keeps its line even though the shifts are missing.
+ */
+export function knowsCaddieCapacity(
+  supply: CourseCaddieSupply | null | undefined,
+): supply is CourseCaddieSupply {
+  if (!supply) return false
+  const effective = effectiveSupply(supply)
+  return effective.roundsCapacity > 0 || effective.caddieAttachedGroups > 0
+}
+
+export type CaddieSupplyAnomalyKey =
+  | 'unbackedAssignedGroups'
+  | 'capacityExceededAssignedGroups'
+  | 'courseMismatchAssignedGroups'
+
+export type CaddieSupplyAnomaly = {
+  key: CaddieSupplyAnomalyKey
+  count: number
+}
+
+/** Return only additive anomaly counts that need to stay visible in the header. */
+export function caddieSupplyAnomalies(
+  supply: CourseCaddieSupply | null | undefined,
+): CaddieSupplyAnomaly[] {
+  if (!supply) return []
+  const entries: [CaddieSupplyAnomalyKey, number | undefined][] = [
+    ['unbackedAssignedGroups', supply.unbackedAssignedGroups],
+    ['capacityExceededAssignedGroups', supply.capacityExceededAssignedGroups],
+    ['courseMismatchAssignedGroups', supply.courseMismatchAssignedGroups],
+  ]
+  return entries.flatMap(([key, count]) =>
+    typeof count === 'number' && count !== 0 ? [{ key, count }] : [],
+  )
+}
+
+/**
+ * A `useResource` read, told apart from a value that was actually loaded.
+ *
+ * `data: T | null` collapses "still loading" and "failed" into the same shape
+ * as "loaded nothing", which is exactly the collapse that must not happen for
+ * the unassigned-caddie badge (SCC-27): a lookup that has not landed yet is
+ * not the same fact as "no shifts are confirmed" or "no caddie is assigned".
+ */
+export type ResourceStatus<T> =
+  | { kind: 'unknown' }
+  | { kind: 'failed' }
+  | { kind: 'loaded'; value: T }
+
+/** Takes a `useResource` result as-is, so data/error are never quietly dropped. */
+export function resourceStatus<T>(resource: {
+  data: T | null
+  error: unknown
+  loading: boolean
+}): ResourceStatus<T> {
+  if (resource.error) return { kind: 'failed' }
+  if (resource.data === null) return { kind: 'unknown' }
+  return { kind: 'loaded', value: resource.data }
+}
+
+/**
+ * Whether the day has at least one confirmed caddie shift.
+ *
+ * `unknown`/`failed` read as `false` — the safe side for a badge that must
+ * never claim a shift is missing merely because the lookup has not answered.
+ */
+export function dayHasConfirmedShifts(
+  shifts: ResourceStatus<{ items: unknown[] }>,
+): boolean {
+  return shifts.kind === 'loaded' && shifts.value.items.length > 0
+}
+
+/**
+ * The reservation IDs on the board with a caddie-attached round nobody is
+ * covering, gathered across every column into one set.
+ *
+ * Returns an empty set when the assignment lookup has not landed or failed —
+ * "unknown" must not be read as "nobody is assigned", or a slow request would
+ * paint the whole board red for a moment on every load.
+ */
+export function unassignedCaddieReservationIds(
+  columns: LedgerColumn[],
+  assignments: ResourceStatus<{ items: CoverageAssignment[] }>,
+): Set<string> {
+  if (assignments.kind !== 'loaded') return new Set()
+  const rows = columns.flatMap(column => column.slots.flatMap(slot => slot.items))
+  return new Set(unassignedCaddieRounds(rows, assignments.value.items).map(row => row.id))
+}
+
+/** `キャディ 8/12` — groups sold against what today's caddies can take. */
+export function formatCaddieCapacity(supply: CourseCaddieSupply): string {
+  const effective = effectiveSupply(supply)
+  return i18next.t('ledger:column.caddie', {
+    booked: String(effective.caddieAttachedGroups),
+    capacity: String(effective.roundsCapacity),
+  })
+}
+
+/**
+ * The line beside the ratio: what is left, or how far past the limit it went.
+ *
+ * The two are worth spelling out rather than leaving the desk to subtract the
+ * ratio in their head, since the answer decides whether the next caddie-side
+ * booking can be taken at all.
+ */
+export function formatCaddieShortfall(supply: CourseCaddieSupply): string {
+  const effective = effectiveSupply(supply)
+  return effective.shortfall < 0
+    ? i18next.t('ledger:column.caddieOver', { n: String(-effective.shortfall) })
+    : i18next.t('ledger:column.caddieSpare', { n: String(effective.shortfall) })
 }

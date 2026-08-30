@@ -29,6 +29,10 @@ import {
   type CourseResource,
   type GolfAvailabilityRule,
 } from './schedule'
+import {
+  inventoryHorizonGap,
+  type BookingHorizonStatusResponse,
+} from './bookingHorizon'
 import type { GolfCourse } from './models'
 
 const coursesPath = '/v1/course/courses'
@@ -97,11 +101,6 @@ type SavedSchedule = {
   built: GenerationSummary | null
 }
 
-/** Only the far edge matters here; how it was set is the policy screen's business. */
-type BookingHorizon = {
-  bookableThrough: string
-}
-
 /**
  * The course's bookable week.
  *
@@ -140,7 +139,7 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
   const [saving, setSaving] = useState(false)
   const [linking, setLinking] = useState(false)
   const horizonResource = useResource(
-    () => courseboardApiJson<BookingHorizon>(bookingHorizonPath),
+    () => courseboardApiJson<BookingHorizonStatusResponse>(bookingHorizonPath),
     [],
     { cacheKey: 'course:booking-horizon', enabled: Boolean(course) },
   )
@@ -154,7 +153,16 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
   )
   const changeCount = ruleChangeCount(changes)
   const weeklyStarts = useMemo(() => weeklyStartCount(rules.map(toStoredRule)), [rules])
-  const onSaleThrough = bookableThrough ?? horizonResource.data?.bookableThrough ?? null
+  const configuredThrough = horizonResource.data?.bookableThrough ?? null
+  const generatedThrough = bookableThrough
+    ?? horizonResource.data?.generatedThrough?.[courseId]
+    ?? null
+  const inventoryGap = configuredThrough && weeklyStarts > 0 && !buildFailed
+    ? inventoryHorizonGap(configuredThrough, generatedThrough)
+    : null
+  const onSaleThrough = configuredThrough && weeklyStarts > 0 && !inventoryGap
+    ? configuredThrough
+    : null
 
   useEffect(() => {
     if (!scheduleResource.data) return
@@ -181,6 +189,7 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
       coursesResource.refresh(),
       resourcesResource.refresh(),
       scheduleResource.refresh(),
+      horizonResource.refresh(),
     ]).then(([, , refreshedSchedule]) => {
       if (!refreshedSchedule) acceptNextScheduleRef.current = false
     })
@@ -189,6 +198,7 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
     coursesResource.refresh,
     resourcesResource.refresh,
     scheduleResource.refresh,
+    horizonResource.refresh,
   ])
 
   useRegisterPageReload(requestReload)
@@ -272,7 +282,7 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
           ? t('schedule:saved.notBuilt.body')
           : t('schedule:saved.body', {
               course: course ? courseLabel(course) : courseId,
-              date: formatCourseDate(response.bookableThrough),
+              date: formatCourseDate(response.bookableThrough, i18next.language),
             }),
       })
     } catch (error) {
@@ -340,11 +350,29 @@ export function CourseSchedulePage({ courseId }: { courseId: string }) {
       {onSaleThrough && !buildFailed ? (
         <p className="on-sale-through">
           <CalendarCheck aria-hidden="true" />
-          <span>{t('schedule:onSale.through', { date: formatCourseDate(onSaleThrough) })}</span>
+          <span>{t('schedule:onSale.through', {
+            date: formatCourseDate(onSaleThrough, i18next.language),
+          })}</span>
           <button type="button" className="link-button" onClick={() => navigate('golf/policy')}>
             {t('schedule:onSale.change')}
           </button>
         </p>
+      ) : null}
+
+      {inventoryGap ? (
+        <Notice tone="warning" title={t('schedule:inventoryGap.title')}>
+          {inventoryGap.generatedThrough === null
+            ? t('schedule:inventoryGap.missing', {
+                date: formatCourseDate(inventoryGap.bookableThrough, i18next.language),
+              })
+            : t('schedule:inventoryGap.behind', {
+                date: formatCourseDate(inventoryGap.bookableThrough, i18next.language),
+                generatedThrough: formatCourseDate(
+                  inventoryGap.generatedThrough,
+                  i18next.language,
+                ),
+              })}
+        </Notice>
       ) : null}
 
       {buildFailed ? (

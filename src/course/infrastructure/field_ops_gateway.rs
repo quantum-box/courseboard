@@ -18,12 +18,11 @@ use super::field_gateway::{
 };
 use crate::course::domain::{
     AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshot, AttendanceSnapshotReport,
-    AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem, AvailabilityQuery,
-    AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability,
-    CaddieCourseMembership, CaddieId, CaddieRankFees, CaddieRating, CaddieRecommendation,
-    CaddieRoster, CaddieSkillLevel, CaddieStaff, CourseError, GatewayCredentials, GolfOpsGateway,
-    RecommendationQuery, ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, WorkedMinutes,
+    AvailabilityQuery, AvailabilityStatus, Caddie, CaddieAssignment, CaddieAssignmentQuery,
+    CaddieAvailability, CaddieCourseMembership, CaddieId, CaddieRankFees, CaddieRating,
+    CaddieRoster, CaddieStaff, CourseError, GatewayCredentials, GolfOpsGateway,
+    ReplaceCaddieMemberships, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    WorkedMinutes,
 };
 
 const GOLF: &str = "/v1/erp/extensions/golf-course";
@@ -452,53 +451,6 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
         .await
     }
 
-    async fn list_caddie_recommendations(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        query: RecommendationQuery,
-    ) -> Result<Vec<CaddieRecommendation>, CourseError> {
-        let mut params = Vec::new();
-        if let Some(reservation_id) = query.reservation_id.as_deref() {
-            params.push(format!(
-                "reservationId={}",
-                urlencoding_query(reservation_id)
-            ));
-        }
-        if let Some(scheduled_at) = query.scheduled_at {
-            params.push(format!(
-                "scheduledAt={}",
-                urlencoding_query(scheduled_at.to_rfc3339())
-            ));
-        }
-        if let Some(player_count) = query.player_count {
-            params.push(format!("playerCount={player_count}"));
-        }
-        if query.include_rookie_pairing {
-            params.push("includeRookiePairing=true".into());
-        }
-        if let Some(limit) = query.limit {
-            params.push(format!("limit={limit}"));
-        }
-        let path = if params.is_empty() {
-            format!("{GOLF}/caddie-recommendations")
-        } else {
-            format!("{GOLF}/caddie-recommendations?{}", params.join("&"))
-        };
-        let items: Vec<FieldRecommendationDto> =
-            field_get_items(&self.client, &self.base_url, &path, credentials).await?;
-        let names_by_profile_id: HashMap<String, String> = self
-            .list_caddie_roster(credentials)
-            .await?
-            .caddies()
-            .iter()
-            .map(|caddie| (caddie.id().to_string(), caddie.display_name().to_string()))
-            .collect();
-        Ok(items
-            .into_iter()
-            .map(|item| map_recommendation(item, &names_by_profile_id))
-            .collect())
-    }
-
     async fn get_attendance_snapshot(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -566,43 +518,6 @@ impl GolfOpsGateway for FieldGolfOpsGateway {
                 )
             })
             .collect())
-    }
-
-    async fn auto_assign_caddies(
-        &self,
-        credentials: GatewayCredentials<'_>,
-        date: NaiveDate,
-        dry_run: bool,
-    ) -> Result<AutoAssignResult, CourseError> {
-        let body = json!({ "date": date, "dryRun": dry_run });
-        let dto: FieldAutoAssignDto = field_send_json(
-            &self.client,
-            &self.base_url,
-            reqwest::Method::POST,
-            &format!("{GOLF}/caddie-auto-assignments"),
-            credentials,
-            Some(&body),
-        )
-        .await?;
-        Ok(AutoAssignResult::new(
-            dto.dry_run,
-            dto.assigned
-                .into_iter()
-                .map(|item| {
-                    AutoAssignPlanItem::reconstitute(
-                        item.reservation_id,
-                        item.scheduled_at,
-                        item.caddie_profile_id,
-                        item.caddie_display_name,
-                        item.rationale,
-                    )
-                })
-                .collect(),
-            dto.skipped
-                .into_iter()
-                .map(|item| AutoAssignSkippedItem::new(item.reservation_id, item.reason))
-                .collect(),
-        ))
     }
 
     async fn get_caddie_rank_fees(
@@ -732,37 +647,6 @@ fn resolve_linked_staff_name(
         .to_string()
 }
 
-/// Recommendations carry no `staffId`, so the roster is the only bridge from a
-/// caddie profile to the linked staff member's name.
-fn map_recommendation(
-    value: FieldRecommendationDto,
-    names_by_profile_id: &HashMap<String, String>,
-) -> CaddieRecommendation {
-    let skill = match value.skill_level {
-        Value::String(raw) => CaddieSkillLevel::parse(&raw),
-        _ => CaddieSkillLevel::Regular,
-    };
-    let display_name = names_by_profile_id
-        .get(&value.caddie_profile_id)
-        .cloned()
-        .unwrap_or(value.display_name);
-    let pairing_display_name = value.pairing_display_name;
-    CaddieRecommendation::reconstitute(
-        value.caddie_profile_id,
-        display_name,
-        skill,
-        value.rating_average,
-        value.rating_count.unwrap_or(0),
-        value.rounds_assigned.unwrap_or(0),
-        None,
-        None,
-        value.recommendation_score.unwrap_or(0),
-        value.recommended_role.unwrap_or_else(|| "primary".into()),
-        pairing_display_name,
-        value.rationale.unwrap_or_default(),
-    )
-}
-
 /// Field answers with the golf extension's own `displayName`, which is a copy
 /// made before a staff master existed and drifts from it. The roster already
 /// resolves the linked staff name; do the same here so a caddie is not called
@@ -859,29 +743,6 @@ struct FieldAvailabilityDto {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct FieldRecommendationDto {
-    caddie_profile_id: String,
-    display_name: String,
-    #[serde(default)]
-    skill_level: Value,
-    #[serde(default)]
-    rating_average: Option<f64>,
-    #[serde(default)]
-    rating_count: Option<i64>,
-    #[serde(default)]
-    rounds_assigned: Option<i64>,
-    #[serde(default)]
-    recommendation_score: Option<i32>,
-    #[serde(default)]
-    recommended_role: Option<String>,
-    #[serde(default)]
-    pairing_display_name: Option<String>,
-    #[serde(default)]
-    rationale: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct FieldAttendanceReportDto {
     date: NaiveDate,
     items: Vec<FieldAttendanceDto>,
@@ -907,32 +768,6 @@ struct FieldAttendancePeriodSnapshotDto {
     caddie_profile_id: String,
     date: NaiveDate,
     attendance_status: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldAutoAssignDto {
-    dry_run: bool,
-    assigned: Vec<FieldAutoAssignItemDto>,
-    skipped: Vec<FieldAutoAssignSkippedDto>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldAutoAssignItemDto {
-    reservation_id: String,
-    scheduled_at: DateTime<Utc>,
-    caddie_profile_id: String,
-    caddie_display_name: String,
-    #[serde(default)]
-    rationale: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FieldAutoAssignSkippedDto {
-    reservation_id: String,
-    reason: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -978,6 +813,26 @@ mod tests {
             authorizer: &crate::course::infrastructure::ALLOW_ALL,
             caller_bearer: "Bearer test",
         }
+    }
+
+    fn caddie_update() -> UpsertCaddie {
+        UpsertCaddie::try_new(
+            "佐藤さん",
+            "regular",
+            "D",
+            12_000,
+            Some("JPY".to_string()),
+            Some("staff-1".to_string()),
+            Some("staff_member".to_string()),
+            Some("staff-1".to_string()),
+            true,
+            Some("active".to_string()),
+            Some(1),
+            None,
+            None,
+            None,
+        )
+        .expect("valid caddie update")
     }
 
     #[test]
@@ -1189,29 +1044,11 @@ mod tests {
         );
         let base_url = spawn_field_server(app).await;
         let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
-        let input = UpsertCaddie::try_new(
-            "佐藤さん",
-            "regular",
-            "D",
-            12_000,
-            Some("JPY".to_string()),
-            Some("staff-1".to_string()),
-            Some("staff_member".to_string()),
-            Some("staff-1".to_string()),
-            true,
-            Some("active".to_string()),
-            Some(1),
-            None,
-            None,
-            None,
-        )
-        .expect("valid caddie update");
-
         let error = gateway
             .update_caddie(
                 test_credentials(),
                 &CaddieId::try_new("caddie-1").expect("valid caddie id"),
-                input,
+                caddie_update(),
             )
             .await
             .expect_err("a duplicate staff link must remain a conflict");
@@ -1274,65 +1111,61 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn field_auth_denials_remain_403_through_the_caddie_gateway() {
-        let app = Router::new()
-            .route(
-                "/v1/erp/extensions/golf-course/caddie-profiles/unauthorized",
-                patch(|| async {
-                    (
-                        StatusCode::UNAUTHORIZED,
-                        Json(json!({ "message": "Field bearer was rejected" })),
-                    )
-                }),
-            )
-            .route(
-                "/v1/erp/extensions/golf-course/caddie-profiles/forbidden",
-                patch(|| async {
-                    (
-                        StatusCode::FORBIDDEN,
-                        Json(json!({ "message": "Field tenant policy denied this operation" })),
-                    )
-                }),
-            );
+    async fn field_authentication_expiry_remains_401_through_the_caddie_gateway() {
+        let app = Router::new().route(
+            "/v1/erp/extensions/golf-course/caddie-profiles/expired",
+            patch(|| async {
+                (
+                    StatusCode::UNAUTHORIZED,
+                    Json(json!({ "message": "Field authentication expired" })),
+                )
+            }),
+        );
         let base_url = spawn_field_server(app).await;
         let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
-
-        for (caddie_id, expected_message) in [
-            ("unauthorized", "Field bearer was rejected"),
-            ("forbidden", "Field tenant policy denied this operation"),
-        ] {
-            let input = UpsertCaddie::try_new(
-                "佐藤さん",
-                "regular",
-                "D",
-                12_000,
-                Some("JPY".to_string()),
-                Some("staff-1".to_string()),
-                Some("staff_member".to_string()),
-                Some("staff-1".to_string()),
-                true,
-                Some("active".to_string()),
-                Some(1),
-                None,
-                None,
-                None,
+        let error = gateway
+            .update_caddie(
+                test_credentials(),
+                &CaddieId::try_new("expired").expect("valid caddie id"),
+                caddie_update(),
             )
-            .expect("valid caddie update");
-            let error = gateway
-                .update_caddie(
-                    test_credentials(),
-                    &CaddieId::try_new(caddie_id).expect("valid caddie id"),
-                    input,
-                )
-                .await
-                .expect_err("Field auth denial must not become a success");
+            .await
+            .expect_err("expired Field authentication must not become a success");
 
-            assert!(matches!(
-                error,
-                CourseError::UpstreamClient { status: 403, message }
-                    if message == expected_message
-            ));
-        }
+        assert!(matches!(
+            error,
+            CourseError::UpstreamClient { status: 401, message }
+                if message == "Field authentication expired"
+        ));
+    }
+
+    #[tokio::test]
+    async fn field_permission_denial_remains_403_through_the_caddie_gateway() {
+        let app = Router::new().route(
+            "/v1/erp/extensions/golf-course/caddie-profiles/forbidden",
+            patch(|| async {
+                (
+                    StatusCode::FORBIDDEN,
+                    Json(json!({ "message": "Field tenant policy denied this operation" })),
+                )
+            }),
+        );
+        let base_url = spawn_field_server(app).await;
+        let gateway = FieldGolfOpsGateway::new(reqwest::Client::new(), Some(&base_url));
+        let error = gateway
+            .update_caddie(
+                test_credentials(),
+                &CaddieId::try_new("forbidden").expect("valid caddie id"),
+                caddie_update(),
+            )
+            .await
+            .expect_err("Field permission denial must not become a success");
+
+        assert!(matches!(
+            error,
+            CourseError::UpstreamClient { status: 403, message }
+                if message == "Field tenant policy denied this operation"
+        ));
     }
 
     #[tokio::test]

@@ -82,6 +82,17 @@ export const caddies: DeepPartial<typeof source> = {
     clockedOut: 'Clocked out',
     notLinked: 'No staff link',
   },
+  shiftPlacement: {
+    unconfirmed: 'Shift not confirmed for that day',
+    unplaced: 'No course assigned',
+  },
+  assignment: {
+    shiftPlacementWarning: {
+      title: 'Check the shift placement',
+      body: '{{name}} is {{status}}. The assignment can still be made, but it will remain visible as a supply anomaly.',
+      confirm: 'Assign this caddie anyway?',
+    },
+  },
   duration: '{{hours}}h {{minutes}}m',
   rounds: '{{n}}R',
   people: '{{n}}',
@@ -137,6 +148,12 @@ export const caddies: DeepPartial<typeof source> = {
       title: 'Past the shift-request deadline ({{deadline}})',
       body: '{{names}} have not filed a shift request for this month. Check before assigning.',
       confirmExecute: '{{names}} have not filed a shift request yet. Commit these assignments anyway?',
+    },
+    shiftPlacementWarning: {
+      title: 'Check the shift placement',
+      body: 'Some assignments have an unconfirmed shift or no course placement. They can still be committed, but will remain visible as supply anomalies.',
+      confirm: 'Commit the auto-assignments anyway?',
+      item: '{{name}}: {{status}}',
     },
   },
   recommendations: {
@@ -252,6 +269,16 @@ export const caddies: DeepPartial<typeof source> = {
       allLinks: 'All',
       linked: 'Linked',
       unlinked: 'Not linked',
+      broken: 'Link is broken',
+    },
+    brokenLinkWarning: {
+      title: '{{n}} caddies point at staff who are no longer on the roster',
+      description:
+        'A staff member removed from the staff roster leaves the caddie side of '
+        + 'the link behind. Attendance and payroll cannot resolve that staff '
+        + 'member, so these caddies drop out of both. Open the name and use '
+        + '"Pick a staff member" to fix it.',
+      showOnly: 'Show only broken links',
     },
     unlinkedWarning: {
       title: '{{n}} caddies still need a staff link',
@@ -266,6 +293,7 @@ export const caddies: DeepPartial<typeof source> = {
     },
     rank: 'Rank {{rank}} · ',
     linked: 'Linked to staff',
+    linkBroken: 'Not on the staff roster',
     notLinked: 'Not linked yet',
     backToList: 'Back to the roster',
     table: {
@@ -357,6 +385,11 @@ export const caddies: DeepPartial<typeof source> = {
     },
   },
   staff: {
+    linkBroken: {
+      title: 'The linked staff member is gone',
+      description: 'The staff record this caddie pointed at is no longer on the roster. Attendance cannot be recorded and payroll will leave them out. Pick the current staff member, or register a new one and link it.',
+    },
+    relinkAction: 'Pick a staff member',
     title: 'Staff & attendance',
     description: 'Manage the staff link and today’s clock-ins.',
     attendanceUnknown: 'Attendance unavailable',
@@ -532,6 +565,65 @@ export const caddies: DeepPartial<typeof source> = {
     title: '{{n}} assignment(s) are left on a cancelled booking',
     body: 'These groups are no longer on the tee sheet. Until the assignment is cancelled, the caddie still counts against their rounds for the day and against the month’s payroll.',
     badge: 'Booking cancelled',
+  },
+  reassign: {
+    action: 'Move',
+    title: 'Move this round',
+    description: '{{name}} \u00b7 the {{time}} group',
+    roundLabel: 'Group',
+    caddieLabel: 'Caddie',
+    currentRound: 'current group',
+    heldBy: '{{name}} is on it',
+    keepCaddie: '{{name}} (as now)',
+    takenNotice: 'Another caddie is on that group. Release them first, then move this round onto it.',
+    loading: 'Loading candidates',
+    save: 'Move',
+    done: 'The {{time}} group is now {{name}}\u2019s',
+    failed: 'Could not move the round',
+    noRounds: {
+      title: 'Nowhere to move it',
+      description: 'The day\u2019s caddie-attached groups have not loaded. Check the tee sheet.',
+    },
+  },
+  duties: {
+    title: 'Other work',
+    description: 'Put a caddie on other work for the hours they have no round \u2014 course upkeep, the practice range. Those hours leave the caddie supply and stop being offered by the automatic run and the candidate list; the rest of the day still walks groups.',
+    loading: 'Loading other work',
+    loadingOptions: 'Loading the list of jobs',
+    onDutyTitle: 'On other work',
+    caddieLabel: 'Caddie',
+    caddiePlaceholder: 'Choose one',
+    freeCount: '{{n}} caddie(s) with hours to spare',
+    hours: 'Hours',
+    hoursHint: 'Clear "all day" to name a start and an end.',
+    allDay: 'All day',
+    startTime: 'From',
+    endTime: 'To',
+    morningFree: 'morning free',
+    afternoonFree: 'afternoon free',
+    orderNotice: 'The end is before the start.',
+    clashNotice: 'Another job or a round already runs through those hours. Move them, or clear that first.',
+    noneFree: 'Every caddie working this day is already spoken for.',
+    assign: 'Put on other work',
+    clear: 'Clear',
+    clearing: 'Clearing',
+    cleared: '{{name}} is back on rounds',
+    assigned: '{{name}} is on {{duty}}',
+    failed: 'Could not change the other work',
+    sheetTitle: 'Put on other work',
+    sheetDescription: '{{date}}',
+    dutyLabel: 'Job',
+    dutyPlaceholder: 'Choose one',
+    note: 'Note',
+    noteHint: 'Where, when, anything the caddie needs for the day.',
+    onDutyEmpty: {
+      title: 'No other work filed',
+      description: 'No caddie has been put on other work for this day.',
+    },
+    noOptions: {
+      title: 'No jobs on the list',
+      description: 'Add the jobs this club fills under Settings \u2192 caddie duties.',
+    },
   },
   unassigned: {
     courseFilter: 'Course',

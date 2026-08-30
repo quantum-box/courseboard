@@ -10,7 +10,6 @@ import {
   Field,
   FormGrid,
   LoadingState,
-  NativeSelect,
   Notice,
   Panel,
   ResourceError,
@@ -19,24 +18,19 @@ import {
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import { clearResourceCache } from '../../hooks/useResource'
-import {
-  notifyTenantTimezoneChanged,
-  useTenantTimezone,
-} from '../../context/TenantTimezoneProvider'
+import { notifyTenantTimezoneChanged } from '../../context/TenantTimezoneProvider'
 import {
   MAX_PLAYER_TAG_LENGTH,
   MAX_PLAYER_TAG_OPTIONS,
   normalizedPlayerTagOptions,
-  playerTagOptionDraftFromConfig,
   validatePlayerTagOptions,
 } from '../golf/playerTagOptions'
 
 const extensionStatusPath = '/v1/course/extension-status'
 const extensionConfigPath = '/v1/course/config'
-const currencyOptions = ['JPY', 'USD', 'EUR'] as const
+const playerTagOptionsPath = '/v1/course/player-tag-options'
 
 type ExtensionConfigDraft = {
-  defaultCurrency: string
   timezone: string
   playerTagOptions: string[]
 }
@@ -51,30 +45,24 @@ type ExtensionStatus = {
 }
 
 const defaultExtensionConfig: ExtensionConfigDraft = {
-  defaultCurrency: 'JPY',
   timezone: COURSE_TIME_ZONE,
   playerTagOptions: [],
 }
 
-export function configDraftFromJson(configJson?: Record<string, unknown> | null): ExtensionConfigDraft {
-  const defaultCurrency = typeof configJson?.defaultCurrency === 'string'
-    ? configJson.defaultCurrency.trim()
-    : ''
+export function configDraftFromJson(
+  configJson?: Record<string, unknown> | null,
+  playerTagOptions: string[] = [],
+): ExtensionConfigDraft {
   const timezone = typeof configJson?.timezone === 'string'
     ? configJson.timezone.trim()
     : ''
   return {
-    defaultCurrency: defaultCurrency || defaultExtensionConfig.defaultCurrency,
     timezone: timezone || defaultExtensionConfig.timezone,
-    playerTagOptions: playerTagOptionDraftFromConfig(configJson),
+    playerTagOptions,
   }
 }
 
 export function validateExtensionConfig(draft: ExtensionConfigDraft) {
-  if (!draft.defaultCurrency.trim()) return i18next.t('settings:extension.validation.currencyRequired')
-  if (!/^[A-Z]{3}$/.test(draft.defaultCurrency.trim())) {
-    return i18next.t('settings:extension.validation.currencyFormat')
-  }
   if (!draft.timezone.trim()) return i18next.t('settings:extension.validation.timezoneRequired')
   if (!isSupportedTimezone(draft.timezone.trim())) {
     return i18next.t('settings:extension.validation.timezoneFormat')
@@ -96,6 +84,14 @@ export function validateExtensionConfig(draft: ExtensionConfigDraft) {
   return null
 }
 
+/**
+ * The config with only the timezone replaced.
+ *
+ * The visitor categories moved to CourseBoard's own table and the currency was
+ * retired, but their stale copies in the config are deliberately left alone:
+ * the categories' migration fallback still reads them on tenants that have
+ * not saved locally yet, and nothing reads the currency at all.
+ */
 export function buildConfigJson(
   draft: ExtensionConfigDraft,
   previous?: Record<string, unknown> | null,
@@ -103,28 +99,10 @@ export function buildConfigJson(
   const previousConfig = previous && typeof previous === 'object' && !Array.isArray(previous)
     ? { ...previous }
     : {}
-  delete previousConfig.defaultCurrency
-  delete previousConfig.timezone
-  delete previousConfig.playerTagOptions
   return {
     ...previousConfig,
-    defaultCurrency: draft.defaultCurrency.trim(),
     timezone: draft.timezone.trim(),
-    playerTagOptions: normalizedPlayerTagOptions(draft.playerTagOptions),
   }
-}
-
-function formatUpdatedAt(value: string | null | undefined, timezone: string) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ja-JP', {
-    timeZone: timezone,
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date)
 }
 
 /**
@@ -140,8 +118,8 @@ function errorMessage(error: unknown) {
 
 export function ExtensionConfigPanel() {
   const { t } = useTranslation(['settings', 'common'])
-  const timezone = useTenantTimezone()
   const [extension, setExtension] = useState<ExtensionStatus | null>(null)
+  const [tags, setTags] = useState<string[]>([])
   const [draft, setDraft] = useState<ExtensionConfigDraft>(defaultExtensionConfig)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<unknown>(null)
@@ -152,9 +130,13 @@ export function ExtensionConfigPanel() {
     setLoading(true)
     setLoadError(null)
     try {
-      const next = await courseboardApiJson<ExtensionStatus | null>(extensionStatusPath)
+      const [next, tagOptions] = await Promise.all([
+        courseboardApiJson<ExtensionStatus | null>(extensionStatusPath),
+        courseboardApiJson<{ items: string[] }>(playerTagOptionsPath),
+      ])
       setExtension(next)
-      setDraft(configDraftFromJson(next?.configJson))
+      setTags(tagOptions.items)
+      setDraft(configDraftFromJson(next?.configJson, tagOptions.items))
     } catch (error) {
       setLoadError(error)
     } finally {
@@ -169,15 +151,11 @@ export function ExtensionConfigPanel() {
   useRegisterPageReload(load)
 
   const persisted = useMemo(
-    () => configDraftFromJson(extension?.configJson),
-    [extension?.configJson],
+    () => configDraftFromJson(extension?.configJson, tags),
+    [extension?.configJson, tags],
   )
-  const dirty = draft.defaultCurrency !== persisted.defaultCurrency
-    || draft.timezone !== persisted.timezone
+  const dirty = draft.timezone !== persisted.timezone
     || JSON.stringify(draft.playerTagOptions) !== JSON.stringify(persisted.playerTagOptions)
-  const knownCurrency = currencyOptions.includes(
-    draft.defaultCurrency as (typeof currencyOptions)[number],
-  )
 
   async function save() {
     const validationError = validateExtensionConfig(draft)
@@ -188,15 +166,35 @@ export function ExtensionConfigPanel() {
     setSaving(true)
     setSaveError(null)
     try {
-      const configJson = buildConfigJson(draft, extension?.configJson)
-      await courseboardApiText(extensionConfigPath, {
-        method: 'PATCH',
-        body: JSON.stringify({ scopeType: 'tenant', configJson }),
-      })
-      setExtension(current => current ? { ...current, configJson } : current)
-      setDraft(configDraftFromJson(configJson))
-      clearResourceCache('course:extension-status')
-      notifyTenantTimezoneChanged(draft.timezone)
+      // Two stores now: the categories are CourseBoard's own rows, the
+      // timezone still rides the extension config until Field grows a generic
+      // tenant attribute for it. Each is written only when it changed, so a
+      // category edit no longer round-trips the whole config object.
+      const nextTags = normalizedPlayerTagOptions(draft.playerTagOptions)
+      let storedTags = tags
+      if (JSON.stringify(nextTags) !== JSON.stringify(tags)) {
+        const stored = await courseboardApiJson<{ items: string[] }>(playerTagOptionsPath, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ items: nextTags }),
+        })
+        storedTags = stored.items
+        setTags(stored.items)
+        clearResourceCache('course:player-tag-options')
+      }
+      let configJson = extension?.configJson ?? null
+      if (draft.timezone.trim() !== persisted.timezone) {
+        configJson = buildConfigJson(draft, extension?.configJson)
+        await courseboardApiText(extensionConfigPath, {
+          method: 'PATCH',
+          body: JSON.stringify({ scopeType: 'tenant', configJson }),
+        })
+        const next = configJson
+        setExtension(current => current ? { ...current, configJson: next } : current)
+        clearResourceCache('course:extension-status')
+        notifyTenantTimezoneChanged(draft.timezone.trim())
+      }
+      setDraft(configDraftFromJson(configJson, storedTags))
       showToast({
         tone: 'success',
         title: t('settings:extension.saved.title'),
@@ -259,41 +257,6 @@ export function ExtensionConfigPanel() {
           ) : null}
 
           <FormGrid columns={2}>
-            <Field
-              label={t('settings:extension.currency')}
-              hint={t('settings:extension.currencyHint', {
-                updated: formatUpdatedAt(extension?.updatedAt, timezone),
-              })}
-              required
-            >
-              {knownCurrency ? (
-                <NativeSelect
-                  value={draft.defaultCurrency}
-                  onChange={event => {
-                    setDraft(current => ({ ...current, defaultCurrency: event.target.value }))
-                    setSaveError(null)
-                  }}
-                >
-                  {currencyOptions.map(code => (
-                    <option key={code} value={code}>{code}</option>
-                  ))}
-                </NativeSelect>
-              ) : (
-                <Input
-                  value={draft.defaultCurrency}
-                  onChange={event => {
-                    setDraft(current => ({
-                      ...current,
-                      defaultCurrency: event.target.value.toUpperCase(),
-                    }))
-                    setSaveError(null)
-                  }}
-                  placeholder="JPY"
-                  maxLength={3}
-                  required
-                />
-              )}
-            </Field>
             <Field
               label={t('settings:extension.timezone')}
               hint={t('settings:extension.timezoneHint')}

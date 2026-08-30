@@ -97,6 +97,8 @@ export const common: DeepPartial<typeof source> = {
     sectionUnavailableTitle: 'This section could not be displayed',
     sectionUnavailableDescription:
       'Check the input and try again. You can continue using the rest of the page.',
+    timezoneFallback:
+      'Could not load this club\'s time zone. Dates and times are shown in {{timezone}}.',
   },
   external: {
     invalidUrl: 'That link is not valid.',
@@ -131,6 +133,8 @@ export const common: DeepPartial<typeof source> = {
     thisMonth: 'This month',
     prevMonth: 'Previous month',
     nextMonth: 'Next month',
+    pickMonth: 'Pick a month',
+    yearMonth: '{{year}}-{{month}}',
     prevDay: 'Previous day',
     nextDay: 'Next day',
   },
@@ -146,5 +150,10 @@ export const common: DeepPartial<typeof source> = {
   },
   notification: {
     label: 'Operation results',
+  },
+  newVersion: {
+    message: 'A new version has been published. Reload to see the latest screen.',
+    reload: 'Reload',
+    dismiss: 'Close',
   },
 }
