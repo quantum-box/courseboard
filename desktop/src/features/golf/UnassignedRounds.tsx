@@ -1,4 +1,4 @@
-import { Button } from '@tachyon-sdk/native-ui'
+import { Badge, Button } from '@tachyon-sdk/native-ui'
 import { UserPlus } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -14,6 +14,8 @@ import {
 } from '../../components/Page'
 import { Sheet } from '../../components/Sheet'
 import { CaddieLink } from './CaddieLink'
+import { placementWarningStatus, type ShiftPlacementStatus } from './caddiePlacement'
+import { holdsTheRound, roundIsStillOn, unassignedCaddieRounds } from './caddieRoundCoverage'
 import { useResource } from '../../hooks/useResource'
 import { showToast } from '../../lib/toast'
 import {
@@ -52,39 +54,13 @@ type DayAssignment = {
   id?: string
   reservationId?: string | null
   status: string
+  canonicalStatus?: string | null
 }
 
 type Candidate = RecommendationForExplanation & {
   caddieProfileId: string
   displayName: string
-}
-
-/**
- * A round still has a caddie when the row is anything but cancelled: a
- * completed round was staffed, and re-offering it would double-book it.
- */
-function holdsTheRound(assignment: DayAssignment) {
-  return assignment.status !== 'cancelled'
-}
-
-export function unassignedCaddieRounds(
-  rows: TeeSheetRow[],
-  assignments: DayAssignment[],
-): TeeSheetRow[] {
-  const covered = new Set(
-    assignments
-      .filter(holdsTheRound)
-      .map(assignment => assignment.reservationId)
-      .filter((id): id is string => Boolean(id)),
-  )
-  return rows
-    .filter(roundIsStillOn)
-    .filter(row => row.playType === 'caddie' && !covered.has(row.id))
-}
-
-/** Whether a tee-sheet row is a group somebody is still going to play. */
-function roundIsStillOn(row: TeeSheetRow) {
-  return row.status !== 'cancelled' && row.status !== 'rejected'
+  shiftPlacementStatus?: ShiftPlacementStatus | null
 }
 
 /**
@@ -304,7 +280,7 @@ export function UnassignedRoundsPanel({
  * The candidates are the same ranking the board shows, asked for this tee time
  * so the day off and half-day requests filed on the shift board are honoured.
  */
-function NameCaddieSheet({
+export function NameCaddieSheet({
   round,
   onClose,
   onNamed,
@@ -338,6 +314,19 @@ function NameCaddieSheet({
 
   async function name(candidate: Candidate) {
     if (!round) return
+    const placement = placementWarningStatus(candidate.shiftPlacementStatus)
+    if (placement) {
+      const placementLabel = t(`caddies:shiftPlacement.${placement}`)
+      const message = [
+        t('caddies:assignment.shiftPlacementWarning.title'),
+        t('caddies:assignment.shiftPlacementWarning.body', {
+          name: candidate.displayName,
+          status: placementLabel,
+        }),
+        t('caddies:assignment.shiftPlacementWarning.confirm'),
+      ].join('\n\n')
+      if (!window.confirm(message)) return
+    }
     setSaving(candidate.caddieProfileId)
     try {
       await courseboardApiJson(`${COURSE_API}/caddie-assignments`, {
@@ -405,10 +394,20 @@ function NameCaddieSheet({
               {t('caddies:recommendations.rank', { n: String(index + 1) })}
             </div>
             <div className="min-w-0 flex-1">
-              <CaddieLink
-                caddieId={candidate.caddieProfileId}
-                displayName={candidate.displayName}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <CaddieLink
+                  caddieId={candidate.caddieProfileId}
+                  displayName={candidate.displayName}
+                />
+                {(() => {
+                  const placement = placementWarningStatus(candidate.shiftPlacementStatus)
+                  return placement ? (
+                    <Badge variant="warning">
+                      {t(`caddies:shiftPlacement.${placement}`)}
+                    </Badge>
+                  ) : null
+                })()}
+              </div>
               <RecommendationExplanation item={candidate} />
             </div>
             <Button

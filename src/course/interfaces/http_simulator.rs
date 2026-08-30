@@ -14,8 +14,8 @@ use super::http::{commercial_gateway, credentials, operator_id, pricing_settings
 
 use super::openapi::ErrorBody;
 use crate::course::domain::{
-    FeeQuote, FeeQuoteRequest, GolfPricingSettings, PlayerTaxLine, RangeRow, RangeSimulation,
-    RangeSimulationRequest,
+    CourseError, FeeQuote, FeeQuoteRequest, GolfPricingSettings, MembershipDiscountsGateway,
+    MembershipPlanId, PlayerTaxLine, RangeRow, RangeSimulation, RangeSimulationRequest,
 };
 use crate::course::infrastructure::CourseboardTaxGateway;
 use crate::course::usecase::{
@@ -133,12 +133,17 @@ fn tax_gateway(state: &AppState) -> Arc<CourseboardTaxGateway> {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CalculateFeeRequest {
+    /// The posted green fee, before any membership comes off it.
     pub green_fee: f64,
     pub num_holes: i32,
     #[serde(default)]
     pub cart_fee: Option<f64>,
     #[serde(default)]
     pub caddy_fee: Option<f64>,
+    /// Price this round for somebody on this membership. Absent quotes a
+    /// visitor, which is what the counter asks for most of the time.
+    #[serde(default)]
+    pub membership_plan_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
@@ -159,6 +164,13 @@ pub struct CalculateFeeResponse {
     pub tax_amount: i64,
     pub total: i64,
     pub breakdown: Vec<PlayerBreakdownDto>,
+    /// The green fee actually priced. Differs from the posted one when a
+    /// membership took something off — shown rather than implied, because the
+    /// tax bracket follows this number and the operator has to be able to see
+    /// why the total moved.
+    pub green_fee: i64,
+    /// What the membership took off, in yen. Zero for a visitor.
+    pub member_discount_amount: i64,
 }
 
 impl From<&PlayerTaxLine> for PlayerBreakdownDto {
@@ -184,6 +196,10 @@ impl From<FeeQuote> for CalculateFeeResponse {
                 .iter()
                 .map(PlayerBreakdownDto::from)
                 .collect(),
+            // Filled in by the handler, which is the only place that knows
+            // what was posted before the membership came off.
+            green_fee: 0,
+            member_discount_amount: 0,
         }
     }
 }
@@ -209,12 +225,33 @@ pub async fn calculate_fee(
     let tenant_id = operator_id(&headers)?.to_string();
     let settings = pricing_settings(&state, &headers).await?;
     let use_case = QuoteGolfFeeUseCase::new(tax_gateway(&state));
+
+    // The membership comes off before the round is priced, not after: the golf
+    // course tax bracket is decided by the green fee, so a member paying less
+    // can fall into a lower bracket. Discounting the total instead would quote
+    // the visitor's tax to a member.
+    let posted_green_fee = rounded_fee(body.green_fee)?;
+    let plan_id = body
+        .membership_plan_id
+        .as_deref()
+        .map(MembershipPlanId::new);
+    let green_fee = if plan_id.is_some() {
+        let discounts = state
+            .membership_discounts
+            .get_membership_discounts(&tenant_id)
+            .await
+            .map_err(AppError::from)?;
+        discounts.green_fee_for(posted_green_fee, plan_id.as_ref())
+    } else {
+        posted_green_fee
+    };
+
     let quote = use_case
         .execute(
             &tenant_id,
             &settings,
             FeeQuoteRequest {
-                green_fee: body.green_fee,
+                green_fee: green_fee as f64,
                 num_holes: body.num_holes,
                 cart_fee: body.cart_fee,
                 caddy_fee: body.caddy_fee,
@@ -222,7 +259,21 @@ pub async fn calculate_fee(
         )
         .await
         .map_err(AppError::from)?;
-    Ok(Json(CalculateFeeResponse::from(quote)))
+    let mut response = CalculateFeeResponse::from(quote);
+    response.green_fee = green_fee;
+    response.member_discount_amount = posted_green_fee - green_fee;
+    Ok(Json(response))
+}
+
+/// The posted green fee as whole yen, refused here rather than deep in the
+/// quote so the discount is never applied to a nonsense number.
+fn rounded_fee(value: f64) -> Result<i64, AppError> {
+    if !value.is_finite() || !(0.0..=100_000_000.0).contains(&value) {
+        return Err(AppError::from(CourseError::BadRequest(
+            "greenFee must be greater than 0 and no more than 100000000",
+        )));
+    }
+    Ok(value.round() as i64)
 }
 
 // ─── Range simulation ─────────────────────────────────────────────────────────

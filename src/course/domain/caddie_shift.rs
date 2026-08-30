@@ -899,6 +899,50 @@ impl ShiftEdit {
     }
 }
 
+/// Which Field shift stands behind one confirmed day.
+///
+/// A caddie being at work is a fact Field's HRM holds too, and the id it gave
+/// back is how a later edit reaches that same shift rather than stacking a
+/// second one on the day (ADR-0013, PLT-3835). It is bookkeeping about the
+/// write-through, not part of what the desk decided, so it travels beside
+/// [`CaddieShift`] instead of inside it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldShiftLink {
+    pub caddie_id: CaddieId,
+    pub date: NaiveDate,
+    /// `None` withdraws the link: Field holds nothing for this day any more,
+    /// because the day was turned off or the caddie has no staff record to
+    /// file it under.
+    pub field_shift_id: Option<String>,
+}
+
+impl FieldShiftLink {
+    pub fn new(
+        caddie_id: impl Into<CaddieId>,
+        date: NaiveDate,
+        field_shift_id: Option<String>,
+    ) -> Self {
+        Self {
+            caddie_id: caddie_id.into(),
+            date,
+            field_shift_id: trimmed(field_shift_id),
+        }
+    }
+}
+
+/// A confirmed day Field has not been told about since it last changed.
+///
+/// Carries the shift itself because the hours to file are derived from it, and
+/// the link because a day Field already holds is moved rather than filed
+/// twice. Read in batches: one CourseBoard operation — confirming a month —
+/// leaves the whole roster behind at once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnsyncedShift {
+    pub shift: CaddieShift,
+    /// What a previous write filed for this caddie and day, if any.
+    pub field_shift_id: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

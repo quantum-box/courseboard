@@ -7,6 +7,11 @@ export const schedule = {
     through: 'いま予約を受けられるのは {{date}} までです。',
     change: '何日先まで受けるかを変える',
   },
+  inventoryGap: {
+    title: '予約を受ける設定とスタート枠が一致していません',
+    missing: '{{date}}まで受ける設定ですが、スタート枠はまだ作られていません。',
+    behind: '{{date}}まで受ける設定ですが、スタート枠は{{generatedThrough}}までしか作られていません。',
+  },
   week: {
     badge: '毎週の決めごと',
     title: '受付する時間',

@@ -78,6 +78,17 @@ export const caddies: DeepPartial<typeof source> = {
     clockedOut: 'もう退勤しました',
     notLinked: 'スタッフとつながっていません',
   },
+  shiftPlacement: {
+    unconfirmed: 'その日のシフトがまだ決まっていません',
+    unplaced: 'コースがまだ決まっていません',
+  },
+  assignment: {
+    shiftPlacementWarning: {
+      title: 'シフトの状態を確かめてください',
+      body: '{{name}}は{{status}}です。配置はできますが、供給の異常として表示されます。',
+      confirm: 'このキャディを配置しますか？',
+    },
+  },
   rounds: '{{n}}ラウンド',
   operationDate: '見たい日',
   dispatch: {
@@ -130,6 +141,12 @@ export const caddies: DeepPartial<typeof source> = {
       title: '休みの希望を出す締め切り（{{deadline}}）を過ぎています',
       body: '{{names}} は、この月の休みの希望がまだ届いていません。決める前に確かめてください。',
       confirmExecute: '{{names}} の休みの希望がまだ届いていません。このまま決めますか？',
+    },
+    shiftPlacementWarning: {
+      title: 'シフトの状態を確かめてください',
+      body: 'その日のシフトがまだ決まっていない人や、コースがまだ決まっていない人を含む配置があります。配置はできますが、供給の異常として表示されます。',
+      confirm: 'この内容で自動配置を実行しますか？',
+      item: '{{name}}：{{status}}',
     },
   },
   recommendations: {
@@ -243,6 +260,15 @@ export const caddies: DeepPartial<typeof source> = {
       allLinks: 'すべて',
       linked: '結びついている',
       unlinked: 'まだ結びついていない',
+      broken: '結びつきが切れている',
+    },
+    brokenLinkWarning: {
+      title: '{{n}}人の結びつき先が、社員名簿に いません',
+      description:
+        '結びつけた社員が いなくなると、キャディ側の 結びつきだけが のこります。'
+        + '出勤や 給料の 集計は その社員を さがせないので、この人たちは 集計から もれます。'
+        + '名前を ひらいて「社員を 選びなおす」で 直して ください。',
+      showOnly: '結びつきが 切れている人だけ 見る',
     },
     unlinkedWarning: {
       title: '{{n}}人が、社員情報と結びついていません',
@@ -256,6 +282,7 @@ export const caddies: DeepPartial<typeof source> = {
       descriptionNoMatch: 'さがす言葉や、しぼり込みを変えてみてください。',
     },
     linked: '社員情報と結びついています',
+    linkBroken: '社員名簿に 見つかりません',
     notLinked: 'まだ結びついていません',
     backToList: '名簿に戻る',
     table: {
@@ -347,6 +374,11 @@ export const caddies: DeepPartial<typeof source> = {
     },
   },
   staff: {
+    linkBroken: {
+      title: 'つないでいた社員が見つかりません',
+      description: 'つないでいた社員が名簿から消えています。このままだと出勤をつけられず、給与にも入りません。いまの社員を選び直すか、新しく登録してつないでください。',
+    },
+    relinkAction: '社員を選びなおす',
     title: '社員情報と出勤',
     description: '勤怠に使う社員情報との結びつけと、今日の出勤の記録をまとめます。',
     attendanceUnknown: '今日の記録がありません',
@@ -518,6 +550,65 @@ export const caddies: DeepPartial<typeof source> = {
     title: '取り消された予約に、担当が{{n}}件のこっています',
     body: 'この組は、もう予約の表にありません。担当を取り消すまで、そのキャディはこの日の担当の数に入り、給料の集計にも入ります。',
     badge: 'この予約は取り消されています',
+  },
+  reassign: {
+    action: 'かえる',
+    title: '担当をかえる',
+    description: '{{name}} · {{time}} の組',
+    roundLabel: '組',
+    caddieLabel: '担当のキャディ',
+    currentRound: 'いまの組',
+    heldBy: '{{name}} が担当',
+    keepCaddie: '{{name}}（いまの担当）',
+    takenNotice: 'その組にはべつの人がいます。さきにその人をはずしてください。',
+    loading: '候補をよみこんでいます',
+    save: 'かえる',
+    done: '{{time}} の組を {{name}} にかえました',
+    failed: 'かえられませんでした',
+    noRounds: {
+      title: 'うつせる組がありません',
+      description: 'この日のキャディ付きの組がよみこめていません。予約をたしかめてください。',
+    },
+  },
+  duties: {
+    title: 'べつの仕事',
+    description: 'ラウンドがない時間に、コースの手入れなど、べつの仕事をたのみます。その時間はラウンドに入りません。午前だけたのんで、午後はラウンド、という入れ方もできます。',
+    loading: 'よみこんでいます',
+    loadingOptions: '仕事のしゅるいをよみこんでいます',
+    onDutyTitle: 'べつの仕事をする人',
+    caddieLabel: 'キャディ',
+    caddiePlaceholder: 'えらんでください',
+    freeCount: '手のあいている時間がある人 {{n}}人',
+    hours: '時間',
+    hoursHint: '「1日じゅう」をはずすと、開始と終了をえらべます。',
+    allDay: '1日じゅう',
+    startTime: 'はじまり',
+    endTime: 'おわり',
+    morningFree: '午前があいている',
+    afternoonFree: '午後があいている',
+    orderNotice: 'おわりがはじまりより前になっています。',
+    clashNotice: 'その時間にはべつの仕事かラウンドが入っています。時間をずらすか、さきに外してください。',
+    noneFree: 'この日はたらくキャディは、みんな予定が入っています。',
+    assign: 'べつの仕事をたのむ',
+    clear: 'やめる',
+    clearing: 'なおしています',
+    cleared: '{{name}} をラウンドにもどしました',
+    assigned: '{{name}} に{{duty}}をたのみました',
+    failed: 'かえられませんでした',
+    sheetTitle: 'べつの仕事をたのむ',
+    sheetDescription: '{{date}}',
+    dutyLabel: '仕事のしゅるい',
+    dutyPlaceholder: 'えらんでください',
+    note: 'メモ',
+    noteHint: 'ばしょや時間など、つたえることがあれば書きます。',
+    onDutyEmpty: {
+      title: 'べつの仕事の予定はありません',
+      description: 'この日、べつの仕事をする人はいません。',
+    },
+    noOptions: {
+      title: '仕事のしゅるいがありません',
+      description: 'せっていの「キャディのべつの仕事」で、しゅるいをふやしてください。',
+    },
   },
   unassigned: {
     courseFilter: 'コースをえらぶ',

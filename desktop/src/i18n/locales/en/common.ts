@@ -133,6 +133,8 @@ export const common: DeepPartial<typeof source> = {
     thisMonth: 'This month',
     prevMonth: 'Previous month',
     nextMonth: 'Next month',
+    pickMonth: 'Pick a month',
+    yearMonth: '{{year}}-{{month}}',
     prevDay: 'Previous day',
     nextDay: 'Next day',
   },
@@ -148,5 +150,10 @@ export const common: DeepPartial<typeof source> = {
   },
   notification: {
     label: 'Operation results',
+  },
+  newVersion: {
+    message: 'A new version has been published. Reload to see the latest screen.',
+    reload: 'Reload',
+    dismiss: 'Close',
   },
 }

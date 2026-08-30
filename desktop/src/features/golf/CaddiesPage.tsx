@@ -14,8 +14,6 @@ import {
   ArrowLeft,
   CalendarDays,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   ClipboardCheck,
   Clock,
   Download,
@@ -24,6 +22,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Shuffle,
   Sparkles,
   Star,
   UserPlus,
@@ -82,7 +81,10 @@ import { normalizeIsoDate } from '../../lib/clock'
 import { navigate, useNavigationGuard, useRouteParamState } from '../../lib/router'
 import { caddieLoadPlan } from './caddieLoadPlan'
 import type { CourseCaddieSupply, DayCaddieSupply } from './caddieCourseSupply'
+import { placementWarningStatus, type ShiftPlacementStatus } from './caddiePlacement'
 import { Sheet } from '../../components/Sheet'
+import { CaddieDutiesPanel } from './CaddieDutyBoard'
+import { ReassignRoundSheet } from './ReassignRoundSheet'
 import { CaddieLink } from './CaddieLink'
 import {
   employmentLabel,
@@ -102,6 +104,7 @@ import {
   caddieCreatePayload,
   exactStaffMatch,
   resolveStaffId,
+  staffLinkBroken,
   staffSuggestions,
 } from './caddieRegistration'
 import {
@@ -178,6 +181,7 @@ type CaddieAssignment = {
   roundReference?: string | null
   scheduledAt: string
   status: string
+  canonicalStatus?: string | null
   assignmentRole: string
   feeAmount: number
   feeCurrency: string
@@ -191,6 +195,7 @@ type CaddieRecommendation = RecommendationForExplanation & {
   caddieProfileId: string
   displayName: string
   recommendedRole: string
+  shiftPlacementStatus?: ShiftPlacementStatus | null
 }
 
 type AttendanceSnapshot = {
@@ -262,6 +267,7 @@ type AutoAssignPlanItem = {
   caddieProfileId: string
   caddieDisplayName: string
   rationale: string[]
+  shiftPlacementStatus?: ShiftPlacementStatus | null
 }
 
 type DeadlineWarning = {
@@ -356,12 +362,6 @@ function punchClock(staffId: string, direction: 'in' | 'out', businessDate: stri
     `/v1/erp/staff/${encodeURIComponent(staffId)}/clock-${direction}`,
     request('POST', clockRequestBody(direction, businessDate)),
   )
-}
-
-function previousYearMonth(timezone: string) {
-  const [year, month] = currentYearMonth(timezone).split('-').map(Number)
-  const previous = new Date(Date.UTC(year!, month! - 2, 1))
-  return previous.toISOString().slice(0, 7)
 }
 
 function formatMoney(amount: number, currency = 'JPY') {
@@ -640,7 +640,12 @@ export function CaddiesPage({
   )
   const staffResource = useMemo<ResourceValue<ListResponse<StaffMember>>>(
     () => ({
-      data: profilesResource.data ? { items: profilesResource.data.staff ?? [] } : null,
+      // `null` when the roster came back without a staff index at all, which
+      // is not the same as coming back with nobody in it. Consumers that only
+      // list staff read both as an empty list; the roster's broken-link check
+      // needs the difference, or a missing index would mark every caddie as
+      // pointing at somebody who is gone.
+      data: profilesResource.data?.staff ? { items: profilesResource.data.staff } : null,
       error: profilesResource.error,
       loading: profilesResource.loading,
       refresh: profilesResource.refresh,
@@ -934,6 +939,15 @@ function DispatchView({
         setFlash={setFlash}
       />
 
+      {/* Read after the groups still missing somebody and the automatic run:
+          who is left over is only known once the day has been staffed. */}
+      <CaddieDutiesPanel
+        date={date}
+        profiles={profiles}
+        assignments={dayAssignments}
+        onChanged={onChanged}
+      />
+
       <section className="app-section space-y-3">
         <h2 className="section-title">{t('caddies:dispatch.boardTitle')}</h2>
         {orphaned.length > 0 ? (
@@ -950,6 +964,8 @@ function DispatchView({
             assignments={dayAssignments}
             profiles={profiles}
             orphanedIds={orphanedIds}
+            date={date}
+            rounds={teeSheet.data?.items ?? []}
             onChanged={onChanged}
             setFlash={setFlash}
           />
@@ -1352,7 +1368,7 @@ function ReinforcementSheet({
   )
 }
 
-function AutoAssignPanel({
+export function AutoAssignPanel({
   date,
   attendance,
   onChanged,
@@ -1377,6 +1393,10 @@ function AutoAssignPanel({
   // Surfaced before the plan is committed, not used to filter it: the morning
   // plan is drawn up before anyone has clocked in.
   const offDuty = offDutyCandidates(plan?.assigned ?? [], attendance)
+  const placementWarnings = plan?.assigned.flatMap(item => {
+    const status = placementWarningStatus(item.shiftPlacementStatus)
+    return status ? [{ item, status }] : []
+  }) ?? []
 
   async function run(dryRun: boolean) {
     setBusy(dryRun ? 'preview' : 'execute')
@@ -1428,14 +1448,29 @@ function AutoAssignPanel({
           className="flex-1"
           disabled={busy !== null || !plan || plan.assigned.length === 0}
           onClick={() => {
-            if (
-              plan?.deadlineWarning
-              && !window.confirm(
+            const confirmations: string[] = []
+            if (plan?.deadlineWarning) {
+              confirmations.push(
                 t('caddies:autoAssign.deadlineWarning.confirmExecute', {
                   names: plan.deadlineWarning.unsubmittedCaddieNames.join('、'),
                 }),
               )
-            ) {
+            }
+            if (placementWarnings.length > 0) {
+              const placementItems = placementWarnings
+                .map(({ item, status }) => t('caddies:autoAssign.shiftPlacementWarning.item', {
+                  name: item.caddieDisplayName,
+                  status: t(`caddies:shiftPlacement.${status}`),
+                }))
+                .join('\n')
+              confirmations.push([
+                t('caddies:autoAssign.shiftPlacementWarning.title'),
+                t('caddies:autoAssign.shiftPlacementWarning.body'),
+                placementItems,
+                t('caddies:autoAssign.shiftPlacementWarning.confirm'),
+              ].join('\n\n'))
+            }
+            if (confirmations.length > 0 && !window.confirm(confirmations.join('\n\n'))) {
               return
             }
             void run(false)
@@ -1470,6 +1505,24 @@ function AutoAssignPanel({
               </p>
             </Notice>
           ) : null}
+          {placementWarnings.length > 0 ? (
+            <Notice
+              tone="warning"
+              title={t('caddies:autoAssign.shiftPlacementWarning.title')}
+            >
+              <p>{t('caddies:autoAssign.shiftPlacementWarning.body')}</p>
+              <ul className="mt-1 list-inside list-disc space-y-1">
+                {placementWarnings.map(({ item, status }) => (
+                  <li key={`${item.reservationId}-${item.caddieProfileId}`}>
+                    {t('caddies:autoAssign.shiftPlacementWarning.item', {
+                      name: item.caddieDisplayName,
+                      status: t(`caddies:shiftPlacement.${status}`),
+                    })}
+                  </li>
+                ))}
+              </ul>
+            </Notice>
+          ) : null}
           {plan.assigned.length === 0 ? (
             <EmptyState
               title={t('caddies:autoAssign.empty.title')}
@@ -1486,7 +1539,17 @@ function AutoAssignPanel({
                         {formatDateTime(item.scheduledAt, timezone)}
                       </p>
                     </div>
-                    <Badge variant="accent">{t('caddies:autoAssign.candidate')}</Badge>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge variant="accent">{t('caddies:autoAssign.candidate')}</Badge>
+                      {(() => {
+                        const placement = placementWarningStatus(item.shiftPlacementStatus)
+                        return placement ? (
+                          <Badge variant="warning">
+                            {t(`caddies:shiftPlacement.${placement}`)}
+                          </Badge>
+                        ) : null
+                      })()}
+                    </div>
                   </div>
                   <RationaleText rationale={item.rationale} />
                 </div>
@@ -1563,9 +1626,19 @@ function RecommendationsPanel({
                   const status = item.attendanceStatus
                     ?? attendance.get(item.caddieProfileId) as RecommendationAttendanceStatus | undefined
                   const reason = offDutyReason(status)
-                  return reason ? (
-                    <Badge variant="warning">{t(`caddies:offDuty.${reason}`)}</Badge>
-                  ) : null
+                  const placement = placementWarningStatus(item.shiftPlacementStatus)
+                  return (
+                    <>
+                      {reason ? (
+                        <Badge variant="warning">{t(`caddies:offDuty.${reason}`)}</Badge>
+                      ) : null}
+                      {placement ? (
+                        <Badge variant="warning">
+                          {t(`caddies:shiftPlacement.${placement}`)}
+                        </Badge>
+                      ) : null}
+                    </>
+                  )
                 })()}
               </div>
               <RecommendationExplanation
@@ -1758,6 +1831,8 @@ function AssignmentsTable({
   assignments,
   profiles,
   orphanedIds = EMPTY_ORPHANS,
+  date,
+  rounds,
   onChanged,
   setFlash,
 }: {
@@ -1769,12 +1844,20 @@ function AssignmentsTable({
    * fetched, so it says nothing rather than guessing.
    */
   orphanedIds?: Set<string>
+  /**
+   * The day board's own date and tee sheet. A caddie's history spans months of
+   * tee sheets nobody fetched, so moving a round is offered only where the day
+   * is actually on the screen.
+   */
+  date?: string
+  rounds?: TeeSheetRow[]
   onChanged: () => void
   setFlash: (flash: Flash) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
   const timezone = useTenantTimezone()
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [moving, setMoving] = useState<CaddieAssignment | null>(null)
   const profileNames = useMemo(
     () => new Map(profiles.map(profile => [profile.id, profile.displayName])),
     [profiles],
@@ -1887,9 +1970,22 @@ function AssignmentsTable({
             <XCircle /> {t('caddies:assignments.cancel')}
           </Button>
         )
+        const move = date && rounds && !orphanedIds.has(row.id) ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="min-h-9"
+            disabled={busyId === row.id}
+            onClick={() => setMoving(row)}
+          >
+            <Shuffle /> {t('caddies:reassign.action')}
+          </Button>
+        ) : null
         if (row.status === 'assigned') {
           return (
             <div className="flex justify-end gap-2">
+              {move}
               <Button
                 type="button"
                 size="sm"
@@ -1915,20 +2011,36 @@ function AssignmentsTable({
   ]
 
   return (
-    <DataTable
-      rows={sorted}
-      columns={columns}
-      rowKey={row => row.id}
-      // A club-sized day is fifty-odd rounds, and the whole lot laid out below
-      // the work pushes everything else off the screen.
-      pageSize={20}
-      empty={(
-        <EmptyState
-          title={t('caddies:assignments.empty.title')}
-          description={t('caddies:assignments.empty.description')}
+    <>
+      <DataTable
+        rows={sorted}
+        columns={columns}
+        rowKey={row => row.id}
+        // A club-sized day is fifty-odd rounds, and the whole lot laid out
+        // below the work pushes everything else off the screen.
+        pageSize={20}
+        empty={(
+          <EmptyState
+            title={t('caddies:assignments.empty.title')}
+            description={t('caddies:assignments.empty.description')}
+          />
+        )}
+      />
+      {date && rounds ? (
+        <ReassignRoundSheet
+          assignment={moving}
+          date={date}
+          rounds={rounds}
+          assignments={assignments}
+          caddieNames={profileNames}
+          onClose={() => setMoving(null)}
+          onMoveDone={() => {
+            setMoving(null)
+            onChanged()
+          }}
         />
-      )}
-    />
+      ) : null}
+    </>
   )
 }
 
@@ -1966,6 +2078,12 @@ function ProfilesView({
   const [skill, setSkill] = useState('all')
   const [link, setLink] = useState('all')
   const profiles = profilesResource.data?.items ?? []
+  // Only a staff list that arrived can tell us a link points at nobody. While
+  // the lookup is out or failed there is no list to check against, and an
+  // empty one would read as "Field has no staff" — every caddie broken at once.
+  const staffIds = staffResource.data
+    ? new Set(staffResource.data.items.map(member => member.id))
+    : null
   const normalizedQuery = query.trim().toLocaleLowerCase('ja')
   const filtered = profiles.filter(profile => {
     const staffId = resolveStaffId(profile)
@@ -1975,12 +2093,19 @@ function ProfilesView({
       || staffId?.toLocaleLowerCase('ja').includes(normalizedQuery)
     const statusMatches = status === 'all' || employmentStatusCode(profile.employmentStatus) === status
     const skillMatches = skill === 'all' || profile.skillLevel === skill
+    const broken = staffLinkBroken(profile, staffIds)
     const linkMatches = link === 'all'
-      || (link === 'linked' ? Boolean(staffId) : !staffId)
+      || (link === 'broken'
+        ? broken
+        : link === 'linked' ? Boolean(staffId) && !broken : !staffId)
     return queryMatches && statusMatches && skillMatches && linkMatches
   })
   const selected = profiles.find(profile => profile.id === selectedProfileId) ?? null
   const unlinked = profiles.filter(profile => !resolveStaffId(profile)).length
+  // Counted apart from `unlinked`: that one looks for a missing id, and these
+  // caddies have one. Folding them together would hide the difference between
+  // "nobody was ever behind this" and "the person behind it is gone".
+  const brokenLinks = profiles.filter(profile => staffLinkBroken(profile, staffIds)).length
 
   // The roster is a list *or* a detail, never both: the old split view squeezed
   // the detail into a third of the width, which is what made it unreadable.
@@ -2063,13 +2188,21 @@ function ProfilesView({
       key: 'link',
       header: t('caddies:roster.table.link'),
       mobileLabel: t('caddies:roster.table.link'),
-      cell: profile => (
-        <span className={resolveStaffId(profile) ? 'text-success' : 'text-warning'}>
-          {resolveStaffId(profile)
-            ? t('caddies:roster.linked')
-            : t('caddies:roster.notLinked')}
-        </span>
-      ),
+      cell: profile => {
+        // Three states, not two. A caddie holding an id Field cannot resolve
+        // is not linked, and saying so is the whole point: it reads as healthy
+        // otherwise, and the desk has no way to spot it.
+        if (staffLinkBroken(profile, staffIds)) {
+          return <span className="text-danger">{t('caddies:roster.linkBroken')}</span>
+        }
+        return (
+          <span className={resolveStaffId(profile) ? 'text-success' : 'text-warning'}>
+            {resolveStaffId(profile)
+              ? t('caddies:roster.linked')
+              : t('caddies:roster.notLinked')}
+          </span>
+        )
+      },
     },
   ]
 
@@ -2077,6 +2210,22 @@ function ProfilesView({
     <div className="space-y-4">
       {staffResource.error ? (
         <ResourceError error={staffResource.error} onRetry={staffResource.refresh} />
+      ) : null}
+      {/* Ahead of the unlinked notice: a caddie nobody was ever behind is a
+          setup step somebody skipped, but a caddie whose staff record has gone
+          is a link that used to work and silently stopped. */}
+      {brokenLinks > 0 ? (
+        <Notice
+          tone="danger"
+          title={t('caddies:roster.brokenLinkWarning.title', { n: String(brokenLinks) })}
+          actions={(
+            <Button type="button" size="sm" variant="secondary" onClick={() => setLink('broken')}>
+              {t('caddies:roster.brokenLinkWarning.showOnly')}
+            </Button>
+          )}
+        >
+          {t('caddies:roster.brokenLinkWarning.description')}
+        </Notice>
       ) : null}
       {unlinked > 0 ? (
         <Notice
@@ -2140,6 +2289,7 @@ function ProfilesView({
             <option value="all">{t('caddies:roster.filter.allLinks')}</option>
             <option value="linked">{t('caddies:roster.filter.linked')}</option>
             <option value="unlinked">{t('caddies:roster.filter.unlinked')}</option>
+            <option value="broken">{t('caddies:roster.filter.broken')}</option>
           </NativeSelect>
         </div>
 
@@ -2760,6 +2910,11 @@ function StaffManagementPanel({
   const [busy, setBusy] = useState(false)
   const staffId = resolveStaffId(profile)
   const linkedStaff = staff.find(item => item.id === staffId)
+  // The roster calls this out and this screen used to not: an id Field cannot
+  // resolve still reads as linked here, and the name fell back to the caddie's
+  // own, so the panel looked healthy. Clocking in and payroll both fail on it,
+  // which is why it gets the same treatment as never having been linked.
+  const linkBroken = staffLinkBroken(profile, staffError ? null : new Set(staff.map(item => item.id)))
   // Clocking in is closed while the caddie is on leave or suspended; clocking
   // out stays open so an ongoing shift can always be closed.
   const clockInBlockedReason = clockInBlocked(profile)
@@ -2799,7 +2954,19 @@ function StaffManagementPanel({
       actions={<Link2 className="size-5 text-primary" aria-hidden="true" />}
     >
       {staffError ? <ResourceError error={staffError} /> : null}
-      {staffId ? (
+      {linkBroken ? (
+        <Notice
+          tone="danger"
+          title={t('caddies:staff.linkBroken.title')}
+          actions={(
+            <Button type="button" variant="primary" size="sm" className="min-h-9" onClick={() => setLinkOpen(true)}>
+              <Link2 /> {t('caddies:staff.relinkAction')}
+            </Button>
+          )}
+        >
+          {t('caddies:staff.linkBroken.description')}
+        </Notice>
+      ) : staffId ? (
         <div className="space-y-4">
           <div className="rounded-lg border border-border bg-background p-3">
             <div className="flex flex-wrap items-start justify-between gap-2">
@@ -3134,11 +3301,6 @@ function monthBounds(yearMonth: string) {
   }
 }
 
-function shiftMonth(yearMonth: string, amount: number) {
-  const [year, month] = yearMonth.split('-').map(Number)
-  const shifted = new Date(year, month - 1 + amount, 1)
-  return `${shifted.getFullYear()}-${String(shifted.getMonth() + 1).padStart(2, '0')}`
-}
 
 function calendarCells(year: number, month: number) {
   const start = new Date(year, month - 1, 1).getDay()
@@ -3233,11 +3395,6 @@ export function AvailabilityCalendar({
     setSelection(emptyCalendarDateSelection())
     setEditorOpen(false)
   }, [profile.id, yearMonth])
-
-  function changeMonth(amount: number) {
-    if (!confirmDiscard()) return
-    setYearMonth(value => shiftMonth(value ?? tenantToday!.slice(0, 7), amount))
-  }
 
   function loadEditorValues(date: string | null) {
     const record = date ? records.get(date) : undefined
@@ -3367,16 +3524,21 @@ export function AvailabilityCalendar({
       title={t('caddies:calendar.title')}
       description={t('caddies:calendar.description')}
       actions={(
-        <div className="flex items-center gap-1 rounded-md border border-border bg-background p-1">
-          <Button type="button" variant="ghost" size="icon" className="min-h-9 min-w-9" aria-label={t('caddies:calendar.prevMonth')} onClick={() => changeMonth(-1)}><ChevronLeft /></Button>
-          <span className="min-w-24 text-center text-sm font-medium">
-            {t('caddies:calendar.monthLabel', {
-              year: String(bounds.year),
-              month: String(bounds.month),
-            })}
-          </span>
-          <Button type="button" variant="ghost" size="icon" className="min-h-9 min-w-9" aria-label={t('caddies:calendar.nextMonth')} onClick={() => changeMonth(1)}><ChevronRight /></Button>
-        </div>
+        // The same control the other four month screens use. It grew the
+        // dropdown this one was missing, and they grew the arrows this one
+        // already had.
+        <YearMonthPicker
+          hideLabel
+          label={t('caddies:calendar.title')}
+          value={yearMonth ?? ''}
+          error={null}
+          // The month change still has to clear unsaved edits first; the old
+          // arrows did that and the picker must not lose it.
+          onChange={candidate => {
+            if (!confirmDiscard()) return
+            setYearMonth(candidate)
+          }}
+        />
       )}
     >
       {loading ? <LoadingState label={t('caddies:calendar.loading')} /> : null}
@@ -3601,7 +3763,14 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
     value: yearMonth,
     error: yearMonthError,
     setCandidate: setYearMonth,
-  } = useRouteYearMonthValue('yearMonth', previousYearMonth(timezone))
+    // The month the screen opens on is the one it is standing in. It used to
+    // be the month before, on the reasoning that payroll closes a finished
+    // month — but closing is a deliberate act and the operator changes the
+    // month to do it, whereas opening the screen on the 27th and being shown
+    // the 1st to the 31st of *last* month reads as stale data. Nothing was
+    // written down for the old default, so it was a default rather than a
+    // decision.
+  } = useRouteYearMonthValue('yearMonth', currentYearMonth(timezone))
   const [downloading, setDownloading] = useState(false)
   const [editingFees, setEditingFees] = useState(false)
   const feesResource = useResource(

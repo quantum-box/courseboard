@@ -8,6 +8,83 @@ export const settings: DeepPartial<typeof source> = {
     title: 'Initial setup',
     description: 'Set these up once; you will rarely open them day to day.',
   },
+  playWindows: {
+    title: 'Membership playing days',
+    description:
+      'Which days and hours each membership may be played. For plans like a weekday-only membership.',
+    hint: 'A booking outside the window still saves. The desk is warned afterwards, never stopped.',
+    noPlans: 'No memberships on sale. Create one first.',
+    saved: 'Playing days saved',
+    failed: 'Could not save the playing days',
+    field: {
+      from: 'From',
+      to: 'To',
+    },
+    day: {
+      mon: 'Mon',
+      tue: 'Tue',
+      wed: 'Wed',
+      thu: 'Thu',
+      fri: 'Fri',
+      sat: 'Sat',
+      sun: 'Sun',
+    },
+  },
+  discounts: {
+    title: 'Member discounts',
+    description:
+      'What each membership takes off the green fee. Left at zero, a plan discounts nothing.',
+    hint: 'Taken off before tax. A lower green fee can fall into a lower golf course tax bracket.',
+    noPlans: 'No memberships on sale. Create one first.',
+    saved: 'Member discounts saved',
+    failed: 'Could not save the member discounts',
+    field: {
+      kind: 'Type',
+      value: 'Amount',
+    },
+    kind: {
+      yen: 'Yen off',
+      percent: 'Percent off',
+    },
+  },
+  caddieDuties: {
+    title: 'Caddie duties',
+    description:
+      'The jobs a caddie is put on when they have no round. The dispatch screen picks from this list. Renaming one leaves the days already filed under the old name alone.',
+    field: {
+      label: 'Job',
+    },
+    placeholder: 'e.g. Course upkeep',
+    add: 'Add a job',
+    remove: 'Remove this job',
+    empty: 'No jobs yet. Add one and the dispatch screen can put a caddie on it.',
+    duplicate: 'The same job appears twice. Remove one of them.',
+    tooLong: 'A job name is at most {{max}} characters.',
+    tooMany: 'At most {{max}} jobs.',
+    saved: 'Jobs saved',
+    failed: 'Could not save the jobs',
+  },
+  grades: {
+    title: 'Customer grades',
+    description:
+      'How regulars are ranked, from how often they come and what they spend. Separate from membership \u2014 visitors get a grade too.',
+    hint: 'Read top down; the first rung whose every threshold is met is the one awarded. A blank box asks nothing.',
+    duplicate: 'Two rungs share a name. Give each rung its own.',
+    empty: 'No rungs yet. Add one and a grade appears on the customer page.',
+    add: 'Add a rung',
+    remove: 'Remove this rung',
+    saved: 'Customer grades saved',
+    failed: 'Could not save the customer grades',
+    field: {
+      name: 'Name',
+      minVisits: 'Rounds played (min)',
+      minSpendPerPlayer: 'Spend per player (min)',
+      minTotalAmount: 'Lifetime takings (min)',
+    },
+    placeholder: {
+      name: 'Gold',
+    },
+  },
   membership: {
     title: 'Memberships',
     description: 'The memberships this course sells. Anyone not holding one is a visitor.',

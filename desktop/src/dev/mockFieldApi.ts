@@ -290,11 +290,15 @@ function mockBookableThrough(horizon = mockBookingHorizon) {
 }
 
 function mockHorizonResponse(horizon = mockBookingHorizon) {
+  const bookableThrough = mockBookableThrough(horizon)
   return {
     mode: horizon.mode,
     days: horizon.mode === 'days' ? horizon.days : null,
     through: horizon.mode === 'through' ? horizon.through : null,
-    bookableThrough: mockBookableThrough(horizon),
+    bookableThrough,
+    generatedThrough: Object.fromEntries(
+      Object.keys(mockSchedulesByCourse).map(courseId => [courseId, bookableThrough]),
+    ),
   }
 }
 
@@ -669,6 +673,38 @@ const mockCourseOrder: string[] = loadMockWrites<string[]>('courseOrder', [])
 
 /** The booking form's visitor categories, as the settings screen arranges them. */
 const mockPlayerTagOptions: string[] = loadMockWrites<string[]>('playerTagOptions', ['共通', '優待', 'WEB'])
+
+/** The jobs a caddie is put on when they have no round, as settings arranges them. */
+const mockCaddieDuties: string[] = loadMockWrites<string[]>('caddieDuties', [
+  'コース整備',
+  '練習場',
+  'フロント補助',
+])
+
+type MockCaddieDuty = {
+  id: string
+  caddieProfileId: string
+  date: string
+  dutyLabel: string
+  /** `HH:MM` in the club's own clock; `00:00`–`24:00` is the whole day. */
+  startTime: string
+  endTime: string
+  allDay: boolean
+  note: string | null
+  updatedBy: string | null
+}
+
+/** `09:00` → `540`, so the mock can refuse overlaps the way the API does. */
+function dutyMinutes(value: string): number {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim())
+  return match ? Number(match[1]) * 60 + Number(match[2]) : 0
+}
+
+/** The days already filed against those jobs. */
+const mockCaddieDutyAssignments: MockCaddieDuty[] = loadMockWrites<MockCaddieDuty[]>(
+  'caddieDutyAssignments',
+  [],
+)
 
 /** The simulator's pricing inputs, as the tax panel sets them. */
 const mockPricingSettings = loadMockWrites<{
@@ -1315,6 +1351,110 @@ function items<T>(values: T[]) {
  * frozen fixture would let the forms be looked at but not walked through.
  * A reload starts clean, same as the rest of this file.
  */
+/**
+ * One person's play, for the mock ledger.
+ *
+ * Keyed by customer so the screen shows a regular, a first-timer, and somebody
+ * whose history is longer than one page — the three readings the panel has to
+ * get right, and the ones a single sample row would never exercise.
+ */
+function mockVisitHistory(customerId: string) {
+  const rows = mockVisitRows(customerId)
+  const played = rows.filter(row => row.kind === 'visited')
+  const priced = played.filter(row => row.amount > 0)
+  const pricedPlayers = priced.reduce((total, row) => total + row.players, 0)
+  const totalAmount = played.reduce((total, row) => total + row.amount, 0)
+  // Never truncated: the server pages a customer's history to the end, so a
+  // partial read is the rare failure the unit tests cover rather than what a
+  // desk sees.
+  const truncated = false
+  return {
+    items: rows,
+    summary: {
+      visits: played.length,
+      players: played.reduce((total, row) => total + row.players, 0),
+      totalAmount,
+      unpricedVisits: played.length - priced.length,
+      spendPerPlayer: pricedPlayers > 0 ? Math.floor(totalAmount / pricedPlayers) : null,
+      cancelled: rows.filter(row => row.kind === 'cancelled').length,
+      noShows: rows.filter(row => row.kind === 'no_show').length,
+      upcoming: rows.filter(row => row.kind === 'upcoming').length,
+      // Withheld while truncated, exactly as the server withholds it: the
+      // oldest row read is not the first round played.
+      firstVisitAt: truncated ? null : (played.at(-1)?.startsAt ?? null),
+      lastVisitAt: played[0]?.startsAt ?? null,
+    },
+    truncated,
+    ...mockGrade(played.length, pricedPlayers > 0 ? Math.floor(totalAmount / pricedPlayers) : null, truncated),
+  }
+}
+
+/** The same four-way verdict the server answers with. */
+function mockGrade(visits: number, spendPerPlayer: number | null, truncated: boolean) {
+  if (mockGradeRules.length === 0) return { grade: 'not_configured' }
+  if (truncated) return { grade: 'unknown' }
+  const reached = mockGradeRules.find(
+    rule =>
+      visits >= rule.minVisits
+      && (rule.minSpendPerPlayer == null
+        || (spendPerPlayer != null && spendPerPlayer >= rule.minSpendPerPlayer)),
+  )
+  return reached ? { grade: 'graded', gradeName: reached.name } : { grade: 'below_lowest' }
+}
+
+const mockGradeRules: Array<{
+  name: string
+  minVisits: number
+  minSpendPerPlayer?: number | null
+  minTotalAmount?: number | null
+}> = [
+  { name: 'ゴールド', minVisits: 24, minSpendPerPlayer: 15_000 },
+  { name: 'シルバー', minVisits: 12 },
+  { name: 'ブロンズ', minVisits: 2 },
+]
+
+function mockVisitRows(customerId: string) {
+  const visit = (
+    id: string,
+    startsAt: string,
+    kind: string,
+    players: number,
+    amount: number,
+    courseId = 'course_east',
+  ) => ({
+    reservationId: `res_${id}`,
+    reservationNumber: `R-2026-${id}`,
+    startsAt,
+    courseId,
+    players,
+    amount,
+    currency: 'JPY',
+    kind,
+    status: kind === 'visited' ? 'completed' : kind,
+  })
+
+  if (customerId === 'cus_honda') {
+    // The regular: books ahead, plays monthly, cancels once in a while.
+    return [
+      visit('0812', '2026-08-12T00:00:00Z', 'upcoming', 4, 62_000),
+      visit('0704', '2026-07-04T00:00:00Z', 'visited', 4, 58_000, 'course_west'),
+      visit('0620', '2026-06-20T00:00:00Z', 'cancelled', 4, 0),
+      visit('0530', '2026-05-30T00:00:00Z', 'visited', 3, 42_000),
+      // Booked before CourseBoard carried the amount across: the row the
+      // spend-per-player metric has to leave out rather than average in.
+      visit('0418', '2026-04-18T00:00:00Z', 'visited', 4, 0),
+    ]
+  }
+  if (customerId === 'cus_masuda') {
+    return [
+      visit('0711', '2026-07-11T00:00:00Z', 'no_show', 2, 28_000),
+      visit('0509', '2026-05-09T00:00:00Z', 'visited', 2, 30_000),
+    ]
+  }
+  // Everybody else is the first-time visitor, which is most of the ledger.
+  return []
+}
+
 const mockCustomers: Array<Record<string, unknown>> = [
   {
     id: 'cus_honda',
@@ -1366,17 +1506,22 @@ const mockMembershipAssignments = new Map<string, string>([
   ['cus_tsuji', 'plan_shareholder'],
 ])
 
+/** Member numbers, as the credential registry would hold them. */
+const mockMemberNumbers = new Map<string, string>([['cus_honda', 'A-1024']])
+
 function mockMembershipOf(customerId: string) {
   const planId = mockMembershipAssignments.get(customerId)
   const plan = planId
     ? mockMembershipPlans.find(candidate => candidate.id === planId)
     : undefined
+  const memberNumber = mockMemberNumbers.get(customerId)
   return {
     customerId,
     // Mirrors the server: whether someone is a member is decided in one place
     // and reported, never re-derived by the client from the plan's presence.
     isMember: Boolean(plan),
     ...(plan ? { plan, startedOn: '2026-04-01' } : {}),
+    ...(memberNumber ? { memberNumber } : {}),
   }
 }
 
@@ -1597,8 +1742,18 @@ function normalizeMockPath(pathname: string): string {
     || pathname === '/v1/course/caddie-rank-fees'
     // Pricing inputs are CourseBoard's own row (ADR-0009).
     || pathname === '/v1/course/pricing-settings'
-    // So are the booking form's visitor categories.
+    // So are the booking form's visitor categories, and the grade ladder.
     || pathname === '/v1/course/player-tag-options'
+    // Moving a round is CourseBoard's own operation: Field has no endpoint
+    // that applies the day's checks, which is the whole point of it.
+    || pathname.match(/^\/v1\/course\/caddie-assignments\/[^/]+\/reassignment$/) !== null
+    // Non-round caddie work is CourseBoard's own row (ADR-0009).
+    || pathname === '/v1/course/caddie-duties'
+    || pathname === '/v1/course/caddie-duty-assignments'
+    || pathname.startsWith('/v1/course/caddie-duty-assignments/')
+    || pathname === '/v1/course/customer-grade-rules'
+    || pathname === '/v1/course/membership-discounts'
+    || pathname === '/v1/course/membership-play-windows'
     || pathname.startsWith('/v1/course/caddie-shifts/')
     || pathname.startsWith('/v1/course/caddie-shift-plans/')
     // The customer ledger and the memberships against it live in Field's own
@@ -1964,6 +2119,54 @@ function caddieAttachedByCourse(date: string): Map<string, number> {
   return demand
 }
 
+/** The canonical status the CourseBoard API adds without changing raw status. */
+function mockAssignmentCanonicalStatus(status: unknown): string {
+  const normalized = String(status ?? '').trim().toLowerCase()
+  if (normalized === 'assigned'
+    || normalized === 'in_progress'
+    || normalized === 'completed') {
+    return normalized
+  }
+  if (normalized === 'cancelled' || normalized === 'canceled') return 'cancelled'
+  return 'other'
+}
+
+/**
+ * The real supply endpoint owns the assignment join. These are fixed response
+ * examples only: one ordinary course and one course with an unbacked
+ * assignment, so the development screen exercises both additive contracts
+ * without copying the backend's aggregation algorithm here.
+ */
+const mockSupplyAdditiveExamples: Record<string, {
+  assignedGroups: number
+  backedAssignedGroups: number
+  unbackedAssignedGroups: number
+  capacityExceededAssignedGroups: number
+  courseMismatchAssignedGroups: number
+}> = {
+  course_east: {
+    assignedGroups: 0,
+    backedAssignedGroups: 0,
+    unbackedAssignedGroups: 0,
+    capacityExceededAssignedGroups: 0,
+    courseMismatchAssignedGroups: 0,
+  },
+  course_west: {
+    assignedGroups: 1,
+    backedAssignedGroups: 0,
+    unbackedAssignedGroups: 1,
+    capacityExceededAssignedGroups: 0,
+    courseMismatchAssignedGroups: 0,
+  },
+  course_hill: {
+    assignedGroups: 2,
+    backedAssignedGroups: 1,
+    unbackedAssignedGroups: 0,
+    capacityExceededAssignedGroups: 1,
+    courseMismatchAssignedGroups: 1,
+  },
+}
+
 function mockCourseSupply(date: string) {
   const working = mockShifts.filter(shift => shift.date === date && shift.isWorking)
   const demand = caddieAttachedByCourse(date)
@@ -1973,6 +2176,13 @@ function mockCourseSupply(date: string) {
       const placed = working.filter(shift => shift.golfCourseId === course.id)
       const roundsCapacity = placed.reduce((total, shift) => total + shift.roundsCapacity, 0)
       const caddieAttachedGroups = demand.get(course.id) ?? 0
+      const additive = mockSupplyAdditiveExamples[course.id] ?? {
+        assignedGroups: 0,
+        backedAssignedGroups: 0,
+        unbackedAssignedGroups: 0,
+        capacityExceededAssignedGroups: 0,
+        courseMismatchAssignedGroups: 0,
+      }
       return {
         golfCourseId: course.id,
         courseName: course.name,
@@ -1981,6 +2191,10 @@ function mockCourseSupply(date: string) {
         caddieAttachedGroups,
         movableCaddies: placed.filter(shift => shift.origin !== 'pinned').length,
         shortfall: roundsCapacity - caddieAttachedGroups,
+        ...additive,
+        effectiveRoundsCapacity: roundsCapacity,
+        effectiveCaddieAttachedGroups: caddieAttachedGroups,
+        effectiveShortfall: roundsCapacity - caddieAttachedGroups,
       }
     }),
     unplacedCaddies: working.filter(shift => shift.golfCourseId === null).length,
@@ -2042,6 +2256,29 @@ function resolveGet(path: string): Json | null | undefined {
   if (pathname === '/v1/course/membership-plans') {
     const includeInactive = url.searchParams.get('includeInactive') === 'true'
     return items(mockMembershipPlans.filter(plan => includeInactive || plan.active === true))
+  }
+
+  if (pathname === '/v1/course/customer-grade-rules') {
+    return items(mockGradeRules)
+  }
+
+  if (pathname === '/v1/course/membership-play-windows') {
+    return items([
+      // 平日会員: Monday to Friday, mornings only.
+      { planId: 'plan_weekday', days: [true, true, true, true, true, false, false], from: '06:00', to: '12:00' },
+    ])
+  }
+
+  if (pathname === '/v1/course/membership-discounts') {
+    return items([
+      { planId: 'plan_full', kind: 'yen', value: 5000 },
+      { planId: 'plan_weekday', kind: 'percent', value: 20 },
+    ])
+  }
+
+  const customerVisitsMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)\/visits$/)
+  if (customerVisitsMatch) {
+    return mockVisitHistory(decodeURIComponent(customerVisitsMatch[1] ?? ''))
   }
 
   const customerMembershipMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)\/membership$/)
@@ -2292,7 +2529,10 @@ function resolveGet(path: string): Json | null | undefined {
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-assignments') {
-    return items(mockAssignments.map(item => ({ ...item })))
+    return items(mockAssignments.map(item => ({
+      ...item,
+      canonicalStatus: mockAssignmentCanonicalStatus(item.status),
+    })))
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-recommendations') {
@@ -2306,6 +2546,7 @@ function resolveGet(path: string): Json | null | undefined {
         roundsAssigned: 1,
         remainingRounds: 1,
         attendanceStatus: 'working',
+        shiftPlacementStatus: 'unconfirmed',
         recommendationScore: 161,
         recommendedRole: 'primary',
         pairingDisplayName: null,
@@ -2414,6 +2655,20 @@ function resolveGet(path: string): Json | null | undefined {
   if (pathname === '/v1/course/pricing-settings') return { ...mockPricingSettings }
 
   if (pathname === '/v1/course/player-tag-options') return { items: [...mockPlayerTagOptions] }
+
+  if (pathname === '/v1/course/caddie-duties') return { items: [...mockCaddieDuties] }
+
+  if (rawPathname === '/v1/course/caddie-duty-assignments') {
+    const from = url.searchParams.get('from') ?? TODAY
+    const to = url.searchParams.get('to') ?? from
+    return items(
+      mockCaddieDutyAssignments
+        .filter(duty => duty.date >= from && duty.date <= to)
+        .sort((left, right) => left.date.localeCompare(right.date)
+          || dutyMinutes(left.startTime) - dutyMinutes(right.startTime)
+          || left.caddieProfileId.localeCompare(right.caddieProfileId)),
+    )
+  }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-payroll-summary') {
     const yearMonth = url.searchParams.get('yearMonth') ?? TODAY.slice(0, 7)
@@ -2596,6 +2851,16 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     if (typeof body?.active === 'boolean') plan.active = body.active
     if (typeof body?.sortOrder === 'number') plan.sortOrder = body.sortOrder
     return hit(plan)
+  }
+
+  const memberNumberMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)\/member-number$/)
+  if (memberNumberMatch && method === 'PUT') {
+    const customerId = decodeURIComponent(memberNumberMatch[1] ?? '')
+    const next = String((body as { memberNumber?: unknown })?.memberNumber ?? '').trim()
+    // Blank withdraws it, exactly as the server does.
+    if (next) mockMemberNumbers.set(customerId, next)
+    else mockMemberNumbers.delete(customerId)
+    return hit(mockMembershipOf(customerId))
   }
 
   const membershipGrantMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)\/membership$/)
@@ -2906,6 +3171,109 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     return hit({ items: [...mockPlayerTagOptions] })
   }
 
+  const reassignMatch = pathname.match(
+    /^\/v1\/course\/caddie-assignments\/([^/]+)\/reassignment$/,
+  )
+  if (reassignMatch && method === 'PUT') {
+    const assignmentId = decodeURIComponent(reassignMatch[1] ?? '')
+    const index = mockAssignments.findIndex(item => item.id === assignmentId)
+    if (index < 0) return error(404, `Mock assignment ${assignmentId} was not found`)
+    const current = mockAssignments[index]!
+    const caddieProfileId = String(body?.caddieProfileId ?? current.caddieProfileId)
+    const reservationId = String(body?.reservationId ?? current.reservationId)
+    const scheduledAt = String(body?.scheduledAt ?? current.scheduledAt)
+    // The API refuses a group somebody else is on; the mock refuses it too, so
+    // the message can be seen without a backend.
+    const taken = mockAssignments.some(
+      item =>
+        item.id !== assignmentId
+        && item.reservationId === reservationId
+        && item.status !== 'cancelled',
+    )
+    if (taken) {
+      return error(400, 'this group already has a caddie; release that assignment first')
+    }
+    const updated = {
+      ...current,
+      caddieProfileId,
+      reservationId,
+      scheduledAt,
+      // The label belongs to the group the row was filed against, so a move
+      // to another group leaves it behind — the same as the API does.
+      roundReference:
+        reservationId === current.reservationId ? current.roundReference : '',
+    }
+    mockAssignments[index] = updated as typeof current
+    return hit(updated)
+  }
+
+  if (pathname === '/v1/course/caddie-duties' && method === 'PUT') {
+    const values = Array.isArray(body?.items) ? (body.items as unknown[]) : []
+    const labels = values
+      .filter((value): value is string => typeof value === 'string')
+      .map(value => value.trim())
+      .filter(Boolean)
+    if (new Set(labels).size !== labels.length) {
+      return error(400, 'the same caddie duty appears twice')
+    }
+    mockCaddieDuties.splice(0, mockCaddieDuties.length, ...labels)
+    saveMockWrites('caddieDuties', mockCaddieDuties)
+    return hit({ items: [...mockCaddieDuties] })
+  }
+
+  if (pathname === '/v1/course/caddie-duty-assignments' && method === 'POST') {
+    const caddieProfileId = String(body?.caddieProfileId ?? '')
+    const date = String(body?.date ?? TODAY)
+    const dutyLabel = String(body?.dutyLabel ?? '').trim()
+    const startTime = body?.startTime == null ? '00:00' : String(body.startTime)
+    const endTime = body?.endTime == null ? '24:00' : String(body.endTime)
+    // The API refuses a job the club never arranged, and hours already spoken
+    // for; the mock refuses them too, so the messages can be seen without a
+    // backend.
+    if (!mockCaddieDuties.includes(dutyLabel)) {
+      return error(400, 'that is not one of this club\u2019s duties; add it to the list first')
+    }
+    if (dutyMinutes(endTime) <= dutyMinutes(startTime)) {
+      return error(400, 'the work ends before it starts')
+    }
+    const clashes = mockCaddieDutyAssignments.some(
+      duty =>
+        duty.caddieProfileId === caddieProfileId
+        && duty.date === date
+        && dutyMinutes(duty.startTime) !== dutyMinutes(startTime)
+        && dutyMinutes(duty.startTime) < dutyMinutes(endTime)
+        && dutyMinutes(startTime) < dutyMinutes(duty.endTime),
+    )
+    if (clashes) {
+      return error(400, 'this caddie is already on other work over those hours')
+    }
+    const stored: MockCaddieDuty = {
+      id: `duty_${caddieProfileId}_${date}_${dutyMinutes(startTime)}`,
+      caddieProfileId,
+      date,
+      dutyLabel,
+      startTime,
+      endTime,
+      allDay: startTime === '00:00' && endTime === '24:00',
+      note: body?.note == null ? null : String(body.note),
+      updatedBy: body?.updatedBy == null ? null : String(body.updatedBy),
+    }
+    const at = mockCaddieDutyAssignments.findIndex(duty => duty.id === stored.id)
+    if (at >= 0) mockCaddieDutyAssignments.splice(at, 1, stored)
+    else mockCaddieDutyAssignments.push(stored)
+    saveMockWrites('caddieDutyAssignments', mockCaddieDutyAssignments)
+    return hit(stored)
+  }
+
+  const dutyIdMatch = pathname.match(/^\/v1\/course\/caddie-duty-assignments\/([^/]+)$/)
+  if (dutyIdMatch && method === 'DELETE') {
+    const dutyId = decodeURIComponent(dutyIdMatch[1] ?? '')
+    const at = mockCaddieDutyAssignments.findIndex(duty => duty.id === dutyId)
+    if (at >= 0) mockCaddieDutyAssignments.splice(at, 1)
+    saveMockWrites('caddieDutyAssignments', mockCaddieDutyAssignments)
+    return hit(null)
+  }
+
   if (pathname === '/v1/course/pricing-settings' && method === 'PUT') {
     const ratio = Number(body?.taxableRatio)
     if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) {
@@ -2967,6 +3335,17 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     mockShiftRules.unfiledRequest = body?.unfiledRequest === 'off' ? 'off' : 'working'
     saveMockWrites('shiftRules', mockShiftRules)
     return hit(mockShiftRulesDto())
+  }
+
+  // The board pushes a confirmed month to Field afterwards. There is no Field
+  // here, so the mock answers "already caught up" and the loop ends on the
+  // first call.
+  const fieldSyncMatch = pathname.match(/^\/v1\/course\/caddie-shift-plans\/([^/]+)\/field-sync$/)
+  if (fieldSyncMatch) {
+    if (method === 'POST') {
+      return hit({ filed: 0, withdrawn: 0, unlinkable: 0, failed: 0, remaining: 0, done: true })
+    }
+    return hit({ remaining: 0 })
   }
 
   const shiftPlanPreviewMatch = pathname.match(
@@ -3555,8 +3934,37 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   if (pathname === '/v1/erp/extensions/golf-course/caddie-auto-assignments' && method === 'POST') {
     return hit({
       dryRun: Boolean(body?.dryRun),
-      assigned: [],
-      skipped: [{ reservationId: 'res_mock', reason: 'Mock mode does not auto-assign' }],
+      assigned: [
+        {
+          reservationId: 'res_mock_4',
+          scheduledAt: `${TODAY}T08:00:00+09:00`,
+          caddieProfileId: 'caddie_mika',
+          caddieDisplayName: '田中 美香',
+          rationale: ['on_duty'],
+          shiftPlacementStatus: 'unconfirmed',
+        },
+        {
+          reservationId: 'res_mock_8',
+          scheduledAt: `${TODAY}T09:30:00+09:00`,
+          caddieProfileId: 'caddie_hiro',
+          caddieDisplayName: '中村 浩',
+          rationale: ['on_duty'],
+          shiftPlacementStatus: 'unplaced',
+        },
+        {
+          reservationId: 'res_mock_11',
+          scheduledAt: `${TODAY}T13:00:00+09:00`,
+          caddieProfileId: 'caddie_aya',
+          caddieDisplayName: '佐藤 彩',
+          rationale: ['on_duty'],
+          shiftPlacementStatus: 'on_course',
+        },
+      ],
+      skipped: [],
+      deadlineWarning: {
+        deadlineDate: `${TODAY.slice(0, 7)}-20`,
+        unsubmittedCaddieNames: ['田中 美香'],
+      },
     })
   }
 

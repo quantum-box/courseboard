@@ -13,6 +13,8 @@ import {
   type PricingSettingsDraft,
 } from './pricing-settings'
 import { Notice } from '../../components/Page'
+import { useResource } from '../../hooks/useResource'
+import { membershipPlansPath, type MembershipPlanList } from './customers/membership'
 import {
   DataTable,
   type DataTableColumn,
@@ -47,6 +49,10 @@ type FeeQuote = {
   taxAmount: number
   total: number
   breakdown: PlayerBreakdown[]
+  /** The green fee actually priced, after any membership came off it. */
+  greenFee: number
+  /** What the membership took off, in yen. Zero for a visitor. */
+  memberDiscountAmount: number
 }
 
 type RangeRow = {
@@ -192,6 +198,15 @@ export function SimulatorPage() {
   const timezone = useTenantTimezone()
   const dates = useMemo(() => defaultDates(timezone), [timezone])
 
+  // Only the plans still sold: quoting a round on a retired membership is not
+  // something the counter does, and the people holding one keep it either way.
+  const plansResource = useResource(
+    () => courseboardApiJson<MembershipPlanList>(membershipPlansPath),
+    [],
+    { cacheKey: 'membership:plans:active' },
+  )
+  const plans = plansResource.data?.items ?? []
+
   const [quote, setQuote] = useState<FeeQuote | null>(null)
   const [quoteError, setQuoteError] = useState<unknown>(null)
   const [quoting, setQuoting] = useState(false)
@@ -216,6 +231,9 @@ export function SimulatorPage() {
             numHoles: form.get('numHoles') === '9' ? 9 : 18,
             cartFee: optionalNumber(form.get('cartFee')),
             caddyFee: optionalNumber(form.get('caddyFee')),
+            // Empty is the visitor, which is what the counter quotes most of
+            // the time — so it stays the default rather than a plan.
+            membershipPlanId: String(form.get('membershipPlanId') ?? '') || undefined,
           }),
         }),
       )
@@ -351,6 +369,19 @@ export function SimulatorPage() {
             <Field label={t('simulator:quote.field.caddyFee')}>
               <Input max={MAX_FEE_AMOUNT} min={0} name="caddyFee" placeholder="0" step={1} type="number" />
             </Field>
+            {/* The green fee above is the posted one. Picking a membership
+                takes its discount off before the round is priced, which can
+                also move the tax bracket. */}
+            <Field label={t('simulator:quote.field.membership')}>
+              <NativeSelect defaultValue="" name="membershipPlanId">
+                <option value="">{t('simulator:quote.membership.visitor')}</option>
+                {plans.map(plan => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
           </FormGrid>
           <Button disabled={quoting} type="submit">
             <Calculator aria-hidden="true" />
@@ -364,6 +395,18 @@ export function SimulatorPage() {
           <>
             <MetricGrid>
               <Metric label={t('simulator:quote.metric.grade')} value={quote.courseGrade || '—'} />
+              {/* Only when a membership actually took something off. A row of
+                  zero on every visitor quote would be noise. */}
+              {quote.memberDiscountAmount > 0 ? (
+                <Metric
+                  label={t('simulator:quote.metric.memberDiscount')}
+                  value={yen(quote.memberDiscountAmount)}
+                  detail={t('simulator:quote.metric.memberGreenFee', {
+                    fee: yen(quote.greenFee),
+                  })}
+                  tone="success"
+                />
+              ) : null}
               <Metric
                 label={t('simulator:quote.metric.taxRate')}
                 value={`${quote.taxRate.toFixed(2)}%`}

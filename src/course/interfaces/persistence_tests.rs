@@ -10,8 +10,6 @@
 //! survives that round trip is genuinely persisted; one that lived in a cache or
 //! a struct field would not.
 
-#![cfg(test)]
-
 use std::sync::{Arc, Mutex};
 
 use axum::{
@@ -389,6 +387,13 @@ fn router_with_multi_course_writes(
             twilio_messaging_service_sid: None,
             twilio_from_number: None,
             multi_course_product_writes,
+            // Matches the production default. No test here drives the Field
+            // write-back, and turning it on would point these at a Field that
+            // is not part of this harness.
+            field_shift_writeback: false,
+            // Same reasoning: the harness serves the extension aliases these
+            // gateways call today, so the generic paths stay off here.
+            field_generic_paths: false,
         },
     ))
 }

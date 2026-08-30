@@ -187,7 +187,36 @@ describe('protected API 401 handling', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('does not refresh or sign out for a Field 401 normalized to 403', async () => {
+  it('soft-signs out when refreshed Field authentication is explicitly expired', async () => {
+    const getAccessToken = vi.fn(async () => 'valid-courseboard-token')
+    const onUnauthorized = vi.fn()
+    const onForbidden = vi.fn()
+    configureApiAuth({
+      tenantId: 'tn_1',
+      operatorId: 'tn_1',
+      platformId: 'plat_1',
+      getAccessToken,
+      onUnauthorized,
+      onForbidden,
+    })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      error: 'upstream_authentication_expired',
+      message: 'Field authentication expired',
+    }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    })))
+
+    await expect(courseboardApiJson('/v1/course/caddie-profiles')).rejects.toMatchObject({
+      status: 401,
+      message: 'Field authentication expired',
+    })
+    expect(getAccessToken).toHaveBeenCalledTimes(2)
+    expect(onUnauthorized).toHaveBeenCalledTimes(1)
+    expect(onForbidden).not.toHaveBeenCalled()
+  })
+
+  it('does not soft-sign-out for a real upstream permission denial', async () => {
     const getAccessToken = vi.fn(async () => 'valid-courseboard-token')
     const onUnauthorized = vi.fn()
     const onForbidden = vi.fn()
@@ -201,7 +230,7 @@ describe('protected API 401 handling', () => {
     })
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       error: 'upstream_client_error',
-      message: 'Field bearer was rejected',
+      message: 'Field tenant policy denied this operation',
     }), {
       status: 403,
       headers: { 'Content-Type': 'application/json' },
@@ -209,7 +238,7 @@ describe('protected API 401 handling', () => {
 
     await expect(courseboardApiJson('/v1/course/caddie-profiles')).rejects.toMatchObject({
       status: 403,
-      message: 'Field bearer was rejected',
+      message: 'Field tenant policy denied this operation',
     })
     expect(getAccessToken).toHaveBeenCalledTimes(1)
     expect(onUnauthorized).not.toHaveBeenCalled()

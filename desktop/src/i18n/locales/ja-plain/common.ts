@@ -107,4 +107,8 @@ export const common: DeepPartial<typeof source> = {
   notification: {
     label: '操作の結果のお知らせ',
   },
+  newVersion: {
+    message: '新しいバージョンが出ました。もう一度読み込むと、いちばん新しい画面になります。',
+    reload: 'もう一度読み込む',
+  },
 }

@@ -23,6 +23,7 @@ export const simulator = {
     description: 'グリーンフィーから等級とゴルフ場利用税を計算し、任意料金を含む合計を出します。',
     field: {
       greenFee: 'グリーンフィー',
+      membership: '会員種別',
       numHoles: 'ホール数',
       cartFee: 'カート料金（任意）',
       caddyFee: 'キャディ料金（任意）',
@@ -35,11 +36,16 @@ export const simulator = {
     submitting: '計算しています',
     prompt: '条件を入力して料金を計算してください。',
     empty: '税の内訳はありません。',
+    membership: {
+      visitor: 'ビジター',
+    },
     metric: {
       grade: '等級',
       taxRate: '税率換算',
       taxAmount: '税額',
       total: '合計',
+      memberDiscount: '会員割引',
+      memberGreenFee: '割引後 {{fee}}',
     },
     table: {
       player: 'プレーヤー',

@@ -28,6 +28,11 @@ export const ledger = {
     caddieOver: '{{n}} 組 おおい',
     caddieHint: 'しゅっきん {{caddies}}人で {{capacity}}組まで うけられます。いま {{booked}}組。',
   },
+  caddieSupply: {
+    unbackedAssignedGroups: 'その日のシフトがまだ決まっていない組 {{n}}組',
+    capacityExceededAssignedGroups: 'シフトの人数では足りない組 {{n}}組',
+    courseMismatchAssignedGroups: 'シフトのコースと予約のコースがちがう組 {{n}}組',
+  },
   order: {
     moveLeft: '{{name}}を ひだりへ',
     moveRight: '{{name}}を みぎへ',
@@ -62,6 +67,7 @@ export const ledger = {
     closed: 'うりどめ',
     special: 'とくべつな りょうきん',
     retired: 'スタート枠が ありません',
+    unassignedCaddie: '未割り当て',
   },
   legend: {
     label: '色の いみ',
@@ -81,6 +87,11 @@ export const ledger = {
   partial: {
     title: 'いちぶの じょうほうが とれていません',
     description: '台帳は 出ていますが、あきの数や うりどめなど いちぶは 出せていません。',
+  },
+  inventoryGap: {
+    title: '予約を受ける日と、スタート枠の日が合っていません',
+    missing: '{{course}}は{{date}}まで予約を受ける決まりですが、スタート枠はまだありません。',
+    behind: '{{course}}は{{date}}まで予約を受ける決まりですが、スタート枠は{{generatedThrough}}までしかありません。',
   },
   marks: {
     title: '枠の せってい',
@@ -128,6 +139,11 @@ export const ledger = {
     exit: 'もとに もどす',
   },
   newReservation: {
+    memberWindowTitle: '会員がプレーできる日から外れています',
+    warning: {
+      member_play_window_day: 'この会員は、この曜日はプレーできません。予約はほぞんしました。',
+      member_play_window_time: 'この会員は、この時間はプレーできません。予約はほぞんしました。',
+    },
     title: '予約を 入れる',
     description: '{{course}} の {{time}} に 予約を 入れます。',
     open: 'この 枠に 予約を 入れる',
@@ -181,6 +197,13 @@ export const ledger = {
     grantMembership: '会員に する',
     changeMembership: '会員の しゅるいを かえる',
     choosePlan: '会員の しゅるいを えらぶ',
+    memberNumberAdd: '会員のばんごうを入れる',
+    memberNumberValue: '会員のばんごう {{number}}',
+    memberNumberPlaceholder: 'れい: A-1024',
+    memberNumberSave: 'ほぞん',
+    memberNumberCancel: 'やめる',
+    memberNumberSaved: 'ほぞんしました',
+    memberNumberFailed: 'ほぞんできませんでした',
     membershipGranted: '会員の しゅるいを のせました',
     membershipGrantFailed: '会員の しゅるいを のせられませんでした',
     searching: 'お客さま台帳を さがして います…',

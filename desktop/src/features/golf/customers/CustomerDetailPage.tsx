@@ -6,6 +6,7 @@ import { courseboardApiJson } from '../../../api'
 import { LoadingState, Notice, Panel, ResourceError } from '../../../components/Page'
 import { useResource } from '../../../hooks/useResource'
 import { navigateFromClick } from '../../../lib/router'
+import { CustomerVisitsPanel } from './CustomerVisitsPanel'
 import { MembershipBadge } from './MembershipBadge'
 import { customerPath, type Customer } from './models'
 
@@ -72,10 +73,9 @@ export function CustomerDetailPage({ customerId }: { customerId: string }) {
             <MembershipBadge customerId={customer.id} editable />
           </Panel>
 
-          {/* Visits belong here — this is the page the desk opens to ask how
-              often somebody comes. Reading them needs a CourseBoard endpoint
-              over Field's `ReservationFilter.customer_id`, which is not built
-              yet, so the promise is not made in the UI until it can be kept. */}
+          {/* Below the membership, because how often somebody comes is read
+              after who they are — and it is the reason the page gets opened. */}
+          <CustomerVisitsPanel customerId={customer.id} />
         </>
       ) : null}
     </div>

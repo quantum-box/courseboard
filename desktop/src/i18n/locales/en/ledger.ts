@@ -28,6 +28,11 @@ export const ledger = {
     caddieOver: '{{n}} over',
     caddieHint: '{{caddies}} caddies on today, taking up to {{capacity}} groups. {{booked}} sold.',
   },
+  caddieSupply: {
+    unbackedAssignedGroups: 'Shift not confirmed for {{n}} group(s)',
+    capacityExceededAssignedGroups: '{{n}} group(s) exceed shift capacity',
+    courseMismatchAssignedGroups: '{{n}} group(s) have a course mismatch',
+  },
   order: {
     moveLeft: 'Move {{name}} left',
     moveRight: 'Move {{name}} right',
@@ -66,6 +71,7 @@ export const ledger = {
     closed: 'Closed',
     special: 'Special rate',
     retired: 'No start slot',
+    unassignedCaddie: 'Unassigned',
   },
   legend: {
     label: 'What the colours mean',
@@ -85,6 +91,11 @@ export const ledger = {
   partial: {
     title: 'Some detail could not be loaded',
     description: 'The ledger is drawn, but remaining capacity and desk marks may be missing.',
+  },
+  inventoryGap: {
+    title: 'The booking window and start slots do not match',
+    missing: '{{course}} is configured through {{date}}, but no start slots have been built yet.',
+    behind: '{{course}} is configured through {{date}}, but start slots have only been built through {{generatedThrough}}.',
   },
   marks: {
     title: 'Slot marks',
@@ -132,6 +143,11 @@ export const ledger = {
     exit: 'Show controls',
   },
   newReservation: {
+    memberWindowTitle: 'Outside this membership\u2019s playing window',
+    warning: {
+      member_play_window_day: 'This membership is not playable on this day. The booking was saved.',
+      member_play_window_time: 'This membership is not playable at this hour. The booking was saved.',
+    },
     title: 'Book this tee time',
     description: 'Booking {{course}} at {{time}}.',
     open: 'Book this tee time',
@@ -185,6 +201,13 @@ export const ledger = {
     grantMembership: 'Make a member',
     changeMembership: 'Change membership',
     choosePlan: 'Choose a membership',
+    memberNumberAdd: 'Add a member number',
+    memberNumberValue: 'Member no. {{number}}',
+    memberNumberPlaceholder: 'e.g. A-1024',
+    memberNumberSave: 'Save',
+    memberNumberCancel: 'Cancel',
+    memberNumberSaved: 'Member number saved',
+    memberNumberFailed: 'Could not save the member number',
     membershipGranted: 'Membership recorded',
     membershipGrantFailed: 'Could not record the membership',
     searching: 'Searching the ledger…',
