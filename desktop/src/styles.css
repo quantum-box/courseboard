@@ -5674,6 +5674,43 @@ button,
   outline-offset: -2px;
 }
 
+/* The check-in list. A row is a name and a tick, so it is a plain list rather
+ * than the two-line grid the editable player rows need — the desk reads down
+ * it to see who is still to arrive. */
+.ledger-party-checkins {
+  display: grid;
+  gap: 8px;
+}
+
+.ledger-party-checkins h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ledger-checkin-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ledger-checkin-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.ledger-checkin-done {
+  display: flex;
+  align-items: center;
+  /* Lines up with the checkboxes above it so the column of names stays
+   * straight as a group is checked in one seat at a time. */
+  padding-left: 21px;
+}
+
 .ledger-party-players {
   display: grid;
   gap: 12px;

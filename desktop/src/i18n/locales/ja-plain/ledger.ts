@@ -215,6 +215,18 @@ export const ledger = {
     registerFailed: 'お客さま台帳に のせられませんでした',
     linkedPlayers: '名前を 入れた {{named}} 人の うち {{linked}} 人が お客さま台帳に のって います。',
   },
+  checkin: {
+    title: '受付',
+    noNames: '組の名前を入れると、ここで受付ができます。',
+    unsaved: '先に上の変更を保存してください。受付は保存された名前に記録します。',
+    unlinked: '（台帳の顧客がえらばれていません）',
+    at: '{{time}} 受付',
+    allDone: 'この組はぜんいん受付がすんでいます。',
+    submit: '受付する（{{count}}人）',
+    saving: '受付しています…',
+    saved: '受付を記録しました',
+    failed: '受付を記録できませんでした',
+  },
   party: {
     title: 'よやくの なかみ',
     description: 'よやくした 人の 名前・人数・コンペの 名前・組の ばんごう・プレイヤーの 名前を なおします。',

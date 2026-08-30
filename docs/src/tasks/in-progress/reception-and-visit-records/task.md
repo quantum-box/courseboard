@@ -69,7 +69,7 @@
 - [x] A: 受付画面と台帳ダイアログが source を送る、カルテに来歴を出す
 - [x] B: migration / domain / repository / usecase / API / authz
 - [x] B: `get_customer_visits` の実測合流とグレード入力の規則
-- [ ] B: 打刻の UI（入口は要相談）
+- [x] B: 打刻の UI。予約台帳の組の編集シートに「受付」を置く
 - [x] i18n（ja / ja-plain / en）、テスト、type-check
 - [ ] DB-backed の repository テストを実行（ローカルは Docker 未起動、CI 待ち）
 - [ ] 実 Field API に対する動作確認
@@ -89,5 +89,11 @@
 
 ## 未確認
 
-- 打刻の入口をどこにするか。台帳の当日の組から打刻するのが自然だが、受付票 OCR の
-  流れの中で打刻させる案、独立した受付画面を作る案もある。バックエンドはどれでも同じ。
+- **DB-backed テストが未実行。** ローカルは Docker 未起動で TiDB が立たない。
+  `golf_customer_registrations` / `golf_visit_checkins` の repository テストは
+  書いてあるが、動かしたのは CI がはじめて。
+- **実 Field API に対する動作確認が未了。** 打刻は Field の `get_reservation` を
+  1回叩いてティータイムから日付を決めるので、そこで 424 が出ないかを見る。
+- 打刻は保存済みの組の名前に対して記録する。編集中は受付ボタンを止めている。
+  実際の朝の受付で「名前を直しながら受付する」流れが多いなら、保存と受付を
+  1つのボタンにまとめ直す。
