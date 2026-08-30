@@ -71,8 +71,8 @@
 - [x] B: `get_customer_visits` の実測合流とグレード入力の規則
 - [x] B: 打刻の UI。予約台帳の組の編集シートに「受付」を置く
 - [x] i18n（ja / ja-plain / en）、テスト、type-check
-- [ ] DB-backed の repository テストを実行（ローカルは Docker 未起動、CI 待ち）
-- [ ] 実 Field API に対する動作確認
+- [x] DB-backed の repository テストを実行（TiDB 起動、`cargo test --lib` 885 passed / 0 failed）
+- [x] 実 Field API に対する動作確認（下記）
 
 ## 決めたこと
 
@@ -87,13 +87,29 @@
   数字の発明になり、そのままグレード判定に入る。回数だけ増え、`unpricedVisits` として
   客単価の計算から外れたことが画面に出る。
 
+## 確認済み
+
+prod Field に対して、テナント `tn_01kygsqn7tnqexzzwe96z0ad17` の実データで確認した
+（打刻は CourseBoard ローカル DB にだけ書くので、Field 側は読むだけ）。
+
+- 実予約 `rsv_01kzgg443t88erhpxpyrj1gkgp`（ティータイム 2026-08-08T06:53+09:00）に対して
+  座席0（顧客に紐づけ）と座席1（未紐づけ）を打刻 → 両方記録された。
+- `playedOn` は `2026-08-08`。この予約は UTC では 08-07 なので、テナントのタイムゾーンで
+  日付を出せていることが実データで確認できた。
+- `checkedInBy` に検証済みトークンの subject が入った。
+- 同じ座席をもう一度打刻しても行は増えず、`checkedInAt` も最初のまま（到着時刻は書き換えない）。
+- **同伴の穴が埋まった。** 顧客 `cus_01KZRRFXETGQ25ZWGM6GX4RWWB`（本田）は本人名義の予約が
+  無く、打刻前は来場0件だった。他人の組に打刻したあとは `visits: 1`、行は
+  `booked=false / checkedIn=true`、`players=0 / amount=0`、`unpricedVisits: 1`。
+  回数だけ増え、売上と人数は予約を取った人に残っている。
+
 ## 未確認
 
-- **DB-backed テストが未実行。** ローカルは Docker 未起動で TiDB が立たない。
-  `golf_customer_registrations` / `golf_visit_checkins` の repository テストは
-  書いてあるが、動かしたのは CI がはじめて。
-- **実 Field API に対する動作確認が未了。** 打刻は Field の `get_reservation` を
-  1回叩いてティータイムから日付を決めるので、そこで 424 が出ないかを見る。
+- **live の authz gate を通していない。** 検証に使った `.env.prod-field` は
+  `COURSEBOARD_DISABLE_ACTION_AUTHZ=true` で、Tachyon Auth への `check` が走らない。
+  新ルートは既存 action（`ManageReservations` / `ListTeeSheet` / `ListCustomers`）を
+  使っており、いずれも台帳と顧客画面が本番で動いている以上は付与済みのはずだが、
+  実地で 403 が出ないことは確かめていない。ルート分類のテスト自体は通っている。
 - 打刻は保存済みの組の名前に対して記録する。編集中は受付ボタンを止めている。
   実際の朝の受付で「名前を直しながら受付する」流れが多いなら、保存と受付を
   1つのボタンにまとめ直す。
