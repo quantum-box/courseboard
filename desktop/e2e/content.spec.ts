@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test'
-import { MOCK_FIXTURE_DATE } from './routes'
+import { expect, test, type Page } from '@playwright/test'
+import { e2eManagedMockServer, MOCK_FIXTURE_DATE } from './routes'
 
 /**
  * 各画面の中身と操作の検証。モックデータ（src/dev/mockFieldApi.ts）の
@@ -306,5 +306,122 @@ test.describe('設定', () => {
     await page.getByRole('button', { name: '高橋 誠 のロールを編集' }).click()
     await expect(page.getByRole('dialog')).toBeVisible()
     await page.keyboard.press('Escape')
+  })
+})
+
+test.describe('予約表のとりこみ（通し）', () => {
+  /**
+   * 表を選ぶところから保存結果まで。コースに紐づけない施設があっても
+   * 止まらずに保存できることが主眼で、ここが通らないと「対応するコースが
+   * 無いゴルフ場は取り込めない」に逆戻りする。
+   *
+   * モックは実ファイルと同じ合計（186 行・6,314 組・キャディ付き 2,476 組）を
+   * 返すので、画面に出る数字がそのまま期待値になる。
+   */
+
+  // このファイルで唯一、保存まで進むスイート。接続先が差し替えられていると
+  // その先がモックである保証が無く、実バックエンドへ本物の取込を書いてしまう。
+  test.skip(
+    !e2eManagedMockServer(),
+    'E2E_BASE_URL / E2E_API_URL で接続先が差し替えられているため、保存を伴う検証は行わない',
+  )
+
+  const REPORT = {
+    name: 'daily-reservations.xlsx',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    // 中身は読まれない。モックが固定の集計を返す。
+    buffer: Buffer.from('PK'),
+  }
+
+  /**
+   * 対象年に選ぶ年。
+   *
+   * 選択肢は現在年の -2〜+4 しか描かれないので、年を固定で書くと**その年が窓から
+   * 外れた日に初めて落ちる**テストになる。モックは渡された年で同じ集計を返すため、
+   * 常に選べる現在年（コース時計）を選ぶ。
+   */
+  const CURRENT_YEAR = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+  }).format(new Date())
+
+  /**
+   * 保存結果の 1 項目の値。
+   *
+   * grid 全体を対象に数字を探すと、狙った項目が欠けていても別の項目が同じ数字を
+   * 持っているだけで通ってしまう。ラベルで項目を特定してから値だけを見る。
+   */
+  function statValue(page: Page, label: string) {
+    return page
+      .locator('.reservation-report-result-grid > div')
+      .filter({ has: page.locator('span').filter({ hasText: new RegExp(`^${label}$`) }) })
+      .locator('strong')
+  }
+
+  async function chooseReport(page: Page) {
+    await page.goto('/golf/reservation-report-import')
+    await page.locator('input[type="file"]').setInputFiles(REPORT)
+    await page.getByLabel('対象年', { exact: false }).selectOption(CURRENT_YEAR)
+    await page.getByRole('button', { name: '内容を確認する' }).click()
+    await expect(page.getByRole('button', { name: '月間表へ進む' })).toBeVisible()
+  }
+
+  async function approveColumnsAndSave(page: Page) {
+    await page.getByRole('checkbox', { name: 'この列の対応を確認しました' }).check()
+    await page.getByRole('button', { name: '月間表へ進む' }).click()
+    await page.getByRole('button', { name: 'この内容を保存する' }).click()
+    await expect(page.getByText('保存しました').first()).toBeVisible()
+  }
+
+  test('選んだファイルが空の状態と見分けられる', async ({ page }) => {
+    await page.goto('/golf/reservation-report-import')
+    await expect(page.getByText('まだ選んでいません。')).toBeVisible()
+
+    await page.locator('input[type="file"]').setInputFiles(REPORT)
+
+    await expect(page.getByText(REPORT.name)).toBeVisible()
+    await expect(page.getByText('まだ選んでいません。')).toBeHidden()
+    await expect(page.getByRole('button', { name: '別のファイルを選ぶ', exact: true })).toBeVisible()
+
+    // 取り消しは意図的な操作なので、未入力エラーではなく手つかずの状態へ戻る
+    await page.getByRole('button', { name: '選択を取り消す', exact: true }).click()
+    await expect(page.getByText('まだ選んでいません。')).toBeVisible()
+    await expect(page.getByText('表ファイルを選んでください。')).toBeHidden()
+  })
+
+  test('施設をコースに紐づけないまま保存できる', async ({ page }) => {
+    await chooseReport(page)
+
+    // 施設名はホール数の接尾と一緒に読み取られる
+    await expect(page.getByText('真駒内 36H')).toBeVisible()
+    await expect(page.getByText('滝の 27H')).toBeVisible()
+    await expect(page.getByText('羊ケ丘 18H')).toBeVisible()
+
+    // 名前の合うコースが無い施設は、勝手に作らずコース登録へ送る
+    await expect(
+      page.getByRole('button', { name: 'この名前でコースを登録' }).first(),
+    ).toBeVisible()
+
+    await approveColumnsAndSave(page)
+
+    await expect(page.getByText('未紐づけの施設も保存しました')).toBeVisible()
+
+    await expect(statValue(page, '日別の行数')).toHaveText('186')
+    await expect(statValue(page, '組数')).toHaveText(/^6,?314$/)
+    await expect(statValue(page, 'キャディ付きの組数')).toHaveText(/^2,?476$/)
+  })
+
+  test('同じ表をもう一度入れても行が増えない', async ({ page }) => {
+    await chooseReport(page)
+    await approveColumnsAndSave(page)
+
+    await chooseReport(page)
+    await approveColumnsAndSave(page)
+
+    // 施設・日付・時間帯が揃うので二重には積まれない。倍の 372 行になったら
+    // 冪等性が壊れている。
+    await expect(statValue(page, '新しく保存した行')).toHaveText('0')
+    await expect(statValue(page, '変更がなかった行')).toHaveText('186')
+    await expect(statValue(page, '日別の行数')).toHaveText('186')
   })
 })

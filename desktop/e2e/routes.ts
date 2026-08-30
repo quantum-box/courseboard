@@ -30,6 +30,23 @@ export function e2eApiUrl(): string | undefined {
   return e2eTarget() === 'prod' ? 'https://courseboard-api.txcloud.app' : undefined
 }
 
+/**
+ * playwright.config.ts 自身が起動したモックモードの Vite を相手にしているか。
+ *
+ * `E2E_TARGET=prod` 以外はすべてローカル扱いになるが、`E2E_BASE_URL` や
+ * `E2E_API_URL` で接続先を差し替えられていると、その先がモックである保証は
+ * どこにも無い。**読み取りだけのスイートと違い、書き込みを伴う検証は
+ * 差し替え先が実バックエンドだった場合に本物のデータを作ってしまう**ので、
+ * その判定にこれを使う。
+ */
+export function e2eManagedMockServer(): boolean {
+  if (e2eTarget() === 'prod') return false
+  // 差し替え先がモックであることを呼び出し側が知っている場合の逃げ道。
+  // :5173 が塞がっていて別ポートへモックモードの Vite を手で立てたときに使う。
+  if (process.env.E2E_MOCK_MODE === '1') return true
+  return !process.env.E2E_BASE_URL && !process.env.E2E_API_URL
+}
+
 export interface AppRoute {
   /** テナント無しのルートパス（router.ts の ROUTE_ROOTS により最後に使ったテナントへ解決される） */
   path: string
