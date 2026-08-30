@@ -87,6 +87,11 @@ export const appRoutes: AppRoute[] = [
   { path: 'settings', title: '設定' },
   { path: 'settings/advanced', title: 'システム連携の詳細' },
   { path: 'settings/members', title: 'メンバーと権限' },
+  { path: 'settings/membership-plans', title: '会員種別' },
+  { path: 'settings/membership-discounts', title: '会員割引' },
+  { path: 'settings/membership-play-windows', title: '会員のプレー可能日' },
+  { path: 'settings/customer-grades', title: '顧客グレード' },
+  { path: 'settings/caddie-duties', title: 'キャディの別業務' },
 ]
 
 export const NOT_FOUND_TITLE = '画面が見つかりません'

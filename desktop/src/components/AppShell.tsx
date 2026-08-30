@@ -83,6 +83,7 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '../auth/AuthProvider'
 import { formatTenantWorkspaceLabel, tenantWorkspaceLabel } from '../auth/tenant-label'
 import { useHiddenRoutes } from '../feature-flags/gated-routes'
+import { settingsMaster } from '../features/settings/masters'
 import { i18next, LOCALES, LOCALE_LABELS, currentLocale, setLocale } from '../i18n'
 import { PageReloadProvider, usePageReload } from '../lib/pageReload'
 import { navigate, navigateFromClick } from '../lib/router'
@@ -311,6 +312,8 @@ function isActive(route: string, itemRoute: string) {
 }
 
 export function routeTitle(route: string) {
+  const master = settingsMaster(route)
+  if (master) return i18next.t(master.titleKey)
   if (route === 'golf/reservation-products' || route.startsWith('golf/reservation-products/')) {
     return navLabel('golf/products')
   }
@@ -329,6 +332,8 @@ export function routeTitle(route: string) {
 }
 
 export function routeDescription(route: string) {
+  const master = settingsMaster(route)
+  if (master) return i18next.t(master.descriptionKey)
   if (route === 'golf/reservation-products' || route.startsWith('golf/reservation-products/')) {
     return navDescription('golf/products')
   }
@@ -344,6 +349,7 @@ export function routeDescription(route: string) {
 export function isKnownAppRoute(route: string) {
   if (route === 'golf/reservation-products' || route.startsWith('golf/reservation-products/')) return true
   if (route === 'settings' || route === 'settings/advanced') return true
+  if (settingsMaster(route)) return true
   if (route === 'golf/customers/reception' || route.startsWith('golf/customers/')) return true
   return settingsNavigation.some(item => isActive(route, item.route))
     || allNavigation.some(item => isActive(route, item.route))

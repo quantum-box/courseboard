@@ -26,6 +26,11 @@ import { ShiftBoardPage } from './features/golf/ShiftBoardPage'
 import { LedgerPage } from './features/golf/ledger/LedgerPage'
 import { ReservationReportImportPage } from './features/golf/reservation-report-import/ReservationReportImportPage'
 import { TimelinePage } from './features/golf/timeline/TimelinePage'
+import { CaddieDutiesPage } from './features/settings/CaddieDutiesPage'
+import { CustomerGradesPage } from './features/settings/CustomerGradesPage'
+import { MembershipDiscountsPage } from './features/settings/MembershipDiscountsPage'
+import { MembershipPlansPage } from './features/settings/MembershipPlansPage'
+import { MembershipPlayWindowsPage } from './features/settings/MembershipPlayWindowsPage'
 import { SettingsAdvancedPage } from './features/settings/SettingsAdvancedPage'
 import { CustomerDetailPage } from './features/golf/customers/CustomerDetailPage'
 import { CustomersPage } from './features/golf/customers/CustomersPage'
@@ -170,6 +175,11 @@ function RouteContent({ route }: { route: string }) {
   if (route === 'settings') return <SettingsPage />
   if (route === 'settings/advanced') return <SettingsAdvancedPage />
   if (route === 'settings/members') return <MembersPage />
+  if (route === 'settings/membership-plans') return <MembershipPlansPage />
+  if (route === 'settings/membership-discounts') return <MembershipDiscountsPage />
+  if (route === 'settings/membership-play-windows') return <MembershipPlayWindowsPage />
+  if (route === 'settings/customer-grades') return <CustomerGradesPage />
+  if (route === 'settings/caddie-duties') return <CaddieDutiesPage />
   return <NotFoundPage />
 }
 
