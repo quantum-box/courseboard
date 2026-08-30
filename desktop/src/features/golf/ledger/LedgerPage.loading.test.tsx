@@ -1,14 +1,21 @@
 /* @vitest-environment jsdom */
 
 import { TooltipProvider } from '@tachyon-sdk/native-ui'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearResourceCache } from '../../../hooks/useResource'
 import { i18next } from '../../../i18n'
-import { PageReloadProvider } from '../../../lib/pageReload'
+import { today } from '../../../lib/clock'
+import { addDays } from '../bookingHorizon'
+import { PageReloadProvider, usePageReload } from '../../../lib/pageReload'
 import { LedgerPage } from './LedgerPage'
 import type { TeeLedgerResponse } from './models'
+
+// The page defaults to today's date on the tenant's clock (no date is fixed
+// via the URL in this test), so the expected query params follow suit rather
+// than a hard-coded day.
+const todayDate = today()
 
 const api = vi.hoisted(() => ({ json: vi.fn() }))
 
@@ -19,7 +26,7 @@ vi.mock('../../../api', async importOriginal => {
 
 vi.mock('../../../lib/toast', () => ({ showToast: vi.fn() }))
 
-const ledgerBody: TeeLedgerResponse = {
+let ledgerBody: TeeLedgerResponse = {
   date: '2026-07-20',
   timezone: 'Asia/Tokyo',
   columns: [
@@ -51,10 +58,53 @@ const ledgerBody: TeeLedgerResponse = {
 
 /** Held open so the page can be inspected while the day is still on the way. */
 let releaseLedger: (() => void) | null = null
+let generatedThrough: string | null = null
+let supplyFailure = false
+let supplyGetCount = 0
+let triggerReload: (() => false | Promise<void>) | null = null
 
-beforeEach(() => {
+function ReloadBridge() {
+  triggerReload = usePageReload().triggerPageReload
+  return null
+}
+
+beforeEach(async () => {
+  await i18next.changeLanguage('ja')
   clearResourceCache()
   releaseLedger = null
+  generatedThrough = null
+  supplyFailure = false
+  supplyGetCount = 0
+  triggerReload = null
+  ledgerBody = {
+    date: '2026-07-20',
+    timezone: 'Asia/Tokyo',
+    columns: [
+      {
+        golfCourseId: 'course-east',
+        courseName: '東コース',
+        gridSource: 'inventory',
+        groupCount: 0,
+        playerCount: 0,
+        selfGroupCount: 0,
+        caddieGroupCount: 0,
+        openSlotCount: 1,
+        slots: [
+          {
+            teeTime: '07:00',
+            capacity: 2,
+            availableGroups: 2,
+            bookedGroups: 0,
+            playerCount: 0,
+            isActive: true,
+            isSellable: true,
+            items: [],
+          },
+        ],
+      },
+    ],
+    unavailable: [],
+  }
   api.json.mockImplementation((path: string) => {
     if (path.startsWith('/v1/course/tee-ledger')) {
       return new Promise(resolve => {
@@ -68,7 +118,37 @@ beforeEach(() => {
       return Promise.resolve({ golfCourseIds: ['course-east'] })
     }
     if (path.startsWith('/v1/course/reservation-products')) return Promise.resolve({ items: [] })
+    if (path.startsWith('/v1/course/booking-horizon')) {
+      return Promise.resolve({
+        bookableThrough: '2027-02-19',
+        generatedThrough: { 'course-east': generatedThrough },
+      })
+    }
+    if (path.startsWith('/v1/course/caddie-course-supply')) {
+      supplyGetCount += 1
+      return supplyFailure
+        ? Promise.reject(new Error('provider_error'))
+        : Promise.resolve({
+            date: todayDate,
+            courses: [{
+              golfCourseId: 'course-east',
+              courseName: '東コース',
+              workingCaddies: 1,
+              roundsCapacity: 1,
+              caddieAttachedGroups: 2,
+              movableCaddies: 1,
+              shortfall: -1,
+              effectiveRoundsCapacity: 1,
+              effectiveCaddieAttachedGroups: 1,
+              effectiveShortfall: 0,
+              unbackedAssignedGroups: 1,
+            }],
+            unplacedCaddies: 0,
+          })
+    }
     if (path.startsWith('/v1/course/extension-status')) return Promise.resolve(null)
+    if (path.startsWith('/v1/course/caddie-assignments')) return Promise.resolve({ items: [] })
+    if (path.startsWith('/v1/course/caddie-shifts')) return Promise.resolve({ items: [] })
     throw new Error(`unexpected request: ${path}`)
   })
 })
@@ -83,6 +163,7 @@ function renderPage() {
     <I18nextProvider i18n={i18next}>
       <TooltipProvider>
         <PageReloadProvider>
+          <ReloadBridge />
           <LedgerPage />
         </PageReloadProvider>
       </TooltipProvider>
@@ -119,5 +200,120 @@ describe('LedgerPage while the day is still loading', () => {
     })
     expect(screen.getByRole('region', { name: '東コース' })).toBeTruthy()
     expect(screen.getByText('07:00')).toBeTruthy()
+  })
+
+  it("requests the day's caddie assignments and confirmed shifts for a matching from/to range", async () => {
+    // useResource swallows a thrown assertion into its own `error` state, so
+    // asserting inside the mock (as this test used to) never fails the test
+    // even if the fetch it is supposed to check is deleted entirely. The
+    // check has to run against the mock's call log, outside the loader.
+    renderPage()
+    releaseLedger?.()
+
+    await waitFor(() => {
+      expect(
+        api.json.mock.calls.some(
+          call => typeof call[0] === 'string' && call[0].startsWith('/v1/course/caddie-assignments'),
+        ),
+      ).toBe(true)
+      expect(
+        api.json.mock.calls.some(
+          call => typeof call[0] === 'string' && call[0].startsWith('/v1/course/caddie-shifts'),
+        ),
+      ).toBe(true)
+    })
+
+    const assignmentsPath = api.json.mock.calls
+      .map(call => call[0])
+      .find((path): path is string => typeof path === 'string' && path.startsWith('/v1/course/caddie-assignments'))
+    const shiftsPath = api.json.mock.calls
+      .map(call => call[0])
+      .find((path): path is string => typeof path === 'string' && path.startsWith('/v1/course/caddie-shifts'))
+
+    // The assignment window is widened a day each way: the provider filters by
+    // UTC calendar day, so a morning round east of UTC lands on the previous
+    // UTC date and an exact-day query would miss it (SCC-31).
+    expect(assignmentsPath).toContain(`from=${addDays(todayDate, -1)}`)
+    expect(assignmentsPath).toContain(`to=${addDays(todayDate, 1)}`)
+    expect(shiftsPath).toContain(`from=${todayDate}`)
+    expect(shiftsPath).toContain(`to=${todayDate}`)
+  })
+
+  it('warns when weekly hours exist but the course has no generated inventory', async () => {
+    ledgerBody = {
+      ...ledgerBody,
+      columns: ledgerBody.columns.map(column => ({
+        ...column,
+        gridSource: 'schedule',
+        openSlotCount: 0,
+        slots: column.slots.map(slot => ({
+          ...slot,
+          capacity: null,
+          availableGroups: null,
+          isSellable: false,
+        })),
+      })),
+    }
+    renderPage()
+    releaseLedger?.()
+
+    expect(await screen.findByText(
+      '東コースは2027年2月19日まで受ける設定ですが、スタート枠はまだ作られていません。',
+    )).toBeTruthy()
+  })
+
+  it('warns when generated inventory stops before the configured edge', async () => {
+    generatedThrough = '2027-02-01'
+    renderPage()
+    releaseLedger?.()
+
+    expect(await screen.findByText(
+      '東コースは2027年2月19日まで受ける設定ですが、スタート枠は2027年2月1日までしか作られていません。',
+    )).toBeTruthy()
+  })
+})
+
+describe('LedgerPage caddie supply failures', () => {
+  beforeEach(async () => {
+    await i18next.changeLanguage('ja')
+  })
+
+  it('shows retry and no caddie numbers when supply fails initially', async () => {
+    supplyFailure = true
+    renderPage()
+    releaseLedger?.()
+
+    await waitFor(() => expect(
+      screen.getByRole('button', { name: i18next.t('common:action.retry') }),
+    ).toBeTruthy())
+    expect(screen.queryByText(/キャディ 1\/1/)).toBeNull()
+    expect(screen.queryByText(
+      i18next.t('ledger:caddieSupply.unbackedAssignedGroups', { n: '1' }),
+    )).toBeNull()
+  })
+
+  it('hides stale numbers and anomalies after a refresh fails', async () => {
+    renderPage()
+    releaseLedger?.()
+
+    await waitFor(() => expect(screen.getByText(/キャディ 1\/1/)).toBeTruthy())
+    expect(screen.getByText(
+      i18next.t('ledger:caddieSupply.unbackedAssignedGroups', { n: '1' }),
+    )).toBeTruthy()
+
+    supplyFailure = true
+    act(() => {
+      void triggerReload?.()
+    })
+
+    await waitFor(() => expect(screen.getByRole(
+      'button',
+      { name: i18next.t('common:action.retry') },
+    )).toBeTruthy())
+    expect(supplyGetCount).toBeGreaterThanOrEqual(2)
+    expect(screen.queryByText(/キャディ 1\/1/)).toBeNull()
+    expect(screen.queryByText(
+      i18next.t('ledger:caddieSupply.unbackedAssignedGroups', { n: '1' }),
+    )).toBeNull()
   })
 })

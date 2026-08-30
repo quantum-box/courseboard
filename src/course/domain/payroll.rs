@@ -173,7 +173,7 @@ feeOverridden,assignedRounds,feeTotal,currency,workedMinutes,shiftedMinutes,open
 roundsWithoutClockIn";
 
 /// A field as CSV: quoted only when it would otherwise break the row.
-fn csv_field(value: &str) -> String {
+pub(super) fn csv_field(value: &str) -> String {
     if value.contains([',', '"', '\n', '\r']) {
         format!("\"{}\"", value.replace('"', "\"\""))
     } else {

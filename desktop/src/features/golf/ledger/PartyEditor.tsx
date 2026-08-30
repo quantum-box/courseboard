@@ -16,6 +16,7 @@ import type { PartyDetails, PartyPlayer } from './models'
 import { resizeReservationPlayerRows } from './newReservationPlayers'
 import { PlanPicker } from './PlanPicker'
 import { PlayerTagInput } from './PlayerTagInput'
+import { ReservationCheckins } from './ReservationCheckins'
 
 /** A row being edited. Blank rows are dropped on save rather than refused. */
 type DraftPlayer = {
@@ -394,6 +395,14 @@ export function PartyEditor({
             {t('ledger:party.addPlayer')}
           </Button>
         </section>
+
+        {/* Below the roster it reads from, and above the save buttons: the desk
+            checks a group in against the names it has just confirmed. */}
+        <ReservationCheckins
+          reservationId={reservation.id}
+          players={reservation.party?.players ?? []}
+          dirty={dirty}
+        />
 
         <div className="ledger-party-actions">
           <Button type="button" variant="ghost" onClick={requestClose} disabled={saving}>

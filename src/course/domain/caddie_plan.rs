@@ -20,7 +20,7 @@ use chrono_tz::Tz;
 
 use super::{
     rank_caddies, AttendanceState, AutoAssignPlanItem, AutoAssignResult, AutoAssignSkippedItem,
-    AvailabilityStatus, CaddieSkillLevel, CourseId, RankingCandidate, RankingOptions,
+    AvailabilityStatus, CaddieShift, CaddieSkillLevel, CourseId, RankingCandidate, RankingOptions,
     ReservationId,
 };
 
@@ -32,7 +32,8 @@ const DEFAULT_ROUND_MINUTES: i64 = 270;
 
 /// Local noon, as minutes from midnight: the line a morning-only or
 /// afternoon-only shift request is read against.
-const MIDDAY_MINUTES: i64 = 12 * 60;
+/// Local noon, the line half-day requests and duty windows are read against.
+pub(crate) const MIDDAY_MINUTES: i64 = 12 * 60;
 
 /// Reasons this module adds to the ranker's vocabulary.
 ///
@@ -64,6 +65,15 @@ pub enum CaddiePlacement {
 }
 
 impl CaddiePlacement {
+    /// Stable wire token for operator-facing DTOs.
+    pub fn status(&self) -> &'static str {
+        match self {
+            Self::Unconfirmed => "unconfirmed",
+            Self::Unplaced => "unplaced",
+            Self::On(_) => "on_course",
+        }
+    }
+
     /// Whether this caddie may take a round on `course_id`.
     pub fn covers(&self, course_id: Option<&CourseId>) -> bool {
         match (self, course_id) {
@@ -73,6 +83,18 @@ impl CaddiePlacement {
             (Self::On(_), None) => true,
             _ => true,
         }
+    }
+}
+
+/// Resolve the confirmed shift state used by recommendation and auto-assign
+/// responses. An absent shift is deliberately different from an unplaced one.
+pub fn placement_for_shift(shift: Option<&CaddieShift>) -> CaddiePlacement {
+    match shift {
+        Some(shift) => match shift.course_id() {
+            Some(course_id) => CaddiePlacement::On(course_id.clone()),
+            None => CaddiePlacement::Unplaced,
+        },
+        None => CaddiePlacement::Unconfirmed,
     }
 }
 
@@ -291,16 +313,18 @@ pub fn plan_caddie_assignments(
         else {
             continue;
         };
+        let placement = pool[index].placement.clone();
         let caddie = &mut pool[index];
         caddie.rounds_assigned_today += 1;
         caddie.busy.push((round.starts_at, round.ends_at()));
 
-        assigned.push(AutoAssignPlanItem::reconstitute(
+        assigned.push(AutoAssignPlanItem::reconstitute_with_placement(
             round.reservation_id.clone(),
             round.starts_at,
             pick.caddie_id,
             pick.display_name,
             pick.reasons,
+            placement,
         ));
     }
 
@@ -532,6 +556,10 @@ mod course_tests {
 
         assert_eq!(result.assigned().len(), 1);
         assert_eq!(result.assigned()[0].caddie_id().as_str(), "on-out");
+        assert_eq!(
+            result.assigned()[0].placement(),
+            &CaddiePlacement::On(CourseId::new("out"))
+        );
     }
 
     #[test]
@@ -558,6 +586,10 @@ mod course_tests {
         );
 
         assert_eq!(result.assigned().len(), 1);
+        assert_eq!(
+            result.assigned()[0].placement(),
+            &CaddiePlacement::Unconfirmed
+        );
     }
 
     #[test]
@@ -569,5 +601,6 @@ mod course_tests {
         );
 
         assert_eq!(result.assigned().len(), 1);
+        assert_eq!(result.assigned()[0].placement(), &CaddiePlacement::Unplaced);
     }
 }

@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useId, useMemo, useReducer } from 'react'
+import { Button, Popover, PopoverContent, PopoverTrigger } from '@tachyon-sdk/native-ui'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useCallback, useEffect, useId, useMemo, useReducer, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   initialYearMonthState,
   normalizeYearMonth,
+  shiftYearMonth,
   yearMonthReducer,
   type YearMonthError,
 } from '../lib/yearMonth'
@@ -56,15 +59,19 @@ export function YearMonthPicker({
   error,
   onChange,
   className = '',
+  hideLabel = false,
 }: {
   label: string
   value: string
   error: YearMonthError | null
   onChange: (candidate: string) => void
   className?: string
+  /** Screens that already name the month in their panel header. */
+  hideLabel?: boolean
 }) {
   const { t } = useTranslation('common')
   const errorId = useId()
+  const [open, setOpen] = useState(false)
   const safeValue = normalizeYearMonth(value) ?? '1970-01'
   const [year, month] = safeValue.split('-')
   const selectedYear = Number(year)
@@ -74,39 +81,103 @@ export function YearMonthPicker({
     return Array.from({ length: last - first + 1 }, (_, index) => first + index)
   }, [selectedYear])
 
+  // One control everywhere. The arrows are what the desk reaches for — next
+  // month, last month — and they used to exist on only one of the five screens.
+  // The dropdowns are for the jump nobody wants to click twelve times, so they
+  // sit behind the label rather than beside it.
+  // `className` is the caller's layout for the field, not for the control: the
+  // screens pass `sm:w-56` / `sm:w-64` to size the labelled block. The control
+  // itself is content-width, which takes two things — `.field` is a grid, so a
+  // child stretches across the column unless told not to (and `inline-flex`
+  // would be blockified back to `flex` there anyway), and `w-fit` covers the
+  // callers that place it outside a field. Without both, the box ran to the
+  // full 256px and left a gap after the forward arrow.
+  const control = (
+    <div
+      className="flex w-fit justify-self-start items-center gap-1 rounded-md border border-border bg-background p-1"
+      role="group"
+      aria-label={label}
+      aria-describedby={error ? errorId : undefined}
+    >
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="min-h-9 min-w-9"
+        aria-label={t('time.prevMonth')}
+        onClick={() => onChange(shiftYearMonth(safeValue, -1))}
+      >
+        <ChevronLeft />
+      </Button>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            className="min-h-9 min-w-24 text-sm font-medium"
+            aria-label={`${label}・${t('time.pickMonth')}`}
+          >
+            {t('time.yearMonth', { year, month: String(Number(month)) })}
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="center" className="w-auto">
+          {/* `.native-select` is `width: 100%`, so the size has to come from
+              the box around it — a utility class on the select itself loses.
+              Without this the year read `202`. */}
+          <div className="flex items-center gap-2">
+            <span className="block w-24">
+              <NativeSelect
+                value={year}
+                aria-label={`${label}・${t('time.year')}`}
+                onChange={event => onChange(`${event.target.value}-${month}`)}
+              >
+                {years.map(option => <option key={option} value={option}>{option}</option>)}
+              </NativeSelect>
+            </span>
+            <span className="text-sm text-muted-foreground">{t('time.year')}</span>
+            <span className="block w-20">
+              <NativeSelect
+                value={month}
+                aria-label={`${label}・${t('time.month')}`}
+                onChange={event => onChange(`${year}-${event.target.value}`)}
+              >
+                {Array.from({ length: 12 }, (_, index) => {
+                  const option = String(index + 1).padStart(2, '0')
+                  return <option key={option} value={option}>{index + 1}</option>
+                })}
+              </NativeSelect>
+            </span>
+            <span className="text-sm text-muted-foreground">{t('time.month')}</span>
+          </div>
+        </PopoverContent>
+      </Popover>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="min-h-9 min-w-9"
+        aria-label={t('time.nextMonth')}
+        onClick={() => onChange(shiftYearMonth(safeValue, 1))}
+      >
+        <ChevronRight />
+      </Button>
+    </div>
+  )
+
+  const message = error ? (
+    <p id={errorId} role="alert" className="mt-1 text-xs text-destructive">
+      {t('error.yearMonthInvalid')}
+    </p>
+  ) : null
+
+  if (hideLabel) {
+    return <div className={className}>{control}{message}</div>
+  }
+
   return (
     <Field requirement="none" label={label} className={className}>
-      <div
-        className="flex items-center gap-2"
-        role="group"
-        aria-label={label}
-        aria-describedby={error ? errorId : undefined}
-      >
-        <NativeSelect
-          value={year}
-          aria-label={`${label}・${t('time.year')}`}
-          onChange={event => onChange(`${event.target.value}-${month}`)}
-        >
-          {years.map(option => <option key={option} value={option}>{option}</option>)}
-        </NativeSelect>
-        <span className="text-sm text-muted-foreground">{t('time.year')}</span>
-        <NativeSelect
-          value={month}
-          aria-label={`${label}・${t('time.month')}`}
-          onChange={event => onChange(`${year}-${event.target.value}`)}
-        >
-          {Array.from({ length: 12 }, (_, index) => {
-            const option = String(index + 1).padStart(2, '0')
-            return <option key={option} value={option}>{index + 1}</option>
-          })}
-        </NativeSelect>
-        <span className="text-sm text-muted-foreground">{t('time.month')}</span>
-      </div>
-      {error ? (
-        <p id={errorId} role="alert" className="mt-1 text-xs text-destructive">
-          {t('error.yearMonthInvalid')}
-        </p>
-      ) : null}
+      {control}
+      {message}
     </Field>
   )
 }

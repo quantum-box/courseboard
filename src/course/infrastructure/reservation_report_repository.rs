@@ -6,9 +6,9 @@
 //! not enough: it is history, not a setting, and two stores answering the same
 //! date cannot be reconciled by a reader. The [`MigratingReservationReportGateway`]
 //! therefore seeds this table from the legacy config copy exactly once — on
-//! the first import, or proactively via `courseboard-migrate-reservation-reports`
-//! — and reads fall back to the legacy copy only while a tenant has no rows
-//! here at all.
+//! the first import, or proactively via
+//! `POST /v1/course/reservation-report-migration` — and reads fall back to the
+//! legacy copy only while a tenant has no rows here at all.
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -21,7 +21,8 @@ use super::reservation_report_gateway::FieldReservationReportGateway;
 use crate::course::domain::{
     Course, CourseError, CourseId, ExternalReservationReportEntry, GatewayCredentials,
     ReservationReportAnalyzeGateway, ReservationReportDayPart, ReservationReportEntryQuery,
-    ReservationReportGateway, ReservationReportUpsertSummary, TabularAnalyzeResult,
+    ReservationReportGateway, ReservationReportMigrationGateway, ReservationReportUpsertSummary,
+    TabularAnalyzeResult,
 };
 
 const UNLINKED_BUCKET_PREFIX: &str = "unlinked:";
@@ -385,18 +386,36 @@ impl MigratingReservationReportGateway {
             legacy,
         }
     }
+}
 
-    pub fn local(&self) -> &MySqlReservationReportRepository {
-        &self.local
+const UNBOUNDED: ReservationReportEntryQuery = ReservationReportEntryQuery {
+    from: None,
+    to: None,
+};
+
+#[async_trait]
+impl ReservationReportMigrationGateway for MigratingReservationReportGateway {
+    async fn list_legacy_entries(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        courses: &[Course],
+    ) -> Result<Vec<ExternalReservationReportEntry>, CourseError> {
+        self.legacy
+            .list_entries(credentials, courses, UNBOUNDED)
+            .await
     }
 
-    pub fn legacy(&self) -> &FieldReservationReportGateway {
-        &self.legacy
+    async fn list_local_entries(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        courses: &[Course],
+    ) -> Result<Vec<ExternalReservationReportEntry>, CourseError> {
+        self.local
+            .list(credentials.operator_id, courses, UNBOUNDED)
+            .await
     }
 
-    /// Copy the whole legacy history in if this tenant has never been seeded.
-    /// Returns how many rows were copied (0 when already seeded or empty).
-    pub async fn seed_from_legacy_if_unseeded(
+    async fn seed_from_legacy_if_unseeded(
         &self,
         credentials: GatewayCredentials<'_>,
         courses: &[Course],
@@ -404,23 +423,20 @@ impl MigratingReservationReportGateway {
         if self.local.has_rows(credentials.operator_id).await? {
             return Ok(0);
         }
-        let legacy_entries = self
-            .legacy
-            .list_entries(
-                credentials,
-                courses,
-                ReservationReportEntryQuery {
-                    from: None,
-                    to: None,
-                },
-            )
-            .await?;
+        let legacy_entries = self.list_legacy_entries(credentials, courses).await?;
         if legacy_entries.is_empty() {
             return Ok(0);
         }
         self.local
             .seed(credentials.operator_id, &legacy_entries)
             .await
+    }
+
+    async fn delete_legacy_config_key(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<bool, CourseError> {
+        self.legacy.delete_report_config_key(credentials).await
     }
 }
 
@@ -435,7 +451,7 @@ impl ReservationReportGateway for MigratingReservationReportGateway {
         // Seeding before the first write makes the switch atomic per tenant:
         // without it, the first local import would make the fallback stop and
         // every older half-day would vanish from the board.
-        self.seed_from_legacy_if_unseeded(credentials, courses)
+        ReservationReportMigrationGateway::seed_from_legacy_if_unseeded(self, credentials, courses)
             .await?;
         self.local
             .upsert(credentials.operator_id, entries, courses)

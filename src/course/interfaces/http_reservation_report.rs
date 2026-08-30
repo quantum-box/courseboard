@@ -15,8 +15,8 @@ use super::http::{bearer_authorization, catalog_gateway, operator_id};
 use crate::course::domain::{ExternalReservationReportEntry, GatewayCredentials};
 use crate::course::usecase::{
     normalized_reservation_report_fingerprint, ImportReservationReportUseCase,
-    ListReservationReportEntriesUseCase, PreviewReservationReportUseCase,
-    ReservationReportCourseMapping, ReservationReportPreview,
+    ListReservationReportEntriesUseCase, MigrateReservationReportsUseCase,
+    PreviewReservationReportUseCase, ReservationReportCourseMapping, ReservationReportPreview,
 };
 use crate::{AppError, AppState};
 
@@ -176,6 +176,33 @@ fn preview_response(preview: ReservationReportPreview) -> ReservationReportPrevi
             .collect(),
         analysis: preview.tabular_analysis().map(analysis_response),
     }
+}
+
+/// Body of the one-shot migration. Absent or `{}` means seed and verify only,
+/// which is the safe default: nothing that cannot be re-run.
+#[derive(Debug, Default, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", default)]
+pub struct ReservationReportMigrationRequest {
+    /// Remove `courseBoardReservationReport` from the tenant config, but only
+    /// after every legacy row is verified readable from CourseBoard's table.
+    pub delete_config_key: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReservationReportMigrationResponse {
+    /// Rows the legacy config still held when this ran.
+    pub legacy_row_count: usize,
+    /// Rows readable from CourseBoard's table afterwards. Legitimately larger
+    /// than the legacy count once imports have landed since the seed.
+    pub local_row_count: usize,
+    /// Rows copied in by this run; 0 when the tenant was already seeded.
+    pub seeded_count: usize,
+    /// Legacy rows not readable locally. The row identities are in the logs.
+    pub missing_row_count: usize,
+    pub verified: bool,
+    /// `false` also covers "already absent" and "deletion was not requested".
+    pub config_key_deleted: bool,
 }
 
 fn reservation_report_credentials<'a>(
@@ -512,6 +539,59 @@ pub async fn list_reservation_report_entries(
         .map_err(AppError::from)?;
     Ok(Json(ReservationReportEntriesResponse {
         items: entries.iter().map(entry_response).collect(),
+    }))
+}
+
+/// POST /v1/course/reservation-report-migration
+///
+/// The one-shot exit from the legacy extension-config copy (ADR-0009). This is
+/// a route rather than only the `courseboard-migrate-reservation-reports`
+/// command because the command cannot reach production: the database is
+/// PrivateLink-only and the migration binary is not in the Lambda package.
+#[utoipa::path(
+    post,
+    path = "/v1/course/reservation-report-migration",
+    tag = "course",
+    request_body = ReservationReportMigrationRequest,
+    responses(
+        (status = 200, description = "Seeded and verified; the legacy key was deleted only if asked", body = ReservationReportMigrationResponse),
+        (status = 401, description = "Unauthorized", body = super::openapi::ErrorBody),
+        (status = 409, description = "Deletion was asked for but the verification failed", body = super::openapi::ErrorBody),
+        (status = 424, description = "Course catalog or extension config provider error", body = super::openapi::ErrorBody)
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn migrate_reservation_reports(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    body: Option<Json<ReservationReportMigrationRequest>>,
+) -> Result<Json<ReservationReportMigrationResponse>, AppError> {
+    super::http::bearer_authorization(&headers)?;
+    let credentials = reservation_report_credentials(state.course_authorizer(), &headers)?;
+    let delete_config_key = body.is_some_and(|Json(body)| body.delete_config_key);
+    let use_case = MigrateReservationReportsUseCase::new(
+        state.reservation_report_gateway(),
+        catalog_gateway(&state),
+    );
+    let outcome = use_case
+        .execute(credentials, delete_config_key)
+        .await
+        .map_err(AppError::from)?;
+    // A failed verification is the report when nothing destructive was asked
+    // for, but an explicit deletion that got refused must not read as success.
+    if delete_config_key && !outcome.verified() {
+        return Err(AppError::Conflict(
+            "some legacy rows are not readable from CourseBoard's table; \
+             the legacy config key was not touched",
+        ));
+    }
+    Ok(Json(ReservationReportMigrationResponse {
+        legacy_row_count: outcome.legacy_row_count,
+        local_row_count: outcome.local_row_count,
+        seeded_count: outcome.seeded_count,
+        missing_row_count: outcome.missing_row_count,
+        verified: outcome.verified(),
+        config_key_deleted: outcome.config_key_deleted,
     }))
 }
 

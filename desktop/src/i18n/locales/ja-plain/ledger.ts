@@ -28,6 +28,11 @@ export const ledger = {
     caddieOver: '{{n}} 組 おおい',
     caddieHint: 'しゅっきん {{caddies}}人で {{capacity}}組まで うけられます。いま {{booked}}組。',
   },
+  caddieSupply: {
+    unbackedAssignedGroups: 'その日のシフトがまだ決まっていない組 {{n}}組',
+    capacityExceededAssignedGroups: 'シフトの人数では足りない組 {{n}}組',
+    courseMismatchAssignedGroups: 'シフトのコースと予約のコースがちがう組 {{n}}組',
+  },
   order: {
     moveLeft: '{{name}}を ひだりへ',
     moveRight: '{{name}}を みぎへ',
@@ -62,6 +67,7 @@ export const ledger = {
     closed: 'うりどめ',
     special: 'とくべつな りょうきん',
     retired: 'スタート枠が ありません',
+    unassignedCaddie: '未割り当て',
   },
   legend: {
     label: '色の いみ',
@@ -81,6 +87,11 @@ export const ledger = {
   partial: {
     title: 'いちぶの じょうほうが とれていません',
     description: '台帳は 出ていますが、あきの数や うりどめなど いちぶは 出せていません。',
+  },
+  inventoryGap: {
+    title: '予約を受ける日と、スタート枠の日が合っていません',
+    missing: '{{course}}は{{date}}まで予約を受ける決まりですが、スタート枠はまだありません。',
+    behind: '{{course}}は{{date}}まで予約を受ける決まりですが、スタート枠は{{generatedThrough}}までしかありません。',
   },
   marks: {
     title: '枠の せってい',
@@ -128,6 +139,11 @@ export const ledger = {
     exit: 'もとに もどす',
   },
   newReservation: {
+    memberWindowTitle: '会員がプレーできる日から外れています',
+    warning: {
+      member_play_window_day: 'この会員は、この曜日はプレーできません。予約はほぞんしました。',
+      member_play_window_time: 'この会員は、この時間はプレーできません。予約はほぞんしました。',
+    },
     title: '予約を 入れる',
     description: '{{course}} の {{time}} に 予約を 入れます。',
     open: 'この 枠に 予約を 入れる',
@@ -153,12 +169,6 @@ export const ledger = {
     save: '予約を 入れる',
     saving: '入れて います…',
     saved: '予約を 入れました',
-    caddieSoldOut: 'キャディが いっぱいです',
-    caddieSoldOutTitle: 'きょうの キャディは いっぱいです',
-    caddieSoldOutBody:
-      '{{course}} の きょうの キャディは、うけられる くみすうに たっしています。'
-      + 'セルフの しょうひんが あれば えらべます。キャディつきで うけたい ときは、'
-      + 'シフトひょうで キャディを ふやして ください。',
     noPlanTitle: 'プレーの しょうひんが ありません',
     noPlanBody:
       '{{course}} で 売れる プレーの しょうひんが まだ ありません。しょうひんを 作ってから 予約を 入れてください。',
@@ -187,6 +197,13 @@ export const ledger = {
     grantMembership: '会員に する',
     changeMembership: '会員の しゅるいを かえる',
     choosePlan: '会員の しゅるいを えらぶ',
+    memberNumberAdd: '会員のばんごうを入れる',
+    memberNumberValue: '会員のばんごう {{number}}',
+    memberNumberPlaceholder: 'れい: A-1024',
+    memberNumberSave: 'ほぞん',
+    memberNumberCancel: 'やめる',
+    memberNumberSaved: 'ほぞんしました',
+    memberNumberFailed: 'ほぞんできませんでした',
     membershipGranted: '会員の しゅるいを のせました',
     membershipGrantFailed: '会員の しゅるいを のせられませんでした',
     searching: 'お客さま台帳を さがして います…',
@@ -197,6 +214,18 @@ export const ledger = {
     registered: 'お客さま台帳に のせました',
     registerFailed: 'お客さま台帳に のせられませんでした',
     linkedPlayers: '名前を 入れた {{named}} 人の うち {{linked}} 人が お客さま台帳に のって います。',
+  },
+  checkin: {
+    title: '受付',
+    noNames: '組の名前を入れると、ここで受付ができます。',
+    unsaved: '先に上の変更を保存してください。受付は保存された名前に記録します。',
+    unlinked: '（台帳の顧客がえらばれていません）',
+    at: '{{time}} 受付',
+    allDone: 'この組はぜんいん受付がすんでいます。',
+    submit: '受付する（{{count}}人）',
+    saving: '受付しています…',
+    saved: '受付を記録しました',
+    failed: '受付を記録できませんでした',
   },
   party: {
     title: 'よやくの なかみ',

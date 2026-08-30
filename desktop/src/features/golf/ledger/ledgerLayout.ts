@@ -1,6 +1,7 @@
 import { i18next } from '../../../i18n'
 
-import type { CourseCaddieSupply } from '../caddieCourseSupply'
+import { effectiveSupply, type CourseCaddieSupply } from '../caddieCourseSupply'
+import { unassignedCaddieRounds, type CoverageAssignment } from '../caddieRoundCoverage'
 import type { TeeReservation } from '../timeline/models'
 import type { LedgerColumn, LedgerSlot, SlotGridSource } from './models'
 
@@ -276,31 +277,94 @@ export function knowsCaddieCapacity(
   supply: CourseCaddieSupply | null | undefined,
 ): supply is CourseCaddieSupply {
   if (!supply) return false
-  return supply.roundsCapacity > 0 || supply.caddieAttachedGroups > 0
+  const effective = effectiveSupply(supply)
+  return effective.roundsCapacity > 0 || effective.caddieAttachedGroups > 0
+}
+
+export type CaddieSupplyAnomalyKey =
+  | 'unbackedAssignedGroups'
+  | 'capacityExceededAssignedGroups'
+  | 'courseMismatchAssignedGroups'
+
+export type CaddieSupplyAnomaly = {
+  key: CaddieSupplyAnomalyKey
+  count: number
+}
+
+/** Return only additive anomaly counts that need to stay visible in the header. */
+export function caddieSupplyAnomalies(
+  supply: CourseCaddieSupply | null | undefined,
+): CaddieSupplyAnomaly[] {
+  if (!supply) return []
+  const entries: [CaddieSupplyAnomalyKey, number | undefined][] = [
+    ['unbackedAssignedGroups', supply.unbackedAssignedGroups],
+    ['capacityExceededAssignedGroups', supply.capacityExceededAssignedGroups],
+    ['courseMismatchAssignedGroups', supply.courseMismatchAssignedGroups],
+  ]
+  return entries.flatMap(([key, count]) =>
+    typeof count === 'number' && count !== 0 ? [{ key, count }] : [],
+  )
 }
 
 /**
- * Whether this course has run out of caddie rounds for the day.
+ * A `useResource` read, told apart from a value that was actually loaded.
  *
- * Only a course whose caddie capacity is known can refuse one. A month nobody
- * has confirmed leaves every course at zero, and a lookup that never landed
- * leaves the course absent from the map — neither is the club saying it has no
- * caddies. Both keep the caddie plans selectable: a desk that cannot sell a
- * caddie round because an upstream call failed is worse off than one that
- * oversells by a group and sorts it out with the caddie master.
+ * `data: T | null` collapses "still loading" and "failed" into the same shape
+ * as "loaded nothing", which is exactly the collapse that must not happen for
+ * the unassigned-caddie badge (SCC-27): a lookup that has not landed yet is
+ * not the same fact as "no shifts are confirmed" or "no caddie is assigned".
  */
-export function caddieRoundsSoldOut(
-  supply: CourseCaddieSupply | null | undefined,
+export type ResourceStatus<T> =
+  | { kind: 'unknown' }
+  | { kind: 'failed' }
+  | { kind: 'loaded'; value: T }
+
+/** Takes a `useResource` result as-is, so data/error are never quietly dropped. */
+export function resourceStatus<T>(resource: {
+  data: T | null
+  error: unknown
+  loading: boolean
+}): ResourceStatus<T> {
+  if (resource.error) return { kind: 'failed' }
+  if (resource.data === null) return { kind: 'unknown' }
+  return { kind: 'loaded', value: resource.data }
+}
+
+/**
+ * Whether the day has at least one confirmed caddie shift.
+ *
+ * `unknown`/`failed` read as `false` — the safe side for a badge that must
+ * never claim a shift is missing merely because the lookup has not answered.
+ */
+export function dayHasConfirmedShifts(
+  shifts: ResourceStatus<{ items: unknown[] }>,
 ): boolean {
-  if (!knowsCaddieCapacity(supply)) return false
-  return supply.shortfall <= 0
+  return shifts.kind === 'loaded' && shifts.value.items.length > 0
+}
+
+/**
+ * The reservation IDs on the board with a caddie-attached round nobody is
+ * covering, gathered across every column into one set.
+ *
+ * Returns an empty set when the assignment lookup has not landed or failed —
+ * "unknown" must not be read as "nobody is assigned", or a slow request would
+ * paint the whole board red for a moment on every load.
+ */
+export function unassignedCaddieReservationIds(
+  columns: LedgerColumn[],
+  assignments: ResourceStatus<{ items: CoverageAssignment[] }>,
+): Set<string> {
+  if (assignments.kind !== 'loaded') return new Set()
+  const rows = columns.flatMap(column => column.slots.flatMap(slot => slot.items))
+  return new Set(unassignedCaddieRounds(rows, assignments.value.items).map(row => row.id))
 }
 
 /** `キャディ 8/12` — groups sold against what today's caddies can take. */
 export function formatCaddieCapacity(supply: CourseCaddieSupply): string {
+  const effective = effectiveSupply(supply)
   return i18next.t('ledger:column.caddie', {
-    booked: String(supply.caddieAttachedGroups),
-    capacity: String(supply.roundsCapacity),
+    booked: String(effective.caddieAttachedGroups),
+    capacity: String(effective.roundsCapacity),
   })
 }
 
@@ -312,7 +376,8 @@ export function formatCaddieCapacity(supply: CourseCaddieSupply): string {
  * booking can be taken at all.
  */
 export function formatCaddieShortfall(supply: CourseCaddieSupply): string {
-  return supply.shortfall < 0
-    ? i18next.t('ledger:column.caddieOver', { n: String(-supply.shortfall) })
-    : i18next.t('ledger:column.caddieSpare', { n: String(supply.shortfall) })
+  const effective = effectiveSupply(supply)
+  return effective.shortfall < 0
+    ? i18next.t('ledger:column.caddieOver', { n: String(-effective.shortfall) })
+    : i18next.t('ledger:column.caddieSpare', { n: String(effective.shortfall) })
 }

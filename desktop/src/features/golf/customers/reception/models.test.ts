@@ -8,24 +8,35 @@ import {
   duplicateNameKeys,
   fileValidationError,
   isCorrected,
-  isHeifFile,
   pendingRows,
   prepareReceptionSheet,
   previewKind,
   rowsFromDraft,
   savedCount,
+  sniffSheetBytes,
   uploadFileName,
   MAX_RECEPTION_SHEET_BYTES,
   RECEPTION_SHEET_ACCEPT,
   type ReceptionRow,
 } from './models'
 
-const heic2any = vi.hoisted(() => vi.fn())
-vi.mock('heic2any', () => ({ default: heic2any }))
+const heifToJpeg = vi.hoisted(() => vi.fn())
+vi.mock('./heif', () => ({ heifToJpeg }))
 
 function file(type: string, size = 1024) {
   return { name: 'scan-2026-08-16-093000.jpg', size, type } as File
 }
+
+/** A file whose first bytes are what a real one of its kind would start with. */
+function bytes(magic: number[], name: string, type = '') {
+  return new File([new Uint8Array([...magic, ...new Array(16).fill(0)])], name, { type })
+}
+
+const JPEG = [0xff, 0xd8, 0xff, 0xe0]
+const PNG = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+const PDF = [0x25, 0x50, 0x44, 0x46]
+// `....ftypheic`: what every photo out of an iPhone camera starts with.
+const HEIC = [0x00, 0x00, 0x00, 0x24, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63]
 
 describe('fileValidationError', () => {
   it('accepts the three formats the reader can read', () => {
@@ -49,7 +60,7 @@ describe('fileValidationError', () => {
 
 describe('HEIC from a phone', () => {
   beforeEach(() => {
-    heic2any.mockReset()
+    heifToJpeg.mockReset()
   })
 
   it('is offered in the picker alongside the formats the API takes', () => {
@@ -57,39 +68,41 @@ describe('HEIC from a phone', () => {
     expect(RECEPTION_SHEET_ACCEPT).toContain('.heif')
   })
 
-  it('is recognised by type or by extension', () => {
-    expect(isHeifFile(new File([], 'sheet.HEIC'))).toBe(true)
-    expect(isHeifFile(new File([], 'sheet.bin', { type: 'image/heif' }))).toBe(true)
-    expect(isHeifFile(new File([], 'sheet.png', { type: 'image/png' }))).toBe(false)
+  it('is recognised by its bytes, whatever the phone called it', async () => {
+    expect(await sniffSheetBytes(bytes(HEIC, 'IMG_0421.HEIC', 'image/heic'))).toBe('heif')
+    expect(await sniffSheetBytes(bytes(HEIC, 'sheet.bin'))).toBe('heif')
+    expect(await sniffSheetBytes(bytes(JPEG, 'sheet.jpg', 'image/jpeg'))).toBe('image/jpeg')
+    expect(await sniffSheetBytes(bytes(PNG, 'sheet.png', 'image/png'))).toBe('image/png')
+    expect(await sniffSheetBytes(bytes(PDF, 'sheet.pdf', 'application/pdf'))).toBe(
+      'application/pdf',
+    )
+    expect(await sniffSheetBytes(bytes([0x50, 0x4b, 0x03, 0x04], 'book.xlsx'))).toBe('unknown')
   })
 
   it('is converted to a JPEG upload', async () => {
-    heic2any.mockResolvedValueOnce(new Blob(['jpeg'], { type: 'image/jpeg' }))
-    const converted = await prepareReceptionSheet(
-      new File(['heic'], 'IMG_0421.HEIC', { type: 'image/heic' }),
-    )
-    expect(heic2any).toHaveBeenCalledWith({
-      blob: expect.any(File),
-      quality: 0.92,
-      toType: 'image/jpeg',
-    })
-    expect(converted.type).toBe('image/jpeg')
+    const jpeg = new File(['jpeg'], 'document.jpg', { type: 'image/jpeg' })
+    heifToJpeg.mockResolvedValueOnce(jpeg)
+    const converted = await prepareReceptionSheet(bytes(HEIC, 'IMG_0421.HEIC', 'image/heic'))
+    expect(heifToJpeg).toHaveBeenCalledOnce()
+    expect(converted).toBe(jpeg)
     expect(fileValidationError(converted)).toBeNull()
   })
 
-  it('takes the first frame when the decoder returns a burst', async () => {
-    heic2any.mockResolvedValueOnce([
-      new Blob(['first'], { type: 'image/jpeg' }),
-      new Blob(['second'], { type: 'image/jpeg' }),
-    ])
-    const converted = await prepareReceptionSheet(new File(['heic'], 'burst.heic'))
-    expect(await converted.text()).toBe('first')
+  it('uploads a JPEG the phone named .heic instead of failing to convert it', async () => {
+    // Sharing a photo through an app hands over a JPEG under the name it had
+    // on the phone. Sent to a HEIC decoder it is refused, and the desk is told
+    // to export a file that was already exported.
+    const shared = bytes(JPEG, 'IMG_0421.HEIC', 'image/heic')
+    const prepared = await prepareReceptionSheet(shared)
+    expect(heifToJpeg).not.toHaveBeenCalled()
+    expect(prepared.type).toBe('image/jpeg')
+    expect(fileValidationError(prepared)).toBeNull()
   })
 
   it('leaves a scan the reader already accepts untouched', async () => {
-    const scan = new File(['png'], 'sheet.png', { type: 'image/png' })
+    const scan = bytes(PNG, 'sheet.png', 'image/png')
     expect(await prepareReceptionSheet(scan)).toBe(scan)
-    expect(heic2any).not.toHaveBeenCalled()
+    expect(heifToJpeg).not.toHaveBeenCalled()
   })
 
   it('rejects a HEIC that was never converted, rather than uploading it', () => {
@@ -172,7 +185,22 @@ describe('correctedFields', () => {
 describe('customerPayload', () => {
   it('sends absent rather than empty for what nobody asked', () => {
     const payload = customerPayload({ ...blankRow('a'), name: ' 本田 康彦 ' })
-    expect(payload).toEqual({ name: '本田 康彦', nameKana: null, phone: null, email: null })
+    expect(payload).toEqual({
+      name: '本田 康彦',
+      nameKana: null,
+      phone: null,
+      email: null,
+      source: 'reception_sheet',
+      sourceRowIndex: undefined,
+    })
+  })
+
+  it('carries the line of the sheet so a duplicate can be traced back to the paper', () => {
+    // The sheet itself is never stored, so this number is the only pointer at
+    // the piece of paper the desk still has.
+    const payload = customerPayload({ ...blankRow('a'), name: '本田 康彦' }, 2)
+    expect(payload.source).toBe('reception_sheet')
+    expect(payload.sourceRowIndex).toBe(2)
   })
 })
 

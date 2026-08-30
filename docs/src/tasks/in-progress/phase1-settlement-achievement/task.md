@@ -56,13 +56,21 @@ Field 版のテストケース（日付マージ、実績のみの日、予算�
 
 デッドメソッド 2 本と、`desktop/src/dev/mockFieldApi.ts` の該当マッピングを消す。これで Field のゴルフ計算ルートへの参照が精算だけになり、Phase 3 への引き渡し表が機械的に作れる。
 
-### 3. 月次精算
+### 3. 月次精算（実装済み・2026-08-24 / 段階移行）
 
-3 つに割る。
+`src/course/domain/settlement.rs` に純粋関数。`SettlementWindow`（テナント TZ のローカル月初 00:00 〜 翌月初 00:00 の半開区間）、`reservation_totals`、`caddie_fee_totals`、`settlement_reservation_lines`、`merge_settlement`、`settlement_csv`。
 
-- **予約集計とキャディフィー** — `src/course/domain/settlement.rs` に純粋関数を新設する。`domain/payroll.rs` と同じ作り。予約一覧に期間フィルタが無いので、Field の起票が通るまでは全件取得して Rust 側で期間を切る暫定で動かす。
-- **キャンセル未収** — 汎用の `/v1/erp/reservation-reports/cancellation-fees` が既にあり、SQL を突き合わせた限り join も期間の判定式も Field 版と同じでほぼそのまま代替できる。ゴルフ語彙のない汎用ルートなので Phase 3 で書き換え不要。「請求リンク発行済み」の判定に必要な請求書 ID が行に無いため、起票が通るまでは決済 URL だけで判定して取りこぼしを受け入れるか、待つかを決める。
-- **Square サマリと CSV** — 期間サマリ API の起票待ち。それまでは取得不可として警告に理由を入れる。Field 版も取得失敗時に同じ警告で縮退するので画面の扱いは変わらない。CSV は素通しをやめて自前生成にし、**列順とヘッダ文字列を Field 版と一致させる**（会計側が機械取り込みしている可能性がある）。
+**移せたのは予約集計とキャディフィーの 2 ブロックだけ。** 残り 2 つは Field 側の受け皿が無い。
+
+- **予約集計** — `starts_at` が月に入る予約を全部。**status フィルタは無い**（Field の SQL に無い）。達成率が cancelled / rejected を落とすのと逆だが、締めは業績ではなく突合で、取り消された組に入った金も会計から見える所に無いと困る。未収は `max(0, price - paid)` を**行ごとに**クランプしてから合算（先に合計して差を取ると、過払いの組が別の組の未収を相殺してしまう）。返金は入金から引かない。
+- **キャディフィー** — `golf_caddie_assignments` の `scheduled_at` × `assigned|completed`。**割当時に押された `fee_amount` をそのまま合算する**。給与サマリが現在のランク表で再計算するのと意図的に違う。給与は「いくら払うべきか」、締めは「いくら約束済みか」を答えている。
+- **キャンセル未収 — Field のまま。** taskdoc の前提が崩れた。`/v1/erp/reservation-reports/cancellation-fees` は tachyonfield の `route_authorization.rs` で quarantine されていて、middleware が **常に 403**（`"Route is unavailable until its authorization policy is configured"`、review 期限 2026-09-30）。解除されても golf スコープ無し・予約種別を判別する列も無し・`timezone` 無し（境界が実質 UTC 日付）・`invoiceId` 無し・LEFT JOIN で同一予約が複数行になりうる。**Field 側に起票が要る。**
+- **Square — Field のまま。** 期間サマリを返す業種非依存ルートが Field に存在しない（`/v1/invoice-reconciliations/square-payments` は明細で期間指定不可、`/v1/field/reports/payout` は Square ではなく別物でこれも quarantine）。**そもそも CourseBoard の決済は Stripe** なので、Square 相当を自前で作る価値は薄い。作るなら Stripe の集計。
+- 0 で埋めずに Field の値を素通しする。0 は「未収なし・突合済み」と読めてしまい、締めが「知らない」ときに一番言ってはいけないこと。
+
+CSV は自前生成に切り替えた。サマリ 6 列 9 行（+ 警告行）→ 明細 7 列の複合フォーマットで、**ヘッダ文字列・metric 名・列順は Field 版と一字一句同じ**。会計がスクリプトで取り込んでいる可能性があるため。
+
+期間フィルタは達成率と同じく Rust 側（PLT-3858 待ち）。**予約一覧が 2000 件で切れるため、忙しいクラブでは月の予約を取りこぼしうる。** compare の `reservationCount` 差分がこれを検出する唯一の手段なので、警告文にその旨を入れてある。
 
 ### 4. キャディフィーの残骸
 
@@ -81,6 +89,23 @@ Field 側に 2 つの計算が残っていて、条件次第でまだ発火す�
 - **月次精算は env flag を必ず入れる。** 会計に流れる数字で、丸めとタイムゾーン境界の違いが「静かに合わない」形で出る。off で Field を正としつつ新実装も並列に走らせて差分を構造化ログに出し、1 締め分の差分ゼロを確認してから on にする。1 締め様子見してから flag と Field 呼び出しを消す。CSV は差分の目視のほうが速いので、同じ月の新旧を手元で比較する手順を受け入れ条件にする。
 
 テナント出し分け用の feature flag は使わない。ここで要るのは実装の切り替えで、テナント差も動的変更も要らない。
+
+**`COURSEBOARD_SETTLEMENT_SOURCE` = `field` | `compare` | `courseboard`**（既定 `field`）。`COURSEBOARD_TENANT_SOURCE` と同じ 3 段（ADR-0011 の切り替えで実績のある形）。
+
+- `field` — 今までどおり Field の答えを返す。自前計算は走らない。
+- `compare` — Field の答えを返しつつ自前でも組み立て、`target: "settlement_source_compare"` に差分を出す。一致で `info`、不一致で `warn`。比較するのは移した 2 ブロックだけ（残り 2 つは素通しなので自分と食い違いようがない）。CSV はバイト一致を判定して、開くべき月だけログに出す。
+- `courseboard` — 自前の答えを返す。キャンセルと Square は Field から取ったまま合成する。
+
+**compare は上流呼び出しが増える。** JSON は Field 精算 + 予約一覧 + コース + リソース + 割当。CSV はそれに Field CSV が乗る。恒久運用する mode ではないので、1 締め見たら落とす。
+
+**切り替え後も Field の精算ルートは呼び続ける。** キャンセルと Square の受け皿ができるまで、Field のゴルフ計算ルートへの参照はゼロにならない。
+
+### Field に起票するもの
+
+ゴルフの文脈を剥がした汎用 contract として。
+
+1. `/v1/erp/reservation-reports/cancellation-fees` の quarantine 解除（`erp_route_actions.rs` に `field:ListReservations` を割り当てる）。加えて汎用の絞り込み手段（予約種別 / industry extension を行に含めるか、クエリで絞れるようにする）と `timezone` パラメータ。
+2. Square の期間サマリ — **優先度は低い。** CourseBoard は Stripe で決済しているので、Square ブロックはそもそも実体を映していない。Field 側で消すか、CourseBoard 側で Stripe の集計に置き換えるかを先に決める。
 
 ## 完了条件
 

@@ -68,6 +68,59 @@ export const customers = {
       alt: '受付用紙のスキャン画像',
     },
   },
+  visits: {
+    title: '来場履歴',
+    description:
+      'この顧客の名前で取った予約と、ほかの人の組で受付をした回です。',
+    column: {
+      date: '日付',
+      kind: '状態',
+      course: 'コース',
+      players: '人数',
+      amount: '金額',
+      reservationNumber: '予約番号',
+    },
+    asGuest: '同伴',
+    checkedIn: '受付済',
+    kind: {
+      visited: '来場',
+      upcoming: '予定',
+      no_show: 'ノーショー',
+      cancelled: 'キャンセル',
+    },
+    metric: {
+      grade: '顧客グレード',
+      grade_below_lowest: 'いちばん下の条件に届いていません',
+      grade_unknown: '通算の来場が読めていないため判定できません',
+      visits: '来場回数',
+      lastVisit: '直近 {{date}}',
+      spendPerPlayer: '客単価',
+      unpriced: '金額の記録がない{{count}}回を除く',
+      frequency: '年間の来場回数',
+      frequencyUnknown: '2回以上・1か月以上の間隔がないと出せません',
+      frequencyTruncated: '通算の来場が読めていないため出せません',
+      cancelled: 'キャンセル',
+      noShows: 'ノーショー{{count}}回',
+    },
+    truncated:
+      '直近{{count}}件だけを読んでいます。上の集計もこの{{count}}件の範囲で、通算ではありません。',
+    empty: {
+      title: 'この顧客の来場の記録はありません',
+      description:
+        'はじめての来場か、ほかの人の名前で予約され受付もされていない可能性があります。',
+    },
+  },
+  registration: {
+    unrecorded: '台帳に入れた記録は残っていません。',
+    from: '{{date}} に{{source}}から登録',
+    fromSheetRow: '{{date}} に受付用紙の{{row}}行目から登録',
+    by: '（{{operator}}）',
+    source: {
+      manual: '顧客台帳の入力',
+      reception_sheet: '受付用紙',
+      ledger: '予約の名前',
+    },
+  },
   detail: {
     description: '台帳に入っている内容です。',
     back: '顧客台帳にもどる',

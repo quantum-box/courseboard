@@ -40,9 +40,22 @@ Field の extension config に、CourseBoard の設定・業務ルール値・�
 
 9 系統で唯一、一回限りの移送が要る。`bin/` にコマンドを足し、seed → 検証 → 切替 → legacy 削除の一方向。dual-write はしない。**この key は切替後に config から明示的に消す。**
 
-実装済み（2026-08-23）: `golf_reservation_report_rows` テーブル、`MigratingReservationReportGateway`（ローカルが正。未 seed のテナントだけ legacy を読み、**最初のインポートの直前に legacy 全量を自動 seed** する）、`courseboard-migrate-reservation-reports` コマンド（seed → 全行照合 → `COURSEBOARD_MIGRATE_DELETE_CONFIG_KEY=1` で legacy key 削除）。残りは本番テナントごとのコマンド実行と key 削除という運用手順だけ。
+実装済み（2026-08-23）: `golf_reservation_report_rows` テーブル、`MigratingReservationReportGateway`（ローカルが正。未 seed のテナントだけ legacy を読み、**最初のインポートの直前に legacy 全量を自動 seed** する）、`courseboard-migrate-reservation-reports` コマンド（seed → 全行照合 → `COURSEBOARD_MIGRATE_DELETE_CONFIG_KEY=1` で legacy key 削除）。
 
-**未解決: 移送コマンドが本番 DB に届かない。** 本番 TiDB は PrivateLink 経由でしか繋がらず（Lambda は VPC 内なので届く）、`courseboard-migrate-reservation-reports` を手元から実行できない。**データの移送自体は困らない**——ゲートウェイが最初のインポートの直前に自動 seed するので、Lambda の中で完結する。届かないのは**照合と legacy key の削除**だけ。key を消すには migration gate と同じく `lambdaInvoke` フックから走らせる形にするか、同等の入口を用意する必要がある。急ぎではない（key が残っていても動作は正しく、hot path のペイロードが太いままなだけ）が、「コマンドを実行すれば終わる」と思って放置すると終わらない類のもの。
+**本番に届く入口を足した（2026-08-24, PLT-3864）。** それまで移送は CLI にしか無く、本番では実行不能だった——本番 TiDB は PrivateLink 経由でしか繋がらず（Lambda は VPC 内なので届く）、`tachyon.yaml` は `lambda-courseboard` しかパッケージしないので、この CLI は配られてすらいない。**データの移送自体は困っていなかった**（最初のインポート直前の自動 seed が Lambda 内で完結する）。届かなかったのは**照合と legacy key の削除**だけで、それが「コマンドを実行すれば終わる」と思われたまま誰も実行できない状態で残っていた。
+
+migration gate と同じ `lambdaInvoke` フック方式は**採れない**。config の PATCH には Field の bearer が要るが、Lambda は自前の Field 資格情報を持たない（client-credentials は旧 `src/field_api.rs` 専用で本番に注入されていない）。**in-VPC の DB 接続と Field の bearer が同時に揃う場所は、操作者のトークンを載せたリクエストの中だけ**なので、入口は認証付きルートになる。
+
+`POST /v1/course/reservation-report-migration`（`MigrateReservationReportsUseCase`、CLI もこの usecase を呼ぶ）。本文なしか `{}` で seed と照合だけ、`{"deleteConfigKey": true}` で照合通過後に legacy key を削除する。照合が落ちたら key には触らず、削除を要求していた場合だけ 409 を返す。何度でも再実行できる。config の PATCH 自体は Field 側で `field:ManageExtensions` を要求するので、実行できるのはテナントオーナー相当。
+
+```sh
+curl -X POST https://courseboard-api.txcloud.app/v1/course/reservation-report-migration \
+  -H "authorization: Bearer <cognito access token>" \
+  -H "x-operator-id: tn_..." -H "x-platform-id: tn_..." \
+  -H "content-type: application/json" -d '{"deleteConfigKey": true}'
+```
+
+残りは本番テナントごとにこれを 1 回叩くだけ。急ぎではない（key が残っていても動作は正しく、hot path のペイロードが太いままなだけ）。
 
 ### 4. 撤退までの暫定対応
 

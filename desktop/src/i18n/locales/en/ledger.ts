@@ -28,6 +28,11 @@ export const ledger = {
     caddieOver: '{{n}} over',
     caddieHint: '{{caddies}} caddies on today, taking up to {{capacity}} groups. {{booked}} sold.',
   },
+  caddieSupply: {
+    unbackedAssignedGroups: 'Shift not confirmed for {{n}} group(s)',
+    capacityExceededAssignedGroups: '{{n}} group(s) exceed shift capacity',
+    courseMismatchAssignedGroups: '{{n}} group(s) have a course mismatch',
+  },
   order: {
     moveLeft: 'Move {{name}} left',
     moveRight: 'Move {{name}} right',
@@ -66,6 +71,7 @@ export const ledger = {
     closed: 'Closed',
     special: 'Special rate',
     retired: 'No start slot',
+    unassignedCaddie: 'Unassigned',
   },
   legend: {
     label: 'What the colours mean',
@@ -85,6 +91,11 @@ export const ledger = {
   partial: {
     title: 'Some detail could not be loaded',
     description: 'The ledger is drawn, but remaining capacity and desk marks may be missing.',
+  },
+  inventoryGap: {
+    title: 'The booking window and start slots do not match',
+    missing: '{{course}} is configured through {{date}}, but no start slots have been built yet.',
+    behind: '{{course}} is configured through {{date}}, but start slots have only been built through {{generatedThrough}}.',
   },
   marks: {
     title: 'Slot marks',
@@ -132,6 +143,11 @@ export const ledger = {
     exit: 'Show controls',
   },
   newReservation: {
+    memberWindowTitle: 'Outside this membership\u2019s playing window',
+    warning: {
+      member_play_window_day: 'This membership is not playable on this day. The booking was saved.',
+      member_play_window_time: 'This membership is not playable at this hour. The booking was saved.',
+    },
     title: 'Book this tee time',
     description: 'Booking {{course}} at {{time}}.',
     open: 'Book this tee time',
@@ -157,12 +173,6 @@ export const ledger = {
     save: 'Book',
     saving: 'Booking…',
     saved: 'Booked',
-    caddieSoldOut: 'No caddie left',
-    caddieSoldOutTitle: "Today's caddies are all spoken for",
-    caddieSoldOutBody:
-      'The confirmed shifts for {{course}} already cover as many groups as '
-      + "today's caddies can take. Self-play plans are still bookable. To take "
-      + 'this round with a caddie, add one on the shift board first.',
     noPlanTitle: 'No plan to book under',
     noPlanBody:
       '{{course}} sells no plan yet. Create a plan before booking this tee time.',
@@ -191,6 +201,13 @@ export const ledger = {
     grantMembership: 'Make a member',
     changeMembership: 'Change membership',
     choosePlan: 'Choose a membership',
+    memberNumberAdd: 'Add a member number',
+    memberNumberValue: 'Member no. {{number}}',
+    memberNumberPlaceholder: 'e.g. A-1024',
+    memberNumberSave: 'Save',
+    memberNumberCancel: 'Cancel',
+    memberNumberSaved: 'Member number saved',
+    memberNumberFailed: 'Could not save the member number',
     membershipGranted: 'Membership recorded',
     membershipGrantFailed: 'Could not record the membership',
     searching: 'Searching the ledger…',
@@ -201,6 +218,18 @@ export const ledger = {
     registered: 'Added to the customer ledger',
     registerFailed: 'Could not add this customer',
     linkedPlayers: '{{linked}} of the {{named}} named players are in the customer ledger.',
+  },
+  checkin: {
+    title: 'Check-in',
+    noNames: 'Add the group\u2019s names to check them in here.',
+    unsaved: 'Save the changes above first. Check-ins are recorded against the saved roster.',
+    unlinked: '(no ledger entry chosen)',
+    at: 'checked in {{time}}',
+    allDone: 'Everyone in this group is checked in.',
+    submit: 'Check in ({{count}})',
+    saving: 'Checking in\u2026',
+    saved: 'Check-in recorded',
+    failed: 'Could not record the check-in',
   },
   party: {
     title: 'Booking detail',

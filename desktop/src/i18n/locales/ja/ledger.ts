@@ -31,6 +31,11 @@ export const ledger = {
     caddieOver: '{{n}} 組オーバー',
     caddieHint: '出勤 {{caddies}}人で {{capacity}}組まで受けられます。いま {{booked}}組。',
   },
+  caddieSupply: {
+    unbackedAssignedGroups: '当日のシフトが未確定 {{n}}組',
+    capacityExceededAssignedGroups: 'シフトの対応数を超えた配置 {{n}}組',
+    courseMismatchAssignedGroups: '確定シフトのコースと予約コースが不一致 {{n}}組',
+  },
   order: {
     moveLeft: '{{name}}を左へ',
     moveRight: '{{name}}を右へ',
@@ -72,6 +77,7 @@ export const ledger = {
     closed: '売り止め',
     special: '特別料金',
     retired: 'スタート枠なし',
+    unassignedCaddie: '未割り当て',
   },
   legend: {
     label: '色の意味',
@@ -91,6 +97,11 @@ export const ledger = {
   partial: {
     title: '一部の情報が取れていません',
     description: '台帳は出ていますが、空き数や売り止めなど一部は表示できていません。',
+  },
+  inventoryGap: {
+    title: '予約を受ける設定とスタート枠が一致していません',
+    missing: '{{course}}は{{date}}まで受ける設定ですが、スタート枠はまだ作られていません。',
+    behind: '{{course}}は{{date}}まで受ける設定ですが、スタート枠は{{generatedThrough}}までしか作られていません。',
   },
   marks: {
     title: '枠の設定',
@@ -137,6 +148,11 @@ export const ledger = {
     exit: '元に戻す',
   },
   newReservation: {
+    memberWindowTitle: '会員のプレー可能日から外れています',
+    warning: {
+      member_play_window_day: 'この会員種別は、この曜日はプレー対象外です。予約は保存しました。',
+      member_play_window_time: 'この会員種別は、この時間帯はプレー対象外です。予約は保存しました。',
+    },
     title: '予約を入れる',
     description: '{{course}} · {{time}} に予約を入れます。',
     open: 'この枠に予約を入れる',
@@ -162,12 +178,6 @@ export const ledger = {
     save: '予約を入れる',
     saving: '登録しています…',
     saved: '予約を入れました',
-    caddieSoldOut: 'キャディが埋まっています',
-    caddieSoldOutTitle: '本日のキャディはすべて埋まっています',
-    caddieSoldOutBody:
-      '{{course}} の本日のキャディは、確定しているシフトでは受けられる組数に達しています。'
-      + 'セルフのプレー商品があれば選べます。キャディ付きで受けたいときは、'
-      + 'シフト表でキャディを追加してください。',
     noPlanTitle: 'プレー商品がありません',
     noPlanBody:
       '{{course}} で売れるプレー商品がまだありません。プレー商品を作ってから予約を入れてください。',
@@ -196,6 +206,13 @@ export const ledger = {
     grantMembership: '会員にする',
     changeMembership: '会員種別を変える',
     choosePlan: '会員種別を選ぶ',
+    memberNumberAdd: '会員番号を登録',
+    memberNumberValue: '会員番号 {{number}}',
+    memberNumberPlaceholder: '例: A-1024',
+    memberNumberSave: '保存',
+    memberNumberCancel: 'やめる',
+    memberNumberSaved: '会員番号を保存しました',
+    memberNumberFailed: '会員番号を保存できませんでした',
     membershipGranted: '会員種別を登録しました',
     membershipGrantFailed: '会員種別を登録できませんでした',
     searching: '顧客台帳を探しています…',
@@ -206,6 +223,18 @@ export const ledger = {
     registered: '顧客台帳に登録しました',
     registerFailed: '顧客台帳に登録できませんでした',
     linkedPlayers: '名前を入れた {{named}} 名のうち {{linked}} 名が顧客台帳に紐付いています。',
+  },
+  checkin: {
+    title: '受付',
+    noNames: '組の名前を入れると、ここで受付ができます。',
+    unsaved: '上の変更を保存してから受付してください。受付は保存された組の名前に対して記録します。',
+    unlinked: '（台帳の顧客が未選択）',
+    at: '{{time}} 受付',
+    allDone: 'この組は全員受付ずみです。',
+    submit: '受付する（{{count}}人）',
+    saving: '受付しています…',
+    saved: '受付を記録しました',
+    failed: '受付を記録できませんでした',
   },
   party: {
     title: '予約の中身',

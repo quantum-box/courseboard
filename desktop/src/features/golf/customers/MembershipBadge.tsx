@@ -1,4 +1,4 @@
-import { Badge, Button } from '@tachyon-sdk/native-ui'
+import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -6,6 +6,7 @@ import { courseboardApiJson } from '../../../api'
 import { NativeSelect } from '../../../components/Page'
 import { showToast } from '../../../lib/toast'
 import {
+  memberNumberPath,
   membershipPath,
   membershipPlansPath,
   type CustomerMembership,
@@ -42,6 +43,8 @@ export function MembershipBadge({
   const [failed, setFailed] = useState(false)
   const [granting, setGranting] = useState(false)
   const [plans, setPlans] = useState<MembershipPlan[] | null>(null)
+  const [numbering, setNumbering] = useState<string | null>(null)
+  const [savingNumber, setSavingNumber] = useState(false)
 
   useEffect(() => {
     let current = true
@@ -100,6 +103,30 @@ export function MembershipBadge({
     }
   }
 
+  const saveNumber = async () => {
+    if (numbering === null) return
+    setSavingNumber(true)
+    try {
+      const updated = await courseboardApiJson<CustomerMembership>(memberNumberPath(customerId), {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        // Blank withdraws the number rather than storing an empty one.
+        body: JSON.stringify({ memberNumber: numbering.trim() || null }),
+      })
+      setMembership(updated)
+      setNumbering(null)
+      showToast({ tone: 'success', message: t('ledger:customer.memberNumberSaved') })
+    } catch (error) {
+      showToast({
+        tone: 'danger',
+        title: t('ledger:customer.memberNumberFailed'),
+        message: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setSavingNumber(false)
+    }
+  }
+
   if (loading) return <span className="ledger-membership__loading">{t('ledger:customer.membershipLoading')}</span>
   if (failed) return <span className="ledger-membership__loading">{t('ledger:customer.membershipUnknown')}</span>
   if (!membership) return null
@@ -129,6 +156,50 @@ export function MembershipBadge({
             : t('ledger:customer.grantMembership')}
         </Button>
       )}
+
+      {/* Only on the customer's own page. A member number is a fact about a
+          person, not about the afternoon's tee time, so the booking form never
+          shows this control. */}
+      {editable ? (
+        numbering !== null ? (
+          <>
+            <Input
+              value={numbering}
+              autoFocus
+              maxLength={40}
+              placeholder={t('ledger:customer.memberNumberPlaceholder')}
+              onChange={event => setNumbering(event.target.value)}
+            />
+            <Button
+              type="button"
+              size="sm"
+              disabled={savingNumber}
+              onClick={() => void saveNumber()}
+            >
+              {t('ledger:customer.memberNumberSave')}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setNumbering(null)}
+            >
+              {t('ledger:customer.memberNumberCancel')}
+            </Button>
+          </>
+        ) : (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setNumbering(membership.memberNumber ?? '')}
+          >
+            {membership.memberNumber
+              ? t('ledger:customer.memberNumberValue', { number: membership.memberNumber })
+              : t('ledger:customer.memberNumberAdd')}
+          </Button>
+        )
+      ) : null}
     </span>
   )
 }

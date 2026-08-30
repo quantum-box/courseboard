@@ -71,7 +71,9 @@ function AppContent() {
     <>
       <PageMetadata route={route} />
       <AuthProvider>
-        <AuthGate>
+        <AuthGate renderExpiredSession={screen => (
+          <AppShell route={route}>{screen}</AppShell>
+        )}>
           <FeatureFlagProvider>
             <TenantTimezoneProvider>
               <AppShell route={route}>

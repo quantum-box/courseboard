@@ -6,6 +6,8 @@ import { courseboardApiJson } from '../../../api'
 import { LoadingState, Notice, Panel, ResourceError } from '../../../components/Page'
 import { useResource } from '../../../hooks/useResource'
 import { navigateFromClick } from '../../../lib/router'
+import { CustomerRegistrationNote } from './CustomerRegistrationNote'
+import { CustomerVisitsPanel } from './CustomerVisitsPanel'
 import { MembershipBadge } from './MembershipBadge'
 import { customerPath, type Customer } from './models'
 
@@ -61,6 +63,10 @@ export function CustomerDetailPage({ customerId }: { customerId: string }) {
               <dt>{t('customers:field.email')}</dt>
               <dd>{customer.email || t('common:state.unset')}</dd>
             </dl>
+            {/* Under the details rather than beside them: how the entry was
+                created is what the desk reaches for when two of these pages
+                look like the same person. */}
+            <CustomerRegistrationNote customerId={customer.id} />
           </Panel>
 
           <Panel
@@ -72,10 +78,9 @@ export function CustomerDetailPage({ customerId }: { customerId: string }) {
             <MembershipBadge customerId={customer.id} editable />
           </Panel>
 
-          {/* Visits belong here — this is the page the desk opens to ask how
-              often somebody comes. Reading them needs a CourseBoard endpoint
-              over Field's `ReservationFilter.customer_id`, which is not built
-              yet, so the promise is not made in the UI until it can be kept. */}
+          {/* Below the membership, because how often somebody comes is read
+              after who they are — and it is the reason the page gets opened. */}
+          <CustomerVisitsPanel customerId={customer.id} />
         </>
       ) : null}
     </div>

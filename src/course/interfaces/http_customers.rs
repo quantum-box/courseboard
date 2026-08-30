@@ -12,28 +12,35 @@ use std::sync::Arc;
 use axum::{
     extract::{Multipart, Path, Query, State},
     http::HeaderMap,
-    Json,
+    Extension, Json,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use super::http::{credentials, ItemsResponse};
+use super::http::{credentials, reservation_gateway, ItemsResponse};
 use super::openapi::ErrorBody;
 
 use crate::course::domain::{
-    AssignMembershipPlan, Customer, CustomerId, CustomerMembership, CustomerSearchQuery,
-    MembershipPlan, MembershipPlanId, NewCustomer, ReceptionDraftRow, ReceptionSheet,
-    UpsertMembershipPlan,
+    AssignMembershipPlan, Customer, CustomerGradeRule, CustomerGradeRules, CustomerId,
+    CustomerMembership, CustomerRegistration, CustomerRegistrationSource, CustomerSearchQuery,
+    CustomerVisit, MemberDiscount, MembershipDiscount, MembershipDiscounts,
+    MembershipDiscountsGateway, MembershipPlan, MembershipPlanId, MembershipPlayWindow,
+    MembershipPlayWindows, MembershipPlayWindowsGateway, NewCustomer, PlayableDays,
+    ReceptionDraftRow, ReceptionSheet, SetMemberNumber, UpsertMembershipPlan,
 };
 use crate::course::infrastructure::{
     FieldCustomerGateway, FieldCustomerReceptionGateway, FieldMembershipGateway,
 };
 use crate::course::usecase::{
     AssignMembershipPlanUseCase, CreateCustomerUseCase, CreateMembershipPlanUseCase,
-    DraftCustomerReceptionUseCase, GetCustomerMembershipUseCase, GetCustomerUseCase,
-    ListMembershipPlansUseCase, SearchCustomersUseCase, UpdateMembershipPlanUseCase,
+    CustomerProvenance, CustomerVisitReport, DraftCustomerReceptionUseCase,
+    GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase, GetCustomerRegistrationUseCase,
+    GetCustomerUseCase, GetCustomerVisitsUseCase, ListMembershipPlansUseCase,
+    ReplaceCustomerGradeRulesUseCase, SearchCustomersUseCase, SetMemberNumberUseCase,
+    UpdateMembershipPlanUseCase,
 };
-use crate::{AppError, AppState};
+use crate::{AppError, AppState, CallerPrincipal};
 
 fn customer_gateway(state: &AppState) -> Arc<FieldCustomerGateway> {
     let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
@@ -51,7 +58,7 @@ fn reception_gateway(state: &AppState) -> Arc<FieldCustomerReceptionGateway> {
     ))
 }
 
-fn membership_gateway(state: &AppState) -> Arc<FieldMembershipGateway> {
+pub(crate) fn membership_gateway(state: &AppState) -> Arc<FieldMembershipGateway> {
     let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
     Arc::new(FieldMembershipGateway::new(
         state.http_client.clone(),
@@ -150,6 +157,16 @@ pub struct CreateCustomerRequest {
     pub email: Option<String>,
     #[serde(default)]
     pub phone: Option<String>,
+    /// Which screen this came from: `manual`, `reception_sheet`, or `ledger`.
+    ///
+    /// Absent means typed at the counter, which is what every caller written
+    /// before this field existed was doing.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Which line of the reception sheet, zero-based. Ignored unless `source`
+    /// says a sheet.
+    #[serde(default)]
+    pub source_row_index: Option<u32>,
 }
 
 /// GET /v1/course/customers/{customer_id}
@@ -204,9 +221,14 @@ pub async fn get_customer(
 pub async fn create_customer(
     State(state): State<AppState>,
     headers: HeaderMap,
+    principal: Option<Extension<CallerPrincipal>>,
     Json(request): Json<CreateCustomerRequest>,
 ) -> Result<Json<CustomerDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
+    let source = match request.source.as_deref() {
+        Some(value) => CustomerRegistrationSource::parse(value).map_err(AppError::from)?,
+        None => CustomerRegistrationSource::Manual,
+    };
     let input = NewCustomer::try_new(
         request.name,
         request.name_kana,
@@ -214,11 +236,639 @@ pub async fn create_customer(
         request.phone,
     )
     .map_err(AppError::from)?;
-    let created = CreateCustomerUseCase::new(customer_gateway(&state))
-        .execute(credentials, input)
+    let created = CreateCustomerUseCase::new(
+        customer_gateway(&state),
+        state.customer_registrations.clone(),
+    )
+    .execute(
+        credentials,
+        input,
+        CustomerProvenance {
+            source,
+            registered_by: principal.and_then(|Extension(caller)| caller.subject),
+            source_row_index: request.source_row_index,
+        },
+    )
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(CustomerDto::from(&created)))
+}
+
+// ─── Visit history ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerVisitDto {
+    pub reservation_id: String,
+    pub reservation_number: String,
+    pub starts_at: DateTime<Utc>,
+    /// The course played. Absent on a booking taken before the group was put
+    /// on a course, which the screen shows as a blank rather than a guess.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub course_id: Option<String>,
+    pub players: i32,
+    pub amount: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<String>,
+    /// `visited`, `upcoming`, `no_show`, `cancelled`, or `other`.
+    pub kind: String,
+    /// Field's own status. Worth showing only for `other`, where `kind` has
+    /// nothing to say.
+    pub status: String,
+    /// Whether the booking is in this person's own name. False for a round
+    /// they played in somebody else's group, where the money and the headcount
+    /// belong to whoever booked it and are reported as zero here.
+    pub booked: bool,
+    /// Whether the desk recorded them arriving, as opposed to the tee time
+    /// having passed on a booking nobody cancelled.
+    pub checked_in: bool,
+}
+
+impl From<&CustomerVisit> for CustomerVisitDto {
+    fn from(value: &CustomerVisit) -> Self {
+        Self {
+            reservation_id: value.id().to_string(),
+            reservation_number: value.reservation_number().to_string(),
+            starts_at: value.starts_at(),
+            course_id: value.course_id().map(ToString::to_string),
+            players: value.players(),
+            amount: value.amount(),
+            currency: value.currency().map(str::to_string),
+            kind: value.kind().as_str().to_string(),
+            status: value.status().to_string(),
+            booked: value.booked(),
+            checked_in: value.checked_in(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerVisitSummaryDto {
+    pub visits: u32,
+    /// Rounds sold across those visits: a foursome counts four.
+    pub players: i64,
+    pub total_amount: i64,
+    /// Visits carrying no money, excluded from `spendPerPlayer`. Reported so
+    /// the screen can name what the average left out.
+    pub unpriced_visits: u32,
+    /// Absent when no visit has money on it — an unknown average, not zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spend_per_player: Option<i64>,
+    pub cancelled: u32,
+    pub no_shows: u32,
+    pub upcoming: u32,
+    /// Absent whenever `truncated` is true: the oldest row read is not the
+    /// first round this person played.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_visit_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_visit_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerVisitHistoryDto {
+    pub items: Vec<CustomerVisitDto>,
+    pub summary: CustomerVisitSummaryDto,
+    /// Reading gave up before the end of the history. The figures are then a
+    /// partial count rather than a lifetime, and the screen must say so.
+    pub truncated: bool,
+    /// `graded`, `below_lowest`, `unknown`, or `not_configured`. Four answers
+    /// rather than a nullable name: "this club grades nobody", "we cannot tell
+    /// from a partial history", and "they have not reached the lowest rung"
+    /// are different things to put on a screen.
+    pub grade: String,
+    /// Set only when `grade` is `graded`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade_name: Option<String>,
+}
+
+impl From<&CustomerVisitReport> for CustomerVisitHistoryDto {
+    fn from(report: &CustomerVisitReport) -> Self {
+        let value = &report.history;
+        let summary = value.summary();
+        Self {
+            items: value.visits().iter().map(CustomerVisitDto::from).collect(),
+            summary: CustomerVisitSummaryDto {
+                visits: summary.visits,
+                players: summary.players,
+                total_amount: summary.total_amount,
+                unpriced_visits: summary.unpriced_visits,
+                spend_per_player: summary.spend_per_player,
+                cancelled: summary.cancelled,
+                no_shows: summary.no_shows,
+                upcoming: summary.upcoming,
+                first_visit_at: summary.first_visit_at,
+                last_visit_at: summary.last_visit_at,
+            },
+            truncated: value.truncated(),
+            grade: report.grade.as_str().to_string(),
+            grade_name: report.grade.name().map(str::to_string),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerVisitParams {
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+/// GET /v1/course/customers/{customer_id}/visits
+///
+/// What this person has played here, newest first, with what it adds up to.
+///
+/// Bookings taken *for* them: Field records one customer per reservation, so a
+/// regular who always comes in a colleague's group has nothing here. The screen
+/// says whose bookings these are — an empty table would otherwise read as
+/// "never been" about somebody who plays monthly.
+#[utoipa::path(
+    get,
+    path = "/v1/course/customers/{customer_id}/visits",
+    tag = "course",
+    params(
+        ("customer_id" = String, Path, description = "Customer id"),
+        CustomerVisitParams,
+    ),
+    responses(
+        (status = 200, description = "Visit history", body = CustomerVisitHistoryDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_customer_visits(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(customer_id): Path<String>,
+    Query(params): Query<CustomerVisitParams>,
+) -> Result<Json<CustomerVisitHistoryDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let customer_id = CustomerId::try_new(customer_id).map_err(AppError::from)?;
+    let report = GetCustomerVisitsUseCase::new(
+        reservation_gateway(&state),
+        state.customer_grade_rules.clone(),
+        state.visit_checkins.clone(),
+    )
+    .execute(credentials, &customer_id, params.limit, Utc::now())
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(CustomerVisitHistoryDto::from(&report)))
+}
+
+// ─── Registration provenance ─────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerRegistrationDto {
+    /// `manual`, `reception_sheet`, or `ledger`.
+    pub source: String,
+    /// The signed-in caller who created the entry. Absent on a token that
+    /// carried no subject.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registered_by: Option<String>,
+    /// Zero-based line of the reception sheet. Only ever set for a sheet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_row_index: Option<u32>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<&CustomerRegistration> for CustomerRegistrationDto {
+    fn from(value: &CustomerRegistration) -> Self {
+        Self {
+            source: value.source.as_str().to_string(),
+            registered_by: value.registered_by.clone(),
+            source_row_index: value.source_row_index,
+            created_at: value.created_at,
+        }
+    }
+}
+
+/// GET /v1/course/customers/{customer_id}/registration
+///
+/// How this entry got into the ledger. `null` for everybody registered before
+/// CourseBoard started keeping it — most of the ledger, for a long while — so
+/// the screen says "not recorded" rather than treating it as a failure.
+#[utoipa::path(
+    get,
+    path = "/v1/course/customers/{customer_id}/registration",
+    tag = "course",
+    params(("customer_id" = String, Path, description = "Customer id")),
+    responses(
+        (status = 200, description = "How the entry was created", body = Option<CustomerRegistrationDto>),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_customer_registration(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(customer_id): Path<String>,
+) -> Result<Json<Option<CustomerRegistrationDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let customer_id = CustomerId::try_new(customer_id).map_err(AppError::from)?;
+    let found = GetCustomerRegistrationUseCase::new(state.customer_registrations.clone())
+        .execute(credentials, &customer_id)
         .await
         .map_err(AppError::from)?;
-    Ok(Json(CustomerDto::from(&created)))
+    Ok(Json(found.as_ref().map(CustomerRegistrationDto::from)))
+}
+
+// ─── Customer grades ──────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerGradeRuleDto {
+    pub name: String,
+    /// Rounds played over the whole history. Zero asks nothing.
+    #[serde(default)]
+    pub min_visits: u32,
+    /// Absent means this rung asks nothing about money.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_spend_per_player: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_total_amount: Option<i64>,
+}
+
+impl From<&CustomerGradeRule> for CustomerGradeRuleDto {
+    fn from(value: &CustomerGradeRule) -> Self {
+        Self {
+            name: value.name().to_string(),
+            min_visits: value.min_visits(),
+            min_spend_per_player: value.min_spend_per_player(),
+            min_total_amount: value.min_total_amount(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceCustomerGradeRulesRequest {
+    /// Highest rung first. The order is the club's judgement, not decoration:
+    /// it decides which rung somebody clearing several of them is given.
+    pub items: Vec<CustomerGradeRuleDto>,
+}
+
+/// GET /v1/course/customer-grade-rules
+#[utoipa::path(
+    get,
+    path = "/v1/course/customer-grade-rules",
+    tag = "course",
+    responses(
+        (status = 200, description = "The club's grade ladder", body = ItemsResponse<CustomerGradeRuleDto>),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_customer_grade_rules(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ItemsResponse<CustomerGradeRuleDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let rules = GetCustomerGradeRulesUseCase::new(state.customer_grade_rules.clone())
+        .execute(credentials)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: rules
+            .rules()
+            .iter()
+            .map(CustomerGradeRuleDto::from)
+            .collect(),
+    }))
+}
+
+/// PUT /v1/course/customer-grade-rules
+///
+/// Replaces the ladder wholesale, in the order sent. Blank rows are dropped —
+/// the form grows rows the operator may leave empty — but a duplicate name is
+/// refused rather than pruned: the ladder that comes back must be theirs.
+#[utoipa::path(
+    put,
+    path = "/v1/course/customer-grade-rules",
+    tag = "course",
+    request_body = ReplaceCustomerGradeRulesRequest,
+    responses(
+        (status = 200, description = "The saved ladder", body = ItemsResponse<CustomerGradeRuleDto>),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replace_customer_grade_rules(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ReplaceCustomerGradeRulesRequest>,
+) -> Result<Json<ItemsResponse<CustomerGradeRuleDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let mut rules = Vec::with_capacity(request.items.len());
+    for item in &request.items {
+        if item.name.trim().is_empty() {
+            continue;
+        }
+        rules.push(
+            CustomerGradeRule::try_new(
+                item.name.clone(),
+                item.min_visits,
+                item.min_spend_per_player,
+                item.min_total_amount,
+            )
+            .map_err(AppError::from)?,
+        );
+    }
+    let rules = CustomerGradeRules::try_new(rules).map_err(AppError::from)?;
+    let saved = ReplaceCustomerGradeRulesUseCase::new(state.customer_grade_rules.clone())
+        .execute(credentials, rules)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: saved
+            .rules()
+            .iter()
+            .map(CustomerGradeRuleDto::from)
+            .collect(),
+    }))
+}
+
+// ─── Membership discounts ─────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MembershipDiscountDto {
+    pub plan_id: String,
+    /// `yen` or `percent`.
+    pub kind: String,
+    pub value: i64,
+}
+
+impl From<&MembershipDiscount> for MembershipDiscountDto {
+    fn from(value: &MembershipDiscount) -> Self {
+        Self {
+            plan_id: value.plan_id().to_string(),
+            kind: value.discount().kind().to_string(),
+            value: value.discount().value(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceMembershipDiscountsRequest {
+    pub items: Vec<MembershipDiscountDto>,
+}
+
+/// GET /v1/course/membership-discounts
+///
+/// What each membership takes off the green fee. A plan with no entry
+/// discounts nothing, which is where every plan starts.
+#[utoipa::path(
+    get,
+    path = "/v1/course/membership-discounts",
+    tag = "course",
+    responses(
+        (status = 200, description = "Discounts by plan", body = ItemsResponse<MembershipDiscountDto>),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_membership_discounts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ItemsResponse<MembershipDiscountDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    credentials
+        .require(crate::course::domain::actions::LIST_MEMBERSHIP)
+        .await
+        .map_err(AppError::from)?;
+    let discounts = state
+        .membership_discounts
+        .get_membership_discounts(credentials.operator_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: discounts
+            .entries()
+            .iter()
+            .map(MembershipDiscountDto::from)
+            .collect(),
+    }))
+}
+
+/// PUT /v1/course/membership-discounts
+///
+/// Replaces every plan's discount at once. A plan left out of the list stops
+/// discounting — which is how a club withdraws one, and why a partial save
+/// would leave the counter quoting a rate the club had already withdrawn.
+#[utoipa::path(
+    put,
+    path = "/v1/course/membership-discounts",
+    tag = "course",
+    request_body = ReplaceMembershipDiscountsRequest,
+    responses(
+        (status = 200, description = "The saved discounts", body = ItemsResponse<MembershipDiscountDto>),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replace_membership_discounts(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ReplaceMembershipDiscountsRequest>,
+) -> Result<Json<ItemsResponse<MembershipDiscountDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    credentials
+        .require(crate::course::domain::actions::MANAGE_MEMBERSHIP_PLANS)
+        .await
+        .map_err(AppError::from)?;
+    let mut entries = Vec::with_capacity(request.items.len());
+    for item in &request.items {
+        if item.plan_id.trim().is_empty() {
+            continue;
+        }
+        // Zero off is not a discount. Dropping it here keeps a row the operator
+        // blanked out from reading back as "discounts nothing, deliberately".
+        if item.value == 0 {
+            continue;
+        }
+        entries.push(MembershipDiscount::new(
+            MembershipPlanId::try_new(item.plan_id.clone()).map_err(AppError::from)?,
+            MemberDiscount::try_new(&item.kind, item.value).map_err(AppError::from)?,
+        ));
+    }
+    let discounts = MembershipDiscounts::try_new(entries).map_err(AppError::from)?;
+    let saved = state
+        .membership_discounts
+        .replace_membership_discounts(credentials.operator_id, &discounts)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: saved
+            .entries()
+            .iter()
+            .map(MembershipDiscountDto::from)
+            .collect(),
+    }))
+}
+
+// ─── Membership playing windows ───────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MembershipPlayWindowDto {
+    pub plan_id: String,
+    /// Monday first. All seven true, or all seven false, both mean "no
+    /// restriction" — a row the operator started and left blank must not lock
+    /// a member out of the whole week.
+    pub days: Vec<bool>,
+    /// `HH:MM` in the course's own clock. Absent means open at that end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+}
+
+impl From<&MembershipPlayWindow> for MembershipPlayWindowDto {
+    fn from(value: &MembershipPlayWindow) -> Self {
+        Self {
+            plan_id: value.plan_id().to_string(),
+            days: value.days().flags().to_vec(),
+            from: value.from().map(crate::course::domain::format_play_time),
+            to: value.to().map(crate::course::domain::format_play_time),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceMembershipPlayWindowsRequest {
+    pub items: Vec<MembershipPlayWindowDto>,
+}
+
+/// GET /v1/course/membership-play-windows
+#[utoipa::path(
+    get,
+    path = "/v1/course/membership-play-windows",
+    tag = "course",
+    responses(
+        (status = 200, description = "Playing windows by plan", body = ItemsResponse<MembershipPlayWindowDto>),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_membership_play_windows(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<ItemsResponse<MembershipPlayWindowDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    credentials
+        .require(crate::course::domain::actions::LIST_MEMBERSHIP)
+        .await
+        .map_err(AppError::from)?;
+    let windows = state
+        .membership_play_windows()
+        .get_membership_play_windows(credentials.operator_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: windows
+            .entries()
+            .iter()
+            .map(MembershipPlayWindowDto::from)
+            .collect(),
+    }))
+}
+
+/// PUT /v1/course/membership-play-windows
+///
+/// Replaces every plan's window at once. A plan left out stops being
+/// restricted — which is how a club opens 平日会員 to weekends.
+#[utoipa::path(
+    put,
+    path = "/v1/course/membership-play-windows",
+    tag = "course",
+    request_body = ReplaceMembershipPlayWindowsRequest,
+    responses(
+        (status = 200, description = "The saved windows", body = ItemsResponse<MembershipPlayWindowDto>),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replace_membership_play_windows(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ReplaceMembershipPlayWindowsRequest>,
+) -> Result<Json<ItemsResponse<MembershipPlayWindowDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    credentials
+        .require(crate::course::domain::actions::MANAGE_MEMBERSHIP_PLANS)
+        .await
+        .map_err(AppError::from)?;
+    let mut entries = Vec::with_capacity(request.items.len());
+    for item in &request.items {
+        if item.plan_id.trim().is_empty() {
+            continue;
+        }
+        let mut flags = [false; 7];
+        for (index, flag) in flags.iter_mut().enumerate() {
+            *flag = item.days.get(index).copied().unwrap_or(false);
+        }
+        let days = PlayableDays::from_flags(flags);
+        let from = item
+            .from
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(crate::course::domain::parse_play_time)
+            .transpose()
+            .map_err(AppError::from)?;
+        let to = item
+            .to
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(crate::course::domain::parse_play_time)
+            .transpose()
+            .map_err(AppError::from)?;
+        let window = MembershipPlayWindow::try_new(
+            MembershipPlanId::try_new(item.plan_id.clone()).map_err(AppError::from)?,
+            days,
+            from,
+            to,
+        )
+        .map_err(AppError::from)?;
+        // A plan that restricts nothing needs no row: storing one would make
+        // "unrestricted" and "never configured" two states nobody can tell
+        // apart on the way back out.
+        if window.is_unrestricted() {
+            continue;
+        }
+        entries.push(window);
+    }
+    let windows = MembershipPlayWindows::try_new(entries).map_err(AppError::from)?;
+    let saved = state
+        .membership_play_windows()
+        .replace_membership_play_windows(credentials.operator_id, &windows)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: saved
+            .entries()
+            .iter()
+            .map(MembershipPlayWindowDto::from)
+            .collect(),
+    }))
 }
 
 // ─── Reception sheet OCR ──────────────────────────────────────────────────────
@@ -373,6 +1023,10 @@ pub struct CustomerMembershipDto {
     pub plan: Option<MembershipPlanDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_on: Option<String>,
+    /// The club's own number for this member, held as a Field credential.
+    /// Absent for a visitor, and for a member the club has not numbered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_number: Option<String>,
 }
 
 impl From<&CustomerMembership> for CustomerMembershipDto {
@@ -382,8 +1036,55 @@ impl From<&CustomerMembership> for CustomerMembershipDto {
             is_member: value.is_member(),
             plan: value.plan().map(MembershipPlanDto::from),
             started_on: value.started_on().map(str::to_string),
+            member_number: value.member_number().map(str::to_string),
         }
     }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetMemberNumberRequest {
+    /// `null` or blank withdraws the number. A member numbered by mistake has
+    /// to be un-numbered, and a blank stored as the number would read as a
+    /// member whose number is the empty string.
+    #[serde(default)]
+    pub member_number: Option<String>,
+}
+
+/// PUT /v1/course/customers/{customer_id}/member-number
+///
+/// Records, changes, or withdraws the club's number for a member. Separate
+/// from granting a plan: a club numbers people at a different moment from when
+/// it sells them the membership, and renumbers without the membership changing.
+#[utoipa::path(
+    put,
+    path = "/v1/course/customers/{customer_id}/member-number",
+    tag = "course",
+    params(("customer_id" = String, Path, description = "Customer id")),
+    request_body = SetMemberNumberRequest,
+    responses(
+        (status = 200, description = "The customer's standing, renumbered", body = CustomerMembershipDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn set_member_number(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(customer_id): Path<String>,
+    Json(request): Json<SetMemberNumberRequest>,
+) -> Result<Json<CustomerMembershipDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let customer_id = CustomerId::try_new(customer_id).map_err(AppError::from)?;
+    let input =
+        SetMemberNumber::try_new(customer_id, request.member_number).map_err(AppError::from)?;
+    let membership = SetMemberNumberUseCase::new(membership_gateway(&state))
+        .execute(credentials, input)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CustomerMembershipDto::from(&membership)))
 }
 
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]

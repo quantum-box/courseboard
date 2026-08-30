@@ -14,32 +14,35 @@ use utoipa::{IntoParams, ToSchema};
 use super::openapi::ErrorBody;
 
 use super::http::{
-    caddie_rank_fee_gateway, catalog_gateway, credentials, ops_gateway, reservation_gateway,
-    CaddieAssignmentDto, CaddieDto, ItemsResponse,
+    caddie_duty_gateway, caddie_rank_fee_gateway, catalog_gateway, credentials, ops_gateway,
+    reservation_gateway, shift_mirror, CaddieAssignmentDto, CaddieDto, ItemsResponse,
 };
 use crate::course::domain::{
     parse_weekday, weekday_key, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
     AutoAssignResult, AvailabilityDeadline, AvailabilityQuery, CaddieAvailability,
-    CaddieCourseMembership, CaddieId, CaddiePatch, CaddieRank, CaddieRankFees, CaddieRating,
-    CaddieRecommendation, CaddieShift, CaddieSupply, CourseError, CourseId, DayCaddieSupply,
-    GolfCatalogGateway, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships,
-    ReservationId, ShiftEdit, ShiftPolicy, ShiftSpan, UnfiledRequest, UpsertCaddie,
-    UpsertCaddieAssignment, UpsertCaddieAvailability, YearMonth, MAX_CONSECUTIVE_WORK_DAYS,
-    MAX_ROUNDS_PER_SHIFT,
+    CaddieCourseMembership, CaddieDutyAssignment, CaddieDutyOptions, CaddieId, CaddiePatch,
+    CaddieRank, CaddieRankFees, CaddieRating, CaddieRecommendation, CaddieShift, CaddieSupply,
+    CourseError, CourseId, DayCaddieSupply, DutyWindow, GolfCatalogGateway, PayrollSummary,
+    RecommendationQuery, ReplaceCaddieMemberships, ReservationId, ShiftEdit, ShiftPolicy,
+    ShiftSpan, UnfiledRequest, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    YearMonth, MAX_CONSECUTIVE_WORK_DAYS, MAX_ROUNDS_PER_SHIFT,
 };
 use crate::course::usecase::{
-    AutoAssignCaddiesUseCase, CreateCaddieAssignmentUseCase, CreateCaddieUseCase,
-    DeleteCaddieAvailabilityUseCase, DeleteCaddieUseCase, ExportPayrollCsvUseCase,
-    GenerateCaddieShiftsUseCase, GeneratedMonth, GetAttendanceSnapshotUseCase,
-    GetAvailabilityDeadlineUseCase, GetCaddieRankFeesUseCase, GetCaddieSupplyUseCase,
+    AssignCaddieDutyUseCase, AutoAssignCaddiesUseCase, ClearCaddieDutyUseCase,
+    CreateCaddieAssignmentUseCase, CreateCaddieUseCase, DeleteCaddieAvailabilityUseCase,
+    DeleteCaddieUseCase, ExportPayrollCsvUseCase, FieldSyncProgress, GenerateCaddieShiftsUseCase,
+    GeneratedMonth, GetAttendanceSnapshotUseCase, GetAvailabilityDeadlineUseCase,
+    GetCaddieDutyOptionsUseCase, GetCaddieRankFeesUseCase, GetCaddieSupplyUseCase,
     GetCourseCaddieSupplyUseCase, GetPayrollSummaryUseCase, GetShiftRulesUseCase,
     ListAttendancePeriodSnapshotsUseCase, ListCaddieAvailabilitiesUseCase,
-    ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase, ListCaddieRecommendationsUseCase,
-    ListCaddieShiftsUseCase, ListCourseReinforcementsUseCase, ListUnsubmittedCaddiesUseCase,
-    NameCaddieForRound, ReinforcementCandidate, ReplaceCaddieMembershipsUseCase,
-    ReplaceCaddieRankFeesUseCase, ShiftPlanMode, UpdateCaddieAssignmentUseCase,
-    UpdateCaddieShiftUseCase, UpdateCaddieUseCase, UpdateShiftRulesUseCase,
-    UpsertAvailabilityDeadlineUseCase, UpsertCaddieAvailabilityUseCase,
+    ListCaddieDutyAssignmentsUseCase, ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase,
+    ListCaddieRecommendationsUseCase, ListCaddieShiftsUseCase, ListCourseReinforcementsUseCase,
+    ListUnsubmittedCaddiesUseCase, MoveTheRound, NameCaddieForRound,
+    ReassignCaddieAssignmentUseCase, ReinforcementCandidate, ReplaceCaddieDutyOptionsUseCase,
+    ReplaceCaddieMembershipsUseCase, ReplaceCaddieRankFeesUseCase, ShiftPlanMode,
+    SyncCaddieShiftsToFieldUseCase, UpdateCaddieAssignmentUseCase, UpdateCaddieShiftUseCase,
+    UpdateCaddieUseCase, UpdateShiftRulesUseCase, UpsertAvailabilityDeadlineUseCase,
+    UpsertCaddieAvailabilityUseCase,
 };
 use crate::{AppError, AppState};
 
@@ -308,8 +311,11 @@ pub async fn create_caddie_assignment(
         .get_tenant_timezone(credentials)
         .await
         .map_err(AppError::from)?;
-    let use_case =
-        CreateCaddieAssignmentUseCase::new(ops_gateway(&state), caddie_rank_fee_gateway(&state));
+    let use_case = CreateCaddieAssignmentUseCase::new(
+        ops_gateway(&state),
+        caddie_rank_fee_gateway(&state),
+        caddie_duty_gateway(&state),
+    );
     let assignment = use_case
         .execute(
             credentials,
@@ -371,6 +377,77 @@ pub async fn update_caddie_assignment(
     let use_case = UpdateCaddieAssignmentUseCase::new(ops_gateway(&state));
     let assignment = use_case
         .execute(credentials, &assignment_id, input)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CaddieAssignmentDto::from(&assignment)))
+}
+
+/// Moving a round already placed: another caddie, another group, or both.
+///
+/// Everything is optional but the day: what the desk did not change stays as
+/// it was, and the day is what the board this was asked from is showing.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReassignCaddieRequest {
+    /// The day board, `YYYY-MM-DD`. The round has to be on it, and stays on it.
+    pub date: NaiveDate,
+    #[serde(default)]
+    pub caddie_profile_id: Option<String>,
+    #[serde(default)]
+    pub reservation_id: Option<String>,
+    /// The new group's tee time. Send it whenever the group changes.
+    #[serde(default)]
+    pub scheduled_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub duration_minutes: Option<i32>,
+}
+
+/// PUT /v1/course/caddie-assignments/:id/reassignment
+#[utoipa::path(
+    put,
+    path = "/v1/course/caddie-assignments/{id}/reassignment",
+    tag = "course-ops",
+    params(("id" = String, Path, description = "Assignment ID")),
+    request_body = ReassignCaddieRequest,
+    responses(
+        (status = 200, description = "The round as it now stands", body = CaddieAssignmentDto),
+        (status = 400, description = "The group is taken, the caddie cannot walk it, or the move leaves the day", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "No such round on that day", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn reassign_caddie_assignment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(assignment_id): Path<String>,
+    Json(body): Json<ReassignCaddieRequest>,
+) -> Result<Json<CaddieAssignmentDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let assignment_id = AssignmentId::try_new(assignment_id).map_err(AppError::from)?;
+    let timezone = catalog_gateway(&state)
+        .get_tenant_timezone(credentials)
+        .await
+        .map_err(AppError::from)?;
+    let use_case = ReassignCaddieAssignmentUseCase::new(
+        ops_gateway(&state),
+        caddie_rank_fee_gateway(&state),
+        caddie_duty_gateway(&state),
+    );
+    let assignment = use_case
+        .execute(
+            credentials,
+            MoveTheRound {
+                assignment_id,
+                date: body.date,
+                caddie_id: CaddieId::from_optional(body.caddie_profile_id),
+                reservation_id: ReservationId::from_optional(body.reservation_id),
+                scheduled_at: body.scheduled_at,
+                duration_minutes: body.duration_minutes,
+            },
+            &timezone,
+        )
         .await
         .map_err(AppError::from)?;
     Ok(Json(CaddieAssignmentDto::from(&assignment)))
@@ -638,6 +715,10 @@ pub struct RecommendationDto {
     pub remaining_rounds: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attendance_status: Option<String>,
+    /// Where the confirmed shift puts the caddie for the requested day.
+    /// Optional so an older backend response remains readable by a newer SPA.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub shift_placement_status: Option<String>,
     pub recommendation_score: i32,
     pub recommended_role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -656,6 +737,7 @@ impl From<&CaddieRecommendation> for RecommendationDto {
             rounds_assigned: value.rounds_assigned(),
             remaining_rounds: value.remaining_rounds(),
             attendance_status: value.attendance_status().map(str::to_string),
+            shift_placement_status: Some(value.placement().status().to_string()),
             recommendation_score: value.recommendation_score(),
             recommended_role: value.recommended_role().to_string(),
             pairing_display_name: value.pairing_display_name().map(str::to_string),
@@ -702,8 +784,11 @@ pub async fn list_caddie_recommendations(
         .get_tenant_timezone(credentials)
         .await
         .map_err(AppError::from)?;
-    let use_case =
-        ListCaddieRecommendationsUseCase::new(ops_gateway(&state), state.caddie_shifts());
+    let use_case = ListCaddieRecommendationsUseCase::new(
+        ops_gateway(&state),
+        state.caddie_shifts(),
+        caddie_duty_gateway(&state),
+    );
     let items = use_case
         .execute(
             credentials,
@@ -923,6 +1008,7 @@ pub async fn get_caddie_supply(
         ops_gateway(&state),
         catalog_gateway(&state),
         reservation_gateway(&state),
+        caddie_duty_gateway(&state),
     );
     let supply = use_case
         .execute(credentials, query.date, query.safety_buffer)
@@ -947,6 +1033,10 @@ pub struct AutoAssignPlanItemDto {
     pub caddie_profile_id: String,
     pub caddie_display_name: String,
     pub rationale: Vec<String>,
+    /// Where the confirmed shift puts the selected caddie for the day.
+    /// Optional so an older auto-assignment response remains readable.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub shift_placement_status: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -988,6 +1078,7 @@ impl From<AutoAssignResult> for AutoAssignResultDto {
                     caddie_profile_id: item.caddie_id().to_string(),
                     caddie_display_name: item.caddie_display_name().to_string(),
                     rationale: item.rationale().to_vec(),
+                    shift_placement_status: Some(item.placement().status().to_string()),
                 })
                 .collect(),
             skipped: value
@@ -1033,6 +1124,7 @@ pub async fn auto_assign_caddies(
         state.availability_deadlines(),
         state.caddie_shifts(),
         caddie_rank_fee_gateway(&state),
+        caddie_duty_gateway(&state),
     );
     let result = use_case
         .execute(credentials, body.date, body.dry_run)
@@ -1684,6 +1776,132 @@ pub async fn generate_caddie_shifts(
     Ok(Json(GeneratedMonthDto::from(generated)))
 }
 
+/// One batch of a confirmed month, pushed to Field.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldSyncProgressDto {
+    /// Working days Field was told about by this call.
+    pub filed: u64,
+    /// Days withdrawn from Field because they are no longer worked.
+    pub withdrawn: u64,
+    /// Days that cannot reach Field: the caddie has no staff record to file
+    /// them under, or names one Field no longer has. Fix the roster, then
+    /// re-send the month.
+    pub unlinkable: u64,
+    /// Days Field refused or could not answer for. Unlike `unlinkable`,
+    /// nothing about the roster explains these.
+    pub failed: u64,
+    /// Days still behind. Call again while this is above zero.
+    pub remaining: u64,
+    pub done: bool,
+}
+
+impl From<FieldSyncProgress> for FieldSyncProgressDto {
+    fn from(value: FieldSyncProgress) -> Self {
+        Self {
+            filed: value.filed(),
+            withdrawn: value.withdrawn(),
+            unlinkable: value.unlinkable(),
+            failed: value.failed(),
+            remaining: value.remaining(),
+            done: value.done(),
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldSyncQuery {
+    /// Start the month over, ignoring what was pushed before. For a month
+    /// stuck behind a roster gap, or one deleted on Field's side.
+    #[serde(default)]
+    pub resend: bool,
+}
+
+/// How much of a month has not reached Field.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldSyncStatusDto {
+    /// Days still behind. Zero means Field has the month as confirmed.
+    pub remaining: u64,
+}
+
+/// GET /v1/course/caddie-shift-plans/:year_month/field-sync
+///
+/// What the board shows on load. A push that died half way leaves days
+/// behind, and nothing else on the screen would say so.
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-shift-plans/{year_month}/field-sync",
+    tag = "course-ops",
+    params(("year_month" = String, Path, description = "YYYY-MM")),
+    responses(
+        (status = 200, description = "Days this month that have not reached Field", body = FieldSyncStatusDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_field_sync_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(year_month): Path<String>,
+) -> Result<Json<FieldSyncStatusDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let year_month = parse_year_month(&year_month)?;
+    let use_case = SyncCaddieShiftsToFieldUseCase::new(
+        ops_gateway(&state),
+        state.caddie_shifts(),
+        state.shift_rules(),
+        shift_mirror(&state),
+    );
+    let remaining = use_case
+        .behind(credentials, year_month)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(FieldSyncStatusDto { remaining }))
+}
+
+/// POST /v1/course/caddie-shift-plans/:year_month/field-sync
+///
+/// Confirming a month writes CourseBoard's own tables and returns at once;
+/// the roster's thousand-odd days reach Field through here, a batch per call.
+/// The caller repeats while `remaining` is above zero.
+#[utoipa::path(
+    post,
+    path = "/v1/course/caddie-shift-plans/{year_month}/field-sync",
+    tag = "course-ops",
+    params(("year_month" = String, Path, description = "YYYY-MM"), FieldSyncQuery),
+    responses(
+        (status = 200, description = "What this batch did, and what is left", body = FieldSyncProgressDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn sync_caddie_shifts_to_field(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(year_month): Path<String>,
+    Query(query): Query<FieldSyncQuery>,
+) -> Result<Json<FieldSyncProgressDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let year_month = parse_year_month(&year_month)?;
+    let use_case = SyncCaddieShiftsToFieldUseCase::new(
+        ops_gateway(&state),
+        state.caddie_shifts(),
+        state.shift_rules(),
+        shift_mirror(&state),
+    );
+    let progress = use_case
+        .execute(credentials, year_month, query.resend)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(FieldSyncProgressDto::from(progress)))
+}
+
 /// PUT /v1/course/caddie-shifts/:caddie_profile_id/:date
 #[utoipa::path(
     put,
@@ -1718,7 +1936,12 @@ pub async fn update_caddie_shift(
         pinned: body.pinned,
         note: body.note,
     };
-    let use_case = UpdateCaddieShiftUseCase::new(ops_gateway(&state), state.caddie_shifts());
+    let use_case = UpdateCaddieShiftUseCase::new(
+        ops_gateway(&state),
+        state.caddie_shifts(),
+        state.shift_rules(),
+        shift_mirror(&state),
+    );
     let shift = use_case
         .execute(credentials, &caddie_id, date, edit, body.updated_by)
         .await
@@ -1740,6 +1963,24 @@ pub struct CourseCaddieSupplyDto {
     pub movable_caddies: i64,
     /// Rounds still coverable. Negative means the course is short.
     pub shortfall: i64,
+    /// Assignment coverage and effective values are additive to the raw fields
+    /// above. Defaults keep old JSON payloads deserializable during rollout.
+    #[serde(default)]
+    pub assigned_groups: i64,
+    #[serde(default)]
+    pub backed_assigned_groups: i64,
+    #[serde(default)]
+    pub unbacked_assigned_groups: i64,
+    #[serde(default)]
+    pub capacity_exceeded_assigned_groups: i64,
+    #[serde(default)]
+    pub course_mismatch_assigned_groups: i64,
+    #[serde(default)]
+    pub effective_rounds_capacity: i64,
+    #[serde(default)]
+    pub effective_caddie_attached_groups: i64,
+    #[serde(default)]
+    pub effective_shortfall: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -1766,6 +2007,14 @@ impl From<DayCaddieSupply> for DayCaddieSupplyDto {
                     caddie_attached_groups: course.caddie_attached_groups(),
                     movable_caddies: course.movable_caddies(),
                     shortfall: course.shortfall(),
+                    assigned_groups: course.assigned_groups(),
+                    backed_assigned_groups: course.backed_assigned_groups(),
+                    unbacked_assigned_groups: course.unbacked_assigned_groups(),
+                    capacity_exceeded_assigned_groups: course.capacity_exceeded_assigned_groups(),
+                    course_mismatch_assigned_groups: course.course_mismatch_assigned_groups(),
+                    effective_rounds_capacity: course.effective_rounds_capacity(),
+                    effective_caddie_attached_groups: course.effective_caddie_attached_groups(),
+                    effective_shortfall: course.effective_shortfall(),
                 })
                 .collect(),
             unplaced_caddies: value.unplaced_caddies(),
@@ -1793,10 +2042,12 @@ pub async fn get_course_caddie_supply(
     Query(params): Query<SupplyQueryParams>,
 ) -> Result<Json<DayCaddieSupplyDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = GetCourseCaddieSupplyUseCase::new(
+    let use_case = GetCourseCaddieSupplyUseCase::with_roster(
         state.caddie_shifts(),
         reservation_gateway(&state),
         catalog_gateway(&state),
+        ops_gateway(&state),
+        caddie_duty_gateway(&state),
     );
     let supply = use_case
         .execute(credentials, params.date)
@@ -2008,4 +2259,385 @@ pub async fn update_shift_rules(
         .await
         .map_err(AppError::from)?;
     Ok(Json(ShiftRulesDto::from(saved)))
+}
+
+/// The jobs a caddie can be put on when they are not walking a round.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CaddieDutyOptionsDto {
+    pub items: Vec<String>,
+}
+
+/// One caddie put on other work for one stretch of one day.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CaddieDutyAssignmentDto {
+    /// How the desk clears this one rather than the other job the same caddie
+    /// is on that afternoon.
+    pub id: String,
+    pub caddie_profile_id: String,
+    pub date: NaiveDate,
+    /// The job as it was filed. A label, not a reference: retiring a job later
+    /// does not rewrite what this day says the caddie did.
+    pub duty_label: String,
+    /// The stretch of the day it covers, `HH:MM` in the club's own clock.
+    /// `00:00`–`24:00` is the whole day.
+    pub start_time: String,
+    pub end_time: String,
+    pub all_day: bool,
+    pub note: Option<String>,
+    pub updated_by: Option<String>,
+}
+
+/// `540` → `09:00`. The minute count is the club's own day, so this never
+/// needs a timezone.
+fn clock(minutes: i32) -> String {
+    format!("{:02}:{:02}", minutes / 60, minutes % 60)
+}
+
+/// `09:00` → `540`, refusing anything that is not a time of day.
+fn minutes_of_day(value: &str) -> Result<i32, AppError> {
+    let (hour, minute) = value
+        .trim()
+        .split_once(':')
+        .ok_or_else(|| AppError::from(CourseError::BadRequest("the time must read HH:MM")))?;
+    let hour: i32 = hour
+        .parse()
+        .map_err(|_| AppError::from(CourseError::BadRequest("the time must read HH:MM")))?;
+    let minute: i32 = minute
+        .parse()
+        .map_err(|_| AppError::from(CourseError::BadRequest("the time must read HH:MM")))?;
+    if !(0..=59).contains(&minute) {
+        return Err(AppError::from(CourseError::BadRequest(
+            "the time must read HH:MM",
+        )));
+    }
+    Ok(hour * 60 + minute)
+}
+
+impl From<&CaddieDutyAssignment> for CaddieDutyAssignmentDto {
+    fn from(value: &CaddieDutyAssignment) -> Self {
+        let window = value.window();
+        Self {
+            id: value.id().map(|id| id.to_string()).unwrap_or_default(),
+            caddie_profile_id: value.caddie_id().to_string(),
+            date: value.date(),
+            duty_label: value.duty_label().to_string(),
+            start_time: clock(window.start_minute()),
+            end_time: clock(window.end_minute()),
+            all_day: window.is_all_day(),
+            note: value.note().map(str::to_string),
+            updated_by: value.updated_by().map(str::to_string),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignCaddieDutyRequest {
+    pub caddie_profile_id: String,
+    pub date: NaiveDate,
+    pub duty_label: String,
+    /// `HH:MM` in the club's own clock. Leave both unset for the whole day;
+    /// `24:00` is a legal end.
+    #[serde(default)]
+    pub start_time: Option<String>,
+    #[serde(default)]
+    pub end_time: Option<String>,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub updated_by: Option<String>,
+}
+
+/// GET /v1/course/caddie-duties
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-duties",
+    tag = "course-ops",
+    responses(
+        (status = 200, description = "The jobs this club fills", body = CaddieDutyOptionsDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_caddie_duties(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<CaddieDutyOptionsDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let options = GetCaddieDutyOptionsUseCase::new(caddie_duty_gateway(&state))
+        .execute(credentials)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CaddieDutyOptionsDto {
+        items: options.options().to_vec(),
+    }))
+}
+
+/// PUT /v1/course/caddie-duties
+#[utoipa::path(
+    put,
+    path = "/v1/course/caddie-duties",
+    tag = "course-ops",
+    request_body = CaddieDutyOptionsDto,
+    responses(
+        (status = 200, description = "The list as it now stands", body = CaddieDutyOptionsDto),
+        (status = 400, description = "A duplicate, an over-long name, or too many of them", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replace_caddie_duties(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<CaddieDutyOptionsDto>,
+) -> Result<Json<CaddieDutyOptionsDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let options = CaddieDutyOptions::try_new(body.items).map_err(AppError::from)?;
+    let stored = ReplaceCaddieDutyOptionsUseCase::new(caddie_duty_gateway(&state))
+        .execute(credentials, options)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CaddieDutyOptionsDto {
+        items: stored.options().to_vec(),
+    }))
+}
+
+/// GET /v1/course/caddie-duty-assignments
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-duty-assignments",
+    tag = "course-ops",
+    params(ShiftRangeQuery),
+    responses(
+        (status = 200, description = "Caddies on other work in the range", body = inline(ItemsResponse<CaddieDutyAssignmentDto>)),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_caddie_duty_assignments(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<ShiftRangeQuery>,
+) -> Result<Json<ItemsResponse<CaddieDutyAssignmentDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let items = ListCaddieDutyAssignmentsUseCase::new(caddie_duty_gateway(&state))
+        .execute(credentials, params.from, params.to)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: items.iter().map(CaddieDutyAssignmentDto::from).collect(),
+    }))
+}
+
+/// POST /v1/course/caddie-duty-assignments
+#[utoipa::path(
+    post,
+    path = "/v1/course/caddie-duty-assignments",
+    tag = "course-ops",
+    request_body = AssignCaddieDutyRequest,
+    responses(
+        (status = 201, description = "The caddie is on other work over those hours", body = CaddieDutyAssignmentDto),
+        (status = 400, description = "Not one of the club's duties, the hours are taken, or a round runs through them", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Caddie not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn assign_caddie_duty(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AssignCaddieDutyRequest>,
+) -> Result<(StatusCode, Json<CaddieDutyAssignmentDto>), AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let caddie_id = CaddieId::try_new(body.caddie_profile_id).map_err(AppError::from)?;
+    let window = match (body.start_time.as_deref(), body.end_time.as_deref()) {
+        (None, None) => DutyWindow::all_day(),
+        // Half a window is a form the desk has not finished filling in, and
+        // guessing the other end would file hours nobody asked for.
+        (Some(start), Some(end)) => {
+            DutyWindow::try_new(minutes_of_day(start)?, minutes_of_day(end)?)
+                .map_err(AppError::from)?
+        }
+        _ => {
+            return Err(AppError::from(CourseError::BadRequest(
+                "name both the start and the end, or neither for the whole day",
+            )))
+        }
+    };
+    let timezone = catalog_gateway(&state)
+        .get_tenant_timezone(credentials)
+        .await
+        .map_err(AppError::from)?;
+    let assignment = CaddieDutyAssignment::try_new(
+        caddie_id,
+        body.date,
+        window,
+        body.duty_label,
+        body.note,
+        body.updated_by,
+    )
+    .map_err(AppError::from)?;
+    let saved = AssignCaddieDutyUseCase::new(ops_gateway(&state), caddie_duty_gateway(&state))
+        .execute(credentials, assignment, &timezone)
+        .await
+        .map_err(AppError::from)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(CaddieDutyAssignmentDto::from(&saved)),
+    ))
+}
+
+/// DELETE /v1/course/caddie-duty-assignments/:duty_id
+#[utoipa::path(
+    delete,
+    path = "/v1/course/caddie-duty-assignments/{duty_id}",
+    tag = "course-ops",
+    params(("duty_id" = String, Path, description = "Filed duty ID")),
+    responses(
+        (status = 204, description = "The caddie is back on rounds for those hours. Also when nothing was there"),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn clear_caddie_duty(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(duty_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let duty_id: i64 = duty_id
+        .parse()
+        .map_err(|_| AppError::from(CourseError::BadRequest("no such filed duty")))?;
+    ClearCaddieDutyUseCase::new(caddie_duty_gateway(&state))
+        .execute(credentials, duty_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+
+    use crate::course::domain::{
+        apply_assignment_coverage, compute_course_supply, AutoAssignPlanItem, AutoAssignResult,
+        CaddiePlacement, CaddieRecommendation, CaddieShift, CaddieSkillLevel, CourseId,
+        ShiftOrigin, ShiftSpan,
+    };
+
+    fn date() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 9, 12).expect("test date")
+    }
+
+    #[test]
+    fn caddie_supply_dto_serializes_additive_values_and_reads_old_json() {
+        let shift = CaddieShift::reconstitute(
+            "caddie-1",
+            date(),
+            Some(CourseId::new("out")),
+            true,
+            ShiftSpan::FullDay,
+            1,
+            ShiftOrigin::Generated,
+            None,
+            None,
+            None,
+        );
+        let mut supply = compute_course_supply(
+            date(),
+            vec![(CourseId::new("out"), "OUT".to_string())],
+            std::slice::from_ref(&shift),
+            &std::collections::HashMap::from([(CourseId::new("out"), 1)]),
+        );
+        apply_assignment_coverage(
+            &mut supply,
+            std::slice::from_ref(&shift),
+            &[crate::course::domain::AssignedCoverage::new(
+                "reservation-1",
+                "out",
+                "caddie-1",
+                "assignment-1",
+            )],
+        );
+
+        let dto = DayCaddieSupplyDto::from(supply);
+        let json = serde_json::to_value(&dto).expect("serialize supply");
+        assert_eq!(json["courses"][0]["assignedGroups"], 1);
+        assert_eq!(json["courses"][0]["backedAssignedGroups"], 1);
+        assert_eq!(json["courses"][0]["effectiveRoundsCapacity"], 0);
+        assert_eq!(json["courses"][0]["effectiveCaddieAttachedGroups"], 0);
+        assert_eq!(json["courses"][0]["effectiveShortfall"], 0);
+
+        let old_json = serde_json::json!({
+            "date": date(),
+            "courses": [{
+                "golfCourseId": "out",
+                "courseName": "OUT",
+                "workingCaddies": 1,
+                "roundsCapacity": 1,
+                "caddieAttachedGroups": 1,
+                "movableCaddies": 1,
+                "shortfall": 0
+            }],
+            "unplacedCaddies": 0
+        });
+        let decoded: DayCaddieSupplyDto =
+            serde_json::from_value(old_json).expect("decode old supply");
+        assert_eq!(decoded.courses[0].assigned_groups, 0);
+        assert_eq!(decoded.courses[0].effective_shortfall, 0);
+    }
+
+    #[test]
+    fn recommendation_and_auto_assign_dtos_serialize_shift_placement_status() {
+        let recommendation = CaddieRecommendation::reconstitute_with_placement(
+            "caddie-1",
+            "Sato",
+            CaddieSkillLevel::Regular,
+            None,
+            0,
+            0,
+            Some(2),
+            None,
+            10,
+            "primary",
+            None,
+            Vec::new(),
+            CaddiePlacement::On(CourseId::new("out")),
+        );
+        let recommendation_json = serde_json::to_value(RecommendationDto::from(&recommendation))
+            .expect("serialize recommendation");
+        assert_eq!(recommendation_json["shiftPlacementStatus"], "on_course");
+        let mut old_recommendation = recommendation_json.clone();
+        old_recommendation
+            .as_object_mut()
+            .expect("recommendation object")
+            .remove("shiftPlacementStatus");
+        let _: RecommendationDto =
+            serde_json::from_value(old_recommendation).expect("decode old recommendation");
+
+        let item = AutoAssignPlanItem::reconstitute_with_placement(
+            "reservation-1",
+            Utc.with_ymd_and_hms(2026, 9, 12, 1, 0, 0).unwrap(),
+            "caddie-1",
+            "Sato",
+            Vec::new(),
+            CaddiePlacement::Unplaced,
+        );
+        let result = AutoAssignResult::new(true, vec![item], Vec::new());
+        let auto_json = serde_json::to_value(AutoAssignResultDto::from(result))
+            .expect("serialize auto assignment");
+        assert_eq!(auto_json["assigned"][0]["shiftPlacementStatus"], "unplaced");
+        let mut old_auto = auto_json;
+        old_auto["assigned"][0]
+            .as_object_mut()
+            .expect("auto item object")
+            .remove("shiftPlacementStatus");
+        let _: AutoAssignResultDto = serde_json::from_value(old_auto).expect("decode old auto");
+    }
 }

@@ -87,6 +87,22 @@ impl ReservationGateway for FieldReservationGateway {
         Ok(items.into_iter().map(map_reservation).collect())
     }
 
+    async fn list_customer_reservations(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Reservation>, CourseError> {
+        let path = format!(
+            "/v1/erp/reservations?customerId={}&limit={limit}&offset={offset}",
+            urlencoding_path(customer_id.as_str())
+        );
+        let items: Vec<FieldReservationDto> =
+            field_get_items(&self.client, &self.base_url, &path, credentials).await?;
+        Ok(items.into_iter().map(map_reservation).collect())
+    }
+
     async fn get_reservation(
         &self,
         credentials: GatewayCredentials<'_>,
@@ -295,11 +311,17 @@ impl ReservationGateway for FieldReservationGateway {
         // Field's cancel takes no body today. The reason is sent anyway so the
         // desk's words land the moment Field can keep them (PLT-3297); an
         // endpoint that ignores unknown fields drops it, which is the same
-        // outcome as not sending it.
-        let body = reason
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| json!({ "reason": value }));
+        // outcome as not sending it. A JSON object is sent either way, though
+        // — `{}` when there is no reason, never nothing at all — because
+        // Field's endpoint runs the same `Json<_>` extractor that requires
+        // `Content-Type: application/json` regardless of whether the body has
+        // anything in it, and reqwest only sets that header when `.json(..)`
+        // is actually called with something.
+        let trimmed_reason = reason.map(str::trim).filter(|value| !value.is_empty());
+        let body = match trimmed_reason {
+            Some(reason) => json!({ "reason": reason }),
+            None => json!({}),
+        };
         // Status only, no decode: a cancel that answers 204 has done the work,
         // and failing to parse an empty body would report the booking as still
         // live and invite the desk to cancel it a second time.
@@ -309,7 +331,7 @@ impl ReservationGateway for FieldReservationGateway {
             reqwest::Method::POST,
             &path,
             credentials,
-            body.as_ref(),
+            Some(&body),
         )
         .await
     }
@@ -1825,21 +1847,13 @@ fn map_field_request_error_with_timeout(error: reqwest::Error, timeout: Duration
 }
 
 /// Preserve every sanitized Field 4xx as an operator-correctable response;
-/// transport failures and 5xx responses remain provider failures.
+/// transport failures and 5xx responses remain provider failures. Authentication
+/// and authorization stay distinct: Field 401 remains 401, while a real policy
+/// denial remains 403.
 pub(crate) fn map_field_status_error(status: reqwest::StatusCode, message: &str) -> CourseError {
     if status.is_client_error() {
-        // A Field 401 describes the forwarded bearer/tenant at the provider
-        // boundary, not the operator's CourseBoard session. Keep the historical
-        // 403 normalization so the browser does not refresh or sign out a valid
-        // CourseBoard login. Both statuses still stay below 500, avoiding
-        // Cloudflare's CORS-less origin 5xx replacement page.
-        let downstream_status = if status == reqwest::StatusCode::UNAUTHORIZED {
-            reqwest::StatusCode::FORBIDDEN
-        } else {
-            status
-        };
         return CourseError::UpstreamClient {
-            status: downstream_status.as_u16(),
+            status: status.as_u16(),
             message: field_error_message(message).unwrap_or_else(|| status.to_string()),
         };
     }
@@ -2073,6 +2087,79 @@ mod tests {
         server.abort();
     }
 
+    #[derive(Clone, Default)]
+    struct CancelServerState {
+        bodies: Arc<Mutex<Vec<Value>>>,
+    }
+
+    async fn cancel_endpoint(
+        State(state): State<CancelServerState>,
+        Json(body): Json<Value>,
+    ) -> axum::http::StatusCode {
+        state.bodies.lock().expect("bodies lock").push(body);
+        axum::http::StatusCode::NO_CONTENT
+    }
+
+    /// Field's cancel endpoint uses the same `Json<_>` extractor as any other
+    /// write, which rejects a request that arrives with no
+    /// `Content-Type: application/json` — reason or no reason. A cancel with a
+    /// blank reason used to skip the body (and the header riding on it)
+    /// entirely, so this pins what actually reaches Field for each shape of
+    /// reason the desk can type (or not).
+    #[tokio::test]
+    async fn cancel_reservation_always_sends_a_json_body_to_field() {
+        for (reason, expected) in [
+            (None, json!({})),
+            (Some("   "), json!({})),
+            (
+                Some("電話でキャンセル"),
+                json!({ "reason": "電話でキャンセル" }),
+            ),
+        ] {
+            let state = CancelServerState::default();
+            let app = Router::new()
+                .route(
+                    "/v1/erp/reservations/res_1/cancel",
+                    axum::routing::post(cancel_endpoint),
+                )
+                .with_state(state.clone());
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+                .await
+                .expect("bind mock Field");
+            let address = listener.local_addr().expect("mock Field address");
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.expect("serve mock Field");
+            });
+
+            let gateway = FieldReservationGateway::new(
+                reqwest::Client::new(),
+                Some(&format!("http://{address}")),
+            );
+            gateway
+                .cancel_reservation(
+                    GatewayCredentials {
+                        authorization: "Bearer test-token",
+                        operator_id: "operator-test",
+                        platform_id: Some("platform-test"),
+                        authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                        caller_bearer: "Bearer test",
+                    },
+                    &ReservationId::new("res_1"),
+                    reason,
+                )
+                .await
+                .unwrap_or_else(|error| panic!("cancel with reason {reason:?}: {error}"));
+
+            assert_eq!(
+                state.bodies.lock().expect("bodies lock").as_slice(),
+                [expected],
+                "reason {reason:?}",
+            );
+
+            server.abort();
+        }
+    }
+
     #[test]
     fn a_booking_the_desk_did_not_identify_carries_no_customer_id_at_all() {
         let body = new_reservation_body(&desk_reservation(), true);
@@ -2118,7 +2205,19 @@ mod tests {
     }
 
     #[test]
-    fn upstream_4xx_keeps_its_status_and_sanitized_message() {
+    fn upstream_authentication_expiry_stays_401() {
+        let unauthorized = map_field_status_error(
+            reqwest::StatusCode::UNAUTHORIZED,
+            "{\"error\":\"unauthorized\",\"message\":\"Field authentication expired\"}",
+        );
+        assert!(
+            matches!(unauthorized, CourseError::UpstreamClient { status: 401, message }
+            if message == "Field authentication expired")
+        );
+    }
+
+    #[test]
+    fn upstream_permission_denial_stays_403() {
         let denied = map_field_status_error(
             reqwest::StatusCode::FORBIDDEN,
             "{\"code\":\"FORBIDDEN\",\"message\":\"tenant policy check denied\"}",
@@ -2127,13 +2226,10 @@ mod tests {
             matches!(denied, CourseError::UpstreamClient { status: 403, message }
             if message == "tenant policy check denied")
         );
+    }
 
-        let unauthorized = map_field_status_error(reqwest::StatusCode::UNAUTHORIZED, "expired");
-        assert!(
-            matches!(unauthorized, CourseError::UpstreamClient { status: 403, message }
-            if message == "expired")
-        );
-
+    #[test]
+    fn upstream_conflict_keeps_its_status_and_sanitized_message() {
         let conflict = map_field_status_error(
             reqwest::StatusCode::CONFLICT,
             "{\"error\":\"staff_already_linked\",\"message\":\"このスタッフは田中さんに既に紐付いています\"}",
