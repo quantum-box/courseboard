@@ -465,6 +465,14 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/reservation-report-entries",
         RouteAuthorization::UpstreamEnforced,
     ),
+    // Writes CourseBoard's table and deletes a Field config key. Field gates
+    // the config write itself (`field:ManageExtensions`), and the usecase asks
+    // for ImportReservationReports before either store is touched.
+    (
+        "*",
+        "/v1/course/reservation-report-migration",
+        RouteAuthorization::UpstreamEnforced,
+    ),
     (
         "*",
         "/v1/course/caddie-profiles",
@@ -1299,6 +1307,7 @@ mod tests {
             ("POST", "/v1/course/reservation-report-imports"),
             ("POST", "/v1/course/reservation-report-imports/preview"),
             ("GET", "/v1/course/reservation-report-entries"),
+            ("POST", "/v1/course/reservation-report-migration"),
             ("GET", "/v1/course/caddie-profiles"),
             ("POST", "/v1/course/caddie-profiles"),
             ("PATCH", "/v1/course/caddie-profiles/cp_1"),

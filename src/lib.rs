@@ -760,6 +760,14 @@ pub fn build_router(state: AppState) -> Router {
                 )),
         )
         .route(
+            "/v1/course/reservation-report-migration",
+            post(course::interfaces::http_reservation_report::migrate_reservation_reports)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/v1/course/demo-seed",
             post(course::interfaces::http::seed_demo_board).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),

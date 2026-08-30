@@ -68,6 +68,7 @@ mod reassign_caddie_assignment;
 mod replace_caddie_memberships;
 mod replace_product_slots;
 mod reservation_report_import;
+mod reservation_report_migration;
 mod search_customers;
 mod seed_demo_board;
 mod shift_rules;
@@ -164,6 +165,9 @@ pub use reservation_report_import::{
     ImportReservationReportUseCase, ListReservationReportEntriesUseCase,
     PreviewReservationReportUseCase, ReservationReportCourseMapping, ReservationReportPreview,
     MAX_RESERVATION_REPORT_BYTES,
+};
+pub use reservation_report_migration::{
+    MigrateReservationReportsUseCase, ReservationReportMigrationOutcome,
 };
 pub use search_customers::SearchCustomersUseCase;
 pub use seed_demo_board::{SeedDemoBoardUseCase, SeedSummary};

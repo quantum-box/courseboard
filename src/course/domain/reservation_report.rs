@@ -641,6 +641,43 @@ pub trait ReservationReportGateway: Send + Sync {
     ) -> Result<Vec<ExternalReservationReportEntry>, CourseError>;
 }
 
+/// Port for the one-shot move off the legacy extension-config copy (ADR-0009).
+///
+/// Kept apart from `ReservationReportGateway` on purpose: the serving path
+/// must not be able to read the legacy store directly or delete the config
+/// key. Only the migration usecase gets these four.
+#[async_trait::async_trait]
+pub trait ReservationReportMigrationGateway: Send + Sync {
+    /// Every row the legacy extension config still holds, unbounded.
+    async fn list_legacy_entries(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        courses: &[Course],
+    ) -> Result<Vec<ExternalReservationReportEntry>, CourseError>;
+
+    /// Every row CourseBoard's own table holds, unbounded.
+    async fn list_local_entries(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        courses: &[Course],
+    ) -> Result<Vec<ExternalReservationReportEntry>, CourseError>;
+
+    /// Copy the whole legacy history in if this tenant has never been seeded.
+    /// Returns how many rows were copied (0 when already seeded or empty).
+    async fn seed_from_legacy_if_unseeded(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        courses: &[Course],
+    ) -> Result<usize, CourseError>;
+
+    /// Remove the legacy key from the tenant config. Returns whether a write
+    /// happened; `false` means the key was already absent.
+    async fn delete_legacy_config_key(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<bool, CourseError>;
+}
+
 /// Port for the optional provider-backed tabular analysis fallback.
 #[async_trait::async_trait]
 pub trait ReservationReportAnalyzeGateway: Send + Sync {
