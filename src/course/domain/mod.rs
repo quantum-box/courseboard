@@ -144,12 +144,11 @@ pub use ports::{
     AvailabilityDeadlineGateway, CaddieDutyGateway, CaddieRankFeeGateway, CaddieShiftGateway,
     CourseAuthorizer, CourseOrderGateway, CustomerGateway, CustomerGradeRulesGateway,
     CustomerReceptionOcrGateway, CustomerRegistrationGateway, FieldCapabilitiesGateway,
-    GatewayCredentials,
-    GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
-    GolfTaxGateway, MembershipDiscountsGateway, MembershipGateway, MembershipPlayWindowsGateway,
-    PlayerTagOptionsGateway, PricingSettingsGateway, ReservationGateway,
-    ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, StaffShiftGateway,
-    StaffShiftInput, TeeLedgerQuery, TeeSheetQuery, VisitCheckinGateway,
+    GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
+    GolfOpsGateway, GolfTaxGateway, MembershipDiscountsGateway, MembershipGateway,
+    MembershipPlayWindowsGateway, PlayerTagOptionsGateway, PricingSettingsGateway,
+    ReservationGateway, ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway,
+    StaffShiftGateway, StaffShiftInput, TeeLedgerQuery, TeeSheetQuery, VisitCheckinGateway,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{

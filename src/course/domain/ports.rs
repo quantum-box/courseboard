@@ -14,15 +14,14 @@ use super::{
     FieldClientCapabilities, FieldRequestContext, FieldShiftLink, GenerationSummary,
     GolfPricingSettings, InventoryWatermark, MembershipDiscounts, MembershipPlan, MembershipPlanId,
     MembershipPlayWindows, MonthlySettlement, NewCustomer, NewCustomerRegistration, NewReservation,
-    PartyDetails,
-    PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet, ReplaceCaddieMemberships,
-    Reservation, ReservationBookingUpdate, ReservationId, ReservationPolicy, ReservationProduct,
-    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
-    SeededReservation, SetMemberNumber, ShiftPolicy, SlotOverride, SlotOverrideQuery,
-    TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
-    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
-    UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin, VisitCheckinRequest,
-    WorkedMinutes, YearMonth,
+    PartyDetails, PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet,
+    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
+    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
+    ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber, ShiftPolicy,
+    SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
+    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin,
+    VisitCheckinRequest, WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
