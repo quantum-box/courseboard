@@ -5,7 +5,9 @@
 - Field 側の汎用 OCR: tachyonfield [#1041](https://github.com/quantum-box/tachyonfield/pull/1041)
   （`POST /v1/field/ocr/{entity_key}/draft` とスキーマ駆動の OCR 取込画面）、
   [#1054](https://github.com/quantum-box/tachyonfield/pull/1054)（カスタムフィールド連携）
-- Linear issue: 未作成
+- Field 側の上流失敗の扱い: tachyonfield [#1238](https://github.com/quantum-box/tachyonfield/pull/1238)
+  （[PLT-4033](https://linear.app/issue/PLT-4033)、merge commit `cfccc0d0`）
+- Linear issue: [PLT-4036](https://linear.app/issue/PLT-4036)（上流失敗の出し分け）
 
 ## 概要
 
@@ -54,6 +56,7 @@ allowlist に個人顧客 `consumer` を含む）。CourseBoard は受付用紙�
 - [x] ドメイン: 受付用紙スキーマ、JPEG/PNG/PDF のマジックバイト検証、10MB 上限、行の正規化
 - [x] gateway: `/v1/field/ocr/consumer/draft` へ転送し、`fields.visitors` を行へ写像
 - [x] usecase: 読み取りのみ。上流障害は 424 `provider_error` として返る
+  （上流 OCR の失敗だけは後述のとおり種類ごとに出し分けるようになった）
 - [x] API: `POST /v1/course/customers/reception-draft`、OpenAPI 登録、`:customer_id` より前にルート登録
 - [x] 画面: 2カラム、行の追加、1行ずつ／まとめて登録、読取値の併記、同姓同名の注意
 - [x] HEIC/HEIF: `heic2any` を動的 import して JPEG へ変換（別チャンク、選んだときだけ読み込む）。
@@ -66,6 +69,40 @@ allowlist に個人顧客 `consumer` を含む）。CourseBoard は受付用紙�
   `vitest run src/features/golf/customers`
 - [ ] 実 Field API に対する動作確認（テナントに `field:RegisterMembership` が要る）
 - [ ] CourseBoard の required checks が green になる
+
+## 上流 OCR が失敗したときの出し分け（PLT-4036）
+
+Field は上流 tachyon-api の失敗も 200 + 空ドラフト + 固定文言に潰していた。
+そのため上流が 402 を返し続けていたテナントで、受付にはピンボケ写真とまったく
+同じ「書類を読み取れませんでした。」しか届かず、用紙を何度も撮り直していた。
+Field #1238 で上流失敗が status で返るようになったので、CourseBoard も
+「読み取りが動かなかった」と「用紙が読めなかった」を分けて扱う。
+
+| Field | CourseBoard | `error` |
+|---|---|---|
+| 402 `PAYMENT_REQUIRED` | 402 | `reception_reader_billing_unsatisfied` |
+| 429 `TOO_MANY_REQUESTS` | 429 | `reception_reader_rate_limited` |
+| 503 `SERVICE_UNAVAILABLE` | 424 | `reception_reader_unavailable` |
+| 上記以外の 4xx | 従来どおり | `upstream_client_error` ほか |
+| 200 + `warnings` | 200 | —（これが本物の「用紙が読めなかった」） |
+
+- 400 や 401 は分類しない。前者はこちらの組み立てが悪く、後者は呼び出し側の
+  セッションの話で、どちらも読み取りサービスの障害ではない。請求設定を見に
+  行かせるのは誤誘導になる。
+- 503 を 503 のまま返さないのは、Cloudflare が origin の 5xx を CORS ヘッダの
+  無い HTML に差し替え、ブラウザに "Failed to fetch" しか届かないため。
+- Field の英文メッセージは転送しない。Field 運用者向けの英語で、受付に出す
+  日本語は画面が持つ。
+- **402 は1種類ではない。** 同じ `PAYMENT_REQUIRED` で上流 message は
+  `No billing account linked` と `Insufficient balance. Required: ..., Available: $0`
+  の両方が実測されている。Field は上流本文をコピーしない（OCR 内容を echo
+  しうる）ので status からは判別できず、必要な行動は「請求先を連携する」と
+  「残高を足す」で別。片方だけ案内すると誤誘導になるので、文言は両方を指す
+  （「請求設定（請求先の連携と残高）の確認を依頼してください」）。
+- **これは運用中の障害モードで、セットアップ漏れの1テナントではない。**
+  同じ bearer・同じリクエストで 200 を返していたテナントが約1時間後に
+  402 `Available: $0` に落ちるのが観測されている。上流の請求が尽きれば
+  全テナントの受付 OCR が同時に止まる。
 
 ## 確認済み
 
@@ -87,3 +124,7 @@ HEIC も JPEG 変換を経て同じ経路を通る。
   は 404）。実証には staff ロールのユーザーが要る。オーナー以外の受付担当が使う
   テナントでは、最初の1回で 403 が出ないか確認すること。
 - 実際の受付用紙（手書き・複写伝票）での読み取り精度 → [PLT-3591](https://linear.app/issue/PLT-3591)
+- **上流失敗の出し分けの実測。** 分類・status・コード・画面の分岐は unit test で
+  固定したが、prod Field に実際に 402 / 429 / 503 を返させての確認はしていない。
+  Field #1238 の prod 反映後、402 を返すテナントで受付画面に請求設定の文言が
+  出ることを確認する。

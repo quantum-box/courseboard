@@ -23,6 +23,7 @@ import {
   prepareReceptionSheet,
   previewKind,
   pendingRows,
+  receptionReadFailure,
   rowsFromDraft,
   savedCount,
   RECEPTION_SHEET_ACCEPT,
@@ -102,7 +103,16 @@ export function ReceptionPage() {
       setWarnings(draft.warnings ?? [])
     } catch (error) {
       setRows([])
-      setReadError(resourceErrorText(error))
+      // A reader that never ran is not a sheet that could not be read. Saying
+      // so is the whole point: the generic copy would send the desk back to
+      // the scanner for an outage no photograph can fix, which is exactly what
+      // happened while an upstream 402 was arriving as an empty draft.
+      const failure = receptionReadFailure(error)
+      setReadError(
+        failure
+          ? t(`customers:reception.readerFailure.${failure}`)
+          : resourceErrorText(error),
+      )
     } finally {
       setReading(false)
     }

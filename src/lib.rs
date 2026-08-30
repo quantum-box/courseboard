@@ -31,7 +31,9 @@ use axum::{
 };
 use cancellation_fees::{CancellationFeeConfig, MySqlCancellationFeeRepository};
 use config::RuntimeConfig;
-use course::domain::{party_tax, project_row, RangeRowInput, SimulatedPlayer, TaxRuleSnapshot};
+use course::domain::{
+    party_tax, project_row, RangeRowInput, ReceptionReaderFailure, SimulatedPlayer, TaxRuleSnapshot,
+};
 use course::infrastructure::{
     FieldReservationReportGateway, MigratingReservationReportGateway,
     MySqlAvailabilityDeadlineRepository, MySqlCaddieDutyRepository, MySqlCaddieRankFeeRepository,
@@ -1982,6 +1984,16 @@ pub enum AppError {
     UpstreamClient { status: StatusCode, message: String },
     #[error("Field authentication expired; sign in again")]
     UpstreamAuthenticationExpired,
+    /// The document reader upstream refused the call, rather than reading a
+    /// sheet and failing to make it out.
+    ///
+    /// Its own variant so the response carries a code the screen can branch
+    /// on. The desk's three answers are different — go and fix billing, wait a
+    /// moment, or type the group in by hand — and none of them is "photograph
+    /// the sheet again", which is what a single generic upstream failure had
+    /// them doing (PLT-4033).
+    #[error("{0}")]
+    ReceptionReaderFailed(ReceptionReaderFailure),
     #[error("tax rule was not found for tenant, prefecture, and green fee")]
     RuleNotFound,
     #[error("{0}")]
@@ -2022,6 +2034,26 @@ impl IntoResponse for AppError {
             AppError::UpstreamAuthenticationExpired => {
                 (StatusCode::UNAUTHORIZED, "upstream_authentication_expired")
             }
+            // 402 and 429 are forwarded as themselves: both are 4xx, so
+            // Cloudflare leaves the body alone, and the number is the one
+            // piece of the reason that survives without any copy at all. The
+            // reader being down would be a 503, which Cloudflare would replace
+            // with CORS-less HTML, so it takes 424 like every other upstream
+            // failure.
+            AppError::ReceptionReaderFailed(failure) => match failure {
+                ReceptionReaderFailure::BillingUnsatisfied => (
+                    StatusCode::PAYMENT_REQUIRED,
+                    "reception_reader_billing_unsatisfied",
+                ),
+                ReceptionReaderFailure::RateLimited => (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "reception_reader_rate_limited",
+                ),
+                ReceptionReaderFailure::Unavailable => (
+                    StatusCode::FAILED_DEPENDENCY,
+                    "reception_reader_unavailable",
+                ),
+            },
             AppError::RuleNotFound => (StatusCode::NOT_FOUND, "rule_not_found"),
             AppError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
             // Cloudflare swaps origin 5xx bodies for its own CORS-less error
@@ -2314,6 +2346,49 @@ mod tests {
             .as_str()
             .expect("message string")
             .contains("external provider error"));
+    }
+
+    /// The three the reception desk has to tell apart. The code is the
+    /// contract with the screen — it is what decides whether the operator is
+    /// sent to the billing screen, told to wait, or told to type the group in
+    /// — so it is pinned here rather than left to whatever `Display` says.
+    #[tokio::test]
+    async fn each_reader_failure_reaches_the_desk_as_its_own_code() {
+        for (failure, status, code) in [
+            (
+                ReceptionReaderFailure::BillingUnsatisfied,
+                StatusCode::PAYMENT_REQUIRED,
+                "reception_reader_billing_unsatisfied",
+            ),
+            (
+                ReceptionReaderFailure::RateLimited,
+                StatusCode::TOO_MANY_REQUESTS,
+                "reception_reader_rate_limited",
+            ),
+            (
+                ReceptionReaderFailure::Unavailable,
+                StatusCode::FAILED_DEPENDENCY,
+                "reception_reader_unavailable",
+            ),
+        ] {
+            let response = AppError::from(
+                crate::course::domain::CourseError::ReceptionReaderFailed(failure),
+            )
+            .into_response();
+            assert_eq!(response.status(), status);
+            // Never a 5xx: Cloudflare swaps an origin 5xx for CORS-less HTML,
+            // and the desk would read "Failed to fetch" instead of the reason.
+            assert!(!response.status().is_server_error());
+            let body = response
+                .into_body()
+                .collect()
+                .await
+                .expect("collect reader failure body")
+                .to_bytes();
+            let body: serde_json::Value =
+                serde_json::from_slice(&body).expect("decode reader failure body");
+            assert_eq!(body["error"], code);
+        }
     }
 
     #[tokio::test]

@@ -1,5 +1,6 @@
 /** 受付用紙を読み取って顧客台帳に入れるまでの、画面側の型と判断。 */
 
+import { ApiError } from '../../../../api'
 import { heifToJpeg } from './heif'
 
 /**
@@ -19,6 +20,41 @@ export const RECEPTION_SHEET_ACCEPT =
 export const RECEPTION_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'application/pdf']
 
 export const MAX_RECEPTION_SHEET_BYTES = 10 * 1024 * 1024
+
+/**
+ * Why nothing was read, when the sheet is not the reason.
+ *
+ * The API used to answer an upstream outage the same way it answers a blurry
+ * photo — 200, no rows, and a warning about the document — because Field did,
+ * and a desk whose reader had run out of upstream credit spent a morning
+ * re-photographing a sheet nothing was wrong with. Field now says which it is
+ * and CourseBoard forwards a code for it, so the screen can stop blaming the
+ * paper for something no camera will fix.
+ *
+ * `warnings` on a 200 still means what it always did: the reader ran, looked at
+ * the sheet, and could not make parts of it out. That one *is* worth another
+ * photograph.
+ */
+export type ReceptionReadFailure = 'billing' | 'rateLimited' | 'unavailable'
+
+/**
+ * Keyed on the code rather than the status: the status is what survives a
+ * proxy, the code is what the API meant, and only the code stays put if a 402
+ * ever has to move.
+ */
+const READ_FAILURE_BY_CODE: Record<string, ReceptionReadFailure> = {
+  reception_reader_billing_unsatisfied: 'billing',
+  reception_reader_rate_limited: 'rateLimited',
+  reception_reader_unavailable: 'unavailable',
+}
+
+export function receptionReadFailure(error: unknown): ReceptionReadFailure | null {
+  if (!(error instanceof ApiError)) return null
+  const details = error.details
+  if (typeof details !== 'object' || details === null || !('error' in details)) return null
+  const code = (details as { error?: unknown }).error
+  return typeof code === 'string' ? READ_FAILURE_BY_CODE[code] ?? null : null
+}
 
 /** What came back from the API: a proposal, never a write. */
 export type ReceptionDraft = {

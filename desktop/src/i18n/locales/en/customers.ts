@@ -44,6 +44,11 @@ export const customers: DeepPartial<typeof source> = {
       type: 'Choose a JPEG, PNG, HEIC/HEIF, or PDF file.',
       convert: 'That iPhone photo (HEIC/HEIF) could not be converted. Export it as JPEG from the Photos app and try again.',
     },
+    readerFailure: {
+      billing: 'The reader is unavailable because its billing is not in order, so nothing can be read right now. This is not a problem with the scan. Ask an administrator to check the billing settings — both that a billing account is linked and that it has balance. You can still use "Add a row" and type from the sheet.',
+      rateLimited: 'The reader is busy, so nothing can be read right now. This is not a problem with the scan. Wait a moment and read the sheet again, or use "Add a row" and type from it.',
+      unavailable: 'The reader is down, so nothing can be read right now. This is not a problem with the scan. Try again later, or use "Add a row" and type from the sheet.',
+    },
     empty: {
       title: 'Choose a reception sheet',
       description: 'The people written on the scan are read out of it. Every value can be corrected before anyone is registered.',
