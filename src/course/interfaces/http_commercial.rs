@@ -15,7 +15,7 @@ use super::openapi::ErrorBody;
 use serde_json::Value;
 
 use super::http::{
-    catalog_gateway, commercial_gateway, credentials, player_tag_options_gateway,
+    catalog_gateway, commercial_gateway, credentials, ops_gateway, player_tag_options_gateway,
     reservation_gateway, ItemsResponse,
 };
 use crate::course::domain::{
@@ -576,6 +576,8 @@ pub async fn get_monthly_settlement(
         commercial_gateway(&state),
         reservation_gateway(&state),
         catalog_gateway(&state),
+        ops_gateway(&state),
+        state.cancellation_fee_config.settlement_source,
     );
     let report = use_case
         .execute(credentials, &query.year_month)
@@ -603,8 +605,13 @@ pub async fn export_monthly_settlement_csv(
     Query(query): Query<YearMonthQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case =
-        ExportMonthlySettlementCsvUseCase::new(catalog_gateway(&state), commercial_gateway(&state));
+    let use_case = ExportMonthlySettlementCsvUseCase::new(
+        catalog_gateway(&state),
+        commercial_gateway(&state),
+        reservation_gateway(&state),
+        ops_gateway(&state),
+        state.cancellation_fee_config.settlement_source,
+    );
     let csv = use_case
         .execute(credentials, &query.year_month)
         .await
