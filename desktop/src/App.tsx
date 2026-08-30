@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { AuthGate } from './auth/AuthGate'
 import { AuthProvider } from './auth/AuthProvider'
 import { AppShell } from './components/AppShell'
+import { LoadingState } from './components/Page'
 import { CourseMap } from './components/CourseMap'
 import {
   CancellationFeeDetailPage,
@@ -38,6 +39,7 @@ import { PaymentPage } from './PaymentPage'
 import { MacOSTabStrip } from './components/MacOSTabStrip'
 import { TenantTimezoneProvider } from './context/TenantTimezoneProvider'
 import { FeatureFlagProvider } from './feature-flags/FeatureFlags'
+import { useRouteGate } from './feature-flags/gated-routes'
 import { PageMetadata } from './lib/pageMetadata'
 
 const WS_URL = 'ws://127.0.0.1:9001/ws'
@@ -94,6 +96,8 @@ function OperatorWebRedirect({ href }: { href: string }) {
 }
 
 function RouteContent({ route }: { route: string }) {
+  // Hooks run for every route rather than beside the branch that needs them.
+  const reportImportGate = useRouteGate('golf/reservation-report-import')
   if (route === 'golf') return <GolfHomePage />
   if (route === 'golf/courses') return <CoursesPage />
   if (route.startsWith('golf/courses/')) {
@@ -111,7 +115,15 @@ function RouteContent({ route }: { route: string }) {
     return <ReservationProductsPage serviceId={segment || undefined} />
   }
   if (route === 'golf/ledger') return <LedgerPage />
-  if (route === 'golf/reservation-report-import') return <ReservationReportImportPage />
+  if (route === 'golf/reservation-report-import') {
+    // Until the tenant's flag says otherwise the screen does not exist: a direct
+    // link answers the same way an unknown route does, rather than showing an
+    // import that the desk is not meant to have yet. The wait is held on the
+    // loader so the page does not flash 404 before the first evaluation lands.
+    if (reportImportGate === 'loading') return <LoadingState />
+    if (reportImportGate === 'hidden') return <NotFoundPage />
+    return <ReservationReportImportPage />
+  }
   if (route === 'golf/timeline') return <TimelinePage />
   if (route === 'golf/caddies/shifts') return <ShiftBoardPage />
   if (route === 'golf/caddies' || route.startsWith('golf/caddies/')) {

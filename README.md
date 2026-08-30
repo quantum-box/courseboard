@@ -360,6 +360,32 @@ apply 対象にするため、古い copy が残っていると global な actio
 巻き戻します。Field 側の権限を確認したいときは
 `quantum-box/tachyonfield` の `.tachyon/manifests/tachyonfield-auth.yml` を直接参照します。
 
+### Feature flags
+
+判断の記録は [ADR-0012](docs/src/architecture/decisions/ADR-0012-feature-flags-on-the-platform-tenant.md) にあります。
+
+フラグは host / platform テナントに置いたものだけが評価されます。利用者テナント
+（Operator）に置いたものは tachyon-apps 側が読み込んだうえで捨てるため、置き場は
+その上の platform になります。本番 platform は CourseBoard 専用ではなく他社の
+Operator も配下にいるので、出し先を絞るときは管理画面
+（`/v1beta/{tenant_id}/feature-flags`）で TenantTargeting を設定します。
+
+| 用途 | platform テナント |
+| -- | -- |
+| 本番 | `tn_01hjjn348rn3t49zz6hvmfq67p` |
+| サンドボックス | `tn_01hjryxysgey07h5jz5wagqj0m` |
+
+**フラグの実体は管理画面で作ります。この repository の manifest では作れません。**
+`kind: FeatureFlags` の manifest は、apply する request の scope と `tenantId` の
+一致を要求します。CourseBoard の manifest は Operator scope で apply されるため、
+platform を指す宣言は forbidden になります。かといって Operator に置くと今度は
+評価されません。**app が自分の manifest から評価に乗るフラグを宣言する経路は、
+現時点で存在しません**（PLT-3418、platform 側の contract 判断待ち）。
+
+キーの接頭辞は必ず `feature.courseboard.` にします（CourseBoard API がそれ以外を
+拒否します）。新規作成時は OFF なので、**画面をフラグで包むより先にフラグを作って
+ON にしてください。** 順序を逆にすると、その画面はフラグが立つまで 404 になります。
+
 ## Local Development
 
 サービスを起動します。

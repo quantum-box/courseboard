@@ -82,6 +82,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../auth/AuthProvider'
 import { formatTenantWorkspaceLabel, tenantWorkspaceLabel } from '../auth/tenant-label'
+import { useHiddenRoutes } from '../feature-flags/gated-routes'
 import { i18next, LOCALES, LOCALE_LABELS, currentLocale, setLocale } from '../i18n'
 import { PageReloadProvider, usePageReload } from '../lib/pageReload'
 import { navigate, navigateFromClick } from '../lib/router'
@@ -384,8 +385,14 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   const mobileTriggerRef = useRef<HTMLButtonElement | null>(null)
   const activeLocale = currentLocale()
 
+  // A route the tenant's flag has not turned on is left out of the sidebar the
+  // same way it is left out of the router. Pinning it earlier does not bring it
+  // back, so the pinned list is filtered by the same set.
+  const flaggedOffRoutes = useHiddenRoutes()
+
   const pinnedItems = useMemo(
     () => pinnedRoutes
+      .filter(pinnedRoute => !flaggedOffRoutes.has(pinnedRoute))
       .map(pinnedRoute => (
         allNavigation.find(item => (
           item.route === pinnedRoute && !sidebarHiddenRoutes.has(item.route)
@@ -393,7 +400,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
         ?? settingsNavigation.find(item => item.route === pinnedRoute)
       ))
       .filter((item): item is NavigationItem => Boolean(item)),
-    [pinnedRoutes],
+    [flaggedOffRoutes, pinnedRoutes],
   )
 
   const pinnedRouteSet = useMemo(() => new Set(pinnedRoutes), [pinnedRoutes])
@@ -402,10 +409,12 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
     () => sidebarNavigationSections
       .map(section => ({
         ...section,
-        items: section.items.filter(item => !pinnedRouteSet.has(item.route)),
+        items: section.items.filter(
+          item => !pinnedRouteSet.has(item.route) && !flaggedOffRoutes.has(item.route),
+        ),
       }))
       .filter(section => section.items.length > 0),
-    [pinnedRouteSet],
+    [flaggedOffRoutes, pinnedRouteSet],
   )
 
   const togglePinned = (itemRoute: string) => {
@@ -967,7 +976,8 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
           <CommandEmpty>{t('nav:command.empty')}</CommandEmpty>
           {navigationSections.map(section => (
             <CommandGroup key={section.id} heading={t(`nav:sections.${section.id}`)}>
-              {section.items.map(item => (
+              {/* ⌘K も画面への入口なので、フラグが降りたルートはここからも外す。 */}
+              {section.items.filter(item => !flaggedOffRoutes.has(item.route)).map(item => (
                 <CommandNavigationItem
                   key={item.route}
                   item={item}
