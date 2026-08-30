@@ -185,7 +185,22 @@ describe('correctedFields', () => {
 describe('customerPayload', () => {
   it('sends absent rather than empty for what nobody asked', () => {
     const payload = customerPayload({ ...blankRow('a'), name: ' 本田 康彦 ' })
-    expect(payload).toEqual({ name: '本田 康彦', nameKana: null, phone: null, email: null })
+    expect(payload).toEqual({
+      name: '本田 康彦',
+      nameKana: null,
+      phone: null,
+      email: null,
+      source: 'reception_sheet',
+      sourceRowIndex: undefined,
+    })
+  })
+
+  it('carries the line of the sheet so a duplicate can be traced back to the paper', () => {
+    // The sheet itself is never stored, so this number is the only pointer at
+    // the piece of paper the desk still has.
+    const payload = customerPayload({ ...blankRow('a'), name: '本田 康彦' }, 2)
+    expect(payload.source).toBe('reception_sheet')
+    expect(payload.sourceRowIndex).toBe(2)
   })
 })
 

@@ -22,11 +22,16 @@ export function draftReceptionSheet(file: File) {
   })
 }
 
-/** Registers one approved row, through the same endpoint the ledger's form uses. */
-export function registerReceptionRow(row: ReceptionRow) {
+/**
+ * Registers one approved row, through the same endpoint the ledger's form uses.
+ *
+ * `sourceRowIndex` is the line on the sheet, so the entry can be traced back to
+ * the paper afterwards.
+ */
+export function registerReceptionRow(row: ReceptionRow, sourceRowIndex?: number) {
   return courseboardApiJson<Customer>(customersPath, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(customerPayload(row)),
+    body: JSON.stringify(customerPayload(row, sourceRowIndex)),
   })
 }

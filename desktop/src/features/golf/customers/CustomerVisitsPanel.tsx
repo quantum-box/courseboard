@@ -32,10 +32,15 @@ type CourseList = { items: { id: string; name: string }[] }
  * The half of a customer's page the desk actually opens it for: a regular is
  * recognised by how often they come and what they spend, not by their kana.
  *
- * These are the bookings taken *for* this person. Field records one customer
- * per reservation, so somebody who plays every month in a colleague's group has
- * nothing here — which is why the panel says whose bookings it is showing
- * rather than letting an empty table read as "never been".
+ * Two kinds of row. Bookings taken *for* this person, which Field can answer
+ * for; and rounds they were checked in to as somebody else's guest, which it
+ * cannot — Field records one customer per reservation, and the rest of the
+ * group lives in CourseBoard's own party detail. Without the second kind a
+ * regular who always plays in a colleague's group reads as never having been.
+ *
+ * A guest round carries no money and no headcount here. Both belong to whoever
+ * booked it, and splitting either between the group would be inventing a number
+ * that then lands in the grade the club sorts people by.
  */
 export function CustomerVisitsPanel({ customerId }: { customerId: string }) {
   const { t } = useTranslation(['customers', 'common'])
@@ -83,14 +88,28 @@ export function CustomerVisitsPanel({ customerId }: { customerId: string }) {
         header: t('customers:visits.column.kind'),
         // `other` has no golf word for what it is, so it shows Field's status
         // rather than a label invented to fill the cell.
-        cell: visit =>
-          visit.kind === 'other' ? (
-            <span className="muted">{visit.status}</span>
-          ) : (
-            <span className={`visit-kind visit-kind-${visit.kind.replace('_', '-')}`}>
-              {t(`customers:visits.kind.${visit.kind}`)}
-            </span>
-          ),
+        cell: visit => (
+          <>
+            {visit.kind === 'other' ? (
+              <span className="muted">{visit.status}</span>
+            ) : (
+              <span className={`visit-kind visit-kind-${visit.kind.replace('_', '-')}`}>
+                {t(`customers:visits.kind.${visit.kind}`)}
+              </span>
+            )}
+            {/* Said on the row rather than in a column of its own: whose
+                booking it was changes how every other cell reads. */}
+            {visit.booked ? null : (
+              <span className="muted"> {t('customers:visits.asGuest')}</span>
+            )}
+            {/* Only the positive is marked. Everything played before the desk
+                started checking people in has no record, and marking those as
+                unconfirmed would put a warning on most of the ledger. */}
+            {visit.checkedIn ? (
+              <span className="muted"> {t('customers:visits.checkedIn')}</span>
+            ) : null}
+          </>
+        ),
         sortValue: visit => visit.kind,
       },
       {
@@ -105,8 +124,10 @@ export function CustomerVisitsPanel({ customerId }: { customerId: string }) {
         key: 'players',
         header: t('customers:visits.column.players'),
         align: 'right',
-        cell: visit => visit.players,
-        sortValue: visit => visit.players,
+        // Blank on a guest round: the seats were sold to whoever booked it, and
+        // a 0 in this column would read as a round nobody played.
+        cell: visit => (visit.booked ? visit.players : ''),
+        sortValue: visit => (visit.booked ? visit.players : null),
       },
       {
         key: 'amount',

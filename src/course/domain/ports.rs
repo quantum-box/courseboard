@@ -9,18 +9,20 @@ use super::{
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
     CaddieDutyAssignment, CaddieDutyOptions, CaddieId, CaddieRankFees, CaddieRating, CaddieRoster,
     CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder, Customer,
-    CustomerGradeRules, CustomerId, CustomerMembership, CustomerSearchQuery, DailyBudget,
-    DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus,
+    CustomerGradeRules, CustomerId, CustomerMembership, CustomerRegistration, CustomerSearchQuery,
+    DailyBudget, DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus,
     FieldClientCapabilities, FieldRequestContext, FieldShiftLink, GenerationSummary,
     GolfPricingSettings, InventoryWatermark, MembershipDiscounts, MembershipPlan, MembershipPlanId,
-    MembershipPlayWindows, MonthlySettlement, NewCustomer, NewReservation, PartyDetails,
+    MembershipPlayWindows, MonthlySettlement, NewCustomer, NewCustomerRegistration, NewReservation,
+    PartyDetails,
     PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet, ReplaceCaddieMemberships,
     Reservation, ReservationBookingUpdate, ReservationId, ReservationPolicy, ReservationProduct,
     ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
     SeededReservation, SetMemberNumber, ShiftPolicy, SlotOverride, SlotOverrideQuery,
     TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
     UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
-    UpsertMembershipPlan, UpsertReservationProduct, WorkedMinutes, YearMonth,
+    UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin, VisitCheckinRequest,
+    WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -317,6 +319,67 @@ pub trait CustomerGradeRulesGateway: Send + Sync {
         tenant_id: &str,
         rules: &CustomerGradeRules,
     ) -> Result<CustomerGradeRules, CourseError>;
+}
+
+/// Port for where a ledger entry came from.
+///
+/// CourseBoard's own storage: Field records the customer and nothing about the
+/// act of writing them down, and that act is what makes two same-name entries
+/// tellable apart afterwards (ADR-0009).
+#[async_trait]
+pub trait CustomerRegistrationGateway: Send + Sync {
+    /// Records a creation. Writing the same customer twice keeps the first
+    /// row: the provenance of an entry is where it first came from, and a
+    /// retried request should not rewrite history.
+    async fn record_customer_registration(
+        &self,
+        tenant_id: &str,
+        entry: &NewCustomerRegistration,
+    ) -> Result<(), CourseError>;
+
+    /// One entry's provenance, absent for everybody registered before this was
+    /// kept. The screen shows that as "not recorded" rather than as an error:
+    /// a ledger full of people who predate the table is the normal state for a
+    /// long while.
+    async fn get_customer_registration(
+        &self,
+        tenant_id: &str,
+        customer_id: &CustomerId,
+    ) -> Result<Option<CustomerRegistration>, CourseError>;
+}
+
+/// Port for who was actually seen at the desk.
+///
+/// CourseBoard's own storage, because the group and its seats are
+/// `golfParty` and Field has nowhere to put a per-player arrival.
+#[async_trait]
+pub trait VisitCheckinGateway: Send + Sync {
+    /// Checks a group in. Idempotent per seat: pressing the button twice is
+    /// one arrival, not two.
+    async fn record_visit_checkins(
+        &self,
+        tenant_id: &str,
+        request: &VisitCheckinRequest,
+        checked_in_by: Option<&str>,
+    ) -> Result<Vec<VisitCheckin>, CourseError>;
+
+    /// Every round this person was seen at, newest first.
+    ///
+    /// This is the half of a customer's play that a booking cannot answer:
+    /// rounds they played in somebody else's group.
+    async fn list_customer_checkins(
+        &self,
+        tenant_id: &str,
+        customer_id: &CustomerId,
+    ) -> Result<Vec<VisitCheckin>, CourseError>;
+
+    /// The seats already checked in on one booking, so the desk sees what it
+    /// has already done rather than pressing the button again to find out.
+    async fn list_reservation_checkins(
+        &self,
+        tenant_id: &str,
+        reservation_id: &ReservationId,
+    ) -> Result<Vec<VisitCheckin>, CourseError>;
 }
 
 #[async_trait]

@@ -36,8 +36,8 @@ use crate::course::domain::actions::{
     CALCULATE_FEES, LIST_CADDIE_ASSIGNMENTS, LIST_CADDIE_AVAILABILITY, LIST_CADDIE_RANK_FEES,
     LIST_COURSES, LIST_CUSTOMERS, LIST_MEMBERSHIP, LIST_SHIFTS, LIST_SLOT_OVERRIDES,
     LIST_TEE_SHEET, MANAGE_CADDIE_ASSIGNMENTS, MANAGE_CADDIE_AVAILABILITY, MANAGE_CADDIE_RANK_FEES,
-    MANAGE_COURSES, MANAGE_CUSTOMERS, MANAGE_MEMBERSHIP_PLANS, MANAGE_RESERVATION_POLICY,
-    MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
+    MANAGE_COURSES, MANAGE_CUSTOMERS, MANAGE_MEMBERSHIP_PLANS, MANAGE_RESERVATIONS,
+    MANAGE_RESERVATION_POLICY, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
 };
 
 /// What standing a route needs before its handler runs.
@@ -306,6 +306,18 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/reservations/:reservation_id/party",
         RouteAuthorization::UpstreamEnforced,
     ),
+    // CourseBoard's own storage, not Field's: the group's seats are
+    // `golfParty` and there is nothing upstream to enforce against.
+    (
+        "GET",
+        "/v1/course/reservations/:reservation_id/checkins",
+        RouteAuthorization::Action(LIST_TEE_SHEET),
+    ),
+    (
+        "POST",
+        "/v1/course/reservations/:reservation_id/checkins",
+        RouteAuthorization::Action(MANAGE_RESERVATIONS),
+    ),
     (
         "*",
         "/v1/course/reservations/:reservation_id/plan",
@@ -393,6 +405,12 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "*",
         "/v1/course/customers/:customer_id/visits",
         RouteAuthorization::UpstreamEnforced,
+    ),
+    // Reads CourseBoard's own record of how the entry was created.
+    (
+        "*",
+        "/v1/course/customers/:customer_id/registration",
+        RouteAuthorization::Action(LIST_CUSTOMERS),
     ),
     (
         "*",
@@ -1267,6 +1285,8 @@ mod tests {
             ("POST", "/v1/course/reservations/res_1/cancel"),
             ("PATCH", "/v1/course/reservations/res_1/party"),
             ("PATCH", "/v1/course/reservations/res_1/plan"),
+            ("GET", "/v1/course/reservations/res_1/checkins"),
+            ("POST", "/v1/course/reservations/res_1/checkins"),
             ("GET", "/v1/course/slot-overrides"),
             ("PUT", "/v1/course/slot-overrides"),
             ("DELETE", "/v1/course/slot-overrides"),
@@ -1292,6 +1312,7 @@ mod tests {
             ("POST", "/v1/course/customers/reception-draft"),
             ("GET", "/v1/course/customers/cus_1"),
             ("GET", "/v1/course/customers/cus_1/visits"),
+            ("GET", "/v1/course/customers/cus_1/registration"),
             ("PUT", "/v1/course/customers/cus_1/member-number"),
             ("GET", "/v1/course/customers/cus_1/membership"),
             ("POST", "/v1/course/customers/cus_1/membership"),

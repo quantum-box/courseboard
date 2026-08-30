@@ -82,6 +82,8 @@ export const customers: DeepPartial<typeof source> = {
       amount: 'Amount',
       reservationNumber: 'Reservation',
     },
+    asGuest: 'as guest',
+    checkedIn: 'checked in',
     kind: {
       visited: 'Played',
       upcoming: 'Booked',
@@ -108,6 +110,17 @@ export const customers: DeepPartial<typeof source> = {
       title: 'No bookings taken in this name',
       description:
         'A first-time visitor, or booked under somebody else\u2019s name. Rounds played in another group do not appear here.',
+    },
+  },
+  registration: {
+    unrecorded: 'No record of how this entry was added.',
+    from: 'Added {{date}} from {{source}}',
+    fromSheetRow: 'Added {{date}} from line {{row}} of a reception sheet',
+    by: '({{operator}})',
+    source: {
+      manual: 'the customer form',
+      reception_sheet: 'a reception sheet',
+      ledger: "a booking's names",
     },
   },
   detail: {

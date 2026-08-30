@@ -36,10 +36,11 @@ use course::infrastructure::{
     FieldReservationReportGateway, MigratingReservationReportGateway,
     MySqlAvailabilityDeadlineRepository, MySqlCaddieDutyRepository, MySqlCaddieRankFeeRepository,
     MySqlCaddieShiftRepository, MySqlCourseOrderRepository, MySqlCustomerGradeRulesRepository,
-    MySqlGeneratedThroughRepository, MySqlGolfProductSettingsRepository,
-    MySqlMembershipDiscountsRepository, MySqlMembershipPlayWindowsRepository,
-    MySqlPlayerTagOptionsRepository, MySqlPricingSettingsRepository, MySqlShiftRulesRepository,
-    MySqlSlotOverrideRepository,
+    MySqlCustomerRegistrationRepository, MySqlGeneratedThroughRepository,
+    MySqlGolfProductSettingsRepository, MySqlMembershipDiscountsRepository,
+    MySqlMembershipPlayWindowsRepository, MySqlPlayerTagOptionsRepository,
+    MySqlPricingSettingsRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
+    MySqlVisitCheckinRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,8 @@ pub struct AppState {
     product_settings: Arc<MySqlGolfProductSettingsRepository>,
     player_tag_options: Arc<MySqlPlayerTagOptionsRepository>,
     customer_grade_rules: Arc<MySqlCustomerGradeRulesRepository>,
+    customer_registrations: Arc<MySqlCustomerRegistrationRepository>,
+    visit_checkins: Arc<MySqlVisitCheckinRepository>,
     membership_discounts: Arc<MySqlMembershipDiscountsRepository>,
     membership_play_windows: Arc<MySqlMembershipPlayWindowsRepository>,
     generated_through: Arc<MySqlGeneratedThroughRepository>,
@@ -114,6 +117,10 @@ impl AppState {
             product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
             customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(pool.clone())),
+            customer_registrations: Arc::new(MySqlCustomerRegistrationRepository::new(
+                pool.clone(),
+            )),
+            visit_checkins: Arc::new(MySqlVisitCheckinRepository::new(pool.clone())),
             membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(pool.clone())),
             membership_play_windows: Arc::new(MySqlMembershipPlayWindowsRepository::new(
                 pool.clone(),
@@ -177,6 +184,10 @@ impl AppState {
             product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
             customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(pool.clone())),
+            customer_registrations: Arc::new(MySqlCustomerRegistrationRepository::new(
+                pool.clone(),
+            )),
+            visit_checkins: Arc::new(MySqlVisitCheckinRepository::new(pool.clone())),
             membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(pool.clone())),
             membership_play_windows: Arc::new(MySqlMembershipPlayWindowsRepository::new(
                 pool.clone(),
@@ -225,6 +236,10 @@ impl AppState {
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
                 product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
+                customer_registrations: Arc::new(MySqlCustomerRegistrationRepository::new(
+                    pool.clone(),
+                )),
+                visit_checkins: Arc::new(MySqlVisitCheckinRepository::new(pool.clone())),
                 customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(
                     pool.clone(),
                 )),
@@ -269,6 +284,10 @@ impl AppState {
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
                 product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
+                customer_registrations: Arc::new(MySqlCustomerRegistrationRepository::new(
+                    pool.clone(),
+                )),
+                visit_checkins: Arc::new(MySqlVisitCheckinRepository::new(pool.clone())),
                 customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(
                     pool.clone(),
                 )),
@@ -649,6 +668,12 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/customers/:customer_id/registration",
+            get(course::interfaces::http_customers::get_customer_registration).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/customers/:customer_id/member-number",
             put(course::interfaces::http_customers::set_member_number).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
@@ -716,6 +741,15 @@ pub fn build_router(state: AppState) -> Router {
             patch(course::interfaces::http::update_reservation_booking).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
+        )
+        .route(
+            "/v1/course/reservations/:reservation_id/checkins",
+            get(course::interfaces::http::list_reservation_checkins)
+                .post(course::interfaces::http::record_reservation_checkins)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
         )
         .route(
             "/v1/course/reservations/:reservation_id/party",
@@ -1466,9 +1500,21 @@ async fn redirect_ui() -> Redirect {
     Redirect::temporary("/ui/")
 }
 
+/// The signed-in caller, as the verified token names them.
+///
+/// Put on the request by [`require_valid_token`] so a handler can write down
+/// who did something without verifying the token a second time. Absent on the
+/// routes that do not carry a bearer, and `subject` is absent on a token that
+/// carried no `sub` — neither is a reason to refuse work that is otherwise
+/// authorized.
+#[derive(Debug, Clone)]
+pub struct CallerPrincipal {
+    pub subject: Option<String>,
+}
+
 async fn require_valid_token(
     State(verifier): State<Arc<dyn TokenVerifier>>,
-    req: Request<Body>,
+    mut req: Request<Body>,
     next: Next,
 ) -> Result<Response, AppError> {
     let Some(value) = req.headers().get(AUTHORIZATION).or_else(|| {
@@ -1486,16 +1532,24 @@ async fn require_valid_token(
     if token.trim().is_empty() {
         return Err(AppError::Unauthorized);
     }
-    if let Err(error) = verifier.verify(token) {
-        tracing::warn!(error = %error, "bearer token verification failed");
-        let category = HeaderValue::from_static(error.category());
-        let mut response = AppError::from(error).into_response();
-        response.headers_mut().insert(
-            HeaderName::from_static("x-courseboard-auth-error"),
-            category,
-        );
-        return Ok(response);
-    }
+    let principal = match verifier.verify(token) {
+        Ok(principal) => principal,
+        Err(error) => {
+            tracing::warn!(error = %error, "bearer token verification failed");
+            let category = HeaderValue::from_static(error.category());
+            let mut response = AppError::from(error).into_response();
+            response.headers_mut().insert(
+                HeaderName::from_static("x-courseboard-auth-error"),
+                category,
+            );
+            return Ok(response);
+        }
+    };
+    // Carried forward rather than re-derived downstream: the subject is only
+    // trustworthy because this is where the signature was checked.
+    req.extensions_mut().insert(CallerPrincipal {
+        subject: principal.subject,
+    });
 
     Ok(next.run(req).await)
 }

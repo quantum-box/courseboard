@@ -64,7 +64,9 @@ export function RegisterNamesDialog({
         const created = await courseboardApiJson<Customer>(customersPath, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: entry.name }),
+          // Answered from the names already on the booking, which is a
+          // different way into the ledger than a sheet or the counter form.
+          body: JSON.stringify({ name: entry.name, source: 'ledger' }),
         })
         registered += 1
         if (entry.role === 'player' && typeof entry.playerIndex === 'number') {

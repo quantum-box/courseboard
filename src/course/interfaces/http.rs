@@ -7,7 +7,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use axum::{
     extract::{Path, Query, State},
     http::{header::AUTHORIZATION, HeaderMap, StatusCode},
-    Json,
+    Extension, Json,
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -19,10 +19,10 @@ use crate::course::domain::{
     tenant_date_at, AvailabilityRule, BookingHorizon, BusinessHours, Caddie, CaddieAssignment,
     CaddieAssignmentQuery, CaddieId, CaddieStaff, Course, CourseError, CourseId, CourseOrder,
     CustomerId, DeleteSlotOverrides, GatewayCredentials, GenerationSummary, GolfCatalogGateway,
-    LedgerColumn, LedgerSlot, PartyDetails, ProductSlot, ReservationId, ReservationProduct,
-    ReservationServiceId, Resource, ResourceId, SavedSchedule, SlotOverride, SlotOverrideKind,
-    SlotOverrideQuery, TeeLedger, TeeLedgerQuery, TeeSheet, TeeSheetItem, TeeSheetQuery,
-    UpsertCourse, UpsertReservationProduct, UpsertSlotOverrides,
+    LedgerColumn, LedgerSlot, NewVisitCheckin, PartyDetails, ProductSlot, ReservationId,
+    ReservationProduct, ReservationServiceId, Resource, ResourceId, SavedSchedule, SlotOverride,
+    SlotOverrideKind, SlotOverrideQuery, TeeLedger, TeeLedgerQuery, TeeSheet, TeeSheetItem,
+    TeeSheetQuery, UpsertCourse, UpsertReservationProduct, UpsertSlotOverrides, VisitCheckin,
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
@@ -38,13 +38,14 @@ use crate::course::usecase::{
     GetBookingHorizonUseCase, GetCourseOrderUseCase, GetCourseScheduleUseCase, GetTeeLedgerUseCase,
     GetTeeSheetUseCase, LinkCourseResourceUseCase, ListCaddieAssignmentsUseCase,
     ListCaddiesUseCase, ListCoursesUseCase, ListProductSlotsUseCase,
-    ListReservationProductsUseCase, ListResourcesUseCase, ListSlotOverridesUseCase,
-    MirrorShiftToField, ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase,
-    ReplaceProductSlotsUseCase, SeedDemoBoardUseCase, SetBookingHorizonUseCase,
-    UpdateCourseUseCase, UpdateReservationBookingInput, UpdateReservationBookingUseCase,
-    UpdateReservationPartyUseCase, UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
+    ListReservationCheckinsUseCase, ListReservationProductsUseCase, ListResourcesUseCase,
+    ListSlotOverridesUseCase, MirrorShiftToField, RecordVisitCheckinUseCase,
+    ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase,
+    SeedDemoBoardUseCase, SetBookingHorizonUseCase, UpdateCourseUseCase,
+    UpdateReservationBookingInput, UpdateReservationBookingUseCase, UpdateReservationPartyUseCase,
+    UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
 };
-use crate::{AppError, AppState};
+use crate::{AppError, AppState, CallerPrincipal};
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -1131,6 +1132,147 @@ pub async fn change_reservation_plan(
         .await
         .map_err(AppError::from)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ─── Reservation check-in ─────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct VisitCheckinDto {
+    pub reservation_id: String,
+    /// Seat in the group, zero-based, as the party roster orders them.
+    pub player_index: u32,
+    /// Who this turned out to be in the ledger. Absent for a seat the desk has
+    /// not decided about, which is a normal state for a group that has already
+    /// gone out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub customer_id: Option<String>,
+    pub player_name: String,
+    pub played_on: NaiveDate,
+    pub checked_in_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checked_in_by: Option<String>,
+}
+
+impl From<&VisitCheckin> for VisitCheckinDto {
+    fn from(value: &VisitCheckin) -> Self {
+        Self {
+            reservation_id: value.reservation_id.to_string(),
+            player_index: value.player_index,
+            customer_id: value.customer_id.as_ref().map(ToString::to_string),
+            player_name: value.player_name.clone(),
+            played_on: value.played_on,
+            checked_in_at: value.checked_in_at,
+            checked_in_by: value.checked_in_by.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckinPlayerDto {
+    pub player_index: u32,
+    #[serde(default)]
+    pub customer_id: Option<String>,
+    pub player_name: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordCheckinRequest {
+    /// The seats that turned up. Sent as a set because a group walks up
+    /// together, and four separate calls is four chances to record half of one.
+    pub players: Vec<CheckinPlayerDto>,
+}
+
+/// POST /v1/course/reservations/{reservation_id}/checkins
+///
+/// The desk saying this group arrived, which is the only thing that can tell a
+/// round played from a round nobody came to — and the only record of the three
+/// people who played in somebody else's booking. Idempotent per seat: pressing
+/// the button twice is one arrival.
+#[utoipa::path(
+    post,
+    path = "/v1/course/reservations/{reservation_id}/checkins",
+    tag = "course",
+    params(("reservation_id" = String, Path, description = "Reservation id")),
+    request_body = RecordCheckinRequest,
+    responses(
+        (status = 200, description = "The booking's check-ins", body = ItemsResponse<VisitCheckinDto>),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn record_reservation_checkins(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(reservation_id): Path<String>,
+    principal: Option<Extension<CallerPrincipal>>,
+    Json(request): Json<RecordCheckinRequest>,
+) -> Result<Json<ItemsResponse<VisitCheckinDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let mut players = Vec::with_capacity(request.players.len());
+    for player in request.players {
+        let customer_id = match player.customer_id {
+            Some(id) => Some(CustomerId::try_new(id).map_err(AppError::from)?),
+            None => None,
+        };
+        players.push(
+            NewVisitCheckin::try_new(player.player_index, customer_id, player.player_name)
+                .map_err(AppError::from)?,
+        );
+    }
+    let checked_in_by = principal.and_then(|Extension(caller)| caller.subject);
+    let stored = RecordVisitCheckinUseCase::new(
+        reservation_gateway(&state),
+        catalog_gateway(&state),
+        state.visit_checkins.clone(),
+    )
+    .execute(
+        credentials,
+        &ReservationId::new(reservation_id),
+        players,
+        checked_in_by.as_deref(),
+    )
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: stored.iter().map(VisitCheckinDto::from).collect(),
+    }))
+}
+
+/// GET /v1/course/reservations/{reservation_id}/checkins
+///
+/// What the desk has already done to this group, so the screen shows it rather
+/// than making somebody press the button again to find out.
+#[utoipa::path(
+    get,
+    path = "/v1/course/reservations/{reservation_id}/checkins",
+    tag = "course",
+    params(("reservation_id" = String, Path, description = "Reservation id")),
+    responses(
+        (status = 200, description = "The booking's check-ins", body = ItemsResponse<VisitCheckinDto>),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_reservation_checkins(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(reservation_id): Path<String>,
+) -> Result<Json<ItemsResponse<VisitCheckinDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let found = ListReservationCheckinsUseCase::new(state.visit_checkins.clone())
+        .execute(credentials, &ReservationId::new(reservation_id))
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(ItemsResponse {
+        items: found.iter().map(VisitCheckinDto::from).collect(),
+    }))
 }
 
 // ─── Slot marks ───────────────────────────────────────────────────────────────

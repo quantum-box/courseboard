@@ -20,6 +20,7 @@ mod course_supply;
 mod customer;
 mod customer_grade;
 mod customer_reception;
+mod customer_registration;
 mod customer_visits;
 mod demo_board;
 mod error;
@@ -45,6 +46,7 @@ mod slot_override;
 mod tee_ledger;
 mod tee_sheet;
 mod tenant_timezone;
+mod visit_checkin;
 
 pub use availability_deadline::{AvailabilityDeadline, YearMonth};
 pub use budget_achievement::{build_budget_achievements, daily_actuals, DailyActual};
@@ -102,6 +104,9 @@ pub use customer_reception::{
     MAX_RECEPTION_SHEET_BYTES, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL,
     RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
 };
+pub use customer_registration::{
+    CustomerRegistration, CustomerRegistrationSource, NewCustomerRegistration,
+};
 pub use customer_visits::{
     CustomerVisit, CustomerVisitHistory, CustomerVisitSummary, VisitKind,
     DEFAULT_VISIT_HISTORY_LIMIT, MAX_VISIT_HISTORY_LIMIT, MAX_VISIT_HISTORY_ROWS,
@@ -138,12 +143,13 @@ pub use player_tags::{PlayerTagOptions, MAX_PLAYER_TAG_LENGTH, MAX_PLAYER_TAG_OP
 pub use ports::{
     AvailabilityDeadlineGateway, CaddieDutyGateway, CaddieRankFeeGateway, CaddieShiftGateway,
     CourseAuthorizer, CourseOrderGateway, CustomerGateway, CustomerGradeRulesGateway,
-    CustomerReceptionOcrGateway, FieldCapabilitiesGateway, GatewayCredentials,
+    CustomerReceptionOcrGateway, CustomerRegistrationGateway, FieldCapabilitiesGateway,
+    GatewayCredentials,
     GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
     GolfTaxGateway, MembershipDiscountsGateway, MembershipGateway, MembershipPlayWindowsGateway,
     PlayerTagOptionsGateway, PricingSettingsGateway, ReservationGateway,
     ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, StaffShiftGateway,
-    StaffShiftInput, TeeLedgerQuery, TeeSheetQuery,
+    StaffShiftInput, TeeLedgerQuery, TeeSheetQuery, VisitCheckinGateway,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{
@@ -196,3 +202,4 @@ pub use tenant_timezone::{
     parse_tenant_timezone, tenant_date_at, tenant_day_bounds, tenant_timezone_from_config,
     utc_offset_minutes_at, DEFAULT_TIMEZONE,
 };
+pub use visit_checkin::{NewVisitCheckin, VisitCheckin, VisitCheckinRequest};

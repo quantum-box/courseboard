@@ -34,6 +34,7 @@ mod get_attendance_snapshot;
 mod get_caddie_supply;
 mod get_course_caddie_supply;
 mod get_customer;
+mod get_customer_registration;
 mod get_customer_visits;
 mod get_extension_status;
 mod get_field_client_capabilities;
@@ -57,6 +58,7 @@ mod list_course_reinforcements;
 mod list_courses;
 mod list_daily_budgets;
 mod list_product_slots;
+mod list_reservation_checkins;
 mod list_reservation_products;
 mod list_resources;
 mod membership;
@@ -65,6 +67,7 @@ mod player_tag_options;
 mod pricing_settings;
 mod quote_golf_fee;
 mod reassign_caddie_assignment;
+mod record_visit_checkin;
 mod replace_caddie_memberships;
 mod replace_product_slots;
 mod reservation_report_import;
@@ -108,7 +111,7 @@ pub use course_schedule::{
 pub use create_caddie::CreateCaddieUseCase;
 pub use create_caddie_assignment::{CreateCaddieAssignmentUseCase, NameCaddieForRound};
 pub use create_course::CreateCourseUseCase;
-pub use create_customer::CreateCustomerUseCase;
+pub use create_customer::{CreateCustomerUseCase, CustomerProvenance};
 pub use create_reservation::{CreateReservationInput, CreateReservationUseCase};
 pub use customer_grade_rules::{GetCustomerGradeRulesUseCase, ReplaceCustomerGradeRulesUseCase};
 pub use delete_caddie::DeleteCaddieUseCase;
@@ -122,6 +125,7 @@ pub use get_attendance_snapshot::GetAttendanceSnapshotUseCase;
 pub use get_caddie_supply::GetCaddieSupplyUseCase;
 pub use get_course_caddie_supply::GetCourseCaddieSupplyUseCase;
 pub use get_customer::GetCustomerUseCase;
+pub use get_customer_registration::GetCustomerRegistrationUseCase;
 pub use get_customer_visits::{CustomerVisitReport, GetCustomerVisitsUseCase};
 pub use get_extension_status::GetExtensionStatusUseCase;
 pub use get_field_client_capabilities::GetFieldClientCapabilitiesUseCase;
@@ -147,6 +151,7 @@ pub use list_course_reinforcements::{ListCourseReinforcementsUseCase, Reinforcem
 pub use list_courses::ListCoursesUseCase;
 pub use list_daily_budgets::ListDailyBudgetsUseCase;
 pub use list_product_slots::ListProductSlotsUseCase;
+pub use list_reservation_checkins::ListReservationCheckinsUseCase;
 pub use list_reservation_products::ListReservationProductsUseCase;
 pub use list_resources::ListResourcesUseCase;
 pub use membership::{
@@ -158,6 +163,7 @@ pub use player_tag_options::{GetPlayerTagOptionsUseCase, ReplacePlayerTagOptions
 pub use pricing_settings::{GetPricingSettingsUseCase, ReplacePricingSettingsUseCase};
 pub use quote_golf_fee::QuoteGolfFeeUseCase;
 pub use reassign_caddie_assignment::{MoveTheRound, ReassignCaddieAssignmentUseCase};
+pub use record_visit_checkin::RecordVisitCheckinUseCase;
 pub use replace_caddie_memberships::ReplaceCaddieMembershipsUseCase;
 pub use replace_product_slots::ReplaceProductSlotsUseCase;
 pub use reservation_report_import::{

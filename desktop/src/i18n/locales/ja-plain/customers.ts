@@ -82,6 +82,8 @@ export const customers: DeepPartial<typeof source> = {
       amount: 'お金',
       reservationNumber: '予約の番号',
     },
+    asGuest: '同伴',
+    checkedIn: '受付ずみ',
     kind: {
       visited: '来た',
       upcoming: 'これから',
@@ -107,6 +109,17 @@ export const customers: DeepPartial<typeof source> = {
       title: 'この人の名前の予約はありません',
       description:
         'はじめて来た人か、ほかの人の名前で予約したのかもしれません。組に入っただけの回はここに出ません。',
+    },
+  },
+  registration: {
+    unrecorded: 'この人をいつ台帳に入れたかの記録はありません。',
+    from: '{{date}} に{{source}}から入れました',
+    fromSheetRow: '{{date}} に受付用紙の{{row}}行目から入れました',
+    by: '（{{operator}}）',
+    source: {
+      manual: '顧客台帳の入力',
+      reception_sheet: '受付用紙',
+      ledger: '予約に書かれた名前',
     },
   },
   detail: {
