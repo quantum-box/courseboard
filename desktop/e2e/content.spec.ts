@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test'
-import { MOCK_FIXTURE_DATE } from './routes'
+import { e2eManagedMockServer, MOCK_FIXTURE_DATE } from './routes'
 
 /**
  * 各画面の中身と操作の検証。モックデータ（src/dev/mockFieldApi.ts）の
@@ -318,6 +318,14 @@ test.describe('予約表のとりこみ（通し）', () => {
    * モックは実ファイルと同じ合計（186 行・6,314 組・キャディ付き 2,476 組）を
    * 返すので、画面に出る数字がそのまま期待値になる。
    */
+
+  // このファイルで唯一、保存まで進むスイート。接続先が差し替えられていると
+  // その先がモックである保証が無く、実バックエンドへ本物の取込を書いてしまう。
+  test.skip(
+    !e2eManagedMockServer(),
+    'E2E_BASE_URL / E2E_API_URL で接続先が差し替えられているため、保存を伴う検証は行わない',
+  )
+
   const REPORT = {
     name: 'daily-reservations.xlsx',
     mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -325,10 +333,35 @@ test.describe('予約表のとりこみ（通し）', () => {
     buffer: Buffer.from('PK'),
   }
 
+  /**
+   * 対象年に選ぶ年。
+   *
+   * 選択肢は現在年の -2〜+4 しか描かれないので、年を固定で書くと**その年が窓から
+   * 外れた日に初めて落ちる**テストになる。モックは渡された年で同じ集計を返すため、
+   * 常に選べる現在年（コース時計）を選ぶ。
+   */
+  const CURRENT_YEAR = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Tokyo',
+    year: 'numeric',
+  }).format(new Date())
+
+  /**
+   * 保存結果の 1 項目の値。
+   *
+   * grid 全体を対象に数字を探すと、狙った項目が欠けていても別の項目が同じ数字を
+   * 持っているだけで通ってしまう。ラベルで項目を特定してから値だけを見る。
+   */
+  function statValue(page: Page, label: string) {
+    return page
+      .locator('.reservation-report-result-grid > div')
+      .filter({ has: page.locator('span').filter({ hasText: new RegExp(`^${label}$`) }) })
+      .locator('strong')
+  }
+
   async function chooseReport(page: Page) {
     await page.goto('/golf/reservation-report-import')
     await page.locator('input[type="file"]').setInputFiles(REPORT)
-    await page.getByLabel('対象年', { exact: false }).selectOption('2026')
+    await page.getByLabel('対象年', { exact: false }).selectOption(CURRENT_YEAR)
     await page.getByRole('button', { name: '内容を確認する' }).click()
     await expect(page.getByRole('button', { name: '月間表へ進む' })).toBeVisible()
   }
@@ -373,10 +406,9 @@ test.describe('予約表のとりこみ（通し）', () => {
 
     await expect(page.getByText('未紐づけの施設も保存しました')).toBeVisible()
 
-    const totals = page.locator('.reservation-report-result-grid')
-    await expect(totals).toContainText('186')
-    await expect(totals).toContainText(/6,?314/)
-    await expect(totals).toContainText(/2,?476/)
+    await expect(statValue(page, '日別の行数')).toHaveText('186')
+    await expect(statValue(page, '組数')).toHaveText(/^6,?314$/)
+    await expect(statValue(page, 'キャディ付きの組数')).toHaveText(/^2,?476$/)
   })
 
   test('同じ表をもう一度入れても行が増えない', async ({ page }) => {
@@ -388,12 +420,8 @@ test.describe('予約表のとりこみ（通し）', () => {
 
     // 施設・日付・時間帯が揃うので二重には積まれない。倍の 372 行になったら
     // 冪等性が壊れている。
-    const created = page.locator('.reservation-report-result-grid > div').first()
-    await expect(created).toContainText('新しく保存した行')
-    await expect(created.locator('strong')).toHaveText('0')
-
-    const totals = page.locator('.reservation-report-result-grid')
-    await expect(totals).toContainText('186')
-    await expect(totals).not.toContainText('372')
+    await expect(statValue(page, '新しく保存した行')).toHaveText('0')
+    await expect(statValue(page, '変更がなかった行')).toHaveText('186')
+    await expect(statValue(page, '日別の行数')).toHaveText('186')
   })
 })
