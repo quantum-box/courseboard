@@ -116,3 +116,22 @@ export function useFeatureFlag(key: string) {
     isLoading: context.isLoading,
   }
 }
+
+/**
+ * The same reading, for callers that must survive having no provider above them.
+ *
+ * `AuthGate` renders the shell for an expired session outside the provider, so a
+ * hook that throws there takes the whole app down at exactly the moment the desk
+ * needs to be told to sign in again. Missing provider reads as **could not
+ * evaluate**, not as OFF: a flag is a rollout switch, and nothing about the
+ * provider being absent says a screen should be taken away.
+ */
+export function useOptionalFeatureFlag(key: string) {
+  const context = useContext(FeatureFlagContext)
+  if (!context) return { enabled: false, error: true, isLoading: false }
+  return {
+    enabled: context.flags[key] ?? false,
+    error: context.error,
+    isLoading: context.isLoading,
+  }
+}

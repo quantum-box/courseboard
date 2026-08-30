@@ -80,6 +80,15 @@ function renderWith(children: React.ReactNode) {
   )
 }
 
+/** provider を挟まない描画。AuthGate の期限切れ経路がこの形になる。 */
+function renderWithoutProvider(children: React.ReactNode) {
+  render(
+    <I18nextProvider i18n={i18next}>
+      <PageReloadProvider>{children}</PageReloadProvider>
+    </I18nextProvider>,
+  )
+}
+
 const shell = <AppShell route="golf"><div /></AppShell>
 
 describe('フラグで出し分ける画面', () => {
@@ -139,6 +148,18 @@ describe('フラグで出し分ける画面', () => {
     await waitFor(() => {
       expect(screen.getAllByRole('button', { name: IMPORT_LABEL }).length).toBeGreaterThan(0)
     })
+  })
+
+  // AuthGate は期限切れのセッションでも shell を描くが、その経路は
+  // FeatureFlagProvider の外側にある。ここで hook が投げると、ログインし直せと
+  // 伝えるべき場面で画面ごと落ちる。
+  it('provider が無くても落ちず、入口も消さない', async () => {
+    renderWithoutProvider(shell)
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('button', { name: IMPORT_LABEL }).length).toBeGreaterThan(0)
+    })
+    expect(api.json).not.toHaveBeenCalled()
   })
 
   describe('ホーム画面のタイル', () => {

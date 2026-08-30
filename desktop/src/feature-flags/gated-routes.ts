@@ -1,4 +1,4 @@
-import { FEATURE_FLAG_KEYS, useFeatureFlag } from './FeatureFlags'
+import { FEATURE_FLAG_KEYS, useOptionalFeatureFlag } from './FeatureFlags'
 
 /**
  * Routes that only exist once the tenant's flag says so.
@@ -39,7 +39,7 @@ export function useRouteGate(route: string): RouteGate {
   const flagKey = ROUTE_FEATURE_FLAGS[route]
   // Hooks cannot be called conditionally; an empty key reads as a missing flag
   // and `routeGateFrom` ignores the state that comes back with it.
-  const state = useFeatureFlag(flagKey ?? '')
+  const state = useOptionalFeatureFlag(flagKey ?? '')
   return routeGateFrom(flagKey, state)
 }
 
