@@ -2,7 +2,7 @@
 //!
 //! Handlers stay thin: parse request → call use case → map domain → response DTO.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::BTreeMap, future::Future, sync::Arc, time::Duration};
 
 use axum::{
     extract::{Path, Query, State},
@@ -41,9 +41,9 @@ use crate::course::usecase::{
     ListReservationCheckinsUseCase, ListReservationProductsUseCase, ListResourcesUseCase,
     ListSlotOverridesUseCase, MirrorShiftToField, RecordVisitCheckinUseCase,
     ReplaceCourseOrderUseCase, ReplaceCourseScheduleUseCase, ReplaceProductSlotsUseCase,
-    SeedDemoBoardUseCase, SetBookingHorizonUseCase, UpdateCourseUseCase,
-    UpdateReservationBookingInput, UpdateReservationBookingUseCase, UpdateReservationPartyUseCase,
-    UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
+    SeedDemoBoardUseCase, SetBookingHorizonUseCase, SyncRollingWindowOptInUseCase,
+    UpdateCourseUseCase, UpdateReservationBookingInput, UpdateReservationBookingUseCase,
+    UpdateReservationPartyUseCase, UpsertReservationProductUseCase, UpsertSlotOverridesUseCase,
 };
 use crate::{AppError, AppState, CallerPrincipal};
 
@@ -581,6 +581,38 @@ pub struct TeeLedgerQueryParams {
     pub golf_course_id: Option<String>,
 }
 
+/// Absolute budget for the whole rolling-window backfill on one ledger visit.
+///
+/// The sync performs up to `2 + C + k` Field calls for `C` course resources and
+/// `k` changed resources (`k <= C`), or at most `2 + 2C`. It is deliberately a
+/// single injected deadline rather than a timeout added per course, so a slow
+/// Field cannot make ledger latency grow without bound as courses are added.
+const ROLLING_WINDOW_SYNC_DEADLINE: Duration = Duration::from_secs(5);
+
+async fn run_rolling_window_sync_then<T, SyncFuture, LedgerFuture>(
+    sync: SyncFuture,
+    deadline: Duration,
+    ledger: LedgerFuture,
+) -> Result<T, CourseError>
+where
+    SyncFuture: Future<Output = Result<Vec<CourseId>, CourseError>>,
+    LedgerFuture: Future<Output = Result<T, CourseError>>,
+{
+    match tokio::time::timeout(deadline, sync).await {
+        Ok(Ok(_synced)) => {}
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "could not sync the Field rolling window opt-in while reading the ledger");
+        }
+        Err(_) => {
+            tracing::warn!(
+                deadline = ?deadline,
+                "Field rolling window opt-in sync exceeded its deadline; continuing without it",
+            );
+        }
+    }
+    ledger.await
+}
+
 impl TeeLedgerQueryParams {
     fn course_ids(&self) -> Vec<CourseId> {
         self.golf_course_ids
@@ -629,7 +661,7 @@ pub async fn get_tee_ledger(
     let catalog = catalog_gateway(&state);
     if let Err(error) = ExtendCourseInventoryUseCase::new(
         catalog.clone(),
-        catalog,
+        catalog.clone(),
         commercial_gateway(&state),
         generated_through_gateway(&state),
     )
@@ -639,6 +671,11 @@ pub async fn get_tee_ledger(
         tracing::warn!(%error, "could not extend the booking window while reading the ledger");
     }
 
+    let rolling_window_sync = SyncRollingWindowOptInUseCase::new(
+        catalog.clone(),
+        catalog.clone(),
+        commercial_gateway(&state),
+    );
     let use_case = GetTeeLedgerUseCase::new(
         reservation_gateway(&state),
         catalog_gateway(&state),
@@ -646,17 +683,20 @@ pub async fn get_tee_ledger(
         slot_override_gateway(&state),
         course_order_gateway(&state),
     );
-    let ledger = use_case
-        .execute(
+    let ledger = run_rolling_window_sync_then(
+        rolling_window_sync.execute(credentials),
+        ROLLING_WINDOW_SYNC_DEADLINE,
+        use_case.execute(
             credentials,
             &tenant_id,
             TeeLedgerQuery {
                 date: query.date,
                 golf_course_ids: query.course_ids(),
             },
-        )
-        .await
-        .map_err(AppError::from)?;
+        ),
+    )
+    .await
+    .map_err(AppError::from)?;
     Ok(Json(TeeLedgerResponse::from(ledger)))
 }
 
@@ -2847,5 +2887,38 @@ mod tests {
         let dto: CaddieAssignmentDto =
             serde_json::from_value(old_json).expect("decode old assignment");
         assert_eq!(dto.canonical_status, None);
+    }
+
+    #[tokio::test]
+    async fn rolling_window_deadline_still_runs_the_ledger_future() {
+        let result = run_rolling_window_sync_then(
+            async {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                Ok::<Vec<CourseId>, CourseError>(Vec::new())
+            },
+            Duration::from_millis(1),
+            async { Ok::<&str, CourseError>("ledger") },
+        )
+        .await
+        .expect("ledger should run after the best-effort timeout");
+
+        assert_eq!(result, "ledger");
+    }
+
+    #[tokio::test]
+    async fn rolling_window_sync_error_still_runs_the_ledger_future() {
+        let result = run_rolling_window_sync_then(
+            async {
+                Err::<Vec<CourseId>, CourseError>(CourseError::Provider(
+                    "Field rejected the sync".into(),
+                ))
+            },
+            ROLLING_WINDOW_SYNC_DEADLINE,
+            async { Ok::<&str, CourseError>("ledger") },
+        )
+        .await
+        .expect("ledger should run after an immediate sync error");
+
+        assert_eq!(result, "ledger");
     }
 }

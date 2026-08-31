@@ -106,7 +106,7 @@ pub use course_order::{GetCourseOrderUseCase, ReplaceCourseOrderUseCase};
 pub use course_schedule::{
     BookingHorizonStatus, ExtendCourseInventoryUseCase, GenerateCourseTimeSlotsUseCase,
     GetBookingHorizonUseCase, GetCourseScheduleUseCase, ReplaceCourseScheduleUseCase,
-    SetBookingHorizonUseCase,
+    SetBookingHorizonUseCase, SyncRollingWindowOptInUseCase,
 };
 pub use create_caddie::CreateCaddieUseCase;
 pub use create_caddie_assignment::{CreateCaddieAssignmentUseCase, NameCaddieForRound};

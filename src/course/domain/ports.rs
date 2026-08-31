@@ -740,7 +740,20 @@ pub trait ReservationScheduleGateway: Send + Sync {
         resource_id: &ResourceId,
         timezone: &str,
         rules: &[AvailabilityRule],
+        rolling_window_days: Option<Option<i32>>,
     ) -> Result<Vec<AvailabilityRule>, CourseError>;
+
+    /// Synchronizes Field's rolling-window opt-in from one schedule read.
+    ///
+    /// The boolean is true only when the schedule was written. The operation
+    /// owns the GET, comparison, and full replacement so callers cannot
+    /// accidentally read rules once and write a stale second read back.
+    async fn sync_rolling_window_opt_in(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        resource_id: &ResourceId,
+        rolling_window_days: Option<i32>,
+    ) -> Result<bool, CourseError>;
 
     async fn generate_resource_time_slots(
         &self,

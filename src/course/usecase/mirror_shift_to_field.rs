@@ -533,7 +533,17 @@ mod tests {
             _resource_id: &ResourceId,
             _timezone: &str,
             _rules: &[AvailabilityRule],
+            _rolling_window_days: Option<Option<i32>>,
         ) -> Result<Vec<AvailabilityRule>, CourseError> {
+            unimplemented!("not used")
+        }
+
+        async fn sync_rolling_window_opt_in(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _resource_id: &ResourceId,
+            _rolling_window_days: Option<i32>,
+        ) -> Result<bool, CourseError> {
             unimplemented!("not used")
         }
 

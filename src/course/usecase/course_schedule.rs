@@ -134,9 +134,19 @@ impl ReplaceCourseScheduleUseCase {
             .ok_or(CourseError::NotFound("course"))?;
         let timezone = timezone?;
         let resource_id = resource_id?;
+        let rolling_window_days = horizon
+            .as_ref()
+            .ok()
+            .map(BookingHorizon::field_rolling_window_days);
         let saved = self
             .schedules
-            .replace_resource_schedule(credentials, &resource_id, &timezone, &rules)
+            .replace_resource_schedule(
+                credentials,
+                &resource_id,
+                &timezone,
+                &rules,
+                rolling_window_days,
+            )
             .await?;
 
         // Past this point the week is stored. A horizon we could not read, or a
@@ -309,6 +319,9 @@ impl GenerateCourseTimeSlotsUseCase {
 ///
 /// Best effort by design — it rides along with a read the operator asked for,
 /// and a course that will not build must not take that read down with it.
+/// Authorization and upstream success are prerequisites; this shoulder does
+/// not promise a completion-time or course-fairness bound when Field is slow or
+/// a tenant has many courses.
 ///
 /// Standing in for something Field should own (PLT-3361). Two things this
 /// cannot do: it never runs on a day nobody opens CourseBoard, and it would not
@@ -444,6 +457,79 @@ impl ExtendCourseInventoryUseCase {
             }
         }
         Ok(extended)
+    }
+}
+
+/// Best-effort opt-in for Field's resource rolling window.
+///
+/// This is intentionally separate from the existing inventory shoulder: it
+/// only synchronizes Field's setting and does not touch the local watermark or
+/// generated slot rows. A slow or failing course must not prevent other courses
+/// from being attempted.
+pub struct SyncRollingWindowOptInUseCase {
+    catalog: Arc<dyn GolfCatalogGateway>,
+    schedules: Arc<dyn ReservationScheduleGateway>,
+    commercial: Arc<dyn GolfCommercialGateway>,
+}
+
+impl SyncRollingWindowOptInUseCase {
+    pub fn new(
+        catalog: Arc<dyn GolfCatalogGateway>,
+        schedules: Arc<dyn ReservationScheduleGateway>,
+        commercial: Arc<dyn GolfCommercialGateway>,
+    ) -> Self {
+        Self {
+            catalog,
+            schedules,
+            commercial,
+        }
+    }
+
+    /// Returns the courses whose Field schedule was actually changed.
+    pub async fn execute(
+        &self,
+        credentials: GatewayCredentials<'_>,
+    ) -> Result<Vec<CourseId>, CourseError> {
+        credentials.require(actions::MANAGE_COURSES).await?;
+        let (horizon, resources) = tokio::join!(
+            self.commercial.get_booking_horizon(credentials),
+            self.catalog.list_resources(credentials),
+        );
+        let expected = horizon?.field_rolling_window_days();
+        let resources = resources?;
+
+        let courses: Vec<(ResourceId, CourseId)> = resources
+            .iter()
+            .filter(|resource| resource.is_active())
+            .filter(|resource| resource.kind() == ResourceKind::Course)
+            .filter_map(|resource| {
+                resource.golf_course_id().cloned().map(|course_id| {
+                    let resource_id = resource
+                        .reservation_resource_id()
+                        .cloned()
+                        .unwrap_or_else(|| resource.id().clone());
+                    (resource_id, course_id)
+                })
+            })
+            .collect();
+
+        let mut synced = Vec::new();
+        for (resource_id, course_id) in courses {
+            match self
+                .schedules
+                .sync_rolling_window_opt_in(credentials, &resource_id, expected)
+                .await
+            {
+                Ok(true) => synced.push(course_id),
+                Ok(false) => {}
+                Err(error) => tracing::warn!(
+                    %error,
+                    course_id = %course_id.as_str(),
+                    "could not sync the Field rolling window opt-in for this course"
+                ),
+            }
+        }
+        Ok(synced)
     }
 }
 
@@ -864,6 +950,10 @@ mod tests {
     #[derive(Default)]
     struct FakeSchedules {
         timezone_used: Mutex<Option<String>>,
+        rolling_window_days_used: Mutex<Option<Option<i32>>>,
+        rolling_window_sync_calls: Mutex<Vec<(ResourceId, Option<i32>)>>,
+        rolling_window_sync_unchanged: Mutex<Vec<ResourceId>>,
+        rolling_window_sync_errors: Mutex<Vec<ResourceId>>,
         generated: Mutex<Vec<(NaiveDate, NaiveDate)>>,
     }
 
@@ -883,9 +973,40 @@ mod tests {
             _resource_id: &ResourceId,
             timezone: &str,
             rules: &[AvailabilityRule],
+            rolling_window_days: Option<Option<i32>>,
         ) -> Result<Vec<AvailabilityRule>, CourseError> {
             *self.timezone_used.lock().expect("lock") = Some(timezone.to_string());
+            *self.rolling_window_days_used.lock().expect("lock") = rolling_window_days;
             Ok(rules.to_vec())
+        }
+
+        async fn sync_rolling_window_opt_in(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            resource_id: &ResourceId,
+            rolling_window_days: Option<i32>,
+        ) -> Result<bool, CourseError> {
+            self.rolling_window_sync_calls
+                .lock()
+                .expect("lock")
+                .push((resource_id.clone(), rolling_window_days));
+            if self
+                .rolling_window_sync_errors
+                .lock()
+                .expect("lock")
+                .contains(resource_id)
+            {
+                return Err(CourseError::Provider("rolling-window sync failed".into()));
+            }
+            if self
+                .rolling_window_sync_unchanged
+                .lock()
+                .expect("lock")
+                .contains(resource_id)
+            {
+                return Ok(false);
+            }
+            Ok(true)
         }
 
         async fn generate_resource_time_slots(
@@ -1018,6 +1139,12 @@ mod tests {
         written: Mutex<Vec<(CourseId, InventoryWatermark)>>,
     }
 
+    impl FakeWatermarks {
+        fn clear_stored(&self) {
+            self.stored.lock().expect("lock").clear();
+        }
+    }
+
     #[async_trait]
     impl GeneratedThroughGateway for FakeWatermarks {
         async fn list_watermarks(
@@ -1043,6 +1170,409 @@ mod tests {
                 .insert(course_id.clone(), watermark);
             Ok(())
         }
+    }
+
+    fn credentials() -> GatewayCredentials<'static> {
+        GatewayCredentials {
+            authorization: "Bearer test",
+            operator_id: "tenant-test",
+            platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
+            caller_bearer: "Bearer test",
+        }
+    }
+
+    fn course_catalog(course_ids: &[&str]) -> Arc<FakeCatalog> {
+        let courses = course_ids
+            .iter()
+            .map(|course_id| {
+                Course::reconstitute(
+                    CourseId::new(*course_id),
+                    *course_id,
+                    None,
+                    18,
+                    "Asia/Tokyo",
+                    8,
+                    true,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            })
+            .collect();
+        let resources = course_ids
+            .iter()
+            .map(|course_id| {
+                Resource::reconstitute(
+                    format!("resource-{course_id}"),
+                    *course_id,
+                    Some(format!("reservation-{course_id}")),
+                    Some((*course_id).to_string()),
+                    ResourceKind::Course,
+                    true,
+                )
+            })
+            .collect();
+        Arc::new(FakeCatalog {
+            tenant_timezone: "Asia/Tokyo".into(),
+            courses,
+            resources,
+            ..FakeCatalog::default()
+        })
+    }
+
+    async fn replaced_rolling_window_value(
+        horizon: Option<BookingHorizon>,
+    ) -> (Option<Option<i32>>, usize) {
+        let catalog = course_catalog(&["course-east"]);
+        let schedules = Arc::new(FakeSchedules::default());
+        let saved = ReplaceCourseScheduleUseCase::new(
+            catalog,
+            schedules.clone(),
+            Arc::new(FakeCommercial { horizon }),
+            Arc::new(FakeWatermarks::default()),
+        )
+        .execute(
+            credentials(),
+            &CourseId::new("course-east"),
+            vec![rule(1, "07:00", "12:00")],
+        )
+        .await
+        .expect("replace schedule");
+        assert_eq!(saved.rules.len(), 1);
+        let rolling_window_days = *schedules.rolling_window_days_used.lock().expect("lock");
+        (rolling_window_days, saved.rules.len())
+    }
+
+    #[tokio::test]
+    async fn replace_schedule_maps_horizon_to_field_three_value_contract() {
+        assert_eq!(
+            replaced_rolling_window_value(Some(
+                BookingHorizon::try_days(90).expect("valid horizon"),
+            ))
+            .await
+            .0,
+            Some(Some(90))
+        );
+        assert_eq!(
+            replaced_rolling_window_value(Some(
+                BookingHorizon::try_days(399).expect("valid horizon"),
+            ))
+            .await
+            .0,
+            Some(None)
+        );
+        assert_eq!(
+            replaced_rolling_window_value(Some(BookingHorizon::through(date("2026-12-31"))))
+                .await
+                .0,
+            Some(None)
+        );
+        let (rolling_window_days, saved_rules) = replaced_rolling_window_value(None).await;
+        assert_eq!(rolling_window_days, None);
+        assert_eq!(saved_rules, 1, "a missing horizon must not stop the save");
+    }
+
+    #[tokio::test]
+    async fn rolling_window_sync_returns_only_changed_courses_and_does_not_read_timezone() {
+        let catalog = course_catalog(&["course-east"]);
+        let schedules = Arc::new(FakeSchedules::default());
+        schedules
+            .rolling_window_sync_unchanged
+            .lock()
+            .expect("lock")
+            .push(ResourceId::new("reservation-course-east"));
+        let synced = SyncRollingWindowOptInUseCase::new(
+            catalog.clone(),
+            schedules.clone(),
+            Arc::new(FakeCommercial {
+                horizon: Some(BookingHorizon::try_days(90).expect("valid horizon")),
+            }),
+        )
+        .execute(credentials())
+        .await
+        .expect("rolling-window sync");
+
+        assert!(synced.is_empty());
+        assert_eq!(
+            *schedules.rolling_window_sync_calls.lock().expect("lock"),
+            vec![(ResourceId::new("reservation-course-east"), Some(90))]
+        );
+        assert_eq!(*catalog.timezone_reads.lock().expect("lock"), 0);
+    }
+
+    #[tokio::test]
+    async fn rolling_window_sync_propagates_a_horizon_read_failure() {
+        let schedules = Arc::new(FakeSchedules::default());
+        let error = SyncRollingWindowOptInUseCase::new(
+            course_catalog(&["course-east"]),
+            schedules.clone(),
+            Arc::new(FakeCommercial { horizon: None }),
+        )
+        .execute(credentials())
+        .await
+        .expect_err("a missing horizon cannot determine an opt-in value");
+
+        assert!(
+            matches!(error, CourseError::Provider(message) if message == "booking horizon unavailable")
+        );
+        assert!(schedules
+            .rolling_window_sync_calls
+            .lock()
+            .expect("lock")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn rolling_window_sync_continues_after_one_failure_and_filters_resources() {
+        let first = CourseId::new("course-east");
+        let second = CourseId::new("course-west");
+        let catalog = Arc::new(FakeCatalog {
+            tenant_timezone: "Asia/Tokyo".into(),
+            courses: vec![
+                Course::reconstitute(
+                    first.clone(),
+                    "East",
+                    None,
+                    18,
+                    "Asia/Tokyo",
+                    8,
+                    true,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+                Course::reconstitute(
+                    second.clone(),
+                    "West",
+                    None,
+                    18,
+                    "Asia/Tokyo",
+                    8,
+                    true,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            ],
+            resources: vec![
+                Resource::reconstitute(
+                    "resource-east",
+                    "East",
+                    Some("reservation-east".to_string()),
+                    Some(first.to_string()),
+                    ResourceKind::Course,
+                    true,
+                ),
+                Resource::reconstitute(
+                    "resource-west",
+                    "West",
+                    Some("reservation-west".to_string()),
+                    Some(second.to_string()),
+                    ResourceKind::Course,
+                    true,
+                ),
+                Resource::reconstitute(
+                    "resource-inactive",
+                    "Inactive",
+                    Some("reservation-inactive".to_string()),
+                    Some("course-inactive".to_string()),
+                    ResourceKind::Course,
+                    false,
+                ),
+                Resource::reconstitute(
+                    "resource-tee",
+                    "Tee",
+                    Some("reservation-tee".to_string()),
+                    Some("course-tee".to_string()),
+                    ResourceKind::Tee,
+                    true,
+                ),
+                Resource::reconstitute(
+                    "resource-unmapped",
+                    "Unmapped",
+                    Some("reservation-unmapped".to_string()),
+                    None,
+                    ResourceKind::Course,
+                    true,
+                ),
+            ],
+            ..FakeCatalog::default()
+        });
+        let schedules = Arc::new(FakeSchedules::default());
+        schedules
+            .rolling_window_sync_errors
+            .lock()
+            .expect("lock")
+            .push(ResourceId::new("reservation-east"));
+        let synced = SyncRollingWindowOptInUseCase::new(
+            catalog,
+            schedules.clone(),
+            Arc::new(FakeCommercial {
+                horizon: Some(BookingHorizon::try_days(399).expect("valid horizon")),
+            }),
+        )
+        .execute(credentials())
+        .await
+        .expect("one course failure must be best effort");
+
+        assert_eq!(synced, vec![second]);
+        assert_eq!(
+            *schedules.rolling_window_sync_calls.lock().expect("lock"),
+            vec![
+                (ResourceId::new("reservation-east"), None),
+                (ResourceId::new("reservation-west"), None),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn rolling_window_sync_follows_days_through_days_changes() {
+        let catalog = course_catalog(&["course-east"]);
+        let schedules = Arc::new(FakeSchedules::default());
+        SyncRollingWindowOptInUseCase::new(
+            catalog.clone(),
+            schedules.clone(),
+            Arc::new(FakeCommercial {
+                horizon: Some(BookingHorizon::through(date("2026-12-31"))),
+            }),
+        )
+        .execute(credentials())
+        .await
+        .expect("through sync");
+        SyncRollingWindowOptInUseCase::new(
+            catalog,
+            schedules.clone(),
+            Arc::new(FakeCommercial {
+                horizon: Some(BookingHorizon::try_days(90).expect("valid horizon")),
+            }),
+        )
+        .execute(credentials())
+        .await
+        .expect("days sync");
+
+        assert_eq!(
+            *schedules.rolling_window_sync_calls.lock().expect("lock"),
+            vec![
+                (ResourceId::new("reservation-course-east"), None),
+                (ResourceId::new("reservation-course-east"), Some(90)),
+            ]
+        );
+    }
+
+    struct DenyAuthorizer;
+
+    #[async_trait]
+    impl crate::course::domain::CourseAuthorizer for DenyAuthorizer {
+        async fn require(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            action: &'static str,
+        ) -> Result<(), CourseError> {
+            Err(CourseError::Forbidden(action))
+        }
+    }
+
+    #[tokio::test]
+    async fn rolling_window_sync_requires_manage_courses() {
+        let authorizer = DenyAuthorizer;
+        let credentials = GatewayCredentials {
+            authorization: "Bearer test",
+            operator_id: "tenant-test",
+            platform_id: None,
+            authorizer: &authorizer,
+            caller_bearer: "Bearer test",
+        };
+        let error = SyncRollingWindowOptInUseCase::new(
+            course_catalog(&["course-east"]),
+            Arc::new(FakeSchedules::default()),
+            Arc::new(FakeCommercial {
+                horizon: Some(BookingHorizon::try_days(90).expect("valid horizon")),
+            }),
+        )
+        .execute(credentials)
+        .await
+        .expect_err("missing manage permission");
+
+        assert!(matches!(
+            error,
+            CourseError::Forbidden(actions::MANAGE_COURSES)
+        ));
+    }
+
+    #[tokio::test]
+    async fn inventory_extension_and_rolling_window_sync_use_independent_schedule_operations() {
+        let catalog = course_catalog(&["course-east"]);
+        let schedules = Arc::new(FakeSchedules::default());
+        let watermarks = Arc::new(FakeWatermarks::default());
+        let commercial = Arc::new(FakeCommercial {
+            horizon: Some(BookingHorizon::try_days(30).expect("valid horizon")),
+        });
+        let credentials = credentials();
+
+        let sync = SyncRollingWindowOptInUseCase::new(
+            catalog.clone(),
+            schedules.clone(),
+            commercial.clone(),
+        );
+        let extend = ExtendCourseInventoryUseCase::new(
+            catalog.clone(),
+            schedules.clone(),
+            commercial,
+            watermarks.clone(),
+        );
+
+        let extended = extend
+            .execute(credentials, "tenant-test")
+            .await
+            .expect("inventory extension");
+        let synced = sync
+            .execute(credentials)
+            .await
+            .expect("rolling-window sync");
+
+        assert_eq!(extended, vec![CourseId::new("course-east")]);
+        assert_eq!(synced, vec![CourseId::new("course-east")]);
+        assert_eq!(
+            schedules
+                .rolling_window_sync_calls
+                .lock()
+                .expect("lock")
+                .len(),
+            1
+        );
+        assert_eq!(schedules.generated.lock().expect("lock").len(), 1);
+        assert_eq!(watermarks.written.lock().expect("lock").len(), 1);
+
+        // Reuse the same fakes for the reverse order. Clear only the persisted
+        // watermark so this logical run starts from the same inventory state;
+        // the schedule observations remain shared and make both executions
+        // visible in the assertions below.
+        watermarks.clear_stored();
+        let reverse_synced = sync
+            .execute(credentials)
+            .await
+            .expect("rolling-window sync first");
+        let reverse_extended = extend
+            .execute(credentials, "tenant-test")
+            .await
+            .expect("inventory extension second");
+
+        assert_eq!(reverse_synced, vec![CourseId::new("course-east")]);
+        assert_eq!(reverse_extended, vec![CourseId::new("course-east")]);
+        assert_eq!(
+            schedules
+                .rolling_window_sync_calls
+                .lock()
+                .expect("lock")
+                .len(),
+            2
+        );
+        assert_eq!(schedules.generated.lock().expect("lock").len(), 2);
+        assert_eq!(watermarks.written.lock().expect("lock").len(), 2);
     }
 
     #[tokio::test]
