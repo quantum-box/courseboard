@@ -17,8 +17,10 @@ import { draftReceptionSheet, registerReceptionRow } from './api'
 import {
   blankRow,
   canRegister,
+  blockedReason,
   duplicateNameKeys,
   fileValidationError,
+  isConsentCorrected,
   isCorrected,
   prepareReceptionSheet,
   previewKind,
@@ -26,7 +28,10 @@ import {
   receptionReadFailure,
   rowsFromDraft,
   savedCount,
+  RECEPTION_CONSENT_KEYS,
   RECEPTION_SHEET_ACCEPT,
+  REQUIRED_RECEPTION_CONSENT,
+  type ReceptionConsentKey,
   type ReceptionFieldKey,
   type ReceptionRow,
 } from './models'
@@ -129,7 +134,13 @@ export function ReceptionPage() {
         row,
         rows.findIndex(candidate => candidate.key === row.key),
       )
-      updateRow(row.key, { status: 'saved', customerId: created.id })
+      updateRow(row.key, {
+        status: 'saved',
+        customerId: created.id,
+        // Saved either way: the person is in the ledger. Registering again to
+        // "fix" the consents would put a second one there.
+        consentsMissing: created.consentsRecorded === false,
+      })
     } catch (error) {
       updateRow(row.key, { status: 'pending', error: resourceErrorText(error) })
       throw error
@@ -327,6 +338,12 @@ const ROW_FIELDS: readonly { key: ReceptionFieldKey; requirement: 'required' | '
   { key: 'email', requirement: 'optional' },
 ]
 
+const CONSENT_LABEL = {
+  golf_antisocial_and_course_terms: 'customers:reception.consents.antisocialAndCourseTerms',
+  golf_cart_terms: 'customers:reception.consents.cartTerms',
+  golf_marketing_contact: 'customers:reception.consents.marketingContact',
+} as const satisfies Record<ReceptionConsentKey, string>
+
 const FIELD_LABEL = {
   name: 'customers:field.name',
   nameKana: 'customers:field.nameKana',
@@ -358,6 +375,7 @@ function ReceptionRowCard({
 }) {
   const { t } = useTranslation(['customers', 'common'])
   const saved = row.status === 'saved'
+  const blocked = blockedReason(row)
 
   return (
     <li className={`reception-row${saved ? ' reception-row-saved' : ''}`}>
@@ -393,6 +411,57 @@ function ReceptionRowCard({
         ))}
       </div>
 
+      <div className="reception-row-consents">
+        {RECEPTION_CONSENT_KEYS.map(key => {
+          const answer = row.consents[key]
+          return (
+            <label key={key} className="reception-consent">
+              <input
+                type="checkbox"
+                className="size-4 accent-primary"
+                checked={answer === true}
+                disabled={disabled || saved || row.status === 'saving'}
+                onChange={event =>
+                  onChange({ consents: { ...row.consents, [key]: event.target.checked } })
+                }
+              />
+              <span className="reception-consent-label">
+                {t(CONSENT_LABEL[key])}
+                {key === REQUIRED_RECEPTION_CONSENT ? (
+                  <Badge variant="outline">{t('customers:reception.consents.required')}</Badge>
+                ) : null}
+              </span>
+              {/* An unread box and a refused box look identical once they are
+                  both an empty checkbox. Saying which is which is the whole
+                  reason the reader's answer is kept beside the desk's. */}
+              {answer === null ? (
+                <span className="reception-read-value">
+                  {t('customers:reception.consents.unread')}
+                </span>
+              ) : isConsentCorrected(row, key) ? (
+                <span className="reception-read-value">
+                  {t('customers:reception.consents.readAs', {
+                    value: t(
+                      row.readConsents[key] === null
+                        ? 'customers:reception.consents.readUnread'
+                        : row.readConsents[key]
+                          ? 'customers:reception.consents.readTicked'
+                          : 'customers:reception.consents.readBlank',
+                    ),
+                  })}
+                </span>
+              ) : null}
+            </label>
+          )
+        })}
+      </div>
+
+      {blocked === 'declaration' && !saved ? (
+        <Notice tone="warning">{t('customers:reception.consents.blocked')}</Notice>
+      ) : null}
+      {row.consentsMissing ? (
+        <Notice tone="danger">{t('customers:reception.consents.notFiled')}</Notice>
+      ) : null}
       {row.error ? <Notice tone="danger">{row.error}</Notice> : null}
 
       <div className="reception-row-actions">

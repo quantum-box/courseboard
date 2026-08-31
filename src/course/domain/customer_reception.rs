@@ -14,6 +14,9 @@
 
 use serde::Serialize;
 
+use super::customer_consent::{
+    reception_consent, required_reception_consents, ReceptionConsentAnswer, RECEPTION_CONSENTS,
+};
 use super::error::CourseError;
 
 /// Field's own ceiling for one document (10 MiB). Rejecting oversized uploads
@@ -168,45 +171,66 @@ pub struct ReceptionOcrField {
     pub item_fields: Vec<ReceptionOcrColumn>,
 }
 
+/// The field type the generic reader uses for a tick box. Anything it cannot
+/// resolve to `true` or `false` comes back dropped with a warning rather than
+/// guessed, which is what a half-inked box on a carbon copy should do.
+pub const RECEPTION_BOOLEAN_FIELD_TYPE: &str = "boolean";
+
 /// What a golf reception sheet is asked for.
 ///
 /// Labels are Japanese on purpose: they are the prompt the reader sees, and a
 /// sheet written for a Japanese course reads as 「氏名」, not "name". Only the
-/// four things the ledger holds are asked for — a sheet also carries the tee
-/// time and the plan, but a booking made off an unchecked read is a booking
-/// nobody can defend, so this screen stops at the people.
+/// things the ledger holds are asked for — a sheet also carries the tee time
+/// and the plan, but a booking made off an unchecked read is a booking nobody
+/// can defend, so this screen stops at the people and what they agreed to.
+///
+/// The consent boxes are asked for exactly as the paper prints them, opt-out
+/// wording included. The desk checks the read against the original, so a
+/// question phrased the other way round would not match the page; the flip
+/// into Field's direction happens later, in [`super::customer_consent`].
 pub fn reception_sheet_schema() -> Vec<ReceptionOcrField> {
+    let mut item_fields = vec![
+        ReceptionOcrColumn {
+            key: RECEPTION_ROW_NAME,
+            label: "氏名",
+            field_type: "text",
+            options: [],
+        },
+        ReceptionOcrColumn {
+            key: RECEPTION_ROW_NAME_KANA,
+            label: "氏名のふりがな（カタカナ）",
+            field_type: "text",
+            options: [],
+        },
+        ReceptionOcrColumn {
+            key: RECEPTION_ROW_PHONE,
+            label: "電話番号",
+            field_type: "tel",
+            options: [],
+        },
+        ReceptionOcrColumn {
+            key: RECEPTION_ROW_EMAIL,
+            label: "メールアドレス",
+            field_type: "email",
+            options: [],
+        },
+    ];
+    item_fields.extend(
+        super::customer_consent::RECEPTION_CONSENTS
+            .iter()
+            .map(|consent| ReceptionOcrColumn {
+                key: consent.key,
+                label: consent.prompt,
+                field_type: RECEPTION_BOOLEAN_FIELD_TYPE,
+                options: [],
+            }),
+    );
     vec![ReceptionOcrField {
         key: RECEPTION_ROWS_KEY,
         label: "来場者（受付用紙に書かれている全員）",
         field_type: "items",
         options: [],
-        item_fields: vec![
-            ReceptionOcrColumn {
-                key: RECEPTION_ROW_NAME,
-                label: "氏名",
-                field_type: "text",
-                options: [],
-            },
-            ReceptionOcrColumn {
-                key: RECEPTION_ROW_NAME_KANA,
-                label: "氏名のふりがな（カタカナ）",
-                field_type: "text",
-                options: [],
-            },
-            ReceptionOcrColumn {
-                key: RECEPTION_ROW_PHONE,
-                label: "電話番号",
-                field_type: "tel",
-                options: [],
-            },
-            ReceptionOcrColumn {
-                key: RECEPTION_ROW_EMAIL,
-                label: "メールアドレス",
-                field_type: "email",
-                options: [],
-            },
-        ],
+        item_fields,
     }]
 }
 
@@ -221,6 +245,10 @@ pub struct ReceptionDraftRow {
     name_kana: Option<String>,
     phone: Option<String>,
     email: Option<String>,
+    /// One answer per declared consent, in the order they are printed, whether
+    /// or not the reader made the box out. The desk needs an unread box to
+    /// show up as a question rather than to disappear.
+    consents: Vec<ReceptionConsentAnswer>,
 }
 
 impl ReceptionDraftRow {
@@ -235,9 +263,55 @@ impl ReceptionDraftRow {
             name_kana: normalize(name_kana),
             phone: normalize(phone),
             email: normalize(email),
+            consents: RECEPTION_CONSENTS
+                .iter()
+                .map(|consent| ReceptionConsentAnswer {
+                    key: consent.key,
+                    accepted: None,
+                })
+                .collect(),
         }
     }
 
+    /// Record a box as the reader saw it on the paper. The printed direction
+    /// is resolved here so that everything downstream reads `accepted` the way
+    /// Field stores it.
+    ///
+    /// An unknown key is ignored rather than appended: the only source of keys
+    /// is the schema this module also builds, and a row carrying a consent the
+    /// desk cannot see is worse than one silently dropped.
+    pub fn with_consent_tick(mut self, key: &str, ticked: Option<bool>) -> Self {
+        let Some(consent) = reception_consent(key) else {
+            return self;
+        };
+        if let Some(answer) = self
+            .consents
+            .iter_mut()
+            .find(|answer| answer.key == consent.key)
+        {
+            answer.accepted = consent.polarity.accepted_from_tick(ticked);
+        }
+        self
+    }
+
+    /// What the sheet said, already in Field's direction.
+    pub fn consents(&self) -> &[ReceptionConsentAnswer] {
+        &self.consents
+    }
+
+    /// Whether the declaration the sheet requires of everyone came back as a
+    /// yes. An unread box is not a yes.
+    pub fn has_required_consents(&self) -> bool {
+        required_reception_consents().all(|required| {
+            self.consents
+                .iter()
+                .any(|answer| answer.key == required.key && answer.accepted == Some(true))
+        })
+    }
+
+    /// Consent ticks alone do not make a person. A row the reader answered
+    /// with nothing but boxes has nobody in it, and registering it would put a
+    /// nameless record in the ledger.
     pub fn is_empty(&self) -> bool {
         self.name.is_none()
             && self.name_kana.is_none()
@@ -434,21 +508,44 @@ mod tests {
     }
 
     #[test]
-    fn the_schema_asks_for_the_four_things_the_ledger_holds() {
+    fn the_schema_asks_for_what_the_ledger_holds_and_what_was_agreed_to() {
         let schema = reception_sheet_schema();
         assert_eq!(schema.len(), 1);
         assert_eq!(schema[0].key, RECEPTION_ROWS_KEY);
         assert_eq!(schema[0].field_type, "items");
         let keys: Vec<&str> = schema[0].item_fields.iter().map(|item| item.key).collect();
-        assert_eq!(
-            keys,
-            vec![
-                RECEPTION_ROW_NAME,
-                RECEPTION_ROW_NAME_KANA,
-                RECEPTION_ROW_PHONE,
-                RECEPTION_ROW_EMAIL
-            ]
-        );
+        let mut expected = vec![
+            RECEPTION_ROW_NAME,
+            RECEPTION_ROW_NAME_KANA,
+            RECEPTION_ROW_PHONE,
+            RECEPTION_ROW_EMAIL,
+        ];
+        expected.extend(RECEPTION_CONSENTS.iter().map(|consent| consent.key));
+        assert_eq!(keys, expected);
+    }
+
+    /// Field caps an `items` field at 20 columns and answers a wider schema
+    /// with a 400. Consents are the thing most likely to grow — a course adds
+    /// a box, then another — so the ceiling is worth failing against here.
+    #[test]
+    fn the_row_stays_inside_the_readers_column_ceiling() {
+        assert!(reception_sheet_schema()[0].item_fields.len() <= 20);
+    }
+
+    /// The reader resolves `boolean` columns to `true` / `false` and drops
+    /// anything else with a warning. Sending a tick box as `text` would let a
+    /// stray mark through as a consent.
+    #[test]
+    fn every_consent_column_is_asked_for_as_a_tick_box() {
+        let schema = reception_sheet_schema();
+        for consent in RECEPTION_CONSENTS.iter() {
+            let column = schema[0]
+                .item_fields
+                .iter()
+                .find(|item| item.key == consent.key)
+                .unwrap_or_else(|| panic!("{} is missing from the schema", consent.key));
+            assert_eq!(column.field_type, RECEPTION_BOOLEAN_FIELD_TYPE);
+        }
     }
 
     #[test]

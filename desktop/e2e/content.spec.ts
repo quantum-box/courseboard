@@ -106,6 +106,17 @@ test.describe('顧客台帳', () => {
     await expect(names.first()).toHaveValue('本田 康彦')
     await expect(names.nth(1)).toHaveValue('増田 公陽')
     await expect(page.getByText('読み取れない項目があります', { exact: false })).toBeVisible()
+
+    // 3人目は必須の表明が読み取れていないので、名前があっても登録できない。
+    // 読み取れた2人だけが対象になる。
+    await expect(page.getByRole('button', { name: 'まとめて登録する（2人）' })).toBeVisible()
+    await expect(
+      page.getByText('にチェックが必要です', { exact: false }).first(),
+    ).toBeVisible()
+
+    // 受付が原本を見て必要なチェックを入れると、その行も対象に入る。
+    const rows = page.locator('li.reception-row')
+    await rows.nth(2).getByRole('checkbox').first().check()
     await expect(page.getByRole('button', { name: 'まとめて登録する（3人）' })).toBeVisible()
   })
 })
