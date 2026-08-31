@@ -19,6 +19,16 @@ export const reservationReportImport: DeepPartial<typeof source> = {
     year: '表の年',
     month: '見る月',
     courseMapping: 'CourseBoardのコース',
+    rotation: 'PDFの向き',
+  },
+  rotation: {
+    hint: '横向きや上下逆で読めないときに選びます。文字を読み取れるPDFは向きを変えても結果が同じです。',
+    option: {
+      keep: 'そのまま',
+      right: '右に90°',
+      half: '180°',
+      left: '左に90°',
+    },
   },
   file: {
     choose: '表ファイルを選ぶ',

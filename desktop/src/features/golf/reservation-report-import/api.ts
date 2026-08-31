@@ -4,6 +4,7 @@ import type {
   ReservationReportColumnMappings,
   ReservationReportEntry,
   ReservationReportImportResult,
+  ReservationReportPdfRotation,
   ReservationReportPreview,
 } from './models'
 
@@ -17,6 +18,7 @@ function reportForm(
   mappings?: Record<string, string>,
   normalizedFingerprint?: string,
   columnMappings?: ReservationReportColumnMappings,
+  rotation?: ReservationReportPdfRotation,
 ) {
   const form = new FormData()
   form.append('file', file, file.name)
@@ -33,6 +35,9 @@ function reportForm(
   }
   if (normalizedFingerprint) form.append('normalizedFingerprint', normalizedFingerprint)
   if (columnMappings) form.append('columnMappings', JSON.stringify(columnMappings))
+  // Only sent when the page is actually turned. Field rejects multipart fields
+  // it does not know, so a request that turns nothing must not name it.
+  if (rotation) form.append('rotation', String(rotation))
   return form
 }
 
@@ -40,10 +45,11 @@ export function previewReservationReport(
   file: File,
   year: number,
   columnMappings?: ReservationReportColumnMappings,
+  rotation?: ReservationReportPdfRotation,
 ) {
   return courseboardApiJson<ReservationReportPreview>(PREVIEW_PATH, {
     method: 'POST',
-    body: reportForm(file, year, undefined, undefined, columnMappings),
+    body: reportForm(file, year, undefined, undefined, columnMappings, rotation),
   })
 }
 
@@ -53,10 +59,11 @@ export function importReservationReport(
   mappings: Record<string, string>,
   normalizedFingerprint: string,
   columnMappings?: ReservationReportColumnMappings,
+  rotation?: ReservationReportPdfRotation,
 ) {
   return courseboardApiJson<ReservationReportImportResult>(IMPORT_PATH, {
     method: 'POST',
-    body: reportForm(file, year, mappings, normalizedFingerprint, columnMappings),
+    body: reportForm(file, year, mappings, normalizedFingerprint, columnMappings, rotation),
   })
 }
 

@@ -26,13 +26,16 @@ import {
 } from '../../../components/Page'
 import { importReservationReport, listReservationReportEntries, previewReservationReport } from './api'
 import {
+  RESERVATION_REPORT_PDF_ROTATIONS,
   RESERVATION_REPORT_TARGETS,
   columnMappingsFromAnalysis,
   fileValidationError,
   formatMonth,
   formatReportDate,
+  isPdfReport,
   monthGridRows,
   monthsInRows,
+  parsePdfRotation,
   suggestCourseMappings,
   sumRows,
   validateCourseMappings,
@@ -42,6 +45,7 @@ import {
   type ReservationReportCourse,
   type ReservationReportEntry,
   type ReservationReportImportResult,
+  type ReservationReportPdfRotation,
   type ReservationReportPreview,
   type ReservationReportReviewRow,
 } from './models'
@@ -49,6 +53,18 @@ import {
 type ImportStage = 'choose' | 'mapping' | 'confirm' | 'result'
 
 const REPORT_COURSES_PATH = '/v1/course/courses'
+
+/**
+ * Named by where the top of the page ends up rather than by the number of
+ * degrees: an operator holding a sideways scan knows which way it has to
+ * turn, not that this is 270 rather than 90.
+ */
+const ROTATION_LABEL_KEYS = {
+  0: 'keep',
+  90: 'right',
+  180: 'half',
+  270: 'left',
+} as const satisfies Record<ReservationReportPdfRotation, string>
 
 function yearsAroundCurrent() {
   const current = Number(currentYearMonth().slice(0, 4))
@@ -85,6 +101,7 @@ export function ReservationReportImportPage() {
   const [file, setFile] = useState<File | null>(null)
   const [year, setYear] = useState(currentYearMonth().slice(0, 4))
   const [fileError, setFileError] = useState<ReturnType<typeof fileValidationError>>(null)
+  const [rotation, setRotation] = useState<ReservationReportPdfRotation>(0)
   const [preview, setPreview] = useState<ReservationReportPreview | null>(null)
   const [mappings, setMappings] = useState<Record<string, string>>({})
   const [columnMappings, setColumnMappings] = useState<ReservationReportColumnMappings>({})
@@ -182,6 +199,7 @@ export function ReservationReportImportPage() {
     const next = event.target.files?.[0] ?? null
     setFile(next)
     setFileError(fileValidationError(next))
+    setRotation(0)
     setPreviewError(null)
     setImportError(null)
     setColumnMappingApproved(false)
@@ -195,6 +213,7 @@ export function ReservationReportImportPage() {
     if (fileInputRef.current) fileInputRef.current.value = ''
     setFile(null)
     setFileError(null)
+    setRotation(0)
     setPreviewError(null)
     setImportError(null)
     setColumnMappingApproved(false)
@@ -220,7 +239,7 @@ export function ReservationReportImportPage() {
     setPreviewError(null)
     setImportError(null)
     try {
-      const payload = await previewReservationReport(file, parsedYear)
+      const payload = await previewReservationReport(file, parsedYear, undefined, rotation)
       if (!isPreviewPayload(payload)) {
         setPreviewError(t('reservationReportImport:error.invalidResponse'))
         return
@@ -276,7 +295,7 @@ export function ReservationReportImportPage() {
       setMappingPreviewing(true)
       setColumnMappingError(null)
       try {
-        const payload = await previewReservationReport(file, Number(year), columnMappings)
+        const payload = await previewReservationReport(file, Number(year), columnMappings, rotation)
         if (!isPreviewPayload(payload)) {
           setColumnMappingError('reparse')
           return
@@ -333,6 +352,7 @@ export function ReservationReportImportPage() {
         mappings,
         preview.normalizedFingerprint,
         preview.analysis ? columnMappings : undefined,
+        rotation,
       )
       setResult(saved)
       setStage('result')
@@ -362,6 +382,7 @@ export function ReservationReportImportPage() {
     setColumnMappingError(null)
     setResult(null)
     setFileError(null)
+    setRotation(0)
     setPreviewError(null)
     setMappingError(null)
     setImportError(null)
@@ -452,6 +473,24 @@ export function ReservationReportImportPage() {
                 {yearsAroundCurrent().map(option => <option key={option} value={option}>{option}</option>)}
               </NativeSelect>
             </Field>
+            {isPdfReport(file) ? (
+              <Field
+                label={t('reservationReportImport:field.rotation')}
+                requirement="none"
+                hint={t('reservationReportImport:rotation.hint')}
+              >
+                <NativeSelect
+                  value={String(rotation)}
+                  onChange={event => setRotation(parsePdfRotation(event.target.value))}
+                >
+                  {RESERVATION_REPORT_PDF_ROTATIONS.map(option => (
+                    <option key={option} value={String(option)}>
+                      {t(`reservationReportImport:rotation.option.${ROTATION_LABEL_KEYS[option]}`)}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </Field>
+            ) : null}
             <div className="reservation-report-form-actions">
               <Button type="submit" variant="primary" disabled={previewing || courseLoading}>
                 {previewing ? <RefreshCw className="spin" /> : <ArrowRight />}

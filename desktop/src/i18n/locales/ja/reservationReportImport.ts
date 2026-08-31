@@ -16,6 +16,16 @@ export const reservationReportImport = {
     year: '対象年',
     month: '表示する月',
     courseMapping: 'CourseBoardのコース',
+    rotation: 'PDFの向き',
+  },
+  rotation: {
+    hint: '横向き・上下逆のまま読み取れないときに選びます。文字を読み取れるPDFでは向きを変えても結果は変わりません。',
+    option: {
+      keep: 'そのまま',
+      right: '右に90°',
+      half: '180°',
+      left: '左に90°',
+    },
   },
   file: {
     choose: '表ファイルを選ぶ',

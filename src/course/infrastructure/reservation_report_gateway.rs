@@ -16,7 +16,7 @@ use super::field_gateway::{
     field_send_json, field_send_multipart, field_send_unit, normalize_base_url, urlencoding_path,
 };
 use crate::course::domain::{
-    Course, CourseError, CourseId, ExternalReservationReportEntry, GatewayCredentials,
+    Course, CourseError, CourseId, ExternalReservationReportEntry, GatewayCredentials, PdfRotation,
     ReservationReportAnalyzeGateway, ReservationReportDayPart, ReservationReportEntryQuery,
     ReservationReportGateway, ReservationReportUpsertSummary, TabularAnalyzeMapping,
     TabularAnalyzeMappingField, TabularAnalyzeResult, TabularAnalyzeRow,
@@ -573,6 +573,7 @@ impl ReservationReportAnalyzeGateway for FieldReservationReportGateway {
         bytes: &[u8],
         filename: Option<&str>,
         year: i32,
+        rotation: PdfRotation,
     ) -> Result<TabularAnalyzeResult, CourseError> {
         let filename = filename.unwrap_or("reservation-report");
         let content_type = match filename
@@ -595,11 +596,17 @@ impl ReservationReportAnalyzeGateway for FieldReservationReportGateway {
             .mime_str(content_type)
             .map_err(|_| CourseError::BadRequest("reservation report file type is invalid"))?;
         let context = format!("CourseBoard daily reservation report. The operator selected year {year}. Map each row to facilityName, date, dayPart, groupCount, and caddieAttachedGroupCount. Preserve source rows and do not infer individual reservations.");
-        let form = reqwest::multipart::Form::new()
+        let mut form = reqwest::multipart::Form::new()
             .part("file", part)
             .text("context", context)
             .text("targetSchema", TABULAR_TARGET_SCHEMA)
             .text("mappingMode", "auto");
+        // Only sent when the operator actually turned the page. Field rejects
+        // multipart fields it does not know, so a request that asks for
+        // nothing must not name the field at all.
+        if rotation.turns_the_page() {
+            form = form.text("rotation", rotation.as_str());
+        }
         let response: FieldTabularAnalyzeResponse = field_send_multipart(
             &self.client,
             &self.base_url,
@@ -827,6 +834,9 @@ mod tests {
     struct ConfigState {
         tenant: Mutex<Value>,
         patches: Mutex<Vec<Value>>,
+        /// The `rotation` multipart field as the test Field saw it, so the
+        /// absent case can be told apart from a `0` that was sent anyway.
+        rotation: Mutex<Option<String>>,
     }
 
     fn test_credentials() -> GatewayCredentials<'static> {
@@ -880,6 +890,7 @@ mod tests {
     }
 
     async fn analyze_tabular(
+        State(state): State<Arc<ConfigState>>,
         headers: HeaderMap,
         mut multipart: Multipart,
     ) -> (StatusCode, Json<Value>) {
@@ -908,10 +919,16 @@ mod tests {
         }
         let mut names = fields.keys().cloned().collect::<Vec<_>>();
         names.sort();
+        // `rotation` is optional on the wire: Field rejects fields it does not
+        // know, so a request that turns nothing must not name it.
+        names.retain(|name| name != "rotation");
         assert_eq!(
             names,
             vec!["context", "file", "mappingMode", "targetSchema"]
         );
+        *state.rotation.lock().expect("rotation lock") = fields
+            .get("rotation")
+            .map(|value| String::from_utf8(value.clone()).expect("rotation is text"));
         assert_eq!(fields["mappingMode"], b"auto");
         let target_schema: Value =
             serde_json::from_slice(&fields["targetSchema"]).expect("target schema JSON");
@@ -1437,13 +1454,12 @@ mod tests {
         // The literal path, not the constant: naming the constant here would
         // let a path change pass silently, which is the one thing this test is
         // holding down.
-        let app = Router::new()
-            .route(
-                "/v1/erp/extensions/golf-course/tabular/analyze",
-                post(analyze_tabular),
-            )
-            .with_state(Arc::new(ConfigState::default()));
-        let base_url = spawn_field_server(app).await;
+        let app = Router::new().route(
+            "/v1/erp/extensions/golf-course/tabular/analyze",
+            post(analyze_tabular),
+        );
+        let state = Arc::new(ConfigState::default());
+        let base_url = spawn_field_server(app.with_state(state.clone())).await;
         let gateway = FieldReservationReportGateway::new(reqwest::Client::new(), Some(&base_url));
         let result = gateway
             .analyze_tabular(
@@ -1451,15 +1467,44 @@ mod tests {
                 b"facility,date,part,groups,caddie",
                 Some("report.csv"),
                 2026,
+                PdfRotation::None,
             )
             .await
             .expect("tabular analysis");
+        assert_eq!(*state.rotation.lock().expect("rotation lock"), None);
         assert_eq!(result.source_type(), "xlsx");
         assert_eq!(result.headers().len(), 5);
         assert_eq!(result.rows()[0].values()[3], "8");
         assert_eq!(result.mapping().mode(), "ai");
         assert_eq!(result.mapping().fields().len(), 5);
         assert_eq!(result.warnings(), &["check the mapped columns"]);
+    }
+
+    /// The orientation the operator picked has to be the one Field reads at,
+    /// or the desk approves a table that was never the one imported.
+    #[tokio::test]
+    async fn tabular_analyze_forwards_the_operator_page_orientation() {
+        let app = Router::new().route(
+            "/v1/erp/extensions/golf-course/tabular/analyze",
+            post(analyze_tabular),
+        );
+        let state = Arc::new(ConfigState::default());
+        let base_url = spawn_field_server(app.with_state(state.clone())).await;
+        let gateway = FieldReservationReportGateway::new(reqwest::Client::new(), Some(&base_url));
+        gateway
+            .analyze_tabular(
+                test_credentials(),
+                b"%PDF-1.7 sideways scan",
+                Some("report.pdf"),
+                2026,
+                PdfRotation::Clockwise270,
+            )
+            .await
+            .expect("tabular analysis of a turned page");
+        assert_eq!(
+            state.rotation.lock().expect("rotation lock").as_deref(),
+            Some("270")
+        );
     }
 
     /// With the flag on the same request goes to Field's generic analyzer.
@@ -1483,6 +1528,7 @@ mod tests {
                 b"facility,date,part,groups,caddie",
                 Some("report.csv"),
                 2026,
+                PdfRotation::None,
             )
             .await
             .expect("tabular analysis over the generic path");

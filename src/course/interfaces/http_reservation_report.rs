@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::http::{bearer_authorization, catalog_gateway, operator_id};
-use crate::course::domain::{ExternalReservationReportEntry, GatewayCredentials};
+use crate::course::domain::{ExternalReservationReportEntry, GatewayCredentials, PdfRotation};
 use crate::course::usecase::{
     normalized_reservation_report_fingerprint, ImportReservationReportUseCase,
     ListReservationReportEntriesUseCase, MigrateReservationReportsUseCase,
@@ -313,6 +313,7 @@ struct UploadedReservationReport {
     mappings: Option<HashMap<String, String>>,
     column_mappings: Option<HashMap<String, String>>,
     normalized_fingerprint: Option<String>,
+    rotation: PdfRotation,
 }
 
 async fn read_upload(mut multipart: Multipart) -> Result<UploadedReservationReport, AppError> {
@@ -322,6 +323,7 @@ async fn read_upload(mut multipart: Multipart) -> Result<UploadedReservationRepo
     let mut mappings = None;
     let mut column_mappings = None;
     let mut normalized_fingerprint = None;
+    let mut rotation = PdfRotation::None;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -369,6 +371,14 @@ async fn read_upload(mut multipart: Multipart) -> Result<UploadedReservationRepo
                         .map_err(|_| AppError::BadRequest("columnMappings is invalid"))?,
                 );
             }
+            "rotation" => {
+                let value = field
+                    .text()
+                    .await
+                    .map_err(|_| AppError::BadRequest("rotation is invalid"))?;
+                rotation = PdfRotation::parse(&value)
+                    .map_err(|_| AppError::BadRequest("rotation must be 0, 90, 180, or 270"))?;
+            }
             "normalizedFingerprint" => {
                 let value = field
                     .text()
@@ -388,6 +398,7 @@ async fn read_upload(mut multipart: Multipart) -> Result<UploadedReservationRepo
         mappings,
         column_mappings,
         normalized_fingerprint,
+        rotation,
     })
 }
 
@@ -418,6 +429,7 @@ pub async fn preview_reservation_report(
         upload.year,
         upload.filename.as_deref(),
         upload.column_mappings.as_ref(),
+        upload.rotation,
     )
     .await
     .map_err(AppError::from)?;
@@ -453,6 +465,7 @@ pub async fn import_reservation_report(
         upload.year,
         upload.filename.as_deref(),
         upload.column_mappings.as_ref(),
+        upload.rotation,
     )
     .await
     .map_err(AppError::from)?;

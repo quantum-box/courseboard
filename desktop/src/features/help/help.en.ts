@@ -259,7 +259,7 @@ export const helpEn: HelpCatalog = {
       usage: [
         {
           heading: 'Choose a report and a year',
-          body: 'Pick an Excel, CSV, or PDF report and choose the year it covers — the report itself does not say. Files larger than 5 MB are refused.',
+          body: 'Pick an Excel, CSV, or PDF report and choose the year it covers — the report itself does not say. Files larger than 5 MB are refused. When a scanned PDF comes out sideways or upside down, set the PDF orientation before previewing; a PDF whose own text can be recovered reads the same at any orientation.',
         },
         {
           heading: 'Map the columns and the courses',

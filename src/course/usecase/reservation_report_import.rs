@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use crate::course::domain::actions;
 use crate::course::domain::{
     CourseError, CourseId, ExternalReservationReportEntry, GatewayCredentials, GolfCatalogGateway,
-    ReservationReport, ReservationReportAnalyzeGateway, ReservationReportDayPart,
+    PdfRotation, ReservationReport, ReservationReportAnalyzeGateway, ReservationReportDayPart,
     ReservationReportFacility, ReservationReportGateway, ReservationReportRow,
     ReservationReportUpsertSummary, TabularAnalyzeMapping, TabularAnalyzeMappingField,
     TabularAnalyzeResult,
@@ -423,6 +423,7 @@ impl PreviewReservationReportUseCase {
         year: i32,
         filename: Option<&str>,
         column_mappings: Option<&HashMap<String, String>>,
+        rotation: PdfRotation,
     ) -> Result<ReservationReportPreview, CourseError> {
         credentials
             .require(actions::IMPORT_RESERVATION_REPORTS)
@@ -445,7 +446,7 @@ impl PreviewReservationReportUseCase {
             }),
             Err(_) => {
                 let analysis = analyzer
-                    .analyze_tabular(credentials, bytes, filename, year)
+                    .analyze_tabular(credentials, bytes, filename, year, rotation)
                     .await?;
                 let analysis = match column_mappings {
                     Some(mappings) => apply_user_column_mappings(analysis, mappings)?,
@@ -1033,6 +1034,18 @@ mod tests {
 
     struct FakeAnalyzeGateway {
         result: TabularAnalyzeResult,
+        /// The turn the analyzer was asked for, so the operator's choice can
+        /// be followed all the way out of the use case.
+        rotation: Mutex<Option<PdfRotation>>,
+    }
+
+    impl FakeAnalyzeGateway {
+        fn new(result: TabularAnalyzeResult) -> Self {
+            Self {
+                result,
+                rotation: Mutex::new(None),
+            }
+        }
     }
 
     #[async_trait::async_trait]
@@ -1043,7 +1056,9 @@ mod tests {
             _bytes: &[u8],
             _filename: Option<&str>,
             _year: i32,
+            rotation: PdfRotation,
         ) -> Result<TabularAnalyzeResult, CourseError> {
+            *self.rotation.lock().unwrap() = Some(rotation);
             Ok(self.result.clone())
         }
     }
@@ -1285,9 +1300,7 @@ mod tests {
             )
             .unwrap(),
         ];
-        let gateway = FakeAnalyzeGateway {
-            result: tabular_analysis(rows),
-        };
+        let gateway = FakeAnalyzeGateway::new(tabular_analysis(rows));
         let preview = PreviewReservationReportUseCase::execute_with_fallback(
             GatewayCredentials {
                 authorization: "Bearer test",
@@ -1301,6 +1314,7 @@ mod tests {
             2026,
             Some("report.pdf"),
             None,
+            PdfRotation::None,
         )
         .await
         .unwrap();
@@ -1314,19 +1328,17 @@ mod tests {
 
     #[tokio::test]
     async fn tabular_fallback_flags_caddie_count_above_groups_without_refusing_the_file() {
-        let gateway = FakeAnalyzeGateway {
-            result: tabular_analysis(vec![TabularAnalyzeRow::new(
-                2,
-                vec![
-                    "東".into(),
-                    "2026-07-18".into(),
-                    "morning".into(),
-                    "1".into(),
-                    "2".into(),
-                ],
-            )
-            .unwrap()]),
-        };
+        let gateway = FakeAnalyzeGateway::new(tabular_analysis(vec![TabularAnalyzeRow::new(
+            2,
+            vec![
+                "東".into(),
+                "2026-07-18".into(),
+                "morning".into(),
+                "1".into(),
+                "2".into(),
+            ],
+        )
+        .unwrap()]));
         // One of the two numbers is wrong and the report does not say which.
         // Refusing the file would leave the club unable to import the month at
         // all over a single half-day, so the row imports and gets flagged.
@@ -1343,6 +1355,7 @@ mod tests {
             2026,
             Some("report.xls"),
             None,
+            PdfRotation::None,
         )
         .await
         .unwrap();
@@ -1355,20 +1368,79 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_operator_page_orientation_reaches_the_analyzer() {
+        let gateway = FakeAnalyzeGateway::new(tabular_analysis(vec![TabularAnalyzeRow::new(
+            2,
+            vec![
+                "東".into(),
+                "2026-07-18".into(),
+                "morning".into(),
+                "3".into(),
+                "1".into(),
+            ],
+        )
+        .unwrap()]));
+        PreviewReservationReportUseCase::execute_with_fallback(
+            GatewayCredentials {
+                authorization: "Bearer test",
+                operator_id: "tenant",
+                platform_id: None,
+                authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                caller_bearer: "Bearer test",
+            },
+            &gateway,
+            b"%PDF-1.7\nsideways scan",
+            2026,
+            Some("report.pdf"),
+            None,
+            PdfRotation::Clockwise270,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            *gateway.rotation.lock().unwrap(),
+            Some(PdfRotation::Clockwise270)
+        );
+    }
+
+    #[test]
+    fn page_orientation_only_accepts_quarter_turns() {
+        assert_eq!(PdfRotation::parse("0").unwrap(), PdfRotation::None);
+        assert_eq!(
+            PdfRotation::parse(" 90 ").unwrap(),
+            PdfRotation::Clockwise90
+        );
+        assert_eq!(
+            PdfRotation::parse("180").unwrap(),
+            PdfRotation::Clockwise180
+        );
+        assert_eq!(
+            PdfRotation::parse("270").unwrap(),
+            PdfRotation::Clockwise270
+        );
+        for value in ["", "45", "360", "-90", "90.0"] {
+            assert!(
+                PdfRotation::parse(value).is_err(),
+                "{value:?} should not parse"
+            );
+        }
+        assert!(!PdfRotation::None.turns_the_page());
+        assert!(PdfRotation::Clockwise180.turns_the_page());
+    }
+
+    #[tokio::test]
     async fn operator_column_mapping_overrides_the_ai_candidate() {
-        let gateway = FakeAnalyzeGateway {
-            result: tabular_analysis(vec![TabularAnalyzeRow::new(
-                2,
-                vec![
-                    "東".into(),
-                    "2026-07-18".into(),
-                    "morning".into(),
-                    "3".into(),
-                    "8".into(),
-                ],
-            )
-            .unwrap()]),
-        };
+        let gateway = FakeAnalyzeGateway::new(tabular_analysis(vec![TabularAnalyzeRow::new(
+            2,
+            vec![
+                "東".into(),
+                "2026-07-18".into(),
+                "morning".into(),
+                "3".into(),
+                "8".into(),
+            ],
+        )
+        .unwrap()]));
         let mappings = HashMap::from([
             ("facilityName".into(), "Facility".into()),
             ("date".into(), "Date".into()),
@@ -1389,6 +1461,7 @@ mod tests {
             2026,
             Some("report.csv"),
             Some(&mappings),
+            PdfRotation::None,
         )
         .await
         .unwrap();
