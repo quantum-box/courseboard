@@ -3,12 +3,12 @@
 ## Links
 
 - 前提: `docs/src/tasks/in-progress/reception-and-visit-records/task.md`（来場の実測、マージ済み）
-- Linear issue（Field への起票分）:
-  - [PLT-4049](https://linear.app/issue/PLT-4049) 予約一覧の増分取得（期間 / updatedSince / 総件数）
-  - [PLT-4050](https://linear.app/issue/PLT-4050) 顧客一覧の `ids` フィルタと `offset`
-  - [PLT-4051](https://linear.app/issue/PLT-4051) 顧客ごとの購買サマリ
-  - [PLT-4052](https://linear.app/issue/PLT-4052) 顧客への接触履歴（activity log）
-  - [PLT-4053](https://linear.app/issue/PLT-4053) 連絡拒否（do-not-contact）
+- Linear issue（Field への起票分）: **5本とも Field 側の実装がマージ済み（2026-08-31）**
+  - [PLT-4049](https://linear.app/issue/PLT-4049) 予約一覧の増分取得（期間 / updatedSince / 総件数） — tachyonfield #1253
+  - [PLT-4050](https://linear.app/issue/PLT-4050) 顧客一覧の `ids` フィルタと `offset` — tachyonfield #1250
+  - [PLT-4051](https://linear.app/issue/PLT-4051) 顧客ごとの購買サマリ — tachyonfield #1254
+  - [PLT-4052](https://linear.app/issue/PLT-4052) 顧客への接触履歴（activity log） — tachyonfield #1251
+  - [PLT-4053](https://linear.app/issue/PLT-4053) 連絡拒否（do-not-contact） — tachyonfield #1252
 
 ## 概要
 
@@ -85,6 +85,8 @@ Field に起票する（下記）。
 - [x] 実 Field API に対する動作確認
 - [ ] 定期実行の配線（いまは CLI のみ。本番 DB は PrivateLink 内なので Lambda 側の仕事）
 - [x] Field 起票（下記5本 = PLT-4049 / PLT-4050 / PLT-4051 / PLT-4052 / PLT-4053）
+- [x] Field 側の実装（5本とも tachyonfield main にマージ済み）
+- [ ] Field が持った contract に CourseBoard 側を寄せる（下記「Field 実装後の残作業」）
 
 
 ## Field に起票する汎用 contract
@@ -115,6 +117,30 @@ Field に起票する（下記）。
 3 が入るまでの CourseBoard 側は暫定である。差し替えられるように、集計の
 読み書きは `CustomerSummaryGateway` 1本に閉じてある。Field が持ったら
 実装を Field gateway に替えるだけで、usecase から上は変わらない。
+
+
+## Field 実装後の残作業
+
+5本とも Field 側に入ったので、CourseBoard 側をそこに寄せられる。まだ寄せていない。
+
+- **予約 sweep を増分取得に替える（PLT-4049）。** `field_gateway.rs` の
+  `list_tenant_reservations` に `updatedSince` を渡し、前回の集計以降に
+  変わった予約だけを読む。総件数が返るので `MAX_SWEEP_ROWS` の打ち切りが
+  「読み切れたか」で判定できるようになり、部分集計を黙って返さずに済む。
+- **顧客名の解決を1コールにする（PLT-4050）。** `list_customer_summaries.rs` の
+  `join_all` による ID ごとの GET を、`ids` フィルタ1本に置き換える。
+- **`golf_customer_summaries` と refresh バッチを畳む（PLT-4051）。** Field が
+  購買サマリを持ったので、`CustomerSummaryGateway` の実装を Field gateway に
+  替えれば、ローカルの集計テーブル・`golf_customer_summary_runs`・
+  `courseboard-refresh-customer-summaries` はまとめて不要になる。数字の定義
+  （1回 = 予約1件、キャンセルと no-show は別建て、税込、通貨は合算しない）が
+  CourseBoard の `CustomerVisitHistory` と一致するかは要確認。ずれていれば
+  カルテと一覧でまた数字が食い違う。
+- **架電の記録を Field に載せる（PLT-4052）。** 架電リストの画面から
+  `/v1/erp/customer-contacts` を叩く。最終接触日時は一覧の
+  `latest-lookup` で1コールで引ける。
+- **連絡拒否を抽出条件に入れる（PLT-4053）。** 一覧から連絡不可を除外する。
+  除外は Field 側の絞り込みでできるので、CourseBoard は判定を持たない。
 
 
 ## 確認済み
