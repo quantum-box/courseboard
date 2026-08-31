@@ -174,6 +174,30 @@ function courseNameVariants(value: string) {
   return new Set([compact, withoutHoles, withoutCourseSuffix].filter(Boolean))
 }
 
+/**
+ * Clockwise quarter turns a scanned PDF may be read at.
+ *
+ * Only right angles: a page comes off a scanner the way the paper went in,
+ * which is always one of these four.
+ */
+export const RESERVATION_REPORT_PDF_ROTATIONS = [0, 90, 180, 270] as const
+
+export type ReservationReportPdfRotation = (typeof RESERVATION_REPORT_PDF_ROTATIONS)[number]
+
+/**
+ * Read a rotation back out of a select, falling back to leaving the page
+ * alone rather than turning it somewhere nobody asked for.
+ */
+export function parsePdfRotation(value: string): ReservationReportPdfRotation {
+  const parsed = Number(value)
+  return RESERVATION_REPORT_PDF_ROTATIONS.find(rotation => rotation === parsed) ?? 0
+}
+
+/** Whether a chosen file is a PDF, which is the only kind a turn applies to. */
+export function isPdfReport(file: File | null) {
+  return file !== null && /\.pdf$/i.test(file.name)
+}
+
 export function fileValidationError(file: File | null): 'required' | 'size' | 'extension' | null {
   if (!file) return 'required'
   if (file.size > MAX_FILE_BYTES) return 'size'

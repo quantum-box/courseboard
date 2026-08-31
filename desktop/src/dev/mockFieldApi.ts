@@ -1584,6 +1584,14 @@ function multipartText(init: RequestInit | undefined, key: string) {
   return typeof value === 'string' ? value : undefined
 }
 
+/**
+ * The turn a scanned PDF may be read at, as the API accepts it. Absent is the
+ * ordinary case: the field is only sent when the operator turns the page.
+ */
+function isMockPdfRotation(value: string | undefined) {
+  return value === undefined || ['0', '90', '180', '270'].includes(value.trim())
+}
+
 function notSupported(action: string): MockFieldResult<never> {
   return error(
     501,
@@ -2906,6 +2914,9 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     if (!Number.isInteger(year) || year < 1900 || year > 2200) {
       return error(400, 'year must be a valid calendar year')
     }
+    if (!isMockPdfRotation(multipartText(init, 'rotation'))) {
+      return error(400, 'rotation must be 0, 90, 180, or 270')
+    }
     const headers = ['施設', '日付', '時間帯', '組数', 'キャ付']
     const defaultColumnMappings: Record<string, string> = {
       facilityName: '施設',
@@ -2981,6 +2992,9 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
 
   if (pathname === '/v1/course/reservation-report-imports' && method === 'POST') {
     const year = Number(multipartText(init, 'year') ?? '2026')
+    if (!isMockPdfRotation(multipartText(init, 'rotation'))) {
+      return error(400, 'rotation must be 0, 90, 180, or 270')
+    }
     const rawMappings = multipartText(init, 'courseMappings')
     const rawColumnMappings = multipartText(init, 'columnMappings')
     const normalizedFingerprint = multipartText(init, 'normalizedFingerprint')

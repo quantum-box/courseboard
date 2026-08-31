@@ -165,11 +165,11 @@ pub use reservation::{
     NewReservation, Reservation, ReservationBilling, ReservationBookingUpdate, SeededReservation,
 };
 pub use reservation_report::{
-    ExternalReservationReportEntry, ReservationReport, ReservationReportAnalyzeGateway,
-    ReservationReportDayPart, ReservationReportEntryQuery, ReservationReportFacility,
-    ReservationReportGateway, ReservationReportMigrationGateway, ReservationReportRow,
-    ReservationReportTotals, ReservationReportUpsertSummary, TabularAnalyzeMapping,
-    TabularAnalyzeMappingField, TabularAnalyzeResult, TabularAnalyzeRow,
+    ExternalReservationReportEntry, PdfRotation, ReservationReport,
+    ReservationReportAnalyzeGateway, ReservationReportDayPart, ReservationReportEntryQuery,
+    ReservationReportFacility, ReservationReportGateway, ReservationReportMigrationGateway,
+    ReservationReportRow, ReservationReportTotals, ReservationReportUpsertSummary,
+    TabularAnalyzeMapping, TabularAnalyzeMappingField, TabularAnalyzeResult, TabularAnalyzeRow,
     DAILY_RESERVATION_STATUS_SOURCE, TABULAR_RESERVATION_REPORT_SOURCE,
 };
 pub use resource::{Resource, ResourceKind, SaveCourseResource};

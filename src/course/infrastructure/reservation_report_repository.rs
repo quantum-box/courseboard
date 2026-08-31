@@ -19,7 +19,7 @@ use sqlx::{MySqlPool, Row};
 
 use super::reservation_report_gateway::FieldReservationReportGateway;
 use crate::course::domain::{
-    Course, CourseError, CourseId, ExternalReservationReportEntry, GatewayCredentials,
+    Course, CourseError, CourseId, ExternalReservationReportEntry, GatewayCredentials, PdfRotation,
     ReservationReportAnalyzeGateway, ReservationReportDayPart, ReservationReportEntryQuery,
     ReservationReportGateway, ReservationReportMigrationGateway, ReservationReportUpsertSummary,
     TabularAnalyzeResult,
@@ -482,9 +482,10 @@ impl ReservationReportAnalyzeGateway for MigratingReservationReportGateway {
         bytes: &[u8],
         filename: Option<&str>,
         year: i32,
+        rotation: PdfRotation,
     ) -> Result<TabularAnalyzeResult, CourseError> {
         self.legacy
-            .analyze_tabular(credentials, bytes, filename, year)
+            .analyze_tabular(credentials, bytes, filename, year, rotation)
             .await
     }
 }

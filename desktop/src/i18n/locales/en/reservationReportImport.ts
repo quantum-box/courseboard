@@ -19,6 +19,16 @@ export const reservationReportImport: DeepPartial<typeof source> = {
     year: 'Report year',
     month: 'Month to show',
     courseMapping: 'CourseBoard course',
+    rotation: 'PDF orientation',
+  },
+  rotation: {
+    hint: 'Choose this when a sideways or upside-down scan cannot be read. A PDF whose own text can be recovered reads the same at any orientation.',
+    option: {
+      keep: 'Leave as is',
+      right: 'Turn right 90°',
+      half: 'Turn 180°',
+      left: 'Turn left 90°',
+    },
   },
   file: {
     choose: 'Choose a table file',

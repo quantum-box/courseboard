@@ -11,6 +11,52 @@ use super::{Course, CourseError, CourseId, GatewayCredentials};
 pub const DAILY_RESERVATION_STATUS_SOURCE: &str = "daily_reservation_status_xlsx";
 pub const TABULAR_RESERVATION_REPORT_SOURCE: &str = "tabular_analyze";
 
+/// How far a scanned PDF should be turned, clockwise, before it is read.
+///
+/// Only right angles: a page comes off a scanner the way the paper went in,
+/// so the operator's choice is always one of these four.  The turn only
+/// affects the OCR path — a PDF whose own text can be recovered is read from
+/// that text, and Field says so in the analysis warnings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PdfRotation {
+    #[default]
+    None,
+    Clockwise90,
+    Clockwise180,
+    Clockwise270,
+}
+
+impl PdfRotation {
+    pub fn parse(value: &str) -> Result<Self, CourseError> {
+        match value.trim() {
+            "0" => Ok(Self::None),
+            "90" => Ok(Self::Clockwise90),
+            "180" => Ok(Self::Clockwise180),
+            "270" => Ok(Self::Clockwise270),
+            _ => Err(CourseError::BadRequest(
+                "rotation must be 0, 90, 180, or 270",
+            )),
+        }
+    }
+
+    /// The wire value Field's tabular analyzer expects.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "0",
+            Self::Clockwise90 => "90",
+            Self::Clockwise180 => "180",
+            Self::Clockwise270 => "270",
+        }
+    }
+
+    /// Whether the page is turned at all.  A rotation that changes nothing is
+    /// left off the upstream request so an analyzer that predates the feature
+    /// keeps working.
+    pub fn turns_the_page(self) -> bool {
+        self != Self::None
+    }
+}
+
 /// The normalized result returned by Field's tabular analysis capability.
 ///
 /// Field JSON is decoded in the infrastructure gateway and crosses into the
@@ -687,5 +733,6 @@ pub trait ReservationReportAnalyzeGateway: Send + Sync {
         bytes: &[u8],
         filename: Option<&str>,
         year: i32,
+        rotation: PdfRotation,
     ) -> Result<TabularAnalyzeResult, CourseError>;
 }
