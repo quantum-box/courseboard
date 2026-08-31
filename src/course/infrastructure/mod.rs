@@ -13,6 +13,7 @@ mod course_order_repository;
 mod customer_grade_rules_repository;
 mod customer_registration_repository;
 mod field_commercial_gateway;
+mod field_customer_consent_gateway;
 mod field_customer_gateway;
 mod field_customer_reception_gateway;
 mod field_gateway;
@@ -44,6 +45,7 @@ pub use course_order_repository::MySqlCourseOrderRepository;
 pub use customer_grade_rules_repository::MySqlCustomerGradeRulesRepository;
 pub use customer_registration_repository::MySqlCustomerRegistrationRepository;
 pub use field_commercial_gateway::FieldGolfCommercialGateway;
+pub use field_customer_consent_gateway::FieldCustomerConsentGateway;
 pub use field_customer_gateway::FieldCustomerGateway;
 pub use field_customer_reception_gateway::FieldCustomerReceptionGateway;
 pub use field_gateway::{

@@ -28,8 +28,18 @@ export function draftReceptionSheet(file: File) {
  * `sourceRowIndex` is the line on the sheet, so the entry can be traced back to
  * the paper afterwards.
  */
+/**
+ * What a registration answers with.
+ *
+ * `consentsRecorded` is `false` when the person reached the ledger but their
+ * consents did not. The registration still succeeded — retrying it would make
+ * a second person — so the screen keeps the row saved and says the consents
+ * are missing.
+ */
+export type RegisteredCustomer = Customer & { consentsRecorded?: boolean }
+
 export function registerReceptionRow(row: ReceptionRow, sourceRowIndex?: number) {
-  return courseboardApiJson<Customer>(customersPath, {
+  return courseboardApiJson<RegisteredCustomer>(customersPath, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(customerPayload(row, sourceRowIndex)),

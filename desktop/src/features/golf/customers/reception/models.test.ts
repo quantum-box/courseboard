@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '../../../../api'
 import {
   blankRow,
+  blockedReason,
   canRegister,
   correctedFields,
   customerPayload,
@@ -19,8 +20,14 @@ import {
   uploadFileName,
   MAX_RECEPTION_SHEET_BYTES,
   RECEPTION_SHEET_ACCEPT,
+  REQUIRED_RECEPTION_CONSENT,
   type ReceptionRow,
 } from './models'
+
+/** A row the desk has confirmed the declaration on, which is what registering needs. */
+function declared(row: ReceptionRow): ReceptionRow {
+  return { ...row, consents: { ...row.consents, [REQUIRED_RECEPTION_CONSENT]: true } }
+}
 
 const heifToJpeg = vi.hoisted(() => vi.fn())
 vi.mock('./heif', () => ({ heifToJpeg }))
@@ -147,17 +154,55 @@ describe('rowsFromDraft', () => {
 })
 
 describe('canRegister', () => {
-  it('registers on a name alone, like the ledger form', () => {
-    expect(canRegister({ ...blankRow('a'), name: '本田 康彦' })).toBe(true)
+  it('registers on a name and the declaration, with nothing else asked for', () => {
+    expect(canRegister(declared({ ...blankRow('a'), name: '本田 康彦' }))).toBe(true)
   })
 
   it('refuses a row with nothing but whitespace in the name', () => {
-    expect(canRegister({ ...blankRow('a'), name: '   ' })).toBe(false)
+    expect(canRegister(declared({ ...blankRow('a'), name: '   ' }))).toBe(false)
   })
 
   it('does not register the same row twice', () => {
-    const saved: ReceptionRow = { ...blankRow('a'), name: '本田 康彦', status: 'saved' }
+    const saved = declared({ ...blankRow('a'), name: '本田 康彦', status: 'saved' })
     expect(canRegister(saved)).toBe(false)
+  })
+
+  // The API refuses it too. Stopping here means the desk sees which box to
+  // look at instead of a 400 about a sheet they can see is ticked.
+  it('refuses a row whose declaration is not ticked', () => {
+    expect(canRegister({ ...blankRow('a'), name: '本田 康彦' })).toBe(false)
+  })
+
+  // Unreadable and refused are different states that both leave the box empty,
+  // and neither of them is agreement.
+  it('refuses a row whose declaration was read as not ticked', () => {
+    const refused: ReceptionRow = {
+      ...blankRow('a'),
+      name: '本田 康彦',
+      consents: { ...blankRow('a').consents, [REQUIRED_RECEPTION_CONSENT]: false },
+    }
+    expect(canRegister(refused)).toBe(false)
+  })
+
+  it('does not require the boxes the sheet leaves optional', () => {
+    const row = declared({ ...blankRow('a'), name: '本田 康彦' })
+    expect(canRegister({ ...row, consents: { ...row.consents, golf_cart_terms: null } })).toBe(true)
+  })
+})
+
+describe('blockedReason', () => {
+  it('says the name when there is no name yet', () => {
+    expect(blockedReason(blankRow('a'))).toBe('name')
+  })
+
+  // A filled-in name beside a disabled button reads as a bug, and the desk
+  // retypes the name looking for what is wrong with it.
+  it('says the declaration once the name is there', () => {
+    expect(blockedReason({ ...blankRow('a'), name: '本田 康彦' })).toBe('declaration')
+  })
+
+  it('says nothing when the row is ready', () => {
+    expect(blockedReason(declared({ ...blankRow('a'), name: '本田 康彦' }))).toBeNull()
   })
 })
 
@@ -194,7 +239,27 @@ describe('customerPayload', () => {
       email: null,
       source: 'reception_sheet',
       sourceRowIndex: undefined,
+      // Every box, unanswered ones included. The API needs to tell "not
+      // ticked" from "not on this sheet"; it files neither.
+      consents: [
+        { key: 'golf_antisocial_and_course_terms', accepted: null },
+        { key: 'golf_cart_terms', accepted: null },
+        { key: 'golf_marketing_contact', accepted: null },
+      ],
     })
+  })
+
+  it('sends what the desk confirmed, in the direction the API stores', () => {
+    const row = declared({ ...blankRow('a'), name: '本田 康彦' })
+    const payload = customerPayload({
+      ...row,
+      consents: { ...row.consents, golf_marketing_contact: false },
+    })
+    expect(payload.consents).toEqual([
+      { key: 'golf_antisocial_and_course_terms', accepted: true },
+      { key: 'golf_cart_terms', accepted: null },
+      { key: 'golf_marketing_contact', accepted: false },
+    ])
   })
 
   it('carries the line of the sheet so a duplicate can be traced back to the paper', () => {
@@ -223,12 +288,14 @@ describe('duplicateNameKeys', () => {
 
 describe('counting', () => {
   const rows: ReceptionRow[] = [
-    { ...blankRow('a'), name: '本田 康彦', status: 'saved' },
-    { ...blankRow('b'), name: '西村 隆' },
+    declared({ ...blankRow('a'), name: '本田 康彦', status: 'saved' }),
+    declared({ ...blankRow('b'), name: '西村 隆' }),
     blankRow('c'),
+    // Named, but the declaration is still open: not ready to send either.
+    { ...blankRow('d'), name: '山田 太郎' },
   ]
 
-  it('counts what is still to register, excluding the nameless row', () => {
+  it('counts what is still to register, excluding rows that are not ready', () => {
     expect(pendingRows(rows).map(row => row.key)).toEqual(['b'])
   })
 

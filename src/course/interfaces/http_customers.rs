@@ -22,15 +22,17 @@ use super::http::{credentials, reservation_gateway, ItemsResponse};
 use super::openapi::ErrorBody;
 
 use crate::course::domain::{
-    AssignMembershipPlan, Customer, CustomerGradeRule, CustomerGradeRules, CustomerId,
-    CustomerMembership, CustomerRegistration, CustomerRegistrationSource, CustomerSearchQuery,
-    CustomerVisit, MemberDiscount, MembershipDiscount, MembershipDiscounts,
-    MembershipDiscountsGateway, MembershipPlan, MembershipPlanId, MembershipPlayWindow,
-    MembershipPlayWindows, MembershipPlayWindowsGateway, NewCustomer, PlayableDays,
-    ReceptionDraftRow, ReceptionSheet, SetMemberNumber, UpsertMembershipPlan,
+    reception_consent, AssignMembershipPlan, CourseError, Customer, CustomerGradeRule,
+    CustomerGradeRules, CustomerId, CustomerMembership, CustomerRegistration,
+    CustomerRegistrationSource, CustomerSearchQuery, CustomerVisit, MemberDiscount,
+    MembershipDiscount, MembershipDiscounts, MembershipDiscountsGateway, MembershipPlan,
+    MembershipPlanId, MembershipPlayWindow, MembershipPlayWindows, MembershipPlayWindowsGateway,
+    NewCustomer, PlayableDays, ReceptionConsentAnswer, ReceptionDraftRow, ReceptionSheet,
+    SetMemberNumber, UpsertMembershipPlan,
 };
 use crate::course::infrastructure::{
-    FieldCustomerGateway, FieldCustomerReceptionGateway, FieldMembershipGateway,
+    FieldCustomerConsentGateway, FieldCustomerGateway, FieldCustomerReceptionGateway,
+    FieldMembershipGateway,
 };
 use crate::course::usecase::{
     AssignMembershipPlanUseCase, CreateCustomerUseCase, CreateMembershipPlanUseCase,
@@ -45,6 +47,14 @@ use crate::{AppError, AppState, CallerPrincipal};
 fn customer_gateway(state: &AppState) -> Arc<FieldCustomerGateway> {
     let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
     Arc::new(FieldCustomerGateway::new(
+        state.http_client.clone(),
+        field_api_url,
+    ))
+}
+
+fn customer_consent_gateway(state: &AppState) -> Arc<FieldCustomerConsentGateway> {
+    let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
+    Arc::new(FieldCustomerConsentGateway::new(
         state.http_client.clone(),
         field_api_url,
     ))
@@ -79,6 +89,19 @@ pub struct CustomerDto {
     pub email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phone: Option<String>,
+    /// Whether the consents sent with a registration reached Field.
+    ///
+    /// `true` when there was nothing to file. `false` means the visitor is in
+    /// the ledger but their declaration is not — the desk retries the consents,
+    /// not the registration, or a second person appears in the ledger.
+    #[serde(default = "consents_recorded_default")]
+    pub consents_recorded: bool,
+}
+
+/// Registrations that never carried consents, and every read of a customer,
+/// report `true`: nothing was left unfiled.
+fn consents_recorded_default() -> bool {
+    true
 }
 
 impl From<&Customer> for CustomerDto {
@@ -89,6 +112,7 @@ impl From<&Customer> for CustomerDto {
             name_kana: value.name_kana().map(str::to_string),
             email: value.email().map(str::to_string),
             phone: value.phone().map(str::to_string),
+            consents_recorded: true,
         }
     }
 }
@@ -167,6 +191,48 @@ pub struct CreateCustomerRequest {
     /// says a sheet.
     #[serde(default)]
     pub source_row_index: Option<u32>,
+    /// What the visitor agreed to, as the desk confirmed it against the sheet.
+    ///
+    /// Keyed by CourseBoard's own consent keys, and already in Field's
+    /// direction: the screen shows the printed opt-out as printed and flips it
+    /// before sending, the same way the reader's answer is flipped.
+    ///
+    /// Absent for anything but a reception sheet. A visitor typed in at the
+    /// counter has no paper to have ticked.
+    #[serde(default)]
+    pub consents: Vec<CreateCustomerConsent>,
+}
+
+/// One tick box as the desk confirmed it.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateCustomerConsent {
+    pub key: String,
+    /// Absent when the desk could not tell from the sheet either. Left
+    /// unrecorded rather than filed as a refusal.
+    #[serde(default)]
+    pub accepted: Option<bool>,
+}
+
+/// Resolves the request's keys against the sheet CourseBoard knows.
+///
+/// An unknown key is refused rather than dropped: Field answers one with a
+/// 400 the desk cannot act on, and silently discarding it would lose a
+/// declaration the caller believed they had filed.
+fn consent_answers(
+    requested: &[CreateCustomerConsent],
+) -> Result<Vec<ReceptionConsentAnswer>, CourseError> {
+    requested
+        .iter()
+        .map(|entry| {
+            let consent = reception_consent(&entry.key)
+                .ok_or(CourseError::BadRequest("unknown reception consent"))?;
+            Ok(ReceptionConsentAnswer {
+                key: consent.key,
+                accepted: entry.accepted,
+            })
+        })
+        .collect()
 }
 
 /// GET /v1/course/customers/{customer_id}
@@ -236,11 +302,13 @@ pub async fn create_customer(
         request.phone,
     )
     .map_err(AppError::from)?;
-    let created = CreateCustomerUseCase::new(
+    let consents = consent_answers(&request.consents).map_err(AppError::from)?;
+    let registered = CreateCustomerUseCase::new(
         customer_gateway(&state),
         state.customer_registrations.clone(),
+        customer_consent_gateway(&state),
     )
-    .execute(
+    .execute_with_consents(
         credentials,
         input,
         CustomerProvenance {
@@ -248,10 +316,13 @@ pub async fn create_customer(
             registered_by: principal.and_then(|Extension(caller)| caller.subject),
             source_row_index: request.source_row_index,
         },
+        &consents,
     )
     .await
     .map_err(AppError::from)?;
-    Ok(Json(CustomerDto::from(&created)))
+    let mut dto = CustomerDto::from(&registered.customer);
+    dto.consents_recorded = registered.consents_recorded;
+    Ok(Json(dto))
 }
 
 // ─── Visit history ────────────────────────────────────────────────────────────
@@ -886,6 +957,23 @@ pub struct ReceptionDraftRowDto {
     pub phone: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
+    /// Every tick box the sheet carries, in printed order, whether or not the
+    /// reader made it out. Always present so the screen can show an unread box
+    /// as a question rather than leave it off the row.
+    ///
+    /// Already in Field's direction: the printed opt-out has been flipped, so
+    /// `accepted: true` means the visitor agreed however the paper phrased it.
+    pub consents: Vec<ReceptionDraftConsentDto>,
+}
+
+/// One tick box as the reader answered it.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceptionDraftConsentDto {
+    pub key: String,
+    /// Absent when the reader could not resolve the box. Not a refusal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accepted: Option<bool>,
 }
 
 impl From<&ReceptionDraftRow> for ReceptionDraftRowDto {
@@ -895,6 +983,14 @@ impl From<&ReceptionDraftRow> for ReceptionDraftRowDto {
             name_kana: value.name_kana().map(str::to_string),
             phone: value.phone().map(str::to_string),
             email: value.email().map(str::to_string),
+            consents: value
+                .consents()
+                .iter()
+                .map(|answer| ReceptionDraftConsentDto {
+                    key: answer.key.to_string(),
+                    accepted: answer.accepted,
+                })
+                .collect(),
         }
     }
 }

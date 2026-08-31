@@ -94,6 +94,32 @@
         "--strictPort"
       ],
       "port": 5174
+    },
+    {
+      "//": "courseboard-mock on 5180, for when 5173, 5174 and 5175 are all taken.",
+      "name": "courseboard-mock-5180",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "VITE_COURSEBOARD_AUTH_MODE=development",
+        "VITE_COURSEBOARD_API_BEARER=dev-local-token",
+        "VITE_COURSEBOARD_TENANT_ID=courseboard_id",
+        "VITE_COURSEBOARD_MOCK_DATA=true",
+        "VITE_COURSEBOARD_MODE=development",
+        "VITE_COURSEBOARD_BROWSER_CLIENT_ID=",
+        "VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT=",
+        "VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT=",
+        "VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT=",
+        "npm",
+        "--prefix",
+        "desktop",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "5180",
+        "--strictPort"
+      ],
+      "port": 5180
     }
   ]
 }

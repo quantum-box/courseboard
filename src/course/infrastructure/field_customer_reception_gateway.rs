@@ -19,7 +19,7 @@ use serde::Deserialize;
 
 use crate::course::domain::{
     reception_sheet_schema, CourseError, CustomerReceptionOcrGateway, GatewayCredentials,
-    ReceptionDraft, ReceptionDraftRow, ReceptionReaderFailure, ReceptionSheet,
+    ReceptionDraft, ReceptionDraftRow, ReceptionReaderFailure, ReceptionSheet, RECEPTION_CONSENTS,
     RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL, RECEPTION_ROW_NAME,
     RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
 };
@@ -126,12 +126,15 @@ fn map_draft(response: FieldGenericOcrDraft) -> ReceptionDraft {
         .map(|rows| {
             rows.iter()
                 .map(|row| {
-                    ReceptionDraftRow::new(
+                    let draft = ReceptionDraftRow::new(
                         column(row, RECEPTION_ROW_NAME),
                         column(row, RECEPTION_ROW_NAME_KANA),
                         column(row, RECEPTION_ROW_PHONE),
                         column(row, RECEPTION_ROW_EMAIL),
-                    )
+                    );
+                    RECEPTION_CONSENTS.iter().fold(draft, |draft, consent| {
+                        draft.with_consent_tick(consent.key, tick_column(row, consent.key))
+                    })
                 })
                 .collect()
         })
@@ -147,10 +150,33 @@ fn column(row: &serde_json::Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+/// A tick box as the reader answered it.
+///
+/// Field validates `boolean` columns and drops anything it cannot resolve, so
+/// a real answer arrives as a JSON boolean. It is also read as the strings
+/// `"true"` / `"false"`, because that is the wire form the reader is prompted
+/// with and a stricter reading here would turn a correct answer into an unread
+/// box. Anything else — an empty string for a box that was never inked, a
+/// stray 「✓」 — stays `None`, which the desk sees as a question.
+fn tick_column(row: &serde_json::Value, key: &str) -> Option<bool> {
+    match row.get(key)? {
+        serde_json::Value::Bool(ticked) => Some(*ticked),
+        serde_json::Value::String(text) => match text.trim().to_ascii_lowercase().as_str() {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::field_gateway::field_error_code;
     use super::*;
+    use crate::course::domain::{
+        CONSENT_ANTISOCIAL_AND_COURSE_TERMS, CONSENT_CART_TERMS, CONSENT_MARKETING_CONTACT,
+    };
 
     fn draft_from(json: serde_json::Value) -> ReceptionDraft {
         map_draft(serde_json::from_value(json).expect("field draft shape"))
@@ -178,6 +204,105 @@ mod tests {
         assert_eq!(draft.rows()[0].email(), Some("honda@example.com"));
         assert_eq!(draft.rows()[1].name(), Some("西村 隆"));
         assert_eq!(draft.rows()[1].phone(), None);
+    }
+
+    fn accepted(draft: &ReceptionDraft, row: usize, key: &str) -> Option<bool> {
+        draft.rows()[row]
+            .consents()
+            .iter()
+            .find(|answer| answer.key == key)
+            .unwrap_or_else(|| panic!("{key} is missing from the row"))
+            .accepted
+    }
+
+    /// The declaration reads straight through, but the marketing box does not:
+    /// the paper says 「不要の場合はチェック」, so a tick has to reach Field as a
+    /// refusal. Recording it as printed would mail the people who opted out.
+    #[test]
+    fn the_opt_out_box_is_stored_the_other_way_round() {
+        let draft = draft_from(serde_json::json!({
+            "fields": {
+                "visitors": [{
+                    "name": "本田 康彦",
+                    "golf_antisocial_and_course_terms": true,
+                    "golf_cart_terms": false,
+                    "golf_marketing_contact": true
+                }]
+            },
+            "manualApprovalRequired": true,
+            "warnings": []
+        }));
+        assert_eq!(
+            accepted(&draft, 0, CONSENT_ANTISOCIAL_AND_COURSE_TERMS),
+            Some(true)
+        );
+        assert_eq!(accepted(&draft, 0, CONSENT_CART_TERMS), Some(false));
+        assert_eq!(accepted(&draft, 0, CONSENT_MARKETING_CONTACT), Some(false));
+        assert!(draft.rows()[0].has_required_consents());
+    }
+
+    /// The reader is prompted to answer `"true"` / `"false"`, and Field passes
+    /// that through for `boolean` columns. Reading only JSON booleans here
+    /// would turn a correct answer into an unread box.
+    #[test]
+    fn a_tick_answered_as_text_still_counts() {
+        let draft = draft_from(serde_json::json!({
+            "fields": {
+                "visitors": [{
+                    "name": "本田 康彦",
+                    "golf_antisocial_and_course_terms": "TRUE",
+                    "golf_marketing_contact": "false"
+                }]
+            },
+            "manualApprovalRequired": true,
+            "warnings": []
+        }));
+        assert_eq!(
+            accepted(&draft, 0, CONSENT_ANTISOCIAL_AND_COURSE_TERMS),
+            Some(true)
+        );
+        assert_eq!(accepted(&draft, 0, CONSENT_MARKETING_CONTACT), Some(true));
+    }
+
+    /// A box the reader could not make out is a question for the desk, not a
+    /// refusal. Filed as `false`, the required declaration would look like the
+    /// visitor declined rather than like the copy was faint.
+    #[test]
+    fn a_box_the_reader_could_not_make_out_stays_unanswered() {
+        let draft = draft_from(serde_json::json!({
+            "fields": {
+                "visitors": [{
+                    "name": "本田 康彦",
+                    "golf_antisocial_and_course_terms": "",
+                    "golf_cart_terms": "✓"
+                }]
+            },
+            "manualApprovalRequired": true,
+            "warnings": []
+        }));
+        assert_eq!(
+            accepted(&draft, 0, CONSENT_ANTISOCIAL_AND_COURSE_TERMS),
+            None
+        );
+        assert_eq!(accepted(&draft, 0, CONSENT_CART_TERMS), None);
+        assert!(!draft.rows()[0].has_required_consents());
+    }
+
+    /// A sheet without any consent columns — an older format, or a read that
+    /// lost them — still yields rows, with every box open for the desk.
+    #[test]
+    fn a_sheet_with_no_boxes_read_still_lists_every_consent() {
+        let draft = draft_from(serde_json::json!({
+            "fields": { "visitors": [{ "name": "本田 康彦" }] },
+            "manualApprovalRequired": true,
+            "warnings": []
+        }));
+        assert_eq!(draft.rows()[0].consents().len(), RECEPTION_CONSENTS.len());
+        assert!(draft.rows()[0]
+            .consents()
+            .iter()
+            .all(|answer| answer.accepted.is_none()));
+        assert!(!draft.rows()[0].has_required_consents());
     }
 
     #[test]

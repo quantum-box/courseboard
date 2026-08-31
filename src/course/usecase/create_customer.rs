@@ -14,33 +14,52 @@ use std::sync::Arc;
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    CourseError, Customer, CustomerGateway, CustomerRegistrationGateway, GatewayCredentials,
-    NewCustomer, NewCustomerRegistration,
+    required_reception_consents, CourseError, Customer, CustomerConsentGateway, CustomerGateway,
+    CustomerRegistrationGateway, CustomerRegistrationSource, GatewayCredentials, NewCustomer,
+    NewCustomerRegistration, ReceptionConsentAnswer,
 };
 
 /// Where this creation came from, as the screen that asked for it knows it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomerProvenance {
-    pub source: crate::course::domain::CustomerRegistrationSource,
+    pub source: CustomerRegistrationSource,
     /// The signed-in caller's subject, when the token carried one.
     pub registered_by: Option<String>,
     /// Which line of the reception sheet, zero-based.
     pub source_row_index: Option<u32>,
 }
 
+/// What a registration produced, beyond the ledger entry itself.
+///
+/// The consent flag exists because the two writes cannot be one. StoreKit's
+/// customer create has no consents, so the record is filed by a second request
+/// to Field's ERP surface, and that request can fail on its own. Telling the
+/// desk the whole registration failed would send them to register the visitor
+/// again — that is how a duplicate is made — so the customer is returned and
+/// the gap is reported instead, for the desk to retry.
+#[derive(Debug, Clone)]
+pub struct RegisteredCustomer {
+    pub customer: Customer,
+    /// `false` when the sheet carried answered boxes that Field did not take.
+    pub consents_recorded: bool,
+}
+
 pub struct CreateCustomerUseCase {
     customers: Arc<dyn CustomerGateway>,
     registrations: Arc<dyn CustomerRegistrationGateway>,
+    consents: Arc<dyn CustomerConsentGateway>,
 }
 
 impl CreateCustomerUseCase {
     pub fn new(
         customers: Arc<dyn CustomerGateway>,
         registrations: Arc<dyn CustomerRegistrationGateway>,
+        consents: Arc<dyn CustomerConsentGateway>,
     ) -> Self {
         Self {
             customers,
             registrations,
+            consents,
         }
     }
 
@@ -49,8 +68,32 @@ impl CreateCustomerUseCase {
         credentials: GatewayCredentials<'_>,
         input: NewCustomer,
         provenance: CustomerProvenance,
+        consents: &[ReceptionConsentAnswer],
     ) -> Result<Customer, CourseError> {
+        self.execute_with_consents(credentials, input, provenance, consents)
+            .await
+            .map(|registered| registered.customer)
+    }
+
+    pub async fn execute_with_consents(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: NewCustomer,
+        provenance: CustomerProvenance,
+        consents: &[ReceptionConsentAnswer],
+    ) -> Result<RegisteredCustomer, CourseError> {
         credentials.require(actions::MANAGE_CUSTOMERS).await?;
+        // Refused before anything is written. A visitor whose declaration is
+        // missing must not reach the ledger at all: created first and refused
+        // afterwards, the desk is left with a customer they were told not to
+        // have.
+        //
+        // Only for a sheet. Someone typed in at the counter has no paper to
+        // have ticked, and the customer screen does not ask for consents —
+        // requiring one there would close the manual path entirely.
+        if provenance.source == CustomerRegistrationSource::ReceptionSheet {
+            refuse_without_the_required_declaration(consents)?;
+        }
         let created = self.customers.create_customer(credentials, &input).await?;
 
         let entry = NewCustomerRegistration::new(
@@ -75,8 +118,52 @@ impl CreateCustomerUseCase {
             );
         }
 
-        Ok(created)
+        let consents_recorded = match self
+            .consents
+            .record_consents(credentials, created.id(), consents)
+            .await
+        {
+            Ok(()) => true,
+            Err(error) => {
+                // Same reasoning as the provenance above, with a louder log:
+                // an unfiled declaration is a compliance gap, not a missing
+                // convenience. The desk is told so it can retry the consents
+                // rather than the visitor.
+                tracing::error!(
+                    error = %error,
+                    customer_id = created.id().as_str(),
+                    "customer was created but their consents could not be recorded"
+                );
+                false
+            }
+        };
+
+        Ok(RegisteredCustomer {
+            customer: created,
+            consents_recorded,
+        })
     }
+}
+
+/// Refuses a sheet whose required declaration is not a yes.
+///
+/// An unread box counts as missing. The reader drops a tick it cannot resolve,
+/// so "not read" and "not ticked" arrive the same way, and treating either as
+/// agreement would file a declaration the visitor never made.
+fn refuse_without_the_required_declaration(
+    consents: &[ReceptionConsentAnswer],
+) -> Result<(), CourseError> {
+    for required in required_reception_consents() {
+        let agreed = consents
+            .iter()
+            .any(|answer| answer.key == required.key && answer.accepted == Some(true));
+        if !agreed {
+            return Err(CourseError::BadRequest(
+                "the reception sheet's required declaration is not ticked",
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -157,6 +244,38 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct StubConsents {
+        recorded: Mutex<Vec<(String, Vec<ReceptionConsentAnswer>)>>,
+        fails: bool,
+    }
+
+    #[async_trait]
+    impl CustomerConsentGateway for StubConsents {
+        async fn record_consents(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            customer_id: &CustomerId,
+            answers: &[ReceptionConsentAnswer],
+        ) -> Result<(), CourseError> {
+            if self.fails {
+                return Err(CourseError::Provider("field down".into()));
+            }
+            self.recorded
+                .lock()
+                .unwrap()
+                .push((customer_id.as_str().to_string(), answers.to_vec()));
+            Ok(())
+        }
+    }
+
+    fn ticked() -> Vec<ReceptionConsentAnswer> {
+        vec![ReceptionConsentAnswer {
+            key: crate::course::domain::CONSENT_ANTISOCIAL_AND_COURSE_TERMS,
+            accepted: Some(true),
+        }]
+    }
+
     fn credentials() -> GatewayCredentials<'static> {
         GatewayCredentials {
             authorization: "Bearer token",
@@ -179,14 +298,19 @@ mod tests {
     async fn a_walk_in_with_nothing_but_a_name_gets_a_ledger_entry() {
         let gateway = Arc::new(StubCustomers::default());
         let registrations = Arc::new(StubRegistrations::default());
-        let created = CreateCustomerUseCase::new(gateway.clone(), registrations.clone())
-            .execute(
-                credentials(),
-                NewCustomer::try_new("本田 康彦", None, None, None).unwrap(),
-                from_a_sheet(),
-            )
-            .await
-            .unwrap();
+        let created = CreateCustomerUseCase::new(
+            gateway.clone(),
+            registrations.clone(),
+            Arc::new(StubConsents::default()),
+        )
+        .execute(
+            credentials(),
+            NewCustomer::try_new("本田 康彦", None, None, None).unwrap(),
+            from_a_sheet(),
+            &ticked(),
+        )
+        .await
+        .unwrap();
         assert_eq!(created.id(), &CustomerId::new("cus_new"));
         assert_eq!(created.email(), None);
         assert_eq!(gateway.created.lock().unwrap().len(), 1);
@@ -195,14 +319,19 @@ mod tests {
     #[tokio::test]
     async fn the_sheet_and_the_line_it_came_off_are_written_down() {
         let registrations = Arc::new(StubRegistrations::default());
-        CreateCustomerUseCase::new(Arc::new(StubCustomers::default()), registrations.clone())
-            .execute(
-                credentials(),
-                NewCustomer::try_new("本田 康彦", None, None, None).unwrap(),
-                from_a_sheet(),
-            )
-            .await
-            .unwrap();
+        CreateCustomerUseCase::new(
+            Arc::new(StubCustomers::default()),
+            registrations.clone(),
+            Arc::new(StubConsents::default()),
+        )
+        .execute(
+            credentials(),
+            NewCustomer::try_new("本田 康彦", None, None, None).unwrap(),
+            from_a_sheet(),
+            &ticked(),
+        )
+        .await
+        .unwrap();
 
         let recorded = registrations.recorded.lock().unwrap();
         assert_eq!(recorded.len(), 1);
@@ -222,13 +351,116 @@ mod tests {
             recorded: Mutex::new(Vec::new()),
             fails: true,
         });
-        let created = CreateCustomerUseCase::new(Arc::new(StubCustomers::default()), registrations)
-            .execute(
-                credentials(),
-                NewCustomer::try_new("本田 康彦", None, None, None).unwrap(),
-                from_a_sheet(),
-            )
-            .await;
+        let created = CreateCustomerUseCase::new(
+            Arc::new(StubCustomers::default()),
+            registrations,
+            Arc::new(StubConsents::default()),
+        )
+        .execute(
+            credentials(),
+            NewCustomer::try_new("本田 康彦", None, None, None).unwrap(),
+            from_a_sheet(),
+            &ticked(),
+        )
+        .await;
         assert!(created.is_ok());
+    }
+
+    /// The declaration is what the sheet itself marks 「必ず☑をご記入下さい」.
+    /// A row registered without it puts someone in the ledger the club has no
+    /// record of having asked, which is the whole point of the box.
+    #[tokio::test]
+    async fn a_sheet_whose_declaration_is_not_ticked_is_refused() {
+        let gateway = Arc::new(StubCustomers::default());
+        let result = CreateCustomerUseCase::new(
+            gateway.clone(),
+            Arc::new(StubRegistrations::default()),
+            Arc::new(StubConsents::default()),
+        )
+        .execute(
+            credentials(),
+            NewCustomer::try_new("本田 康彦", None, None, None).unwrap(),
+            from_a_sheet(),
+            &[ReceptionConsentAnswer {
+                key: crate::course::domain::CONSENT_ANTISOCIAL_AND_COURSE_TERMS,
+                accepted: None,
+            }],
+        )
+        .await;
+        assert!(matches!(result, Err(CourseError::BadRequest(_))));
+        // Refused before the write, so there is no customer to clean up.
+        assert!(gateway.created.lock().unwrap().is_empty());
+    }
+
+    /// The counter's own form does not ask for consents, and there is no paper
+    /// behind it. Requiring the declaration there would close the manual path.
+    #[tokio::test]
+    async fn someone_typed_in_at_the_counter_needs_no_sheet() {
+        let created = CreateCustomerUseCase::new(
+            Arc::new(StubCustomers::default()),
+            Arc::new(StubRegistrations::default()),
+            Arc::new(StubConsents::default()),
+        )
+        .execute(
+            credentials(),
+            NewCustomer::try_new("本田 康彦", None, None, None).unwrap(),
+            CustomerProvenance {
+                source: CustomerRegistrationSource::Manual,
+                registered_by: None,
+                source_row_index: None,
+            },
+            &[],
+        )
+        .await;
+        assert!(created.is_ok());
+    }
+
+    #[tokio::test]
+    async fn what_the_sheet_said_is_filed_against_the_new_customer() {
+        let consents = Arc::new(StubConsents::default());
+        CreateCustomerUseCase::new(
+            Arc::new(StubCustomers::default()),
+            Arc::new(StubRegistrations::default()),
+            consents.clone(),
+        )
+        .execute(
+            credentials(),
+            NewCustomer::try_new("本田 康彦", None, None, None).unwrap(),
+            from_a_sheet(),
+            &ticked(),
+        )
+        .await
+        .unwrap();
+
+        let recorded = consents.recorded.lock().unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].0, "cus_new");
+        assert_eq!(recorded[0].1, ticked());
+    }
+
+    /// Field being unreachable must not read as "the registration failed".
+    /// The visitor is already in the ledger; sending the desk to do it again
+    /// is how the same person is registered twice. The gap is reported so the
+    /// consents can be retried on their own.
+    #[tokio::test]
+    async fn a_consent_that_could_not_be_filed_is_reported_not_thrown() {
+        let registered = CreateCustomerUseCase::new(
+            Arc::new(StubCustomers::default()),
+            Arc::new(StubRegistrations::default()),
+            Arc::new(StubConsents {
+                recorded: Mutex::new(Vec::new()),
+                fails: true,
+            }),
+        )
+        .execute_with_consents(
+            credentials(),
+            NewCustomer::try_new("本田 康彦", None, None, None).unwrap(),
+            from_a_sheet(),
+            &ticked(),
+        )
+        .await
+        .expect("the customer still exists");
+        assert_eq!(registered.customer.id(), &CustomerId::new("cus_new"));
+        assert!(!registered.consents_recorded);
     }
 }

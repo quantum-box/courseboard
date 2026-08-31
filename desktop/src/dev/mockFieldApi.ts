@@ -2784,8 +2784,9 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       return error(400, "multipart field 'file' is required")
     }
     // A read good enough to be worth checking, and wrong in the ways a real one
-    // is: a kana nobody wrote down, a row whose name the scan lost. The screen
-    // exists for exactly these rows, so the fixture has to contain them.
+    // is: a kana nobody wrote down, a row whose name the scan lost, a tick box
+    // the copy was too faint to resolve. The screen exists for exactly these
+    // rows, so the fixture has to contain them.
     return hit({
       visitors: [
         {
@@ -2793,9 +2794,27 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
           nameKana: 'ホンダ ヤスヒコ',
           phone: '090-1234-5678',
           email: 'honda@example.com',
+          consents: [
+            { key: 'golf_antisocial_and_course_terms', accepted: true },
+            { key: 'golf_cart_terms', accepted: true },
+            // Ticked on the paper as "no contact please", which reaches the
+            // screen already flipped into "may we contact you".
+            { key: 'golf_marketing_contact', accepted: false },
+          ],
         },
-        { name: '増田 公陽', nameKana: 'マスダ キミハル', phone: '090-2222-3333' },
-        { name: '辻 俊行' },
+        {
+          name: '増田 公陽',
+          nameKana: 'マスダ キミハル',
+          phone: '090-2222-3333',
+          consents: [
+            { key: 'golf_antisocial_and_course_terms', accepted: true },
+            { key: 'golf_cart_terms', accepted: false },
+            { key: 'golf_marketing_contact', accepted: true },
+          ],
+        },
+        // The declaration could not be resolved: the row cannot be registered
+        // until the desk looks at the original and ticks it.
+        { name: '辻 俊行', consents: [{ key: 'golf_cart_terms', accepted: true }] },
         { phone: '080-4444-5555' },
       ],
       warnings: ['読み取れない項目があります。原本を見ながらすべての項目を確認してください。'],

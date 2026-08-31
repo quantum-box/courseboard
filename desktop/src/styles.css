@@ -6242,6 +6242,44 @@ button,
   overflow-wrap: anywhere;
 }
 
+/* The tick boxes, stacked under the person's fields.
+   One per line rather than in the two-column grid the fields use: the labels
+   are whole sentences off the paper, and wrapping them into half a row is how
+   a declaration stops being read before it is ticked. */
+.reception-row-consents {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.reception-consent {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 2px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.reception-consent input {
+  margin-top: 2px;
+}
+
+.reception-consent-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Sits under the label, in the column the label is in, so an unread box reads
+   as a note about that box rather than as a line of its own. */
+.reception-consent .reception-read-value {
+  grid-column: 2;
+}
+
 .reception-row-actions {
   display: flex;
   justify-content: flex-end;

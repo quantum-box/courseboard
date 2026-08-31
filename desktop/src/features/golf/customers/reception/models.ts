@@ -67,6 +67,63 @@ export type ReceptionDraftVisitor = {
   nameKana?: string | null
   phone?: string | null
   email?: string | null
+  consents?: ReceptionDraftConsent[]
+}
+
+export type ReceptionDraftConsent = {
+  key: string
+  /** Absent when the reader could not resolve the box. Not a refusal. */
+  accepted?: boolean | null
+}
+
+/**
+ * The tick boxes a golf reception sheet carries, in printed order.
+ *
+ * The keys are the API's, and the same ones Field files the record under. The
+ * screen never inverts anything: the API already flipped the printed opt-out,
+ * so `accepted: true` here means the visitor agreed however the paper phrased
+ * it. What the screen does carry is the printed wording, because the desk is
+ * comparing the row against the page.
+ */
+export const RECEPTION_CONSENT_KEYS = [
+  'golf_antisocial_and_course_terms',
+  'golf_cart_terms',
+  'golf_marketing_contact',
+] as const
+
+export type ReceptionConsentKey = (typeof RECEPTION_CONSENT_KEYS)[number]
+
+/**
+ * The one box the sheet itself marks 「必ず☑をご記入下さい」.
+ *
+ * The API refuses a registration without it, so the screen has to stop the row
+ * before it is sent — otherwise the desk gets a 400 they cannot act on for a
+ * box they can see ticked on the paper in front of them.
+ */
+export const REQUIRED_RECEPTION_CONSENT: ReceptionConsentKey =
+  'golf_antisocial_and_course_terms'
+
+/** Unanswered is `null`, which is neither agreement nor refusal. */
+export type ConsentAnswer = boolean | null
+
+export type ReceptionConsents = Record<ReceptionConsentKey, ConsentAnswer>
+
+function emptyConsents(): ReceptionConsents {
+  return {
+    golf_antisocial_and_course_terms: null,
+    golf_cart_terms: null,
+    golf_marketing_contact: null,
+  }
+}
+
+function consentsFromVisitor(visitor: ReceptionDraftVisitor): ReceptionConsents {
+  const consents = emptyConsents()
+  for (const answer of visitor.consents ?? []) {
+    if ((RECEPTION_CONSENT_KEYS as readonly string[]).includes(answer.key)) {
+      consents[answer.key as ReceptionConsentKey] = answer.accepted ?? null
+    }
+  }
+  return consents
 }
 
 export type ReceptionFieldKey = 'name' | 'nameKana' | 'phone' | 'email'
@@ -92,9 +149,21 @@ export type ReceptionRow = {
   phone: string
   email: string
   read: Record<ReceptionFieldKey, string>
+  /** What the desk has now, after any correction. */
+  consents: ReceptionConsents
+  /** What the reader made of the boxes, kept for comparison like `read`. */
+  readConsents: ReceptionConsents
   status: 'pending' | 'saving' | 'saved'
   /** Set once registered, so the row can link to the person it became. */
   customerId?: string
+  /**
+   * True when the customer was created but their consents were not filed.
+   *
+   * The registration still counts — the person is in the ledger — so the row
+   * is saved. The gap is shown separately, because the fix is to retry the
+   * consents, not the registration: registering again makes a second person.
+   */
+  consentsMissing?: boolean
   error?: string
 }
 
@@ -181,12 +250,15 @@ export function rowFromVisitor(visitor: ReceptionDraftVisitor, index: number): R
     phone: text(visitor.phone),
     email: text(visitor.email),
   }
+  const consents = consentsFromVisitor(visitor)
   return {
     // Position, not content: two players in a family share a phone number and
     // sometimes a surname, and a key made of those collapses them into one row.
     key: `visitor-${index}`,
     ...read,
     read,
+    consents,
+    readConsents: { ...consents },
     status: 'pending',
   }
 }
@@ -204,6 +276,8 @@ export function blankRow(key: string): ReceptionRow {
     phone: '',
     email: '',
     read: { name: '', nameKana: '', phone: '', email: '' },
+    consents: emptyConsents(),
+    readConsents: emptyConsents(),
     status: 'pending',
   }
 }
@@ -214,7 +288,34 @@ export function blankRow(key: string): ReceptionRow {
  * kept visitors out of the ledger to begin with.
  */
 export function canRegister(row: ReceptionRow) {
-  return row.status === 'pending' && text(row.name).length > 0
+  return (
+    row.status === 'pending' &&
+    text(row.name).length > 0 &&
+    row.consents[REQUIRED_RECEPTION_CONSENT] === true
+  )
+}
+
+/**
+ * Why a named row still cannot be registered.
+ *
+ * Separate from `canRegister` so the screen can say which of the two things is
+ * missing. A button that is simply disabled next to a filled-in name reads as
+ * a bug, and the desk retypes the name looking for the problem.
+ */
+export function blockedReason(row: ReceptionRow): 'name' | 'declaration' | null {
+  if (row.status !== 'pending') return null
+  if (text(row.name).length === 0) return 'name'
+  if (row.consents[REQUIRED_RECEPTION_CONSENT] !== true) return 'declaration'
+  return null
+}
+
+/** Boxes where the desk did not keep what the reader proposed. */
+export function correctedConsents(row: ReceptionRow): ReceptionConsentKey[] {
+  return RECEPTION_CONSENT_KEYS.filter(key => row.consents[key] !== row.readConsents[key])
+}
+
+export function isConsentCorrected(row: ReceptionRow, key: ReceptionConsentKey) {
+  return row.consents[key] !== row.readConsents[key]
 }
 
 export function pendingRows(rows: readonly ReceptionRow[]) {
@@ -251,6 +352,13 @@ export function customerPayload(row: ReceptionRow, sourceRowIndex?: number) {
     // the only pointer at the paper the desk still has.
     source: 'reception_sheet' as const,
     sourceRowIndex,
+    // Every box, including the ones nobody could resolve. An unanswered box is
+    // sent as `null` rather than dropped so the API can tell "not ticked" from
+    // "not on this sheet"; it files neither.
+    consents: RECEPTION_CONSENT_KEYS.map(key => ({
+      key,
+      accepted: row.consents[key],
+    })),
   }
 }
 

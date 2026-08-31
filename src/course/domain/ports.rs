@@ -14,8 +14,8 @@ use super::{
     FieldClientCapabilities, FieldRequestContext, FieldShiftLink, GenerationSummary,
     GolfPricingSettings, InventoryWatermark, MembershipDiscounts, MembershipPlan, MembershipPlanId,
     MembershipPlayWindows, MonthlySettlement, NewCustomer, NewCustomerRegistration, NewReservation,
-    PartyDetails, PlayerTagOptions, ProductSlot, ReceptionDraft, ReceptionSheet,
-    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
+    PartyDetails, PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionDraft,
+    ReceptionSheet, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
     ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
     ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber, ShiftPolicy,
     SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
@@ -318,6 +318,29 @@ pub trait CustomerGradeRulesGateway: Send + Sync {
         tenant_id: &str,
         rules: &CustomerGradeRules,
     ) -> Result<CustomerGradeRules, CourseError>;
+}
+
+/// Port for what a visitor agreed to.
+///
+/// Field's, not ours. The trail is append-only and carries the terms version
+/// it was agreed under, which is the whole point of keeping it: a tick box
+/// stored as a bare `true` cannot answer what the visitor actually signed once
+/// the terms are revised. CourseBoard supplies which boxes a golf sheet has
+/// and which way each one points; Field stores the record (ADR-0005).
+#[async_trait]
+pub trait CustomerConsentGateway: Send + Sync {
+    /// Files what the sheet said, one row per answered box.
+    ///
+    /// Boxes the reader could not make out are left out entirely rather than
+    /// sent as `false` — an unread box is a question for the desk, and a
+    /// refusal nobody made is worse than a gap. `accepted` is already in
+    /// Field's direction; the printed opt-out was flipped upstream of here.
+    async fn record_consents(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+        answers: &[ReceptionConsentAnswer],
+    ) -> Result<(), CourseError>;
 }
 
 /// Port for where a ledger entry came from.
