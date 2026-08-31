@@ -913,21 +913,9 @@ impl ReservationScheduleGateway for FieldGolfCatalogGateway {
         credentials: GatewayCredentials<'_>,
         resource_id: &ResourceId,
     ) -> Result<Vec<AvailabilityRule>, CourseError> {
-        if is_empty_course_store(&self.base_url) {
-            return Ok(Vec::new());
-        }
-        let response: FieldResourceScheduleDto = field_send_json(
-            &self.client,
-            &self.base_url,
-            reqwest::Method::GET,
-            &format!(
-                "/v1/erp/reservation-resources/{}/schedule",
-                urlencoding_path(resource_id.as_str())
-            ),
-            credentials,
-            None,
-        )
-        .await?;
+        let response =
+            fetch_resource_schedule_dto(&self.client, &self.base_url, resource_id, credentials)
+                .await?;
         response.rules.iter().map(rule_to_domain).collect()
     }
 
@@ -937,6 +925,7 @@ impl ReservationScheduleGateway for FieldGolfCatalogGateway {
         resource_id: &ResourceId,
         timezone: &str,
         rules: &[AvailabilityRule],
+        rolling_window_days: Option<Option<i32>>,
     ) -> Result<Vec<AvailabilityRule>, CourseError> {
         let path = format!(
             "/v1/erp/reservation-resources/{}/schedule",
@@ -945,16 +934,10 @@ impl ReservationScheduleGateway for FieldGolfCatalogGateway {
         // Field's PUT is a full replacement. Read immediately before it so
         // fields introduced by Field but not yet modeled by CourseBoard travel
         // through the save instead of being reset to null/default.
-        let current: FieldResourceScheduleDto = field_send_json(
-            &self.client,
-            &self.base_url,
-            reqwest::Method::GET,
-            &path,
-            credentials,
-            None,
-        )
-        .await?;
-        let body = schedule_replace_body(&current.rules, rules, timezone);
+        let current =
+            fetch_resource_schedule_dto(&self.client, &self.base_url, resource_id, credentials)
+                .await?;
+        let body = schedule_replace_body(&current.rules, rules, timezone, rolling_window_days);
         let response: FieldResourceScheduleDto = field_send_json(
             &self.client,
             &self.base_url,
@@ -965,6 +948,38 @@ impl ReservationScheduleGateway for FieldGolfCatalogGateway {
         )
         .await?;
         response.rules.iter().map(rule_to_domain).collect()
+    }
+
+    async fn sync_rolling_window_opt_in(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        resource_id: &ResourceId,
+        rolling_window_days: Option<i32>,
+    ) -> Result<bool, CourseError> {
+        if is_empty_course_store(&self.base_url) {
+            return Ok(false);
+        }
+        let path = format!(
+            "/v1/erp/reservation-resources/{}/schedule",
+            urlencoding_path(resource_id.as_str())
+        );
+        let current =
+            fetch_resource_schedule_dto(&self.client, &self.base_url, resource_id, credentials)
+                .await?;
+        if current.rolling_window_days == rolling_window_days {
+            return Ok(false);
+        }
+        let body = rolling_window_sync_body(&current, rolling_window_days);
+        let _: FieldResourceScheduleDto = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::PUT,
+            &path,
+            credentials,
+            Some(&body),
+        )
+        .await?;
+        Ok(true)
     }
 
     async fn generate_resource_time_slots(
@@ -1038,6 +1053,32 @@ impl ReservationScheduleGateway for FieldGolfCatalogGateway {
     }
 }
 
+async fn fetch_resource_schedule_dto(
+    client: &reqwest::Client,
+    base_url: &str,
+    resource_id: &ResourceId,
+    credentials: GatewayCredentials<'_>,
+) -> Result<FieldResourceScheduleDto, CourseError> {
+    if is_empty_course_store(base_url) {
+        return Ok(FieldResourceScheduleDto {
+            rolling_window_days: None,
+            rules: Vec::new(),
+        });
+    }
+    field_send_json(
+        client,
+        base_url,
+        reqwest::Method::GET,
+        &format!(
+            "/v1/erp/reservation-resources/{}/schedule",
+            urlencoding_path(resource_id.as_str())
+        ),
+        credentials,
+        None,
+    )
+    .await
+}
+
 fn map_time_slot(value: FieldResourceTimeSlotDto) -> ResourceTimeSlot {
     // `availableQuantity` is Field's own arithmetic; recomputing it here would
     // invent a second answer to the same question when the two disagree.
@@ -1081,6 +1122,8 @@ struct FieldResourceTimeSlotDto {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FieldResourceScheduleDto {
+    #[serde(default)]
+    rolling_window_days: Option<i32>,
     #[serde(default)]
     rules: Vec<FieldAvailabilityRuleDto>,
 }
@@ -1170,6 +1213,7 @@ fn schedule_replace_body(
     current: &[FieldAvailabilityRuleDto],
     edited: &[AvailabilityRule],
     timezone: &str,
+    rolling_window_days: Option<Option<i32>>,
 ) -> Value {
     let current_by_id: HashMap<&str, &FieldAvailabilityRuleDto> = current
         .iter()
@@ -1191,7 +1235,11 @@ fn schedule_replace_body(
             Value::Object(body)
         })
         .collect::<Vec<_>>();
-    json!({ "rules": rules })
+    let mut body = json!({ "rules": rules });
+    if let (Some(object), Some(value)) = (body.as_object_mut(), rolling_window_days) {
+        object.insert("rollingWindowDays".into(), json!(value));
+    }
+    body
 }
 
 fn field_rule_passthrough_fields(rule: &FieldAvailabilityRuleDto) -> Map<String, Value> {
@@ -1200,6 +1248,39 @@ fn field_rule_passthrough_fields(rule: &FieldAvailabilityRuleDto) -> Map<String,
         .filter(|(key, _)| !FIELD_RULE_RESPONSE_ONLY_FIELDS.contains(&key.as_str()))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect()
+}
+
+fn rule_dto_to_put_json(rule: &FieldAvailabilityRuleDto) -> Value {
+    let mut body = json!({
+        "dayOfWeek": rule.day_of_week,
+        "startTime": rule.start_time,
+        "endTime": rule.end_time,
+        "capacity": rule.capacity,
+        "slotIntervalMinutes": rule.slot_interval_minutes,
+    });
+    let object = body
+        .as_object_mut()
+        .expect("object literal always serializes to a JSON object");
+    if let Some(id) = &rule.id {
+        object.insert("id".into(), json!(id));
+    }
+    object.extend(field_rule_passthrough_fields(rule));
+    body
+}
+
+fn rolling_window_sync_body(
+    current: &FieldResourceScheduleDto,
+    rolling_window_days: Option<i32>,
+) -> Value {
+    let rules = current
+        .rules
+        .iter()
+        .map(rule_dto_to_put_json)
+        .collect::<Vec<_>>();
+    json!({
+        "rules": rules,
+        "rollingWindowDays": rolling_window_days,
+    })
 }
 
 pub(crate) fn normalize_base_url(field_api_url: Option<&str>) -> String {
@@ -2024,31 +2105,40 @@ mod tests {
     #[derive(Clone, Default)]
     struct ScheduleServerState {
         calls: Arc<Mutex<Vec<&'static str>>>,
+        get_body: Arc<Mutex<Option<Value>>>,
         put_body: Arc<Mutex<Option<Value>>>,
     }
 
     async fn read_schedule(State(state): State<ScheduleServerState>) -> Json<Value> {
         state.calls.lock().expect("calls lock").push("GET");
-        Json(json!({
-            "resourceId": "resource-1",
-            "rules": [{
-                "id": "rule-1",
-                "timezone": "Asia/Tokyo",
-                "dayOfWeek": 0,
-                "startTime": "07:00",
-                "endTime": "12:00",
-                "capacity": 1,
-                "slotIntervalMinutes": 8,
-                "futureWritePolicy": {
-                    "mode": "field-owned",
-                    "thresholds": [2, 4]
-                },
-                "active": true,
-                "createdAt": "2026-08-10T00:00:00Z",
-                "updatedAt": "2026-08-10T00:00:00Z",
-                "revision": 7
-            }]
-        }))
+        let response = state
+            .get_body
+            .lock()
+            .expect("get body lock")
+            .clone()
+            .unwrap_or_else(|| {
+                json!({
+                    "resourceId": "resource-1",
+                    "rules": [{
+                        "id": "rule-1",
+                        "timezone": "Asia/Tokyo",
+                        "dayOfWeek": 0,
+                        "startTime": "07:00",
+                        "endTime": "12:00",
+                        "capacity": 1,
+                        "slotIntervalMinutes": 8,
+                        "futureWritePolicy": {
+                            "mode": "field-owned",
+                            "thresholds": [2, 4]
+                        },
+                        "active": true,
+                        "createdAt": "2026-08-10T00:00:00Z",
+                        "updatedAt": "2026-08-10T00:00:00Z",
+                        "revision": 7
+                    }]
+                })
+            });
+        Json(response)
     }
 
     async fn write_schedule(
@@ -2058,6 +2148,35 @@ mod tests {
         state.calls.lock().expect("calls lock").push("PUT");
         *state.put_body.lock().expect("put body lock") = Some(body.clone());
         Json(body)
+    }
+
+    async fn spawn_schedule_server(
+        state: ScheduleServerState,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let app = Router::new()
+            .route(
+                "/v1/erp/reservation-resources/resource-1/schedule",
+                get(read_schedule).put(write_schedule),
+            )
+            .with_state(state);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock Field");
+        let address = listener.local_addr().expect("mock Field address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve mock Field");
+        });
+        (format!("http://{address}"), server)
+    }
+
+    fn schedule_credentials() -> GatewayCredentials<'static> {
+        GatewayCredentials {
+            authorization: "Bearer test-token",
+            operator_id: "operator-test",
+            platform_id: Some("platform-test"),
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
+            caller_bearer: "Bearer test",
+        }
     }
 
     fn desk_reservation() -> NewReservation {
@@ -2135,6 +2254,7 @@ mod tests {
                 &ResourceId::new("resource-1"),
                 "Europe/Berlin",
                 &[edited],
+                None,
             )
             .await
             .expect("replace schedule");
@@ -2148,6 +2268,7 @@ mod tests {
         assert_eq!(*state.calls.lock().expect("calls lock"), vec!["GET", "PUT"]);
         assert_eq!(body["rules"][0]["capacity"], 2);
         assert_eq!(body["rules"][0]["timezone"], "Europe/Berlin");
+        assert!(body.get("rollingWindowDays").is_none());
         assert_eq!(
             body["rules"][0]["futureWritePolicy"],
             json!({ "mode": "field-owned", "thresholds": [2, 4] })
@@ -2158,6 +2279,136 @@ mod tests {
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].capacity(), 2);
 
+        server.abort();
+    }
+
+    #[test]
+    fn schedule_replace_body_distinguishes_omission_setting_and_release() {
+        let edited =
+            AvailabilityRule::try_new(None, 1, "07:00", "12:00", 2, 8).expect("edited rule");
+
+        let omitted = schedule_replace_body(&[], &[edited.clone()], "Asia/Tokyo", None);
+        assert!(omitted.get("rollingWindowDays").is_none());
+
+        let released = schedule_replace_body(&[], &[edited.clone()], "Asia/Tokyo", Some(None));
+        assert_eq!(released["rollingWindowDays"], Value::Null);
+
+        let configured = schedule_replace_body(&[], &[edited], "Asia/Tokyo", Some(Some(90)));
+        assert_eq!(configured["rollingWindowDays"], json!(90));
+    }
+
+    #[tokio::test]
+    async fn rolling_window_sync_skips_put_when_field_already_matches() {
+        let state = ScheduleServerState::default();
+        *state.get_body.lock().expect("get body lock") = Some(json!({
+            "rollingWindowDays": 90,
+            "rules": []
+        }));
+        let (base_url, server) = spawn_schedule_server(state.clone()).await;
+        let gateway = FieldGolfCatalogGateway::new(reqwest::Client::new(), Some(&base_url));
+
+        let changed = gateway
+            .sync_rolling_window_opt_in(
+                schedule_credentials(),
+                &ResourceId::new("resource-1"),
+                Some(90),
+            )
+            .await
+            .expect("rolling-window sync");
+
+        assert!(!changed);
+        assert_eq!(*state.calls.lock().expect("calls lock"), vec!["GET"]);
+        assert!(state.put_body.lock().expect("put body lock").is_none());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn rolling_window_sync_echoes_one_get_without_response_only_fields() {
+        let state = ScheduleServerState::default();
+        *state.get_body.lock().expect("get body lock") = Some(json!({
+            "rollingWindowDays": 30,
+            "rules": [{
+                "id": "rule-1",
+                "timezone": "Asia/Tokyo",
+                "dayOfWeek": 0,
+                "startTime": "07:00",
+                "endTime": "12:00",
+                "capacity": 1,
+                "slotIntervalMinutes": 8,
+                "effectiveFrom": "2026-08-01",
+                "effectiveTo": "2026-12-31",
+                "season": "high",
+                "solarWindow": {"sunrise": "05:00"},
+                "futureWritePolicy": {"mode": "field-owned"},
+                "active": true,
+                "createdAt": "2026-08-10T00:00:00Z",
+                "updatedAt": "2026-08-10T00:00:00Z",
+                "revision": 7
+            }]
+        }));
+        let (base_url, server) = spawn_schedule_server(state.clone()).await;
+        let gateway = FieldGolfCatalogGateway::new(reqwest::Client::new(), Some(&base_url));
+
+        let changed = gateway
+            .sync_rolling_window_opt_in(
+                schedule_credentials(),
+                &ResourceId::new("resource-1"),
+                Some(90),
+            )
+            .await
+            .expect("rolling-window sync");
+
+        assert!(changed);
+        assert_eq!(*state.calls.lock().expect("calls lock"), vec!["GET", "PUT"]);
+        let body = state
+            .put_body
+            .lock()
+            .expect("put body lock")
+            .clone()
+            .expect("PUT body");
+        assert_eq!(body["rollingWindowDays"], json!(90));
+        assert_eq!(body["rules"][0]["id"], json!("rule-1"));
+        assert_eq!(body["rules"][0]["timezone"], json!("Asia/Tokyo"));
+        assert_eq!(body["rules"][0]["effectiveFrom"], json!("2026-08-01"));
+        assert_eq!(body["rules"][0]["effectiveTo"], json!("2026-12-31"));
+        assert_eq!(body["rules"][0]["season"], json!("high"));
+        assert_eq!(body["rules"][0]["solarWindow"], json!({"sunrise": "05:00"}));
+        assert_eq!(
+            body["rules"][0]["futureWritePolicy"],
+            json!({"mode": "field-owned"})
+        );
+        for response_only in FIELD_RULE_RESPONSE_ONLY_FIELDS {
+            assert!(body["rules"][0].get(response_only).is_none());
+        }
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn rolling_window_sync_sends_null_to_explicitly_release_field_opt_in() {
+        let state = ScheduleServerState::default();
+        *state.get_body.lock().expect("get body lock") = Some(json!({
+            "rollingWindowDays": 90,
+            "rules": []
+        }));
+        let (base_url, server) = spawn_schedule_server(state.clone()).await;
+        let gateway = FieldGolfCatalogGateway::new(reqwest::Client::new(), Some(&base_url));
+
+        gateway
+            .sync_rolling_window_opt_in(
+                schedule_credentials(),
+                &ResourceId::new("resource-1"),
+                None,
+            )
+            .await
+            .expect("rolling-window release");
+
+        let body = state
+            .put_body
+            .lock()
+            .expect("put body lock")
+            .clone()
+            .expect("PUT body");
+        assert_eq!(body["rollingWindowDays"], Value::Null);
         server.abort();
     }
 

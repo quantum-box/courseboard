@@ -187,6 +187,8 @@ impl BookingHorizon {
     pub const MIN_DAYS: i64 = 1;
     /// One short of the generate cap, because the range is `today ..= today + days`.
     pub const MAX_DAYS: i64 = 399;
+    /// The largest value Field accepts for its rolling inventory window.
+    pub const FIELD_ROLLING_WINDOW_MAX_DAYS: i64 = 365;
 
     pub fn try_days(days: i64) -> Result<Self, CourseError> {
         if !(Self::MIN_DAYS..=Self::MAX_DAYS).contains(&days) {
@@ -206,6 +208,17 @@ impl BookingHorizon {
             Self::Days(days) => Some(*days),
             Self::Through(_) => None,
         }
+    }
+
+    /// The Field rolling-window value represented by this horizon.
+    ///
+    /// A fixed closing date cannot be represented by a static number of days,
+    /// and Field's maximum is shorter than the largest horizon CourseBoard
+    /// accepts. Both cases therefore opt out explicitly when written to Field.
+    pub fn field_rolling_window_days(&self) -> Option<i32> {
+        self.days()
+            .filter(|&days| (Self::MIN_DAYS..=Self::FIELD_ROLLING_WINDOW_MAX_DAYS).contains(&days))
+            .map(|days| days as i32)
     }
 
     pub fn through_date(&self) -> Option<NaiveDate> {
@@ -332,6 +345,51 @@ mod tests {
         assert!(BookingHorizon::try_days(400).is_err());
         assert!(BookingHorizon::try_days(0).is_err());
         assert!(BookingHorizon::try_days(-1).is_err());
+    }
+
+    #[test]
+    fn field_rolling_window_accepts_only_field_supported_day_horizons() {
+        assert_eq!(
+            BookingHorizon::try_days(1)
+                .unwrap()
+                .field_rolling_window_days(),
+            Some(1)
+        );
+        assert_eq!(
+            BookingHorizon::try_days(180)
+                .unwrap()
+                .field_rolling_window_days(),
+            Some(180)
+        );
+        assert_eq!(
+            BookingHorizon::try_days(365)
+                .unwrap()
+                .field_rolling_window_days(),
+            Some(365)
+        );
+        assert_eq!(
+            BookingHorizon::try_days(366)
+                .unwrap()
+                .field_rolling_window_days(),
+            None
+        );
+        assert_eq!(
+            BookingHorizon::try_days(399)
+                .unwrap()
+                .field_rolling_window_days(),
+            None
+        );
+        assert_eq!(
+            BookingHorizon::through(NaiveDate::from_ymd_opt(2026, 12, 31).unwrap())
+                .field_rolling_window_days(),
+            None
+        );
+
+        for days in BookingHorizon::MIN_DAYS..=BookingHorizon::MAX_DAYS {
+            if let Some(value) = BookingHorizon::Days(days).field_rolling_window_days() {
+                assert!((1..=365).contains(&value));
+            }
+        }
     }
 
     #[test]
