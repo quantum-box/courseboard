@@ -82,6 +82,7 @@ export const timeline: DeepPartial<typeof source> = {
     assigned: 'Assigned',
     unassigned: 'Unassigned',
     self: 'Self play',
+    secondRound: 'Second round',
     conflict: 'Conflict',
   },
   demo: {
@@ -106,6 +107,10 @@ export const timeline: DeepPartial<typeof source> = {
       description: 'Pick another day. Reservations appear here once they are made.',
       goToToday: 'Go to today',
     },
+  },
+  twoRound: {
+    requestBadge: 'Asked for two',
+    secondBadge: 'Second round',
   },
   caddieLane: {
     title: 'Caddie lanes',

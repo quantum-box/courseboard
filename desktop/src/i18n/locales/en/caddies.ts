@@ -72,6 +72,7 @@ export const caddies: DeepPartial<typeof source> = {
     atDailyLimit: 'At the daily round limit',
     rookiePaired: 'Rookie paired with a veteran',
     veteranForFoursome: 'A veteran suits a full foursome',
+    twoRoundRequest: 'Placed for the two rounds they asked for',
     noCaddieAvailable: 'No caddie is free for this round',
     allAtDailyLimit: 'Every available caddie is at the daily limit',
     noCaddieOnCourse: 'Nobody is standing on this course',
@@ -101,6 +102,7 @@ export const caddies: DeepPartial<typeof source> = {
   operationDate: 'Date',
   dispatch: {
     boardTitle: 'Assignments that day',
+    boardDescription: 'Change who walks a group from the Move button on its row — another caddie on the same group, the same caddie on another group, or both.',
     loading: 'Loading assignments',
     supportTitle: 'Capacity, per-course balance, and suggested caddies',
   },
@@ -561,6 +563,10 @@ export const caddies: DeepPartial<typeof source> = {
     failed: 'Could not load this caddie',
     open: 'Opens this caddie’s screen',
   },
+  twoRound: {
+    requestBadge: 'Asked for two',
+    secondBadge: 'Second round',
+  },
   orphaned: {
     title: '{{n}} assignment(s) are left on a cancelled booking',
     body: 'These groups are no longer on the tee sheet. Until the assignment is cancelled, the caddie still counts against their rounds for the day and against the month’s payroll.',
@@ -587,7 +593,7 @@ export const caddies: DeepPartial<typeof source> = {
   },
   duties: {
     title: 'Other work',
-    description: 'Put a caddie on other work for the hours they have no round \u2014 course upkeep, the practice range. Those hours leave the caddie supply and stop being offered by the automatic run and the candidate list; the rest of the day still walks groups.',
+    description: 'Put a caddie on other work for the hours they have no round \u2014 course upkeep, divot filling, helping the porters. Those hours leave the caddie supply and stop being offered by the automatic run and the candidate list; the rest of the day still walks groups.',
     loading: 'Loading other work',
     loadingOptions: 'Loading the list of jobs',
     onDutyTitle: 'On other work',
@@ -622,7 +628,8 @@ export const caddies: DeepPartial<typeof source> = {
     },
     noOptions: {
       title: 'No jobs on the list',
-      description: 'Add the jobs this club fills under Settings \u2192 caddie duties.',
+      description: 'Add the jobs this club fills \u2014 course upkeep, divot filling, helping the porters \u2014 under Settings \u2192 caddie duties.',
+      action: 'Add the jobs',
     },
   },
   unassigned: {

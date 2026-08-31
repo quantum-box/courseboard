@@ -16,6 +16,7 @@ import {
 } from '../../components/Page'
 import { Sheet } from '../../components/Sheet'
 import { useResource } from '../../hooks/useResource'
+import { navigate } from '../../lib/router'
 import { showToast } from '../../lib/toast'
 import { CaddieLink } from './CaddieLink'
 import {
@@ -344,6 +345,11 @@ export function AssignDutySheet({
           <EmptyState
             title={t('caddies:duties.noOptions.title')}
             description={t('caddies:duties.noOptions.description')}
+            action={(
+              <Button type="button" variant="secondary" onClick={() => navigate('settings/caddie-duties')}>
+                {t('caddies:duties.noOptions.action')}
+              </Button>
+            )}
           />
         ) : null}
 

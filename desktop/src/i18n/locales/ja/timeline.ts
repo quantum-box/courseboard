@@ -80,6 +80,7 @@ export const timeline = {
     assigned: '割当ずみ',
     unassigned: 'まだ決まっていない',
     self: 'セルフ',
+    secondRound: '2R目',
     conflict: '重なり',
   },
   demo: {
@@ -104,6 +105,11 @@ export const timeline = {
       description: '別の日を選んでください。予約が入るとここに表示されます。',
       goToToday: '今日にもどる',
     },
+  },
+  /** 2ラウンド希望の印。希望を出した人と、その日の2本目の担当に付けます。 */
+  twoRound: {
+    requestBadge: '2R希望',
+    secondBadge: '2R目',
   },
   caddieLane: {
     title: 'キャディの列',

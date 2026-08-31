@@ -50,6 +50,15 @@ pub mod skip_reason {
     pub const NO_CADDIE_ON_COURSE: &str = "no_caddie_on_the_course";
 }
 
+/// Reasons this module adds to a caddie the plan picked.
+///
+/// Same shape as [`super::reason`] — stable snake_case keys the operator
+/// screens translate.
+pub mod plan_reason {
+    /// Put on this group to make up the two rounds they asked for.
+    pub const TWO_ROUND_REQUEST: &str = "two_round_request";
+}
+
 /// Where the confirmed month put a caddie for the day.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CaddiePlacement {
@@ -145,6 +154,9 @@ pub struct PlannableCaddie {
     pub busy: Vec<(DateTime<Utc>, DateTime<Utc>)>,
     /// Where the confirmed month put them for the day.
     pub placement: CaddiePlacement,
+    /// Whether they can walk two rounds and asked to on this day — the two
+    /// halves the supply count already reads together.
+    pub wants_two_rounds: bool,
 }
 
 impl PlannableCaddie {
@@ -165,6 +177,27 @@ impl PlannableCaddie {
 
     fn stands_on(&self, round: &PlannableRound) -> bool {
         self.placement.covers(round.course_id.as_ref())
+    }
+
+    /// Whether putting them on this group is what makes their two rounds
+    /// happen.
+    ///
+    /// Two different moments, both needed for the request to come true: the
+    /// first of the two, which is only worth holding an early group for while
+    /// a later group is still there to be the second, and the second itself,
+    /// which they must be given or the early group they were handed bought
+    /// the club nothing. The request alone is never enough — the caddie's own
+    /// daily limit still has to leave room for what is being planned.
+    fn needs_this_round_for_two(&self, another_round_follows: bool) -> bool {
+        if !self.wants_two_rounds {
+            return false;
+        }
+        let remaining = i64::from(self.max_rounds_per_day) - self.rounds_assigned_today;
+        if self.rounds_assigned_today == 0 {
+            another_round_follows && remaining >= 2
+        } else {
+            remaining >= 1
+        }
     }
 }
 
@@ -228,6 +261,12 @@ pub fn plan_caddie_assignments(
         })
     });
 
+    // The last tee time still to be staffed. Whether a group is "early" is
+    // read against this rather than the clock: an 09:00 group is early on a
+    // day that runs to 13:00 and the last chance of the day on one that does
+    // not, and only the first kind can be somebody's first of two.
+    let last_start = ordered.last().map(|round| round.starts_at);
+
     let mut assigned = Vec::new();
     let mut skipped = Vec::new();
 
@@ -271,7 +310,22 @@ pub fn plan_caddie_assignments(
             continue;
         }
 
-        let candidates: Vec<RankingCandidate> = eligible
+        // A caddie who asked for two rounds comes first, on the group that
+        // starts their pair and again on the one that finishes it. Left to the
+        // ranking alone the early groups go to whoever scores highest and the
+        // two-round requests end up on a single afternoon round — the club
+        // sells the day's supply as two-round caddies and then does not walk
+        // them. Nobody is ruled out: with no such request in the eligible list
+        // the day is planned exactly as it always was.
+        let another_round_follows = last_start.is_some_and(|last| last >= round.ends_at());
+        let keen: Vec<usize> = eligible
+            .iter()
+            .copied()
+            .filter(|index| pool[*index].needs_this_round_for_two(another_round_follows))
+            .collect();
+        let shortlist = if keen.is_empty() { &eligible } else { &keen };
+
+        let candidates: Vec<RankingCandidate> = shortlist
             .iter()
             .map(|index| {
                 let caddie = &pool[*index];
@@ -299,7 +353,7 @@ pub fn plan_caddie_assignments(
                 limit: Some(1),
             },
         );
-        let Some(pick) = ranked.into_iter().next() else {
+        let Some(mut pick) = ranked.into_iter().next() else {
             skipped.push(AutoAssignSkippedItem::new(
                 round.reservation_id.clone(),
                 skip_reason::NO_CADDIE_AVAILABLE,
@@ -314,6 +368,10 @@ pub fn plan_caddie_assignments(
             continue;
         };
         let placement = pool[index].placement.clone();
+        if !keen.is_empty() {
+            pick.reasons
+                .push(plan_reason::TWO_ROUND_REQUEST.to_string());
+        }
         let caddie = &mut pool[index];
         caddie.rounds_assigned_today += 1;
         caddie.busy.push((round.starts_at, round.ends_at()));
@@ -369,7 +427,114 @@ mod tests {
             availability: None,
             busy: Vec::new(),
             placement: CaddiePlacement::Unconfirmed,
+            wants_two_rounds: false,
         }
+    }
+
+    /// Two caddies who differ only in what the ranker sees, so a plan that
+    /// ignored the two-round request would always hand the group to `strong`.
+    fn a_strong_and_a_keen_caddie() -> (PlannableCaddie, PlannableCaddie) {
+        let mut strong = caddie("cad_strong", "Strong");
+        strong.rating_average = Some(5.0);
+        strong.rating_count = 10;
+        let mut keen = caddie("cad_keen", "Keen");
+        keen.rating_average = Some(1.0);
+        keen.rating_count = 10;
+        keen.wants_two_rounds = true;
+        (strong, keen)
+    }
+
+    #[test]
+    fn a_two_round_request_is_walked_as_two_rounds() {
+        // The early group starts the pair and the later one finishes it. Left
+        // to the ranking, the better-rated caddie takes both and the request
+        // is answered with nothing.
+        let (strong, keen) = a_strong_and_a_keen_caddie();
+
+        let plan = plan_caddie_assignments(
+            &[round("rsv_early", 9, 4), round("rsv_late", 14, 4)],
+            &[strong, keen],
+            options(),
+        );
+
+        assert_eq!(plan.assigned()[0].reservation_id().as_str(), "rsv_early");
+        assert_eq!(plan.assigned()[0].caddie_id().as_str(), "cad_keen");
+        assert_eq!(plan.assigned()[1].caddie_id().as_str(), "cad_keen");
+        assert!(plan.assigned()[0]
+            .rationale()
+            .contains(&plan_reason::TWO_ROUND_REQUEST.to_string()));
+    }
+
+    #[test]
+    fn the_last_group_of_the_day_is_not_held_for_a_two_round_request() {
+        // Nothing follows an 09:00 round on a one-group day, so the request
+        // buys nobody a second round and the ranking decides as it always did.
+        let (strong, keen) = a_strong_and_a_keen_caddie();
+
+        let plan = plan_caddie_assignments(&[round("rsv_only", 9, 4)], &[strong, keen], options());
+
+        assert_eq!(plan.assigned()[0].caddie_id().as_str(), "cad_strong");
+        assert!(plan.assigned()[0]
+            .rationale()
+            .iter()
+            .all(|reason| reason != plan_reason::TWO_ROUND_REQUEST));
+    }
+
+    #[test]
+    fn a_request_the_daily_limit_refuses_changes_nothing() {
+        // Asking for two rounds does not raise the caddie's own limit, and a
+        // one-round caddie holding an early group would answer the request by
+        // making the day worse.
+        let (strong, mut keen) = a_strong_and_a_keen_caddie();
+        keen.max_rounds_per_day = 1;
+
+        let plan = plan_caddie_assignments(
+            &[round("rsv_early", 9, 4), round("rsv_late", 14, 4)],
+            &[strong, keen],
+            options(),
+        );
+
+        assert_eq!(plan.assigned()[0].caddie_id().as_str(), "cad_strong");
+    }
+
+    #[test]
+    fn a_two_round_caddie_out_on_one_round_is_not_offered_an_overlapping_second() {
+        // The pair still has to be two rounds one person can walk. The request
+        // reorders the candidates; it never puts a caddie in two places.
+        let (_, mut keen) = a_strong_and_a_keen_caddie();
+        keen.rounds_assigned_today = 1;
+        keen.busy = vec![(
+            Utc.with_ymd_and_hms(2026, 8, 8, 0, 0, 0).unwrap(),
+            Utc.with_ymd_and_hms(2026, 8, 8, 4, 30, 0).unwrap(),
+        )];
+        let plain = caddie("cad_plain", "Plain");
+
+        let plan = plan_caddie_assignments(
+            &[round("rsv_overlapping", 11, 4)],
+            &[keen, plain],
+            options(),
+        );
+
+        assert_eq!(plan.assigned()[0].caddie_id().as_str(), "cad_plain");
+    }
+
+    #[test]
+    fn a_two_round_request_nobody_can_honour_still_gets_the_day_staffed() {
+        // Everyone left asked for two rounds and none of them may walk two.
+        // The shortlist empties, and the plan must fall back to the whole
+        // eligible list rather than reporting the group as unstaffable.
+        let mut keen = caddie("cad_keen", "Keen");
+        keen.wants_two_rounds = true;
+        keen.max_rounds_per_day = 1;
+
+        let plan = plan_caddie_assignments(
+            &[round("rsv_early", 9, 4), round("rsv_late", 14, 4)],
+            &[keen],
+            options(),
+        );
+
+        assert_eq!(plan.assigned().len(), 1);
+        assert_eq!(plan.assigned()[0].caddie_id().as_str(), "cad_keen");
     }
 
     #[test]
@@ -540,6 +705,7 @@ mod course_tests {
             availability: None,
             busy: Vec::new(),
             placement,
+            wants_two_rounds: false,
         }
     }
 

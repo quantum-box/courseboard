@@ -20,7 +20,7 @@ use crate::course::domain::{
     duty_windows_for, parse_tenant_timezone, placement_for_shift, plan_caddie_assignments,
     tenant_date_at, tenant_day_bounds, widen_for_utc_date_filter, AttendanceState,
     AutoAssignResult, AvailabilityDeadline, AvailabilityDeadlineGateway, AvailabilityQuery,
-    AvailabilityStatus, CaddieAssignmentQuery, CaddieDutyGateway, CaddieRankFeeGateway,
+    CaddieAssignmentQuery, CaddieAvailability, CaddieDutyGateway, CaddieRankFeeGateway,
     CaddieRoster, CaddieShift, CaddieShiftGateway, CourseError, DeadlineWarning,
     GatewayCredentials, GolfCatalogGateway, GolfOpsGateway, PlanOptions, PlannableCaddie,
     PlannableRound, ReservationGateway, TeeSheetItem, TeeSheetQuery, UpsertCaddieAssignment,
@@ -237,9 +237,9 @@ impl AutoAssignCaddiesUseCase {
                 )
             })
             .collect();
-        let availability_by_caddie: HashMap<&str, AvailabilityStatus> = availabilities
+        let availability_by_caddie: HashMap<&str, &CaddieAvailability> = availabilities
             .iter()
-            .map(|row| (row.caddie_id().as_str(), row.status()))
+            .map(|row| (row.caddie_id().as_str(), row))
             .collect();
 
         let caddies: Vec<PlannableCaddie> =
@@ -274,7 +274,17 @@ impl AutoAssignCaddiesUseCase {
                             .get(id)
                             .copied()
                             .unwrap_or(AttendanceState::NotClocked),
-                        availability: availability_by_caddie.get(id).copied(),
+                        availability: availability_by_caddie
+                            .get(id)
+                            .map(|availability| availability.status()),
+                        // Both halves, the same way the supply count reads
+                        // them: a caddie who cannot walk two rounds does not
+                        // get an early group by asking for one.
+                        wants_two_rounds: caddie.can_two_rounds()
+                            && availability_by_caddie
+                                .get(id)
+                                .map(|availability| availability.two_round_request())
+                                .unwrap_or(false),
                         busy: committed
                             .iter()
                             .map(|assignment| {

@@ -77,6 +77,7 @@ export const timeline: DeepPartial<typeof source> = {
     assigned: '担当が決まった',
     unassigned: '担当がまだ',
     self: 'キャディなし',
+    secondRound: '2ラウンド目',
     conflict: '同じ人が二重',
   },
   demo: {
@@ -100,6 +101,10 @@ export const timeline: DeepPartial<typeof source> = {
       description: 'ほかの日をえらんでください。予約が入ると、ここに出ます。',
       goToToday: '今日にもどる',
     },
+  },
+  twoRound: {
+    requestBadge: '2ラウンドきぼう',
+    secondBadge: '2ラウンド目',
   },
   caddieLane: {
     title: 'キャディごとの予定',

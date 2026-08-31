@@ -1489,6 +1489,11 @@ button,
 
 .data-table tbody tr:last-child td { border-bottom: 0; }
 .data-table tbody tr:hover { background: hsl(var(--nui-muted) / .55); }
+/* The second round of somebody's day, on the caddie boards. Read at a glance
+   down a column of otherwise identical rows, so it is a band on the edge and a
+   tint rather than a badge the eye has to find. */
+.data-table tbody tr.second-round-row { background: hsl(var(--nui-primary) / .09); box-shadow: inset 3px 0 hsl(var(--nui-primary)); }
+.data-table tbody tr.second-round-row:hover { background: hsl(var(--nui-primary) / .16); }
 .data-table .clickable-row { cursor: pointer; outline: none; }
 .data-table .clickable-row:focus-visible { box-shadow: inset 2px 0 hsl(var(--nui-primary)), inset 0 0 0 1px hsl(var(--nui-ring) / .4); background: hsl(var(--nui-selected)); }
 
@@ -3248,6 +3253,12 @@ button,
   border-color: var(--course-turf-dark);
 }
 
+.timeline-legend-item.coverage-second-round::before {
+  background: color-mix(in srgb, var(--course-turf) 32%, white);
+  border-color: var(--course-turf-dark);
+  box-shadow: inset 4px 0 var(--course-turf-dark);
+}
+
 .timeline-legend-item.coverage-unassigned::before {
   background:
     repeating-linear-gradient(
@@ -3819,6 +3830,15 @@ button,
 .timeline-block-assignment {
   background: color-mix(in srgb, var(--course-turf) 18%, hsl(var(--nui-background)));
   border-color: color-mix(in srgb, var(--course-turf) 55%, hsl(var(--nui-border)));
+}
+
+/* The second round of a caddie's day. The same turf as any other assignment,
+   banded and deepened rather than recoloured: a second round is not a
+   different kind of work, it is the half of a two-round day the desk is
+   checking landed. Conflict is declared after this and still wins the block. */
+.timeline-block-assignment.is-second-round {
+  background: color-mix(in srgb, var(--course-turf) 32%, hsl(var(--nui-background)));
+  box-shadow: inset 4px 0 var(--course-turf-dark);
 }
 
 .timeline-block-assignment.is-conflict {

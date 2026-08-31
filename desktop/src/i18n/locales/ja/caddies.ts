@@ -74,6 +74,7 @@ export const caddies = {
     atDailyLimit: 'この日の上限に到達',
     rookiePaired: '新人をベテランと組ませます',
     veteranForFoursome: '4人組にはベテランが向きます',
+    twoRoundRequest: '2ラウンド希望に合わせた配置',
     noCaddieAvailable: '空いているキャディがいません',
     allAtDailyLimit: '出られるキャディが全員、この日の上限に到達',
     noCaddieOnCourse: 'このコースに立っているキャディがいません',
@@ -103,6 +104,7 @@ export const caddies = {
   operationDate: '対象の日',
   dispatch: {
     boardTitle: 'この日の割当',
+    boardDescription: '担当を変えるときは、その行の「付け替え」から。別のキャディに移すことも、同じキャディを別の組に移すこともできます。',
     loading: '割当を読み込んでいます',
     supportTitle: '人数の目安・コース別の過不足・おすすめの候補',
   },
@@ -565,6 +567,13 @@ export const caddies = {
     open: '押すとこの人の画面へ',
   },
   /** Assignments left on a group that is no longer on the tee sheet. */
+  /**
+   * 2ラウンド希望の印。希望を出した人と、その日の2本目の担当に付けます。
+   */
+  twoRound: {
+    requestBadge: '2R希望',
+    secondBadge: '2R目',
+  },
   orphaned: {
     title: '取り消された予約に、担当が{{n}}件残っています',
     body: 'この組はもう予約表にありません。担当を取り消すまで、そのキャディはこの日の担当数に数えられ、給与の集計にも入ります。',
@@ -591,7 +600,7 @@ export const caddies = {
   },
   duties: {
     title: '別業務',
-    description: 'ラウンドの入っていない時間に、コース整備などの別業務を割り当てます。その時間はキャディ供給から外れ、自動配置と候補一覧にも出ません。午前だけ別業務にして午後はラウンドに入れる、という入れ方ができます。',
+    description: 'ラウンドの入っていない時間に、コース整備・埋め土・ポーター補助などの別業務を割り当てます。その時間はキャディ供給から外れ、自動配置と候補一覧にも出ません。午前だけ別業務にして午後はラウンドに入れる、という入れ方ができます。',
     loading: '別業務を読み込んでいます',
     loadingOptions: '業務種別を読み込んでいます',
     onDutyTitle: '別業務に出ている人',
@@ -626,7 +635,8 @@ export const caddies = {
     },
     noOptions: {
       title: '業務種別がありません',
-      description: '設定の「キャディの別業務」で、コース整備などの業務種別を登録してください。',
+      description: '設定の「キャディの別業務」で、コース整備・埋め土・ポーター補助などの業務種別を登録してください。',
+      action: '業務種別を登録する',
     },
   },
   unassigned: {

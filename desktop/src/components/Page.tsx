@@ -412,6 +412,7 @@ export function DataTable<T>({
   rows,
   columns,
   rowKey,
+  rowClassName,
   empty,
   onRowClick,
   defaultSort,
@@ -422,6 +423,11 @@ export function DataTable<T>({
   rows: T[]
   columns: DataTableColumn<T>[]
   rowKey: (row: T, index: number) => string
+  /**
+   * Marks a row as something other than an ordinary one — a second round of
+   * the day, say. Returning nothing leaves the row exactly as it was.
+   */
+  rowClassName?: (row: T) => string | undefined
   empty?: ReactNode
   onRowClick?: (row: T) => void
   /** Which column the table opens sorted by. */
@@ -533,7 +539,9 @@ export function DataTable<T>({
                 <tr
                   key={rowKey(row, rowIndex)}
                   tabIndex={onRowClick ? 0 : undefined}
-                  className={onRowClick ? 'clickable-row' : undefined}
+                  className={[onRowClick ? 'clickable-row' : '', rowClassName?.(row) ?? '']
+                    .filter(Boolean)
+                    .join(' ') || undefined}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
                   onKeyDown={onRowClick ? event => {
                     if (event.key === 'Enter' || event.key === ' ') {
