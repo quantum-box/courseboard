@@ -2567,13 +2567,18 @@ function resolveGet(path: string): Json | null | undefined {
         const day = Number(date.slice(8, 10))
         mockCaddies.forEach((profile, index) => {
           // Two marked days per caddie per week, staggered by roster position.
-          if ((day + index) % 7 !== 0 && (day + index * 3) % 11 !== 0) return
+          const marked = (day + index) % 7 === 0 || (day + index * 3) % 11 === 0
+          // Everyone else filed nothing, except a third of the two-round
+          // caddies who asked for the pair — the day boards mark those, and a
+          // single day queried on its own would otherwise come back empty.
+          const asksForTwo = !marked && profile.canTwoRounds && (day + index) % 3 === 0
+          if (!marked && !asksForTwo) return
           results.push({
             id: `avail_${profile.id}_${date}`,
             caddieProfileId: profile.id,
             date,
-            status: statuses[(day + index) % statuses.length],
-            twoRoundRequest: Boolean(profile.canTwoRounds),
+            status: marked ? statuses[(day + index) % statuses.length] : 'available',
+            twoRoundRequest: marked ? Boolean(profile.canTwoRounds) : true,
             healthNote: null,
             updatedAt: NOW,
           })

@@ -68,6 +68,7 @@ export const caddies: DeepPartial<typeof source> = {
     atDailyLimit: 'この日はもういっぱいです',
     rookiePaired: '新しい人を、なれた人と組ませます',
     veteranForFoursome: '4人の組なので、なれた人が向いています',
+    twoRoundRequest: '2ラウンドまわりたい人を先に入れました',
     noCaddieAvailable: 'この時間に出られる人がいません',
     allAtDailyLimit: '出られる人は、この日はもういっぱいです',
     noCaddieOnCourse: 'このコースに入っている人がいません',
@@ -93,6 +94,7 @@ export const caddies: DeepPartial<typeof source> = {
   operationDate: '見たい日',
   dispatch: {
     boardTitle: 'この日の担当',
+    boardDescription: '担当をかえるときは、その行の「かえる」からです。ほかのキャディにうつすことも、同じキャディをほかの組にうつすこともできます。',
     loading: '担当を読み込んでいます',
     supportTitle: '人数の目安・コースごとの過不足・おすすめの人',
   },
@@ -546,6 +548,10 @@ export const caddies: DeepPartial<typeof source> = {
     failed: '情報を読み込めませんでした',
     open: '押すと、この人の画面が開きます',
   },
+  twoRound: {
+    requestBadge: '2ラウンドきぼう',
+    secondBadge: '2ラウンド目',
+  },
   orphaned: {
     title: '取り消された予約に、担当が{{n}}件のこっています',
     body: 'この組は、もう予約の表にありません。担当を取り消すまで、そのキャディはこの日の担当の数に入り、給料の集計にも入ります。',
@@ -572,7 +578,7 @@ export const caddies: DeepPartial<typeof source> = {
   },
   duties: {
     title: 'べつの仕事',
-    description: 'ラウンドがない時間に、コースの手入れなど、べつの仕事をたのみます。その時間はラウンドに入りません。午前だけたのんで、午後はラウンド、という入れ方もできます。',
+    description: 'ラウンドがない時間に、コースの手入れ・うめ土・ポーターの手つだいなど、べつの仕事をたのみます。その時間はラウンドに入りません。午前だけたのんで、午後はラウンド、という入れ方もできます。',
     loading: 'よみこんでいます',
     loadingOptions: '仕事のしゅるいをよみこんでいます',
     onDutyTitle: 'べつの仕事をする人',
@@ -607,7 +613,8 @@ export const caddies: DeepPartial<typeof source> = {
     },
     noOptions: {
       title: '仕事のしゅるいがありません',
-      description: 'せっていの「キャディのべつの仕事」で、しゅるいをふやしてください。',
+      description: 'せっていの「キャディのべつの仕事」で、コースの手入れ・うめ土・ポーターの手つだいなどをふやしてください。',
+      action: '仕事のしゅるいをふやす',
     },
   },
   unassigned: {

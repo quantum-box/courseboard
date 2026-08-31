@@ -118,6 +118,7 @@ import {
   type Rank,
 } from './caddieRankFees'
 import { profilePatchPayload } from './caddieProfileEdit'
+import { secondRoundAssignmentIds, twoRoundRequestIds } from './twoRoundDay'
 import {
   calendarDateInTimezone,
   calendarSelectionAfterClick,
@@ -141,7 +142,7 @@ type AvailabilityStatus =
   | 'afternoon_only'
   | 'light_duty'
 
-type CaddieProfile = {
+export type CaddieProfile = {
   id: string
   displayName: string
   staffId?: string | null
@@ -174,7 +175,7 @@ type GolfCourse = {
   isActive: boolean
 }
 
-type CaddieAssignment = {
+export type CaddieAssignment = {
   id: string
   caddieProfileId: string
   reservationId?: string | null
@@ -516,6 +517,7 @@ const RATIONALE_KEYS: Record<string, string> = {
   at_daily_limit: 'caddies:rationale.atDailyLimit',
   rookie_paired_with_veteran: 'caddies:rationale.rookiePaired',
   veteran_for_foursome: 'caddies:rationale.veteranForFoursome',
+  two_round_request: 'caddies:rationale.twoRoundRequest',
   // Why the planner left a round unstaffed.
   no_caddie_available: 'caddies:rationale.noCaddieAvailable',
   all_caddies_at_daily_limit: 'caddies:rationale.allAtDailyLimit',
@@ -906,6 +908,25 @@ function DispatchView({
     () => new Set(orphaned.map(assignment => assignment.id)),
     [orphaned],
   )
+  // Who asked to walk two rounds today. Read on the board because the pair is
+  // what the club sold the day's supply as, and a two-round caddie left on one
+  // round is a group's worth of capacity that quietly went missing. A failed
+  // fetch costs the marks and nothing else, so it is not surfaced as an error.
+  const availabilities = useResource(
+    useCallback(
+      () =>
+        courseboardApiJson<ListResponse<AvailabilityRecord>>(
+          `${COURSE_API}/caddie-availabilities?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`,
+        ),
+      [date],
+    ),
+    [date],
+    { cacheKey: `caddie-availabilities:${date}:${date}` },
+  )
+  const twoRoundRequests = useMemo(
+    () => twoRoundRequestIds(availabilities.data?.items ?? []),
+    [availabilities.data],
+  )
 
   // Deciding who walks each group is the whole job of this screen, so the day
   // picker, the groups still missing somebody and the automatic run come first
@@ -949,7 +970,12 @@ function DispatchView({
       />
 
       <section className="app-section space-y-3">
-        <h2 className="section-title">{t('caddies:dispatch.boardTitle')}</h2>
+        <div>
+          <h2 className="section-title">{t('caddies:dispatch.boardTitle')}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t('caddies:dispatch.boardDescription')}
+          </p>
+        </div>
         {orphaned.length > 0 ? (
           <Notice tone="warning" title={t('caddies:orphaned.title', { n: String(orphaned.length) })}>
             {t('caddies:orphaned.body')}
@@ -964,6 +990,7 @@ function DispatchView({
             assignments={dayAssignments}
             profiles={profiles}
             orphanedIds={orphanedIds}
+            twoRoundRequests={twoRoundRequests}
             date={date}
             rounds={teeSheet.data?.items ?? []}
             onChanged={onChanged}
@@ -1826,11 +1853,13 @@ function AttendancePanel({
 }
 
 const EMPTY_ORPHANS: Set<string> = new Set()
+const EMPTY_TWO_ROUND_REQUESTS: Set<string> = new Set()
 
-function AssignmentsTable({
+export function AssignmentsTable({
   assignments,
   profiles,
   orphanedIds = EMPTY_ORPHANS,
+  twoRoundRequests = EMPTY_TWO_ROUND_REQUESTS,
   date,
   rounds,
   onChanged,
@@ -1844,6 +1873,12 @@ function AssignmentsTable({
    * fetched, so it says nothing rather than guessing.
    */
   orphanedIds?: Set<string>
+  /**
+   * The caddies who filed a two-round request for the day. Only the day board
+   * knows this — a caddie's own history spans months of requests nobody
+   * fetched.
+   */
+  twoRoundRequests?: Set<string>
   /**
    * The day board's own date and tee sheet. A caddie's history spans months of
    * tee sheets nobody fetched, so moving a round is offered only where the day
@@ -1866,6 +1901,10 @@ function AssignmentsTable({
     () => [...assignments].sort((left, right) => left.scheduledAt.localeCompare(right.scheduledAt)),
     [assignments],
   )
+  // Which rows are somebody's second round of the day. The table is one long
+  // column of near-identical rows, and "did the two-round caddies get their
+  // second?" is the question the desk asks of it all morning.
+  const secondRounds = useMemo(() => secondRoundAssignmentIds(sorted), [sorted])
 
   async function updateStatus(assignment: CaddieAssignment, status: 'completed' | 'cancelled') {
     setBusyId(assignment.id)
@@ -1920,6 +1959,9 @@ function AssignmentsTable({
         <div>
           <p className="font-medium">{row.roundReference ?? row.reservationId ?? row.id}</p>
           <p className="text-xs text-muted-foreground">{roleLabel(row.assignmentRole)}</p>
+          {secondRounds.has(row.id) ? (
+            <Badge variant="accent">{t('caddies:twoRound.secondBadge')}</Badge>
+          ) : null}
           {orphanedIds.has(row.id) ? (
             <Badge variant="warning">{t('caddies:orphaned.badge')}</Badge>
           ) : null}
@@ -1931,10 +1973,15 @@ function AssignmentsTable({
       header: t('caddies:assignments.table.caddie'),
       mobileLabel: t('caddies:assignments.table.caddie'),
       cell: row => (
-        <CaddieLink
-          caddieId={row.caddieProfileId}
-          displayName={profileNames.get(row.caddieProfileId)}
-        />
+        <div className="flex flex-wrap items-center gap-1">
+          <CaddieLink
+            caddieId={row.caddieProfileId}
+            displayName={profileNames.get(row.caddieProfileId)}
+          />
+          {twoRoundRequests.has(row.caddieProfileId) ? (
+            <Badge variant="accent">{t('caddies:twoRound.requestBadge')}</Badge>
+          ) : null}
+        </div>
       ),
     },
     {
@@ -1974,7 +2021,7 @@ function AssignmentsTable({
           <Button
             type="button"
             size="sm"
-            variant="ghost"
+            variant="secondary"
             className="min-h-9"
             disabled={busyId === row.id}
             onClick={() => setMoving(row)}
@@ -2016,6 +2063,7 @@ function AssignmentsTable({
         rows={sorted}
         columns={columns}
         rowKey={row => row.id}
+        rowClassName={row => (secondRounds.has(row.id) ? 'second-round-row' : undefined)}
         // A club-sized day is fifty-odd rounds, and the whole lot laid out
         // below the work pushes everything else off the screen.
         pageSize={20}

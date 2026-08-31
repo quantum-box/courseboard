@@ -73,6 +73,7 @@ import {
   trackWidthPx,
   zoomPercent,
 } from './timelineLayout'
+import { secondRoundAssignmentIds, twoRoundRequestIds } from '../twoRoundDay'
 
 const COURSE_API = '/v1/course'
 const LANE_WIDTH_PX = 168
@@ -278,6 +279,15 @@ export function TimelinePage() {
     [],
     { cacheKey: 'caddie-profiles:list' },
   )
+  // Who asked to walk two rounds today. The lanes are where a pair that did
+  // not happen is visible, and the request is the club's own supply figure.
+  const availabilitiesResource = useResource(
+    () => courseboardApiJson<ListResponse<{ caddieProfileId: string; twoRoundRequest?: boolean }>>(
+      `${COURSE_API}/caddie-availabilities?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`,
+    ),
+    [date],
+    { cacheKey: `caddie-availabilities:${date}:${date}` },
+  )
   const coursesResource = useResource(
     () => courseboardApiJson<ListResponse<{
       id: string
@@ -295,6 +305,7 @@ export function TimelinePage() {
     assignmentsResource.refresh()
     caddiesResource.refresh()
     coursesResource.refresh()
+    availabilitiesResource.refresh()
   }
   useRegisterPageReload(refreshAll)
 
@@ -329,6 +340,8 @@ export function TimelinePage() {
   )
   const summary = summarizeDay(reservations, assignments, timezone)
   const conflicts = findOverlappingAssignmentIds(assignments, timezone)
+  const secondRounds = secondRoundAssignmentIds(assignments)
+  const twoRoundRequests = twoRoundRequestIds(availabilitiesResource.data?.items ?? [])
   const hourMarks = buildHourMarks(DEFAULT_TIMELINE_WINDOW, markStepMinutes(pxPerHour))
   const nowPct = nowLinePercent(currentMinute, date)
   const trackWidth = trackWidthPx(pxPerHour)
@@ -577,6 +590,7 @@ export function TimelinePage() {
             <span className="timeline-legend-item coverage-assigned">{t('timeline:legend.assigned')}</span>
             <span className="timeline-legend-item coverage-unassigned">{t('timeline:legend.unassigned')}</span>
             <span className="timeline-legend-item coverage-self">{t('timeline:legend.self')}</span>
+            <span className="timeline-legend-item coverage-second-round">{t('timeline:legend.secondRound')}</span>
             <span className="timeline-legend-item coverage-conflict">{t('timeline:legend.conflict')}</span>
           </div>
         </section>
@@ -746,29 +760,44 @@ export function TimelinePage() {
                     return {
                       id: profile.id,
                       label: profile.displayName,
-                      meta: t('timeline:caddieLane.meta', {
-                        rank: profile.rank,
-                        skill: skillLabel(profile.skillLevel),
-                      }),
+                      meta: [
+                        t('timeline:caddieLane.meta', {
+                          rank: profile.rank,
+                          skill: skillLabel(profile.skillLevel),
+                        }),
+                        twoRoundRequests.has(profile.id)
+                          ? t('timeline:twoRound.requestBadge')
+                          : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' · '),
                       blocks: laneAssignments.map(item => {
                         const start = parseTenantDateParts(item.scheduledAt, timezone).minutes
                         const block = toTimelineBlock(item.id, start, item.durationMinutes ?? 270)
                         const reservation = reservations.find(entry => entry.id === item.reservationId)
                         const selected = selection?.kind === 'assignment' && selection.id === item.id
                         const conflicted = conflicts.has(item.id)
+                        const second = secondRounds.has(item.id)
                         const partyLabel = reservation?.partyName ?? item.roundReference ?? item.id
+                        // Said as well as coloured: a lane printed in grey, or
+                        // read by somebody who cannot tell the two greens
+                        // apart, still has to say which round this is.
+                        const roundLabel = second
+                          ? `${t('timeline:twoRound.secondBadge')} · ${roleLabel(item.assignmentRole)}`
+                          : roleLabel(item.assignmentRole)
                         return {
                           ...block,
                           className: [
                             'timeline-block',
                             'timeline-block-assignment',
+                            second ? 'is-second-round' : '',
                             conflicted ? 'is-conflict' : '',
                             block.widthPct < 9 ? 'is-compact' : '',
                             selected ? 'is-selected' : '',
                           ].join(' '),
                           title: partyLabel,
-                          subtitle: `${roleLabel(item.assignmentRole)} · ${statusLabel(item.status)}`,
-                          tooltip: `${partyLabel} · ${roleLabel(item.assignmentRole)} · ${statusLabel(item.status)}`,
+                          subtitle: `${roundLabel} · ${statusLabel(item.status)}`,
+                          tooltip: `${partyLabel} · ${roundLabel} · ${statusLabel(item.status)}`,
                           onSelect: () => setSelection({ kind: 'assignment', id: item.id }),
                           toneNote: conflicted ? t('timeline:legend.conflict') : reservation?.courseName ?? null,
                         }
