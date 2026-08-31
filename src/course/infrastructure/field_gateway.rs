@@ -2222,35 +2222,13 @@ mod tests {
     #[tokio::test]
     async fn schedule_save_round_trips_a_field_owned_unknown_field() {
         let state = ScheduleServerState::default();
-        let app = Router::new()
-            .route(
-                "/v1/erp/reservation-resources/resource-1/schedule",
-                get(read_schedule).put(write_schedule),
-            )
-            .with_state(state.clone());
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind mock Field");
-        let address = listener.local_addr().expect("mock Field address");
-        let server = tokio::spawn(async move {
-            axum::serve(listener, app).await.expect("serve mock Field");
-        });
-
-        let gateway = FieldGolfCatalogGateway::new(
-            reqwest::Client::new(),
-            Some(&format!("http://{address}")),
-        );
+        let (base_url, server) = spawn_schedule_server(state.clone()).await;
+        let gateway = FieldGolfCatalogGateway::new(reqwest::Client::new(), Some(&base_url));
         let edited = AvailabilityRule::try_new(Some("rule-1".into()), 1, "07:00", "12:00", 2, 8)
             .expect("edited rule");
         let saved = gateway
             .replace_resource_schedule(
-                GatewayCredentials {
-                    authorization: "Bearer test-token",
-                    operator_id: "operator-test",
-                    platform_id: Some("platform-test"),
-                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
-                    caller_bearer: "Bearer test",
-                },
+                schedule_credentials(),
                 &ResourceId::new("resource-1"),
                 "Europe/Berlin",
                 &[edited],
@@ -2282,15 +2260,47 @@ mod tests {
         server.abort();
     }
 
+    #[tokio::test]
+    async fn schedule_save_sends_configured_rolling_window_days() {
+        let state = ScheduleServerState::default();
+        let (base_url, server) = spawn_schedule_server(state.clone()).await;
+        let gateway = FieldGolfCatalogGateway::new(reqwest::Client::new(), Some(&base_url));
+        let edited = AvailabilityRule::try_new(Some("rule-1".into()), 1, "07:00", "12:00", 2, 8)
+            .expect("edited rule");
+
+        gateway
+            .replace_resource_schedule(
+                schedule_credentials(),
+                &ResourceId::new("resource-1"),
+                "Europe/Berlin",
+                &[edited],
+                Some(Some(90)),
+            )
+            .await
+            .expect("replace schedule");
+
+        let body = state
+            .put_body
+            .lock()
+            .expect("put body lock")
+            .clone()
+            .expect("PUT body");
+        assert_eq!(*state.calls.lock().expect("calls lock"), vec!["GET", "PUT"]);
+        assert_eq!(body["rollingWindowDays"], json!(90));
+
+        server.abort();
+    }
+
     #[test]
     fn schedule_replace_body_distinguishes_omission_setting_and_release() {
         let edited =
             AvailabilityRule::try_new(None, 1, "07:00", "12:00", 2, 8).expect("edited rule");
 
-        let omitted = schedule_replace_body(&[], &[edited.clone()], "Asia/Tokyo", None);
+        let omitted = schedule_replace_body(&[], std::slice::from_ref(&edited), "Asia/Tokyo", None);
         assert!(omitted.get("rollingWindowDays").is_none());
 
-        let released = schedule_replace_body(&[], &[edited.clone()], "Asia/Tokyo", Some(None));
+        let released =
+            schedule_replace_body(&[], std::slice::from_ref(&edited), "Asia/Tokyo", Some(None));
         assert_eq!(released["rollingWindowDays"], Value::Null);
 
         let configured = schedule_replace_body(&[], &[edited], "Asia/Tokyo", Some(Some(90)));
@@ -2369,6 +2379,11 @@ mod tests {
         assert_eq!(body["rollingWindowDays"], json!(90));
         assert_eq!(body["rules"][0]["id"], json!("rule-1"));
         assert_eq!(body["rules"][0]["timezone"], json!("Asia/Tokyo"));
+        assert_eq!(body["rules"][0]["dayOfWeek"], json!(0));
+        assert_eq!(body["rules"][0]["startTime"], json!("07:00"));
+        assert_eq!(body["rules"][0]["endTime"], json!("12:00"));
+        assert_eq!(body["rules"][0]["capacity"], json!(1));
+        assert_eq!(body["rules"][0]["slotIntervalMinutes"], json!(8));
         assert_eq!(body["rules"][0]["effectiveFrom"], json!("2026-08-01"));
         assert_eq!(body["rules"][0]["effectiveTo"], json!("2026-12-31"));
         assert_eq!(body["rules"][0]["season"], json!("high"));

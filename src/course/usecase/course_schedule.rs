@@ -954,7 +954,6 @@ mod tests {
         rolling_window_sync_calls: Mutex<Vec<(ResourceId, Option<i32>)>>,
         rolling_window_sync_unchanged: Mutex<Vec<ResourceId>>,
         rolling_window_sync_errors: Mutex<Vec<ResourceId>>,
-        rolling_window_sync_delay: Mutex<Option<std::time::Duration>>,
         generated: Mutex<Vec<(NaiveDate, NaiveDate)>>,
     }
 
@@ -991,10 +990,6 @@ mod tests {
                 .lock()
                 .expect("lock")
                 .push((resource_id.clone(), rolling_window_days));
-            let delay = *self.rolling_window_sync_delay.lock().expect("lock");
-            if let Some(delay) = delay {
-                tokio::time::sleep(delay).await;
-            }
             if self
                 .rolling_window_sync_errors
                 .lock()
@@ -1142,6 +1137,12 @@ mod tests {
     struct FakeWatermarks {
         stored: Mutex<HashMap<CourseId, InventoryWatermark>>,
         written: Mutex<Vec<(CourseId, InventoryWatermark)>>,
+    }
+
+    impl FakeWatermarks {
+        fn clear_stored(&self) {
+            self.stored.lock().expect("lock").clear();
+        }
     }
 
     #[async_trait]
@@ -1507,32 +1508,34 @@ mod tests {
         let catalog = course_catalog(&["course-east"]);
         let schedules = Arc::new(FakeSchedules::default());
         let watermarks = Arc::new(FakeWatermarks::default());
+        let commercial = Arc::new(FakeCommercial {
+            horizon: Some(BookingHorizon::try_days(30).expect("valid horizon")),
+        });
         let credentials = credentials();
 
-        let synced = SyncRollingWindowOptInUseCase::new(
+        let sync = SyncRollingWindowOptInUseCase::new(
             catalog.clone(),
             schedules.clone(),
-            Arc::new(FakeCommercial {
-                horizon: Some(BookingHorizon::try_days(30).expect("valid horizon")),
-            }),
-        )
-        .execute(credentials)
-        .await
-        .expect("rolling-window sync");
-        let extended = ExtendCourseInventoryUseCase::new(
-            catalog,
+            commercial.clone(),
+        );
+        let extend = ExtendCourseInventoryUseCase::new(
+            catalog.clone(),
             schedules.clone(),
-            Arc::new(FakeCommercial {
-                horizon: Some(BookingHorizon::try_days(30).expect("valid horizon")),
-            }),
-            watermarks,
-        )
-        .execute(credentials, "tenant-test")
-        .await
-        .expect("inventory extension");
+            commercial,
+            watermarks.clone(),
+        );
 
-        assert_eq!(synced, vec![CourseId::new("course-east")]);
+        let extended = extend
+            .execute(credentials, "tenant-test")
+            .await
+            .expect("inventory extension");
+        let synced = sync
+            .execute(credentials)
+            .await
+            .expect("rolling-window sync");
+
         assert_eq!(extended, vec![CourseId::new("course-east")]);
+        assert_eq!(synced, vec![CourseId::new("course-east")]);
         assert_eq!(
             schedules
                 .rolling_window_sync_calls
@@ -1542,43 +1545,34 @@ mod tests {
             1
         );
         assert_eq!(schedules.generated.lock().expect("lock").len(), 1);
+        assert_eq!(watermarks.written.lock().expect("lock").len(), 1);
 
-        let reverse_catalog = course_catalog(&["course-east"]);
-        let reverse_schedules = Arc::new(FakeSchedules::default());
-        let reverse_watermarks = Arc::new(FakeWatermarks::default());
-        let reverse_extended = ExtendCourseInventoryUseCase::new(
-            reverse_catalog.clone(),
-            reverse_schedules.clone(),
-            Arc::new(FakeCommercial {
-                horizon: Some(BookingHorizon::try_days(30).expect("valid horizon")),
-            }),
-            reverse_watermarks,
-        )
-        .execute(credentials, "tenant-test")
-        .await
-        .expect("inventory extension first");
-        let reverse_synced = SyncRollingWindowOptInUseCase::new(
-            reverse_catalog,
-            reverse_schedules.clone(),
-            Arc::new(FakeCommercial {
-                horizon: Some(BookingHorizon::try_days(30).expect("valid horizon")),
-            }),
-        )
-        .execute(credentials)
-        .await
-        .expect("rolling-window sync second");
+        // Reuse the same fakes for the reverse order. Clear only the persisted
+        // watermark so this logical run starts from the same inventory state;
+        // the schedule observations remain shared and make both executions
+        // visible in the assertions below.
+        watermarks.clear_stored();
+        let reverse_synced = sync
+            .execute(credentials)
+            .await
+            .expect("rolling-window sync first");
+        let reverse_extended = extend
+            .execute(credentials, "tenant-test")
+            .await
+            .expect("inventory extension second");
 
-        assert_eq!(reverse_extended, vec![CourseId::new("course-east")]);
         assert_eq!(reverse_synced, vec![CourseId::new("course-east")]);
+        assert_eq!(reverse_extended, vec![CourseId::new("course-east")]);
         assert_eq!(
-            reverse_schedules
+            schedules
                 .rolling_window_sync_calls
                 .lock()
                 .expect("lock")
                 .len(),
-            1
+            2
         );
-        assert_eq!(reverse_schedules.generated.lock().expect("lock").len(), 1);
+        assert_eq!(schedules.generated.lock().expect("lock").len(), 2);
+        assert_eq!(watermarks.written.lock().expect("lock").len(), 2);
     }
 
     #[tokio::test]
