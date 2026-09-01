@@ -32,6 +32,8 @@ PLT-3373 待ち。
   `/v1/course/customers/{id}/membership` を生やす。
 - [x] 設定画面に会員種別の一覧・追加・編集を置く。
 - [x] 顧客を選んだときに会員 / ビジターを表示し、その場で会員種別を付与できるようにする。
+- [x] 顧客詳細から確認付きで台帳の顧客を論理削除できるようにする。Field の
+  `DELETE /v1/storekit/customers/{id}` を使い、予約・来場履歴は残す。
 - [x] 請求先が顧客と分けて持てないことを PLT-3373 に、`commerce_customers` の改名を
   PLT-3375 に起票する。
 - [x] prod Field API に対して疎通を確認した（テナント tn_01kxd5…、API :8081 + DB

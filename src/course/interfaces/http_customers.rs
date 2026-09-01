@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Multipart, Path, Query, State},
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     Extension, Json,
 };
 use chrono::{DateTime, NaiveDate, Utc};
@@ -40,8 +40,8 @@ use crate::course::infrastructure::{
 use crate::course::usecase::{
     AnalyzeCustomerReceptionFieldsUseCase, AssignMembershipPlanUseCase, CreateCustomerUseCase,
     CreateMembershipPlanUseCase, CreateReceptionCustomerUseCase, CustomerProvenance,
-    CustomerVisitReport, DraftCustomerReceptionUseCase, GetCustomerGradeRulesUseCase,
-    GetCustomerMembershipUseCase, GetCustomerReceptionFieldsUseCase,
+    CustomerVisitReport, DeleteCustomerUseCase, DraftCustomerReceptionUseCase,
+    GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase, GetCustomerReceptionFieldsUseCase,
     GetCustomerRegistrationUseCase, GetCustomerUseCase, GetCustomerVisitsUseCase,
     ListMembershipPlansUseCase, RecordReceptionCustomerValuesUseCase,
     ReplaceCustomerGradeRulesUseCase, ReplaceCustomerReceptionFieldsUseCase,
@@ -386,6 +386,39 @@ pub async fn get_customer(
         .await
         .map_err(AppError::from)?;
     Ok(Json(CustomerDto::from(&customer)))
+}
+
+/// DELETE /v1/course/customers/{customer_id}
+///
+/// Removes the person from Field's active ledger. Field retains the row for
+/// audit and reference integrity, so reservations and visit history remain
+/// historical facts rather than being cascaded away.
+#[utoipa::path(
+    delete,
+    path = "/v1/course/customers/{customer_id}",
+    tag = "course",
+    params(("customer_id" = String, Path, description = "Customer id")),
+    responses(
+        (status = 204, description = "Customer removed from the active ledger"),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn delete_customer(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(customer_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let customer_id = CustomerId::try_new(customer_id).map_err(AppError::from)?;
+    DeleteCustomerUseCase::new(customer_gateway(&state))
+        .execute(credentials, &customer_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 /// POST /v1/course/customers

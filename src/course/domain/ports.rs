@@ -942,6 +942,17 @@ pub trait CustomerGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         input: &NewCustomer,
     ) -> Result<Customer, CourseError>;
+
+    /// Removes a person from the active ledger.
+    ///
+    /// Field keeps the row for audit and reference integrity, but excludes it
+    /// from subsequent reads and searches. CourseBoard must not try to remove
+    /// reservations or its own historical records alongside this operation.
+    async fn delete_customer(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+    ) -> Result<(), CourseError>;
 }
 
 /// Port for reading a paper reception sheet into ledger candidates.

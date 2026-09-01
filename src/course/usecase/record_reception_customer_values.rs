@@ -100,6 +100,14 @@ mod tests {
         ) -> Result<Customer, CourseError> {
             unreachable!()
         }
+
+        async fn delete_customer(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _customer_id: &CustomerId,
+        ) -> Result<(), CourseError> {
+            unreachable!()
+        }
     }
 
     #[async_trait]

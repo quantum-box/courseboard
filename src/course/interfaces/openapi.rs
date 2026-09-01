@@ -91,6 +91,7 @@ impl Modify for SecurityAddon {
         http::list_caddie_assignments,
         http_customers::search_customers,
         http_customers::create_customer,
+        http_customers::delete_customer,
         http_customers::get_customer,
         http_customers::get_customer_visits,
         http_customers::get_customer_registration,

@@ -1,22 +1,20 @@
-//! GetCustomerUseCase: one use case, one public entrypoint (`execute`).
+//! DeleteCustomerUseCase: remove one person from the active customer ledger.
 //!
-//! Reading one person out of the ledger by id, which is what a customer's own
-//! page is drawn from. Distinct from a search: a search answers with candidates
-//! and may answer with none, while this is asked about somebody already
-//! identified, so not finding them is an error rather than an empty list.
+//! Field owns the ledger and implements deletion as deactivation. CourseBoard
+//! deliberately does not cascade into reservations, visits, or local audit
+//! records: those remain historical facts even after the person stops appearing
+//! in customer searches.
 
 use std::sync::Arc;
 
 use crate::course::domain::actions;
-use crate::course::domain::{
-    CourseError, Customer, CustomerGateway, CustomerId, GatewayCredentials,
-};
+use crate::course::domain::{CourseError, CustomerGateway, CustomerId, GatewayCredentials};
 
-pub struct GetCustomerUseCase {
+pub struct DeleteCustomerUseCase {
     customers: Arc<dyn CustomerGateway>,
 }
 
-impl GetCustomerUseCase {
+impl DeleteCustomerUseCase {
     pub fn new(customers: Arc<dyn CustomerGateway>) -> Self {
         Self { customers }
     }
@@ -25,9 +23,11 @@ impl GetCustomerUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
         customer_id: &CustomerId,
-    ) -> Result<Customer, CourseError> {
-        credentials.require(actions::LIST_CUSTOMERS).await?;
-        self.customers.get_customer(credentials, customer_id).await
+    ) -> Result<(), CourseError> {
+        credentials.require(actions::MANAGE_CUSTOMERS).await?;
+        self.customers
+            .delete_customer(credentials, customer_id)
+            .await
     }
 }
 
@@ -37,11 +37,11 @@ mod tests {
     use async_trait::async_trait;
     use std::sync::Mutex;
 
-    use crate::course::domain::{CustomerSearchQuery, NewCustomer};
+    use crate::course::domain::{Customer, CustomerSearchQuery, NewCustomer};
 
     #[derive(Default)]
     struct StubCustomers {
-        asked: Mutex<Vec<String>>,
+        deleted: Mutex<Vec<String>>,
     }
 
     #[async_trait]
@@ -51,22 +51,15 @@ mod tests {
             _credentials: GatewayCredentials<'_>,
             _query: &CustomerSearchQuery,
         ) -> Result<Vec<Customer>, CourseError> {
-            unreachable!("a customer page reads by id, never by name")
+            unreachable!("not used by this use case")
         }
 
         async fn get_customer(
             &self,
             _credentials: GatewayCredentials<'_>,
-            customer_id: &CustomerId,
+            _customer_id: &CustomerId,
         ) -> Result<Customer, CourseError> {
-            self.asked.lock().unwrap().push(customer_id.to_string());
-            Ok(Customer::reconstitute(
-                customer_id.clone(),
-                "本田 康彦",
-                None,
-                None,
-                None,
-            ))
+            unreachable!("not used by this use case")
         }
 
         async fn create_customer(
@@ -74,15 +67,16 @@ mod tests {
             _credentials: GatewayCredentials<'_>,
             _input: &NewCustomer,
         ) -> Result<Customer, CourseError> {
-            unreachable!("not used by this test")
+            unreachable!("not used by this use case")
         }
 
         async fn delete_customer(
             &self,
             _credentials: GatewayCredentials<'_>,
-            _customer_id: &CustomerId,
+            customer_id: &CustomerId,
         ) -> Result<(), CourseError> {
-            unreachable!("not used by this test")
+            self.deleted.lock().unwrap().push(customer_id.to_string());
+            Ok(())
         }
     }
 
@@ -97,13 +91,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_customer_page_reads_the_person_it_was_opened_for() {
+    async fn removes_only_the_requested_customer_from_the_active_ledger() {
         let gateway = Arc::new(StubCustomers::default());
-        let customer = GetCustomerUseCase::new(gateway.clone())
+        DeleteCustomerUseCase::new(gateway.clone())
             .execute(credentials(), &CustomerId::new("cus_1"))
             .await
             .unwrap();
-        assert_eq!(customer.name(), "本田 康彦");
-        assert_eq!(*gateway.asked.lock().unwrap(), vec!["cus_1".to_string()]);
+
+        assert_eq!(*gateway.deleted.lock().unwrap(), vec!["cus_1"]);
     }
 }

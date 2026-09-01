@@ -28,6 +28,7 @@ mod customer_reception_fields;
 mod delete_caddie;
 mod delete_caddie_availability;
 mod delete_course;
+mod delete_customer;
 mod draft_customer_reception;
 mod export_monthly_settlement_csv;
 mod export_payroll_csv;
@@ -125,6 +126,7 @@ pub use customer_reception_fields::{
 pub use delete_caddie::DeleteCaddieUseCase;
 pub use delete_caddie_availability::DeleteCaddieAvailabilityUseCase;
 pub use delete_course::DeleteCourseUseCase;
+pub use delete_customer::DeleteCustomerUseCase;
 pub use draft_customer_reception::DraftCustomerReceptionUseCase;
 pub use export_monthly_settlement_csv::ExportMonthlySettlementCsvUseCase;
 pub use export_payroll_csv::ExportPayrollCsvUseCase;
