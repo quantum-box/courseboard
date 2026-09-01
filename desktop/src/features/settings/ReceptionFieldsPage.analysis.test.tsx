@@ -117,4 +117,41 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     expect(document.activeElement).toBe(keyInput)
     expect((keyInput as HTMLInputElement).value).toBe('member_code')
   })
+
+  it('keeps a reordered row associated with its own move control', async () => {
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return {
+          items: [
+            ...DEFAULT_RECEPTION_FIELDS,
+            ...['first_field', 'second_field', 'third_field'].map((fieldKey, index) => ({
+              fieldKey,
+              kind: 'custom',
+              fieldType: 'text',
+              enabled: true,
+              required: false,
+              label: fieldKey,
+              customLabel: true,
+              sortOrder: DEFAULT_RECEPTION_FIELDS.length + index,
+              options: [],
+            })),
+          ],
+        }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    renderPage()
+    expect(await screen.findAllByRole('textbox', { name: '項目キー' })).toHaveLength(3)
+    const firstMoveDown = screen.getAllByRole('button', { name: '下へ移動' })[0]
+    firstMoveDown.focus()
+
+    fireEvent.click(firstMoveDown)
+    expect(document.activeElement).toBe(firstMoveDown)
+    fireEvent.click(firstMoveDown)
+
+    expect(screen.getAllByRole('textbox', { name: '項目キー' }).map(input => (
+      (input as HTMLInputElement).value
+    ))).toEqual(['second_field', 'third_field', 'first_field'])
+  })
 })
