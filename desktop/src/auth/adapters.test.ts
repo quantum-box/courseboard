@@ -635,6 +635,36 @@ describe('Production BrowserPkceAdapter', () => {
     expect(await adapter.getAccessToken()).toBe('cognito-access-token')
   })
 
+  it('loads the profile from the API preview matching the frontend PR', async () => {
+    vi.stubGlobal('window', {
+      location: {
+        search: '',
+        href: 'https://pr313--courseboard.txcloud.app/',
+        origin: 'https://pr313--courseboard.txcloud.app',
+        protocol: 'https:',
+        reload: vi.fn(),
+      },
+      history: { replaceState: vi.fn(), state: null },
+    })
+
+    const { BROWSER_PKCE_SESSION_KEY, createAuthAdapter } = await import('./adapters')
+    localStorageMock.setItem(BROWSER_PKCE_SESSION_KEY, JSON.stringify({
+      accessToken: 'preview-access-token',
+      accessTokenExpiresAt: Date.now() + 60 * 60 * 1000,
+    }))
+    const fetchMock = vi.fn(async () => Response.json({
+      user: { id: 'user-preview', username: 'preview.operator' },
+      tenants: [{ id: 'tn_01example', name: 'Example Club' }],
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect((await createAuthAdapter().bootstrap()).kind).toBe('authenticated')
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://pr313--courseboard-api.txcloud.app/v1/me',
+      expect.any(Object),
+    )
+  })
+
   it('keeps a fresh Cognito access token when force-refresh has no refresh token', async () => {
     // False-positive path: navigation 401 → getAccessToken(true) must not discard
     // a usable access token just because Cognito omitted refresh_token.
