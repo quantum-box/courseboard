@@ -53,6 +53,19 @@ describe('membership activity formatter', () => {
     expect(summary).not.toContain('not shown')
   })
 
+  it('formats calendar dates and instants with the active locale and tenant timezone', () => {
+    const context = { locale: 'en', timezone: 'America/Los_Angeles' }
+    const summary = formatMembershipActivitySnapshot('membership.credential_updated', {
+      issuedOn: '2026-01-01',
+      verifiedAt: '2026-01-01T00:30:00Z',
+    }, undefined, context)
+
+    // `issuedOn` is a calendar day, so it must not become 12/31 in a western
+    // tenant. `verifiedAt` is an instant and therefore follows the tenant zone.
+    expect(summary).toContain('01/01/2026')
+    expect(summary).toContain('Dec 31, 2025')
+  })
+
   it('formats consent terms and channel while preserving a type-only target', () => {
     const summary = formatMembershipActivitySnapshot('membership.consents_recorded', {
       consents: [{

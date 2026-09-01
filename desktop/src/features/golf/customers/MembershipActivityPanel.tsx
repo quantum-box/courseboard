@@ -21,6 +21,37 @@ import {
   type MembershipActivityTranslate,
 } from './membership-activities'
 
+function uniqueActivities(items: readonly MembershipActivity[]) {
+  const seen = new Set<string>()
+  return items.filter(activity => {
+    if (seen.has(activity.id)) return false
+    seen.add(activity.id)
+    return true
+  })
+}
+
+type PaginationState = Readonly<{
+  scopeKey: string
+  items: readonly MembershipActivity[]
+  continuationCursor: string | null
+  hasLoadedMore: boolean
+  loadingRequestId: number | null
+  error: unknown | null
+}>
+
+function emptyPagination(scopeKey: string): PaginationState {
+  return {
+    scopeKey,
+    items: [],
+    continuationCursor: null,
+    hasLoadedMore: false,
+    loadingRequestId: null,
+    error: null,
+  }
+}
+
+let nextLoadMoreRequestId = 0
+
 function ActivityRow({
   activity,
   timezone,
@@ -34,11 +65,12 @@ function ActivityRow({
   translate: MembershipActivityTranslate
   t: (key: string, options?: Record<string, unknown>) => string
 }) {
-  const presentation = formatMembershipActivity(activity, translate)
+  const formatContext = { timezone, locale }
+  const presentation = formatMembershipActivity(activity, translate, formatContext)
   const target = formatMembershipActivityTarget(activity.target)
   const source = formatMembershipActivitySource(activity.source, translate)
-  const before = formatMembershipActivitySnapshot(activity.kind, activity.before, translate)
-  const after = formatMembershipActivitySnapshot(activity.kind, activity.after, translate)
+  const before = formatMembershipActivitySnapshot(activity.kind, activity.before, translate, formatContext)
+  const after = formatMembershipActivitySnapshot(activity.kind, activity.after, translate, formatContext)
   const hasSnapshots = activity.before !== null || activity.after !== null
 
   return (
@@ -104,54 +136,119 @@ function ActivityRow({
  * visit history remains about rounds and check-ins.  A successful empty page
  * is the only state that renders EmptyState; a 404 remains ResourceError.
  */
-export function MembershipActivityPanel({ customerId }: { customerId: string }) {
+export function MembershipActivityPanel({
+  customerId,
+  refreshRevision = 0,
+}: {
+  customerId: string
+  /** Advances after a sibling membership mutation succeeds. */
+  refreshRevision?: number
+}) {
   const { t, i18n } = useTranslation(['membershipActivity', 'common'])
   const timezone = useTenantTimezone()
-  const [items, setItems] = useState<readonly MembershipActivity[] | null>(null)
-  const [nextCursor, setNextCursor] = useState<string | null>(null)
-  const [loadMoreError, setLoadMoreError] = useState<unknown | null>(null)
-  const [loadingMore, setLoadingMore] = useState(false)
+  const scopeKey = `${customerId}\u0000${refreshRevision}`
+  // Scope the shared resource as well: on a revision change, useResource must
+  // not synchronously surface the prior revision's first-page data or error.
+  const resourceCacheKey = `customer:membership-activities:${scopeKey}`
+  const [pagination, setPagination] = useState<PaginationState>(() => emptyPagination(scopeKey))
 
   const resource = useResource(
     () =>
       courseboardApiJson<MembershipActivityPage>(
         membershipActivitiesPath(customerId, MEMBERSHIP_ACTIVITY_PAGE_SIZE),
       ),
-    [customerId],
-    { cacheKey: `customer:membership-activities:${customerId}` },
+    [customerId, refreshRevision],
+    { cacheKey: resourceCacheKey },
   )
 
-  // Keep pagination state separate from useResource: the first page is
-  // cached/revalidated by the shared hook, while subsequent pages are appended
-  // without replacing the first page.
+  // Do not let a previous customer/revision's local pagination state cross the
+  // render boundary. The effect installs the new scope after commit; until it
+  // does, rendering derives only from the current resource.
+  const activePagination = pagination.scopeKey === scopeKey ? pagination : null
+
   useEffect(() => {
+    let effectIsCurrent = true
+    setPagination(current => {
+      if (!effectIsCurrent || current.scopeKey === scopeKey) return current
+      return emptyPagination(scopeKey)
+    })
+    return () => {
+      effectIsCurrent = false
+    }
+  }, [scopeKey])
+
+  useEffect(() => {
+    let effectIsCurrent = true
     if (resource.data) {
-      setItems(resource.data.items)
-      setNextCursor(resource.data.nextCursor ?? null)
-      setLoadMoreError(null)
-      return
+      const firstPage = resource.data
+      setPagination(current => {
+        if (!effectIsCurrent || current.scopeKey !== scopeKey) return current
+        // Field's feed is append-only. A revalidated first page can gain a new
+        // head and drop an old tail without invalidating items previously shown,
+        // so retain their union and let the newest first page win duplicate ids.
+        return {
+          ...current,
+          items: uniqueActivities([...firstPage.items, ...current.items]),
+          continuationCursor: current.hasLoadedMore
+            ? current.continuationCursor
+            : (firstPage.nextCursor ?? null),
+        }
+      })
     }
-    if (resource.loading && !resource.error) {
-      setItems(null)
-      setNextCursor(null)
-      setLoadMoreError(null)
+    return () => {
+      effectIsCurrent = false
     }
-  }, [customerId, resource.data, resource.error, resource.loading])
+  }, [resource.data, scopeKey])
+
+  // Apply a just-arrived first page synchronously for this render as well as
+  // persisting it in the effect above. This prevents a transient duplicate or
+  // gap while React schedules the merge.
+  const items = resource.data
+    ? uniqueActivities([...resource.data.items, ...(activePagination?.items ?? [])])
+    : activePagination && activePagination.items.length > 0
+      ? activePagination.items
+      : null
+  const nextCursor = activePagination?.continuationCursor ?? null
+  const loadingMore = activePagination?.loadingRequestId !== null
+  const loadMoreError = activePagination?.error ?? null
 
   const loadMore = async () => {
-    if (!items || !nextCursor || loadingMore) return
-    setLoadingMore(true)
-    setLoadMoreError(null)
+    if (!activePagination || !items || !nextCursor || loadingMore) return
+    const capturedScope = scopeKey
+    const capturedCursor = nextCursor
+    const requestId = nextLoadMoreRequestId + 1
+    nextLoadMoreRequestId = requestId
+    setPagination(current => {
+      if (
+        current.scopeKey !== capturedScope ||
+        current.continuationCursor !== capturedCursor ||
+        current.loadingRequestId !== null
+      ) return current
+      return { ...current, loadingRequestId: requestId, error: null }
+    })
     try {
       const page = await courseboardApiJson<MembershipActivityPage>(
-        membershipActivitiesPath(customerId, MEMBERSHIP_ACTIVITY_PAGE_SIZE, nextCursor),
+        membershipActivitiesPath(customerId, MEMBERSHIP_ACTIVITY_PAGE_SIZE, capturedCursor),
       )
-      setItems(current => [...(current ?? []), ...page.items])
-      setNextCursor(page.nextCursor ?? null)
+      setPagination(current => {
+        if (current.scopeKey !== capturedScope || current.loadingRequestId !== requestId) {
+          return current
+        }
+        return {
+          ...current,
+          items: uniqueActivities([...current.items, ...page.items]),
+          continuationCursor: page.nextCursor ?? null,
+          hasLoadedMore: true,
+          loadingRequestId: null,
+        }
+      })
     } catch (error) {
-      setLoadMoreError(error)
-    } finally {
-      setLoadingMore(false)
+      setPagination(current => {
+        if (current.scopeKey !== capturedScope || current.loadingRequestId !== requestId) {
+          return current
+        }
+        return { ...current, error, loadingRequestId: null }
+      })
     }
   }
 

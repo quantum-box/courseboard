@@ -5,7 +5,7 @@ import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../../../api'
-import { clearResourceCache } from '../../../hooks/useResource'
+import { clearResourceCache, writeResourceCache } from '../../../hooks/useResource'
 import { i18next } from '../../../i18n'
 import { MembershipActivityPanel } from './MembershipActivityPanel'
 
@@ -37,12 +37,16 @@ const second = {
   after: { future: true },
 }
 
-function renderPanel() {
+function renderPanel(refreshRevision = 0, customerId = 'cus_1') {
   return render(
     <I18nextProvider i18n={i18next}>
-      <MembershipActivityPanel customerId="cus_1" />
+      <MembershipActivityPanel customerId={customerId} refreshRevision={refreshRevision} />
     </I18nextProvider>,
   )
+}
+
+function activityCacheKey(customerId = 'cus_1', refreshRevision = 0) {
+  return `customer:membership-activities:${customerId}\u0000${refreshRevision}`
 }
 
 describe('MembershipActivityPanel', () => {
@@ -110,5 +114,227 @@ describe('MembershipActivityPanel', () => {
     await waitFor(() => expect(screen.getByText('対象を更新')).toBeTruthy())
     expect(screen.getByText('consent')).toBeTruthy()
     expect(screen.queryByText(/consent \/$/)).toBeNull()
+  })
+
+  it('reloads the first page when a successful sibling mutation advances its revision', async () => {
+    api.json
+      .mockResolvedValueOnce({ items: [], nextCursor: null })
+      .mockResolvedValueOnce({ items: [{ ...first, kind: 'membership.plan_assigned' }], nextCursor: null })
+    const view = renderPanel()
+
+    await screen.findByText('会員変更履歴はありません')
+    view.rerender(
+      <I18nextProvider i18n={i18next}>
+        <MembershipActivityPanel customerId="cus_1" refreshRevision={1} />
+      </I18nextProvider>,
+    )
+
+    await waitFor(() => expect(api.json).toHaveBeenCalledTimes(2))
+    await screen.findByText('プランを割り当て')
+  })
+
+  it('does not surface the old first page while a same-customer revision loads', async () => {
+    const oldFirst = { ...first, id: 'old-first', after: { name: '旧 revision' } }
+    const refreshedFirst = { ...first, id: 'refreshed-first', after: { name: '更新済み revision' } }
+    let finishRefresh: ((page: { items: typeof refreshedFirst[]; nextCursor: null }) => void) | undefined
+    const refresh = new Promise<{ items: typeof refreshedFirst[]; nextCursor: null }>(resolve => {
+      finishRefresh = resolve
+    })
+    api.json
+      .mockResolvedValueOnce({ items: [oldFirst], nextCursor: 'old/1' })
+      .mockReturnValueOnce(refresh)
+    const view = renderPanel()
+
+    await screen.findAllByText('旧 revision')
+    view.rerender(
+      <I18nextProvider i18n={i18next}>
+        <MembershipActivityPanel customerId="cus_1" refreshRevision={1} />
+      </I18nextProvider>,
+    )
+
+    expect(screen.queryByText('旧 revision')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'さらに読み込む' })).toBeNull()
+    expect(screen.getByText('会員変更履歴を読み込んでいます。')).toBeTruthy()
+
+    finishRefresh?.({ items: [refreshedFirst], nextCursor: null })
+    await screen.findAllByText('更新済み revision')
+  })
+
+  it('unions an append-only revalidated first page with retained pages and keeps their cursor', async () => {
+    const activity = (id: string) => ({ ...first, id, before: null, after: { name: id } })
+    const oldFirst = ['activity-A', 'activity-B', 'activity-C', 'activity-D', 'activity-E'].map(activity)
+    const loadedPage = ['activity-F', 'activity-G', 'activity-H', 'activity-I', 'activity-J'].map(activity)
+    const revalidatedFirst = {
+      items: [activity('activity-N'), ...oldFirst.slice(0, 4)],
+      nextCursor: 'new-first-cursor',
+    }
+    writeResourceCache(activityCacheKey(), {
+      items: oldFirst,
+      nextCursor: 'old-first-cursor',
+    })
+    let finishRevalidation: ((page: typeof revalidatedFirst) => void) | undefined
+    const revalidation = new Promise<typeof revalidatedFirst>(resolve => {
+      finishRevalidation = resolve
+    })
+    api.json.mockImplementation((path: string) => {
+      if (path.includes('cursor=old-first-cursor')) {
+        return Promise.resolve({ items: loadedPage, nextCursor: 'after-J-cursor' })
+      }
+      if (path.includes('cursor=after-J-cursor')) return Promise.resolve({ items: [], nextCursor: null })
+      return revalidation
+    })
+    renderPanel()
+
+    await screen.findByRole('button', { name: 'さらに読み込む' })
+    fireEvent.click(screen.getByRole('button', { name: 'さらに読み込む' }))
+    await waitFor(() => expect(document.querySelectorAll('.membership-activity-row')).toHaveLength(10))
+
+    finishRevalidation?.(revalidatedFirst)
+    await waitFor(() => expect(document.querySelectorAll('.membership-activity-row')).toHaveLength(11))
+    const rows = [...document.querySelectorAll('.membership-activity-row')]
+    for (const id of [
+      'activity-N',
+      'activity-A',
+      'activity-B',
+      'activity-C',
+      'activity-D',
+      'activity-E',
+      'activity-F',
+      'activity-G',
+      'activity-H',
+      'activity-I',
+      'activity-J',
+    ]) {
+      expect(rows.filter(row => row.textContent?.includes(id))).toHaveLength(1)
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: 'さらに読み込む' }))
+    await waitFor(() => expect(api.json).toHaveBeenCalledWith(
+      '/v1/course/customers/cus_1/membership-activities?limit=5&cursor=after-J-cursor',
+    ))
+  })
+
+  it('does not expose old pagination items, errors, or loading after a scope change', async () => {
+    const oldExtra = { ...first, id: 'old-extra', before: null, after: { name: 'old-extra' } }
+    let secondLoad = true
+    api.json.mockImplementation((path: string) => {
+      if (path.includes('customers/cus_1/membership-activities?limit=5&cursor=old%2F1')) {
+        return Promise.resolve({ items: [oldExtra], nextCursor: 'old/2' })
+      }
+      if (path.includes('customers/cus_1/membership-activities?limit=5&cursor=old%2F2')) {
+        return new Promise(() => undefined)
+      }
+      if (path.includes('customers/cus_1/membership-activities')) {
+        // The first request supplies the first cursor; subsequent calls here
+        // are only a safety net for revalidation in this focused test.
+        if (secondLoad) {
+          secondLoad = false
+          return Promise.resolve({ items: [first], nextCursor: 'old/1' })
+        }
+        return Promise.resolve({ items: [first], nextCursor: 'old/1' })
+      }
+      return new Promise(() => undefined)
+    })
+    const view = renderPanel()
+
+    await screen.findByRole('button', { name: 'さらに読み込む' })
+    fireEvent.click(screen.getByRole('button', { name: 'さらに読み込む' }))
+    await screen.findAllByText('old-extra')
+    fireEvent.click(screen.getByRole('button', { name: 'さらに読み込む' }))
+    await screen.findByRole('button', { name: 'さらに読み込んでいます…' })
+
+    view.rerender(
+      <I18nextProvider i18n={i18next}>
+        <MembershipActivityPanel customerId="cus_2" />
+      </I18nextProvider>,
+    )
+
+    expect(screen.queryByText('old-extra')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'さらに読み込んでいます…' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'さらに読み込む' })).toBeNull()
+    expect(screen.getByText('会員変更履歴を読み込んでいます。')).toBeTruthy()
+  })
+
+  it('ignores an old load-more success after the customer changes', async () => {
+    const oldExtra = { ...second, id: 'mact_old' }
+    const newFirst = { ...first, id: 'mact_new', after: { name: '新しい顧客' } }
+    let finishOldPage: ((page: { items: typeof oldExtra[]; nextCursor: null }) => void) | undefined
+    let oldPageSettled = false
+    const oldPage = new Promise<{ items: typeof oldExtra[]; nextCursor: null }>(resolve => {
+      finishOldPage = resolve
+    })
+    void oldPage.then(() => { oldPageSettled = true })
+    api.json.mockImplementation((path: string) => {
+      if (path.includes('customers/cus_1/membership-activities?limit=5&cursor=old%2F1')) {
+        return oldPage
+      }
+      if (path.includes('customers/cus_1/membership-activities')) {
+        return Promise.resolve({ items: [first], nextCursor: 'old/1' })
+      }
+      if (path.includes('customers/cus_2/membership-activities?limit=5&cursor=new%2F1')) {
+        return Promise.resolve({ items: [second], nextCursor: null })
+      }
+      return Promise.resolve({ items: [newFirst], nextCursor: 'new/1' })
+    })
+    const view = renderPanel()
+
+    await screen.findByRole('button', { name: 'さらに読み込む' })
+    fireEvent.click(screen.getByRole('button', { name: 'さらに読み込む' }))
+    view.rerender(
+      <I18nextProvider i18n={i18next}>
+        <MembershipActivityPanel customerId="cus_2" />
+      </I18nextProvider>,
+    )
+    await screen.findAllByText('新しい顧客')
+
+    finishOldPage?.({ items: [oldExtra], nextCursor: null })
+    await waitFor(() => expect(oldPageSettled).toBe(true))
+    await waitFor(() => expect(screen.queryByText(/membership\.future_change/)).toBeNull())
+    expect(screen.getByRole('button', { name: 'さらに読み込む' })).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'さらに読み込む' }))
+    await waitFor(() => expect(api.json).toHaveBeenCalledWith(
+      '/v1/course/customers/cus_2/membership-activities?limit=5&cursor=new%2F1',
+    ))
+  })
+
+  it('ignores an old load-more failure after the refresh revision changes', async () => {
+    let rejectOldPage: ((error: Error) => void) | undefined
+    let oldPageSettled = false
+    const oldPage = new Promise<never>((_resolve, reject) => {
+      rejectOldPage = reject
+    })
+    void oldPage.then(
+      () => { oldPageSettled = true },
+      () => { oldPageSettled = true },
+    )
+    let initialFirstPage = true
+    api.json.mockImplementation((path: string) => {
+      if (path.includes('cursor=old%2F1')) return oldPage
+      if (path.includes('customers/cus_1/membership-activities')) {
+        if (initialFirstPage) {
+          initialFirstPage = false
+          return Promise.resolve({ items: [first], nextCursor: 'old/1' })
+        }
+        return Promise.resolve({ items: [{ ...first, after: { name: '更新済み' } }], nextCursor: 'new/1' })
+      }
+      throw new Error(`Unexpected API path: ${path}`)
+    })
+    const view = renderPanel()
+
+    await screen.findByRole('button', { name: 'さらに読み込む' })
+    fireEvent.click(screen.getByRole('button', { name: 'さらに読み込む' }))
+    view.rerender(
+      <I18nextProvider i18n={i18next}>
+        <MembershipActivityPanel customerId="cus_1" refreshRevision={1} />
+      </I18nextProvider>,
+    )
+    await screen.findAllByText('更新済み')
+
+    rejectOldPage?.(new Error('old page failed'))
+    await waitFor(() => expect(oldPageSettled).toBe(true))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('button', { name: 'さらに読み込む' })).toBeTruthy()
   })
 })

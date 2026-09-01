@@ -69,6 +69,20 @@ export type MembershipActivityTranslate = (
   options?: Record<string, unknown>,
 ) => string
 
+export type MembershipActivityFormatContext = Readonly<{
+  timezone: string
+  locale: string
+}>
+
+const DEFAULT_FORMAT_CONTEXT: MembershipActivityFormatContext = {
+  timezone: 'Asia/Tokyo',
+  locale: 'ja-JP',
+}
+
+function intlLocale(locale: string) {
+  return locale.toLowerCase().startsWith('en') ? 'en-US' : 'ja-JP'
+}
+
 const KIND_KEYS: Readonly<Record<string, string>> = {
   'membership.consents_recorded': 'kind.consentsRecorded',
   'membership.credential_archived': 'kind.credentialArchived',
@@ -142,27 +156,47 @@ function nestedString(
   return nested ? firstString(nested, ...keys) : null
 }
 
-function formatSnapshotDate(value: unknown) {
+function formatSnapshotDate(
+  value: unknown,
+  context: MembershipActivityFormatContext = DEFAULT_FORMAT_CONTEXT,
+) {
   const string = asString(value)
   if (!string) return null
+  const calendarDate = /^(\d{4})-(\d{2})-(\d{2})$/.exec(string)
+  if (calendarDate) {
+    const [, year, month, day] = calendarDate
+    // Date-only snapshot fields are calendar values, not UTC instants. Keep
+    // their parts intact and use UTC solely as a neutral Intl carrier.
+    return new Intl.DateTimeFormat(intlLocale(context.locale), {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      timeZone: 'UTC',
+    }).format(new Date(Date.UTC(Number(year), Number(month) - 1, Number(day))))
+  }
   const date = new Date(string)
   if (Number.isNaN(date.getTime())) return string
-  return new Intl.DateTimeFormat('ja-JP', {
+  return new Intl.DateTimeFormat(intlLocale(context.locale), {
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
+    timeZone: context.timezone,
   }).format(date)
 }
 
-function formatSnapshotDateTime(value: unknown) {
+function formatSnapshotDateTime(
+  value: unknown,
+  context: MembershipActivityFormatContext = DEFAULT_FORMAT_CONTEXT,
+) {
   const string = asString(value)
   if (!string) return null
-  return formatMembershipActivityDateTime(string)
+  return formatMembershipActivityDateTime(string, context.timezone, context.locale)
 }
 
 function formatPlanSnapshot(
   snapshot: SnapshotRecord,
   translate?: MembershipActivityTranslate,
+  context?: MembershipActivityFormatContext,
 ) {
   const plan =
     firstString(snapshot, 'planName', 'name') ??
@@ -172,14 +206,16 @@ function formatPlanSnapshot(
     firstString(snapshot, 'startedOn') ??
       nestedString(snapshot, 'assignment', 'startedOn') ??
       nestedString(snapshot, 'plan', 'startedOn'),
+    context,
   )
   const endedOn = formatSnapshotDate(
     firstString(snapshot, 'endedOn') ??
       nestedString(snapshot, 'assignment', 'endedOn') ??
       nestedString(snapshot, 'plan', 'endedOn'),
+    context,
   )
-  const oldEndedOn = formatSnapshotDate(firstString(snapshot, 'previousEndedOn', 'oldEndedOn'))
-  const newEndedOn = formatSnapshotDate(firstString(snapshot, 'newEndedOn', 'endedOn'))
+  const oldEndedOn = formatSnapshotDate(firstString(snapshot, 'previousEndedOn', 'oldEndedOn'), context)
+  const newEndedOn = formatSnapshotDate(firstString(snapshot, 'newEndedOn', 'endedOn'), context)
   const status = formatStatus(
     snapshot.status ??
       nestedString(snapshot, 'assignment', 'status') ??
@@ -242,10 +278,11 @@ function formatPlanSnapshot(
 function formatSubjectSnapshot(
   snapshot: SnapshotRecord,
   translate?: MembershipActivityTranslate,
+  context?: MembershipActivityFormatContext,
 ) {
   const name = firstString(snapshot, 'name')
   const subjectType = firstString(snapshot, 'subjectType', 'type')
-  const birthDate = formatSnapshotDate(snapshot.birthDate)
+  const birthDate = formatSnapshotDate(snapshot.birthDate, context)
   const sex = firstString(snapshot, 'sex')
   const note = firstString(snapshot, 'note')
   const archived = snapshot.archived === true
@@ -268,13 +305,14 @@ function formatSubjectSnapshot(
 function formatCredentialSnapshot(
   snapshot: SnapshotRecord,
   translate?: MembershipActivityTranslate,
+  context?: MembershipActivityFormatContext,
 ) {
   const subjectId = firstString(snapshot, 'subjectId')
   const label = firstString(snapshot, 'label', 'name')
   const kind = firstString(snapshot, 'kind')
-  const issuedOn = formatSnapshotDate(snapshot.issuedOn)
-  const expiresOn = formatSnapshotDate(snapshot.expiresOn)
-  const verifiedAt = formatSnapshotDateTime(snapshot.verifiedAt)
+  const issuedOn = formatSnapshotDate(snapshot.issuedOn, context)
+  const expiresOn = formatSnapshotDate(snapshot.expiresOn, context)
+  const verifiedAt = formatSnapshotDateTime(snapshot.verifiedAt, context)
   const verifiedBy = firstString(snapshot, 'verifiedBy')
   const note = firstString(snapshot, 'note')
   const archived = snapshot.archived === true
@@ -403,10 +441,11 @@ function formatConsentSnapshot(
 function formatRegisteredSnapshot(
   snapshot: SnapshotRecord,
   translate?: MembershipActivityTranslate,
+  context?: MembershipActivityFormatContext,
 ) {
   const customerId = firstString(snapshot, 'customerId')
   const status = firstString(snapshot, 'status')
-  const plan = formatPlanSnapshot(nestedRecord(snapshot, 'plan') ?? snapshot, translate)
+  const plan = formatPlanSnapshot(nestedRecord(snapshot, 'plan') ?? snapshot, translate, context)
   const subjects = Array.isArray(snapshot.subjects) ? snapshot.subjects.length : null
   const credentials = Array.isArray(snapshot.credentials) ? snapshot.credentials.length : null
   const consents = Array.isArray(snapshot.consents) ? snapshot.consents.length : null
@@ -460,17 +499,18 @@ export function formatMembershipActivitySnapshot(
   kind: string,
   snapshot: unknown,
   translate?: MembershipActivityTranslate,
+  context?: MembershipActivityFormatContext,
 ) {
   const record = asRecord(snapshot)
   if (!record) return ''
   if (kind === 'membership.plan_assigned' || kind === 'membership.plan_assignment_truncated') {
-    return formatPlanSnapshot(record, translate)
+    return formatPlanSnapshot(record, translate, context)
   }
-  if (kind.startsWith('membership.subject_')) return formatSubjectSnapshot(record, translate)
-  if (kind.startsWith('membership.credential_')) return formatCredentialSnapshot(record, translate)
+  if (kind.startsWith('membership.subject_')) return formatSubjectSnapshot(record, translate, context)
+  if (kind.startsWith('membership.credential_')) return formatCredentialSnapshot(record, translate, context)
   if (kind === 'membership.consents_recorded') return formatConsentSnapshot(record, translate)
   if (kind === 'membership.registered' || kind === 'membership.registration_submitted') {
-    return formatRegisteredSnapshot(record, translate)
+    return formatRegisteredSnapshot(record, translate, context)
   }
   return ''
 }
@@ -484,11 +524,12 @@ export type MembershipActivityPresentation = Readonly<{
 export function formatMembershipActivity(
   activity: MembershipActivity,
   translate?: MembershipActivityTranslate,
+  context?: MembershipActivityFormatContext,
 ): MembershipActivityPresentation {
   const kindLabel = membershipActivityKindLabel(activity.kind, translate)
   const summary =
-    formatMembershipActivitySnapshot(activity.kind, activity.after, translate) ||
-    formatMembershipActivitySnapshot(activity.kind, activity.before, translate) ||
+    formatMembershipActivitySnapshot(activity.kind, activity.after, translate, context) ||
+    formatMembershipActivitySnapshot(activity.kind, activity.before, translate, context) ||
     translated(translate, 'snapshot.unavailable', '変更内容を表示できません。')
   return { kindLabel, summary }
 }
@@ -542,8 +583,7 @@ export function formatMembershipActivityDateTime(
 ) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
-  const intlLocale = locale.toLowerCase().startsWith('en') ? 'en-US' : 'ja-JP'
-  return new Intl.DateTimeFormat(intlLocale, {
+  return new Intl.DateTimeFormat(intlLocale(locale), {
     dateStyle: 'medium',
     timeStyle: 'short',
     timeZone: timezone,

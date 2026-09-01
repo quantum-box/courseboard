@@ -52,10 +52,18 @@ const MEMBER: CustomerMembership = {
 type ApiCall = { path: string; init?: RequestInit }
 const calls: ApiCall[] = []
 
-function renderBadge(editable = false, customerId = CUSTOMER_ID) {
+function renderBadge(
+  editable = false,
+  customerId = CUSTOMER_ID,
+  onMembershipChanged?: () => void,
+) {
   return render(
     <I18nextProvider i18n={i18next}>
-      <MembershipBadge customerId={customerId} editable={editable} />
+      <MembershipBadge
+        customerId={customerId}
+        editable={editable}
+        onMembershipChanged={onMembershipChanged}
+      />
     </I18nextProvider>,
   )
 }
@@ -175,6 +183,7 @@ describe('MembershipBadge resource lifecycle', () => {
   })
 
   it('updates the membership cache after granting a plan', async () => {
+    const onMembershipChanged = vi.fn()
     api.json.mockImplementation(async (path: string, init?: RequestInit) => {
       calls.push({ path, init })
       if (path === membershipPath(CUSTOMER_ID) && !init?.method) return VISITOR
@@ -183,7 +192,7 @@ describe('MembershipBadge resource lifecycle', () => {
       throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
     })
 
-    renderBadge(true)
+    renderBadge(true, CUSTOMER_ID, onMembershipChanged)
     await screen.findByText('ビジター')
     fireEvent.click(screen.getByRole('button', { name: '会員にする' }))
     await waitFor(() => expect(calls.filter(call => call.path === membershipPlansPath)).toHaveLength(1))
@@ -196,6 +205,29 @@ describe('MembershipBadge resource lifecycle', () => {
       path: membershipPath(CUSTOMER_ID),
       init: expect.objectContaining({ method: 'POST' }),
     }))
+    expect(onMembershipChanged).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not notify sibling resources when assigning a plan fails', async () => {
+    const onMembershipChanged = vi.fn()
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      calls.push({ path, init })
+      if (path === membershipPath(CUSTOMER_ID) && !init?.method) return VISITOR
+      if (path === membershipPlansPath) return { items: [PLAN] }
+      if (path === membershipPath(CUSTOMER_ID) && init?.method === 'POST') {
+        throw new Error('assignment failed')
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    renderBadge(true, CUSTOMER_ID, onMembershipChanged)
+    await screen.findByText('ビジター')
+    fireEvent.click(screen.getByRole('button', { name: '会員にする' }))
+    await screen.findByRole('option', { name: '正会員' })
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: PLAN.id } })
+
+    await waitFor(() => expect(toast.show).toHaveBeenCalled())
+    expect(onMembershipChanged).not.toHaveBeenCalled()
   })
 
   it('updates the membership cache after saving a member number', async () => {
