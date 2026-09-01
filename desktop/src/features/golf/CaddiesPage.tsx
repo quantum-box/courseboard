@@ -997,8 +997,9 @@ function DispatchView({
           tabIndex={activeTab === 'rounds' ? 0 : -1}
           onKeyDown={event => moveDispatchTab(event, 'rounds')}
           onClick={() => setTab('rounds')}
+          prominent
         >
-          <ClipboardCheck /> {t('caddies:dispatch.tabs.rounds')}
+          <ClipboardCheck className="size-4" /> {t('caddies:dispatch.tabs.rounds')}
         </DetailTabButton>
         <DetailTabButton
           id="caddie-dispatch-duty-tab"
@@ -1007,8 +1008,9 @@ function DispatchView({
           tabIndex={activeTab === 'duties' ? 0 : -1}
           onKeyDown={event => moveDispatchTab(event, 'duties')}
           onClick={() => setTab('duties')}
+          prominent
         >
-          <ClipboardList /> {t('caddies:dispatch.tabs.duties')}
+          <ClipboardList className="size-4" /> {t('caddies:dispatch.tabs.duties')}
         </DetailTabButton>
       </div>
 
@@ -1054,52 +1056,65 @@ function DispatchView({
         role="tabpanel"
         aria-labelledby="caddie-dispatch-round-tab"
         hidden={activeTab !== 'rounds'}
-        className="space-y-6"
+        className="space-y-4"
       >
-        <UnassignedRoundsPanel
-          sheet={teeSheet}
-          assignments={horizonAssignments}
-          horizon={horizon}
-          onHorizonChange={setHorizon}
-          onChanged={onChanged}
-        />
-
-        <AutoAssignPanel
-          date={date}
-          attendance={attendanceById}
-          onChanged={onChanged}
-          setFlash={setFlash}
-        />
-
-        <section className="app-section space-y-3">
+        <section className="space-y-3">
           <div>
-            <h2 className="section-title">{t('caddies:dispatch.boardTitle')}</h2>
+            <h2 className="section-title">{t('caddies:dispatch.primaryTitle')}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              {t('caddies:dispatch.boardDescription')}
+              {t('caddies:dispatch.primaryDescription')}
             </p>
           </div>
-          {orphaned.length > 0 ? (
-            <Notice tone="warning" title={t('caddies:orphaned.title', { n: String(orphaned.length) })}>
-              {t('caddies:orphaned.body')}
-            </Notice>
-          ) : null}
-          {assignmentsResource.loading ? <LoadingState label={t('caddies:dispatch.loading')} /> : null}
-          {assignmentsResource.error ? (
-            <ResourceError error={assignmentsResource.error} onRetry={assignmentsResource.refresh} />
-          ) : null}
-          {!assignmentsResource.loading && !assignmentsResource.error ? (
-            <AssignmentsTable
-              assignments={dayAssignments}
-              profiles={profiles}
-              orphanedIds={orphanedIds}
-              twoRoundRequests={twoRoundRequests}
+          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+            <UnassignedRoundsPanel
+              sheet={teeSheet}
+              assignments={horizonAssignments}
+              horizon={horizon}
+              onHorizonChange={setHorizon}
+              onChanged={onChanged}
+            />
+
+            <AutoAssignPanel
               date={date}
-              rounds={teeSheet.data?.items ?? []}
+              attendance={attendanceById}
               onChanged={onChanged}
               setFlash={setFlash}
             />
-          ) : null}
+          </div>
         </section>
+
+        <CollapsibleSection
+          title={t('caddies:dispatch.assignedTitle', {
+            n: assignedCount === null ? '—' : String(assignedCount),
+          })}
+        >
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {t('caddies:dispatch.boardDescription')}
+            </p>
+            {orphaned.length > 0 ? (
+              <Notice tone="warning" title={t('caddies:orphaned.title', { n: String(orphaned.length) })}>
+                {t('caddies:orphaned.body')}
+              </Notice>
+            ) : null}
+            {assignmentsResource.loading ? <LoadingState label={t('caddies:dispatch.loading')} /> : null}
+            {assignmentsResource.error ? (
+              <ResourceError error={assignmentsResource.error} onRetry={assignmentsResource.refresh} />
+            ) : null}
+            {!assignmentsResource.loading && !assignmentsResource.error ? (
+              <AssignmentsTable
+                assignments={dayAssignments}
+                profiles={profiles}
+                orphanedIds={orphanedIds}
+                twoRoundRequests={twoRoundRequests}
+                date={date}
+                rounds={teeSheet.data?.items ?? []}
+                onChanged={onChanged}
+                setFlash={setFlash}
+              />
+            ) : null}
+          </div>
+        </CollapsibleSection>
 
         <CollapsibleSection title={t('caddies:dispatch.supportTitle')}>
           <DailySupplyPanel date={date} />
@@ -2884,6 +2899,7 @@ function DetailTabButton({
   ariaControls,
   onKeyDown,
   tabIndex,
+  prominent = false,
 }: {
   active: boolean
   onClick: () => void
@@ -2892,7 +2908,18 @@ function DetailTabButton({
   ariaControls?: string
   onKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void
   tabIndex?: number
+  prominent?: boolean
 }) {
+  const activeClass = prominent
+    ? 'bg-primary text-primary-foreground shadow-sm'
+    : 'bg-background text-foreground shadow-sm'
+  const inactiveClass = prominent
+    ? 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground'
+    : 'text-muted-foreground hover:bg-muted'
+  const sizeClass = prominent
+    ? 'min-h-9 px-3 text-sm font-semibold'
+    : 'px-2 text-xs font-medium'
+
   return (
     <button
       type="button"
@@ -2903,8 +2930,8 @@ function DetailTabButton({
       tabIndex={tabIndex}
       onKeyDown={onKeyDown}
       onClick={onClick}
-      className={`flex min-w-[6.5rem] items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
-        active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted'
+      className={`flex min-w-[6.5rem] items-center justify-center gap-1.5 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${sizeClass} ${
+        active ? activeClass : inactiveClass
       }`}
     >
       {children}

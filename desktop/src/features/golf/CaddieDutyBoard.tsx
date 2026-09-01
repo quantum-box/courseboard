@@ -138,16 +138,23 @@ export function CaddieDutiesPanel({
       title={t('caddies:duties.title')}
       description={t('caddies:duties.description')}
       actions={(
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={free.length === 0}
-          onClick={() => setAssigning(true)}
-        >
-          <ClipboardList />
-          {t('caddies:duties.assign')}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {!filed.loading && !filed.error && !shifts.loading && !shifts.error ? (
+            <Badge variant="neutral">
+              {t('caddies:duties.freeCount', { n: String(free.length) })}
+            </Badge>
+          ) : null}
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={free.length === 0}
+            onClick={() => setAssigning(true)}
+          >
+            <ClipboardList />
+            {t('caddies:duties.assign')}
+          </Button>
+        </div>
       )}
     >
       {filed.loading || shifts.loading ? (
@@ -203,15 +210,6 @@ export function CaddieDutiesPanel({
               </div>
             ))
           )}
-
-          {/* How much of the day is going spare, in one line. The names are in
-              the sheet: a desk screen that lists forty idle caddies buries the
-              handful actually put on something. */}
-          <p className="text-xs text-muted-foreground">
-            {free.length === 0
-              ? t('caddies:duties.noneFree')
-              : t('caddies:duties.freeCount', { n: String(free.length) })}
-          </p>
         </div>
       ) : null}
 

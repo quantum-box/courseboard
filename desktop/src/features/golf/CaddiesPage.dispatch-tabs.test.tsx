@@ -103,7 +103,7 @@ describe('CaddiesPage dispatch tabs', () => {
     vi.restoreAllMocks()
   })
 
-  it('starts on round assignments and shows the three round-work panels', async () => {
+  it('starts on the unassigned workflow with secondary information collapsed', async () => {
     renderPage()
 
     const roundTab = await screen.findByRole('tab', { name: /ラウンド配置/ })
@@ -111,11 +111,16 @@ describe('CaddiesPage dispatch tabs', () => {
     const dateInput = screen.getByLabelText('対象の日')
     expect(roundTab.getAttribute('aria-selected')).toBe('true')
     expect(dutyTab.getAttribute('aria-selected')).toBe('false')
+    expect(roundTab.className).toContain('bg-primary')
+    expect(dutyTab.className).toContain('bg-background')
     expect(roundTab.compareDocumentPosition(dateInput) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 
+    expect(screen.getByRole('heading', { name: '未配置を解消する' })).toBeTruthy()
     expect(await screen.findByRole('heading', { name: 'キャディが決まっていない組' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: /自動.*配置/ })).toBeTruthy()
-    expect(screen.getByRole('heading', { name: 'この日の割当' })).toBeTruthy()
+    const assigned = document.querySelector('details.collapsible-section')
+    expect(assigned).toBeTruthy()
+    expect(assigned?.hasAttribute('open')).toBe(false)
     expect(screen.queryByRole('heading', { name: '別業務' })).toBeNull()
   })
 

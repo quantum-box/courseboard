@@ -95,6 +95,7 @@ export const caddies: DeepPartial<typeof source> = {
   dispatch: {
     boardTitle: 'この日の担当',
     boardDescription: '担当をかえるときは、その行の「かえる」からです。ほかのキャディにうつすことも、同じキャディをほかの組にうつすこともできます。',
+    primaryDescription: 'まだ担当が決まっていない組を見て、まとめて決めるか、1組ずつ決めます。',
     loading: '担当を読み込んでいます',
     supportTitle: '人数の目安・コースごとの過不足・おすすめの人',
     tabs: {
@@ -590,7 +591,7 @@ export const caddies: DeepPartial<typeof source> = {
   },
   duties: {
     title: 'べつの仕事',
-    description: 'ラウンドがない時間に、コースの手入れ・うめ土・ポーターの手つだいなど、べつの仕事をたのみます。その時間はラウンドに入りません。午前だけたのんで、午後はラウンド、という入れ方もできます。',
+    description: 'ラウンドではない仕事を、1日じゅう、または時間を決めてたのみます。',
     loading: 'よみこんでいます',
     loadingOptions: '仕事のしゅるいをよみこんでいます',
     onDutyTitle: 'べつの仕事をする人',

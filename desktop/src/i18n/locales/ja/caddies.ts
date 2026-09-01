@@ -105,6 +105,9 @@ export const caddies = {
   dispatch: {
     boardTitle: 'この日の割当',
     boardDescription: '担当を変えるときは、その行の「付け替え」から。別のキャディに移すことも、同じキャディを別の組に移すこともできます。',
+    primaryTitle: '未配置を解消する',
+    primaryDescription: '未配置の組を確認し、まとめて割り当てるか、1組ずつ担当を決めます。',
+    assignedTitle: '配置済み {{n}}組',
     loading: '割当を読み込んでいます',
     supportTitle: '人数の目安・コース別の過不足・おすすめの候補',
     tabs: {
@@ -612,7 +615,7 @@ export const caddies = {
   },
   duties: {
     title: '別業務',
-    description: 'ラウンドの入っていない時間に、コース整備・埋め土・ポーター補助などの別業務を割り当てます。その時間はキャディ供給から外れ、自動配置と候補一覧にも出ません。午前だけ別業務にして午後はラウンドに入れる、という入れ方ができます。',
+    description: 'ラウンド以外の仕事を、終日または時間帯で割り当てます。',
     loading: '別業務を読み込んでいます',
     loadingOptions: '業務種別を読み込んでいます',
     onDutyTitle: '別業務に出ている人',

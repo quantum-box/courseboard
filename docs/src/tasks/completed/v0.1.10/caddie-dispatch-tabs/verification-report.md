@@ -33,11 +33,12 @@
 
 ```text
 type-check: 成功
-test: 108 files / 923 tests passed（最新mainへrebase後）
+targeted test: 3 files / 14 tests passed（タブ、別業務、翻訳カタログ）
+full test: 108 files / 923 tests passed（worker数を制限して再実行）
 build: 成功（Vite 6.4.3、2171 modules transformed）
 git diff --check: 成功
-browser: local fixture でラウンド配置 / 別業務、date/tab URL保持、console warning/error 0件
-design QA: design-qa.md final result passed
+browser: PR Previewの再build後に確認
+design QA: PR Previewの再build後に更新
 ```
 
 ## CI / PR
