@@ -109,6 +109,7 @@ PR version: API `0.1.13`（base `0.1.12`）、UI `0.1.9`（base `0.1.8`）。
 - [x] Field の標準項目提案を既存の CourseBoard 受付票項目へ写像
 - [x] `consumer` のカスタム項目を CourseBoard ローカル項目として提案し、subject 項目など保存先がない提案を warning として表示
 - [x] 設定画面で分析結果を未保存の提案として反映し、確認・修正・取消・保存できる UI
+- [x] 項目設定と空用紙分析を受付作業画面から `settings/reception-fields` へ移動
 - [x] mock、Rust、frontend の focused test
 - [ ] 実 Field API の #1257 ルートへ空用紙を送った結果を PR Preview で確認
 
@@ -123,9 +124,10 @@ PR version: API `0.1.13`（base `0.1.12`）、UI `0.1.9`（base `0.1.8`）。
 - `cargo test --lib blank_form`、`cargo test --lib consumer_custom_fields`
 - `cargo test --lib every_registered_route_is_classified`
 - `cd desktop && npm run type-check`
-- `cd desktop && npm run test`（106 files / 923 tests）
+- `cd desktop && npm run test`（106 files / 924 tests）
 - `cd desktop && npm run build`
 - mock UI で空用紙分析、標準項目と custom 項目の提案、warning、preview、取消を確認
+- mock UI で受付作業画面から項目設定が外れ、設定ハブと `settings/reception-fields` に表示されることを確認
 
 実 Field API への送信と PR Preview は未確認。今回の差分に DB schema 変更はない。
 

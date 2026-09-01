@@ -31,6 +31,7 @@ import { CustomerGradesPage } from './features/settings/CustomerGradesPage'
 import { MembershipDiscountsPage } from './features/settings/MembershipDiscountsPage'
 import { MembershipPlansPage } from './features/settings/MembershipPlansPage'
 import { MembershipPlayWindowsPage } from './features/settings/MembershipPlayWindowsPage'
+import { ReceptionFieldsPage } from './features/settings/ReceptionFieldsPage'
 import { SettingsAdvancedPage } from './features/settings/SettingsAdvancedPage'
 import { CustomerDetailPage } from './features/golf/customers/CustomerDetailPage'
 import { CustomersPage } from './features/golf/customers/CustomersPage'
@@ -180,6 +181,7 @@ function RouteContent({ route }: { route: string }) {
   if (route === 'settings/membership-play-windows') return <MembershipPlayWindowsPage />
   if (route === 'settings/customer-grades') return <CustomerGradesPage />
   if (route === 'settings/caddie-duties') return <CaddieDutiesPage />
+  if (route === 'settings/reception-fields') return <ReceptionFieldsPage />
   return <NotFoundPage />
 }
 

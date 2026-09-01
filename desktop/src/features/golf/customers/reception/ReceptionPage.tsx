@@ -232,7 +232,7 @@ export function ReceptionPage() {
     }
   }
 
-  const busy = reading || registeringAll
+  const busy = reading || registeringAll || fieldSettings.loading || Boolean(fieldSettings.error)
 
   return (
     <div className="page-stack">
@@ -285,13 +285,9 @@ export function ReceptionPage() {
         ))}
       </Panel>
 
-      <ReceptionFieldSettingsPanel
-        fields={receptionFields}
-        loading={fieldSettings.loading}
-        error={fieldSettings.error}
-        onRetry={() => void fieldSettings.refresh()}
-        onSaved={fieldSettings.setData}
-      />
+      {fieldSettings.error ? (
+        <ResourceError error={fieldSettings.error} onRetry={() => void fieldSettings.refresh()} />
+      ) : null}
 
       {reading ? <LoadingState label={t('customers:reception.reading')} /> : null}
 
@@ -428,12 +424,12 @@ function customFieldKeyIsInvalid(fields: readonly ReceptionField[]) {
 }
 
 /**
- * Settings for the sheet are kept on this screen because they are only useful
- * while comparing a sheet. The editor deliberately sends the complete list:
+ * Settings for the sheet live under the Settings hub, away from the morning
+ * reception workflow. The editor deliberately sends the complete list:
  * the API treats PUT as a replacement and the server merges missing defaults
  * back in, so a newly added standard field cannot disappear from old tenants.
  */
-function ReceptionFieldSettingsPanel({
+export function ReceptionFieldSettingsPanel({
   fields,
   loading,
   error,
