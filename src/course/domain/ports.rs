@@ -16,13 +16,14 @@ use super::{
     MembershipDiscounts, MembershipPlan, MembershipPlanId, MembershipPlayWindows,
     MonthlySettlement, NewCustomer, NewCustomerRegistration, NewReservation, PartyDetails,
     PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraft,
-    ReceptionSheet, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
-    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
-    ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber, ShiftPolicy,
-    SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
-    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
-    UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin,
-    VisitCheckinRequest, WorkedMinutes, YearMonth,
+    ReceptionFormProposal, ReceptionSheet, ReplaceCaddieMemberships, Reservation,
+    ReservationBookingUpdate, ReservationId, ReservationPolicy, ReservationProduct,
+    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
+    SeededReservation, SetMemberNumber, ShiftPolicy, SlotOverride, SlotOverrideQuery,
+    TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
+    UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin, VisitCheckinRequest,
+    WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -962,6 +963,15 @@ pub trait CustomerReceptionOcrGateway: Send + Sync {
         sheet: ReceptionSheet,
         fields: &[CustomerReceptionField],
     ) -> Result<ReceptionDraft, CourseError>;
+
+    /// Analyzes a blank sheet and proposes only fields that can be represented
+    /// by CourseBoard's current reception-field model.  The proposal is not a
+    /// write; the caller reviews it and uses the settings PUT to persist it.
+    async fn analyze_reception_form(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        sheet: ReceptionSheet,
+    ) -> Result<ReceptionFormProposal, CourseError>;
 }
 
 /// Port for the reception-only Field ERP customer create capability.

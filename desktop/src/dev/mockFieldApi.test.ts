@@ -28,6 +28,33 @@ describe('mockFieldApi', () => {
     expect(isMockFieldDataEnabled()).toBe(false)
   })
 
+  it('analyzes a blank reception sheet without mutating saved settings', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const before = resolveMockFieldApiJson('/v1/course/customer-reception-fields')
+    expect(before.kind).toBe('hit')
+
+    const form = new FormData()
+    form.append('file', new File(['mock'], 'blank-sheet.jpg', { type: 'image/jpeg' }))
+    const analysis = resolveMockFieldApiJson(
+      '/v1/course/customer-reception-fields/analysis',
+      { method: 'POST', body: form },
+    )
+    expect(analysis.kind).toBe('hit')
+    if (analysis.kind !== 'hit') return
+    expect(analysis.data).toMatchObject({
+      fields: expect.arrayContaining([
+        expect.objectContaining({ fieldKey: 'phone', required: true, label: 'ご連絡先' }),
+        expect.objectContaining({ fieldKey: 'membership_class', kind: 'custom' }),
+      ]),
+      warnings: expect.arrayContaining([expect.stringContaining('申込者区分')]),
+      previewImage: expect.stringContaining('data:image/png;base64,'),
+    })
+
+    const after = resolveMockFieldApiJson('/v1/course/customer-reception-fields')
+    expect(after).toEqual(before)
+  })
+
   it('returns golf extension status and course-api courses fixtures', () => {
     vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')

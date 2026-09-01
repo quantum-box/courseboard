@@ -93,6 +93,18 @@ Field の汎用 OCR は複合 `address` 型を受けないため、住所設定�
 描画し、必須欄が空なら登録ボタンの理由を表示する。修正前の OCR 値は標準項目と追加項目の
 両方で併記する。
 
+### 空用紙からの設定提案
+
+Field #1257 の `POST /v1/erp/membership/reception-fields/analysis` を、CourseBoard の
+`POST /v1/course/customer-reception-fields/analysis` から同じ bearer で呼ぶ。返された標準項目の
+うち、CourseBoard の既存標準キーへ対応できるものだけを現在の設定案へ反映する。
+
+Field の会員申込書分析は申込者氏名と同意欄を意図的に対象外にしているため、氏名の固定必須と
+ゴルフ固有の同意定義は変更しない。`consumer` の custom field 提案は Field の registry へ保存せず、
+CourseBoard が所有するゴルフ固有項目の未保存案として取り込む。`customer_subject` など CourseBoard に
+保存先のない提案は黙って採用せず warning として表示する。分析結果は自動保存せず、設定画面の
+未保存状態へ適用し、係が原本を確認・修正してから既存 PUT API で全量保存する。
+
 ## 失敗と整合性
 
 - 設定変更前から開いている画面を信用せず、登録時にサーバで再検証する。

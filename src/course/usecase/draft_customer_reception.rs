@@ -50,7 +50,9 @@ mod tests {
     use async_trait::async_trait;
     use std::sync::Mutex;
 
-    use crate::course::domain::{ReceptionDraftRow, ReceptionSheetMediaType};
+    use crate::course::domain::{
+        ReceptionDraftRow, ReceptionFormProposal, ReceptionSheetMediaType,
+    };
 
     struct StubReader {
         seen: Mutex<Vec<ReceptionSheetMediaType>>,
@@ -76,6 +78,14 @@ mod tests {
         ) -> Result<ReceptionDraft, CourseError> {
             self.seen.lock().unwrap().push(sheet.media_type());
             self.answer.lock().unwrap().take().expect("one call")
+        }
+
+        async fn analyze_reception_form(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _sheet: ReceptionSheet,
+        ) -> Result<ReceptionFormProposal, CourseError> {
+            unreachable!("not used by this use case")
         }
     }
 
