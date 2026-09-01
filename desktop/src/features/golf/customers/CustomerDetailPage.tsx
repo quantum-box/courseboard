@@ -135,6 +135,10 @@ function DeleteCustomerDialog({
     try {
       await courseboardApiJson<void>(customerPath(customer.id), { method: 'DELETE' })
       clearResourceCache(`customer:${customer.id}`)
+      clearResourceCache(`customer:membership:${customer.id}`)
+      clearResourceCache(`customer:visits:${customer.id}`)
+      clearResourceCache(`customer:registration:${customer.id}`)
+      clearResourceCache('customers:search:')
       showToast({ tone: 'success', message: t('customers:delete.saved') })
       navigate('golf/customers')
     } catch (reason) {

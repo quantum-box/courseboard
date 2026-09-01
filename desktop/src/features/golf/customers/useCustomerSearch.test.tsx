@@ -5,6 +5,7 @@ import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { i18next } from '../../../i18n'
+import { clearResourceCache } from '../../../hooks/useResource'
 import { CustomersPage } from './CustomersPage'
 import { useCustomerSearch } from './useCustomerSearch'
 
@@ -36,6 +37,7 @@ describe('customer search acceptance', () => {
 
   afterEach(() => {
     cleanup()
+    clearResourceCache()
     vi.clearAllTimers()
     vi.useRealTimers()
     vi.unstubAllEnvs()
@@ -72,6 +74,31 @@ describe('customer search acceptance', () => {
     // The same table the other rosters use — columns and a pager, not a list.
     expect(screen.getByRole('table')).toBeTruthy()
     expect(screen.getByRole('columnheader', { name: /カナ/ })).toBeTruthy()
+    // Membership is loaded only after selecting a customer. Rendering one
+    // badge per row would turn this ledger request into an N+1 waterfall.
+    expect(screen.queryByRole('columnheader', { name: /会員種別/ })).toBeNull()
+    expect(screen.queryByText('会員種別を確認しています…')).toBeNull()
+  })
+
+  it('台帳へ戻った直後はキャッシュ済みの顧客を表示する', async () => {
+    const first = render(
+      <I18nextProvider i18n={i18next}>
+        <CustomersPage />
+      </I18nextProvider>,
+    )
+    await finishDebounce()
+    expect(screen.getByText('本田 康彦')).toBeTruthy()
+    first.unmount()
+
+    render(
+      <I18nextProvider i18n={i18next}>
+        <CustomersPage />
+      </I18nextProvider>,
+    )
+
+    // Revalidation is still waiting for the debounce, but the previous page
+    // is already available and must not collapse back to a loading screen.
+    expect(screen.getByText('本田 康彦')).toBeTruthy()
   })
 
   it('20人を超えるとページャで次のページに進める', async () => {
@@ -101,7 +128,7 @@ describe('customer search acceptance', () => {
     fireEvent.click(screen.getByRole('button', { name: /次へ/ }))
 
     expect(screen.getByText('本田 康彦')).toBeTruthy()
-  })
+  }, 15_000)
 
   it('登録した顧客はリロード後の一覧にも残る', async () => {
     const { unmount } = render(

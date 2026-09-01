@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import { courseboardApiJson } from '../../../api'
+import { peekResourceCache, writeResourceCache } from '../../../hooks/useResource'
 import type { Customer, CustomerList } from './models'
 
 /** Long enough that typing a full name is one request, not six. */
@@ -33,6 +34,10 @@ export function customerSearchParameter(query: string): CustomerSearchParameter 
  * asking for more only ever gets 100 back — past that the desk searches.
  */
 export const LEDGER_PAGE_ROWS = 100
+
+function customerSearchCacheKey(path: string) {
+  return `customers:search:${path}`
+}
 
 /**
  * `listWhenEmpty` is what the ledger screen asks for: an empty box means the
@@ -97,12 +102,21 @@ export function useCustomerSearch(
     }
 
     const generation = ++latest.current
-    setState({ candidates: [], searching: true, completedQuery: null, error: null })
+    const cacheKey = customerSearchCacheKey(path)
+    const previous = peekResourceCache(cacheKey) as CustomerList | undefined
+    setState({
+      candidates: previous?.items ?? [],
+      // A cache hit stays visible while the debounce and revalidation run.
+      searching: previous === undefined,
+      completedQuery: previous ? trimmed : null,
+      error: null,
+    })
     const timer = setTimeout(() => {
       void (async () => {
         try {
           const found = await courseboardApiJson<CustomerList>(path)
           if (latest.current !== generation) return
+          writeResourceCache(cacheKey, found)
           setState({
             candidates: found.items ?? [],
             searching: false,
@@ -112,9 +126,9 @@ export function useCustomerSearch(
         } catch (error) {
           if (latest.current !== generation) return
           setState({
-            candidates: [],
+            candidates: previous?.items ?? [],
             searching: false,
-            completedQuery: null,
+            completedQuery: previous ? trimmed : null,
             error: error instanceof Error ? error.message : String(error),
           })
         }

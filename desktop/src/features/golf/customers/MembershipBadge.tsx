@@ -4,13 +4,13 @@ import { useTranslation } from 'react-i18next'
 
 import { courseboardApiJson } from '../../../api'
 import { NativeSelect } from '../../../components/Page'
+import { useResource } from '../../../hooks/useResource'
 import { showToast } from '../../../lib/toast'
 import {
   memberNumberPath,
   membershipPath,
   membershipPlansPath,
   type CustomerMembership,
-  type MembershipPlan,
   type MembershipPlanList,
 } from './membership'
 
@@ -38,49 +38,32 @@ export function MembershipBadge({
   editable?: boolean
 }) {
   const { t } = useTranslation(['ledger'])
-  const [membership, setMembership] = useState<CustomerMembership | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [failed, setFailed] = useState(false)
+  const membershipResource = useResource(
+    () => courseboardApiJson<CustomerMembership>(membershipPath(customerId)),
+    [customerId],
+    { cacheKey: `customer:membership:${customerId}` },
+  )
+  const membership = membershipResource.data
+  const loading = membershipResource.loading
+  const failed = membershipResource.error !== null
   const [granting, setGranting] = useState(false)
-  const [plans, setPlans] = useState<MembershipPlan[] | null>(null)
   const [numbering, setNumbering] = useState<string | null>(null)
   const [savingNumber, setSavingNumber] = useState(false)
 
   useEffect(() => {
-    let current = true
-    setMembership(null)
-    setFailed(false)
     setGranting(false)
-    setLoading(true)
-    void (async () => {
-      try {
-        const found = await courseboardApiJson<CustomerMembership>(membershipPath(customerId))
-        if (!current) return
-        setMembership(found)
-      } catch {
-        // Not a blocker: the booking is writable whether or not the standing
-        // could be read, so this stays a quiet "unknown" rather than a toast.
-        if (current) setFailed(true)
-      } finally {
-        if (current) setLoading(false)
-      }
-    })()
-    return () => {
-      current = false
-    }
+    setNumbering(null)
   }, [customerId])
 
-  const openGrant = async () => {
+  const plansResource = useResource(
+    () => courseboardApiJson<MembershipPlanList>(membershipPlansPath),
+    [],
+    { cacheKey: 'membership:plans:active', enabled: granting },
+  )
+  const plans = plansResource.data?.items ?? null
+
+  const openGrant = () => {
     setGranting(true)
-    if (plans) return
-    try {
-      // Active plans only. A plan the course retired is not something to put a
-      // new member on, even though the members already on it stay members.
-      const found = await courseboardApiJson<MembershipPlanList>(membershipPlansPath)
-      setPlans(found.items ?? [])
-    } catch {
-      setPlans([])
-    }
   }
 
   const grant = async (planId: string) => {
@@ -91,7 +74,7 @@ export function MembershipBadge({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ planId }),
       })
-      setMembership(updated)
+      membershipResource.setData(updated)
       setGranting(false)
       showToast({ tone: 'success', message: t('ledger:customer.membershipGranted') })
     } catch (error) {
@@ -113,7 +96,7 @@ export function MembershipBadge({
         // Blank withdraws the number rather than storing an empty one.
         body: JSON.stringify({ memberNumber: numbering.trim() || null }),
       })
-      setMembership(updated)
+      membershipResource.setData(updated)
       setNumbering(null)
       showToast({ tone: 'success', message: t('ledger:customer.memberNumberSaved') })
     } catch (error) {
@@ -127,10 +110,13 @@ export function MembershipBadge({
     }
   }
 
-  if (loading) return <span className="ledger-membership__loading">{t('ledger:customer.membershipLoading')}</span>
-  if (failed) return <span className="ledger-membership__loading">{t('ledger:customer.membershipUnknown')}</span>
-  if (!membership) return null
-
+  if (loading && !membership) {
+    return <span className="ledger-membership__loading">{t('ledger:customer.membershipLoading')}</span>
+  }
+  if (!membership) {
+    if (failed) return <span className="ledger-membership__loading">{t('ledger:customer.membershipUnknown')}</span>
+    return null
+  }
   return (
     <span className="ledger-membership">
       {membership.isMember ? (
