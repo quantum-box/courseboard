@@ -29,6 +29,7 @@ mod error;
 mod field_capabilities;
 mod ids;
 mod membership;
+mod membership_activity;
 mod membership_play_window;
 mod membership_pricing;
 mod party;
@@ -144,6 +145,11 @@ pub use membership::{
     AssignMembershipPlan, CustomerMembership, MembershipPlan, SetMemberNumber,
     UpsertMembershipPlan, MEMBER_NUMBER_CREDENTIAL_KIND,
 };
+pub use membership_activity::{
+    MembershipActivity, MembershipActivityActor, MembershipActivityPage, MembershipActivityQuery,
+    MembershipActivitySource, MembershipActivityTarget, DEFAULT_MEMBERSHIP_ACTIVITY_LIMIT,
+    MAX_MEMBERSHIP_ACTIVITY_LIMIT,
+};
 pub use membership_play_window::{
     format_play_time, parse_play_time, MembershipPlayWindow, MembershipPlayWindows,
     PlayWindowBreach, PlayableDays,
@@ -160,11 +166,11 @@ pub use ports::{
     CustomerGradeRulesGateway, CustomerReceptionCreateGateway, CustomerReceptionFieldsGateway,
     CustomerReceptionOcrGateway, CustomerReceptionValuesGateway, CustomerRegistrationGateway,
     FieldCapabilitiesGateway, GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway,
-    GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, MembershipDiscountsGateway,
-    MembershipGateway, MembershipPlayWindowsGateway, PlayerTagOptionsGateway,
-    PricingSettingsGateway, ReservationGateway, ReservationScheduleGateway, ShiftRulesGateway,
-    SlotOverrideGateway, StaffShiftGateway, StaffShiftInput, TeeLedgerQuery, TeeSheetQuery,
-    VisitCheckinGateway,
+    GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, MembershipActivityGateway,
+    MembershipDiscountsGateway, MembershipGateway, MembershipPlayWindowsGateway,
+    PlayerTagOptionsGateway, PricingSettingsGateway, ReservationGateway,
+    ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, StaffShiftGateway,
+    StaffShiftInput, TeeLedgerQuery, TeeSheetQuery, VisitCheckinGateway,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{

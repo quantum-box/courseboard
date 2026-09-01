@@ -736,6 +736,14 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/customers/:customer_id/membership-activities",
+            get(course::interfaces::http_customers::get_customer_membership_activities)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/v1/course/customers/:customer_id/registration",
             get(course::interfaces::http_customers::get_customer_registration).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),

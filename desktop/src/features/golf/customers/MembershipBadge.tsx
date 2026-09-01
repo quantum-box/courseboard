@@ -33,9 +33,12 @@ import {
 export function MembershipBadge({
   customerId,
   editable = false,
+  onMembershipChanged,
 }: {
   customerId: string
   editable?: boolean
+  /** Called after a successful membership mutation, for sibling views that depend on it. */
+  onMembershipChanged?: () => void
 }) {
   const { t } = useTranslation(['ledger'])
   const membershipResource = useResource(
@@ -75,6 +78,7 @@ export function MembershipBadge({
         body: JSON.stringify({ planId }),
       })
       membershipResource.setData(updated)
+      onMembershipChanged?.()
       setGranting(false)
       showToast({ tone: 'success', message: t('ledger:customer.membershipGranted') })
     } catch (error) {
@@ -97,6 +101,7 @@ export function MembershipBadge({
         body: JSON.stringify({ memberNumber: numbering.trim() || null }),
       })
       membershipResource.setData(updated)
+      onMembershipChanged?.()
       setNumbering(null)
       showToast({ tone: 'success', message: t('ledger:customer.memberNumberSaved') })
     } catch (error) {

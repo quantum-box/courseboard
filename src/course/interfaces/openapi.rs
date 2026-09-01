@@ -94,6 +94,7 @@ impl Modify for SecurityAddon {
         http_customers::delete_customer,
         http_customers::get_customer,
         http_customers::get_customer_visits,
+        http_customers::get_customer_membership_activities,
         http_customers::get_customer_registration,
         http_customers::get_customer_grade_rules,
         http_customers::replace_customer_grade_rules,
@@ -196,6 +197,12 @@ impl Modify for SecurityAddon {
             http_customers::CustomerVisitSummaryDto,
             http_customers::CustomerVisitHistoryDto,
             http_customers::CustomerVisitParams,
+            http_customers::MembershipActivityActorDto,
+            http_customers::MembershipActivitySourceDto,
+            http_customers::MembershipActivityTargetDto,
+            http_customers::MembershipActivityDto,
+            http_customers::MembershipActivityListResponse,
+            http_customers::MembershipActivityParams,
             http_customers::CustomerGradeRuleDto,
             http_customers::ReplaceCustomerGradeRulesRequest,
             http_customers::MembershipDiscountDto,
@@ -378,6 +385,22 @@ mod tests {
         assert!(paths.contains_key("/v1/course/daily-budgets"));
         assert!(paths.contains_key("/v1/course/reservation-report-imports"));
         assert!(paths.contains_key("/v1/course/reservation-report-entries"));
+        let membership_activities = paths
+            .get("/v1/course/customers/{customer_id}/membership-activities")
+            .and_then(|value| value.as_object())
+            .expect("membership activity path");
+        let membership_activity_get = membership_activities
+            .get("get")
+            .and_then(|value| value.as_object())
+            .expect("membership activity GET operation");
+        let responses = membership_activity_get
+            .get("responses")
+            .and_then(|value| value.as_object())
+            .expect("membership activity responses");
+        assert!(responses.contains_key("200"));
+        assert!(responses.contains_key("403"));
+        assert!(responses.contains_key("404"));
+        assert!(responses.contains_key("424"));
         assert!(paths.contains_key("/v1/field/client-capabilities"));
         assert!(paths.contains_key("/v1/me"));
         let components = json
@@ -390,5 +413,7 @@ mod tests {
         assert!(components.contains_key("ErrorBody"));
         assert!(components.contains_key("ProfileResponse"));
         assert!(components.contains_key("ProfileErrorResponse"));
+        assert!(components.contains_key("MembershipActivityDto"));
+        assert!(components.contains_key("MembershipActivityTargetDto"));
     }
 }

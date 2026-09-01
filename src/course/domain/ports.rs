@@ -13,17 +13,17 @@ use super::{
     CustomerRegistration, CustomerSearchQuery, DailyBudget, DailyBudgetQuery, DefaultWorkingHours,
     DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
     FieldShiftLink, GenerationSummary, GolfPricingSettings, InventoryWatermark,
-    MembershipDiscounts, MembershipPlan, MembershipPlanId, MembershipPlayWindows,
-    MonthlySettlement, NewCustomer, NewCustomerRegistration, NewReservation, PartyDetails,
-    PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraft,
-    ReceptionFormProposal, ReceptionSheet, ReplaceCaddieMemberships, Reservation,
-    ReservationBookingUpdate, ReservationId, ReservationPolicy, ReservationProduct,
-    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
-    SeededReservation, SetMemberNumber, ShiftPolicy, SlotOverride, SlotOverrideQuery,
-    TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
-    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
-    UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin, VisitCheckinRequest,
-    WorkedMinutes, YearMonth,
+    MembershipActivityPage, MembershipActivityQuery, MembershipDiscounts, MembershipPlan,
+    MembershipPlanId, MembershipPlayWindows, MonthlySettlement, NewCustomer,
+    NewCustomerRegistration, NewReservation, PartyDetails, PlayerTagOptions, ProductSlot,
+    ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal,
+    ReceptionSheet, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
+    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
+    ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber, ShiftPolicy,
+    SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
+    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin,
+    VisitCheckinRequest, WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -1088,6 +1088,21 @@ pub trait MembershipGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         input: &SetMemberNumber,
     ) -> Result<CustomerMembership, CourseError>;
+}
+
+/// Port for the append-only membership activity feed owned by Field.
+///
+/// CourseBoard never copies these rows into its own database.  The provider's
+/// cursor and JSON snapshots pass through unchanged so a newer Field event can
+/// still be displayed by an older CourseBoard build.
+#[async_trait]
+pub trait MembershipActivityGateway: Send + Sync {
+    async fn list_membership_activities(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+        query: &MembershipActivityQuery,
+    ) -> Result<MembershipActivityPage, CourseError>;
 }
 
 /// Port for golf catalog (courses, resources, reservation products).

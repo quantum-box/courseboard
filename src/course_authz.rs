@@ -426,6 +426,11 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/customers/:customer_id/visits",
         RouteAuthorization::UpstreamEnforced,
     ),
+    (
+        "*",
+        "/v1/course/customers/:customer_id/membership-activities",
+        RouteAuthorization::UpstreamEnforced,
+    ),
     // Reads CourseBoard's own record of how the entry was created.
     (
         "*",
@@ -1165,6 +1170,13 @@ mod tests {
             Some(RouteAuthorization::UpstreamEnforced)
         );
         assert_eq!(
+            classify(
+                &Method::GET,
+                "/v1/course/customers/cus_1/membership-activities"
+            ),
+            Some(RouteAuthorization::UpstreamEnforced)
+        );
+        assert_eq!(
             classify(&Method::PUT, "/field-api/v1/field/iam/users/us_1/policies"),
             Some(RouteAuthorization::UpstreamEnforced)
         );
@@ -1206,6 +1218,13 @@ mod tests {
         assert_eq!(
             classify(&Method::HEAD, "/v1/course/slot-overrides"),
             Some(RouteAuthorization::Action(LIST_SLOT_OVERRIDES))
+        );
+        assert_eq!(
+            classify(
+                &Method::HEAD,
+                "/v1/course/customers/cus_1/membership-activities"
+            ),
+            Some(RouteAuthorization::UpstreamEnforced)
         );
         assert_eq!(
             classify(&Method::HEAD, "/healthz"),
@@ -1336,6 +1355,7 @@ mod tests {
             ("GET", "/v1/course/customers/cus_1"),
             ("DELETE", "/v1/course/customers/cus_1"),
             ("GET", "/v1/course/customers/cus_1/visits"),
+            ("GET", "/v1/course/customers/cus_1/membership-activities"),
             ("GET", "/v1/course/customers/cus_1/registration"),
             ("PUT", "/v1/course/customers/cus_1/member-number"),
             ("GET", "/v1/course/customers/cus_1/membership"),

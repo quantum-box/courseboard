@@ -11,6 +11,7 @@ import { home } from './home'
 import { ledger } from './ledger'
 import { map } from './map'
 import { members } from './members'
+import { membershipActivity } from './membershipActivity'
 import { nav } from './nav'
 import { payment } from './payment'
 import { policy } from './policy'
@@ -39,6 +40,7 @@ export const ja = {
   ledger,
   map,
   members,
+  membershipActivity,
   nav,
   payment,
   policy,

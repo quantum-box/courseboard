@@ -19,6 +19,7 @@ import { showToast } from '../../../lib/toast'
 import { CustomerRegistrationNote } from './CustomerRegistrationNote'
 import { CustomerVisitsPanel } from './CustomerVisitsPanel'
 import { MembershipBadge } from './MembershipBadge'
+import { MembershipActivityPanel } from './MembershipActivityPanel'
 import { customerPath, type Customer } from './models'
 
 /**
@@ -32,6 +33,7 @@ import { customerPath, type Customer } from './models'
 export function CustomerDetailPage({ customerId }: { customerId: string }) {
   const { t } = useTranslation(['customers', 'common'])
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [membershipActivityRevision, setMembershipActivityRevision] = useState(0)
   // Read by id rather than re-running the search that led here: the page has
   // to survive a reload and a pasted link, where no search has been typed.
   const resource = useResource(
@@ -99,8 +101,17 @@ export function CustomerDetailPage({ customerId }: { customerId: string }) {
           >
             {/* The one place a membership is granted or changed: this page is
                 about who somebody is, not about a booking they are making. */}
-            <MembershipBadge customerId={customer.id} editable />
+            <MembershipBadge
+              customerId={customer.id}
+              editable
+              onMembershipChanged={() => setMembershipActivityRevision(current => current + 1)}
+            />
           </Panel>
+
+          <MembershipActivityPanel
+            customerId={customer.id}
+            refreshRevision={membershipActivityRevision}
+          />
 
           {/* Below the membership, because how often somebody comes is read
               after who they are — and it is the reason the page gets opened. */}
