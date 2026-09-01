@@ -5,18 +5,21 @@ import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { courseboardApiJson } from '../../../api'
+import { clearResourceCache, peekResourceCache } from '../../../hooks/useResource'
 import { i18next } from '../../../i18n'
 import { CustomerDetailPage } from './CustomerDetailPage'
 import { customerPath, customersPath, type Customer } from './models'
 
 describe('customer ledger deletion', () => {
   beforeEach(async () => {
+    clearResourceCache()
     vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
     await i18next.changeLanguage('ja')
   })
 
   afterEach(() => {
+    clearResourceCache()
     cleanup()
     vi.unstubAllEnvs()
   })
@@ -36,6 +39,7 @@ describe('customer ledger deletion', () => {
     )
 
     await screen.findByText('削除確認 テスト')
+    expect(peekResourceCache(`customer:${customer.id}`)).toMatchObject({ name: '削除確認 テスト' })
     fireEvent.click(screen.getByRole('button', { name: '顧客台帳から削除する' }))
 
     expect(screen.getByText('「削除確認 テスト」を顧客台帳から削除しますか？')).toBeTruthy()
@@ -49,6 +53,7 @@ describe('customer ledger deletion', () => {
     await waitFor(() => {
       expect(window.location.pathname).toBe('/courseboard_id/golf/customers')
     })
+    expect(peekResourceCache(`customer:${customer.id}`)).toBeUndefined()
     await expect(courseboardApiJson<Customer>(customerPath(customer.id))).rejects.toMatchObject({
       status: 404,
     })

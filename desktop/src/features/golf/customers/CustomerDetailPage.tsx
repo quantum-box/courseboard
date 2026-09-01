@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next'
 
 import { courseboardApiJson } from '../../../api'
 import { LoadingState, Notice, Panel, ResourceError } from '../../../components/Page'
-import { useResource } from '../../../hooks/useResource'
+import { clearResourceCache, useResource } from '../../../hooks/useResource'
 import { navigate, navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { CustomerRegistrationNote } from './CustomerRegistrationNote'
@@ -134,6 +134,7 @@ function DeleteCustomerDialog({
     setError(null)
     try {
       await courseboardApiJson<void>(customerPath(customer.id), { method: 'DELETE' })
+      clearResourceCache(`customer:${customer.id}`)
       showToast({ tone: 'success', message: t('customers:delete.saved') })
       navigate('golf/customers')
     } catch (reason) {
