@@ -450,12 +450,14 @@ export function ReceptionFieldSettingsPanel({
   const [analysisWarnings, setAnalysisWarnings] = useState<string[]>([])
   const [analysisPreview, setAnalysisPreview] = useState<string | null>(null)
   const analysisInputRef = useRef<HTMLInputElement | null>(null)
+  const proposalSnapshotRef = useRef<ReceptionField[] | null>(null)
 
   useEffect(() => {
     setDrafts(cloneReceptionFields(fields))
     setProposalActive(false)
     setAnalysisWarnings([])
     setAnalysisPreview(null)
+    proposalSnapshotRef.current = null
   }, [fields])
 
   const dirty = !settingsEqual(drafts, fields)
@@ -516,13 +518,18 @@ export function ReceptionFieldSettingsPanel({
   }
 
   function cancelProposal() {
-    setDrafts(cloneReceptionFields(fields))
+    const restore = proposalActive && proposalSnapshotRef.current
+      ? proposalSnapshotRef.current
+      : fields
+    setDrafts(cloneReceptionFields(restore))
     setProposalActive(false)
     setAnalysisWarnings([])
     setAnalysisPreview(null)
+    proposalSnapshotRef.current = null
   }
 
   async function analyzeBlankForm(picked: File) {
+    const beforeAnalysis = cloneReceptionFields(drafts)
     setAnalyzing(true)
     try {
       let prepared: File
@@ -534,7 +541,8 @@ export function ReceptionFieldSettingsPanel({
       const invalid = fileValidationError(prepared)
       if (invalid) throw new Error(t(`customers:reception.file.${invalid}`))
       const proposal = await analyzeReceptionForm(prepared)
-      setDrafts(current => applyReceptionFormProposal(current, proposal))
+      proposalSnapshotRef.current = beforeAnalysis
+      setDrafts(applyReceptionFormProposal(beforeAnalysis, proposal))
       setProposalActive(true)
       setAnalysisWarnings(proposal.warnings)
       setAnalysisPreview(proposal.previewImage ?? null)
@@ -572,6 +580,7 @@ export function ReceptionFieldSettingsPanel({
       setProposalActive(false)
       setAnalysisWarnings([])
       setAnalysisPreview(null)
+      proposalSnapshotRef.current = null
       showToast({ tone: 'success', message: t('customers:reception.settings.saved') })
     } catch (saveError) {
       showToast({

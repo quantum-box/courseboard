@@ -552,11 +552,12 @@ export function applyReceptionFormProposal(
     return {
       ...field,
       // Name is a CourseBoard invariant even if an upstream analyzer suggests
-      // otherwise. Disabled fields are never required.
+      // otherwise. Its label is also CourseBoard-owned because Field excludes
+      // name from analysis. Disabled fields are never required.
       enabled: field.fieldKey === 'name' ? true : next.enabled,
       required: field.fieldKey === 'name' ? true : next.enabled && next.required,
-      label: next.label || field.label,
-      customLabel: next.customLabel,
+      label: field.fieldKey === 'name' ? field.label : next.label || field.label,
+      customLabel: field.fieldKey === 'name' ? field.customLabel : next.customLabel,
       options: [...field.options],
     }
   })

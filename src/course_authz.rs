@@ -404,7 +404,7 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     (
         "POST",
         "/v1/course/customer-reception-fields/analysis",
-        RouteAuthorization::Action(MANAGE_CUSTOMERS),
+        RouteAuthorization::UpstreamEnforced,
     ),
     (
         "*",

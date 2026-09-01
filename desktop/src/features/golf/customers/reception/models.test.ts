@@ -673,12 +673,20 @@ describe('reception field settings', () => {
     })
   })
 
-  it('keeps the name invariant even if an analyzer suggests disabling it', () => {
+  it('keeps the name invariant and tenant label when an analyzer suggests changing it', () => {
+    const current = DEFAULT_RECEPTION_FIELDS.map(field => field.fieldKey === 'name'
+      ? { ...field, label: 'ご来場者名', customLabel: true }
+      : field)
     const proposal = normalizeReceptionFormProposal({
       fields: [{ fieldKey: 'name', enabled: false, required: false, label: '申込者' }],
       warnings: [],
     })
-    const [name] = applyReceptionFormProposal(DEFAULT_RECEPTION_FIELDS, proposal)
-    expect(name).toMatchObject({ enabled: true, required: true, label: '申込者' })
+    const [name] = applyReceptionFormProposal(current, proposal)
+    expect(name).toMatchObject({
+      enabled: true,
+      required: true,
+      label: 'ご来場者名',
+      customLabel: true,
+    })
   })
 })
