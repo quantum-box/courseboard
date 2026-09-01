@@ -19,6 +19,7 @@
 
 # Business
 
+- [キャディ割当シミュレーション](src/business/caddie-assignment-simulation.md)
 - [キャンセル料徴収の原価と課金モデル](src/business/cancellation-fee-pricing.md)
 
 # Tasks
