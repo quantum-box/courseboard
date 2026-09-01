@@ -76,6 +76,14 @@ mod tests {
         ) -> Result<Customer, CourseError> {
             unreachable!("not used by this test")
         }
+
+        async fn delete_customer(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _customer_id: &CustomerId,
+        ) -> Result<(), CourseError> {
+            unreachable!("not used by this test")
+        }
     }
 
     fn credentials() -> GatewayCredentials<'static> {

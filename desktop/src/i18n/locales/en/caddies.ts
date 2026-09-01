@@ -103,8 +103,23 @@ export const caddies: DeepPartial<typeof source> = {
   dispatch: {
     boardTitle: 'Assignments that day',
     boardDescription: 'Change who walks a group from the Move button on its row — another caddie on the same group, the same caddie on another group, or both.',
+    primaryTitle: 'Clear the unassigned queue',
+    primaryDescription: 'Review open rounds, then assign them in one pass or name a caddie one round at a time.',
+    assignedTitle: 'Assigned {{n}} groups',
     loading: 'Loading assignments',
     supportTitle: 'Capacity, per-course balance, and suggested caddies',
+    tabs: {
+      label: 'Assignment type',
+      rounds: 'Round assignments',
+      duties: 'Other duties',
+    },
+    summary: {
+      label: 'Day summary',
+      unassigned: 'Unassigned',
+      assigned: 'Assigned',
+      duties: 'Other duties',
+      free: 'With free time',
+    },
   },
   supply: {
     title: 'Caddie-required capacity',
@@ -593,7 +608,7 @@ export const caddies: DeepPartial<typeof source> = {
   },
   duties: {
     title: 'Other work',
-    description: 'Put a caddie on other work for the hours they have no round \u2014 course upkeep, divot filling, helping the porters. Those hours leave the caddie supply and stop being offered by the automatic run and the candidate list; the rest of the day still walks groups.',
+    description: 'Assign work outside rounds for the whole day or a specific time window.',
     loading: 'Loading other work',
     loadingOptions: 'Loading the list of jobs',
     onDutyTitle: 'On other work',

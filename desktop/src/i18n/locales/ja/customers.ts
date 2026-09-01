@@ -25,6 +25,17 @@ export const customers = {
     saved: '顧客を登録しました',
     failed: '顧客を登録できませんでした',
   },
+  delete: {
+    open: '顧客台帳から削除する',
+    title: '「{{name}}」を顧客台帳から削除しますか？',
+    description: 'この顧客は検索や新しい予約の顧客選択に出なくなります。',
+    warning: '予約と来場履歴は消えません。削除した顧客を台帳へ戻す操作は、この画面ではできません。',
+    keep: '削除しない',
+    submit: '顧客台帳から削除する',
+    submitting: '削除しています…',
+    saved: '顧客を台帳から削除しました',
+    failed: '顧客を台帳から削除できませんでした',
+  },
   reception: {
     open: '受付用紙から登録する',
     title: '受付用紙から顧客を登録する',
@@ -97,6 +108,15 @@ export const customers = {
         select: '選択肢',
         boolean: 'はい／いいえ',
       },
+    },
+    analysis: {
+      choose: '空の用紙から提案する',
+      analyzing: '空の用紙を読み取り中…',
+      cancel: '提案を取り消す',
+      applied: '用紙の項目を提案しました。確認して保存してください。',
+      failed: '空の用紙を読み取れませんでした',
+      previewTitle: '分析プレビュー',
+      previewAlt: '分析した受付用紙のプレビュー',
     },
     addressParts: {
       postalCode: '郵便番号',

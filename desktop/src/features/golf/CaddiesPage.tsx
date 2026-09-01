@@ -15,6 +15,7 @@ import {
   CalendarDays,
   CheckCircle2,
   ClipboardCheck,
+  ClipboardList,
   Clock,
   Download,
   Link2,
@@ -35,6 +36,7 @@ import {
   useMemo,
   useState,
   type FormEvent,
+  type KeyboardEvent,
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -86,6 +88,7 @@ import { Sheet } from '../../components/Sheet'
 import { CaddieDutiesPanel } from './CaddieDutyBoard'
 import { ReassignRoundSheet } from './ReassignRoundSheet'
 import { CaddieLink } from './CaddieLink'
+import { roundIsStillOn, unassignedCaddieRounds } from './caddieRoundCoverage'
 import {
   employmentLabel,
   employmentStatusCode,
@@ -134,6 +137,11 @@ const PAYROLL_PAGE_SIZE = 20
 type ListResponse<T> = { items: T[] }
 type CaddieRosterResponse = ListResponse<CaddieProfile> & { staff?: StaffMember[] }
 type View = 'roster' | 'dispatch' | 'attendance' | 'payroll'
+type DispatchTab = 'rounds' | 'duties'
+type DispatchDutySummary = {
+  dutyCount: number | null
+  freeCount: number | null
+}
 type SkillLevel = 'rookie' | 'regular' | 'veteran'
 type AvailabilityStatus =
   | 'available'
@@ -908,6 +916,32 @@ function DispatchView({
     () => new Set(orphaned.map(assignment => assignment.id)),
     [orphaned],
   )
+  const dayRounds = useMemo(
+    () => (teeSheet.data?.items ?? []).filter(round => dateKey(round.teeTime, timezone) === date),
+    [date, teeSheet.data, timezone],
+  )
+  const unassignedDayRounds = useMemo(
+    () => unassignedCaddieRounds(dayRounds, dayAssignments),
+    [dayAssignments, dayRounds],
+  )
+  const assignmentCountsReady = !teeSheet.loading
+    && !teeSheet.error
+    && teeSheet.data !== null
+    && !assignmentsResource.loading
+    && !assignmentsResource.error
+    && assignmentsResource.data !== null
+  const unassignedCount = assignmentCountsReady ? unassignedDayRounds.length : null
+  const assignedCount = assignmentCountsReady
+    ? dayRounds.filter(round => roundIsStillOn(round) && round.playType === 'caddie').length
+      - unassignedDayRounds.length
+    : null
+  const [dutySummary, setDutySummary] = useState<DispatchDutySummary>({
+    dutyCount: null,
+    freeCount: null,
+  })
+  useEffect(() => {
+    setDutySummary({ dutyCount: null, freeCount: null })
+  }, [date])
   // Who asked to walk two rounds today. Read on the board because the pair is
   // what the club sold the day's supply as, and a two-round caddie left on one
   // round is a group's worth of capacity that quietly went missing. A failed
@@ -928,85 +962,190 @@ function DispatchView({
     [availabilities.data],
   )
 
-  // Deciding who walks each group is the whole job of this screen, so the day
-  // picker, the groups still missing somebody and the automatic run come first
-  // and the settled assignments follow. The figures consulted while deciding —
-  // sellable capacity, the per-course balance, the ranked roster — are one
-  // click away instead of pushing the work below the fold.
+  const [tab, setTab] = useRouteParamState('tab', {
+    fallback: 'rounds',
+    normalize: value => value === 'duties' || value === 'rounds' ? value : null,
+  })
+  const activeTab: DispatchTab = tab === 'duties' ? 'duties' : 'rounds'
+
+  function moveDispatchTab(event: KeyboardEvent<HTMLButtonElement>, current: DispatchTab) {
+    const next: DispatchTab | null = event.key === 'ArrowRight'
+      ? current === 'rounds' ? 'duties' : 'rounds'
+      : event.key === 'ArrowLeft'
+        ? current === 'rounds' ? 'duties' : 'rounds'
+        : event.key === 'Home'
+          ? 'rounds'
+          : event.key === 'End'
+            ? 'duties'
+            : null
+    if (!next) return
+    event.preventDefault()
+    setTab(next)
+    document.getElementById(`caddie-dispatch-${next === 'rounds' ? 'round' : 'duty'}-tab`)?.focus()
+  }
+
+  // Deciding who walks each group is the whole job of the round tab, so the
+  // date, tabs and shared day summary come before either branch. The figures
+  // consulted while deciding — sellable capacity, the per-course balance, the
+  // ranked roster — stay inside the round branch instead of competing with the
+  // action of putting a caddie on another job.
   return (
     <div className="space-y-6">
-      <div className="page-toolbar">
+      <div
+        className="grid w-full max-w-md grid-cols-2 gap-1 rounded-lg border border-border bg-surface p-1"
+        role="tablist"
+        aria-label={t('caddies:dispatch.tabs.label')}
+      >
+        <DetailTabButton
+          id="caddie-dispatch-round-tab"
+          ariaControls="caddie-dispatch-round-panel"
+          active={activeTab === 'rounds'}
+          tabIndex={activeTab === 'rounds' ? 0 : -1}
+          onKeyDown={event => moveDispatchTab(event, 'rounds')}
+          onClick={() => setTab('rounds')}
+          prominent
+        >
+          <ClipboardCheck className="size-4" /> {t('caddies:dispatch.tabs.rounds')}
+        </DetailTabButton>
+        <DetailTabButton
+          id="caddie-dispatch-duty-tab"
+          ariaControls="caddie-dispatch-duty-panel"
+          active={activeTab === 'duties'}
+          tabIndex={activeTab === 'duties' ? 0 : -1}
+          onKeyDown={event => moveDispatchTab(event, 'duties')}
+          onClick={() => setTab('duties')}
+          prominent
+        >
+          <ClipboardList className="size-4" /> {t('caddies:dispatch.tabs.duties')}
+        </DetailTabButton>
+      </div>
+
+      <div
+        className="flex min-h-10 flex-wrap items-center gap-x-4 gap-y-1 border-y border-border py-2 text-sm"
+        aria-label={t('caddies:dispatch.summary.label')}
+      >
         <Input
           type="date"
           aria-label={t('caddies:operationDate')}
-          className="w-full sm:w-44"
+          className="h-8 w-full sm:w-40"
           value={date}
           onChange={event => onDateChange(event.target.value)}
         />
+        <span className="whitespace-nowrap text-muted-foreground">
+          {t('caddies:dispatch.summary.unassigned')}
+          <strong className="ml-1 font-semibold text-foreground">
+            {unassignedCount === null ? '—' : t('caddies:groups', { n: String(unassignedCount) })}
+          </strong>
+        </span>
+        <span className="whitespace-nowrap text-muted-foreground">
+          {t('caddies:dispatch.summary.assigned')}
+          <strong className="ml-1 font-semibold text-foreground">
+            {assignedCount === null ? '—' : t('caddies:groups', { n: String(assignedCount) })}
+          </strong>
+        </span>
+        <span className="whitespace-nowrap text-muted-foreground">
+          {t('caddies:dispatch.summary.duties')}
+          <strong className="ml-1 font-semibold text-foreground">
+            {dutySummary.dutyCount === null ? '—' : t('caddies:people', { n: String(dutySummary.dutyCount) })}
+          </strong>
+        </span>
+        <span className="whitespace-nowrap text-muted-foreground">
+          {t('caddies:dispatch.summary.free')}
+          <strong className="ml-1 font-semibold text-foreground">
+            {dutySummary.freeCount === null ? '—' : t('caddies:people', { n: String(dutySummary.freeCount) })}
+          </strong>
+        </span>
       </div>
 
-      <UnassignedRoundsPanel
-        sheet={teeSheet}
-        assignments={horizonAssignments}
-        horizon={horizon}
-        onHorizonChange={setHorizon}
-        onChanged={onChanged}
-      />
+      <div
+        id="caddie-dispatch-round-panel"
+        role="tabpanel"
+        aria-labelledby="caddie-dispatch-round-tab"
+        hidden={activeTab !== 'rounds'}
+        className="space-y-4"
+      >
+        <section className="space-y-3">
+          <div>
+            <h2 className="section-title">{t('caddies:dispatch.primaryTitle')}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {t('caddies:dispatch.primaryDescription')}
+            </p>
+          </div>
+          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
+            <UnassignedRoundsPanel
+              sheet={teeSheet}
+              assignments={horizonAssignments}
+              horizon={horizon}
+              onHorizonChange={setHorizon}
+              onChanged={onChanged}
+            />
 
-      <AutoAssignPanel
-        date={date}
-        attendance={attendanceById}
-        onChanged={onChanged}
-        setFlash={setFlash}
-      />
+            <AutoAssignPanel
+              date={date}
+              attendance={attendanceById}
+              onChanged={onChanged}
+              setFlash={setFlash}
+            />
+          </div>
+        </section>
 
-      {/* Read after the groups still missing somebody and the automatic run:
-          who is left over is only known once the day has been staffed. */}
-      <CaddieDutiesPanel
-        date={date}
-        profiles={profiles}
-        assignments={dayAssignments}
-        onChanged={onChanged}
-      />
+        <CollapsibleSection
+          title={t('caddies:dispatch.assignedTitle', {
+            n: assignedCount === null ? '—' : String(assignedCount),
+          })}
+        >
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {t('caddies:dispatch.boardDescription')}
+            </p>
+            {orphaned.length > 0 ? (
+              <Notice tone="warning" title={t('caddies:orphaned.title', { n: String(orphaned.length) })}>
+                {t('caddies:orphaned.body')}
+              </Notice>
+            ) : null}
+            {assignmentsResource.loading ? <LoadingState label={t('caddies:dispatch.loading')} /> : null}
+            {assignmentsResource.error ? (
+              <ResourceError error={assignmentsResource.error} onRetry={assignmentsResource.refresh} />
+            ) : null}
+            {!assignmentsResource.loading && !assignmentsResource.error ? (
+              <AssignmentsTable
+                assignments={dayAssignments}
+                profiles={profiles}
+                orphanedIds={orphanedIds}
+                twoRoundRequests={twoRoundRequests}
+                date={date}
+                rounds={teeSheet.data?.items ?? []}
+                onChanged={onChanged}
+                setFlash={setFlash}
+              />
+            ) : null}
+          </div>
+        </CollapsibleSection>
 
-      <section className="app-section space-y-3">
-        <div>
-          <h2 className="section-title">{t('caddies:dispatch.boardTitle')}</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t('caddies:dispatch.boardDescription')}
-          </p>
-        </div>
-        {orphaned.length > 0 ? (
-          <Notice tone="warning" title={t('caddies:orphaned.title', { n: String(orphaned.length) })}>
-            {t('caddies:orphaned.body')}
-          </Notice>
-        ) : null}
-        {assignmentsResource.loading ? <LoadingState label={t('caddies:dispatch.loading')} /> : null}
-        {assignmentsResource.error ? (
-          <ResourceError error={assignmentsResource.error} onRetry={assignmentsResource.refresh} />
-        ) : null}
-        {!assignmentsResource.loading && !assignmentsResource.error ? (
-          <AssignmentsTable
-            assignments={dayAssignments}
-            profiles={profiles}
-            orphanedIds={orphanedIds}
-            twoRoundRequests={twoRoundRequests}
-            date={date}
-            rounds={teeSheet.data?.items ?? []}
-            onChanged={onChanged}
-            setFlash={setFlash}
+        <CollapsibleSection title={t('caddies:dispatch.supportTitle')}>
+          <DailySupplyPanel date={date} />
+          <CourseBalancePanel date={date} onChanged={onChanged} />
+          <RecommendationsPanel
+            resource={recommendationsResource}
+            attendance={attendanceById}
           />
-        ) : null}
-      </section>
+        </CollapsibleSection>
+      </div>
 
-      <CollapsibleSection title={t('caddies:dispatch.supportTitle')}>
-        <DailySupplyPanel date={date} />
-        <CourseBalancePanel date={date} onChanged={onChanged} />
-        <RecommendationsPanel
-          resource={recommendationsResource}
-          attendance={attendanceById}
+      <div
+        id="caddie-dispatch-duty-panel"
+        role="tabpanel"
+        aria-labelledby="caddie-dispatch-duty-tab"
+        hidden={activeTab !== 'duties'}
+      >
+        <CaddieDutiesPanel
+          date={date}
+          profiles={profiles}
+          assignments={dayAssignments}
+          onChanged={onChanged}
+          onSummaryChange={setDutySummary}
         />
-      </CollapsibleSection>
+      </div>
     </div>
   )
 }
@@ -2758,15 +2897,47 @@ function ProfileDetail({
   )
 }
 
-function DetailTabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+function DetailTabButton({
+  active,
+  onClick,
+  children,
+  id,
+  ariaControls,
+  onKeyDown,
+  tabIndex,
+  prominent = false,
+}: {
+  active: boolean
+  onClick: () => void
+  children: ReactNode
+  id?: string
+  ariaControls?: string
+  onKeyDown?: (event: KeyboardEvent<HTMLButtonElement>) => void
+  tabIndex?: number
+  prominent?: boolean
+}) {
+  const activeClass = prominent
+    ? 'bg-primary text-primary-foreground shadow-sm'
+    : 'bg-background text-foreground shadow-sm'
+  const inactiveClass = prominent
+    ? 'bg-background text-muted-foreground hover:bg-muted hover:text-foreground'
+    : 'text-muted-foreground hover:bg-muted'
+  const sizeClass = prominent
+    ? 'min-h-9 px-3 text-sm font-semibold'
+    : 'px-2 text-xs font-medium'
+
   return (
     <button
       type="button"
+      id={id}
       role="tab"
       aria-selected={active}
+      aria-controls={ariaControls}
+      tabIndex={tabIndex}
+      onKeyDown={onKeyDown}
       onClick={onClick}
-      className={`flex min-w-[6.5rem] items-center justify-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
-        active ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted'
+      className={`flex min-w-[6.5rem] items-center justify-center gap-1.5 rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${sizeClass} ${
+        active ? activeClass : inactiveClass
       }`}
     >
       {children}

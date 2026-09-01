@@ -6195,6 +6195,21 @@ button,
   line-height: 1.5;
 }
 
+.reception-analysis-preview {
+  display: grid;
+  gap: 6px;
+  max-width: 360px;
+}
+
+.reception-analysis-preview img {
+  width: 100%;
+  max-height: 260px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  object-fit: contain;
+  background: hsl(var(--nui-muted) / .45);
+}
+
 .reception-settings-section-head {
   display: flex;
   align-items: flex-start;

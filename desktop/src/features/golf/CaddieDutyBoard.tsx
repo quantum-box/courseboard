@@ -1,6 +1,6 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import { ClipboardList } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { courseboardApiJson } from '../../api'
@@ -58,11 +58,13 @@ export function CaddieDutiesPanel({
   profiles,
   assignments,
   onChanged,
+  onSummaryChange,
 }: {
   date: string
   profiles: DutyProfile[]
   assignments: DutyRoundAssignment[]
   onChanged: () => void
+  onSummaryChange?: (summary: { dutyCount: number | null; freeCount: number | null }) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
   const [assigning, setAssigning] = useState(false)
@@ -94,10 +96,22 @@ export function CaddieDutiesPanel({
   const duties = useMemo(() => filed.data?.items ?? [], [filed.data])
   const dayShifts = useMemo<DutyShift[]>(() => shifts.data?.items ?? [], [shifts.data])
   const rows = useMemo(() => filedDuties({ profiles, duties, date }), [profiles, duties, date])
+  const dutyCaddieCount = useMemo(
+    () => new Set(rows.map(row => row.duty.caddieProfileId)).size,
+    [rows],
+  )
   const free = useMemo(
     () => caddiesWithFreeHours({ profiles, assignments, shifts: dayShifts, duties, date }),
     [profiles, assignments, dayShifts, duties, date],
   )
+
+  useEffect(() => {
+    if (!onSummaryChange) return
+    onSummaryChange({
+      dutyCount: filed.loading || filed.error ? null : dutyCaddieCount,
+      freeCount: filed.loading || filed.error || shifts.loading || shifts.error ? null : free.length,
+    })
+  }, [dutyCaddieCount, filed.error, filed.loading, free.length, onSummaryChange, shifts.error, shifts.loading])
 
   async function clear(duty: CaddieDutyAssignment, displayName: string) {
     setClearing(duty.id)
@@ -128,16 +142,23 @@ export function CaddieDutiesPanel({
       title={t('caddies:duties.title')}
       description={t('caddies:duties.description')}
       actions={(
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          disabled={free.length === 0}
-          onClick={() => setAssigning(true)}
-        >
-          <ClipboardList />
-          {t('caddies:duties.assign')}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {!filed.loading && !filed.error && !shifts.loading && !shifts.error ? (
+            <Badge variant="neutral">
+              {t('caddies:duties.freeCount', { n: String(free.length) })}
+            </Badge>
+          ) : null}
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={free.length === 0}
+            onClick={() => setAssigning(true)}
+          >
+            <ClipboardList />
+            {t('caddies:duties.assign')}
+          </Button>
+        </div>
       )}
     >
       {filed.loading || shifts.loading ? (
@@ -193,15 +214,6 @@ export function CaddieDutiesPanel({
               </div>
             ))
           )}
-
-          {/* How much of the day is going spare, in one line. The names are in
-              the sheet: a desk screen that lists forty idle caddies buries the
-              handful actually put on something. */}
-          <p className="text-xs text-muted-foreground">
-            {free.length === 0
-              ? t('caddies:duties.noneFree')
-              : t('caddies:duties.freeCount', { n: String(free.length) })}
-          </p>
         </div>
       ) : null}
 

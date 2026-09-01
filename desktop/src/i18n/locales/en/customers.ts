@@ -27,6 +27,17 @@ export const customers: DeepPartial<typeof source> = {
     saved: 'Customer registered',
     failed: 'Could not register the customer',
   },
+  delete: {
+    open: 'Remove from customer ledger',
+    title: 'Remove “{{name}}” from the customer ledger?',
+    description: 'This customer will no longer appear in searches or new booking customer pickers.',
+    warning: 'Bookings and visit history are kept. This screen cannot restore a removed customer to the ledger.',
+    keep: 'Keep customer',
+    submit: 'Remove from customer ledger',
+    submitting: 'Removing…',
+    saved: 'Customer removed from the ledger',
+    failed: 'Could not remove the customer from the ledger',
+  },
   reception: {
     open: 'Register from a reception sheet',
     title: 'Register customers from a reception sheet',
@@ -93,6 +104,15 @@ export const customers: DeepPartial<typeof source> = {
         select: 'Choice',
         boolean: 'Yes / no',
       },
+    },
+    analysis: {
+      choose: 'Suggest from a blank sheet',
+      analyzing: 'Reading the blank sheet…',
+      cancel: 'Cancel proposal',
+      applied: 'Fields suggested from the sheet. Review them and save.',
+      failed: 'Could not read the blank sheet',
+      previewTitle: 'Analysis preview',
+      previewAlt: 'Preview of the analyzed reception sheet',
     },
     addressParts: {
       postalCode: 'Postal code',

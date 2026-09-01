@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '../../../../api'
 import {
+  applyReceptionFormProposal,
   blankRow,
   blockedReason,
   canonicalReceptionFieldKey,
@@ -16,10 +17,12 @@ import {
   missingRequiredFields,
   normalizeReceptionField,
   normalizeReceptionFields,
+  normalizeReceptionFormProposal,
   pendingRows,
   receptionFieldDefaultLabel,
   prepareReceptionSheet,
   previewKind,
+  receptionPreviewImageSrc,
   receptionReadFailure,
   receptionRowValue,
   rowsFromDraft,
@@ -30,6 +33,7 @@ import {
   MAX_RECEPTION_SHEET_BYTES,
   RECEPTION_SHEET_ACCEPT,
   REQUIRED_RECEPTION_CONSENT,
+  type ReceptionField,
   type ReceptionRow,
 } from './models'
 
@@ -572,5 +576,117 @@ describe('reception field settings', () => {
     expect(normalizeReceptionField({ fieldType: 'text' })).toBeNull()
     expect(receptionFieldDefaultLabel('nameKana')).toBe('氏名のふりがな（カタカナ）')
     expect(receptionFieldDefaultLabel('club_note')).toBe('club_note')
+  })
+
+  it('normalizes a blank-form proposal and warns for unsupported fields', () => {
+    const proposal = normalizeReceptionFormProposal({
+      fields: [
+        {
+          fieldKey: 'customer_phone',
+          enabled: true,
+          required: true,
+          label: 'ご連絡先',
+        },
+        {
+          fieldKey: 'customer_subject',
+          enabled: true,
+          required: false,
+          label: '会員区分',
+        },
+      ],
+      customFields: [{ label: 'ハンディキャップ' }],
+      warnings: ['原本を確認してください。'],
+      previewImage: 'abc123',
+    })
+    expect(proposal.fields).toHaveLength(1)
+    expect(proposal.fields[0]).toMatchObject({
+      fieldKey: 'phone',
+      enabled: true,
+      required: true,
+      label: 'ご連絡先',
+    })
+    expect(proposal.warnings).toEqual(expect.arrayContaining([
+      '原本を確認してください。',
+      '「会員区分」はCourseBoardの受付票項目として保存できないため、取り込みません。',
+      '「ハンディキャップ」はCourseBoardの受付票項目として保存できないため、取り込みません。',
+    ]))
+    expect(receptionPreviewImageSrc(proposal.previewImage)).toBe('data:image/png;base64,abc123')
+  })
+
+  it('merges only proposed standards and preserves existing custom fields', () => {
+    const custom: ReceptionField = {
+      fieldKey: 'membership_class',
+      kind: 'custom',
+      fieldType: 'select',
+      enabled: true,
+      required: true,
+      label: '会員区分',
+      customLabel: true,
+      sortOrder: 7,
+      options: ['正会員', 'ゲスト'],
+    }
+    const current = [...DEFAULT_RECEPTION_FIELDS, custom]
+    const proposal = normalizeReceptionFormProposal({
+      fields: [
+        { fieldKey: 'customer_phone', enabled: true, required: true, label: 'ご連絡先' },
+        {
+          fieldKey: 'membership_class',
+          kind: 'custom',
+          fieldType: 'select',
+          enabled: false,
+          required: false,
+          label: '会員区分（更新）',
+          options: ['正会員', 'ゲスト', '休会'],
+        },
+        {
+          fieldKey: 'playing_style',
+          kind: 'custom',
+          fieldType: 'text',
+          enabled: true,
+          required: false,
+          label: 'プレースタイル',
+        },
+      ],
+      warnings: [],
+    })
+    const next = applyReceptionFormProposal(current, proposal)
+    expect(next.find(field => field.fieldKey === 'phone')).toMatchObject({
+      enabled: true,
+      required: true,
+      label: 'ご連絡先',
+      customLabel: true,
+    })
+    // Absent standards and CourseBoard-owned custom definitions are untouched.
+    expect(next.find(field => field.fieldKey === 'birth_date')).toEqual(
+      DEFAULT_RECEPTION_FIELDS.find(field => field.fieldKey === 'birth_date'),
+    )
+    expect(next.find(field => field.fieldKey === 'membership_class')).toMatchObject({
+      fieldKey: 'membership_class',
+      enabled: false,
+      label: '会員区分（更新）',
+      options: ['正会員', 'ゲスト', '休会'],
+    })
+    expect(next.find(field => field.fieldKey === 'playing_style')).toMatchObject({
+      kind: 'custom',
+      label: 'プレースタイル',
+      enabled: true,
+    })
+  })
+
+  it('keeps the name invariant and tenant label when an analyzer suggests changing it', () => {
+    const current = DEFAULT_RECEPTION_FIELDS.map(field => field.fieldKey === 'name'
+      ? { ...field, label: 'ご来場者名', customLabel: true }
+      : field)
+    const proposal = normalizeReceptionFormProposal({
+      fields: [{ fieldKey: 'name', enabled: false, required: false, label: '申込者' }],
+      warnings: [],
+    })
+    const [name] = applyReceptionFormProposal(current, proposal)
+    expect(name).toMatchObject({
+      enabled: true,
+      required: true,
+      label: 'ご来場者名',
+      customLabel: true,
+    })
   })
 })

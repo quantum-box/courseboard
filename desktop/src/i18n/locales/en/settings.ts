@@ -12,6 +12,11 @@ export const settings: DeepPartial<typeof source> = {
     title: 'Master data',
     description: 'The lists the day-to-day screens pick from.',
   },
+  receptionFields: {
+    title: 'Reception-sheet fields',
+    description: 'Set the standard and golf-course-specific fields read from reception sheets.',
+    linkDescription: 'Fields, required values, and printed labels on reception sheets',
+  },
   playWindows: {
     title: 'Membership playing days',
     description:

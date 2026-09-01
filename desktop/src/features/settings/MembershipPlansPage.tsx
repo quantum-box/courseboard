@@ -16,7 +16,7 @@ import {
   type DataTableColumn,
 } from '../../components/Page'
 import { Sheet } from '../../components/Sheet'
-import { useResource } from '../../hooks/useResource'
+import { clearResourceCache, useResource } from '../../hooks/useResource'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import {
@@ -73,6 +73,11 @@ export function MembershipPlansPage() {
           body: JSON.stringify(planRequestBody(editing)),
         },
       )
+      // The all-plans screen and active-plan pickers intentionally have
+      // different cache keys. A create, rename, retire, or restore changes
+      // both views, and embedded plan names in cached memberships too.
+      clearResourceCache('membership:plans:active')
+      clearResourceCache('customer:membership:')
       showToast({ tone: 'success', message: t('settings:membership.saved') })
       setEditing(null)
       await resource.refresh()

@@ -12,6 +12,11 @@ export const settings: DeepPartial<typeof source> = {
     title: 'えらぶもとになるもの',
     description: 'ふだんの画面でえらぶものを、ここでそろえます。',
   },
+  receptionFields: {
+    title: '受付の紙にある項目',
+    description: '受付の紙から読む項目と、かならず入れる項目を決めます。',
+    linkDescription: '受付の紙から読む項目と、紙に書いてある名前',
+  },
   playWindows: {
     title: '会員がプレーできる日',
     description: '会員の種類ごとに、プレーできる曜日と時間です。平日だけの会員などに使います。',

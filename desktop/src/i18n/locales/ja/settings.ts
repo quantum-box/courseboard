@@ -9,6 +9,11 @@ export const settings = {
     title: 'マスタ',
     description: 'ふだんの画面で選ぶ選択肢を、ここでそろえます。',
   },
+  receptionFields: {
+    title: '受付票の項目',
+    description: '受付票から読み取る標準項目と、ゴルフ場独自の追加項目を設定します。',
+    linkDescription: '受付票から読み取る項目、必須項目、用紙上の呼び名',
+  },
   playWindows: {
     title: '会員のプレー可能日',
     description:

@@ -218,6 +218,14 @@ mod tests {
                 input.phone.clone(),
             ))
         }
+
+        async fn delete_customer(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _customer_id: &CustomerId,
+        ) -> Result<(), CourseError> {
+            unreachable!("not used by this use case")
+        }
     }
 
     #[derive(Default)]

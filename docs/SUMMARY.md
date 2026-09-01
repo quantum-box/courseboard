@@ -19,6 +19,7 @@
 
 # Business
 
+- [キャディ割当シミュレーション](src/business/caddie-assignment-simulation.md)
 - [キャンセル料徴収の原価と課金モデル](src/business/cancellation-fee-pricing.md)
 
 # Tasks
@@ -55,16 +56,25 @@
   - [PLT-3258 CourseBoard UI ルール](src/tasks/in-progress/plt-3258-ui-rules/task.md)
 
 - [Completed]()
+  - [v0.1.13]()
+    - [顧客台帳から顧客を削除できるようにする](src/tasks/completed/v0.1.13/customer-ledger-delete/task.md)
+  - [v0.1.12]()
+    - [一覧の N+1 と再訪時の再読み込みをなくす](src/tasks/completed/v0.1.12/eliminate-n-plus-one-resource-cache/task.md)
+      - [設計](src/tasks/completed/v0.1.12/eliminate-n-plus-one-resource-cache/design.md)
   - [v0.1.7]()
     - [シフト表の確認と出力を改善する](src/tasks/completed/v0.1.7/shift-board-review-export/task.md)
       - [設計](src/tasks/completed/v0.1.7/shift-board-review-export/design.md)
   - [v0.1.11]()
+    - [受付票の追加項目キー入力でフォーカスが外れる問題を直す](src/tasks/completed/v0.1.11/fix-reception-field-focus/task.md)
     - [予約表集計を有効なテナントスコープへ保存する](src/tasks/completed/v0.1.11/fix-reservation-report-tenant-scope/task.md)
     - [メンバーへの policy 単位の権限付与](src/tasks/completed/v0.1.11/permission-policy-granularity/task.md)
     - [/v1/me proxyとextension連動テナント選択（superseded）](src/tasks/completed/v0.1.11/v1-me-proxy-extension-filter/task.md)
       - [設計](src/tasks/completed/v0.1.11/v1-me-proxy-extension-filter/design.md)
     - [日別予約状況の取り込み（撤去済み）](src/tasks/completed/v0.1.11/reservation-summary-import/task.md)
   - [v0.1.10]()
+    - [キャディ配置画面のタブ分離と情報設計](src/tasks/completed/v0.1.10/caddie-dispatch-tabs/task.md)
+      - [設計](src/tasks/completed/v0.1.10/caddie-dispatch-tabs/design.md)
+      - [検証レポート](src/tasks/completed/v0.1.10/caddie-dispatch-tabs/verification-report.md)
     - [既存予約システムの日別予約表をとりこむ](src/tasks/completed/v0.1.10/reservation-report-import/task.md)
   - [v0.1.9]()
     - [キャディ配置を予約 ID で上流絞り込みする](src/tasks/completed/v0.1.9/plt-3377-reservation-filter/task.md)

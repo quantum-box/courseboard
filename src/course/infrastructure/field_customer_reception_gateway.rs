@@ -12,7 +12,7 @@
 //! The visitor is drafted as `consumer` — Field's individual-customer entity,
 //! the same record `/v1/storekit/customers` writes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -20,9 +20,10 @@ use serde::Deserialize;
 use crate::course::domain::{
     reception_sheet_schema_for_fields, CourseError, CustomerReceptionField,
     CustomerReceptionOcrGateway, GatewayCredentials, ReceptionDraft, ReceptionDraftRow,
+    ReceptionFieldInput, ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal,
     ReceptionReaderFailure, ReceptionSheet, RECEPTION_CONSENTS, RECEPTION_OCR_ENTITY_KEY,
     RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL, RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA,
-    RECEPTION_ROW_PHONE,
+    RECEPTION_ROW_PHONE, STANDARD_RECEPTION_FIELD_KEYS,
 };
 
 use super::field_gateway::{
@@ -83,6 +84,244 @@ impl CustomerReceptionOcrGateway for FieldCustomerReceptionGateway {
         .await?;
         Ok(map_draft(response, fields))
     }
+
+    async fn analyze_reception_form(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        sheet: ReceptionSheet,
+    ) -> Result<ReceptionFormProposal, CourseError> {
+        let media_type = sheet.media_type();
+        let part = reqwest::multipart::Part::bytes(sheet.into_bytes())
+            // The scanner's filename is deliberately not forwarded: Field has
+            // no use for it and it may contain operator or visitor data.
+            .file_name(media_type.upload_filename())
+            .mime_str(media_type.content_type())
+            .map_err(|_| CourseError::BadRequest("reception sheet file type is invalid"))?;
+        let response: FieldReceptionFormProposal = super::field_gateway::field_send_multipart(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            "/v1/erp/membership/reception-fields/analysis",
+            credentials,
+            reqwest::multipart::Form::new().part("file", part),
+        )
+        .await?;
+        Ok(map_form_proposal(credentials.operator_id, response))
+    }
+}
+
+/// The blank-form analyzer's built-in vocabulary is wider than CourseBoard's
+/// reception model. Keep this adapter explicit so Field-only concepts (for
+/// example a subject or a plan) cannot accidentally become golf settings.
+const FIELD_STANDARD_TO_COURSE: &[(&str, &str)] = &[
+    ("customer_name_kana", "name_kana"),
+    ("customer_email", "email"),
+    ("customer_phone", "phone"),
+    ("customer_birth_date", "birth_date"),
+    ("customer_sex", "sex"),
+    ("customer_address", "address"),
+];
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldReceptionFormProposal {
+    #[serde(default)]
+    fields: Vec<FieldProposedReceptionField>,
+    #[serde(default)]
+    custom_fields: Vec<FieldProposedCustomField>,
+    #[serde(default)]
+    warnings: Vec<String>,
+    #[serde(default)]
+    preview_image: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldProposedReceptionField {
+    #[serde(default)]
+    field_key: String,
+    #[serde(default)]
+    enabled: bool,
+    #[serde(default)]
+    required: bool,
+    #[serde(default)]
+    label: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldProposedCustomField {
+    #[serde(default)]
+    entity_type: String,
+    #[serde(default)]
+    field_key: String,
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    field_type: String,
+    #[serde(default)]
+    required: bool,
+    #[serde(default)]
+    options: Vec<String>,
+}
+
+fn map_form_proposal(
+    tenant_id: &str,
+    response: FieldReceptionFormProposal,
+) -> ReceptionFormProposal {
+    // Keep CourseBoard's fixed name row in the proposal even though Field's
+    // analyzer intentionally omits it. This gives the settings UI the same
+    // current DTO shape as GET while still preventing upstream from changing
+    // the invariant.
+    let mut fields = CustomerReceptionField::default_for(tenant_id, "name")
+        .into_iter()
+        .collect::<Vec<_>>();
+    let mut seen_keys: HashSet<String> = HashSet::new();
+    seen_keys.insert("name".to_string());
+    let mut warnings = response.warnings;
+
+    for proposed in response.fields {
+        let field_key = proposed.field_key.trim();
+        let display_label = proposed
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .unwrap_or(field_key);
+        // Field deliberately omits the applicant's name, but keep this guard
+        // in case an older/newer Field version sends it back. CourseBoard's
+        // name is an invariant and must never be changed by analysis.
+        if matches!(field_key, "customer_name" | "name") {
+            continue;
+        }
+        let Some(course_key) = map_standard_field_key(field_key) else {
+            // Field returns its complete built-in table, including disabled
+            // keys that were not found on this form. Only an enabled
+            // unsupported key is a proposal that needs an operator warning;
+            // otherwise every analysis would warn about all Field-only
+            // subject/plan columns even when the paper has none.
+            if proposed.enabled && !display_label.is_empty() {
+                warnings.push(unsupported_analysis_warning(display_label));
+            }
+            continue;
+        };
+        if !seen_keys.insert(course_key.to_string()) {
+            warnings.push(duplicate_analysis_warning(course_key));
+            continue;
+        }
+        let Some(mut field) = CustomerReceptionField::default_for(tenant_id, course_key) else {
+            // Keep the adapter fail-closed if a standard is added to the
+            // mapping before the local model receives its default definition.
+            warnings.push(unsupported_analysis_warning(display_label));
+            continue;
+        };
+        field.enabled = proposed.enabled;
+        field.required = proposed.enabled && proposed.required;
+        if let Some(label) = proposed
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+        {
+            if label.chars().count() <= crate::course::domain::MAX_RECEPTION_FIELD_LABEL_LENGTH {
+                field.label = Some(label.to_string());
+            } else {
+                warnings.push(format!(
+                    "「{label}」は受付票項目名が長すぎるため、標準の呼称を使います。"
+                ));
+            }
+        }
+        fields.push(field);
+    }
+
+    let custom_sort_start = STANDARD_RECEPTION_FIELD_KEYS.len() as i32;
+    for (index, proposed) in response.custom_fields.into_iter().enumerate() {
+        let label = proposal_label(&proposed.label, &proposed.field_key);
+        if proposed.entity_type.trim() != "consumer" {
+            warnings.push(unsupported_analysis_warning(&label));
+            continue;
+        }
+        let Some(field_type) = map_custom_field_type(proposed.field_type.trim()) else {
+            warnings.push(unsupported_analysis_warning(&label));
+            continue;
+        };
+        let key = proposed.field_key.trim();
+        // Keep Field's customer namespace reserved for its standard columns;
+        // a custom suggestion using that prefix would be rejected by the UI
+        // and could shadow a future standard key.
+        if key.is_empty() || key.starts_with("customer_") {
+            warnings.push(unsupported_analysis_warning(&label));
+            continue;
+        }
+        if !seen_keys.insert(key.to_string()) {
+            warnings.push(duplicate_analysis_warning(key));
+            continue;
+        }
+        let input = ReceptionFieldInput {
+            field_key: key.to_string(),
+            kind: ReceptionFieldKind::Custom,
+            field_type,
+            enabled: true,
+            required: proposed.required,
+            label: (!proposed.label.trim().is_empty()).then(|| proposed.label.clone()),
+            sort_order: custom_sort_start.saturating_add(index as i32),
+            options: proposed.options,
+        };
+        match CustomerReceptionField::try_new(tenant_id, input) {
+            Ok(field) => fields.push(field),
+            Err(_) => warnings.push(unsupported_analysis_warning(&label)),
+        }
+    }
+
+    fields.sort_by(|left, right| {
+        left.sort_order
+            .cmp(&right.sort_order)
+            .then_with(|| left.field_key.cmp(&right.field_key))
+    });
+    ReceptionFormProposal {
+        fields,
+        warnings,
+        preview_image: response.preview_image,
+    }
+}
+
+fn map_standard_field_key(field_key: &str) -> Option<&'static str> {
+    FIELD_STANDARD_TO_COURSE
+        .iter()
+        .find_map(|(field, course)| (*field == field_key).then_some(*course))
+}
+
+fn map_custom_field_type(field_type: &str) -> Option<ReceptionFieldType> {
+    match field_type {
+        "text" => Some(ReceptionFieldType::Text),
+        "date" => Some(ReceptionFieldType::Date),
+        "select" => Some(ReceptionFieldType::Select),
+        "boolean" => Some(ReceptionFieldType::Boolean),
+        _ => None,
+    }
+}
+
+fn proposal_label(label: &str, field_key: &str) -> String {
+    let label = label.trim();
+    if label.is_empty() {
+        field_key.trim().to_string()
+    } else {
+        label.to_string()
+    }
+}
+
+fn unsupported_analysis_warning(label: &str) -> String {
+    format!(
+        "「{}」はCourseBoardの受付票項目として保存できないため、取り込みません。",
+        proposal_label(label, "この項目")
+    )
+}
+
+fn duplicate_analysis_warning(key: &str) -> String {
+    format!(
+        "「{}」は受付票項目として重複しているため、最初の候補だけ取り込みます。",
+        proposal_label(key, "この項目")
+    )
 }
 
 /// Separates "the reader was not available" from everything else Field can
@@ -200,6 +439,118 @@ mod tests {
             serde_json::from_value(json).expect("field draft shape"),
             fields,
         )
+    }
+
+    #[test]
+    fn blank_form_standard_fields_are_mapped_to_courseboard_keys() {
+        let proposal = map_form_proposal(
+            "test-tenant",
+            serde_json::from_value(serde_json::json!({
+                "fields": [
+                    { "fieldKey": "customer_name_kana", "enabled": true, "required": true, "label": "フリガナ" },
+                    { "fieldKey": "customer_phone", "enabled": true, "required": false, "label": "連絡先" },
+                    { "fieldKey": "customer_email", "enabled": false, "required": true, "label": null },
+                    { "fieldKey": "customer_birth_date", "enabled": true, "required": false, "label": "生年月日" },
+                    { "fieldKey": "customer_sex", "enabled": true, "required": false, "label": "性別" },
+                    { "fieldKey": "customer_address", "enabled": true, "required": true, "label": "住所" },
+                    { "fieldKey": "subject_name", "enabled": true, "required": false, "label": "ペット名" }
+                ],
+                "warnings": [],
+                "previewImage": "data:image/jpeg;base64,abc"
+            }))
+            .expect("field proposal shape"),
+        );
+
+        let field = |key: &str| {
+            proposal
+                .fields
+                .iter()
+                .find(|field| field.field_key == key)
+                .unwrap_or_else(|| panic!("missing {key}"))
+        };
+        assert!(field("name_kana").enabled);
+        assert!(field("name_kana").required);
+        assert_eq!(field("name_kana").effective_label(), "フリガナ");
+        assert_eq!(field("phone").effective_label(), "連絡先");
+        assert!(!field("email").enabled);
+        // A disabled upstream field cannot become required locally.
+        assert!(!field("email").required);
+        assert!(field("address").required);
+        assert!(proposal
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("ペット名")));
+        assert_eq!(
+            proposal.preview_image.as_deref(),
+            Some("data:image/jpeg;base64,abc")
+        );
+        // Field never owns CourseBoard's fixed name setting; the adapter
+        // returns it unchanged for the UI's complete settings shape.
+        let name = field("name");
+        assert!(name.enabled);
+        assert!(name.required);
+    }
+
+    #[test]
+    fn consumer_custom_fields_are_validated_and_subject_or_number_fields_warn() {
+        let proposal = map_form_proposal(
+            "test-tenant",
+            serde_json::from_value(serde_json::json!({
+                "fields": [],
+                "customFields": [
+                    {
+                        "entityType": "consumer",
+                        "fieldKey": "membership_type",
+                        "label": "会員区分",
+                        "fieldType": "select",
+                        "required": true,
+                        "options": ["正会員", "平日会員"]
+                    },
+                    {
+                        "entityType": "consumer",
+                        "fieldKey": "birthday_number",
+                        "label": "受付番号",
+                        "fieldType": "number",
+                        "required": false,
+                        "options": []
+                    },
+                    {
+                        "entityType": "customer_subject",
+                        "fieldKey": "breed",
+                        "label": "犬種",
+                        "fieldType": "text",
+                        "required": false,
+                        "options": []
+                    }
+                ],
+                "warnings": ["原本を確認してください。"]
+            }))
+            .expect("field proposal shape"),
+        );
+
+        let custom = proposal
+            .fields
+            .iter()
+            .find(|field| field.field_key == "membership_type")
+            .expect("consumer custom field is mapped");
+        assert_eq!(custom.kind, ReceptionFieldKind::Custom);
+        assert_eq!(custom.field_type, ReceptionFieldType::Select);
+        assert!(custom.enabled);
+        assert!(custom.required);
+        assert_eq!(custom.options, ["正会員", "平日会員"]);
+        assert_eq!(custom.effective_label(), "会員区分");
+        assert!(proposal
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("受付番号")));
+        assert!(proposal
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("犬種")));
+        assert!(proposal
+            .warnings
+            .iter()
+            .any(|warning| warning == "原本を確認してください。"));
     }
 
     #[test]

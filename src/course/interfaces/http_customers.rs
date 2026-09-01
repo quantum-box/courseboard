@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Multipart, Path, Query, State},
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     Extension, Json,
 };
 use chrono::{DateTime, NaiveDate, Utc};
@@ -31,19 +31,20 @@ use crate::course::domain::{
     MembershipDiscountsGateway, MembershipPlan, MembershipPlanId, MembershipPlayWindow,
     MembershipPlayWindows, MembershipPlayWindowsGateway, NewCustomer, PlayableDays,
     ReceptionAddress, ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraftRow,
-    ReceptionFieldInput, ReceptionFieldKind, ReceptionFieldType, ReceptionSheet, SetMemberNumber,
-    UpsertMembershipPlan,
+    ReceptionFieldInput, ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal,
+    ReceptionSheet, SetMemberNumber, UpsertMembershipPlan,
 };
 use crate::course::infrastructure::{
     FieldCustomerConsentGateway, FieldCustomerGateway, FieldCustomerReceptionCreateGateway,
     FieldCustomerReceptionGateway, FieldMembershipActivityGateway, FieldMembershipGateway,
 };
 use crate::course::usecase::{
-    AssignMembershipPlanUseCase, CreateCustomerUseCase, CreateMembershipPlanUseCase,
-    CreateReceptionCustomerUseCase, CustomerProvenance, CustomerVisitReport,
-    DraftCustomerReceptionUseCase, GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase,
-    GetCustomerReceptionFieldsUseCase, GetCustomerRegistrationUseCase, GetCustomerUseCase,
-    GetCustomerVisitsUseCase, ListMembershipActivitiesUseCase, ListMembershipPlansUseCase,
+    AnalyzeCustomerReceptionFieldsUseCase, AssignMembershipPlanUseCase, CreateCustomerUseCase,
+    CreateMembershipPlanUseCase, CreateReceptionCustomerUseCase, CustomerProvenance,
+    CustomerVisitReport, DeleteCustomerUseCase, DraftCustomerReceptionUseCase,
+    GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase, GetCustomerReceptionFieldsUseCase,
+    GetCustomerRegistrationUseCase, GetCustomerUseCase, GetCustomerVisitsUseCase,
+    ListMembershipActivitiesUseCase, ListMembershipPlansUseCase,
     RecordReceptionCustomerValuesUseCase, ReplaceCustomerGradeRulesUseCase,
     ReplaceCustomerReceptionFieldsUseCase, SearchCustomersUseCase, SetMemberNumberUseCase,
     UpdateMembershipPlanUseCase,
@@ -397,6 +398,39 @@ pub async fn get_customer(
     Ok(Json(CustomerDto::from(&customer)))
 }
 
+/// DELETE /v1/course/customers/{customer_id}
+///
+/// Removes the person from Field's active ledger. Field retains the row for
+/// audit and reference integrity, so reservations and visit history remain
+/// historical facts rather than being cascaded away.
+#[utoipa::path(
+    delete,
+    path = "/v1/course/customers/{customer_id}",
+    tag = "course",
+    params(("customer_id" = String, Path, description = "Customer id")),
+    responses(
+        (status = 204, description = "Customer removed from the active ledger"),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn delete_customer(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(customer_id): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let customer_id = CustomerId::try_new(customer_id).map_err(AppError::from)?;
+    DeleteCustomerUseCase::new(customer_gateway(&state))
+        .execute(credentials, &customer_id)
+        .await
+        .map_err(AppError::from)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 /// POST /v1/course/customers
 ///
 /// Adds someone the desk has decided is not already in the ledger. No
@@ -522,6 +556,32 @@ pub struct CustomerReceptionFieldsResponse {
     pub items: Vec<CustomerReceptionFieldDto>,
 }
 
+/// A transient proposal returned by blank-form analysis. It is deliberately
+/// not the settings response shape: `fields` contains only values the analyzer
+/// identified, while the settings screen merges them into its current draft.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerReceptionFieldsAnalysisResponse {
+    pub fields: Vec<CustomerReceptionFieldDto>,
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_image: Option<String>,
+}
+
+impl From<ReceptionFormProposal> for CustomerReceptionFieldsAnalysisResponse {
+    fn from(proposal: ReceptionFormProposal) -> Self {
+        Self {
+            fields: proposal
+                .fields
+                .iter()
+                .map(CustomerReceptionFieldDto::from)
+                .collect(),
+            warnings: proposal.warnings,
+            preview_image: proposal.preview_image,
+        }
+    }
+}
+
 /// Input for one field setting. `label: null` or a blank label restores the
 /// built-in wording.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -641,6 +701,43 @@ pub async fn replace_customer_reception_fields(
     Ok(Json(CustomerReceptionFieldsResponse {
         items: fields.iter().map(CustomerReceptionFieldDto::from).collect(),
     }))
+}
+
+/// POST /v1/course/customer-reception-fields/analysis
+///
+/// Sends the blank sheet to Field's #1257 analyzer. The result is a proposal
+/// only; saving remains the explicit PUT operation above, after the desk has
+/// checked the original paper and corrected any warnings.
+#[utoipa::path(
+    post,
+    path = "/v1/course/customer-reception-fields/analysis",
+    tag = "course",
+    request_body(
+        content = String,
+        description = "multipart/form-data with a single `file` part (JPEG, PNG, or PDF, up to 10MB)",
+        content_type = "multipart/form-data"
+    ),
+    responses(
+        (status = 200, description = "Proposed reception sheet fields", body = CustomerReceptionFieldsAnalysisResponse),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn analyze_customer_reception_fields(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> Result<Json<CustomerReceptionFieldsAnalysisResponse>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let sheet = read_reception_sheet(multipart).await?;
+    let proposal = AnalyzeCustomerReceptionFieldsUseCase::new(reception_gateway(&state))
+        .execute(credentials, sheet)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(proposal.into()))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

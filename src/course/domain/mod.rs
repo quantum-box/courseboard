@@ -108,11 +108,11 @@ pub use customer_grade::{
 };
 pub use customer_reception::{
     reception_sheet_schema, reception_sheet_schema_for_fields, ReceptionAddress,
-    ReceptionCustomerInput, ReceptionDraft, ReceptionDraftRow, ReceptionOcrColumn,
-    ReceptionOcrField, ReceptionReaderFailure, ReceptionSheet, ReceptionSheetMediaType,
-    MAX_RECEPTION_OCR_COLUMNS, MAX_RECEPTION_OCR_SCHEMA_BYTES, MAX_RECEPTION_ROWS,
-    MAX_RECEPTION_SHEET_BYTES, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL,
-    RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
+    ReceptionCustomerInput, ReceptionDraft, ReceptionDraftRow, ReceptionFormProposal,
+    ReceptionOcrColumn, ReceptionOcrField, ReceptionReaderFailure, ReceptionSheet,
+    ReceptionSheetMediaType, MAX_RECEPTION_OCR_COLUMNS, MAX_RECEPTION_OCR_SCHEMA_BYTES,
+    MAX_RECEPTION_ROWS, MAX_RECEPTION_SHEET_BYTES, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY,
+    RECEPTION_ROW_EMAIL, RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
 };
 pub use customer_reception_fields::{
     CustomerReceptionField, ReceptionFieldInput, ReceptionFieldKind, ReceptionFieldType,

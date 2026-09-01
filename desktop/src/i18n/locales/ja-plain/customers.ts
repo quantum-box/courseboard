@@ -28,6 +28,17 @@ export const customers: DeepPartial<typeof source> = {
     saved: 'お客さまを のせました',
     failed: 'お客さまを のせられませんでした',
   },
+  delete: {
+    open: 'お客さま台帳から けす',
+    title: '「{{name}}」を お客さま台帳から けしますか？',
+    description: 'この 人は、さがす 画面や あたらしい 予約で 人を えらぶ ときに 出なく なります。',
+    warning: '予約と 来た きろくは のこります。けした 人を 台帳に もどす ことは、この 画面では できません。',
+    keep: 'けさない',
+    submit: 'お客さま台帳から けす',
+    submitting: 'けして います…',
+    saved: 'お客さまを 台帳から けしました',
+    failed: 'お客さまを 台帳から けせませんでした',
+  },
   reception: {
     open: '受付の 紙から のせる',
     title: '受付の 紙から お客さまを のせる',
@@ -94,6 +105,15 @@ export const customers: DeepPartial<typeof source> = {
         select: 'えらぶ',
         boolean: 'はい／いいえ',
       },
+    },
+    analysis: {
+      choose: 'まっさらな 紙から つくる',
+      analyzing: 'まっさらな 紙を 読んでいます…',
+      cancel: '提案を 取り消す',
+      applied: '紙から 項目を えらびました。たしかめて 保存してください。',
+      failed: 'まっさらな 紙を 読めませんでした',
+      previewTitle: '読んだ 紙の 画像',
+      previewAlt: '読んだ 受付の 紙の 画像',
     },
     addressParts: {
       postalCode: 'ゆうびんばんごう',

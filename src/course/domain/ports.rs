@@ -16,8 +16,8 @@ use super::{
     MembershipActivityPage, MembershipActivityQuery, MembershipDiscounts, MembershipPlan,
     MembershipPlanId, MembershipPlayWindows, MonthlySettlement, NewCustomer,
     NewCustomerRegistration, NewReservation, PartyDetails, PlayerTagOptions, ProductSlot,
-    ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraft, ReceptionSheet,
-    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
+    ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal,
+    ReceptionSheet, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
     ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
     ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber, ShiftPolicy,
     SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
@@ -942,6 +942,17 @@ pub trait CustomerGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         input: &NewCustomer,
     ) -> Result<Customer, CourseError>;
+
+    /// Removes a person from the active ledger.
+    ///
+    /// Field keeps the row for audit and reference integrity, but excludes it
+    /// from subsequent reads and searches. CourseBoard must not try to remove
+    /// reservations or its own historical records alongside this operation.
+    async fn delete_customer(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+    ) -> Result<(), CourseError>;
 }
 
 /// Port for reading a paper reception sheet into ledger candidates.
@@ -963,6 +974,15 @@ pub trait CustomerReceptionOcrGateway: Send + Sync {
         sheet: ReceptionSheet,
         fields: &[CustomerReceptionField],
     ) -> Result<ReceptionDraft, CourseError>;
+
+    /// Analyzes a blank sheet and proposes only fields that can be represented
+    /// by CourseBoard's current reception-field model.  The proposal is not a
+    /// write; the caller reviews it and uses the settings PUT to persist it.
+    async fn analyze_reception_form(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        sheet: ReceptionSheet,
+    ) -> Result<ReceptionFormProposal, CourseError>;
 }
 
 /// Port for the reception-only Field ERP customer create capability.
