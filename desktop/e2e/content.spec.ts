@@ -102,7 +102,9 @@ test.describe('顧客台帳', () => {
     })
 
     // 読み取り結果は編集用の入力欄に値として入る
-    const names = page.getByRole('textbox', { name: '名前 必須' })
+    // 項目名は受付票設定から来る。モック設定の標準ラベル「氏名」で探し、
+    // 表示文言を固定していた旧ラベル「名前 必須」には依存しない。
+    const names = page.getByRole('textbox', { name: '氏名', exact: true })
     await expect(names.first()).toHaveValue('本田 康彦')
     await expect(names.nth(1)).toHaveValue('増田 公陽')
     await expect(page.getByText('読み取れない項目があります', { exact: false })).toBeVisible()
