@@ -15,9 +15,9 @@ import {
   Panel,
 } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
+import { clearResourceCache } from '../../../hooks/useResource'
 import { navigate, navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
-import { MembershipBadge } from './MembershipBadge'
 import { customersPath, type Customer } from './models'
 import {
   customerSearchParameter,
@@ -80,14 +80,6 @@ export function CustomersPage() {
       cell: customer => customer.email ?? null,
       sortValue: customer => customer.email ?? null,
     },
-    {
-      key: 'membership',
-      header: t('customers:field.membership'),
-      align: 'right',
-      // Member or visitor, for every row on the page. The desk asks this about
-      // a name before it prices anything, so it belongs in the list too.
-      cell: customer => <MembershipBadge customerId={customer.id} />,
-    },
   ], [t])
 
   return (
@@ -138,7 +130,7 @@ export function CustomersPage() {
           </p>
         ) : null}
 
-        {!search.searching && !search.error ? (
+        {!search.searching && (!search.error || search.candidates.length > 0) ? (
           <DataTable
             rows={search.candidates}
             columns={columns}
@@ -224,6 +216,7 @@ function NewCustomerSheet({
           email: draft.email.trim() || null,
         }),
       })
+      clearResourceCache('customers:search:')
       showToast({ tone: 'success', message: t('customers:create.saved') })
       setDraft(EMPTY_DRAFT)
       onCreated(created)

@@ -9,6 +9,7 @@ import {
 import { fieldPlatformId, fieldTenant } from '../api'
 
 const resourceCache = new Map<string, unknown>()
+const resourceInflight = new Map<string, Promise<unknown>>()
 const MAX_CACHE_ENTRIES = 128
 const CACHE_KEY_SEPARATOR = '\u0000'
 
@@ -41,6 +42,28 @@ function cache(key: string, value: unknown) {
   }
 }
 
+/**
+ * Share a request only when its fully scoped cache key is the same. A cache
+ * entry is written when the consumer's request generation accepts the result;
+ * this map only prevents concurrent consumers from starting the same loader.
+ */
+function loadWithDedup<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  const existing = resourceInflight.get(key)
+  if (existing) return existing as Promise<T>
+
+  const request = loader()
+  resourceInflight.set(key, request)
+  const release = () => {
+    // A future request may have replaced this one after an invalidation. Do
+    // not remove the newer request when this older promise settles.
+    if (resourceInflight.get(key) === request) resourceInflight.delete(key)
+  }
+  // Handle both outcomes so a rejected shared request is removed and can be
+  // retried, without creating an unhandled rejected promise via `finally`.
+  void request.then(release, release)
+  return request
+}
+
 export type UseResourceOptions = {
   /**
    * When set, successful responses are stored and reused across remounts /
@@ -55,11 +78,16 @@ export type UseResourceOptions = {
 export function clearResourceCache(prefix?: string) {
   if (!prefix) {
     resourceCache.clear()
+    resourceInflight.clear()
     return
   }
   for (const key of resourceCache.keys()) {
     const logical = logicalCacheKey(key)
     if (logical === prefix || logical.startsWith(prefix)) resourceCache.delete(key)
+  }
+  for (const key of resourceInflight.keys()) {
+    const logical = logicalCacheKey(key)
+    if (logical === prefix || logical.startsWith(prefix)) resourceInflight.delete(key)
   }
 }
 
@@ -128,7 +156,9 @@ export function useResource<T>(
     })
 
     try {
-      const value = await loaderRef.current()
+      const value = cacheKey
+        ? await loadWithDedup(cacheKey, () => loaderRef.current())
+        : await loaderRef.current()
       if (requestIdRef.current !== requestId) return undefined
       if (cacheKey) cache(cacheKey, value)
       const next = { key: cacheKey, data: value, error: null, loading: false }

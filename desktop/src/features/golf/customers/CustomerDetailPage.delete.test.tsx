@@ -5,7 +5,11 @@ import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { courseboardApiJson } from '../../../api'
-import { clearResourceCache, peekResourceCache } from '../../../hooks/useResource'
+import {
+  clearResourceCache,
+  peekResourceCache,
+  writeResourceCache,
+} from '../../../hooks/useResource'
 import { i18next } from '../../../i18n'
 import { CustomerDetailPage } from './CustomerDetailPage'
 import { customerPath, customersPath, type Customer } from './models'
@@ -40,6 +44,10 @@ describe('customer ledger deletion', () => {
 
     await screen.findByText('削除確認 テスト')
     expect(peekResourceCache(`customer:${customer.id}`)).toMatchObject({ name: '削除確認 テスト' })
+    writeResourceCache(`customer:membership:${customer.id}`, { isMember: true })
+    writeResourceCache(`customer:visits:${customer.id}`, { items: [] })
+    writeResourceCache(`customer:registration:${customer.id}`, { source: 'manual' })
+    writeResourceCache('customers:search:/v1/course/customers?limit=100', { items: [customer] })
     fireEvent.click(screen.getByRole('button', { name: '顧客台帳から削除する' }))
 
     expect(screen.getByText('「削除確認 テスト」を顧客台帳から削除しますか？')).toBeTruthy()
@@ -54,6 +62,10 @@ describe('customer ledger deletion', () => {
       expect(window.location.pathname).toBe('/courseboard_id/golf/customers')
     })
     expect(peekResourceCache(`customer:${customer.id}`)).toBeUndefined()
+    expect(peekResourceCache(`customer:membership:${customer.id}`)).toBeUndefined()
+    expect(peekResourceCache(`customer:visits:${customer.id}`)).toBeUndefined()
+    expect(peekResourceCache(`customer:registration:${customer.id}`)).toBeUndefined()
+    expect(peekResourceCache('customers:search:/v1/course/customers?limit=100')).toBeUndefined()
     await expect(courseboardApiJson<Customer>(customerPath(customer.id))).rejects.toMatchObject({
       status: 404,
     })
