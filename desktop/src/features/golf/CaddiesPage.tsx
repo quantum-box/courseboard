@@ -1071,7 +1071,7 @@ function DispatchView({
               {t('caddies:dispatch.primaryDescription')}
             </p>
           </div>
-          <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
             <UnassignedRoundsPanel
               sheet={teeSheet}
               assignments={horizonAssignments}
