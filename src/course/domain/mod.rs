@@ -21,6 +21,7 @@ mod customer;
 mod customer_consent;
 mod customer_grade;
 mod customer_reception;
+mod customer_reception_fields;
 mod customer_registration;
 mod customer_visits;
 mod demo_board;
@@ -105,10 +106,17 @@ pub use customer_grade::{
     CustomerGradeRule, CustomerGradeRules, CustomerGradeVerdict, MAX_GRADE_RULES,
 };
 pub use customer_reception::{
-    reception_sheet_schema, ReceptionDraft, ReceptionDraftRow, ReceptionOcrColumn,
+    reception_sheet_schema, reception_sheet_schema_for_fields, ReceptionAddress,
+    ReceptionCustomerInput, ReceptionDraft, ReceptionDraftRow, ReceptionOcrColumn,
     ReceptionOcrField, ReceptionReaderFailure, ReceptionSheet, ReceptionSheetMediaType,
-    MAX_RECEPTION_ROWS, MAX_RECEPTION_SHEET_BYTES, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY,
-    RECEPTION_ROW_EMAIL, RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
+    MAX_RECEPTION_OCR_COLUMNS, MAX_RECEPTION_OCR_SCHEMA_BYTES, MAX_RECEPTION_ROWS,
+    MAX_RECEPTION_SHEET_BYTES, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL,
+    RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
+};
+pub use customer_reception_fields::{
+    CustomerReceptionField, ReceptionFieldInput, ReceptionFieldKind, ReceptionFieldType,
+    MAX_RECEPTION_FIELD_KEY_LENGTH, MAX_RECEPTION_FIELD_LABEL_LENGTH, MAX_RECEPTION_FIELD_OPTIONS,
+    MAX_RECEPTION_FIELD_OPTION_LENGTH, STANDARD_RECEPTION_FIELD_KEYS,
 };
 pub use customer_registration::{
     CustomerRegistration, CustomerRegistrationSource, NewCustomerRegistration,
@@ -149,7 +157,8 @@ pub use player_tags::{PlayerTagOptions, MAX_PLAYER_TAG_LENGTH, MAX_PLAYER_TAG_OP
 pub use ports::{
     AvailabilityDeadlineGateway, CaddieDutyGateway, CaddieRankFeeGateway, CaddieShiftGateway,
     CourseAuthorizer, CourseOrderGateway, CustomerConsentGateway, CustomerGateway,
-    CustomerGradeRulesGateway, CustomerReceptionOcrGateway, CustomerRegistrationGateway,
+    CustomerGradeRulesGateway, CustomerReceptionCreateGateway, CustomerReceptionFieldsGateway,
+    CustomerReceptionOcrGateway, CustomerReceptionValuesGateway, CustomerRegistrationGateway,
     FieldCapabilitiesGateway, GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway,
     GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, MembershipDiscountsGateway,
     MembershipGateway, MembershipPlayWindowsGateway, PlayerTagOptionsGateway,

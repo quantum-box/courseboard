@@ -18,10 +18,11 @@ use async_trait::async_trait;
 use serde::Deserialize;
 
 use crate::course::domain::{
-    reception_sheet_schema, CourseError, CustomerReceptionOcrGateway, GatewayCredentials,
-    ReceptionDraft, ReceptionDraftRow, ReceptionReaderFailure, ReceptionSheet, RECEPTION_CONSENTS,
-    RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL, RECEPTION_ROW_NAME,
-    RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
+    reception_sheet_schema_for_fields, CourseError, CustomerReceptionField,
+    CustomerReceptionOcrGateway, GatewayCredentials, ReceptionDraft, ReceptionDraftRow,
+    ReceptionReaderFailure, ReceptionSheet, RECEPTION_CONSENTS, RECEPTION_OCR_ENTITY_KEY,
+    RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL, RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA,
+    RECEPTION_ROW_PHONE,
 };
 
 use super::field_gateway::{
@@ -49,10 +50,12 @@ impl CustomerReceptionOcrGateway for FieldCustomerReceptionGateway {
         &self,
         credentials: GatewayCredentials<'_>,
         sheet: ReceptionSheet,
+        fields: &[CustomerReceptionField],
     ) -> Result<ReceptionDraft, CourseError> {
-        let schema = serde_json::to_string(&reception_sheet_schema()).map_err(|_| {
-            CourseError::Provider("reception sheet schema is not serializable".into())
-        })?;
+        let schema =
+            serde_json::to_string(&reception_sheet_schema_for_fields(fields)?).map_err(|_| {
+                CourseError::Provider("reception sheet schema is not serializable".into())
+            })?;
         let media_type = sheet.media_type();
         let part = reqwest::multipart::Part::bytes(sheet.into_bytes())
             // The desk's own filename is deliberately not forwarded: a scanner
@@ -78,7 +81,7 @@ impl CustomerReceptionOcrGateway for FieldCustomerReceptionGateway {
             reader_failure,
         )
         .await?;
-        Ok(map_draft(response))
+        Ok(map_draft(response, fields))
     }
 }
 
@@ -118,7 +121,7 @@ struct FieldGenericOcrDraft {
     warnings: Vec<String>,
 }
 
-fn map_draft(response: FieldGenericOcrDraft) -> ReceptionDraft {
+fn map_draft(response: FieldGenericOcrDraft, fields: &[CustomerReceptionField]) -> ReceptionDraft {
     let rows = response
         .fields
         .get(RECEPTION_ROWS_KEY)
@@ -131,7 +134,8 @@ fn map_draft(response: FieldGenericOcrDraft) -> ReceptionDraft {
                         column(row, RECEPTION_ROW_NAME_KANA),
                         column(row, RECEPTION_ROW_PHONE),
                         column(row, RECEPTION_ROW_EMAIL),
-                    );
+                    )
+                    .with_configured_fields(fields, row);
                     RECEPTION_CONSENTS.iter().fold(draft, |draft, consent| {
                         draft.with_consent_tick(consent.key, tick_column(row, consent.key))
                     })
@@ -179,7 +183,23 @@ mod tests {
     };
 
     fn draft_from(json: serde_json::Value) -> ReceptionDraft {
-        map_draft(serde_json::from_value(json).expect("field draft shape"))
+        map_draft(
+            serde_json::from_value(json).expect("field draft shape"),
+            &crate::course::domain::CustomerReceptionField::merge_with_defaults(
+                "test-tenant",
+                Vec::new(),
+            ),
+        )
+    }
+
+    fn draft_from_with_fields(
+        json: serde_json::Value,
+        fields: &[CustomerReceptionField],
+    ) -> ReceptionDraft {
+        map_draft(
+            serde_json::from_value(json).expect("field draft shape"),
+            fields,
+        )
     }
 
     #[test]
@@ -204,6 +224,55 @@ mod tests {
         assert_eq!(draft.rows()[0].email(), Some("honda@example.com"));
         assert_eq!(draft.rows()[1].name(), Some("西村 隆"));
         assert_eq!(draft.rows()[1].phone(), None);
+    }
+
+    #[test]
+    fn custom_values_follow_the_fields_visitors_entity_and_row_keys() {
+        let custom = CustomerReceptionField::try_new(
+            "test-tenant",
+            crate::course::domain::ReceptionFieldInput {
+                field_key: "membership_type".to_string(),
+                kind: crate::course::domain::ReceptionFieldKind::Custom,
+                field_type: crate::course::domain::ReceptionFieldType::Select,
+                enabled: true,
+                required: false,
+                label: Some("会員区分".to_string()),
+                sort_order: 7,
+                options: vec!["正会員".to_string(), "平日会員".to_string()],
+            },
+        )
+        .unwrap();
+        let boolean = CustomerReceptionField::try_new(
+            "test-tenant",
+            crate::course::domain::ReceptionFieldInput {
+                field_key: "cart_required".to_string(),
+                kind: crate::course::domain::ReceptionFieldKind::Custom,
+                field_type: crate::course::domain::ReceptionFieldType::Boolean,
+                enabled: true,
+                required: false,
+                label: Some("カート利用".to_string()),
+                sort_order: 8,
+                options: Vec::new(),
+            },
+        )
+        .unwrap();
+        let fields = CustomerReceptionField::merge_with_defaults("test-tenant", [custom, boolean]);
+        let draft = draft_from_with_fields(
+            serde_json::json!({
+                "fields": {
+                    "visitors": [{
+                        "name": "本田 康彦",
+                        "membership_type": "正会員",
+                        "cart_required": false
+                    }]
+                },
+                "warnings": []
+            }),
+            &fields,
+        );
+        assert_eq!(draft.rows()[0].name(), Some("本田 康彦"));
+        assert_eq!(draft.rows()[0].custom_fields()["membership_type"], "正会員");
+        assert_eq!(draft.rows()[0].custom_fields()["cart_required"], false);
     }
 
     fn accepted(draft: &ReceptionDraft, row: usize, key: &str) -> Option<bool> {
@@ -450,6 +519,10 @@ mod tests {
                     caller_bearer: "Bearer test",
                 },
                 ReceptionSheet::try_new(vec![0xff, 0xd8, 0xff, 0x00], "image/jpeg").expect("sheet"),
+                &crate::course::domain::CustomerReceptionField::merge_with_defaults(
+                    "operator-test",
+                    Vec::new(),
+                ),
             )
             .await
             .expect_err("an unpaid reader cannot draft");
@@ -470,7 +543,7 @@ mod tests {
 
     #[test]
     fn the_schema_sent_upstream_is_the_golf_reception_sheet() {
-        let schema = serde_json::to_value(reception_sheet_schema()).unwrap();
+        let schema = serde_json::to_value(crate::course::domain::reception_sheet_schema()).unwrap();
         assert_eq!(schema[0]["key"], RECEPTION_ROWS_KEY);
         assert_eq!(schema[0]["itemFields"][0]["key"], RECEPTION_ROW_NAME);
     }

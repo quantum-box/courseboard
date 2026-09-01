@@ -2,12 +2,36 @@ import { courseboardApiJson } from '../../../../api'
 import { customersPath, type Customer } from '../models'
 import {
   customerPayload,
+  normalizeReceptionFields,
   uploadFileName,
   type ReceptionDraft,
+  type ReceptionField,
+  type ReceptionFieldWriteInput,
   type ReceptionRow,
 } from './models'
 
 const RECEPTION_DRAFT_PATH = '/v1/course/customers/reception-draft'
+export const RECEPTION_FIELDS_PATH = '/v1/course/customer-reception-fields'
+
+/**
+ * The CourseBoard API returns a complete list (`{ items }`) after merging the
+ * tenant's saved rows with defaults. Keep parsing here so the rest of the UI
+ * never has to know whether an older local server returned an array directly.
+ */
+export async function listReceptionFields(): Promise<readonly ReceptionField[]> {
+  const response = await courseboardApiJson<unknown>(RECEPTION_FIELDS_PATH)
+  return normalizeReceptionFields(response)
+}
+
+/** Replace the tenant's reception-field definitions and return the saved list. */
+export async function saveReceptionFields(items: readonly ReceptionFieldWriteInput[]) {
+  const response = await courseboardApiJson<unknown>(RECEPTION_FIELDS_PATH, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ items }),
+  })
+  return normalizeReceptionFields(response)
+}
 
 /**
  * Reads one sheet. Nothing is stored anywhere along the way — not the file, not
@@ -36,12 +60,36 @@ export function draftReceptionSheet(file: File) {
  * a second person — so the screen keeps the row saved and says the consents
  * are missing.
  */
-export type RegisteredCustomer = Customer & { consentsRecorded?: boolean }
+export type RegisteredCustomer = Customer & {
+  consentsRecorded?: boolean
+  customFieldsRecorded?: boolean
+}
 
-export function registerReceptionRow(row: ReceptionRow, sourceRowIndex?: number) {
+export function registerReceptionRow(
+  row: ReceptionRow,
+  sourceRowIndex?: number,
+  fields?: readonly ReceptionField[],
+) {
   return courseboardApiJson<RegisteredCustomer>(customersPath, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(customerPayload(row, sourceRowIndex)),
+    body: JSON.stringify(customerPayload(row, sourceRowIndex, fields)),
   })
+}
+
+/** Retry only CourseBoard's local custom values after Field already created the customer. */
+export function retryReceptionValues(
+  customerId: string,
+  row: ReceptionRow,
+  fields: readonly ReceptionField[],
+) {
+  const { customFields } = customerPayload(row, undefined, fields)
+  return courseboardApiJson<{ recorded: boolean }>(
+    `${customersPath}/${encodeURIComponent(customerId)}/reception-values`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ customFields }),
+    },
+  )
 }

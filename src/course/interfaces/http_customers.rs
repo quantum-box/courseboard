@@ -14,7 +14,7 @@ use axum::{
     http::HeaderMap,
     Extension, Json,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
@@ -23,24 +23,27 @@ use super::openapi::ErrorBody;
 
 use crate::course::domain::{
     reception_consent, AssignMembershipPlan, CourseError, Customer, CustomerGradeRule,
-    CustomerGradeRules, CustomerId, CustomerMembership, CustomerRegistration,
-    CustomerRegistrationSource, CustomerSearchQuery, CustomerVisit, MemberDiscount,
-    MembershipDiscount, MembershipDiscounts, MembershipDiscountsGateway, MembershipPlan,
-    MembershipPlanId, MembershipPlayWindow, MembershipPlayWindows, MembershipPlayWindowsGateway,
-    NewCustomer, PlayableDays, ReceptionConsentAnswer, ReceptionDraftRow, ReceptionSheet,
-    SetMemberNumber, UpsertMembershipPlan,
+    CustomerGradeRules, CustomerId, CustomerMembership, CustomerReceptionCreateGateway,
+    CustomerReceptionField, CustomerReceptionFieldsGateway, CustomerReceptionValuesGateway,
+    CustomerRegistration, CustomerRegistrationSource, CustomerSearchQuery, CustomerVisit,
+    MemberDiscount, MembershipDiscount, MembershipDiscounts, MembershipDiscountsGateway,
+    MembershipPlan, MembershipPlanId, MembershipPlayWindow, MembershipPlayWindows,
+    MembershipPlayWindowsGateway, NewCustomer, PlayableDays, ReceptionAddress,
+    ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraftRow, ReceptionFieldInput,
+    ReceptionFieldKind, ReceptionFieldType, ReceptionSheet, SetMemberNumber, UpsertMembershipPlan,
 };
 use crate::course::infrastructure::{
-    FieldCustomerConsentGateway, FieldCustomerGateway, FieldCustomerReceptionGateway,
-    FieldMembershipGateway,
+    FieldCustomerConsentGateway, FieldCustomerGateway, FieldCustomerReceptionCreateGateway,
+    FieldCustomerReceptionGateway, FieldMembershipGateway,
 };
 use crate::course::usecase::{
     AssignMembershipPlanUseCase, CreateCustomerUseCase, CreateMembershipPlanUseCase,
-    CustomerProvenance, CustomerVisitReport, DraftCustomerReceptionUseCase,
-    GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase, GetCustomerRegistrationUseCase,
-    GetCustomerUseCase, GetCustomerVisitsUseCase, ListMembershipPlansUseCase,
-    ReplaceCustomerGradeRulesUseCase, SearchCustomersUseCase, SetMemberNumberUseCase,
-    UpdateMembershipPlanUseCase,
+    CreateReceptionCustomerUseCase, CustomerProvenance, CustomerVisitReport,
+    DraftCustomerReceptionUseCase, GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase,
+    GetCustomerReceptionFieldsUseCase, GetCustomerRegistrationUseCase, GetCustomerUseCase,
+    GetCustomerVisitsUseCase, ListMembershipPlansUseCase, RecordReceptionCustomerValuesUseCase,
+    ReplaceCustomerGradeRulesUseCase, ReplaceCustomerReceptionFieldsUseCase,
+    SearchCustomersUseCase, SetMemberNumberUseCase, UpdateMembershipPlanUseCase,
 };
 use crate::{AppError, AppState, CallerPrincipal};
 
@@ -66,6 +69,22 @@ fn reception_gateway(state: &AppState) -> Arc<FieldCustomerReceptionGateway> {
         state.http_client.clone(),
         field_api_url,
     ))
+}
+
+fn reception_create_gateway(state: &AppState) -> Arc<dyn CustomerReceptionCreateGateway> {
+    let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
+    Arc::new(FieldCustomerReceptionCreateGateway::new(
+        state.http_client.clone(),
+        field_api_url,
+    ))
+}
+
+fn reception_fields_gateway(state: &AppState) -> Arc<dyn CustomerReceptionFieldsGateway> {
+    state.customer_reception_fields()
+}
+
+fn reception_values_gateway(state: &AppState) -> Arc<dyn CustomerReceptionValuesGateway> {
+    state.customer_reception_values()
 }
 
 pub(crate) fn membership_gateway(state: &AppState) -> Arc<FieldMembershipGateway> {
@@ -96,11 +115,20 @@ pub struct CustomerDto {
     /// not the registration, or a second person appears in the ledger.
     #[serde(default = "consents_recorded_default")]
     pub consents_recorded: bool,
+    /// `false` means the Field customer exists but CourseBoard could not file
+    /// its reception-only custom values. The row must be retried, not created
+    /// again.
+    #[serde(default = "custom_fields_recorded_default")]
+    pub custom_fields_recorded: bool,
 }
 
 /// Registrations that never carried consents, and every read of a customer,
 /// report `true`: nothing was left unfiled.
 fn consents_recorded_default() -> bool {
+    true
+}
+
+fn custom_fields_recorded_default() -> bool {
     true
 }
 
@@ -113,6 +141,7 @@ impl From<&Customer> for CustomerDto {
             email: value.email().map(str::to_string),
             phone: value.phone().map(str::to_string),
             consents_recorded: true,
+            custom_fields_recorded: true,
         }
     }
 }
@@ -171,6 +200,21 @@ pub async fn search_customers(
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct ReceptionAddressRequest {
+    #[serde(default)]
+    pub postal_code: String,
+    #[serde(default)]
+    pub state: String,
+    #[serde(default)]
+    pub city: String,
+    #[serde(default)]
+    pub address1: String,
+    #[serde(default)]
+    pub address2: Option<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct CreateCustomerRequest {
     pub name: String,
     #[serde(default)]
@@ -181,6 +225,18 @@ pub struct CreateCustomerRequest {
     pub email: Option<String>,
     #[serde(default)]
     pub phone: Option<String>,
+    /// Reception-only standard values accepted by Field's ERP customer
+    /// capability. They are rejected when `source` is not a reception sheet.
+    #[serde(default)]
+    pub birth_date: Option<String>,
+    #[serde(default)]
+    pub sex: Option<String>,
+    #[serde(default)]
+    pub address: Option<ReceptionAddressRequest>,
+    /// Reception-only CourseBoard values. They never cross the Field boundary.
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub custom_fields: std::collections::BTreeMap<String, serde_json::Value>,
     /// Which screen this came from: `manual`, `reception_sheet`, or `ledger`.
     ///
     /// Absent means typed at the counter, which is what every caller written
@@ -233,6 +289,69 @@ fn consent_answers(
             })
         })
         .collect()
+}
+
+fn reception_customer_input(
+    request: &CreateCustomerRequest,
+) -> Result<ReceptionCustomerInput, AppError> {
+    let customer = NewCustomer::try_new(
+        request.name.clone(),
+        request.name_kana.clone(),
+        request.email.clone(),
+        request.phone.clone(),
+    )
+    .map_err(AppError::from)?;
+    let birth_date = request
+        .birth_date
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| {
+            NaiveDate::parse_from_str(value.trim(), "%Y-%m-%d")
+                .map_err(|_| AppError::BadRequest("birthDate must be YYYY-MM-DD"))
+        })
+        .transpose()?;
+    let sex = request
+        .sex
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let address = request.address.as_ref().map(|address| ReceptionAddress {
+        postal_code: address.postal_code.trim().to_string(),
+        state: address.state.trim().to_string(),
+        city: address.city.trim().to_string(),
+        address1: address.address1.trim().to_string(),
+        address2: address
+            .address2
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+    });
+    let address = match address {
+        Some(address)
+            if address.postal_code.is_empty()
+                && address.state.is_empty()
+                && address.city.is_empty()
+                && address.address1.is_empty()
+                && address.address2.is_none() =>
+        {
+            None
+        }
+        Some(address) if address.address1.is_empty() => {
+            return Err(AppError::BadRequest(
+                "address1 is required when address is present",
+            ));
+        }
+        address => address,
+    };
+    Ok(ReceptionCustomerInput::new(
+        customer,
+        birth_date,
+        sex,
+        address,
+        request.custom_fields.clone(),
+    ))
 }
 
 /// GET /v1/course/customers/{customer_id}
@@ -295,34 +414,277 @@ pub async fn create_customer(
         Some(value) => CustomerRegistrationSource::parse(value).map_err(AppError::from)?,
         None => CustomerRegistrationSource::Manual,
     };
-    let input = NewCustomer::try_new(
-        request.name,
-        request.name_kana,
-        request.email,
-        request.phone,
-    )
-    .map_err(AppError::from)?;
     let consents = consent_answers(&request.consents).map_err(AppError::from)?;
-    let registered = CreateCustomerUseCase::new(
-        customer_gateway(&state),
-        state.customer_registrations.clone(),
-        customer_consent_gateway(&state),
-    )
-    .execute_with_consents(
-        credentials,
-        input,
-        CustomerProvenance {
-            source,
-            registered_by: principal.and_then(|Extension(caller)| caller.subject),
-            source_row_index: request.source_row_index,
-        },
-        &consents,
-    )
-    .await
-    .map_err(AppError::from)?;
+    let provenance = CustomerProvenance {
+        source,
+        registered_by: principal.and_then(|Extension(caller)| caller.subject),
+        source_row_index: request.source_row_index,
+    };
+    let registered = if source == CustomerRegistrationSource::ReceptionSheet {
+        CreateReceptionCustomerUseCase::new(
+            reception_create_gateway(&state),
+            reception_fields_gateway(&state),
+            reception_values_gateway(&state),
+            state.customer_registrations.clone(),
+        )
+        .execute(
+            credentials,
+            reception_customer_input(&request)?,
+            provenance,
+            &consents,
+        )
+        .await
+        .map_err(AppError::from)?
+    } else {
+        if request.birth_date.is_some()
+            || request.sex.is_some()
+            || request.address.is_some()
+            || !request.custom_fields.is_empty()
+        {
+            return Err(AppError::BadRequest(
+                "extended customer fields require a reception sheet source",
+            ));
+        }
+        let input = NewCustomer::try_new(
+            request.name,
+            request.name_kana,
+            request.email,
+            request.phone,
+        )
+        .map_err(AppError::from)?;
+        CreateCustomerUseCase::new(
+            customer_gateway(&state),
+            state.customer_registrations.clone(),
+            customer_consent_gateway(&state),
+        )
+        .execute_with_consents(credentials, input, provenance, &consents)
+        .await
+        .map_err(AppError::from)?
+    };
     let mut dto = CustomerDto::from(&registered.customer);
     dto.consents_recorded = registered.consents_recorded;
+    dto.custom_fields_recorded = registered.custom_fields_recorded;
     Ok(Json(dto))
+}
+
+// ─── Reception sheet field settings ──────────────────────────────────────────
+
+/// One standard or golf-specific field shown on a reception sheet.
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerReceptionFieldDto {
+    pub field_key: String,
+    pub kind: String,
+    pub field_type: String,
+    pub enabled: bool,
+    pub required: bool,
+    /// The effective label. An omitted label in PUT is returned as the
+    /// built-in wording here.
+    pub label: String,
+    /// Whether `label` is a tenant override or the current built-in wording.
+    /// The settings screen uses this to avoid persisting a copied default.
+    pub custom_label: bool,
+    pub sort_order: i32,
+    #[serde(default)]
+    pub options: Vec<String>,
+}
+
+impl From<&CustomerReceptionField> for CustomerReceptionFieldDto {
+    fn from(field: &CustomerReceptionField) -> Self {
+        Self {
+            field_key: field.field_key.clone(),
+            kind: field.kind.as_str().to_string(),
+            field_type: field.field_type.as_str().to_string(),
+            enabled: field.enabled,
+            required: field.required,
+            label: field.effective_label().to_string(),
+            custom_label: field.label.is_some(),
+            sort_order: field.sort_order,
+            options: field.options.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerReceptionFieldsResponse {
+    pub items: Vec<CustomerReceptionFieldDto>,
+}
+
+/// Input for one field setting. `label: null` or a blank label restores the
+/// built-in wording.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerReceptionFieldRequest {
+    pub field_key: String,
+    pub kind: String,
+    pub field_type: String,
+    pub enabled: bool,
+    pub required: bool,
+    #[serde(default)]
+    pub label: Option<String>,
+    /// False means the label is the built-in wording, even when a client sends
+    /// that wording back in `label`. This preserves the nullable storage
+    /// contract across a GET → edit → PUT round trip.
+    #[serde(default)]
+    pub custom_label: bool,
+    #[serde(default)]
+    pub sort_order: i32,
+    #[serde(default)]
+    pub options: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceCustomerReceptionFieldsRequest {
+    pub items: Vec<CustomerReceptionFieldRequest>,
+}
+
+fn reception_field_input(
+    request: CustomerReceptionFieldRequest,
+) -> Result<ReceptionFieldInput, AppError> {
+    let kind = match request.kind.as_str() {
+        "standard" => ReceptionFieldKind::Standard,
+        "custom" => ReceptionFieldKind::Custom,
+        _ => return Err(AppError::BadRequest("invalid reception field kind")),
+    };
+    let field_type = match request.field_type.as_str() {
+        "text" => ReceptionFieldType::Text,
+        "tel" => ReceptionFieldType::Tel,
+        "email" => ReceptionFieldType::Email,
+        "date" => ReceptionFieldType::Date,
+        "select" => ReceptionFieldType::Select,
+        "boolean" => ReceptionFieldType::Boolean,
+        "address" => ReceptionFieldType::Address,
+        _ => return Err(AppError::BadRequest("invalid reception field type")),
+    };
+    Ok(ReceptionFieldInput {
+        field_key: request.field_key,
+        kind,
+        field_type,
+        enabled: request.enabled,
+        required: request.required,
+        label: request.custom_label.then_some(request.label).flatten(),
+        sort_order: request.sort_order,
+        options: request.options,
+    })
+}
+
+/// GET /v1/course/customer-reception-fields
+#[utoipa::path(
+    get,
+    path = "/v1/course/customer-reception-fields",
+    tag = "course",
+    responses(
+        (status = 200, description = "Reception sheet field settings", body = CustomerReceptionFieldsResponse),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_customer_reception_fields(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<CustomerReceptionFieldsResponse>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let fields = GetCustomerReceptionFieldsUseCase::new(reception_fields_gateway(&state))
+        .execute(credentials)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CustomerReceptionFieldsResponse {
+        items: fields.iter().map(CustomerReceptionFieldDto::from).collect(),
+    }))
+}
+
+/// PUT /v1/course/customer-reception-fields
+#[utoipa::path(
+    put,
+    path = "/v1/course/customer-reception-fields",
+    tag = "course",
+    request_body = ReplaceCustomerReceptionFieldsRequest,
+    responses(
+        (status = 200, description = "Replaced reception sheet field settings", body = CustomerReceptionFieldsResponse),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn replace_customer_reception_fields(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<ReplaceCustomerReceptionFieldsRequest>,
+) -> Result<Json<CustomerReceptionFieldsResponse>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let inputs = request
+        .items
+        .into_iter()
+        .map(reception_field_input)
+        .collect::<Result<Vec<_>, _>>()?;
+    let fields = ReplaceCustomerReceptionFieldsUseCase::new(reception_fields_gateway(&state))
+        .execute(credentials, inputs)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CustomerReceptionFieldsResponse {
+        items: fields.iter().map(CustomerReceptionFieldDto::from).collect(),
+    }))
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordReceptionCustomerValuesRequest {
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub custom_fields: std::collections::BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordReceptionCustomerValuesResponse {
+    pub recorded: bool,
+}
+
+/// PUT /v1/course/customers/{customer_id}/reception-values
+///
+/// Idempotently retries the local half of a reception registration after the
+/// Field customer was already created. It never writes Field, so retrying
+/// cannot duplicate a person in the ledger.
+#[utoipa::path(
+    put,
+    path = "/v1/course/customers/{customer_id}/reception-values",
+    tag = "course",
+    params(("customer_id" = String, Path, description = "Field customer id")),
+    request_body = RecordReceptionCustomerValuesRequest,
+    responses(
+        (status = 200, description = "Reception values recorded", body = RecordReceptionCustomerValuesResponse),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 424, description = "Local storage error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn record_reception_customer_values(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(customer_id): Path<String>,
+    Json(request): Json<RecordReceptionCustomerValuesRequest>,
+) -> Result<Json<RecordReceptionCustomerValuesResponse>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let customer_id = CustomerId::try_new(customer_id).map_err(AppError::from)?;
+    RecordReceptionCustomerValuesUseCase::new(
+        reception_fields_gateway(&state),
+        reception_values_gateway(&state),
+        customer_gateway(&state),
+    )
+    .execute(credentials, &customer_id, request.custom_fields)
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(RecordReceptionCustomerValuesResponse {
+        recorded: true,
+    }))
 }
 
 // ─── Visit history ────────────────────────────────────────────────────────────
@@ -957,6 +1319,19 @@ pub struct ReceptionDraftRowDto {
     pub phone: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub birth_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<serde_json::Value>,
+    /// Values for enabled custom fields, retaining their JSON type (for
+    /// example boolean rather than the string `"true"`). Missing values are
+    /// represented as null so the confirmation screen can render every
+    /// configured custom row in a stable order.
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub custom_fields: std::collections::BTreeMap<String, serde_json::Value>,
     /// Every tick box the sheet carries, in printed order, whether or not the
     /// reader made it out. Always present so the screen can show an unread box
     /// as a question rather than leave it off the row.
@@ -983,6 +1358,10 @@ impl From<&ReceptionDraftRow> for ReceptionDraftRowDto {
             name_kana: value.name_kana().map(str::to_string),
             phone: value.phone().map(str::to_string),
             email: value.email().map(str::to_string),
+            birth_date: value.birth_date().map(str::to_string),
+            sex: value.sex().map(str::to_string),
+            address: value.address().cloned(),
+            custom_fields: value.custom_fields().clone(),
             consents: value
                 .consents()
                 .iter()
@@ -1035,10 +1414,13 @@ pub async fn draft_customer_reception(
 ) -> Result<Json<ReceptionDraftDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
     let sheet = read_reception_sheet(multipart).await?;
-    let draft = DraftCustomerReceptionUseCase::new(reception_gateway(&state))
-        .execute(credentials, sheet)
-        .await
-        .map_err(AppError::from)?;
+    let draft = DraftCustomerReceptionUseCase::new(
+        reception_gateway(&state),
+        reception_fields_gateway(&state),
+    )
+    .execute(credentials, sheet)
+    .await
+    .map_err(AppError::from)?;
     Ok(Json(ReceptionDraftDto {
         visitors: draft
             .rows()
@@ -1472,5 +1854,31 @@ mod tests {
         assert_eq!(json["name"], serde_json::json!("本田 康彦"));
         assert!(json.get("email").is_none());
         assert!(json.get("phone").is_none());
+    }
+
+    #[test]
+    fn reception_field_dto_distinguishes_default_and_custom_labels() {
+        let standard = CustomerReceptionField::default_for("tenant-1", "email").unwrap();
+        let standard_json =
+            serde_json::to_value(CustomerReceptionFieldDto::from(&standard)).unwrap();
+        assert_eq!(standard_json["label"], "メールアドレス");
+        assert_eq!(standard_json["customLabel"], false);
+
+        let custom = CustomerReceptionField::try_new(
+            "tenant-1",
+            ReceptionFieldInput {
+                field_key: "membership_type".to_string(),
+                kind: ReceptionFieldKind::Custom,
+                field_type: ReceptionFieldType::Text,
+                enabled: true,
+                required: false,
+                label: Some("会員区分".to_string()),
+                sort_order: 7,
+                options: Vec::new(),
+            },
+        )
+        .unwrap();
+        let custom_json = serde_json::to_value(CustomerReceptionFieldDto::from(&custom)).unwrap();
+        assert_eq!(custom_json["customLabel"], true);
     }
 }

@@ -42,6 +42,10 @@ pub struct RegisteredCustomer {
     pub customer: Customer,
     /// `false` when the sheet carried answered boxes that Field did not take.
     pub consents_recorded: bool,
+    /// `false` when reception-only custom values could not be persisted after
+    /// the customer was created. The customer remains valid and must not be
+    /// registered again.
+    pub custom_fields_recorded: bool,
 }
 
 pub struct CreateCustomerUseCase {
@@ -141,6 +145,7 @@ impl CreateCustomerUseCase {
         Ok(RegisteredCustomer {
             customer: created,
             consents_recorded,
+            custom_fields_recorded: true,
         })
     }
 }
@@ -150,7 +155,7 @@ impl CreateCustomerUseCase {
 /// An unread box counts as missing. The reader drops a tick it cannot resolve,
 /// so "not read" and "not ticked" arrive the same way, and treating either as
 /// agreement would file a declaration the visitor never made.
-fn refuse_without_the_required_declaration(
+pub(crate) fn refuse_without_the_required_declaration(
     consents: &[ReceptionConsentAnswer],
 ) -> Result<(), CourseError> {
     for required in required_reception_consents() {

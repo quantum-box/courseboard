@@ -10,16 +10,21 @@ use std::sync::Arc;
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    CourseError, CustomerReceptionOcrGateway, GatewayCredentials, ReceptionDraft, ReceptionSheet,
+    CourseError, CustomerReceptionField, CustomerReceptionFieldsGateway,
+    CustomerReceptionOcrGateway, GatewayCredentials, ReceptionDraft, ReceptionSheet,
 };
 
 pub struct DraftCustomerReceptionUseCase {
     reader: Arc<dyn CustomerReceptionOcrGateway>,
+    fields: Arc<dyn CustomerReceptionFieldsGateway>,
 }
 
 impl DraftCustomerReceptionUseCase {
-    pub fn new(reader: Arc<dyn CustomerReceptionOcrGateway>) -> Self {
-        Self { reader }
+    pub fn new(
+        reader: Arc<dyn CustomerReceptionOcrGateway>,
+        fields: Arc<dyn CustomerReceptionFieldsGateway>,
+    ) -> Self {
+        Self { reader, fields }
     }
 
     pub async fn execute(
@@ -28,7 +33,14 @@ impl DraftCustomerReceptionUseCase {
         sheet: ReceptionSheet,
     ) -> Result<ReceptionDraft, CourseError> {
         credentials.require(actions::MANAGE_CUSTOMERS).await?;
-        self.reader.draft_reception(credentials, sheet).await
+        let stored = self
+            .fields
+            .list_customer_reception_fields(credentials.operator_id)
+            .await?;
+        let fields = CustomerReceptionField::merge_with_defaults(credentials.operator_id, stored);
+        self.reader
+            .draft_reception(credentials, sheet, &fields)
+            .await
     }
 }
 
@@ -60,9 +72,31 @@ mod tests {
             &self,
             _credentials: GatewayCredentials<'_>,
             sheet: ReceptionSheet,
+            _fields: &[CustomerReceptionField],
         ) -> Result<ReceptionDraft, CourseError> {
             self.seen.lock().unwrap().push(sheet.media_type());
             self.answer.lock().unwrap().take().expect("one call")
+        }
+    }
+
+    #[derive(Default)]
+    struct StubFields;
+
+    #[async_trait]
+    impl CustomerReceptionFieldsGateway for StubFields {
+        async fn list_customer_reception_fields(
+            &self,
+            _tenant_id: &str,
+        ) -> Result<Vec<CustomerReceptionField>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn replace_customer_reception_fields(
+            &self,
+            _tenant_id: &str,
+            _fields: &[CustomerReceptionField],
+        ) -> Result<(), CourseError> {
+            unreachable!("not used by this use case")
         }
     }
 
@@ -91,7 +125,7 @@ mod tests {
             )],
             vec![],
         ))));
-        let draft = DraftCustomerReceptionUseCase::new(reader.clone())
+        let draft = DraftCustomerReceptionUseCase::new(reader.clone(), Arc::new(StubFields))
             .execute(credentials(), sheet())
             .await
             .unwrap();
@@ -108,7 +142,7 @@ mod tests {
         let reader = Arc::new(StubReader::answering(Err(CourseError::Provider(
             "ocr provider unavailable".into(),
         ))));
-        let error = DraftCustomerReceptionUseCase::new(reader)
+        let error = DraftCustomerReceptionUseCase::new(reader, Arc::new(StubFields))
             .execute(credentials(), sheet())
             .await
             .unwrap_err();

@@ -8,6 +8,8 @@
 - Field 側の上流失敗の扱い: tachyonfield [#1238](https://github.com/quantum-box/tachyonfield/pull/1238)
   （[PLT-4033](https://linear.app/issue/PLT-4033)、merge commit `cfccc0d0`）
 - Linear issue: [PLT-4036](https://linear.app/issue/PLT-4036)（上流失敗の出し分け）
+- 任意形式の受付項目: tachyonfield [#1255](https://github.com/quantum-box/tachyonfield/pull/1255)
+- [設計](design.md)
 
 ## 概要
 
@@ -34,6 +36,9 @@ allowlist に個人顧客 `consumer` を含む）。CourseBoard は受付用紙�
 - 登録は既存の `POST /v1/course/customers` を1行ずつ呼ぶ。名前だけで登録できる。
 - 読めなかった行も残す（電話番号だけの行など）。名前が入るまで登録ボタンは押せない。
 - 同姓同名は消さずに印を付ける。1組に同姓同名が実在するため、自動で落とすと人が消える。
+- 受付票の標準項目をテナントごとに `enabled / required / label` で設定する。
+- ゴルフ場固有の追加項目を定義し、OCR・確認・登録・CourseBoard ローカル保存まで一貫して扱う。
+- 氏名・カナ・電話・メール・生年月日・性別・住所は Field 顧客台帳を正とする。
 
 ## Non-goals
 
@@ -69,6 +74,31 @@ allowlist に個人顧客 `consumer` を含む）。CourseBoard は受付用紙�
   `vitest run src/features/golf/customers`
 - [ ] 実 Field API に対する動作確認（テナントに `field:RegisterMembership` が要る）
 - [ ] CourseBoard の required checks が green になる
+
+## 任意形式対応（tachyonfield #1255 追随）
+
+PR version: API `0.1.12`（base `0.1.11`）、UI `0.1.8`（base `0.1.7`）。
+
+- [x] DD で標準項目とゴルフ固有項目の保存境界を確定
+- [x] `golf_reception_fields` と `golf_customer_reception_values` の migration / repository
+- [x] 項目設定 GET/PUT API と認可分類
+- [x] 設定から組み立てる OCR schema と動的 draft DTO
+- [x] 標準追加項目の Field 登録と追加項目のローカル保存
+- [x] 受付票項目設定 UI と動的な確認行
+- [x] Rust / frontend の focused test
+- [ ] 実ブラウザと実 Field API での保存確認
+
+### PR前検証
+
+- `cargo fmt --all -- --check`
+- `cargo clippy --lib --all-features -- -D warnings`
+- TiDB を使った `cargo test`（1017件）
+- `npm run type-check`
+- `npm run test`
+- `npm run build`
+
+実ブラウザ・実 Field API はPR Previewで確認するため未実施。固定のゴルフ同意キーが
+対象テナントの Field consent item に設定済みであることも実環境確認に含める。
 
 ## 上流 OCR が失敗したときの出し分け（PLT-4036）
 

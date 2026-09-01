@@ -34,6 +34,8 @@ const MONTH = new Intl.DateTimeFormat('sv-SE', {
   month: '2-digit',
 }).format(new Date()).slice(0, 7)
 const FIRST_DAY = `${MONTH}-01`
+const MONTH_LABEL = `${Number(MONTH.slice(5, 7))}月`
+const DAYS_IN_MONTH = new Date(Number(MONTH.slice(0, 4)), Number(MONTH.slice(5, 7)), 0).getDate()
 
 /** The one confirmed day the board starts with: the caddie is off. */
 const confirmed: ConfirmedShift = {
@@ -223,10 +225,10 @@ describe('planning a month before confirming it', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: i18next.t('shifts:export.pdfPrint') }))
 
     expect(window.print).toHaveBeenCalledOnce()
-    expect(document.title).toBe('キャディシフト表_8月')
+    expect(document.title).toBe(`キャディシフト表_${MONTH_LABEL}`)
     const printable = document.body.querySelector<HTMLElement>('.shift-board-print')
     expect(printable?.dataset.printSource).toBe('confirmed')
-    expect(printable?.querySelectorAll('thead th')).toHaveLength(33)
+    expect(printable?.querySelectorAll('thead th')).toHaveLength(DAYS_IN_MONTH + 2)
     expect(printable?.querySelector<HTMLTableCellElement>('tbody td[data-kind]')?.dataset.kind)
       .toBe('off')
 
@@ -250,7 +252,7 @@ describe('planning a month before confirming it', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: i18next.t('shifts:export.pdfPrint') }))
 
     expect(window.print).toHaveBeenCalledOnce()
-    expect(document.title).toBe('キャディシフト案_8月')
+    expect(document.title).toBe(`キャディシフト案_${MONTH_LABEL}`)
     const printable = document.body.querySelector<HTMLElement>('.shift-board-print')
     const firstPrintedDay = printable
       ?.querySelector<HTMLTableCellElement>('tbody td[data-kind]')
@@ -273,7 +275,7 @@ describe('planning a month before confirming it', () => {
 
     expect(api.downloadText).toHaveBeenCalledOnce()
     const [filename, contents] = api.downloadText.mock.calls[0] as [string, string]
-    expect(filename).toBe('キャディシフト表_8月.csv')
+    expect(filename).toBe(`キャディシフト表_${MONTH_LABEL}.csv`)
     expect(contents.startsWith('\uFEFF')).toBe(true)
     expect(contents).toContain('高田 卓哉')
   })
@@ -291,7 +293,7 @@ describe('planning a month before confirming it', () => {
 
     await waitFor(() => expect(api.downloadBlob).toHaveBeenCalledOnce())
     const [filename, blob] = api.downloadBlob.mock.calls[0] as [string, Blob]
-    expect(filename).toBe('キャディシフト案_8月.xlsx')
+    expect(filename).toBe(`キャディシフト案_${MONTH_LABEL}.xlsx`)
     expect(blob.type).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     expect(blob.size).toBeGreaterThan(1000)
   })
