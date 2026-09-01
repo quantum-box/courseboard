@@ -9,6 +9,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  ScanLine,
   Trash2,
   Upload,
 } from 'lucide-react'
@@ -31,6 +32,7 @@ import { useResource } from '../../../../hooks/useResource'
 import { navigate, navigateFromClick } from '../../../../lib/router'
 import { showToast } from '../../../../lib/toast'
 import {
+  analyzeReceptionForm,
   draftReceptionSheet,
   listReceptionFields,
   registerReceptionRow,
@@ -39,6 +41,7 @@ import {
 } from './api'
 import {
   blankRow,
+  applyReceptionFormProposal,
   canRegister,
   blockedReason,
   duplicateNameKeys,
@@ -53,6 +56,7 @@ import {
   receptionFieldLabel,
   receptionFieldDefaultLabel,
   receptionReadFailure,
+  receptionPreviewImageSrc,
   receptionRowReadValue,
   receptionRowValue,
   updateReceptionRowField,
@@ -228,7 +232,7 @@ export function ReceptionPage() {
     }
   }
 
-  const busy = reading || registeringAll
+  const busy = reading || registeringAll || fieldSettings.loading || Boolean(fieldSettings.error)
 
   return (
     <div className="page-stack">
@@ -281,13 +285,9 @@ export function ReceptionPage() {
         ))}
       </Panel>
 
-      <ReceptionFieldSettingsPanel
-        fields={receptionFields}
-        loading={fieldSettings.loading}
-        error={fieldSettings.error}
-        onRetry={() => void fieldSettings.refresh()}
-        onSaved={fieldSettings.setData}
-      />
+      {fieldSettings.error ? (
+        <ResourceError error={fieldSettings.error} onRetry={() => void fieldSettings.refresh()} />
+      ) : null}
 
       {reading ? <LoadingState label={t('customers:reception.reading')} /> : null}
 
@@ -424,12 +424,12 @@ function customFieldKeyIsInvalid(fields: readonly ReceptionField[]) {
 }
 
 /**
- * Settings for the sheet are kept on this screen because they are only useful
- * while comparing a sheet. The editor deliberately sends the complete list:
+ * Settings for the sheet live under the Settings hub, away from the morning
+ * reception workflow. The editor deliberately sends the complete list:
  * the API treats PUT as a replacement and the server merges missing defaults
  * back in, so a newly added standard field cannot disappear from old tenants.
  */
-function ReceptionFieldSettingsPanel({
+export function ReceptionFieldSettingsPanel({
   fields,
   loading,
   error,
@@ -445,9 +445,19 @@ function ReceptionFieldSettingsPanel({
   const { t } = useTranslation(['customers', 'common'])
   const [drafts, setDrafts] = useState<ReceptionField[]>(() => cloneReceptionFields(fields))
   const [saving, setSaving] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [proposalActive, setProposalActive] = useState(false)
+  const [analysisWarnings, setAnalysisWarnings] = useState<string[]>([])
+  const [analysisPreview, setAnalysisPreview] = useState<string | null>(null)
+  const analysisInputRef = useRef<HTMLInputElement | null>(null)
+  const proposalSnapshotRef = useRef<ReceptionField[] | null>(null)
 
   useEffect(() => {
     setDrafts(cloneReceptionFields(fields))
+    setProposalActive(false)
+    setAnalysisWarnings([])
+    setAnalysisPreview(null)
+    proposalSnapshotRef.current = null
   }, [fields])
 
   const dirty = !settingsEqual(drafts, fields)
@@ -507,6 +517,47 @@ function ReceptionFieldSettingsPanel({
     })
   }
 
+  function cancelProposal() {
+    const restore = proposalActive && proposalSnapshotRef.current
+      ? proposalSnapshotRef.current
+      : fields
+    setDrafts(cloneReceptionFields(restore))
+    setProposalActive(false)
+    setAnalysisWarnings([])
+    setAnalysisPreview(null)
+    proposalSnapshotRef.current = null
+  }
+
+  async function analyzeBlankForm(picked: File) {
+    const beforeAnalysis = cloneReceptionFields(drafts)
+    setAnalyzing(true)
+    try {
+      let prepared: File
+      try {
+        prepared = await prepareReceptionSheet(picked)
+      } catch {
+        throw new Error(t('customers:reception.file.convert'))
+      }
+      const invalid = fileValidationError(prepared)
+      if (invalid) throw new Error(t(`customers:reception.file.${invalid}`))
+      const proposal = await analyzeReceptionForm(prepared)
+      proposalSnapshotRef.current = beforeAnalysis
+      setDrafts(applyReceptionFormProposal(beforeAnalysis, proposal))
+      setProposalActive(true)
+      setAnalysisWarnings(proposal.warnings)
+      setAnalysisPreview(proposal.previewImage ?? null)
+      showToast({ tone: 'success', message: t('customers:reception.analysis.applied') })
+    } catch (analysisError) {
+      showToast({
+        tone: 'danger',
+        title: t('customers:reception.analysis.failed'),
+        message: resourceErrorText(analysisError),
+      })
+    } finally {
+      setAnalyzing(false)
+    }
+  }
+
   async function save() {
     if (invalidCustomKey) return
     setSaving(true)
@@ -526,6 +577,10 @@ function ReceptionFieldSettingsPanel({
       })))
       setDrafts(cloneReceptionFields(next))
       onSaved(next)
+      setProposalActive(false)
+      setAnalysisWarnings([])
+      setAnalysisPreview(null)
+      proposalSnapshotRef.current = null
       showToast({ tone: 'success', message: t('customers:reception.settings.saved') })
     } catch (saveError) {
       showToast({
@@ -544,19 +599,67 @@ function ReceptionFieldSettingsPanel({
       title={t('customers:reception.settings.title')}
       description={t('customers:reception.settings.description')}
       actions={(
-        <Button
-          type="button"
-          variant="primary"
-          disabled={!dirty || saving || loading || invalidCustomKey}
-          onClick={() => void save()}
-        >
-          <Save />
-          {saving
-            ? t('customers:reception.settings.saving')
-            : t('customers:reception.settings.save')}
-        </Button>
+        <>
+          <input
+            ref={analysisInputRef}
+            id="reception-analysis-file"
+            type="file"
+            accept={RECEPTION_SHEET_ACCEPT}
+            className="visually-hidden-input"
+            onChange={event => {
+              const next = event.target.files?.[0]
+              event.target.value = ''
+              if (next) void analyzeBlankForm(next)
+            }}
+          />
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={loading || saving || analyzing}
+            onClick={() => analysisInputRef.current?.click()}
+          >
+            <ScanLine />
+            {analyzing
+              ? t('customers:reception.analysis.analyzing')
+              : t('customers:reception.analysis.choose')}
+          </Button>
+          {dirty || proposalActive ? (
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={saving || analyzing}
+              onClick={cancelProposal}
+            >
+              <RotateCcw />
+              {t('customers:reception.analysis.cancel')}
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            variant="primary"
+            disabled={!dirty || saving || analyzing || loading || invalidCustomKey}
+            onClick={() => void save()}
+          >
+            <Save />
+            {saving
+              ? t('customers:reception.settings.saving')
+              : t('customers:reception.settings.save')}
+          </Button>
+        </>
       )}
     >
+      {analysisWarnings.map((warning, index) => (
+        <Notice key={`${warning}-${index}`} tone="warning">{warning}</Notice>
+      ))}
+      {receptionPreviewImageSrc(analysisPreview) ? (
+        <div className="reception-analysis-preview">
+          <p className="reception-settings-hint">{t('customers:reception.analysis.previewTitle')}</p>
+          <img
+            src={receptionPreviewImageSrc(analysisPreview) ?? undefined}
+            alt={t('customers:reception.analysis.previewAlt')}
+          />
+        </div>
+      ) : null}
       {loading ? <LoadingState label={t('customers:reception.settings.loading')} /> : null}
       {error ? (
         <ResourceError error={error} onRetry={onRetry} />
@@ -589,7 +692,7 @@ function ReceptionFieldSettingsPanel({
                         type="checkbox"
                         aria-label={t('customers:reception.settings.enableLabel', { field: receptionFieldLabel(field) })}
                         checked={field.enabled}
-                        disabled={alwaysRequired || saving}
+                        disabled={alwaysRequired || saving || analyzing}
                         onChange={event => update(field.fieldKey, { enabled: event.target.checked })}
                       />
                     </td>
@@ -598,7 +701,7 @@ function ReceptionFieldSettingsPanel({
                         type="checkbox"
                         aria-label={t('customers:reception.settings.requiredLabel', { field: receptionFieldLabel(field) })}
                         checked={alwaysRequired || field.required}
-                        disabled={alwaysRequired || !field.enabled || saving}
+                        disabled={alwaysRequired || !field.enabled || saving || analyzing}
                         onChange={event => update(field.fieldKey, { required: event.target.checked })}
                       />
                       {alwaysRequired ? (
@@ -609,7 +712,7 @@ function ReceptionFieldSettingsPanel({
                       <Input
                         aria-label={t('customers:reception.settings.labelLabel', { field: receptionFieldLabel(field) })}
                         value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
-                        disabled={saving}
+                        disabled={saving || analyzing}
                         onChange={event => update(field.fieldKey, {
                           label: event.target.value,
                           customLabel: event.target.value.trim().length > 0,
@@ -621,7 +724,7 @@ function ReceptionFieldSettingsPanel({
                           variant="ghost"
                           size="sm"
                           aria-label={t('customers:reception.settings.resetLabel')}
-                          disabled={saving}
+                          disabled={saving || analyzing}
                           onClick={() => update(field.fieldKey, {
                             label: receptionFieldDefaultLabel(field.fieldKey),
                             customLabel: false,
@@ -646,7 +749,7 @@ function ReceptionFieldSettingsPanel({
             <h3>{t('customers:reception.settings.customTitle')}</h3>
             <p className="reception-settings-hint">{t('customers:reception.settings.customHint')}</p>
           </div>
-          <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={addCustomField}>
+          <Button type="button" variant="secondary" size="sm" disabled={saving || analyzing} onClick={addCustomField}>
             <Plus />
             {t('customers:reception.settings.addCustom')}
           </Button>
@@ -666,14 +769,14 @@ function ReceptionFieldSettingsPanel({
                   <Field label={t('customers:reception.settings.customKey')}>
                     <Input
                       value={field.fieldKey}
-                      disabled={saving}
+                      disabled={saving || analyzing}
                       onChange={event => update(field.fieldKey, { fieldKey: event.target.value })}
                     />
                   </Field>
                   <Field label={t('customers:reception.settings.customLabel')}>
                     <Input
                       value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
-                      disabled={saving}
+                      disabled={saving || analyzing}
                       onChange={event => update(field.fieldKey, {
                         label: event.target.value,
                         customLabel: event.target.value.trim().length > 0,
@@ -685,7 +788,7 @@ function ReceptionFieldSettingsPanel({
                         variant="ghost"
                         size="sm"
                         aria-label={t('customers:reception.settings.resetLabel')}
-                        disabled={saving}
+                        disabled={saving || analyzing}
                         onClick={() => update(field.fieldKey, {
                           label: receptionFieldDefaultLabel(field.fieldKey),
                           customLabel: false,
@@ -699,7 +802,7 @@ function ReceptionFieldSettingsPanel({
                   <Field label={t('customers:reception.settings.customType')}>
                     <NativeSelect
                       value={field.fieldType}
-                      disabled={saving}
+                      disabled={saving || analyzing}
                       onChange={event => update(field.fieldKey, {
                         fieldType: event.target.value as ReceptionFieldType,
                         options: event.target.value === 'select' ? field.options : [],
@@ -716,7 +819,7 @@ function ReceptionFieldSettingsPanel({
                     <input
                       type="checkbox"
                       checked={field.enabled}
-                      disabled={saving}
+                      disabled={saving || analyzing}
                       onChange={event => update(field.fieldKey, { enabled: event.target.checked })}
                     />
                     {t('customers:reception.settings.columns.enabled')}
@@ -725,7 +828,7 @@ function ReceptionFieldSettingsPanel({
                     <input
                       type="checkbox"
                       checked={field.required}
-                      disabled={!field.enabled || saving}
+                      disabled={!field.enabled || saving || analyzing}
                       onChange={event => update(field.fieldKey, { required: event.target.checked })}
                     />
                     {t('customers:reception.settings.columns.required')}
@@ -736,7 +839,7 @@ function ReceptionFieldSettingsPanel({
                       variant="ghost"
                       size="sm"
                       aria-label={t('customers:reception.settings.moveUp')}
-                      disabled={saving || index === 0}
+                      disabled={saving || analyzing || index === 0}
                       onClick={() => moveCustomField(field.fieldKey, -1)}
                     >
                       <ArrowUp />
@@ -746,7 +849,7 @@ function ReceptionFieldSettingsPanel({
                       variant="ghost"
                       size="sm"
                       aria-label={t('customers:reception.settings.moveDown')}
-                      disabled={saving || index === custom.length - 1}
+                      disabled={saving || analyzing || index === custom.length - 1}
                       onClick={() => moveCustomField(field.fieldKey, 1)}
                     >
                       <ArrowDown />
@@ -756,7 +859,7 @@ function ReceptionFieldSettingsPanel({
                       variant="ghost"
                       size="sm"
                       aria-label={t('customers:reception.settings.removeCustom')}
-                      disabled={saving}
+                      disabled={saving || analyzing}
                       onClick={() => removeCustomField(field.fieldKey)}
                     >
                       <Trash2 />
@@ -771,7 +874,7 @@ function ReceptionFieldSettingsPanel({
                   >
                     <NativeTextarea
                       value={field.options.join('\n')}
-                      disabled={saving}
+                      disabled={saving || analyzing}
                       onChange={event => update(field.fieldKey, {
                         options: event.target.value.split('\n').map(option => option.trim()).filter(Boolean),
                       })}

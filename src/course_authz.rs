@@ -402,6 +402,11 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         RouteAuthorization::Action(MANAGE_CUSTOMERS),
     ),
     (
+        "POST",
+        "/v1/course/customer-reception-fields/analysis",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
         "*",
         "/v1/course/customers/reception-draft",
         RouteAuthorization::UpstreamEnforced,
@@ -1326,6 +1331,7 @@ mod tests {
             ("POST", "/v1/course/customers"),
             ("GET", "/v1/course/customer-reception-fields"),
             ("PUT", "/v1/course/customer-reception-fields"),
+            ("POST", "/v1/course/customer-reception-fields/analysis"),
             ("POST", "/v1/course/customers/reception-draft"),
             ("GET", "/v1/course/customers/cus_1"),
             ("DELETE", "/v1/course/customers/cus_1"),

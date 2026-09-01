@@ -6,6 +6,7 @@ import {
   IdCard,
   Percent,
   Plug,
+  ScanLine,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
@@ -29,6 +30,7 @@ const MASTER_ICONS: Record<string, LucideIcon> = {
   playWindows: CalendarClock,
   grades: Award,
   caddieDuties: ClipboardList,
+  receptionFields: ScanLine,
 }
 
 function MasterLink({

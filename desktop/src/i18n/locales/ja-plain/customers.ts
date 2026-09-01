@@ -106,6 +106,15 @@ export const customers: DeepPartial<typeof source> = {
         boolean: 'はい／いいえ',
       },
     },
+    analysis: {
+      choose: 'まっさらな 紙から つくる',
+      analyzing: 'まっさらな 紙を 読んでいます…',
+      cancel: '提案を 取り消す',
+      applied: '紙から 項目を えらびました。たしかめて 保存してください。',
+      failed: 'まっさらな 紙を 読めませんでした',
+      previewTitle: '読んだ 紙の 画像',
+      previewAlt: '読んだ 受付の 紙の 画像',
+    },
     addressParts: {
       postalCode: 'ゆうびんばんごう',
       state: '都道府県',

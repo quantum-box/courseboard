@@ -30,18 +30,20 @@ use crate::course::domain::{
     MembershipPlan, MembershipPlanId, MembershipPlayWindow, MembershipPlayWindows,
     MembershipPlayWindowsGateway, NewCustomer, PlayableDays, ReceptionAddress,
     ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraftRow, ReceptionFieldInput,
-    ReceptionFieldKind, ReceptionFieldType, ReceptionSheet, SetMemberNumber, UpsertMembershipPlan,
+    ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal, ReceptionSheet, SetMemberNumber,
+    UpsertMembershipPlan,
 };
 use crate::course::infrastructure::{
     FieldCustomerConsentGateway, FieldCustomerGateway, FieldCustomerReceptionCreateGateway,
     FieldCustomerReceptionGateway, FieldMembershipGateway,
 };
 use crate::course::usecase::{
-    AssignMembershipPlanUseCase, CreateCustomerUseCase, CreateMembershipPlanUseCase,
-    CreateReceptionCustomerUseCase, CustomerProvenance, CustomerVisitReport, DeleteCustomerUseCase,
-    DraftCustomerReceptionUseCase, GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase,
-    GetCustomerReceptionFieldsUseCase, GetCustomerRegistrationUseCase, GetCustomerUseCase,
-    GetCustomerVisitsUseCase, ListMembershipPlansUseCase, RecordReceptionCustomerValuesUseCase,
+    AnalyzeCustomerReceptionFieldsUseCase, AssignMembershipPlanUseCase, CreateCustomerUseCase,
+    CreateMembershipPlanUseCase, CreateReceptionCustomerUseCase, CustomerProvenance,
+    CustomerVisitReport, DeleteCustomerUseCase, DraftCustomerReceptionUseCase,
+    GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase, GetCustomerReceptionFieldsUseCase,
+    GetCustomerRegistrationUseCase, GetCustomerUseCase, GetCustomerVisitsUseCase,
+    ListMembershipPlansUseCase, RecordReceptionCustomerValuesUseCase,
     ReplaceCustomerGradeRulesUseCase, ReplaceCustomerReceptionFieldsUseCase,
     SearchCustomersUseCase, SetMemberNumberUseCase, UpdateMembershipPlanUseCase,
 };
@@ -544,6 +546,32 @@ pub struct CustomerReceptionFieldsResponse {
     pub items: Vec<CustomerReceptionFieldDto>,
 }
 
+/// A transient proposal returned by blank-form analysis. It is deliberately
+/// not the settings response shape: `fields` contains only values the analyzer
+/// identified, while the settings screen merges them into its current draft.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerReceptionFieldsAnalysisResponse {
+    pub fields: Vec<CustomerReceptionFieldDto>,
+    pub warnings: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview_image: Option<String>,
+}
+
+impl From<ReceptionFormProposal> for CustomerReceptionFieldsAnalysisResponse {
+    fn from(proposal: ReceptionFormProposal) -> Self {
+        Self {
+            fields: proposal
+                .fields
+                .iter()
+                .map(CustomerReceptionFieldDto::from)
+                .collect(),
+            warnings: proposal.warnings,
+            preview_image: proposal.preview_image,
+        }
+    }
+}
+
 /// Input for one field setting. `label: null` or a blank label restores the
 /// built-in wording.
 #[derive(Debug, Deserialize, ToSchema)]
@@ -663,6 +691,43 @@ pub async fn replace_customer_reception_fields(
     Ok(Json(CustomerReceptionFieldsResponse {
         items: fields.iter().map(CustomerReceptionFieldDto::from).collect(),
     }))
+}
+
+/// POST /v1/course/customer-reception-fields/analysis
+///
+/// Sends the blank sheet to Field's #1257 analyzer. The result is a proposal
+/// only; saving remains the explicit PUT operation above, after the desk has
+/// checked the original paper and corrected any warnings.
+#[utoipa::path(
+    post,
+    path = "/v1/course/customer-reception-fields/analysis",
+    tag = "course",
+    request_body(
+        content = String,
+        description = "multipart/form-data with a single `file` part (JPEG, PNG, or PDF, up to 10MB)",
+        content_type = "multipart/form-data"
+    ),
+    responses(
+        (status = 200, description = "Proposed reception sheet fields", body = CustomerReceptionFieldsAnalysisResponse),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn analyze_customer_reception_fields(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    multipart: Multipart,
+) -> Result<Json<CustomerReceptionFieldsAnalysisResponse>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let sheet = read_reception_sheet(multipart).await?;
+    let proposal = AnalyzeCustomerReceptionFieldsUseCase::new(reception_gateway(&state))
+        .execute(credentials, sheet)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(proposal.into()))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

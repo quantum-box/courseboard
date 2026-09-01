@@ -105,6 +105,15 @@ export const customers: DeepPartial<typeof source> = {
         boolean: 'Yes / no',
       },
     },
+    analysis: {
+      choose: 'Suggest from a blank sheet',
+      analyzing: 'Reading the blank sheet…',
+      cancel: 'Cancel proposal',
+      applied: 'Fields suggested from the sheet. Review them and save.',
+      failed: 'Could not read the blank sheet',
+      previewTitle: 'Analysis preview',
+      previewAlt: 'Preview of the analyzed reception sheet',
+    },
     addressParts: {
       postalCode: 'Postal code',
       state: 'State / prefecture',

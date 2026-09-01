@@ -2918,6 +2918,87 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     return hit({ items: cloneMockReceptionFields() })
   }
 
+  if (pathname === '/v1/course/customer-reception-fields/analysis' && method === 'POST') {
+    if (typeof FormData === 'undefined' || !(init?.body instanceof FormData)) {
+      return error(400, "multipart field 'file' is required")
+    }
+    // Keep this response intentionally narrower than the saved settings. The
+    // real Field analyzer may return only the fields it found on this paper;
+    // the UI must merge them and preserve CourseBoard custom fields.
+    return hit({
+      fields: [
+        {
+          fieldKey: 'name',
+          kind: 'standard',
+          fieldType: 'text',
+          enabled: true,
+          required: true,
+          label: '氏名',
+          customLabel: false,
+          sortOrder: 0,
+          options: [],
+        },
+        {
+          fieldKey: 'name_kana',
+          kind: 'standard',
+          fieldType: 'text',
+          enabled: true,
+          required: false,
+          label: 'フリガナ',
+          customLabel: true,
+          sortOrder: 1,
+          options: [],
+        },
+        {
+          fieldKey: 'phone',
+          kind: 'standard',
+          fieldType: 'tel',
+          enabled: true,
+          required: true,
+          label: 'ご連絡先',
+          customLabel: true,
+          sortOrder: 2,
+          options: [],
+        },
+        {
+          fieldKey: 'email',
+          kind: 'standard',
+          fieldType: 'email',
+          enabled: false,
+          required: false,
+          label: 'メールアドレス',
+          customLabel: false,
+          sortOrder: 3,
+          options: [],
+        },
+        {
+          fieldKey: 'membership_class',
+          kind: 'custom',
+          fieldType: 'select',
+          enabled: true,
+          required: false,
+          label: '会員区分',
+          customLabel: true,
+          sortOrder: 7,
+          options: ['正会員', 'ゲスト'],
+        },
+        {
+          fieldKey: 'customer_subject',
+          kind: 'custom',
+          fieldType: 'text',
+          enabled: true,
+          required: false,
+          label: '申込者区分',
+          customLabel: true,
+          sortOrder: 8,
+          options: [],
+        },
+      ],
+      warnings: ['「申込者区分」はCourseBoardの受付票項目として保存できないため、取り込みません。'],
+      previewImage: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    })
+  }
+
   if (
     /^\/v1\/course\/customers\/[^/]+\/reception-values$/.test(pathname)
     && method === 'PUT'

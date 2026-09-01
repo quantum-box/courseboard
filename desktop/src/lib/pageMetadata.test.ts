@@ -48,6 +48,7 @@ describe('metadataForRoute', () => {
     'settings',
     'settings/advanced',
     'settings/members',
+    'settings/reception-fields',
   ]
 
   it('makes only the public download page indexable', () => {

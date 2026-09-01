@@ -2,16 +2,19 @@ import { courseboardApiJson } from '../../../../api'
 import { customersPath, type Customer } from '../models'
 import {
   customerPayload,
+  normalizeReceptionFormProposal,
   normalizeReceptionFields,
   uploadFileName,
   type ReceptionDraft,
   type ReceptionField,
   type ReceptionFieldWriteInput,
+  type ReceptionFormProposal,
   type ReceptionRow,
 } from './models'
 
 const RECEPTION_DRAFT_PATH = '/v1/course/customers/reception-draft'
 export const RECEPTION_FIELDS_PATH = '/v1/course/customer-reception-fields'
+export const RECEPTION_FIELDS_ANALYSIS_PATH = `${RECEPTION_FIELDS_PATH}/analysis`
 
 /**
  * The CourseBoard API returns a complete list (`{ items }`) after merging the
@@ -31,6 +34,17 @@ export async function saveReceptionFields(items: readonly ReceptionFieldWriteInp
     body: JSON.stringify({ items }),
   })
   return normalizeReceptionFields(response)
+}
+
+/** Analyze a blank reception sheet and return an unsaved settings proposal. */
+export async function analyzeReceptionForm(file: File): Promise<ReceptionFormProposal> {
+  const form = new FormData()
+  form.append('file', file, uploadFileName(file))
+  const response = await courseboardApiJson<unknown>(RECEPTION_FIELDS_ANALYSIS_PATH, {
+    method: 'POST',
+    body: form,
+  })
+  return normalizeReceptionFormProposal(response)
 }
 
 /**

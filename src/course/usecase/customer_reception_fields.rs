@@ -6,7 +6,8 @@ use std::sync::Arc;
 use crate::course::domain::actions;
 use crate::course::domain::{
     reception_sheet_schema_for_fields, CourseError, CustomerReceptionField,
-    CustomerReceptionFieldsGateway, GatewayCredentials, ReceptionFieldInput,
+    CustomerReceptionFieldsGateway, CustomerReceptionOcrGateway, GatewayCredentials,
+    ReceptionFieldInput, ReceptionFormProposal, ReceptionSheet,
 };
 
 /// Returns the saved settings merged with the built-in standard fields.
@@ -74,6 +75,32 @@ impl ReplaceCustomerReceptionFieldsUseCase {
             .replace_customer_reception_fields(credentials.operator_id, &fields)
             .await?;
         Ok(effective)
+    }
+}
+
+/// Proposes reception-field settings from a blank sheet without writing them.
+///
+/// Analysis is a settings-management operation, so it uses the same action as
+/// PUT. The gateway owns the Field contract and maps its response into the
+/// CourseBoard field model before this use case returns it.
+pub struct AnalyzeCustomerReceptionFieldsUseCase {
+    analyzer: Arc<dyn CustomerReceptionOcrGateway>,
+}
+
+impl AnalyzeCustomerReceptionFieldsUseCase {
+    pub fn new(analyzer: Arc<dyn CustomerReceptionOcrGateway>) -> Self {
+        Self { analyzer }
+    }
+
+    pub async fn execute(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        sheet: ReceptionSheet,
+    ) -> Result<ReceptionFormProposal, CourseError> {
+        credentials.require(actions::MANAGE_CUSTOMERS).await?;
+        self.analyzer
+            .analyze_reception_form(credentials, sheet)
+            .await
     }
 }
 

@@ -109,6 +109,15 @@ export const customers = {
         boolean: 'はい／いいえ',
       },
     },
+    analysis: {
+      choose: '空の用紙から提案する',
+      analyzing: '空の用紙を読み取り中…',
+      cancel: '提案を取り消す',
+      applied: '用紙の項目を提案しました。確認して保存してください。',
+      failed: '空の用紙を読み取れませんでした',
+      previewTitle: '分析プレビュー',
+      previewAlt: '分析した受付用紙のプレビュー',
+    },
     addressParts: {
       postalCode: '郵便番号',
       state: '都道府県',

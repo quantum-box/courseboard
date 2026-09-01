@@ -38,6 +38,12 @@ export const SETTINGS_MASTERS = [
     titleKey: 'settings:caddieDuties.title',
     descriptionKey: 'settings:caddieDuties.linkDescription',
   },
+  {
+    route: 'settings/reception-fields',
+    key: 'receptionFields',
+    titleKey: 'settings:receptionFields.title',
+    descriptionKey: 'settings:receptionFields.linkDescription',
+  },
 ] as const
 
 export type SettingsMaster = (typeof SETTINGS_MASTERS)[number]

@@ -208,6 +208,14 @@ export type ReceptionFieldWriteInput = {
   options: string[]
 }
 
+/** A form-analysis response is a proposal, never a persisted setting. */
+export type ReceptionFormProposal = {
+  /** Only fields the analyzer could identify are present in this list. */
+  fields: ReceptionField[]
+  warnings: string[]
+  previewImage?: string | null
+}
+
 const STANDARD_FIELD_DEFAULTS: readonly ReceptionField[] = [
   {
     fieldKey: 'name',
@@ -292,14 +300,21 @@ export const DEFAULT_RECEPTION_FIELDS: readonly ReceptionField[] = STANDARD_FIEL
 
 const STANDARD_KEY_ALIASES: Record<string, ReceptionStandardFieldKey> = {
   name: 'name',
+  customer_name: 'name',
   nameKana: 'name_kana',
   name_kana: 'name_kana',
+  customer_name_kana: 'name_kana',
   phone: 'phone',
+  customer_phone: 'phone',
   email: 'email',
+  customer_email: 'email',
   birthDate: 'birth_date',
   birth_date: 'birth_date',
+  customer_birth_date: 'birth_date',
   sex: 'sex',
+  customer_sex: 'sex',
   address: 'address',
+  customer_address: 'address',
 }
 
 const STANDARD_DEFAULT_BY_KEY = new Map(
@@ -416,6 +431,158 @@ export function normalizeReceptionFields(value: unknown): ReceptionField[] {
   return [...standards, ...customs].sort((left, right) =>
     left.sortOrder - right.sortOrder || left.fieldKey.localeCompare(right.fieldKey),
   )
+}
+
+function stringFromUnknown(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function unsupportedProposalWarning(label: string): string {
+  return `「${label}」はCourseBoardの受付票項目として保存できないため、取り込みません。`
+}
+
+const RECEPTION_CUSTOM_FIELD_KEY_PATTERN = /^[a-z][a-z0-9_]{0,63}$/u
+const RECEPTION_CUSTOM_FIELD_TYPES = new Set<ReceptionFieldType>([
+  'text',
+  'date',
+  'select',
+  'boolean',
+])
+
+/** Field's `customer_*` columns are not CourseBoard custom fields. */
+function supportedProposalCustomField(field: ReceptionField): boolean {
+  return field.kind === 'custom'
+    && RECEPTION_CUSTOM_FIELD_KEY_PATTERN.test(field.fieldKey)
+    && !field.fieldKey.startsWith('customer_')
+    && RECEPTION_CUSTOM_FIELD_TYPES.has(field.fieldType)
+    && (field.fieldType !== 'select' || field.options.length > 0)
+}
+
+/**
+ * Normalize the response of the blank-form analyzer without filling missing
+ * standards. Missing fields are significant here: applying a proposal must
+ * leave existing settings (including custom fields) untouched.
+ */
+export function normalizeReceptionFormProposal(value: unknown): ReceptionFormProposal {
+  if (typeof value !== 'object' || value === null) {
+    return { fields: [], warnings: [] }
+  }
+  const raw = value as Record<string, unknown>
+  const rawFields = Array.isArray(raw.fields)
+    ? raw.fields
+    : typeof raw.settings === 'object' && raw.settings !== null
+      && Array.isArray((raw.settings as { fields?: unknown }).fields)
+      ? (raw.settings as { fields: unknown[] }).fields
+      : []
+  const warnings = Array.isArray(raw.warnings)
+    ? raw.warnings.filter((warning): warning is string => typeof warning === 'string')
+    : []
+  const fields: ReceptionField[] = []
+  const unsupported = new Set<string>()
+  rawFields.forEach((item, index) => {
+    const field = normalizeReceptionField(item, index)
+    if (!field) return
+    if (field.kind === 'standard' || supportedProposalCustomField(field)) {
+      fields.push(field)
+    } else {
+      const rawItem = item as Record<string, unknown>
+      const label = stringFromUnknown(rawItem.label)
+        || stringFromUnknown(rawItem.fieldKey ?? rawItem.field_key ?? rawItem.key)
+      if (label) unsupported.add(label)
+    }
+  })
+  const customFields = raw.customFields ?? raw.custom_fields
+  if (Array.isArray(customFields)) {
+    customFields.forEach((item, index) => {
+      if (typeof item !== 'object' || item === null) return
+      const custom = item as Record<string, unknown>
+      const field = normalizeReceptionField(item, rawFields.length + index)
+      if (field && supportedProposalCustomField(field)) {
+        fields.push(field)
+        return
+      }
+      const label = stringFromUnknown(custom.label)
+        || stringFromUnknown(custom.fieldKey ?? custom.field_key ?? custom.key)
+      if (label) unsupported.add(label)
+    })
+  }
+  return {
+    fields,
+    warnings: [
+      ...warnings,
+      ...[...unsupported].map(unsupportedProposalWarning),
+    ].filter((warning, index, all) => all.indexOf(warning) === index),
+    previewImage: typeof raw.previewImage === 'string'
+      ? raw.previewImage
+      : typeof raw.preview_image === 'string'
+        ? raw.preview_image
+        : null,
+  }
+}
+
+/**
+ * Apply analyzer-proposed standard fields and CourseBoard-compatible custom
+ * fields to the current draft. This is intentionally a merge: an analyzer
+ * response from an older Field version may contain four fields while
+ * CourseBoard already knows seven, and it must never erase a tenant's custom
+ * definitions.
+ */
+export function applyReceptionFormProposal(
+  current: readonly ReceptionField[],
+  proposal: ReceptionFormProposal,
+): ReceptionField[] {
+  const proposed = new Map(
+    proposal.fields
+      .filter(field => field.kind === 'standard' || supportedProposalCustomField(field))
+      .map(field => [canonicalReceptionFieldKey(field.fieldKey), field]),
+  )
+  const next = current.map(field => {
+    const next = proposed.get(field.fieldKey)
+    if (!next || field.kind !== next.kind) {
+      return { ...field, options: [...field.options] }
+    }
+    if (field.kind === 'custom') {
+      return {
+        ...next,
+        fieldKey: field.fieldKey,
+        sortOrder: field.sortOrder,
+        options: [...next.options],
+      }
+    }
+    return {
+      ...field,
+      // Name is a CourseBoard invariant even if an upstream analyzer suggests
+      // otherwise. Its label is also CourseBoard-owned because Field excludes
+      // name from analysis. Disabled fields are never required.
+      enabled: field.fieldKey === 'name' ? true : next.enabled,
+      required: field.fieldKey === 'name' ? true : next.enabled && next.required,
+      label: field.fieldKey === 'name' ? field.label : next.label || field.label,
+      customLabel: field.fieldKey === 'name' ? field.customLabel : next.customLabel,
+      options: [...field.options],
+    }
+  })
+  const existingKeys = new Set(next.map(field => field.fieldKey))
+  let sortOrder = Math.max(-1, ...next.map(field => field.sortOrder)) + 1
+  for (const field of proposal.fields) {
+    if (!supportedProposalCustomField(field)) continue
+    const fieldKey = field.fieldKey.trim()
+    if (existingKeys.has(fieldKey)) continue
+    next.push({ ...field, fieldKey, sortOrder, options: [...field.options] })
+    existingKeys.add(fieldKey)
+    sortOrder += 1
+  }
+  return next
+}
+
+/** Convert a base64 preview into an image source when Field omitted a prefix. */
+export function receptionPreviewImageSrc(value: string | null | undefined): string | null {
+  const image = value?.trim()
+  if (!image) return null
+  if (image.startsWith('data:') || image.startsWith('blob:')
+    || image.startsWith('http://') || image.startsWith('https://')) {
+    return image
+  }
+  return `data:image/png;base64,${image}`
 }
 
 export function receptionFieldDefaultLabel(fieldKey: string): string {

@@ -120,7 +120,8 @@ pub use create_reception_customer::CreateReceptionCustomerUseCase;
 pub use create_reservation::{CreateReservationInput, CreateReservationUseCase};
 pub use customer_grade_rules::{GetCustomerGradeRulesUseCase, ReplaceCustomerGradeRulesUseCase};
 pub use customer_reception_fields::{
-    GetCustomerReceptionFieldsUseCase, ReplaceCustomerReceptionFieldsUseCase,
+    AnalyzeCustomerReceptionFieldsUseCase, GetCustomerReceptionFieldsUseCase,
+    ReplaceCustomerReceptionFieldsUseCase,
 };
 pub use delete_caddie::DeleteCaddieUseCase;
 pub use delete_caddie_availability::DeleteCaddieAvailabilityUseCase;

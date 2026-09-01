@@ -94,6 +94,20 @@ pub enum ReceptionSheetMediaType {
     Pdf,
 }
 
+/// A transient proposal returned by the blank-form analyzer.
+///
+/// The proposal is intentionally separate from the persisted reception-field
+/// settings.  It is shown to the desk for review and only reaches the local
+/// settings table after the existing PUT endpoint is confirmed.  The image is
+/// also transient: it may be displayed beside the proposal, but CourseBoard
+/// never stores the uploaded sheet or this preview.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReceptionFormProposal {
+    pub fields: Vec<super::CustomerReceptionField>,
+    pub warnings: Vec<String>,
+    pub preview_image: Option<String>,
+}
+
 impl ReceptionSheetMediaType {
     pub fn content_type(self) -> &'static str {
         match self {
