@@ -231,6 +231,7 @@ describe('MembershipBadge resource lifecycle', () => {
   })
 
   it('updates the membership cache after saving a member number', async () => {
+    const onMembershipChanged = vi.fn()
     const numberedMember: CustomerMembership = { ...MEMBER, memberNumber: 'M-42' }
     api.json.mockImplementation(async (path: string, init?: RequestInit) => {
       calls.push({ path, init })
@@ -241,7 +242,7 @@ describe('MembershipBadge resource lifecycle', () => {
       throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
     })
 
-    renderBadge(true)
+    renderBadge(true, CUSTOMER_ID, onMembershipChanged)
     await screen.findByText('正会員')
     fireEvent.click(screen.getByRole('button', { name: '会員番号を登録' }))
     fireEvent.change(screen.getByPlaceholderText('例: A-1024'), { target: { value: 'M-42' } })
@@ -253,5 +254,27 @@ describe('MembershipBadge resource lifecycle', () => {
       path: memberNumberPath(CUSTOMER_ID),
       init: expect.objectContaining({ method: 'PUT' }),
     }))
+    expect(onMembershipChanged).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not notify sibling resources when saving a member number fails', async () => {
+    const onMembershipChanged = vi.fn()
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      calls.push({ path, init })
+      if (path === membershipPath(CUSTOMER_ID) && !init?.method) return MEMBER
+      if (path === memberNumberPath(CUSTOMER_ID) && init?.method === 'PUT') {
+        throw new Error('member number failed')
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    renderBadge(true, CUSTOMER_ID, onMembershipChanged)
+    await screen.findByText('正会員')
+    fireEvent.click(screen.getByRole('button', { name: '会員番号を登録' }))
+    fireEvent.change(screen.getByPlaceholderText('例: A-1024'), { target: { value: 'M-42' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(toast.show).toHaveBeenCalled())
+    expect(onMembershipChanged).not.toHaveBeenCalled()
   })
 })

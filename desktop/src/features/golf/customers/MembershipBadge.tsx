@@ -37,7 +37,7 @@ export function MembershipBadge({
 }: {
   customerId: string
   editable?: boolean
-  /** Called after a successful plan assignment, for sibling views that depend on it. */
+  /** Called after a successful membership mutation, for sibling views that depend on it. */
   onMembershipChanged?: () => void
 }) {
   const { t } = useTranslation(['ledger'])
@@ -101,6 +101,7 @@ export function MembershipBadge({
         body: JSON.stringify({ memberNumber: numbering.trim() || null }),
       })
       membershipResource.setData(updated)
+      onMembershipChanged?.()
       setNumbering(null)
       showToast({ tone: 'success', message: t('ledger:customer.memberNumberSaved') })
     } catch (error) {
