@@ -167,7 +167,8 @@ PLT-3373 が解けたら、既存の `get_monthly_settlement` を請求先単位
 既存予約、来場履歴、CourseBoard が持つ登録経路の記録は消さない。
 
 誤操作を防ぐため、顧客名と影響を確認ダイアログに明記する。認可は既存の
-`field:ManageCustomers` を usecase 冒頭で要求し、同じ bearer を Field へ転送する。
+独立action名前空間の `field_extension_golf:ManageCustomers` を usecase 冒頭で要求し、
+同じ bearer を Field へ転送する。このactionはField extensionの有効・無効とは無関係。
 CourseBoard ローカル DB に復元状態や削除フラグを二重管理しない。復元 API は Field に
 存在しないため、本変更の non-goal とする。
 

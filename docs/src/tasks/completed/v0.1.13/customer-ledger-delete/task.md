@@ -15,7 +15,9 @@ Field admin を開かせず、顧客名と影響を確認してから実行す�
 
 - `DELETE /v1/course/customers/{customer_id}` を追加し、同じ bearer を Field の
   `DELETE /v1/storekit/customers/{customer_id}` へ転送する。
-- usecase 冒頭で `field:ManageCustomers` を要求する。
+- usecase 冒頭で独立action名前空間の
+  `field_extension_golf:ManageCustomers` を要求する。Field extension の有効・無効とは
+  無関係である。
 - Field の `active = false` による論理削除を利用し、予約・来場履歴・登録経路の記録は
   削除しない。
 - 顧客詳細に顧客名と影響を示す確認ダイアログを追加する。
