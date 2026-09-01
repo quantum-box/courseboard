@@ -3000,6 +3000,15 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     return hit(created)
   }
 
+  const deleteCustomerMatch = pathname.match(/^\/v1\/course\/customers\/([^/]+)$/)
+  if (deleteCustomerMatch && method === 'DELETE') {
+    const customerId = decodeURIComponent(deleteCustomerMatch[1] ?? '')
+    const index = mockCustomers.findIndex(customer => customer.id === customerId)
+    if (index < 0) return error(404, 'Customer not found')
+    mockCustomers.splice(index, 1)
+    return hit(null)
+  }
+
   if (pathname === '/v1/course/membership-plans' && method === 'POST') {
     const name = typeof body?.name === 'string' ? body.name.trim() : ''
     if (!name) return error(400, 'plan name is required')

@@ -705,9 +705,12 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/v1/course/customers/:customer_id",
-            get(course::interfaces::http_customers::get_customer).route_layer(
-                middleware::from_fn_with_state(state.clone(), require_valid_token),
-            ),
+            get(course::interfaces::http_customers::get_customer)
+                .delete(course::interfaces::http_customers::delete_customer)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
         )
         .route(
             "/v1/course/customers/:customer_id/reception-values",

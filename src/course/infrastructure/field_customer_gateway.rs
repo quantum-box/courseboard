@@ -21,7 +21,7 @@ use crate::course::domain::{
 };
 
 use super::field_gateway::{
-    field_get_items, field_send_json, normalize_base_url, urlencoding_path,
+    field_get_items, field_send_json, field_send_unit, normalize_base_url, urlencoding_path,
 };
 
 /// Reads and writes the tenant's customer ledger in Field.
@@ -92,6 +92,26 @@ impl CustomerGateway for FieldCustomerGateway {
         )
         .await?;
         Ok(map_customer(dto))
+    }
+
+    async fn delete_customer(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        customer_id: &CustomerId,
+    ) -> Result<(), CourseError> {
+        let path = format!(
+            "/v1/storekit/customers/{}",
+            urlencoding_path(customer_id.as_str())
+        );
+        field_send_unit(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::DELETE,
+            &path,
+            credentials,
+            None,
+        )
+        .await
     }
 }
 

@@ -1,11 +1,21 @@
-import { Button } from '@tachyon-sdk/native-ui'
-import { ChevronLeft } from 'lucide-react'
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@tachyon-sdk/native-ui'
+import { ChevronLeft, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { courseboardApiJson } from '../../../api'
 import { LoadingState, Notice, Panel, ResourceError } from '../../../components/Page'
-import { useResource } from '../../../hooks/useResource'
-import { navigateFromClick } from '../../../lib/router'
+import { clearResourceCache, useResource } from '../../../hooks/useResource'
+import { navigate, navigateFromClick } from '../../../lib/router'
+import { showToast } from '../../../lib/toast'
 import { CustomerRegistrationNote } from './CustomerRegistrationNote'
 import { CustomerVisitsPanel } from './CustomerVisitsPanel'
 import { MembershipBadge } from './MembershipBadge'
@@ -21,6 +31,7 @@ import { customerPath, type Customer } from './models'
  */
 export function CustomerDetailPage({ customerId }: { customerId: string }) {
   const { t } = useTranslation(['customers', 'common'])
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   // Read by id rather than re-running the search that led here: the page has
   // to survive a reload and a pasted link, where no search has been typed.
   const resource = useResource(
@@ -54,7 +65,20 @@ export function CustomerDetailPage({ customerId }: { customerId: string }) {
 
       {customer ? (
         <>
-          <Panel title={customer.name} description={t('customers:detail.description')}>
+          <Panel
+            title={customer.name}
+            description={t('customers:detail.description')}
+            actions={(
+              <Button
+                type="button"
+                variant="destructive"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                <Trash2 />
+                {t('customers:delete.open')}
+              </Button>
+            )}
+          >
             <dl className="customer-ledger-detail">
               <dt>{t('customers:field.nameKana')}</dt>
               <dd>{customer.nameKana || t('common:state.unset')}</dd>
@@ -81,8 +105,75 @@ export function CustomerDetailPage({ customerId }: { customerId: string }) {
           {/* Below the membership, because how often somebody comes is read
               after who they are — and it is the reason the page gets opened. */}
           <CustomerVisitsPanel customerId={customer.id} />
+
+          {confirmingDelete ? (
+            <DeleteCustomerDialog
+              customer={customer}
+              onOpenChange={setConfirmingDelete}
+            />
+          ) : null}
         </>
       ) : null}
     </div>
+  )
+}
+
+function DeleteCustomerDialog({
+  customer,
+  onOpenChange,
+}: {
+  customer: Customer
+  onOpenChange: (open: boolean) => void
+}) {
+  const { t } = useTranslation(['customers', 'common'])
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  async function remove() {
+    setDeleting(true)
+    setError(null)
+    try {
+      await courseboardApiJson<void>(customerPath(customer.id), { method: 'DELETE' })
+      clearResourceCache(`customer:${customer.id}`)
+      showToast({ tone: 'success', message: t('customers:delete.saved') })
+      navigate('golf/customers')
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : t('customers:delete.failed'))
+      setDeleting(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t('customers:delete.title', { name: customer.name })}</DialogTitle>
+          <DialogDescription>{t('customers:delete.description')}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <Notice tone="warning">{t('customers:delete.warning')}</Notice>
+          {error ? <Notice tone="danger">{error}</Notice> : null}
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onOpenChange(false)}
+              disabled={deleting}
+            >
+              {t('customers:delete.keep')}
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => void remove()}
+              disabled={deleting}
+            >
+              <Trash2 />
+              {deleting ? t('customers:delete.submitting') : t('customers:delete.submit')}
+            </Button>
+          </DialogFooter>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
