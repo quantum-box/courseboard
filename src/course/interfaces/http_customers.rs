@@ -26,24 +26,27 @@ use crate::course::domain::{
     CustomerGradeRules, CustomerId, CustomerMembership, CustomerReceptionCreateGateway,
     CustomerReceptionField, CustomerReceptionFieldsGateway, CustomerReceptionValuesGateway,
     CustomerRegistration, CustomerRegistrationSource, CustomerSearchQuery, CustomerVisit,
-    MemberDiscount, MembershipDiscount, MembershipDiscounts, MembershipDiscountsGateway,
-    MembershipPlan, MembershipPlanId, MembershipPlayWindow, MembershipPlayWindows,
-    MembershipPlayWindowsGateway, NewCustomer, PlayableDays, ReceptionAddress,
-    ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraftRow, ReceptionFieldInput,
-    ReceptionFieldKind, ReceptionFieldType, ReceptionSheet, SetMemberNumber, UpsertMembershipPlan,
+    MemberDiscount, MembershipActivity, MembershipActivityActor, MembershipActivityQuery,
+    MembershipActivitySource, MembershipActivityTarget, MembershipDiscount, MembershipDiscounts,
+    MembershipDiscountsGateway, MembershipPlan, MembershipPlanId, MembershipPlayWindow,
+    MembershipPlayWindows, MembershipPlayWindowsGateway, NewCustomer, PlayableDays,
+    ReceptionAddress, ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraftRow,
+    ReceptionFieldInput, ReceptionFieldKind, ReceptionFieldType, ReceptionSheet, SetMemberNumber,
+    UpsertMembershipPlan,
 };
 use crate::course::infrastructure::{
     FieldCustomerConsentGateway, FieldCustomerGateway, FieldCustomerReceptionCreateGateway,
-    FieldCustomerReceptionGateway, FieldMembershipGateway,
+    FieldCustomerReceptionGateway, FieldMembershipActivityGateway, FieldMembershipGateway,
 };
 use crate::course::usecase::{
     AssignMembershipPlanUseCase, CreateCustomerUseCase, CreateMembershipPlanUseCase,
     CreateReceptionCustomerUseCase, CustomerProvenance, CustomerVisitReport,
     DraftCustomerReceptionUseCase, GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase,
     GetCustomerReceptionFieldsUseCase, GetCustomerRegistrationUseCase, GetCustomerUseCase,
-    GetCustomerVisitsUseCase, ListMembershipPlansUseCase, RecordReceptionCustomerValuesUseCase,
-    ReplaceCustomerGradeRulesUseCase, ReplaceCustomerReceptionFieldsUseCase,
-    SearchCustomersUseCase, SetMemberNumberUseCase, UpdateMembershipPlanUseCase,
+    GetCustomerVisitsUseCase, ListMembershipActivitiesUseCase, ListMembershipPlansUseCase,
+    RecordReceptionCustomerValuesUseCase, ReplaceCustomerGradeRulesUseCase,
+    ReplaceCustomerReceptionFieldsUseCase, SearchCustomersUseCase, SetMemberNumberUseCase,
+    UpdateMembershipPlanUseCase,
 };
 use crate::{AppError, AppState, CallerPrincipal};
 
@@ -90,6 +93,14 @@ fn reception_values_gateway(state: &AppState) -> Arc<dyn CustomerReceptionValues
 pub(crate) fn membership_gateway(state: &AppState) -> Arc<FieldMembershipGateway> {
     let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
     Arc::new(FieldMembershipGateway::new(
+        state.http_client.clone(),
+        field_api_url,
+    ))
+}
+
+pub(crate) fn membership_activity_gateway(state: &AppState) -> Arc<FieldMembershipActivityGateway> {
+    let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
+    Arc::new(FieldMembershipActivityGateway::new(
         state.http_client.clone(),
         field_api_url,
     ))
@@ -851,6 +862,155 @@ pub async fn get_customer_visits(
     .await
     .map_err(AppError::from)?;
     Ok(Json(CustomerVisitHistoryDto::from(&report)))
+}
+
+// ─── Membership activity history ────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct MembershipActivityActorDto {
+    #[serde(rename = "type")]
+    pub actor_type: String,
+    pub id: String,
+}
+
+impl From<&MembershipActivityActor> for MembershipActivityActorDto {
+    fn from(value: &MembershipActivityActor) -> Self {
+        Self {
+            actor_type: value.kind.clone(),
+            id: value.id.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MembershipActivitySourceDto {
+    #[serde(default)]
+    pub channel: Option<String>,
+    #[serde(default)]
+    pub application: Option<String>,
+}
+
+impl From<&MembershipActivitySource> for MembershipActivitySourceDto {
+    fn from(value: &MembershipActivitySource) -> Self {
+        Self {
+            channel: value.channel.clone(),
+            application: value.application.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct MembershipActivityTargetDto {
+    #[serde(rename = "type")]
+    pub target_type: String,
+    pub id: Option<String>,
+}
+
+impl From<&MembershipActivityTarget> for MembershipActivityTargetDto {
+    fn from(value: &MembershipActivityTarget) -> Self {
+        Self {
+            target_type: value.kind.clone(),
+            id: value.id.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MembershipActivityDto {
+    pub id: String,
+    /// Unknown future kinds are preserved as-is for older CourseBoard builds.
+    pub kind: String,
+    pub occurred_at: DateTime<Utc>,
+    pub actor: MembershipActivityActorDto,
+    #[serde(default)]
+    pub source: Option<MembershipActivitySourceDto>,
+    pub target: Option<MembershipActivityTargetDto>,
+    #[serde(default)]
+    pub before: Option<serde_json::Value>,
+    #[serde(default)]
+    pub after: Option<serde_json::Value>,
+    pub schema_version: u32,
+}
+
+impl From<&MembershipActivity> for MembershipActivityDto {
+    fn from(value: &MembershipActivity) -> Self {
+        Self {
+            id: value.id.clone(),
+            kind: value.kind.clone(),
+            occurred_at: value.occurred_at,
+            actor: MembershipActivityActorDto::from(&value.actor),
+            source: value.source.as_ref().map(MembershipActivitySourceDto::from),
+            target: value.target.as_ref().map(MembershipActivityTargetDto::from),
+            before: value.before.clone(),
+            after: value.after.clone(),
+            schema_version: value.schema_version,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MembershipActivityListResponse {
+    pub items: Vec<MembershipActivityDto>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct MembershipActivityParams {
+    /// Number of rows to request. Field bounds this to 1..=100.
+    #[serde(default)]
+    #[param(minimum = 1, maximum = 100)]
+    pub limit: Option<u32>,
+    /// Opaque Field keyset cursor returned by the previous page.
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+/// GET /v1/course/customers/{customer_id}/membership-activities
+///
+/// Field owns the feed.  A missing customer is intentionally kept as Field's
+/// 404 rather than being turned into an empty list: an empty history for a real
+/// customer is a valid 200 response, while a typo or cross-tenant id is not.
+#[utoipa::path(
+    get,
+    path = "/v1/course/customers/{customer_id}/membership-activities",
+    tag = "course",
+    params(
+        ("customer_id" = String, Path, description = "Customer id"),
+        MembershipActivityParams,
+    ),
+    responses(
+        (status = 200, description = "Membership activity history", body = MembershipActivityListResponse),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 404, description = "Customer not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_customer_membership_activities(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(customer_id): Path<String>,
+    Query(params): Query<MembershipActivityParams>,
+) -> Result<Json<MembershipActivityListResponse>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let customer_id = CustomerId::try_new(customer_id).map_err(AppError::from)?;
+    let query =
+        MembershipActivityQuery::try_new(params.limit, params.cursor).map_err(AppError::from)?;
+    let page = ListMembershipActivitiesUseCase::new(membership_activity_gateway(&state))
+        .execute(credentials, &customer_id, query)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(MembershipActivityListResponse {
+        items: page.items.iter().map(MembershipActivityDto::from).collect(),
+        next_cursor: page.next_cursor,
+    }))
 }
 
 // ─── Registration provenance ─────────────────────────────────────────────────
@@ -1880,5 +2040,37 @@ mod tests {
         .unwrap();
         let custom_json = serde_json::to_value(CustomerReceptionFieldDto::from(&custom)).unwrap();
         assert_eq!(custom_json["customLabel"], true);
+    }
+
+    #[test]
+    fn membership_activity_keeps_nullable_source_target_and_snapshots_in_json() {
+        let activity = MembershipActivity {
+            id: "mact_1".into(),
+            kind: "membership.consents_recorded".into(),
+            occurred_at: "2026-09-01T00:00:00Z".parse().unwrap(),
+            actor: MembershipActivityActor {
+                kind: "user".into(),
+                id: "operator_1".into(),
+            },
+            source: Some(MembershipActivitySource {
+                channel: None,
+                application: None,
+            }),
+            target: Some(MembershipActivityTarget {
+                kind: "consent".into(),
+                id: None,
+            }),
+            before: None,
+            after: Some(serde_json::json!({ "consents": [] })),
+            schema_version: 1,
+        };
+        let json = serde_json::to_value(MembershipActivityDto::from(&activity)).unwrap();
+        assert_eq!(json["actor"]["type"], "user");
+        assert_eq!(json["source"]["channel"], serde_json::Value::Null);
+        assert_eq!(json["source"]["application"], serde_json::Value::Null);
+        assert_eq!(json["target"]["type"], "consent");
+        assert_eq!(json["target"]["id"], serde_json::Value::Null);
+        assert_eq!(json["before"], serde_json::Value::Null);
+        assert_eq!(json["after"]["consents"], serde_json::json!([]));
     }
 }

@@ -9,6 +9,7 @@ import { navigateFromClick } from '../../../lib/router'
 import { CustomerRegistrationNote } from './CustomerRegistrationNote'
 import { CustomerVisitsPanel } from './CustomerVisitsPanel'
 import { MembershipBadge } from './MembershipBadge'
+import { MembershipActivityPanel } from './MembershipActivityPanel'
 import { customerPath, type Customer } from './models'
 
 /**
@@ -77,6 +78,8 @@ export function CustomerDetailPage({ customerId }: { customerId: string }) {
                 about who somebody is, not about a booking they are making. */}
             <MembershipBadge customerId={customer.id} editable />
           </Panel>
+
+          <MembershipActivityPanel customerId={customer.id} />
 
           {/* Below the membership, because how often somebody comes is read
               after who they are — and it is the reason the page gets opened. */}

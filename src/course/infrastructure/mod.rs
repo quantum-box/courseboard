@@ -20,6 +20,7 @@ mod field_customer_gateway;
 mod field_customer_reception_create_gateway;
 mod field_customer_reception_gateway;
 mod field_gateway;
+mod field_membership_activity_gateway;
 mod field_membership_gateway;
 mod field_ops_gateway;
 mod field_sdk_capabilities_gateway;
@@ -57,6 +58,7 @@ pub use field_customer_reception_gateway::FieldCustomerReceptionGateway;
 pub use field_gateway::{
     FieldGolfCatalogGateway, FieldReservationGateway, DEFAULT_MULTI_COURSE_PRODUCT_WRITES,
 };
+pub use field_membership_activity_gateway::FieldMembershipActivityGateway;
 pub use field_membership_gateway::FieldMembershipGateway;
 pub use field_ops_gateway::FieldGolfOpsGateway;
 pub use field_sdk_capabilities_gateway::FieldSdkCapabilitiesGateway;

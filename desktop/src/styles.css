@@ -5995,6 +5995,118 @@ button,
   margin: 0;
 }
 
+/* Membership activity is a quiet audit feed, separate from the visit ledger.
+ * The event kind stays prominent while actor/source/target remain readable
+ * metadata, including a consent event whose target has no id. */
+.membership-activity-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid hsl(var(--nui-border));
+}
+
+.membership-activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid hsl(var(--nui-border));
+}
+
+.membership-activity-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  margin-top: 2px;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.membership-activity-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.membership-activity-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.membership-activity-heading strong {
+  overflow-wrap: anywhere;
+}
+
+.membership-activity-heading span {
+  overflow-wrap: anywhere;
+}
+
+.membership-activity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 14px;
+  margin: 4px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.membership-activity-meta > div {
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.membership-activity-meta dt::after {
+  content: ':';
+}
+
+.membership-activity-meta dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.membership-activity-snapshots {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.membership-activity-snapshots summary {
+  width: fit-content;
+  color: hsl(var(--nui-muted-foreground));
+  cursor: pointer;
+}
+
+.membership-activity-snapshots dl {
+  display: grid;
+  gap: 3px 10px;
+  margin: 6px 0 0;
+}
+
+.membership-activity-snapshots dl > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+}
+
+.membership-activity-snapshots dt {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.membership-activity-snapshots dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.membership-activity-load-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 12px;
+}
+
 /* Visit history status. Colour carries the reading at a glance — a cancelled
    round and a played one are scanned down a column, not read one by one — but
    the word is always there, so nothing depends on the colour alone. */
