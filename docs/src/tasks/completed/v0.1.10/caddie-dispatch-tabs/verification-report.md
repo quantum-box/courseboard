@@ -35,6 +35,7 @@
 type-check: 成功
 targeted test: 3 files / 14 tests passed（タブ、別業務、翻訳カタログ）
 full test: 108 files / 923 tests passed（worker数を制限して再実行）
+targeted E2E: 配置画面 2 tests passed（認証setup + 主作業/配置済み折りたたみ）
 build: 成功（Vite 6.4.3、2171 modules transformed）
 git diff --check: 成功
 browser: PR Previewの再build後に確認
