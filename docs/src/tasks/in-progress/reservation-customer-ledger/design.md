@@ -159,6 +159,18 @@ PLT-3373 が解けたら、既存の `get_monthly_settlement` を請求先単位
   `GET/PUT /v1/course/membership-play-windows`、設定画面の「会員のプレー可能日」。
   **警告であって拒否ではない**（下記）
 
+### 顧客台帳からの削除
+
+顧客詳細から `DELETE /v1/course/customers/{id}` を呼び、gateway が Field の
+`DELETE /v1/storekit/customers/{id}` へ転送する。Field の実装は物理削除ではなく
+`active = false` の論理削除で、削除後の顧客は一覧・検索・新しい予約の顧客選択に出ない。
+既存予約、来場履歴、CourseBoard が持つ登録経路の記録は消さない。
+
+誤操作を防ぐため、顧客名と影響を確認ダイアログに明記する。認可は既存の
+`field:ManageCustomers` を usecase 冒頭で要求し、同じ bearer を Field へ転送する。
+CourseBoard ローカル DB に復元状態や削除フラグを二重管理しない。復元 API は Field に
+存在しないため、本変更の non-goal とする。
+
 読むときの注意が7つある。
 
 - **履歴は予約者としての来場だけ。** Field は予約に顧客を1人しか持たず、

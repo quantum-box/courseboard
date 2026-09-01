@@ -55,6 +55,8 @@
   - [PLT-3258 CourseBoard UI ルール](src/tasks/in-progress/plt-3258-ui-rules/task.md)
 
 - [Completed]()
+  - [v0.1.13]()
+    - [顧客台帳から顧客を削除できるようにする](src/tasks/completed/v0.1.13/customer-ledger-delete/task.md)
   - [v0.1.7]()
     - [シフト表の確認と出力を改善する](src/tasks/completed/v0.1.7/shift-board-review-export/task.md)
       - [設計](src/tasks/completed/v0.1.7/shift-board-review-export/design.md)

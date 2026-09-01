@@ -1328,6 +1328,7 @@ mod tests {
             ("PUT", "/v1/course/customer-reception-fields"),
             ("POST", "/v1/course/customers/reception-draft"),
             ("GET", "/v1/course/customers/cus_1"),
+            ("DELETE", "/v1/course/customers/cus_1"),
             ("GET", "/v1/course/customers/cus_1/visits"),
             ("GET", "/v1/course/customers/cus_1/registration"),
             ("PUT", "/v1/course/customers/cus_1/member-number"),
