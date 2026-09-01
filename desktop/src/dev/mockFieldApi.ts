@@ -52,6 +52,102 @@ export const MOCK_FIXTURE_DATE = '2026-07-18'
 const NOW = `${MOCK_FIXTURE_DATE}T09:00:00+09:00`
 const TODAY = MOCK_FIXTURE_DATE
 
+type MockReceptionField = {
+  fieldKey: string
+  kind: 'standard' | 'custom'
+  fieldType: string
+  enabled: boolean
+  required: boolean
+  label: string
+  customLabel: boolean
+  sortOrder: number
+  options: string[]
+}
+
+let mockReceptionFields: MockReceptionField[] = [
+  {
+    fieldKey: 'name',
+    kind: 'standard',
+    fieldType: 'text',
+    enabled: true,
+    required: true,
+    label: '氏名',
+    customLabel: false,
+    sortOrder: 0,
+    options: [],
+  },
+  {
+    fieldKey: 'name_kana',
+    kind: 'standard',
+    fieldType: 'text',
+    enabled: true,
+    required: false,
+    label: '氏名のふりがな（カタカナ）',
+    customLabel: false,
+    sortOrder: 1,
+    options: [],
+  },
+  {
+    fieldKey: 'phone',
+    kind: 'standard',
+    fieldType: 'tel',
+    enabled: true,
+    required: false,
+    label: '電話番号',
+    customLabel: false,
+    sortOrder: 2,
+    options: [],
+  },
+  {
+    fieldKey: 'email',
+    kind: 'standard',
+    fieldType: 'email',
+    enabled: true,
+    required: false,
+    label: 'メールアドレス',
+    customLabel: false,
+    sortOrder: 3,
+    options: [],
+  },
+  {
+    fieldKey: 'birth_date',
+    kind: 'standard',
+    fieldType: 'date',
+    enabled: false,
+    required: false,
+    label: '生年月日',
+    customLabel: false,
+    sortOrder: 4,
+    options: [],
+  },
+  {
+    fieldKey: 'sex',
+    kind: 'standard',
+    fieldType: 'text',
+    enabled: false,
+    required: false,
+    label: '性別',
+    customLabel: false,
+    sortOrder: 5,
+    options: [],
+  },
+  {
+    fieldKey: 'address',
+    kind: 'standard',
+    fieldType: 'address',
+    enabled: false,
+    required: false,
+    label: '住所',
+    customLabel: false,
+    sortOrder: 6,
+    options: [],
+  },
+]
+
+function cloneMockReceptionFields() {
+  return mockReceptionFields.map(field => ({ ...field, options: [...field.options] }))
+}
+
 /** `YYYY-MM-DD`, `days` after the fixture day. */
 function daysAfterFixture(days: number): string {
   return shiftDate(MOCK_FIXTURE_DATE, days)
@@ -2261,6 +2357,10 @@ function resolveGet(path: string): Json | null | undefined {
     )
   }
 
+  if (pathname === '/v1/course/customer-reception-fields') {
+    return items(cloneMockReceptionFields())
+  }
+
   if (pathname === '/v1/course/membership-plans') {
     const includeInactive = url.searchParams.get('includeInactive') === 'true'
     return items(mockMembershipPlans.filter(plan => includeInactive || plan.active === true))
@@ -2792,6 +2892,39 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     })
   }
 
+  if (pathname === '/v1/course/customer-reception-fields' && method === 'PUT') {
+    const incoming = Array.isArray(body?.items) ? body.items : null
+    if (!incoming) return error(400, "request field 'items' must be an array")
+    mockReceptionFields = incoming.flatMap(item => {
+      if (typeof item !== 'object' || item === null) return []
+      const raw = item as Record<string, unknown>
+      if (typeof raw.fieldKey !== 'string' || !raw.fieldKey.trim()) return []
+      return [{
+        fieldKey: raw.fieldKey.trim(),
+        kind: raw.kind === 'custom' ? 'custom' as const : 'standard' as const,
+        fieldType: typeof raw.fieldType === 'string' ? raw.fieldType : 'text',
+        enabled: raw.enabled === true,
+        required: raw.required === true,
+        label: typeof raw.label === 'string' ? raw.label : '',
+        customLabel: typeof raw.customLabel === 'boolean'
+          ? raw.customLabel
+          : typeof raw.label === 'string' && raw.label.trim().length > 0,
+        sortOrder: typeof raw.sortOrder === 'number' ? raw.sortOrder : 0,
+        options: Array.isArray(raw.options)
+          ? raw.options.filter((option): option is string => typeof option === 'string')
+          : [],
+      }]
+    })
+    return hit({ items: cloneMockReceptionFields() })
+  }
+
+  if (
+    /^\/v1\/course\/customers\/[^/]+\/reception-values$/.test(pathname)
+    && method === 'PUT'
+  ) {
+    return hit({ recorded: true })
+  }
+
   if (pathname === '/v1/course/customers/reception-draft' && method === 'POST') {
     if (typeof FormData === 'undefined' || !(init?.body instanceof FormData)) {
       return error(400, "multipart field 'file' is required")
@@ -2807,6 +2940,19 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
           nameKana: 'ホンダ ヤスヒコ',
           phone: '090-1234-5678',
           email: 'honda@example.com',
+          birthDate: '1978-04-03',
+          sex: '男性',
+          address: {
+            postalCode: '100-0001',
+            state: '東京都',
+            city: '千代田区',
+            address1: '千代田1-1-1',
+            address2: 'サンプルビル',
+          },
+          customFields: {
+            membership_class: '正会員',
+            newsletter: true,
+          },
           consents: [
             { key: 'golf_antisocial_and_course_terms', accepted: true },
             { key: 'golf_cart_terms', accepted: true },

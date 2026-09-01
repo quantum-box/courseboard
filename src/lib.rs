@@ -38,6 +38,7 @@ use course::infrastructure::{
     FieldReservationReportGateway, MigratingReservationReportGateway,
     MySqlAvailabilityDeadlineRepository, MySqlCaddieDutyRepository, MySqlCaddieRankFeeRepository,
     MySqlCaddieShiftRepository, MySqlCourseOrderRepository, MySqlCustomerGradeRulesRepository,
+    MySqlCustomerReceptionFieldsRepository, MySqlCustomerReceptionValuesRepository,
     MySqlCustomerRegistrationRepository, MySqlGeneratedThroughRepository,
     MySqlGolfProductSettingsRepository, MySqlMembershipDiscountsRepository,
     MySqlMembershipPlayWindowsRepository, MySqlPlayerTagOptionsRepository,
@@ -71,6 +72,8 @@ pub struct AppState {
     product_settings: Arc<MySqlGolfProductSettingsRepository>,
     player_tag_options: Arc<MySqlPlayerTagOptionsRepository>,
     customer_grade_rules: Arc<MySqlCustomerGradeRulesRepository>,
+    customer_reception_fields: Arc<MySqlCustomerReceptionFieldsRepository>,
+    customer_reception_values: Arc<MySqlCustomerReceptionValuesRepository>,
     customer_registrations: Arc<MySqlCustomerRegistrationRepository>,
     visit_checkins: Arc<MySqlVisitCheckinRepository>,
     membership_discounts: Arc<MySqlMembershipDiscountsRepository>,
@@ -119,6 +122,12 @@ impl AppState {
             product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
             customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(pool.clone())),
+            customer_reception_fields: Arc::new(MySqlCustomerReceptionFieldsRepository::new(
+                pool.clone(),
+            )),
+            customer_reception_values: Arc::new(MySqlCustomerReceptionValuesRepository::new(
+                pool.clone(),
+            )),
             customer_registrations: Arc::new(MySqlCustomerRegistrationRepository::new(
                 pool.clone(),
             )),
@@ -186,6 +195,12 @@ impl AppState {
             product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
             customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(pool.clone())),
+            customer_reception_fields: Arc::new(MySqlCustomerReceptionFieldsRepository::new(
+                pool.clone(),
+            )),
+            customer_reception_values: Arc::new(MySqlCustomerReceptionValuesRepository::new(
+                pool.clone(),
+            )),
             customer_registrations: Arc::new(MySqlCustomerRegistrationRepository::new(
                 pool.clone(),
             )),
@@ -238,6 +253,12 @@ impl AppState {
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
                 product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
+                customer_reception_fields: Arc::new(MySqlCustomerReceptionFieldsRepository::new(
+                    pool.clone(),
+                )),
+                customer_reception_values: Arc::new(MySqlCustomerReceptionValuesRepository::new(
+                    pool.clone(),
+                )),
                 customer_registrations: Arc::new(MySqlCustomerRegistrationRepository::new(
                     pool.clone(),
                 )),
@@ -286,6 +307,12 @@ impl AppState {
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
                 product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
+                customer_reception_fields: Arc::new(MySqlCustomerReceptionFieldsRepository::new(
+                    pool.clone(),
+                )),
+                customer_reception_values: Arc::new(MySqlCustomerReceptionValuesRepository::new(
+                    pool.clone(),
+                )),
                 customer_registrations: Arc::new(MySqlCustomerRegistrationRepository::new(
                     pool.clone(),
                 )),
@@ -363,6 +390,16 @@ impl AppState {
     /// CourseBoard-owned visitor categories for the booking form.
     pub fn player_tag_options(&self) -> Arc<MySqlPlayerTagOptionsRepository> {
         self.player_tag_options.clone()
+    }
+
+    /// CourseBoard-owned standard and custom reception-sheet field settings.
+    pub fn customer_reception_fields(&self) -> Arc<MySqlCustomerReceptionFieldsRepository> {
+        self.customer_reception_fields.clone()
+    }
+
+    /// CourseBoard-owned answers to custom reception-sheet fields.
+    pub fn customer_reception_values(&self) -> Arc<MySqlCustomerReceptionValuesRepository> {
+        self.customer_reception_values.clone()
     }
 
     /// CourseBoard-owned record of how far each course has been built.
@@ -636,6 +673,15 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/customer-reception-fields",
+            get(course::interfaces::http_customers::get_customer_reception_fields)
+                .put(course::interfaces::http_customers::replace_customer_reception_fields)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/v1/course/customers",
             get(course::interfaces::http_customers::search_customers)
                 .post(course::interfaces::http_customers::create_customer)
@@ -660,6 +706,12 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/course/customers/:customer_id",
             get(course::interfaces::http_customers::get_customer).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/customers/:customer_id/reception-values",
+            put(course::interfaces::http_customers::record_reception_customer_values).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
         )

@@ -1,4 +1,5 @@
 import { i18next } from './i18n'
+import { courseboardApiBaseUrlForOrigin } from './courseboardApiOrigin'
 
 import {
   resolveMockFieldApiJson,
@@ -67,12 +68,11 @@ export function configureApiAuth(context: ApiAuthContext | null) {
   apiAuthContext = context
 }
 
-function trimTrailingSlash(value: string) {
-  return value.replace(/\/+$/, '')
-}
-
 export function operatorApiBaseUrl() {
-  const configured = trimTrailingSlash(import.meta.env.VITE_COURSEBOARD_API_BASE_URL ?? '')
+  const configured = courseboardApiBaseUrlForOrigin(
+    import.meta.env.VITE_COURSEBOARD_API_BASE_URL ?? '',
+    window.location.origin,
+  )
   if (!configured) return ''
 
   const target = new URL(configured, window.location.origin)
@@ -83,10 +83,11 @@ export function operatorApiBaseUrl() {
 }
 
 export function publicApiBaseUrl() {
-  return trimTrailingSlash(
+  return courseboardApiBaseUrlForOrigin(
     import.meta.env.VITE_COURSEBOARD_PUBLIC_API_BASE_URL
       ?? import.meta.env.VITE_COURSEBOARD_API_BASE_URL
       ?? '',
+    window.location.origin,
   )
 }
 

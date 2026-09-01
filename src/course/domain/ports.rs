@@ -9,12 +9,13 @@ use super::{
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
     CaddieDutyAssignment, CaddieDutyOptions, CaddieId, CaddieRankFees, CaddieRating, CaddieRoster,
     CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder, Customer,
-    CustomerGradeRules, CustomerId, CustomerMembership, CustomerRegistration, CustomerSearchQuery,
-    DailyBudget, DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus,
-    FieldClientCapabilities, FieldRequestContext, FieldShiftLink, GenerationSummary,
-    GolfPricingSettings, InventoryWatermark, MembershipDiscounts, MembershipPlan, MembershipPlanId,
-    MembershipPlayWindows, MonthlySettlement, NewCustomer, NewCustomerRegistration, NewReservation,
-    PartyDetails, PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionDraft,
+    CustomerGradeRules, CustomerId, CustomerMembership, CustomerReceptionField,
+    CustomerRegistration, CustomerSearchQuery, DailyBudget, DailyBudgetQuery, DefaultWorkingHours,
+    DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
+    FieldShiftLink, GenerationSummary, GolfPricingSettings, InventoryWatermark,
+    MembershipDiscounts, MembershipPlan, MembershipPlanId, MembershipPlayWindows,
+    MonthlySettlement, NewCustomer, NewCustomerRegistration, NewReservation, PartyDetails,
+    PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraft,
     ReceptionSheet, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
     ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
     ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber, ShiftPolicy,
@@ -959,7 +960,55 @@ pub trait CustomerReceptionOcrGateway: Send + Sync {
         &self,
         credentials: GatewayCredentials<'_>,
         sheet: ReceptionSheet,
+        fields: &[CustomerReceptionField],
     ) -> Result<ReceptionDraft, CourseError>;
+}
+
+/// Port for the reception-only Field ERP customer create capability.
+///
+/// This must stay separate from [`CustomerGateway`]: manual and booking-ledger
+/// creation use the existing StoreKit response contract, while this endpoint
+/// returns only an id and accepts the reception-only standard columns and
+/// consents.
+#[async_trait]
+pub trait CustomerReceptionCreateGateway: Send + Sync {
+    async fn create_reception_customer(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: &ReceptionCustomerInput,
+        consents: &[ReceptionConsentAnswer],
+    ) -> Result<Customer, CourseError>;
+}
+
+/// Port for CourseBoard-owned answers to custom reception fields.
+#[async_trait]
+pub trait CustomerReceptionValuesGateway: Send + Sync {
+    async fn record_customer_reception_values(
+        &self,
+        tenant_id: &str,
+        customer_id: &CustomerId,
+        values: &std::collections::BTreeMap<String, serde_json::Value>,
+    ) -> Result<(), CourseError>;
+}
+
+/// Port for the reception sheet settings CourseBoard owns locally.
+///
+/// The repository intentionally takes a tenant string rather than Field
+/// credentials: these rows never cross the Field boundary. Use cases still
+/// receive credentials so the action check is made before a tenant-scoped
+/// read or write.
+#[async_trait]
+pub trait CustomerReceptionFieldsGateway: Send + Sync {
+    async fn list_customer_reception_fields(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Vec<CustomerReceptionField>, CourseError>;
+
+    async fn replace_customer_reception_fields(
+        &self,
+        tenant_id: &str,
+        fields: &[CustomerReceptionField],
+    ) -> Result<(), CourseError>;
 }
 
 /// Port for the tenant's membership registry in Field.

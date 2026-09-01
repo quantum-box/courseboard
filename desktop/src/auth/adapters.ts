@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { i18next } from '../i18n'
+import { courseboardApiBaseUrlForOrigin } from '../courseboardApiOrigin'
 import {
   CognitoRequestError,
   authenticateWithCognito,
@@ -242,15 +243,23 @@ function browserPkceConfiguration(): BrowserPkceConfiguration {
     || 'ap-northeast-1'
   const configuredProfileEndpoint =
     import.meta.env.VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT?.trim()
-  const courseboardApiBase =
-    import.meta.env.VITE_COURSEBOARD_API_BASE_URL?.trim().replace(/\/+$/, '')
+  const configuredCourseboardApiBase =
+    import.meta.env.VITE_COURSEBOARD_API_BASE_URL?.trim() ?? ''
+  const courseboardApiBase = courseboardApiBaseUrlForOrigin(
+    configuredCourseboardApiBase,
+    window.location.origin,
+  )
+  const previewProfileEndpoint = courseboardApiBase !== configuredCourseboardApiBase.replace(/\/+$/, '')
+    ? `${courseboardApiBase}/v1/me`
+    : undefined
 
   return {
     cognitoEndpoint: httpsEndpoint(
       `https://cognito-idp.${region}.amazonaws.com/`,
       'Cognito endpoint',
     ),
-    profileEndpoint: configuredProfileEndpoint
+    profileEndpoint: previewProfileEndpoint
+      || configuredProfileEndpoint
       || (courseboardApiBase ? `${courseboardApiBase}/v1/me` : '/v1/me'),
     clientId,
   }

@@ -6058,6 +6058,135 @@ button,
   opacity: .7;
 }
 
+/* Reception-field settings stay next to the sheet workflow. Keep the standard
+   rows compact, while custom definitions get a wrapped editor on narrow panes. */
+.reception-settings {
+  display: grid;
+  gap: 16px;
+}
+
+.reception-settings-section {
+  display: grid;
+  gap: 8px;
+}
+
+.reception-settings-section h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.reception-settings-hint,
+.reception-settings-empty {
+  margin: 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.reception-settings-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reception-settings-table-wrap {
+  overflow-x: auto;
+}
+
+.reception-settings-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 620px;
+}
+
+.reception-settings-table th,
+.reception-settings-table td {
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.reception-settings-table th {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.reception-settings-table td:first-child {
+  min-width: 180px;
+}
+
+.reception-settings-table td > strong,
+.reception-settings-table td > small {
+  display: block;
+}
+
+.reception-settings-table td > small {
+  margin-top: 2px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+}
+
+.reception-settings-table input[type='checkbox'],
+.reception-custom-field-check input[type='checkbox'] {
+  accent-color: hsl(var(--nui-primary));
+}
+
+.reception-settings-table .field input,
+.reception-custom-field input,
+.reception-custom-field select,
+.reception-custom-field textarea {
+  width: 100%;
+}
+
+.reception-custom-field-list {
+  display: grid;
+  gap: 8px;
+}
+
+.reception-custom-field {
+  display: grid;
+  gap: 8px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 10px;
+}
+
+.reception-custom-field-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(140px, 1.2fr) minmax(110px, .8fr) auto auto auto;
+  align-items: end;
+  gap: 8px 12px;
+}
+
+.reception-custom-field-check {
+  display: inline-flex;
+  min-height: var(--control-height);
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.reception-custom-field-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.reception-custom-field-actions button {
+  padding-inline: 6px;
+}
+
+.reception-custom-field-options {
+  max-width: 560px;
+}
+
+.reception-custom-field-options textarea {
+  min-height: 64px;
+}
+
 .reception-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -6125,6 +6254,30 @@ button,
   gap: 8px 12px;
 }
 
+.reception-address-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.reception-address-part {
+  display: grid;
+  gap: 3px;
+}
+
+.reception-address-part-label {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.reception-boolean-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  font-size: 13px;
+}
+
 /* Under the input it belongs to, so correcting and comparing happen without
    the eye leaving the field. */
 .reception-read-value {
@@ -6190,7 +6343,23 @@ button,
 }
 
 @media (max-width: 720px) {
+  .reception-settings-section-head {
+    flex-direction: column;
+  }
+
+  .reception-custom-field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reception-custom-field-actions {
+    justify-content: flex-end;
+  }
+
   .reception-row-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .reception-address-fields {
     grid-template-columns: 1fr;
   }
 }

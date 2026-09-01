@@ -12,12 +12,17 @@
 //! (ADR-0005). Nothing here is persisted: a draft is a proposal the desk
 //! corrects, and the sheet itself is never stored.
 
+use std::collections::BTreeMap;
+
+use chrono::NaiveDate;
 use serde::Serialize;
+use serde_json::Value;
 
 use super::customer_consent::{
     reception_consent, required_reception_consents, ReceptionConsentAnswer, RECEPTION_CONSENTS,
 };
 use super::error::CourseError;
+use super::NewCustomer;
 
 /// Field's own ceiling for one document (10 MiB). Rejecting oversized uploads
 /// here keeps a scan the desk cannot use from crossing the network twice.
@@ -31,6 +36,49 @@ pub const RECEPTION_OCR_ENTITY_KEY: &str = "consumer";
 /// Every row a sheet may yield, capped at what one screen can be checked
 /// against the original. Field's own row cap is higher; the desk's is not.
 pub const MAX_RECEPTION_ROWS: usize = 50;
+
+/// The address shape accepted by Field's ERP customer endpoint.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReceptionAddress {
+    pub postal_code: String,
+    pub state: String,
+    pub city: String,
+    pub address1: String,
+    pub address2: Option<String>,
+}
+
+/// Customer values submitted from a reception sheet.
+///
+/// The four legacy ledger values remain in [`NewCustomer`] so manual and
+/// booking-ledger creation keep their existing StoreKit contract. These
+/// additional values are intentionally scoped to the reception-only Field ERP
+/// create capability.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReceptionCustomerInput {
+    pub customer: NewCustomer,
+    pub birth_date: Option<NaiveDate>,
+    pub sex: Option<String>,
+    pub address: Option<ReceptionAddress>,
+    pub custom_fields: BTreeMap<String, Value>,
+}
+
+impl ReceptionCustomerInput {
+    pub fn new(
+        customer: NewCustomer,
+        birth_date: Option<NaiveDate>,
+        sex: Option<String>,
+        address: Option<ReceptionAddress>,
+        custom_fields: BTreeMap<String, Value>,
+    ) -> Self {
+        Self {
+            customer,
+            birth_date,
+            sex,
+            address,
+            custom_fields,
+        }
+    }
+}
 
 /// A scanned reception sheet on its way upstream, already known to be a format
 /// the reader accepts.
@@ -149,27 +197,37 @@ pub const RECEPTION_ROW_PHONE: &str = "phone";
 pub const RECEPTION_ROW_EMAIL: &str = "email";
 /// The rows field itself, which is what the reader returns them under.
 pub const RECEPTION_ROWS_KEY: &str = "visitors";
+const RECEPTION_ADDRESS_POSTAL_CODE: &str = "address_postal_code";
+const RECEPTION_ADDRESS_STATE: &str = "address_state";
+const RECEPTION_ADDRESS_CITY: &str = "address_city";
+const RECEPTION_ADDRESS_1: &str = "address1";
+const RECEPTION_ADDRESS_2: &str = "address2";
 
 /// One column of the reception sheet as the reader is asked to see it.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceptionOcrColumn {
-    pub key: &'static str,
-    pub label: &'static str,
-    pub field_type: &'static str,
-    pub options: [&'static str; 0],
+    pub key: String,
+    pub label: String,
+    pub field_type: String,
+    pub options: Vec<String>,
 }
 
 /// The reception sheet as a form schema the generic reader can work against.
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceptionOcrField {
-    pub key: &'static str,
-    pub label: &'static str,
-    pub field_type: &'static str,
-    pub options: [&'static str; 0],
+    pub key: String,
+    pub label: String,
+    pub field_type: String,
+    pub options: Vec<String>,
     pub item_fields: Vec<ReceptionOcrColumn>,
 }
+
+/// Field's `items` reader rejects an item schema wider than twenty columns.
+/// Three fixed consent boxes leave room for seventeen tenant reception fields.
+pub const MAX_RECEPTION_OCR_COLUMNS: usize = 20;
+pub const MAX_RECEPTION_OCR_SCHEMA_BYTES: usize = 64 * 1024;
 
 /// The field type the generic reader uses for a tick box. Anything it cannot
 /// resolve to `true` or `false` comes back dropped with a warning rather than
@@ -189,49 +247,98 @@ pub const RECEPTION_BOOLEAN_FIELD_TYPE: &str = "boolean";
 /// question phrased the other way round would not match the page; the flip
 /// into Field's direction happens later, in [`super::customer_consent`].
 pub fn reception_sheet_schema() -> Vec<ReceptionOcrField> {
-    let mut item_fields = vec![
-        ReceptionOcrColumn {
-            key: RECEPTION_ROW_NAME,
-            label: "氏名",
-            field_type: "text",
-            options: [],
-        },
-        ReceptionOcrColumn {
-            key: RECEPTION_ROW_NAME_KANA,
-            label: "氏名のふりがな（カタカナ）",
-            field_type: "text",
-            options: [],
-        },
-        ReceptionOcrColumn {
-            key: RECEPTION_ROW_PHONE,
-            label: "電話番号",
-            field_type: "tel",
-            options: [],
-        },
-        ReceptionOcrColumn {
-            key: RECEPTION_ROW_EMAIL,
-            label: "メールアドレス",
-            field_type: "email",
-            options: [],
-        },
-    ];
+    let fields = super::CustomerReceptionField::merge_with_defaults("default", Vec::new());
+    reception_sheet_schema_for_fields(&fields)
+        .expect("the built-in reception schema fits Field's item column limit")
+}
+
+/// Builds the Field OCR schema from the current tenant configuration.
+///
+/// The outer `visitors` `items` field and the fixed consent columns remain the
+/// same contract as the original reader. Only the enabled configured fields
+/// between them vary, so the response still maps by `fields.visitors` and row
+/// keys rather than by a positional convention.
+pub fn reception_sheet_schema_for_fields(
+    fields: &[super::CustomerReceptionField],
+) -> Result<Vec<ReceptionOcrField>, CourseError> {
+    let mut item_fields = Vec::new();
+    for field in fields.iter().filter(|field| field.enabled) {
+        if field.kind == super::ReceptionFieldKind::Standard && field.field_key == "address" {
+            // Field's generic OCR schema has no compound `address` type. Keep
+            // address as one setting/UI value, but read its searchable ERP
+            // parts as ordinary text columns, as tachyonfield #1255 does.
+            let label = field.effective_label();
+            item_fields.extend([
+                address_column(RECEPTION_ADDRESS_POSTAL_CODE, label, "郵便番号"),
+                address_column(RECEPTION_ADDRESS_STATE, label, "都道府県"),
+                address_column(RECEPTION_ADDRESS_CITY, label, "市区町村"),
+                address_column(RECEPTION_ADDRESS_1, label, "番地"),
+                address_column(RECEPTION_ADDRESS_2, label, "建物名・部屋番号"),
+            ]);
+        } else {
+            item_fields.push(ReceptionOcrColumn {
+                key: field.field_key.clone(),
+                label: field.effective_label().to_string(),
+                field_type: field.field_type.as_str().to_string(),
+                options: field.options.clone(),
+            });
+        }
+    }
     item_fields.extend(
         super::customer_consent::RECEPTION_CONSENTS
             .iter()
             .map(|consent| ReceptionOcrColumn {
-                key: consent.key,
-                label: consent.prompt,
-                field_type: RECEPTION_BOOLEAN_FIELD_TYPE,
-                options: [],
+                key: consent.key.to_string(),
+                label: consent.prompt.to_string(),
+                field_type: RECEPTION_BOOLEAN_FIELD_TYPE.to_string(),
+                options: Vec::new(),
             }),
     );
-    vec![ReceptionOcrField {
-        key: RECEPTION_ROWS_KEY,
-        label: "来場者（受付用紙に書かれている全員）",
-        field_type: "items",
-        options: [],
+    if item_fields
+        .iter()
+        .any(|column| column.label.chars().count() > 120)
+    {
+        return Err(CourseError::BadRequest(
+            "reception OCR field label is too long",
+        ));
+    }
+    let unique_keys = item_fields
+        .iter()
+        .map(|column| column.key.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    if unique_keys.len() != item_fields.len() {
+        return Err(CourseError::BadRequest(
+            "reception OCR field keys must be unique",
+        ));
+    }
+    if item_fields.len() > MAX_RECEPTION_OCR_COLUMNS {
+        return Err(CourseError::BadRequest(
+            "reception sheet has too many OCR fields",
+        ));
+    }
+    let schema = vec![ReceptionOcrField {
+        key: RECEPTION_ROWS_KEY.to_string(),
+        label: "来場者（受付用紙に書かれている全員）".to_string(),
+        field_type: "items".to_string(),
+        options: Vec::new(),
         item_fields,
-    }]
+    }];
+    let encoded = serde_json::to_vec(&schema).map_err(|error| {
+        CourseError::Provider(format!("failed to encode reception OCR schema: {error}"))
+    })?;
+    if encoded.len() > MAX_RECEPTION_OCR_SCHEMA_BYTES {
+        return Err(CourseError::BadRequest("reception OCR schema is too large"));
+    }
+    Ok(schema)
+}
+
+fn address_column(key: &str, label: &str, part: &str) -> ReceptionOcrColumn {
+    ReceptionOcrColumn {
+        key: key.to_string(),
+        label: format!("{label}（{part}）"),
+        field_type: "text".to_string(),
+        options: Vec::new(),
+    }
 }
 
 /// One person as the sheet was read, before anybody has looked at it.
@@ -239,12 +346,16 @@ pub fn reception_sheet_schema() -> Vec<ReceptionOcrField> {
 /// Every field is optional including the name: a row the reader could not make
 /// out is still worth showing, because the desk can read it off the original
 /// beside it. Dropping it would silently lose a player from the group.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReceptionDraftRow {
     name: Option<String>,
     name_kana: Option<String>,
     phone: Option<String>,
     email: Option<String>,
+    birth_date: Option<String>,
+    sex: Option<String>,
+    address: Option<Value>,
+    custom_fields: BTreeMap<String, Value>,
     /// One answer per declared consent, in the order they are printed, whether
     /// or not the reader made the box out. The desk needs an unread box to
     /// show up as a question rather than to disappear.
@@ -263,6 +374,10 @@ impl ReceptionDraftRow {
             name_kana: normalize(name_kana),
             phone: normalize(phone),
             email: normalize(email),
+            birth_date: None,
+            sex: None,
+            address: None,
+            custom_fields: BTreeMap::new(),
             consents: RECEPTION_CONSENTS
                 .iter()
                 .map(|consent| ReceptionConsentAnswer {
@@ -271,6 +386,53 @@ impl ReceptionDraftRow {
                 })
                 .collect(),
         }
+    }
+
+    /// Adds configured standard/custom values from one Field `items` row.
+    ///
+    /// The reader answers rows as JSON because a value can be a string,
+    /// boolean, object, or null depending on the configured field type. Keep
+    /// the typed JSON in custom fields so the confirmation screen can render
+    /// booleans and address objects without guessing from strings.
+    pub fn with_configured_fields(
+        mut self,
+        fields: &[super::CustomerReceptionField],
+        row: &Value,
+    ) -> Self {
+        for field in fields.iter().filter(|field| field.enabled) {
+            let value = row.get(&field.field_key);
+            match (field.kind, field.field_key.as_str()) {
+                (super::ReceptionFieldKind::Standard, "name") => {
+                    self.name = column(row, RECEPTION_ROW_NAME);
+                }
+                (super::ReceptionFieldKind::Standard, "name_kana") => {
+                    self.name_kana = column(row, RECEPTION_ROW_NAME_KANA);
+                }
+                (super::ReceptionFieldKind::Standard, "phone") => {
+                    self.phone = column(row, RECEPTION_ROW_PHONE);
+                }
+                (super::ReceptionFieldKind::Standard, "email") => {
+                    self.email = column(row, RECEPTION_ROW_EMAIL);
+                }
+                (super::ReceptionFieldKind::Standard, "birth_date") => {
+                    self.birth_date = value.and_then(value_as_string);
+                }
+                (super::ReceptionFieldKind::Standard, "sex") => {
+                    self.sex = value.and_then(value_as_string);
+                }
+                (super::ReceptionFieldKind::Standard, "address") => {
+                    self.address = reception_address(row);
+                }
+                (super::ReceptionFieldKind::Custom, key) => {
+                    self.custom_fields.insert(
+                        key.to_string(),
+                        normalized_ocr_value(field.field_type, value),
+                    );
+                }
+                _ => {}
+            }
+        }
+        self
     }
 
     /// Record a box as the reader saw it on the paper. The printed direction
@@ -317,6 +479,13 @@ impl ReceptionDraftRow {
             && self.name_kana.is_none()
             && self.phone.is_none()
             && self.email.is_none()
+            && self.birth_date.is_none()
+            && self.sex.is_none()
+            && self.address.is_none()
+            && self
+                .custom_fields
+                .values()
+                .all(|value| value.is_null() || value_is_blank(value))
     }
 
     pub fn name(&self) -> Option<&str> {
@@ -334,6 +503,87 @@ impl ReceptionDraftRow {
     pub fn email(&self) -> Option<&str> {
         self.email.as_deref()
     }
+
+    pub fn birth_date(&self) -> Option<&str> {
+        self.birth_date.as_deref()
+    }
+
+    pub fn sex(&self) -> Option<&str> {
+        self.sex.as_deref()
+    }
+
+    pub fn address(&self) -> Option<&Value> {
+        self.address.as_ref()
+    }
+
+    pub fn custom_fields(&self) -> &BTreeMap<String, Value> {
+        &self.custom_fields
+    }
+}
+
+fn normalized_ocr_value(field_type: super::ReceptionFieldType, value: Option<&Value>) -> Value {
+    let Some(value) = value else {
+        return Value::Null;
+    };
+    if field_type == super::ReceptionFieldType::Boolean {
+        if let Some(boolean) = value.as_bool() {
+            return Value::Bool(boolean);
+        }
+        if let Some(text) = value.as_str() {
+            return match text.trim().to_ascii_lowercase().as_str() {
+                "true" => Value::Bool(true),
+                "false" => Value::Bool(false),
+                _ => Value::Null,
+            };
+        }
+        return Value::Null;
+    }
+    value.clone()
+}
+
+fn column(row: &Value, key: &str) -> Option<String> {
+    row.get(key).and_then(value_as_string)
+}
+
+fn reception_address(row: &Value) -> Option<Value> {
+    let postal_code = column(row, RECEPTION_ADDRESS_POSTAL_CODE);
+    let state = column(row, RECEPTION_ADDRESS_STATE);
+    let city = column(row, RECEPTION_ADDRESS_CITY);
+    let address1 = column(row, RECEPTION_ADDRESS_1);
+    let address2 = column(row, RECEPTION_ADDRESS_2);
+    if [&postal_code, &state, &city, &address1, &address2]
+        .iter()
+        .all(|part| part.is_none())
+    {
+        return None;
+    }
+    Some(serde_json::json!({
+        "postalCode": postal_code,
+        "state": state,
+        "city": city,
+        "address1": address1,
+        "address2": address2,
+    }))
+}
+
+fn value_as_string(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            value
+                .as_number()
+                .map(ToString::to_string)
+                .or_else(|| value.as_bool().map(|value| value.to_string()))
+        })
+}
+
+fn value_is_blank(value: &Value) -> bool {
+    value.as_str().is_some_and(|value| value.trim().is_empty())
+        || value
+            .as_object()
+            .is_some_and(|value| value.values().all(value_is_blank))
 }
 
 fn normalize(value: Option<String>) -> Option<String> {
@@ -399,7 +649,7 @@ impl ReceptionReaderFailure {
 /// The warnings are not decoration. A partial read looks exactly like a
 /// complete one on screen, and the only thing that tells the desk to go back to
 /// the original is a sentence saying so.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReceptionDraft {
     rows: Vec<ReceptionDraftRow>,
     warnings: Vec<String>,
@@ -513,7 +763,11 @@ mod tests {
         assert_eq!(schema.len(), 1);
         assert_eq!(schema[0].key, RECEPTION_ROWS_KEY);
         assert_eq!(schema[0].field_type, "items");
-        let keys: Vec<&str> = schema[0].item_fields.iter().map(|item| item.key).collect();
+        let keys: Vec<&str> = schema[0]
+            .item_fields
+            .iter()
+            .map(|item| item.key.as_str())
+            .collect();
         let mut expected = vec![
             RECEPTION_ROW_NAME,
             RECEPTION_ROW_NAME_KANA,
@@ -556,5 +810,100 @@ mod tests {
         assert_eq!(field["options"], serde_json::json!([]));
         assert_eq!(field["itemFields"][2]["fieldType"], "tel");
         assert_eq!(field["itemFields"][2]["key"], RECEPTION_ROW_PHONE);
+    }
+
+    #[test]
+    fn address_is_split_into_field_supported_text_columns_and_reassembled() {
+        let mut fields = crate::course::domain::CustomerReceptionField::merge_with_defaults(
+            "tenant-1",
+            Vec::new(),
+        );
+        fields
+            .iter_mut()
+            .find(|field| field.field_key == "address")
+            .unwrap()
+            .enabled = true;
+        let schema = reception_sheet_schema_for_fields(&fields).unwrap();
+        let address_columns = &schema[0].item_fields[4..9];
+        assert_eq!(
+            address_columns
+                .iter()
+                .map(|column| column.key.as_str())
+                .collect::<Vec<_>>(),
+            [
+                RECEPTION_ADDRESS_POSTAL_CODE,
+                RECEPTION_ADDRESS_STATE,
+                RECEPTION_ADDRESS_CITY,
+                RECEPTION_ADDRESS_1,
+                RECEPTION_ADDRESS_2,
+            ]
+        );
+        assert!(address_columns
+            .iter()
+            .all(|column| column.field_type == "text"));
+
+        let row = serde_json::json!({
+            "name": "本田 康彦",
+            "address_postal_code": "100-0001",
+            "address_state": "東京都",
+            "address_city": "千代田区",
+            "address1": "千代田1-1-1",
+            "address2": "サンプルビル"
+        });
+        let draft = ReceptionDraftRow::default().with_configured_fields(&fields, &row);
+        assert_eq!(draft.address().unwrap()["postalCode"], "100-0001");
+        assert_eq!(draft.address().unwrap()["address1"], "千代田1-1-1");
+    }
+
+    #[test]
+    fn field_string_boolean_is_normalized_for_the_confirmation_and_create_contract() {
+        let custom = crate::course::domain::CustomerReceptionField::try_new(
+            "tenant-1",
+            crate::course::domain::ReceptionFieldInput {
+                field_key: "needs_cart".to_string(),
+                kind: crate::course::domain::ReceptionFieldKind::Custom,
+                field_type: crate::course::domain::ReceptionFieldType::Boolean,
+                enabled: true,
+                required: false,
+                label: Some("カート希望".to_string()),
+                sort_order: 7,
+                options: Vec::new(),
+            },
+        )
+        .unwrap();
+        let row = ReceptionDraftRow::default()
+            .with_configured_fields(&[custom], &serde_json::json!({ "needs_cart": "true" }));
+        assert_eq!(row.custom_fields()["needs_cart"], true);
+    }
+
+    #[test]
+    fn a_schema_over_fields_multipart_limit_is_rejected_when_settings_are_saved() {
+        let mut fields = crate::course::domain::CustomerReceptionField::merge_with_defaults(
+            "tenant-1",
+            Vec::new(),
+        );
+        for index in 0..13 {
+            let options = (0..50)
+                .map(|option| format!("{}{option:04}", "あ".repeat(116)))
+                .collect();
+            fields.push(
+                crate::course::domain::CustomerReceptionField::try_new(
+                    "tenant-1",
+                    crate::course::domain::ReceptionFieldInput {
+                        field_key: format!("custom_{index}"),
+                        kind: crate::course::domain::ReceptionFieldKind::Custom,
+                        field_type: crate::course::domain::ReceptionFieldType::Select,
+                        enabled: true,
+                        required: false,
+                        label: None,
+                        sort_order: 7 + index,
+                        options,
+                    },
+                )
+                .unwrap(),
+            );
+        }
+        let error = reception_sheet_schema_for_fields(&fields).unwrap_err();
+        assert!(matches!(error, CourseError::BadRequest(_)));
     }
 }

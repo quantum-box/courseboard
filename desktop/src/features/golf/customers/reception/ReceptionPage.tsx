@@ -1,19 +1,42 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
-import { CheckCircle2, ChevronLeft, FileScan, Plus, RefreshCw, Upload } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  CheckCircle2,
+  ChevronLeft,
+  FileScan,
+  Plus,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Trash2,
+  Upload,
+} from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
   EmptyState,
   Field,
   LoadingState,
+  NativeSelect,
+  NativeTextarea,
   Notice,
   Panel,
+  ResourceError,
   resourceErrorText,
 } from '../../../../components/Page'
+import { useResource } from '../../../../hooks/useResource'
 import { navigate, navigateFromClick } from '../../../../lib/router'
 import { showToast } from '../../../../lib/toast'
-import { draftReceptionSheet, registerReceptionRow } from './api'
+import {
+  draftReceptionSheet,
+  listReceptionFields,
+  registerReceptionRow,
+  retryReceptionValues,
+  saveReceptionFields,
+} from './api'
 import {
   blankRow,
   canRegister,
@@ -21,18 +44,30 @@ import {
   duplicateNameKeys,
   fileValidationError,
   isConsentCorrected,
-  isCorrected,
+  isStandardReceptionFieldKey,
+  isReceptionFieldCorrected,
+  missingRequiredFields,
   prepareReceptionSheet,
   previewKind,
   pendingRows,
+  receptionFieldLabel,
+  receptionFieldDefaultLabel,
   receptionReadFailure,
+  receptionRowReadValue,
+  receptionRowValue,
+  updateReceptionRowField,
+  valueText,
+  DEFAULT_RECEPTION_FIELDS,
+  type ReceptionAddress,
+  type ReceptionField,
+  type ReceptionFieldValue,
+  type ReceptionFieldType,
   rowsFromDraft,
   savedCount,
   RECEPTION_CONSENT_KEYS,
   RECEPTION_SHEET_ACCEPT,
   REQUIRED_RECEPTION_CONSENT,
   type ReceptionConsentKey,
-  type ReceptionFieldKey,
   type ReceptionRow,
 } from './models'
 
@@ -50,6 +85,11 @@ import {
  */
 export function ReceptionPage() {
   const { t } = useTranslation(['customers', 'common'])
+  const fieldSettings = useResource(
+    () => listReceptionFields(),
+    [],
+    { cacheKey: 'course:customer-reception-fields' },
+  )
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [reading, setReading] = useState(false)
@@ -73,7 +113,8 @@ export function ReceptionPage() {
   }, [file])
 
   const duplicates = useMemo(() => duplicateNameKeys(rows), [rows])
-  const pending = pendingRows(rows)
+  const receptionFields = fieldSettings.data ?? DEFAULT_RECEPTION_FIELDS
+  const pending = pendingRows(rows, receptionFields)
   const saved = savedCount(rows)
 
   function updateRow(key: string, patch: Partial<ReceptionRow>) {
@@ -104,7 +145,7 @@ export function ReceptionPage() {
       }
       setFile(next)
       const draft = await draftReceptionSheet(next)
-      setRows(rowsFromDraft(draft))
+      setRows(rowsFromDraft(draft, receptionFields))
       setWarnings(draft.warnings ?? [])
     } catch (error) {
       setRows([])
@@ -124,7 +165,7 @@ export function ReceptionPage() {
   }
 
   async function register(row: ReceptionRow) {
-    if (!canRegister(row)) return
+    if (!canRegister(row, receptionFields)) return
     updateRow(row.key, { status: 'saving', error: undefined })
     try {
       // The row's position on screen is its line on the paper — rows are added
@@ -133,6 +174,7 @@ export function ReceptionPage() {
       const created = await registerReceptionRow(
         row,
         rows.findIndex(candidate => candidate.key === row.key),
+        receptionFields,
       )
       updateRow(row.key, {
         status: 'saved',
@@ -140,10 +182,22 @@ export function ReceptionPage() {
         // Saved either way: the person is in the ledger. Registering again to
         // "fix" the consents would put a second one there.
         consentsMissing: created.consentsRecorded === false,
+        customFieldsMissing: created.customFieldsRecorded === false,
       })
     } catch (error) {
       updateRow(row.key, { status: 'pending', error: resourceErrorText(error) })
       throw error
+    }
+  }
+
+  async function retryCustomValues(row: ReceptionRow) {
+    if (!row.customerId) return
+    updateRow(row.key, { customFieldsRetrying: true, error: undefined })
+    try {
+      await retryReceptionValues(row.customerId, row, receptionFields)
+      updateRow(row.key, { customFieldsRetrying: false, customFieldsMissing: false })
+    } catch (error) {
+      updateRow(row.key, { customFieldsRetrying: false, error: resourceErrorText(error) })
     }
   }
 
@@ -154,7 +208,7 @@ export function ReceptionPage() {
       // One at a time, in sheet order: the ledger has no bulk write, and a
       // group registered in parallel comes back in an order nobody can match
       // against the paper when one of them fails.
-      for (const row of pendingRows(rows)) {
+      for (const row of pendingRows(rows, receptionFields)) {
         try {
           await register(row)
           registered += 1
@@ -227,6 +281,14 @@ export function ReceptionPage() {
         ))}
       </Panel>
 
+      <ReceptionFieldSettingsPanel
+        fields={receptionFields}
+        loading={fieldSettings.loading}
+        error={fieldSettings.error}
+        onRetry={() => void fieldSettings.refresh()}
+        onSaved={fieldSettings.setData}
+      />
+
       {reading ? <LoadingState label={t('customers:reception.reading')} /> : null}
 
       {!file && !reading ? (
@@ -258,7 +320,10 @@ export function ReceptionPage() {
                   disabled={busy}
                   onClick={() => {
                     addedRowsRef.current += 1
-                    setRows(current => [...current, blankRow(`added-${addedRowsRef.current}`)])
+                    setRows(current => [
+                      ...current,
+                      blankRow(`added-${addedRowsRef.current}`, receptionFields),
+                    ])
                   }}
                 >
                   <Plus />
@@ -295,11 +360,13 @@ export function ReceptionPage() {
                 <ReceptionRowCard
                   key={row.key}
                   row={row}
+                  fields={receptionFields}
                   index={index}
                   duplicate={duplicates.has(row.key)}
                   disabled={busy}
                   onChange={patch => updateRow(row.key, patch)}
                   onRegister={() => void register(row).catch(() => {})}
+                  onRetryCustomValues={() => void retryCustomValues(row)}
                 />
               ))}
             </ol>
@@ -331,12 +398,394 @@ export function ReceptionPage() {
   )
 }
 
-const ROW_FIELDS: readonly { key: ReceptionFieldKey; requirement: 'required' | 'optional' }[] = [
-  { key: 'name', requirement: 'required' },
-  { key: 'nameKana', requirement: 'optional' },
-  { key: 'phone', requirement: 'optional' },
-  { key: 'email', requirement: 'optional' },
-]
+const CUSTOM_FIELD_KEY_PATTERN = /^[a-z][a-z0-9_]{0,63}$/u
+
+const FIELD_TYPE_OPTIONS = [
+  'text',
+  'date',
+  'select',
+  'boolean',
+] as const satisfies readonly ReceptionFieldType[]
+
+function cloneReceptionFields(fields: readonly ReceptionField[]): ReceptionField[] {
+  return fields.map(field => ({ ...field, options: [...field.options] }))
+}
+
+function settingsEqual(left: readonly ReceptionField[], right: readonly ReceptionField[]) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function customFieldKeyIsInvalid(fields: readonly ReceptionField[]) {
+  const custom = fields.filter(field => field.kind === 'custom')
+  const keys = custom.map(field => field.fieldKey.trim())
+  return keys.some(key => !CUSTOM_FIELD_KEY_PATTERN.test(key))
+    || keys.some(key => isStandardReceptionFieldKey(key))
+    || new Set(keys).size !== keys.length
+}
+
+/**
+ * Settings for the sheet are kept on this screen because they are only useful
+ * while comparing a sheet. The editor deliberately sends the complete list:
+ * the API treats PUT as a replacement and the server merges missing defaults
+ * back in, so a newly added standard field cannot disappear from old tenants.
+ */
+function ReceptionFieldSettingsPanel({
+  fields,
+  loading,
+  error,
+  onRetry,
+  onSaved,
+}: {
+  fields: readonly ReceptionField[]
+  loading: boolean
+  error: unknown
+  onRetry: () => void
+  onSaved: (fields: readonly ReceptionField[]) => void
+}) {
+  const { t } = useTranslation(['customers', 'common'])
+  const [drafts, setDrafts] = useState<ReceptionField[]>(() => cloneReceptionFields(fields))
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    setDrafts(cloneReceptionFields(fields))
+  }, [fields])
+
+  const dirty = !settingsEqual(drafts, fields)
+  const invalidCustomKey = customFieldKeyIsInvalid(drafts)
+  const standard = drafts.filter(field => field.kind === 'standard')
+  const custom = drafts.filter(field => field.kind === 'custom')
+
+  function update(fieldKey: string, patch: Partial<ReceptionField>) {
+    setDrafts(current => current.map(field => (
+      field.fieldKey === fieldKey ? { ...field, ...patch } : field
+    )))
+  }
+
+  function addCustomField() {
+    const existing = new Set(custom.map(field => field.fieldKey))
+    let number = custom.length + 1
+    let fieldKey = `custom_field_${number}`
+    while (existing.has(fieldKey)) {
+      number += 1
+      fieldKey = `custom_field_${number}`
+    }
+    setDrafts(current => [
+      ...current,
+      {
+        fieldKey,
+        kind: 'custom',
+        fieldType: 'text',
+        enabled: true,
+        required: false,
+        label: '',
+        customLabel: false,
+        sortOrder: current.length,
+        options: [],
+      },
+    ])
+  }
+
+  function removeCustomField(fieldKey: string) {
+    setDrafts(current => current.filter(field => field.fieldKey !== fieldKey))
+  }
+
+  function moveCustomField(fieldKey: string, delta: number) {
+    setDrafts(current => {
+      const indexes = current
+        .map((field, index) => (field.kind === 'custom' ? index : -1))
+        .filter(index => index >= 0)
+      const index = current.findIndex(field => field.fieldKey === fieldKey)
+      const customPosition = indexes.indexOf(index)
+      const target = customPosition + delta
+      if (customPosition < 0 || target < 0 || target >= indexes.length) return current
+      const next = [...current]
+      const targetIndex = indexes[target]
+      const moved = next[index]
+      next[index] = next[targetIndex] as ReceptionField
+      next[targetIndex] = moved as ReceptionField
+      return next.map((field, position) => ({ ...field, sortOrder: position }))
+    })
+  }
+
+  async function save() {
+    if (invalidCustomKey) return
+    setSaving(true)
+    try {
+      const next = await saveReceptionFields(drafts.map(field => ({
+        fieldKey: field.fieldKey.trim(),
+        kind: field.kind,
+        fieldType: field.fieldType,
+        enabled: field.enabled,
+        required: field.kind === 'standard' && field.fieldKey === 'name'
+          ? true
+          : field.required,
+        label: field.customLabel ? field.label?.trim() || null : null,
+        customLabel: field.customLabel,
+        sortOrder: field.sortOrder,
+        options: field.fieldType === 'select' ? field.options : [],
+      })))
+      setDrafts(cloneReceptionFields(next))
+      onSaved(next)
+      showToast({ tone: 'success', message: t('customers:reception.settings.saved') })
+    } catch (saveError) {
+      showToast({
+        tone: 'danger',
+        title: t('customers:reception.settings.failed'),
+        message: resourceErrorText(saveError),
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Panel
+      className="reception-settings"
+      title={t('customers:reception.settings.title')}
+      description={t('customers:reception.settings.description')}
+      actions={(
+        <Button
+          type="button"
+          variant="primary"
+          disabled={!dirty || saving || loading || invalidCustomKey}
+          onClick={() => void save()}
+        >
+          <Save />
+          {saving
+            ? t('customers:reception.settings.saving')
+            : t('customers:reception.settings.save')}
+        </Button>
+      )}
+    >
+      {loading ? <LoadingState label={t('customers:reception.settings.loading')} /> : null}
+      {error ? (
+        <ResourceError error={error} onRetry={onRetry} />
+      ) : null}
+
+      <div className="reception-settings-section">
+        <h3>{t('customers:reception.settings.standardTitle')}</h3>
+        <p className="reception-settings-hint">{t('customers:reception.settings.standardHint')}</p>
+        <div className="reception-settings-table-wrap">
+          <table className="reception-settings-table">
+            <thead>
+              <tr>
+                <th>{t('customers:reception.settings.columns.field')}</th>
+                <th>{t('customers:reception.settings.columns.enabled')}</th>
+                <th>{t('customers:reception.settings.columns.required')}</th>
+                <th>{t('customers:reception.settings.columns.label')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {standard.map(field => {
+                const alwaysRequired = field.fieldKey === 'name'
+                return (
+                  <tr key={field.fieldKey}>
+                    <td>
+                      <strong>{receptionFieldLabel(field)}</strong>
+                      <small>{field.fieldKey}</small>
+                    </td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={t('customers:reception.settings.enableLabel', { field: receptionFieldLabel(field) })}
+                        checked={field.enabled}
+                        disabled={alwaysRequired || saving}
+                        onChange={event => update(field.fieldKey, { enabled: event.target.checked })}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        aria-label={t('customers:reception.settings.requiredLabel', { field: receptionFieldLabel(field) })}
+                        checked={alwaysRequired || field.required}
+                        disabled={alwaysRequired || !field.enabled || saving}
+                        onChange={event => update(field.fieldKey, { required: event.target.checked })}
+                      />
+                      {alwaysRequired ? (
+                        <small>{t('customers:reception.settings.alwaysRequired')}</small>
+                      ) : null}
+                    </td>
+                    <td>
+                      <Input
+                        aria-label={t('customers:reception.settings.labelLabel', { field: receptionFieldLabel(field) })}
+                        value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
+                        disabled={saving}
+                        onChange={event => update(field.fieldKey, {
+                          label: event.target.value,
+                          customLabel: event.target.value.trim().length > 0,
+                        })}
+                      />
+                      {field.customLabel ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={t('customers:reception.settings.resetLabel')}
+                          disabled={saving}
+                          onClick={() => update(field.fieldKey, {
+                            label: receptionFieldDefaultLabel(field.fieldKey),
+                            customLabel: false,
+                          })}
+                        >
+                          <RotateCcw />
+                          {t('customers:reception.settings.resetLabel')}
+                        </Button>
+                      ) : null}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div className="reception-settings-section">
+        <div className="reception-settings-section-head">
+          <div>
+            <h3>{t('customers:reception.settings.customTitle')}</h3>
+            <p className="reception-settings-hint">{t('customers:reception.settings.customHint')}</p>
+          </div>
+          <Button type="button" variant="secondary" size="sm" disabled={saving} onClick={addCustomField}>
+            <Plus />
+            {t('customers:reception.settings.addCustom')}
+          </Button>
+        </div>
+
+        {invalidCustomKey ? (
+          <Notice tone="warning">{t('customers:reception.settings.invalidKey')}</Notice>
+        ) : null}
+
+        {custom.length === 0 ? (
+          <p className="reception-settings-empty">{t('customers:reception.settings.customEmpty')}</p>
+        ) : (
+          <div className="reception-custom-field-list">
+            {custom.map((field, index) => (
+              <div className="reception-custom-field" key={field.fieldKey}>
+                <div className="reception-custom-field-grid">
+                  <Field label={t('customers:reception.settings.customKey')}>
+                    <Input
+                      value={field.fieldKey}
+                      disabled={saving}
+                      onChange={event => update(field.fieldKey, { fieldKey: event.target.value })}
+                    />
+                  </Field>
+                  <Field label={t('customers:reception.settings.customLabel')}>
+                    <Input
+                      value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
+                      disabled={saving}
+                      onChange={event => update(field.fieldKey, {
+                        label: event.target.value,
+                        customLabel: event.target.value.trim().length > 0,
+                      })}
+                    />
+                    {field.customLabel ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={t('customers:reception.settings.resetLabel')}
+                        disabled={saving}
+                        onClick={() => update(field.fieldKey, {
+                          label: receptionFieldDefaultLabel(field.fieldKey),
+                          customLabel: false,
+                        })}
+                      >
+                        <RotateCcw />
+                        {t('customers:reception.settings.resetLabel')}
+                      </Button>
+                    ) : null}
+                  </Field>
+                  <Field label={t('customers:reception.settings.customType')}>
+                    <NativeSelect
+                      value={field.fieldType}
+                      disabled={saving}
+                      onChange={event => update(field.fieldKey, {
+                        fieldType: event.target.value as ReceptionFieldType,
+                        options: event.target.value === 'select' ? field.options : [],
+                      })}
+                    >
+                      {FIELD_TYPE_OPTIONS.map(type => (
+                        <option key={type} value={type}>
+                          {t(`customers:reception.settings.types.${type}`)}
+                        </option>
+                      ))}
+                    </NativeSelect>
+                  </Field>
+                  <label className="reception-custom-field-check">
+                    <input
+                      type="checkbox"
+                      checked={field.enabled}
+                      disabled={saving}
+                      onChange={event => update(field.fieldKey, { enabled: event.target.checked })}
+                    />
+                    {t('customers:reception.settings.columns.enabled')}
+                  </label>
+                  <label className="reception-custom-field-check">
+                    <input
+                      type="checkbox"
+                      checked={field.required}
+                      disabled={!field.enabled || saving}
+                      onChange={event => update(field.fieldKey, { required: event.target.checked })}
+                    />
+                    {t('customers:reception.settings.columns.required')}
+                  </label>
+                  <div className="reception-custom-field-actions">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={t('customers:reception.settings.moveUp')}
+                      disabled={saving || index === 0}
+                      onClick={() => moveCustomField(field.fieldKey, -1)}
+                    >
+                      <ArrowUp />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={t('customers:reception.settings.moveDown')}
+                      disabled={saving || index === custom.length - 1}
+                      onClick={() => moveCustomField(field.fieldKey, 1)}
+                    >
+                      <ArrowDown />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      aria-label={t('customers:reception.settings.removeCustom')}
+                      disabled={saving}
+                      onClick={() => removeCustomField(field.fieldKey)}
+                    >
+                      <Trash2 />
+                    </Button>
+                  </div>
+                </div>
+                {field.fieldType === 'select' ? (
+                  <Field
+                    className="reception-custom-field-options"
+                    label={t('customers:reception.settings.options')}
+                    hint={t('customers:reception.settings.optionsHint')}
+                  >
+                    <NativeTextarea
+                      value={field.options.join('\n')}
+                      disabled={saving}
+                      onChange={event => update(field.fieldKey, {
+                        options: event.target.value.split('\n').map(option => option.trim()).filter(Boolean),
+                      })}
+                    />
+                  </Field>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </Panel>
+  )
+}
 
 const CONSENT_LABEL = {
   golf_antisocial_and_course_terms: 'customers:reception.consents.antisocialAndCourseTerms',
@@ -344,12 +793,163 @@ const CONSENT_LABEL = {
   golf_marketing_contact: 'customers:reception.consents.marketingContact',
 } as const satisfies Record<ReceptionConsentKey, string>
 
-const FIELD_LABEL = {
-  name: 'customers:field.name',
-  nameKana: 'customers:field.nameKana',
-  phone: 'customers:field.phone',
-  email: 'customers:field.email',
-} as const satisfies Record<ReceptionFieldKey, string>
+const ADDRESS_PART_KEYS = [
+  'postalCode',
+  'state',
+  'city',
+  'address1',
+  'address2',
+] as const
+
+function receptionDisplayValue(
+  value: ReceptionFieldValue,
+  booleanYes: string,
+  booleanNo: string,
+) {
+  if (typeof value === 'boolean') {
+    return value ? booleanYes : booleanNo
+  }
+  return valueText(value)
+}
+
+function ReceptionAddressEditor({
+  value,
+  label,
+  disabled,
+  onChange,
+}: {
+  value: ReceptionFieldValue
+  label: string
+  disabled: boolean
+  onChange: (value: ReceptionFieldValue) => void
+}) {
+  const { t } = useTranslation(['customers', 'common'])
+  const empty: ReceptionAddress = {
+    postalCode: '',
+    state: '',
+    city: '',
+    address1: '',
+    address2: '',
+  }
+  const address: ReceptionAddress = typeof value === 'object' && value !== null
+    ? value
+    : { ...empty, address1: valueText(value) }
+  return (
+    <div className="reception-address-fields">
+      {ADDRESS_PART_KEYS.map(part => (
+        <div className="reception-address-part" key={part}>
+          <span className="reception-address-part-label">
+            {t(`customers:reception.addressParts.${part}`)}
+          </span>
+          <Input
+            aria-label={`${label} ${t(`customers:reception.addressParts.${part}`)}`}
+            value={address[part] ?? ''}
+            disabled={disabled}
+            onChange={event => onChange({ ...address, [part]: event.target.value })}
+          />
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ReceptionDynamicField({
+  row,
+  field,
+  disabled,
+  onChange,
+}: {
+  row: ReceptionRow
+  field: ReceptionField
+  disabled: boolean
+  onChange: (patch: Partial<ReceptionRow>) => void
+}) {
+  const { t } = useTranslation(['customers', 'common'])
+  const value = receptionRowValue(row, field.fieldKey)
+  const read = receptionRowReadValue(row, field.fieldKey)
+  const label = receptionFieldLabel(field)
+  const fieldDisabled = disabled || row.status === 'saved' || row.status === 'saving'
+  const requirement = field.required ? 'required' : 'optional'
+  const update = (next: ReceptionFieldValue) => {
+    onChange(updateReceptionRowField(row, field.fieldKey, next))
+  }
+  const corrected = isReceptionFieldCorrected(row, field)
+
+  let control: ReactNode
+  if (field.fieldType === 'select') {
+    control = (
+      <NativeSelect
+        aria-label={label}
+        value={valueText(value)}
+        disabled={fieldDisabled}
+        onChange={event => update(event.target.value || null)}
+      >
+        <option value="">{t('customers:reception.rows.chooseValue')}</option>
+        {field.options.map(option => <option key={option} value={option}>{option}</option>)}
+      </NativeSelect>
+    )
+  } else if (field.fieldType === 'boolean') {
+    control = (
+      <div className="reception-boolean-input">
+        <input
+          type="checkbox"
+          aria-label={label}
+          checked={value === true}
+          disabled={fieldDisabled}
+          onChange={event => update(event.target.checked)}
+        />
+        <span>
+          {value === null
+            ? t('customers:reception.rows.unanswered')
+            : receptionDisplayValue(
+              value,
+              t('customers:reception.rows.booleanYes'),
+              t('customers:reception.rows.booleanNo'),
+            )}
+        </span>
+      </div>
+    )
+  } else if (field.fieldType === 'address') {
+    control = (
+      <ReceptionAddressEditor
+        value={value}
+        label={label}
+        disabled={fieldDisabled}
+        onChange={update}
+      />
+    )
+  } else {
+    const inputType = field.fieldType === 'tel' || field.fieldType === 'email' || field.fieldType === 'date'
+      ? field.fieldType
+      : 'text'
+    control = (
+      <Input
+        type={inputType}
+        aria-label={label}
+        value={valueText(value)}
+        disabled={fieldDisabled}
+        onChange={event => update(event.target.value || null)}
+      />
+    )
+  }
+
+  return (
+    <Field label={label} requirement={requirement}>
+      {control}
+      {corrected ? (
+        <span className="reception-read-value">
+          {t('customers:reception.rows.readAs', {
+            value: receptionDisplayValue(
+              read,
+              t('customers:reception.rows.booleanYes'),
+              t('customers:reception.rows.booleanNo'),
+            ),
+          })}
+        </span>
+      ) : null}
+    </Field>
+  )
+}
 
 /**
  * One person from the sheet.
@@ -360,22 +960,27 @@ const FIELD_LABEL = {
  */
 function ReceptionRowCard({
   row,
+  fields,
   index,
   duplicate,
   disabled,
   onChange,
   onRegister,
+  onRetryCustomValues,
 }: {
   row: ReceptionRow
+  fields: readonly ReceptionField[]
   index: number
   duplicate: boolean
   disabled: boolean
   onChange: (patch: Partial<ReceptionRow>) => void
   onRegister: () => void
+  onRetryCustomValues: () => void
 }) {
   const { t } = useTranslation(['customers', 'common'])
   const saved = row.status === 'saved'
-  const blocked = blockedReason(row)
+  const blocked = blockedReason(row, fields)
+  const missing = missingRequiredFields(row, fields)
 
   return (
     <li className={`reception-row${saved ? ' reception-row-saved' : ''}`}>
@@ -393,22 +998,17 @@ function ReceptionRowCard({
       </div>
 
       <div className="reception-row-fields">
-        {ROW_FIELDS.map(({ key, requirement }) => (
-          <Field key={key} label={t(FIELD_LABEL[key])} requirement={requirement}>
-            <Input
-              value={row[key]}
-              disabled={disabled || saved || row.status === 'saving'}
-              onChange={event => onChange({ [key]: event.target.value } as Partial<ReceptionRow>)}
+        {fields
+          .filter(field => field.enabled)
+          .map(field => (
+            <ReceptionDynamicField
+              key={field.fieldKey}
+              row={row}
+              field={field}
+              disabled={disabled}
+              onChange={onChange}
             />
-            {/* Only where it differs: repeating an untouched value under every
-                field turns the one changed row into noise. */}
-            {isCorrected(row, key) ? (
-              <span className="reception-read-value">
-                {t('customers:reception.rows.readAs', { value: row.read[key] })}
-              </span>
-            ) : null}
-          </Field>
-        ))}
+          ))}
       </div>
 
       <div className="reception-row-consents">
@@ -459,12 +1059,35 @@ function ReceptionRowCard({
       {blocked === 'declaration' && !saved ? (
         <Notice tone="warning">{t('customers:reception.consents.blocked')}</Notice>
       ) : null}
+      {missing.length > 0 && !saved ? (
+        <Notice tone="warning">
+          {t('customers:reception.rows.requiredFields', {
+            fields: missing.map(field => receptionFieldLabel(field)).join('、'),
+          })}
+        </Notice>
+      ) : null}
       {row.consentsMissing ? (
         <Notice tone="danger">{t('customers:reception.consents.notFiled')}</Notice>
+      ) : null}
+      {row.customFieldsMissing ? (
+        <Notice tone="danger">{t('customers:reception.rows.customFieldsNotFiled')}</Notice>
       ) : null}
       {row.error ? <Notice tone="danger">{row.error}</Notice> : null}
 
       <div className="reception-row-actions">
+        {saved && row.customFieldsMissing ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={disabled || row.customFieldsRetrying}
+            onClick={onRetryCustomValues}
+          >
+            {row.customFieldsRetrying
+              ? t('common:action.saving')
+              : t('customers:reception.rows.retryCustomFields')}
+          </Button>
+        ) : null}
         {saved && row.customerId ? (
           <Button
             type="button"
@@ -479,7 +1102,7 @@ function ReceptionRowCard({
             type="button"
             variant="secondary"
             size="sm"
-            disabled={disabled || !canRegister(row) || row.status === 'saving'}
+            disabled={disabled || !canRegister(row, fields) || row.status === 'saving'}
             onClick={onRegister}
           >
             {row.status === 'saving' ? t('common:action.saving') : t('customers:reception.rows.register')}

@@ -11,10 +11,13 @@ mod caddie_shift_repository;
 mod course_order_config;
 mod course_order_repository;
 mod customer_grade_rules_repository;
+mod customer_reception_fields_repository;
+mod customer_reception_values_repository;
 mod customer_registration_repository;
 mod field_commercial_gateway;
 mod field_customer_consent_gateway;
 mod field_customer_gateway;
+mod field_customer_reception_create_gateway;
 mod field_customer_reception_gateway;
 mod field_gateway;
 mod field_membership_gateway;
@@ -43,10 +46,13 @@ pub use caddie_rank_fee_repository::MySqlCaddieRankFeeRepository;
 pub use caddie_shift_repository::MySqlCaddieShiftRepository;
 pub use course_order_repository::MySqlCourseOrderRepository;
 pub use customer_grade_rules_repository::MySqlCustomerGradeRulesRepository;
+pub use customer_reception_fields_repository::MySqlCustomerReceptionFieldsRepository;
+pub use customer_reception_values_repository::MySqlCustomerReceptionValuesRepository;
 pub use customer_registration_repository::MySqlCustomerRegistrationRepository;
 pub use field_commercial_gateway::FieldGolfCommercialGateway;
 pub use field_customer_consent_gateway::FieldCustomerConsentGateway;
 pub use field_customer_gateway::FieldCustomerGateway;
+pub use field_customer_reception_create_gateway::FieldCustomerReceptionCreateGateway;
 pub use field_customer_reception_gateway::FieldCustomerReceptionGateway;
 pub use field_gateway::{
     FieldGolfCatalogGateway, FieldReservationGateway, DEFAULT_MULTI_COURSE_PRODUCT_WRITES,

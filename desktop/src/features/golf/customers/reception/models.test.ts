@@ -4,19 +4,28 @@ import { ApiError } from '../../../../api'
 import {
   blankRow,
   blockedReason,
+  canonicalReceptionFieldKey,
   canRegister,
   correctedFields,
   customerPayload,
+  DEFAULT_RECEPTION_FIELDS,
   duplicateNameKeys,
   fileValidationError,
   isCorrected,
+  isReceptionFieldCorrected,
+  missingRequiredFields,
+  normalizeReceptionField,
+  normalizeReceptionFields,
   pendingRows,
+  receptionFieldDefaultLabel,
   prepareReceptionSheet,
   previewKind,
   receptionReadFailure,
+  receptionRowValue,
   rowsFromDraft,
   savedCount,
   sniffSheetBytes,
+  updateReceptionRowField,
   uploadFileName,
   MAX_RECEPTION_SHEET_BYTES,
   RECEPTION_SHEET_ACCEPT,
@@ -138,6 +147,64 @@ describe('rowsFromDraft', () => {
     expect(rows[0].read.name).toBe('本田 康彦')
     expect(rows[0].phone).toBe('')
     expect(rows[0].status).toBe('pending')
+    expect(rows[0].values.name).toBe('本田 康彦')
+    expect(rows[0].values.birth_date).toBeNull()
+  })
+
+  it('carries configured standard and custom values for dynamic row rendering', () => {
+    const fields = [
+      ...DEFAULT_RECEPTION_FIELDS.map(field => field.fieldKey === 'birth_date'
+        ? { ...field, enabled: true, required: true }
+        : field),
+      {
+        fieldKey: 'membership_class',
+        kind: 'custom' as const,
+        fieldType: 'select' as const,
+        enabled: true,
+        required: true,
+        label: '会員区分',
+        customLabel: true,
+        sortOrder: 7,
+        options: ['正会員', 'ゲスト'],
+      },
+    ]
+    const rows = rowsFromDraft({
+      visitors: [{
+        name: '本田 康彦',
+        birthDate: '1978-04-03',
+        address: {
+          postalCode: '100-0001',
+          state: '東京都',
+          city: '千代田区',
+          address1: '千代田1-1-1',
+          address2: 'サンプルビル',
+        },
+        customFields: { membership_class: '正会員' },
+      }],
+      warnings: [],
+    }, fields)
+    expect(rows[0].values.birth_date).toBe('1978-04-03')
+    expect(rows[0].values.address).toEqual({
+      postalCode: '100-0001',
+      state: '東京都',
+      city: '千代田区',
+      address1: '千代田1-1-1',
+      address2: 'サンプルビル',
+    })
+    expect(rows[0].customFields).toEqual({ membership_class: '正会員' })
+    expect(rows[0].readCustomFields).toEqual({ membership_class: '正会員' })
+  })
+
+  it('never treats standard keys from a draft customFields object as local custom values', () => {
+    const [row] = rowsFromDraft({
+      visitors: [{
+        name: '本田 康彦',
+        customFields: { name: '偽名', name_kana: 'ニセメイ', membership_class: '正会員' },
+      }],
+      warnings: [],
+    })
+    expect(row.customFields).toEqual({ membership_class: '正会員' })
+    expect(customerPayload(row).customFields).toEqual({ membership_class: '正会員' })
   })
 
   it('gives two players with the same name distinct rows', () => {
@@ -188,6 +255,30 @@ describe('canRegister', () => {
     const row = declared({ ...blankRow('a'), name: '本田 康彦' })
     expect(canRegister({ ...row, consents: { ...row.consents, golf_cart_terms: null } })).toBe(true)
   })
+
+  it('requires enabled configured fields and accepts false as a boolean answer', () => {
+    const fields = [
+      ...DEFAULT_RECEPTION_FIELDS,
+      {
+        fieldKey: 'newsletter',
+        kind: 'custom' as const,
+        fieldType: 'boolean' as const,
+        enabled: true,
+        required: true,
+        label: 'お知らせ',
+        customLabel: true,
+        sortOrder: 7,
+        options: [],
+      },
+    ]
+    const row = declared({ ...blankRow('a', fields), name: '本田 康彦' })
+    expect(missingRequiredFields(row, fields).map(field => field.fieldKey)).toEqual(['newsletter'])
+    expect(canRegister(row, fields)).toBe(false)
+    const answered = updateReceptionRowField(row, 'newsletter', false)
+    const next = { ...row, ...answered }
+    expect(missingRequiredFields(next, fields)).toEqual([])
+    expect(canRegister(next, fields)).toBe(true)
+  })
 })
 
 describe('blockedReason', () => {
@@ -227,6 +318,30 @@ describe('correctedFields', () => {
     expect(isCorrected(row, 'name')).toBe(true)
     expect(isCorrected(row, 'phone')).toBe(false)
   })
+
+  it('detects corrected custom values without showing a value OCR did not read', () => {
+    const fields = [{
+      fieldKey: 'membership_class',
+      kind: 'custom' as const,
+      fieldType: 'select' as const,
+      enabled: true,
+      required: false,
+      label: '会員区分',
+      customLabel: true,
+      sortOrder: 0,
+      options: ['正会員', 'ゲスト'],
+    }]
+    const row = rowsFromDraft({
+      visitors: [{ customFields: { membership_class: '正会員' } }],
+      warnings: [],
+    }, fields)[0]
+    const edited = {
+      ...row,
+      ...updateReceptionRowField(row, 'membership_class', 'ゲスト'),
+    }
+    expect(isReceptionFieldCorrected(edited, fields[0])).toBe(true)
+    expect(receptionRowValue(edited, 'membership_class')).toBe('ゲスト')
+  })
 })
 
 describe('customerPayload', () => {
@@ -237,6 +352,10 @@ describe('customerPayload', () => {
       nameKana: null,
       phone: null,
       email: null,
+      birthDate: null,
+      sex: null,
+      address: null,
+      customFields: {},
       source: 'reception_sheet',
       sourceRowIndex: undefined,
       // Every box, unanswered ones included. The API needs to tell "not
@@ -268,6 +387,48 @@ describe('customerPayload', () => {
     const payload = customerPayload({ ...blankRow('a'), name: '本田 康彦' }, 2)
     expect(payload.source).toBe('reception_sheet')
     expect(payload.sourceRowIndex).toBe(2)
+  })
+
+  it('sends standard extras and custom answers in the registration contract', () => {
+    const fields = [
+      ...DEFAULT_RECEPTION_FIELDS,
+      {
+        fieldKey: 'membership_class',
+        kind: 'custom' as const,
+        fieldType: 'select' as const,
+        enabled: true,
+        required: true,
+        label: '会員区分',
+        customLabel: true,
+        sortOrder: 7,
+        options: ['正会員', 'ゲスト'],
+      },
+    ]
+    const row = declared({ ...blankRow('a', fields), name: '本田 康彦' })
+    let next = row
+    next = { ...next, ...updateReceptionRowField(next, 'birth_date', '1978-04-03') }
+    next = { ...next, ...updateReceptionRowField(next, 'sex', '女性') }
+    next = {
+      ...next,
+      ...updateReceptionRowField(next, 'address', {
+        postalCode: '100-0001',
+        state: '東京都',
+        city: '千代田区',
+        address1: '千代田1-1-1',
+        address2: 'サンプルビル',
+      }),
+    }
+    next = { ...next, ...updateReceptionRowField(next, 'membership_class', '正会員') }
+    expect(next.customFields).toEqual({ membership_class: '正会員' })
+    expect(customerPayload(next, undefined, fields)).toMatchObject({
+      birthDate: '1978-04-03',
+      sex: '女性',
+      address: {
+        postalCode: '100-0001',
+        address1: '千代田1-1-1',
+      },
+      customFields: { membership_class: '正会員' },
+    })
   })
 })
 
@@ -340,5 +501,76 @@ describe('receptionReadFailure', () => {
     expect(receptionReadFailure(new ApiError('Request failed with 402', 402))).toBeNull()
     expect(receptionReadFailure(new Error('offline'))).toBeNull()
     expect(receptionReadFailure(null)).toBeNull()
+  })
+})
+
+describe('reception field settings', () => {
+  it('provides the seven standard fields with name enabled and required', () => {
+    expect(DEFAULT_RECEPTION_FIELDS.map(field => field.fieldKey)).toEqual([
+      'name',
+      'name_kana',
+      'phone',
+      'email',
+      'birth_date',
+      'sex',
+      'address',
+    ])
+    expect(DEFAULT_RECEPTION_FIELDS[0]).toMatchObject({
+      fieldKey: 'name',
+      enabled: true,
+      required: true,
+    })
+  })
+
+  it('accepts camel and snake case DTOs and fills standards missing from an old server', () => {
+    const fields = normalizeReceptionFields({
+      items: [
+        {
+          fieldKey: 'nameKana',
+          fieldType: 'text',
+          enabled: false,
+          required: false,
+          label: '読みがな',
+          sortOrder: 10,
+        },
+        {
+          field_key: 'membership_class',
+          kind: 'custom',
+          field_type: 'select',
+          enabled: true,
+          required: true,
+          label: '会員区分',
+          sort_order: 1,
+          options_json: '["正会員", "ゲスト"]',
+        },
+      ],
+    })
+
+    expect(fields).toContainEqual(expect.objectContaining({
+      fieldKey: 'name_kana',
+      enabled: false,
+      label: '読みがな',
+    }))
+    expect(fields).toContainEqual(expect.objectContaining({
+      fieldKey: 'membership_class',
+      kind: 'custom',
+      fieldType: 'select',
+      options: ['正会員', 'ゲスト'],
+    }))
+    expect(fields.find(field => field.fieldKey === 'name')?.label).toBe('氏名')
+    expect(fields.find(field => field.fieldKey === 'name')?.customLabel).toBe(false)
+    expect(fields.find(field => field.fieldKey === 'membership_class')?.customLabel).toBe(true)
+    expect(fields.filter(field => field.kind === 'standard')).toHaveLength(7)
+  })
+
+  it('uses safe defaults for malformed rows and aliases field keys', () => {
+    expect(canonicalReceptionFieldKey('birthDate')).toBe('birth_date')
+    expect(normalizeReceptionField({ fieldKey: 'phone', enabled: true }, 2))
+      .toMatchObject({ fieldType: 'tel', label: '電話番号', customLabel: false, sortOrder: 2 })
+    expect(normalizeReceptionField({ fieldKey: 'club_note', options: 'one\ntwo' }))
+      .toMatchObject({ kind: 'custom', options: ['one', 'two'] })
+    expect(normalizeReceptionField({ fieldType: 'text' })).toBeNull()
+    expect(receptionFieldDefaultLabel('nameKana')).toBe('氏名のふりがな（カタカナ）')
+    expect(receptionFieldDefaultLabel('club_note')).toBe('club_note')
   })
 })
