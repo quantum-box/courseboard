@@ -4,7 +4,7 @@
 
 - `npm run type-check`: 成功
 - `npm run build`: 成功（既存の chunk size warning のみ）
-- `npm run test -- --run src/features/settings/ReceptionFieldsPage.analysis.test.tsx`: 3件成功
+- `npm run test -- --run src/features/settings/ReceptionFieldsPage.analysis.test.tsx`: 4件成功
 - `git diff --check`: 成功
 
 ## ブラウザ確認

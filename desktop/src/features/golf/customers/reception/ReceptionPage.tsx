@@ -484,9 +484,9 @@ export function ReceptionFieldSettingsPanel({
   const standard = drafts.filter(field => field.kind === 'standard')
   const custom = drafts.filter(field => field.kind === 'custom')
 
-  function update(fieldKey: string, patch: Partial<ReceptionField>) {
+  function update(editorKey: string, patch: Partial<ReceptionField>) {
     setDrafts(current => current.map(field => (
-      field.fieldKey === fieldKey ? { ...field, ...patch } : field
+      field.editorKey === editorKey ? { ...field, ...patch } : field
     )))
   }
 
@@ -515,16 +515,16 @@ export function ReceptionFieldSettingsPanel({
     ])
   }
 
-  function removeCustomField(fieldKey: string) {
-    setDrafts(current => current.filter(field => field.fieldKey !== fieldKey))
+  function removeCustomField(editorKey: string) {
+    setDrafts(current => current.filter(field => field.editorKey !== editorKey))
   }
 
-  function moveCustomField(fieldKey: string, delta: number) {
+  function moveCustomField(editorKey: string, delta: number) {
     setDrafts(current => {
       const indexes = current
         .map((field, index) => (field.kind === 'custom' ? index : -1))
         .filter(index => index >= 0)
-      const index = current.findIndex(field => field.fieldKey === fieldKey)
+      const index = current.findIndex(field => field.editorKey === editorKey)
       const customPosition = indexes.indexOf(index)
       const target = customPosition + delta
       if (customPosition < 0 || target < 0 || target >= indexes.length) return current
@@ -713,7 +713,7 @@ export function ReceptionFieldSettingsPanel({
                         aria-label={t('customers:reception.settings.enableLabel', { field: receptionFieldLabel(field) })}
                         checked={field.enabled}
                         disabled={alwaysRequired || saving || analyzing}
-                        onChange={event => update(field.fieldKey, { enabled: event.target.checked })}
+                        onChange={event => update(field.editorKey, { enabled: event.target.checked })}
                       />
                     </td>
                     <td>
@@ -722,7 +722,7 @@ export function ReceptionFieldSettingsPanel({
                         aria-label={t('customers:reception.settings.requiredLabel', { field: receptionFieldLabel(field) })}
                         checked={alwaysRequired || field.required}
                         disabled={alwaysRequired || !field.enabled || saving || analyzing}
-                        onChange={event => update(field.fieldKey, { required: event.target.checked })}
+                        onChange={event => update(field.editorKey, { required: event.target.checked })}
                       />
                       {alwaysRequired ? (
                         <small>{t('customers:reception.settings.alwaysRequired')}</small>
@@ -733,7 +733,7 @@ export function ReceptionFieldSettingsPanel({
                         aria-label={t('customers:reception.settings.labelLabel', { field: receptionFieldLabel(field) })}
                         value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
                         disabled={saving || analyzing}
-                        onChange={event => update(field.fieldKey, {
+                        onChange={event => update(field.editorKey, {
                           label: event.target.value,
                           customLabel: event.target.value.trim().length > 0,
                         })}
@@ -745,7 +745,7 @@ export function ReceptionFieldSettingsPanel({
                           size="sm"
                           aria-label={t('customers:reception.settings.resetLabel')}
                           disabled={saving || analyzing}
-                          onClick={() => update(field.fieldKey, {
+                          onClick={() => update(field.editorKey, {
                             label: receptionFieldDefaultLabel(field.fieldKey),
                             customLabel: false,
                           })}
@@ -790,14 +790,14 @@ export function ReceptionFieldSettingsPanel({
                     <Input
                       value={field.fieldKey}
                       disabled={saving || analyzing}
-                      onChange={event => update(field.fieldKey, { fieldKey: event.target.value })}
+                      onChange={event => update(field.editorKey, { fieldKey: event.target.value })}
                     />
                   </Field>
                   <Field label={t('customers:reception.settings.customLabel')}>
                     <Input
                       value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
                       disabled={saving || analyzing}
-                      onChange={event => update(field.fieldKey, {
+                      onChange={event => update(field.editorKey, {
                         label: event.target.value,
                         customLabel: event.target.value.trim().length > 0,
                       })}
@@ -809,7 +809,7 @@ export function ReceptionFieldSettingsPanel({
                         size="sm"
                         aria-label={t('customers:reception.settings.resetLabel')}
                         disabled={saving || analyzing}
-                        onClick={() => update(field.fieldKey, {
+                        onClick={() => update(field.editorKey, {
                           label: receptionFieldDefaultLabel(field.fieldKey),
                           customLabel: false,
                         })}
@@ -823,7 +823,7 @@ export function ReceptionFieldSettingsPanel({
                     <NativeSelect
                       value={field.fieldType}
                       disabled={saving || analyzing}
-                      onChange={event => update(field.fieldKey, {
+                      onChange={event => update(field.editorKey, {
                         fieldType: event.target.value as ReceptionFieldType,
                         options: event.target.value === 'select' ? field.options : [],
                       })}
@@ -840,7 +840,7 @@ export function ReceptionFieldSettingsPanel({
                       type="checkbox"
                       checked={field.enabled}
                       disabled={saving || analyzing}
-                      onChange={event => update(field.fieldKey, { enabled: event.target.checked })}
+                      onChange={event => update(field.editorKey, { enabled: event.target.checked })}
                     />
                     {t('customers:reception.settings.columns.enabled')}
                   </label>
@@ -849,7 +849,7 @@ export function ReceptionFieldSettingsPanel({
                       type="checkbox"
                       checked={field.required}
                       disabled={!field.enabled || saving || analyzing}
-                      onChange={event => update(field.fieldKey, { required: event.target.checked })}
+                      onChange={event => update(field.editorKey, { required: event.target.checked })}
                     />
                     {t('customers:reception.settings.columns.required')}
                   </label>
@@ -860,7 +860,7 @@ export function ReceptionFieldSettingsPanel({
                       size="sm"
                       aria-label={t('customers:reception.settings.moveUp')}
                       disabled={saving || analyzing || index === 0}
-                      onClick={() => moveCustomField(field.fieldKey, -1)}
+                      onClick={() => moveCustomField(field.editorKey, -1)}
                     >
                       <ArrowUp />
                     </Button>
@@ -870,7 +870,7 @@ export function ReceptionFieldSettingsPanel({
                       size="sm"
                       aria-label={t('customers:reception.settings.moveDown')}
                       disabled={saving || analyzing || index === custom.length - 1}
-                      onClick={() => moveCustomField(field.fieldKey, 1)}
+                      onClick={() => moveCustomField(field.editorKey, 1)}
                     >
                       <ArrowDown />
                     </Button>
@@ -880,7 +880,7 @@ export function ReceptionFieldSettingsPanel({
                       size="sm"
                       aria-label={t('customers:reception.settings.removeCustom')}
                       disabled={saving || analyzing}
-                      onClick={() => removeCustomField(field.fieldKey)}
+                      onClick={() => removeCustomField(field.editorKey)}
                     >
                       <Trash2 />
                     </Button>
@@ -895,7 +895,7 @@ export function ReceptionFieldSettingsPanel({
                     <NativeTextarea
                       value={field.options.join('\n')}
                       disabled={saving || analyzing}
-                      onChange={event => update(field.fieldKey, {
+                      onChange={event => update(field.editorKey, {
                         options: event.target.value.split('\n').map(option => option.trim()).filter(Boolean),
                       })}
                     />

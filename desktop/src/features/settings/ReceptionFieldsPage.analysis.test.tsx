@@ -118,6 +118,41 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     expect((keyInput as HTMLInputElement).value).toBe('member_code')
   })
 
+  it('updates only the edited row when custom field keys temporarily match', async () => {
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return {
+          items: [
+            ...DEFAULT_RECEPTION_FIELDS,
+            ...['member', 'member_code'].map((fieldKey, index) => ({
+              fieldKey,
+              kind: 'custom',
+              fieldType: 'text',
+              enabled: true,
+              required: false,
+              label: fieldKey,
+              customLabel: true,
+              sortOrder: DEFAULT_RECEPTION_FIELDS.length + index,
+              options: [],
+            })),
+          ],
+        }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    renderPage()
+    const keyInputs = await screen.findAllByRole('textbox', { name: '項目キー' })
+
+    fireEvent.change(keyInputs[0], { target: { value: 'member_code' } })
+    fireEvent.change(keyInputs[0], { target: { value: 'member_code2' } })
+
+    expect(keyInputs.map(input => (input as HTMLInputElement).value)).toEqual([
+      'member_code2',
+      'member_code',
+    ])
+  })
+
   it('keeps a reordered row associated with its own move control', async () => {
     api.json.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/v1/course/customer-reception-fields' && !init?.method) {
