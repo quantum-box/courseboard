@@ -84,4 +84,109 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     await waitFor(() => expect(screen.getByDisplayValue('手入力した連絡先')).toBeTruthy())
     expect(screen.queryByDisplayValue('分析した連絡先')).toBeNull()
   })
+
+  it('keeps focus while editing a custom field key', async () => {
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return {
+          items: [
+            ...DEFAULT_RECEPTION_FIELDS,
+            {
+              fieldKey: 'custom_field_1',
+              kind: 'custom',
+              fieldType: 'text',
+              enabled: true,
+              required: false,
+              label: '追加項目',
+              customLabel: true,
+              sortOrder: DEFAULT_RECEPTION_FIELDS.length,
+              options: [],
+            },
+          ],
+        }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    renderPage()
+    const keyInput = await screen.findByDisplayValue('custom_field_1')
+    keyInput.focus()
+
+    fireEvent.change(keyInput, { target: { value: 'member_code' } })
+
+    expect(document.activeElement).toBe(keyInput)
+    expect((keyInput as HTMLInputElement).value).toBe('member_code')
+  })
+
+  it('updates only the edited row when custom field keys temporarily match', async () => {
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return {
+          items: [
+            ...DEFAULT_RECEPTION_FIELDS,
+            ...['member', 'member_code'].map((fieldKey, index) => ({
+              fieldKey,
+              kind: 'custom',
+              fieldType: 'text',
+              enabled: true,
+              required: false,
+              label: fieldKey,
+              customLabel: true,
+              sortOrder: DEFAULT_RECEPTION_FIELDS.length + index,
+              options: [],
+            })),
+          ],
+        }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    renderPage()
+    const keyInputs = await screen.findAllByRole('textbox', { name: '項目キー' })
+
+    fireEvent.change(keyInputs[0], { target: { value: 'member_code' } })
+    fireEvent.change(keyInputs[0], { target: { value: 'member_code2' } })
+
+    expect(keyInputs.map(input => (input as HTMLInputElement).value)).toEqual([
+      'member_code2',
+      'member_code',
+    ])
+  })
+
+  it('keeps a reordered row associated with its own move control', async () => {
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return {
+          items: [
+            ...DEFAULT_RECEPTION_FIELDS,
+            ...['first_field', 'second_field', 'third_field'].map((fieldKey, index) => ({
+              fieldKey,
+              kind: 'custom',
+              fieldType: 'text',
+              enabled: true,
+              required: false,
+              label: fieldKey,
+              customLabel: true,
+              sortOrder: DEFAULT_RECEPTION_FIELDS.length + index,
+              options: [],
+            })),
+          ],
+        }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    renderPage()
+    expect(await screen.findAllByRole('textbox', { name: '項目キー' })).toHaveLength(3)
+    const firstMoveDown = screen.getAllByRole('button', { name: '下へ移動' })[0]
+    firstMoveDown.focus()
+
+    fireEvent.click(firstMoveDown)
+    expect(document.activeElement).toBe(firstMoveDown)
+    fireEvent.click(firstMoveDown)
+
+    expect(screen.getAllByRole('textbox', { name: '項目キー' }).map(input => (
+      (input as HTMLInputElement).value
+    ))).toEqual(['second_field', 'third_field', 'first_field'])
+  })
 })

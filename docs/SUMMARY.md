@@ -62,6 +62,7 @@
     - [シフト表の確認と出力を改善する](src/tasks/completed/v0.1.7/shift-board-review-export/task.md)
       - [設計](src/tasks/completed/v0.1.7/shift-board-review-export/design.md)
   - [v0.1.11]()
+    - [受付票の追加項目キー入力でフォーカスが外れる問題を直す](src/tasks/completed/v0.1.11/fix-reception-field-focus/task.md)
     - [予約表集計を有効なテナントスコープへ保存する](src/tasks/completed/v0.1.11/fix-reservation-report-tenant-scope/task.md)
     - [メンバーへの policy 単位の権限付与](src/tasks/completed/v0.1.11/permission-policy-granularity/task.md)
     - [/v1/me proxyとextension連動テナント選択（superseded）](src/tasks/completed/v0.1.11/v1-me-proxy-extension-filter/task.md)
