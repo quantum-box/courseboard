@@ -96,6 +96,10 @@ export function CaddieDutiesPanel({
   const duties = useMemo(() => filed.data?.items ?? [], [filed.data])
   const dayShifts = useMemo<DutyShift[]>(() => shifts.data?.items ?? [], [shifts.data])
   const rows = useMemo(() => filedDuties({ profiles, duties, date }), [profiles, duties, date])
+  const dutyCaddieCount = useMemo(
+    () => new Set(rows.map(row => row.duty.caddieProfileId)).size,
+    [rows],
+  )
   const free = useMemo(
     () => caddiesWithFreeHours({ profiles, assignments, shifts: dayShifts, duties, date }),
     [profiles, assignments, dayShifts, duties, date],
@@ -104,10 +108,10 @@ export function CaddieDutiesPanel({
   useEffect(() => {
     if (!onSummaryChange) return
     onSummaryChange({
-      dutyCount: filed.loading || filed.error ? null : rows.length,
+      dutyCount: filed.loading || filed.error ? null : dutyCaddieCount,
       freeCount: filed.loading || filed.error || shifts.loading || shifts.error ? null : free.length,
     })
-  }, [filed.error, filed.loading, free.length, onSummaryChange, rows.length, shifts.error, shifts.loading])
+  }, [dutyCaddieCount, filed.error, filed.loading, free.length, onSummaryChange, shifts.error, shifts.loading])
 
   async function clear(duty: CaddieDutyAssignment, displayName: string) {
     setClearing(duty.id)

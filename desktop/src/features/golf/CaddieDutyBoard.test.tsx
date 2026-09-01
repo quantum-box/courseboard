@@ -52,7 +52,7 @@ function answer(path: string) {
   return { items: [] }
 }
 
-function renderPanel(onChanged = vi.fn()) {
+function renderPanel(onChanged = vi.fn(), onSummaryChange = vi.fn()) {
   return render(
     <I18nextProvider i18n={i18next}>
       <CaddieDutiesPanel
@@ -60,6 +60,7 @@ function renderPanel(onChanged = vi.fn()) {
         profiles={profiles}
         assignments={assignments}
         onChanged={onChanged}
+        onSummaryChange={onSummaryChange}
       />
     </I18nextProvider>,
   )
@@ -96,6 +97,33 @@ describe('CaddieDutiesPanel', () => {
     // Both are in: the morning round only takes half of one caddie's day.
     await waitFor(() =>
       expect(screen.getByText('手の空いている時間があるキャディ 2人')).toBeTruthy())
+  })
+
+  it('counts a caddie with two duties as one person in the day summary', async () => {
+    filedDuties = [
+      {
+        id: 'duty_morning',
+        caddieProfileId: 'cp_1',
+        date: DATE,
+        dutyLabel: 'コース整備',
+        startTime: '08:00',
+        endTime: '10:00',
+        allDay: false,
+      },
+      {
+        id: 'duty_afternoon',
+        caddieProfileId: 'cp_1',
+        date: DATE,
+        dutyLabel: '練習場',
+        startTime: '13:00',
+        endTime: '15:00',
+        allDay: false,
+      },
+    ]
+    const onSummaryChange = vi.fn()
+    renderPanel(vi.fn(), onSummaryChange)
+
+    await waitFor(() => expect(onSummaryChange).toHaveBeenCalledWith({ dutyCount: 1, freeCount: 1 }))
   })
 
   it('files the whole day when the desk leaves the hours alone', async () => {

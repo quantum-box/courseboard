@@ -924,11 +924,17 @@ function DispatchView({
     () => unassignedCaddieRounds(dayRounds, dayAssignments),
     [dayAssignments, dayRounds],
   )
-  const unassignedCount = teeSheet.data === null ? null : unassignedDayRounds.length
-  const assignedCount = teeSheet.data === null || assignmentsResource.data === null
-    ? null
-    : dayRounds.filter(round => roundIsStillOn(round) && round.playType === 'caddie').length
+  const assignmentCountsReady = !teeSheet.loading
+    && !teeSheet.error
+    && teeSheet.data !== null
+    && !assignmentsResource.loading
+    && !assignmentsResource.error
+    && assignmentsResource.data !== null
+  const unassignedCount = assignmentCountsReady ? unassignedDayRounds.length : null
+  const assignedCount = assignmentCountsReady
+    ? dayRounds.filter(round => roundIsStillOn(round) && round.playType === 'caddie').length
       - unassignedDayRounds.length
+    : null
   const [dutySummary, setDutySummary] = useState<DispatchDutySummary>({
     dutyCount: null,
     freeCount: null,
