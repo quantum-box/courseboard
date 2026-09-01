@@ -166,8 +166,12 @@ test.describe('キャディ名簿', () => {
 
   test('配置画面に割当とおすすめが出る', async ({ page }) => {
     await page.goto(`/golf/caddies/dispatch?date=${D}`)
-    await expect(page.getByRole('heading', { name: 'この日の割当' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '未配置を解消する' })).toBeVisible()
     await expect(page.getByRole('heading', { name: '自動で配置する' })).toBeVisible()
+    const assigned = page.getByText('配置済み 70組', { exact: true })
+    await expect(assigned).toBeVisible()
+    await assigned.click()
+    await expect(page.getByText(/担当を変えるときは、その行の「付け替え」から/)).toBeVisible()
   })
 
   test('出勤ボードが表示される', async ({ page }) => {
