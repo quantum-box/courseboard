@@ -84,4 +84,37 @@ describe('ReceptionFieldsPage analysis proposal', () => {
     await waitFor(() => expect(screen.getByDisplayValue('手入力した連絡先')).toBeTruthy())
     expect(screen.queryByDisplayValue('分析した連絡先')).toBeNull()
   })
+
+  it('keeps focus while editing a custom field key', async () => {
+    api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/course/customer-reception-fields' && !init?.method) {
+        return {
+          items: [
+            ...DEFAULT_RECEPTION_FIELDS,
+            {
+              fieldKey: 'custom_field_1',
+              kind: 'custom',
+              fieldType: 'text',
+              enabled: true,
+              required: false,
+              label: '追加項目',
+              customLabel: true,
+              sortOrder: DEFAULT_RECEPTION_FIELDS.length,
+              options: [],
+            },
+          ],
+        }
+      }
+      throw new Error(`Unexpected API call: ${init?.method ?? 'GET'} ${path}`)
+    })
+
+    renderPage()
+    const keyInput = await screen.findByDisplayValue('custom_field_1')
+    keyInput.focus()
+
+    fireEvent.change(keyInput, { target: { value: 'member_code' } })
+
+    expect(document.activeElement).toBe(keyInput)
+    expect((keyInput as HTMLInputElement).value).toBe('member_code')
+  })
 })

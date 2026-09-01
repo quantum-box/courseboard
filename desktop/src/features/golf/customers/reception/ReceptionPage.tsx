@@ -764,7 +764,7 @@ export function ReceptionFieldSettingsPanel({
         ) : (
           <div className="reception-custom-field-list">
             {custom.map((field, index) => (
-              <div className="reception-custom-field" key={field.fieldKey}>
+              <div className="reception-custom-field" key={field.sortOrder}>
                 <div className="reception-custom-field-grid">
                   <Field label={t('customers:reception.settings.customKey')}>
                     <Input
