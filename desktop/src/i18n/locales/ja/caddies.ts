@@ -107,6 +107,18 @@ export const caddies = {
     boardDescription: '担当を変えるときは、その行の「付け替え」から。別のキャディに移すことも、同じキャディを別の組に移すこともできます。',
     loading: '割当を読み込んでいます',
     supportTitle: '人数の目安・コース別の過不足・おすすめの候補',
+    tabs: {
+      label: '配置の種類',
+      rounds: 'ラウンド配置',
+      duties: '別業務',
+    },
+    summary: {
+      label: '当日の稼働サマリー',
+      unassigned: '未配置',
+      assigned: '配置済み',
+      duties: '別業務',
+      free: '空きあり',
+    },
   },
   supply: {
     title: 'キャディ付き枠',

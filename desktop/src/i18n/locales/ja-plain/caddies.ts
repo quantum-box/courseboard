@@ -97,6 +97,18 @@ export const caddies: DeepPartial<typeof source> = {
     boardDescription: '担当をかえるときは、その行の「かえる」からです。ほかのキャディにうつすことも、同じキャディをほかの組にうつすこともできます。',
     loading: '担当を読み込んでいます',
     supportTitle: '人数の目安・コースごとの過不足・おすすめの人',
+    tabs: {
+      label: '配置の種類',
+      rounds: 'ラウンド配置',
+      duties: '別業務',
+    },
+    summary: {
+      label: 'この日のまとめ',
+      unassigned: 'まだ決まっていない組',
+      assigned: '担当が決まった組',
+      duties: '別業務',
+      free: '空き時間がある人',
+    },
   },
   supply: {
     title: 'キャディが付く枠の目安',

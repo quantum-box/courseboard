@@ -1,6 +1,6 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import { ClipboardList } from 'lucide-react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { courseboardApiJson } from '../../api'
@@ -58,11 +58,13 @@ export function CaddieDutiesPanel({
   profiles,
   assignments,
   onChanged,
+  onSummaryChange,
 }: {
   date: string
   profiles: DutyProfile[]
   assignments: DutyRoundAssignment[]
   onChanged: () => void
+  onSummaryChange?: (summary: { dutyCount: number | null; freeCount: number | null }) => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
   const [assigning, setAssigning] = useState(false)
@@ -98,6 +100,14 @@ export function CaddieDutiesPanel({
     () => caddiesWithFreeHours({ profiles, assignments, shifts: dayShifts, duties, date }),
     [profiles, assignments, dayShifts, duties, date],
   )
+
+  useEffect(() => {
+    if (!onSummaryChange) return
+    onSummaryChange({
+      dutyCount: filed.loading || filed.error ? null : rows.length,
+      freeCount: filed.loading || filed.error || shifts.loading || shifts.error ? null : free.length,
+    })
+  }, [filed.error, filed.loading, free.length, onSummaryChange, rows.length, shifts.error, shifts.loading])
 
   async function clear(duty: CaddieDutyAssignment, displayName: string) {
     setClearing(duty.id)

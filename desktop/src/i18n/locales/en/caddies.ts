@@ -105,6 +105,18 @@ export const caddies: DeepPartial<typeof source> = {
     boardDescription: 'Change who walks a group from the Move button on its row — another caddie on the same group, the same caddie on another group, or both.',
     loading: 'Loading assignments',
     supportTitle: 'Capacity, per-course balance, and suggested caddies',
+    tabs: {
+      label: 'Assignment type',
+      rounds: 'Round assignments',
+      duties: 'Other duties',
+    },
+    summary: {
+      label: 'Day summary',
+      unassigned: 'Unassigned',
+      assigned: 'Assigned',
+      duties: 'Other duties',
+      free: 'With free time',
+    },
   },
   supply: {
     title: 'Caddie-required capacity',
