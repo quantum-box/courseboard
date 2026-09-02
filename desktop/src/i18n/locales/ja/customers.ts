@@ -216,6 +216,46 @@ export const customers = {
         'はじめての来場か、ほかの人の名前で予約され受付もされていない可能性があります。',
     },
   },
+  callList: {
+    open: '架電リスト',
+    title: '架電リスト',
+    description: 'また来てほしい人を、来場と売上から抽出します。',
+    unnamed: '台帳から読めませんでした',
+    filters: {
+      title: '抽出の条件',
+      description: '条件を変えると一覧が入れ替わります。',
+      sort: '並べ替え',
+      minDays: '最終来場からの日数',
+      minDaysHint: '空欄にすると、最近来た人も含みます。',
+      minVisits: '来場回数の下限',
+      minVisitsHint: '1回だけの人を外すと、常連にしぼれます。',
+      minTotalAmount: '累計金額の下限',
+    },
+    sort: {
+      total_amount: '累計金額が多い順',
+      visits: '来場回数が多い順',
+      last_visit: '最終来場が古い順',
+    },
+    column: {
+      lastVisit: '最終来場',
+      totalAmount: '累計金額',
+    },
+    daysAgo: '{{count}}日前',
+    results: {
+      title: '抽出した顧客',
+      description: '条件に合う顧客は{{count}}人です。',
+      capped: '一覧に出るのは{{count}}人までです。条件をしぼると残りが出てきます。',
+    },
+    run: {
+      succeeded: '{{date}}に集計した数字です。',
+      failed: '{{date}}の集計が失敗しています。表示中の数字はそれより前のものです。',
+      never: 'まだ集計していません。集計するまで一覧は空のままです。',
+    },
+    empty: {
+      title: '条件に合う顧客はいません',
+      description: '日数や来場回数の下限をゆるめると、対象が広がります。',
+    },
+  },
   registration: {
     unrecorded: '台帳に入れた記録は残っていません。',
     from: '{{date}} に{{source}}から登録',

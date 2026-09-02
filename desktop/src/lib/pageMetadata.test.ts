@@ -35,6 +35,7 @@ describe('metadataForRoute', () => {
     'golf/customers',
     'golf/customers/customer-1',
     'golf/customers/reception',
+    'golf/customers/call-list',
     'golf/budgets',
     'golf/policy',
     'golf/settlement',

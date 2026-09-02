@@ -95,6 +95,7 @@ impl Modify for SecurityAddon {
         http_customers::get_customer,
         http_customers::get_customer_visits,
         http_customers::get_customer_membership_activities,
+        http_customers::list_customer_summaries,
         http_customers::get_customer_registration,
         http_customers::get_customer_grade_rules,
         http_customers::replace_customer_grade_rules,

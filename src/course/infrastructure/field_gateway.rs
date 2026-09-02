@@ -103,6 +103,22 @@ impl ReservationGateway for FieldReservationGateway {
         Ok(items.into_iter().map(map_reservation).collect())
     }
 
+    async fn list_tenant_reservations(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Reservation>, CourseError> {
+        // No date filter and no total to ask for: Field's listing takes a
+        // window and nothing else, and clamps the window to 500 without saying
+        // so. The caller reads from the newest backwards until a page comes
+        // back short.
+        let path = format!("/v1/erp/reservations?limit={limit}&offset={offset}");
+        let items: Vec<FieldReservationDto> =
+            field_get_items(&self.client, &self.base_url, &path, credentials).await?;
+        Ok(items.into_iter().map(map_reservation).collect())
+    }
+
     async fn get_reservation(
         &self,
         credentials: GatewayCredentials<'_>,

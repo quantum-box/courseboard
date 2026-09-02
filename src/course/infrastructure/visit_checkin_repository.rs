@@ -108,6 +108,36 @@ impl VisitCheckinGateway for MySqlVisitCheckinRepository {
         rows.iter().map(row_to_checkin).collect()
     }
 
+    async fn list_linked_checkins(
+        &self,
+        tenant_id: &str,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<VisitCheckin>, CourseError> {
+        // Ordered by the primary key rather than by the day, because the caller
+        // is paging the whole tenant: two rows sharing a date would otherwise
+        // be free to swap places between pages and one of them would be read
+        // twice while the other was never read at all.
+        let rows = sqlx::query(
+            r#"
+            SELECT reservation_id, player_index, customer_id, player_name,
+                   played_on, checked_in_at, checked_in_by
+            FROM golf_visit_checkins
+            WHERE tenant_id = ? AND customer_id IS NOT NULL
+            ORDER BY id
+            LIMIT ? OFFSET ?
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(provider)?;
+
+        rows.iter().map(row_to_checkin).collect()
+    }
+
     async fn list_reservation_checkins(
         &self,
         tenant_id: &str,
