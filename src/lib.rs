@@ -2076,6 +2076,10 @@ pub enum AppError {
     MonthRequired(&'static str),
     #[error("{0}")]
     Conflict(&'static str),
+    /// The endpoint used to exist, but the operation has been retired while
+    /// compatibility routes for already-issued links remain available.
+    #[error("{0}")]
+    Gone(&'static str),
     #[error("{message}")]
     UpstreamClient { status: StatusCode, message: String },
     #[error("Field authentication expired; sign in again")]
@@ -2126,6 +2130,7 @@ impl IntoResponse for AppError {
             AppError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
             AppError::MonthRequired(_) => (StatusCode::BAD_REQUEST, "month_required"),
             AppError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
+            AppError::Gone(_) => (StatusCode::GONE, "gone"),
             AppError::UpstreamClient { status, .. } => (status, "upstream_client_error"),
             AppError::UpstreamAuthenticationExpired => {
                 (StatusCode::UNAUTHORIZED, "upstream_authentication_expired")
@@ -2286,8 +2291,8 @@ mod tests {
     use crate::auth::{AuthConfig, Jwk, Jwks, OidcJwtVerifier};
     use crate::config::SettlementSource;
     use axum::{
-        http::{header::CONTENT_TYPE, HeaderMap, Method},
-        routing::{get, post},
+        http::{header::CONTENT_TYPE, Method},
+        routing::get,
     };
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     use http_body_util::BodyExt;
@@ -2626,69 +2631,6 @@ mod tests {
             field_shift_writeback: false,
             field_generic_paths: false,
         }
-    }
-
-    async fn spawn_test_field_api() -> String {
-        async fn create_invoice(
-            headers: HeaderMap,
-            Json(body): Json<serde_json::Value>,
-        ) -> (StatusCode, Json<serde_json::Value>) {
-            let authorization = headers
-                .get(AUTHORIZATION)
-                .and_then(|value| value.to_str().ok())
-                .expect("authorization header");
-            assert!(authorization.starts_with("Bearer "));
-            assert_eq!(
-                headers
-                    .get("x-operator-id")
-                    .and_then(|value| value.to_str().ok()),
-                Some("scc")
-            );
-            assert_eq!(
-                body["billTo"],
-                serde_json::json!({
-                    "kind": "client",
-                    "clientId": "cl_company_x",
-                    "affiliationId": "ccaf_person_a_company_x"
-                })
-            );
-            assert!(body.get("clientId").is_none());
-            assert!(!body.to_string().contains("courseboard:"));
-            assert_eq!(body["clientName"], "山田 太郎");
-            assert_eq!(body["lineItems"][0]["unitPrice"], 5000);
-            (
-                StatusCode::CREATED,
-                Json(serde_json::json!({
-                    "id": "inv_test_courseboard",
-                    "paymentLinkUrl": "https://field.example/pay/inv_test_courseboard"
-                })),
-            )
-        }
-
-        async fn public_invoice() -> Json<serde_json::Value> {
-            Json(serde_json::json!({
-                "id": "inv_test_courseboard",
-                "tenantId": "scc",
-                "status": "Sent"
-            }))
-        }
-
-        let app = Router::new()
-            .route("/v1/invoices", post(create_invoice))
-            .route(
-                "/v1/public/invoices/:tenant_id/:invoice_id",
-                get(public_invoice),
-            );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind test Field API");
-        let addr = listener.local_addr().expect("test Field API addr");
-        tokio::spawn(async move {
-            axum::serve(listener, app)
-                .await
-                .expect("serve test Field API");
-        });
-        format!("http://{addr}")
     }
 
     async fn calculate_with_green_fee(green_fee: i64) -> CalculateResponse {
@@ -3038,14 +2980,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn creates_cancellation_fee_collection_and_public_payment_link() {
+    async fn legacy_cancellation_fee_collection_creation_is_disabled() {
         let auth = TestAuth::new();
-        let field_api_url = spawn_test_field_api().await;
-        let app = test_app_with_verifier_and_cancellation_fee_config(
-            auth.verifier(),
-            cancellation_fee_config(Some(field_api_url)),
-        )
-        .await;
+        // If the handler accidentally reaches the provider call, this URL
+        // fails immediately. The expected 410 therefore also protects the
+        // no-new-invoice/no-new-local-row boundary.
+        // This test deliberately uses a lazy pool: the retired path must stop
+        // before it needs either the repository or a live TiDB instance.
+        let pool = MySqlPoolOptions::new().connect_lazy_with(
+            MySqlConnectOptions::new()
+                .host("127.0.0.1")
+                .username("root")
+                .database("unused_legacy_collection_retirement_test"),
+        );
+        let app = build_router(AppState::new_with_cancellation_fee_config(
+            pool,
+            Arc::new(auth.verifier()),
+            cancellation_fee_config(Some("http://127.0.0.1:1".to_string())),
+        ));
         let body = serde_json::json!({
             "tenant_id": "scc",
             "reference": "RSV-1001",
@@ -3063,7 +3015,6 @@ mod tests {
             "send_sms": false
         });
         let response = app
-            .clone()
             .oneshot(
                 Request::builder()
                     .method(Method::POST)
@@ -3076,60 +3027,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), StatusCode::GONE);
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
-        let created: cancellation_fees::CreateCancellationFeeCollectionResponse =
-            serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(created.collection.amount, 5000);
-        assert_eq!(created.collection.currency, "JPY");
-        assert_eq!(created.collection.sms_status, "not_requested");
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["error"], "gone");
         assert_eq!(
-            created.collection.field_invoice_id.as_deref(),
-            Some("inv_test_courseboard")
+            body["message"],
+            "legacy cancellation fee collection creation is disabled; use Field invoice API"
         );
-        assert!(created.collection.payment_url.contains("index.html#/pay/"));
-        assert!(created.sms_message.contains("キャンセル料5000円"));
-
-        let mut second_body = body.clone();
-        second_body["reference"] = serde_json::json!("RSV-1002");
-        let second_response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/cancellation-fee-collections")
-                    .header(AUTHORIZATION, format!("Bearer {}", auth.valid_token()))
-                    .header(CONTENT_TYPE, "application/json")
-                    .body(Body::from(second_body.to_string()))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(second_response.status(), StatusCode::OK);
-
-        let token = created
-            .collection
-            .payment_url
-            .rsplit('/')
-            .next()
-            .expect("payment token");
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method(Method::GET)
-                    .uri(format!("/public/cancellation-fees/{token}"))
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        let bytes = response.into_body().collect().await.unwrap().to_bytes();
-        let public: cancellation_fees::CancellationFeeCollectionResponse =
-            serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(public.reference.as_deref(), Some("RSV-1001"));
-        assert_eq!(public.customer_name, "山田 太郎");
     }
 
     #[tokio::test]

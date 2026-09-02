@@ -1,11 +1,99 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   cancellationFeeInvoiceRequestBody,
   deliveryFailures,
+  EDITABLE_INVOICE_STATUSES,
+  filterDisplayedInvoices,
   fulfillmentIssue,
+  invoiceDisplayStatus,
   invoiceBillTo,
+  isInvoiceUpdateAllowed,
   normalizePhone,
+  summarize,
 } from './CancellationFeesPage'
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+describe('cancellation fee display status', () => {
+  it('derives overdue from the tenant business date, including timezone boundaries', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-31T15:30:00.000Z'))
+    const invoice = { status: 'Sent' as const, dueDate: '2026-08-31' }
+
+    // The same instant is September 1 in Tokyo but still August 31 in New
+    // York, so only the Tokyo invoice is overdue.
+    expect(invoiceDisplayStatus(invoice, 'Asia/Tokyo')).toBe('Overdue')
+    expect(invoiceDisplayStatus(invoice, 'America/New_York')).toBe('Sent')
+  })
+
+  it('does not mark the due date itself overdue', () => {
+    expect(invoiceDisplayStatus(
+      { status: 'SendFailed', dueDate: '2026-09-01' },
+      'Asia/Tokyo',
+      '2026-09-01',
+    )).toBe('SendFailed')
+  })
+
+  it('preserves paid and stored overdue states regardless of due date', () => {
+    expect(invoiceDisplayStatus(
+      { status: 'Paid', dueDate: '2026-01-01' },
+      'Asia/Tokyo',
+      '2026-09-01',
+    )).toBe('Paid')
+    expect(invoiceDisplayStatus(
+      { status: 'Overdue', dueDate: '2026-12-31' },
+      'Asia/Tokyo',
+      '2026-09-01',
+    )).toBe('Overdue')
+  })
+
+  it('falls back to the stored state for malformed due dates', () => {
+    expect(invoiceDisplayStatus(
+      { status: 'Sent', dueDate: '2026-02-31' },
+      'Asia/Tokyo',
+      '2026-09-01',
+    )).toBe('Sent')
+    expect(invoiceDisplayStatus(
+      { status: 'Draft', dueDate: 'not-a-date' },
+      'Asia/Tokyo',
+      '2026-09-01',
+    )).toBe('Draft')
+  })
+
+  it('uses the same derived state for filtering and summary totals', () => {
+    const invoices = [
+      { id: 'sent-overdue', status: 'Sent' as const, dueDate: '2026-08-31', totalAmount: 1_000 },
+      { id: 'sent-current', status: 'Sent' as const, dueDate: '2026-09-01', totalAmount: 2_000 },
+      { id: 'paid', status: 'Paid' as const, dueDate: '2026-08-01', totalAmount: 3_000 },
+    ]
+    const displayed = invoices.map(invoice => ({
+      ...invoice,
+      status: invoiceDisplayStatus(invoice, 'Asia/Tokyo', '2026-09-01'),
+    }))
+
+    expect(filterDisplayedInvoices(displayed, 'Overdue').map(invoice => invoice.id)).toEqual(['sent-overdue'])
+    expect(summarize(invoices, 'Asia/Tokyo', '2026-09-01')).toEqual({
+      count: 3,
+      unpaid: 3_000,
+      overdue: 1,
+      paid: 3_000,
+    })
+  })
+})
+
+describe('cancellation fee status operations', () => {
+  it('does not expose Paid as an ordinary editable state', () => {
+    expect(EDITABLE_INVOICE_STATUSES).toEqual(['Draft', 'Sent', 'SendFailed', 'Overdue'])
+    expect(EDITABLE_INVOICE_STATUSES).not.toContain('Paid')
+  })
+
+  it('locks all invoice updates after payment', () => {
+    expect(isInvoiceUpdateAllowed({ status: 'Paid' })).toBe(false)
+    expect(isInvoiceUpdateAllowed({ status: 'Sent' })).toBe(true)
+  })
+})
 
 describe('cancellation fee invoice request', () => {
   it('puts a typed client billTo in each POST body without a legacy clientId', () => {
