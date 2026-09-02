@@ -9,7 +9,7 @@ import { e2eManagedMockServer, MOCK_FIXTURE_DATE } from './routes'
  * 方針:
  * - 手書きフィクスチャの安定した値（山田組・佐藤 彩・本田 康彦・CF-2026-0001 など）だけを検証する
  * - 操作は読み取り専用か、セッション内メモリにしか書かないものに限る
- * - モックが対応していないエンドポイント（打刻・請求書発行・シミュレータ計算など）は叩かない
+ * - モックが対応していないエンドポイント（打刻・シミュレータ計算など）は叩かない
  */
 
 const D = MOCK_FIXTURE_DATE
@@ -269,8 +269,13 @@ test.describe('キャンセル料', () => {
     await expect(page.getByText('Taro Yamada')).toBeVisible()
     await expect(page.getByText('￥11,000').first()).toBeVisible()
 
+    await page.getByLabel('状態').selectOption({ label: '期限すぎ' })
+    await expect(page.getByText('CF-2026-0003')).toBeVisible()
+    await expect(page.getByText('CF-2026-0001')).toBeHidden()
+
     await page.getByLabel('状態').selectOption({ label: '入金ずみ' })
-    await expect(page.getByText('キャンセル料の請求はありません')).toBeVisible()
+    await expect(page.getByText('CF-2026-0004')).toBeVisible()
+    await expect(page.getByText('キャンセル料の請求はありません')).toBeHidden()
   })
 
   test('請求詳細が表示される', async ({ page }) => {
@@ -278,16 +283,50 @@ test.describe('キャンセル料', () => {
     await expect(page.getByRole('heading', { name: 'Taro Yamada' })).toBeVisible()
     await expect(page.getByRole('heading', { name: '請求の明細' })).toBeVisible()
     await expect(page.getByText('￥11,000').first()).toBeVisible()
+    const statusSelect = page.locator('select')
+    await expect(statusSelect).toBeVisible()
+    await expect(statusSelect.locator('option', { hasText: '入金ずみ' })).toHaveCount(0)
   })
 
   test('新規請求フォームが表示される', async ({ page }) => {
-    // 送信はモック対象外（POST /v1/invoices）なので表示のみ検証する
     await page.goto('/cancellation-fees/new')
     await expect(
       page.getByRole('heading', { level: 1, name: 'キャンセル料の請求' }),
     ).toBeVisible()
     await expect(page.getByRole('heading', { name: '請求先' })).toBeVisible()
     await expect(page.getByRole('heading', { name: '送る方法' })).toBeVisible()
+  })
+
+  test('請求作成から通知と支払いリンク表示まで進められる', async ({ page }) => {
+    test.skip(!e2eManagedMockServer(), 'モック管理下ではないため請求作成を実行しない')
+
+    await page.goto('/cancellation-fees/new')
+    await page.getByRole('textbox', { name: '対象の予約・注文' }).fill('RSV-E2E-0001')
+    await page.getByRole('textbox', { name: '請求先の名前' }).fill('E2E Demo Customer')
+    await page.getByRole('textbox', { name: '顧客ID' }).fill('cus_honda')
+    await page.getByRole('textbox', { name: '送り先のメール' }).fill('e2e@example.com')
+    await page.getByRole('button', { name: '請求を作って送る' }).click()
+
+    await expect(page).toHaveURL(/\/cancellation-fees\/inv_mock_created_\d+$/)
+    await expect(page.getByRole('heading', { name: 'E2E Demo Customer' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '支払いページ' })).toBeVisible()
+    await expect(page.getByText('Ready', { exact: true })).toBeVisible()
+    await expect(page.getByText('Sent', { exact: true })).toBeVisible()
+  })
+
+  test('入金ずみ請求の状態変更と再送を操作できない', async ({ page }) => {
+    await page.goto('/cancellation-fees/inv_mock_paid')
+    await expect(page.getByRole('heading', { name: 'Paid Demo Customer' })).toBeVisible()
+    await expect(page.getByText('入金ずみ').first()).toBeVisible()
+
+    await expect(page.locator('select')).toBeDisabled()
+    const checkboxes = page.locator('input[type="checkbox"]')
+    await expect(checkboxes).toHaveCount(2)
+    for (const checkbox of await checkboxes.all()) {
+      await expect(checkbox).toBeDisabled()
+    }
+    await expect(page.getByRole('button', { name: '変更する' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'リンクを作って送り直す' })).toBeDisabled()
   })
 })
 

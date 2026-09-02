@@ -35,7 +35,7 @@ import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import { openExternal } from '../../lib/platform'
 import { currentRouteSearchParams, navigate } from '../../lib/router'
-import { today } from '../../lib/clock'
+import { DEFAULT_TIME_ZONE, normalizeIsoDate, today } from '../../lib/clock'
 
 type InvoiceStatus = 'Draft' | 'Sent' | 'SendFailed' | 'Paid' | 'Overdue'
 
@@ -158,6 +158,52 @@ export function cancellationFeeInvoiceRequestBody(input: CancellationFeeInvoiceR
 
 const INVOICE_STATUSES: InvoiceStatus[] = ['Draft', 'Sent', 'SendFailed', 'Paid', 'Overdue']
 
+/**
+ * Paid is an accounting fact, not an ordinary operator-editable invoice
+ * state. It may be displayed and filtered, but it must come from the Field
+ * payment flow (or a future audited manual-payment contract).
+ */
+export const EDITABLE_INVOICE_STATUSES: InvoiceStatus[] = [
+  'Draft',
+  'Sent',
+  'SendFailed',
+  'Overdue',
+]
+
+export function invoiceDisplayStatus(
+  invoice: Pick<InvoiceData, 'status' | 'dueDate'>,
+  timezone: string,
+  businessDate = today(timezone),
+): InvoiceStatus {
+  // A paid invoice remains paid even when its due date is in the past. The
+  // stored Overdue state is also preserved so this function is idempotent
+  // when it is called for rows that Field has already marked overdue.
+  if (invoice.status === 'Paid' || invoice.status === 'Overdue') return invoice.status
+
+  // dueDate is a date-only contract. Validate it before comparing strings so
+  // malformed upstream data does not turn into a false overdue badge.
+  const dueDate = normalizeIsoDate(invoice.dueDate)
+  return dueDate !== null && dueDate < businessDate ? 'Overdue' : invoice.status
+}
+
+function withDisplayStatus(invoice: InvoiceData, timezone: string, businessDate: string) {
+  return {
+    ...invoice,
+    status: invoiceDisplayStatus(invoice, timezone, businessDate),
+  }
+}
+
+export function filterDisplayedInvoices<T extends Pick<InvoiceData, 'status'>>(
+  invoices: T[],
+  status: 'all' | InvoiceStatus,
+) {
+  return status === 'all' ? invoices : invoices.filter(invoice => invoice.status === status)
+}
+
+export function isInvoiceUpdateAllowed(invoice: Pick<InvoiceData, 'status'>) {
+  return invoice.status !== 'Paid'
+}
+
 function statusLabel(status: InvoiceStatus) {
   return i18next.t(`cancellationFees:status.${status}` as 'cancellationFees:status.Draft')
 }
@@ -212,14 +258,29 @@ function isCancellationFee(invoice: InvoiceData) {
 
 export function CancellationFeesPage() {
   const { t } = useTranslation(['cancellationFees', 'common'])
+  const timezone = useTenantTimezone()
+  const businessDate = today(timezone)
   const [status, setStatus] = useState<'all' | InvoiceStatus>('all')
   const loader = useCallback(async () => {
-    const suffix = status === 'all' ? '' : `?status=${encodeURIComponent(status)}`
-    const response = await fieldApiJson<{ items: InvoiceData[] }>(`/v1/invoices${suffix}`)
+    // Do not pass the saved status filter to Field. A Sent invoice can be
+    // overdue according to the tenant's business date even while Field still
+    // stores it as Sent, so filtering happens after deriving the display state.
+    const response = await fieldApiJson<{ items: InvoiceData[] }>('/v1/invoices')
     return response.items.filter(isCancellationFee)
-  }, [status])
-  const resource = useResource(loader, [status])
-  const summary = useMemo(() => summarize(resource.data ?? []), [resource.data])
+  }, [])
+  const resource = useResource(loader, [])
+  const displayedInvoices = useMemo(
+    () => (resource.data ?? []).map(invoice => withDisplayStatus(invoice, timezone, businessDate)),
+    [businessDate, resource.data, timezone],
+  )
+  const visibleInvoices = useMemo(
+    () => filterDisplayedInvoices(displayedInvoices, status),
+    [displayedInvoices, status],
+  )
+  const summary = useMemo(
+    () => summarize(visibleInvoices, timezone, businessDate),
+    [businessDate, timezone, visibleInvoices],
+  )
   useRegisterPageReload(resource.refresh)
 
   return (
@@ -274,7 +335,7 @@ export function CancellationFeesPage() {
         {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
         {resource.data ? (
           <DataTable
-            rows={resource.data}
+            rows={visibleInvoices}
             rowKey={invoice => invoice.id}
             onRowClick={invoice => navigate(`cancellation-fees/${invoice.id}`)}
             empty={(
@@ -641,6 +702,8 @@ export function NewCancellationFeePage() {
 
 export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) {
   const { t } = useTranslation(['cancellationFees', 'common'])
+  const timezone = useTenantTimezone()
+  const businessDate = today(timezone)
   const loader = useCallback(() => fieldApiJson<InvoiceData>(`/v1/invoices/${encodeURIComponent(invoiceId)}`), [invoiceId])
   const resource = useResource(loader, [invoiceId])
   useRegisterPageReload(resource.refresh)
@@ -649,6 +712,10 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
   const setNotice = showToast
 
   async function fulfill() {
+    // Payment-link fulfilment is a mutation too. A paid invoice is terminal;
+    // keep the guard here in addition to disabling the button below so a
+    // stale click cannot resend a paid invoice.
+    if (!resource.data || !isInvoiceUpdateAllowed(resource.data)) return
     setFulfilling(true)
     setNotice(null)
     try {
@@ -717,8 +784,9 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
 
   if (resource.loading) return <LoadingState label={t('cancellationFees:detail.loading')} />
   if (resource.error) return <ResourceError error={resource.error} onRetry={resource.refresh} />
-  const invoice = resource.data
-  if (!invoice) return <EmptyState title={t('cancellationFees:detail.notFound')} />
+  const storedInvoice = resource.data
+  if (!storedInvoice) return <EmptyState title={t('cancellationFees:detail.notFound')} />
+  const invoice = withDisplayStatus(storedInvoice, timezone, businessDate)
 
   return (
     <div className="page-stack page-narrow">
@@ -780,7 +848,12 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
               </>
             ) : null}
             <Button type="button" onClick={() => void downloadPdf(invoice)}><Download /> PDF</Button>
-            <Button type="button" variant="primary" disabled={fulfilling} onClick={() => void fulfill()}>
+            <Button
+              type="button"
+              variant="primary"
+              disabled={fulfilling || invoice.status === 'Paid'}
+              onClick={() => void fulfill()}
+            >
               <Send />
               {fulfilling
                 ? t('cancellationFees:detail.payment.working')
@@ -812,8 +885,8 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
         </dl>
       </Panel>
       <InvoiceOperations
-        key={`${invoice.status}-${invoice.paymentLinkStatus}-${invoice.updatedAt ?? ''}`}
-        invoice={invoice}
+        key={`${storedInvoice.status}-${storedInvoice.paymentLinkStatus}-${storedInvoice.updatedAt ?? ''}`}
+        invoice={storedInvoice}
         onRefresh={resource.refresh}
         onNotice={setNotice}
       />
@@ -867,8 +940,10 @@ function InvoiceOperations({
   const [createPaymentLink, setCreatePaymentLink] = useState(false)
   const [sendEmail, setSendEmail] = useState(false)
   const [saving, setSaving] = useState(false)
+  const isPaid = !isInvoiceUpdateAllowed(invoice)
 
   async function updateInvoice() {
+    if (isPaid) return
     setSaving(true)
     try {
       await fieldApiJson<InvoiceData>(`/v1/invoices/${encodeURIComponent(invoice.id)}`, {
@@ -903,8 +978,12 @@ function InvoiceOperations({
     >
       <FormGrid>
         <Field label={t('cancellationFees:detail.update.status')}>
-          <NativeSelect value={status} onChange={event => setStatus(event.target.value as InvoiceStatus)}>
-            {INVOICE_STATUSES.map(value => (
+          <NativeSelect
+            value={status}
+            disabled={isPaid}
+            onChange={event => setStatus(event.target.value as InvoiceStatus)}
+          >
+            {(isPaid ? [invoice.status] : EDITABLE_INVOICE_STATUSES).map(value => (
               <option key={value} value={value}>{statusLabel(value)}</option>
             ))}
           </NativeSelect>
@@ -914,18 +993,29 @@ function InvoiceOperations({
             <input
               type="checkbox"
               checked={createPaymentLink}
+              disabled={isPaid}
               onChange={event => setCreatePaymentLink(event.target.checked)}
             />
             <span><strong>{t('cancellationFees:detail.update.regenerateLink')}</strong></span>
           </label>
           <label className="consent-check">
-            <input type="checkbox" checked={sendEmail} onChange={event => setSendEmail(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={sendEmail}
+              disabled={isPaid}
+              onChange={event => setSendEmail(event.target.checked)}
+            />
             <span><strong>{t('cancellationFees:detail.update.sendEmail')}</strong></span>
           </label>
         </div>
       </FormGrid>
       <div className="panel-footer-actions">
-        <Button type="button" variant="primary" disabled={saving} onClick={() => void updateInvoice()}>
+        <Button
+          type="button"
+          variant="primary"
+          disabled={saving || isPaid}
+          onClick={() => void updateInvoice()}
+        >
           <Save />
           {saving
             ? t('cancellationFees:detail.update.submitting')
@@ -936,12 +1026,17 @@ function InvoiceOperations({
   )
 }
 
-function summarize(invoices: InvoiceData[]) {
+export function summarize(
+  invoices: Array<Pick<InvoiceData, 'status' | 'dueDate' | 'totalAmount'>>,
+  timezone = DEFAULT_TIME_ZONE,
+  businessDate = today(timezone),
+) {
   return invoices.reduce((summary, invoice) => {
+    const status = invoiceDisplayStatus(invoice, timezone, businessDate)
     summary.count += 1
-    if (invoice.status === 'Paid') summary.paid += invoice.totalAmount
+    if (status === 'Paid') summary.paid += invoice.totalAmount
     else summary.unpaid += invoice.totalAmount
-    if (invoice.status === 'Overdue') summary.overdue += 1
+    if (status === 'Overdue') summary.overdue += 1
     return summary
   }, { count: 0, unpaid: 0, overdue: 0, paid: 0 })
 }

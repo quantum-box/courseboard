@@ -17,6 +17,20 @@ use crate::{
     AppError,
 };
 
+// Stage 1 of PLT-4119: the operator UI now creates Field invoices directly.
+// Keep the handler and public token routes in place for old links, but make it
+// impossible for this legacy producer to create any new local/Field pair.
+const LEGACY_COLLECTION_CREATION_ENABLED: bool = false;
+const LEGACY_COLLECTION_CREATION_DISABLED_MESSAGE: &str =
+    "legacy cancellation fee collection creation is disabled; use Field invoice API";
+
+fn legacy_collection_creation_gate() -> Result<(), AppError> {
+    if !LEGACY_COLLECTION_CREATION_ENABLED {
+        return Err(AppError::Gone(LEGACY_COLLECTION_CREATION_DISABLED_MESSAGE));
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct CancellationFeeConfig {
     pub public_ui_base_url: String,
@@ -406,6 +420,8 @@ pub async fn create_collection(
     headers: HeaderMap,
     Json(request): Json<CreateCancellationFeeCollectionRequest>,
 ) -> Result<Json<CreateCancellationFeeCollectionResponse>, AppError> {
+    legacy_collection_creation_gate()?;
+
     let tenant_id = required_text(&request.tenant_id, "tenant_id is required")?;
     // Against the tenant in the body, which is the one the invoice and the
     // local row are written for. Checking the header's tenant instead would
@@ -1100,5 +1116,14 @@ mod tests {
             affiliation_id: " ".to_string(),
         })
         .is_err());
+    }
+
+    #[test]
+    fn legacy_collection_creation_gate_is_closed() {
+        assert!(matches!(
+            legacy_collection_creation_gate(),
+            Err(AppError::Gone(message))
+                if message == LEGACY_COLLECTION_CREATION_DISABLED_MESSAGE
+        ));
     }
 }

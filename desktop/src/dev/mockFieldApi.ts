@@ -1423,7 +1423,40 @@ const mockAssignments = [
   ),
 ]
 
-const mockInvoices = [
+type MockInvoice = {
+  id: string
+  tenantId: string
+  invoiceNumber: string
+  clientId: string
+  clientName: string | null
+  clientEmail: string | null
+  clientPhone: string | null
+  lineItems: Array<{
+    description: string
+    quantity: number
+    unitPrice: number
+    amount: number
+  }>
+  dueDate: string
+  status: 'Draft' | 'Sent' | 'SendFailed' | 'Paid' | 'Overdue'
+  currency: string
+  subtotalAmount: number
+  taxAmount: number
+  totalAmount: number
+  paymentLinkUrl: string | null
+  paymentLinkStatus: 'Pending' | 'Ready' | 'Failed' | null
+  emailDeliveryStatus: 'Pending' | 'Sent' | 'Failed' | null
+  smsDeliveryStatus: 'Pending' | 'Sent' | 'Failed' | null
+  emailDeliveryFailureCode?: string | null
+  smsDeliveryFailureCode?: string | null
+  notes: string | null
+  sentAt: string | null
+  paidAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+const mockInvoices: MockInvoice[] = [
   {
     id: 'inv_mock_001',
     tenantId: 'courseboard_id',
@@ -1440,7 +1473,7 @@ const mockInvoices = [
         amount: 11000,
       },
     ],
-    dueDate: '2026-07-25',
+    dueDate: '2099-12-31',
     status: 'Sent',
     currency: 'JPY',
     subtotalAmount: 11000,
@@ -1475,7 +1508,7 @@ const mockInvoices = [
         amount: 5500,
       },
     ],
-    dueDate: '2026-07-25',
+    dueDate: '2099-12-31',
     status: 'SendFailed',
     currency: 'JPY',
     subtotalAmount: 5500,
@@ -1491,7 +1524,89 @@ const mockInvoices = [
     createdAt: NOW,
     updatedAt: NOW,
   },
+  {
+    id: 'inv_mock_overdue',
+    tenantId: 'courseboard_id',
+    invoiceNumber: 'CF-2026-0003',
+    clientId: 'client_mock_overdue',
+    clientName: 'Overdue Demo Customer',
+    clientEmail: 'overdue@example.com',
+    clientPhone: null,
+    lineItems: [
+      {
+        description: 'キャンセル料 (期限超過のデモ)',
+        quantity: 1,
+        unitPrice: 7700,
+        amount: 7700,
+      },
+    ],
+    dueDate: '2000-01-01',
+    // The saved state deliberately stays Sent. CourseBoard must derive the
+    // overdue display state from dueDate and the tenant clock.
+    status: 'Sent',
+    currency: 'JPY',
+    subtotalAmount: 7700,
+    taxAmount: 0,
+    totalAmount: 7700,
+    paymentLinkUrl: 'https://example.com/pay/mock-overdue',
+    paymentLinkStatus: 'Ready',
+    emailDeliveryStatus: 'Sent',
+    smsDeliveryStatus: null,
+    notes: '[courseboard:cancellation-fee] overdue fixture',
+    sentAt: NOW,
+    paidAt: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+  },
+  {
+    id: 'inv_mock_paid',
+    tenantId: 'courseboard_id',
+    invoiceNumber: 'CF-2026-0004',
+    clientId: 'client_mock_paid',
+    clientName: 'Paid Demo Customer',
+    clientEmail: 'paid@example.com',
+    clientPhone: null,
+    lineItems: [
+      {
+        description: 'キャンセル料 (入金済みのデモ)',
+        quantity: 1,
+        unitPrice: 8800,
+        amount: 8800,
+      },
+    ],
+    dueDate: '2000-01-01',
+    status: 'Paid',
+    currency: 'JPY',
+    subtotalAmount: 8800,
+    taxAmount: 0,
+    totalAmount: 8800,
+    paymentLinkUrl: 'https://example.com/pay/mock-paid',
+    paymentLinkStatus: 'Ready',
+    emailDeliveryStatus: 'Sent',
+    smsDeliveryStatus: null,
+    notes: '[courseboard:cancellation-fee] paid fixture',
+    sentAt: NOW,
+    paidAt: NOW,
+    createdAt: NOW,
+    updatedAt: NOW,
+  },
 ]
+
+let mockInvoiceSequence = mockInvoices.length + 1
+
+const MOCK_EDITABLE_INVOICE_STATUSES = new Set<MockInvoice['status']>([
+  'Draft',
+  'Sent',
+  'SendFailed',
+  'Overdue',
+])
+
+function cloneMockInvoice(invoice: MockInvoice) {
+  return {
+    ...invoice,
+    lineItems: invoice.lineItems.map(item => ({ ...item })),
+  }
+}
 
 function items<T>(values: T[]) {
   return { items: values }
@@ -2919,10 +3034,9 @@ function resolveGet(path: string): Json | null | undefined {
     const filtered = status
       ? mockInvoices.filter(invoice => invoice.status === status)
       : mockInvoices
-    return items(filtered.map(invoice => ({
+    return items(filtered.map(invoice => cloneMockInvoice({
       ...invoice,
       tenantId: TENANT_ID() || invoice.tenantId,
-      lineItems: invoice.lineItems.map(item => ({ ...item })),
     })))
   }
 
@@ -2931,11 +3045,10 @@ function resolveGet(path: string): Json | null | undefined {
     const invoiceId = decodeURIComponent(invoiceMatch[1] ?? '')
     const invoice = mockInvoices.find(item => item.id === invoiceId)
     if (!invoice) return null
-    return {
+    return cloneMockInvoice({
       ...invoice,
       tenantId: TENANT_ID() || invoice.tenantId,
-      lineItems: invoice.lineItems.map(item => ({ ...item })),
-    }
+    })
   }
 
   return undefined
@@ -2945,6 +3058,110 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   const pathname = normalizeMockPath(pathnameOf(path))
   const method = methodOf(init)
   const body = parseBody(init) as Record<string, unknown> | undefined
+
+  if (pathname === '/v1/invoices' && method === 'POST') {
+    const rawBillTo = body?.billTo
+    const billTo = rawBillTo && typeof rawBillTo === 'object'
+      ? rawBillTo as Record<string, unknown>
+      : undefined
+    const clientId = typeof billTo?.customerId === 'string'
+      ? billTo.customerId
+      : typeof billTo?.clientId === 'string'
+        ? billTo.clientId
+        : ''
+    const rawLineItems = Array.isArray(body?.lineItems) ? body.lineItems : []
+    const lineItems = rawLineItems.flatMap(value => {
+      if (value === null || typeof value !== 'object') return []
+      const raw = value as Record<string, unknown>
+      const description = typeof raw.description === 'string' ? raw.description : ''
+      const quantity = typeof raw.quantity === 'number' ? raw.quantity : 1
+      const unitPrice = typeof raw.unitPrice === 'number' ? raw.unitPrice : 0
+      if (!description || !Number.isFinite(quantity) || !Number.isFinite(unitPrice)) return []
+      return [{
+        description,
+        quantity,
+        unitPrice,
+        amount: typeof raw.amount === 'number' ? raw.amount : quantity * unitPrice,
+      }]
+    })
+    if (!clientId || lineItems.length === 0) {
+      return error(400, 'billTo and lineItems are required')
+    }
+
+    const sequence = mockInvoiceSequence++
+    const sendEmail = body?.sendEmail === true
+    const sendSms = body?.sendSms === true
+    const subtotalAmount = lineItems.reduce((sum, item) => sum + item.amount, 0)
+    const taxAmount = typeof body?.taxAmount === 'number' ? body.taxAmount : 0
+    const created: MockInvoice = {
+      id: `inv_mock_created_${sequence}`,
+      tenantId: TENANT_ID() || 'courseboard_id',
+      invoiceNumber: `CF-2026-${String(sequence).padStart(4, '0')}`,
+      clientId,
+      clientName: typeof body?.clientName === 'string' ? body.clientName : null,
+      clientEmail: typeof body?.clientEmail === 'string' ? body.clientEmail : null,
+      clientPhone: typeof body?.clientPhone === 'string' ? body.clientPhone : null,
+      lineItems,
+      dueDate: typeof body?.dueDate === 'string' ? body.dueDate : TODAY,
+      status: 'Draft',
+      currency: typeof body?.currency === 'string' ? body.currency : 'JPY',
+      subtotalAmount,
+      taxAmount,
+      totalAmount: subtotalAmount + taxAmount,
+      paymentLinkUrl: null,
+      paymentLinkStatus: 'Pending',
+      emailDeliveryStatus: sendEmail ? 'Pending' : null,
+      smsDeliveryStatus: sendSms ? 'Pending' : null,
+      notes: typeof body?.notes === 'string' ? body.notes : null,
+      sentAt: null,
+      paidAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    }
+    mockInvoices.push(created)
+    return hit(cloneMockInvoice(created))
+  }
+
+  const invoiceFulfillMatch = pathname.match(/^\/v1\/invoices\/([^/]+)\/fulfill$/)
+  if (invoiceFulfillMatch && method === 'POST') {
+    const invoiceId = decodeURIComponent(invoiceFulfillMatch[1] ?? '')
+    const invoice = mockInvoices.find(item => item.id === invoiceId)
+    if (!invoice) return error(404, 'Mock Field API invoice was not found')
+    if (invoice.status === 'Paid') return error(409, 'Paid invoices cannot be fulfilled')
+    invoice.paymentLinkUrl = `https://example.com/pay/${invoice.id}`
+    invoice.paymentLinkStatus = 'Ready'
+    if (invoice.emailDeliveryStatus !== null) invoice.emailDeliveryStatus = 'Sent'
+    if (invoice.smsDeliveryStatus !== null) invoice.smsDeliveryStatus = 'Sent'
+    invoice.status = 'Sent'
+    invoice.sentAt = NOW
+    invoice.updatedAt = NOW
+    return hit(cloneMockInvoice(invoice))
+  }
+
+  const invoiceUpdateMatch = pathname.match(/^\/v1\/invoices\/([^/]+)$/)
+  if (invoiceUpdateMatch && method === 'PATCH') {
+    const invoiceId = decodeURIComponent(invoiceUpdateMatch[1] ?? '')
+    const invoice = mockInvoices.find(item => item.id === invoiceId)
+    if (!invoice) return error(404, 'Mock Field API invoice was not found')
+    if (invoice.status === 'Paid') return error(409, 'Paid invoices cannot be updated')
+    if (body?.status === 'Paid') return error(409, 'Paid status is provider-controlled')
+    if (body?.status !== undefined) {
+      if (typeof body.status !== 'string' || !MOCK_EDITABLE_INVOICE_STATUSES.has(body.status as MockInvoice['status'])) {
+        return error(400, 'invoice status is not editable')
+      }
+      invoice.status = body.status as MockInvoice['status']
+    }
+    if (body?.createPaymentLink === true) {
+      invoice.paymentLinkUrl = `https://example.com/pay/${invoice.id}`
+      invoice.paymentLinkStatus = 'Ready'
+    }
+    if (body?.sendEmail === true) {
+      invoice.emailDeliveryStatus = 'Sent'
+      invoice.sentAt = NOW
+    }
+    invoice.updatedAt = NOW
+    return hit(cloneMockInvoice(invoice))
+  }
 
   if (pathname === '/v1/course/feature-flags/evaluate' && method === 'POST') {
     // Mock mode behaves like an all-enabled flag store so gated features stay

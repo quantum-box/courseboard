@@ -1212,6 +1212,17 @@ mod tests {
             get("/public/cancellation-fees/token123"),
             Some(RouteAuthorization::Public)
         );
+        assert_eq!(
+            classify(
+                &Method::POST,
+                "/public/cancellation-fees/token123/stripe-payment-intent"
+            ),
+            Some(RouteAuthorization::Public)
+        );
+        assert_eq!(
+            classify(&Method::POST, "/public/cancellation-fees/token123/confirm"),
+            Some(RouteAuthorization::Public)
+        );
         assert_eq!(get("/v1/me"), Some(RouteAuthorization::AuthenticatedOnly));
         assert_eq!(get("/admin"), Some(RouteAuthorization::AuthenticatedOnly));
         assert_eq!(
