@@ -323,6 +323,9 @@ export function routeTitle(route: string) {
   // Reading a sheet is its own piece of work, not a person's page, so it says
   // so in the title bar rather than borrowing the ledger's name.
   if (route === 'golf/customers/reception') return i18next.t('customers:reception.title')
+  // Ringing people back is its own piece of work, not a page of the ledger, so
+  // the title bar says so rather than borrowing the ledger's name.
+  if (route === 'golf/customers/call-list') return i18next.t('customers:callList.title')
   // A customer's own page carries the ledger's name in the title bar; the
   // person's name is already the first thing on the page itself.
   if (route.startsWith('golf/customers/')) return navLabel('golf/customers')
@@ -340,6 +343,7 @@ export function routeDescription(route: string) {
   if (route === 'settings/advanced') return i18next.t('settings:advanced.description')
   if (route === 'settings') return i18next.t('settings:description')
   if (route === 'golf/customers/reception') return i18next.t('customers:reception.description')
+  if (route === 'golf/customers/call-list') return i18next.t('customers:callList.description')
   if (route.startsWith('golf/customers/')) return navDescription('golf/customers')
   const match = settingsNavigation.find(item => isActive(route, item.route))
     ?? allNavigation.find(item => isActive(route, item.route))

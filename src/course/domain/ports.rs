@@ -11,6 +11,7 @@ use super::{
     CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder,
     CreateCustomerConsentItem, Customer, CustomerConsentItem, CustomerGradeRules, CustomerId,
     CustomerMembership, CustomerReceptionField, CustomerRegistration, CustomerSearchQuery,
+    CustomerSummary, CustomerSummaryQuery, CustomerSummaryRun, CustomerSummaryRunStatus,
     DailyBudget, DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus,
     FieldClientCapabilities, FieldRequestContext, FieldShiftLink, GenerationSummary,
     GolfPricingSettings, InventoryWatermark, MembershipActivityPage, MembershipActivityQuery,
@@ -389,6 +390,67 @@ pub trait CustomerRegistrationGateway: Send + Sync {
     ) -> Result<Option<CustomerRegistration>, CourseError>;
 }
 
+/// Port for the ledger ranked by play.
+///
+/// CourseBoard's own storage. The figures are golf's reading of generic
+/// bookings, and the reason they are kept rather than computed on demand is
+/// that one person's history costs a paged sweep of Field — affordable for a
+/// customer's own page, not for a list ordered by what people are worth.
+///
+/// Reads take `now` because the segment the desk asks for is relative to it:
+/// "not seen for ninety days" is a cutoff, and taking it from the caller's
+/// clock is what keeps the answer the same in a test as at the desk.
+#[async_trait]
+pub trait CustomerSummaryGateway: Send + Sync {
+    async fn list_customer_summaries(
+        &self,
+        tenant_id: &str,
+        query: &CustomerSummaryQuery,
+        now: DateTime<Utc>,
+    ) -> Result<Vec<CustomerSummary>, CourseError>;
+
+    /// How many people the segment holds, not how many fit on the page.
+    ///
+    /// The desk decides whether a filter is worth a morning from the size of
+    /// what it selected, so a pager that could only say "there is more" would
+    /// be answering a different question.
+    async fn count_customer_summaries(
+        &self,
+        tenant_id: &str,
+        query: &CustomerSummaryQuery,
+        now: DateTime<Utc>,
+    ) -> Result<i64, CourseError>;
+
+    /// Writes what a refresh worked out. Upsert by customer: a re-run replaces
+    /// the figures for everybody it saw and leaves alone anybody it did not,
+    /// so a sweep that dies halfway degrades to stale rows rather than to a
+    /// half-empty ledger.
+    async fn upsert_customer_summaries(
+        &self,
+        tenant_id: &str,
+        rows: &[CustomerSummary],
+    ) -> Result<u64, CourseError>;
+
+    /// The last refresh, so the screen can say how old the figures are.
+    async fn latest_summary_run(
+        &self,
+        tenant_id: &str,
+    ) -> Result<Option<CustomerSummaryRun>, CourseError>;
+
+    /// Opens a run and hands back its id. Written before the sweep starts, so
+    /// a process that dies leaves a `running` row rather than no trace.
+    async fn start_summary_run(&self, tenant_id: &str) -> Result<i64, CourseError>;
+
+    async fn finish_summary_run(
+        &self,
+        run_id: i64,
+        status: CustomerSummaryRunStatus,
+        reservations_scanned: i64,
+        customers_written: i64,
+        error: Option<&str>,
+    ) -> Result<(), CourseError>;
+}
+
 /// Port for who was actually seen at the desk.
 ///
 /// CourseBoard's own storage, because the group and its seats are
@@ -412,6 +474,20 @@ pub trait VisitCheckinGateway: Send + Sync {
         &self,
         tenant_id: &str,
         customer_id: &CustomerId,
+    ) -> Result<Vec<VisitCheckin>, CourseError>;
+
+    /// Every arrival the tenant has recorded against a ledger entry, a page at
+    /// a time.
+    ///
+    /// Only for the summary refresh, which needs the whole tenant at once to
+    /// work out what everybody has played. Rows with no ledger link are left
+    /// out: they make a headcount true but belong to nobody, and no summary can
+    /// be filed under them.
+    async fn list_linked_checkins(
+        &self,
+        tenant_id: &str,
+        limit: u32,
+        offset: u32,
     ) -> Result<Vec<VisitCheckin>, CourseError>;
 
     /// The seats already checked in on one booking, so the desk sees what it
@@ -825,6 +901,25 @@ pub trait ReservationGateway: Send + Sync {
         &self,
         credentials: GatewayCredentials<'_>,
         customer_id: &CustomerId,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<Reservation>, CourseError>;
+
+    /// Every booking the tenant has, a page at a time, newest first.
+    ///
+    /// Distinct from [`Self::list_reservations`], which asks for one capped
+    /// batch and is what the tee sheet and the seeder use. This one is for the
+    /// case that genuinely needs the lot: working out what every customer in
+    /// the ledger has spent.
+    ///
+    /// Field offers no date filter, no `updatedSince`, and no total, so the
+    /// only way through is from the newest backwards until a page comes back
+    /// short. That is why the summary refresh is a batch job rather than a
+    /// request, and why the generic contract for an incremental listing is the
+    /// first thing to ask Field for.
+    async fn list_tenant_reservations(
+        &self,
+        credentials: GatewayCredentials<'_>,
         limit: u32,
         offset: u32,
     ) -> Result<Vec<Reservation>, CourseError>;

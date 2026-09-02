@@ -24,6 +24,7 @@ mod customer_grade;
 mod customer_reception;
 mod customer_reception_fields;
 mod customer_registration;
+mod customer_summary;
 mod customer_visits;
 mod demo_board;
 mod error;
@@ -128,6 +129,10 @@ pub use customer_reception_fields::{
 pub use customer_registration::{
     CustomerRegistration, CustomerRegistrationSource, NewCustomerRegistration,
 };
+pub use customer_summary::{
+    CustomerSummary, CustomerSummaryQuery, CustomerSummaryRun, CustomerSummaryRunStatus,
+    CustomerSummarySort, DEFAULT_SUMMARY_PAGE, MAX_SUMMARY_PAGE,
+};
 pub use customer_visits::{
     CustomerVisit, CustomerVisitHistory, CustomerVisitSummary, VisitKind,
     DEFAULT_VISIT_HISTORY_LIMIT, MAX_VISIT_HISTORY_LIMIT, MAX_VISIT_HISTORY_ROWS,
@@ -171,12 +176,13 @@ pub use ports::{
     CourseAuthorizer, CourseOrderGateway, CustomerConsentCatalogGateway, CustomerConsentGateway,
     CustomerGateway, CustomerGradeRulesGateway, CustomerReceptionCreateGateway,
     CustomerReceptionFieldsGateway, CustomerReceptionOcrGateway, CustomerReceptionValuesGateway,
-    CustomerRegistrationGateway, FieldCapabilitiesGateway, GatewayCredentials,
-    GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
-    GolfTaxGateway, MembershipActivityGateway, MembershipDiscountsGateway, MembershipGateway,
-    MembershipPlayWindowsGateway, PlayerTagOptionsGateway, PricingSettingsGateway,
-    ReservationGateway, ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway,
-    StaffShiftGateway, StaffShiftInput, TeeLedgerQuery, TeeSheetQuery, VisitCheckinGateway,
+    CustomerRegistrationGateway, CustomerSummaryGateway, FieldCapabilitiesGateway,
+    GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
+    GolfOpsGateway, GolfTaxGateway, MembershipActivityGateway, MembershipDiscountsGateway,
+    MembershipGateway, MembershipPlayWindowsGateway, PlayerTagOptionsGateway,
+    PricingSettingsGateway, ReservationGateway, ReservationScheduleGateway, ShiftRulesGateway,
+    SlotOverrideGateway, StaffShiftGateway, StaffShiftInput, TeeLedgerQuery, TeeSheetQuery,
+    VisitCheckinGateway,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{

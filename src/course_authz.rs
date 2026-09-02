@@ -452,6 +452,14 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/customers/:customer_id/membership",
         RouteAuthorization::UpstreamEnforced,
     ),
+    // CourseBoard's own figures about Field's customers (ADR-0009). The rows
+    // hold no ledger data, but the ranking is exactly the kind of thing a
+    // viewer should not be able to walk, so it is gated where customers are.
+    (
+        "GET",
+        "/v1/course/customer-summaries",
+        RouteAuthorization::Action(LIST_CUSTOMERS),
+    ),
     // CourseBoard's own rows (ADR-0009), so the gate is here rather than at
     // Field: read wherever a customer is read, arranged where customers are
     // managed. Deciding what makes somebody a good customer is a decision
@@ -1367,6 +1375,7 @@ mod tests {
             ("PUT", "/v1/course/customers/cus_1/member-number"),
             ("GET", "/v1/course/customers/cus_1/membership"),
             ("POST", "/v1/course/customers/cus_1/membership"),
+            ("GET", "/v1/course/customer-summaries"),
             ("GET", "/v1/course/customer-grade-rules"),
             ("PUT", "/v1/course/customer-grade-rules"),
             ("GET", "/v1/course/membership-discounts"),

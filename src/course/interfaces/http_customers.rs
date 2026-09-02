@@ -26,8 +26,8 @@ use crate::course::domain::{
     CustomerConsentItem, CustomerGradeRule, CustomerGradeRules, CustomerId, CustomerMembership,
     CustomerReceptionCreateGateway, CustomerReceptionField, CustomerReceptionFieldsGateway,
     CustomerReceptionValuesGateway, CustomerRegistration, CustomerRegistrationSource,
-    CustomerSearchQuery, CustomerVisit, MemberDiscount, MembershipActivity,
-    MembershipActivityActor, MembershipActivityQuery, MembershipActivitySource,
+    CustomerSearchQuery, CustomerSummaryQuery, CustomerSummarySort, CustomerVisit, MemberDiscount,
+    MembershipActivity, MembershipActivityActor, MembershipActivityQuery, MembershipActivitySource,
     MembershipActivityTarget, MembershipDiscount, MembershipDiscounts, MembershipDiscountsGateway,
     MembershipPlan, MembershipPlanId, MembershipPlayWindow, MembershipPlayWindows,
     MembershipPlayWindowsGateway, NewCustomer, PlayableDays, ProposedConsentItem, ReceptionAddress,
@@ -45,10 +45,11 @@ use crate::course::usecase::{
     CreateReceptionCustomerUseCase, CustomerProvenance, CustomerVisitReport, DeleteCustomerUseCase,
     DraftCustomerReceptionUseCase, GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase,
     GetCustomerReceptionFieldsUseCase, GetCustomerRegistrationUseCase, GetCustomerUseCase,
-    GetCustomerVisitsUseCase, ListCustomerConsentItemsUseCase, ListMembershipActivitiesUseCase,
-    ListMembershipPlansUseCase, RecordReceptionCustomerValuesUseCase,
-    ReplaceCustomerGradeRulesUseCase, ReplaceCustomerReceptionFieldsUseCase,
-    SearchCustomersUseCase, SetMemberNumberUseCase, UpdateMembershipPlanUseCase,
+    GetCustomerVisitsUseCase, ListCustomerConsentItemsUseCase, ListCustomerSummariesUseCase,
+    ListMembershipActivitiesUseCase, ListMembershipPlansUseCase,
+    RecordReceptionCustomerValuesUseCase, ReplaceCustomerGradeRulesUseCase,
+    ReplaceCustomerReceptionFieldsUseCase, SearchCustomersUseCase, SetMemberNumberUseCase,
+    UpdateMembershipPlanUseCase,
 };
 use crate::{AppError, AppState, CallerPrincipal};
 
@@ -1261,6 +1262,195 @@ pub async fn get_customer_membership_activities(
     Ok(Json(MembershipActivityListResponse {
         items: page.items.iter().map(MembershipActivityDto::from).collect(),
         next_cursor: page.next_cursor,
+    }))
+}
+
+// ─── The call list ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerSummaryDto {
+    pub customer_id: String,
+    /// Who this is, read from Field for the rows on this page. Absent when the
+    /// ledger would not answer — the row stays, because silently shrinking a
+    /// list somebody is working through is worse than an unnamed line on it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_kana: Option<String>,
+    /// The reason the desk can act on the row at all. A person with no number
+    /// cannot be rung, and the screen says so rather than leaving a blank.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phone: Option<String>,
+    pub visits: u32,
+    pub players: i64,
+    pub total_amount: i64,
+    pub unpriced_visits: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spend_per_player: Option<i64>,
+    pub cancelled: u32,
+    pub no_shows: u32,
+    pub upcoming: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_visit_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_visit_at: Option<DateTime<Utc>>,
+    /// The refresh stopped short of this person's beginning, so the figures are
+    /// a partial count and carry no grade.
+    pub truncated: bool,
+    /// `graded`, `below_lowest`, `unknown`, or `not_configured`, exactly as on
+    /// the customer's own page.
+    pub grade: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grade_name: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerSummaryRunDto {
+    pub started_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finished_at: Option<DateTime<Utc>>,
+    /// `running`, `succeeded`, or `failed`.
+    pub status: String,
+    pub reservations_scanned: i64,
+    pub customers_written: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerSummaryPageDto {
+    pub items: Vec<CustomerSummaryDto>,
+    /// How many people the filters selected, not how many are on this page.
+    pub total: i64,
+    /// The last refresh. `null` before one has ever run, which is what the
+    /// screen shows instead of an empty list that looks like "nobody qualifies".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_run: Option<CustomerSummaryRunDto>,
+}
+
+#[derive(Debug, Deserialize, IntoParams, ToSchema)]
+#[into_params(parameter_in = Query)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerSummaryParams {
+    /// `total_amount` (default), `visits`, or `last_visit`.
+    #[serde(default)]
+    pub sort: Option<String>,
+    /// Descending by default: the biggest spender and the longest absence are
+    /// both the top of their order.
+    #[serde(default)]
+    pub ascending: Option<bool>,
+    /// Days since the last round played. The lapsed-customer filter.
+    #[serde(default)]
+    pub min_days_since_last_visit: Option<u32>,
+    #[serde(default)]
+    pub max_days_since_last_visit: Option<u32>,
+    #[serde(default)]
+    pub min_visits: Option<u32>,
+    #[serde(default)]
+    pub min_total_amount: Option<i64>,
+    /// Include people in the ledger who have never played. Off by default.
+    #[serde(default)]
+    pub include_never_visited: Option<bool>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub offset: Option<u32>,
+}
+
+/// GET /v1/course/customer-summaries
+///
+/// The ledger ranked by play, so a call list can be drawn rather than made up.
+///
+/// The figures come from the last refresh, not from Field on the spot: working
+/// out what everybody has spent means sweeping the tenant's whole booking
+/// history, which is a batch job. `lastRun` is how old the answer is, and the
+/// screen has to show it — stale figures look exactly like fresh ones.
+#[utoipa::path(
+    get,
+    path = "/v1/course/customer-summaries",
+    tag = "course",
+    params(CustomerSummaryParams),
+    responses(
+        (status = 200, description = "Customers ranked by play", body = CustomerSummaryPageDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_customer_summaries(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<CustomerSummaryParams>,
+) -> Result<Json<CustomerSummaryPageDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let sort = match params.sort.as_deref() {
+        Some(value) => CustomerSummarySort::parse(value).map_err(AppError::from)?,
+        None => CustomerSummarySort::TotalAmount,
+    };
+    let query = CustomerSummaryQuery {
+        sort,
+        descending: !params.ascending.unwrap_or(false),
+        min_days_since_last_visit: params.min_days_since_last_visit,
+        max_days_since_last_visit: params.max_days_since_last_visit,
+        min_visits: params.min_visits,
+        min_total_amount: params.min_total_amount,
+        include_never_visited: params.include_never_visited.unwrap_or(false),
+        ..CustomerSummaryQuery::default()
+    }
+    .with_paging(params.limit, params.offset);
+
+    let page = ListCustomerSummariesUseCase::new(
+        state.customer_summaries.clone(),
+        customer_gateway(&state),
+        state.customer_grade_rules.clone(),
+    )
+    .execute(credentials, &query, Utc::now())
+    .await
+    .map_err(AppError::from)?;
+
+    Ok(Json(CustomerSummaryPageDto {
+        items: page
+            .entries
+            .iter()
+            .map(|entry| CustomerSummaryDto {
+                customer_id: entry.summary.customer_id.to_string(),
+                name: entry.customer.as_ref().map(|c| c.name().to_string()),
+                name_kana: entry
+                    .customer
+                    .as_ref()
+                    .and_then(|c| c.name_kana().map(str::to_string)),
+                phone: entry
+                    .customer
+                    .as_ref()
+                    .and_then(|c| c.phone().map(str::to_string)),
+                visits: entry.summary.summary.visits,
+                players: entry.summary.summary.players,
+                total_amount: entry.summary.summary.total_amount,
+                unpriced_visits: entry.summary.summary.unpriced_visits,
+                spend_per_player: entry.summary.summary.spend_per_player,
+                cancelled: entry.summary.summary.cancelled,
+                no_shows: entry.summary.summary.no_shows,
+                upcoming: entry.summary.summary.upcoming,
+                first_visit_at: entry.summary.summary.first_visit_at,
+                last_visit_at: entry.summary.summary.last_visit_at,
+                truncated: entry.summary.truncated,
+                grade: entry.grade.as_str().to_string(),
+                grade_name: entry.grade.name().map(str::to_string),
+            })
+            .collect(),
+        total: page.total,
+        last_run: page.last_run.as_ref().map(|run| CustomerSummaryRunDto {
+            started_at: run.started_at,
+            finished_at: run.finished_at,
+            status: run.status.as_str().to_string(),
+            reservations_scanned: run.reservations_scanned,
+            customers_written: run.customers_written,
+            error: run.error.clone(),
+        }),
     }))
 }
 

@@ -248,6 +248,15 @@ mod tests {
 
     #[async_trait]
     impl ReservationGateway for FakeReservationGateway {
+        async fn list_tenant_reservations(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _limit: u32,
+            _offset: u32,
+        ) -> Result<Vec<Reservation>, CourseError> {
+            unreachable!("only the summary refresh sweeps the tenant")
+        }
+
         async fn list_customer_reservations(
             &self,
             _credentials: GatewayCredentials<'_>,

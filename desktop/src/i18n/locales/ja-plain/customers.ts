@@ -211,6 +211,46 @@ export const customers: DeepPartial<typeof source> = {
         'はじめて来た人か、ほかの人の名前で予約したのかもしれません。組に入っただけの回はここに出ません。',
     },
   },
+  callList: {
+    open: '電話を かける リスト',
+    title: '電話を かける リスト',
+    description: 'また 来て ほしい 人を、来た 回数と 使った お金から えらびます。',
+    unnamed: '台帳から よめませんでした',
+    filters: {
+      title: 'えらぶ 条件',
+      description: '条件を かえると、下の 一覧が かわります。',
+      sort: 'ならべる 順番',
+      minDays: 'さいごに 来てから 何日',
+      minDaysHint: 'からっぽに すると、さいきん 来た 人も 入ります。',
+      minVisits: '来た 回数の 下限',
+      minVisitsHint: '1回だけの 人を のぞくと、じょうれんの 人だけに なります。',
+      minTotalAmount: '使った お金の 下限',
+    },
+    sort: {
+      total_amount: '使った お金が 多い 順',
+      visits: '来た 回数が 多い 順',
+      last_visit: 'さいごに 来たのが 古い 順',
+    },
+    column: {
+      lastVisit: 'さいごに 来た 日',
+      totalAmount: '使った お金',
+    },
+    daysAgo: '{{count}}日 まえ',
+    results: {
+      title: 'えらんだ お客さま',
+      description: '条件に あう 人は {{count}}人です。',
+      capped: '一覧に 出るのは {{count}}人までです。条件を せまくすると、のこりが 出て きます。',
+    },
+    run: {
+      succeeded: '{{date}}に かぞえた 数字です。',
+      failed: '{{date}}の かぞえが しっぱいして います。いまの 数字は それより 前の ものです。',
+      never: 'まだ かぞえて いません。かぞえるまで 一覧は からっぽの ままです。',
+    },
+    empty: {
+      title: '条件に あう 人は いません',
+      description: '日数や 回数の 下限を ゆるめると、たいしょうが ふえます。',
+    },
+  },
   registration: {
     unrecorded: 'この人をいつ台帳に入れたかの記録はありません。',
     from: '{{date}} に{{source}}から入れました',

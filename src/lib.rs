@@ -39,11 +39,11 @@ use course::infrastructure::{
     MySqlAvailabilityDeadlineRepository, MySqlCaddieDutyRepository, MySqlCaddieRankFeeRepository,
     MySqlCaddieShiftRepository, MySqlCourseOrderRepository, MySqlCustomerGradeRulesRepository,
     MySqlCustomerReceptionFieldsRepository, MySqlCustomerReceptionValuesRepository,
-    MySqlCustomerRegistrationRepository, MySqlGeneratedThroughRepository,
-    MySqlGolfProductSettingsRepository, MySqlMembershipDiscountsRepository,
-    MySqlMembershipPlayWindowsRepository, MySqlPlayerTagOptionsRepository,
-    MySqlPricingSettingsRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
-    MySqlVisitCheckinRepository,
+    MySqlCustomerRegistrationRepository, MySqlCustomerSummaryRepository,
+    MySqlGeneratedThroughRepository, MySqlGolfProductSettingsRepository,
+    MySqlMembershipDiscountsRepository, MySqlMembershipPlayWindowsRepository,
+    MySqlPlayerTagOptionsRepository, MySqlPricingSettingsRepository, MySqlShiftRulesRepository,
+    MySqlSlotOverrideRepository, MySqlVisitCheckinRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -75,6 +75,7 @@ pub struct AppState {
     customer_reception_fields: Arc<MySqlCustomerReceptionFieldsRepository>,
     customer_reception_values: Arc<MySqlCustomerReceptionValuesRepository>,
     customer_registrations: Arc<MySqlCustomerRegistrationRepository>,
+    customer_summaries: Arc<MySqlCustomerSummaryRepository>,
     visit_checkins: Arc<MySqlVisitCheckinRepository>,
     membership_discounts: Arc<MySqlMembershipDiscountsRepository>,
     membership_play_windows: Arc<MySqlMembershipPlayWindowsRepository>,
@@ -128,6 +129,7 @@ impl AppState {
             customer_reception_values: Arc::new(MySqlCustomerReceptionValuesRepository::new(
                 pool.clone(),
             )),
+            customer_summaries: Arc::new(MySqlCustomerSummaryRepository::new(pool.clone())),
             customer_registrations: Arc::new(MySqlCustomerRegistrationRepository::new(
                 pool.clone(),
             )),
@@ -201,6 +203,7 @@ impl AppState {
             customer_reception_values: Arc::new(MySqlCustomerReceptionValuesRepository::new(
                 pool.clone(),
             )),
+            customer_summaries: Arc::new(MySqlCustomerSummaryRepository::new(pool.clone())),
             customer_registrations: Arc::new(MySqlCustomerRegistrationRepository::new(
                 pool.clone(),
             )),
@@ -266,6 +269,7 @@ impl AppState {
                 customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(
                     pool.clone(),
                 )),
+                customer_summaries: Arc::new(MySqlCustomerSummaryRepository::new(pool.clone())),
                 membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(
                     pool.clone(),
                 )),
@@ -320,6 +324,7 @@ impl AppState {
                 customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(
                     pool.clone(),
                 )),
+                customer_summaries: Arc::new(MySqlCustomerSummaryRepository::new(pool.clone())),
                 membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(
                     pool.clone(),
                 )),
@@ -772,6 +777,14 @@ pub fn build_router(state: AppState) -> Router {
                     state.clone(),
                     require_valid_token,
                 )),
+        )
+        // Static, and registered before nothing else claims it: this is a
+        // listing of the ledger ranked by play, not a customer id.
+        .route(
+            "/v1/course/customer-summaries",
+            get(course::interfaces::http_customers::list_customer_summaries).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
         )
         .route(
             "/v1/course/customer-grade-rules",

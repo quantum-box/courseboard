@@ -34,6 +34,7 @@ import { MembershipPlayWindowsPage } from './features/settings/MembershipPlayWin
 import { ReceptionFieldsPage } from './features/settings/ReceptionFieldsPage'
 import { SettingsAdvancedPage } from './features/settings/SettingsAdvancedPage'
 import { CustomerDetailPage } from './features/golf/customers/CustomerDetailPage'
+import { CallListPage } from './features/golf/customers/CallListPage'
 import { CustomersPage } from './features/golf/customers/CustomersPage'
 import { ReceptionPage } from './features/golf/customers/reception/ReceptionPage'
 import { SettingsPage } from './features/settings/SettingsPage'
@@ -167,8 +168,10 @@ function RouteContent({ route }: { route: string }) {
   }
   if (route === 'course-map') return <CourseMapPage />
   if (route === 'golf/customers') return <CustomersPage />
-  // Before the id route: `reception` is a screen on the ledger, not a customer.
+  // Before the id route: `reception` and `call-list` are screens on the ledger,
+  // not customer ids.
   if (route === 'golf/customers/reception') return <ReceptionPage />
+  if (route === 'golf/customers/call-list') return <CallListPage />
   if (route.startsWith('golf/customers/')) {
     const segment = decodeRouteSegment(route.slice('golf/customers/'.length).split('/')[0] ?? '')
     if (segment) return <CustomerDetailPage key={segment} customerId={segment} />

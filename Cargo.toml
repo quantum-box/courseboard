@@ -46,6 +46,10 @@ path = "bin/migrate.rs"
 name = "courseboard-migrate-reservation-reports"
 path = "bin/migrate_reservation_reports.rs"
 
+[[bin]]
+name = "courseboard-refresh-customer-summaries"
+path = "bin/refresh_customer_summaries.rs"
+
 [dev-dependencies]
 base64 = "0.22"
 http-body-util = "0.1"

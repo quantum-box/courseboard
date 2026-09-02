@@ -1,5 +1,5 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
-import { FileScan, UserPlus } from 'lucide-react'
+import { FileScan, PhoneCall, UserPlus } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -101,6 +101,16 @@ export function CustomersPage() {
               onClick={event => navigateFromClick(event, 'golf/customers/reception')}
             >
               <FileScan /> {t('customers:reception.open')}
+            </Button>
+            {/* Ringing people back starts from a ranked slice of the ledger,
+                which is a different question from "who is this person" and so
+                a different screen. */}
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={event => navigateFromClick(event, 'golf/customers/call-list')}
+            >
+              <PhoneCall /> {t('customers:callList.open')}
             </Button>
             <Button type="button" variant="primary" onClick={() => setCreating(true)}>
               <UserPlus /> {t('customers:create.open')}

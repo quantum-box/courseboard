@@ -212,6 +212,46 @@ export const customers: DeepPartial<typeof source> = {
         'A first-time visitor, or booked under somebody else\u2019s name. Rounds played in another group do not appear here.',
     },
   },
+  callList: {
+    open: 'Call list',
+    title: 'Call list',
+    description: 'Pick who to ring back, from what people have played and spent.',
+    unnamed: 'Not readable from the ledger',
+    filters: {
+      title: 'Who to select',
+      description: 'Changing a filter replaces the list below.',
+      sort: 'Order by',
+      minDays: 'Days since last round',
+      minDaysHint: 'Leave blank to include people who came recently.',
+      minVisits: 'Fewest rounds played',
+      minVisitsHint: 'Excluding one-time visitors narrows this to regulars.',
+      minTotalAmount: 'Lowest lifetime spend',
+    },
+    sort: {
+      total_amount: 'Highest lifetime spend',
+      visits: 'Most rounds played',
+      last_visit: 'Longest since last round',
+    },
+    column: {
+      lastVisit: 'Last round',
+      totalAmount: 'Lifetime spend',
+    },
+    daysAgo: '{{count}} days ago',
+    results: {
+      title: 'Selected customers',
+      description: '{{count}} customers match.',
+      capped: 'Up to {{count}} are listed. Narrow the filters to reach the rest.',
+    },
+    run: {
+      succeeded: 'Figures worked out on {{date}}.',
+      failed: 'The refresh on {{date}} failed. These figures are from before it.',
+      never: 'Nothing has been worked out yet. The list stays empty until it is.',
+    },
+    empty: {
+      title: 'Nobody matches',
+      description: 'Lowering the days or the fewest rounds widens the selection.',
+    },
+  },
   registration: {
     unrecorded: 'No record of how this entry was added.',
     from: 'Added {{date}} from {{source}}',

@@ -229,6 +229,15 @@ mod tests {
 
     #[async_trait]
     impl ReservationGateway for StubReservations {
+        async fn list_tenant_reservations(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _limit: u32,
+            _offset: u32,
+        ) -> Result<Vec<Reservation>, CourseError> {
+            unreachable!("only the summary refresh sweeps the tenant")
+        }
+
         async fn list_reservations(
             &self,
             _credentials: GatewayCredentials<'_>,
@@ -368,6 +377,15 @@ mod tests {
 
     #[async_trait]
     impl VisitCheckinGateway for StubCheckins {
+        async fn list_linked_checkins(
+            &self,
+            _tenant_id: &str,
+            _limit: u32,
+            _offset: u32,
+        ) -> Result<Vec<VisitCheckin>, CourseError> {
+            unreachable!("only the summary refresh sweeps the tenant")
+        }
+
         async fn record_visit_checkins(
             &self,
             _tenant_id: &str,
