@@ -3,9 +3,13 @@ import { customersPath, type Customer } from '../models'
 import {
   customerPayload,
   normalizeReceptionFormProposal,
+  normalizeReceptionConsentItem,
+  normalizeReceptionConsentItems,
   normalizeReceptionFields,
   uploadFileName,
   type ReceptionDraft,
+  type ReceptionConsentItem,
+  type ReceptionConsentItemWriteInput,
   type ReceptionField,
   type ReceptionFieldWriteInput,
   type ReceptionFormProposal,
@@ -15,6 +19,7 @@ import {
 const RECEPTION_DRAFT_PATH = '/v1/course/customers/reception-draft'
 export const RECEPTION_FIELDS_PATH = '/v1/course/customer-reception-fields'
 export const RECEPTION_FIELDS_ANALYSIS_PATH = `${RECEPTION_FIELDS_PATH}/analysis`
+export const RECEPTION_CONSENT_ITEMS_PATH = '/v1/course/customer-consent-items'
 
 /**
  * The CourseBoard API returns a complete list (`{ items }`) after merging the
@@ -34,6 +39,37 @@ export async function saveReceptionFields(items: readonly ReceptionFieldWriteInp
     body: JSON.stringify({ items }),
   })
   return normalizeReceptionFields(response)
+}
+
+/** Read Field's consent catalog; settings includes inactive definitions for dedupe. */
+export async function listReceptionConsentItems(options: {
+  includeInactive?: boolean
+  signal?: AbortSignal
+} = {}): Promise<readonly ReceptionConsentItem[]> {
+  const query = options.includeInactive ? '?includeInactive=true' : ''
+  const response = await courseboardApiJson<unknown>(
+    `${RECEPTION_CONSENT_ITEMS_PATH}${query}`,
+    options.signal ? { signal: options.signal } : undefined,
+  )
+  return normalizeReceptionConsentItems(response)
+}
+
+/** Create one Field consent definition after the operator confirms its wording. */
+export async function createReceptionConsentItem(
+  input: ReceptionConsentItemWriteInput,
+): Promise<ReceptionConsentItem> {
+  const response = await courseboardApiJson<unknown>(RECEPTION_CONSENT_ITEMS_PATH, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  const normalized = normalizeReceptionConsentItem(
+    typeof response === 'object' && response !== null && 'item' in response
+      ? (response as { item?: unknown }).item
+      : response,
+  )
+  if (!normalized) throw new Error('API response did not contain a consent item')
+  return normalized
 }
 
 /** Analyze a blank reception sheet and return an unsaved settings proposal. */
@@ -83,11 +119,12 @@ export function registerReceptionRow(
   row: ReceptionRow,
   sourceRowIndex?: number,
   fields?: readonly ReceptionField[],
+  consentItems?: readonly ReceptionConsentItem[],
 ) {
   return courseboardApiJson<RegisteredCustomer>(customersPath, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(customerPayload(row, sourceRowIndex, fields)),
+    body: JSON.stringify(customerPayload(row, sourceRowIndex, fields, consentItems)),
   })
 }
 

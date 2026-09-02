@@ -3,8 +3,8 @@
 //! `POST /v1/erp/customers/{id}/consents` files what a visitor agreed to. The
 //! trail is append-only and Field snapshots the terms version itself, so a
 //! record made today still says what the visitor signed after the terms are
-//! revised (PLT-4041). CourseBoard supplies the keys and which way each
-//! printed box points; Field stores it (ADR-0005).
+//! revised (PLT-4041). Field supplies the active keys; CourseBoard only maps
+//! the paper's checked state into Field's accepted direction (ADR-0014).
 //!
 //! Note the surface. The rest of CourseBoard's customer ledger goes through
 //! `/v1/storekit/customers`, which has no consent — StoreKit's create and
@@ -14,13 +14,17 @@
 //! own ERP surface offers.
 
 use async_trait::async_trait;
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::course::domain::{
-    CourseError, CustomerConsentGateway, CustomerId, GatewayCredentials, ReceptionConsentAnswer,
+    CourseError, CreateCustomerConsentItem, CustomerConsentCatalogGateway, CustomerConsentGateway,
+    CustomerConsentItem, CustomerId, GatewayCredentials, ReceptionConsentAnswer,
 };
 
-use super::field_gateway::{field_send_unit, normalize_base_url, urlencoding_path};
+use super::field_gateway::{
+    field_get_items, field_send_json, field_send_unit, normalize_base_url, urlencoding_path,
+};
 
 /// Where a consent was taken, in Field's vocabulary. A reception sheet is
 /// handed over a counter, which is `store` — the other values are for a web
@@ -71,6 +75,77 @@ impl CustomerConsentGateway for FieldCustomerConsentGateway {
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldCustomerConsentItem {
+    id: String,
+    consent_key: String,
+    label: String,
+    body: Option<String>,
+    required: bool,
+    terms_version: String,
+    active: bool,
+    sort_order: i32,
+}
+
+impl From<FieldCustomerConsentItem> for CustomerConsentItem {
+    fn from(item: FieldCustomerConsentItem) -> Self {
+        Self {
+            id: item.id,
+            consent_key: item.consent_key,
+            label: item.label,
+            body: item.body,
+            required: item.required,
+            terms_version: item.terms_version,
+            active: item.active,
+            sort_order: item.sort_order,
+        }
+    }
+}
+
+#[async_trait]
+impl CustomerConsentCatalogGateway for FieldCustomerConsentGateway {
+    async fn list_consent_items(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        include_inactive: bool,
+    ) -> Result<Vec<CustomerConsentItem>, CourseError> {
+        let path = if include_inactive {
+            "/v1/erp/membership/consent-items?includeInactive=true"
+        } else {
+            "/v1/erp/membership/consent-items"
+        };
+        let items: Vec<FieldCustomerConsentItem> =
+            field_get_items(&self.client, &self.base_url, path, credentials).await?;
+        Ok(items.into_iter().map(CustomerConsentItem::from).collect())
+    }
+
+    async fn create_consent_item(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        item: &CreateCustomerConsentItem,
+    ) -> Result<CustomerConsentItem, CourseError> {
+        let body = json!({
+            "body": item.body,
+            "consentKey": item.consent_key,
+            "label": item.label,
+            "required": item.required,
+            "sortOrder": item.sort_order,
+            "termsVersion": item.terms_version,
+        });
+        let created: FieldCustomerConsentItem = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            "/v1/erp/membership/consent-items",
+            credentials,
+            Some(&body),
+        )
+        .await?;
+        Ok(created.into())
+    }
+}
+
 /// Only the boxes that were actually answered.
 ///
 /// An unread box is dropped rather than sent as `false`: Field would file it
@@ -99,7 +174,10 @@ mod tests {
     };
 
     fn answer(key: &'static str, accepted: Option<bool>) -> ReceptionConsentAnswer {
-        ReceptionConsentAnswer { key, accepted }
+        ReceptionConsentAnswer {
+            key: key.to_string(),
+            accepted,
+        }
     }
 
     /// Field's request keys are camelCase, unlike the StoreKit surface the

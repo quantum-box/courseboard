@@ -22,32 +22,33 @@ use super::http::{credentials, reservation_gateway, ItemsResponse};
 use super::openapi::ErrorBody;
 
 use crate::course::domain::{
-    reception_consent, AssignMembershipPlan, CourseError, Customer, CustomerGradeRule,
-    CustomerGradeRules, CustomerId, CustomerMembership, CustomerReceptionCreateGateway,
-    CustomerReceptionField, CustomerReceptionFieldsGateway, CustomerReceptionValuesGateway,
-    CustomerRegistration, CustomerRegistrationSource, CustomerSearchQuery, CustomerVisit,
-    MemberDiscount, MembershipActivity, MembershipActivityActor, MembershipActivityQuery,
-    MembershipActivitySource, MembershipActivityTarget, MembershipDiscount, MembershipDiscounts,
-    MembershipDiscountsGateway, MembershipPlan, MembershipPlanId, MembershipPlayWindow,
-    MembershipPlayWindows, MembershipPlayWindowsGateway, NewCustomer, PlayableDays,
-    ReceptionAddress, ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraftRow,
-    ReceptionFieldInput, ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal,
-    ReceptionSheet, SetMemberNumber, UpsertMembershipPlan,
+    reception_consent, AssignMembershipPlan, CourseError, CreateCustomerConsentItem, Customer,
+    CustomerConsentItem, CustomerGradeRule, CustomerGradeRules, CustomerId, CustomerMembership,
+    CustomerReceptionCreateGateway, CustomerReceptionField, CustomerReceptionFieldsGateway,
+    CustomerReceptionValuesGateway, CustomerRegistration, CustomerRegistrationSource,
+    CustomerSearchQuery, CustomerVisit, MemberDiscount, MembershipActivity,
+    MembershipActivityActor, MembershipActivityQuery, MembershipActivitySource,
+    MembershipActivityTarget, MembershipDiscount, MembershipDiscounts, MembershipDiscountsGateway,
+    MembershipPlan, MembershipPlanId, MembershipPlayWindow, MembershipPlayWindows,
+    MembershipPlayWindowsGateway, NewCustomer, PlayableDays, ProposedConsentItem, ReceptionAddress,
+    ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraftRow, ReceptionFieldInput,
+    ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal, ReceptionSheet, SetMemberNumber,
+    UpsertMembershipPlan,
 };
 use crate::course::infrastructure::{
     FieldCustomerConsentGateway, FieldCustomerGateway, FieldCustomerReceptionCreateGateway,
     FieldCustomerReceptionGateway, FieldMembershipActivityGateway, FieldMembershipGateway,
 };
 use crate::course::usecase::{
-    AnalyzeCustomerReceptionFieldsUseCase, AssignMembershipPlanUseCase, CreateCustomerUseCase,
-    CreateMembershipPlanUseCase, CreateReceptionCustomerUseCase, CustomerProvenance,
-    CustomerVisitReport, DeleteCustomerUseCase, DraftCustomerReceptionUseCase,
-    GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase, GetCustomerReceptionFieldsUseCase,
-    GetCustomerRegistrationUseCase, GetCustomerUseCase, GetCustomerVisitsUseCase,
-    ListMembershipActivitiesUseCase, ListMembershipPlansUseCase,
-    RecordReceptionCustomerValuesUseCase, ReplaceCustomerGradeRulesUseCase,
-    ReplaceCustomerReceptionFieldsUseCase, SearchCustomersUseCase, SetMemberNumberUseCase,
-    UpdateMembershipPlanUseCase,
+    AnalyzeCustomerReceptionFieldsUseCase, AssignMembershipPlanUseCase,
+    CreateCustomerConsentItemUseCase, CreateCustomerUseCase, CreateMembershipPlanUseCase,
+    CreateReceptionCustomerUseCase, CustomerProvenance, CustomerVisitReport, DeleteCustomerUseCase,
+    DraftCustomerReceptionUseCase, GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase,
+    GetCustomerReceptionFieldsUseCase, GetCustomerRegistrationUseCase, GetCustomerUseCase,
+    GetCustomerVisitsUseCase, ListCustomerConsentItemsUseCase, ListMembershipActivitiesUseCase,
+    ListMembershipPlansUseCase, RecordReceptionCustomerValuesUseCase,
+    ReplaceCustomerGradeRulesUseCase, ReplaceCustomerReceptionFieldsUseCase,
+    SearchCustomersUseCase, SetMemberNumberUseCase, UpdateMembershipPlanUseCase,
 };
 use crate::{AppError, AppState, CallerPrincipal};
 
@@ -65,6 +66,57 @@ fn customer_consent_gateway(state: &AppState) -> Arc<FieldCustomerConsentGateway
         state.http_client.clone(),
         field_api_url,
     ))
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerConsentItemsQuery {
+    #[serde(default)]
+    pub include_inactive: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerConsentItemDto {
+    pub id: String,
+    pub consent_key: String,
+    pub label: String,
+    pub body: Option<String>,
+    pub required: bool,
+    pub terms_version: String,
+    pub active: bool,
+    pub sort_order: i32,
+}
+
+impl From<CustomerConsentItem> for CustomerConsentItemDto {
+    fn from(item: CustomerConsentItem) -> Self {
+        Self {
+            id: item.id,
+            consent_key: item.consent_key,
+            label: item.label,
+            body: item.body,
+            required: item.required,
+            terms_version: item.terms_version,
+            active: item.active,
+            sort_order: item.sort_order,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct CustomerConsentItemsResponse {
+    pub items: Vec<CustomerConsentItemDto>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateCustomerConsentItemRequest {
+    pub body: Option<String>,
+    pub consent_key: String,
+    pub label: String,
+    pub required: bool,
+    pub terms_version: String,
+    pub sort_order: i32,
 }
 
 fn reception_gateway(state: &AppState) -> Arc<FieldCustomerReceptionGateway> {
@@ -296,7 +348,7 @@ fn consent_answers(
             let consent = reception_consent(&entry.key)
                 .ok_or(CourseError::BadRequest("unknown reception consent"))?;
             Ok(ReceptionConsentAnswer {
-                key: consent.key,
+                key: consent.key.to_string(),
                 accepted: entry.accepted,
             })
         })
@@ -471,6 +523,7 @@ pub async fn create_customer(
             reception_fields_gateway(&state),
             reception_values_gateway(&state),
             state.customer_registrations.clone(),
+            customer_consent_gateway(&state),
         )
         .execute(
             credentials,
@@ -563,9 +616,30 @@ pub struct CustomerReceptionFieldsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct CustomerReceptionFieldsAnalysisResponse {
     pub fields: Vec<CustomerReceptionFieldDto>,
+    pub consent_items: Vec<ProposedConsentItemDto>,
     pub warnings: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preview_image: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProposedConsentItemDto {
+    pub consent_key: String,
+    pub label: String,
+    pub body: Option<String>,
+    pub required: bool,
+}
+
+impl From<ProposedConsentItem> for ProposedConsentItemDto {
+    fn from(item: ProposedConsentItem) -> Self {
+        Self {
+            consent_key: item.consent_key,
+            label: item.label,
+            body: item.body,
+            required: item.required,
+        }
+    }
 }
 
 impl From<ReceptionFormProposal> for CustomerReceptionFieldsAnalysisResponse {
@@ -575,6 +649,11 @@ impl From<ReceptionFormProposal> for CustomerReceptionFieldsAnalysisResponse {
                 .fields
                 .iter()
                 .map(CustomerReceptionFieldDto::from)
+                .collect(),
+            consent_items: proposal
+                .consent_items
+                .into_iter()
+                .map(ProposedConsentItemDto::from)
                 .collect(),
             warnings: proposal.warnings,
             preview_image: proposal.preview_image,
@@ -644,6 +723,78 @@ fn reception_field_input(
 /// GET /v1/course/customer-reception-fields
 #[utoipa::path(
     get,
+    path = "/v1/course/customer-consent-items",
+    tag = "course",
+    params(CustomerConsentItemsQuery),
+    responses(
+        (status = 200, description = "Field-owned customer consent items", body = CustomerConsentItemsResponse),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_customer_consent_items(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<CustomerConsentItemsQuery>,
+) -> Result<Json<CustomerConsentItemsResponse>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let items = ListCustomerConsentItemsUseCase::new(customer_consent_gateway(&state))
+        .execute(credentials, query.include_inactive)
+        .await
+        .map_err(AppError::from)?;
+    Ok(Json(CustomerConsentItemsResponse {
+        items: items
+            .into_iter()
+            .map(CustomerConsentItemDto::from)
+            .collect(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/course/customer-consent-items",
+    tag = "course",
+    request_body = CreateCustomerConsentItemRequest,
+    responses(
+        (status = 201, description = "Created Field consent item", body = CustomerConsentItemDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 403, description = "Forbidden", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_customer_consent_item(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateCustomerConsentItemRequest>,
+) -> Result<(StatusCode, Json<CustomerConsentItemDto>), AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let item = CreateCustomerConsentItemUseCase::new(
+        customer_consent_gateway(&state),
+        reception_fields_gateway(&state),
+    )
+    .execute(
+        credentials,
+        CreateCustomerConsentItem {
+            consent_key: request.consent_key,
+            label: request.label,
+            body: request.body,
+            required: request.required,
+            terms_version: request.terms_version,
+            sort_order: request.sort_order,
+        },
+    )
+    .await
+    .map_err(AppError::from)?;
+    Ok((StatusCode::CREATED, Json(item.into())))
+}
+
+/// GET /v1/course/customer-reception-fields
+#[utoipa::path(
+    get,
     path = "/v1/course/customer-reception-fields",
     tag = "course",
     responses(
@@ -694,10 +845,13 @@ pub async fn replace_customer_reception_fields(
         .into_iter()
         .map(reception_field_input)
         .collect::<Result<Vec<_>, _>>()?;
-    let fields = ReplaceCustomerReceptionFieldsUseCase::new(reception_fields_gateway(&state))
-        .execute(credentials, inputs)
-        .await
-        .map_err(AppError::from)?;
+    let fields = ReplaceCustomerReceptionFieldsUseCase::new(
+        reception_fields_gateway(&state),
+        customer_consent_gateway(&state),
+    )
+    .execute(credentials, inputs)
+    .await
+    .map_err(AppError::from)?;
     Ok(Json(CustomerReceptionFieldsResponse {
         items: fields.iter().map(CustomerReceptionFieldDto::from).collect(),
     }))
@@ -1674,6 +1828,7 @@ pub async fn draft_customer_reception(
     let draft = DraftCustomerReceptionUseCase::new(
         reception_gateway(&state),
         reception_fields_gateway(&state),
+        customer_consent_gateway(&state),
     )
     .execute(credentials, sheet)
     .await

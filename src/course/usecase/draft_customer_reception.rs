@@ -10,21 +10,29 @@ use std::sync::Arc;
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    CourseError, CustomerReceptionField, CustomerReceptionFieldsGateway,
-    CustomerReceptionOcrGateway, GatewayCredentials, ReceptionDraft, ReceptionSheet,
+    active_reception_consent_definitions, reception_sheet_schema_for_fields_and_consents,
+    CourseError, CustomerConsentCatalogGateway, CustomerReceptionField,
+    CustomerReceptionFieldsGateway, CustomerReceptionOcrGateway, GatewayCredentials,
+    ReceptionDraft, ReceptionSheet,
 };
 
 pub struct DraftCustomerReceptionUseCase {
     reader: Arc<dyn CustomerReceptionOcrGateway>,
     fields: Arc<dyn CustomerReceptionFieldsGateway>,
+    consents: Arc<dyn CustomerConsentCatalogGateway>,
 }
 
 impl DraftCustomerReceptionUseCase {
     pub fn new(
         reader: Arc<dyn CustomerReceptionOcrGateway>,
         fields: Arc<dyn CustomerReceptionFieldsGateway>,
+        consents: Arc<dyn CustomerConsentCatalogGateway>,
     ) -> Self {
-        Self { reader, fields }
+        Self {
+            reader,
+            fields,
+            consents,
+        }
     }
 
     pub async fn execute(
@@ -38,8 +46,11 @@ impl DraftCustomerReceptionUseCase {
             .list_customer_reception_fields(credentials.operator_id)
             .await?;
         let fields = CustomerReceptionField::merge_with_defaults(credentials.operator_id, stored);
+        let catalog = self.consents.list_consent_items(credentials, false).await?;
+        let consents = active_reception_consent_definitions(&catalog);
+        reception_sheet_schema_for_fields_and_consents(&fields, &consents)?;
         self.reader
-            .draft_reception(credentials, sheet, &fields)
+            .draft_reception(credentials, sheet, &fields, &consents)
             .await
     }
 }
@@ -51,7 +62,9 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        ReceptionDraftRow, ReceptionFormProposal, ReceptionSheetMediaType,
+        CreateCustomerConsentItem, CustomerConsentCatalogGateway, CustomerConsentItem,
+        ReceptionConsentDefinition, ReceptionDraftRow, ReceptionFormProposal,
+        ReceptionSheetMediaType,
     };
 
     struct StubReader {
@@ -75,6 +88,7 @@ mod tests {
             _credentials: GatewayCredentials<'_>,
             sheet: ReceptionSheet,
             _fields: &[CustomerReceptionField],
+            _consents: &[ReceptionConsentDefinition],
         ) -> Result<ReceptionDraft, CourseError> {
             self.seen.lock().unwrap().push(sheet.media_type());
             self.answer.lock().unwrap().take().expect("one call")
@@ -91,6 +105,28 @@ mod tests {
 
     #[derive(Default)]
     struct StubFields;
+
+    #[derive(Default)]
+    struct StubConsents;
+
+    #[async_trait]
+    impl CustomerConsentCatalogGateway for StubConsents {
+        async fn list_consent_items(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _include_inactive: bool,
+        ) -> Result<Vec<CustomerConsentItem>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn create_consent_item(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _item: &CreateCustomerConsentItem,
+        ) -> Result<CustomerConsentItem, CourseError> {
+            unreachable!("not used by this use case")
+        }
+    }
 
     #[async_trait]
     impl CustomerReceptionFieldsGateway for StubFields {
@@ -135,10 +171,14 @@ mod tests {
             )],
             vec![],
         ))));
-        let draft = DraftCustomerReceptionUseCase::new(reader.clone(), Arc::new(StubFields))
-            .execute(credentials(), sheet())
-            .await
-            .unwrap();
+        let draft = DraftCustomerReceptionUseCase::new(
+            reader.clone(),
+            Arc::new(StubFields),
+            Arc::new(StubConsents),
+        )
+        .execute(credentials(), sheet())
+        .await
+        .unwrap();
         assert_eq!(draft.rows().len(), 1);
         assert_eq!(draft.rows()[0].name_kana(), Some("ホンダ ヤスヒコ"));
         assert_eq!(
@@ -152,10 +192,14 @@ mod tests {
         let reader = Arc::new(StubReader::answering(Err(CourseError::Provider(
             "ocr provider unavailable".into(),
         ))));
-        let error = DraftCustomerReceptionUseCase::new(reader, Arc::new(StubFields))
-            .execute(credentials(), sheet())
-            .await
-            .unwrap_err();
+        let error = DraftCustomerReceptionUseCase::new(
+            reader,
+            Arc::new(StubFields),
+            Arc::new(StubConsents),
+        )
+        .execute(credentials(), sheet())
+        .await
+        .unwrap_err();
         // Not a 5xx: Cloudflare replaces an origin 5xx with CORS-less HTML, and
         // the desk would see "Failed to fetch" instead of "try again".
         assert!(matches!(error, CourseError::Provider(_)));

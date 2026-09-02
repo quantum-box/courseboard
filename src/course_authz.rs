@@ -392,6 +392,11 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         RouteAuthorization::UpstreamEnforced,
     ),
     (
+        "*",
+        "/v1/course/customer-consent-items",
+        RouteAuthorization::Action(MANAGE_CUSTOMERS),
+    ),
+    (
         "GET",
         "/v1/course/customer-reception-fields",
         RouteAuthorization::Action(LIST_CUSTOMERS),
@@ -1348,6 +1353,8 @@ mod tests {
             ("PUT", "/v1/course/reservation-products/svc_1/slots"),
             ("GET", "/v1/course/customers"),
             ("POST", "/v1/course/customers"),
+            ("GET", "/v1/course/customer-consent-items"),
+            ("POST", "/v1/course/customer-consent-items"),
             ("GET", "/v1/course/customer-reception-fields"),
             ("PUT", "/v1/course/customer-reception-fields"),
             ("POST", "/v1/course/customer-reception-fields/analysis"),

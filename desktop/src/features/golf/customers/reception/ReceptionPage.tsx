@@ -33,7 +33,9 @@ import { navigate, navigateFromClick } from '../../../../lib/router'
 import { showToast } from '../../../../lib/toast'
 import {
   analyzeReceptionForm,
+  createReceptionConsentItem,
   draftReceptionSheet,
+  listReceptionConsentItems,
   listReceptionFields,
   registerReceptionRow,
   retryReceptionValues,
@@ -49,6 +51,7 @@ import {
   isConsentCorrected,
   isStandardReceptionFieldKey,
   isReceptionFieldCorrected,
+  missingRequiredConsentItems,
   missingRequiredFields,
   prepareReceptionSheet,
   previewKind,
@@ -62,15 +65,18 @@ import {
   updateReceptionRowField,
   valueText,
   DEFAULT_RECEPTION_FIELDS,
+  DEFAULT_RECEPTION_CONSENT_ITEMS,
+  activeReceptionConsentItems,
   type ReceptionAddress,
+  type ReceptionConsentCandidate,
+  type ReceptionConsentItem,
+  type ReceptionConsentItemWriteInput,
   type ReceptionField,
   type ReceptionFieldValue,
   type ReceptionFieldType,
   rowsFromDraft,
   savedCount,
-  RECEPTION_CONSENT_KEYS,
   RECEPTION_SHEET_ACCEPT,
-  REQUIRED_RECEPTION_CONSENT,
   type ReceptionConsentKey,
   type ReceptionRow,
 } from './models'
@@ -93,6 +99,11 @@ export function ReceptionPage() {
     () => listReceptionFields(),
     [],
     { cacheKey: 'course:customer-reception-fields' },
+  )
+  const consentSettings = useResource(
+    () => listReceptionConsentItems(),
+    [],
+    { cacheKey: 'course:customer-consent-items-active' },
   )
   const [file, setFile] = useState<File | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -118,7 +129,10 @@ export function ReceptionPage() {
 
   const duplicates = useMemo(() => duplicateNameKeys(rows), [rows])
   const receptionFields = fieldSettings.data ?? DEFAULT_RECEPTION_FIELDS
-  const pending = pendingRows(rows, receptionFields)
+  const receptionConsentItems = activeReceptionConsentItems(
+    consentSettings.data ?? DEFAULT_RECEPTION_CONSENT_ITEMS,
+  )
+  const pending = pendingRows(rows, receptionFields, receptionConsentItems)
   const saved = savedCount(rows)
 
   function updateRow(key: string, patch: Partial<ReceptionRow>) {
@@ -149,7 +163,7 @@ export function ReceptionPage() {
       }
       setFile(next)
       const draft = await draftReceptionSheet(next)
-      setRows(rowsFromDraft(draft, receptionFields))
+      setRows(rowsFromDraft(draft, receptionFields, receptionConsentItems))
       setWarnings(draft.warnings ?? [])
     } catch (error) {
       setRows([])
@@ -169,7 +183,7 @@ export function ReceptionPage() {
   }
 
   async function register(row: ReceptionRow) {
-    if (!canRegister(row, receptionFields)) return
+    if (!canRegister(row, receptionFields, receptionConsentItems)) return
     updateRow(row.key, { status: 'saving', error: undefined })
     try {
       // The row's position on screen is its line on the paper — rows are added
@@ -179,6 +193,7 @@ export function ReceptionPage() {
         row,
         rows.findIndex(candidate => candidate.key === row.key),
         receptionFields,
+        receptionConsentItems,
       )
       updateRow(row.key, {
         status: 'saved',
@@ -212,7 +227,7 @@ export function ReceptionPage() {
       // One at a time, in sheet order: the ledger has no bulk write, and a
       // group registered in parallel comes back in an order nobody can match
       // against the paper when one of them fails.
-      for (const row of pendingRows(rows, receptionFields)) {
+      for (const row of pendingRows(rows, receptionFields, receptionConsentItems)) {
         try {
           await register(row)
           registered += 1
@@ -232,7 +247,12 @@ export function ReceptionPage() {
     }
   }
 
-  const busy = reading || registeringAll || fieldSettings.loading || Boolean(fieldSettings.error)
+  const busy = reading
+    || registeringAll
+    || fieldSettings.loading
+    || Boolean(fieldSettings.error)
+    || consentSettings.loading
+    || Boolean(consentSettings.error)
 
   return (
     <div className="page-stack">
@@ -288,6 +308,12 @@ export function ReceptionPage() {
       {fieldSettings.error ? (
         <ResourceError error={fieldSettings.error} onRetry={() => void fieldSettings.refresh()} />
       ) : null}
+      {consentSettings.error ? (
+        <ResourceError
+          error={consentSettings.error}
+          onRetry={() => void consentSettings.refresh()}
+        />
+      ) : null}
 
       {reading ? <LoadingState label={t('customers:reception.reading')} /> : null}
 
@@ -322,7 +348,11 @@ export function ReceptionPage() {
                     addedRowsRef.current += 1
                     setRows(current => [
                       ...current,
-                      blankRow(`added-${addedRowsRef.current}`, receptionFields),
+                      blankRow(
+                        `added-${addedRowsRef.current}`,
+                        receptionFields,
+                        receptionConsentItems,
+                      ),
                     ])
                   }}
                 >
@@ -361,6 +391,7 @@ export function ReceptionPage() {
                   key={row.key}
                   row={row}
                   fields={receptionFields}
+                  consentItems={receptionConsentItems}
                   index={index}
                   duplicate={duplicates.has(row.key)}
                   disabled={busy}
@@ -450,12 +481,22 @@ function customFieldKeyIsInvalid(fields: readonly ReceptionField[]) {
  */
 export function ReceptionFieldSettingsPanel({
   fields,
+  consentItems = DEFAULT_RECEPTION_CONSENT_ITEMS,
+  consentItemsLoading = false,
+  consentItemsError = null,
+  onRetryConsentItems,
+  onConsentItemsCreated,
   loading,
   error,
   onRetry,
   onSaved,
 }: {
   fields: readonly ReceptionField[]
+  consentItems?: readonly ReceptionConsentItem[]
+  consentItemsLoading?: boolean
+  consentItemsError?: unknown
+  onRetryConsentItems?: () => void
+  onConsentItemsCreated?: (items: readonly ReceptionConsentItem[]) => void
   loading: boolean
   error: unknown
   onRetry: () => void
@@ -465,7 +506,9 @@ export function ReceptionFieldSettingsPanel({
   const [drafts, setDrafts] = useState<ReceptionFieldDraft[]>(() => cloneReceptionFields(fields))
   const [saving, setSaving] = useState(false)
   const [analyzing, setAnalyzing] = useState(false)
+  const [creatingConsentItems, setCreatingConsentItems] = useState(false)
   const [proposalActive, setProposalActive] = useState(false)
+  const [proposedConsentItems, setProposedConsentItems] = useState<ReceptionConsentCandidate[]>([])
   const [analysisWarnings, setAnalysisWarnings] = useState<string[]>([])
   const [analysisPreview, setAnalysisPreview] = useState<string | null>(null)
   const analysisInputRef = useRef<HTMLInputElement | null>(null)
@@ -476,13 +519,27 @@ export function ReceptionFieldSettingsPanel({
     setProposalActive(false)
     setAnalysisWarnings([])
     setAnalysisPreview(null)
+    setProposedConsentItems([])
     proposalSnapshotRef.current = null
   }, [fields])
+
+  // A refresh may arrive after a POST whose response was lost. Never keep a
+  // candidate visible once Field confirms that its key exists (including an
+  // inactive definition).
+  useEffect(() => {
+    const existingKeys = new Set(consentItems.map(item => item.consentKey))
+    setProposedConsentItems(current => {
+      const next = current.filter(candidate => !existingKeys.has(candidate.consentKey))
+      return next.length === current.length ? current : next
+    })
+  }, [consentItems])
 
   const dirty = !settingsEqual(drafts, fields)
   const invalidCustomKey = customFieldKeyIsInvalid(drafts)
   const standard = drafts.filter(field => field.kind === 'standard')
   const custom = drafts.filter(field => field.kind === 'custom')
+  const changing = saving || analyzing || creatingConsentItems
+  const canCreateConsentItems = !consentItemsLoading && !consentItemsError
 
   function update(editorKey: string, patch: Partial<ReceptionField>) {
     setDrafts(current => current.map(field => (
@@ -545,6 +602,7 @@ export function ReceptionFieldSettingsPanel({
     setProposalActive(false)
     setAnalysisWarnings([])
     setAnalysisPreview(null)
+    setProposedConsentItems([])
     proposalSnapshotRef.current = null
   }
 
@@ -563,6 +621,10 @@ export function ReceptionFieldSettingsPanel({
       const proposal = await analyzeReceptionForm(prepared)
       proposalSnapshotRef.current = beforeAnalysis
       setDrafts(cloneReceptionFields(applyReceptionFormProposal(beforeAnalysis, proposal)))
+      const existingConsentKeys = new Set(consentItems.map(item => item.consentKey))
+      setProposedConsentItems(proposal.consentItems.filter(
+        candidate => !existingConsentKeys.has(candidate.consentKey),
+      ))
       setProposalActive(true)
       setAnalysisWarnings(proposal.warnings)
       setAnalysisPreview(proposal.previewImage ?? null)
@@ -576,6 +638,77 @@ export function ReceptionFieldSettingsPanel({
     } finally {
       setAnalyzing(false)
     }
+  }
+
+  /** Create confirmed Field consent definitions one at a time. */
+  async function createProposedConsentItems() {
+    if (!canCreateConsentItems || proposedConsentItems.length === 0) return
+    setCreatingConsentItems(true)
+    const remaining: ReceptionConsentCandidate[] = []
+    const createdItems: ReceptionConsentItem[] = []
+    const firstSortOrder = consentItems.reduce(
+      (maximum, item) => Math.max(maximum, item.sortOrder),
+      -1,
+    ) + 1
+    let failure: unknown = null
+
+    try {
+      for (const [index, candidate] of proposedConsentItems.entries()) {
+        if (failure) {
+          remaining.push(candidate)
+          continue
+        }
+        try {
+          const input: ReceptionConsentItemWriteInput = {
+            body: candidate.body?.trim() || null,
+            consentKey: candidate.consentKey,
+            label: candidate.label.trim() || candidate.consentKey,
+            required: candidate.required,
+            sortOrder: firstSortOrder + index,
+            termsVersion: '1',
+          }
+          createdItems.push(await createReceptionConsentItem(input))
+        } catch (createError) {
+          // A request can commit in Field while its HTTP response is lost. A
+          // re-read distinguishes that case from a genuine failure and makes
+          // retrying safe instead of repeatedly hitting the duplicate key.
+          try {
+            const latest = await listReceptionConsentItems({ includeInactive: true })
+            const reconciled = latest.find(
+              item => item.consentKey === candidate.consentKey,
+            )
+            if (reconciled) {
+              createdItems.push(reconciled)
+              continue
+            }
+          } catch {
+            // Keep the original create error; an inconclusive re-read is not a
+            // reason to hide the error that the operator can act on.
+          }
+          failure = createError
+          remaining.push(candidate)
+        }
+      }
+    } finally {
+      setCreatingConsentItems(false)
+    }
+
+    setProposedConsentItems(remaining)
+    if (createdItems.length > 0) onConsentItemsCreated?.(createdItems)
+    if (failure) {
+      showToast({
+        tone: 'danger',
+        title: t('customers:reception.settings.consentCreateFailed'),
+        message: resourceErrorText(failure),
+      })
+      return
+    }
+    showToast({
+      tone: 'success',
+      message: t('customers:reception.settings.consentCreated', {
+        count: createdItems.length,
+      }),
+    })
   }
 
   async function save() {
@@ -600,6 +733,7 @@ export function ReceptionFieldSettingsPanel({
       setProposalActive(false)
       setAnalysisWarnings([])
       setAnalysisPreview(null)
+      setProposedConsentItems([])
       proposalSnapshotRef.current = null
       showToast({ tone: 'success', message: t('customers:reception.settings.saved') })
     } catch (saveError) {
@@ -629,13 +763,14 @@ export function ReceptionFieldSettingsPanel({
             onChange={event => {
               const next = event.target.files?.[0]
               event.target.value = ''
+              if (changing) return
               if (next) void analyzeBlankForm(next)
             }}
           />
           <Button
             type="button"
             variant="secondary"
-            disabled={loading || saving || analyzing}
+            disabled={loading || changing}
             onClick={() => analysisInputRef.current?.click()}
           >
             <ScanLine />
@@ -647,7 +782,7 @@ export function ReceptionFieldSettingsPanel({
             <Button
               type="button"
               variant="ghost"
-              disabled={saving || analyzing}
+              disabled={changing}
               onClick={cancelProposal}
             >
               <RotateCcw />
@@ -657,7 +792,7 @@ export function ReceptionFieldSettingsPanel({
           <Button
             type="button"
             variant="primary"
-            disabled={!dirty || saving || analyzing || loading || invalidCustomKey}
+            disabled={!dirty || changing || loading || invalidCustomKey}
             onClick={() => void save()}
           >
             <Save />
@@ -671,6 +806,54 @@ export function ReceptionFieldSettingsPanel({
       {analysisWarnings.map((warning, index) => (
         <Notice key={`${warning}-${index}`} tone="warning">{warning}</Notice>
       ))}
+      {consentItemsError ? (
+        <ResourceError
+          error={consentItemsError}
+          onRetry={onRetryConsentItems ?? (() => undefined)}
+        />
+      ) : null}
+      {consentItemsLoading ? (
+        <LoadingState label={t('customers:reception.settings.consentLoading')} />
+      ) : null}
+      {proposedConsentItems.length > 0 ? (
+        <div className="reception-consent-candidates">
+          <div className="reception-settings-section-head">
+            <div>
+              <h3>{t('customers:reception.settings.consentCandidatesTitle')}</h3>
+              <p className="reception-settings-hint">
+                {t('customers:reception.settings.consentCandidatesHint')}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={changing || !canCreateConsentItems}
+              onClick={() => void createProposedConsentItems()}
+            >
+              {creatingConsentItems
+                ? t('customers:reception.settings.consentCreating')
+                : t('customers:reception.settings.consentCreate', {
+                  count: proposedConsentItems.length,
+                })}
+            </Button>
+          </div>
+          <ul className="reception-consent-candidate-list">
+            {proposedConsentItems.map(candidate => (
+              <li key={candidate.consentKey}>
+                <strong>{candidate.label}</strong>
+                <small>
+                  {candidate.consentKey}
+                  {candidate.required
+                    ? ` / ${t('customers:reception.consents.required')}`
+                    : ''}
+                </small>
+                {candidate.body ? <span>{candidate.body}</span> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {receptionPreviewImageSrc(analysisPreview) ? (
         <div className="reception-analysis-preview">
           <p className="reception-settings-hint">{t('customers:reception.analysis.previewTitle')}</p>
@@ -712,7 +895,7 @@ export function ReceptionFieldSettingsPanel({
                         type="checkbox"
                         aria-label={t('customers:reception.settings.enableLabel', { field: receptionFieldLabel(field) })}
                         checked={field.enabled}
-                        disabled={alwaysRequired || saving || analyzing}
+                        disabled={alwaysRequired || changing}
                         onChange={event => update(field.editorKey, { enabled: event.target.checked })}
                       />
                     </td>
@@ -721,7 +904,7 @@ export function ReceptionFieldSettingsPanel({
                         type="checkbox"
                         aria-label={t('customers:reception.settings.requiredLabel', { field: receptionFieldLabel(field) })}
                         checked={alwaysRequired || field.required}
-                        disabled={alwaysRequired || !field.enabled || saving || analyzing}
+                        disabled={alwaysRequired || !field.enabled || changing}
                         onChange={event => update(field.editorKey, { required: event.target.checked })}
                       />
                       {alwaysRequired ? (
@@ -732,7 +915,7 @@ export function ReceptionFieldSettingsPanel({
                       <Input
                         aria-label={t('customers:reception.settings.labelLabel', { field: receptionFieldLabel(field) })}
                         value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
-                        disabled={saving || analyzing}
+                        disabled={changing}
                         onChange={event => update(field.editorKey, {
                           label: event.target.value,
                           customLabel: event.target.value.trim().length > 0,
@@ -744,7 +927,7 @@ export function ReceptionFieldSettingsPanel({
                           variant="ghost"
                           size="sm"
                           aria-label={t('customers:reception.settings.resetLabel')}
-                          disabled={saving || analyzing}
+                          disabled={changing}
                           onClick={() => update(field.editorKey, {
                             label: receptionFieldDefaultLabel(field.fieldKey),
                             customLabel: false,
@@ -769,7 +952,7 @@ export function ReceptionFieldSettingsPanel({
             <h3>{t('customers:reception.settings.customTitle')}</h3>
             <p className="reception-settings-hint">{t('customers:reception.settings.customHint')}</p>
           </div>
-          <Button type="button" variant="secondary" size="sm" disabled={saving || analyzing} onClick={addCustomField}>
+          <Button type="button" variant="secondary" size="sm" disabled={changing} onClick={addCustomField}>
             <Plus />
             {t('customers:reception.settings.addCustom')}
           </Button>
@@ -789,14 +972,14 @@ export function ReceptionFieldSettingsPanel({
                   <Field label={t('customers:reception.settings.customKey')}>
                     <Input
                       value={field.fieldKey}
-                      disabled={saving || analyzing}
+                      disabled={changing}
                       onChange={event => update(field.editorKey, { fieldKey: event.target.value })}
                     />
                   </Field>
                   <Field label={t('customers:reception.settings.customLabel')}>
                     <Input
                       value={field.customLabel ? field.label ?? '' : receptionFieldLabel(field)}
-                      disabled={saving || analyzing}
+                      disabled={changing}
                       onChange={event => update(field.editorKey, {
                         label: event.target.value,
                         customLabel: event.target.value.trim().length > 0,
@@ -808,7 +991,7 @@ export function ReceptionFieldSettingsPanel({
                         variant="ghost"
                         size="sm"
                         aria-label={t('customers:reception.settings.resetLabel')}
-                        disabled={saving || analyzing}
+                        disabled={changing}
                         onClick={() => update(field.editorKey, {
                           label: receptionFieldDefaultLabel(field.fieldKey),
                           customLabel: false,
@@ -822,7 +1005,7 @@ export function ReceptionFieldSettingsPanel({
                   <Field label={t('customers:reception.settings.customType')}>
                     <NativeSelect
                       value={field.fieldType}
-                      disabled={saving || analyzing}
+                      disabled={changing}
                       onChange={event => update(field.editorKey, {
                         fieldType: event.target.value as ReceptionFieldType,
                         options: event.target.value === 'select' ? field.options : [],
@@ -839,7 +1022,7 @@ export function ReceptionFieldSettingsPanel({
                     <input
                       type="checkbox"
                       checked={field.enabled}
-                      disabled={saving || analyzing}
+                      disabled={changing}
                       onChange={event => update(field.editorKey, { enabled: event.target.checked })}
                     />
                     {t('customers:reception.settings.columns.enabled')}
@@ -848,7 +1031,7 @@ export function ReceptionFieldSettingsPanel({
                     <input
                       type="checkbox"
                       checked={field.required}
-                      disabled={!field.enabled || saving || analyzing}
+                      disabled={!field.enabled || changing}
                       onChange={event => update(field.editorKey, { required: event.target.checked })}
                     />
                     {t('customers:reception.settings.columns.required')}
@@ -859,7 +1042,7 @@ export function ReceptionFieldSettingsPanel({
                       variant="ghost"
                       size="sm"
                       aria-label={t('customers:reception.settings.moveUp')}
-                      disabled={saving || analyzing || index === 0}
+                      disabled={changing || index === 0}
                       onClick={() => moveCustomField(field.editorKey, -1)}
                     >
                       <ArrowUp />
@@ -869,7 +1052,7 @@ export function ReceptionFieldSettingsPanel({
                       variant="ghost"
                       size="sm"
                       aria-label={t('customers:reception.settings.moveDown')}
-                      disabled={saving || analyzing || index === custom.length - 1}
+                      disabled={changing || index === custom.length - 1}
                       onClick={() => moveCustomField(field.editorKey, 1)}
                     >
                       <ArrowDown />
@@ -879,7 +1062,7 @@ export function ReceptionFieldSettingsPanel({
                       variant="ghost"
                       size="sm"
                       aria-label={t('customers:reception.settings.removeCustom')}
-                      disabled={saving || analyzing}
+                      disabled={changing}
                       onClick={() => removeCustomField(field.editorKey)}
                     >
                       <Trash2 />
@@ -894,7 +1077,7 @@ export function ReceptionFieldSettingsPanel({
                   >
                     <NativeTextarea
                       value={field.options.join('\n')}
-                      disabled={saving || analyzing}
+                      disabled={changing}
                       onChange={event => update(field.editorKey, {
                         options: event.target.value.split('\n').map(option => option.trim()).filter(Boolean),
                       })}
@@ -1084,6 +1267,7 @@ function ReceptionDynamicField({
 function ReceptionRowCard({
   row,
   fields,
+  consentItems,
   index,
   duplicate,
   disabled,
@@ -1093,6 +1277,7 @@ function ReceptionRowCard({
 }: {
   row: ReceptionRow
   fields: readonly ReceptionField[]
+  consentItems: readonly ReceptionConsentItem[]
   index: number
   duplicate: boolean
   disabled: boolean
@@ -1102,8 +1287,9 @@ function ReceptionRowCard({
 }) {
   const { t } = useTranslation(['customers', 'common'])
   const saved = row.status === 'saved'
-  const blocked = blockedReason(row, fields)
+  const blocked = blockedReason(row, fields, consentItems)
   const missing = missingRequiredFields(row, fields)
+  const missingConsents = missingRequiredConsentItems(row, consentItems)
 
   return (
     <li className={`reception-row${saved ? ' reception-row-saved' : ''}`}>
@@ -1135,8 +1321,9 @@ function ReceptionRowCard({
       </div>
 
       <div className="reception-row-consents">
-        {RECEPTION_CONSENT_KEYS.map(key => {
-          const answer = row.consents[key]
+        {activeReceptionConsentItems(consentItems).map(item => {
+          const key = item.consentKey
+          const answer = row.consents[key] ?? null
           return (
             <label key={key} className="reception-consent">
               <input
@@ -1149,8 +1336,10 @@ function ReceptionRowCard({
                 }
               />
               <span className="reception-consent-label">
-                {t(CONSENT_LABEL[key])}
-                {key === REQUIRED_RECEPTION_CONSENT ? (
+                {item.id === null && CONSENT_LABEL[key as ReceptionConsentKey]
+                  ? t(CONSENT_LABEL[key as ReceptionConsentKey])
+                  : item.label}
+                {item.required ? (
                   <Badge variant="outline">{t('customers:reception.consents.required')}</Badge>
                 ) : null}
               </span>
@@ -1180,7 +1369,11 @@ function ReceptionRowCard({
       </div>
 
       {blocked === 'declaration' && !saved ? (
-        <Notice tone="warning">{t('customers:reception.consents.blocked')}</Notice>
+        <Notice tone="warning">
+          {t('customers:reception.consents.blocked', {
+            items: missingConsents.map(item => item.label).join('、'),
+          })}
+        </Notice>
       ) : null}
       {missing.length > 0 && !saved ? (
         <Notice tone="warning">
@@ -1225,7 +1418,7 @@ function ReceptionRowCard({
             type="button"
             variant="secondary"
             size="sm"
-            disabled={disabled || !canRegister(row, fields) || row.status === 'saving'}
+            disabled={disabled || !canRegister(row, fields, consentItems) || row.status === 'saving'}
             onClick={onRegister}
           >
             {row.status === 'saving' ? t('common:action.saving') : t('customers:reception.rows.register')}

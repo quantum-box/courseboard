@@ -115,6 +115,83 @@ CourseBoard が所有するゴルフ固有項目の未保存案として取り�
 - 顧客作成前にすべての追加項目を検証する。作成後に起こりうるのは DB 書込障害だけに絞る。
 - 追加項目の DB 書込障害は、作成済み customer id と画面に残した回答から追加項目だけ再試行する。
 
+## 同意項目カタログ追随の設計入口
+
+tachyonfield #1271 の `consentItems` を CourseBoard へ接続する境界は
+[ADR-0014](../../../../architecture/decisions/ADR-0014-reception-consent-catalog-boundary.md) を正とする。
+Field は同意キー、表示名、本文、必須性、規約版、有効状態、並び順と証跡を所有する。
+CourseBoard は同意定義を永続化せず、Field の active なカタログを OCR、確認画面、
+必須判定、顧客登録へ接続する。
+
+### API
+
+courseboard-api に次を追加する。UI は `/field-api/*` や Tachyon platform API を直接呼ばない。
+
+- `GET /v1/course/customer-consent-items?includeInactive=true`
+  - Field `GET /v1/erp/membership/consent-items` を同じ bearer / operator / platform scope で呼ぶ。
+  - `items` は `id / consentKey / label / body / required / termsVersion / active / sortOrder`。
+  - 設定画面は inactive を含めて重複キーを判定する。OCR と顧客登録は active のみを読む。
+- `POST /v1/course/customer-consent-items`
+  - `body / consentKey / label / required / termsVersion / sortOrder` を受け、Field の既存 API へ渡す。
+  - CourseBoard の設定変更 action と Field `field:ManageMembership` の両方を通った利用者だけが使える。
+- `POST /v1/course/customer-reception-fields/analysis`
+  - 既存レスポンスへ additive な `consentItems` を追加する。
+  - 候補は `consentKey / label / body / required`。欠落時は空配列として旧 Field と互換にする。
+
+Field の同意項目を表す domain type と list/create port を追加するが、CourseBoard repository は
+追加しない。Field response の timestamp は Field の監査情報であり、CourseBoard の受付処理では
+使わないため domain / public DTO へ持ち込まない。
+
+### OCR と登録
+
+`DraftCustomerReceptionUseCase` は受付項目と Field の active consent items を読み、両方を
+`CustomerReceptionOcrGateway` に渡す。OCR schema は同意本文があれば本文、なければ表示名を
+boolean column の prompt に使う。Field の `sortOrder`、同値なら `consentKey` の順に安定化する。
+
+draft row は同意ごとに `key / label / required / accepted` を返す。読み取れなかった値は `null` の
+ままにする。新しい候補はすべて「チェック＝同意」として扱う。既存の
+`golf_marketing_contact` だけはキーで判定し、「チェック＝拒否」を Field の `accepted` 方向へ
+一度だけ反転する。
+
+`CreateReceptionCustomerUseCase` は Field を書く前に active catalog を再取得する。送信された
+未知キー、inactive key、重複キーを拒否し、Field で `required=true` の項目が `accepted=true`
+でなければ顧客を作らない。検証後の回答だけを Field の顧客登録 API へ渡す。ブラウザが分析時に
+見た catalog ではなく、登録時点の Field catalog を正とする。
+
+標準項目、CourseBoard 追加項目、active consent items の合計は OCR の20列以下でなければならない。
+受付項目 PUT、同意候補 POST、受付 draft の3経路で同じ domain validator を使い、上限を超えた
+設定を作る処理と、既に超えている設定での読み取りをどちらも拒否する。
+
+### 設定画面と失敗時の再開
+
+`ReceptionFieldsPage` は受付項目と inactive を含む Field consent items を読み込む。空用紙分析の
+候補から既存 `consentKey` を除き、残りを原本と並べて表示する。候補は自動保存しない。
+
+作成は1件ずつ行い、既存最大 `sortOrder + 1` から採番する。途中で失敗したら後続を開始せず、
+作成済み候補を除いて未作成候補を残す。POST の response だけが失われた可能性があるため、
+失敗時は inactive を含む一覧を再取得し、同じキーがあれば成功扱いにする。分析、受付項目保存、
+候補作成、候補取消は相互ロックし、古い処理の完了で新しい候補を消さない。
+
+### 認可と互換性
+
+- CourseBoard route と usecase は設定変更 action を要求する。
+- Field GET は `field:ListMembership`、POST は `field:ManageMembership` を利用者 bearer で要求する。
+- 受付担当へ `field:ManageMembership` を追加しない。候補作成は manager / admin の設定操作である。
+- `consentItems` は additive response で、旧 backend では frontend が空配列へ fallback する。
+- 既存の固定3キーと過去の Field 証跡は変更しない。通常経路の定義、label、required、並び順は
+  Field catalog へ移し、CourseBoard に残すのは既存 opt-out の極性互換だけとする。
+- 新しい opt-out が必要になった場合は CourseBoard 設定を増やさず、Field に汎用 polarity capability を起票する。
+
+### 検証
+
+- Rust domain: key、label/body、required、active、安定順、20列上限、opt-out 反転。
+- Rust gateway: Field camelCase、includeInactive、POST body、upstream 4xx/5xx、分析 `consentItems`。
+- Rust usecase/HTTP: GET/POST、認可、unknown/inactive/duplicate、required、route classification、OpenAPI。
+- frontend models/API: camelCase/snake_case fallback、欠落時空配列、GET/POST body。
+- frontend component: 候補表示、既存除外、最大 sortOrder、部分失敗、POST response loss、相互ロック。
+- mock UI: 空用紙分析から候補作成、再分析後の保持、active catalog が受付確認画面へ出ること。
+- PR Preview: manager/admin で候補作成、受付担当で作成403、実 Field OCR と顧客同意証跡を確認する。
+
 ## 検証
 
 - domain: 既定 merge、固定必須、型・選択肢・必須検証、OCR schema。

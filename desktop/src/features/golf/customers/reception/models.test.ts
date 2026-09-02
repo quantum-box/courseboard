@@ -9,14 +9,19 @@ import {
   canRegister,
   correctedFields,
   customerPayload,
+  activeReceptionConsentItems,
+  DEFAULT_RECEPTION_CONSENT_ITEMS,
   DEFAULT_RECEPTION_FIELDS,
   duplicateNameKeys,
   fileValidationError,
   isCorrected,
   isReceptionFieldCorrected,
   missingRequiredFields,
+  missingRequiredConsentItems,
   normalizeReceptionField,
   normalizeReceptionFields,
+  normalizeReceptionConsentItem,
+  normalizeReceptionConsentItems,
   normalizeReceptionFormProposal,
   pendingRows,
   receptionFieldDefaultLabel,
@@ -224,6 +229,83 @@ describe('rowsFromDraft', () => {
   })
 })
 
+describe('Field consent catalog', () => {
+  it('normalizes camel and snake case catalog responses and keeps stable order', () => {
+    expect(normalizeReceptionConsentItems({
+      items: [
+        {
+          id: 'mci_b',
+          consent_key: 'b_terms',
+          label: 'B terms',
+          body: 'B body',
+          required: false,
+          terms_version: '2',
+          active: false,
+          sort_order: 2,
+        },
+        {
+          id: 'mci_a',
+          consentKey: 'a_terms',
+          label: 'A terms',
+          required: true,
+          termsVersion: '1',
+          active: true,
+          sortOrder: 1,
+        },
+        { consentKey: 'a_terms', label: 'duplicate' },
+      ],
+    })).toEqual([
+      {
+        id: 'mci_a',
+        consentKey: 'a_terms',
+        label: 'A terms',
+        body: null,
+        required: true,
+        termsVersion: '1',
+        active: true,
+        sortOrder: 1,
+      },
+      {
+        id: 'mci_b',
+        consentKey: 'b_terms',
+        label: 'B terms',
+        body: 'B body',
+        required: false,
+        termsVersion: '2',
+        active: false,
+        sortOrder: 2,
+      },
+    ])
+    expect(activeReceptionConsentItems(normalizeReceptionConsentItems({
+      items: [{ consentKey: 'inactive', active: false }],
+    }))).toEqual([])
+    expect(normalizeReceptionConsentItem(null)).toBeNull()
+  })
+
+  it('normalizes consent candidates while accepting Field suggestedKey responses', () => {
+    expect(normalizeReceptionFormProposal({
+      fields: [],
+      consentItems: [
+        {
+          suggestedKey: 'course_rules',
+          label: '利用約款に同意する',
+          body: '約款を確認しました',
+          required: true,
+        },
+        { consent_key: 'course_rules', label: 'duplicate' },
+      ],
+      warnings: [],
+    }).consentItems).toEqual([{
+      consentKey: 'course_rules',
+      label: '利用約款に同意する',
+      body: '約款を確認しました',
+      required: true,
+    }])
+    expect(normalizeReceptionFormProposal({ fields: [], warnings: [] }).consentItems)
+      .toEqual([])
+  })
+})
+
 describe('canRegister', () => {
   it('registers on a name and the declaration, with nothing else asked for', () => {
     expect(canRegister(declared({ ...blankRow('a'), name: '本田 康彦' }))).toBe(true)
@@ -231,6 +313,44 @@ describe('canRegister', () => {
 
   it('refuses a row with nothing but whitespace in the name', () => {
     expect(canRegister(declared({ ...blankRow('a'), name: '   ' }))).toBe(false)
+  })
+
+  it('uses active Field consent items for required validation', () => {
+    const consentItems = [
+      ...DEFAULT_RECEPTION_CONSENT_ITEMS,
+      {
+        id: 'mci_new',
+        consentKey: 'new_terms',
+        label: '新しい約款',
+        body: null,
+        required: true,
+        termsVersion: '1',
+        active: true,
+        sortOrder: 10,
+      },
+      {
+        id: 'mci_old',
+        consentKey: 'old_terms',
+        label: '停止した約款',
+        body: null,
+        required: true,
+        termsVersion: '1',
+        active: false,
+        sortOrder: 11,
+      },
+    ] as const
+    const row = declared({
+      ...blankRow('a', DEFAULT_RECEPTION_FIELDS, consentItems),
+      name: '本田 康彦',
+    })
+    expect(missingRequiredConsentItems(row, consentItems).map(item => item.consentKey))
+      .toEqual(['new_terms'])
+    expect(canRegister(row, DEFAULT_RECEPTION_FIELDS, consentItems)).toBe(false)
+    const checked = {
+      ...row,
+      consents: { ...row.consents, new_terms: true },
+    }
+    expect(canRegister(checked, DEFAULT_RECEPTION_FIELDS, consentItems)).toBe(true)
   })
 
   it('does not register the same row twice', () => {
@@ -383,6 +503,38 @@ describe('customerPayload', () => {
       { key: 'golf_cart_terms', accepted: null },
       { key: 'golf_marketing_contact', accepted: false },
     ])
+  })
+
+  it('sends the active Field catalog instead of a fixed consent allowlist', () => {
+    const consentItems = [
+      {
+        id: 'mci_terms',
+        consentKey: 'terms',
+        label: 'Terms',
+        body: null,
+        required: true,
+        termsVersion: '1',
+        active: true,
+        sortOrder: 4,
+      },
+      {
+        id: 'mci_inactive',
+        consentKey: 'inactive_terms',
+        label: 'Inactive',
+        body: null,
+        required: false,
+        termsVersion: '1',
+        active: false,
+        sortOrder: 5,
+      },
+    ] as const
+    const row = {
+      ...blankRow('a', DEFAULT_RECEPTION_FIELDS, consentItems),
+      name: '本田 康彦',
+      consents: { terms: true, inactive_terms: false },
+    }
+    expect(customerPayload(row, undefined, DEFAULT_RECEPTION_FIELDS, consentItems).consents)
+      .toEqual([{ key: 'terms', accepted: true }])
   })
 
   it('carries the line of the sheet so a duplicate can be traced back to the paper', () => {

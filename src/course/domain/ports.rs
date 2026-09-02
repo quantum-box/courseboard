@@ -8,16 +8,17 @@ use super::{
     AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, Caddie,
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
     CaddieDutyAssignment, CaddieDutyOptions, CaddieId, CaddieRankFees, CaddieRating, CaddieRoster,
-    CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder, Customer,
-    CustomerGradeRules, CustomerId, CustomerMembership, CustomerReceptionField,
-    CustomerRegistration, CustomerSearchQuery, DailyBudget, DailyBudgetQuery, DefaultWorkingHours,
-    DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
-    FieldShiftLink, GenerationSummary, GolfPricingSettings, InventoryWatermark,
-    MembershipActivityPage, MembershipActivityQuery, MembershipDiscounts, MembershipPlan,
-    MembershipPlanId, MembershipPlayWindows, MonthlySettlement, NewCustomer,
-    NewCustomerRegistration, NewReservation, PartyDetails, PlayerTagOptions, ProductSlot,
-    ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal,
-    ReceptionSheet, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
+    CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder,
+    CreateCustomerConsentItem, Customer, CustomerConsentItem, CustomerGradeRules, CustomerId,
+    CustomerMembership, CustomerReceptionField, CustomerRegistration, CustomerSearchQuery,
+    DailyBudget, DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus,
+    FieldClientCapabilities, FieldRequestContext, FieldShiftLink, GenerationSummary,
+    GolfPricingSettings, InventoryWatermark, MembershipActivityPage, MembershipActivityQuery,
+    MembershipDiscounts, MembershipPlan, MembershipPlanId, MembershipPlayWindows,
+    MonthlySettlement, NewCustomer, NewCustomerRegistration, NewReservation, PartyDetails,
+    PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionConsentDefinition,
+    ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal, ReceptionSheet,
+    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
     ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
     ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber, ShiftPolicy,
     SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
@@ -327,8 +328,8 @@ pub trait CustomerGradeRulesGateway: Send + Sync {
 /// Field's, not ours. The trail is append-only and carries the terms version
 /// it was agreed under, which is the whole point of keeping it: a tick box
 /// stored as a bare `true` cannot answer what the visitor actually signed once
-/// the terms are revised. CourseBoard supplies which boxes a golf sheet has
-/// and which way each one points; Field stores the record (ADR-0005).
+/// the terms are revised. Field supplies the active catalog; CourseBoard maps
+/// the paper's checked state into the accepted direction and files it (ADR-0014).
 #[async_trait]
 pub trait CustomerConsentGateway: Send + Sync {
     /// Files what the sheet said, one row per answered box.
@@ -343,6 +344,22 @@ pub trait CustomerConsentGateway: Send + Sync {
         customer_id: &CustomerId,
         answers: &[ReceptionConsentAnswer],
     ) -> Result<(), CourseError>;
+}
+
+/// Port for Field's tenant-wide membership consent catalog.
+#[async_trait]
+pub trait CustomerConsentCatalogGateway: Send + Sync {
+    async fn list_consent_items(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        include_inactive: bool,
+    ) -> Result<Vec<CustomerConsentItem>, CourseError>;
+
+    async fn create_consent_item(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        item: &CreateCustomerConsentItem,
+    ) -> Result<CustomerConsentItem, CourseError>;
 }
 
 /// Port for where a ledger entry came from.
@@ -973,6 +990,7 @@ pub trait CustomerReceptionOcrGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         sheet: ReceptionSheet,
         fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
     ) -> Result<ReceptionDraft, CourseError>;
 
     /// Analyzes a blank sheet and proposes only fields that can be represented

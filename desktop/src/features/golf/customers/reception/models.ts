@@ -89,9 +89,44 @@ export type ReceptionDraftVisitor = {
 }
 
 export type ReceptionDraftConsent = {
-  key: string
+  key?: string
+  /** Field may call this property `consentKey` in a membership DTO. */
+  consentKey?: string | null
+  /** The catalog wording is echoed so a draft can be displayed if it changed. */
+  label?: string | null
+  body?: string | null
+  required?: boolean
   /** Absent when the reader could not resolve the box. Not a refusal. */
   accepted?: boolean | null
+}
+
+/** A consent definition owned by Field's membership catalog. */
+export type ReceptionConsentItem = {
+  id: string | null
+  consentKey: string
+  label: string
+  body: string | null
+  required: boolean
+  termsVersion: string
+  active: boolean
+  sortOrder: number
+}
+
+/** The unsaved consent candidate returned by blank-form analysis. */
+export type ReceptionConsentCandidate = {
+  consentKey: string
+  label: string
+  body: string | null
+  required: boolean
+}
+
+export type ReceptionConsentItemWriteInput = {
+  body: string | null
+  consentKey: string
+  label: string
+  required: boolean
+  sortOrder: number
+  termsVersion: string
 }
 
 /**
@@ -112,6 +147,44 @@ export const RECEPTION_CONSENT_KEYS = [
 export type ReceptionConsentKey = (typeof RECEPTION_CONSENT_KEYS)[number]
 
 /**
+ * Compatibility catalog used while an older CourseBoard API is in front of
+ * the screen, and as the default for pure model callers. The live UI replaces
+ * this with Field's active catalog as soon as it loads it.
+ */
+export const DEFAULT_RECEPTION_CONSENT_ITEMS: readonly ReceptionConsentItem[] = [
+  {
+    id: null,
+    consentKey: 'golf_antisocial_and_course_terms',
+    label: '反社会的勢力でないことの表明・ゴルフ場利用約款の遵守',
+    body: null,
+    required: true,
+    termsVersion: '1',
+    active: true,
+    sortOrder: 0,
+  },
+  {
+    id: null,
+    consentKey: 'golf_cart_terms',
+    label: 'カート利用約款の遵守',
+    body: null,
+    required: false,
+    termsVersion: '1',
+    active: true,
+    sortOrder: 1,
+  },
+  {
+    id: null,
+    consentKey: 'golf_marketing_contact',
+    label: 'クラブからの情報提供を受け取る',
+    body: null,
+    required: false,
+    termsVersion: '1',
+    active: true,
+    sortOrder: 2,
+  },
+]
+
+/**
  * The one box the sheet itself marks 「必ず☑をご記入下さい」.
  *
  * The API refuses a registration without it, so the screen has to stop the row
@@ -124,21 +197,26 @@ export const REQUIRED_RECEPTION_CONSENT: ReceptionConsentKey =
 /** Unanswered is `null`, which is neither agreement nor refusal. */
 export type ConsentAnswer = boolean | null
 
-export type ReceptionConsents = Record<ReceptionConsentKey, ConsentAnswer>
+/** Answers are keyed by Field's dynamic consent catalog key. */
+export type ReceptionConsents = Record<string, ConsentAnswer>
 
-function emptyConsents(): ReceptionConsents {
-  return {
-    golf_antisocial_and_course_terms: null,
-    golf_cart_terms: null,
-    golf_marketing_contact: null,
-  }
+export function emptyConsents(
+  consentItems: readonly ReceptionConsentItem[] = DEFAULT_RECEPTION_CONSENT_ITEMS,
+): ReceptionConsents {
+  return Object.fromEntries(
+    consentItems.map(item => [item.consentKey, null]),
+  )
 }
 
-function consentsFromVisitor(visitor: ReceptionDraftVisitor): ReceptionConsents {
-  const consents = emptyConsents()
+function consentsFromVisitor(
+  visitor: ReceptionDraftVisitor,
+  consentItems: readonly ReceptionConsentItem[] = DEFAULT_RECEPTION_CONSENT_ITEMS,
+): ReceptionConsents {
+  const consents = emptyConsents(consentItems)
   for (const answer of visitor.consents ?? []) {
-    if ((RECEPTION_CONSENT_KEYS as readonly string[]).includes(answer.key)) {
-      consents[answer.key as ReceptionConsentKey] = answer.accepted ?? null
+    const key = answer.key ?? answer.consentKey
+    if (typeof key === 'string' && key.trim()) {
+      consents[key.trim()] = answer.accepted ?? null
     }
   }
   return consents
@@ -212,6 +290,8 @@ export type ReceptionFieldWriteInput = {
 export type ReceptionFormProposal = {
   /** Only fields the analyzer could identify are present in this list. */
   fields: ReceptionField[]
+  /** Explicit acknowledgement checkboxes, kept as unsaved Field candidates. */
+  consentItems: ReceptionConsentCandidate[]
   warnings: string[]
   previewImage?: string | null
 }
@@ -433,6 +513,74 @@ export function normalizeReceptionFields(value: unknown): ReceptionField[] {
   )
 }
 
+function nullableString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+/** Accept Field's camelCase DTO and the snake_case shape used by older mocks. */
+export function normalizeReceptionConsentItem(
+  value: unknown,
+  index = 0,
+): ReceptionConsentItem | null {
+  if (typeof value !== 'object' || value === null) return null
+  const raw = value as Record<string, unknown>
+  const rawKey = raw.consentKey ?? raw.consent_key ?? raw.key
+  if (typeof rawKey !== 'string' || !rawKey.trim()) return null
+  const consentKey = rawKey.trim()
+  const rawLabel = raw.label ?? raw.name
+  const label = typeof rawLabel === 'string' && rawLabel.trim()
+    ? rawLabel.trim()
+    : consentKey
+  const rawBody = raw.body ?? raw.termsBody ?? raw.terms_body
+  return {
+    id: nullableString(raw.id),
+    consentKey,
+    label,
+    body: nullableString(rawBody),
+    required: raw.required === true,
+    termsVersion: nullableString(raw.termsVersion ?? raw.terms_version) ?? '1',
+    active: raw.active !== false,
+    sortOrder: typeof raw.sortOrder === 'number'
+      ? raw.sortOrder
+      : typeof raw.sort_order === 'number'
+        ? raw.sort_order
+        : index,
+  }
+}
+
+/** Normalize and de-duplicate the Field catalog before it reaches the UI. */
+export function normalizeReceptionConsentItems(value: unknown): ReceptionConsentItem[] {
+  const rawItems = Array.isArray(value)
+    ? value
+    : typeof value === 'object' && value !== null
+      ? ((value as { items?: unknown; consentItems?: unknown; consent_items?: unknown }).items
+        ?? (value as { consentItems?: unknown }).consentItems
+        ?? (value as { consent_items?: unknown }).consent_items)
+      : undefined
+  if (!Array.isArray(rawItems)) return []
+  const byKey = new Map<string, ReceptionConsentItem>()
+  rawItems.forEach((item, index) => {
+    const normalized = normalizeReceptionConsentItem(item, index)
+    if (normalized && !byKey.has(normalized.consentKey)) {
+      byKey.set(normalized.consentKey, normalized)
+    }
+  })
+  return [...byKey.values()].sort((left, right) =>
+    left.sortOrder - right.sortOrder || left.consentKey.localeCompare(right.consentKey),
+  )
+}
+
+/** The active subset drives OCR and registration; inactive definitions remain in settings. */
+export function activeReceptionConsentItems(
+  items: readonly ReceptionConsentItem[],
+): ReceptionConsentItem[] {
+  return items
+    .filter(item => item.active)
+    .sort((left, right) =>
+      left.sortOrder - right.sortOrder || left.consentKey.localeCompare(right.consentKey),
+    )
+}
+
 function stringFromUnknown(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
@@ -465,7 +613,7 @@ function supportedProposalCustomField(field: ReceptionField): boolean {
  */
 export function normalizeReceptionFormProposal(value: unknown): ReceptionFormProposal {
   if (typeof value !== 'object' || value === null) {
-    return { fields: [], warnings: [] }
+    return { fields: [], consentItems: [], warnings: [] }
   }
   const raw = value as Record<string, unknown>
   const rawFields = Array.isArray(raw.fields)
@@ -506,8 +654,34 @@ export function normalizeReceptionFormProposal(value: unknown): ReceptionFormPro
       if (label) unsupported.add(label)
     })
   }
+  const rawConsentItems = raw.consentItems ?? raw.consent_items
+  const consentItems: ReceptionConsentCandidate[] = []
+  const seenConsentKeys = new Set<string>()
+  if (Array.isArray(rawConsentItems)) {
+    rawConsentItems.forEach(item => {
+      if (typeof item !== 'object' || item === null) return
+      const consent = item as Record<string, unknown>
+      const rawKey = consent.consentKey
+        ?? consent.consent_key
+        ?? consent.key
+        ?? consent.suggestedKey
+        ?? consent.suggested_key
+      if (typeof rawKey !== 'string' || !rawKey.trim()) return
+      const consentKey = rawKey.trim()
+      const label = stringFromUnknown(consent.label) || consentKey
+      if (seenConsentKeys.has(consentKey)) return
+      seenConsentKeys.add(consentKey)
+      consentItems.push({
+        consentKey,
+        label,
+        body: nullableString(consent.body),
+        required: consent.required === true,
+      })
+    })
+  }
   return {
     fields,
+    consentItems,
     warnings: [
       ...warnings,
       ...[...unsupported].map(unsupportedProposalWarning),
@@ -809,6 +983,7 @@ export function rowFromVisitor(
   visitor: ReceptionDraftVisitor,
   index: number,
   fields: readonly ReceptionField[] = DEFAULT_RECEPTION_FIELDS,
+  consentItems: readonly ReceptionConsentItem[] = DEFAULT_RECEPTION_CONSENT_ITEMS,
 ): ReceptionRow {
   const customFields = customValuesFromVisitor(visitor)
   const configuredCustomFields = Object.fromEntries([
@@ -834,7 +1009,7 @@ export function rowFromVisitor(
     phone: legacyFieldValue(readValues, 'phone'),
     email: legacyFieldValue(readValues, 'email'),
   }
-  const consents = consentsFromVisitor(visitor)
+  const consents = consentsFromVisitor(visitor, consentItems)
   return {
     // Position, not content: two players in a family share a phone number and
     // sometimes a surname, and a key made of those collapses them into one row.
@@ -863,14 +1038,18 @@ export function rowFromVisitor(
 export function rowsFromDraft(
   draft: ReceptionDraft,
   fields: readonly ReceptionField[] = DEFAULT_RECEPTION_FIELDS,
+  consentItems: readonly ReceptionConsentItem[] = DEFAULT_RECEPTION_CONSENT_ITEMS,
 ): ReceptionRow[] {
-  return (draft.visitors ?? []).map((visitor, index) => rowFromVisitor(visitor, index, fields))
+  return (draft.visitors ?? []).map((visitor, index) => (
+    rowFromVisitor(visitor, index, fields, consentItems)
+  ))
 }
 
 /** A row the desk adds because the reader missed somebody on the sheet. */
 export function blankRow(
   key: string,
   fields: readonly ReceptionField[] = DEFAULT_RECEPTION_FIELDS,
+  consentItems: readonly ReceptionConsentItem[] = DEFAULT_RECEPTION_CONSENT_ITEMS,
 ): ReceptionRow {
   const values = Object.fromEntries(fields.map(field => [field.fieldKey, null]))
   const customFields = Object.fromEntries(
@@ -889,8 +1068,8 @@ export function blankRow(
     customFields,
     readCustomFields: { ...customFields },
     read: { name: '', nameKana: '', phone: '', email: '' },
-    consents: emptyConsents(),
-    readConsents: emptyConsents(),
+    consents: emptyConsents(consentItems),
+    readConsents: emptyConsents(consentItems),
     status: 'pending',
   }
 }
@@ -989,14 +1168,24 @@ export function missingRequiredFields(
   )
 }
 
+export function missingRequiredConsentItems(
+  row: ReceptionRow,
+  consentItems: readonly ReceptionConsentItem[] = DEFAULT_RECEPTION_CONSENT_ITEMS,
+): ReceptionConsentItem[] {
+  return activeReceptionConsentItems(consentItems).filter(item =>
+    item.required && row.consents[item.consentKey] !== true,
+  )
+}
+
 export function canRegister(
   row: ReceptionRow,
   fields: readonly ReceptionField[] = DEFAULT_RECEPTION_FIELDS,
+  consentItems: readonly ReceptionConsentItem[] = DEFAULT_RECEPTION_CONSENT_ITEMS,
 ) {
   return (
     row.status === 'pending' &&
     valueText(receptionRowValue(row, 'name')).length > 0 &&
-    row.consents[REQUIRED_RECEPTION_CONSENT] === true &&
+    missingRequiredConsentItems(row, consentItems).length === 0 &&
     missingRequiredFields(row, fields).length === 0
   )
 }
@@ -1017,29 +1206,36 @@ export type ReceptionBlockedReason =
 export function blockedReason(
   row: ReceptionRow,
   fields: readonly ReceptionField[] = DEFAULT_RECEPTION_FIELDS,
+  consentItems: readonly ReceptionConsentItem[] = DEFAULT_RECEPTION_CONSENT_ITEMS,
 ): ReceptionBlockedReason {
   if (row.status !== 'pending') return null
   if (valueText(receptionRowValue(row, 'name')).length === 0) return 'name'
-  if (row.consents[REQUIRED_RECEPTION_CONSENT] !== true) return 'declaration'
+  if (missingRequiredConsentItems(row, consentItems).length > 0) return 'declaration'
   const missing = missingRequiredFields(row, fields).find(field => field.fieldKey !== 'name')
   if (missing) return { kind: 'field', fieldKey: missing.fieldKey, label: receptionFieldLabel(missing) }
   return null
 }
 
 /** Boxes where the desk did not keep what the reader proposed. */
-export function correctedConsents(row: ReceptionRow): ReceptionConsentKey[] {
-  return RECEPTION_CONSENT_KEYS.filter(key => row.consents[key] !== row.readConsents[key])
+export function correctedConsents(
+  row: ReceptionRow,
+  consentItems: readonly ReceptionConsentItem[] = DEFAULT_RECEPTION_CONSENT_ITEMS,
+): string[] {
+  return activeReceptionConsentItems(consentItems)
+    .map(item => item.consentKey)
+    .filter(key => row.consents[key] !== row.readConsents[key])
 }
 
-export function isConsentCorrected(row: ReceptionRow, key: ReceptionConsentKey) {
+export function isConsentCorrected(row: ReceptionRow, key: string) {
   return row.consents[key] !== row.readConsents[key]
 }
 
 export function pendingRows(
   rows: readonly ReceptionRow[],
   fields: readonly ReceptionField[] = DEFAULT_RECEPTION_FIELDS,
+  consentItems: readonly ReceptionConsentItem[] = DEFAULT_RECEPTION_CONSENT_ITEMS,
 ) {
-  return rows.filter(row => canRegister(row, fields))
+  return rows.filter(row => canRegister(row, fields, consentItems))
 }
 
 export function savedCount(rows: readonly ReceptionRow[]) {
@@ -1088,6 +1284,7 @@ export function customerPayload(
   row: ReceptionRow,
   sourceRowIndex?: number,
   fields: readonly ReceptionField[] = DEFAULT_RECEPTION_FIELDS,
+  consentItems: readonly ReceptionConsentItem[] = DEFAULT_RECEPTION_CONSENT_ITEMS,
 ) {
   const customKeys = new Set([
     ...fields.filter(field => field.kind === 'custom').map(field => field.fieldKey),
@@ -1114,9 +1311,9 @@ export function customerPayload(
     // Every box, including the ones nobody could resolve. An unanswered box is
     // sent as `null` rather than dropped so the API can tell "not ticked" from
     // "not on this sheet"; it files neither.
-    consents: RECEPTION_CONSENT_KEYS.map(key => ({
-      key,
-      accepted: row.consents[key],
+    consents: activeReceptionConsentItems(consentItems).map(item => ({
+      key: item.consentKey,
+      accepted: row.consents[item.consentKey] ?? null,
     })),
   }
 }

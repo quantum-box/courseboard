@@ -19,7 +19,8 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::customer_consent::{
-    reception_consent, required_reception_consents, ReceptionConsentAnswer, RECEPTION_CONSENTS,
+    legacy_reception_consent_definitions, reception_consent, ReceptionConsentAnswer,
+    ReceptionConsentDefinition,
 };
 use super::error::CourseError;
 use super::NewCustomer;
@@ -104,8 +105,17 @@ pub enum ReceptionSheetMediaType {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReceptionFormProposal {
     pub fields: Vec<super::CustomerReceptionField>,
+    pub consent_items: Vec<ProposedConsentItem>,
     pub warnings: Vec<String>,
     pub preview_image: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProposedConsentItem {
+    pub consent_key: String,
+    pub label: String,
+    pub body: Option<String>,
+    pub required: bool,
 }
 
 impl ReceptionSheetMediaType {
@@ -275,6 +285,19 @@ pub fn reception_sheet_schema() -> Vec<ReceptionOcrField> {
 pub fn reception_sheet_schema_for_fields(
     fields: &[super::CustomerReceptionField],
 ) -> Result<Vec<ReceptionOcrField>, CourseError> {
+    let consents = legacy_reception_consent_definitions();
+    reception_sheet_schema_for_fields_and_consents(fields, &consents)
+}
+
+/// Builds a reception OCR schema with the active Field consent catalog.
+///
+/// The catalog is intentionally passed as an argument rather than read from a
+/// CourseBoard repository: Field is the source of truth and callers must fetch
+/// it for the current tenant immediately before this function is used.
+pub fn reception_sheet_schema_for_fields_and_consents(
+    fields: &[super::CustomerReceptionField],
+    consents: &[ReceptionConsentDefinition],
+) -> Result<Vec<ReceptionOcrField>, CourseError> {
     let mut item_fields = Vec::new();
     for field in fields.iter().filter(|field| field.enabled) {
         if field.kind == super::ReceptionFieldKind::Standard && field.field_key == "address" {
@@ -298,16 +321,18 @@ pub fn reception_sheet_schema_for_fields(
             });
         }
     }
-    item_fields.extend(
-        super::customer_consent::RECEPTION_CONSENTS
-            .iter()
-            .map(|consent| ReceptionOcrColumn {
-                key: consent.key.to_string(),
-                label: consent.prompt.to_string(),
-                field_type: RECEPTION_BOOLEAN_FIELD_TYPE.to_string(),
-                options: Vec::new(),
-            }),
-    );
+    let mut consent_refs = consents.iter().collect::<Vec<_>>();
+    consent_refs.sort_by(|left, right| {
+        left.sort_order
+            .cmp(&right.sort_order)
+            .then_with(|| left.key.cmp(&right.key))
+    });
+    item_fields.extend(consent_refs.iter().map(|consent| ReceptionOcrColumn {
+        key: consent.key.clone(),
+        label: consent.prompt().to_string(),
+        field_type: RECEPTION_BOOLEAN_FIELD_TYPE.to_string(),
+        options: Vec::new(),
+    }));
     if item_fields
         .iter()
         .any(|column| column.label.chars().count() > 120)
@@ -355,6 +380,18 @@ fn address_column(key: &str, label: &str, part: &str) -> ReceptionOcrColumn {
     }
 }
 
+fn sorted_consent_definitions(
+    consents: &[ReceptionConsentDefinition],
+) -> Vec<ReceptionConsentDefinition> {
+    let mut sorted = consents.to_vec();
+    sorted.sort_by(|left, right| {
+        left.sort_order
+            .cmp(&right.sort_order)
+            .then_with(|| left.key.cmp(&right.key))
+    });
+    sorted
+}
+
 /// One person as the sheet was read, before anybody has looked at it.
 ///
 /// Every field is optional including the name: a row the reader could not make
@@ -383,6 +420,19 @@ impl ReceptionDraftRow {
         phone: Option<String>,
         email: Option<String>,
     ) -> Self {
+        let consents = legacy_reception_consent_definitions();
+        Self::new_with_consents(name, name_kana, phone, email, &consents)
+    }
+
+    /// Creates a row with one unanswered answer for every active Field
+    /// catalog item.
+    pub fn new_with_consents(
+        name: Option<String>,
+        name_kana: Option<String>,
+        phone: Option<String>,
+        email: Option<String>,
+        consents: &[ReceptionConsentDefinition],
+    ) -> Self {
         Self {
             name: normalize(name),
             name_kana: normalize(name_kana),
@@ -392,12 +442,9 @@ impl ReceptionDraftRow {
             sex: None,
             address: None,
             custom_fields: BTreeMap::new(),
-            consents: RECEPTION_CONSENTS
-                .iter()
-                .map(|consent| ReceptionConsentAnswer {
-                    key: consent.key,
-                    accepted: None,
-                })
+            consents: sorted_consent_definitions(consents)
+                .into_iter()
+                .map(|consent| ReceptionConsentAnswer::new(consent.key.clone(), None))
                 .collect(),
         }
     }
@@ -456,16 +503,37 @@ impl ReceptionDraftRow {
     /// An unknown key is ignored rather than appended: the only source of keys
     /// is the schema this module also builds, and a row carrying a consent the
     /// desk cannot see is worse than one silently dropped.
-    pub fn with_consent_tick(mut self, key: &str, ticked: Option<bool>) -> Self {
+    pub fn with_consent_tick(self, key: &str, ticked: Option<bool>) -> Self {
         let Some(consent) = reception_consent(key) else {
             return self;
         };
+        let definition = ReceptionConsentDefinition {
+            key: consent.key.to_string(),
+            label: consent.label.to_string(),
+            body: Some(consent.prompt.to_string()),
+            required: consent.required,
+            sort_order: 0,
+            polarity: consent.polarity,
+        };
+        self.with_consent_definition(&definition, ticked)
+    }
+
+    /// Records a reader answer using one Field catalog definition.
+    pub fn with_consent_definition(
+        mut self,
+        consent: &ReceptionConsentDefinition,
+        ticked: Option<bool>,
+    ) -> Self {
+        let accepted = consent.accepted_from_tick(ticked);
         if let Some(answer) = self
             .consents
             .iter_mut()
             .find(|answer| answer.key == consent.key)
         {
-            answer.accepted = consent.polarity.accepted_from_tick(ticked);
+            answer.accepted = accepted;
+        } else {
+            self.consents
+                .push(ReceptionConsentAnswer::new(consent.key.clone(), accepted));
         }
         self
     }
@@ -478,11 +546,20 @@ impl ReceptionDraftRow {
     /// Whether the declaration the sheet requires of everyone came back as a
     /// yes. An unread box is not a yes.
     pub fn has_required_consents(&self) -> bool {
-        required_reception_consents().all(|required| {
-            self.consents
-                .iter()
-                .any(|answer| answer.key == required.key && answer.accepted == Some(true))
-        })
+        let definitions = legacy_reception_consent_definitions();
+        self.has_required_consents_for(&definitions)
+    }
+
+    /// Whether every required active Field consent was explicitly accepted.
+    pub fn has_required_consents_for(&self, consents: &[ReceptionConsentDefinition]) -> bool {
+        consents
+            .iter()
+            .filter(|consent| consent.required)
+            .all(|required| {
+                self.consents
+                    .iter()
+                    .any(|answer| answer.key == required.key && answer.accepted == Some(true))
+            })
     }
 
     /// Consent ticks alone do not make a person. A row the reader answered
@@ -688,6 +765,7 @@ impl ReceptionDraft {
 
 #[cfg(test)]
 mod tests {
+    use super::super::customer_consent::RECEPTION_CONSENTS;
     use super::*;
 
     fn jpeg(extra: usize) -> Vec<u8> {

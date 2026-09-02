@@ -16,6 +16,7 @@
   - [ADR-0011: テナント選択はextension有効判定ではなくポリシーで行う](src/architecture/decisions/ADR-0011-policy-based-tenant-selection.md)
   - [ADR-0012: CourseBoardのフィーチャーフラグはplatformテナントに置く](src/architecture/decisions/ADR-0012-feature-flags-on-the-platform-tenant.md)
   - [ADR-0013: ひとつの操作を抽象と具体へ分解し、両方へ書く](src/architecture/decisions/ADR-0013-split-one-action-into-abstract-and-concrete.md)
+  - [ADR-0014: 受付用紙の同意カタログはFieldを正とする](src/architecture/decisions/ADR-0014-reception-consent-catalog-boundary.md)
 
 # Business
 
@@ -43,7 +44,7 @@
     - [設計](src/tasks/in-progress/reservation-customer-ledger/design.md)
   - [CourseBoard の請求先と法人売掛を連携する](src/tasks/in-progress/plt-3406-bill-to/task.md)
     - [設計](src/tasks/in-progress/plt-3406-bill-to/design.md)
-  - [受付用紙の画像から顧客を登録する（AI OCR）](src/tasks/in-progress/ai-ocr-customer-reception/task.md)
+  - [受付用紙の画像から顧客を登録する（AI OCR）](src/tasks/completed/v0.1.14/ai-ocr-customer-reception/task.md)
   - [SCC-3 コース横断予約商品](src/tasks/in-progress/scc-3-product-courses/task.md)
     - [設計](src/tasks/in-progress/scc-3-product-courses/design.md)
   - [SCC-6 テナント timezone](src/tasks/in-progress/scc-6-tenant-timezone/task.md)

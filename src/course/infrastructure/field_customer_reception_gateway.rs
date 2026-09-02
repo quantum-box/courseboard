@@ -18,12 +18,13 @@ use async_trait::async_trait;
 use serde::Deserialize;
 
 use crate::course::domain::{
-    reception_sheet_schema_for_fields, CourseError, CustomerReceptionField,
-    CustomerReceptionOcrGateway, GatewayCredentials, ReceptionDraft, ReceptionDraftRow,
-    ReceptionFieldInput, ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal,
-    ReceptionReaderFailure, ReceptionSheet, RECEPTION_CONSENTS, RECEPTION_OCR_ENTITY_KEY,
-    RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL, RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA,
-    RECEPTION_ROW_PHONE, STANDARD_RECEPTION_FIELD_KEYS,
+    reception_sheet_schema_for_fields_and_consents, CourseError, CustomerReceptionField,
+    CustomerReceptionOcrGateway, GatewayCredentials, ProposedConsentItem,
+    ReceptionConsentDefinition, ReceptionDraft, ReceptionDraftRow, ReceptionFieldInput,
+    ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal, ReceptionReaderFailure,
+    ReceptionSheet, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL,
+    RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
+    STANDARD_RECEPTION_FIELD_KEYS,
 };
 
 use super::field_gateway::{
@@ -52,11 +53,12 @@ impl CustomerReceptionOcrGateway for FieldCustomerReceptionGateway {
         credentials: GatewayCredentials<'_>,
         sheet: ReceptionSheet,
         fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
     ) -> Result<ReceptionDraft, CourseError> {
-        let schema =
-            serde_json::to_string(&reception_sheet_schema_for_fields(fields)?).map_err(|_| {
-                CourseError::Provider("reception sheet schema is not serializable".into())
-            })?;
+        let schema = serde_json::to_string(&reception_sheet_schema_for_fields_and_consents(
+            fields, consents,
+        )?)
+        .map_err(|_| CourseError::Provider("reception sheet schema is not serializable".into()))?;
         let media_type = sheet.media_type();
         let part = reqwest::multipart::Part::bytes(sheet.into_bytes())
             // The desk's own filename is deliberately not forwarded: a scanner
@@ -82,7 +84,7 @@ impl CustomerReceptionOcrGateway for FieldCustomerReceptionGateway {
             reader_failure,
         )
         .await?;
-        Ok(map_draft(response, fields))
+        Ok(map_draft(response, fields, consents))
     }
 
     async fn analyze_reception_form(
@@ -130,9 +132,24 @@ struct FieldReceptionFormProposal {
     #[serde(default)]
     custom_fields: Vec<FieldProposedCustomField>,
     #[serde(default)]
+    consent_items: Vec<FieldProposedConsentItem>,
+    #[serde(default)]
     warnings: Vec<String>,
     #[serde(default)]
     preview_image: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldProposedConsentItem {
+    #[serde(default)]
+    consent_key: String,
+    #[serde(default)]
+    label: String,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    required: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -179,6 +196,7 @@ fn map_form_proposal(
     let mut seen_keys: HashSet<String> = HashSet::new();
     seen_keys.insert("name".to_string());
     let mut warnings = response.warnings;
+    let consent_items = map_proposed_consent_items(response.consent_items, &mut warnings);
 
     for proposed in response.fields {
         let field_key = proposed.field_key.trim();
@@ -280,9 +298,61 @@ fn map_form_proposal(
     });
     ReceptionFormProposal {
         fields,
+        consent_items,
         warnings,
         preview_image: response.preview_image,
     }
+}
+
+fn map_proposed_consent_items(
+    items: Vec<FieldProposedConsentItem>,
+    warnings: &mut Vec<String>,
+) -> Vec<ProposedConsentItem> {
+    let mut seen = HashSet::new();
+    let mut mapped = Vec::new();
+    for item in items.into_iter().take(60) {
+        let key = item.consent_key.trim();
+        let label = item.label.trim();
+        let valid_key = !key.is_empty()
+            && key.len() <= 64
+            && key
+                .chars()
+                .next()
+                .is_some_and(|first| first.is_ascii_lowercase())
+            && key.chars().all(|character| {
+                character.is_ascii_lowercase() || character.is_ascii_digit() || character == '_'
+            });
+        let body = item
+            .body
+            .map(|body| body.trim().to_string())
+            .filter(|body| !body.is_empty());
+        if !valid_key
+            || label.is_empty()
+            || label.chars().count() > 500
+            || body
+                .as_ref()
+                .is_some_and(|body| body.chars().count() > 4_000)
+        {
+            warnings.push(format!(
+                "同意項目「{}」は Field の同意定義として扱えないため候補から除外しました。",
+                if label.is_empty() { key } else { label }
+            ));
+            continue;
+        }
+        if !seen.insert(key.to_string()) {
+            warnings.push(format!(
+                "同意キー「{key}」が重複したため、最初の候補だけを使います。"
+            ));
+            continue;
+        }
+        mapped.push(ProposedConsentItem {
+            consent_key: key.to_string(),
+            label: label.to_string(),
+            body,
+            required: item.required,
+        });
+    }
+    mapped
 }
 
 fn map_standard_field_key(field_key: &str) -> Option<&'static str> {
@@ -360,7 +430,11 @@ struct FieldGenericOcrDraft {
     warnings: Vec<String>,
 }
 
-fn map_draft(response: FieldGenericOcrDraft, fields: &[CustomerReceptionField]) -> ReceptionDraft {
+fn map_draft(
+    response: FieldGenericOcrDraft,
+    fields: &[CustomerReceptionField],
+    consents: &[ReceptionConsentDefinition],
+) -> ReceptionDraft {
     let rows = response
         .fields
         .get(RECEPTION_ROWS_KEY)
@@ -368,15 +442,19 @@ fn map_draft(response: FieldGenericOcrDraft, fields: &[CustomerReceptionField]) 
         .map(|rows| {
             rows.iter()
                 .map(|row| {
-                    let draft = ReceptionDraftRow::new(
+                    let draft = ReceptionDraftRow::new_with_consents(
                         column(row, RECEPTION_ROW_NAME),
                         column(row, RECEPTION_ROW_NAME_KANA),
                         column(row, RECEPTION_ROW_PHONE),
                         column(row, RECEPTION_ROW_EMAIL),
+                        consents,
                     )
                     .with_configured_fields(fields, row);
-                    RECEPTION_CONSENTS.iter().fold(draft, |draft, consent| {
-                        draft.with_consent_tick(consent.key, tick_column(row, consent.key))
+                    consents.iter().fold(draft, |draft, consent| {
+                        draft.with_consent_definition(
+                            consent,
+                            tick_column(row, consent.key.as_str()),
+                        )
                     })
                 })
                 .collect()
@@ -418,16 +496,19 @@ mod tests {
     use super::super::field_gateway::field_error_code;
     use super::*;
     use crate::course::domain::{
-        CONSENT_ANTISOCIAL_AND_COURSE_TERMS, CONSENT_CART_TERMS, CONSENT_MARKETING_CONTACT,
+        legacy_reception_consent_definitions, CONSENT_ANTISOCIAL_AND_COURSE_TERMS,
+        CONSENT_CART_TERMS, CONSENT_MARKETING_CONTACT, RECEPTION_CONSENTS,
     };
 
     fn draft_from(json: serde_json::Value) -> ReceptionDraft {
+        let consents = legacy_reception_consent_definitions();
         map_draft(
             serde_json::from_value(json).expect("field draft shape"),
             &crate::course::domain::CustomerReceptionField::merge_with_defaults(
                 "test-tenant",
                 Vec::new(),
             ),
+            &consents,
         )
     }
 
@@ -435,9 +516,11 @@ mod tests {
         json: serde_json::Value,
         fields: &[CustomerReceptionField],
     ) -> ReceptionDraft {
+        let consents = legacy_reception_consent_definitions();
         map_draft(
             serde_json::from_value(json).expect("field draft shape"),
             fields,
+            &consents,
         )
     }
 
@@ -454,6 +537,14 @@ mod tests {
                     { "fieldKey": "customer_sex", "enabled": true, "required": false, "label": "性別" },
                     { "fieldKey": "customer_address", "enabled": true, "required": true, "label": "住所" },
                     { "fieldKey": "subject_name", "enabled": true, "required": false, "label": "ペット名" }
+                ],
+                "consentItems": [
+                    {
+                        "consentKey": "golf_privacy_terms",
+                        "label": "個人情報の取扱い",
+                        "body": "個人情報の取扱いに同意します",
+                        "required": true
+                    }
                 ],
                 "warnings": [],
                 "previewImage": "data:image/jpeg;base64,abc"
@@ -476,6 +567,9 @@ mod tests {
         // A disabled upstream field cannot become required locally.
         assert!(!field("email").required);
         assert!(field("address").required);
+        assert_eq!(proposal.consent_items.len(), 1);
+        assert_eq!(proposal.consent_items[0].consent_key, "golf_privacy_terms");
+        assert!(proposal.consent_items[0].required);
         assert!(proposal
             .warnings
             .iter()
@@ -860,6 +954,7 @@ mod tests {
             reqwest::Client::new(),
             Some(&format!("http://{address}")),
         );
+        let consents = legacy_reception_consent_definitions();
         let error = gateway
             .draft_reception(
                 GatewayCredentials {
@@ -874,6 +969,7 @@ mod tests {
                     "operator-test",
                     Vec::new(),
                 ),
+                &consents,
             )
             .await
             .expect_err("an unpaid reader cannot draft");
