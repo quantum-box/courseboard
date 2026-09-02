@@ -7,7 +7,10 @@
     "studio": "remotion studio src/index.ts",
     "type-check": "tsc --noEmit",
     "render": "remotion render src/index.ts CourseBoardPromo out/courseboard-promo.mp4 --codec h264 --crf 18 --pixel-format yuv420p",
-    "render:poster": "remotion still src/index.ts CourseBoardPromoPoster out/courseboard-promo-poster.png"
+    "render:poster": "remotion still src/index.ts CourseBoardPromoPoster out/courseboard-promo-poster.png",
+    "render:reception-tutorial": "remotion render src/index.ts ReceptionTutorial out/courseboard-reception-tutorial.mp4 --codec h264 --crf 18 --pixel-format yuv420p",
+    "narration": "node scripts/build-narration.mjs",
+    "render:reception-tutorial:poster": "remotion still src/index.ts ReceptionTutorialPoster out/courseboard-reception-tutorial-poster.png"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.349",

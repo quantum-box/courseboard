@@ -1,5 +1,10 @@
 import {Composition, Still} from 'remotion';
 import {CourseBoardPromoRapid, CourseBoardPromoRapidPoster} from './rapid-video';
+import {
+  RECEPTION_TUTORIAL_FRAMES,
+  ReceptionTutorial,
+  ReceptionTutorialPoster,
+} from './reception-tutorial';
 
 export const RemotionRoot = () => (
   <>
@@ -14,6 +19,20 @@ export const RemotionRoot = () => (
     <Still
       id="CourseBoardPromoPoster"
       component={CourseBoardPromoRapidPoster}
+      width={1920}
+      height={1080}
+    />
+    <Composition
+      id="ReceptionTutorial"
+      component={ReceptionTutorial}
+      durationInFrames={RECEPTION_TUTORIAL_FRAMES}
+      fps={30}
+      width={1920}
+      height={1080}
+    />
+    <Still
+      id="ReceptionTutorialPoster"
+      component={ReceptionTutorialPoster}
       width={1920}
       height={1080}
     />
