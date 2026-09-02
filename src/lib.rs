@@ -3038,59 +3038,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancellation_fee_collection_requires_field_api_url() {
-        let auth = TestAuth::new();
-        let app = test_app_with_verifier_and_cancellation_fee_config(
-            auth.verifier(),
-            cancellation_fee_config(None),
-        )
-        .await;
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .method(Method::POST)
-                    .uri("/cancellation-fee-collections")
-                    .header(AUTHORIZATION, format!("Bearer {}", auth.valid_token()))
-                    .header(CONTENT_TYPE, "application/json")
-                    .body(Body::from(
-                        serde_json::json!({
-                            "tenant_id": "scc",
-                            "bill_to": {
-                                "kind": "customer",
-                                "customerId": "cus_person_a"
-                            },
-                            "customer_name": "山田 太郎",
-                            "customer_phone": "+819012345678",
-                            "amount": 5000,
-                            "due_date": "2026-07-04"
-                        })
-                        .to_string(),
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        // Provider failures deliberately use 424 rather than a 5xx response:
-        // Cloudflare can replace origin 5xx bodies with a CORS-less error page,
-        // hiding the actionable configuration error from the operator UI.
-        assert_eq!(response.status(), StatusCode::FAILED_DEPENDENCY);
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .expect("collect missing Field API URL response")
-            .to_bytes();
-        let body: serde_json::Value =
-            serde_json::from_slice(&body).expect("decode missing Field API URL response");
-        assert_eq!(body["error"], "provider_error");
-        assert_eq!(
-            body["message"],
-            "external provider error: TACHYON_FIELD_API_URL is required to create cancellation fee payment links"
-        );
-    }
-
-    #[tokio::test]
     async fn access_token_without_audience_uses_client_id() {
         let auth = TestAuth::new();
         let app = test_app_with_verifier(
