@@ -5,9 +5,11 @@ description: CourseBoard の機能の使い方を解説する動画を Remotion 
 
 # CourseBoard の使い方解説動画
 
-`video/` が動画置き場。プロモーション動画と機能ごとの使い方動画が同居する。既存の実装は
-[reception-tutorial.tsx](../../../video/src/reception-tutorial.tsx) が唯一の完成形なので、
-新しい動画はこれを写して作る。
+`video/` が動画置き場。プロモーション動画と機能ごとの使い方動画が同居する。完成形は
+[reception-tutorial.tsx](../../../video/src/reception-tutorial.tsx)（受付）と
+[dispatch-tutorial.tsx](../../../video/src/dispatch-tutorial.tsx)（キャディの配置）の2本で、
+新しい動画はどちらかを写して作る。部品（Stage / Cursor / Ring / MockPanel …）は両方に同じものが
+入っている。配置の方には、表・シート・タブ・数値カードの部品と、座標を定数から引く書き方がある。
 
 プロモ動画（`rapid-video.tsx`）とは別物。**プロモは「何ができるか」を見せ、使い方動画は
 「どう操作するか」を1手順ずつ追う。** 画面モックの作り込みと、カーソル・強調枠・
@@ -28,13 +30,15 @@ description: CourseBoard の機能の使い方を解説する動画を Remotion 
 
 尺を tsx に数字で持たせない。音声の長さから決める。
 
-- 原稿と生成は `video/scripts/build-narration.mjs`。現状は受付専用なので、
-  **新しい動画は雛形としてコピーし、`AUDIO_DIR` と `MANIFEST` の出力先を変える。**
-- `npm run narration` が `public/audio/<機能>/*.wav` と、音声の長さを並べた JSON を書く。
-  受付の分は `public/audio/reception/` と `src/narration.json`。**2本目を足すときは
-  機能ごとに名前を分ける**（`src/narration.json` は受付専用の名前のまま増やせない）。
+- 生成は `video/scripts/build-narration.mjs <機能>`。原稿と出力先は
+  `video/scripts/narration/<機能>.mjs`（`audioDir` / `manifest` / `clips`）にある。
+  **新しい動画はここにファイルを1つ足し、`package.json` に `narration:<機能>` を足す。**
+- `npm run narration`（受付）/ `npm run narration:dispatch`（配置）が
+  `public/audio/<機能>/*.wav` と、音声の長さを並べた JSON を書く。
+  受付は `src/narration.json`、配置は `src/narration-dispatch.json`。
   原稿が変わっていないクリップは作り直さない（TTS は毎回まったく同じ音にならないため、
-  作り直すと関係ないシーンの尺まで動く）。
+  作り直すと関係ないシーンの尺まで動く）。**流す前に `git status` で音声が触られていないことを
+  確かめる。** manifest の `hash` が原稿とずれていると全クリップが作り直される。
 - tsx 側は JSON の秒数から `sceneFrames(id)` を出し、`TransitionSeries.Sequence` に渡す。
 
 ```ts

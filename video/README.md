@@ -9,7 +9,8 @@ CourseBoard の動画を置く Remotion プロジェクトである。プロモ�
 npm install
 npm run studio
 npm run type-check
-npm run narration    # 受付の使い方動画のナレーションを作り直す
+npm run narration             # 受付の使い方動画のナレーションを作り直す
+npm run narration:dispatch    # キャディの配置の使い方動画のナレーションを作り直す
 ```
 
 ```bash
@@ -17,6 +18,8 @@ npm run render                            # プロモ本編
 npm run render:poster                     # プロモのポスター
 npm run render:reception-tutorial         # 受付の使い方動画
 npm run render:reception-tutorial:poster  # 受付の使い方動画のサムネイル
+npm run render:dispatch-tutorial          # キャディの配置の使い方動画
+npm run render:dispatch-tutorial:poster   # キャディの配置の使い方動画のサムネイル
 ```
 
 成果物は `out/` に生成される。
@@ -48,11 +51,27 @@ npm run render:reception-tutorial:poster  # 受付の使い方動画のサムネ
 
 #### ナレーション
 
-読み上げは Tachyon CLI の TTS（`tachyon tts synthesize`）で作る。原稿は `scripts/build-narration.mjs` にあり、`npm run narration` で `public/audio/reception/*.wav` と `src/narration.json` を作り直す。原稿が変わっていないクリップは作り直さない（TTS は毎回まったく同じ音にはならないため）。全部やり直すときは `npm run narration -- --force`。
+読み上げは Tachyon CLI の TTS（`tachyon tts synthesize`）で作る。原稿は `scripts/narration/reception.mjs` にあり、`npm run narration` で `public/audio/reception/*.wav` と `src/narration.json` を作り直す。原稿が変わっていないクリップは作り直さない（TTS は毎回まったく同じ音にはならないため）。全部やり直すときは `npm run narration -- --force`。
 
 **シーンの尺と画面の動きは、この音声の長さから決まる。** `narration.json` の秒数から各シーンのフレーム数が決まり、カーソルの移動やチェックの入るタイミングは読み上げの進み具合（0〜1）で置いてある。原稿を直せば尺も動きも勝手に合うので、`src/reception-tutorial.tsx` 側で尺を数字で持たない。
 
 認証は Tachyon CLI の profile を使う。既定は `admin` プロファイルと CourseBoard のテナントで、`TACHYON_PROFILE` / `TACHYON_TENANT_ID` で上書きできる。声とモデルは `NARRATION_VOICE` / `NARRATION_MODEL`（既定は `Kore` / `gemini-2.5-flash-preview-tts`）。
+
+### `DispatchTutorial` — キャディの配置の使い方動画（約 103 秒）
+
+その日、だれがどの組につくかを決めるまでを1手順ずつ追う。読み上げと、画面下のテロップで進む。
+
+1. 日付をえらぶ（当日でも先の日でも。未配置・配置済みの組数が出る）
+2. 自動で試す（「配置を試す」は候補を並べるだけで、まだ何も決まらない）
+3. この配置で決める（割り当てた件数と飛ばした件数が出る）
+4. 残りを1組ずつ（「キャディを決める」→ おすすめの候補 → 「この人にする」）
+5. 割当を直す（「この日の割当」の付け替え・完了・取り消し）
+
+このあとに「人数の目安」（キャディ付き枠と予備に残す組数）の補足がつく。
+
+画面は `desktop/src/features/golf/CaddiesPage.tsx` の dispatch タブと `UnassignedRounds.tsx` の再現で、文言は日本語 locale の `caddies.dispatch.* / autoAssign.* / unassigned.* / reassign.* / supply.*` に合わせている。**配置画面の UI や文言を変えたら `src/dispatch-tutorial.tsx` も直す。**
+
+原稿は `scripts/narration/dispatch.mjs`。`npm run narration:dispatch` で `public/audio/dispatch/*.wav` と `src/narration-dispatch.json` を作り直す。尺と動きの決まり方は受付の動画と同じ。
 
 ## 素材
 

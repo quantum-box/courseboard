@@ -9,8 +9,11 @@
     "render": "remotion render src/index.ts CourseBoardPromo out/courseboard-promo.mp4 --codec h264 --crf 18 --pixel-format yuv420p",
     "render:poster": "remotion still src/index.ts CourseBoardPromoPoster out/courseboard-promo-poster.png",
     "render:reception-tutorial": "remotion render src/index.ts ReceptionTutorial out/courseboard-reception-tutorial.mp4 --codec h264 --crf 18 --pixel-format yuv420p",
-    "narration": "node scripts/build-narration.mjs",
-    "render:reception-tutorial:poster": "remotion still src/index.ts ReceptionTutorialPoster out/courseboard-reception-tutorial-poster.png"
+    "narration": "node scripts/build-narration.mjs reception",
+    "render:reception-tutorial:poster": "remotion still src/index.ts ReceptionTutorialPoster out/courseboard-reception-tutorial-poster.png",
+    "narration:dispatch": "node scripts/build-narration.mjs dispatch",
+    "render:dispatch-tutorial": "remotion render src/index.ts DispatchTutorial out/courseboard-dispatch-tutorial.mp4 --codec h264 --crf 18 --pixel-format yuv420p",
+    "render:dispatch-tutorial:poster": "remotion still src/index.ts DispatchTutorialPoster out/courseboard-dispatch-tutorial-poster.png"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.349",
