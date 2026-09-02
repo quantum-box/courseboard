@@ -71,6 +71,7 @@ import {
   type NewReservationTarget,
 } from './NewReservationEditor'
 import { CancelReservationDialog } from './CancelReservationDialog'
+import { DayCancellations } from './DayCancellations'
 import { RegisterNamesDialog } from './RegisterNamesDialog'
 import { PartyEditor } from './PartyEditor'
 import { SlotContextMenu, type SlotContextTarget } from './SlotContextMenu'
@@ -794,6 +795,10 @@ export function LedgerPage() {
           />
         )}
       </div>
+
+      {/* Under the board, not on it: the slot is genuinely free again, and
+          the desk still needs to know a group let it go this morning. */}
+      <DayCancellations date={date} />
 
       <SlotContextMenu
         target={contextTarget}

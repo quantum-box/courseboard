@@ -53,7 +53,9 @@ use crate::course::usecase::{
 };
 use crate::{AppError, AppState, CallerPrincipal};
 
-fn customer_gateway(state: &AppState) -> Arc<FieldCustomerGateway> {
+/// Shared with the cancellation handlers, which resolve the same ledger for
+/// the rows they are about to show.
+pub(super) fn customer_gateway(state: &AppState) -> Arc<FieldCustomerGateway> {
     let field_api_url = state.cancellation_fee_config.field_api_url.as_deref();
     Arc::new(FieldCustomerGateway::new(
         state.http_client.clone(),

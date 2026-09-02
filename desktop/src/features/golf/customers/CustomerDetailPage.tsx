@@ -17,6 +17,7 @@ import { clearResourceCache, useResource } from '../../../hooks/useResource'
 import { navigate, navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { CustomerRegistrationNote } from './CustomerRegistrationNote'
+import { CustomerCancellationsPanel } from './CustomerCancellationsPanel'
 import { CustomerVisitsPanel } from './CustomerVisitsPanel'
 import { MembershipBadge } from './MembershipBadge'
 import { MembershipActivityPanel } from './MembershipActivityPanel'
@@ -116,6 +117,11 @@ export function CustomerDetailPage({ customerId }: { customerId: string }) {
           {/* Below the membership, because how often somebody comes is read
               after who they are — and it is the reason the page gets opened. */}
           <CustomerVisitsPanel customerId={customer.id} />
+
+          {/* After the visits, because the count of cancellations is up there
+              and this is what that count is made of — including whether the
+              club has already billed for any of it. */}
+          <CustomerCancellationsPanel customerId={customer.id} />
 
           {confirmingDelete ? (
             <DeleteCustomerDialog

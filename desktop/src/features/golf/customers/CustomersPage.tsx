@@ -1,5 +1,5 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
-import { FileScan, PhoneCall, UserPlus } from 'lucide-react'
+import { CalendarX, FileScan, PhoneCall, UserPlus } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -111,6 +111,16 @@ export function CustomersPage() {
               onClick={event => navigateFromClick(event, 'golf/customers/call-list')}
             >
               <PhoneCall /> {t('customers:callList.open')}
+            </Button>
+            {/* Who cancelled and who still owes for it: the same ledger read
+                by what people gave up rather than by who they are, and the
+                only place a cancellation fee starts from a real booking. */}
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={event => navigateFromClick(event, 'golf/customers/cancellations')}
+            >
+              <CalendarX /> {t('customers:cancellations.open')}
             </Button>
             <Button type="button" variant="primary" onClick={() => setCreating(true)}>
               <UserPlus /> {t('customers:create.open')}

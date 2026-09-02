@@ -9,6 +9,7 @@ use utoipa::{
 };
 
 use super::http;
+use super::http_cancellations;
 use super::http_commercial;
 use super::http_customers;
 use super::http_field;
@@ -96,6 +97,8 @@ impl Modify for SecurityAddon {
         http_customers::get_customer_visits,
         http_customers::get_customer_membership_activities,
         http_customers::list_customer_summaries,
+        http_cancellations::list_reservation_cancellations,
+        http_cancellations::settle_cancellation_fees,
         http_customers::get_customer_registration,
         http_customers::get_customer_grade_rules,
         http_customers::replace_customer_grade_rules,

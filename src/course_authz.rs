@@ -36,8 +36,9 @@ use crate::course::domain::actions::{
     CALCULATE_FEES, LIST_CADDIE_ASSIGNMENTS, LIST_CADDIE_AVAILABILITY, LIST_CADDIE_RANK_FEES,
     LIST_COURSES, LIST_CUSTOMERS, LIST_MEMBERSHIP, LIST_SHIFTS, LIST_SLOT_OVERRIDES,
     LIST_TEE_SHEET, MANAGE_CADDIE_ASSIGNMENTS, MANAGE_CADDIE_AVAILABILITY, MANAGE_CADDIE_RANK_FEES,
-    MANAGE_COURSES, MANAGE_CUSTOMERS, MANAGE_MEMBERSHIP_PLANS, MANAGE_RESERVATIONS,
-    MANAGE_RESERVATION_POLICY, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES, SEED_DEMO_BOARD,
+    MANAGE_CANCELLATION_FEES, MANAGE_COURSES, MANAGE_CUSTOMERS, MANAGE_MEMBERSHIP_PLANS,
+    MANAGE_RESERVATIONS, MANAGE_RESERVATION_POLICY, MANAGE_SHIFTS, MANAGE_SLOT_OVERRIDES,
+    SEED_DEMO_BOARD,
 };
 
 /// What standing a route needs before its handler runs.
@@ -459,6 +460,19 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "GET",
         "/v1/course/customer-summaries",
         RouteAuthorization::Action(LIST_CUSTOMERS),
+    ),
+    // Why bookings came off the board, and what became of the fee. Read where
+    // customers are read: the list names people and says what they did, which
+    // is ledger reading by another route. Settling is gated as the money it is.
+    (
+        "GET",
+        "/v1/course/reservation-cancellations",
+        RouteAuthorization::Action(LIST_CUSTOMERS),
+    ),
+    (
+        "POST",
+        "/v1/course/reservation-cancellations/fees",
+        RouteAuthorization::Action(MANAGE_CANCELLATION_FEES),
     ),
     // CourseBoard's own rows (ADR-0009), so the gate is here rather than at
     // Field: read wherever a customer is read, arranged where customers are
@@ -1387,6 +1401,8 @@ mod tests {
             ("GET", "/v1/course/customers/cus_1/membership"),
             ("POST", "/v1/course/customers/cus_1/membership"),
             ("GET", "/v1/course/customer-summaries"),
+            ("GET", "/v1/course/reservation-cancellations"),
+            ("POST", "/v1/course/reservation-cancellations/fees"),
             ("GET", "/v1/course/customer-grade-rules"),
             ("PUT", "/v1/course/customer-grade-rules"),
             ("GET", "/v1/course/membership-discounts"),

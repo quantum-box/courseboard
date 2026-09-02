@@ -3,10 +3,23 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { courseboardApiJson } from '../../../api'
-import { Field, Notice } from '../../../components/Page'
+import { Field, NativeSelect, Notice } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import { showToast } from '../../../lib/toast'
+import {
+  CANCELLATION_REASONS,
+  type CancellationReason,
+} from '../customers/cancellations'
 import type { TeeReservation } from '../timeline/models'
+
+/**
+ * What the desk reaches for when they have not been told anything useful.
+ *
+ * Deliberately not the first entry in the list: opening on "weather" would
+ * quietly file a month of ordinary cancellations as acts of god, and weather
+ * is the one reason the club does not charge for.
+ */
+const DEFAULT_REASON: CancellationReason = 'personal'
 
 export function CancelReservationDialog({
   reservation,
@@ -17,7 +30,8 @@ export function CancelReservationDialog({
   onClose: () => void
   onCancelled: () => void
 }) {
-  const { t } = useTranslation(['ledger'])
+  const { t } = useTranslation(['ledger', 'customers'])
+  const [reasonCode, setReasonCode] = useState<CancellationReason>(DEFAULT_REASON)
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -26,7 +40,10 @@ export function CancelReservationDialog({
   // operator is halfway through typing.
   const reservationId = reservation?.id ?? null
   useEffect(() => {
-    if (reservationId) setReason('')
+    if (reservationId) {
+      setReasonCode(DEFAULT_REASON)
+      setReason('')
+    }
   }, [reservationId])
 
   if (!reservation) return null
@@ -39,7 +56,10 @@ export function CancelReservationDialog({
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ reason: reason.trim() || null }),
+          body: JSON.stringify({
+            reasonCode,
+            reason: reason.trim() || null,
+          }),
         },
       )
       showToast({ tone: 'success', message: t('ledger:cancelReservation.done') })
@@ -72,6 +92,26 @@ export function CancelReservationDialog({
         <Notice tone="warning" title={t('ledger:cancelReservation.warnTitle')}>
           {t('ledger:cancelReservation.warnBody')}
         </Notice>
+
+        {/* The category first, because it is the part that survives: it is
+            what the cancellation list is filtered and counted by, and what
+            decides whether a cancellation fee is expected. The sentence below
+            it is what makes one row make sense. */}
+        <Field
+          label={t('ledger:cancelReservation.reasonCode')}
+          hint={t('ledger:cancelReservation.reasonCodeHint')}
+        >
+          <NativeSelect
+            value={reasonCode}
+            onChange={event => setReasonCode(event.target.value as CancellationReason)}
+          >
+            {CANCELLATION_REASONS.map(code => (
+              <option key={code} value={code}>
+                {t(`customers:cancellations.reason.${code}`)}
+              </option>
+            ))}
+          </NativeSelect>
+        </Field>
 
         <Field label={t('ledger:cancelReservation.reason')} requirement="none">
           <textarea

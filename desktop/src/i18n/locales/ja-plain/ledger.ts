@@ -115,11 +115,18 @@ export const ledger = {
     cancelReservation: 'この 予約を キャンセルする',
     slotSettings: '枠の せってい（売り止め・とくべつ 料金）',
   },
+  cancellations: {
+    title: 'この日のキャンセル（{{count}}件）',
+    description: '台帳からは消えています。理由は受付が入れたものです。',
+    players: '{{count}}名',
+  },
   cancelReservation: {
     title: '予約を キャンセルする',
     description: '{{time}} の「{{name}}」を キャンセルします。',
     warnTitle: 'もとに もどせません',
     warnBody: 'キャンセルすると この 予約は 台帳から なくなります。取り消しは できません。',
+    reasonCode: 'キャンセルのしゅるい',
+    reasonCodeHint: 'あとで「お金をもらうか」をきめるときにつかいます。',
     reason: 'キャンセルの りゆう',
     reasonPlaceholder: 'れい）お客さまの ごつごう・雨のため',
     keep: 'やめる',

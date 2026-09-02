@@ -119,11 +119,18 @@ export const ledger = {
     cancelReservation: 'Cancel this booking',
     slotSettings: 'Slot settings (close / special rate)',
   },
+  cancellations: {
+    title: 'Cancelled today ({{count}})',
+    description: 'Off the board. The reason is what the desk recorded.',
+    players: '{{count}} players',
+  },
   cancelReservation: {
     title: 'Cancel this booking',
     description: 'Cancelling “{{name}}” at {{time}}.',
     warnTitle: 'This cannot be undone',
     warnBody: 'The booking leaves the board once cancelled, and cannot be restored.',
+    reasonCode: 'Kind of cancellation',
+    reasonCodeHint: 'Used later to decide whether a cancellation fee is due.',
     reason: 'Reason',
     reasonPlaceholder: 'e.g. customer request, rain',
     keep: 'Keep booking',
