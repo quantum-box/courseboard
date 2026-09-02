@@ -22,7 +22,7 @@ CourseBoard のゴルフ場運用を短時間で伝える、約 30 秒のプロ�
 
 ## 対象ファイル
 
-- `promo-video/`
+- `video/`
 - `docs/src/tasks/completed/v1.0.1/courseboard-promotion-video/`
 - `docs/SUMMARY.md`
 
@@ -41,7 +41,7 @@ CourseBoard のゴルフ場運用を短時間で伝える、約 30 秒のプロ�
 
 ## 完了条件
 
-- `promo-video/out/courseboard-promo.mp4` を再生可能な H.264 MP4 として生成できる。
+- `video/out/courseboard-promo.mp4` を再生可能な H.264 MP4 として生成できる。
 - 1920 × 1080、30 fps、約 30 秒である。
 - 画面内の文言と素材に実在顧客の個人情報が含まれない。
 - ソースから同じ成果物を再レンダリングできる。
@@ -86,7 +86,7 @@ CourseBoard のゴルフ場運用を短時間で伝える、約 30 秒のプロ�
 
 ## PR Ready
 
-- owning component: `promo-video`
+- owning component: `video`
 - base version: `1.0.0`（今回の新規コンポーネント初期版）
 - PR version: `1.0.1`
 - bump: patch

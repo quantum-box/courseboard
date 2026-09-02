@@ -1,4 +1,3 @@
-import {loadFont} from '@remotion/fonts';
 import {Audio} from '@remotion/media';
 import {TransitionSeries, linearTiming} from '@remotion/transitions';
 import {fade} from '@remotion/transitions/fade';
@@ -13,6 +12,8 @@ import {
   useVideoConfig,
 } from 'remotion';
 
+import {FONT} from './font';
+
 const C = {
   ink: '#10212b',
   forest: '#174d3a',
@@ -26,7 +27,6 @@ const C = {
   red: '#c65b54',
 };
 
-const FONT = 'CourseBoard Gothic, system-ui, sans-serif';
 const CLAMP = {extrapolateLeft: 'clamp' as const, extrapolateRight: 'clamp' as const};
 
 const SECTION_THEMES = {
@@ -81,13 +81,6 @@ const SECTION_THEMES = {
 } as const;
 
 type SectionTheme = (typeof SECTION_THEMES)[keyof typeof SECTION_THEMES];
-
-void loadFont({
-  family: 'CourseBoard Gothic',
-  url: staticFile('fonts/ipag.ttf'),
-  format: 'truetype',
-  weight: '400',
-});
 
 const Logo = ({light = false, width = 235}: {light?: boolean; width?: number}) => (
   <Img
