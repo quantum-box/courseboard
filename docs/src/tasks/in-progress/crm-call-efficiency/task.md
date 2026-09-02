@@ -86,7 +86,7 @@ Field に起票する（下記）。
 - [ ] 定期実行の配線（いまは CLI のみ。本番 DB は PrivateLink 内なので Lambda 側の仕事）
 - [x] Field 起票（下記5本 = PLT-4049 / PLT-4050 / PLT-4051 / PLT-4052 / PLT-4053）
 - [x] Field 側の実装（5本とも tachyonfield main にマージ済み）
-- [ ] Field が持った contract に CourseBoard 側を寄せる（下記「Field 実装後の残作業」）
+- [ ] Field が持った contract に CourseBoard 側を寄せる（**予約の確定が先。下記「実データで分かったこと」**）
 
 
 ## Field に起票する汎用 contract
@@ -133,14 +133,142 @@ Field に起票する（下記）。
   購買サマリを持ったので、`CustomerSummaryGateway` の実装を Field gateway に
   替えれば、ローカルの集計テーブル・`golf_customer_summary_runs`・
   `courseboard-refresh-customer-summaries` はまとめて不要になる。数字の定義
-  （1回 = 予約1件、キャンセルと no-show は別建て、税込、通貨は合算しない）が
-  CourseBoard の `CustomerVisitHistory` と一致するかは要確認。ずれていれば
-  カルテと一覧でまた数字が食い違う。
+  （1回 = 予約1件、キャンセルと no-show は別建て、税込、通貨は合算しない）は
+  **突き合わせ済みで、一致しない**。下の「数字の定義の突き合わせ」を参照。
 - **架電の記録を Field に載せる（PLT-4052）。** 架電リストの画面から
   `/v1/erp/customer-contacts` を叩く。最終接触日時は一覧の
   `latest-lookup` で1コールで引ける。
 - **連絡拒否を抽出条件に入れる（PLT-4053）。** 一覧から連絡不可を除外する。
   除外は Field 側の絞り込みでできるので、CourseBoard は判定を持たない。
+
+
+## 数字の定義の突き合わせ（PLT-4051、2026-08-31）
+
+tachyonfield #1254 の `customer_purchase_summary` と CourseBoard の
+`CustomerVisitHistory` を突き合わせた。**そのままは寄せられない。**
+一致するのは金額の元（`price_amount`・税込）と、キャンセル / no-show を
+回数にも金額にも入れない方針、金額未確定を件数で見せる方針の3つだけ。
+
+### 寄せると数字が変わるもの
+
+- **未確定ステータスの扱いが逆。** CourseBoard の `classify` は
+  「キャンセルでも no_show でも waiting/suspended でもなく、提供日を過ぎている」
+  を全部 `Visited` にしている。つまり `requested` / `payment_pending` /
+  `change_requested` / `admin_review` の予約で日付が過ぎたものを来場1回として
+  数えている。Field はこれを `pending` に落として purchase に入れない。
+  **CourseBoard のほうが来場回数が多く出る。** どちらが正しいかは業務の判断で、
+  Field の読みのほうが素直に見える。
+- **`cancel_requested` の帰属が違う。** CourseBoard は Cancelled、Field は
+  `pending`（`cancelled` / `rejected` だけを cancelled にしている）。
+  購入回数には効かないが `cancelledCount` がずれる。
+- **`billing().is_cancelled()` を Field は見ていない。** CourseBoard は status と
+  別に billing 由来のキャンセルを判定している。status が `confirmed` のまま
+  billing がキャンセル済みの予約があると、CourseBoard は Cancelled、Field は
+  purchase。回数だけでなく**金額まで食い違う**。実データにこの組み合わせが
+  あるかは未調査。
+- **初回 / 最終の型とタイムゾーン。** Field は
+  `DATE(CONVERT_TZ(starts_at,'+00:00','+09:00'))` で **JST 固定の日付**を返す。
+  CourseBoard は UTC の instant を持ち、画面は `useTenantTimezone` で描いている。
+  国内だけなら実害は小さいが、テナントのタイムゾーンが JST でなければ境界の
+  予約が1日ずれる。
+- **通貨。** CourseBoard は通貨を区別せず合算している。Field は横断で `currency`
+  必須（省略時に2通貨以上あれば 400）。寄せるなら CourseBoard 側が通貨を
+  決めて渡す必要がある。合算していた今の値のほうが黙って間違っている。
+
+### Field から取れないもの
+
+- **人数と客単価。** Field の集計は `quantity` をどこにも読んでいないので、
+  `players` も `spendPerPlayer` も返らない。**グレード判定の
+  `min_spend_per_player` はこれを入力にしている**ので、Field に寄せると
+  グレードの一段が判定不能になる。人数の集計を PLT-4051 に足してもらうか、
+  客単価だけ CourseBoard 側で予約を読んで出すか、判断が要る。
+- **同伴者の来場。** Field は `reservations.customer_id`（予約した本人）でしか
+  束ねない。他人の組に入って打刻された回は Field 集計に一切出ない。
+  `reception-and-visit-records` で埋めた穴がそのまま開く。
+  `golf_visit_checkins` の合流は CourseBoard 側に残す必要がある。
+- **絞り込みの一部。** Field にあるのは `dormantSince`（日付）と
+  `minPurchaseCount` と期間だけ。CourseBoard の画面が持っている
+  `maxDaysSinceLastVisit` と `minTotalAmount` に相当するものが無い。
+  画面から落とすか、Field に足してもらうか。
+- **来場が0回の顧客。** Field は `minPurchaseCount` 既定1で落とす。
+  CourseBoard の `include_never_visited` に相当する読み方ができない。
+
+### 認可
+
+Field 側の action は `field:ViewSalesAnalytics`。CourseBoard の
+`/v1/course/customer-summaries` はいま `ListCustomers`。寄せて
+`UpstreamEnforced` にすると、**架電リストを開く受付オペレーターに売上分析の
+権限が要る**ことになる。テナントへの付与状況とあわせて、それが妥当かを先に決める。
+
+### 結論
+
+「`CustomerSummaryGateway` の実装を Field gateway に差し替えるだけ」にはならない。
+順番はこう。
+
+1. 人数（`quantity`）の集計を PLT-4051 に足してもらう。客単価とグレードが
+   これに乗っているので、無いと機能が減る
+2. 未確定ステータスをどちらの読みに揃えるか決める。CourseBoard の
+   `classify` を Field に合わせるのが筋に見える。合わせると既存のカルテの
+   来場回数が減るので、先に実データで影響件数を数える
+3. `billing().is_cancelled()` と status が食い違う予約が実在するか数える
+4. `field:ViewSalesAnalytics` の付与を確認する
+5. そのうえで差し替える。同伴者の合流と、通貨の指定は CourseBoard に残る
+
+
+## 実データで分かったこと（2026-09-02）
+
+**寄せられない理由は数字の定義ではなかった。CourseBoard が予約を確定していない。**
+
+prod Field のテナント `tn_01kygsqn7tnqexzzwe96z0ad17`（予約55件）で数えた。
+
+- status の内訳は `requested` 37 / `cancelled` 17 / `confirmed` 1。
+- CourseBoard は「キャンセルでも no_show でも waiting/suspended でもなく提供日を
+  過ぎている」を全部 `Visited` にするので、**37件を来場として数えている**。
+- Field の購入判定は `confirmed` / `completed` のみ。**37件は1件も購入に入らない。**
+- 実際に `GET /v1/erp/analytics/customer-purchase-summary?currency=JPY` を叩くと
+  `total: 0`、`items: []`。顧客4人・来場9回ぶんの実績があるテナントで、Field 側の
+  集計は空を返す。
+
+原因は `new_reservation_body`（`src/course/infrastructure/field_gateway.rs`）が
+**status を送っていない**こと。Field の既定は `requested` で、CourseBoard には
+確定に上げる経路が1つも無い。つまり CourseBoard で取った予約は、Field から見ると
+永久に「未確定の申し込み」のまま積み上がる。
+
+`billing.cancelled_at` と status の食い違い（想定していたずれ）は0件だった。
+ただし `confirmed` が1件しかないので、この確認自体に意味がある状態ではない。
+
+### これは架電リストだけの話ではない
+
+Field 側で予約 status を見ているものは、CourseBoard のテナントを
+「確定ゼロ・申し込みばかり」と読む。売上分析も、予約を数える機能も同じ。
+架電リストはそれが表に出た最初の1つでしかない。
+
+### 選択肢
+
+1. **CourseBoard が予約を確定する。** 受付が台帳に書いた予約は、定義上confirmed
+   である。`new_reservation_body` に status を載せるか、作成後に確定へ上げる。
+   既存行の backfill が要る。**筋はこれ。** ただし予約の振る舞いを変えるので
+   別 taskdoc を切って決める話。
+2. Field の購入判定を広げてもらう。**採らない。** 汎用モデルで `requested` は
+   本当に「未確定」であって、CourseBoard 側の穴を汎用 contract に押し込むことになる。
+3. CourseBoard が自前集計を持ち続ける。PLT-4051 が消そうとした重複がそのまま残る。
+
+### 認可
+
+管理者トークンでは `GET /v1/erp/analytics/customer-purchase-summary` が 200 を返した
+（`field:ViewSalesAnalytics` は届いている）。ただし確認したのは管理者の token だけで、
+**受付オペレーターの権限で通るかは未確認**。寄せる段になったら、その権限で
+架電リストが開けるかを実際のオペレーター token で確かめる。
+
+### PLT-4051 への追加依頼
+
+数量が返らない件は [PLT-4113](https://linear.app/issue/PLT-4113) として起票済み
+（`purchaseQuantity` / `pricedQuantity` の2列。客単価とグレード判定がこれに乗っている）。
+
+### いま止めていること
+
+上の 1 が決まるまで `CustomerSummaryGateway` の差し替えはしない。
+いま差し替えると、架電リストは全テナントで空になる。
 
 
 ## 確認済み
