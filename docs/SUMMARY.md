@@ -20,6 +20,7 @@
 # Business
 
 - [キャンセル料徴収の原価と課金モデル](src/business/cancellation-fee-pricing.md)
+- [経営会議向け機能紹介スライド](src/decks/courseboard-feature-deck.md)
 
 # Tasks
 - [In Progress]()
