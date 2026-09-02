@@ -6,7 +6,7 @@
 //! columns and consents travel in one request. Golf-specific custom values are
 //! written locally only after the upstream customer exists.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use chrono::NaiveDate;
@@ -14,21 +14,21 @@ use serde_json::{json, Value};
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    CourseError, CustomerReceptionCreateGateway, CustomerReceptionField,
-    CustomerReceptionFieldsGateway, CustomerReceptionValuesGateway, CustomerRegistrationGateway,
-    CustomerRegistrationSource, GatewayCredentials, NewCustomerRegistration,
-    ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionFieldKind, ReceptionFieldType,
+    CourseError, CustomerConsentCatalogGateway, CustomerReceptionCreateGateway,
+    CustomerReceptionField, CustomerReceptionFieldsGateway, CustomerReceptionValuesGateway,
+    CustomerRegistrationGateway, CustomerRegistrationSource, GatewayCredentials,
+    NewCustomerRegistration, ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionFieldKind,
+    ReceptionFieldType,
 };
 
-use super::create_customer::{
-    refuse_without_the_required_declaration, CustomerProvenance, RegisteredCustomer,
-};
+use super::create_customer::{CustomerProvenance, RegisteredCustomer};
 
 pub struct CreateReceptionCustomerUseCase {
     customers: Arc<dyn CustomerReceptionCreateGateway>,
     fields: Arc<dyn CustomerReceptionFieldsGateway>,
     values: Arc<dyn CustomerReceptionValuesGateway>,
     registrations: Arc<dyn CustomerRegistrationGateway>,
+    consents: Arc<dyn CustomerConsentCatalogGateway>,
 }
 
 impl CreateReceptionCustomerUseCase {
@@ -37,12 +37,14 @@ impl CreateReceptionCustomerUseCase {
         fields: Arc<dyn CustomerReceptionFieldsGateway>,
         values: Arc<dyn CustomerReceptionValuesGateway>,
         registrations: Arc<dyn CustomerRegistrationGateway>,
+        consents: Arc<dyn CustomerConsentCatalogGateway>,
     ) -> Self {
         Self {
             customers,
             fields,
             values,
             registrations,
+            consents,
         }
     }
 
@@ -69,7 +71,8 @@ impl CreateReceptionCustomerUseCase {
             .await?;
         let fields = CustomerReceptionField::merge_with_defaults(credentials.operator_id, stored);
         validate_reception_customer(&fields, &input)?;
-        refuse_without_the_required_declaration(consents)?;
+        let catalog = self.consents.list_consent_items(credentials, false).await?;
+        validate_consents(&catalog, consents)?;
 
         // The ERP endpoint records these consents together with the customer;
         // unlike the StoreKit path there is no second consent request to
@@ -132,6 +135,39 @@ impl CreateReceptionCustomerUseCase {
             custom_fields_recorded,
         })
     }
+}
+
+fn validate_consents(
+    catalog: &[crate::course::domain::CustomerConsentItem],
+    answers: &[ReceptionConsentAnswer],
+) -> Result<(), CourseError> {
+    let active = catalog
+        .iter()
+        .filter(|item| item.active)
+        .map(|item| (item.consent_key.as_str(), item))
+        .collect::<HashMap<_, _>>();
+    let mut keys = HashSet::with_capacity(answers.len());
+    for answer in answers {
+        if !keys.insert(answer.key.as_str()) {
+            return Err(CourseError::BadRequest("consent keys must be unique"));
+        }
+        if !active.contains_key(answer.key.as_str()) {
+            return Err(CourseError::BadRequest(
+                "consent keys must belong to the active Field catalog",
+            ));
+        }
+    }
+    if active.values().any(|item| {
+        item.required
+            && !answers
+                .iter()
+                .any(|answer| answer.key == item.consent_key && answer.accepted == Some(true))
+    }) {
+        return Err(CourseError::BadRequest(
+            "required reception consents must be accepted",
+        ));
+    }
+    Ok(())
 }
 
 /// Validates all settings and submitted values before the ERP create call.
@@ -340,13 +376,46 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        required_reception_consents, Customer, CustomerId, NewCustomer, ReceptionFieldInput,
-        ReceptionFieldKind, ReceptionFieldType, STANDARD_RECEPTION_FIELD_KEYS,
+        required_reception_consents, CreateCustomerConsentItem, Customer, CustomerConsentItem,
+        CustomerId, NewCustomer, ReceptionFieldInput, ReceptionFieldKind, ReceptionFieldType,
+        STANDARD_RECEPTION_FIELD_KEYS,
     };
 
     #[derive(Default)]
     struct StubCreate {
         calls: Mutex<usize>,
+    }
+
+    #[derive(Default)]
+    struct StubConsents;
+
+    #[async_trait]
+    impl CustomerConsentCatalogGateway for StubConsents {
+        async fn list_consent_items(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _include_inactive: bool,
+        ) -> Result<Vec<CustomerConsentItem>, CourseError> {
+            let required = required_reception_consents().next().unwrap();
+            Ok(vec![CustomerConsentItem {
+                id: "consent-1".to_string(),
+                consent_key: required.key.to_string(),
+                label: required.label.to_string(),
+                body: Some(required.prompt.to_string()),
+                required: true,
+                terms_version: "1".to_string(),
+                active: true,
+                sort_order: 0,
+            }])
+        }
+
+        async fn create_consent_item(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _item: &CreateCustomerConsentItem,
+        ) -> Result<CustomerConsentItem, CourseError> {
+            unreachable!("not used by this use case")
+        }
     }
 
     #[async_trait]
@@ -483,7 +552,11 @@ mod tests {
 
     fn required_consent() -> Vec<ReceptionConsentAnswer> {
         vec![ReceptionConsentAnswer {
-            key: required_reception_consents().next().unwrap().key,
+            key: required_reception_consents()
+                .next()
+                .unwrap()
+                .key
+                .to_string(),
             accepted: Some(true),
         }]
     }
@@ -498,6 +571,7 @@ mod tests {
             }),
             Arc::new(StubValues::default()),
             Arc::new(StubRegistrations),
+            Arc::new(StubConsents),
         );
         let error = usecase
             .execute(
@@ -528,6 +602,7 @@ mod tests {
             }),
             values.clone(),
             Arc::new(StubRegistrations),
+            Arc::new(StubConsents),
         )
         .execute(
             credentials(),

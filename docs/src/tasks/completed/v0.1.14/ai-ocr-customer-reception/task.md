@@ -10,6 +10,8 @@
 - Linear issue: [PLT-4036](https://linear.app/issue/PLT-4036)（上流失敗の出し分け）
 - 任意形式の受付項目: tachyonfield [#1255](https://github.com/quantum-box/tachyonfield/pull/1255)
 - 空の申込書から項目設定を提案する分析 API: tachyonfield [#1257](https://github.com/quantum-box/tachyonfield/pull/1257)
+- 空用紙から同意項目を提案する分析 API: tachyonfield [#1271](https://github.com/quantum-box/tachyonfield/pull/1271)
+- [ADR-0014: 受付用紙の同意カタログはFieldを正とする](../../../../architecture/decisions/ADR-0014-reception-consent-catalog-boundary.md)
 - [設計](design.md)
 
 ## 概要
@@ -132,6 +134,47 @@ PR version: API `0.1.13`（base `0.1.12`）、UI `0.1.9`（base `0.1.8`）。
 - PR Preview の Field Golf Sandbox で設定画面への移動と受付作業画面からの分離を確認
 
 PR Preview から実 Field API への空用紙送信は未確認。今回の差分に DB schema 変更はない。
+
+## 同意項目候補（tachyonfield #1271 追随）
+
+Field #1271 は空用紙分析レスポンスへ `consentItems` を追加した。CourseBoard は現時点で
+この field を捨てており、既存3項目以外の規約・注意事項を受付 OCR と同意証跡へ接続できない。
+
+この追随は Field の汎用同意カタログと CourseBoard の固定3項目の所有境界を変更するため、
+[ADR-0014](../../../../architecture/decisions/ADR-0014-reception-consent-catalog-boundary.md) で
+境界を確定してから実装する。今回は利用者の明示判断により、ADR と実装を同じ作業差分で進める。
+
+- [x] PR #1271 の API/UI/失敗時再照合 contract を確認
+- [x] 同意定義・必須性・規約版・有効状態・並び順・証跡を Field の正と決定
+- [x] CourseBoard に projection table / repository / migration を作らないと決定
+- [x] 既存 opt-out の反転、20列上限、認可境界を整理
+- [x] ADR で所有境界を確定
+- [x] `consentItems` の adapter / HTTP DTO 追随
+- [x] Field 同意定義 list/create の gateway と CourseBoard API
+- [x] 分析、設定保存、候補作成の相互ロックと部分失敗再試行 UI
+- [x] Field の active な同意項目を OCR、必須判定、顧客登録へ接続
+- [x] 固定3項目を動的カタログへ移し、既存 opt-out の反転だけ互換処理として残す
+- [x] Rust / frontend focused test
+- [ ] 認証済み browser verification
+
+実装 DD は ADR の決定に沿って確定する。CourseBoard の DB migration は行わない。
+約款改訂、`termsVersion` 更新、再同意、inactive 化の運用は別タスクとする。
+
+PR version: API `0.1.14`（base `0.1.13`）、UI `0.1.13`（base `0.1.12`）。
+
+### PR前検証
+
+- `cargo fmt --check`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo test --no-run`
+- 同意 catalog、OCR、顧客登録、認可 route の focused Rust tests
+- `cd desktop && npm run type-check`
+- `cd desktop && npm run test`（114 files / 975 tests）
+- `cd desktop && npm run build`
+- `git diff --check`
+
+TiDB がローカルで起動していないため DB を使う全 Rust test は未実施。認証済みブラウザと
+実 Field API の確認は PR Preview で行う。今回の差分に CourseBoard DB migration はない。
 
 ## 上流 OCR が失敗したときの出し分け（PLT-4036）
 

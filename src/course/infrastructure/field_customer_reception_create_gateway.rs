@@ -153,7 +153,7 @@ mod tests {
         let body = reception_customer_body(
             &input(),
             &[ReceptionConsentAnswer {
-                key: CONSENT_ANTISOCIAL_AND_COURSE_TERMS,
+                key: CONSENT_ANTISOCIAL_AND_COURSE_TERMS.to_string(),
                 accepted: Some(true),
             }],
         );

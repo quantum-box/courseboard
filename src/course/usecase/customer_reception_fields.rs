@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    reception_sheet_schema_for_fields, CourseError, CustomerReceptionField,
+    active_reception_consent_definitions, reception_sheet_schema_for_fields_and_consents,
+    CourseError, CustomerConsentCatalogGateway, CustomerReceptionField,
     CustomerReceptionFieldsGateway, CustomerReceptionOcrGateway, GatewayCredentials,
     ReceptionFieldInput, ReceptionFormProposal, ReceptionSheet,
 };
@@ -39,11 +40,15 @@ impl GetCustomerReceptionFieldsUseCase {
 /// Validates and replaces a tenant's reception-field settings.
 pub struct ReplaceCustomerReceptionFieldsUseCase {
     fields: Arc<dyn CustomerReceptionFieldsGateway>,
+    consents: Arc<dyn CustomerConsentCatalogGateway>,
 }
 
 impl ReplaceCustomerReceptionFieldsUseCase {
-    pub fn new(fields: Arc<dyn CustomerReceptionFieldsGateway>) -> Self {
-        Self { fields }
+    pub fn new(
+        fields: Arc<dyn CustomerReceptionFieldsGateway>,
+        consents: Arc<dyn CustomerConsentCatalogGateway>,
+    ) -> Self {
+        Self { fields, consents }
     }
 
     pub async fn execute(
@@ -70,7 +75,9 @@ impl ReplaceCustomerReceptionFieldsUseCase {
         // Refuse an unusable configuration at PUT time instead of letting the
         // next scan fail against Field's twenty-column items limit. Address
         // counts as five OCR columns even though it is one setting in the UI.
-        reception_sheet_schema_for_fields(&effective)?;
+        let catalog = self.consents.list_consent_items(credentials, false).await?;
+        let consents = active_reception_consent_definitions(&catalog);
+        reception_sheet_schema_for_fields_and_consents(&effective, &consents)?;
         self.fields
             .replace_customer_reception_fields(credentials.operator_id, &fields)
             .await?;
@@ -111,7 +118,8 @@ mod tests {
     use std::sync::Mutex;
 
     use crate::course::domain::{
-        ReceptionFieldKind, ReceptionFieldType, STANDARD_RECEPTION_FIELD_KEYS,
+        CreateCustomerConsentItem, CustomerConsentItem, ReceptionFieldKind, ReceptionFieldType,
+        RECEPTION_CONSENTS, STANDARD_RECEPTION_FIELD_KEYS,
     };
 
     #[derive(Default)]
@@ -136,6 +144,41 @@ mod tests {
         ) -> Result<(), CourseError> {
             self.replaced.lock().unwrap().push(fields.to_vec());
             Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct StubConsents;
+
+    #[async_trait]
+    impl CustomerConsentCatalogGateway for StubConsents {
+        async fn list_consent_items(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _include_inactive: bool,
+        ) -> Result<Vec<CustomerConsentItem>, CourseError> {
+            Ok(RECEPTION_CONSENTS
+                .iter()
+                .enumerate()
+                .map(|(index, consent)| CustomerConsentItem {
+                    id: format!("consent-{index}"),
+                    consent_key: consent.key.to_string(),
+                    label: consent.label.to_string(),
+                    body: Some(consent.prompt.to_string()),
+                    required: consent.required,
+                    terms_version: "1".to_string(),
+                    active: true,
+                    sort_order: index as i32,
+                })
+                .collect())
+        }
+
+        async fn create_consent_item(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _item: &CreateCustomerConsentItem,
+        ) -> Result<CustomerConsentItem, CourseError> {
+            unreachable!("not used by this use case")
         }
     }
 
@@ -181,10 +224,11 @@ mod tests {
     #[tokio::test]
     async fn put_validates_and_replaces_custom_settings() {
         let gateway = Arc::new(StubFields::default());
-        let fields = ReplaceCustomerReceptionFieldsUseCase::new(gateway.clone())
-            .execute(credentials(), vec![custom()])
-            .await
-            .unwrap();
+        let fields =
+            ReplaceCustomerReceptionFieldsUseCase::new(gateway.clone(), Arc::new(StubConsents))
+                .execute(credentials(), vec![custom()])
+                .await
+                .unwrap();
         assert_eq!(fields.len(), STANDARD_RECEPTION_FIELD_KEYS.len() + 1);
         let replaced = gateway.replaced.lock().unwrap();
         assert_eq!(replaced.len(), 1);
@@ -194,10 +238,11 @@ mod tests {
     #[tokio::test]
     async fn put_rejects_duplicate_keys_before_writing() {
         let gateway = Arc::new(StubFields::default());
-        let error = ReplaceCustomerReceptionFieldsUseCase::new(gateway.clone())
-            .execute(credentials(), vec![custom(), custom()])
-            .await
-            .unwrap_err();
+        let error =
+            ReplaceCustomerReceptionFieldsUseCase::new(gateway.clone(), Arc::new(StubConsents))
+                .execute(credentials(), vec![custom(), custom()])
+                .await
+                .unwrap_err();
         assert!(matches!(error, CourseError::BadRequest(_)));
         assert!(gateway.replaced.lock().unwrap().is_empty());
     }
@@ -217,10 +262,11 @@ mod tests {
                 options: Vec::new(),
             })
             .collect();
-        let error = ReplaceCustomerReceptionFieldsUseCase::new(gateway.clone())
-            .execute(credentials(), inputs)
-            .await
-            .unwrap_err();
+        let error =
+            ReplaceCustomerReceptionFieldsUseCase::new(gateway.clone(), Arc::new(StubConsents))
+                .execute(credentials(), inputs)
+                .await
+                .unwrap_err();
         assert!(matches!(error, CourseError::BadRequest(_)));
         assert!(gateway.replaced.lock().unwrap().is_empty());
     }

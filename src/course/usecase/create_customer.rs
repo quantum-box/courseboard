@@ -284,7 +284,7 @@ mod tests {
 
     fn ticked() -> Vec<ReceptionConsentAnswer> {
         vec![ReceptionConsentAnswer {
-            key: crate::course::domain::CONSENT_ANTISOCIAL_AND_COURSE_TERMS,
+            key: crate::course::domain::CONSENT_ANTISOCIAL_AND_COURSE_TERMS.to_string(),
             accepted: Some(true),
         }]
     }
@@ -395,7 +395,7 @@ mod tests {
             NewCustomer::try_new("本田 康彦", None, None, None).unwrap(),
             from_a_sheet(),
             &[ReceptionConsentAnswer {
-                key: crate::course::domain::CONSENT_ANTISOCIAL_AND_COURSE_TERMS,
+                key: crate::course::domain::CONSENT_ANTISOCIAL_AND_COURSE_TERMS.to_string(),
                 accepted: None,
             }],
         )

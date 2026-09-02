@@ -19,6 +19,7 @@ mod course_order;
 mod course_supply;
 mod customer;
 mod customer_consent;
+mod customer_consent_catalog;
 mod customer_grade;
 mod customer_reception;
 mod customer_reception_fields;
@@ -99,15 +100,20 @@ pub use customer::{
     MAX_CUSTOMER_SEARCH_LIMIT,
 };
 pub use customer_consent::{
-    reception_consent, required_reception_consents, ConsentPolarity, ReceptionConsent,
-    ReceptionConsentAnswer, CONSENT_ANTISOCIAL_AND_COURSE_TERMS, CONSENT_CART_TERMS,
-    CONSENT_MARKETING_CONTACT, RECEPTION_CONSENTS,
+    legacy_reception_consent_definitions, reception_consent, required_reception_consents,
+    ConsentPolarity, ReceptionConsent, ReceptionConsentAnswer, ReceptionConsentDefinition,
+    CONSENT_ANTISOCIAL_AND_COURSE_TERMS, CONSENT_CART_TERMS, CONSENT_MARKETING_CONTACT,
+    RECEPTION_CONSENTS,
+};
+pub use customer_consent_catalog::{
+    active_reception_consent_definitions, CreateCustomerConsentItem, CustomerConsentItem,
 };
 pub use customer_grade::{
     CustomerGradeRule, CustomerGradeRules, CustomerGradeVerdict, MAX_GRADE_RULES,
 };
 pub use customer_reception::{
-    reception_sheet_schema, reception_sheet_schema_for_fields, ReceptionAddress,
+    reception_sheet_schema, reception_sheet_schema_for_fields,
+    reception_sheet_schema_for_fields_and_consents, ProposedConsentItem, ReceptionAddress,
     ReceptionCustomerInput, ReceptionDraft, ReceptionDraftRow, ReceptionFormProposal,
     ReceptionOcrColumn, ReceptionOcrField, ReceptionReaderFailure, ReceptionSheet,
     ReceptionSheetMediaType, MAX_RECEPTION_OCR_COLUMNS, MAX_RECEPTION_OCR_SCHEMA_BYTES,
@@ -162,15 +168,15 @@ pub use payroll::{
 pub use player_tags::{PlayerTagOptions, MAX_PLAYER_TAG_LENGTH, MAX_PLAYER_TAG_OPTIONS};
 pub use ports::{
     AvailabilityDeadlineGateway, CaddieDutyGateway, CaddieRankFeeGateway, CaddieShiftGateway,
-    CourseAuthorizer, CourseOrderGateway, CustomerConsentGateway, CustomerGateway,
-    CustomerGradeRulesGateway, CustomerReceptionCreateGateway, CustomerReceptionFieldsGateway,
-    CustomerReceptionOcrGateway, CustomerReceptionValuesGateway, CustomerRegistrationGateway,
-    FieldCapabilitiesGateway, GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway,
-    GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, MembershipActivityGateway,
-    MembershipDiscountsGateway, MembershipGateway, MembershipPlayWindowsGateway,
-    PlayerTagOptionsGateway, PricingSettingsGateway, ReservationGateway,
-    ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, StaffShiftGateway,
-    StaffShiftInput, TeeLedgerQuery, TeeSheetQuery, VisitCheckinGateway,
+    CourseAuthorizer, CourseOrderGateway, CustomerConsentCatalogGateway, CustomerConsentGateway,
+    CustomerGateway, CustomerGradeRulesGateway, CustomerReceptionCreateGateway,
+    CustomerReceptionFieldsGateway, CustomerReceptionOcrGateway, CustomerReceptionValuesGateway,
+    CustomerRegistrationGateway, FieldCapabilitiesGateway, GatewayCredentials,
+    GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway, GolfOpsGateway,
+    GolfTaxGateway, MembershipActivityGateway, MembershipDiscountsGateway, MembershipGateway,
+    MembershipPlayWindowsGateway, PlayerTagOptionsGateway, PricingSettingsGateway,
+    ReservationGateway, ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway,
+    StaffShiftGateway, StaffShiftInput, TeeLedgerQuery, TeeSheetQuery, VisitCheckinGateway,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{

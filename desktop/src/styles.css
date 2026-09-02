@@ -6217,6 +6217,41 @@ button,
   gap: 12px;
 }
 
+.reception-consent-candidates {
+  display: grid;
+  gap: 8px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 10px;
+  background: hsl(var(--nui-muted) / .2);
+}
+
+.reception-consent-candidate-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reception-consent-candidate-list li {
+  display: grid;
+  gap: 2px;
+  padding-block: 4px;
+  border-bottom: 1px solid hsl(var(--nui-border) / .7);
+}
+
+.reception-consent-candidate-list li:last-child {
+  border-bottom: 0;
+}
+
+.reception-consent-candidate-list small,
+.reception-consent-candidate-list span {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
 .reception-settings-table-wrap {
   overflow-x: auto;
 }

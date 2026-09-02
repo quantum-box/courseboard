@@ -673,6 +673,15 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/customer-consent-items",
+            get(course::interfaces::http_customers::list_customer_consent_items)
+                .post(course::interfaces::http_customers::create_customer_consent_item)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
             "/v1/course/customer-reception-fields",
             get(course::interfaces::http_customers::get_customer_reception_fields)
                 .put(course::interfaces::http_customers::replace_customer_reception_fields)

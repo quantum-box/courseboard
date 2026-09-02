@@ -103,6 +103,8 @@ impl Modify for SecurityAddon {
         http_customers::get_membership_play_windows,
         http_customers::replace_membership_play_windows,
         http_customers::draft_customer_reception,
+        http_customers::list_customer_consent_items,
+        http_customers::create_customer_consent_item,
         http_customers::get_customer_reception_fields,
         http_customers::replace_customer_reception_fields,
         http_customers::analyze_customer_reception_fields,

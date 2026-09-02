@@ -23,6 +23,7 @@ mod create_course;
 mod create_customer;
 mod create_reception_customer;
 mod create_reservation;
+mod customer_consent_items;
 mod customer_grade_rules;
 mod customer_reception_fields;
 mod delete_caddie;
@@ -119,6 +120,9 @@ pub use create_course::CreateCourseUseCase;
 pub use create_customer::{CreateCustomerUseCase, CustomerProvenance};
 pub use create_reception_customer::CreateReceptionCustomerUseCase;
 pub use create_reservation::{CreateReservationInput, CreateReservationUseCase};
+pub use customer_consent_items::{
+    CreateCustomerConsentItemUseCase, ListCustomerConsentItemsUseCase,
+};
 pub use customer_grade_rules::{GetCustomerGradeRulesUseCase, ReplaceCustomerGradeRulesUseCase};
 pub use customer_reception_fields::{
     AnalyzeCustomerReceptionFieldsUseCase, GetCustomerReceptionFieldsUseCase,

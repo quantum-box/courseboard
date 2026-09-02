@@ -1,11 +1,10 @@
 //! What a golf reception sheet asks a visitor to agree to.
 //!
-//! Field owns the generic act of recording a consent: an append-only trail of
-//! `(consent_key, terms_version, accepted, channel)` against a customer, with
-//! the checklist itself defined per tenant. What CourseBoard owns — and what
-//! lives here — is the golf side of that: which boxes a course's reception
-//! sheet carries, what they are called in front of a Japanese desk, and which
-//! direction each box points (ADR-0005).
+//! Field owns both the tenant consent catalog and the append-only evidence.
+//! CourseBoard fetches that catalog for each reception flow and does not keep a
+//! projection. The constants below are compatibility fixtures for tenants and
+//! callers that predate the catalog integration; the one CourseBoard-specific
+//! behavior that remains is the legacy marketing opt-out polarity (ADR-0014).
 //!
 //! The direction is the part that is easy to get wrong. A Japanese reception
 //! sheet asks for marketing the wrong way round: the visitor ticks the box to
@@ -64,6 +63,62 @@ pub struct ReceptionConsent {
     pub polarity: ConsentPolarity,
 }
 
+/// A consent definition projected from Field's tenant catalog for one
+/// reception-sheet read.
+///
+/// CourseBoard deliberately does not persist this value.  The Field catalog
+/// is loaded immediately before OCR or registration and this owned form keeps
+/// the OCR port independent of the HTTP/Field DTO.  `body` is preferred as
+/// the OCR prompt when present; otherwise the catalog label is used.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReceptionConsentDefinition {
+    pub key: String,
+    pub label: String,
+    pub body: Option<String>,
+    pub required: bool,
+    pub sort_order: i32,
+    pub polarity: ConsentPolarity,
+}
+
+impl ReceptionConsentDefinition {
+    pub fn new(
+        key: impl Into<String>,
+        label: impl Into<String>,
+        body: Option<String>,
+        required: bool,
+        sort_order: i32,
+    ) -> Self {
+        let key = key.into();
+        let label = label.into();
+        let polarity = if key == CONSENT_MARKETING_CONTACT {
+            ConsentPolarity::TickMeansDeclined
+        } else {
+            ConsentPolarity::TickMeansAccepted
+        };
+        Self {
+            key,
+            label,
+            body,
+            required,
+            sort_order,
+            polarity,
+        }
+    }
+
+    /// The text the OCR reader should look for on the paper.
+    pub fn prompt(&self) -> &str {
+        self.body
+            .as_deref()
+            .filter(|body| !body.trim().is_empty())
+            .unwrap_or(self.label.as_str())
+    }
+
+    /// Convert the printed tick to Field's `accepted` direction.
+    pub fn accepted_from_tick(&self, ticked: Option<bool>) -> Option<bool> {
+        self.polarity.accepted_from_tick(ticked)
+    }
+}
+
 /// The declaration the sheet requires of everyone: not a member of an
 /// organised crime group, and bound by the course's terms of use. One printed
 /// box covers both, so it is one consent rather than two — splitting it would
@@ -114,15 +169,40 @@ pub fn required_reception_consents() -> impl Iterator<Item = &'static ReceptionC
     RECEPTION_CONSENTS.iter().filter(|consent| consent.required)
 }
 
+/// The legacy three-box catalog used only as a compatibility fallback for
+/// callers that predate Field's tenant consent catalog.
+pub fn legacy_reception_consent_definitions() -> Vec<ReceptionConsentDefinition> {
+    RECEPTION_CONSENTS
+        .iter()
+        .map(|consent| ReceptionConsentDefinition {
+            key: consent.key.to_string(),
+            label: consent.label.to_string(),
+            body: Some(consent.prompt.to_string()),
+            required: consent.required,
+            sort_order: 0,
+            polarity: consent.polarity,
+        })
+        .collect()
+}
+
 /// One consent as read off a sheet, before anybody has looked at it.
 ///
 /// `accepted` is already in Field's direction — the printed opt-out has been
 /// flipped — so nothing downstream has to remember which way the paper ran.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceptionConsentAnswer {
-    pub key: &'static str,
+    pub key: String,
     pub accepted: Option<bool>,
+}
+
+impl ReceptionConsentAnswer {
+    pub fn new(key: impl Into<String>, accepted: Option<bool>) -> Self {
+        Self {
+            key: key.into(),
+            accepted,
+        }
+    }
 }
 
 #[cfg(test)]

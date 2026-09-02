@@ -64,6 +64,17 @@ type MockReceptionField = {
   options: string[]
 }
 
+type MockReceptionConsentItem = {
+  id: string
+  consentKey: string
+  label: string
+  body: string | null
+  required: boolean
+  termsVersion: string
+  active: boolean
+  sortOrder: number
+}
+
 let mockReceptionFields: MockReceptionField[] = [
   {
     fieldKey: 'name',
@@ -146,6 +157,53 @@ let mockReceptionFields: MockReceptionField[] = [
 
 function cloneMockReceptionFields() {
   return mockReceptionFields.map(field => ({ ...field, options: [...field.options] }))
+}
+
+let mockReceptionConsentItems: MockReceptionConsentItem[] = [
+  {
+    id: 'mci_golf_antisocial_and_course_terms',
+    consentKey: 'golf_antisocial_and_course_terms',
+    label: '反社会的勢力でないことの表明・ゴルフ場利用約款の遵守',
+    body: null,
+    required: true,
+    termsVersion: '1',
+    active: true,
+    sortOrder: 0,
+  },
+  {
+    id: 'mci_golf_cart_terms',
+    consentKey: 'golf_cart_terms',
+    label: 'カート利用約款の遵守',
+    body: null,
+    required: false,
+    termsVersion: '1',
+    active: true,
+    sortOrder: 1,
+  },
+  {
+    id: 'mci_golf_marketing_contact',
+    consentKey: 'golf_marketing_contact',
+    label: 'クラブからの情報提供を受け取る',
+    body: null,
+    required: false,
+    termsVersion: '1',
+    active: true,
+    sortOrder: 2,
+  },
+  {
+    id: 'mci_golf_photo_release',
+    consentKey: 'golf_photo_release',
+    label: 'クラブ便りへの写真掲載に同意する',
+    body: 'クラブ便りや公式サイトにプレー中の写真を掲載することがあります。',
+    required: false,
+    termsVersion: '1',
+    active: true,
+    sortOrder: 3,
+  },
+]
+
+function cloneMockReceptionConsentItems() {
+  return mockReceptionConsentItems.map(item => ({ ...item }))
 }
 
 /** `YYYY-MM-DD`, `days` after the fixture day. */
@@ -2361,6 +2419,13 @@ function resolveGet(path: string): Json | null | undefined {
     return items(cloneMockReceptionFields())
   }
 
+  if (pathname === '/v1/course/customer-consent-items') {
+    const includeInactive = url.searchParams.get('includeInactive') === 'true'
+    return items(cloneMockReceptionConsentItems().filter(item =>
+      includeInactive || item.active,
+    ))
+  }
+
   if (pathname === '/v1/course/membership-plans') {
     const includeInactive = url.searchParams.get('includeInactive') === 'true'
     return items(mockMembershipPlans.filter(plan => includeInactive || plan.active === true))
@@ -2892,6 +2957,31 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     })
   }
 
+  if (pathname === '/v1/course/customer-consent-items' && method === 'POST') {
+    const consentKey = typeof body?.consentKey === 'string' ? body.consentKey.trim() : ''
+    const label = typeof body?.label === 'string' ? body.label.trim() : ''
+    if (!consentKey || !label) return error(400, 'consentKey and label are required')
+    if (mockReceptionConsentItems.some(item => item.consentKey === consentKey)) {
+      return error(400, `consent item already exists: ${consentKey}`)
+    }
+    const created: MockReceptionConsentItem = {
+      id: `mci_${consentKey}`,
+      consentKey,
+      label,
+      body: typeof body?.body === 'string' && body.body.trim() ? body.body.trim() : null,
+      required: body?.required === true,
+      termsVersion: typeof body?.termsVersion === 'string' && body.termsVersion.trim()
+        ? body.termsVersion.trim()
+        : '1',
+      active: true,
+      sortOrder: typeof body?.sortOrder === 'number'
+        ? body.sortOrder
+        : mockReceptionConsentItems.length,
+    }
+    mockReceptionConsentItems.push(created)
+    return hit({ ...created })
+  }
+
   if (pathname === '/v1/course/customer-reception-fields' && method === 'PUT') {
     const incoming = Array.isArray(body?.items) ? body.items : null
     if (!incoming) return error(400, "request field 'items' must be an array")
@@ -2994,6 +3084,14 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
           options: [],
         },
       ],
+      consentItems: [
+        {
+          consentKey: 'golf_photo_release_new',
+          label: 'クラブ便りへの写真掲載に同意する',
+          body: 'クラブ便りや公式サイトにプレー中の写真を掲載することがあります。',
+          required: false,
+        },
+      ],
       warnings: ['「申込者区分」はCourseBoardの受付票項目として保存できないため、取り込みません。'],
       previewImage: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
     })
@@ -3040,6 +3138,7 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
             // Ticked on the paper as "no contact please", which reaches the
             // screen already flipped into "may we contact you".
             { key: 'golf_marketing_contact', accepted: false },
+            { key: 'golf_photo_release', accepted: true },
           ],
         },
         {
@@ -3050,6 +3149,7 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
             { key: 'golf_antisocial_and_course_terms', accepted: true },
             { key: 'golf_cart_terms', accepted: false },
             { key: 'golf_marketing_contact', accepted: true },
+            { key: 'golf_photo_release', accepted: false },
           ],
         },
         // The declaration could not be resolved: the row cannot be registered
