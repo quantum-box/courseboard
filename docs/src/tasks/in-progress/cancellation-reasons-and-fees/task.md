@@ -3,7 +3,9 @@
 ## Links
 
 - 関連: `docs/src/tasks/in-progress/crm-call-efficiency/task.md`（架電リスト、抽出の作り方が同型）
-- Field 側: PLT-3297（予約のキャンセル理由を Field が保持する）— 未着手
+- Field 側 既存: PLT-3297（予約のキャンセル理由を Field が保持する）— 未着手。理由の転送は続けている
+- Field 側 既存: PLT-4050（顧客の一括取得）— キャンセル一覧の氏名解決も同じ N+1 を踏んでいる
+- [Field 起票案：請求書に「何に対する請求か」の参照を持つ](./field-invoice-source-issue.md) — 未起票
 - Linear issue: 未作成
 
 ## 概要
@@ -65,6 +67,8 @@ CourseBoard ローカル DB が持つ（ADR-0009）。Field への理由の転�
 - 支払い状態の複製。払われたかは請求書（Field）が正で、こちらには持たない。
 - Field 側でキャンセル理由を持つ話（PLT-3297）。持てるようになっても、
   分類とキャンセル料の判断は CourseBoard に残る。
+- Field 側の実装そのもの（PLT-3297 / PLT-4050 / 請求書の由来）。CourseBoard から
+  書かず、業種非依存の contract として起票して待つ（CLAUDE.md）。
 
 ## Status
 
