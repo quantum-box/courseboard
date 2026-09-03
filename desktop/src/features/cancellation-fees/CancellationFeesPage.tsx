@@ -43,7 +43,9 @@ import {
   invoiceBillTo,
   normalizePhone,
   CANCELLATION_FEE_MARKER,
+  isCancellationFeeInvoice,
   type InvoiceBillTo,
+  type InvoiceSource,
 } from './models'
 
 // Re-exported so the existing tests and any importer of this screen keep
@@ -95,6 +97,8 @@ type InvoiceData = {
   emailDeliveryFailureCode?: string | null
   smsDeliveryFailureCode?: string | null
   notes?: string | null
+  /** What this invoice was raised from (PLT-4158). Empty on older invoices. */
+  sources?: InvoiceSource[] | null
   sentAt?: string | null
   paidAt?: string | null
   createdAt: string
@@ -201,16 +205,11 @@ const statusVariants: Record<InvoiceStatus, 'neutral' | 'accent' | 'warning' | '
 }
 
 /**
- * Invoices created by Course Board carry the notes marker. The Japanese prefix
- * stays hard-coded because it identifies rows already stored by earlier
- * versions — translating it would hide them.
+ * Since PLT-4158 an invoice declares what it was raised from, so the honest
+ * reading is its `sources`. The two older readings stay because every invoice
+ * raised before then has one of them and nothing else: dropping either would
+ * empty this list of its own history. See `isCancellationFeeInvoice`.
  */
-const LEGACY_FEE_DESCRIPTION_PREFIX = 'キャンセル料'
-
-function isCancellationFee(invoice: InvoiceData) {
-  return invoice.notes?.includes(CANCELLATION_FEE_MARKER)
-    || invoice.lineItems.some(item => item.description.startsWith(LEGACY_FEE_DESCRIPTION_PREFIX))
-}
 
 export function CancellationFeesPage() {
   const { t } = useTranslation(['cancellationFees', 'common'])
@@ -222,7 +221,7 @@ export function CancellationFeesPage() {
     // overdue according to the tenant's business date even while Field still
     // stores it as Sent, so filtering happens after deriving the display state.
     const response = await fieldApiJson<{ items: InvoiceData[] }>('/v1/invoices')
-    return response.items.filter(isCancellationFee)
+    return response.items.filter(isCancellationFeeInvoice)
   }, [])
   const resource = useResource(loader, [])
   const displayedInvoices = useMemo(

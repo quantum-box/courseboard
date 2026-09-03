@@ -323,6 +323,8 @@ export const customers = {
       sendEmailHint: 'メールの登録がない人には、請求書だけ作って送りません。',
       groupDetail: '{{count}}件・{{players}}名分',
       noEmail: 'メールの登録がありません。請求書は作りますが送りません。',
+      alreadyInvoicedTitle: 'すでに請求済みの予約があります',
+      alreadyInvoiced: '{{count}}件はすでに請求書が出ています。二重請求になるため今回は外しました。',
       unbillableTitle: '請求できない予約があります',
       unbillable: '{{count}}件は台帳の顧客と結びついていないため、請求書を出せません。',
       invoiceNote: 'キャンセル料のご請求です（{{count}}件）。',

@@ -26,6 +26,10 @@ import { showToast } from '../../../lib/toast'
 import {
   CANCELLATION_FEE_MARKER,
   cancellationFeeInvoiceRequestBody,
+  cancellationFeeInvoicesPath,
+  cancellationFeeSources,
+  invoicedReservationIds,
+  type InvoiceSource,
 } from '../../cancellation-fees/models'
 import {
   addDays,
@@ -52,6 +56,10 @@ const PAGE_SIZE = 20
 const DEFAULT_PER_PLAYER_FEE = 3_000
 
 type InvoiceResponse = { id: string; invoiceNumber?: string }
+
+type InvoiceListResponse = {
+  items: { id: string; sources?: InvoiceSource[] | null }[]
+}
 
 /**
  * Who gave up a tee time, why, and who still owes for it.
@@ -440,9 +448,32 @@ function BillCancellationFeesSheet({
   const [saving, setSaving] = useState(false)
   const [results, setResults] = useState<BillingResult[] | null>(null)
 
-  const plan = useMemo(() => planCancellationFees(rows, perPlayer), [rows, perPlayer])
+  // What Field already holds a cancellation fee for (PLT-4158).
+  //
+  // CourseBoard's own rows answer this for every batch it managed to record.
+  // The case worth catching is the one it could not: the invoice went out and
+  // the write back failed, leaving the row `unsettled` so the next extraction
+  // offers it again. A read that fails leaves the batch exactly as it was
+  // before this guard existed — it narrows, never blocks.
+  const invoiced = useResource(
+    () => fieldApiJson<InvoiceListResponse>(cancellationFeeInvoicesPath),
+    [open],
+    { enabled: open, cacheKey: 'field:invoices:cancellation-fee' },
+  )
+  const alreadyInvoiced = useMemo(
+    () => invoicedReservationIds(invoiced.data?.items ?? []),
+    [invoiced.data],
+  )
+
+  const plan = useMemo(
+    () => planCancellationFees(rows, perPlayer, alreadyInvoiced),
+    [rows, perPlayer, alreadyInvoiced],
+  )
 
   if (!open) return null
+
+  const unlinked = plan.unbillable.filter(entry => entry.reason === 'unlinked')
+  const alreadyBilled = plan.unbillable.filter(entry => entry.reason === 'already_invoiced')
 
   const submit = async () => {
     setSaving(true)
@@ -458,6 +489,10 @@ function BillCancellationFeesSheet({
           headers: { 'idempotency-key': crypto.randomUUID() },
           body: JSON.stringify(cancellationFeeInvoiceRequestBody({
             billTo: { kind: 'customer', customerId: group.customerId },
+            // What this invoice is for, machine-readable. The notes marker
+            // below is kept as well: it is what every invoice raised before
+            // PLT-4158 has, and the list still reads both.
+            sources: cancellationFeeSources(group.rows.map(row => row.reservationId)),
             clientName: group.customerName,
             clientEmail: sendEmail ? group.customerEmail : undefined,
             dueDate,
@@ -593,9 +628,17 @@ function BillCancellationFeesSheet({
           ))}
         </ul>
 
-        {plan.unbillable.length > 0 ? (
+        {/* Two different surprises, so two different sentences. One is a row
+            nobody can be billed for; the other is a row somebody already was. */}
+        {unlinked.length > 0 ? (
           <Notice tone="warning" title={t('customers:cancellations.bill.unbillableTitle')}>
-            {t('customers:cancellations.bill.unbillable', { count: plan.unbillable.length })}
+            {t('customers:cancellations.bill.unbillable', { count: unlinked.length })}
+          </Notice>
+        ) : null}
+
+        {alreadyBilled.length > 0 ? (
+          <Notice tone="warning" title={t('customers:cancellations.bill.alreadyInvoicedTitle')}>
+            {t('customers:cancellations.bill.alreadyInvoiced', { count: alreadyBilled.length })}
           </Notice>
         ) : null}
 

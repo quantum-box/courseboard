@@ -40,6 +40,22 @@ function cancellation(overrides: Record<string, unknown> = {}) {
   }
 }
 
+/**
+ * Field answers two different calls here: the reverse lookup that guards
+ * against billing twice, and the invoice creation itself.
+ */
+function mockField(billedSources: unknown[] = []) {
+  api.field.mockImplementation(async (path: string) => {
+    if (path.startsWith('/v1/invoices?')) return { items: billedSources }
+    return { id: 'inv_1', invoiceNumber: 'INV-1' }
+  })
+}
+
+/** The POST calls only — the guard's GET is not an invoice being raised. */
+function invoicePosts() {
+  return api.field.mock.calls.filter(call => call[0] === '/v1/invoices')
+}
+
 function renderPage() {
   return render(
     <I18nextProvider i18n={i18next}>
@@ -86,7 +102,7 @@ describe('the cancellation extraction', () => {
       ],
       total: 2,
     })
-    api.field.mockResolvedValue({ id: 'inv_1', invoiceNumber: 'INV-1' })
+    mockField()
 
     await act(async () => {
       renderPage()
@@ -104,13 +120,19 @@ describe('the cancellation extraction', () => {
 
     // One person, two cancelled bookings, one invoice — not two bills the
     // caller has to reconcile themselves.
-    expect(api.field).toHaveBeenCalledTimes(1)
+    expect(invoicePosts()).toHaveLength(1)
     const invoiceBody = JSON.parse(
-      (api.field.mock.calls[0]?.[1] as RequestInit).body as string,
+      (invoicePosts()[0]?.[1] as RequestInit).body as string,
     )
     expect(invoiceBody.billTo).toEqual({ kind: 'customer', customerId: 'cus_1' })
     // Six rounds given up at the default 3,000 each.
     expect(invoiceBody.lineItems[0].unitPrice).toBe(18_000)
+    // Both bookings are declared upstream, so Field can answer "has this one
+    // already been billed" without CourseBoard's own table (PLT-4158).
+    expect(invoiceBody.sources).toEqual([
+      { sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' },
+      { sourceType: 'reservation', sourceId: 'res_2', reason: 'cancellation_fee' },
+    ])
 
     const settle = api.course.mock.calls.find(
       call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
@@ -122,11 +144,37 @@ describe('the cancellation extraction', () => {
       decision.state === 'invoiced' && decision.invoiceId === 'inv_1')).toBe(true)
   })
 
+  it('leaves out a booking Field already holds an invoice for, and says so', async () => {
+    // Our own row says unsettled — that is why it is on the list. Field says
+    // otherwise, which means the invoice went out and the write back failed.
+    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
+    mockField([
+      { id: 'inv_old', sources: [
+        { sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' },
+      ] },
+    ])
+
+    await act(async () => {
+      renderPage()
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('この一覧をすべて選ぶ'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
+    })
+
+    expect(screen.getByText('すでに請求済みの予約があります')).toBeTruthy()
+    // Nothing left to bill, so the button cannot raise a second invoice.
+    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
+  })
+
   it('says which selected bookings cannot be billed rather than quietly leaving them out', async () => {
     api.course.mockResolvedValue({
       items: [cancellation({ reservationId: 'res_1', customerId: null, billable: false })],
       total: 1,
     })
+    mockField()
 
     await act(async () => {
       renderPage()
@@ -145,7 +193,10 @@ describe('the cancellation extraction', () => {
     // The order the whole flow depends on: a row marked invoiced that points at
     // nothing never comes back on the next extraction.
     api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
-    api.field.mockRejectedValue(new Error('field is down'))
+    api.field.mockImplementation(async (path: string) => {
+      if (path.startsWith('/v1/invoices?')) return { items: [] }
+      throw new Error('field is down')
+    })
 
     await act(async () => {
       renderPage()

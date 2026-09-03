@@ -5,7 +5,7 @@
 - 関連: `docs/src/tasks/in-progress/crm-call-efficiency/task.md`（架電リスト、抽出の作り方が同型）
 - Field 側 既存: PLT-3297（予約のキャンセル理由を Field が保持する）— 未着手。理由の転送は続けている
 - Field 側 既存: PLT-4050（顧客の一括取得）— キャンセル一覧の氏名解決も同じ N+1 を踏んでいる
-- Field 側 新規: [PLT-4158](https://linear.app/issue/PLT-4158)（請求書に「何に対する請求か」の参照を持つ）— [起票案](./field-invoice-source-issue.md)
+- Field 側 新規: [PLT-4158](https://linear.app/issue/PLT-4158)（請求書に「何に対する請求か」の参照を持つ）— tachyonfield#1291 でマージ・本番デプロイ済み。CourseBoard 側も切り替え済み（下記 D）
 - Linear issue: 未作成
 
 ## 概要
@@ -61,14 +61,37 @@ CourseBoard ローカル DB が持つ（ADR-0009）。Field への理由の転�
 - 顧客カルテ: キャンセルの履歴（理由つき）と、請求済みなら請求書へのリンク。
 - キャンセル料の新規作成: 顧客IDの手入力をやめて `CustomerPicker` から選ぶ。
 
+### D. 請求書の由来への切り替え（PLT-4158 が入ったあと）
+
+- 一括請求は `sources: [{sourceType: 'reservation', sourceId, reason: 'cancellation_fee'}]` を送る。
+  Field の上限は1請求書あたり50件なので、超えたぶんは送らない（ローカルの
+  `fee_invoice_id` が残るので見失いはしない）。
+- キャンセル料一覧の判定は `sources` を先に読み、`notes` の印と旧 line item 前置きも
+  読み続ける。**印の読みは捨てられない。** PLT-4158 より前に出した請求書には
+  source 行が無く、切り替えると一覧から履歴が丸ごと消える。印を書くのも当面続ける。
+- 一括請求の前に `GET /v1/invoices?reason=cancellation_fee` を1回引いて、
+  **すでに請求書がある予約を今回の対象から外す。** ローカルが `unsettled` のままなのに
+  Field に請求書があるのは「請求は通ったが記録の書き戻しが落ちた」ケースで、
+  そのまま請求すると二重になる。この穴は PLT-4158 より前は塞ぎようがなかった。
+  引けなかったときは絞り込まない（受付を止めない）。
+
+`golf_reservation_cancellations.fee_invoice_id` は**残す**。逆引きが Field で
+引けるようになったので理屈の上では消せるが、一覧の徴収状態を描くのに行ごとの
+Field 呼び出しが必要になる。消すのは破壊的 migration で、得るものが無い。
+
+手入力の「キャンセル料の新規作成」画面は予約を持たないので `sources` を送らない。
+そこから出した請求書は今まで通り `notes` の印だけで見つかる。
+
 ## Out of scope
 
 - 何日前なら何割、という料金表そのもの。いまは1名あたりの金額を都度入力する。
 - 支払い状態の複製。払われたかは請求書（Field）が正で、こちらには持たない。
 - Field 側でキャンセル理由を持つ話（PLT-3297）。持てるようになっても、
   分類とキャンセル料の判断は CourseBoard に残る。
-- Field 側の実装そのもの（PLT-3297 / PLT-4050 / 請求書の由来）。CourseBoard から
-  書かず、業種非依存の contract として起票して待つ（CLAUDE.md）。
+- Field 側の実装そのもの（PLT-3297 / PLT-4050）。CourseBoard から書かず、
+  業種非依存の contract として起票して待つ（CLAUDE.md）。
+- `notes` の印を書くのをやめること。既存請求書の backfill が要る別作業。
+  Field 自身の `reservation_billing.rs` も同じ理由で `notes` 解析を残している。
 
 ## Status
 

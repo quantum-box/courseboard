@@ -102,6 +102,30 @@ describe('what a bulk collection would send', () => {
     expect(plan.total).toBe(0)
   })
 
+  it('leaves out a booking Field already holds an invoice for', () => {
+    // Our own row says unsettled, which is why the desk selected it. Field
+    // says otherwise, which means the invoice went out and the write back
+    // failed. Billing it again is the double charge this guard exists for.
+    const plan = planCancellationFees(
+      [row({ reservationId: 'res_1' }), row({ reservationId: 'res_2' })],
+      3_000,
+      new Set(['res_1']),
+    )
+
+    expect(plan.groups).toHaveLength(1)
+    expect(plan.groups[0]?.rows.map(entry => entry.reservationId)).toEqual(['res_2'])
+    expect(plan.unbillable).toHaveLength(1)
+    expect(plan.unbillable[0]?.reason).toBe('already_invoiced')
+  })
+
+  it('bills the whole batch when the upstream check could not be made', () => {
+    // An empty set is "we do not know", not "nothing is billed". Blocking the
+    // batch on a failed read would stop the desk on a morning Field is slow.
+    const plan = planCancellationFees([row()], 3_000)
+    expect(plan.groups).toHaveLength(1)
+    expect(plan.unbillable).toHaveLength(0)
+  })
+
   it('charges a booking with no headcount as one round rather than as nothing', () => {
     const plan = planCancellationFees([row({ players: 0 })], 5_000)
     expect(plan.groups[0]?.amount).toBe(5_000)

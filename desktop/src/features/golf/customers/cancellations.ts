@@ -140,10 +140,17 @@ export type CustomerFeeGroup = {
   amount: number
 }
 
-/** A booking that is real but cannot be billed, and why. */
+/** A booking that is real but is being left out of this batch, and why. */
 export type UnbillableRow = {
   row: ReservationCancellation
-  reason: 'unlinked'
+  /**
+   * `unlinked` — nobody in the ledger to raise an invoice against.
+   * `already_invoiced` — Field already holds a cancellation-fee invoice for
+   * this booking. CourseBoard's own row says otherwise, which means the
+   * invoice went out and the write back failed; billing it again would be the
+   * double charge this whole path exists to prevent.
+   */
+  reason: 'unlinked' | 'already_invoiced'
 }
 
 export type FeeBillingPlan = {
@@ -163,11 +170,24 @@ export type FeeBillingPlan = {
 export function planCancellationFees(
   rows: ReservationCancellation[],
   perPlayerAmount: number,
+  /**
+   * Bookings Field already has a cancellation-fee invoice for. Empty when the
+   * lookup could not be made, which leaves the batch exactly as it was before
+   * the guard existed rather than blocking it.
+   */
+  alreadyInvoiced: ReadonlySet<string> = new Set(),
 ): FeeBillingPlan {
   const groups = new Map<string, CustomerFeeGroup>()
   const unbillable: UnbillableRow[] = []
 
   for (const row of rows) {
+    // Checked before the ledger link, because it is the more surprising of the
+    // two: the desk selected this row precisely because our own record says
+    // nobody has billed it.
+    if (alreadyInvoiced.has(row.reservationId)) {
+      unbillable.push({ row, reason: 'already_invoiced' })
+      continue
+    }
     const customerId = row.customerId?.trim()
     if (!customerId) {
       unbillable.push({ row, reason: 'unlinked' })

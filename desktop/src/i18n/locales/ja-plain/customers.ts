@@ -318,6 +318,8 @@ export const customers: DeepPartial<typeof source> = {
       sendEmailHint: 'メールがない人には、つくるだけでおくりません。',
       groupDetail: '{{count}}件・{{players}}人ぶん',
       noEmail: 'メールがありません。つくるだけでおくりません。',
+      alreadyInvoicedTitle: 'もうせいきゅうしたものがあります',
+      alreadyInvoiced: '{{count}}件はもう請求書が出ています。2回になるので今回は外しました。',
       unbillableTitle: 'せいきゅうできないものがあります',
       unbillable: '{{count}}件は、だれかわからないのでせいきゅうできません。',
       invoiceNote: 'キャンセル料のせいきゅうです（{{count}}件）。',

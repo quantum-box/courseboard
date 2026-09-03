@@ -319,6 +319,8 @@ export const customers: DeepPartial<typeof source> = {
       sendEmailHint: 'People with no email get an invoice that is not sent.',
       groupDetail: '{{count}} bookings, {{players}} players',
       noEmail: 'No email on file. The invoice is raised but not sent.',
+      alreadyInvoicedTitle: 'Some bookings are already invoiced',
+      alreadyInvoiced: '{{count}} already carry an invoice. They are left out to avoid billing twice.',
       unbillableTitle: 'Some bookings cannot be invoiced',
       unbillable: '{{count}} are not linked to a ledger entry, so no invoice can be raised.',
       invoiceNote: 'Cancellation fee ({{count}} bookings).',

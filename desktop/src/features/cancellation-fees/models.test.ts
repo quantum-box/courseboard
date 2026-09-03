@@ -11,6 +11,13 @@ import {
   normalizePhone,
   summarize,
 } from './CancellationFeesPage'
+import {
+  CANCELLATION_FEE_MARKER,
+  cancellationFeeSources,
+  invoicedReservationIds,
+  isCancellationFeeInvoice,
+  INVOICE_SOURCE_MAX_COUNT,
+} from './models'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -220,5 +227,79 @@ describe('normalizePhone', () => {
   it('rejects invalid destinations', () => {
     expect(normalizePhone('123')).toBe('')
     expect(normalizePhone('+0123456789')).toBe('')
+  })
+})
+
+describe('what an invoice was raised from', () => {
+  it('declares every cancelled booking on the invoice', () => {
+    const sources = cancellationFeeSources(['res_1', 'res_2'])
+    expect(sources).toEqual([
+      { sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' },
+      { sourceType: 'reservation', sourceId: 'res_2', reason: 'cancellation_fee' },
+    ])
+  })
+
+  it('never sends more origins than Field accepts', () => {
+    // Past the cap Field rejects the request, and losing one booking's
+    // upstream origin is a far smaller harm than losing the whole invoice.
+    const many = Array.from({ length: INVOICE_SOURCE_MAX_COUNT + 5 }, (_, i) => `res_${i}`)
+    expect(cancellationFeeSources(many)).toHaveLength(INVOICE_SOURCE_MAX_COUNT)
+  })
+
+  it('drops blanks and repeats', () => {
+    expect(cancellationFeeSources(['res_1', ' res_1 ', '', '  '])).toHaveLength(1)
+  })
+
+  it('omits the origins entirely rather than claiming an empty search', () => {
+    const body = cancellationFeeInvoiceRequestBody({
+      billTo: { kind: 'customer', customerId: 'cus_1' },
+      sources: [],
+      clientName: '本田 康彦',
+      dueDate: '2026-06-17',
+      taxAmount: 0,
+      notes: '',
+      description: 'キャンセル料',
+      amount: 5_000,
+      sendEmail: false,
+      sendSms: false,
+    })
+    expect('sources' in body).toBe(false)
+  })
+})
+
+describe('finding cancellation fees among ordinary invoices', () => {
+  it('reads the declared source', () => {
+    expect(isCancellationFeeInvoice({
+      sources: [{ sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' }],
+    })).toBe(true)
+  })
+
+  it('still finds the ones raised before invoices could say what they were for', () => {
+    // Dropping this reading would empty the list of its whole history.
+    expect(isCancellationFeeInvoice({ notes: `${CANCELLATION_FEE_MARKER}\nご請求です` })).toBe(true)
+    expect(isCancellationFeeInvoice({
+      lineItems: [{ description: 'キャンセル料（4名）' }],
+    })).toBe(true)
+  })
+
+  it('leaves ordinary invoices alone', () => {
+    expect(isCancellationFeeInvoice({
+      sources: [{ sourceType: 'order', sourceId: 'ord_1', reason: 'late_delivery' }],
+      notes: 'ご請求です',
+      lineItems: [{ description: 'プレー料金' }],
+    })).toBe(false)
+  })
+
+  it('collects the bookings already billed, ignoring other kinds of origin', () => {
+    const billed = invoicedReservationIds([
+      { sources: [
+        { sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' },
+        { sourceType: 'reservation', sourceId: 'res_2', reason: 'no_show_fee' },
+        { sourceType: 'order', sourceId: 'res_1', reason: 'cancellation_fee' },
+      ] },
+      { sources: null },
+      {},
+    ])
+    expect([...billed]).toEqual(['res_1'])
   })
 })
