@@ -5,7 +5,7 @@
 - 関連: `docs/src/tasks/in-progress/crm-call-efficiency/task.md`（架電リスト、抽出の作り方が同型）
 - Field 側 既存: PLT-3297（予約のキャンセル理由を Field が保持する）— 未着手。理由の転送は続けている
 - Field 側 既存: PLT-4050（顧客の一括取得）— キャンセル一覧の氏名解決も同じ N+1 を踏んでいる
-- [Field 起票案：請求書に「何に対する請求か」の参照を持つ](./field-invoice-source-issue.md) — 未起票
+- Field 側 新規: [PLT-4158](https://linear.app/issue/PLT-4158)（請求書に「何に対する請求か」の参照を持つ）— [起票案](./field-invoice-source-issue.md)
 - Linear issue: 未作成
 
 ## 概要
