@@ -262,6 +262,8 @@ export const customers = {
       description: 'この顧客名義の予約のキャンセルが{{count}}件あります。',
     },
     open: 'キャンセルした人をさがす',
+    title: 'キャンセルとキャンセル料',
+    description: 'キャンセルを理由で抽出し、キャンセル料をまとめて請求します。',
     selectAll: 'この一覧をすべて選ぶ',
     selectRow: '「{{name}}」を選ぶ',
     unlinked: '（台帳と未連携）',

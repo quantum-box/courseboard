@@ -90,6 +90,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
       name: '相手の名前',
       id: '相手の管理番号',
       idPlaceholder: 'cl_...',
+      customerPick: 'せいきゅうする人',
       customerHint: '顧客台帳からえらびます。名前を入れると出てきます。',
       customerId: 'お客さまの管理番号',
       customerIdPlaceholder: 'cus_...',

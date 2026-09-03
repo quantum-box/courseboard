@@ -564,7 +564,7 @@ export function NewCancellationFeePage() {
               // decision, and typing one without the other is what produced
               // invoices addressed to nobody.
               <Field
-                label={t('cancellationFees:new.client.customer')}
+                label={t('cancellationFees:new.client.customerPick')}
                 hint={t('cancellationFees:new.client.customerHint')}
                 required
               >

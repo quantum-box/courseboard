@@ -63,6 +63,7 @@ export const appRoutes: AppRoute[] = [
   { path: 'golf/timeline', title: 'タイムライン' },
   { path: 'golf/customers', title: '顧客台帳', sidebarLabel: '顧客台帳' },
   { path: 'golf/customers/reception', title: '受付用紙から顧客を登録する' },
+  { path: 'golf/customers/cancellations', title: 'キャンセルとキャンセル料' },
   { path: 'golf/products', title: 'プレー商品', sidebarLabel: 'プレー商品' },
   { path: 'golf/courses', title: 'コース', sidebarLabel: 'コース' },
   { path: 'golf/caddies', title: 'キャディ名簿', sidebarLabel: 'キャディ名簿' },

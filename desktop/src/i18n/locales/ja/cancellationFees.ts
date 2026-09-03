@@ -94,6 +94,7 @@ export const cancellationFees = {
       name: '請求先の名前',
       id: '取引先ID',
       idPlaceholder: 'cl_...',
+      customerPick: '請求先の顧客',
       customerHint: '顧客台帳から選びます。名前を入れると候補が出ます。',
       customerId: '顧客ID',
       customerIdPlaceholder: 'cus_...',

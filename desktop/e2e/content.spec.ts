@@ -302,13 +302,17 @@ test.describe('キャンセル料', () => {
 
     await page.goto('/cancellation-fees/new')
     await page.getByRole('textbox', { name: '対象の予約・注文' }).fill('RSV-E2E-0001')
-    await page.getByRole('textbox', { name: '請求先の名前' }).fill('E2E Demo Customer')
-    await page.getByRole('textbox', { name: '顧客ID' }).fill('cus_honda')
+    // The customer is picked out of the ledger rather than typed as an id: a
+    // cancellation fee is always somebody the club already has a booking for,
+    // and copying `cus_…` off another screen is how the wrong person gets
+    // invoiced.
+    await page.getByRole('textbox', { name: '請求先の顧客' }).fill('本田')
+    await page.getByRole('button', { name: /本田 康彦/ }).click()
     await page.getByRole('textbox', { name: '送り先のメール' }).fill('e2e@example.com')
     await page.getByRole('button', { name: '請求を作って送る' }).click()
 
     await expect(page).toHaveURL(/\/cancellation-fees\/inv_mock_created_\d+$/)
-    await expect(page.getByRole('heading', { name: 'E2E Demo Customer' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: '本田 康彦' })).toBeVisible()
     await expect(page.getByRole('button', { name: '支払いページ' })).toBeVisible()
     await expect(page.getByText('Ready', { exact: true })).toBeVisible()
     await expect(page.getByText('Sent', { exact: true })).toBeVisible()

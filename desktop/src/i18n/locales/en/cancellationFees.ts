@@ -97,6 +97,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
       name: 'Client name',
       id: 'Client ID',
       idPlaceholder: 'cl_...',
+      customerPick: 'Customer to bill',
       customerHint: 'Picked from the ledger. Type a name to see candidates.',
       customerId: 'Customer ID',
       customerIdPlaceholder: 'cus_...',

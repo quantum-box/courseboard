@@ -258,6 +258,8 @@ export const customers: DeepPartial<typeof source> = {
       description: '{{count}} bookings in this person\u2019s name were cancelled.',
     },
     open: 'Find who cancelled',
+    title: 'Cancellations and fees',
+    description: 'Select cancellations by reason and invoice the fees together.',
     selectAll: 'Select every row',
     selectRow: 'Select {{name}}',
     unlinked: '(not in the ledger)',

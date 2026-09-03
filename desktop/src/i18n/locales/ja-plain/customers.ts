@@ -257,6 +257,8 @@ export const customers: DeepPartial<typeof source> = {
       description: 'この人の名前の予約で、キャンセルが{{count}}件あります。',
     },
     open: 'キャンセルした人をさがす',
+    title: 'キャンセルとキャンセル料',
+    description: 'キャンセルを理由でさがして、キャンセル料をまとめてせいきゅうします。',
     selectAll: 'ぜんぶえらぶ',
     selectRow: '「{{name}}」をえらぶ',
     unlinked: '（だれかわからない）',
