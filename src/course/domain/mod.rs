@@ -41,6 +41,7 @@ mod ports;
 mod pricing_settings;
 mod product;
 mod reservation;
+mod reservation_cancellation;
 mod reservation_report;
 mod resource;
 mod schedule;
@@ -180,9 +181,9 @@ pub use ports::{
     GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
     GolfOpsGateway, GolfTaxGateway, MembershipActivityGateway, MembershipDiscountsGateway,
     MembershipGateway, MembershipPlayWindowsGateway, PlayerTagOptionsGateway,
-    PricingSettingsGateway, ReservationGateway, ReservationScheduleGateway, ShiftRulesGateway,
-    SlotOverrideGateway, StaffShiftGateway, StaffShiftInput, TeeLedgerQuery, TeeSheetQuery,
-    VisitCheckinGateway,
+    PricingSettingsGateway, ReservationCancellationGateway, ReservationGateway,
+    ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, StaffShiftGateway,
+    StaffShiftInput, TeeLedgerQuery, TeeSheetQuery, VisitCheckinGateway,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{
@@ -190,6 +191,11 @@ pub use product::{
 };
 pub use reservation::{
     NewReservation, Reservation, ReservationBilling, ReservationBookingUpdate, SeededReservation,
+};
+pub use reservation_cancellation::{
+    notice_days_between, CancellationDetails, CancellationFeeDecision, CancellationFeeState,
+    CancellationQuery, CancellationReason, NewReservationCancellation, ReservationCancellation,
+    CANCELLATION_PAGE_LIMIT, MAX_CANCELLATION_NOTE_CHARS,
 };
 pub use reservation_report::{
     ExternalReservationReportEntry, PdfRotation, ReservationReport,

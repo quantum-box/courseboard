@@ -1773,6 +1773,48 @@ button,
 .delivery-choice strong { font-weight: 600; }
 .delivery-choice small { color: hsl(var(--nui-muted-foreground)); font-size: 11px; }
 
+/* The bill a bulk cancellation-fee collection is about to raise: one line per
+   person, read before anything is sent. Dense on purpose — the desk is
+   checking a list, not reading a document. */
+/* The day's cancellations under the tee sheet. One line each, reason first,
+   because the reason is what the next shift is reading for. */
+.day-cancellation-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.day-cancellation-list > li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid hsl(var(--nui-border));
+}
+
+.day-cancellation-list > li:last-child { border-bottom: 0; }
+
+.fee-plan-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.fee-plan-list > li {
+  padding: 6px 8px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 6px;
+}
+
 .consent-check {
   display: flex;
   align-items: flex-start;

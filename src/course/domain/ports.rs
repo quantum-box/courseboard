@@ -8,24 +8,25 @@ use super::{
     AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, Caddie,
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
     CaddieDutyAssignment, CaddieDutyOptions, CaddieId, CaddieRankFees, CaddieRating, CaddieRoster,
-    CaddieShift, CaddieStaff, Course, CourseError, CourseId, CourseOrder,
-    CreateCustomerConsentItem, Customer, CustomerConsentItem, CustomerGradeRules, CustomerId,
-    CustomerMembership, CustomerReceptionField, CustomerRegistration, CustomerSearchQuery,
-    CustomerSummary, CustomerSummaryQuery, CustomerSummaryRun, CustomerSummaryRunStatus,
-    DailyBudget, DailyBudgetQuery, DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus,
-    FieldClientCapabilities, FieldRequestContext, FieldShiftLink, GenerationSummary,
-    GolfPricingSettings, InventoryWatermark, MembershipActivityPage, MembershipActivityQuery,
-    MembershipDiscounts, MembershipPlan, MembershipPlanId, MembershipPlayWindows,
-    MonthlySettlement, NewCustomer, NewCustomerRegistration, NewReservation, PartyDetails,
+    CaddieShift, CaddieStaff, CancellationFeeDecision, CancellationQuery, Course, CourseError,
+    CourseId, CourseOrder, CreateCustomerConsentItem, Customer, CustomerConsentItem,
+    CustomerGradeRules, CustomerId, CustomerMembership, CustomerReceptionField,
+    CustomerRegistration, CustomerSearchQuery, CustomerSummary, CustomerSummaryQuery,
+    CustomerSummaryRun, CustomerSummaryRunStatus, DailyBudget, DailyBudgetQuery,
+    DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities,
+    FieldRequestContext, FieldShiftLink, GenerationSummary, GolfPricingSettings,
+    InventoryWatermark, MembershipActivityPage, MembershipActivityQuery, MembershipDiscounts,
+    MembershipPlan, MembershipPlanId, MembershipPlayWindows, MonthlySettlement, NewCustomer,
+    NewCustomerRegistration, NewReservation, NewReservationCancellation, PartyDetails,
     PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionConsentDefinition,
     ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal, ReceptionSheet,
-    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationId,
-    ReservationPolicy, ReservationProduct, ReservationServiceId, Resource, ResourceId,
-    ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber, ShiftPolicy,
-    SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
-    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
-    UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin,
-    VisitCheckinRequest, WorkedMinutes, YearMonth,
+    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationCancellation,
+    ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
+    ResourceId, ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber,
+    ShiftPolicy, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift,
+    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
+    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan,
+    UpsertReservationProduct, VisitCheckin, VisitCheckinRequest, WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -449,6 +450,51 @@ pub trait CustomerSummaryGateway: Send + Sync {
         customers_written: i64,
         error: Option<&str>,
     ) -> Result<(), CourseError>;
+}
+
+/// Port for why bookings came off the board.
+///
+/// CourseBoard's own storage. Field records that a booking was cancelled and
+/// when, and has nowhere to put why (PLT-3297); the club's reading of that —
+/// which of its own reasons this was, and whether a fee is owed — is a golf
+/// judgement and stays here (ADR-0009).
+#[async_trait]
+pub trait ReservationCancellationGateway: Send + Sync {
+    /// Records a cancellation. Idempotent per booking: a second cancel of the
+    /// same booking corrects the reason rather than adding a row, and never
+    /// disturbs a fee decision somebody has already made about it.
+    async fn record_cancellation(
+        &self,
+        tenant_id: &str,
+        cancellation: &NewReservationCancellation,
+    ) -> Result<(), CourseError>;
+
+    /// The rows a query selects, newest play day first.
+    async fn list_cancellations(
+        &self,
+        tenant_id: &str,
+        query: &CancellationQuery,
+    ) -> Result<Vec<ReservationCancellation>, CourseError>;
+
+    /// How many rows the query selects, which is not how many came back. The
+    /// desk decides whether a period is worth working through from this.
+    async fn count_cancellations(
+        &self,
+        tenant_id: &str,
+        query: &CancellationQuery,
+    ) -> Result<i64, CourseError>;
+
+    /// Records what somebody decided about a set of fees, and answers with the
+    /// rows as they now stand.
+    ///
+    /// Taken as a set because the decision is made as one: the desk selects a
+    /// morning's worth of cancellations and bills them together, and a write
+    /// per row is a write per chance to leave half the batch unrecorded.
+    async fn settle_cancellation_fees(
+        &self,
+        tenant_id: &str,
+        decisions: &[CancellationFeeDecision],
+    ) -> Result<Vec<ReservationCancellation>, CourseError>;
 }
 
 /// Port for who was actually seen at the desk.

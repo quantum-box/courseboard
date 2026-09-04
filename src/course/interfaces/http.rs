@@ -17,12 +17,13 @@ use super::openapi::ErrorBody;
 
 use crate::course::domain::{
     tenant_date_at, AvailabilityRule, BookingHorizon, BusinessHours, Caddie, CaddieAssignment,
-    CaddieAssignmentQuery, CaddieId, CaddieStaff, Course, CourseError, CourseId, CourseOrder,
-    CustomerId, DeleteSlotOverrides, GatewayCredentials, GenerationSummary, GolfCatalogGateway,
-    LedgerColumn, LedgerSlot, NewVisitCheckin, PartyDetails, ProductSlot, ReservationId,
-    ReservationProduct, ReservationServiceId, Resource, ResourceId, SavedSchedule, SlotOverride,
-    SlotOverrideKind, SlotOverrideQuery, TeeLedger, TeeLedgerQuery, TeeSheet, TeeSheetItem,
-    TeeSheetQuery, UpsertCourse, UpsertReservationProduct, UpsertSlotOverrides, VisitCheckin,
+    CaddieAssignmentQuery, CaddieId, CaddieStaff, CancellationDetails, CancellationReason, Course,
+    CourseError, CourseId, CourseOrder, CustomerId, DeleteSlotOverrides, GatewayCredentials,
+    GenerationSummary, GolfCatalogGateway, LedgerColumn, LedgerSlot, NewVisitCheckin, PartyDetails,
+    ProductSlot, ReservationId, ReservationProduct, ReservationServiceId, Resource, ResourceId,
+    SavedSchedule, SlotOverride, SlotOverrideKind, SlotOverrideQuery, TeeLedger, TeeLedgerQuery,
+    TeeSheet, TeeSheetItem, TeeSheetQuery, UpsertCourse, UpsertReservationProduct,
+    UpsertSlotOverrides, VisitCheckin,
 };
 use crate::course::infrastructure::{
     party_from_request, FieldGolfCatalogGateway, FieldGolfCommercialGateway, FieldGolfOpsGateway,
@@ -973,6 +974,14 @@ pub async fn create_reservation(
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CancelReservationRequest {
+    /// Which of the club's reasons this was: `weather`, `illness`, `personal`,
+    /// `no_contact`, `course_side`, `shortage`, `mistake`, or `other`.
+    ///
+    /// Optional so that a client written before the reasons existed still
+    /// cancels rather than failing, and lands as `other`. It is what the whole
+    /// month is counted by, so every screen of ours sends one.
+    #[serde(default)]
+    pub reason_code: Option<String>,
     /// Why the desk cancelled, in their own words. Optional.
     #[serde(default)]
     pub reason: Option<String>,
@@ -997,15 +1006,29 @@ pub async fn cancel_reservation(
     State(state): State<AppState>,
     headers: HeaderMap,
     Path(reservation_id): Path<String>,
+    principal: Option<Extension<CallerPrincipal>>,
     Json(request): Json<CancelReservationRequest>,
 ) -> Result<StatusCode, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case = CancelReservationUseCase::new(reservation_gateway(&state), ops_gateway(&state));
+    let reason = match request.reason_code.as_deref() {
+        Some(code) => CancellationReason::parse(code).map_err(AppError::from)?,
+        None => CancellationReason::Other,
+    };
+    let details =
+        CancellationDetails::try_new(reason, request.reason.as_deref()).map_err(AppError::from)?;
+    let cancelled_by = principal.and_then(|Extension(caller)| caller.subject);
+    let use_case = CancelReservationUseCase::new(
+        reservation_gateway(&state),
+        ops_gateway(&state),
+        catalog_gateway(&state),
+        state.reservation_cancellations.clone(),
+    );
     use_case
         .execute(
             credentials,
             &ReservationId::new(reservation_id),
-            request.reason.as_deref(),
+            &details,
+            cancelled_by.as_deref(),
         )
         .await
         .map_err(AppError::from)?;

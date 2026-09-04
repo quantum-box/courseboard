@@ -35,7 +35,27 @@ import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import { openExternal } from '../../lib/platform'
 import { currentRouteSearchParams, navigate } from '../../lib/router'
+import { CustomerPicker } from '../golf/customers/CustomerPicker'
+import type { Customer } from '../golf/customers/models'
 import { DEFAULT_TIME_ZONE, normalizeIsoDate, today } from '../../lib/clock'
+import {
+  cancellationFeeInvoiceRequestBody,
+  invoiceBillTo,
+  normalizePhone,
+  CANCELLATION_FEE_MARKER,
+  isCancellationFeeInvoice,
+  type InvoiceBillTo,
+  type InvoiceSource,
+} from './models'
+
+// Re-exported so the existing tests and any importer of this screen keep
+// reaching them at the name they already use.
+export {
+  cancellationFeeInvoiceRequestBody,
+  invoiceBillTo,
+  normalizePhone,
+  type InvoiceBillTo,
+}
 
 type InvoiceStatus = 'Draft' | 'Sent' | 'SendFailed' | 'Paid' | 'Overdue'
 
@@ -77,6 +97,8 @@ type InvoiceData = {
   emailDeliveryFailureCode?: string | null
   smsDeliveryFailureCode?: string | null
   notes?: string | null
+  /** What this invoice was raised from (PLT-4158). Empty on older invoices. */
+  sources?: InvoiceSource[] | null
   sentAt?: string | null
   paidAt?: string | null
   createdAt: string
@@ -92,68 +114,6 @@ type OrderData = {
   totalAmount: number
   currency: string
   status: string
-}
-
-export type InvoiceBillTo =
-  | { kind: 'customer'; customerId: string }
-  | { kind: 'client'; clientId: string; affiliationId: string }
-
-type CancellationFeeInvoiceRequestInput = {
-  billTo: InvoiceBillTo
-  clientName: string
-  clientEmail?: string
-  clientPhone?: string
-  dueDate: string
-  taxAmount: number
-  notes: string
-  description: string
-  amount: number
-  sendEmail: boolean
-  sendSms: boolean
-  smsMessage?: string
-}
-
-export function invoiceBillTo(input: {
-  kind: string
-  customerId?: string
-  clientId?: string
-  affiliationId?: string
-}): InvoiceBillTo | undefined {
-  if (input.kind === 'customer') {
-    const customerId = input.customerId?.trim()
-    return customerId ? { kind: 'customer', customerId } : undefined
-  }
-  if (input.kind === 'client') {
-    const clientId = input.clientId?.trim()
-    const affiliationId = input.affiliationId?.trim()
-    return clientId && affiliationId
-      ? { kind: 'client', clientId, affiliationId }
-      : undefined
-  }
-  return undefined
-}
-
-export function cancellationFeeInvoiceRequestBody(input: CancellationFeeInvoiceRequestInput) {
-  return {
-    billTo: input.billTo,
-    clientName: input.clientName,
-    clientEmail: input.clientEmail,
-    clientPhone: input.clientPhone,
-    dueDate: input.dueDate,
-    currency: 'JPY',
-    taxAmount: input.taxAmount,
-    notes: input.notes,
-    lineItems: [{
-      description: input.description,
-      quantity: 1,
-      unitPrice: input.amount,
-    }],
-    createPaymentLink: true,
-    paymentLinkProvider: 'stripe',
-    sendEmail: input.sendEmail,
-    sendSms: input.sendSms,
-    smsMessage: input.smsMessage,
-  }
 }
 
 const INVOICE_STATUSES: InvoiceStatus[] = ['Draft', 'Sent', 'SendFailed', 'Paid', 'Overdue']
@@ -245,16 +205,11 @@ const statusVariants: Record<InvoiceStatus, 'neutral' | 'accent' | 'warning' | '
 }
 
 /**
- * Invoices created by Course Board carry the notes marker. The Japanese prefix
- * stays hard-coded because it identifies rows already stored by earlier
- * versions — translating it would hide them.
+ * Since PLT-4158 an invoice declares what it was raised from, so the honest
+ * reading is its `sources`. The two older readings stay because every invoice
+ * raised before then has one of them and nothing else: dropping either would
+ * empty this list of its own history. See `isCancellationFeeInvoice`.
  */
-const LEGACY_FEE_DESCRIPTION_PREFIX = 'キャンセル料'
-
-function isCancellationFee(invoice: InvoiceData) {
-  return invoice.notes?.includes('[courseboard:cancellation-fee]')
-    || invoice.lineItems.some(item => item.description.startsWith(LEGACY_FEE_DESCRIPTION_PREFIX))
-}
 
 export function CancellationFeesPage() {
   const { t } = useTranslation(['cancellationFees', 'common'])
@@ -266,7 +221,7 @@ export function CancellationFeesPage() {
     // overdue according to the tenant's business date even while Field still
     // stores it as Sent, so filtering happens after deriving the display state.
     const response = await fieldApiJson<{ items: InvoiceData[] }>('/v1/invoices')
-    return response.items.filter(isCancellationFee)
+    return response.items.filter(isCancellationFeeInvoice)
   }, [])
   const resource = useResource(loader, [])
   const displayedInvoices = useMemo(
@@ -397,6 +352,12 @@ export function NewCancellationFeePage() {
   const [sendEmail, setSendEmail] = useState(true)
   const [sendSms, setSendSms] = useState(false)
   const [billToKind, setBillToKind] = useState<'customer' | 'client'>(orderId ? 'client' : 'customer')
+  // The person being billed, chosen from the ledger rather than typed as an
+  // id. A cancellation fee is always somebody the club already has a booking
+  // for, and asking the desk to copy `cus_01j…` off another screen is how the
+  // wrong person gets invoiced.
+  const [customer, setCustomer] = useState<Customer | null>(null)
+  const [customerName, setCustomerName] = useState(order?.clientName ?? '')
   const [amount, setAmount] = useState(5000)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -417,13 +378,15 @@ export function NewCancellationFeePage() {
       return
     }
     const reference = String(form.get('reference') ?? '').trim()
-    const clientName = String(form.get('clientName') ?? '').trim()
+    const clientName = (billToKind === 'customer'
+      ? (customer?.name ?? customerName)
+      : String(form.get('clientName') ?? '')).trim()
     const reason = String(form.get('reason') ?? '').trim()
     const notes = String(form.get('notes') ?? '').trim()
     const customerPhone = normalizePhone(String(form.get('clientPhone') ?? ''))
     const billTo = invoiceBillTo({
-      kind: String(form.get('billToKind') ?? ''),
-      customerId: String(form.get('customerId') ?? ''),
+      kind: billToKind,
+      customerId: customer?.id ?? '',
       clientId: String(form.get('clientId') ?? ''),
       affiliationId: String(form.get('affiliationId') ?? ''),
     })
@@ -453,7 +416,7 @@ export function NewCancellationFeePage() {
           dueDate: String(form.get('dueDate') ?? ''),
           taxAmount: Number(form.get('taxAmount') ?? 0),
           notes: [
-            '[courseboard:cancellation-fee]',
+            CANCELLATION_FEE_MARKER,
             t('cancellationFees:new.message.intro'),
             reference ? t('cancellationFees:new.message.reference', { reference }) : null,
             reason ? t('cancellationFees:new.message.reason', { reason }) : null,
@@ -596,15 +559,36 @@ export function NewCancellationFeePage() {
                 <option value="client">{t('cancellationFees:new.client.company')}</option>
               </NativeSelect>
             </Field>
-            <Field label={t('cancellationFees:new.client.name')} required>
-              <Input name="clientName" required defaultValue={order?.clientName ?? ''} />
-            </Field>
             {billToKind === 'customer' ? (
-              <Field label={t('cancellationFees:new.client.customerId')} required>
-                <Input name="customerId" required placeholder={t('cancellationFees:new.client.customerIdPlaceholder')} />
+              // One field, not two: the name and the ledger entry are the same
+              // decision, and typing one without the other is what produced
+              // invoices addressed to nobody.
+              <Field
+                label={t('cancellationFees:new.client.customerPick')}
+                hint={t('cancellationFees:new.client.customerHint')}
+                required
+              >
+                <CustomerPicker
+                  name={customerName}
+                  customerId={customer?.id ?? null}
+                  onNameChange={value => {
+                    setCustomerName(value)
+                    // Editing the name after a pick means the desk is looking
+                    // for somebody else; keeping the old link would invoice
+                    // the person whose name is no longer on screen.
+                    if (customer && value !== customer.name) setCustomer(null)
+                  }}
+                  onSelect={picked => {
+                    setCustomer(picked)
+                    if (picked) setCustomerName(picked.name)
+                  }}
+                />
               </Field>
             ) : (
               <>
+                <Field label={t('cancellationFees:new.client.name')} required>
+                  <Input name="clientName" required defaultValue={order?.clientName ?? ''} />
+                </Field>
                 <Field label={t('cancellationFees:new.client.id')} required>
                   <Input
                     name="clientId"
@@ -658,11 +642,20 @@ export function NewCancellationFeePage() {
                 required={sendEmail}
                 disabled={!sendEmail}
                 placeholder="guest@example.com"
-                defaultValue={order?.clientEmail ?? ''}
+                key={customer?.id ?? order?.id ?? 'blank'}
+                defaultValue={customer?.email ?? order?.clientEmail ?? ''}
               />
             </Field>
             <Field label={t('cancellationFees:new.delivery.smsTo')} required={sendSms}>
-              <Input name="clientPhone" type="tel" required={sendSms} disabled={!sendSms} placeholder="09012345678" />
+              <Input
+                name="clientPhone"
+                type="tel"
+                required={sendSms}
+                disabled={!sendSms}
+                placeholder="09012345678"
+                key={customer?.id ?? 'blank'}
+                defaultValue={customer?.phone ?? ''}
+              />
             </Field>
           </FormGrid>
           {sendSms ? (
@@ -1130,18 +1123,6 @@ export function fulfillmentIssue(
     return i18next.t('cancellationFees:new.error.deliveryPartial')
   }
   return undefined
-}
-
-export function normalizePhone(value: string) {
-  const trimmed = value.trim()
-  if (!trimmed) return ''
-  if (trimmed.startsWith('+')) {
-    const normalized = `+${trimmed.slice(1).replace(/\D/g, '')}`
-    return /^\+[1-9]\d{7,14}$/.test(normalized) ? normalized : ''
-  }
-  const digits = trimmed.replace(/\D/g, '')
-  if (/^0\d{9,10}$/.test(digits)) return `+81${digits.slice(1)}`
-  return ''
 }
 
 async function copyToClipboard(value: string) {

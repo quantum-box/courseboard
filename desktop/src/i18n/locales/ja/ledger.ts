@@ -124,11 +124,18 @@ export const ledger = {
     cancelReservation: 'この予約をキャンセルする',
     slotSettings: '枠の設定（売り止め・特別料金）',
   },
+  cancellations: {
+    title: 'この日のキャンセル（{{count}}件）',
+    description: '台帳からは外れています。理由は受付が入力したものです。',
+    players: '{{count}}名',
+  },
   cancelReservation: {
     title: '予約をキャンセルする',
     description: '{{time}} の「{{name}}」をキャンセルします。',
     warnTitle: '元に戻せません',
     warnBody: 'キャンセルすると、この予約は台帳から外れます。取り消しはできません。',
+    reasonCode: 'キャンセルの区分',
+    reasonCodeHint: 'あとで「キャンセル料をとるか」を決めるときに使います。',
     reason: 'キャンセルの理由',
     reasonPlaceholder: '例）お客様都合・雨天のため',
     keep: 'やめる',

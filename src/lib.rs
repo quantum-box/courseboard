@@ -42,8 +42,9 @@ use course::infrastructure::{
     MySqlCustomerRegistrationRepository, MySqlCustomerSummaryRepository,
     MySqlGeneratedThroughRepository, MySqlGolfProductSettingsRepository,
     MySqlMembershipDiscountsRepository, MySqlMembershipPlayWindowsRepository,
-    MySqlPlayerTagOptionsRepository, MySqlPricingSettingsRepository, MySqlShiftRulesRepository,
-    MySqlSlotOverrideRepository, MySqlVisitCheckinRepository,
+    MySqlPlayerTagOptionsRepository, MySqlPricingSettingsRepository,
+    MySqlReservationCancellationRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
+    MySqlVisitCheckinRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -77,6 +78,7 @@ pub struct AppState {
     customer_registrations: Arc<MySqlCustomerRegistrationRepository>,
     customer_summaries: Arc<MySqlCustomerSummaryRepository>,
     visit_checkins: Arc<MySqlVisitCheckinRepository>,
+    reservation_cancellations: Arc<MySqlReservationCancellationRepository>,
     membership_discounts: Arc<MySqlMembershipDiscountsRepository>,
     membership_play_windows: Arc<MySqlMembershipPlayWindowsRepository>,
     generated_through: Arc<MySqlGeneratedThroughRepository>,
@@ -134,6 +136,9 @@ impl AppState {
                 pool.clone(),
             )),
             visit_checkins: Arc::new(MySqlVisitCheckinRepository::new(pool.clone())),
+            reservation_cancellations: Arc::new(MySqlReservationCancellationRepository::new(
+                pool.clone(),
+            )),
             membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(pool.clone())),
             membership_play_windows: Arc::new(MySqlMembershipPlayWindowsRepository::new(
                 pool.clone(),
@@ -208,6 +213,9 @@ impl AppState {
                 pool.clone(),
             )),
             visit_checkins: Arc::new(MySqlVisitCheckinRepository::new(pool.clone())),
+            reservation_cancellations: Arc::new(MySqlReservationCancellationRepository::new(
+                pool.clone(),
+            )),
             membership_discounts: Arc::new(MySqlMembershipDiscountsRepository::new(pool.clone())),
             membership_play_windows: Arc::new(MySqlMembershipPlayWindowsRepository::new(
                 pool.clone(),
@@ -266,6 +274,9 @@ impl AppState {
                     pool.clone(),
                 )),
                 visit_checkins: Arc::new(MySqlVisitCheckinRepository::new(pool.clone())),
+                reservation_cancellations: Arc::new(MySqlReservationCancellationRepository::new(
+                    pool.clone(),
+                )),
                 customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(
                     pool.clone(),
                 )),
@@ -321,6 +332,9 @@ impl AppState {
                     pool.clone(),
                 )),
                 visit_checkins: Arc::new(MySqlVisitCheckinRepository::new(pool.clone())),
+                reservation_cancellations: Arc::new(MySqlReservationCancellationRepository::new(
+                    pool.clone(),
+                )),
                 customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(
                     pool.clone(),
                 )),
@@ -783,6 +797,22 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/v1/course/customer-summaries",
             get(course::interfaces::http_customers::list_customer_summaries).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        // Static, and before any `/v1/course/reservations/:id` shape: the
+        // other end of cancelling, read by period rather than by booking.
+        .route(
+            "/v1/course/reservation-cancellations",
+            get(course::interfaces::http_cancellations::list_reservation_cancellations)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/reservation-cancellations/fees",
+            post(course::interfaces::http_cancellations::settle_cancellation_fees).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
         )
