@@ -10,6 +10,8 @@ import {
   invoiceBillTo,
   isInvoiceUpdateAllowed,
   normalizePhone,
+  recipientEmail,
+  recipientPhone,
   summarize,
 } from './CancellationFeesPage'
 import {
@@ -267,6 +269,37 @@ describe('cancellation fee invoice request', () => {
       phone: '+819000000000',
       idempotencyKey: 'cbfee-cus-1',
     })
+  })
+})
+
+describe('who a cancellation fee can be reached at', () => {
+  it('falls back to the recipient snapshot when no channel filled the destination', () => {
+    // Verified against production Field: an unregistered bill-to raised
+    // without SMS comes back with `clientPhone: null` and the number on the
+    // snapshot. Reading only the destination left the desk with no way to ring
+    // the guest about the fee.
+    const invoice = {
+      clientPhone: null,
+      clientEmail: null,
+      billTo: {
+        kind: 'unregistered',
+        snapshot: { name: '山田 太郎', phone: '+819000000000', email: 'guest@example.com' },
+      },
+    }
+    expect(recipientPhone(invoice)).toBe('+819000000000')
+    expect(recipientEmail(invoice)).toBe('guest@example.com')
+  })
+
+  it('prefers the destination Field actually sent to', () => {
+    expect(recipientPhone({
+      clientPhone: '+819011111111',
+      billTo: { kind: 'unregistered', snapshot: { phone: '+819000000000' } },
+    })).toBe('+819011111111')
+  })
+
+  it('has nothing to show for an invoice that carries no snapshot', () => {
+    expect(recipientPhone({ clientPhone: null })).toBeNull()
+    expect(recipientEmail({ clientEmail: null, billTo: null })).toBeNull()
   })
 })
 

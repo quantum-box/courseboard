@@ -1431,6 +1431,16 @@ type MockInvoice = {
   clientName: string | null
   clientEmail: string | null
   clientPhone: string | null
+  /**
+   * The recipient as Field records them. Only an unregistered bill-to carries
+   * a snapshot, and for one raised without SMS it is the only place the guest's
+   * number survives — `clientPhone` is the delivery destination, not the
+   * recipient's contact detail.
+   */
+  billTo?: {
+    kind: string
+    snapshot?: { name?: string | null; phone?: string | null; email?: string | null } | null
+  } | null
   lineItems: Array<{
     description: string
     quantity: number
@@ -3118,7 +3128,19 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       clientId,
       clientName: typeof body?.clientName === 'string' ? body.clientName : snapshotName,
       clientEmail: typeof body?.clientEmail === 'string' ? body.clientEmail : snapshotEmail,
-      clientPhone: typeof body?.clientPhone === 'string' ? body.clientPhone : snapshotPhone,
+      // Field leaves this empty unless the channel was asked for; the number
+      // itself lives on the snapshot below.
+      clientPhone: sendSms
+        ? (typeof body?.clientPhone === 'string' ? body.clientPhone : snapshotPhone)
+        : (typeof body?.clientPhone === 'string' ? body.clientPhone : null),
+      ...(unregistered
+        ? {
+          billTo: {
+            kind: 'unregistered',
+            snapshot: { name: snapshotName, phone: snapshotPhone, email: snapshotEmail },
+          },
+        }
+        : {}),
       lineItems,
       dueDate: typeof body?.dueDate === 'string' ? body.dueDate : TODAY,
       status: 'Draft',

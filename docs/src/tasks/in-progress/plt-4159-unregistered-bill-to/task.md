@@ -52,7 +52,18 @@
 - [x] `npm run type-check` / `npm run test` 1029 passed / `npm run build`
 - [x] mock fixture で通し確認（`courseboard-mock`）: 台帳に無い相手 → 顧客登録あり →
       確認シート → 請求作成 → SMS 送信 → 請求詳細まで到達
-- [ ] 実 Field を通した通し確認
+- [x] 実 Field (production) を通した確認。テストテナント `courseboard`
+      (`tn_01kxd5gdvm9thcbj8c2e8c6yhq`)、送信は全部切って実施。
+  - 契約（書き込みなし）: `unregistered` は deploy 済み（unknown variant ではなく
+    `missing field name` が返る）／`idempotencyKey` も deploy 済み（同意項目の検証より
+    手前で `idempotencyKey must not be blank`）／`819012345678` は拒否／`clientId`
+    併用は拒否
+  - 正常系: 顧客登録 1回目 `201`・2回目 同じ鍵で `200` かつ同じ ID
+    (`cus_710HTPAZ45G0T2VH44GMWZYEEE`)／`unregistered` の請求書は `clientId` 空・
+    `clientName` が写しから補完・`billTo.snapshot.phone` が `+819000000000` に正規化・
+    再送で同じ請求書 (`inv_01m1nc7pgna2hd4bjmm5z157rs`, `INV-CF-plt4159probe1`)
+  - 見つかったギャップ: SMS を送らないと Field は `clientPhone` を埋めない。番号は
+    `billTo.snapshot.phone` にしか無いので、請求詳細が写しも読むようにした。
 
 ## #329 との重なり
 

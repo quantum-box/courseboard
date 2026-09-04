@@ -80,6 +80,18 @@ type InvoiceData = {
   clientName?: string | null
   clientEmail?: string | null
   clientPhone?: string | null
+  /**
+   * The recipient as the invoice records them.
+   *
+   * For somebody who is not in the ledger this is the only place their name
+   * and number live: Field fills `clientPhone` from it when an SMS is asked
+   * for and leaves it empty otherwise, so a fee raised by email — or by no
+   * notice at all — would show no way to reach the guest.
+   */
+  billTo?: {
+    kind: string
+    snapshot?: { name?: string | null; phone?: string | null; email?: string | null } | null
+  } | null
   lineItems: InvoiceLineItem[]
   dueDate: string
   status: InvoiceStatus
@@ -1036,6 +1048,23 @@ export function NewCancellationFeePage() {
   )
 }
 
+/**
+ * How to reach the person this invoice is addressed to.
+ *
+ * `clientPhone` and `clientEmail` are the delivery destinations, so Field only
+ * fills them for a channel that was actually asked for. The recipient's own
+ * contact details are on the `billTo` snapshot, which is what a cancellation
+ * fee raised without an SMS still has to show — the desk rings the guest about
+ * the fee whether or not the notice went out that way.
+ */
+export function recipientPhone(invoice: Pick<InvoiceData, 'clientPhone' | 'billTo'>) {
+  return invoice.clientPhone ?? invoice.billTo?.snapshot?.phone ?? null
+}
+
+export function recipientEmail(invoice: Pick<InvoiceData, 'clientEmail' | 'billTo'>) {
+  return invoice.clientEmail ?? invoice.billTo?.snapshot?.email ?? null
+}
+
 /** Where the payment link is going, for the confirmation step. */
 function destinationSummary(pending: Pick<PendingSubmission, 'clientEmail' | 'clientPhone'>) {
   const destinations = [pending.clientEmail, pending.clientPhone]
@@ -1218,11 +1247,11 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
           </div>
           <div>
             <dt>{t('cancellationFees:detail.payment.emailTo')}</dt>
-            <dd>{invoice.clientEmail ?? '—'}</dd>
+            <dd>{recipientEmail(invoice) ?? '—'}</dd>
           </div>
           <div>
             <dt>{t('cancellationFees:detail.payment.phoneTo')}</dt>
-            <dd>{invoice.clientPhone ?? '—'}</dd>
+            <dd>{recipientPhone(invoice) ?? '—'}</dd>
           </div>
           <div>
             <dt>{t('cancellationFees:detail.payment.paidAt')}</dt>
