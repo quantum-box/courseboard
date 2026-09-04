@@ -9,10 +9,23 @@
  * find again.
  */
 
-/** Who Field bills: a person in the ledger, or a company account. */
+/**
+ * Who Field bills: a person in the ledger, a company account, or somebody who
+ * is not in the ledger at all.
+ *
+ * `unregistered` is the one-off recipient. A cancellation fee is often owed by
+ * somebody the club knows only as the name and the mobile number taken over
+ * the phone, and Field records that pair as an immutable snapshot rather than
+ * asking for an identifier the caller would have to invent. Field never
+ * creates a customer from it — putting somebody in the ledger is a separate,
+ * deliberate act (`customerRegistrationRequestBody`).
+ */
 export type InvoiceBillTo =
   | { kind: 'customer'; customerId: string }
-  | { kind: 'client'; clientId: string; affiliationId: string }
+  | { kind: 'client'; clientId: string; affiliationId?: string }
+  | { kind: 'unregistered'; name: string; phone?: string; email?: string }
+
+export type BillToKind = InvoiceBillTo['kind']
 
 /**
  * One record an invoice was raised from (PLT-4158, tachyonfield#1291).
@@ -43,6 +56,16 @@ export type CancellationFeeInvoiceRequestInput = {
   sendEmail: boolean
   sendSms: boolean
   smsMessage?: string
+  /**
+   * Field derives the invoice number from this, so a retry of a request whose
+   * answer never arrived lands on the invoice that was already created rather
+   * than a second one. At most 48 bytes.
+   *
+   * Optional because the extraction screen deliberately bills without one: a
+   * second press there means "bill the ones that did not go through", and the
+   * rows that did are kept out by `invoicedReservationIds` instead.
+   */
+  idempotencyKey?: string
 }
 
 /**
@@ -146,6 +169,9 @@ export function invoiceBillTo(input: {
   customerId?: string
   clientId?: string
   affiliationId?: string
+  name?: string
+  phone?: string
+  email?: string
 }): InvoiceBillTo | undefined {
   if (input.kind === 'customer') {
     const customerId = input.customerId?.trim()
@@ -153,12 +179,51 @@ export function invoiceBillTo(input: {
   }
   if (input.kind === 'client') {
     const clientId = input.clientId?.trim()
+    // The affiliation is optional upstream (PLT-3512). Demanding it here only
+    // meant a company that has one contact could not be invoiced at all.
     const affiliationId = input.affiliationId?.trim()
-    return clientId && affiliationId
+    if (!clientId) return undefined
+    return affiliationId
       ? { kind: 'client', clientId, affiliationId }
-      : undefined
+      : { kind: 'client', clientId }
+  }
+  if (input.kind === 'unregistered') {
+    const name = input.name?.trim()
+    if (!name) return undefined
+    const phone = input.phone?.trim()
+    const email = input.email?.trim()
+    return {
+      kind: 'unregistered',
+      name,
+      ...(phone ? { phone } : {}),
+      ...(email ? { email } : {}),
+    }
   }
   return undefined
+}
+
+/**
+ * The ledger entry for a recipient the operator chose to keep.
+ *
+ * The key is derived from the attempt rather than generated per press, so the
+ * second press of a button whose first press timed out reaches the same
+ * customer instead of a second row with the same name. Field answers `200`
+ * with the first customer in that case, and `201` only the first time.
+ */
+export function customerRegistrationRequestBody(input: {
+  name: string
+  phone?: string
+  email?: string
+  idempotencyKey: string
+}) {
+  const phone = input.phone?.trim()
+  const email = input.email?.trim()
+  return {
+    name: input.name.trim(),
+    ...(phone ? { phone } : {}),
+    ...(email ? { email } : {}),
+    idempotencyKey: input.idempotencyKey,
+  }
 }
 
 export function cancellationFeeInvoiceRequestBody(input: CancellationFeeInvoiceRequestInput) {
@@ -184,6 +249,9 @@ export function cancellationFeeInvoiceRequestBody(input: CancellationFeeInvoiceR
     sendEmail: input.sendEmail,
     sendSms: input.sendSms,
     smsMessage: input.smsMessage,
+    // A body field, not the `Idempotency-Key` header: Field reads it off the
+    // request body and ignores the header, so a header alone protects nothing.
+    ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
   }
 }
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   cancellationFeeInvoiceRequestBody,
+  customerRegistrationRequestBody,
   deliveryFailures,
   EDITABLE_INVOICE_STATUSES,
   filterDisplayedInvoices,
@@ -123,6 +124,7 @@ describe('cancellation fee invoice request', () => {
       amount: 5_000,
       sendEmail: false,
       sendSms: false,
+      idempotencyKey: 'retry-key',
     }
     const bodies = [
       cancellationFeeInvoiceRequestBody({
@@ -155,7 +157,87 @@ describe('cancellation fee invoice request', () => {
       customerId: 'cus_person_a',
     })
     expect(invoiceBillTo({ kind: 'customer', customerId: ' ' })).toBeUndefined()
-    expect(invoiceBillTo({ kind: 'client', clientId: 'cl_company_x' })).toBeUndefined()
+  })
+
+  it('bills a company that has no affiliation on file', () => {
+    // The affiliation is optional upstream. Requiring it here meant a company
+    // whose only contact was never given one could not be invoiced at all.
+    expect(invoiceBillTo({ kind: 'client', clientId: ' cl_company_x ' })).toEqual({
+      kind: 'client',
+      clientId: 'cl_company_x',
+    })
+    expect(invoiceBillTo({ kind: 'client', clientId: ' ', affiliationId: 'ccaf_x' }))
+      .toBeUndefined()
+  })
+
+  it('bills somebody who is not in the ledger from a name and a number', () => {
+    // The whole point of the unregistered recipient: no identifier is asked
+    // for, so nothing has to be invented to stand in for one.
+    expect(invoiceBillTo({
+      kind: 'unregistered',
+      name: ' 山田 太郎 ',
+      phone: ' +819000000000 ',
+    })).toEqual({
+      kind: 'unregistered',
+      name: '山田 太郎',
+      phone: '+819000000000',
+    })
+    // Blank contact details are left out rather than sent as empty strings —
+    // Field stores this snapshot as the record of who was billed.
+    expect(invoiceBillTo({ kind: 'unregistered', name: '山田 太郎', phone: '', email: '' }))
+      .toEqual({ kind: 'unregistered', name: '山田 太郎' })
+    expect(invoiceBillTo({ kind: 'unregistered', name: '  ' })).toBeUndefined()
+  })
+
+  it('carries the retry key in the body, where Field reads it', () => {
+    // Sent as a header it protected nothing: Field takes it off the body and
+    // derives the invoice number from it, which is what makes a retry of a
+    // request whose answer was lost land on the invoice already created.
+    const body = cancellationFeeInvoiceRequestBody({
+      billTo: { kind: 'unregistered', name: '山田 太郎' },
+      clientName: '山田 太郎',
+      dueDate: '2026-08-31',
+      taxAmount: 0,
+      notes: 'Cancellation RSV-1001',
+      description: 'Cancellation fee (RSV-1001)',
+      amount: 5_000,
+      sendEmail: false,
+      sendSms: false,
+      idempotencyKey: 'retry-key',
+    })
+    expect(body.idempotencyKey).toBe('retry-key')
+    expect('retry-key'.length).toBeLessThanOrEqual(48)
+  })
+
+  it('leaves the retry key out when the caller did not give one', () => {
+    // The extraction screen bills without one on purpose: a second press there
+    // means "bill the ones that did not go through", and an empty key would
+    // reach Field as a blank invoice number rather than as no key at all.
+    const body = cancellationFeeInvoiceRequestBody({
+      billTo: { kind: 'customer', customerId: 'cus_person_a' },
+      clientName: '山田 太郎',
+      dueDate: '2026-08-31',
+      taxAmount: 0,
+      notes: 'Cancellation RSV-1001',
+      description: 'Cancellation fee (RSV-1001)',
+      amount: 5_000,
+      sendEmail: false,
+      sendSms: false,
+    })
+    expect(body).not.toHaveProperty('idempotencyKey')
+  })
+
+  it('registers the recipient under a key derived from the attempt, not the press', () => {
+    expect(customerRegistrationRequestBody({
+      name: ' 山田 太郎 ',
+      phone: ' +819000000000 ',
+      email: '',
+      idempotencyKey: 'cbfee-cus-1',
+    })).toEqual({
+      name: '山田 太郎',
+      phone: '+819000000000',
+      idempotencyKey: 'cbfee-cus-1',
+    })
   })
 })
 
