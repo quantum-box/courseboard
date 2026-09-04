@@ -7493,3 +7493,50 @@ button,
     flex: 1 1 100%;
   }
 }
+
+/* Candidates for a cancellation-fee recipient the desk chose to keep in the
+ * ledger. Listed inline rather than floating like the booking picker: this one
+ * sits at the end of a panel with nothing under it to cover, and the desk is
+ * reading the rows to decide, not typing past them. */
+.cancellation-fee-candidates {
+  display: grid;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 6px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 6px;
+}
+
+.cancellation-fee-candidates__note {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  opacity: .75;
+}
+
+.cancellation-fee-candidate {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cancellation-fee-candidate:hover {
+  background: hsl(var(--nui-muted) / .5);
+}
+
+/* Whatever tells two people with the same name apart — without it the list is
+ * a column of identical rows and the desk picks the first one. */
+.cancellation-fee-candidate__detail {
+  font-size: 11px;
+  font-weight: 400;
+  opacity: .75;
+}

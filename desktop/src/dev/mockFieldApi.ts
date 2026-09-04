@@ -3064,6 +3064,9 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     const billTo = rawBillTo && typeof rawBillTo === 'object'
       ? rawBillTo as Record<string, unknown>
       : undefined
+    const unregistered = billTo?.kind === 'unregistered'
+    // A recipient who is not in the ledger has no identity to put in the
+    // compatibility column; Field stores an empty one for exactly that case.
     const clientId = typeof billTo?.customerId === 'string'
       ? billTo.customerId
       : typeof billTo?.clientId === 'string'
@@ -3084,9 +3087,22 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
         amount: typeof raw.amount === 'number' ? raw.amount : quantity * unitPrice,
       }]
     })
-    if (!clientId || lineItems.length === 0) {
+    if ((!clientId && !unregistered) || lineItems.length === 0) {
       return error(400, 'billTo and lineItems are required')
     }
+    const idempotencyKey = typeof body?.idempotencyKey === 'string' ? body.idempotencyKey.trim() : ''
+    if (idempotencyKey) {
+      // Field derives the invoice number from the key, so a replayed request
+      // returns the invoice already created rather than a second one.
+      const replayed = mockInvoices.find(invoice => invoice.invoiceNumber === `INV-${idempotencyKey}`)
+      if (replayed) return hit(cloneMockInvoice(replayed))
+    }
+    // Field fills the name and the number from the snapshot when the caller
+    // left them out, so the mock has to as well or the fixture invoice loses
+    // the only record of who was billed.
+    const snapshotName = unregistered && typeof billTo?.name === 'string' ? billTo.name : null
+    const snapshotPhone = unregistered && typeof billTo?.phone === 'string' ? billTo.phone : null
+    const snapshotEmail = unregistered && typeof billTo?.email === 'string' ? billTo.email : null
 
     const sequence = mockInvoiceSequence++
     const sendEmail = body?.sendEmail === true
@@ -3096,11 +3112,13 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     const created: MockInvoice = {
       id: `inv_mock_created_${sequence}`,
       tenantId: TENANT_ID() || 'courseboard_id',
-      invoiceNumber: `CF-2026-${String(sequence).padStart(4, '0')}`,
+      invoiceNumber: idempotencyKey
+        ? `INV-${idempotencyKey}`
+        : `CF-2026-${String(sequence).padStart(4, '0')}`,
       clientId,
-      clientName: typeof body?.clientName === 'string' ? body.clientName : null,
-      clientEmail: typeof body?.clientEmail === 'string' ? body.clientEmail : null,
-      clientPhone: typeof body?.clientPhone === 'string' ? body.clientPhone : null,
+      clientName: typeof body?.clientName === 'string' ? body.clientName : snapshotName,
+      clientEmail: typeof body?.clientEmail === 'string' ? body.clientEmail : snapshotEmail,
+      clientPhone: typeof body?.clientPhone === 'string' ? body.clientPhone : snapshotPhone,
       lineItems,
       dueDate: typeof body?.dueDate === 'string' ? body.dueDate : TODAY,
       status: 'Draft',
@@ -3120,6 +3138,49 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     }
     mockInvoices.push(created)
     return hit(cloneMockInvoice(created))
+  }
+
+  if (pathname === '/v1/erp/customers' && method === 'POST') {
+    const name = typeof body?.name === 'string' ? body.name.trim() : ''
+    if (!name) return error(400, 'customer name is required')
+    const idempotencyKey = typeof body?.idempotencyKey === 'string' ? body.idempotencyKey.trim() : ''
+    // Field derives the customer id from the key, so a second press of the
+    // button reaches the first customer instead of a namesake beside it.
+    const existing = idempotencyKey
+      ? mockCustomers.find(customer => customer.id === `cus_mock_key_${idempotencyKey}`)
+      : undefined
+    if (existing) return hit({ id: existing.id })
+    const created = {
+      id: idempotencyKey
+        ? `cus_mock_key_${idempotencyKey}`
+        : `cus_mock_${mockCustomers.length + 1}`,
+      name,
+      ...(typeof body?.phone === 'string' && body.phone.trim()
+        ? { phone: body.phone.trim() }
+        : {}),
+      ...(typeof body?.email === 'string' && body.email.trim()
+        ? { email: body.email.trim() }
+        : {}),
+    }
+    mockCustomers.push(created)
+    // ERP answers with the id alone; the caller already holds what it sent.
+    return hit({ id: created.id })
+  }
+
+  const invoiceResendMatch = pathname.match(/^\/v1\/invoices\/([^/]+)\/payment-link\/resend$/)
+  if (invoiceResendMatch && method === 'POST') {
+    const invoiceId = decodeURIComponent(invoiceResendMatch[1] ?? '')
+    const invoice = mockInvoices.find(item => item.id === invoiceId)
+    if (!invoice) return error(404, 'Mock Field API invoice was not found')
+    if (invoice.status === 'Paid') return error(400, 'Paid invoices cannot be resent')
+    invoice.paymentLinkUrl = `https://example.com/pay/${invoice.id}`
+    invoice.paymentLinkStatus = 'Ready'
+    if (body?.sendEmail !== false) invoice.emailDeliveryStatus = 'Sent'
+    if (body?.sendSms === true) invoice.smsDeliveryStatus = 'Sent'
+    invoice.status = 'Sent'
+    invoice.sentAt = NOW
+    invoice.updatedAt = NOW
+    return hit(cloneMockInvoice(invoice))
   }
 
   const invoiceFulfillMatch = pathname.match(/^\/v1\/invoices\/([^/]+)\/fulfill$/)

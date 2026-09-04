@@ -302,6 +302,10 @@ test.describe('キャンセル料', () => {
 
     await page.goto('/cancellation-fees/new')
     await page.getByRole('textbox', { name: '対象の予約・注文' }).fill('RSV-E2E-0001')
+    // The form opens on a recipient who is not in the ledger, which is what
+    // the desk has when somebody cancels by phone. This case bills a member,
+    // so it says so first.
+    await page.getByRole('combobox', { name: '請求先の種類' }).selectOption('customer')
     // The customer is picked out of the ledger rather than typed as an id: a
     // cancellation fee is always somebody the club already has a booking for,
     // and copying `cus_…` off another screen is how the wrong person gets
@@ -309,6 +313,12 @@ test.describe('キャンセル料', () => {
     await page.getByRole('textbox', { name: '請求先の顧客' }).fill('本田')
     await page.getByRole('button', { name: /本田 康彦/ }).click()
     await page.getByRole('textbox', { name: '送り先のメール' }).fill('e2e@example.com')
+    await page.getByRole('button', { name: '送る内容を確認する' }).click()
+
+    // Nothing is sent until the recipient, the amount, the due date and
+    // whether this also writes to the ledger have been shown once.
+    await expect(page.getByText('この内容で送ります')).toBeVisible()
+    await expect(page.getByText('登録ずみの相手です')).toBeVisible()
     await page.getByRole('button', { name: '請求を作って送る' }).click()
 
     await expect(page).toHaveURL(/\/cancellation-fees\/inv_mock_created_\d+$/)
