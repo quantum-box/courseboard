@@ -189,6 +189,73 @@ describe('the cancellation extraction', () => {
     expect(screen.getByText('請求できない予約があります')).toBeTruthy()
   })
 
+  async function selectAllAndOpenSheet() {
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('この一覧をすべて選ぶ'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
+    })
+  }
+
+  async function pressBill() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /を請求する$/ }))
+    })
+  }
+
+  function keyOf(index: number) {
+    const init = invoicePosts()[index]![1] as RequestInit
+    return (JSON.parse(String(init.body)) as { idempotencyKey?: string }).idempotencyKey
+  }
+
+  it('bills one person once when the same cancellation comes round twice', async () => {
+    // The guard that keeps a booking out of a second batch reads a page of
+    // Field's invoices, so it can come back empty while the invoice exists —
+    // and the row is offered again. The key used to travel in a header Field
+    // never reads, so that second pass raised a second invoice for the same
+    // cancellation. Keyed on the charge, it reaches the invoice already there.
+    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
+    mockField()
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await pressBill()
+    expect(keyOf(0)).toMatch(/^CF-[0-9a-z]+$/)
+    // Nothing rides on the header any more.
+    expect((invoicePosts()[0]![1] as RequestInit).headers).toBeUndefined()
+
+    await selectAllAndOpenSheet()
+    await pressBill()
+    expect(invoicePosts()).toHaveLength(2)
+    expect(keyOf(1)).toBe(keyOf(0))
+  })
+
+  it('gives a changed charge its own key rather than the invoice raised before the change', async () => {
+    // A key fixed per person would answer a corrected amount with the invoice
+    // the desk was trying to correct.
+    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
+    mockField()
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await pressBill()
+
+    await selectAllAndOpenSheet()
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('1名あたりの金額', { exact: false }), {
+        target: { value: '9000' },
+      })
+    })
+    await pressBill()
+
+    expect(keyOf(1)).not.toBe(keyOf(0))
+  })
+
   it('never records a fee for an invoice that failed to be raised', async () => {
     // The order the whole flow depends on: a row marked invoiced that points at
     // nothing never comes back on the next extraction.

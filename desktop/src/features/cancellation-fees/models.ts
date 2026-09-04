@@ -203,6 +203,55 @@ export function invoiceBillTo(input: {
 }
 
 /**
+ * The prefix every cancellation-fee retry key carries.
+ *
+ * It ends up in the invoice number: Field maps `idempotencyKey` onto the
+ * `INV-{key}` uniqueness constraint, which is what makes a replayed request
+ * land on the invoice that already exists. So the key is also what the desk
+ * reads out to a guest over the phone, and it has to stay short enough to be
+ * read at all — Field's own default is `INV-20260904113344`.
+ */
+const FEE_KEY_PREFIX = 'CF-'
+
+/**
+ * A 32-bit FNV-1a pass, seeded so two of them can be joined into one key.
+ *
+ * Not a cryptographic hash and not asked to be one. The only thing riding on
+ * it is whether two invoices that describe the same charge collapse into one,
+ * and the input is a handful of ids from a single tenant.
+ */
+function fnv1a(value: string, seed: number): number {
+  let hash = seed
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash >>> 0
+}
+
+/**
+ * The retry key for an invoice, derived from what the invoice charges for.
+ *
+ * Content, not the press: two presses describing the same charge have to reach
+ * the same invoice, and a press describing a different one has to reach a new
+ * invoice. A key generated per attempt fails the first half — every press
+ * bills again — and a key fixed per screen fails the second, answering an
+ * edited charge with the invoice raised before the edit.
+ *
+ * `parts` is joined with a separator that cannot appear inside an id, so
+ * (`["ab", "c"]`) and (`["a", "bc"]`) cannot hash to the same key.
+ */
+export function cancellationFeeIdempotencyKey(parts: string[]): string {
+  const canonical = parts.join('\u0000')
+  // Both halves are padded to the width of a 32-bit value in base 36, so the
+  // pair reads back unambiguously — unpadded, a short first half and a long
+  // second one would spell the same key as the other way round.
+  const low = fnv1a(canonical, 0x811c9dc5).toString(36).padStart(7, '0')
+  const high = fnv1a(canonical, 0x9e3779b9).toString(36).padStart(7, '0')
+  return `${FEE_KEY_PREFIX}${low}${high}`
+}
+
+/**
  * The ledger entry for a recipient the operator chose to keep.
  *
  * The key is derived from the attempt rather than generated per press, so the

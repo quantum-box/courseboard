@@ -14,6 +14,7 @@ import {
 } from './CancellationFeesPage'
 import {
   CANCELLATION_FEE_MARKER,
+  cancellationFeeIdempotencyKey,
   cancellationFeeSources,
   invoicedReservationIds,
   isCancellationFeeInvoice,
@@ -225,6 +226,34 @@ describe('cancellation fee invoice request', () => {
       sendSms: false,
     })
     expect(body).not.toHaveProperty('idempotencyKey')
+  })
+
+  it('answers the same charge with the same retry key, and a changed one with a new key', () => {
+    // Content, not the press. Two presses describing the same charge have to
+    // collapse into one invoice; a charge that changed has to raise its own,
+    // or an edited amount is answered with the invoice raised before the edit.
+    const charge = ['cus_person_a', '2026-09-11', '5000', 'rsv_1', 'rsv_2']
+    expect(cancellationFeeIdempotencyKey(charge))
+      .toBe(cancellationFeeIdempotencyKey([...charge]))
+    expect(cancellationFeeIdempotencyKey(charge))
+      .not.toBe(cancellationFeeIdempotencyKey(['cus_person_a', '2026-09-11', '5000', 'rsv_1']))
+    expect(cancellationFeeIdempotencyKey(charge))
+      .not.toBe(cancellationFeeIdempotencyKey(['cus_person_a', '2026-09-11', '6000', 'rsv_1', 'rsv_2']))
+  })
+
+  it('cannot spell one key from two different splits of the same characters', () => {
+    // The separator is what stops ("ab", "c") and ("a", "bc") from hashing the
+    // same charge — two people's bookings run together otherwise.
+    expect(cancellationFeeIdempotencyKey(['ab', 'c']))
+      .not.toBe(cancellationFeeIdempotencyKey(['a', 'bc']))
+  })
+
+  it('keeps the retry key short enough to read out as an invoice number', () => {
+    // Field spells the key into `INV-{key}`, and that number is what the desk
+    // reads to a guest over the phone. It also has to fit Field's 48 bytes.
+    const key = cancellationFeeIdempotencyKey(['cus_person_a', 'rsv_1'])
+    expect(key.length).toBeLessThanOrEqual(20)
+    expect(key).toMatch(/^CF-[0-9a-z]+$/)
   })
 
   it('registers the recipient under a key derived from the attempt, not the press', () => {
