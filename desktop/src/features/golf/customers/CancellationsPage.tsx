@@ -25,6 +25,7 @@ import { navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import {
   CANCELLATION_FEE_MARKER,
+  cancellationFeeIdempotencyKey,
   cancellationFeeInvoiceRequestBody,
   cancellationFeeInvoicesPath,
   cancellationFeeSources,
@@ -483,12 +484,20 @@ function BillCancellationFeesSheet({
       try {
         const invoice = await fieldApiJson<InvoiceResponse>('/v1/invoices', {
           method: 'POST',
-          // A retry of the whole sheet is a new key on purpose: the desk
-          // pressing the button again after a partial failure means "bill the
-          // ones that did not go through", and those have no invoice yet.
-          headers: { 'idempotency-key': crypto.randomUUID() },
           body: JSON.stringify(cancellationFeeInvoiceRequestBody({
             billTo: { kind: 'customer', customerId: group.customerId },
+            // Keyed on the charge itself, so pressing the button twice bills
+            // this person once. A retry of the whole sheet still does what the
+            // desk means by it: the groups that went through are answered with
+            // the invoice they already have, and the ones that failed are
+            // created. A key generated per press would bill everybody again,
+            // and it used to be sent as a header Field never reads.
+            idempotencyKey: cancellationFeeIdempotencyKey([
+              group.customerId,
+              dueDate,
+              String(group.amount),
+              ...group.rows.map(row => row.reservationId).sort(),
+            ]),
             // What this invoice is for, machine-readable. The notes marker
             // below is kept as well: it is what every invoice raised before
             // PLT-4158 has, and the list still reads both.
@@ -543,8 +552,11 @@ function BillCancellationFeesSheet({
         })
         onSettled()
       } catch (error) {
-        // The invoices exist. Saying so plainly is the only useful thing left:
-        // pressing the button again would raise them a second time.
+        // The invoices exist and CourseBoard's rows do not say so, so the
+        // bookings come round again on the next extraction. Billing them a
+        // second time is what the retry key now prevents; what is left is to
+        // say the recording failed, because until somebody looks, the club's
+        // own record of who was billed is short by this batch.
         showToast({
           tone: 'danger',
           title: t('customers:cancellations.bill.recordFailed'),

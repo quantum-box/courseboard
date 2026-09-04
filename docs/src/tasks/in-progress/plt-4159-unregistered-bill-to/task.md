@@ -67,6 +67,17 @@
 - 一括徴収も `idempotency-key` header を送っているが、これも Field には届いていない。
   `saving` と `invoicedReservationIds` で実害は抑えられているので、この PR では触らない。
 
+## 追いかけ (#330 の後)
+
+`idempotencyKey` は Field で `INV-{鍵}` という請求番号になる。そこに気付かずに #330 は
+生の UUID を送っていたので、請求番号が `INV-6913f82ce-8433-42bc-...` になっていた。
+受付が電話口で読み上げる番号なので短くした（`INV-CF-1r0qvxh0f02pq1`）。
+
+- [x] 鍵を短く読める形にする（`cancellationFeeIdempotencyKey`）。
+- [x] 一括徴収も鍵を body で送る。header で送っていたものは Field に届いていなかった。
+      鍵は「誰に・いつまでに・いくら・どの予約」から導く。押すたびに変わる鍵だと
+      二重に請求し、人ごとに固定した鍵だと金額を直したときに直す前の請求書が返る。
+
 ## Merge gate
 
 - **Field production に `e903804b` が届いてから merge する。** 未到達の Field に

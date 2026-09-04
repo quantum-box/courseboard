@@ -41,6 +41,7 @@ import { useCustomerSearch } from '../golf/customers/useCustomerSearch'
 import { DEFAULT_TIME_ZONE, normalizeIsoDate, today } from '../../lib/clock'
 import { Sheet } from '../../components/Sheet'
 import {
+  cancellationFeeIdempotencyKey,
   cancellationFeeInvoiceRequestBody,
   customerRegistrationRequestBody,
   invoiceBillTo,
@@ -369,8 +370,13 @@ export function NewCancellationFeePage() {
    * One key per visit to this screen, not per attempt. A retry after a timeout
    * has to carry the key of the attempt that may already have landed, or the
    * recipient gets a second ledger entry and a second invoice.
+   *
+   * Kept short because Field spells it into the invoice number (`INV-{key}`),
+   * and that number is what the desk reads out over the phone. Half a UUID is
+   * 64 bits, which is far more than one club's cancellation fees can collide
+   * across.
    */
-  const requestKey = useRef(crypto.randomUUID())
+  const requestKey = useRef(cancellationFeeIdempotencyKey([crypto.randomUUID()]))
   /** Set once the recipient is in the ledger, so a retry skips that call. */
   const registeredCustomerId = useRef<string | null>(null)
   const orderId = currentRouteSearchParams().get('orderId')?.trim() ?? ''
@@ -547,7 +553,10 @@ export function NewCancellationFeePage() {
               name: submission.billTo.name,
               phone: submission.billTo.phone,
               email: submission.billTo.email,
-              idempotencyKey: `cbfee-cus-${requestKey.current}`,
+              // A different namespace from the invoice: Field derives the
+              // customer id from this key, and reusing one string for both
+              // would tie two unrelated records to the same value.
+              idempotencyKey: `customer-${requestKey.current}`,
             })),
           },
         )).id
