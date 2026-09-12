@@ -115,6 +115,7 @@ spec:
       watchPaths:
         - Cargo.toml
         - Cargo.lock
+        - rust-toolchain.toml
         - bin/**
         - migrations/**
         - src/**

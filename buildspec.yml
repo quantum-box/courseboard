@@ -3,7 +3,8 @@ version: 0.2
 phases:
   build:
     commands:
-      - cargo build --release --locked
+      - rustup toolchain install nightly-2026-06-04 --profile minimal --no-self-update
+      - cargo +nightly-2026-06-04 build --release --locked
   post_build:
     commands:
       - |
