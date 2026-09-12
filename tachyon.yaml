@@ -115,6 +115,7 @@ spec:
       watchPaths:
         - Cargo.toml
         - Cargo.lock
+        - rust-toolchain.toml
         - bin/**
         - migrations/**
         - src/**
@@ -125,7 +126,13 @@ spec:
         # survived. Cargo trusts the marker, skips unpacking, and aborts with
         # `failed to read .../Cargo.toml` before compiling. Drop those entries
         # so Cargo downloads them again.
-        installCommand: sh tooling/repair_cargo_registry_cache.sh
+        # The builder disables implicit rustup installation. Provision the
+        # pinned channel and Lambda target before any Cargo command runs.
+        # Only rustup uses the image's Cargo home; Cargo keeps the build cache.
+        installCommand: >-
+          CARGO_HOME=/usr/local/cargo rustup toolchain install nightly-2026-06-04 --profile minimal
+          --component rustfmt --component clippy --target aarch64-unknown-linux-gnu
+          && sh tooling/repair_cargo_registry_cache.sh
         package: courseboard
         binary: lambda-courseboard
         release: true

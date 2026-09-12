@@ -12,6 +12,7 @@
 # Outbound Field auth uses the browser-pkce login bearer (no hourly CLI token refresh).
 
 [tools]
+rust = "nightly-2026-06-04"
 "cargo:bacon" = "3.18.0"
 
 [tasks."courseboard:pkce-env"]

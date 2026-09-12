@@ -95,7 +95,9 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-06-04
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2

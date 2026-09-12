@@ -8,6 +8,11 @@ Tachyon Compute に独立してデプロイし、ゴルフ場固有の Rust API 
 Cloud App ID、Auth audience、Auth policy は、deployment / registry / auth policy
 の移行が完了するまでは互換性のため `tachyonfield-golf` 系の名前を残しています。
 
+## 開発環境
+
+Rust は `rust-toolchain.toml` と `mise.toml` の `nightly-2026-06-04` に固定しています。
+初回セットアップでは `mise install` を実行してください。
+
 ## アーキテクチャ
 
 - Rust + axum の独立した REST API サーバです。
