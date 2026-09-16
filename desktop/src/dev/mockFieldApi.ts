@@ -2522,6 +2522,11 @@ function resolveGet(path: string): Json | null | undefined {
     return mockHorizonResponse()
   }
 
+  // CourseBoard wraps Field's policy so an unset one is `null`, not a 404.
+  if (rawPathname === '/v1/course/reservation-policy') {
+    return { policy: { ...mockReservationPolicy, tenantId: TENANT_ID() || 'courseboard_id' } }
+  }
+
   if (pathname === '/v1/course/customers') {
     const search: MockCustomerSearch = {
       name: url.searchParams.get('name')?.trim() || null,

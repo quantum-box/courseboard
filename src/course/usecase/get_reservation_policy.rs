@@ -19,7 +19,7 @@ impl GetReservationPolicyUseCase {
     pub async fn execute(
         &self,
         credentials: GatewayCredentials<'_>,
-    ) -> Result<ReservationPolicy, CourseError> {
+    ) -> Result<Option<ReservationPolicy>, CourseError> {
         credentials
             .require(actions::LIST_RESERVATION_POLICY)
             .await?;

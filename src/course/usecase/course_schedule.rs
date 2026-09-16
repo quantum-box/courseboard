@@ -1063,7 +1063,7 @@ mod tests {
         async fn get_reservation_policy(
             &self,
             _credentials: GatewayCredentials<'_>,
-        ) -> Result<ReservationPolicy, CourseError> {
+        ) -> Result<Option<ReservationPolicy>, CourseError> {
             unimplemented!("not used")
         }
 

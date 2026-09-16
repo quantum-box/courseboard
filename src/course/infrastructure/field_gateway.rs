@@ -1710,17 +1710,35 @@ pub(crate) async fn field_send_json<T: for<'de> Deserialize<'de>>(
     credentials: GatewayCredentials<'_>,
     body: Option<&Value>,
 ) -> Result<T, CourseError> {
-    field_send_json_inner(client, base_url, method, path_and_query, credentials, body).await
+    field_send_json_classified(
+        client,
+        base_url,
+        method,
+        path_and_query,
+        credentials,
+        body,
+        |_| None,
+    )
+    .await
 }
 
-async fn field_send_json_inner<T: for<'de> Deserialize<'de>>(
+/// `field_send_json` for a call whose failures mean something to the caller.
+///
+/// `classify` sees the status and Field's error code before the default
+/// mapping does, and answers `None` to fall through to it.
+pub(crate) async fn field_send_json_classified<T, F>(
     client: &reqwest::Client,
     base_url: &str,
     method: reqwest::Method,
     path_and_query: &str,
     credentials: GatewayCredentials<'_>,
     body: Option<&Value>,
-) -> Result<T, CourseError> {
+    classify: F,
+) -> Result<T, CourseError>
+where
+    T: for<'de> Deserialize<'de>,
+    F: FnOnce(&FieldStatusFailure<'_>) -> Option<CourseError>,
+{
     if is_empty_course_store(base_url) {
         return Err(empty_course_store_error());
     }
@@ -1732,8 +1750,15 @@ async fn field_send_json_inner<T: for<'de> Deserialize<'de>>(
     let response = request.send().await.map_err(map_field_request_error)?;
     let status = response.status();
     if !status.is_success() {
-        let message = response.text().await.unwrap_or_default();
-        return Err(map_field_status_error(status, &message));
+        let body = response.text().await.unwrap_or_default();
+        let failure = FieldStatusFailure {
+            status,
+            code: field_error_code(&body),
+            body: &body,
+        };
+        return Err(
+            classify(&failure).unwrap_or_else(|| map_field_status_error(status, failure.body))
+        );
     }
     response.json().await.map_err(|error| {
         map_field_body_error_with_timeout(&method, path_and_query, error, FIELD_UPSTREAM_TIMEOUT)
