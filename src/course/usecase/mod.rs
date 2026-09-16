@@ -109,7 +109,9 @@ pub use caddie_duties::{
     AssignCaddieDutyUseCase, ClearCaddieDutyUseCase, GetCaddieDutyOptionsUseCase,
     ListCaddieDutyAssignmentsUseCase, ReplaceCaddieDutyOptionsUseCase,
 };
-pub use caddie_rank_fees::{GetCaddieRankFeesUseCase, ReplaceCaddieRankFeesUseCase};
+pub use caddie_rank_fees::{
+    GetCaddieRankFeesUseCase, ListCaddieRankFeeChangesUseCase, ReplaceCaddieRankFeesUseCase,
+};
 pub use cancel_reservation::CancelReservationUseCase;
 pub use change_reservation_plan::ChangeReservationPlanUseCase;
 pub use course_order::{GetCourseOrderUseCase, ReplaceCourseOrderUseCase};

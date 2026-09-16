@@ -5,6 +5,8 @@ import {
   payrollTotals,
   rankFeeDraft,
   rankFeeDraftIsDirty,
+  rankFeeMoves,
+  type CaddieRankFeeChange,
   rankTotals,
   type PayrollRow,
   type Rank,
@@ -104,5 +106,32 @@ describe('month totals', () => {
       row({ rank: 'D', caddieProfileId: 'd1', assignedRounds: 1, feeTotal: 9000 }),
     ])
     expect(totals).toEqual({ workedMinutes: 600, rounds: 3, fees: 33000, warnings: 0 })
+  })
+})
+
+describe('rank fee history', () => {
+  function change(overrides: Partial<CaddieRankFeeChange>): CaddieRankFeeChange {
+    return {
+      id: 1,
+      fees: DEFAULT_RANK_FEES,
+      changedRanks: [],
+      changedAt: '2026-09-16T01:00:00Z',
+      ...overrides,
+    }
+  }
+
+  it('names only the ranks whose amount moved, with both amounts', () => {
+    const moves = rankFeeMoves(change({
+      previous: DEFAULT_RANK_FEES,
+      fees: { ...DEFAULT_RANK_FEES, a: 13000, d: 8500 },
+    }))
+    expect(moves).toEqual([
+      { rank: 'A', from: 12000, to: 13000 },
+      { rank: 'D', from: 9000, to: 8500 },
+    ])
+  })
+
+  it('reads the entry the history began with as moving nothing', () => {
+    expect(rankFeeMoves(change({ previous: null }))).toEqual([])
   })
 })

@@ -526,6 +526,29 @@ export const caddies: DeepPartial<typeof source> = {
         title: '金額を保存しました',
         message: 'いま見ている月の合計を計算しなおしました。',
       },
+      note: {
+        label: '変えた理由',
+        hint: '書かなくても保存できます。記録に残るので、あとで「なぜこの金額か」を説明するときに使えます。',
+        placeholder: '例: 2026年度から金額を見直した',
+      },
+      history: {
+        title: 'これまでの変更',
+        description: 'いつ、だれが、どのランクの金額をいくらからいくらに変えたかの記録です。新しいものが上にきます。',
+        loading: '変更の記録を読み込んでいます',
+        initial: '記録を始めたときの金額',
+        confirmed: '金額は変わっていません（いまの金額で決めました）',
+        move: '{{from}} → {{to}}',
+        table: {
+          changedAt: '日時',
+          amounts: '変えた内容',
+          changedBy: '変えた人',
+          note: '理由',
+        },
+        empty: {
+          title: 'まだ変更はありません',
+          description: '金額を保存すると、ここに記録が残ります。',
+        },
+      },
       scope: {
         title: '前の月にも反映されます',
         description: '払う金額は「その月に担当した数 × いまの金額」で、そのつど計算します。金額を直すと、もう終わった月の合計も新しい金額で計算しなおします。',

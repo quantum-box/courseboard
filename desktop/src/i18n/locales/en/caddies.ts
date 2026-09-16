@@ -542,6 +542,29 @@ export const caddies: DeepPartial<typeof source> = {
         title: 'Rank fees saved',
         message: 'Re-priced the month on screen.',
       },
+      note: {
+        label: 'Reason for the change',
+        hint: 'Optional. Kept in the history so the pay can be explained later.',
+        placeholder: 'e.g. FY2026 rate revision (board decision)',
+      },
+      history: {
+        title: 'Change history',
+        description: 'When, who, and which rank fee moved from what to what. Newest first.',
+        loading: 'Loading the change history',
+        initial: 'Fees in force when the history began',
+        confirmed: 'No amount changed (confirmed the fees in force)',
+        move: '{{from}} → {{to}}',
+        table: {
+          changedAt: 'When',
+          amounts: 'Change',
+          changedBy: 'Changed by',
+          note: 'Reason',
+        },
+        empty: {
+          title: 'No changes yet',
+          description: 'Saving the fees leaves a record here.',
+        },
+      },
       scope: {
         title: 'Past months are re-priced too',
         description: 'Pay is the rounds worked in a month times the fee as it stands now. Correcting a fee corrects months that are already closed.',

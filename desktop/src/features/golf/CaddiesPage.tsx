@@ -112,9 +112,13 @@ import {
 } from './caddieRegistration'
 import {
   RANKS,
+  MAX_RANK_FEE_NOTE_CHARS,
   buildRankFees,
+  feeForRank,
   rankFeeDraft,
   rankFeeDraftIsDirty,
+  rankFeeMoves,
+  type CaddieRankFeeChange,
   type CaddieRankFeeDraft,
   type CaddieRankFees,
   type PayrollRow,
@@ -379,6 +383,20 @@ function formatMoney(amount: number, currency = 'JPY') {
     currency,
     maximumFractionDigits: currency === 'JPY' ? 0 : 2,
   }).format(amount)
+}
+
+/** A moment that may be in another year, so the year is kept. */
+function formatDateTimeWithYear(value: string, timezone: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('ja-JP', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
 }
 
 function formatDateTime(value: string, timezone: string) {
@@ -4211,17 +4229,103 @@ function RankFeeSheet({
   onSaved: () => void
 }) {
   const { t } = useTranslation(['caddies', 'common'])
+  const timezone = useTenantTimezone()
   const fees = resource.data
   const [draft, setDraft] = useState<CaddieRankFeeDraft | null>(null)
+  const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  // Read only while the sheet is open: nobody else on the payroll screen needs
+  // who changed the rates, and the sheet is where the question gets asked.
+  const history = useResource(
+    () => courseboardApiJson<{ items: CaddieRankFeeChange[] }>(
+      `${COURSE_API}/caddie-rank-fees/history`,
+    ),
+    [open],
+    { enabled: open },
+  )
 
   // The form starts from whatever the club is paying by now. Reloading after a
   // save re-seeds it, so the fields never keep an amount the server refused.
   useEffect(() => {
     setDraft(fees ? rankFeeDraft(fees) : null)
+    setNote('')
     setSaveError(null)
   }, [fees])
+
+  const historyColumns: DataTableColumn<CaddieRankFeeChange>[] = [
+    {
+      key: 'changedAt',
+      header: t('caddies:payroll.rankFees.history.table.changedAt'),
+      mobileLabel: t('caddies:payroll.rankFees.history.table.changedAt'),
+      sortValue: change => change.changedAt,
+      cell: change => (
+        <span className="whitespace-nowrap tabular-nums">
+          {formatDateTimeWithYear(change.changedAt, timezone)}
+        </span>
+      ),
+    },
+    {
+      key: 'amounts',
+      header: t('caddies:payroll.rankFees.history.table.amounts'),
+      mobileLabel: t('caddies:payroll.rankFees.history.table.amounts'),
+      cell: change => {
+        const moves = rankFeeMoves(change)
+        if (!change.previous) {
+          // The entry the history began with: nothing moved, so say what was
+          // in force rather than showing an empty cell.
+          return (
+            <div>
+              <p className="text-xs text-muted-foreground">
+                {t('caddies:payroll.rankFees.history.initial')}
+              </p>
+              <p className="tabular-nums">
+                {RANKS.map(rank => `${rank} ${formatMoney(feeForRank(change.fees, rank), change.fees.currency)}`).join(' / ')}
+              </p>
+            </div>
+          )
+        }
+        if (moves.length === 0) {
+          return (
+            <span className="text-muted-foreground">
+              {t('caddies:payroll.rankFees.history.confirmed')}
+            </span>
+          )
+        }
+        return (
+          <ul className="space-y-0.5">
+            {moves.map(move => (
+              <li key={move.rank} className="flex items-center gap-2 tabular-nums">
+                <Badge variant="accent">{move.rank}</Badge>
+                <span>
+                  {t('caddies:payroll.rankFees.history.move', {
+                    from: formatMoney(move.from, change.previous?.currency),
+                    to: formatMoney(move.to, change.fees.currency),
+                  })}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )
+      },
+    },
+    {
+      key: 'changedBy',
+      header: t('caddies:payroll.rankFees.history.table.changedBy'),
+      mobileLabel: t('caddies:payroll.rankFees.history.table.changedBy'),
+      sortValue: change => change.changedByName ?? '',
+      // The entry the history began with has nobody on it; blank says so.
+      cell: change => change.changedByName ?? null,
+    },
+    {
+      key: 'note',
+      header: t('caddies:payroll.rankFees.history.table.note'),
+      mobileLabel: t('caddies:payroll.rankFees.history.table.note'),
+      cell: change => change.note
+        ? <span className="whitespace-pre-wrap">{change.note}</span>
+        : null,
+    },
+  ]
 
   const dirty = draft !== null && fees !== null && rankFeeDraftIsDirty(draft, fees)
 
@@ -4239,9 +4343,10 @@ function RankFeeSheet({
     try {
       await courseboardApiJson<CaddieRankFees>(`${COURSE_API}/caddie-rank-fees`, {
         method: 'PUT',
-        body: JSON.stringify(next),
+        body: JSON.stringify({ ...next, note: note.trim() === '' ? null : note.trim() }),
       })
       resource.refresh()
+      history.refresh()
       onSaved()
       onClose()
       setFlash({
@@ -4294,6 +4399,18 @@ function RankFeeSheet({
                 </Field>
               ))}
             </FormGrid>
+            <Field
+              label={t('caddies:payroll.rankFees.note.label')}
+              hint={t('caddies:payroll.rankFees.note.hint')}
+            >
+              <NativeTextarea
+                rows={2}
+                maxLength={MAX_RANK_FEE_NOTE_CHARS}
+                value={note}
+                onChange={event => setNote(event.target.value)}
+                placeholder={t('caddies:payroll.rankFees.note.placeholder')}
+              />
+            </Field>
             <Notice tone="info" title={t('caddies:payroll.rankFees.scope.title')}>
               {t('caddies:payroll.rankFees.scope.description')}
             </Notice>
@@ -4311,6 +4428,31 @@ function RankFeeSheet({
             </Button>
           </>
         ) : null}
+        <section className="space-y-2 border-t pt-4">
+          <div>
+            <h3 className="text-sm font-semibold">{t('caddies:payroll.rankFees.history.title')}</h3>
+            <p className="text-xs text-muted-foreground">
+              {t('caddies:payroll.rankFees.history.description')}
+            </p>
+          </div>
+          {history.loading ? <LoadingState label={t('caddies:payroll.rankFees.history.loading')} /> : null}
+          {history.error ? <ResourceError error={history.error} onRetry={history.refresh} /> : null}
+          {history.data ? (
+            <DataTable
+              rows={history.data.items}
+              columns={historyColumns}
+              rowKey={change => String(change.id)}
+              defaultSort={{ key: 'changedAt', direction: 'desc' }}
+              pageSize={10}
+              empty={(
+                <EmptyState
+                  title={t('caddies:payroll.rankFees.history.empty.title')}
+                  description={t('caddies:payroll.rankFees.history.empty.description')}
+                />
+              )}
+            />
+          ) : null}
+        </section>
       </div>
     </Sheet>
   )

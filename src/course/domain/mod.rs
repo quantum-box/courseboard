@@ -77,7 +77,10 @@ pub use caddie_plan::{
     placement_for_shift, plan_caddie_assignments, shift_covers_tee_time, skip_reason,
     CaddiePlacement, PlanOptions, PlannableCaddie, PlannableRound,
 };
-pub use caddie_rank_fee::CaddieRankFees;
+pub use caddie_rank_fee::{
+    CaddieRankFeeChange, CaddieRankFeeChangeContext, CaddieRankFees, MAX_RANK_FEE_CHANGE_LIMIT,
+    MAX_RANK_FEE_NOTE_CHARS,
+};
 pub use caddie_ranking::{
     rank_caddies, AttendanceState, RankedCaddie, RankingCandidate, RankingOptions,
 };

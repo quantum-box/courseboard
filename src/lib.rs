@@ -1216,6 +1216,12 @@ pub fn build_router(state: AppState) -> Router {
             ),
         )
         .route(
+            "/v1/course/caddie-rank-fees/history",
+            get(course::interfaces::http_ops::list_caddie_rank_fee_changes).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
             "/v1/course/caddie-rank-fees",
             get(course::interfaces::http_ops::get_caddie_rank_fees)
                 .put(course::interfaces::http_ops::replace_caddie_rank_fees)
@@ -1638,6 +1644,9 @@ async fn redirect_ui() -> Redirect {
 #[derive(Debug, Clone)]
 pub struct CallerPrincipal {
     pub subject: Option<String>,
+    /// The `username` claim, which Cognito access tokens carry. What a person
+    /// reading a history of changes can recognise; the subject is not.
+    pub username: Option<String>,
 }
 
 async fn require_valid_token(
@@ -1677,6 +1686,7 @@ async fn require_valid_token(
     // trustworthy because this is where the signature was checked.
     req.extensions_mut().insert(CallerPrincipal {
         subject: principal.subject,
+        username: principal.username,
     });
 
     Ok(next.run(req).await)
@@ -3090,6 +3100,32 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[test]
+    fn the_username_claim_is_read_for_showing_who_changed_something() {
+        let auth = TestAuth::new();
+        let verifier = auth.verifier_with("field-core", HashSet::from(["field-core".to_string()]));
+        let named = verifier
+            .verify(&auth.token_with_claims(serde_json::json!({
+                "iss": "test-issuer",
+                "sub": "87f4fa48-b0d1-70ab-ae9f-cfa01ec164c3",
+                "client_id": "field-core",
+                "username": "yamada"
+            })))
+            .expect("valid token");
+        assert_eq!(named.username.as_deref(), Some("yamada"));
+
+        // A blank claim is no name, not an empty one on the history.
+        let blank = verifier
+            .verify(&auth.token_with_claims(serde_json::json!({
+                "iss": "test-issuer",
+                "sub": "87f4fa48-b0d1-70ab-ae9f-cfa01ec164c3",
+                "client_id": "field-core",
+                "username": "  "
+            })))
+            .expect("valid token");
+        assert_eq!(blank.username, None);
     }
 
     #[tokio::test]
