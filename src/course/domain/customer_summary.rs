@@ -36,14 +36,17 @@ pub struct CustomerSummary {
 
 /// What the list is ordered by.
 ///
-/// Three orders, because a call list is built in three ways: who is worth the
-/// most, who has been away the longest, who comes most often. Anything else is
-/// a sort on a column the desk does not ring people about.
+/// Three orders a call list is built in — who is worth the most, who has been
+/// away the longest, who comes most often — plus spend per player, the figure
+/// the grade is judged on. Each is a column of the summary table, so the order
+/// is the database's and holds across pages. Name and phone are not here: they
+/// are Field's, read only for the page being shown, and cannot order the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CustomerSummarySort {
     TotalAmount,
     Visits,
     LastVisit,
+    SpendPerPlayer,
 }
 
 impl CustomerSummarySort {
@@ -52,6 +55,7 @@ impl CustomerSummarySort {
             Self::TotalAmount => "total_amount",
             Self::Visits => "visits",
             Self::LastVisit => "last_visit",
+            Self::SpendPerPlayer => "spend_per_player",
         }
     }
 
@@ -62,6 +66,7 @@ impl CustomerSummarySort {
             Self::TotalAmount => "total_amount",
             Self::Visits => "visits",
             Self::LastVisit => "last_visit_at",
+            Self::SpendPerPlayer => "spend_per_player",
         }
     }
 
@@ -70,6 +75,7 @@ impl CustomerSummarySort {
             "total_amount" => Ok(Self::TotalAmount),
             "visits" => Ok(Self::Visits),
             "last_visit" => Ok(Self::LastVisit),
+            "spend_per_player" => Ok(Self::SpendPerPlayer),
             _ => Err(CourseError::BadRequest("unknown customer summary sort")),
         }
     }

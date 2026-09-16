@@ -231,6 +231,7 @@ export const customers: DeepPartial<typeof source> = {
       total_amount: 'Highest lifetime spend',
       visits: 'Most rounds played',
       last_visit: 'Longest since last round',
+      spend_per_player: 'Highest spend per player',
     },
     column: {
       lastVisit: 'Last round',
@@ -240,7 +241,6 @@ export const customers: DeepPartial<typeof source> = {
     results: {
       title: 'Selected customers',
       description: '{{count}} customers match.',
-      capped: 'Up to {{count}} are listed. Narrow the filters to reach the rest.',
     },
     run: {
       succeeded: 'Figures worked out on {{date}}.',
@@ -260,7 +260,7 @@ export const customers: DeepPartial<typeof source> = {
     open: 'Find who cancelled',
     title: 'Cancellations and fees',
     description: 'Select cancellations by reason and invoice the fees together.',
-    selectAll: 'Select every row',
+    selectAll: 'Select every row on this page',
     selectRow: 'Select {{name}}',
     unlinked: '(not in the ledger)',
     daysBefore: '{{count}} days before',
@@ -304,7 +304,6 @@ export const customers: DeepPartial<typeof source> = {
     results: {
       title: 'Cancellations',
       description: '{{count}} cancellations match.',
-      capped: 'At most {{count}} rows are listed. Narrow the period to see the rest.',
     },
     empty: {
       title: 'No cancellations match',

@@ -1,5 +1,5 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type {
   ComponentProps,
   FormEvent,
@@ -26,6 +26,8 @@ import {
   nextSort,
   pageCountOf,
   pageSlice,
+  serverPageAfterEmpty,
+  serverPager,
   sortRows,
   type DataTableSort,
 } from './dataTable'
@@ -406,6 +408,33 @@ export type DataTableColumn<T> = {
   sortValue?: (row: T) => string | number | null
   /** What this column contributes to the search box, if anything. */
   searchValue?: (row: T) => string
+  /**
+   * With `server`, makes the column sortable by the server. `sortValue` is
+   * ignored there: the rows on screen are one page, and ordering them would
+   * reorder a page rather than the list.
+   */
+  serverSortable?: boolean
+}
+
+/**
+ * Hands sorting and paging to whoever fetched the rows.
+ *
+ * For a list that grows without bound — the customer ledger, a period of
+ * cancellations — fetching everything to sort it in the browser stops working
+ * long before anybody notices it has. The table then only draws the page it was
+ * given and reports what the viewer asked for next.
+ */
+export type DataTableServer = {
+  /** Zero-based. */
+  page: number
+  onPageChange: (page: number) => void
+  /** Rows the query selects across every page. Absent when upstream only knows `hasMore`. */
+  total?: number
+  hasMore?: boolean
+  sort?: DataTableSort | null
+  onSortChange?: (sort: DataTableSort) => void
+  /** The next page is on its way; the rows on screen are the previous one. */
+  loading?: boolean
 }
 
 export function DataTable<T>({
@@ -419,6 +448,7 @@ export function DataTable<T>({
   pageSize,
   searchable = false,
   searchPlaceholder,
+  server,
 }: {
   rows: T[]
   columns: DataTableColumn<T>[]
@@ -437,32 +467,84 @@ export function DataTable<T>({
   /** Shows a search box filtering on the columns that define `searchValue`. */
   searchable?: boolean
   searchPlaceholder?: string
+  /**
+   * Sorting and paging done upstream; `rows` is the current page. Needs
+   * `pageSize`, and does not combine with `searchable` — a list big enough to
+   * page on the server is searched there too, by the screen's own filters.
+   */
+  server?: DataTableServer
 }) {
   const { t } = useTranslation('common')
-  const [sort, setSort] = useState<DataTableSort | null>(defaultSort ?? null)
+  const [localSort, setLocalSort] = useState<DataTableSort | null>(defaultSort ?? null)
   const [query, setQuery] = useState('')
-  const [page, setPage] = useState(0)
+  const [localPage, setLocalPage] = useState(0)
 
+  const sort = server ? server.sort ?? null : localSort
   const searchColumns = useMemo(
-    () => columns.filter(column => column.searchValue),
-    [columns],
+    () => (server ? [] : columns.filter(column => column.searchValue)),
+    [columns, server],
   )
-  const sortColumn = sort ? columns.find(column => column.key === sort.key) : undefined
+  const sortColumn = sort && !server ? columns.find(column => column.key === sort.key) : undefined
 
   const visible = useMemo(
-    () => sortRows(filterRows(rows, columns, query), sortColumn, sort?.direction ?? 'asc'),
-    [rows, columns, query, sortColumn, sort?.direction],
+    () => (server
+      ? rows
+      : sortRows(filterRows(rows, columns, query), sortColumn, sort?.direction ?? 'asc')),
+    [rows, columns, query, sortColumn, sort?.direction, server],
   )
 
-  const pageCount = pageSize ? pageCountOf(visible.length, pageSize) : 1
-  const paged = pageSize ? pageSlice(visible, page, pageSize) : { page: 0, rows: visible }
+  const localPageCount = pageSize ? pageCountOf(visible.length, pageSize) : 1
+  const paged = pageSize && !server
+    ? pageSlice(visible, localPage, pageSize)
+    : { page: server?.page ?? 0, rows: visible }
   const currentPage = paged.page
   const pageRows = paged.rows
+  const pager = server && pageSize
+    ? serverPager({
+      page: server.page,
+      pageSize,
+      rowCount: rows.length,
+      total: server.total,
+      hasMore: server.hasMore,
+    })
+    : pageSize
+      ? {
+        from: currentPage * pageSize + 1,
+        to: currentPage * pageSize + pageRows.length,
+        pageCount: localPageCount,
+        canPrev: currentPage > 0,
+        canNext: currentPage < localPageCount - 1,
+      }
+      : null
+  const total = server ? server.total : visible.length
+
+  // A page emptied under the viewer — its last rows settled elsewhere — steps
+  // back to one that still has rows rather than showing an empty table.
+  const emptiedPage = server && pageSize && rows.length === 0 && !server.loading
+    ? serverPageAfterEmpty(server.page, pageSize, server.total)
+    : null
+  const onPageChange = server?.onPageChange
+  useEffect(() => {
+    if (emptiedPage !== null) onPageChange?.(emptiedPage)
+  }, [emptiedPage, onPageChange])
+
+  function setPage(next: number) {
+    if (server) server.onPageChange(next)
+    else setLocalPage(next)
+  }
+
+  function sortableColumn(column: DataTableColumn<T>) {
+    return server ? Boolean(column.serverSortable && server.onSortChange) : Boolean(column.sortValue)
+  }
 
   function toggleSort(column: DataTableColumn<T>) {
-    if (!column.sortValue) return
-    setPage(0)
-    setSort(current => nextSort(current, column.key))
+    if (!sortableColumn(column)) return
+    if (server) {
+      server.onSortChange?.(nextSort(sort, column.key))
+      return
+    }
+    setLocalPage(0)
+    setLocalSort(current => nextSort(current, column.key))
   }
 
   const search = searchable && searchColumns.length > 0 ? (
@@ -471,7 +553,7 @@ export function DataTable<T>({
         value={query}
         onChange={event => {
           setQuery(event.target.value)
-          setPage(0)
+          setLocalPage(0)
         }}
         placeholder={searchPlaceholder ?? t('action.search')}
         aria-label={searchPlaceholder ?? t('action.search')}
@@ -484,14 +566,14 @@ export function DataTable<T>({
     </div>
   ) : null
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && (!server || emptiedPage === null)) {
     return <>{empty ?? <EmptyState title={t('state.emptyRows')} />}</>
   }
 
   return (
-    <div className="data-table-frame">
+    <div className="data-table-frame" aria-busy={server?.loading || undefined}>
       {search}
-      {visible.length === 0 ? (
+      {visible.length === 0 && !server ? (
         <EmptyState
           title={t('table.noMatches.title')}
           description={t('table.noMatches.description')}
@@ -509,7 +591,7 @@ export function DataTable<T>({
                 {columns.map(column => {
                   const sorted = sort?.key === column.key ? sort.direction : null
                   const className = `${column.className ?? ''} align-${column.align ?? 'left'}`
-                  if (!column.sortValue) {
+                  if (!sortableColumn(column)) {
                     return <th key={column.key} className={className}>{column.header}</th>
                   }
                   return (
@@ -565,33 +647,37 @@ export function DataTable<T>({
           </table>
         </div>
       )}
-      {pageSize && visible.length > 0 ? (
+      {pager && pageRows.length > 0 ? (
         <div className="data-table-pager">
           <span className="data-table-count">
-            {t('table.range', {
-              from: String(currentPage * pageSize + 1),
-              to: String(currentPage * pageSize + pageRows.length),
-              total: String(visible.length),
-            })}
+            {total === undefined
+              ? t('table.rangeOpen', { from: String(pager.from), to: String(pager.to) })
+              : t('table.range', {
+                from: String(pager.from),
+                to: String(pager.to),
+                total: String(total),
+              })}
           </span>
           <div className="data-table-pager-buttons">
             <Button
               type="button"
               variant="secondary"
               size="sm"
-              disabled={currentPage === 0}
+              disabled={!pager.canPrev || server?.loading}
               onClick={() => setPage(currentPage - 1)}
             >
               <ChevronLeft /> {t('table.prev')}
             </Button>
             <span className="data-table-count">
-              {t('table.page', { page: String(currentPage + 1), pages: String(pageCount) })}
+              {pager.pageCount === null
+                ? t('table.pageOpen', { page: String(currentPage + 1) })
+                : t('table.page', { page: String(currentPage + 1), pages: String(pager.pageCount) })}
             </span>
             <Button
               type="button"
               variant="secondary"
               size="sm"
-              disabled={currentPage >= pageCount - 1}
+              disabled={!pager.canNext || server?.loading}
               onClick={() => setPage(currentPage + 1)}
             >
               {t('table.next')} <ChevronRight />

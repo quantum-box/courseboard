@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import {
   CALL_LIST_DEFAULTS,
-  CALL_LIST_ROWS,
+  CALL_LIST_PAGE_SIZE,
   callListQuery,
+  callListSortForColumn,
   daysSince,
   isStale,
+  naturalAscending,
   STALE_AFTER_DAYS,
   type CustomerSummaryRun,
 } from './callList'
@@ -29,7 +31,8 @@ describe('callListQuery', () => {
     expect(query).toContain('sort=total_amount')
     expect(query).toContain('minDaysSinceLastVisit=90')
     expect(query).toContain('minVisits=2')
-    expect(query).toContain(`limit=${CALL_LIST_ROWS}`)
+    expect(query).toContain(`limit=${CALL_LIST_PAGE_SIZE}`)
+    expect(query).not.toContain('offset')
     // Descending is the default upstream, so the biggest spender is the top of
     // the list without the screen having to say so.
     expect(query).not.toContain('ascending')
@@ -38,8 +41,22 @@ describe('callListQuery', () => {
   it('turns the last-visit order around so the longest absence comes first', () => {
     // Descending on a date would open the list with whoever played yesterday,
     // which is the opposite of who needs ringing.
-    expect(callListQuery({ ...CALL_LIST_DEFAULTS, sort: 'last_visit' }))
+    expect(callListQuery({ ...CALL_LIST_DEFAULTS, sort: 'last_visit', ascending: true }))
       .toContain('ascending=true')
+    expect(naturalAscending('last_visit')).toBe(true)
+    expect(naturalAscending('total_amount')).toBe(false)
+  })
+
+  it('asks the server for the page on screen rather than slicing a capped list', () => {
+    const query = callListQuery(CALL_LIST_DEFAULTS, 2)
+    expect(query).toContain(`limit=${CALL_LIST_PAGE_SIZE}`)
+    expect(query).toContain(`offset=${CALL_LIST_PAGE_SIZE * 2}`)
+  })
+
+  it('maps a sortable column to the order the server knows it by', () => {
+    expect(callListSortForColumn('spendPerPlayer')).toBe('spend_per_player')
+    // Name and phone are Field's and cannot order the segment.
+    expect(callListSortForColumn('name')).toBeNull()
   })
 
   it('treats a cleared box as no filter rather than as a filter of zero', () => {

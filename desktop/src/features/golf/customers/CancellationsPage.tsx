@@ -19,6 +19,7 @@ import {
 } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
 import { useTenantTimezone } from '../../../context/TenantTimezoneProvider'
+import { useKeptData } from '../../../hooks/useKeptData'
 import { useResource } from '../../../hooks/useResource'
 import { today } from '../../../lib/clock'
 import { navigateFromClick } from '../../../lib/router'
@@ -36,22 +37,23 @@ import {
   addDays,
   CANCELLATION_FEE_STATES,
   CANCELLATION_REASONS,
-  CANCELLATION_ROWS,
+  CANCELLATION_PAGE_SIZE,
+  CANCELLATION_SORT_COLUMNS,
+  DEFAULT_CANCELLATION_ORDER,
+  cancellationSortForColumn,
   cancellationsQuery,
   defaultCancellationFilters,
   planCancellationFees,
   splitFeeAcrossRows,
   type CancellationFeeState,
   type CancellationFilters,
+  type CancellationOrder,
   type CancellationReason,
   type CustomerFeeGroup,
   type ReservationCancellation,
   type ReservationCancellationPage,
 } from './cancellations'
 import { visitDate } from './visits'
-
-/** Same as the other rosters: a screenful of rows, then a pager. */
-const PAGE_SIZE = 20
 
 /** What a club most often charges per round given up. Editable on the sheet. */
 const DEFAULT_PER_PLAYER_FEE = 3_000
@@ -85,11 +87,15 @@ export function CancellationsPage() {
   const businessDate = today(timezone)
   const [filters, setFilters] = useState<CancellationFilters>(() =>
     defaultCancellationFilters(businessDate))
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [order, setOrder] = useState<CancellationOrder>(DEFAULT_CANCELLATION_ORDER)
+  const [pageIndex, setPageIndex] = useState(0)
+  // Kept with the row, not just its id: the selection outlives the page it was
+  // made on, and billing needs the whole row for bookings no longer on screen.
+  const [selected, setSelected] = useState<Map<string, ReservationCancellation>>(new Map())
   const [billing, setBilling] = useState(false)
   const [waiving, setWaiving] = useState(false)
 
-  const query = cancellationsQuery(filters)
+  const query = cancellationsQuery(filters, order, pageIndex)
   // Keyed by the query so changing a filter re-reads rather than showing the
   // previous period under the new description of it.
   const resource = useResource(
@@ -98,24 +104,38 @@ export function CancellationsPage() {
     { cacheKey: `course:cancellations:${query}` },
   )
 
-  const page = resource.data ?? null
+  // A period can hold more cancellations than anybody pages through by hand,
+  // so the server orders and pages it. The previous page stays up, dimmed,
+  // while the next one loads.
+  const page = useKeptData(resource.data)
   const rows = useMemo(() => page?.items ?? [], [page])
-  const selectedRows = useMemo(
-    () => rows.filter(row => selected.has(row.reservationId)),
-    [rows, selected],
-  )
+  const selectedRows = useMemo(() => [...selected.values()], [selected])
 
   const patch = (change: Partial<CancellationFilters>) => {
     setFilters(current => ({ ...current, ...change }))
-    // The selection is a set of ids on the list that is going away. Carrying
-    // it across a filter change would bill rows nobody can still see.
-    setSelected(new Set())
+    setPageIndex(0)
+    // The selection is rows of the list that is going away. Carrying it
+    // across a filter change would bill rows nobody can still see. Turning a
+    // page or re-ordering keeps it: those rows are still in the list.
+    setSelected(new Map())
   }
 
-  const toggle = (reservationId: string) => {
+  const toggle = (row: ReservationCancellation) => {
     setSelected(current => {
-      const next = new Set(current)
-      if (!next.delete(reservationId)) next.add(reservationId)
+      const next = new Map(current)
+      if (!next.delete(row.reservationId)) next.set(row.reservationId, row)
+      return next
+    })
+  }
+
+  /** The header box ticks or clears the page on screen, not the whole period. */
+  const togglePage = (select: boolean) => {
+    setSelected(current => {
+      const next = new Map(current)
+      for (const row of rows) {
+        if (select) next.set(row.reservationId, row)
+        else next.delete(row.reservationId)
+      }
       return next
     })
   }
@@ -130,8 +150,7 @@ export function CancellationsPage() {
           type="checkbox"
           checked={allSelected}
           aria-label={t('customers:cancellations.selectAll')}
-          onChange={() =>
-            setSelected(allSelected ? new Set() : new Set(rows.map(row => row.reservationId)))}
+          onChange={() => togglePage(!allSelected)}
         />
       ),
       cell: row => (
@@ -142,7 +161,7 @@ export function CancellationsPage() {
             name: row.customerName ?? row.reservationId,
           })}
           onClick={event => event.stopPropagation()}
-          onChange={() => toggle(row.reservationId)}
+          onChange={() => toggle(row)}
         />
       ),
     },
@@ -150,7 +169,7 @@ export function CancellationsPage() {
       key: 'playedOn',
       header: t('customers:cancellations.column.playedOn'),
       cell: row => (row.playedOn ? visitDate(row.playedOn, timezone) : ''),
-      sortValue: row => row.playedOn ?? null,
+      serverSortable: true,
     },
     {
       key: 'name',
@@ -172,7 +191,6 @@ export function CancellationsPage() {
             </>
           )
       ),
-      sortValue: row => row.customerName ?? null,
     },
     {
       key: 'reason',
@@ -189,7 +207,7 @@ export function CancellationsPage() {
           {row.reasonNote ? <div className="muted">{row.reasonNote}</div> : null}
         </>
       ),
-      sortValue: row => String(row.reason),
+      serverSortable: true,
     },
     {
       key: 'notice',
@@ -204,14 +222,14 @@ export function CancellationsPage() {
           ? <span className="muted">{t('customers:cancellations.afterTeeTime')}</span>
           : t('customers:cancellations.daysBefore', { count: row.noticeDays })
       },
-      sortValue: row => row.noticeDays ?? null,
+      serverSortable: true,
     },
     {
       key: 'players',
       header: t('customers:cancellations.column.players'),
       align: 'right',
       cell: row => row.players || '',
-      sortValue: row => row.players,
+      serverSortable: true,
     },
     {
       key: 'bookingAmount',
@@ -219,7 +237,7 @@ export function CancellationsPage() {
       align: 'right',
       // Zero means "nothing recorded" far more often than a free round.
       cell: row => (row.bookingAmount ? row.bookingAmount.toLocaleString() : ''),
-      sortValue: row => row.bookingAmount ?? null,
+      serverSortable: true,
     },
     {
       key: 'feeState',
@@ -243,7 +261,7 @@ export function CancellationsPage() {
           {row.feeNote ? <div className="muted">{row.feeNote}</div> : null}
         </>
       ),
-      sortValue: row => String(row.feeState),
+      serverSortable: true,
     },
   ], [allSelected, rows, selected, t, timezone])
 
@@ -347,22 +365,31 @@ export function CancellationsPage() {
           </>
         ) : undefined}
       >
-        {resource.loading ? <LoadingState /> : null}
+        {resource.loading && !page ? <LoadingState /> : null}
         {resource.error ? <ResourceError error={resource.error} onRetry={resource.refresh} /> : null}
 
-        {/* Said once, above the rows: the list is capped, so a period with more
-            cancellations than this needs narrowing rather than scrolling. */}
-        {page && page.total > rows.length ? (
-          <Notice tone="info">
-            {t('customers:cancellations.results.capped', { count: CANCELLATION_ROWS })}
-          </Notice>
-        ) : null}
 
         <DataTable
           rows={rows}
           columns={columns}
           rowKey={row => row.reservationId}
-          pageSize={PAGE_SIZE}
+          pageSize={CANCELLATION_PAGE_SIZE}
+          server={{
+            page: pageIndex,
+            onPageChange: setPageIndex,
+            total: page?.total ?? 0,
+            loading: resource.loading || resource.data !== page,
+            sort: {
+              key: CANCELLATION_SORT_COLUMNS[order.sort],
+              direction: order.ascending ? 'asc' : 'desc',
+            },
+            onSortChange: next => {
+              const sort = cancellationSortForColumn(next.key)
+              if (!sort) return
+              setOrder({ sort, ascending: next.direction === 'asc' })
+              setPageIndex(0)
+            },
+          }}
           empty={(
             <EmptyState
               title={t('customers:cancellations.empty.title')}
@@ -378,7 +405,7 @@ export function CancellationsPage() {
         businessDate={businessDate}
         onClose={() => setBilling(false)}
         onSettled={() => {
-          setSelected(new Set())
+          setSelected(new Map())
           resource.refresh()
         }}
       />
@@ -387,7 +414,7 @@ export function CancellationsPage() {
         rows={selectedRows}
         onClose={() => setWaiving(false)}
         onSettled={() => {
-          setSelected(new Set())
+          setSelected(new Map())
           resource.refresh()
         }}
       />

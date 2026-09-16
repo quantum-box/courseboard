@@ -116,8 +116,12 @@ impl CustomerSummaryGateway for MySqlCustomerSummaryRepository {
         );
         push_filters(&mut builder, tenant_id, query, now);
         // The column comes from a closed enum, never from the request: this is
-        // the one place in the statement that is not a bind.
-        builder.push(" ORDER BY ").push(query.sort.column());
+        // the one place in the statement that is not a bind. A missing figure
+        // goes last in both directions, as the screen's own sort put it — at
+        // the top of an ascending spend column it would read as the cheapest.
+        let column = query.sort.column();
+        builder.push(" ORDER BY ").push(column).push(" IS NULL, ");
+        builder.push(column);
         builder.push(if query.descending { " DESC" } else { " ASC" });
         // Ties broken by a unique column so page two does not repeat a row from
         // page one. A ledger has thousands of people on nought visits, and
@@ -495,5 +499,45 @@ mod tests {
         assert_eq!(failed.reservations_scanned, 1_200);
         assert_eq!(failed.error.as_deref(), Some("field said 424"));
         assert!(failed.finished_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn a_missing_spend_per_player_sorts_last_in_both_directions() {
+        let repository = repository().await;
+        let tenant = test_tenant("summary-spend-order");
+        let mut unpriced = entry("cus-unpriced", 2, 0, Some(10));
+        unpriced.summary.spend_per_player = None;
+        repository
+            .upsert_customer_summaries(
+                &tenant,
+                &[
+                    entry("cus-cheap", 2, 8_000, Some(10)),
+                    unpriced,
+                    entry("cus-dear", 2, 80_000, Some(10)),
+                ],
+            )
+            .await
+            .unwrap();
+
+        for (descending, expected) in [
+            (true, ["cus-dear", "cus-cheap", "cus-unpriced"]),
+            (false, ["cus-cheap", "cus-dear", "cus-unpriced"]),
+        ] {
+            let query = CustomerSummaryQuery {
+                sort: CustomerSummarySort::SpendPerPlayer,
+                descending,
+                ..CustomerSummaryQuery::default()
+            };
+            let rows = repository
+                .list_customer_summaries(&tenant, &query, now())
+                .await
+                .unwrap();
+            assert_eq!(
+                rows.iter()
+                    .map(|row| row.customer_id.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+        }
     }
 }

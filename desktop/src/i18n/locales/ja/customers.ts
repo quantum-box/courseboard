@@ -235,6 +235,7 @@ export const customers = {
       total_amount: '累計金額が多い順',
       visits: '来場回数が多い順',
       last_visit: '最終来場が古い順',
+      spend_per_player: '客単価が高い順',
     },
     column: {
       lastVisit: '最終来場',
@@ -244,7 +245,6 @@ export const customers = {
     results: {
       title: '抽出した顧客',
       description: '条件に合う顧客は{{count}}人です。',
-      capped: '一覧に出るのは{{count}}人までです。条件をしぼると残りが出てきます。',
     },
     run: {
       succeeded: '{{date}}に集計した数字です。',
@@ -264,7 +264,7 @@ export const customers = {
     open: 'キャンセルした人をさがす',
     title: 'キャンセルとキャンセル料',
     description: 'キャンセルを理由で抽出し、キャンセル料をまとめて請求します。',
-    selectAll: 'この一覧をすべて選ぶ',
+    selectAll: 'このページをすべて選ぶ',
     selectRow: '「{{name}}」を選ぶ',
     unlinked: '（台帳と未連携）',
     daysBefore: '{{count}}日前',
@@ -308,7 +308,6 @@ export const customers = {
     results: {
       title: '抽出したキャンセル',
       description: '条件に合うキャンセルは{{count}}件です。',
-      capped: '一覧に出るのは{{count}}件までです。期間をしぼると残りが出てきます。',
     },
     empty: {
       title: '条件に合うキャンセルはいません',

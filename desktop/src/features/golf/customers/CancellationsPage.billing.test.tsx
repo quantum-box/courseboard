@@ -109,7 +109,7 @@ describe('the cancellation extraction', () => {
     })
 
     await act(async () => {
-      fireEvent.click(screen.getByLabelText('この一覧をすべて選ぶ'))
+      fireEvent.click(screen.getByLabelText('このページをすべて選ぶ'))
     })
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
@@ -158,7 +158,7 @@ describe('the cancellation extraction', () => {
       renderPage()
     })
     await act(async () => {
-      fireEvent.click(screen.getByLabelText('この一覧をすべて選ぶ'))
+      fireEvent.click(screen.getByLabelText('このページをすべて選ぶ'))
     })
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
@@ -180,7 +180,7 @@ describe('the cancellation extraction', () => {
       renderPage()
     })
     await act(async () => {
-      fireEvent.click(screen.getByLabelText('この一覧をすべて選ぶ'))
+      fireEvent.click(screen.getByLabelText('このページをすべて選ぶ'))
     })
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
@@ -191,7 +191,7 @@ describe('the cancellation extraction', () => {
 
   async function selectAllAndOpenSheet() {
     await act(async () => {
-      fireEvent.click(screen.getByLabelText('この一覧をすべて選ぶ'))
+      fireEvent.click(screen.getByLabelText('このページをすべて選ぶ'))
     })
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
@@ -269,7 +269,7 @@ describe('the cancellation extraction', () => {
       renderPage()
     })
     await act(async () => {
-      fireEvent.click(screen.getByLabelText('この一覧をすべて選ぶ'))
+      fireEvent.click(screen.getByLabelText('このページをすべて選ぶ'))
     })
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))

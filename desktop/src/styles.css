@@ -1361,6 +1361,12 @@ button,
   gap: 8px;
 }
 
+/* The next page is loading; the rows on screen are the previous one. */
+.data-table-frame[aria-busy="true"] .data-table-scroll {
+  opacity: 0.55;
+  transition: opacity 120ms ease;
+}
+
 .data-table-toolbar {
   display: flex;
   flex-wrap: wrap;
