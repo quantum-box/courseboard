@@ -45,7 +45,7 @@ export type PayrollRow = {
   roundsWithoutClockIn: number
 }
 
-/** A rank's share of the month, for the breakdown above the table. */
+/** A rank's share of the month, for the breakdown on the monthly close. */
 export type RankTotals = {
   rank: Rank
   caddies: number
@@ -137,7 +137,7 @@ export function rankTotals(rows: PayrollRow[]): RankTotals[] {
   })
 }
 
-/** The whole month, in the order the metric row reads. */
+/** The whole month, as the monthly close totals it. */
 export function payrollTotals(rows: PayrollRow[]) {
   return rows.reduce(
     (total, row) => ({

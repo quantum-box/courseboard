@@ -329,8 +329,8 @@ export const helpEn: HelpCatalog = {
       ],
       data: [
         {
-          heading: 'Outstanding',
-          body: 'Booking revenue minus what has actually been received.',
+          heading: 'Cost as assigned and pay',
+          body: 'Cost as assigned uses the fee when the round was assigned; pay uses the current rank fees. Correcting a fee opens a gap. Pay is what is paid.',
         },
         {
           heading: 'Unmatched rows',
