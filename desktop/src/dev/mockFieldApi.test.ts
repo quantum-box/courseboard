@@ -196,6 +196,63 @@ describe('mockFieldApi', () => {
     expect((extensionStatus.data as { extensionKey: string }).extensionKey).toBe('golf_course')
   })
 
+  it('keeps day-off requests saved and withdrawn during the session', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    const month = '/v1/course/caddie-availabilities?caddieProfileId=caddie_aya&from=2026-07-01&to=2026-07-31'
+    type Row = { caddieProfileId: string; date: string; status: string; healthNote: string | null }
+    const rowsOf = () => {
+      const result = resolveMockFieldApiJson(month)
+      if (result.kind !== 'hit') throw new Error(result.kind)
+      return (result.data as { items: Row[] }).items
+    }
+
+    expect(rowsOf().every(row => row.caddieProfileId === 'caddie_aya')).toBe(true)
+
+    const saved = resolveMockFieldApiJson('/v1/course/caddie-availabilities', {
+      method: 'POST',
+      body: JSON.stringify({
+        caddieProfileId: 'caddie_aya',
+        date: '2026-07-15',
+        status: 'unavailable',
+        twoRoundRequest: false,
+        healthNote: '通院',
+      }),
+    })
+    expect(saved.kind).toBe('hit')
+    expect(rowsOf().find(row => row.date === '2026-07-15')).toMatchObject({
+      status: 'unavailable',
+      healthNote: '通院',
+    })
+    // The same day seen from the day boards, which ask for every caddie at once.
+    const day = resolveMockFieldApiJson('/v1/course/caddie-availabilities?from=2026-07-15&to=2026-07-15')
+    if (day.kind !== 'hit') throw new Error(day.kind)
+    expect((day.data as { items: Row[] }).items).toContainEqual(
+      expect.objectContaining({ caddieProfileId: 'caddie_aya', status: 'unavailable' }),
+    )
+
+    // Withdrawing also hides a day the generated fixture would have filed.
+    const fixtureDay = rowsOf().find(row => row.date !== '2026-07-15')
+    expect(fixtureDay).toBeDefined()
+    for (const date of ['2026-07-15', fixtureDay!.date]) {
+      const removed = resolveMockFieldApiText(
+        `/v1/course/caddie-availabilities/caddie_aya/${date}`,
+        { method: 'DELETE' },
+      )
+      expect(removed.kind).toBe('hit')
+    }
+    const remaining = rowsOf().map(row => row.date)
+    expect(remaining).not.toContain('2026-07-15')
+    expect(remaining).not.toContain(fixtureDay!.date)
+
+    if (typeof sessionStorage !== 'undefined') {
+      expect(
+        JSON.parse(sessionStorage.getItem('courseboard.mock.ledgerWrites.caddieAvailabilities') ?? '{}'),
+      ).toMatchObject({ 'caddie_aya:2026-07-15': null })
+      sessionStorage.removeItem('courseboard.mock.ledgerWrites.caddieAvailabilities')
+    }
+  })
+
   it('previews and upserts the reservation report with an optional course link idempotently', () => {
     vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
