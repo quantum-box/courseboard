@@ -17,14 +17,18 @@ import {
   ResourceError,
 } from '../../../components/Page'
 import { useTenantTimezone } from '../../../context/TenantTimezoneProvider'
+import { useKeptData } from '../../../hooks/useKeptData'
 import { useResource } from '../../../hooks/useResource'
 import { navigate, navigateFromClick } from '../../../lib/router'
 import {
   CALL_LIST_DEFAULTS,
-  CALL_LIST_ROWS,
+  CALL_LIST_PAGE_SIZE,
+  CALL_LIST_SORT_COLUMNS,
   callListQuery,
+  callListSortForColumn,
   daysSince,
   isStale,
+  naturalAscending,
   type CallListFilters,
   type CallListSort,
   type CustomerSummaryPage,
@@ -32,10 +36,7 @@ import {
 } from './callList'
 import { visitDate } from './visits'
 
-/** Same as the other rosters: a screenful of rows, then a pager. */
-const PAGE_SIZE = 20
-
-const SORTS: CallListSort[] = ['total_amount', 'visits', 'last_visit']
+const SORTS: CallListSort[] = ['total_amount', 'visits', 'last_visit', 'spend_per_player']
 
 /**
  * Who to ring, and why them.
@@ -56,8 +57,15 @@ const SORTS: CallListSort[] = ['total_amount', 'visits', 'last_visit']
 export function CallListPage() {
   const { t } = useTranslation(['customers', 'common'])
   const timezone = useTenantTimezone()
-  const [filters, setFilters] = useState<CallListFilters>(CALL_LIST_DEFAULTS)
-  const query = callListQuery(filters)
+  const [filters, setFiltersState] = useState<CallListFilters>(CALL_LIST_DEFAULTS)
+  const [pageIndex, setPageIndex] = useState(0)
+  const query = callListQuery(filters, pageIndex)
+  // A new segment starts from its first page; page three of the old one means
+  // nothing under the new filters.
+  const setFilters = (change: (current: CallListFilters) => CallListFilters) => {
+    setFiltersState(change)
+    setPageIndex(0)
+  }
 
   // Keyed by the query so changing a filter re-reads rather than showing the
   // previous segment under the new description of it.
@@ -67,7 +75,10 @@ export function CallListPage() {
     { cacheKey: `customer:summaries:${query}` },
   )
 
-  const page = resource.data ?? null
+  // The segment can run to thousands, so the server sorts and pages it and
+  // only the page on screen is fetched. The previous page stays up, dimmed,
+  // while the next one loads.
+  const page = useKeptData(resource.data)
   const rows = page?.items ?? []
   // One clock for the whole render, so two rows measured a millisecond apart
   // cannot disagree about what "90 days ago" means.
@@ -79,7 +90,6 @@ export function CallListPage() {
       key: 'name',
       header: t('customers:field.name'),
       cell: row => <strong>{row.name ?? t('customers:callList.unnamed')}</strong>,
-      sortValue: row => row.name ?? null,
     },
     {
       key: 'phone',
@@ -88,7 +98,6 @@ export function CallListPage() {
       // kept — it is still a lapsed regular, and somebody may have the number
       // elsewhere — but it says so rather than leaving a blank to squint at.
       cell: row => row.phone ?? <span className="muted">{t('customers:noContact')}</span>,
-      sortValue: row => row.phone ?? null,
     },
     {
       key: 'lastVisit',
@@ -108,14 +117,14 @@ export function CallListPage() {
           </>
         )
       },
-      sortValue: row => (row.lastVisitAt ? Date.parse(row.lastVisitAt) : null),
+      serverSortable: true,
     },
     {
       key: 'visits',
       header: t('customers:visits.metric.visits'),
       align: 'right',
       cell: row => row.visits,
-      sortValue: row => row.visits,
+      serverSortable: true,
     },
     {
       key: 'totalAmount',
@@ -124,14 +133,14 @@ export function CallListPage() {
       // Zero means "nothing recorded" far more often than it means free rounds,
       // which is why it is blank rather than a nought.
       cell: row => (row.totalAmount > 0 ? row.totalAmount.toLocaleString() : ''),
-      sortValue: row => (row.totalAmount > 0 ? row.totalAmount : null),
+      serverSortable: true,
     },
     {
       key: 'spendPerPlayer',
       header: t('customers:visits.metric.spendPerPlayer'),
       align: 'right',
       cell: row => (row.spendPerPlayer ? row.spendPerPlayer.toLocaleString() : ''),
-      sortValue: row => row.spendPerPlayer ?? null,
+      serverSortable: true,
     },
     {
       key: 'grade',
@@ -141,7 +150,6 @@ export function CallListPage() {
       // "unknown" is about a partial count — neither is a fact about this
       // person, and putting either in a column would read as one.
       cell: row => (row.grade === 'graded' ? row.gradeName : null),
-      sortValue: row => (row.grade === 'graded' ? row.gradeName ?? null : null),
     },
   ], [now, t, timezone])
 
@@ -165,10 +173,10 @@ export function CallListPage() {
           <Field label={t('customers:callList.filters.sort')}>
             <NativeSelect
               value={filters.sort}
-              onChange={event => setFilters(current => ({
-                ...current,
-                sort: event.target.value as CallListSort,
-              }))}
+              onChange={event => {
+                const sort = event.target.value as CallListSort
+                setFilters(current => ({ ...current, sort, ascending: naturalAscending(sort) }))
+              }}
             >
               {SORTS.map(sort => (
                 <option key={sort} value={sort}>
@@ -240,27 +248,40 @@ export function CallListPage() {
           <Notice tone="warning">{t('customers:callList.run.never')}</Notice>
         ) : null}
 
-        {resource.loading ? <LoadingState /> : null}
+        {resource.loading && !page ? <LoadingState /> : null}
         {resource.error ? (
           <ResourceError error={resource.error} onRetry={() => void resource.refresh()} />
         ) : null}
 
-        {/* Said once, above the rows: the segment can be larger than what is
-            listed, and a desk that worked to the bottom should know there is
-            more rather than conclude it has rung everybody. */}
-        {page && page.total > rows.length ? (
-          <p className="customer-ledger-hint">
-            {t('customers:callList.results.capped', { count: CALL_LIST_ROWS })}
-          </p>
-        ) : null}
 
-        {!resource.loading && !resource.error ? (
+        {page && !resource.error ? (
           <DataTable
             rows={rows}
             columns={columns}
             rowKey={row => row.customerId}
             onRowClick={row => navigate(`golf/customers/${row.customerId}`)}
-            pageSize={PAGE_SIZE}
+            pageSize={CALL_LIST_PAGE_SIZE}
+            server={{
+              page: pageIndex,
+              onPageChange: setPageIndex,
+              total: page.total,
+              loading: resource.loading || resource.data !== page,
+              sort: {
+                key: CALL_LIST_SORT_COLUMNS[filters.sort],
+                direction: filters.ascending ? 'asc' : 'desc',
+              },
+              onSortChange: next => {
+                const sort = callListSortForColumn(next.key)
+                if (!sort) return
+                setFilters(current => ({
+                  ...current,
+                  sort,
+                  // A new column starts the way round the desk reads it; the
+                  // same column again turns it over.
+                  ascending: current.sort === sort ? !current.ascending : naturalAscending(sort),
+                }))
+              },
+            }}
             empty={(
               <EmptyState
                 title={t('customers:callList.empty.title')}

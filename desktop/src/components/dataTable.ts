@@ -99,3 +99,50 @@ export function nextSort(current: DataTableSort | null, key: string): DataTableS
     ? { key, direction: current.direction === 'asc' ? 'desc' : 'asc' }
     : { key, direction: 'asc' }
 }
+
+/**
+ * What a table paged by the server shows in its pager.
+ *
+ * `total` is absent when the upstream list only says whether another page
+ * exists: the pager can still step forward, it just cannot say how far there
+ * is to go.
+ */
+export function serverPager({
+  page,
+  pageSize,
+  rowCount,
+  total,
+  hasMore,
+}: {
+  page: number
+  pageSize: number
+  rowCount: number
+  total?: number
+  hasMore?: boolean
+}) {
+  const from = rowCount === 0 ? 0 : page * pageSize + 1
+  const to = page * pageSize + rowCount
+  const pageCount = total === undefined ? null : pageCountOf(total, pageSize)
+  return {
+    from,
+    to,
+    pageCount,
+    canPrev: page > 0,
+    canNext: pageCount === null ? Boolean(hasMore) : page < pageCount - 1,
+  }
+}
+
+/**
+ * The page to move to when the one on screen came back empty.
+ *
+ * Settling the last rows of the last page leaves the viewer on a page that no
+ * longer exists. With a total the last real page is known; without one, one
+ * step back is the best guess. `null` means stay: the page is fine, or it is
+ * the first one and the list is simply empty.
+ */
+export function serverPageAfterEmpty(page: number, pageSize: number, total?: number) {
+  if (page === 0) return null
+  if (total === undefined) return page - 1
+  const last = pageCountOf(total, pageSize) - 1
+  return page > last ? last : null
+}

@@ -47,12 +47,18 @@ export type CustomerSummaryPage = {
   lastRun?: CustomerSummaryRun | null
 }
 
-/** The three orders a call list is built in. */
-export type CallListSort = 'total_amount' | 'visits' | 'last_visit'
+/**
+ * The orders the server can put the whole segment in. The first three are how
+ * a call list is built; spend per player is there because the grade is judged
+ * on it. Name and phone are Field's and cannot order more than one page.
+ */
+export type CallListSort = 'total_amount' | 'visits' | 'last_visit' | 'spend_per_player'
 
 /** What the desk is asking for. Every field is a filter the segment applies. */
 export type CallListFilters = {
   sort: CallListSort
+  /** Oldest absence first when ranking by last visit; biggest first otherwise. */
+  ascending: boolean
   minDaysSinceLastVisit: string
   minVisits: string
   minTotalAmount: string
@@ -60,6 +66,7 @@ export type CallListFilters = {
 
 export const CALL_LIST_DEFAULTS: CallListFilters = {
   sort: 'total_amount',
+  ascending: false,
   // Ninety days is the club's usual reading of "we have not seen them in a
   // while" — long enough that a monthly regular is not on the list, short
   // enough that a lapsing one still remembers the course.
@@ -68,8 +75,32 @@ export const CALL_LIST_DEFAULTS: CallListFilters = {
   minTotalAmount: '',
 }
 
-/** Rows the list asks for at once. Matches the API's own cap. */
-export const CALL_LIST_ROWS = 100
+/** Rows a page asks the server for. Same as the other rosters. */
+export const CALL_LIST_PAGE_SIZE = 20
+
+/**
+ * The direction an order starts in when the desk picks it.
+ *
+ * Descending on a date would open the list with whoever played yesterday,
+ * which is the opposite of who needs ringing; for the amounts and counts the
+ * biggest is the top.
+ */
+export function naturalAscending(sort: CallListSort) {
+  return sort === 'last_visit'
+}
+
+/** The table column each server order is drawn in, and back. */
+export const CALL_LIST_SORT_COLUMNS: Record<CallListSort, string> = {
+  total_amount: 'totalAmount',
+  visits: 'visits',
+  last_visit: 'lastVisit',
+  spend_per_player: 'spendPerPlayer',
+}
+
+export function callListSortForColumn(key: string): CallListSort | null {
+  const entry = Object.entries(CALL_LIST_SORT_COLUMNS).find(([, column]) => column === key)
+  return entry ? (entry[0] as CallListSort) : null
+}
 
 export const customerSummariesPath = '/v1/course/customer-summaries'
 
@@ -89,19 +120,19 @@ function positiveNumber(value: string): number | null {
   return Math.floor(parsed)
 }
 
-export function callListQuery(filters: CallListFilters): string {
+export function callListQuery(filters: CallListFilters, page = 0): string {
   const params = new URLSearchParams()
   params.set('sort', filters.sort)
-  // Oldest absence first when ranking by when somebody last played; biggest
-  // first for the two that are counts of something.
-  if (filters.sort === 'last_visit') params.set('ascending', 'true')
+  // Descending is the upstream default, so only the other way round is said.
+  if (filters.ascending) params.set('ascending', 'true')
   const days = positiveNumber(filters.minDaysSinceLastVisit)
   if (days !== null) params.set('minDaysSinceLastVisit', String(days))
   const visits = positiveNumber(filters.minVisits)
   if (visits !== null) params.set('minVisits', String(visits))
   const amount = positiveNumber(filters.minTotalAmount)
   if (amount !== null) params.set('minTotalAmount', String(amount))
-  params.set('limit', String(CALL_LIST_ROWS))
+  params.set('limit', String(CALL_LIST_PAGE_SIZE))
+  if (page > 0) params.set('offset', String(page * CALL_LIST_PAGE_SIZE))
   return `${customerSummariesPath}?${params.toString()}`
 }
 

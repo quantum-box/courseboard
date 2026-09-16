@@ -71,8 +71,43 @@ export type ReservationCancellationPage = {
 
 export const cancellationsPath = '/v1/course/reservation-cancellations'
 
-/** Rows the list asks for at once. Matches the API's own cap. */
-export const CANCELLATION_ROWS = 100
+/** Rows a page asks the server for. Same as the other rosters. */
+export const CANCELLATION_PAGE_SIZE = 20
+
+/**
+ * The orders the server can put a whole period in. The name is not one: the
+ * name on screen is the ledger's, looked up for the page being shown.
+ */
+export type CancellationSort =
+  | 'played_on'
+  | 'reason'
+  | 'notice_days'
+  | 'players'
+  | 'booking_amount'
+  | 'fee_state'
+
+export type CancellationOrder = { sort: CancellationSort; ascending: boolean }
+
+/** Latest day of play first: the order a desk works a period in. */
+export const DEFAULT_CANCELLATION_ORDER: CancellationOrder = {
+  sort: 'played_on',
+  ascending: false,
+}
+
+/** The table column each server order is drawn in. */
+export const CANCELLATION_SORT_COLUMNS: Record<CancellationSort, string> = {
+  played_on: 'playedOn',
+  reason: 'reason',
+  notice_days: 'notice',
+  players: 'players',
+  booking_amount: 'bookingAmount',
+  fee_state: 'feeState',
+}
+
+export function cancellationSortForColumn(key: string): CancellationSort | null {
+  const entry = Object.entries(CANCELLATION_SORT_COLUMNS).find(([, column]) => column === key)
+  return entry ? (entry[0] as CancellationSort) : null
+}
 
 /** What the desk is asking for. Every field narrows. */
 export type CancellationFilters = {
@@ -109,7 +144,11 @@ export function addDays(date: string, days: number) {
   return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10)
 }
 
-export function cancellationsQuery(filters: CancellationFilters) {
+export function cancellationsQuery(
+  filters: CancellationFilters,
+  order: CancellationOrder = DEFAULT_CANCELLATION_ORDER,
+  page = 0,
+) {
   const params = new URLSearchParams()
   if (filters.from) params.set('from', filters.from)
   if (filters.to) params.set('to', filters.to)
@@ -118,7 +157,11 @@ export function cancellationsQuery(filters: CancellationFilters) {
   // Asking for one reason is more specific than "the chargeable ones", so the
   // two are not both sent: a weather row selected by name should come back.
   if (filters.chargeableOnly && !filters.reason) params.set('feeExpectedOnly', 'true')
-  params.set('limit', String(CANCELLATION_ROWS))
+  if (order.sort !== DEFAULT_CANCELLATION_ORDER.sort) params.set('sort', order.sort)
+  // Descending is the upstream default, so only the other way round is said.
+  if (order.ascending) params.set('ascending', 'true')
+  params.set('limit', String(CANCELLATION_PAGE_SIZE))
+  if (page > 0) params.set('offset', String(page * CANCELLATION_PAGE_SIZE))
   return `${cancellationsPath}?${params.toString()}`
 }
 

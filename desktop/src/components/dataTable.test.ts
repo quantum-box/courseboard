@@ -5,6 +5,8 @@ import {
   nextSort,
   pageCountOf,
   pageSlice,
+  serverPageAfterEmpty,
+  serverPager,
   sortRows,
   type SortableColumn,
 } from './dataTable'
@@ -106,5 +108,32 @@ describe('pages', () => {
   it('falls back to the last page when the one asked for no longer exists', () => {
     // Filtering down while on page 3 must not leave the table blank.
     expect(pageSlice(many.slice(0, 12), 2, 10)).toEqual({ page: 1, rows: [10, 11] })
+  })
+})
+
+describe('server paging', () => {
+  it('counts the rows on the page from where the page starts in the whole list', () => {
+    expect(serverPager({ page: 2, pageSize: 20, rowCount: 5, total: 45 })).toEqual({
+      from: 41,
+      to: 45,
+      pageCount: 3,
+      canPrev: true,
+      canNext: false,
+    })
+  })
+
+  it('steps forward on hasMore when upstream cannot say how many there are', () => {
+    const pager = serverPager({ page: 0, pageSize: 20, rowCount: 20, hasMore: true })
+    expect(pager.pageCount).toBeNull()
+    expect(pager.canNext).toBe(true)
+    expect(serverPager({ page: 1, pageSize: 20, rowCount: 3, hasMore: false }).canNext).toBe(false)
+  })
+
+  it('moves back to the last real page when the one on screen was emptied', () => {
+    // Settling the last two rows of page three leaves forty.
+    expect(serverPageAfterEmpty(2, 20, 40)).toBe(1)
+    expect(serverPageAfterEmpty(1, 20, undefined)).toBe(0)
+    // An empty first page is an empty list, not a page to leave.
+    expect(serverPageAfterEmpty(0, 20, 0)).toBeNull()
   })
 })

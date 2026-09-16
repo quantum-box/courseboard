@@ -49,8 +49,16 @@ description: CourseBoard の desktop 画面（desktop/src/features/**）を作�
 
 - 並べ替えは列に `sortValue` を足したときだけ有効。`cell` は ReactNode なので比較できない
 - 値が無いセルは **ダッシュではなく空**。「まだ聞けていない」が普通の状態の項目が多い
-- ページングはクライアント側。サーバーから取る件数の上限が実質の天井になるので、
-  上限があるなら画面に文言で書く（顧客台帳は「新しく登録した順に100人まで」）
+- 既定のページングはクライアント側。キャディ名簿・当日配置・設定マスタのように
+  組織の規模で件数が頭打ちになる一覧はこれでよい
+- 顧客・予約・請求のように**業務の累積で増え続ける一覧はサーバー側**にする。
+  `server={{ page, onPageChange, total, sort, onSortChange, loading }}` を渡し、
+  並べ替えられる列は `sortValue` ではなく `serverSortable: true`。API は
+  `limit` / `offset` / `sort` / `ascending` で受けて `total` を返す
+  （[CallListPage](../../../desktop/src/features/golf/customers/CallListPage.tsx) が手本）。
+  前のページは `useKeptData` で残し、読み込み中に表が消えないようにする
+- Field から 1 ページ分だけ引く列（氏名など）はサーバー側で並べられない。並べ替え可能にしない
+- 「◯件までです」と上限を文言で断る一覧を新しく作らない。サーバー側ページングにする
 - 検索がサーバー側にあるなら `searchable` は使わない。二重の検索箱になる
 
 ## 詳細画面

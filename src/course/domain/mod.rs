@@ -197,8 +197,8 @@ pub use reservation::{
 };
 pub use reservation_cancellation::{
     notice_days_between, CancellationDetails, CancellationFeeDecision, CancellationFeeState,
-    CancellationQuery, CancellationReason, NewReservationCancellation, ReservationCancellation,
-    CANCELLATION_PAGE_LIMIT, MAX_CANCELLATION_NOTE_CHARS,
+    CancellationQuery, CancellationReason, CancellationSort, NewReservationCancellation,
+    ReservationCancellation, CANCELLATION_PAGE_LIMIT, MAX_CANCELLATION_NOTE_CHARS,
 };
 pub use reservation_report::{
     ExternalReservationReportEntry, PdfRotation, ReservationReport,

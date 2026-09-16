@@ -239,6 +239,49 @@ impl CancellationDetails {
 /// tenant-local play days rather than cancellation timestamps, because the
 /// question the club asks is "what did we lose in June", and a booking
 /// cancelled in May for a June tee time was lost in June.
+/// What the cancellation list is ordered by.
+///
+/// Every order is a column CourseBoard keeps, so the database sorts and the
+/// order holds across pages. The name is deliberately absent: the one the
+/// screen shows is the ledger's, asked of Field for the page on screen, and a
+/// sort on the name the booking was taken under would disagree with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancellationSort {
+    PlayedOn,
+    Reason,
+    NoticeDays,
+    Players,
+    BookingAmount,
+    FeeState,
+}
+
+impl CancellationSort {
+    /// The column, for whoever builds the statement. Kept beside the parser so
+    /// a new sort cannot be added without giving it one.
+    pub fn column(self) -> &'static str {
+        match self {
+            Self::PlayedOn => "played_on",
+            Self::Reason => "reason_code",
+            Self::NoticeDays => "notice_days",
+            Self::Players => "players",
+            Self::BookingAmount => "booking_amount",
+            Self::FeeState => "fee_state",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, CourseError> {
+        match value {
+            "played_on" => Ok(Self::PlayedOn),
+            "reason" => Ok(Self::Reason),
+            "notice_days" => Ok(Self::NoticeDays),
+            "players" => Ok(Self::Players),
+            "booking_amount" => Ok(Self::BookingAmount),
+            "fee_state" => Ok(Self::FeeState),
+            _ => Err(CourseError::BadRequest("unknown cancellation sort")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CancellationQuery {
     pub from: Option<NaiveDate>,
@@ -253,6 +296,10 @@ pub struct CancellationQuery {
     /// Keep only rows that carry a ledger link, which is what a fee can be
     /// billed against.
     pub linked_only: bool,
+    pub sort: CancellationSort,
+    /// Newest day of play first by default, which is the order a desk works a
+    /// period in.
+    pub descending: bool,
     pub limit: u32,
     pub offset: u32,
 }
@@ -271,6 +318,8 @@ impl Default for CancellationQuery {
             fee_states: Vec::new(),
             fee_expected_only: false,
             linked_only: false,
+            sort: CancellationSort::PlayedOn,
+            descending: true,
             limit: CANCELLATION_PAGE_LIMIT,
             offset: 0,
         }

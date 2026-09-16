@@ -178,10 +178,16 @@ impl ReservationCancellationGateway for MySqlReservationCancellationRepository {
         builder.push(" FROM golf_reservation_cancellations WHERE tenant_id = ");
         builder.push_bind(tenant_id);
         push_filters(&mut builder, query);
-        // The day of play first, because that is the order a desk works a
-        // period in. `id` breaks ties so two rows on one day cannot swap
-        // places between pages, which would show one twice and the other never.
-        builder.push(" ORDER BY played_on DESC, id DESC LIMIT ");
+        // The column comes from a closed enum, never from the request. A blank
+        // goes last in both directions — an unrecorded amount at the top of a
+        // descending column would read as the largest. The day of play, then
+        // `id`, break ties so two equal rows cannot swap places between pages,
+        // which would show one twice and the other never.
+        let column = query.sort.column();
+        let direction = if query.descending { " DESC" } else { " ASC" };
+        builder.push(" ORDER BY ").push(column).push(" IS NULL, ");
+        builder.push(column).push(direction);
+        builder.push(", played_on DESC, id DESC LIMIT ");
         builder.push_bind(query.limit);
         builder.push(" OFFSET ");
         builder.push_bind(query.offset);
@@ -276,6 +282,7 @@ impl ReservationCancellationGateway for MySqlReservationCancellationRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::course::domain::CancellationSort;
     use crate::test_support::{test_pool, test_tenant};
 
     async fn repository() -> MySqlReservationCancellationRepository {
@@ -633,5 +640,54 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(rows[0].fee_state, CancellationFeeState::Unsettled);
+    }
+
+    #[tokio::test]
+    async fn a_sort_orders_the_whole_period_and_leaves_blanks_last() {
+        let repository = repository().await;
+        let tenant = test_tenant("cancel-sort");
+        let mut small = cancellation("res_small", None, day(10), CancellationReason::Illness);
+        small.booking_amount = Some(12_000);
+        let mut large = cancellation("res_large", None, day(11), CancellationReason::Illness);
+        large.booking_amount = Some(96_000);
+        let mut blank = cancellation("res_blank", None, day(12), CancellationReason::Illness);
+        blank.booking_amount = None;
+        for row in [&small, &large, &blank] {
+            repository.record_cancellation(&tenant, row).await.unwrap();
+        }
+
+        let ids = |rows: Vec<ReservationCancellation>| {
+            rows.into_iter()
+                .map(|row| row.reservation_id.as_str().to_string())
+                .collect::<Vec<_>>()
+        };
+        for (descending, expected) in [
+            (true, ["res_large", "res_small", "res_blank"]),
+            (false, ["res_small", "res_large", "res_blank"]),
+        ] {
+            let query = CancellationQuery {
+                sort: CancellationSort::BookingAmount,
+                descending,
+                ..CancellationQuery::default()
+            };
+            let rows = repository
+                .list_cancellations(&tenant, &query)
+                .await
+                .unwrap();
+            assert_eq!(ids(rows), expected);
+        }
+
+        // The second page continues the same order rather than restarting it.
+        let query = CancellationQuery {
+            sort: CancellationSort::BookingAmount,
+            descending: true,
+            ..CancellationQuery::default()
+        }
+        .with_paging(Some(1), Some(1));
+        let rows = repository
+            .list_cancellations(&tenant, &query)
+            .await
+            .unwrap();
+        assert_eq!(ids(rows), ["res_small"]);
     }
 }

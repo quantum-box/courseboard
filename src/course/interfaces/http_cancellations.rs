@@ -23,7 +23,7 @@ use super::openapi::ErrorBody;
 
 use crate::course::domain::{
     CancellationFeeDecision, CancellationFeeState, CancellationQuery, CancellationReason,
-    ReservationId,
+    CancellationSort, ReservationId,
 };
 use crate::course::usecase::{
     CancellationEntry, ListReservationCancellationsUseCase, SettleCancellationFeesUseCase,
@@ -154,6 +154,11 @@ pub struct CancellationParams {
     /// Keep only rows that carry a ledger link, which is what a fee can be
     /// billed against.
     pub linked_only: Option<bool>,
+    /// `played_on` (default), `reason`, `notice_days`, `players`,
+    /// `booking_amount`, or `fee_state`.
+    pub sort: Option<String>,
+    /// Descending by default: the latest day of play is the top of the list.
+    pub ascending: Option<bool>,
     pub limit: Option<u32>,
     pub offset: Option<u32>,
 }
@@ -214,6 +219,11 @@ pub async fn list_reservation_cancellations(
         fee_states: parse_list(params.fee_states.as_deref(), CancellationFeeState::parse)?,
         fee_expected_only: params.fee_expected_only.unwrap_or(false),
         linked_only: params.linked_only.unwrap_or(false),
+        sort: match params.sort.as_deref() {
+            Some(value) => CancellationSort::parse(value).map_err(AppError::from)?,
+            None => CancellationSort::PlayedOn,
+        },
+        descending: !params.ascending.unwrap_or(false),
         ..CancellationQuery::default()
     }
     .with_paging(params.limit, params.offset);

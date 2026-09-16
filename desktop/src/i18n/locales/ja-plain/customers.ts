@@ -230,6 +230,7 @@ export const customers: DeepPartial<typeof source> = {
       total_amount: '使った お金が 多い 順',
       visits: '来た 回数が 多い 順',
       last_visit: 'さいごに 来たのが 古い 順',
+      spend_per_player: '1人あたりの お金が 多い 順',
     },
     column: {
       lastVisit: 'さいごに 来た 日',
@@ -239,7 +240,6 @@ export const customers: DeepPartial<typeof source> = {
     results: {
       title: 'えらんだ お客さま',
       description: '条件に あう 人は {{count}}人です。',
-      capped: '一覧に 出るのは {{count}}人までです。条件を せまくすると、のこりが 出て きます。',
     },
     run: {
       succeeded: '{{date}}に かぞえた 数字です。',
@@ -259,7 +259,7 @@ export const customers: DeepPartial<typeof source> = {
     open: 'キャンセルした人をさがす',
     title: 'キャンセルとキャンセル料',
     description: 'キャンセルを理由でさがして、キャンセル料をまとめてせいきゅうします。',
-    selectAll: 'ぜんぶえらぶ',
+    selectAll: 'この ページを ぜんぶ えらぶ',
     selectRow: '「{{name}}」をえらぶ',
     unlinked: '（だれかわからない）',
     daysBefore: '{{count}}日まえ',
@@ -303,7 +303,6 @@ export const customers: DeepPartial<typeof source> = {
     results: {
       title: '見つかったキャンセル',
       description: '{{count}}件あります。',
-      capped: '出るのは{{count}}件までです。日をせまくすると、のこりが出ます。',
     },
     empty: {
       title: '見つかりません',

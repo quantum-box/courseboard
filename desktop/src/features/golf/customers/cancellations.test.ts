@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import {
   addDays,
+  CANCELLATION_PAGE_SIZE,
+  cancellationSortForColumn,
   cancellationsQuery,
   defaultCancellationFilters,
   planCancellationFees,
@@ -36,6 +38,22 @@ describe('the collection list the desk opens on', () => {
     expect(query).toContain('from=2026-05-31')
     expect(query).toContain('feeStates=unsettled')
     expect(query).toContain('feeExpectedOnly=true')
+    expect(query).toContain(`limit=${CANCELLATION_PAGE_SIZE}`)
+    expect(query).not.toContain('offset')
+    expect(query).not.toContain('sort=')
+  })
+
+  it('asks the server to order and page the whole period', () => {
+    const query = cancellationsQuery(
+      defaultCancellationFilters('2026-06-30'),
+      { sort: 'booking_amount', ascending: true },
+      3,
+    )
+    expect(query).toContain('sort=booking_amount')
+    expect(query).toContain('ascending=true')
+    expect(query).toContain(`offset=${CANCELLATION_PAGE_SIZE * 3}`)
+    expect(cancellationSortForColumn('bookingAmount')).toBe('booking_amount')
+    expect(cancellationSortForColumn('name')).toBeNull()
   })
 
   it('drops the chargeable-only narrowing once one reason is named', () => {
