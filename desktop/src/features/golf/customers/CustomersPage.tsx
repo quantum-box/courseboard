@@ -15,18 +15,16 @@ import {
   Panel,
 } from '../../../components/Page'
 import { Sheet } from '../../../components/Sheet'
+import { useKeptData } from '../../../hooks/useKeptData'
 import { clearResourceCache } from '../../../hooks/useResource'
 import { navigate, navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { customersPath, type Customer } from './models'
 import {
   customerSearchParameter,
-  LEDGER_PAGE_ROWS,
+  LEDGER_PAGE_SIZE,
   useCustomerSearch,
 } from './useCustomerSearch'
-
-/** Same as the other rosters: a screenful of rows, then a pager. */
-const PAGE_SIZE = 20
 
 /**
  * The customer ledger.
@@ -35,17 +33,31 @@ const PAGE_SIZE = 20
  * they are the person nobody would otherwise write down, and the reason this
  * screen exists is so the second visit can be recognised as a second visit.
  *
- * An empty box lists the newest arrivals rather than nothing, capped at what
- * Field will hand over in one go. Past that cap the desk searches — the cap is
- * why this is a ledger the desk can look at, not a way to walk the whole tenant.
+ * An empty box lists the ledger rather than nothing, most recently touched
+ * first, a page at a time from Field. The ledger grows with every visitor, so
+ * nothing here holds more of it than the page on screen.
  */
 export function CustomersPage() {
   const { t } = useTranslation(['customers', 'common'])
-  const [term, setTerm] = useState('')
+  const [term, setTermState] = useState('')
+  const [pageIndex, setPageIndex] = useState(0)
+  // A new search starts from its first page; page three of the old answer
+  // means nothing for the new one.
+  const setTerm = (next: string) => {
+    setTermState(next)
+    setPageIndex(0)
+  }
   // An empty box lists the ledger rather than waiting to be typed into: the
   // desk arrives with a name most of the time, but not always, and a screen
   // that answers a reload with nothing reads as if the ledger were empty.
-  const search = useCustomerSearch(term, { listWhenEmpty: true, limit: LEDGER_PAGE_ROWS })
+  const search = useCustomerSearch(term, {
+    listWhenEmpty: true,
+    limit: LEDGER_PAGE_SIZE,
+    offset: pageIndex * LEDGER_PAGE_SIZE,
+  })
+  // The page on screen stays up, dimmed, while the next one loads, so turning
+  // a page does not collapse the table under the pointer.
+  const shown = useKeptData(search.searching ? null : search)
   const [creating, setCreating] = useState(false)
   const trimmedTerm = term.trim()
   const searchParameter = customerSearchParameter(term)
@@ -58,7 +70,6 @@ export function CustomersPage() {
       key: 'name',
       header: t('customers:field.name'),
       cell: customer => <strong>{customer.name}</strong>,
-      sortValue: customer => customer.name,
     },
     {
       key: 'nameKana',
@@ -66,19 +77,16 @@ export function CustomersPage() {
       // Blank rather than a dash: a visitor taken by phone usually has no
       // reading on file, and that is the normal state, not a gap to fill.
       cell: customer => customer.nameKana ?? null,
-      sortValue: customer => customer.nameKana ?? null,
     },
     {
       key: 'phone',
       header: t('customers:field.phone'),
       cell: customer => customer.phone ?? null,
-      sortValue: customer => customer.phone ?? null,
     },
     {
       key: 'email',
       header: t('customers:field.email'),
       cell: customer => customer.email ?? null,
-      sortValue: customer => customer.email ?? null,
     },
   ], [t])
 
@@ -136,27 +144,29 @@ export function CustomersPage() {
           />
         </Field>
 
-        {search.searching ? <LoadingState /> : null}
+        {search.searching && !shown ? <LoadingState /> : null}
         {/* A ledger that cannot be reached is a note, not a blocked screen:
             the desk still has to be able to register someone. */}
         {search.error ? <Notice tone="danger">{search.error}</Notice> : null}
 
-        {/* Said once, above the rows: what is listed is the newest arrivals and
-            not the whole ledger, so a regular missing from it sends the desk to
-            the search box rather than to the conclusion that they were lost. */}
-        {!trimmedTerm && search.candidates.length > 0 ? (
-          <p className="customer-ledger-hint">
-            {t('customers:search.recent', { count: LEDGER_PAGE_ROWS })}
-          </p>
-        ) : null}
 
-        {!search.searching && (!search.error || search.candidates.length > 0) ? (
+        {/* No column sorts: Field lists the ledger in one fixed order and
+            sorting one page of it would not sort the ledger (PLT-4746). */}
+        {shown && (!search.error || shown.candidates.length > 0) ? (
           <DataTable
-            rows={search.candidates}
+            rows={shown.candidates}
             columns={columns}
             rowKey={customer => customer.id}
             onRowClick={customer => navigate(`golf/customers/${customer.id}`)}
-            pageSize={PAGE_SIZE}
+            pageSize={LEDGER_PAGE_SIZE}
+            server={{
+              page: pageIndex,
+              onPageChange: setPageIndex,
+              total: shown.total ?? undefined,
+              // Without a count, a full page is the only sign of another one.
+              hasMore: shown.candidates.length >= LEDGER_PAGE_SIZE,
+              loading: search.searching,
+            }}
             empty={(
               <EmptyState
                 title={trimmedTerm

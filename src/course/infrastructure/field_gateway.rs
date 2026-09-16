@@ -47,7 +47,7 @@ const CONFIG_WRITE_ATTEMPTS: usize = 3;
 /// what makes an unexpectedly old Field recoverable without a code revert.
 pub const DEFAULT_MULTI_COURSE_PRODUCT_WRITES: bool = true;
 
-fn is_empty_course_store(base_url: &str) -> bool {
+pub(crate) fn is_empty_course_store(base_url: &str) -> bool {
     base_url.trim().eq_ignore_ascii_case(EMPTY_COURSE_STORE_URL)
         || base_url.trim().starts_with("empty://")
 }

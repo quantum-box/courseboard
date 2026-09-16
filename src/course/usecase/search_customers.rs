@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    CourseError, Customer, CustomerGateway, CustomerSearchQuery, GatewayCredentials,
+    CourseError, CustomerGateway, CustomerPage, CustomerSearchQuery, GatewayCredentials,
 };
 
 pub struct SearchCustomersUseCase {
@@ -25,9 +25,11 @@ impl SearchCustomersUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
         query: CustomerSearchQuery,
-    ) -> Result<Vec<Customer>, CourseError> {
+    ) -> Result<CustomerPage, CourseError> {
         credentials.require(actions::LIST_CUSTOMERS).await?;
-        self.customers.search_customers(credentials, &query).await
+        self.customers
+            .search_customer_page(credentials, &query)
+            .await
     }
 }
 
@@ -37,7 +39,7 @@ mod tests {
     use async_trait::async_trait;
     use std::sync::Mutex;
 
-    use crate::course::domain::{CustomerId, NewCustomer};
+    use crate::course::domain::{Customer, CustomerId, NewCustomer};
 
     #[derive(Default)]
     struct StubCustomers {
@@ -107,6 +109,6 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(found.len(), 2);
+        assert_eq!(found.customers.len(), 2);
     }
 }

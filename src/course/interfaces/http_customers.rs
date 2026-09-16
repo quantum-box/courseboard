@@ -228,6 +228,20 @@ pub struct CustomerSearchParams {
     pub email: Option<String>,
     #[serde(default)]
     pub limit: Option<u32>,
+    /// Rows to skip, for the ledger screen paging through the whole ledger.
+    #[serde(default)]
+    pub offset: Option<u32>,
+}
+
+/// One page of candidates.
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomerPageDto {
+    pub items: Vec<CustomerDto>,
+    /// How many customers the search selects across every page. Absent when
+    /// the ledger did not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<i64>,
 }
 
 /// GET /v1/course/customers
@@ -241,7 +255,7 @@ pub struct CustomerSearchParams {
     tag = "course",
     params(CustomerSearchParams),
     responses(
-        (status = 200, description = "Matching customers", body = ItemsResponse<CustomerDto>),
+        (status = 200, description = "Matching customers", body = CustomerPageDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
         (status = 424, description = "Upstream provider error", body = ErrorBody),
@@ -252,16 +266,18 @@ pub async fn search_customers(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(params): Query<CustomerSearchParams>,
-) -> Result<Json<ItemsResponse<CustomerDto>>, AppError> {
+) -> Result<Json<CustomerPageDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
     let query = CustomerSearchQuery::try_new(params.name, params.phone, params.email, params.limit)
-        .map_err(AppError::from)?;
+        .map_err(AppError::from)?
+        .with_offset(params.offset);
     let found = SearchCustomersUseCase::new(customer_gateway(&state))
         .execute(credentials, query)
         .await
         .map_err(AppError::from)?;
-    Ok(Json(ItemsResponse {
-        items: found.iter().map(CustomerDto::from).collect(),
+    Ok(Json(CustomerPageDto {
+        items: found.customers.iter().map(CustomerDto::from).collect(),
+        total: found.total,
     }))
 }
 

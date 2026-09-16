@@ -128,17 +128,18 @@ impl NewCustomer {
 /// with separators ignored on both sides. `email` is exact — an address is
 /// either the one on file or it is not.
 ///
-/// Nothing typed means the ledger itself: the most recent arrivals, capped at
-/// `limit`. A desk that has just written somebody down looks for them where it
-/// wrote them, and a screen that answers an empty box with nothing reads as if
-/// the save was lost. The cap is what keeps this from being a way to walk the
-/// whole tenant a page at a time.
+/// Nothing typed means the ledger itself, most recently touched first. A desk
+/// that has just written somebody down looks for them where it wrote them, and
+/// a screen that answers an empty box with nothing reads as if the save was
+/// lost. `limit` and `offset` page through it: the ledger screen walks it a
+/// page at a time rather than holding a capped slice of it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CustomerSearchQuery {
     pub name: Option<String>,
     pub phone: Option<String>,
     pub email: Option<String>,
     pub limit: u32,
+    pub offset: u32,
 }
 
 impl CustomerSearchQuery {
@@ -158,8 +159,24 @@ impl CustomerSearchQuery {
             limit: limit
                 .unwrap_or(DEFAULT_CUSTOMER_SEARCH_LIMIT)
                 .clamp(1, MAX_CUSTOMER_SEARCH_LIMIT),
+            offset: 0,
         })
     }
+
+    pub fn with_offset(mut self, offset: Option<u32>) -> Self {
+        self.offset = offset.unwrap_or(0);
+        self
+    }
+}
+
+/// One page of candidates, and how many the search selects in all.
+///
+/// `total` is absent when the ledger did not say; the screen then pages
+/// without a count rather than inventing one from the rows it holds.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CustomerPage {
+    pub customers: Vec<Customer>,
+    pub total: Option<i64>,
 }
 
 fn blank_to_none(value: Option<String>) -> Option<String> {

@@ -70,7 +70,6 @@ describe('customer search acceptance', () => {
     // What a reload lands on. An empty box is the ledger, not a blank page.
     expect(screen.getByLabelText('名前・カナ・電話番号・メールアドレス')).toBeTruthy()
     expect(screen.getByText('本田 康彦')).toBeTruthy()
-    expect(screen.getByText(/新しく登録した順に/)).toBeTruthy()
     // The same table the other rosters use — columns and a pager, not a list.
     expect(screen.getByRole('table')).toBeTruthy()
     expect(screen.getByRole('columnheader', { name: /カナ/ })).toBeTruthy()
@@ -125,7 +124,10 @@ describe('customer search acceptance', () => {
     await finishDebounce()
 
     expect(screen.getAllByRole('row').length).toBe(PAGE_ROWS + 1)
+    // The count is the whole ledger's, not the page's.
+    expect(screen.getByText(/全\d+件/)).toBeTruthy()
     fireEvent.click(screen.getByRole('button', { name: /次へ/ }))
+    await finishDebounce()
 
     expect(screen.getByText('本田 康彦')).toBeTruthy()
   }, 15_000)
