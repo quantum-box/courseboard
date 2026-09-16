@@ -9,7 +9,10 @@ Accepted.
 利用しなくなる件は [ADR-0010](./ADR-0010-courseboard-is-not-a-field-extension.md)、
 テナント選択の軸は [ADR-0011](./ADR-0011-policy-based-tenant-selection.md)。
 
-対になる Field 側の決定は `tachyon-apps` の
+2026-09-16 に Phase 3b へ、旧ルートを `/v1` から削除しないという判断
+（PLT-3178）を追記した。
+
+対になる Field 側の決定は `tachyonfield` の
 `docs/adr/golf-domain-courseboard-migration.md`。両者は同じ移行を
 それぞれの立場から記述している。
 
@@ -132,6 +135,20 @@ Field 側のテーブルと API をどう汎用化するかは Field の実行�
    置き換わるのに合わせて gateway の呼び先を書き換える。
    実行設計と段取りは Field が持つ。CourseBoard は起票して待ち、
    gateway の path 定数だけを追従させる。
+
+   **旧ルートは `/v1` から消えない**（[PLT-3178](https://linear.app/issue/PLT-3178)、
+   2026-09 判断）。Field の API バージョニング規約 CERP-25 が `/v1` 内での
+   endpoint 削除を禁じており、CI の breaking change 検出もこれを落とす。
+   `/v1/erp/extensions/golf-course/*` は `/v1` に残したまま OpenAPI 上で
+   `deprecated` にし、ルートごとに置き換え先を明記し、次のメジャーバージョンで
+   の削除候補として Field 側に記録する。`/v2` を切る案と、CERP-25 に例外条項を
+   足す案は採らない。
+
+   CourseBoard の完了条件は変わらない。**「Field がルートを消すこと」ではなく
+   「CourseBoard が呼ばなくなること」**で、旧ルートが残ることは切り戻しの
+   安全側に働く。一方で「消えるまで待つ」理由は無くなったので、汎用ルートが
+   既に存在する束（スタッフ・割当・出勤可否、予約リソース、表形式解析）は Field を待たずに
+   付け替えてよい。
 
 段取りの詳細は
 [courseboard-extension-exit](../../tasks/in-progress/courseboard-extension-exit/task.md)。
