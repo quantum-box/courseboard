@@ -177,6 +177,7 @@ mod tests {
                 Ok(AuthenticatedPrincipal {
                     issuer: "fixture".to_string(),
                     subject: Some("fixture-user".to_string()),
+                    username: None,
                     client_id: Some("fixture-client".to_string()),
                 })
             } else {

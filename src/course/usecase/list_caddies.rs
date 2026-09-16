@@ -42,11 +42,12 @@ mod tests {
         ReplaceCaddieMemberships, ReservationId, UnsyncedShift, UpsertCaddie,
         UpsertCaddieAssignment, UpsertCaddieAvailability,
     };
+    use crate::course::domain::{CaddieRankFeeChangeContext, CaddieRankFeeGateway};
     use crate::course::usecase::caddie_rank_fees::UnsetRankFees;
     use crate::course::usecase::{
         CreateCaddieAssignmentUseCase, ListCaddieAssignmentsUseCase,
         ListCaddieRecommendationsUseCase, MoveTheRound, NameCaddieForRound,
-        ReassignCaddieAssignmentUseCase,
+        ReassignCaddieAssignmentUseCase, ReplaceCaddieRankFeesUseCase,
     };
 
     /// The ranking tests predate confirmed shifts and are about who is
@@ -1226,5 +1227,121 @@ mod tests {
             None,
             0,
         )
+    }
+
+    /// Rank fee storage that remembers every save, for the history tests.
+    #[derive(Default)]
+    struct RecordingRankFees {
+        stored: Mutex<Option<CaddieRankFees>>,
+        saves: Mutex<Vec<(CaddieRankFees, CaddieRankFees, CaddieRankFeeChangeContext)>>,
+    }
+
+    #[async_trait]
+    impl CaddieRankFeeGateway for RecordingRankFees {
+        async fn get_caddie_rank_fees(
+            &self,
+            _tenant_id: &str,
+        ) -> Result<Option<CaddieRankFees>, CourseError> {
+            Ok(self.stored.lock().expect("lock").clone())
+        }
+
+        async fn replace_caddie_rank_fees(
+            &self,
+            _tenant_id: &str,
+            previous: &CaddieRankFees,
+            fees: &CaddieRankFees,
+            context: &CaddieRankFeeChangeContext,
+        ) -> Result<CaddieRankFees, CourseError> {
+            *self.stored.lock().expect("lock") = Some(fees.clone());
+            self.saves.lock().expect("lock").push((
+                previous.clone(),
+                fees.clone(),
+                context.clone(),
+            ));
+            Ok(fees.clone())
+        }
+
+        async fn list_caddie_rank_fee_changes(
+            &self,
+            _tenant_id: &str,
+            _limit: u32,
+        ) -> Result<Vec<crate::course::domain::CaddieRankFeeChange>, CourseError> {
+            Ok(Vec::new())
+        }
+    }
+
+    fn allow_all() -> GatewayCredentials<'static> {
+        GatewayCredentials {
+            authorization: "Bearer t",
+            operator_id: "scc",
+            platform_id: None,
+            authorizer: &crate::course::infrastructure::ALLOW_ALL,
+            caller_bearer: "Bearer test",
+        }
+    }
+
+    fn rank_fees(a: i64, d: i64) -> CaddieRankFees {
+        CaddieRankFees::try_new(a, 11_000, 10_000, d, "JPY").expect("fees")
+    }
+
+    #[tokio::test]
+    async fn a_first_save_records_what_payroll_was_reading_before_it() {
+        // Nothing stored yet, so payroll was paying by the fallback — the
+        // defaults here. The history has to say the save moved away from those,
+        // not from nothing.
+        let storage = Arc::new(RecordingRankFees::default());
+        let context = CaddieRankFeeChangeContext::try_new(
+            Some("sub-1".into()),
+            Some("yamada".into()),
+            Some("春の改定"),
+        )
+        .expect("context");
+        ReplaceCaddieRankFeesUseCase::new(Arc::new(FakeOps::with(vec![])), storage.clone())
+            .execute(allow_all(), rank_fees(13_000, 8_000), context.clone())
+            .await
+            .expect("saved");
+
+        let saves = storage.saves.lock().expect("lock");
+        assert_eq!(saves.len(), 1);
+        assert_eq!(saves[0].0, CaddieRankFees::default());
+        assert_eq!(saves[0].1, rank_fees(13_000, 8_000));
+        assert_eq!(saves[0].2, context);
+    }
+
+    #[tokio::test]
+    async fn a_later_save_records_the_stored_table_as_what_it_replaced() {
+        let storage = Arc::new(RecordingRankFees::default());
+        *storage.stored.lock().expect("lock") = Some(rank_fees(14_000, 9_000));
+        ReplaceCaddieRankFeesUseCase::new(Arc::new(FakeOps::with(vec![])), storage.clone())
+            .execute(
+                allow_all(),
+                rank_fees(15_000, 9_000),
+                CaddieRankFeeChangeContext::default(),
+            )
+            .await
+            .expect("saved");
+
+        let saves = storage.saves.lock().expect("lock");
+        assert_eq!(saves[0].0, rank_fees(14_000, 9_000));
+    }
+
+    #[tokio::test]
+    async fn saving_the_amounts_already_stored_leaves_no_entry() {
+        // A history padded with saves that changed nobody's pay buries the ones
+        // that did.
+        let storage = Arc::new(RecordingRankFees::default());
+        *storage.stored.lock().expect("lock") = Some(rank_fees(14_000, 9_000));
+        let stored =
+            ReplaceCaddieRankFeesUseCase::new(Arc::new(FakeOps::with(vec![])), storage.clone())
+                .execute(
+                    allow_all(),
+                    rank_fees(14_000, 9_000),
+                    CaddieRankFeeChangeContext::default(),
+                )
+                .await
+                .expect("saved");
+
+        assert_eq!(stored, rank_fees(14_000, 9_000));
+        assert!(storage.saves.lock().expect("lock").is_empty());
     }
 }

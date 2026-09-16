@@ -31,6 +31,7 @@ impl TokenVerifier for StaticBearerVerifier {
             Ok(AuthenticatedPrincipal {
                 issuer: "local-dev".to_string(),
                 subject: Some("local-dev".to_string()),
+                username: Some("local-dev".to_string()),
                 client_id: Some("local-dev".to_string()),
             })
         } else {
@@ -43,6 +44,9 @@ impl TokenVerifier for StaticBearerVerifier {
 pub struct AuthenticatedPrincipal {
     pub issuer: String,
     pub subject: Option<String>,
+    /// Cognito's `username` claim. Only for showing who did something; never
+    /// an identity to authorize on — that is `subject`.
+    pub username: Option<String>,
     pub client_id: Option<String>,
 }
 
@@ -245,6 +249,10 @@ impl TokenVerifier for OidcJwtVerifier {
         Ok(AuthenticatedPrincipal {
             issuer: token_data.claims.iss,
             subject: token_data.claims.sub,
+            username: token_data
+                .claims
+                .username
+                .filter(|value| !value.trim().is_empty()),
             client_id,
         })
     }
@@ -316,6 +324,7 @@ pub struct Jwk {
 struct JwtClaims {
     iss: String,
     sub: Option<String>,
+    username: Option<String>,
     #[serde(default)]
     aud: serde_json::Value,
     exp: u64,

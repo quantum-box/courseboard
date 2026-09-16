@@ -10,12 +10,21 @@
 //! per-caddie amount exists, and silently repricing them to their rank would be
 //! a pay cut nobody asked for.
 
+use chrono::{DateTime, Utc};
+
 use crate::course::domain::{CaddieRank, CourseError};
 
 /// A fee nobody would type on purpose. Above it, the entry is a slip — a yen
 /// amount pasted where a rate belonged — and taking it would quietly commit the
 /// club to paying it.
 const MAX_ROUND_FEE: i64 = 1_000_000;
+
+/// Longest reason a repricing can carry. A paragraph is plenty to say why; past
+/// that it is a pasted document, and the history list is not where that lives.
+pub const MAX_RANK_FEE_NOTE_CHARS: usize = 500;
+
+/// How many changes the history answers with at most.
+pub const MAX_RANK_FEE_CHANGE_LIMIT: u32 = 200;
 
 /// Per-round fee for each rank, in one currency.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +116,75 @@ impl Default for CaddieRankFees {
     }
 }
 
+/// Who repriced the ranks, and why.
+///
+/// Taken from the verified token rather than the request body: a history the
+/// caller can sign with any name is not an answer to "who changed my pay".
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CaddieRankFeeChangeContext {
+    pub changed_by: Option<String>,
+    pub changed_by_name: Option<String>,
+    note: Option<String>,
+}
+
+impl CaddieRankFeeChangeContext {
+    pub fn try_new(
+        changed_by: Option<String>,
+        changed_by_name: Option<String>,
+        note: Option<&str>,
+    ) -> Result<Self, CourseError> {
+        let note = note
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        if note
+            .as_deref()
+            .is_some_and(|value| value.chars().count() > MAX_RANK_FEE_NOTE_CHARS)
+        {
+            return Err(CourseError::BadRequest(
+                "the reason for the change is too long",
+            ));
+        }
+        Ok(Self {
+            changed_by,
+            changed_by_name,
+            note,
+        })
+    }
+
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
+    }
+}
+
+/// One repricing, as the history keeps it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CaddieRankFeeChange {
+    pub id: i64,
+    /// What payroll was reading just before. `None` only for the entry seeded
+    /// when the history began, where nothing earlier was recorded.
+    pub previous: Option<CaddieRankFees>,
+    pub fees: CaddieRankFees,
+    pub note: Option<String>,
+    pub changed_by: Option<String>,
+    pub changed_by_name: Option<String>,
+    pub changed_at: DateTime<Utc>,
+}
+
+impl CaddieRankFeeChange {
+    /// The ranks whose amount moved. Empty for the seeded entry, which moved
+    /// nothing — it only says what was already in force.
+    pub fn changed_ranks(&self) -> Vec<CaddieRank> {
+        let Some(previous) = &self.previous else {
+            return Vec::new();
+        };
+        CaddieRank::ALL
+            .into_iter()
+            .filter(|rank| previous.fee_for(*rank) != self.fees.fee_for(*rank))
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,5 +235,48 @@ mod tests {
         let table = CaddieRankFees::default();
         assert!(table.fee_for(CaddieRank::C) > 0);
         assert_eq!(table.currency(), "JPY");
+    }
+
+    #[test]
+    fn a_reason_is_kept_trimmed_and_a_blank_one_is_no_reason() {
+        let context = CaddieRankFeeChangeContext::try_new(None, None, Some("  春の改定  "))
+            .expect("a short reason");
+        assert_eq!(context.note(), Some("春の改定"));
+        let blank = CaddieRankFeeChangeContext::try_new(None, None, Some("   ")).expect("blank");
+        assert_eq!(blank.note(), None);
+    }
+
+    #[test]
+    fn a_reason_longer_than_a_paragraph_is_refused() {
+        let long = "あ".repeat(MAX_RANK_FEE_NOTE_CHARS + 1);
+        assert!(CaddieRankFeeChangeContext::try_new(None, None, Some(&long)).is_err());
+    }
+
+    #[test]
+    fn a_change_names_only_the_ranks_whose_amount_moved() {
+        let change = CaddieRankFeeChange {
+            id: 1,
+            previous: Some(fees()),
+            fees: CaddieRankFees::try_new(13_000, 11_000, 10_000, 8_000, "JPY").unwrap(),
+            note: None,
+            changed_by: None,
+            changed_by_name: None,
+            changed_at: Utc::now(),
+        };
+        assert_eq!(change.changed_ranks(), vec![CaddieRank::A, CaddieRank::D]);
+    }
+
+    #[test]
+    fn the_entry_the_history_began_with_moved_nothing() {
+        let change = CaddieRankFeeChange {
+            id: 1,
+            previous: None,
+            fees: fees(),
+            note: None,
+            changed_by: None,
+            changed_by_name: None,
+            changed_at: Utc::now(),
+        };
+        assert!(change.changed_ranks().is_empty());
     }
 }

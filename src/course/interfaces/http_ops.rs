@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode},
     response::IntoResponse,
-    Json,
+    Extension, Json,
 };
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
@@ -21,11 +21,12 @@ use crate::course::domain::{
     parse_weekday, weekday_key, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
     AutoAssignResult, AvailabilityDeadline, AvailabilityQuery, CaddieAvailability,
     CaddieCourseMembership, CaddieDutyAssignment, CaddieDutyOptions, CaddieId, CaddiePatch,
-    CaddieRank, CaddieRankFees, CaddieRating, CaddieRecommendation, CaddieShift, CaddieSupply,
-    CourseError, CourseId, DayCaddieSupply, DutyWindow, GolfCatalogGateway, PayrollSummary,
-    RecommendationQuery, ReplaceCaddieMemberships, ReservationId, ShiftEdit, ShiftPolicy,
-    ShiftSpan, UnfiledRequest, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
-    YearMonth, MAX_CONSECUTIVE_WORK_DAYS, MAX_ROUNDS_PER_SHIFT,
+    CaddieRank, CaddieRankFeeChange, CaddieRankFeeChangeContext, CaddieRankFees, CaddieRating,
+    CaddieRecommendation, CaddieShift, CaddieSupply, CourseError, CourseId, DayCaddieSupply,
+    DutyWindow, GolfCatalogGateway, PayrollSummary, RecommendationQuery, ReplaceCaddieMemberships,
+    ReservationId, ShiftEdit, ShiftPolicy, ShiftSpan, UnfiledRequest, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, YearMonth, MAX_CONSECUTIVE_WORK_DAYS,
+    MAX_ROUNDS_PER_SHIFT,
 };
 use crate::course::usecase::{
     AssignCaddieDutyUseCase, AutoAssignCaddiesUseCase, ClearCaddieDutyUseCase,
@@ -35,16 +36,16 @@ use crate::course::usecase::{
     GetCaddieDutyOptionsUseCase, GetCaddieRankFeesUseCase, GetCaddieSupplyUseCase,
     GetCourseCaddieSupplyUseCase, GetPayrollSummaryUseCase, GetShiftRulesUseCase,
     ListAttendancePeriodSnapshotsUseCase, ListCaddieAvailabilitiesUseCase,
-    ListCaddieDutyAssignmentsUseCase, ListCaddieMembershipsUseCase, ListCaddieRatingsUseCase,
-    ListCaddieRecommendationsUseCase, ListCaddieShiftsUseCase, ListCourseReinforcementsUseCase,
-    ListUnsubmittedCaddiesUseCase, MoveTheRound, NameCaddieForRound,
-    ReassignCaddieAssignmentUseCase, ReinforcementCandidate, ReplaceCaddieDutyOptionsUseCase,
-    ReplaceCaddieMembershipsUseCase, ReplaceCaddieRankFeesUseCase, ShiftPlanMode,
-    SyncCaddieShiftsToFieldUseCase, UpdateCaddieAssignmentUseCase, UpdateCaddieShiftUseCase,
-    UpdateCaddieUseCase, UpdateShiftRulesUseCase, UpsertAvailabilityDeadlineUseCase,
-    UpsertCaddieAvailabilityUseCase,
+    ListCaddieDutyAssignmentsUseCase, ListCaddieMembershipsUseCase,
+    ListCaddieRankFeeChangesUseCase, ListCaddieRatingsUseCase, ListCaddieRecommendationsUseCase,
+    ListCaddieShiftsUseCase, ListCourseReinforcementsUseCase, ListUnsubmittedCaddiesUseCase,
+    MoveTheRound, NameCaddieForRound, ReassignCaddieAssignmentUseCase, ReinforcementCandidate,
+    ReplaceCaddieDutyOptionsUseCase, ReplaceCaddieMembershipsUseCase, ReplaceCaddieRankFeesUseCase,
+    ShiftPlanMode, SyncCaddieShiftsToFieldUseCase, UpdateCaddieAssignmentUseCase,
+    UpdateCaddieShiftUseCase, UpdateCaddieUseCase, UpdateShiftRulesUseCase,
+    UpsertAvailabilityDeadlineUseCase, UpsertCaddieAvailabilityUseCase,
 };
-use crate::{AppError, AppState};
+use crate::{AppError, AppState, CallerPrincipal};
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1378,12 +1379,26 @@ pub async fn get_caddie_rank_fees(
     Ok(Json(CaddieRankFeesDto::from(fees)))
 }
 
+/// A new rank fee table, and optionally why it changed.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplaceCaddieRankFeesRequest {
+    pub a: i64,
+    pub b: i64,
+    pub c: i64,
+    pub d: i64,
+    pub currency: String,
+    /// Why the amounts changed. Kept with the history entry for this save.
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
 /// PUT /v1/course/caddie-rank-fees
 #[utoipa::path(
     put,
     path = "/v1/course/caddie-rank-fees",
     tag = "course-ops",
-    request_body = CaddieRankFeesDto,
+    request_body = ReplaceCaddieRankFeesRequest,
     responses(
         (status = 200, description = "Stored per-round fee by rank", body = CaddieRankFeesDto),
         (status = 400, description = "Bad request", body = ErrorBody),
@@ -1395,17 +1410,104 @@ pub async fn get_caddie_rank_fees(
 pub async fn replace_caddie_rank_fees(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<CaddieRankFeesDto>,
+    principal: Option<Extension<CallerPrincipal>>,
+    Json(request): Json<ReplaceCaddieRankFeesRequest>,
 ) -> Result<Json<CaddieRankFeesDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
     let fees =
         CaddieRankFees::try_new(request.a, request.b, request.c, request.d, request.currency)
             .map_err(AppError::from)?;
-    let stored = ReplaceCaddieRankFeesUseCase::new(caddie_rank_fee_gateway(&state))
-        .execute(credentials, fees)
+    let (changed_by, changed_by_name) = principal
+        .map(|Extension(caller)| (caller.subject, caller.username))
+        .unwrap_or_default();
+    let context =
+        CaddieRankFeeChangeContext::try_new(changed_by, changed_by_name, request.note.as_deref())
+            .map_err(AppError::from)?;
+    let stored =
+        ReplaceCaddieRankFeesUseCase::new(ops_gateway(&state), caddie_rank_fee_gateway(&state))
+            .execute(credentials, fees, context)
+            .await
+            .map_err(AppError::from)?;
+    Ok(Json(CaddieRankFeesDto::from(stored)))
+}
+
+/// One save of the rank fee table.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CaddieRankFeeChangeDto {
+    pub id: i64,
+    /// What payroll read just before. Absent on the entry the history began
+    /// with, which records the table already in force.
+    pub previous: Option<CaddieRankFeesDto>,
+    pub fees: CaddieRankFeesDto,
+    /// The ranks whose amount moved, `A` to `D`.
+    pub changed_ranks: Vec<String>,
+    pub note: Option<String>,
+    /// The `sub` of whoever saved.
+    pub changed_by: Option<String>,
+    /// The username their token carried.
+    pub changed_by_name: Option<String>,
+    pub changed_at: DateTime<Utc>,
+}
+
+impl From<CaddieRankFeeChange> for CaddieRankFeeChangeDto {
+    fn from(value: CaddieRankFeeChange) -> Self {
+        Self {
+            id: value.id,
+            changed_ranks: value
+                .changed_ranks()
+                .into_iter()
+                .map(|rank| rank.as_str().to_string())
+                .collect(),
+            previous: value.previous.map(CaddieRankFeesDto::from),
+            fees: CaddieRankFeesDto::from(value.fees),
+            note: value.note,
+            changed_by: value.changed_by,
+            changed_by_name: value.changed_by_name,
+            changed_at: value.changed_at,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct RankFeeChangeQueryParams {
+    /// At most this many changes, newest first. 1 to 200; defaults to 50.
+    pub limit: Option<u32>,
+}
+
+const DEFAULT_RANK_FEE_CHANGE_LIMIT: u32 = 50;
+
+/// GET /v1/course/caddie-rank-fees/history
+#[utoipa::path(
+    get,
+    path = "/v1/course/caddie-rank-fees/history",
+    tag = "course-ops",
+    params(RankFeeChangeQueryParams),
+    responses(
+        (status = 200, description = "Rank fee changes, newest first", body = inline(ItemsResponse<CaddieRankFeeChangeDto>)),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn list_caddie_rank_fee_changes(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(query): Query<RankFeeChangeQueryParams>,
+) -> Result<Json<ItemsResponse<CaddieRankFeeChangeDto>>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let limit = query.limit.unwrap_or(DEFAULT_RANK_FEE_CHANGE_LIMIT);
+    let changes = ListCaddieRankFeeChangesUseCase::new(caddie_rank_fee_gateway(&state))
+        .execute(credentials, limit)
         .await
         .map_err(AppError::from)?;
-    Ok(Json(CaddieRankFeesDto::from(stored)))
+    Ok(Json(ItemsResponse {
+        items: changes
+            .into_iter()
+            .map(CaddieRankFeeChangeDto::from)
+            .collect(),
+    }))
 }
 
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]

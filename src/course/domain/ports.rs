@@ -7,16 +7,17 @@ use super::{
     AssignMembershipPlan, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
     AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, Caddie,
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
-    CaddieDutyAssignment, CaddieDutyOptions, CaddieId, CaddieRankFees, CaddieRating, CaddieRoster,
-    CaddieShift, CaddieStaff, CancellationFeeDecision, CancellationQuery, Course, CourseError,
-    CourseId, CourseOrder, CreateCustomerConsentItem, Customer, CustomerConsentItem,
-    CustomerGradeRules, CustomerId, CustomerMembership, CustomerReceptionField,
-    CustomerRegistration, CustomerSearchQuery, CustomerSummary, CustomerSummaryQuery,
-    CustomerSummaryRun, CustomerSummaryRunStatus, DailyBudget, DailyBudgetQuery,
-    DefaultWorkingHours, DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities,
-    FieldRequestContext, FieldShiftLink, GenerationSummary, GolfPricingSettings,
-    InventoryWatermark, MembershipActivityPage, MembershipActivityQuery, MembershipDiscounts,
-    MembershipPlan, MembershipPlanId, MembershipPlayWindows, MonthlySettlement, NewCustomer,
+    CaddieDutyAssignment, CaddieDutyOptions, CaddieId, CaddieRankFeeChange,
+    CaddieRankFeeChangeContext, CaddieRankFees, CaddieRating, CaddieRoster, CaddieShift,
+    CaddieStaff, CancellationFeeDecision, CancellationQuery, Course, CourseError, CourseId,
+    CourseOrder, CreateCustomerConsentItem, Customer, CustomerConsentItem, CustomerGradeRules,
+    CustomerId, CustomerMembership, CustomerReceptionField, CustomerRegistration,
+    CustomerSearchQuery, CustomerSummary, CustomerSummaryQuery, CustomerSummaryRun,
+    CustomerSummaryRunStatus, DailyBudget, DailyBudgetQuery, DefaultWorkingHours,
+    DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
+    FieldShiftLink, GenerationSummary, GolfPricingSettings, InventoryWatermark,
+    MembershipActivityPage, MembershipActivityQuery, MembershipDiscounts, MembershipPlan,
+    MembershipPlanId, MembershipPlayWindows, MonthlySettlement, NewCustomer,
     NewCustomerRegistration, NewReservation, NewReservationCancellation, PartyDetails,
     PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionConsentDefinition,
     ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal, ReceptionSheet,
@@ -299,11 +300,26 @@ pub trait CaddieRankFeeGateway: Send + Sync {
         tenant_id: &str,
     ) -> Result<Option<CaddieRankFees>, CourseError>;
 
+    /// Replace the table and record the change in one go.
+    ///
+    /// `previous` is what payroll was reading just before — the caller's
+    /// resolved answer, which for a club that never saved is the defaults or
+    /// the old extension config rather than anything in this storage. The
+    /// write and its history entry commit together or not at all.
     async fn replace_caddie_rank_fees(
         &self,
         tenant_id: &str,
+        previous: &CaddieRankFees,
         fees: &CaddieRankFees,
+        context: &CaddieRankFeeChangeContext,
     ) -> Result<CaddieRankFees, CourseError>;
+
+    /// The most recent changes first, at most `limit` of them.
+    async fn list_caddie_rank_fee_changes(
+        &self,
+        tenant_id: &str,
+        limit: u32,
+    ) -> Result<Vec<CaddieRankFeeChange>, CourseError>;
 }
 
 /// Port for the booking form's visitor categories.

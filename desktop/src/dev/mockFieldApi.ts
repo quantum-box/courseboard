@@ -886,6 +886,17 @@ const mockRankFees = loadMockWrites<{
   currency: string
 }>('caddieRankFees', { a: 12_000, b: 11_000, c: 10_000, d: 9_000, currency: 'JPY' })
 
+const mockRankFeeChanges = loadMockWrites<Array<{
+  id: number
+  previous: typeof mockRankFees | null
+  fees: typeof mockRankFees
+  changedRanks: string[]
+  note: string | null
+  changedBy: string | null
+  changedByName: string | null
+  changedAt: string
+}>>('caddieRankFeeChanges', [])
+
 /**
  * The same arithmetic the API does: a caddie's own fee wins when they have one,
  * otherwise their rank decides, and the month is that times the rounds worked.
@@ -3033,6 +3044,7 @@ function resolveGet(path: string): Json | null | undefined {
     }
   }
 
+  if (pathname === '/v1/course/caddie-rank-fees/history') return { items: [...mockRankFeeChanges].reverse() }
   if (pathname === '/v1/course/caddie-rank-fees') return mockRankFees
 
   if (pathname === '/v1/course/pricing-settings') return { ...mockPricingSettings }
@@ -4051,6 +4063,7 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
 
   if (pathname === '/v1/course/caddie-rank-fees' && method === 'PUT') {
     const ranks = ['a', 'b', 'c', 'd'] as const
+    const previous = { ...mockRankFees }
     for (const rank of ranks) {
       const amount = Number(body?.[rank])
       // The API refuses these rather than clamping, so the mock does too.
@@ -4062,6 +4075,23 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     const currency = String(body?.currency ?? '').trim().toUpperCase()
     if (currency) mockRankFees.currency = currency
     saveMockWrites('caddieRankFees', mockRankFees)
+    // Saving the amounts already stored leaves no entry, as the API does.
+    const changedRanks = (['A', 'B', 'C', 'D'] as const)
+      .filter(rank => previous[rank.toLowerCase() as 'a'] !== mockRankFees[rank.toLowerCase() as 'a'])
+    if (changedRanks.length > 0 || previous.currency !== mockRankFees.currency) {
+      const note = typeof body?.note === 'string' && body.note.trim() !== '' ? body.note.trim() : null
+      mockRankFeeChanges.push({
+        id: mockRankFeeChanges.length + 1,
+        previous,
+        fees: { ...mockRankFees },
+        changedRanks: [...changedRanks],
+        note,
+        changedBy: 'mock-user',
+        changedByName: 'mock-user',
+        changedAt: new Date().toISOString(),
+      })
+      saveMockWrites('caddieRankFeeChanges', mockRankFeeChanges)
+    }
     return hit({ ...mockRankFees })
   }
 

@@ -24,6 +24,29 @@ export type CaddieRankFees = {
   currency: string
 }
 
+/** One save of the table, as `GET /caddie-rank-fees/history` answers it. */
+export type CaddieRankFeeChange = {
+  id: number
+  /** What payroll read just before. Absent on the entry the history began with. */
+  previous?: CaddieRankFees | null
+  fees: CaddieRankFees
+  changedRanks: Rank[]
+  note?: string | null
+  changedBy?: string | null
+  changedByName?: string | null
+  changedAt: string
+}
+
+/** One rank's move within a change, for the history list. */
+export type RankFeeMove = {
+  rank: Rank
+  from: number
+  to: number
+}
+
+/** The longest reason the API keeps with a change. */
+export const MAX_RANK_FEE_NOTE_CHARS = 500
+
 /** The same table while it is being typed into, which is text until it parses. */
 export type CaddieRankFeeDraft = Record<Rank, string>
 
@@ -148,4 +171,23 @@ export function payrollTotals(rows: PayrollRow[]) {
     }),
     { workedMinutes: 0, rounds: 0, fees: 0, warnings: 0 },
   )
+}
+
+/**
+ * The ranks a change moved, with the amounts either side.
+ *
+ * Only the ranks that moved: a save that touched A alone should read as "A went
+ * up", not as four numbers the reader has to compare against the line below.
+ * The entry the history began with moved nothing and answers an empty list.
+ */
+export function rankFeeMoves(change: CaddieRankFeeChange): RankFeeMove[] {
+  const previous = change.previous
+  if (!previous) return []
+  return RANKS
+    .map(rank => ({
+      rank,
+      from: feeForRank(previous, rank),
+      to: feeForRank(change.fees, rank),
+    }))
+    .filter(move => move.from !== move.to)
 }

@@ -632,6 +632,11 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         RouteAuthorization::Action(LIST_CADDIE_RANK_FEES),
     ),
     (
+        "GET",
+        "/v1/course/caddie-rank-fees/history",
+        RouteAuthorization::Action(LIST_CADDIE_RANK_FEES),
+    ),
+    (
         "PUT",
         "/v1/course/caddie-rank-fees",
         RouteAuthorization::Action(MANAGE_CADDIE_RANK_FEES),
@@ -1441,6 +1446,7 @@ mod tests {
             ("GET", "/v1/course/caddie-ratings"),
             ("GET", "/v1/course/caddie-rank-fees"),
             ("PUT", "/v1/course/caddie-rank-fees"),
+            ("GET", "/v1/course/caddie-rank-fees/history"),
             ("GET", "/v1/course/caddie-payroll-summary"),
             ("GET", "/v1/course/caddie-payroll-summary/export.csv"),
             ("GET", "/v1/course/caddie-shift-rules"),

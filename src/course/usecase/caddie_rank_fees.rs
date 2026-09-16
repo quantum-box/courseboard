@@ -1,14 +1,16 @@
 //! Reading and setting what a round pays at each rank.
 //!
-//! Two use cases, one public entrypoint each. Both are thin: the table is a
+//! Three use cases, one public entrypoint each. All are thin: the table is a
 //! value object that validates itself, and the storage is a single row of
-//! CourseBoard's own (ADR-0009).
+//! CourseBoard's own (ADR-0009) with a history of every save beside it
+//! (PLT-3348).
 
 use std::sync::Arc;
 
 use crate::course::domain::actions;
 use crate::course::domain::{
-    CaddieRankFeeGateway, CaddieRankFees, CourseError, GatewayCredentials, GolfOpsGateway,
+    CaddieRankFeeChange, CaddieRankFeeChangeContext, CaddieRankFeeGateway, CaddieRankFees,
+    CourseError, GatewayCredentials, GolfOpsGateway,
 };
 
 /// The table a club is paying by.
@@ -60,9 +62,19 @@ impl CaddieRankFeeGateway for UnsetRankFees {
     async fn replace_caddie_rank_fees(
         &self,
         _tenant_id: &str,
+        _previous: &CaddieRankFees,
         fees: &CaddieRankFees,
+        _context: &CaddieRankFeeChangeContext,
     ) -> Result<CaddieRankFees, CourseError> {
         Ok(fees.clone())
+    }
+
+    async fn list_caddie_rank_fee_changes(
+        &self,
+        _tenant_id: &str,
+        _limit: u32,
+    ) -> Result<Vec<CaddieRankFeeChange>, CourseError> {
+        Ok(Vec::new())
     }
 }
 
@@ -86,10 +98,56 @@ impl GetCaddieRankFeesUseCase {
 }
 
 pub struct ReplaceCaddieRankFeesUseCase {
+    ops: Arc<dyn GolfOpsGateway>,
     rank_fees: Arc<dyn CaddieRankFeeGateway>,
 }
 
 impl ReplaceCaddieRankFeesUseCase {
+    pub fn new(ops: Arc<dyn GolfOpsGateway>, rank_fees: Arc<dyn CaddieRankFeeGateway>) -> Self {
+        Self { ops, rank_fees }
+    }
+
+    /// Set the table, and write down what it replaced, who, and why.
+    ///
+    /// "What it replaced" is what payroll was reading, not only what this
+    /// storage held: for a club saving for the first time that is the defaults
+    /// or the old extension config, and a history that started from nothing
+    /// could not say what the first save changed.
+    ///
+    /// Saving the amounts already stored changes nobody's pay and leaves no
+    /// entry — a history padded with no-ops buries the saves that mattered.
+    pub async fn execute(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        fees: CaddieRankFees,
+        context: CaddieRankFeeChangeContext,
+    ) -> Result<CaddieRankFees, CourseError> {
+        credentials
+            .require(actions::MANAGE_CADDIE_RANK_FEES)
+            .await?;
+        let stored = self
+            .rank_fees
+            .get_caddie_rank_fees(credentials.operator_id)
+            .await?;
+        if stored.as_ref() == Some(&fees) {
+            return Ok(fees);
+        }
+        let previous = match stored {
+            Some(stored) => stored,
+            None => self.ops.get_caddie_rank_fees(credentials).await?,
+        };
+        self.rank_fees
+            .replace_caddie_rank_fees(credentials.operator_id, &previous, &fees, &context)
+            .await
+    }
+}
+
+/// How the rank fees got to where they are, newest change first.
+pub struct ListCaddieRankFeeChangesUseCase {
+    rank_fees: Arc<dyn CaddieRankFeeGateway>,
+}
+
+impl ListCaddieRankFeeChangesUseCase {
     pub fn new(rank_fees: Arc<dyn CaddieRankFeeGateway>) -> Self {
         Self { rank_fees }
     }
@@ -97,13 +155,11 @@ impl ReplaceCaddieRankFeesUseCase {
     pub async fn execute(
         &self,
         credentials: GatewayCredentials<'_>,
-        fees: CaddieRankFees,
-    ) -> Result<CaddieRankFees, CourseError> {
-        credentials
-            .require(actions::MANAGE_CADDIE_RANK_FEES)
-            .await?;
+        limit: u32,
+    ) -> Result<Vec<CaddieRankFeeChange>, CourseError> {
+        credentials.require(actions::LIST_CADDIE_RANK_FEES).await?;
         self.rank_fees
-            .replace_caddie_rank_fees(credentials.operator_id, &fees)
+            .list_caddie_rank_fee_changes(credentials.operator_id, limit)
             .await
     }
 }
