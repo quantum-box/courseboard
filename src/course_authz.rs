@@ -641,6 +641,19 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
         "/v1/course/caddie-rank-fees",
         RouteAuthorization::Action(MANAGE_CADDIE_RANK_FEES),
     ),
+    // Moving caddies onto their rank fee writes CourseBoard's own change log
+    // and decides pay, so it is checked here like the fee table. The use case
+    // also requires the roster actions for the profile it reads and writes.
+    (
+        "GET",
+        "/v1/course/caddie-fee-alignment",
+        RouteAuthorization::Action(LIST_CADDIE_RANK_FEES),
+    ),
+    (
+        "POST",
+        "/v1/course/caddie-fee-alignment",
+        RouteAuthorization::Action(MANAGE_CADDIE_RANK_FEES),
+    ),
     (
         "*",
         "/v1/course/caddie-payroll-summary",
@@ -1447,6 +1460,8 @@ mod tests {
             ("GET", "/v1/course/caddie-rank-fees"),
             ("PUT", "/v1/course/caddie-rank-fees"),
             ("GET", "/v1/course/caddie-rank-fees/history"),
+            ("GET", "/v1/course/caddie-fee-alignment"),
+            ("POST", "/v1/course/caddie-fee-alignment"),
             ("GET", "/v1/course/caddie-payroll-summary"),
             ("GET", "/v1/course/caddie-payroll-summary/export.csv"),
             ("GET", "/v1/course/caddie-shift-rules"),

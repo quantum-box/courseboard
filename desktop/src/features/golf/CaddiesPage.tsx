@@ -86,6 +86,7 @@ import type { CourseCaddieSupply, DayCaddieSupply } from './caddieCourseSupply'
 import { placementWarningStatus, type ShiftPlacementStatus } from './caddiePlacement'
 import { Sheet } from '../../components/Sheet'
 import { CaddieDutiesPanel } from './CaddieDutyBoard'
+import { CaddieFeeAlignmentSheet } from './CaddieFeeAlignmentSheet'
 import { ReassignRoundSheet } from './ReassignRoundSheet'
 import { CaddieLink } from './CaddieLink'
 import { roundIsStillOn, unassignedCaddieRounds } from './caddieRoundCoverage'
@@ -4010,6 +4011,7 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
   } = useRouteYearMonthValue('yearMonth', currentYearMonth(timezone))
   const [downloading, setDownloading] = useState(false)
   const [editingFees, setEditingFees] = useState(false)
+  const [aligningFees, setAligningFees] = useState(false)
   const feesResource = useResource(
     () => courseboardApiJson<CaddieRankFees>(`${COURSE_API}/caddie-rank-fees`),
     [],
@@ -4160,6 +4162,9 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
             <Button type="button" variant="secondary" onClick={() => setEditingFees(true)}>
               <Pencil /> {t('caddies:payroll.rankFees.open')}
             </Button>
+            <Button type="button" variant="secondary" onClick={() => setAligningFees(true)}>
+              <Shuffle /> {t('caddies:payroll.feeAlignment.open')}
+            </Button>
             <Button type="button" variant="primary" disabled={downloading || !resource.data} onClick={() => void downloadCsv()}>
               <Download /> {downloading ? t('caddies:payroll.exporting') : t('caddies:payroll.exportCsv')}
             </Button>
@@ -4203,6 +4208,12 @@ function PayrollView({ setFlash }: { setFlash: (flash: Flash) => void }) {
         resource={feesResource}
         setFlash={setFlash}
         onSaved={resource.refresh}
+      />
+
+      <CaddieFeeAlignmentSheet
+        open={aligningFees}
+        onClose={() => setAligningFees(false)}
+        onAligned={resource.refresh}
       />
     </div>
   )

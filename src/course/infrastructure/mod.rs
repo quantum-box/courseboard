@@ -5,6 +5,7 @@
 mod availability_deadline_repository;
 mod booking_horizon_config;
 mod caddie_duty_repository;
+mod caddie_fee_change_repository;
 mod caddie_rank_fee_config;
 mod caddie_rank_fee_repository;
 mod caddie_shift_repository;
@@ -45,6 +46,7 @@ mod visit_checkin_repository;
 
 pub use availability_deadline_repository::MySqlAvailabilityDeadlineRepository;
 pub use caddie_duty_repository::MySqlCaddieDutyRepository;
+pub use caddie_fee_change_repository::MySqlCaddieFeeChangeRepository;
 pub use caddie_rank_fee_repository::MySqlCaddieRankFeeRepository;
 pub use caddie_shift_repository::MySqlCaddieShiftRepository;
 pub use course_order_repository::MySqlCourseOrderRepository;

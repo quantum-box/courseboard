@@ -36,15 +36,15 @@ use course::domain::{
 };
 use course::infrastructure::{
     FieldReservationReportGateway, MigratingReservationReportGateway,
-    MySqlAvailabilityDeadlineRepository, MySqlCaddieDutyRepository, MySqlCaddieRankFeeRepository,
-    MySqlCaddieShiftRepository, MySqlCourseOrderRepository, MySqlCustomerGradeRulesRepository,
-    MySqlCustomerReceptionFieldsRepository, MySqlCustomerReceptionValuesRepository,
-    MySqlCustomerRegistrationRepository, MySqlCustomerSummaryRepository,
-    MySqlGeneratedThroughRepository, MySqlGolfProductSettingsRepository,
-    MySqlMembershipDiscountsRepository, MySqlMembershipPlayWindowsRepository,
-    MySqlPlayerTagOptionsRepository, MySqlPricingSettingsRepository,
-    MySqlReservationCancellationRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
-    MySqlVisitCheckinRepository,
+    MySqlAvailabilityDeadlineRepository, MySqlCaddieDutyRepository, MySqlCaddieFeeChangeRepository,
+    MySqlCaddieRankFeeRepository, MySqlCaddieShiftRepository, MySqlCourseOrderRepository,
+    MySqlCustomerGradeRulesRepository, MySqlCustomerReceptionFieldsRepository,
+    MySqlCustomerReceptionValuesRepository, MySqlCustomerRegistrationRepository,
+    MySqlCustomerSummaryRepository, MySqlGeneratedThroughRepository,
+    MySqlGolfProductSettingsRepository, MySqlMembershipDiscountsRepository,
+    MySqlMembershipPlayWindowsRepository, MySqlPlayerTagOptionsRepository,
+    MySqlPricingSettingsRepository, MySqlReservationCancellationRepository,
+    MySqlShiftRulesRepository, MySqlSlotOverrideRepository, MySqlVisitCheckinRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -68,6 +68,7 @@ pub struct AppState {
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
     course_order: Arc<MySqlCourseOrderRepository>,
     caddie_rank_fees: Arc<MySqlCaddieRankFeeRepository>,
+    caddie_fee_changes: Arc<MySqlCaddieFeeChangeRepository>,
     caddie_duties: Arc<MySqlCaddieDutyRepository>,
     pricing_settings: Arc<MySqlPricingSettingsRepository>,
     product_settings: Arc<MySqlGolfProductSettingsRepository>,
@@ -120,6 +121,7 @@ impl AppState {
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
             course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
             caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
+            caddie_fee_changes: Arc::new(MySqlCaddieFeeChangeRepository::new(pool.clone())),
             caddie_duties: Arc::new(MySqlCaddieDutyRepository::new(pool.clone())),
             pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
             product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
@@ -197,6 +199,7 @@ impl AppState {
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
             course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
             caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
+            caddie_fee_changes: Arc::new(MySqlCaddieFeeChangeRepository::new(pool.clone())),
             caddie_duties: Arc::new(MySqlCaddieDutyRepository::new(pool.clone())),
             pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
             product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
@@ -260,6 +263,7 @@ impl AppState {
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
                 course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
                 caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
+                caddie_fee_changes: Arc::new(MySqlCaddieFeeChangeRepository::new(pool.clone())),
                 caddie_duties: Arc::new(MySqlCaddieDutyRepository::new(pool.clone())),
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
                 product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
@@ -318,6 +322,7 @@ impl AppState {
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
                 course_order: Arc::new(MySqlCourseOrderRepository::new(pool.clone())),
                 caddie_rank_fees: Arc::new(MySqlCaddieRankFeeRepository::new(pool.clone())),
+                caddie_fee_changes: Arc::new(MySqlCaddieFeeChangeRepository::new(pool.clone())),
                 caddie_duties: Arc::new(MySqlCaddieDutyRepository::new(pool.clone())),
                 pricing_settings: Arc::new(MySqlPricingSettingsRepository::new(pool.clone())),
                 product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
@@ -391,6 +396,11 @@ impl AppState {
     /// CourseBoard-owned table of what a round pays at each caddie rank.
     pub fn caddie_rank_fees(&self) -> Arc<MySqlCaddieRankFeeRepository> {
         self.caddie_rank_fees.clone()
+    }
+
+    /// CourseBoard-owned log of caddies moved onto their rank fee.
+    pub fn caddie_fee_changes(&self) -> Arc<MySqlCaddieFeeChangeRepository> {
+        self.caddie_fee_changes.clone()
     }
 
     /// CourseBoard-owned pricing inputs: the tax-schedule key and the cost
@@ -1225,6 +1235,15 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/course/caddie-rank-fees",
             get(course::interfaces::http_ops::get_caddie_rank_fees)
                 .put(course::interfaces::http_ops::replace_caddie_rank_fees)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/caddie-fee-alignment",
+            get(course::interfaces::http_caddie_fee_alignment::preview_caddie_fee_alignment)
+                .post(course::interfaces::http_caddie_fee_alignment::align_caddie_fees)
                 .route_layer(middleware::from_fn_with_state(
                     state.clone(),
                     require_valid_token,
