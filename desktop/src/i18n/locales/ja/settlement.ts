@@ -22,7 +22,7 @@ export const settlement = {
       unpaidDetail: '売上から入金を引いた額',
       refunded: '返金ずみ',
       refundedDetail: 'この月の返金',
-      caddieCost: 'キャディの費用',
+      caddieCost: 'キャディの費用（割当時）',
       caddieCostDetail: '{{n}} 件の割当',
       unpaidCancellation: '未入金のキャンセル料',
       unpaidCancellationDetail: '{{n}} 件',
@@ -34,6 +34,37 @@ export const settlement = {
       squareUnmatchedDetail: '突き合わせが済んでいない行',
     },
     warning: '決済の照合に気をつける点があります',
+  },
+  caddiePay: {
+    title: 'キャディへの支給',
+    description: 'いまのランク単価で数えた、この月の支給額です。給与の画面と同じ数字です。',
+    openPayroll: '給与の一覧を開く',
+    loading: '支給額を集計しています',
+    metrics: {
+      fees: '支給額',
+      feesDetail: '{{caddies}} 人 · {{rounds}} ラウンド',
+      committed: '割当時の額',
+      committedDetail: '支給額との差 {{amount}}',
+      committedOtherCurrency: '通貨が違うため差は出していません',
+      toCheck: '確認が必要',
+      toCheckValue: '{{n}} 人',
+      toCheckDetail: '退勤の記録なし・割当の日の出勤なし',
+    },
+    gap: {
+      title: '割当時の額と支給額が合っていません',
+      description:
+        '割当のあとでランク単価や本人ごとの単価を直した、名簿から外れたキャディの割当がある、などで差が出ます。給与として払うのは支給額です。',
+    },
+    byRank: {
+      title: 'ランク別の内訳',
+      badge: 'いまのランクで集計',
+      rank: 'ランク',
+      caddies: '人数',
+      caddiesValue: '{{n}} 人',
+      overridden: 'うち本人ごとの単価 {{n}} 人',
+      rounds: 'ラウンド',
+      fees: '支給額',
+    },
   },
   reservations: {
     title: 'この月の予約',
@@ -120,7 +151,7 @@ export const settlement = {
     },
     caddie: {
       title: 'キャディ',
-      detail: '割当の件数と費用を確かめる',
+      detail: '割当時の額と支給額の差、出勤の照合を確かめる',
     },
     payment: {
       title: '決済',

@@ -26,7 +26,7 @@ export const settlement: DeepPartial<typeof source> = {
       unpaidDetail: 'Revenue minus payments',
       refunded: 'Refunded',
       refundedDetail: 'Refunds this month',
-      caddieCost: 'Caddie cost',
+      caddieCost: 'Caddie cost (as assigned)',
       caddieCostDetail: '{{n}} assignments',
       unpaidCancellation: 'Unpaid cancellation fees',
       unpaidCancellationDetail: '{{n}} items',
@@ -38,6 +38,37 @@ export const settlement: DeepPartial<typeof source> = {
       squareUnmatchedDetail: 'Imported rows not yet reconciled',
     },
     warning: 'There are notes on payment matching',
+  },
+  caddiePay: {
+    title: 'Caddie pay',
+    description: "This month's pay at the current rank fees. The same figures as the payroll sheet.",
+    openPayroll: 'Open payroll',
+    loading: 'Totalling up caddie pay',
+    metrics: {
+      fees: 'Pay',
+      feesDetail: '{{caddies}} caddies · {{rounds}} rounds',
+      committed: 'Cost as assigned',
+      committedDetail: 'Difference to pay {{amount}}',
+      committedOtherCurrency: 'Different currency, so no difference shown',
+      toCheck: 'Needs a check',
+      toCheckValue: '{{n}} caddies',
+      toCheckDetail: 'No clock-out, or no clock-in on a round day',
+    },
+    gap: {
+      title: 'Cost as assigned does not match pay',
+      description:
+        'A rank fee or personal fee was corrected after the rounds were assigned, or a caddie no longer on the roster had rounds. Pay is what the caddies are paid.',
+    },
+    byRank: {
+      title: 'By rank',
+      badge: 'Grouped by current rank',
+      rank: 'Rank',
+      caddies: 'Caddies',
+      caddiesValue: '{{n}}',
+      overridden: '{{n}} on a personal fee',
+      rounds: 'Rounds',
+      fees: 'Pay',
+    },
   },
   reservations: {
     title: 'Bookings this month',
@@ -125,7 +156,7 @@ export const settlement: DeepPartial<typeof source> = {
     },
     caddie: {
       title: 'Caddies',
-      detail: 'Check assignment counts and cost',
+      detail: 'Check the gap between assigned cost and pay, and attendance',
     },
     payment: {
       title: 'Payments',

@@ -34,6 +34,7 @@ import {
 import { YearMonthPicker, useRouteYearMonthValue } from '../../components/YearMonthPicker'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { openExternal } from '../../lib/platform'
+import { SettlementCaddiePayPanel } from './SettlementCaddiePayPanel'
 
 type GolfMonthlySettlementPeriod = {
   yearMonth: string
@@ -404,6 +405,8 @@ export function SettlementPage() {
               </Notice>
             ) : null}
           </Panel>
+
+          <SettlementCaddiePayPanel yearMonth={report.period.yearMonth} committed={report.caddieFees} />
 
           <div className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
             <Panel

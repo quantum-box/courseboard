@@ -26,7 +26,7 @@ export const settlement: DeepPartial<typeof source> = {
       unpaidDetail: '売上から、入ったお金を引いた残り',
       refunded: '返したお金',
       refundedDetail: 'この月に返金した分',
-      caddieCost: 'キャディの費用',
+      caddieCost: 'キャディの費用（担当を決めたときの額）',
       caddieCostDetail: '担当 {{n}} 件分',
       unpaidCancellation: 'まだ入っていないキャンセル料',
       squareIn: '決済で入ったお金',
@@ -37,6 +37,37 @@ export const settlement: DeepPartial<typeof source> = {
       squareUnmatchedDetail: 'どの予約の入金か分からない記録',
     },
     warning: '入金の突き合わせで、気をつける点があります',
+  },
+  caddiePay: {
+    title: 'キャディに払うお金',
+    description: 'いまのランクごとの金額で数えた、この月に払う額です。給与の画面と同じ数字です。',
+    openPayroll: '給与の一覧を開く',
+    loading: '払う額を数えています',
+    metrics: {
+      fees: '払う額',
+      feesDetail: '{{caddies}} 人 · {{rounds}} 回',
+      committed: '担当を決めたときの額',
+      committedDetail: '払う額との差 {{amount}}',
+      committedOtherCurrency: 'お金の種類が違うので、差は出していません',
+      toCheck: '見直しが必要',
+      toCheckValue: '{{n}} 人',
+      toCheckDetail: '帰りの記録がない、担当の日に出勤の記録がない',
+    },
+    gap: {
+      title: '担当を決めたときの額と、払う額が合っていません',
+      description:
+        '担当を決めたあとで1回あたりの金額を直した、名簿にいないキャディの担当が残っている、などで差が出ます。実際に払うのは「払う額」です。',
+    },
+    byRank: {
+      title: 'ランクごとの内訳',
+      badge: 'いまのランクで数えています',
+      rank: 'ランク',
+      caddies: '人数',
+      caddiesValue: '{{n}} 人',
+      overridden: 'うち本人だけの金額 {{n}} 人',
+      rounds: '回数',
+      fees: '払う額',
+    },
   },
   reservations: {
     title: 'この月に入っている予約',
@@ -117,7 +148,7 @@ export const settlement: DeepPartial<typeof source> = {
     },
     caddie: {
       title: 'キャディ',
-      detail: '担当した件数と、その費用を見る',
+      detail: '担当を決めたときの額と払う額の差、出勤の記録を見る',
     },
     payment: {
       title: 'お金',
