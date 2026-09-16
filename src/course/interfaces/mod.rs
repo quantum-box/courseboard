@@ -1,6 +1,7 @@
 //! Inbound adapters (HTTP) for the course domain.
 
 pub mod http;
+pub mod http_caddie_fee_alignment;
 pub mod http_cancellations;
 pub mod http_commercial;
 pub mod http_customers;

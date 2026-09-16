@@ -7,7 +7,7 @@ use super::{
     AssignMembershipPlan, AssignmentId, AttendancePeriodSnapshot, AttendanceSnapshotReport,
     AvailabilityDeadline, AvailabilityQuery, AvailabilityRule, BookingHorizon, Caddie,
     CaddieAssignment, CaddieAssignmentQuery, CaddieAvailability, CaddieCourseMembership,
-    CaddieDutyAssignment, CaddieDutyOptions, CaddieId, CaddieRankFeeChange,
+    CaddieDutyAssignment, CaddieDutyOptions, CaddieFeeChange, CaddieId, CaddieRankFeeChange,
     CaddieRankFeeChangeContext, CaddieRankFees, CaddieRating, CaddieRoster, CaddieShift,
     CaddieStaff, CancellationFeeDecision, CancellationQuery, Course, CourseError, CourseId,
     CourseOrder, CreateCustomerConsentItem, Customer, CustomerConsentItem, CustomerGradeRules,
@@ -21,13 +21,14 @@ use super::{
     NewCustomerRegistration, NewReservation, NewReservationCancellation, PartyDetails,
     PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionConsentDefinition,
     ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal, ReceptionSheet,
-    ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate, ReservationCancellation,
-    ReservationId, ReservationPolicy, ReservationProduct, ReservationServiceId, Resource,
-    ResourceId, ResourceTimeSlot, SaveCourseResource, SeededReservation, SetMemberNumber,
-    ShiftPolicy, SlotOverride, SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift,
-    UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment,
-    UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan,
-    UpsertReservationProduct, VisitCheckin, VisitCheckinRequest, WorkedMinutes, YearMonth,
+    RecordedCaddieFeeChange, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate,
+    ReservationCancellation, ReservationId, ReservationPolicy, ReservationProduct,
+    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
+    SeededReservation, SetMemberNumber, ShiftPolicy, SlotOverride, SlotOverrideQuery,
+    TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
+    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
+    UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin, VisitCheckinRequest,
+    WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -320,6 +321,36 @@ pub trait CaddieRankFeeGateway: Send + Sync {
         tenant_id: &str,
         limit: u32,
     ) -> Result<Vec<CaddieRankFeeChange>, CourseError>;
+}
+
+/// Port for the log of caddies moved off a fee of their own onto their rank.
+///
+/// Keyed by tenant id: CourseBoard's own storage. The fee itself lives on the
+/// caddie profile upstream, which keeps only the current amount, so this is the
+/// only place that can say what a caddie was paid before and who changed it.
+///
+/// A change is written before the profile is and confirmed after, so a crash in
+/// between leaves an unconfirmed row rather than a pay change nobody logged.
+/// Unconfirmed rows are never listed.
+#[async_trait]
+pub trait CaddieFeeChangeGateway: Send + Sync {
+    async fn record_pending_fee_change(
+        &self,
+        tenant_id: &str,
+        change: &CaddieFeeChange,
+    ) -> Result<u64, CourseError>;
+
+    async fn confirm_fee_change(&self, tenant_id: &str, id: u64) -> Result<(), CourseError>;
+
+    /// Drops an unconfirmed row whose profile write was refused.
+    async fn discard_fee_change(&self, tenant_id: &str, id: u64) -> Result<(), CourseError>;
+
+    /// Confirmed changes, newest first.
+    async fn list_fee_changes(
+        &self,
+        tenant_id: &str,
+        limit: u32,
+    ) -> Result<Vec<RecordedCaddieFeeChange>, CourseError>;
 }
 
 /// Port for the booking form's visitor categories.

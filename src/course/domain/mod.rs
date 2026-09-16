@@ -8,6 +8,7 @@ mod availability_deadline;
 mod budget_achievement;
 mod caddie;
 mod caddie_duty;
+mod caddie_fee_alignment;
 mod caddie_ops;
 mod caddie_plan;
 mod caddie_rank_fee;
@@ -64,6 +65,11 @@ pub use caddie_duty::{
     caddies_off_the_day, duty_blocks_round, duty_windows_for, free_halves, free_rounds,
     round_minutes, CaddieDutyAssignment, CaddieDutyOptions, DutyWindow, MAX_CADDIE_DUTIES,
     MAX_CADDIE_DUTY_LENGTH, MAX_CADDIE_DUTY_NOTE_LENGTH, MINUTES_IN_DAY,
+};
+pub use caddie_fee_alignment::{
+    fee_alignment_candidates, plan_fee_alignment, CaddieFeeChange, FeeAlignmentCandidate,
+    FeeAlignmentEffect, FeeAlignmentItem, FeeAlignmentOutcome, FeeAlignmentRequest,
+    RecordedCaddieFeeChange, MAX_FEE_ALIGNMENT_ITEMS, MAX_FEE_ALIGNMENT_NOTE_CHARS,
 };
 pub use caddie_ops::{
     compute_caddie_supply, AttendancePeriodSnapshot, AttendanceSnapshot, AttendanceSnapshotReport,
@@ -176,17 +182,17 @@ pub use payroll::{
 };
 pub use player_tags::{PlayerTagOptions, MAX_PLAYER_TAG_LENGTH, MAX_PLAYER_TAG_OPTIONS};
 pub use ports::{
-    AvailabilityDeadlineGateway, CaddieDutyGateway, CaddieRankFeeGateway, CaddieShiftGateway,
-    CourseAuthorizer, CourseOrderGateway, CustomerConsentCatalogGateway, CustomerConsentGateway,
-    CustomerGateway, CustomerGradeRulesGateway, CustomerReceptionCreateGateway,
-    CustomerReceptionFieldsGateway, CustomerReceptionOcrGateway, CustomerReceptionValuesGateway,
-    CustomerRegistrationGateway, CustomerSummaryGateway, FieldCapabilitiesGateway,
-    GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway, GolfCommercialGateway,
-    GolfOpsGateway, GolfTaxGateway, MembershipActivityGateway, MembershipDiscountsGateway,
-    MembershipGateway, MembershipPlayWindowsGateway, PlayerTagOptionsGateway,
-    PricingSettingsGateway, ReservationCancellationGateway, ReservationGateway,
-    ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway, StaffShiftGateway,
-    StaffShiftInput, TeeLedgerQuery, TeeSheetQuery, VisitCheckinGateway,
+    AvailabilityDeadlineGateway, CaddieDutyGateway, CaddieFeeChangeGateway, CaddieRankFeeGateway,
+    CaddieShiftGateway, CourseAuthorizer, CourseOrderGateway, CustomerConsentCatalogGateway,
+    CustomerConsentGateway, CustomerGateway, CustomerGradeRulesGateway,
+    CustomerReceptionCreateGateway, CustomerReceptionFieldsGateway, CustomerReceptionOcrGateway,
+    CustomerReceptionValuesGateway, CustomerRegistrationGateway, CustomerSummaryGateway,
+    FieldCapabilitiesGateway, GatewayCredentials, GeneratedThroughGateway, GolfCatalogGateway,
+    GolfCommercialGateway, GolfOpsGateway, GolfTaxGateway, MembershipActivityGateway,
+    MembershipDiscountsGateway, MembershipGateway, MembershipPlayWindowsGateway,
+    PlayerTagOptionsGateway, PricingSettingsGateway, ReservationCancellationGateway,
+    ReservationGateway, ReservationScheduleGateway, ShiftRulesGateway, SlotOverrideGateway,
+    StaffShiftGateway, StaffShiftInput, TeeLedgerQuery, TeeSheetQuery, VisitCheckinGateway,
 };
 pub use pricing_settings::GolfPricingSettings;
 pub use product::{

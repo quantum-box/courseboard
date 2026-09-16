@@ -9,6 +9,7 @@ use utoipa::{
 };
 
 use super::http;
+use super::http_caddie_fee_alignment;
 use super::http_cancellations;
 use super::http_commercial;
 use super::http_customers;
@@ -150,6 +151,8 @@ impl Modify for SecurityAddon {
         http_ops::get_caddie_rank_fees,
         http_ops::replace_caddie_rank_fees,
         http_ops::list_caddie_rank_fee_changes,
+        http_caddie_fee_alignment::preview_caddie_fee_alignment,
+        http_caddie_fee_alignment::align_caddie_fees,
         http_ops::get_payroll_summary,
         http_ops::export_payroll_csv,
         http_ops::list_caddie_ratings,
@@ -312,6 +315,13 @@ impl Modify for SecurityAddon {
             http_ops::CaddieRankFeesDto,
             http_ops::ReplaceCaddieRankFeesRequest,
             http_ops::CaddieRankFeeChangeDto,
+            http_caddie_fee_alignment::FeeAlignmentCandidateDto,
+            http_caddie_fee_alignment::CaddieFeeChangeDto,
+            http_caddie_fee_alignment::FeeAlignmentPreviewResponse,
+            http_caddie_fee_alignment::FeeAlignmentItemRequest,
+            http_caddie_fee_alignment::AlignCaddieFeesRequest,
+            http_caddie_fee_alignment::FeeAlignmentResultDto,
+            http_caddie_fee_alignment::AlignCaddieFeesResponse,
             http_ops::PayrollRowDto,
             http_ops::PayrollSummaryDto,
             http_ops::YearMonthQuery,

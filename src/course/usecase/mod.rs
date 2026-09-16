@@ -11,6 +11,7 @@
 mod auto_assign_caddies;
 mod availability_deadline;
 mod caddie_duties;
+mod caddie_fee_alignment;
 mod caddie_rank_fees;
 mod caddie_round_guards;
 mod cancel_reservation;
@@ -108,6 +109,10 @@ pub use availability_deadline::{
 pub use caddie_duties::{
     AssignCaddieDutyUseCase, ClearCaddieDutyUseCase, GetCaddieDutyOptionsUseCase,
     ListCaddieDutyAssignmentsUseCase, ReplaceCaddieDutyOptionsUseCase,
+};
+pub use caddie_fee_alignment::{
+    AlignCaddieFeesToRankUseCase, FeeAlignmentPreview, FeeAlignmentResult,
+    PreviewCaddieFeeAlignmentUseCase,
 };
 pub use caddie_rank_fees::{
     GetCaddieRankFeesUseCase, ListCaddieRankFeeChangesUseCase, ReplaceCaddieRankFeesUseCase,

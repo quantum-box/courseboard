@@ -897,6 +897,54 @@ const mockRankFeeChanges = loadMockWrites<Array<{
   changedAt: string
 }>>('caddieRankFeeChanges', [])
 
+/** Caddies moved onto their rank fee during the session, newest first. */
+const mockFeeChanges: Array<{
+  id: number
+  caddieProfileId: string
+  rank: string
+  previousFee: number
+  newFee: number
+  rankFee: number
+  currency: string
+  note?: string
+  changedAt: string
+}> = loadMockWrites('caddieFeeChanges', [])
+
+/** What moving each caddie with a fee of their own onto their rank would do. */
+function mockFeeAlignmentPreview() {
+  const effectOrder = { cut: 0, raise: 1, unchanged: 2 } as const
+  const candidates = mockCaddies
+    .filter(profile => profile.baseFeeAmount > 0)
+    .map(profile => {
+      const rank = profile.rank as 'A' | 'B' | 'C' | 'D'
+      const rankFee = mockRankFees[rank.toLowerCase() as 'a' | 'b' | 'c' | 'd']
+      const difference = rankFee - profile.baseFeeAmount
+      const effect: keyof typeof effectOrder = difference === 0 ? 'unchanged' : difference > 0 ? 'raise' : 'cut'
+      return {
+        caddieProfileId: profile.id,
+        displayName: profile.displayName,
+        active: profile.active,
+        rank,
+        ownFee: profile.baseFeeAmount,
+        rankFee,
+        difference,
+        effect,
+      }
+    })
+    .sort((left, right) => effectOrder[left.effect] - effectOrder[right.effect]
+      || Math.abs(right.difference) - Math.abs(left.difference))
+  return {
+    // The mock table always counts as saved, so the flow can be walked through.
+    rankFeesConfirmed: true,
+    fees: { ...mockRankFees },
+    candidates,
+    recentChanges: mockFeeChanges.map(change => ({
+      ...change,
+      displayName: mockCaddies.find(profile => profile.id === change.caddieProfileId)?.displayName,
+    })),
+  }
+}
+
 /**
  * The same arithmetic the API does: a caddie's own fee wins when they have one,
  * otherwise their rank decides, and the month is that times the rounds worked.
@@ -2112,6 +2160,8 @@ function normalizeMockPath(pathname: string): string {
     // Rank fees are a golf pay rule, kept in the extension config rather than
     // behind a Field endpoint of their own.
     || pathname === '/v1/course/caddie-rank-fees'
+    // Moving caddies onto their rank fee writes CourseBoard's own change log.
+    || pathname === '/v1/course/caddie-fee-alignment'
     // Pricing inputs are CourseBoard's own row (ADR-0009).
     || pathname === '/v1/course/pricing-settings'
     // So are the booking form's visitor categories, and the grade ladder.
@@ -3054,6 +3104,8 @@ function resolveGet(path: string): Json | null | undefined {
 
   if (pathname === '/v1/course/caddie-rank-fees/history') return { items: [...mockRankFeeChanges].reverse() }
   if (pathname === '/v1/course/caddie-rank-fees') return mockRankFees
+
+  if (pathname === '/v1/course/caddie-fee-alignment') return mockFeeAlignmentPreview()
 
   if (pathname === '/v1/course/pricing-settings') return { ...mockPricingSettings }
 
@@ -4067,6 +4119,37 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     })
     saveMockWrites('pricingSettings', mockPricingSettings)
     return hit({ ...mockPricingSettings })
+  }
+
+  if (pathname === '/v1/course/caddie-fee-alignment' && method === 'POST') {
+    const requested: Array<{ caddieProfileId?: unknown; expectedOwnFee?: unknown }> =
+      Array.isArray(body?.items) ? body.items : []
+    if (requested.length === 0) return error(400, 'choose at least one caddie to move onto their rank fee')
+    const note = String(body?.note ?? '').trim()
+    const results = requested.map(item => {
+      const caddieProfileId = String(item.caddieProfileId ?? '')
+      const profile = mockCaddies.find(candidate => candidate.id === caddieProfileId)
+      if (!profile) return { caddieProfileId, outcome: 'not_found' }
+      if (profile.baseFeeAmount <= 0) return { caddieProfileId, outcome: 'already_on_rank' }
+      if (profile.baseFeeAmount !== Number(item.expectedOwnFee)) return { caddieProfileId, outcome: 'own_fee_changed' }
+      const rankFee = mockRankFees[profile.rank.toLowerCase() as 'a' | 'b' | 'c' | 'd']
+      if (rankFee <= 0) return { caddieProfileId, outcome: 'rank_unpriced' }
+      mockFeeChanges.unshift({
+        id: Date.now() + mockFeeChanges.length,
+        caddieProfileId,
+        rank: profile.rank,
+        previousFee: profile.baseFeeAmount,
+        newFee: 0,
+        rankFee,
+        currency: mockRankFees.currency,
+        ...(note ? { note } : {}),
+        changedAt: new Date().toISOString(),
+      })
+      profile.baseFeeAmount = 0
+      return { caddieProfileId, outcome: 'aligned' }
+    })
+    saveMockWrites('caddieFeeChanges', mockFeeChanges)
+    return hit({ results })
   }
 
   if (pathname === '/v1/course/caddie-rank-fees' && method === 'PUT') {
