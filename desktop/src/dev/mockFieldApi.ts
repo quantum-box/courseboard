@@ -930,6 +930,80 @@ const mockSlotMarks: Array<{
 /** Shift-request filing deadline per `YYYY-MM`, and anything set during the session. */
 const mockAvailabilityDeadlines: Record<string, string> = loadMockWrites('availabilityDeadlines', {})
 
+type MockAvailability = {
+  id: string
+  caddieProfileId: string
+  date: string
+  status: string
+  twoRoundRequest: boolean
+  healthNote: string | null
+  updatedAt: string
+}
+
+/**
+ * Day-off requests filed or withdrawn during the session, by `caddie:date`.
+ *
+ * The generated fixture still supplies the month's texture; these sit on top
+ * of it. A withdrawn day is kept as `null` so a fixture row does not come back
+ * after the delete.
+ */
+const mockAvailabilityWrites: Record<string, MockAvailability | null> = loadMockWrites(
+  'caddieAvailabilities',
+  {},
+)
+
+function availabilityKey(caddieProfileId: string, date: string) {
+  return `${caddieProfileId}:${date}`
+}
+
+function storeAvailability(body: Record<string, unknown> | undefined): MockAvailability {
+  const caddieProfileId = String(body?.caddieProfileId ?? '')
+  const date = String(body?.date ?? TODAY)
+  const healthNote = typeof body?.healthNote === 'string' && body.healthNote.trim()
+    ? body.healthNote
+    : null
+  const record: MockAvailability = {
+    id: `avail_${caddieProfileId || 'caddie'}_${date}`,
+    caddieProfileId,
+    date,
+    status: String(body?.status ?? 'available'),
+    twoRoundRequest: Boolean(body?.twoRoundRequest),
+    healthNote,
+    updatedAt: NOW,
+  }
+  mockAvailabilityWrites[availabilityKey(caddieProfileId, date)] = record
+  saveMockWrites('caddieAvailabilities', mockAvailabilityWrites)
+  return record
+}
+
+function withdrawAvailability(caddieProfileId: string, date: string) {
+  mockAvailabilityWrites[availabilityKey(caddieProfileId, date)] = null
+  saveMockWrites('caddieAvailabilities', mockAvailabilityWrites)
+}
+
+/** Lays the session's writes over generated rows for the given dates. */
+function withAvailabilityWrites(
+  generated: Array<Record<string, unknown>>,
+  dates: string[],
+  caddieProfileId: string | null,
+) {
+  const inRange = new Set(dates)
+  const merged = new Map<string, Record<string, unknown>>()
+  for (const row of generated) {
+    merged.set(availabilityKey(String(row.caddieProfileId), String(row.date)), row)
+  }
+  for (const [key, record] of Object.entries(mockAvailabilityWrites)) {
+    if (record === null) {
+      merged.delete(key)
+    } else if (inRange.has(record.date)) {
+      merged.set(key, { ...record })
+    }
+  }
+  return [...merged.values()]
+    .filter(row => !caddieProfileId || row.caddieProfileId === caddieProfileId)
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+}
+
 /** Group detail entered during the session, by reservation id. */
 const mockParties: Record<string, unknown> = loadMockWrites('parties', {})
 
@@ -2856,6 +2930,7 @@ function resolveGet(path: string): Json | null | undefined {
   if (pathname === '/v1/erp/extensions/golf-course/caddie-availabilities') {
     const from = url.searchParams.get('from')
     const to = url.searchParams.get('to')
+    const caddieProfileId = url.searchParams.get('caddieProfileId')
     // Range queries feed the shift board: deterministic days off per caddie so
     // the month view has some texture without Math.random().
     if (from && to) {
@@ -2882,17 +2957,22 @@ function resolveGet(path: string): Json | null | undefined {
           })
         })
       }
-      return items(results)
+      return items(withAvailabilityWrites(results, datesBetween(from, to), caddieProfileId))
     }
-    return items(mockCaddies.map(profile => ({
-      id: `avail_${profile.id}_${TODAY}`,
-      caddieProfileId: profile.id,
-      date: url.searchParams.get('date') ?? TODAY,
-      status: 'available',
-      twoRoundRequest: Boolean(profile.canTwoRounds),
-      healthNote: null,
-      updatedAt: NOW,
-    })))
+    const date = url.searchParams.get('date') ?? TODAY
+    return items(withAvailabilityWrites(
+      mockCaddies.map(profile => ({
+        id: `avail_${profile.id}_${date}`,
+        caddieProfileId: profile.id,
+        date,
+        status: 'available',
+        twoRoundRequest: Boolean(profile.canTwoRounds),
+        healthNote: null,
+        updatedAt: NOW,
+      })),
+      [date],
+      caddieProfileId,
+    ))
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-attendance-snapshot') {
@@ -4594,15 +4674,7 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-availabilities'
     && (method === 'POST' || method === 'PUT' || method === 'PATCH')) {
-    return hit({
-      id: `avail_${String(body?.caddieProfileId ?? 'caddie')}_${String(body?.date ?? TODAY)}`,
-      caddieProfileId: String(body?.caddieProfileId ?? ''),
-      date: String(body?.date ?? TODAY),
-      status: String(body?.status ?? 'available'),
-      twoRoundRequest: Boolean(body?.twoRoundRequest),
-      healthNote: body?.healthNote ?? null,
-      updatedAt: NOW,
-    })
+    return hit(storeAvailability(body))
   }
 
   if (pathname === '/v1/erp/extensions/golf-course/caddie-auto-assignments' && method === 'POST') {
@@ -4719,6 +4791,7 @@ export function resolveMockFieldApiText(path: string, init?: RequestInit): MockF
       || pathname === '/v1/erp/extensions/golf-course/caddie-availabilities')
     && (method === 'POST' || method === 'PUT' || method === 'PATCH')
   ) {
+    storeAvailability(parseBody(init) as Record<string, unknown> | undefined)
     return hit('')
   }
 
@@ -4726,6 +4799,17 @@ export function resolveMockFieldApiText(path: string, init?: RequestInit): MockF
     /^\/v1\/erp\/extensions\/golf-course\/caddie-availabilities\/([^/]+)\/([^/]+)$/,
   )
   if (availabilityMatch && (method === 'PUT' || method === 'PATCH' || method === 'DELETE')) {
+    const caddieProfileId = decodeURIComponent(availabilityMatch[1] ?? '')
+    const date = decodeURIComponent(availabilityMatch[2] ?? '')
+    if (method === 'DELETE') {
+      withdrawAvailability(caddieProfileId, date)
+    } else {
+      storeAvailability({
+        ...(parseBody(init) as Record<string, unknown> | undefined),
+        caddieProfileId,
+        date,
+      })
+    }
     return hit('')
   }
 
