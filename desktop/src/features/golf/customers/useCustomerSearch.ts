@@ -29,11 +29,11 @@ export function customerSearchParameter(query: string): CustomerSearchParameter 
 }
 
 /**
- * Rows the ledger screen holds so its table can page through them, rather than
- * the shorter default a picker wants. Field caps a customer listing at 100, so
- * asking for more only ever gets 100 back — past that the desk searches.
+ * Rows one page of the ledger screen asks for. The ledger grows with every
+ * visitor, so the screen walks it a page at a time on the server rather than
+ * holding the newest hundred and paging those.
  */
-export const LEDGER_PAGE_ROWS = 100
+export const LEDGER_PAGE_SIZE = 20
 
 function customerSearchCacheKey(path: string) {
   return `customers:search:${path}`
@@ -47,21 +47,30 @@ function customerSearchCacheKey(path: string) {
  */
 export function customerSearchPath(
   query: string,
-  { listWhenEmpty = false, limit }: { listWhenEmpty?: boolean; limit?: number } = {},
+  { listWhenEmpty = false, limit, offset = 0 }: CustomerSearchOptions = {},
 ): string | null {
   const trimmed = query.trim()
   const parameter = customerSearchParameter(trimmed)
-  const cap = limit ? `limit=${limit}` : ''
-  if (!parameter) {
-    if (!listWhenEmpty) return null
-    return cap ? `/v1/course/customers?${cap}` : '/v1/course/customers'
-  }
-  const filter = `${parameter}=${encodeURIComponent(trimmed)}`
-  return `/v1/course/customers?${cap ? `${filter}&${cap}` : filter}`
+  if (!parameter && !listWhenEmpty) return null
+  const params = [
+    parameter ? `${parameter}=${encodeURIComponent(trimmed)}` : '',
+    limit ? `limit=${limit}` : '',
+    offset > 0 ? `offset=${offset}` : '',
+  ].filter(Boolean)
+  return params.length > 0 ? `/v1/course/customers?${params.join('&')}` : '/v1/course/customers'
+}
+
+export type CustomerSearchOptions = {
+  listWhenEmpty?: boolean
+  limit?: number
+  /** Rows to skip, for a screen paging through the ledger. */
+  offset?: number
 }
 
 export type CustomerSearchState = {
   candidates: Customer[]
+  /** How many the search selects across every page, when the ledger says. */
+  total: number | null
   searching: boolean
   /** Trimmed input for which `candidates` is the completed answer. */
   completedQuery: string | null
@@ -80,10 +89,11 @@ export type CustomerSearchState = {
  */
 export function useCustomerSearch(
   query: string,
-  { listWhenEmpty = false, limit }: { listWhenEmpty?: boolean; limit?: number } = {},
+  { listWhenEmpty = false, limit, offset = 0 }: CustomerSearchOptions = {},
 ): CustomerSearchState {
   const [state, setState] = useState<CustomerSearchState>({
     candidates: [],
+    total: null,
     searching: false,
     completedQuery: null,
     error: null,
@@ -94,10 +104,10 @@ export function useCustomerSearch(
 
   useEffect(() => {
     const trimmed = query.trim()
-    const path = customerSearchPath(trimmed, { listWhenEmpty, limit })
+    const path = customerSearchPath(trimmed, { listWhenEmpty, limit, offset })
     if (!path) {
       latest.current += 1
-      setState({ candidates: [], searching: false, completedQuery: null, error: null })
+      setState({ candidates: [], total: null, searching: false, completedQuery: null, error: null })
       return
     }
 
@@ -106,6 +116,7 @@ export function useCustomerSearch(
     const previous = peekResourceCache(cacheKey) as CustomerList | undefined
     setState({
       candidates: previous?.items ?? [],
+      total: previous?.total ?? null,
       // A cache hit stays visible while the debounce and revalidation run.
       searching: previous === undefined,
       completedQuery: previous ? trimmed : null,
@@ -119,6 +130,7 @@ export function useCustomerSearch(
           writeResourceCache(cacheKey, found)
           setState({
             candidates: found.items ?? [],
+            total: found.total ?? null,
             searching: false,
             completedQuery: trimmed,
             error: null,
@@ -127,6 +139,7 @@ export function useCustomerSearch(
           if (latest.current !== generation) return
           setState({
             candidates: previous?.items ?? [],
+            total: previous?.total ?? null,
             searching: false,
             completedQuery: previous ? trimmed : null,
             error: error instanceof Error ? error.message : String(error),
@@ -136,7 +149,7 @@ export function useCustomerSearch(
     }, DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [query, listWhenEmpty, limit])
+  }, [query, listWhenEmpty, limit, offset])
 
   return state
 }

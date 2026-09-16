@@ -2619,15 +2619,18 @@ function resolveGet(path: string): Json | null | undefined {
       email: url.searchParams.get('email')?.trim() || null,
     }
     const limit = Number(url.searchParams.get('limit')) || 20
+    const offset = Number(url.searchParams.get('offset')) || 0
     // Nothing typed is the ledger listing the screen opens with, newest first
     // — the same shape the server answers, so the empty state is exercised
-    // here rather than only against Field.
-    if (!search.name && !search.phone && !search.email) {
-      return items([...mockCustomers].reverse().slice(0, limit))
+    // here rather than only against Field. `total` is the whole match, as
+    // Field counts it, so the pager is exercised too.
+    const matched = !search.name && !search.phone && !search.email
+      ? [...mockCustomers].reverse()
+      : mockCustomers.filter(customer => mockCustomerMatches(customer, search))
+    return {
+      items: matched.slice(offset, offset + limit),
+      total: matched.length,
     }
-    return items(
-      mockCustomers.filter(customer => mockCustomerMatches(customer, search)).slice(0, limit),
-    )
   }
 
   if (pathname === '/v1/course/customer-reception-fields') {

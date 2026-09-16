@@ -16,12 +16,12 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use crate::course::domain::{
-    CourseError, Customer, CustomerGateway, CustomerId, CustomerSearchQuery, GatewayCredentials,
-    NewCustomer,
+    CourseError, Customer, CustomerGateway, CustomerId, CustomerPage, CustomerSearchQuery,
+    GatewayCredentials, NewCustomer,
 };
 
 use super::field_gateway::{
-    field_get_items, field_send_json, field_send_unit, normalize_base_url, urlencoding_path,
+    field_send_json, field_send_unit, is_empty_course_store, normalize_base_url, urlencoding_path,
 };
 
 /// Reads and writes the tenant's customer ledger in Field.
@@ -46,14 +46,38 @@ impl CustomerGateway for FieldCustomerGateway {
         credentials: GatewayCredentials<'_>,
         query: &CustomerSearchQuery,
     ) -> Result<Vec<Customer>, CourseError> {
+        Ok(self
+            .search_customer_page(credentials, query)
+            .await?
+            .customers)
+    }
+
+    async fn search_customer_page(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        query: &CustomerSearchQuery,
+    ) -> Result<CustomerPage, CourseError> {
+        if is_empty_course_store(&self.base_url) {
+            return Ok(CustomerPage::default());
+        }
         let path = format!("/v1/storekit/customers?{}", search_query_string(query)?);
-        let mut items: Vec<FieldCustomerDto> =
-            field_get_items(&self.client, &self.base_url, &path, credentials).await?;
+        let mut body: FieldCustomerList = field_send_json(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::GET,
+            &path,
+            credentials,
+            None,
+        )
+        .await?;
         // Field echoes `limit: 0` and has answered an unlimited listing before,
         // so the cap is honoured here too rather than trusted upstream. An
         // empty search asks for the ledger, and the ledger is not bounded.
-        items.truncate(query.limit as usize);
-        Ok(items.into_iter().map(map_customer).collect())
+        body.items.truncate(query.limit as usize);
+        Ok(CustomerPage {
+            customers: body.items.into_iter().map(map_customer).collect(),
+            total: body.total,
+        })
     }
 
     async fn get_customer(
@@ -115,6 +139,16 @@ impl CustomerGateway for FieldCustomerGateway {
     }
 }
 
+/// StoreKit's list envelope. `total` is the size of the filtered set; the
+/// `limit` and `offset` it echoes are always zero and are not read.
+#[derive(Debug, Deserialize)]
+struct FieldCustomerList {
+    #[serde(default)]
+    items: Vec<FieldCustomerDto>,
+    #[serde(default)]
+    total: Option<i64>,
+}
+
 /// Field's customer keys are snake_case, unlike the reservation surfaces.
 #[derive(Debug, Deserialize)]
 struct FieldCustomerDto {
@@ -171,6 +205,9 @@ fn search_query_string(query: &CustomerSearchQuery) -> Result<String, CourseErro
         params.push(("email", value.to_string()));
     }
     params.push(("limit", query.limit.to_string()));
+    if query.offset > 0 {
+        params.push(("offset", query.offset.to_string()));
+    }
     // Percent-encoding rather than string concatenation: a desk searching for
     // `山田 太郎` puts a space and multi-byte text straight into the query.
     serde_urlencoded::to_string(params).map_err(|error| {
@@ -197,6 +234,24 @@ mod tests {
         let query = CustomerSearchQuery::try_new(None, None, None, None).unwrap();
         let encoded = search_query_string(&query).unwrap();
         assert_eq!(encoded, "limit=20");
+    }
+
+    #[test]
+    fn a_later_page_asks_field_to_skip_what_came_before() {
+        let query = CustomerSearchQuery::try_new(None, None, None, Some(20))
+            .unwrap()
+            .with_offset(Some(40));
+        assert_eq!(search_query_string(&query).unwrap(), "limit=20&offset=40");
+    }
+
+    #[test]
+    fn the_ledger_count_is_read_from_the_storekit_envelope() {
+        let body: FieldCustomerList = serde_json::from_str(
+            r#"{"items":[{"id":"cus_1","name":"本田 康彦","email":""}],"limit":0,"offset":0,"has_more":true,"total":241}"#,
+        )
+        .unwrap();
+        assert_eq!(body.total, Some(241));
+        assert_eq!(body.items.len(), 1);
     }
 
     #[test]

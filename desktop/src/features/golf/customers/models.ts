@@ -10,6 +10,8 @@ export type Customer = {
 
 export type CustomerList = {
   items: Customer[]
+  /** How many the search selects across every page, when the ledger says. */
+  total?: number | null
 }
 
 export const customersPath = '/v1/course/customers'

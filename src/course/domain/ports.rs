@@ -11,7 +11,7 @@ use super::{
     CaddieRankFeeChangeContext, CaddieRankFees, CaddieRating, CaddieRoster, CaddieShift,
     CaddieStaff, CancellationFeeDecision, CancellationQuery, Course, CourseError, CourseId,
     CourseOrder, CreateCustomerConsentItem, Customer, CustomerConsentItem, CustomerGradeRules,
-    CustomerId, CustomerMembership, CustomerReceptionField, CustomerRegistration,
+    CustomerId, CustomerMembership, CustomerPage, CustomerReceptionField, CustomerRegistration,
     CustomerSearchQuery, CustomerSummary, CustomerSummaryQuery, CustomerSummaryRun,
     CustomerSummaryRunStatus, DailyBudget, DailyBudgetQuery, DefaultWorkingHours,
     DeleteSlotOverrides, ExtensionStatus, FieldClientCapabilities, FieldRequestContext,
@@ -1099,6 +1099,22 @@ pub trait CustomerGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         query: &CustomerSearchQuery,
     ) -> Result<Vec<Customer>, CourseError>;
+
+    /// The same search as a page of the whole result, with its size.
+    ///
+    /// Defaults to the plain search with no count, which is all an in-memory
+    /// ledger in a test needs. The Field ledger overrides it, since Field
+    /// counts the set it filtered.
+    async fn search_customer_page(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        query: &CustomerSearchQuery,
+    ) -> Result<CustomerPage, CourseError> {
+        Ok(CustomerPage {
+            customers: self.search_customers(credentials, query).await?,
+            total: None,
+        })
+    }
 
     async fn get_customer(
         &self,

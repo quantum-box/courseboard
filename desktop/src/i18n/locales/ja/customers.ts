@@ -6,7 +6,6 @@ export const customers = {
     label: '名前・カナ・電話番号・メールアドレス',
     placeholder: '例）本田、ホンダ、090-1234、honda@example.com',
     prompt: '名前・カナ・電話番号・メールアドレスを入力してください。1文字の名前から検索できます。',
-    recent: '新しく登録した順に{{count}}人まで表示しています。ここにいない人は、名前・カナ・電話番号・メールアドレスで検索してください。',
     emptyLedgerTitle: 'まだ顧客がいません',
     emptyLedger: '「顧客を新しく登録する」から追加できます。',
     condition: {

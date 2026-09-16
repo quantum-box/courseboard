@@ -101,7 +101,7 @@ pub use course_supply::{
     CaddieCapability, CourseCaddieSupply, DayCaddieSupply, Reinforcement,
 };
 pub use customer::{
-    Customer, CustomerSearchQuery, NewCustomer, DEFAULT_CUSTOMER_SEARCH_LIMIT,
+    Customer, CustomerPage, CustomerSearchQuery, NewCustomer, DEFAULT_CUSTOMER_SEARCH_LIMIT,
     MAX_CUSTOMER_SEARCH_LIMIT,
 };
 pub use customer_consent::{
