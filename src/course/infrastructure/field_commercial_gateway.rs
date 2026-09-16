@@ -7,8 +7,9 @@ use serde_json::{json, Value};
 
 use super::booking_horizon_config;
 use super::field_gateway::{
-    field_get_items, field_send_json, field_send_raw, field_send_text, field_send_unit,
-    normalize_base_url, read_extension_config, write_extension_config_key,
+    field_get_items, field_send_json, field_send_json_classified, field_send_raw, field_send_text,
+    field_send_unit, normalize_base_url, read_extension_config, write_extension_config_key,
+    FieldStatusFailure,
 };
 use crate::course::domain::{
     BookingHorizon, CourseError, DailyBudget, DailyBudgetQuery, ExtensionStatus,
@@ -55,17 +56,22 @@ impl GolfCommercialGateway for FieldGolfCommercialGateway {
     async fn get_reservation_policy(
         &self,
         credentials: GatewayCredentials<'_>,
-    ) -> Result<ReservationPolicy, CourseError> {
-        let dto: FieldPolicyDto = field_send_json(
+    ) -> Result<Option<ReservationPolicy>, CourseError> {
+        let read = field_send_json_classified::<FieldPolicyDto, _>(
             &self.client,
             &self.base_url,
             reqwest::Method::GET,
             &format!("{GOLF}/reservation-policy"),
             credentials,
             None,
+            classify_policy_read_failure,
         )
-        .await?;
-        Ok(map_policy(dto))
+        .await;
+        match read {
+            Ok(dto) => Ok(Some(map_policy(dto))),
+            Err(CourseError::NotFound(POLICY_NOT_SET)) => Ok(None),
+            Err(error) => Err(error),
+        }
     }
 
     async fn update_reservation_policy(
@@ -279,6 +285,36 @@ fn urlencoding_query(value: impl AsRef<str>) -> String {
             _ => format!("%{:02X}", ch as u8),
         })
         .collect()
+}
+
+const POLICY_NOT_SET: &str = "reservation policy is not set";
+
+/// What a failed policy read means.
+///
+/// Field answers "this tenant has no policy row" with a 404 carrying its
+/// `NOT_FOUND` code. That is the club not having set its rules yet, and the
+/// screen shows an empty form for it. A 404 *without* that code is a route
+/// Field no longer serves, which must not pass for "not set" — the operator
+/// would fill the form and the save would fail on the same missing route.
+///
+/// The read sends nothing the operator chose, so a 400 is Field refusing the
+/// tenant rather than the request (today: the tenant's policy store has not
+/// been opened on Field's side). The operator cannot correct that from
+/// CourseBoard, so it is a provider failure, not a bad request.
+fn classify_policy_read_failure(failure: &FieldStatusFailure<'_>) -> Option<CourseError> {
+    match failure.status.as_u16() {
+        404 if failure.code.as_deref() == Some("NOT_FOUND") => {
+            Some(CourseError::NotFound(POLICY_NOT_SET))
+        }
+        404 => Some(CourseError::Provider(
+            "Field did not serve the reservation policy route (404 without NOT_FOUND)".into(),
+        )),
+        400 => Some(CourseError::Provider(
+            "この施設では予約ルールをまだ保存できる状態になっていません。導入担当にご連絡ください"
+                .into(),
+        )),
+        _ => None,
+    }
 }
 
 fn map_policy(value: FieldPolicyDto) -> ReservationPolicy {
@@ -529,6 +565,48 @@ struct FieldValidationDto {
     valid: Option<bool>,
     #[serde(default)]
     errors: Option<Vec<String>>,
+}
+
+#[cfg(test)]
+mod reservation_policy_read_tests {
+    use super::*;
+
+    fn classify(status: u16, body: &str) -> Option<CourseError> {
+        classify_policy_read_failure(&FieldStatusFailure {
+            status: reqwest::StatusCode::from_u16(status).unwrap(),
+            code: super::super::field_gateway::field_error_code(body),
+            body,
+        })
+    }
+
+    #[test]
+    fn a_tenant_without_a_policy_row_reads_as_not_set() {
+        let error = classify(
+            404,
+            r#"{"code":"NOT_FOUND","message":"NotFoundError: golf reservation policy not found"}"#,
+        );
+        assert!(matches!(error, Some(CourseError::NotFound(POLICY_NOT_SET))));
+    }
+
+    #[test]
+    fn a_missing_route_is_not_mistaken_for_an_unset_policy() {
+        assert!(matches!(classify(404, ""), Some(CourseError::Provider(_))));
+    }
+
+    #[test]
+    fn a_tenant_field_refuses_is_a_provider_failure() {
+        let error = classify(
+            400,
+            r#"{"code":"BAD_REQUEST","message":"BadRequest: golf_course extension is not enabled"}"#,
+        );
+        assert!(matches!(error, Some(CourseError::Provider(_))));
+    }
+
+    #[test]
+    fn other_failures_keep_the_default_mapping() {
+        assert!(classify(403, r#"{"code":"FORBIDDEN","message":"denied"}"#).is_none());
+        assert!(classify(502, "bad gateway").is_none());
+    }
 }
 
 #[cfg(test)]

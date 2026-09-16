@@ -178,6 +178,9 @@ describe('mockFieldApi', () => {
 
     const policy = resolveMockFieldApiJson('/v1/course/reservation-policy')
     expect(policy.kind).toBe('hit')
+    if (policy.kind !== 'hit') return
+    expect((policy.data as { policy: { cartPolicy: string } | null }).policy?.cartPolicy)
+      .toBe('optional')
 
     const budgets = resolveMockFieldApiJson('/v1/course/daily-budgets?from=2026-07-01&to=2026-07-31')
     expect(budgets.kind).toBe('hit')

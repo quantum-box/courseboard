@@ -7,6 +7,11 @@ export const policy = {
     configured: '設定ずみ',
     missing: 'まだ未設定',
   },
+  unset: {
+    title: '予約ルールはまだ保存されていません',
+    description:
+      '保存するまでは、セルフの受付時間帯や客単価の判定はかからず、予約はそのまま入ります。下の初期値を確かめて保存してください。',
+  },
   saved: {
     title: '予約ルールを保存しました',
     description: 'これからの予約は、この設定で判定します。',

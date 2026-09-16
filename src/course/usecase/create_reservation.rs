@@ -308,19 +308,14 @@ impl CreateReservationUseCase {
         &self,
         credentials: GatewayCredentials<'_>,
     ) -> Result<String, CourseError> {
-        match self.commercial.get_reservation_policy(credentials).await {
-            Ok(policy) => {
-                let from_policy = policy.reservation_type_id().trim().to_string();
-                if !from_policy.is_empty() {
-                    return Ok(from_policy);
-                }
+        // Only "there is no policy" falls through. A timeout or a 5xx is a real
+        // upstream failure, and swallowing it would book the round under
+        // whichever type happened to be first.
+        if let Some(policy) = self.commercial.get_reservation_policy(credentials).await? {
+            let from_policy = policy.reservation_type_id().trim().to_string();
+            if !from_policy.is_empty() {
+                return Ok(from_policy);
             }
-            // Only "there is no policy" falls through — Field answers that as a
-            // 404. A timeout or a 5xx is a real upstream failure, and swallowing
-            // it would book the round under whichever type happened to be first.
-            Err(CourseError::NotFound(_)) => {}
-            Err(CourseError::UpstreamClient { status: 404, .. }) => {}
-            Err(error) => return Err(error),
         }
         self.reservations
             .list_reservation_type_ids(credentials)
@@ -938,8 +933,8 @@ mod tests {
         async fn get_reservation_policy(
             &self,
             _credentials: GatewayCredentials<'_>,
-        ) -> Result<ReservationPolicy, CourseError> {
-            Err(CourseError::NotFound("reservation policy"))
+        ) -> Result<Option<ReservationPolicy>, CourseError> {
+            Ok(None)
         }
 
         async fn update_reservation_policy(

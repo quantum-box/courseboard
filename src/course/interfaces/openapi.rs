@@ -318,6 +318,7 @@ impl Modify for SecurityAddon {
             http_ops::RatingDto,
             http_ops::RatingsQueryParams,
             http_commercial::ReservationPolicyDto,
+            http_commercial::ReservationPolicyReadDto,
             http_commercial::UpdateReservationPolicyRequest,
             http_commercial::DailyBudgetDto,
             http_commercial::DailyBudgetQueryParams,

@@ -1542,10 +1542,13 @@ pub trait GolfOpsGateway: Send + Sync {
 /// Port for budgets, settlement, reservation policy, and extension config.
 #[async_trait]
 pub trait GolfCommercialGateway: Send + Sync {
+    /// The tenant's reservation policy, or `None` while the club has not set
+    /// one yet. Not having one is an ordinary state — the ledger and the desk
+    /// work without it — so it is not an error.
     async fn get_reservation_policy(
         &self,
         credentials: GatewayCredentials<'_>,
-    ) -> Result<ReservationPolicy, CourseError>;
+    ) -> Result<Option<ReservationPolicy>, CourseError>;
 
     async fn update_reservation_policy(
         &self,

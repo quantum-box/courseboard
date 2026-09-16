@@ -1,4 +1,4 @@
-import { ApiError, courseboardApiJson, today } from '../../api'
+import { courseboardApiJson, today } from '../../api'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import { formatCourseDate } from '../../lib/clock'
@@ -75,6 +75,11 @@ type GolfReservationPolicy = {
   cutoffHours: number
   policyHooksJson: GolfPolicyHooks | null
   metadataJson: unknown
+}
+
+/** `policy` is null until the club saves its rules for the first time. */
+type ReservationPolicyRead = {
+  policy: GolfReservationPolicy | null
 }
 
 type BookingHorizon = BookingHorizonResponse
@@ -297,24 +302,16 @@ export function PolicyPage() {
     setLoadError(null)
     void loadHorizon()
     try {
-      const policy = await courseboardApiJson<GolfReservationPolicy>(
+      const { policy } = await courseboardApiJson<ReservationPolicyRead>(
         '/v1/course/reservation-policy',
       )
-      setDraft(policyToDraft(policy))
-      setPreservedHooks(policy.policyHooksJson ?? {})
-      setPreservedMetadata(policy.metadataJson ?? {})
-      setExists(true)
+      setDraft(policy ? policyToDraft(policy) : emptyDraft())
+      setPreservedHooks(policy?.policyHooksJson ?? {})
+      setPreservedMetadata(policy?.metadataJson ?? {})
+      setExists(policy !== null)
       setSaveError(null)
     } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
-        setDraft(emptyDraft())
-        setPreservedHooks({})
-        setPreservedMetadata({})
-        setExists(false)
-        setSaveError(null)
-      } else {
-        setLoadError(error)
-      }
+      setLoadError(error)
     } finally {
       setLoading(false)
     }
@@ -446,6 +443,12 @@ export function PolicyPage() {
           <Save /> {saving ? t('common:action.saving') : t('common:action.save')}
         </Button>
       </div>
+
+      {exists ? null : (
+        <Notice tone="warning" title={t('policy:unset.title')}>
+          {t('policy:unset.description')}
+        </Notice>
+      )}
 
       <Panel
         title={t('policy:basics.title')}

@@ -67,6 +67,15 @@ impl From<&ReservationPolicy> for ReservationPolicyDto {
     }
 }
 
+/// A club that has not set its reservation rules yet is an ordinary tenant,
+/// so the read answers 200 with `policy: null` rather than a 404 the screen
+/// has to tell apart from a missing route.
+#[derive(Debug, Serialize, Deserialize, PartialEq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReservationPolicyReadDto {
+    pub policy: Option<ReservationPolicyDto>,
+}
+
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateReservationPolicyRequest {
@@ -98,7 +107,7 @@ pub struct UpdateReservationPolicyRequest {
     path = "/v1/course/reservation-policy",
     tag = "course-commercial",
     responses(
-        (status = 200, description = "Reservation policy", body = ReservationPolicyDto),
+        (status = 200, description = "Reservation policy; `policy` is null until the club sets one", body = ReservationPolicyReadDto),
         (status = 401, description = "Unauthorized", body = ErrorBody),
         (status = 424, description = "Upstream provider error", body = ErrorBody),
     ),
@@ -107,14 +116,16 @@ pub struct UpdateReservationPolicyRequest {
 pub async fn get_reservation_policy(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<ReservationPolicyDto>, AppError> {
+) -> Result<Json<ReservationPolicyReadDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
     let use_case = GetReservationPolicyUseCase::new(commercial_gateway(&state));
     let policy = use_case
         .execute(credentials)
         .await
         .map_err(AppError::from)?;
-    Ok(Json(ReservationPolicyDto::from(&policy)))
+    Ok(Json(ReservationPolicyReadDto {
+        policy: policy.as_ref().map(ReservationPolicyDto::from),
+    }))
 }
 
 /// PATCH /v1/course/reservation-policy

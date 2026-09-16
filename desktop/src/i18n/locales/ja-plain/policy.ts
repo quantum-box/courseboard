@@ -12,6 +12,11 @@ export const policy: DeepPartial<typeof source> = {
     configured: '決めてあります',
     missing: 'まだ決めていません',
   },
+  unset: {
+    title: '予約の決まりごとは、まだ保存されていません',
+    description:
+      '保存するまでは、セルフで受けない時間や、1人あたりの金額のチェックは効きません。予約はそのまま入ります。下の最初の値を見て、保存してください。',
+  },
   saved: {
     title: '決まりごとを保存しました',
     description: 'これから入る予約は、この内容で判断します。',

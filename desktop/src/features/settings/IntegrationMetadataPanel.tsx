@@ -3,7 +3,7 @@ import { Save } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { i18next } from '../../i18n'
-import { ApiError, courseboardApiJson } from '../../api'
+import { courseboardApiJson } from '../../api'
 import {
   Field,
   LoadingState,
@@ -15,8 +15,9 @@ import {
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 
-type ReservationPolicy = {
-  metadataJson?: unknown
+type ReservationPolicyRead = {
+  /** null until the club saves its booking rules for the first time. */
+  policy: { metadataJson?: unknown } | null
 }
 
 const METADATA_PLACEHOLDER = `{
@@ -61,21 +62,15 @@ export function IntegrationMetadataPanel() {
     setLoadError(null)
     setSaveError(null)
     try {
-      const policy = await courseboardApiJson<ReservationPolicy>(
+      const { policy } = await courseboardApiJson<ReservationPolicyRead>(
         '/v1/course/reservation-policy',
       )
-      const next = formatMetadata(policy.metadataJson)
+      const next = formatMetadata(policy?.metadataJson)
       setDraft(next)
       setBaseline(next)
-      setPolicyMissing(false)
+      setPolicyMissing(policy === null)
     } catch (error) {
-      if (error instanceof ApiError && error.status === 404) {
-        setDraft('{}')
-        setBaseline('{}')
-        setPolicyMissing(true)
-      } else {
-        setLoadError(error)
-      }
+      setLoadError(error)
     } finally {
       setLoading(false)
     }

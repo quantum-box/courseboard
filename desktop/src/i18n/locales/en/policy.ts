@@ -10,6 +10,11 @@ export const policy: DeepPartial<typeof source> = {
     configured: 'Configured',
     missing: 'Not set up yet',
   },
+  unset: {
+    title: 'Booking rules have not been saved yet',
+    description:
+      'Until they are saved, no self-play time limits or spend checks apply and bookings go straight through. Check the defaults below and save.',
+  },
   saved: {
     title: 'Booking rules saved',
     description: 'New bookings will be judged with these settings.',
