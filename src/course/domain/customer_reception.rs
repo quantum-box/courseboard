@@ -29,6 +29,19 @@ use super::NewCustomer;
 /// here keeps a scan the desk cannot use from crossing the network twice.
 pub const MAX_RECEPTION_SHEET_BYTES: usize = 10 * 1024 * 1024;
 
+/// How many sheets one read may carry. A group that arrives on several
+/// sheets — or one sheet photographed front and back — is read in one go
+/// rather than one file at a time, and Field reads them as consecutive pages
+/// of one document. Eight is Field's own ceiling on pictures per read: past it
+/// each page would have to be shrunk below what handwriting survives.
+pub const MAX_RECEPTION_SHEETS: usize = 8;
+
+/// What all the sheets of one read may weigh together. Field takes them in
+/// one synchronous request whose file budget is 4,000,000 bytes, and a body
+/// above that is dropped by the platform before anything can say it was too
+/// large — so the check lives here, where it can still be a 400.
+pub const MAX_RECEPTION_UPLOAD_BYTES: usize = 4_000_000;
+
 /// The generic entity Field drafts for. A golf visitor is an individual
 /// customer in the tenant's ledger — the same record the counter registers by
 /// hand — so the reception sheet is read against `consumer`.
@@ -198,6 +211,55 @@ impl ReceptionSheet {
 
     pub fn media_type(&self) -> ReceptionSheetMediaType {
         self.media_type
+    }
+}
+
+/// The sheets of one read, in the order the desk picked them. That order is
+/// the page order upstream reads in, and so the order the rows come back in.
+#[derive(Debug)]
+pub struct ReceptionSheets(Vec<ReceptionSheet>);
+
+impl ReceptionSheets {
+    pub fn try_new(sheets: Vec<ReceptionSheet>) -> Result<Self, CourseError> {
+        if sheets.is_empty() {
+            return Err(CourseError::BadRequest(
+                "multipart field 'file' is required",
+            ));
+        }
+        if sheets.len() > MAX_RECEPTION_SHEETS {
+            return Err(CourseError::BadRequest(
+                "a reception read may contain at most 8 sheets",
+            ));
+        }
+        let total: usize = sheets.iter().map(|sheet| sheet.bytes.len()).sum();
+        if total > MAX_RECEPTION_UPLOAD_BYTES {
+            return Err(CourseError::BadRequest(
+                "reception sheets are larger than 4MB in total",
+            ));
+        }
+        Ok(Self(sheets))
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &ReceptionSheet> {
+        self.0.iter()
+    }
+
+    pub fn into_inner(self) -> Vec<ReceptionSheet> {
+        self.0
+    }
+}
+
+impl From<ReceptionSheet> for ReceptionSheets {
+    fn from(sheet: ReceptionSheet) -> Self {
+        Self(vec![sheet])
     }
 }
 
@@ -806,6 +868,49 @@ mod tests {
     fn a_sheet_over_ten_megabytes_never_leaves_courseboard() {
         let error =
             ReceptionSheet::try_new(jpeg(MAX_RECEPTION_SHEET_BYTES), "image/jpeg").unwrap_err();
+        assert!(matches!(error, CourseError::BadRequest(_)));
+    }
+
+    fn sheet_of(extra: usize) -> ReceptionSheet {
+        ReceptionSheet::try_new(jpeg(extra), "image/jpeg").unwrap()
+    }
+
+    #[test]
+    fn several_sheets_are_one_read_in_the_order_they_were_picked() {
+        let sheets = ReceptionSheets::try_new(vec![
+            sheet_of(1),
+            ReceptionSheet::try_new(b"%PDF-1.7 body".to_vec(), "application/pdf").unwrap(),
+        ])
+        .unwrap();
+        let kinds: Vec<_> = sheets.iter().map(ReceptionSheet::media_type).collect();
+        assert_eq!(
+            kinds,
+            [ReceptionSheetMediaType::Jpeg, ReceptionSheetMediaType::Pdf]
+        );
+    }
+
+    #[test]
+    fn a_read_needs_a_sheet_and_stops_at_what_upstream_reads_at_once() {
+        assert!(matches!(
+            ReceptionSheets::try_new(Vec::new()).unwrap_err(),
+            CourseError::BadRequest(_)
+        ));
+        let nine = (0..=MAX_RECEPTION_SHEETS).map(|_| sheet_of(1)).collect();
+        assert!(matches!(
+            ReceptionSheets::try_new(nine).unwrap_err(),
+            CourseError::BadRequest(_)
+        ));
+        let eight = (0..MAX_RECEPTION_SHEETS).map(|_| sheet_of(1)).collect();
+        assert_eq!(ReceptionSheets::try_new(eight).unwrap().len(), 8);
+    }
+
+    /// Each sheet fits, the request does not: the platform would drop it
+    /// before Field could say so, so it is refused here while it can still be
+    /// a message.
+    #[test]
+    fn sheets_that_fit_one_by_one_can_still_be_too_heavy_together() {
+        let half = MAX_RECEPTION_UPLOAD_BYTES / 2;
+        let error = ReceptionSheets::try_new(vec![sheet_of(half), sheet_of(half)]).unwrap_err();
         assert!(matches!(error, CourseError::BadRequest(_)));
     }
 

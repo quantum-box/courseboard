@@ -84,12 +84,14 @@ export async function analyzeReceptionForm(file: File): Promise<ReceptionFormPro
 }
 
 /**
- * Reads one sheet. Nothing is stored anywhere along the way — not the file, not
- * the text upstream made of it — so a re-read means picking the file again.
+ * Reads the sheets of one group together, as pages in the order given; the rows
+ * come back in that order. Nothing is stored anywhere along the way — not the
+ * files, not the text upstream made of them — so a re-read means picking the
+ * files again.
  */
-export function draftReceptionSheet(file: File) {
+export function draftReceptionSheets(files: readonly File[]) {
   const form = new FormData()
-  form.append('file', file, uploadFileName(file))
+  for (const file of files) form.append('file', file, uploadFileName(file))
   return courseboardApiJson<ReceptionDraft>(RECEPTION_DRAFT_PATH, {
     method: 'POST',
     body: form,

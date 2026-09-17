@@ -26,6 +26,7 @@
 
 # Tasks
 - [In Progress]()
+  - [受付用紙を一度に複数枚読み取る](src/tasks/in-progress/reception-multi-sheet-read/task.md)
   - [CourseBoardをField extensionから切り離す](src/tasks/in-progress/courseboard-extension-exit/task.md)
     - [設計](src/tasks/in-progress/courseboard-extension-exit/design.md)
     - [extension configから撤退する](src/tasks/in-progress/extension-config-exit/task.md)

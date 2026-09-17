@@ -46,11 +46,13 @@ export const customers: DeepPartial<typeof source> = {
     choose: {
       open: 'Choose a reception sheet',
       again: 'Read another sheet',
-      hint: 'JPEG, PNG, HEIC/HEIF, and PDF, up to 10MB per file. iPhone photos are converted to JPEG before being read. The sheet itself is not stored.',
+      hint: 'JPEG, PNG, HEIC/HEIF, and PDF. Pick up to 8 sheets at once; they are read in the order picked. iPhone photos are converted to JPEG, and large sets are downscaled before being read. The sheets themselves are not stored.',
     },
     file: {
       required: 'Choose a reception sheet file.',
       size: 'That file is too large. Choose a file of 10MB or less.',
+      count: 'Up to {{count}} sheets can be read at once. Read the rest separately.',
+      totalSize: 'The selected sheets are too large together. Pick fewer, or split the PDF.',
       type: 'Choose a JPEG, PNG, HEIC/HEIF, or PDF file.',
       convert: 'That iPhone photo (HEIC/HEIF) could not be converted. Export it as JPEG from the Photos app and try again.',
     },
@@ -167,6 +169,7 @@ export const customers: DeepPartial<typeof source> = {
       title: 'Reception sheet',
       description: 'The sheet this read came from.',
       alt: 'Scanned reception sheet',
+      page: 'Sheet {{index}} of {{total}}',
     },
   },
   visits: {

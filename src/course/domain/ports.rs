@@ -20,7 +20,7 @@ use super::{
     MembershipPlanId, MembershipPlayWindows, MonthlySettlement, NewCustomer,
     NewCustomerRegistration, NewReservation, NewReservationCancellation, PartyDetails,
     PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionConsentDefinition,
-    ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal, ReceptionSheet,
+    ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal, ReceptionSheet, ReceptionSheets,
     RecordedCaddieFeeChange, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate,
     ReservationCancellation, ReservationId, ReservationPolicy, ReservationProduct,
     ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
@@ -1184,15 +1184,16 @@ pub trait CustomerGateway: Send + Sync {
 /// not be holding a port it cannot reach.
 #[async_trait]
 pub trait CustomerReceptionOcrGateway: Send + Sync {
-    /// Reads one sheet. Nothing is stored — upstream keeps neither the document
-    /// nor the raw text, and neither does CourseBoard.
+    /// Reads the sheets of one group as one document, in the order given.
+    /// Nothing is stored — upstream keeps neither the document nor the raw
+    /// text, and neither does CourseBoard.
     ///
     /// Returns a draft, never a write: every row is a proposal the desk checks
     /// against the original before anybody lands in the ledger.
     async fn draft_reception(
         &self,
         credentials: GatewayCredentials<'_>,
-        sheet: ReceptionSheet,
+        sheets: ReceptionSheets,
         fields: &[CustomerReceptionField],
         consents: &[ReceptionConsentDefinition],
     ) -> Result<ReceptionDraft, CourseError>;

@@ -1,7 +1,7 @@
 /** 受付用紙を読み取って顧客台帳に入れるまでの、画面側の型と判断。 */
 
 import { ApiError } from '../../../../api'
-import { heifToJpeg } from './heif'
+import { heifToJpeg, shrinkSheetImage } from './heif'
 
 /**
  * What the desk may pick.
@@ -20,6 +20,27 @@ export const RECEPTION_SHEET_ACCEPT =
 export const RECEPTION_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'application/pdf']
 
 export const MAX_RECEPTION_SHEET_BYTES = 10 * 1024 * 1024
+
+/**
+ * How many sheets one read may carry. A group that arrives on several sheets
+ * is picked and read together, and comes back as one list of rows in the order
+ * the sheets were picked. Eight is what the reader takes in one go.
+ */
+export const MAX_RECEPTION_SHEETS = 8
+
+/**
+ * What the sheets of one read may weigh together once they are ready to send.
+ * They travel in one request, and the platform drops a request over this
+ * without anything getting to say why.
+ */
+export const MAX_RECEPTION_UPLOAD_BYTES = 4_000_000
+
+/**
+ * The long edges to try, largest first, when several photos do not fit in one
+ * upload as they are. The reader shrinks every page far below the first of
+ * these before it looks, so nothing it would have read is lost until the last.
+ */
+const SHRINK_EDGES = [2400, 1800, 1400, 1100] as const
 
 /**
  * Why nothing was read, when the sheet is not the reason.
@@ -826,6 +847,53 @@ export function fileValidationError(file: File | null): 'required' | 'size' | 't
   if (file.size > MAX_RECEPTION_SHEET_BYTES) return 'size'
   if (!RECEPTION_UPLOAD_TYPES.includes(file.type)) return 'type'
   return null
+}
+
+export type ReceptionSheetsError = 'required' | 'count' | 'size' | 'totalSize' | 'type'
+
+/**
+ * The sheets of one read, checked the way they will be uploaded: each one a
+ * format the reader takes, and all of them together inside one request.
+ */
+export function sheetsValidationError(files: readonly File[]): ReceptionSheetsError | null {
+  if (files.length === 0) return 'required'
+  if (files.length > MAX_RECEPTION_SHEETS) return 'count'
+  for (const file of files) {
+    const invalid = fileValidationError(file)
+    if (invalid) return invalid
+  }
+  if (totalBytes(files) > MAX_RECEPTION_UPLOAD_BYTES) return 'totalSize'
+  return null
+}
+
+function totalBytes(files: readonly File[]) {
+  return files.reduce((sum, file) => sum + file.size, 0)
+}
+
+/**
+ * The picked sheets as they will be uploaded, in the order they were picked.
+ *
+ * Each is prepared as a single sheet would be (HEIC to JPEG, labels fixed from
+ * the bytes). If the set is then too heavy for one request, the photos — never
+ * the PDFs, which a browser cannot redraw — are re-encoded smaller, one step at
+ * a time, until it fits or there is no smaller step left. What is still too
+ * heavy after that is left for `sheetsValidationError` to refuse.
+ */
+export async function prepareReceptionSheets(picked: readonly File[]): Promise<File[]> {
+  const prepared = await Promise.all(picked.map(file => prepareReceptionSheet(file)))
+  if (totalBytes(prepared) <= MAX_RECEPTION_UPLOAD_BYTES) return prepared
+  let current = prepared
+  for (const edge of SHRINK_EDGES) {
+    current = await Promise.all(
+      prepared.map(file => (isShrinkable(file) ? shrinkSheetImage(file, edge) : file)),
+    )
+    if (totalBytes(current) <= MAX_RECEPTION_UPLOAD_BYTES) return current
+  }
+  return current
+}
+
+function isShrinkable(file: File) {
+  return file.type === 'image/jpeg' || file.type === 'image/png'
 }
 
 /**

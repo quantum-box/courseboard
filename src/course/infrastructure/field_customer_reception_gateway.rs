@@ -22,8 +22,8 @@ use crate::course::domain::{
     CustomerReceptionOcrGateway, GatewayCredentials, ProposedConsentItem,
     ReceptionConsentDefinition, ReceptionDraft, ReceptionDraftRow, ReceptionFieldInput,
     ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal, ReceptionReaderFailure,
-    ReceptionSheet, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL,
-    RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
+    ReceptionSheet, ReceptionSheets, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY,
+    RECEPTION_ROW_EMAIL, RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
     STANDARD_RECEPTION_FIELD_KEYS,
 };
 
@@ -51,7 +51,7 @@ impl CustomerReceptionOcrGateway for FieldCustomerReceptionGateway {
     async fn draft_reception(
         &self,
         credentials: GatewayCredentials<'_>,
-        sheet: ReceptionSheet,
+        sheets: ReceptionSheets,
         fields: &[CustomerReceptionField],
         consents: &[ReceptionConsentDefinition],
     ) -> Result<ReceptionDraft, CourseError> {
@@ -59,17 +59,14 @@ impl CustomerReceptionOcrGateway for FieldCustomerReceptionGateway {
             fields, consents,
         )?)
         .map_err(|_| CourseError::Provider("reception sheet schema is not serializable".into()))?;
-        let media_type = sheet.media_type();
-        let part = reqwest::multipart::Part::bytes(sheet.into_bytes())
-            // The desk's own filename is deliberately not forwarded: a scanner
-            // names files after the machine and the minute, and upstream has no
-            // use for either.
-            .file_name(media_type.upload_filename())
-            .mime_str(media_type.content_type())
-            .map_err(|_| CourseError::BadRequest("reception sheet file type is invalid"))?;
-        let form = reqwest::multipart::Form::new()
-            .part("file", part)
-            .text("schema", schema);
+        // One `file` part per sheet, in the order the desk picked them: Field
+        // reads repeated parts as consecutive pages of one document, so this
+        // order is the order the rows come back in.
+        let mut form = reqwest::multipart::Form::new();
+        for sheet in sheets.into_inner() {
+            form = form.part("file", sheet_part(sheet)?);
+        }
+        let form = form.text("schema", schema);
         let path = format!(
             "/v1/field/ocr/{}/draft",
             urlencoding_path(RECEPTION_OCR_ENTITY_KEY)
@@ -110,6 +107,17 @@ impl CustomerReceptionOcrGateway for FieldCustomerReceptionGateway {
         .await?;
         Ok(map_form_proposal(credentials.operator_id, response))
     }
+}
+
+fn sheet_part(sheet: ReceptionSheet) -> Result<reqwest::multipart::Part, CourseError> {
+    let media_type = sheet.media_type();
+    reqwest::multipart::Part::bytes(sheet.into_bytes())
+        // The desk's own filename is deliberately not forwarded: a scanner
+        // names files after the machine and the minute, and upstream has no
+        // use for either.
+        .file_name(media_type.upload_filename())
+        .mime_str(media_type.content_type())
+        .map_err(|_| CourseError::BadRequest("reception sheet file type is invalid"))
 }
 
 /// The blank-form analyzer's built-in vocabulary is wider than CourseBoard's
@@ -923,6 +931,71 @@ mod tests {
         assert!(failure_for(413, "").is_none());
     }
 
+    /// Several sheets travel as repeated `file` parts in the desk's order,
+    /// beside one schema. The order is the page order Field reads in, which
+    /// is what keeps rows lined up with the paper.
+    #[tokio::test]
+    async fn several_sheets_go_upstream_as_file_parts_in_the_order_picked() {
+        use axum::{extract::Multipart, routing::post, Json, Router};
+
+        let app = Router::new().route(
+            "/v1/field/ocr/consumer/draft",
+            post(|mut multipart: Multipart| async move {
+                let mut parts = Vec::new();
+                while let Some(field) = multipart.next_field().await.unwrap() {
+                    let name = field.name().unwrap_or_default().to_string();
+                    let content_type = field.content_type().unwrap_or_default().to_string();
+                    let _ = field.bytes().await.unwrap();
+                    parts.push(format!("{name}:{content_type}"));
+                }
+                Json(serde_json::json!({
+                    "fields": { "visitors": [{ "name": parts.join(",") }] },
+                    "warnings": []
+                }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock Field");
+        let address = listener.local_addr().expect("mock Field address");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve mock Field");
+        });
+
+        let gateway = FieldCustomerReceptionGateway::new(
+            reqwest::Client::new(),
+            Some(&format!("http://{address}")),
+        );
+        let sheets = ReceptionSheets::try_new(vec![
+            ReceptionSheet::try_new(vec![0xff, 0xd8, 0xff, 0x00], "image/jpeg").unwrap(),
+            ReceptionSheet::try_new(b"%PDF-1.7 body".to_vec(), "application/pdf").unwrap(),
+        ])
+        .unwrap();
+        let draft = gateway
+            .draft_reception(
+                GatewayCredentials {
+                    authorization: "Bearer test-token",
+                    operator_id: "operator-test",
+                    platform_id: Some("platform-test"),
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
+                },
+                sheets,
+                &crate::course::domain::CustomerReceptionField::merge_with_defaults(
+                    "operator-test",
+                    Vec::new(),
+                ),
+                &legacy_reception_consent_definitions(),
+            )
+            .await
+            .expect("draft");
+
+        assert_eq!(
+            draft.rows()[0].name(),
+            Some("file:image/jpeg,file:application/pdf,schema:")
+        );
+    }
+
     /// The whole path, over a real socket: Field's status and `code` have to
     /// survive the send helper to reach the classifier at all. The unit tests
     /// above pin what the classifier decides; this pins that it is asked.
@@ -964,7 +1037,9 @@ mod tests {
                     authorizer: &crate::course::infrastructure::ALLOW_ALL,
                     caller_bearer: "Bearer test",
                 },
-                ReceptionSheet::try_new(vec![0xff, 0xd8, 0xff, 0x00], "image/jpeg").expect("sheet"),
+                ReceptionSheet::try_new(vec![0xff, 0xd8, 0xff, 0x00], "image/jpeg")
+                    .expect("sheet")
+                    .into(),
                 &crate::course::domain::CustomerReceptionField::merge_with_defaults(
                     "operator-test",
                     Vec::new(),

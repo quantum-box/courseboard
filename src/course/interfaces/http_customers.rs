@@ -32,8 +32,8 @@ use crate::course::domain::{
     MembershipPlan, MembershipPlanId, MembershipPlayWindow, MembershipPlayWindows,
     MembershipPlayWindowsGateway, NewCustomer, PlayableDays, ProposedConsentItem, ReceptionAddress,
     ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraftRow, ReceptionFieldInput,
-    ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal, ReceptionSheet, SetMemberNumber,
-    UpsertMembershipPlan,
+    ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal, ReceptionSheet, ReceptionSheets,
+    SetMemberNumber, UpsertMembershipPlan, MAX_RECEPTION_SHEETS,
 };
 use crate::course::infrastructure::{
     FieldCustomerConsentGateway, FieldCustomerGateway, FieldCustomerReceptionCreateGateway,
@@ -2013,11 +2013,11 @@ pub struct ReceptionDraftDto {
     tag = "course",
     request_body(
         content = String,
-        description = "multipart/form-data with a single `file` part (JPEG, PNG, or PDF, up to 10MB)",
+        description = "multipart/form-data with 1 to 8 `file` parts (JPEG, PNG, or PDF; up to 4MB in total), read in order as the pages of one group",
         content_type = "multipart/form-data"
     ),
     responses(
-        (status = 200, description = "Rows read off the sheet", body = ReceptionDraftDto),
+        (status = 200, description = "Rows read off the sheets, in sheet order", body = ReceptionDraftDto),
         (status = 400, description = "Bad request", body = ErrorBody),
         (status = 401, description = "Unauthorized", body = ErrorBody),
         (status = 402, description = "The reader is unavailable until upstream billing is linked and funded (`reception_reader_billing_unsatisfied`)", body = ErrorBody),
@@ -2032,13 +2032,13 @@ pub async fn draft_customer_reception(
     multipart: Multipart,
 ) -> Result<Json<ReceptionDraftDto>, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let sheet = read_reception_sheet(multipart).await?;
+    let sheets = read_reception_sheets(multipart).await?;
     let draft = DraftCustomerReceptionUseCase::new(
         reception_gateway(&state),
         reception_fields_gateway(&state),
         customer_consent_gateway(&state),
     )
-    .execute(credentials, sheet)
+    .execute(credentials, sheets)
     .await
     .map_err(AppError::from)?;
     Ok(Json(ReceptionDraftDto {
@@ -2051,6 +2051,7 @@ pub async fn draft_customer_reception(
     }))
 }
 
+/// A blank form is one form: analysis reads exactly one sheet.
 async fn read_reception_sheet(mut multipart: Multipart) -> Result<ReceptionSheet, AppError> {
     let mut sheet = None;
     while let Some(field) = multipart
@@ -2076,6 +2077,36 @@ async fn read_reception_sheet(mut multipart: Multipart) -> Result<ReceptionSheet
             Some(ReceptionSheet::try_new(bytes.to_vec(), &content_type).map_err(AppError::from)?);
     }
     sheet.ok_or(AppError::BadRequest("multipart field 'file' is required"))
+}
+
+/// Every `file` part, in the order the browser wrote them — which is the
+/// order the desk picked the sheets in, and the page order upstream reads.
+async fn read_reception_sheets(mut multipart: Multipart) -> Result<ReceptionSheets, AppError> {
+    let mut sheets = Vec::new();
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|_| AppError::BadRequest("invalid multipart request"))?
+    {
+        if field.name() != Some("file") {
+            continue;
+        }
+        // Refused before the ninth file is buffered, not after.
+        if sheets.len() == MAX_RECEPTION_SHEETS {
+            return Err(AppError::BadRequest(
+                "a reception read may contain at most 8 sheets",
+            ));
+        }
+        // The scanner's filename is neither read nor forwarded.
+        let content_type = field.content_type().unwrap_or_default().to_string();
+        let bytes = field
+            .bytes()
+            .await
+            .map_err(|_| AppError::BadRequest("failed to read the reception sheet"))?;
+        sheets
+            .push(ReceptionSheet::try_new(bytes.to_vec(), &content_type).map_err(AppError::from)?);
+    }
+    ReceptionSheets::try_new(sheets).map_err(AppError::from)
 }
 
 // ─── Membership ───────────────────────────────────────────────────────────────

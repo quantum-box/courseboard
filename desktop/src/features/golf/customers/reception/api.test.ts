@@ -9,8 +9,28 @@ vi.mock('../../../../api', () => ({
 import {
   analyzeReceptionForm,
   createReceptionConsentItem,
+  draftReceptionSheets,
   listReceptionConsentItems,
 } from './api'
+
+describe('reception draft API adapter', () => {
+  it('sends every picked sheet as a file part, in order, without the desk filenames', async () => {
+    api.json.mockResolvedValueOnce({ visitors: [], warnings: [] })
+    const photo = new File(['a'], 'IMG_0001.jpg', { type: 'image/jpeg' })
+    const scan = new File(['b'], 'scanner-0930.pdf', { type: 'application/pdf' })
+
+    await draftReceptionSheets([photo, scan])
+
+    const [path, init] = api.json.mock.calls.at(-1) as [string, { method: string; body: FormData }]
+    expect(path).toBe('/v1/course/customers/reception-draft')
+    expect(init.method).toBe('POST')
+    const parts = init.body.getAll('file') as File[]
+    expect(parts.map(part => [part.name, part.type])).toEqual([
+      ['document.jpg', 'image/jpeg'],
+      ['document.pdf', 'application/pdf'],
+    ])
+  })
+})
 
 describe('reception consent API adapter', () => {
   it('lists inactive consent definitions when requested', async () => {
