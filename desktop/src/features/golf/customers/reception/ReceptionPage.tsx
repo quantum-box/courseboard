@@ -34,7 +34,7 @@ import { showToast } from '../../../../lib/toast'
 import {
   analyzeReceptionForm,
   createReceptionConsentItem,
-  draftReceptionSheet,
+  draftReceptionSheets,
   listReceptionConsentItems,
   listReceptionFields,
   registerReceptionRow,
@@ -54,6 +54,7 @@ import {
   missingRequiredConsentItems,
   missingRequiredFields,
   prepareReceptionSheet,
+  prepareReceptionSheets,
   previewKind,
   pendingRows,
   receptionFieldLabel,
@@ -76,6 +77,8 @@ import {
   type ReceptionFieldType,
   rowsFromDraft,
   savedCount,
+  sheetsValidationError,
+  MAX_RECEPTION_SHEETS,
   RECEPTION_SHEET_ACCEPT,
   type ReceptionConsentKey,
   type ReceptionRow,
@@ -105,8 +108,8 @@ export function ReceptionPage() {
     [],
     { cacheKey: 'course:customer-consent-items-active' },
   )
-  const [file, setFile] = useState<File | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [files, setFiles] = useState<File[]>([])
+  const [previewUrls, setPreviewUrls] = useState<string[]>([])
   const [reading, setReading] = useState(false)
   const [readError, setReadError] = useState<string | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
@@ -115,17 +118,14 @@ export function ReceptionPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const addedRowsRef = useRef(0)
 
-  // The preview is an object URL over the file the desk picked; it is revoked
-  // when the file changes so a morning of scans does not accumulate blobs.
+  // The previews are object URLs over the files the desk picked; they are
+  // revoked when the files change so a morning of scans does not accumulate
+  // blobs.
   useEffect(() => {
-    if (!file) {
-      setPreviewUrl(null)
-      return
-    }
-    const url = URL.createObjectURL(file)
-    setPreviewUrl(url)
-    return () => URL.revokeObjectURL(url)
-  }, [file])
+    const urls = files.map(file => URL.createObjectURL(file))
+    setPreviewUrls(urls)
+    return () => urls.forEach(url => URL.revokeObjectURL(url))
+  }, [files])
 
   const duplicates = useMemo(() => duplicateNameKeys(rows), [rows])
   const receptionFields = fieldSettings.data ?? DEFAULT_RECEPTION_FIELDS
@@ -139,30 +139,37 @@ export function ReceptionPage() {
     setRows(current => current.map(row => (row.key === key ? { ...row, ...patch } : row)))
   }
 
-  async function read(picked: File) {
+  async function read(picked: File[]) {
     setRows([])
     setWarnings([])
     setReadError(null)
+    // Refused before anything is converted: a ninth photo is not worth
+    // decoding eight others for.
+    if (picked.length > MAX_RECEPTION_SHEETS) {
+      setFiles([])
+      setReadError(t('customers:reception.file.count', { count: MAX_RECEPTION_SHEETS }))
+      return
+    }
     setReading(true)
     try {
-      // Converting a phone photo can take a second on a large image, so the
+      // Converting phone photos can take a second each on large images, so the
       // screen is already in its reading state before it starts.
-      let next: File
+      let next: File[]
       try {
-        next = await prepareReceptionSheet(picked)
+        next = await prepareReceptionSheets(picked)
       } catch {
-        setFile(null)
+        setFiles([])
         setReadError(t('customers:reception.file.convert'))
         return
       }
-      const invalid = fileValidationError(next)
+      const invalid = sheetsValidationError(next)
       if (invalid) {
-        setFile(null)
-        setReadError(t(`customers:reception.file.${invalid}`))
+        setFiles([])
+        setReadError(t(`customers:reception.file.${invalid}`, { count: MAX_RECEPTION_SHEETS }))
         return
       }
-      setFile(next)
-      const draft = await draftReceptionSheet(next)
+      setFiles(next)
+      const draft = await draftReceptionSheets(next)
       setRows(rowsFromDraft(draft, receptionFields, receptionConsentItems))
       setWarnings(draft.warnings ?? [])
     } catch (error) {
@@ -274,23 +281,28 @@ export function ReceptionPage() {
             <input
               ref={fileInputRef}
               type="file"
+              multiple
               accept={RECEPTION_SHEET_ACCEPT}
               className="visually-hidden-input"
               onChange={event => {
-                const next = event.target.files?.[0]
-                // Reset so picking the same scan twice still fires a change.
+                // In the order the picker hands them over, which is the order
+                // the rows come back in.
+                const next = Array.from(event.target.files ?? [])
+                // Reset so picking the same scans twice still fires a change.
                 event.target.value = ''
-                if (next) void read(next)
+                if (next.length > 0) void read(next)
               }}
             />
             <Button
               type="button"
-              variant={file ? 'ghost' : 'primary'}
+              variant={files.length > 0 ? 'ghost' : 'primary'}
               disabled={busy}
               onClick={() => fileInputRef.current?.click()}
             >
-              {file ? <RefreshCw /> : <Upload />}
-              {file ? t('customers:reception.choose.again') : t('customers:reception.choose.open')}
+              {files.length > 0 ? <RefreshCw /> : <Upload />}
+              {files.length > 0
+                ? t('customers:reception.choose.again')
+                : t('customers:reception.choose.open')}
             </Button>
           </>
         )}
@@ -317,7 +329,7 @@ export function ReceptionPage() {
 
       {reading ? <LoadingState label={t('customers:reception.reading')} /> : null}
 
-      {!file && !reading ? (
+      {files.length === 0 && !reading ? (
         <Panel>
           <EmptyState
             title={t('customers:reception.empty.title')}
@@ -332,7 +344,7 @@ export function ReceptionPage() {
         </Panel>
       ) : null}
 
-      {file && !reading ? (
+      {files.length > 0 && !reading ? (
         <div className="reception-workspace">
           <Panel
             className="reception-rows"
@@ -408,20 +420,37 @@ export function ReceptionPage() {
             title={t('customers:reception.preview.title')}
             description={t('customers:reception.preview.description')}
           >
-            {previewUrl && previewKind(file) === 'pdf' ? (
-              <iframe
-                className="reception-preview-frame"
-                src={previewUrl}
-                title={t('customers:reception.preview.title')}
-              />
-            ) : null}
-            {previewUrl && previewKind(file) === 'image' ? (
-              <img
-                className="reception-preview-image"
-                src={previewUrl}
-                alt={t('customers:reception.preview.alt')}
-              />
-            ) : null}
+            <div className="reception-preview-list">
+              {files.map((file, index) => {
+                const url = previewUrls[index]
+                if (!url) return null
+                // Numbered only when there is more than one, so a single sheet
+                // looks the way it always did.
+                const label = files.length > 1
+                  ? t('customers:reception.preview.page', { index: String(index + 1), total: String(files.length) })
+                  : null
+                return (
+                  <figure key={url} className="reception-preview-page">
+                    {label ? <figcaption className="reception-hint">{label}</figcaption> : null}
+                    {previewKind(file) === 'pdf' ? (
+                      <iframe
+                        className="reception-preview-frame"
+                        src={url}
+                        title={label ?? t('customers:reception.preview.title')}
+                      />
+                    ) : (
+                      <img
+                        className="reception-preview-image"
+                        src={url}
+                        alt={label
+                          ? `${t('customers:reception.preview.alt')} (${label})`
+                          : t('customers:reception.preview.alt')}
+                      />
+                    )}
+                  </figure>
+                )
+              })}
+            </div>
           </Panel>
         </div>
       ) : null}

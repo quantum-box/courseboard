@@ -20,7 +20,23 @@ const SHEET_JPEG_QUALITY = 0.9
 export async function heifToJpeg(file: File): Promise<File> {
   const bitmap = await decode(file)
   try {
-    return await encodeJpeg(bitmap, file.lastModified)
+    return await encodeJpeg(bitmap, file.lastModified, MAX_SHEET_EDGE)
+  } finally {
+    bitmap.close()
+  }
+}
+
+/**
+ * A JPEG or PNG sheet re-encoded as a JPEG no longer than `maxEdge`.
+ *
+ * Only used when several sheets are read together and would not fit in one
+ * upload as they are: the reader shrinks them to a far smaller budget anyway,
+ * so what is given up here is bytes the reader would never have seen.
+ */
+export async function shrinkSheetImage(file: File, maxEdge: number): Promise<File> {
+  const bitmap = await createImageBitmap(file)
+  try {
+    return await encodeJpeg(bitmap, file.lastModified, maxEdge)
   } finally {
     bitmap.close()
   }
@@ -44,8 +60,8 @@ async function decode(file: File): Promise<ImageBitmap> {
   return heicTo({ blob: file, type: 'bitmap' })
 }
 
-function encodeJpeg(bitmap: ImageBitmap, lastModified: number): Promise<File> {
-  const scale = Math.min(1, MAX_SHEET_EDGE / Math.max(bitmap.width, bitmap.height))
+function encodeJpeg(bitmap: ImageBitmap, lastModified: number, maxEdge: number): Promise<File> {
+  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height))
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(bitmap.width * scale))
   canvas.height = Math.max(1, Math.round(bitmap.height * scale))

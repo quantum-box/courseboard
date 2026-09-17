@@ -6411,6 +6411,19 @@ button,
   top: 0;
 }
 
+.reception-preview-list {
+  display: grid;
+  max-height: 80vh;
+  overflow-y: auto;
+  gap: 12px;
+}
+
+.reception-preview-page {
+  display: grid;
+  margin: 0;
+  gap: 4px;
+}
+
 .reception-preview-frame,
 .reception-preview-image {
   width: 100%;

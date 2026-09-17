@@ -26,6 +26,8 @@ import {
   pendingRows,
   receptionFieldDefaultLabel,
   prepareReceptionSheet,
+  prepareReceptionSheets,
+  sheetsValidationError,
   previewKind,
   receptionPreviewImageSrc,
   receptionReadFailure,
@@ -36,6 +38,8 @@ import {
   updateReceptionRowField,
   uploadFileName,
   MAX_RECEPTION_SHEET_BYTES,
+  MAX_RECEPTION_SHEETS,
+  MAX_RECEPTION_UPLOAD_BYTES,
   RECEPTION_SHEET_ACCEPT,
   REQUIRED_RECEPTION_CONSENT,
   type ReceptionField,
@@ -48,7 +52,8 @@ function declared(row: ReceptionRow): ReceptionRow {
 }
 
 const heifToJpeg = vi.hoisted(() => vi.fn())
-vi.mock('./heif', () => ({ heifToJpeg }))
+const shrinkSheetImage = vi.hoisted(() => vi.fn())
+vi.mock('./heif', () => ({ heifToJpeg, shrinkSheetImage }))
 
 function file(type: string, size = 1024) {
   return { name: 'scan-2026-08-16-093000.jpg', size, type } as File
@@ -82,6 +87,52 @@ describe('fileValidationError', () => {
 
   it('reports nothing chosen separately from something wrong', () => {
     expect(fileValidationError(null)).toBe('required')
+  })
+})
+
+describe('several sheets in one read', () => {
+  beforeEach(() => {
+    shrinkSheetImage.mockReset()
+  })
+
+  it('accepts a group of sheets in any of the formats the reader takes', () => {
+    expect(sheetsValidationError([file('image/jpeg'), file('application/pdf')])).toBeNull()
+  })
+
+  it('refuses nothing, too many, or too heavy together, each for its own reason', () => {
+    expect(sheetsValidationError([])).toBe('required')
+    expect(
+      sheetsValidationError(Array.from({ length: MAX_RECEPTION_SHEETS + 1 }, () => file('image/jpeg'))),
+    ).toBe('count')
+    const half = MAX_RECEPTION_UPLOAD_BYTES / 2
+    expect(sheetsValidationError([file('image/jpeg', half), file('image/png', half + 1)])).toBe(
+      'totalSize',
+    )
+    expect(sheetsValidationError([file('image/jpeg'), file('text/csv')])).toBe('type')
+  })
+
+  it('sends a set that already fits as it is', async () => {
+    const scans = [bytes(JPEG, 'a.jpg', 'image/jpeg'), bytes(PDF, 'b.pdf', 'application/pdf')]
+    expect(await prepareReceptionSheets(scans)).toEqual(scans)
+    expect(shrinkSheetImage).not.toHaveBeenCalled()
+  })
+
+  it('shrinks the photos, in order and never the PDF, until the set fits one upload', async () => {
+    const big = Math.floor(MAX_RECEPTION_UPLOAD_BYTES / 2)
+    const photo = (name: string) =>
+      new File([new Uint8Array(JPEG), new Uint8Array(big)], name, { type: 'image/jpeg' })
+    const pdf = bytes(PDF, 'c.pdf', 'application/pdf')
+    const shrunk = (name: string) => new File(['small'], name, { type: 'image/jpeg' })
+    // The first step is not enough; the second is.
+    shrinkSheetImage.mockImplementation(async (source: File, edge: number) =>
+      edge >= 2400 ? source : shrunk(source.name))
+
+    const prepared = await prepareReceptionSheets([photo('a.jpg'), pdf, photo('b.jpg')])
+
+    expect(prepared.map(sheet => sheet.name)).toEqual(['a.jpg', 'c.pdf', 'b.jpg'])
+    expect(prepared[1]).toBe(pdf)
+    expect(sheetsValidationError(prepared)).toBeNull()
+    expect(shrinkSheetImage).not.toHaveBeenCalledWith(pdf, expect.anything())
   })
 })
 

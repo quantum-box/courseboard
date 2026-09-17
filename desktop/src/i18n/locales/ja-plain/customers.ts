@@ -47,11 +47,13 @@ export const customers: DeepPartial<typeof source> = {
     choose: {
       open: '受付の 紙を えらぶ',
       again: 'ほかの 紙を 読む',
-      hint: 'JPEG・PNG・HEIC/HEIF・PDFが 読めます。1つ 10MBまで。iPhoneで とった 写真は JPEGに かえてから 読みます。紙は のこりません。',
+      hint: 'JPEG・PNG・HEIC/HEIF・PDFが 読めます。紙は 一度に 8まいまで まとめて えらべて、えらんだ じゅんに 読みます。iPhoneで とった 写真は JPEGに かえ、大きい ときは ちいさく してから 読みます。紙は のこりません。',
     },
     file: {
       required: '受付の 紙の ファイルを えらんで ください。',
       size: 'ファイルが 大きすぎます。10MBまでの ファイルを えらんで ください。',
+      count: '一度に 読める 紙は {{count}}まいまでです。わけて 読んで ください。',
+      totalSize: 'えらんだ 紙が ぜんぶで 大きすぎます。まいすうを へらすか、PDFを わけて 読んで ください。',
       type: 'JPEG・PNG・HEIC/HEIF・PDFの ファイルを えらんで ください。',
       convert: 'iPhoneの 写真（HEIC/HEIF）を かえられませんでした。写真アプリで JPEGに 書き出してから ためして ください。',
     },
@@ -168,6 +170,7 @@ export const customers: DeepPartial<typeof source> = {
       title: '受付の 紙',
       description: '読む もとに した 紙です。',
       alt: '受付の 紙を うつした 画像',
+      page: '{{index}}まいめ / {{total}}まい',
     },
   },
   visits: {

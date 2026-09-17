@@ -13,7 +13,7 @@ use crate::course::domain::{
     active_reception_consent_definitions, reception_sheet_schema_for_fields_and_consents,
     CourseError, CustomerConsentCatalogGateway, CustomerReceptionField,
     CustomerReceptionFieldsGateway, CustomerReceptionOcrGateway, GatewayCredentials,
-    ReceptionDraft, ReceptionSheet,
+    ReceptionDraft, ReceptionSheets,
 };
 
 pub struct DraftCustomerReceptionUseCase {
@@ -38,7 +38,7 @@ impl DraftCustomerReceptionUseCase {
     pub async fn execute(
         &self,
         credentials: GatewayCredentials<'_>,
-        sheet: ReceptionSheet,
+        sheets: ReceptionSheets,
     ) -> Result<ReceptionDraft, CourseError> {
         credentials.require(actions::MANAGE_CUSTOMERS).await?;
         let stored = self
@@ -50,7 +50,7 @@ impl DraftCustomerReceptionUseCase {
         let consents = active_reception_consent_definitions(&catalog);
         reception_sheet_schema_for_fields_and_consents(&fields, &consents)?;
         self.reader
-            .draft_reception(credentials, sheet, &fields, &consents)
+            .draft_reception(credentials, sheets, &fields, &consents)
             .await
     }
 }
@@ -63,7 +63,7 @@ mod tests {
 
     use crate::course::domain::{
         CreateCustomerConsentItem, CustomerConsentCatalogGateway, CustomerConsentItem,
-        ReceptionConsentDefinition, ReceptionDraftRow, ReceptionFormProposal,
+        ReceptionConsentDefinition, ReceptionDraftRow, ReceptionFormProposal, ReceptionSheet,
         ReceptionSheetMediaType,
     };
 
@@ -86,11 +86,14 @@ mod tests {
         async fn draft_reception(
             &self,
             _credentials: GatewayCredentials<'_>,
-            sheet: ReceptionSheet,
+            sheets: ReceptionSheets,
             _fields: &[CustomerReceptionField],
             _consents: &[ReceptionConsentDefinition],
         ) -> Result<ReceptionDraft, CourseError> {
-            self.seen.lock().unwrap().push(sheet.media_type());
+            self.seen
+                .lock()
+                .unwrap()
+                .extend(sheets.iter().map(ReceptionSheet::media_type));
             self.answer.lock().unwrap().take().expect("one call")
         }
 
@@ -156,8 +159,10 @@ mod tests {
         }
     }
 
-    fn sheet() -> ReceptionSheet {
-        ReceptionSheet::try_new(vec![0xff, 0xd8, 0xff, 0x00], "image/jpeg").unwrap()
+    fn sheet() -> ReceptionSheets {
+        ReceptionSheet::try_new(vec![0xff, 0xd8, 0xff, 0x00], "image/jpeg")
+            .unwrap()
+            .into()
     }
 
     #[tokio::test]

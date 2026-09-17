@@ -745,7 +745,7 @@ pub fn build_router(state: AppState) -> Router {
             "/v1/course/customers/reception-draft",
             post(course::interfaces::http_customers::draft_customer_reception)
                 .layer(DefaultBodyLimit::max(
-                    course::domain::MAX_RECEPTION_SHEET_BYTES + 256 * 1024,
+                    course::domain::MAX_RECEPTION_UPLOAD_BYTES + 256 * 1024,
                 ))
                 .route_layer(middleware::from_fn_with_state(
                     state.clone(),

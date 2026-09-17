@@ -44,11 +44,13 @@ export const customers = {
     choose: {
       open: '受付用紙をえらぶ',
       again: '別の用紙を読み取る',
-      hint: 'JPEG・PNG・HEIC/HEIF・PDFが読み取れます。1ファイル10MBまで。iPhoneで撮った写真はJPEGに変換してから読み取ります。用紙は保存されません。',
+      hint: 'JPEG・PNG・HEIC/HEIF・PDFが読み取れます。複数の用紙は一度に8枚までまとめてえらべ、えらんだ順に読み取ります。iPhoneで撮った写真はJPEGに変換し、合計が大きいときは縮小してから読み取ります。用紙は保存されません。',
     },
     file: {
       required: '受付用紙のファイルをえらんでください。',
       size: 'ファイルが大きすぎます。10MBまでのファイルをえらんでください。',
+      count: '一度に読み取れる用紙は{{count}}枚までです。分けて読み取ってください。',
+      totalSize: 'えらんだ用紙の合計が大きすぎます。枚数を減らすか、PDFを分けて読み取ってください。',
       type: 'JPEG・PNG・HEIC/HEIF・PDFのファイルをえらんでください。',
       convert: 'iPhoneの写真（HEIC/HEIF）を変換できませんでした。写真アプリでJPEGとして書き出してからお試しください。',
     },
@@ -171,6 +173,7 @@ export const customers = {
       title: '受付用紙',
       description: '読み取りのもとになった用紙です。',
       alt: '受付用紙のスキャン画像',
+      page: '{{index}}枚目 / {{total}}枚',
     },
   },
   visits: {
