@@ -18,7 +18,9 @@ export default defineConfig({
   // 2 vCPU ではない。32 コアのノードに載ると 16 並列の Chromium が 2 vCPU を
   // 取り合い、遷移だけで 20〜40 秒かかって全テストがタイムアウトする
   // （16 workers の run は全滅、8 workers の run は 3〜4 分で通っていた）。
-  workers: target === 'prod' ? 2 : process.env.CI ? 4 : undefined,
+  // 4 workers でも runner Pod の memory limit 4Gi で OOMKilled される run が
+  // 出た（courseboard#346、2026-09-16 に 3 Pod）ので 2 で比較する。
+  workers: target === 'prod' ? 2 : process.env.CI ? 2 : undefined,
   reporter: [
     ['list'],
     ['html', { outputFolder: 'e2e/playwright-report', open: 'never' }],
