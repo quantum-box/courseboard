@@ -3,7 +3,7 @@
 ## Links
 
 - 前提: `docs/src/tasks/completed/v0.1.14/ai-ocr-customer-reception/task.md`
-- Field 側: 汎用 OCR `POST /v1/field/ocr/{entity}/draft` の複数ファイル対応（tachyonfield PR、下記）
+- Field 側: 汎用 OCR `POST /v1/field/ocr/{entity}/draft` の複数ファイル対応: https://github.com/quantum-box/tachyonfield/pull/1412
 - Linear issue: 未作成
 
 ## 概要
