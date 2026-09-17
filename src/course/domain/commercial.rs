@@ -128,6 +128,41 @@ impl UpdateReservationPolicy {
         }
         Ok(())
     }
+
+    /// Fill every field this update leaves out from the stored policy.
+    ///
+    /// Field's reservation-policy PATCH is a replace in disguise: a missing
+    /// field becomes Field's default and `policyHooksJson` is written as NULL.
+    /// A screen that edits one part of the policy (integration metadata, say)
+    /// would otherwise reset the booking rules and drop the self-lock and
+    /// spend-judgment hooks that another screen saved.
+    pub fn overlay_on(self, current: &ReservationPolicy) -> Self {
+        let stored_type = current.reservation_type_id().trim();
+        Self {
+            // An empty id is "no policy chose one", not a value worth sending.
+            reservation_type_id: self
+                .reservation_type_id
+                .or_else(|| (!stored_type.is_empty()).then(|| stored_type.to_string())),
+            default_holes: self.default_holes.or(Some(current.default_holes())),
+            max_players_per_tee_time: self
+                .max_players_per_tee_time
+                .or(Some(current.max_players_per_tee_time())),
+            cart_policy: self
+                .cart_policy
+                .or_else(|| Some(current.cart_policy().to_string())),
+            member_deposit_bps: self
+                .member_deposit_bps
+                .or(Some(current.member_deposit_bps())),
+            guest_deposit_bps: self.guest_deposit_bps.or(Some(current.guest_deposit_bps())),
+            cutoff_hours: self.cutoff_hours.or(Some(current.cutoff_hours())),
+            policy_hooks_json: self
+                .policy_hooks_json
+                .or_else(|| current.policy_hooks_json().cloned()),
+            metadata_json: self
+                .metadata_json
+                .or_else(|| current.metadata_json().cloned()),
+        }
+    }
 }
 
 /// Daily revenue / mix budget for a course.
