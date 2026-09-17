@@ -323,13 +323,19 @@ jobs:
           cache-dependency-path: desktop/package-lock.json
 
       - name: Setup Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # action の既定値 `tools platform-tools` の `tools` は廃止済みで、
+          # Google の SDK リポジトリから消えたため sdkmanager が
+          # "Failed to find package 'tools'" で落ちる。sdkmanager 自体は
+          # cmdline-tools が提供するので platform-tools だけを入れる。
+          packages: platform-tools
 
       - name: Install Android NDK
         run: sdkmanager "ndk;27.0.12077973"
