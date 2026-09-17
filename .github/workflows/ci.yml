@@ -260,7 +260,7 @@ jobs:
 
   android_bundle:
     name: Android debug bundle
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    if: github.event_name == 'push'
     needs: frontend
     # 4 ABI 分の Rust をコンパイルするため standard runner の 4 GiB では
     # runner が CPU/Memory 不足で server との通信を失って落ちる。
