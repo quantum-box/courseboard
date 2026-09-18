@@ -123,6 +123,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
       smsBodyHint: 'This text is used for SMS only, never for the email body. {url} is replaced by the payment URL.',
       smsBodyDefault:
         'Course Board here.\nPlease pay the cancellation fee of {amount}{currency}.\nDue: {dueDate}\n{url}',
+      smsParts: 'Sent as {{characters}} characters, billed as {{parts}} part(s). One part holds 70 characters, then 67 per part.',
     },
     total: 'Invoice amount',
     review: 'Review before sending',
@@ -139,6 +140,8 @@ export const cancellationFees: DeepPartial<typeof source> = {
       ledgerRegister: 'Will be added under this name',
       ledgerSkip: 'Nothing will be added',
       ledgerExisting: 'Already in the ledger',
+      smsPreview: 'The SMS as it will arrive',
+      smsPreviewHint: 'The payment link is issued with the invoice. The one shown here is a stand-in of the same length.',
       back: 'Go back and edit',
     },
     validation: {

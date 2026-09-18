@@ -2121,6 +2121,13 @@ button,
 .detail-list dt { color: hsl(var(--nui-muted-foreground)); font-size: 11px; }
 .detail-list dd { margin: 2px 0 0; overflow-wrap: anywhere; }
 .notes-block { overflow-x: auto; border-radius: var(--nui-radius-md); padding: 10px; background: hsl(var(--nui-surface)); color: hsl(var(--nui-muted-foreground)); font-family: var(--nui-font-mono); font-size: 11px; white-space: pre-wrap; }
+.sms-preview {
+  /* The payment link is one unbroken token, and pre-wrap will not break
+     inside it: without this the end of the URL scrolls out of sight, in
+     the one place the whole message is meant to be readable. */
+  overflow-x: visible;
+  overflow-wrap: anywhere;
+}
 
 .command-copy {
   display: flex;

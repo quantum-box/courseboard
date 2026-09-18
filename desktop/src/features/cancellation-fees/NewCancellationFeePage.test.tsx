@@ -262,4 +262,76 @@ describe('the cancellation fee form', () => {
       phone: '+818011112222',
     })
   })
+
+  it('shows the finished SMS, and what it will be billed as, before it goes', async () => {
+    // Field substitutes the placeholders after this screen hands the send
+    // over, so without this the desk confirms a template and finds out what
+    // the guest actually received afterwards.
+    api.field.mockResolvedValue(sentInvoice())
+    renderPage()
+    fillNamePhoneAmount()
+
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+
+    const preview = screen.getByText(/キャンセル料5000円/)
+    expect(preview.textContent).toContain('https://tachyonfield.txcloud.app/p/')
+    expect(preview.textContent).not.toContain('{amount}')
+    expect(preview.textContent).not.toContain('{url}')
+    // What this send costs, while it can still be shortened. Two of them: the
+    // form behind the dialog carries the same count under the textarea.
+    expect(screen.getAllByText(/118文字・2通ぶん/)).toHaveLength(2)
+  })
+
+  it('counts the message as it is typed, not only at the confirmation step', async () => {
+    // By the confirmation step the wording is finished and the only answer to
+    // a third part is to go back, so the count has to move while it is being
+    // written.
+    api.field.mockResolvedValue(sentInvoice())
+    renderPage()
+    fillNamePhoneAmount()
+
+    const body = screen.getByLabelText('SMSの文面', { exact: false })
+    expect(screen.getByText(/118文字・2通ぶん/)).toBeTruthy()
+
+    fireEvent.change(body, {
+      target: { value: 'キャンセル料{amount}円。支払期限{dueDate}。{url}' },
+    })
+    expect(screen.getByText(/88文字・2通ぶん/)).toBeTruthy()
+
+    // Short enough to stop splitting at all.
+    fireEvent.change(body, { target: { value: '{url}' } })
+    expect(screen.getByText(/61文字・1通ぶん/)).toBeTruthy()
+  })
+
+  it('counts the amount the message quotes, tax included', async () => {
+    // The message asks for what the guest owes. Counting the fee before tax
+    // would report a different length from the one that goes out.
+    api.field.mockResolvedValue(sentInvoice())
+    renderPage()
+    fillNamePhoneAmount()
+
+    // 5000 + 500 would still be four digits wide, so the count only moves
+    // once the total gains one: 5000 + 12500 = 17500.
+    fireEvent.change(screen.getByLabelText('税額', { exact: false }), {
+      target: { value: '12500' },
+    })
+    expect(screen.getByText(/119文字・2通ぶん/)).toBeTruthy()
+  })
+
+  it('leaves the SMS preview out when nothing is going by SMS', async () => {
+    api.field.mockResolvedValue(sentInvoice())
+    renderPage()
+    fireEvent.change(screen.getByLabelText('請求先の名前', { exact: false }), {
+      target: { value: '山田 太郎' },
+    })
+    fireEvent.change(screen.getByLabelText('送り先のメール', { exact: false }), {
+      target: { value: 'guest@example.com' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+
+    expect(screen.queryByText('送られるSMSの文面')).toBeNull()
+  })
 })
