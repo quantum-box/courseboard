@@ -1756,6 +1756,93 @@ function items<T>(values: T[]) {
 }
 
 /**
+ * A month of cancellations, as the collection list reads them.
+ *
+ * Dated from the real day rather than the fixture day, because the screen opens
+ * on "the last 30 days" of whenever it is being looked at.
+ *
+ * Two of the rows carry no ledger link, which is the case the club actually
+ * spends its mornings on: somebody rang, gave a name and gave up a tee time.
+ * One of them gave no name at all.
+ */
+function mockReservationCancellations(): Array<Record<string, unknown>> {
+  const daysAgo = (days: number) => {
+    const date = new Date(Date.now() - days * 86_400_000)
+    return date.toISOString().slice(0, 10)
+  }
+  return [
+    {
+      reservationId: 'res_mock_cancel_1',
+      reservationNumber: 'R-2026-0101',
+      customerId: 'cus_honda',
+      customerName: '本田 康彦',
+      customerPhone: '090-1234-5678',
+      customerEmail: 'honda@example.com',
+      billable: true,
+      playedOn: daysAgo(3),
+      players: 4,
+      bookingAmount: 48_000,
+      reason: 'no_contact',
+      reasonNote: '当日連絡がつかず',
+      feeExpected: true,
+      noticeDays: 0,
+      feeState: 'unsettled',
+      cancelledAt: `${daysAgo(3)}T00:10:00Z`,
+    },
+    {
+      reservationId: 'res_mock_cancel_2',
+      reservationNumber: 'R-2026-0104',
+      customerId: 'cus_honda',
+      customerName: '本田 康彦',
+      customerPhone: '090-1234-5678',
+      customerEmail: 'honda@example.com',
+      billable: true,
+      playedOn: daysAgo(9),
+      players: 2,
+      bookingAmount: 24_000,
+      reason: 'personal',
+      feeExpected: true,
+      noticeDays: 1,
+      feeState: 'unsettled',
+      cancelledAt: `${daysAgo(10)}T08:00:00Z`,
+    },
+    {
+      // Taken over the phone under a name nobody linked to the ledger.
+      reservationId: 'res_mock_cancel_3',
+      reservationNumber: 'R-2026-0117',
+      customerName: '増田 公陽',
+      billable: false,
+      playedOn: daysAgo(5),
+      players: 2,
+      bookingAmount: 26_000,
+      reason: 'no_contact',
+      reasonNote: '電話のみの予約',
+      feeExpected: true,
+      noticeDays: 0,
+      feeState: 'unsettled',
+      cancelledAt: `${daysAgo(5)}T01:00:00Z`,
+    },
+    {
+      // Not even a name: the row the sheet cannot address until somebody types
+      // one into it.
+      reservationId: 'res_mock_cancel_4',
+      reservationNumber: 'R-2026-0121',
+      billable: false,
+      playedOn: daysAgo(12),
+      players: 1,
+      reason: 'no_contact',
+      feeExpected: true,
+      noticeDays: 0,
+      feeState: 'unsettled',
+      cancelledAt: `${daysAgo(12)}T02:30:00Z`,
+    },
+  ]
+}
+
+/** What the mock has been told about the fees, so a billed row drops out. */
+const mockCancellationFeeDecisions = new Map<string, Record<string, unknown>>()
+
+/**
  * The customer ledger, and the memberships held against it.
  *
  * Mutable because the whole point of the screens above them is adding a
@@ -2173,6 +2260,10 @@ function normalizeMockPath(pathname: string): string {
     || pathname === '/v1/course/caddie-duties'
     || pathname === '/v1/course/caddie-duty-assignments'
     || pathname.startsWith('/v1/course/caddie-duty-assignments/')
+    // Cancelled bookings and what became of the fee are CourseBoard's own
+    // rows: Field keeps only the fact that a reservation was cancelled.
+    || pathname === '/v1/course/reservation-cancellations'
+    || pathname === '/v1/course/reservation-cancellations/fees'
     || pathname === '/v1/course/customer-grade-rules'
     || pathname === '/v1/course/membership-discounts'
     || pathname === '/v1/course/membership-play-windows'
@@ -2681,6 +2772,29 @@ function resolveGet(path: string): Json | null | undefined {
       items: matched.slice(offset, offset + limit),
       total: matched.length,
     }
+  }
+
+  if (pathname === '/v1/course/reservation-cancellations') {
+    const from = url.searchParams.get('from')
+    const to = url.searchParams.get('to')
+    const feeStates = url.searchParams.get('feeStates')?.split(',').filter(Boolean) ?? []
+    const reasons = url.searchParams.get('reasons')?.split(',').filter(Boolean) ?? []
+    const feeExpectedOnly = url.searchParams.get('feeExpectedOnly') === 'true'
+    const limit = Number(url.searchParams.get('limit')) || 20
+    const offset = Number(url.searchParams.get('offset')) || 0
+    const matched = mockReservationCancellations()
+      .map(row => ({ ...row, ...mockCancellationFeeDecisions.get(String(row.reservationId)) }))
+      .filter(row => {
+        const playedOn = String(row.playedOn ?? '')
+        if (from && playedOn < from) return false
+        if (to && playedOn > to) return false
+        if (feeStates.length > 0 && !feeStates.includes(String(row.feeState))) return false
+        if (reasons.length > 0 && !reasons.includes(String(row.reason))) return false
+        if (feeExpectedOnly && row.feeExpected !== true) return false
+        return true
+      })
+      .sort((left, right) => String(right.playedOn).localeCompare(String(left.playedOn)))
+    return { items: matched.slice(offset, offset + limit), total: matched.length }
   }
 
   if (pathname === '/v1/course/customer-reception-fields') {
@@ -3611,6 +3725,22 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
       ],
       warnings: ['読み取れない項目があります。原本を見ながらすべての項目を確認してください。'],
     })
+  }
+
+  if (pathname === '/v1/course/reservation-cancellations/fees' && method === 'POST') {
+    const decisions = Array.isArray(body?.decisions) ? body.decisions : []
+    for (const decision of decisions as Array<Record<string, unknown>>) {
+      const reservationId = String(decision.reservationId ?? '')
+      if (!reservationId) continue
+      mockCancellationFeeDecisions.set(reservationId, {
+        feeState: decision.state,
+        ...(decision.invoiceId ? { feeInvoiceId: decision.invoiceId } : {}),
+        ...(typeof decision.amount === 'number' ? { feeAmount: decision.amount } : {}),
+        ...(decision.note ? { feeNote: decision.note } : {}),
+        feeSettledAt: new Date().toISOString(),
+      })
+    }
+    return hit({ updated: decisions.length })
   }
 
   if (pathname === '/v1/course/customers' && method === 'POST') {

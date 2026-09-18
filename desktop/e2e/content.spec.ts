@@ -262,6 +262,37 @@ test.describe('予約表のとりこみ', () => {
   })
 })
 
+test.describe('キャンセルとキャンセル料', () => {
+  test('台帳と結びついていない予約も、その場で請求先を決めて請求できる', async ({ page }) => {
+    await page.goto('/golf/customers/cancellations')
+    await expect(page.getByRole('heading', { name: '抽出したキャンセル' })).toBeVisible()
+    // 台帳に紐付いた予約と、電話だけで取った予約が混ざっているのが普通の月。
+    await expect(page.getByText('台帳と未連携').first()).toBeVisible()
+
+    await page.getByLabel('このページをすべて選ぶ').check()
+    await page.getByRole('button', { name: /キャンセル料を請求/ }).click()
+
+    // 紐付いていない予約は「請求できません」で終わらせず、請求先を決める欄を出す。
+    await expect(page.getByText('台帳と結びついていない予約')).toBeVisible()
+    const names = page.getByRole('textbox', { name: '請求先の名前' })
+    await expect(names).toHaveCount(2)
+    // 名前が空の1件だけが請求できないまま残る。
+    await expect(page.getByText('請求できない予約があります')).toBeVisible()
+    await expect(page.getByRole('button', { name: /￥24,000を請求する/ })).toBeVisible()
+
+    // 名前を入れると、その予約も請求に入る（3,000円 × 1名）。
+    await names.nth(1).fill('山田 太郎')
+    await expect(page.getByText('請求できない予約があります')).toBeHidden()
+    await expect(page.getByRole('button', { name: /￥27,000を請求する/ })).toBeVisible()
+
+    // 台帳にいる人は候補から選べる。選べば台帳の顧客として請求する。
+    await names.nth(0).fill('増田')
+    await page.getByRole('button', { name: /増田 公陽/ }).click()
+    await expect(page.getByRole('button', { name: '紐付けを外す' })).toBeVisible()
+    await expect(names.nth(0)).toHaveValue('増田 公陽')
+  })
+})
+
 test.describe('キャンセル料', () => {
   test('請求一覧と状態フィルタが動く', async ({ page }) => {
     await page.goto('/cancellation-fees')
@@ -302,15 +333,11 @@ test.describe('キャンセル料', () => {
 
     await page.goto('/cancellation-fees/new')
     await page.getByRole('textbox', { name: '対象の予約・注文' }).fill('RSV-E2E-0001')
-    // The form opens on a recipient who is not in the ledger, which is what
-    // the desk has when somebody cancels by phone. This case bills a member,
-    // so it says so first.
-    await page.getByRole('combobox', { name: '請求先の種類' }).selectOption('customer')
-    // The customer is picked out of the ledger rather than typed as an id: a
-    // cancellation fee is always somebody the club already has a booking for,
-    // and copying `cus_…` off another screen is how the wrong person gets
-    // invoiced.
-    await page.getByRole('textbox', { name: '請求先の顧客' }).fill('本田')
+    // One name box for the whole question. Typing the name offers whoever the
+    // ledger holds under it, and picking one bills that customer — there is no
+    // recipient type to choose first and no `cus_…` to copy off another
+    // screen, which is how the wrong person got invoiced.
+    await page.getByRole('textbox', { name: '請求先の名前' }).fill('本田')
     await page.getByRole('button', { name: /本田 康彦/ }).click()
     await page.getByRole('textbox', { name: '送り先のメール' }).fill('e2e@example.com')
     await page.getByRole('button', { name: '送る内容を確認する' }).click()

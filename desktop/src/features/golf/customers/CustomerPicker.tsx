@@ -21,6 +21,9 @@ export function CustomerPicker({
   name,
   customerId,
   placeholder,
+  required,
+  candidatesOnFocus = false,
+  allowRegister = true,
   onNameChange,
   onSelect,
   disabled,
@@ -28,6 +31,29 @@ export function CustomerPicker({
   name: string
   customerId: string | null
   placeholder?: string
+  /** Whether the surrounding form refuses to submit without a name. */
+  required?: boolean
+  /**
+   * Whether focusing a box that already holds a name opens the candidates.
+   *
+   * Off by default, and that default is the booking sheet's: it opens with the
+   * name already on the booking, and answering the cursor landing there with a
+   * list over the fields below is a search nobody asked for. The collection
+   * sheet is the other way round — the box is prefilled with the name a
+   * cancellation was taken under precisely so the desk can tell who that is,
+   * and having to edit the name to be offered the answer is absurd.
+   */
+  candidatesOnFocus?: boolean
+  /**
+   * Whether the candidate list may write a new ledger entry on the spot.
+   *
+   * Turned off by a form that already asks the question its own way — the
+   * cancellation fee sheet offers "also add this recipient to the ledger" and
+   * writes the entry when the invoice goes out. Two buttons that both create a
+   * customer, through two different endpoints, is how one guest ends up in the
+   * ledger twice.
+   */
+  allowRegister?: boolean
   onNameChange: (name: string) => void
   /** `null` clears the identity while leaving the typed name alone. */
   onSelect: (customer: Customer | null) => void
@@ -100,6 +126,7 @@ export function CustomerPicker({
       <Input
         value={name}
         placeholder={placeholder}
+        required={required}
         disabled={disabled}
         onChange={event => {
           const value = event.target.value
@@ -112,7 +139,7 @@ export function CustomerPicker({
           if (customerId) onSelect(null)
         }}
         onFocus={() => {
-          if (typed) setShowCandidates(true)
+          if (typed || candidatesOnFocus) setShowCandidates(true)
         }}
       />
 
@@ -169,15 +196,17 @@ export function CustomerPicker({
           {!searching && !error && completedQuery === trimmed && candidates.length === 0 ? (
             <p className="ledger-customer-picker__note">{t('ledger:customer.noCandidates')}</p>
           ) : null}
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={disabled || registering || !trimmed}
-            onClick={register}
-          >
-            {registering ? t('ledger:customer.registering') : t('ledger:customer.register')}
-          </Button>
+          {allowRegister ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={disabled || registering || !trimmed}
+              onClick={register}
+            >
+              {registering ? t('ledger:customer.registering') : t('ledger:customer.register')}
+            </Button>
+          ) : null}
         </div>
       ) : null}
     </div>
