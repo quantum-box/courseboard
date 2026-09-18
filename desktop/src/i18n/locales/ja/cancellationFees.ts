@@ -120,6 +120,7 @@ export const cancellationFees = {
       smsBodyHint: 'この文面はSMSだけに使います（メール本文には使いません）。{url} のところに支払いのURLが入ります。',
       smsBodyDefault:
         'Course Boardです。\nキャンセル料{amount}円のお支払いをお願いします。\n支払期限:{dueDate}\n{url}',
+      smsParts: '{{characters}}文字・{{parts}}通ぶんとして送られます（70文字までが1通、こえると67文字ごとに1通）。',
     },
     total: '請求の金額',
     review: '送る内容を確認する',
@@ -138,7 +139,6 @@ export const cancellationFees = {
       ledgerExisting: '登録ずみの相手です',
       smsPreview: '送られるSMSの文面',
       smsPreviewHint: '支払いのURLは請求書を作ったときに決まります。ここに出しているのは同じ長さの見本です。',
-      smsParts: '{{characters}}文字・{{parts}}通ぶんとして送られます（70文字までが1通、こえると67文字ごとに1通）。',
       back: '戻って直す',
     },
     validation: {

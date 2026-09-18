@@ -425,6 +425,17 @@ export function NewCancellationFeePage() {
   const [customerName, setCustomerName] = useState(order?.clientName ?? '')
   const [registerCustomer, setRegisterCustomer] = useState(false)
   const [amount, setAmount] = useState(5000)
+  // Held rather than read off the form at submit like the other fields: the
+  // SMS counter has to move as these change, and all three feed the text it
+  // counts. `review` still reads them back out of the form, so the submitted
+  // values are the ones the operator can see.
+  const [taxAmount, setTaxAmount] = useState(0)
+  const [dueDate, setDueDate] = useState(due)
+  // Typed explicitly: the i18n resources give `t` a literal return type, and
+  // inferring it here would leave the state unable to hold an edit.
+  const [smsMessage, setSmsMessage] = useState<string>(
+    () => i18next.t('cancellationFees:new.delivery.smsBodyDefault'),
+  )
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState<PendingSubmission | null>(null)
@@ -741,7 +752,13 @@ export function NewCancellationFeePage() {
               <Input name="amount" type="number" min={1} required value={amount} onChange={event => setAmount(Number(event.target.value))} />
             </Field>
             <Field label={t('cancellationFees:new.detail.tax')}>
-              <Input name="taxAmount" type="number" min={0} defaultValue={0} />
+              <Input
+                name="taxAmount"
+                type="number"
+                min={0}
+                value={taxAmount}
+                onChange={event => setTaxAmount(Number(event.target.value))}
+              />
             </Field>
             <Field label={t('cancellationFees:new.detail.reason')}>
               <Input name="reason" placeholder={t('cancellationFees:new.detail.reasonPlaceholder')} />
@@ -826,7 +843,13 @@ export function NewCancellationFeePage() {
               </>
             )}
             <Field label={t('cancellationFees:new.client.due')} required>
-              <Input name="dueDate" type="date" required defaultValue={due} />
+              <Input
+                name="dueDate"
+                type="date"
+                required
+                value={dueDate}
+                onChange={event => setDueDate(event.target.value)}
+              />
             </Field>
           </FormGrid>
 
@@ -918,7 +941,13 @@ export function NewCancellationFeePage() {
                 <NativeTextarea
                   name="smsMessage"
                   rows={4}
-                  defaultValue={t('cancellationFees:new.delivery.smsBodyDefault')}
+                  value={smsMessage}
+                  onChange={event => setSmsMessage(event.target.value)}
+                />
+                <SmsPartsHint
+                  template={smsMessage}
+                  amount={amount + taxAmount}
+                  dueDate={dueDate}
                 />
               </Field>
             </>
@@ -1055,13 +1084,39 @@ function SmsPreview({
       <span className="field-label">{t('cancellationFees:new.confirm.smsPreview')}</span>
       <p className="notes-block sms-preview">{text}</p>
       <span className="field-hint">{t('cancellationFees:new.confirm.smsPreviewHint')}</span>
-      <span className="field-hint">
-        {t('cancellationFees:new.confirm.smsParts', {
-          characters: String(smsCharacterCount(text)),
-          parts: String(smsPartCount(text)),
-        })}
-      </span>
+      <SmsPartsHint template={template} amount={amount} dueDate={dueDate} />
     </div>
+  )
+}
+
+/**
+ * How long the message runs and what AWS will bill it as.
+ *
+ * Shown under the text while it is being written as well as on the
+ * confirmation step. The confirmation step alone is too late to be much use:
+ * by then the operator has finished writing, and the only way to answer a
+ * third part is to go back. Under the textarea the count moves as they type,
+ * so the sentence that costs 11.8円 more is visible while they are still
+ * deciding whether to keep it.
+ */
+function SmsPartsHint({
+  template,
+  amount,
+  dueDate,
+}: {
+  template: string
+  amount: number
+  dueDate: string
+}) {
+  const { t } = useTranslation(['cancellationFees'])
+  const text = renderSmsPreview({ template, amount, dueDate })
+  return (
+    <span className="field-hint">
+      {t('cancellationFees:new.delivery.smsParts', {
+        characters: String(smsCharacterCount(text)),
+        parts: String(smsPartCount(text)),
+      })}
+    </span>
   )
 }
 

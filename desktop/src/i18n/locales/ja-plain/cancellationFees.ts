@@ -115,6 +115,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
       smsBody: 'ショートメールの文章',
       smsBodyHint:
         'この文章は、ショートメールだけに使います。メールの本文には使いません。{url} と書いたところに、支払い用のリンクが入ります。',
+      smsParts: '{{characters}}文字です。{{parts}}通ぶんの料金でとどきます（70文字までが1通、こえると67文字ごとに1通）。',
     },
     total: '請求する金額',
     review: '送る内容を確かめる',
@@ -133,7 +134,6 @@ export const cancellationFees: DeepPartial<typeof source> = {
       ledgerExisting: 'すでに名簿にいる相手です',
       smsPreview: '相手にとどくSMSの文',
       smsPreviewHint: '支払いのURLは請求書を作るときに決まります。ここに出ているのは、同じ長さの見本です。',
-      smsParts: '{{characters}}文字です。{{parts}}通ぶんの料金でとどきます（70文字までが1通、こえると67文字ごとに1通）。',
       back: '戻して直す',
     },
     validation: {
