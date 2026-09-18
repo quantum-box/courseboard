@@ -262,4 +262,39 @@ describe('the cancellation fee form', () => {
       phone: '+818011112222',
     })
   })
+
+  it('shows the finished SMS, and what it will be billed as, before it goes', async () => {
+    // Field substitutes the placeholders after this screen hands the send
+    // over, so without this the desk confirms a template and finds out what
+    // the guest actually received afterwards.
+    api.field.mockResolvedValue(sentInvoice())
+    renderPage()
+    fillNamePhoneAmount()
+
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+
+    const preview = screen.getByText(/キャンセル料5000円/)
+    expect(preview.textContent).toContain('https://tachyonfield.txcloud.app/p/')
+    expect(preview.textContent).not.toContain('{amount}')
+    expect(preview.textContent).not.toContain('{url}')
+    // What this send costs, while it can still be shortened.
+    expect(screen.getByText(/118文字・2通ぶん/)).toBeTruthy()
+  })
+
+  it('leaves the SMS preview out when nothing is going by SMS', async () => {
+    api.field.mockResolvedValue(sentInvoice())
+    renderPage()
+    fireEvent.change(screen.getByLabelText('請求先の名前', { exact: false }), {
+      target: { value: '山田 太郎' },
+    })
+    fireEvent.change(screen.getByLabelText('送り先のメール', { exact: false }), {
+      target: { value: 'guest@example.com' },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+
+    expect(screen.queryByText('送られるSMSの文面')).toBeNull()
+  })
 })

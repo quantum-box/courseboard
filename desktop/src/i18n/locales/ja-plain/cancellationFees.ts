@@ -131,6 +131,9 @@ export const cancellationFees: DeepPartial<typeof source> = {
       ledgerRegister: 'この名前で名簿に入れます',
       ledgerSkip: '名簿には入れません',
       ledgerExisting: 'すでに名簿にいる相手です',
+      smsPreview: '相手にとどくSMSの文',
+      smsPreviewHint: '支払いのURLは請求書を作るときに決まります。ここに出ているのは、同じ長さの見本です。',
+      smsParts: '{{characters}}文字です。{{parts}}通ぶんの料金でとどきます（70文字までが1通、こえると67文字ごとに1通）。',
       back: '戻して直す',
     },
     validation: {

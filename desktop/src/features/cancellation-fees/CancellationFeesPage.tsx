@@ -51,6 +51,7 @@ import {
   type InvoiceBillTo,
   type InvoiceSource,
 } from './models'
+import { renderSmsPreview, smsCharacterCount, smsPartCount } from './smsMessage'
 
 // Re-exported so the existing tests and any importer of this screen keep
 // reaching them at the name they already use.
@@ -973,6 +974,13 @@ export function NewCancellationFeePage() {
                 </dd>
               </div>
             </dl>
+            {pending.sendSms && pending.smsMessage ? (
+              <SmsPreview
+                template={pending.smsMessage}
+                amount={pending.amount + pending.taxAmount}
+                dueDate={pending.dueDate}
+              />
+            ) : null}
             <div className="toolbar-row">
               <Button type="button" disabled={submitting} onClick={() => setPending(null)}>
                 {t('cancellationFees:new.confirm.back')}
@@ -1011,6 +1019,50 @@ export function recipientPhone(invoice: Pick<InvoiceData, 'clientPhone' | 'billT
 
 export function recipientEmail(invoice: Pick<InvoiceData, 'clientEmail' | 'billTo'>) {
   return invoice.clientEmail ?? invoice.billTo?.snapshot?.email ?? null
+}
+
+/**
+ * The SMS as it will arrive, for the confirmation step.
+ *
+ * This is the last point where the finished text can still be read: Field
+ * substitutes the placeholders after the send is handed over, so up to here
+ * the desk has only seen a template. The part count rides along because the
+ * text is editable and AWS bills per part — the shipped wording leaves sixteen
+ * characters under the two-part ceiling, so one added phrase makes every send
+ * half again as expensive without looking any different.
+ *
+ * `amount` is the invoice total: the message asks for what the guest owes, and
+ * a preview that quoted the fee before tax would be a different number from
+ * the one on the payment page.
+ */
+function SmsPreview({
+  template,
+  amount,
+  dueDate,
+}: {
+  template: string
+  amount: number
+  dueDate: string
+}) {
+  const { t } = useTranslation(['cancellationFees'])
+  // The payment link does not exist yet, so this renders against a stand-in of
+  // the same length rather than leaving `{url}` showing.
+  const text = renderSmsPreview({ template, amount, dueDate })
+  // Not a `Field`: that renders a `<label>`, and the preview is a block of
+  // text rather than a control for the label to name.
+  return (
+    <div className="field">
+      <span className="field-label">{t('cancellationFees:new.confirm.smsPreview')}</span>
+      <p className="notes-block sms-preview">{text}</p>
+      <span className="field-hint">{t('cancellationFees:new.confirm.smsPreviewHint')}</span>
+      <span className="field-hint">
+        {t('cancellationFees:new.confirm.smsParts', {
+          characters: String(smsCharacterCount(text)),
+          parts: String(smsPartCount(text)),
+        })}
+      </span>
+    </div>
+  )
 }
 
 /** Where the payment link is going, for the confirmation step. */
