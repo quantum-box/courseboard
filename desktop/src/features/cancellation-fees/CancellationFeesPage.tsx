@@ -36,8 +36,7 @@ import { showToast } from '../../lib/toast'
 import { openExternal } from '../../lib/platform'
 import { currentRouteSearchParams, navigate } from '../../lib/router'
 import { CustomerPicker } from '../golf/customers/CustomerPicker'
-import { customerDistinguisher, type Customer } from '../golf/customers/models'
-import { useCustomerSearch } from '../golf/customers/useCustomerSearch'
+import type { Customer } from '../golf/customers/models'
 import { DEFAULT_TIME_ZONE, normalizeIsoDate, today } from '../../lib/clock'
 import { Sheet } from '../../components/Sheet'
 import {
@@ -355,6 +354,17 @@ export function CancellationFeesPage() {
 }
 
 /**
+ * Who the desk says it is billing, which is all it is asked to decide.
+ *
+ * A person is one answer, not two: whether the name typed into the box turns
+ * out to be in the customer ledger is what the picker answers, not a choice
+ * made before anything has been typed. A company is genuinely different — it
+ * is billed against an account Field holds, and the order it came from names
+ * that account.
+ */
+type RecipientKind = 'person' | 'client'
+
+/**
  * What the confirmation step is holding: everything the send will use, read
  * off the form once so the operator confirms the same values that go upstream.
  */
@@ -403,9 +413,9 @@ export function NewCancellationFeePage() {
   const [sendEmail, setSendEmail] = useState(true)
   const [sendSms, setSendSms] = useState(false)
   // An order names a company, so it arrives with an identifier. Everything else
-  // starts from the name and the number the desk was given on the phone: a
-  // caller who has never paid the club anything has no ledger entry to pick.
-  const [billToKind, setBillToKind] = useState<BillToKind>(orderId ? 'client' : 'unregistered')
+  // is a person, and which kind of person is not something the desk can answer
+  // before it has typed the name.
+  const [recipientKind, setRecipientKind] = useState<RecipientKind>(orderId ? 'client' : 'person')
   // The person being billed, chosen from the ledger rather than typed as an
   // id. A cancellation fee is always somebody the club already has a booking
   // for, and asking the desk to copy `cus_01j…` off another screen is how the
@@ -421,48 +431,25 @@ export function NewCancellationFeePage() {
   const [sent, setSent] = useState<PendingSubmission | null>(null)
   const [deliveryError, setDeliveryError] = useState<string | null>(null)
   const [resending, setResending] = useState(false)
-  // Only asked while the desk is about to write a ledger entry. Somebody being
-  // billed as a one-off is not a question about the ledger at all.
-  const searchLedger = billToKind === 'unregistered' && registerCustomer
-  const { candidates, searching, completedQuery } = useCustomerSearch(
-    searchLedger ? customerName : '',
-  )
 
   /**
-   * What the candidate list has to say, if anything.
+   * Which of Field's three recipients this invoice is actually addressed to.
    *
-   * Kept apart from the markup because the three states are one answer to "is
-   * this person already in the ledger" — and the wrong pair shown together
-   * ("the ledger has that name" above "nobody has that name") is worse than
-   * showing nothing.
+   * Derived, never chosen: a person the desk recognised in the ledger is billed
+   * as that customer, and the same person typed in and left unrecognised is
+   * billed by name. Both are ordinary — a caller who has never paid the club
+   * anything has no ledger entry to pick, and being asked for one is what used
+   * to stop the desk mid-call.
    */
-  const trimmedName = customerName.trim()
-  const ledgerCandidatesState = !searchLedger || !trimmedName
-    ? 'idle'
-    : searching
-      ? 'searching'
-      : candidates.length > 0
-        ? 'found'
-        : completedQuery === trimmedName ? 'none' : 'idle'
+  const billToKind: BillToKind = recipientKind === 'client'
+    ? 'client'
+    : customer ? 'customer' : 'unregistered'
 
-  function changeBillToKind(kind: BillToKind) {
-    setBillToKind(kind)
+  function changeRecipientKind(kind: RecipientKind) {
+    setRecipientKind(kind)
     // The picked entry answered "who is this person in the ledger"; it means
-    // nothing once the form is addressing a one-off recipient or a company.
-    if (kind !== 'customer') setCustomer(null)
-  }
-
-  /**
-   * Bill an existing ledger entry the desk recognised among the candidates.
-   *
-   * Only ever reached by a click. Matching on the phone number alone would
-   * merge a family sharing one mobile into whoever was entered first, and two
-   * people with the same name sit a row apart in the list.
-   */
-  function billExistingCustomer(picked: Customer) {
-    setCustomer(picked)
-    setCustomerName(picked.name)
-    setBillToKind('customer')
+    // nothing once the form is addressing a company account.
+    if (kind === 'client') setCustomer(null)
   }
 
   /**
@@ -775,36 +762,32 @@ export function NewCancellationFeePage() {
           <FormGrid>
             <Field label={t('cancellationFees:new.client.kind')} required>
               <NativeSelect
-                name="billToKind"
-                value={billToKind}
-                onChange={event => changeBillToKind(event.target.value as BillToKind)}
+                name="recipientKind"
+                value={recipientKind}
+                onChange={event => changeRecipientKind(event.target.value as RecipientKind)}
               >
-                <option value="unregistered">{t('cancellationFees:new.client.unregistered')}</option>
-                <option value="customer">{t('cancellationFees:new.client.customer')}</option>
+                <option value="person">{t('cancellationFees:new.client.person')}</option>
                 <option value="client">{t('cancellationFees:new.client.company')}</option>
               </NativeSelect>
             </Field>
-            {billToKind === 'unregistered' ? (
-              <Field label={t('cancellationFees:new.client.name')} required>
-                <Input
-                  value={customerName}
-                  required
-                  onChange={event => setCustomerName(event.target.value)}
-                />
-              </Field>
-            ) : null}
-            {billToKind === 'customer' ? (
-              // One field, not two: the name and the ledger entry are the same
-              // decision, and typing one without the other is what produced
-              // invoices addressed to nobody.
+            {recipientKind === 'person' ? (
+              // One box for the whole question. The desk types the name it was
+              // given, the ledger offers whoever answers to it, and picking is
+              // optional — an identifier the caller would have to be looked up
+              // by is not something anybody has on the phone.
               <Field
-                label={t('cancellationFees:new.client.customerPick')}
-                hint={t('cancellationFees:new.client.customerHint')}
+                label={t('cancellationFees:new.client.name')}
+                hint={t('cancellationFees:new.client.nameHint')}
                 required
               >
                 <CustomerPicker
                   name={customerName}
                   customerId={customer?.id ?? null}
+                  required
+                  // The ledger entry is written by the checkbox below, when the
+                  // invoice goes out, so the picker does not offer to write one
+                  // of its own here.
+                  allowRegister={false}
                   onNameChange={value => {
                     setCustomerName(value)
                     // Editing the name after a pick means the desk is looking
@@ -818,8 +801,7 @@ export function NewCancellationFeePage() {
                   }}
                 />
               </Field>
-            ) : null}
-            {billToKind === 'client' ? (
+            ) : (
               <>
                 <Field label={t('cancellationFees:new.client.name')} required>
                   <Input name="clientName" required defaultValue={order?.clientName ?? ''} />
@@ -841,60 +823,26 @@ export function NewCancellationFeePage() {
                   />
                 </Field>
               </>
-            ) : null}
+            )}
             <Field label={t('cancellationFees:new.client.due')} required>
               <Input name="dueDate" type="date" required defaultValue={due} />
             </Field>
           </FormGrid>
 
+          {/* Only offered for somebody the ledger does not already hold: a
+              recipient picked from it is in there by definition. */}
           {billToKind === 'unregistered' ? (
-            <>
-              <label className="consent-check">
-                <input
-                  type="checkbox"
-                  checked={registerCustomer}
-                  onChange={event => setRegisterCustomer(event.target.checked)}
-                />
-                <span>
-                  <strong>{t('cancellationFees:new.client.register')}</strong>
-                  <small>{t('cancellationFees:new.client.registerDetail')}</small>
-                </span>
-              </label>
-
-              {ledgerCandidatesState === 'idle' ? null : (
-                <div className="cancellation-fee-candidates">
-                  {ledgerCandidatesState === 'searching' ? (
-                    <p className="cancellation-fee-candidates__note">
-                      {t('cancellationFees:new.client.searching')}
-                    </p>
-                  ) : null}
-                  {ledgerCandidatesState === 'found' ? (
-                    <p className="cancellation-fee-candidates__note">
-                      {t('cancellationFees:new.client.candidatesHint')}
-                    </p>
-                  ) : null}
-                  {ledgerCandidatesState === 'found' ? candidates.map(candidate => {
-                    const detail = customerDistinguisher(candidate)
-                    return (
-                      <button
-                        type="button"
-                        key={candidate.id}
-                        className="cancellation-fee-candidate"
-                        onClick={() => billExistingCustomer(candidate)}
-                      >
-                        <span>{candidate.name}</span>
-                        {detail ? <span className="cancellation-fee-candidate__detail">{detail}</span> : null}
-                      </button>
-                    )
-                  }) : null}
-                  {ledgerCandidatesState === 'none' ? (
-                    <p className="cancellation-fee-candidates__note">
-                      {t('cancellationFees:new.client.noCandidates')}
-                    </p>
-                  ) : null}
-                </div>
-              )}
-            </>
+            <label className="consent-check">
+              <input
+                type="checkbox"
+                checked={registerCustomer}
+                onChange={event => setRegisterCustomer(event.target.checked)}
+              />
+              <span>
+                <strong>{t('cancellationFees:new.client.register')}</strong>
+                <small>{t('cancellationFees:new.client.registerDetail')}</small>
+              </span>
+            </label>
           ) : null}
         </Panel>
 

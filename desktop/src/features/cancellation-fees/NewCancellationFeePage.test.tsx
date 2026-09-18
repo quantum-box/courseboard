@@ -3,7 +3,7 @@
 import { TooltipProvider } from '@tachyon-sdk/native-ui'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { i18next } from '../../i18n'
 import { NewCancellationFeePage } from './CancellationFeesPage'
@@ -26,6 +26,12 @@ afterEach(() => {
   api.field.mockReset()
   api.courseboard.mockReset()
   router.navigate.mockReset()
+})
+
+beforeEach(() => {
+  // The name box searches the ledger as the desk types, so every test needs an
+  // answer for it. A test about the candidates replaces this with its own.
+  api.courseboard.mockResolvedValue({ items: [] })
 })
 
 /** A created invoice that reached the recipient, so the happy path completes. */
@@ -67,6 +73,9 @@ function checkbox(name: RegExp) {
 /**
  * Fill in the three things the desk actually has when somebody cancels by
  * phone: a name, a mobile number, and an amount.
+ *
+ * No recipient type is chosen and no identifier is typed, because that is the
+ * point: the form opens on the person the desk is about to bill.
  */
 function fillNamePhoneAmount(name = '山田 太郎', phone = '090-0000-0000') {
   fireEvent.click(checkbox(/請求書と支払いリンク/))
@@ -201,7 +210,7 @@ describe('the cancellation fee form', () => {
     expect(api.field.mock.calls.filter(call => call[0] === '/v1/invoices')).toHaveLength(1)
   })
 
-  it('offers ledger entries with the same name but never picks one on its own', async () => {
+  it('offers ledger entries for the name as it is typed, and never picks one on its own', async () => {
     // A shared mobile number and two members called 本田 are both ordinary.
     // Merging on a match would attach one person's history to another.
     api.courseboard.mockResolvedValue({
@@ -209,12 +218,13 @@ describe('the cancellation fee form', () => {
     })
     api.field.mockResolvedValue(sentInvoice())
     renderPage()
+    // Typing the name is the whole search: no recipient type to choose first,
+    // and nothing to tick before the ledger is consulted.
     fillNamePhoneAmount()
-    fireEvent.click(checkbox(/送信先を顧客台帳にも登録する/))
 
     const candidate = await screen.findByRole('button', { name: /山田 太郎/ })
     fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
-    await screen.findByText('この名前で登録します')
+    await screen.findByText('登録しません')
     fireEvent.click(screen.getByRole('button', { name: '戻って直す' }))
 
     fireEvent.click(candidate)
@@ -226,5 +236,30 @@ describe('the cancellation fee form', () => {
     expect(api.field.mock.calls.some(call => call[0] === '/v1/erp/customers')).toBe(false)
     const create = bodyOf(api.field.mock.calls.find(call => call[0] === '/v1/invoices')!)
     expect(create.billTo).toEqual({ kind: 'customer', customerId: 'cus_existing' })
+  })
+
+  it('never asks for an identifier: the ledger is a choice, not a requirement', async () => {
+    // What the desk sees is one name box. The recipient the club has never
+    // billed before is the ordinary case, and it has no id to offer.
+    api.courseboard.mockResolvedValue({ items: [] })
+    api.field.mockResolvedValue(sentInvoice())
+    renderPage()
+
+    expect(screen.queryByLabelText(/顧客ID/)).toBeNull()
+    const kind = screen.getByLabelText('請求先の種類', { exact: false }) as HTMLSelectElement
+    expect([...kind.options].map(option => option.value)).toEqual(['person', 'client'])
+
+    fillNamePhoneAmount('新谷 花子', '080-1111-2222')
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await waitFor(() => expect(api.field).toHaveBeenCalled())
+
+    const create = bodyOf(api.field.mock.calls.find(call => call[0] === '/v1/invoices')!)
+    expect(create.billTo).toEqual({
+      kind: 'unregistered',
+      name: '新谷 花子',
+      phone: '+818011112222',
+    })
   })
 })
