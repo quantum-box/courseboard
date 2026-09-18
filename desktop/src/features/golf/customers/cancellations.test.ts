@@ -106,18 +106,89 @@ describe('what a bulk collection would send', () => {
     expect(plan.total).toBe(10_000)
   })
 
-  it('reports a booking nobody linked instead of quietly dropping it', () => {
-    // Silently leaving it out would bill less than the desk selected and say
-    // nothing about it, which is money nobody chases.
+  it('bills a booking nobody linked by the name it was taken under', () => {
+    // The ordinary cancellation taken over the phone. Requiring a customer id
+    // for it left every one of them uncollectable, and leaving it out of the
+    // batch billed less than the desk selected while saying nothing about it.
     const plan = planCancellationFees(
-      [row({ reservationId: 'res_1', customerId: null, billable: false })],
+      [row({ reservationId: 'res_1', customerId: null, billable: false, players: 2 })],
+      5_000,
+    )
+
+    expect(plan.unbillable).toHaveLength(0)
+    expect(plan.groups).toHaveLength(1)
+    expect(plan.groups[0]?.recipient).toEqual({ kind: 'unregistered', name: '本田 康彦' })
+    expect(plan.total).toBe(10_000)
+  })
+
+  it('keeps two unlinked bookings apart even under the same name', () => {
+    // Two people called 本田 cancelling in the same month is ordinary, and a
+    // typed name is not evidence that they are one person. One invoice for
+    // both would put one guest's fee on the other guest's bill.
+    const plan = planCancellationFees(
+      [
+        row({ reservationId: 'res_1', customerId: null, players: 1 }),
+        row({ reservationId: 'res_2', customerId: null, players: 1 }),
+      ],
+      5_000,
+    )
+
+    expect(plan.groups.map(group => group.key)).toEqual([
+      'reservation:res_1',
+      'reservation:res_2',
+    ])
+    expect(plan.total).toBe(10_000)
+  })
+
+  it('reports a booking with no name at all rather than inventing a recipient', () => {
+    const plan = planCancellationFees(
+      [row({ reservationId: 'res_1', customerId: null, customerName: null })],
       5_000,
     )
 
     expect(plan.groups).toHaveLength(0)
     expect(plan.unbillable).toHaveLength(1)
+    expect(plan.unbillable[0]?.reason).toBe('unnamed')
     expect(plan.unbillable[0]?.row.reservationId).toBe('res_1')
     expect(plan.total).toBe(0)
+  })
+
+  it('takes the name and number the desk typed for an unlinked booking', () => {
+    const plan = planCancellationFees(
+      [row({ reservationId: 'res_1', customerId: null, customerName: '本田', players: 1 })],
+      5_000,
+      new Set(),
+      new Map([['res_1', { customer: null, name: '新谷 花子', phone: '+819000000000' }]]),
+    )
+
+    expect(plan.groups[0]?.recipient).toEqual({
+      kind: 'unregistered',
+      name: '新谷 花子',
+      phone: '+819000000000',
+    })
+    expect(plan.groups[0]?.customerName).toBe('新谷 花子')
+  })
+
+  it('merges an unlinked booking into the ledger customer the desk recognised', () => {
+    // Somebody with one linked cancellation and one unlinked gets a single
+    // invoice, which is the whole reason the groups exist.
+    const plan = planCancellationFees(
+      [
+        row({ reservationId: 'res_1', customerId: 'cus_1', players: 1 }),
+        row({ reservationId: 'res_2', customerId: null, customerName: '本田', players: 1 }),
+      ],
+      5_000,
+      new Set(),
+      new Map([[
+        'res_2',
+        { customer: { id: 'cus_1', name: '本田 康彦' }, name: '本田 康彦' },
+      ]]),
+    )
+
+    expect(plan.groups).toHaveLength(1)
+    expect(plan.groups[0]?.recipient).toEqual({ kind: 'customer', customerId: 'cus_1' })
+    expect(plan.groups[0]?.rows.map(entry => entry.reservationId)).toEqual(['res_1', 'res_2'])
+    expect(plan.total).toBe(10_000)
   })
 
   it('leaves out a booking Field already holds an invoice for', () => {

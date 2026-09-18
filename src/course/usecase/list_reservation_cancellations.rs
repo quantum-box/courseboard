@@ -33,11 +33,13 @@ pub struct CancellationEntry {
 }
 
 impl CancellationEntry {
-    /// Whether a cancellation fee can actually be raised against this row.
+    /// Whether this booking carries a ledger link.
     ///
-    /// An invoice needs somebody in the ledger to bill. A booking taken under
-    /// a name nobody linked can be read and chased by hand, but not billed,
-    /// and the screen has to say so rather than offering a button that fails.
+    /// Not whether a fee can be raised for it: since PLT-4159 an invoice can
+    /// be addressed to a name alone, and the collection screen bills a booking
+    /// taken under one as an unregistered recipient. What this still answers
+    /// is whether there is a customer to attribute the charge to, which is
+    /// what decides between one invoice per person and one per booking.
     pub fn billable(&self) -> bool {
         self.cancellation.customer_id.is_some()
     }

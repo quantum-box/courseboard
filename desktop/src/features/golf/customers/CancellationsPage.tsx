@@ -31,6 +31,7 @@ import {
   cancellationFeeInvoicesPath,
   cancellationFeeSources,
   invoicedReservationIds,
+  normalizePhone,
   type InvoiceSource,
 } from '../../cancellation-fees/models'
 import {
@@ -45,6 +46,7 @@ import {
   defaultCancellationFilters,
   planCancellationFees,
   splitFeeAcrossRows,
+  type CancellationFeeAssignment,
   type CancellationFeeState,
   type CancellationFilters,
   type CancellationOrder,
@@ -53,6 +55,8 @@ import {
   type ReservationCancellation,
   type ReservationCancellationPage,
 } from './cancellations'
+import { CustomerPicker } from './CustomerPicker'
+import type { Customer } from './models'
 import { visitDate } from './visits'
 
 /** What a club most often charges per round given up. Editable on the sheet. */
@@ -449,6 +453,24 @@ function describeFeeLine(
 type BillingResult = { group: CustomerFeeGroup; invoiceId?: string; error?: string }
 
 /**
+ * What the desk typed into the sheet for a booking the ledger has no link for.
+ *
+ * Held as the raw text of the boxes rather than as a finished recipient: the
+ * number is normalised when the plan is built, and the desk has to be able to
+ * see what it typed while the normalisation refuses it.
+ */
+type RecipientEdit = { customer: Customer | null; name: string; phone: string }
+
+/** What the boxes for a booking start out holding: whatever the booking says. */
+function recipientEditFor(row: ReservationCancellation): RecipientEdit {
+  return {
+    customer: null,
+    name: row.customerName?.trim() ?? '',
+    phone: row.customerPhone?.trim() ?? '',
+  }
+}
+
+/**
  * Raise one invoice per person for everything they cancelled, then record it.
  *
  * The order matters and is not negotiable: the invoice is created upstream
@@ -470,11 +492,15 @@ function BillCancellationFeesSheet({
   onSettled: () => void
 }) {
   const { t } = useTranslation(['customers', 'cancellationFees', 'common'])
+  const timezone = useTenantTimezone()
   const [perPlayer, setPerPlayer] = useState(DEFAULT_PER_PLAYER_FEE)
   const [dueDate, setDueDate] = useState(() => addDays(businessDate, 7))
   const [sendEmail, setSendEmail] = useState(true)
   const [saving, setSaving] = useState(false)
   const [results, setResults] = useState<BillingResult[] | null>(null)
+  // Keyed by booking, so an entry survives the sheet being closed and reopened
+  // and means nothing to the bookings it is not about.
+  const [edits, setEdits] = useState<Map<string, RecipientEdit>>(new Map())
 
   // What Field already holds a cancellation fee for (PLT-4158).
   //
@@ -493,14 +519,49 @@ function BillCancellationFeesSheet({
     [invoiced.data],
   )
 
+  /** The bookings the sheet has to ask about: no ledger link on the row. */
+  const unlinkedRows = useMemo(
+    () => rows.filter(row => !row.customerId?.trim() && !alreadyInvoiced.has(row.reservationId)),
+    [rows, alreadyInvoiced],
+  )
+  const editFor = (row: ReservationCancellation) =>
+    edits.get(row.reservationId) ?? recipientEditFor(row)
+  const patchEdit = (row: ReservationCancellation, change: Partial<RecipientEdit>) => {
+    setEdits(current => {
+      const next = new Map(current)
+      next.set(row.reservationId, { ...editFor(row), ...change })
+      return next
+    })
+  }
+
+  /**
+   * What the desk decided, in the shape the plan reads.
+   *
+   * The number is normalised here rather than in the box: Field rejects the
+   * whole invoice for one it cannot read, and losing the number is a far
+   * smaller harm than losing the invoice — the sheet says so beside the box.
+   */
+  const assignments = useMemo(() => {
+    const decided = new Map<string, CancellationFeeAssignment>()
+    for (const row of unlinkedRows) {
+      const edit = edits.get(row.reservationId) ?? recipientEditFor(row)
+      decided.set(row.reservationId, {
+        customer: edit.customer,
+        name: edit.name,
+        phone: normalizePhone(edit.phone),
+      })
+    }
+    return decided
+  }, [unlinkedRows, edits])
+
   const plan = useMemo(
-    () => planCancellationFees(rows, perPlayer, alreadyInvoiced),
-    [rows, perPlayer, alreadyInvoiced],
+    () => planCancellationFees(rows, perPlayer, alreadyInvoiced, assignments),
+    [rows, perPlayer, alreadyInvoiced, assignments],
   )
 
   if (!open) return null
 
-  const unlinked = plan.unbillable.filter(entry => entry.reason === 'unlinked')
+  const unnamed = plan.unbillable.filter(entry => entry.reason === 'unnamed')
   const alreadyBilled = plan.unbillable.filter(entry => entry.reason === 'already_invoiced')
 
   const submit = async () => {
@@ -512,7 +573,9 @@ function BillCancellationFeesSheet({
         const invoice = await fieldApiJson<InvoiceResponse>('/v1/invoices', {
           method: 'POST',
           body: JSON.stringify(cancellationFeeInvoiceRequestBody({
-            billTo: { kind: 'customer', customerId: group.customerId },
+            // The ledger entry when there is one, and the name the booking was
+            // taken under when there is not (PLT-4159).
+            billTo: group.recipient,
             // Keyed on the charge itself, so pressing the button twice bills
             // this person once. A retry of the whole sheet still does what the
             // desk means by it: the groups that went through are answered with
@@ -520,7 +583,12 @@ function BillCancellationFeesSheet({
             // created. A key generated per press would bill everybody again,
             // and it used to be sent as a header Field never reads.
             idempotencyKey: cancellationFeeIdempotencyKey([
-              group.customerId,
+              // The recipient as the charge names them, not the grouping key:
+              // a key that changed shape would answer a batch already sent
+              // with a second invoice for the same bookings.
+              group.recipient.kind === 'customer'
+                ? group.recipient.customerId
+                : `name:${group.recipient.name}`,
               dueDate,
               String(group.amount),
               ...group.rows.map(row => row.reservationId).sort(),
@@ -647,11 +715,82 @@ function BillCancellationFeesSheet({
           </span>
         </label>
 
+        {/* Who the club has no ledger link for, and the two ways out of it:
+            recognise them in the ledger, or bill the name as it stands. These
+            bookings used to be reported as unbillable and dropped, which left
+            every cancellation taken over the phone uncollectable. */}
+        {unlinkedRows.length > 0 ? (
+          <div className="fee-recipient-editor">
+            <h4>{t('customers:cancellations.bill.unlinkedTitle')}</h4>
+            <p className="muted">{t('customers:cancellations.bill.unlinkedHint')}</p>
+            <ul className="fee-recipient-list">
+              {unlinkedRows.map(row => {
+                const edit = editFor(row)
+                const unreadablePhone = Boolean(edit.phone.trim()) && !normalizePhone(edit.phone)
+                return (
+                  <li key={row.reservationId}>
+                    <span className="muted">
+                      {t('customers:cancellations.bill.unlinkedBooking', {
+                        date: row.playedOn ? visitDate(row.playedOn, timezone) : '',
+                        players: String(Math.max(1, row.players)),
+                      })}
+                    </span>
+                    <FormGrid columns={2}>
+                      <Field label={t('customers:cancellations.bill.unlinkedName')}>
+                        <CustomerPicker
+                          name={edit.name}
+                          customerId={edit.customer?.id ?? null}
+                          disabled={saving}
+                          // The box opens holding the name the booking was
+                          // taken under, so landing in it is a question about
+                          // who that is.
+                          candidatesOnFocus
+                          // The ledger is written from the customer's own page,
+                          // not in the middle of a morning's collection.
+                          allowRegister={false}
+                          onNameChange={name => patchEdit(row, {
+                            name,
+                            // Editing the name after a pick means this is
+                            // somebody else; the old link would bill the person
+                            // whose name is no longer in the box.
+                            ...(edit.customer && name !== edit.customer.name
+                              ? { customer: null }
+                              : {}),
+                          })}
+                          onSelect={customer => patchEdit(row, {
+                            customer,
+                            ...(customer ? { name: customer.name } : {}),
+                          })}
+                        />
+                      </Field>
+                      <Field
+                        label={t('customers:cancellations.bill.unlinkedPhone')}
+                        requirement="optional"
+                        hint={unreadablePhone
+                          ? t('customers:cancellations.bill.unlinkedPhoneUnreadable')
+                          : undefined}
+                      >
+                        <Input
+                          type="tel"
+                          value={edit.phone}
+                          placeholder="09012345678"
+                          disabled={saving || Boolean(edit.customer)}
+                          onChange={event => patchEdit(row, { phone: event.target.value })}
+                        />
+                      </Field>
+                    </FormGrid>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : null}
+
         {/* The bill before it is raised: who, how much, and what is being left
             out. A collection that quietly skips rows is money nobody chases. */}
         <ul className="fee-plan-list">
           {plan.groups.map(group => (
-            <li key={group.customerId}>
+            <li key={group.key}>
               <strong>{group.customerName}</strong>{' '}
               <span className="muted">
                 {t('customers:cancellations.bill.groupDetail', {
@@ -660,6 +799,9 @@ function BillCancellationFeesSheet({
                 })}
               </span>{' '}
               {yen(group.amount)}
+              {group.recipient.kind === 'unregistered' ? (
+                <div className="muted">{t('customers:cancellations.bill.unregistered')}</div>
+              ) : null}
               {group.customerEmail ? null : (
                 <div className="muted">{t('customers:cancellations.bill.noEmail')}</div>
               )}
@@ -668,10 +810,11 @@ function BillCancellationFeesSheet({
         </ul>
 
         {/* Two different surprises, so two different sentences. One is a row
-            nobody can be billed for; the other is a row somebody already was. */}
-        {unlinked.length > 0 ? (
+            with nothing to address an invoice to; the other is a row somebody
+            already was billed for. */}
+        {unnamed.length > 0 ? (
           <Notice tone="warning" title={t('customers:cancellations.bill.unbillableTitle')}>
-            {t('customers:cancellations.bill.unbillable', { count: unlinked.length })}
+            {t('customers:cancellations.bill.unbillable', { count: unnamed.length })}
           </Notice>
         ) : null}
 
@@ -688,7 +831,7 @@ function BillCancellationFeesSheet({
           >
             <ul className="fee-plan-list">
               {results.map(result => (
-                <li key={result.group.customerId}>
+                <li key={result.group.key}>
                   {result.group.customerName}:{' '}
                   {result.error ?? t('customers:cancellations.bill.resultOk')}
                 </li>

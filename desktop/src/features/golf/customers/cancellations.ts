@@ -9,6 +9,8 @@
  * many did the weather take", and only one of them ends in an invoice.
  */
 
+import type { Customer } from './models'
+
 /** The club's own reasons, in the order the screen offers them. */
 export const CANCELLATION_REASONS = [
   'weather',
@@ -40,7 +42,11 @@ export type ReservationCancellation = {
   customerName?: string | null
   customerPhone?: string | null
   customerEmail?: string | null
-  /** Whether an invoice can be raised against this row at all. */
+  /**
+   * Whether the booking carries a ledger link. Not whether it can be billed:
+   * a booking taken under a name alone is invoiced as an unregistered
+   * recipient (PLT-4159).
+   */
   billable: boolean
   golfCourseId?: string | null
   teeTime?: string | null
@@ -166,14 +172,31 @@ export function cancellationsQuery(
 }
 
 /**
- * One customer's share of a bulk collection.
+ * Who one invoice in a bulk collection is addressed to.
+ *
+ * A booking the ledger knows is billed as that customer. A booking taken under
+ * a name nobody ever linked is billed by the name itself, which Field keeps as
+ * an immutable snapshot (PLT-4159) — the club has no identifier for somebody
+ * who rang once and gave up a tee time, and a cancellation nobody can invoice
+ * is money nobody chases.
+ */
+export type FeeRecipient =
+  | { kind: 'customer'; customerId: string }
+  | { kind: 'unregistered'; name: string; phone?: string }
+
+/**
+ * One recipient's share of a bulk collection.
  *
  * Grouped by person rather than by booking because that is what an invoice is:
  * somebody who cancelled twice in a month gets one bill for both, not two
- * bills they have to reconcile themselves.
+ * bills they have to reconcile themselves. Two bookings under the same *typed*
+ * name are not evidence of one person, though, so an unlinked booking is its
+ * own group — see `feeGroupKey`.
  */
 export type CustomerFeeGroup = {
-  customerId: string
+  /** What the rows were grouped by. Stable, and not for display. */
+  key: string
+  recipient: FeeRecipient
   customerName: string
   customerEmail?: string
   customerPhone?: string
@@ -183,17 +206,34 @@ export type CustomerFeeGroup = {
   amount: number
 }
 
+/**
+ * What the desk decided about a booking the ledger has no link for.
+ *
+ * Supplied by the collection sheet, per booking, so a row that used to be
+ * dropped for want of a customer id can be billed: either against the ledger
+ * entry the desk recognised, or by the name as typed.
+ */
+export type CancellationFeeAssignment = {
+  /** The ledger entry the desk picked, if it recognised one. */
+  customer: Customer | null
+  /** Who the invoice goes out to when no ledger entry was picked. */
+  name: string
+  /** E.164, or empty. The caller normalises; an unreadable number never gets here. */
+  phone?: string
+}
+
 /** A booking that is real but is being left out of this batch, and why. */
 export type UnbillableRow = {
   row: ReservationCancellation
   /**
-   * `unlinked` — nobody in the ledger to raise an invoice against.
+   * `unnamed` — no ledger link and no name to address an invoice to, so there
+   * is nothing to put on one. The sheet offers a name box for exactly these.
    * `already_invoiced` — Field already holds a cancellation-fee invoice for
    * this booking. CourseBoard's own row says otherwise, which means the
    * invoice went out and the write back failed; billing it again would be the
    * double charge this whole path exists to prevent.
    */
-  reason: 'unlinked' | 'already_invoiced'
+  reason: 'unnamed' | 'already_invoiced'
 }
 
 export type FeeBillingPlan = {
@@ -204,11 +244,24 @@ export type FeeBillingPlan = {
 }
 
 /**
+ * What the rows of one invoice are collected under.
+ *
+ * A customer id groups every booking that person gave up. A booking with no
+ * ledger link groups only itself: the typed name is all there is to go on, and
+ * merging two of them would put one guest's fee on another guest's invoice.
+ */
+function feeGroupKey(recipient: FeeRecipient, row: ReservationCancellation): string {
+  return recipient.kind === 'customer'
+    ? `customer:${recipient.customerId}`
+    : `reservation:${row.reservationId}`
+}
+
+/**
  * What a bulk collection would actually send.
  *
  * Built before anything is posted so the sheet can show the desk the bill it
  * is about to raise — how many people, how much each, and which selected rows
- * will be left behind because nobody linked them to the ledger.
+ * are still short of a name to address.
  */
 export function planCancellationFees(
   rows: ReservationCancellation[],
@@ -219,40 +272,49 @@ export function planCancellationFees(
    * the guard existed rather than blocking it.
    */
   alreadyInvoiced: ReadonlySet<string> = new Set(),
+  /** What the desk filled in for the bookings with no ledger link. */
+  assignments: ReadonlyMap<string, CancellationFeeAssignment> = new Map(),
 ): FeeBillingPlan {
   const groups = new Map<string, CustomerFeeGroup>()
   const unbillable: UnbillableRow[] = []
 
   for (const row of rows) {
-    // Checked before the ledger link, because it is the more surprising of the
-    // two: the desk selected this row precisely because our own record says
-    // nobody has billed it.
+    // Checked first, because it is the most surprising of the outcomes: the
+    // desk selected this row precisely because our own record says nobody has
+    // billed it.
     if (alreadyInvoiced.has(row.reservationId)) {
       unbillable.push({ row, reason: 'already_invoiced' })
       continue
     }
-    const customerId = row.customerId?.trim()
-    if (!customerId) {
-      unbillable.push({ row, reason: 'unlinked' })
+    const assignment = assignments.get(row.reservationId)
+    const recipient = feeRecipient(row, assignment)
+    if (!recipient) {
+      unbillable.push({ row, reason: 'unnamed' })
       continue
     }
     // A booking with no headcount is still one person who did not turn up;
     // charging it as zero would quietly bill nothing at all.
     const players = Math.max(1, row.players)
-    const existing = groups.get(customerId)
+    const key = feeGroupKey(recipient, row)
+    const email = row.customerEmail?.trim() || assignment?.customer?.email?.trim() || undefined
+    const phone = recipient.kind === 'unregistered'
+      ? recipient.phone
+      : row.customerPhone?.trim() || assignment?.customer?.phone?.trim() || undefined
+    const existing = groups.get(key)
     if (existing) {
       existing.rows.push(row)
       existing.players += players
       existing.amount += players * perPlayerAmount
-      existing.customerEmail = existing.customerEmail ?? row.customerEmail ?? undefined
-      existing.customerPhone = existing.customerPhone ?? row.customerPhone ?? undefined
+      existing.customerEmail = existing.customerEmail ?? email
+      existing.customerPhone = existing.customerPhone ?? phone
       continue
     }
-    groups.set(customerId, {
-      customerId,
-      customerName: row.customerName?.trim() || customerId,
-      customerEmail: row.customerEmail ?? undefined,
-      customerPhone: row.customerPhone ?? undefined,
+    groups.set(key, {
+      key,
+      recipient,
+      customerName: recipientName(row, recipient, assignment),
+      customerEmail: email,
+      customerPhone: phone,
       rows: [row],
       players,
       amount: players * perPlayerAmount,
@@ -265,6 +327,39 @@ export function planCancellationFees(
     unbillable,
     total: ordered.reduce((sum, group) => sum + group.amount, 0),
   }
+}
+
+/**
+ * Who this booking's fee is owed by, or nothing if that cannot be said yet.
+ *
+ * The booking's own ledger link comes first: it is the club's record of who
+ * played, and the desk's entry in the sheet is there to answer the rows that
+ * have none.
+ */
+function feeRecipient(
+  row: ReservationCancellation,
+  assignment: CancellationFeeAssignment | undefined,
+): FeeRecipient | null {
+  const customerId = row.customerId?.trim() || assignment?.customer?.id.trim()
+  if (customerId) return { kind: 'customer', customerId }
+  // The sheet's entry wins where there is one: the desk may have corrected the
+  // name the booking was taken under, or cleared a number it should not keep.
+  const name = (assignment ? assignment.name : row.customerName ?? '').trim()
+  if (!name) return null
+  const phone = (assignment ? assignment.phone ?? '' : row.customerPhone ?? '').trim()
+  return { kind: 'unregistered', name, ...(phone ? { phone } : {}) }
+}
+
+/** The name on the invoice, and on the line of the sheet that previews it. */
+function recipientName(
+  row: ReservationCancellation,
+  recipient: FeeRecipient,
+  assignment: CancellationFeeAssignment | undefined,
+): string {
+  if (recipient.kind === 'unregistered') return recipient.name
+  return row.customerName?.trim()
+    || assignment?.customer?.name.trim()
+    || recipient.customerId
 }
 
 /**

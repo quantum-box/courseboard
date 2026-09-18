@@ -49,7 +49,8 @@ pub struct ReservationCancellationDto {
     pub customer_phone: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub customer_email: Option<String>,
-    /// Whether an invoice can be raised for this row at all.
+    /// Whether the booking carries a ledger link. A booking without one is
+    /// still billable — the fee is invoiced to the name it was taken under.
     pub billable: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub golf_course_id: Option<String>,

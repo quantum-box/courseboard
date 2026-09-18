@@ -76,6 +76,21 @@ describe('the cancellation extraction', () => {
     clearResourceCache()
   })
 
+  async function selectAllAndOpenSheet() {
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText('このページをすべて選ぶ'))
+    })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
+    })
+  }
+
+  async function pressBill() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /を請求する$/ }))
+    })
+  }
+
   it('opens on the chargeable cancellations nobody has settled, and shows why each one was', async () => {
     api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
 
@@ -169,9 +184,17 @@ describe('the cancellation extraction', () => {
     expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
   })
 
-  it('says which selected bookings cannot be billed rather than quietly leaving them out', async () => {
+  it('bills a booking with no ledger link by the name it was taken under', async () => {
+    // The cancellation taken over the phone. It used to be reported as
+    // unbillable and dropped, so a club could not collect on any of them.
     api.course.mockResolvedValue({
-      items: [cancellation({ reservationId: 'res_1', customerId: null, billable: false })],
+      items: [cancellation({
+        reservationId: 'res_1',
+        customerId: null,
+        billable: false,
+        customerEmail: null,
+        players: 2,
+      })],
       total: 1,
     })
     mockField()
@@ -179,30 +202,120 @@ describe('the cancellation extraction', () => {
     await act(async () => {
       renderPage()
     })
+    await selectAllAndOpenSheet()
+
+    // The booking is shown as something to decide, not as a failure.
+    expect(screen.getByText('台帳と結びついていない予約')).toBeTruthy()
+    expect(screen.queryByText('請求できない予約があります')).toBeNull()
+    expect(screen.getByText('台帳に無い相手として、この名前で請求します。')).toBeTruthy()
+
+    // The number the desk took over the phone, in the form it was given. An
+    // unlinked booking carries no contact details of its own.
     await act(async () => {
-      fireEvent.click(screen.getByLabelText('このページをすべて選ぶ'))
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
+      fireEvent.change(screen.getByLabelText('電話番号', { exact: false }), {
+        target: { value: '090-0000-0000' },
+      })
     })
 
-    expect(screen.getByText('請求できない予約があります')).toBeTruthy()
+    await pressBill()
+
+    expect(invoicePosts()).toHaveLength(1)
+    const invoiceBody = JSON.parse((invoicePosts()[0]?.[1] as RequestInit).body as string)
+    expect(invoiceBody.billTo).toEqual({
+      kind: 'unregistered',
+      name: '本田 康彦',
+      phone: '+819000000000',
+    })
+    // Two rounds given up at the default 3,000 each, recorded against the
+    // booking exactly as a linked one would be.
+    expect(invoiceBody.lineItems[0].unitPrice).toBe(6_000)
+    const settle = api.course.mock.calls.find(
+      call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
+    )
+    const decisions = JSON.parse((settle?.[1] as RequestInit).body as string).decisions
+    expect(decisions).toEqual([
+      { reservationId: 'res_1', state: 'invoiced', invoiceId: 'inv_1', amount: 6_000 },
+    ])
   })
 
-  async function selectAllAndOpenSheet() {
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText('このページをすべて選ぶ'))
+  it('bills the ledger customer the desk recognised for an unlinked booking', async () => {
+    api.course.mockImplementation(async (path: string) => {
+      if (path.startsWith('/v1/course/customers')) {
+        return { items: [{ id: 'cus_9', name: '本田 康彦', email: 'honda@example.com' }] }
+      }
+      if (path.startsWith('/v1/course/reservation-cancellations?')) {
+        return {
+          items: [cancellation({
+            reservationId: 'res_1',
+            customerId: null,
+            billable: false,
+            customerName: '本田',
+            customerEmail: null,
+            players: 1,
+          })],
+          total: 1,
+        }
+      }
+      return {}
     })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
-    })
-  }
+    mockField()
 
-  async function pressBill() {
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /を請求する$/ }))
+      renderPage()
     })
-  }
+    await selectAllAndOpenSheet()
+
+    // The box opens holding the name the booking was taken under, so landing
+    // in it asks the ledger who that is. Nothing is picked automatically: two
+    // members called 本田 are one row apart in the list.
+    await act(async () => {
+      // `focusIn`, not `focus`: React listens for the bubbling one.
+      fireEvent.focusIn(screen.getByLabelText('請求先の名前', { exact: false }))
+    })
+    // Awaited outside `act`: the search is debounced, and a `findBy` nested in
+    // an `act` never sees the timer fire.
+    const candidate = await screen.findByRole('button', { name: /本田 康彦/ })
+    await act(async () => {
+      fireEvent.click(candidate)
+    })
+    await pressBill()
+
+    const invoiceBody = JSON.parse((invoicePosts()[0]?.[1] as RequestInit).body as string)
+    expect(invoiceBody.billTo).toEqual({ kind: 'customer', customerId: 'cus_9' })
+  })
+
+  it('says which selected bookings cannot be billed rather than quietly leaving them out', async () => {
+    // Nothing to address an invoice to: no ledger link and no name on the
+    // booking either. The name box is there, and until it is filled in the
+    // sheet says why this row is not on the bill.
+    api.course.mockResolvedValue({
+      items: [cancellation({
+        reservationId: 'res_1',
+        customerId: null,
+        customerName: null,
+        billable: false,
+      })],
+      total: 1,
+    })
+    mockField()
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+
+    expect(screen.getByText('請求できない予約があります')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
+
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('請求先の名前', { exact: false }), {
+        target: { value: '名前のわかった人' },
+      })
+    })
+
+    expect(screen.queryByText('請求できない予約があります')).toBeNull()
+    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', false)
+  })
 
   function keyOf(index: number) {
     const init = invoicePosts()[index]![1] as RequestInit
