@@ -5,6 +5,20 @@ on:
     branches: [main]
   pull_request:
 
+# PLT-4940: 同じ PR / 同じ main への新しい push が来たら、古い run を取り消す。
+# PR は PR 番号ごと、main は ref ごとに group を分けるので、別 PR や PR と main が
+# 互いを取り消すことはない。ci.yml には deploy・release・署名・外部更新が無く、
+# artifact は失敗時の診断用だけなので、途中の run を打ち切っても副作用は残らない。
+# 取り消されるのは同じ group に後から queue された run より古い run で、通常は
+# main の最新 SHA の run が残る。ただし GitHub は group 内の順序を保証しないし、
+# 古い main run を手動で re-run すると進行中の最新 run を取り消す。古い SHA の
+# re-run は main の run が全部終わってから行う。
+# PR だけに戻す場合は group の github.ref を github.run_id に、
+# cancel-in-progress を ${{ github.event_name == 'pull_request' }} にする（2 行）。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
 
