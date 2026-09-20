@@ -60,6 +60,7 @@ export function YearMonthPicker({
   onChange,
   className = '',
   hideLabel = false,
+  currentMonth,
 }: {
   label: string
   value: string
@@ -68,11 +69,18 @@ export function YearMonthPicker({
   className?: string
   /** Screens that already name the month in their panel header. */
   hideLabel?: boolean
+  /**
+   * The month the tenant is in today. Screens that pass it get a way back:
+   * paging three months out and then clicking the arrows back is the same
+   * walk in reverse, and the desk reads this board day after day.
+   */
+  currentMonth?: string
 }) {
   const { t } = useTranslation('common')
   const errorId = useId()
   const [open, setOpen] = useState(false)
   const safeValue = normalizeYearMonth(value) ?? '1970-01'
+  const today = currentMonth ? normalizeYearMonth(currentMonth) : null
   const [year, month] = safeValue.split('-')
   const selectedYear = Number(year)
   const years = useMemo(() => {
@@ -161,6 +169,20 @@ export function YearMonthPicker({
       >
         <ChevronRight />
       </Button>
+      {/* Disabled rather than hidden on the current month: the control sits
+          next to the board's own actions, and a button that comes and goes
+          moves them under the cursor. */}
+      {today ? (
+        <Button
+          type="button"
+          variant="ghost"
+          className="min-h-9 px-2 text-sm font-medium"
+          disabled={today === safeValue}
+          onClick={() => onChange(today)}
+        >
+          {t('time.thisMonth')}
+        </Button>
+      ) : null}
     </div>
   )
 

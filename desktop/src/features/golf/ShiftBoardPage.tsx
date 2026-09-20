@@ -690,6 +690,7 @@ export function ShiftBoardPage() {
             value={yearMonth}
             error={yearMonthError}
             onChange={setYearMonth}
+            currentMonth={currentYearMonth(timezone)}
             className="shift-board-month-picker"
           />
           {/* The month picker is what the desk reads; the actions sit away

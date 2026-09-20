@@ -78,6 +78,27 @@ describe('YearMonthPicker', () => {
     expect(markup).not.toContain('yearMonth')
   })
 
+  it('jumps straight back to the month the tenant is in today', () => {
+    const onChange = vi.fn()
+    render(picker({ value: '2026-05', currentMonth: '2026-02', onChange }))
+
+    fireEvent.click(screen.getByRole('button', { name: '今月' }))
+
+    expect(onChange).toHaveBeenCalledWith('2026-02')
+  })
+
+  it('leaves the jump inert while the screen already shows the current month', () => {
+    render(picker({ value: '2026-02', currentMonth: '2026-02' }))
+
+    expect(screen.getByRole('button', { name: '今月' }).hasAttribute('disabled')).toBe(true)
+  })
+
+  it('has no jump on the screens that do not name a current month', () => {
+    render(picker())
+
+    expect(screen.queryByRole('button', { name: '今月' })).toBeNull()
+  })
+
   it('drops the field label for a screen whose panel already names the month', () => {
     const withLabel = renderToStaticMarkup(picker())
     const without = renderToStaticMarkup(picker({ hideLabel: true }))
