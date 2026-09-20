@@ -59,11 +59,14 @@ const proposed: ConfirmedShift = {
 
 const calls: Array<{ path: string; method: string }> = []
 let employmentStatus = 'active'
+/** The saved month the board reads. Tests that need a working day replace it. */
+let confirmedShift: ConfirmedShift = confirmed
 
 beforeEach(() => {
   clearResourceCache()
   calls.length = 0
   employmentStatus = 'active'
+  confirmedShift = confirmed
   api.json.mockReset()
   api.downloadBlob.mockReset()
   api.downloadText.mockReset()
@@ -76,7 +79,7 @@ beforeEach(() => {
     }
     if (path.startsWith('/v1/course/caddie-availabilities?')) return { items: [] }
     if (path.startsWith('/v1/course/caddie-assignments?')) return { items: [] }
-    if (path.startsWith('/v1/course/caddie-shifts?')) return { items: [confirmed] }
+    if (path.startsWith('/v1/course/caddie-shifts?')) return { items: [confirmedShift] }
     if (path.startsWith('/v1/course/caddie-availability-deadlines/')) return null
     if (path.startsWith('/v1/course/caddie-availability-submissions/')) return { items: [] }
     if (path === '/v1/course/courses') {
@@ -278,6 +281,31 @@ describe('planning a month before confirming it', () => {
     expect(filename).toBe(`キャディシフト表_${MONTH_LABEL}.csv`)
     expect(contents.startsWith('\uFEFF')).toBe(true)
     expect(contents).toContain('高田 卓哉')
+  })
+
+  it('leaves the planned course out of the exported sheet', async () => {
+    // The sheet is handed round as "who works when". A course tag beside the
+    // day's mark read as part of that state, so the export drops it even
+    // though the day was planned onto one.
+    confirmedShift = {
+      ...confirmed,
+      golfCourseId: 'course-east',
+      isWorking: true,
+      roundsCapacity: 1,
+    }
+    const { container } = renderBoard()
+    await waitFor(() => expect(firstDayCell(container).dataset.kind).toBe('available'))
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: i18next.t('shifts:export.action') }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: i18next.t('shifts:export.csv') }))
+
+    expect(api.downloadText).toHaveBeenCalledOnce()
+    const [, contents] = api.downloadText.mock.calls[0] as [string, string]
+    expect(contents).toContain(i18next.t('shifts:cell.available'))
+    expect(contents).not.toContain('東')
   })
 
   it('exports the proposed month as a real Excel workbook', async () => {
