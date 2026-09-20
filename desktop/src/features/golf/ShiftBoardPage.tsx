@@ -222,47 +222,58 @@ function buildShiftExportDocument({
     i18next.t('shifts:streak.header'),
     ...dates.map(date => `${Number(date.slice(8, 10))} ${weekdayLabel(date)}`),
   ]
-  const rows = profiles.map(profile => {
-    const row = buildShiftRow(
+  const rows = profiles
+    .map(profile => ({
       profile,
-      dates,
-      availabilities,
-      assignments,
-      source.shifts,
-      timezone,
-    )
-    const values = row.cells.map(cell => {
-      const marks = []
-      if (source.changedDays?.has(shiftKey({ caddieProfileId: profile.id, date: cell.date }))) {
-        marks.push(i18next.t('shifts:export.changedMark'))
+      row: buildShiftRow(
+        profile,
+        dates,
+        availabilities,
+        assignments,
+        source.shifts,
+        timezone,
+      ),
+    }))
+    // A month that is 休 on every single day — they filed the whole month off,
+    // or the plan gave it to them — is a row with nothing in it to read. The
+    // sheet is handed round to find who is on the course, so those rows are
+    // left out. Days nobody has filed for yet are not 休: somebody whose
+    // requests have not arrived stays on the sheet, which is where the desk
+    // notices them.
+    .filter(({ row }) => row.cells.some(cell => cell.kind !== 'off'))
+    .map(({ profile, row }) => {
+      const values = row.cells.map(cell => {
+        const marks = []
+        if (source.changedDays?.has(shiftKey({ caddieProfileId: profile.id, date: cell.date }))) {
+          marks.push(i18next.t('shifts:export.changedMark'))
+        }
+        if (cell.confirmed?.origin === 'pinned') marks.push(i18next.t('shifts:export.pinnedMark'))
+        // The course a day was planned onto is deliberately left out: the sheet
+        // is handed round as "who works when", and the two-letter course tag
+        // read as part of the day's state.
+        return [...marks, cellDisplay(cell)].filter(Boolean).join(' ')
+      })
+      return {
+        values: [
+          profile.displayName,
+          employmentStatusLabel(row.employmentStatus) ?? i18next.t('shifts:export.active'),
+          row.maxStreak > 0
+            ? i18next.t('shifts:streak.days', { n: String(row.maxStreak) })
+            : '—',
+          ...values,
+        ],
+        employmentStatus: row.employmentStatus,
+        dayStyles: row.cells.map(cell => ({
+          kind: cell.kind,
+          weekend: exportWeekend(cell.date),
+          longStreak: cell.inLongStreak,
+          changed: source.changedDays?.has(
+            shiftKey({ caddieProfileId: profile.id, date: cell.date }),
+          ) ?? false,
+          pinned: cell.confirmed?.origin === 'pinned',
+        })),
       }
-      if (cell.confirmed?.origin === 'pinned') marks.push(i18next.t('shifts:export.pinnedMark'))
-      // The course a day was planned onto is deliberately left out: the sheet
-      // is handed round as "who works when", and the two-letter course tag
-      // read as part of the day's state.
-      return [...marks, cellDisplay(cell)].filter(Boolean).join(' ')
     })
-    return {
-      values: [
-        profile.displayName,
-        employmentStatusLabel(row.employmentStatus) ?? i18next.t('shifts:export.active'),
-        row.maxStreak > 0
-          ? i18next.t('shifts:streak.days', { n: String(row.maxStreak) })
-          : '—',
-        ...values,
-      ],
-      employmentStatus: row.employmentStatus,
-      dayStyles: row.cells.map(cell => ({
-        kind: cell.kind,
-        weekend: exportWeekend(cell.date),
-        longStreak: cell.inLongStreak,
-        changed: source.changedDays?.has(
-          shiftKey({ caddieProfileId: profile.id, date: cell.date }),
-        ) ?? false,
-        pinned: cell.confirmed?.origin === 'pinned',
-      })),
-    }
-  })
   return {
     title,
     note: i18next.t('shifts:export.note'),

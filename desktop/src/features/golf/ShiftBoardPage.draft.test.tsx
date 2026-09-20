@@ -61,12 +61,18 @@ const calls: Array<{ path: string; method: string }> = []
 let employmentStatus = 'active'
 /** The saved month the board reads. Tests that need a working day replace it. */
 let confirmedShift: ConfirmedShift = confirmed
+/** Caddies the board reads beside the one every test starts with. */
+let extraProfiles: Array<{ id: string; displayName: string; employmentStatus: string }> = []
+/** Their saved month, when a test needs one. */
+let extraShifts: ConfirmedShift[] = []
 
 beforeEach(() => {
   clearResourceCache()
   calls.length = 0
   employmentStatus = 'active'
   confirmedShift = confirmed
+  extraProfiles = []
+  extraShifts = []
   api.json.mockReset()
   api.downloadBlob.mockReset()
   api.downloadText.mockReset()
@@ -75,11 +81,15 @@ beforeEach(() => {
   api.json.mockImplementation(async (path: string, init?: RequestInit) => {
     calls.push({ path, method: init?.method ?? 'GET' })
     if (path === '/v1/course/caddie-profiles') {
-      return { items: [{ id: CADDIE, displayName: '高田 卓哉', employmentStatus }] }
+      return {
+        items: [{ id: CADDIE, displayName: '高田 卓哉', employmentStatus }, ...extraProfiles],
+      }
     }
     if (path.startsWith('/v1/course/caddie-availabilities?')) return { items: [] }
     if (path.startsWith('/v1/course/caddie-assignments?')) return { items: [] }
-    if (path.startsWith('/v1/course/caddie-shifts?')) return { items: [confirmedShift] }
+    if (path.startsWith('/v1/course/caddie-shifts?')) {
+      return { items: [confirmedShift, ...extraShifts] }
+    }
     if (path.startsWith('/v1/course/caddie-availability-deadlines/')) return null
     if (path.startsWith('/v1/course/caddie-availability-submissions/')) return { items: [] }
     if (path === '/v1/course/courses') {
@@ -306,6 +316,35 @@ describe('planning a month before confirming it', () => {
     const [, contents] = api.downloadText.mock.calls[0] as [string, string]
     expect(contents).toContain(i18next.t('shifts:cell.available'))
     expect(contents).not.toContain('東')
+  })
+
+  it('leaves a caddie who is off all month out of the exported sheet', async () => {
+    // The sheet is read to find who is on the course, and a row of nothing but
+    // 休 answers nobody. Days nobody has filed for are a different thing: the
+    // caddie the test starts with has one saved day off and no request for the
+    // rest of the month, and has to stay on the sheet.
+    const AWAY = 'caddie-away'
+    extraProfiles = [{ id: AWAY, displayName: '沼田 登', employmentStatus: 'active' }]
+    extraShifts = Array.from({ length: DAYS_IN_MONTH }, (_, index) => ({
+      ...confirmed,
+      caddieProfileId: AWAY,
+      date: `${MONTH}-${String(index + 1).padStart(2, '0')}`,
+    }))
+    renderBoard()
+    // Both caddies are drawn on the board (screen and print view); only the
+    // sheet leaves one out.
+    await waitFor(() => expect(screen.getAllByText('沼田 登').length).toBeGreaterThan(0))
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: i18next.t('shifts:export.action') }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: i18next.t('shifts:export.csv') }))
+
+    expect(api.downloadText).toHaveBeenCalledOnce()
+    const [, contents] = api.downloadText.mock.calls[0] as [string, string]
+    expect(contents).toContain('高田 卓哉')
+    expect(contents).not.toContain('沼田 登')
   })
 
   it('exports the proposed month as a real Excel workbook', async () => {
