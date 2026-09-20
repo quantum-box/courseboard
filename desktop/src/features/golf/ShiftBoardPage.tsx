@@ -149,13 +149,6 @@ type ShiftPrintSource = {
 /** The one day the desk opened for editing. */
 type ShiftEditTarget = { profile: CaddieProfile; cell: ShiftCell }
 
-/** The course label a day cell has room for. */
-function courseLabel(course: GolfCourse | undefined) {
-  if (!course) return ''
-  const short = course.shortName?.trim()
-  return short && short.length > 0 ? short : course.name.slice(0, 2)
-}
-
 // The value is a calendar date, not an instant. UTC construction keeps its
 // weekday independent of the browser device timezone.
 function weekdayIndex(date: string) {
@@ -211,7 +204,6 @@ function buildShiftExportDocument({
   profiles,
   availabilities,
   assignments,
-  courses,
 }: {
   source: ShiftPrintSource
   yearMonth: string
@@ -220,9 +212,7 @@ function buildShiftExportDocument({
   profiles: CaddieProfile[]
   availabilities: ShiftAvailability[]
   assignments: ShiftAssignment[]
-  courses: GolfCourse[]
 }): ShiftExportDocument {
-  const courseById = new Map(courses.map(course => [course.id, course]))
   const title = i18next.t(source.kind === 'draft'
     ? 'shifts:print.draftTitle'
     : 'shifts:print.confirmedTitle', { month: yearMonth })
@@ -247,10 +237,10 @@ function buildShiftExportDocument({
         marks.push(i18next.t('shifts:export.changedMark'))
       }
       if (cell.confirmed?.origin === 'pinned') marks.push(i18next.t('shifts:export.pinnedMark'))
-      const course = cell.confirmed?.golfCourseId
-        ? courseLabel(courseById.get(cell.confirmed.golfCourseId))
-        : ''
-      return [...marks, cellDisplay(cell), course].filter(Boolean).join(' ')
+      // The course a day was planned onto is deliberately left out: the sheet
+      // is handed round as "who works when", and the two-letter course tag
+      // read as part of the day's state.
+      return [...marks, cellDisplay(cell)].filter(Boolean).join(' ')
     })
     return {
       values: [
@@ -634,7 +624,6 @@ export function ShiftBoardPage() {
         profiles: profilesResource.data?.items ?? [],
         availabilities: availabilityResource.data?.items ?? [],
         assignments: assignmentsResource.data?.items ?? [],
-        courses: coursesResource.data?.items ?? [],
       })
       const filename = `${exportFileStem(source)}.${format}`
       if (format === 'csv') {
@@ -660,7 +649,6 @@ export function ShiftBoardPage() {
     profilesResource.data,
     availabilityResource.data,
     assignmentsResource.data,
-    coursesResource.data,
     exportFileStem,
     t,
   ])
