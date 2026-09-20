@@ -3,6 +3,7 @@ import {
   collectSlotIssues,
   copyWeekdaySlots,
   countSlotIssues,
+  courseLabel,
   nextSlotForWeekday,
   sortSlots,
   summarizeSlotChanges,
@@ -20,6 +21,22 @@ function slot(overrides: Partial<GolfProductSlot> = {}): GolfProductSlot {
     ...overrides,
   }
 }
+
+describe('courseLabel', () => {
+  it('names a course the same way on every screen: by its full name', () => {
+    // The products and schedule screens used to write 「東」 while the
+    // timeline wrote 「東コース」, so the desk could not tell whether two
+    // screens meant the same course (SCC-18).
+    expect(courseLabel({ name: '東コース', shortName: '東' })).toBe('東コース')
+    expect(courseLabel({ name: '東コース', shortName: null })).toBe('東コース')
+    expect(courseLabel({ name: '  東コース  ', shortName: '東' })).toBe('東コース')
+  })
+
+  it('falls back to the abbreviation rather than drawing an empty cell', () => {
+    expect(courseLabel({ name: '   ', shortName: '東' })).toBe('東')
+    expect(courseLabel({ name: '', shortName: null })).toBe('')
+  })
+})
 
 describe('countSlotIssues', () => {
   it('rejects reversed time ranges and duplicate rows', () => {
