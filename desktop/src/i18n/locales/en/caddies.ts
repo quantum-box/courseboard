@@ -481,6 +481,7 @@ export const caddies: DeepPartial<typeof source> = {
     confirmDiscard: 'If you move on, your unsaved day-off request will be lost. Continue?',
     status: 'Availability',
     twoRounds: 'Wants two rounds',
+    twoRoundsHint: 'Only a full free day can be walked twice; half days and light duty are one round.',
     note: 'Condition note',
     notePlaceholder: 'Notes for whoever schedules the day',
     save: 'Save',
