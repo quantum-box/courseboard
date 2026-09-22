@@ -483,6 +483,7 @@ export const caddies = {
     confirmDiscard: 'このまま移動すると、保存していない休みの希望は失われます。移動しますか？',
     status: '出られるかどうか',
     twoRounds: '2ラウンドを希望する',
+    twoRoundsHint: '「出られる」の日だけ希望できます。半日や軽い仕事の日は1ラウンドです。',
     note: '体調のメモ',
     notePlaceholder: '担当者に伝えたいこと',
     save: '保存',

@@ -129,6 +129,48 @@ describe('AvailabilityCalendar range entry flow', () => {
     clearResourceCache()
   })
 
+  it('drops the two-round request when the day turns into one they cannot work', async () => {
+    // Two rounds are only walked on a whole free day, so the form must not be
+    // able to file the pair against a day off: the board drew a "2R" badge
+    // beside somebody who had just said they cannot come, and the day's
+    // caddie supply counted the request.
+    const yearMonth = new Intl.DateTimeFormat('sv-SE', {
+      timeZone: 'Asia/Tokyo',
+      year: 'numeric',
+      month: '2-digit',
+    }).format(new Date())
+    const selectedDate = `${yearMonth}-21`
+    renderCalendar()
+
+    fireEvent.click(await screen.findByRole('button', {
+      name: `${selectedDate} の希望を入れる`,
+    }))
+    const dialog = await screen.findByRole('dialog')
+    const twoRounds = within(dialog).getByRole('checkbox', {
+      name: /2ラウンドを希望する/,
+    }) as HTMLInputElement
+
+    fireEvent.click(twoRounds)
+    expect(twoRounds.checked).toBe(true)
+    expect(twoRounds.disabled).toBe(false)
+
+    fireEvent.change(within(dialog).getByRole('combobox', { name: /出られるかどうか/ }), {
+      target: { value: 'unavailable' },
+    })
+    expect(twoRounds.checked).toBe(false)
+    expect(twoRounds.disabled).toBe(true)
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(postBodies).toEqual([{
+      caddieProfileId: profile.id,
+      date: selectedDate,
+      status: 'unavailable',
+      twoRoundRequest: false,
+      healthNote: null,
+    }]))
+  })
+
   it('keeps the anchor after closing the Sheet and saves an expanded mixed range', async () => {
     const yearMonth = new Intl.DateTimeFormat('sv-SE', {
       timeZone: 'Asia/Tokyo',

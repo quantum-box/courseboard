@@ -465,6 +465,7 @@ export const caddies: DeepPartial<typeof source> = {
     confirmDiscard: 'このまま別の日や画面に移ると、まだ保存していない休みの希望は消えます。移りますか？',
     status: '出られるかどうか',
     twoRounds: '1日2ラウンドまわりたい',
+    twoRoundsHint: '「出られる」の日だけえらべます。半日や軽い仕事の日は1ラウンドです。',
     note: '体調などのメモ',
     notePlaceholder: '担当を決める人に伝えたいことがあれば入れてください',
     save: '保存する',

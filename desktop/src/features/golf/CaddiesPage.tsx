@@ -3611,11 +3611,20 @@ export function AvailabilityCalendar({
   const selectedDates = selection.dates
   const selectedDate = selection.anchor
   const selectedRecord = selectedDate ? records.get(selectedDate) : undefined
+  /**
+   * Two rounds are only ever walked on a whole free day: the API's
+   * `capacity_for` gives a half day, light duty and a day off one round
+   * whatever was asked for. Letting the form file the request anyway put a
+   * "2R" against people who had just said they cannot come, and the day's
+   * supply figure counted it.
+   */
+  const twoRoundsAllowed = status === 'available'
+  const twoRoundsChecked = twoRoundsAllowed && twoRounds
   // The anchor supplies the shared form values. Other selected dates may have
   // mixed stored values without making range selection itself an unsaved edit.
   const dirty = editorOpen && selectedDate !== null && (
     status !== (selectedRecord?.status ?? 'available')
-    || twoRounds !== (selectedRecord?.twoRoundRequest ?? false)
+    || twoRoundsChecked !== (selectedRecord?.twoRoundRequest ?? false)
     || note.trim() !== (selectedRecord?.healthNote ?? '').trim()
   )
 
@@ -3682,7 +3691,7 @@ export function AvailabilityCalendar({
           caddieProfileId: profile.id,
           date,
           status,
-          twoRoundRequest: twoRounds,
+          twoRoundRequest: twoRoundsChecked,
           healthNote: note.trim() || null,
         }))
       )))
@@ -3876,22 +3885,38 @@ export function AvailabilityCalendar({
               <Field label={t('caddies:calendar.status')} required>
                 <NativeSelect
                   value={status}
-                  onChange={event => setStatus(event.target.value as AvailabilityStatus)}
+                  onChange={event => {
+                    const next = event.target.value as AvailabilityStatus
+                    setStatus(next)
+                    // Clearing it here, rather than only on save, keeps the box
+                    // from coming back ticked if they switch to "出られる" again.
+                    if (next !== 'available') setTwoRounds(false)
+                  }}
                 >
                   {AVAILABILITY_STATUSES.map(value => (
                     <option key={value} value={value}>{availabilityLabel(value)}</option>
                   ))}
                 </NativeSelect>
               </Field>
-              <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md border border-border px-3">
-                <input
-                  type="checkbox"
-                  checked={twoRounds}
-                  onChange={event => setTwoRounds(event.target.checked)}
-                  className="size-5 accent-primary"
-                />
-                <span className="text-sm font-medium">{t('caddies:calendar.twoRounds')}</span>
-              </label>
+              <div>
+                <label className={`flex min-h-11 items-center gap-3 rounded-md border border-border px-3 ${
+                  twoRoundsAllowed ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
+                }`}>
+                  <input
+                    type="checkbox"
+                    checked={twoRoundsChecked}
+                    disabled={!twoRoundsAllowed}
+                    onChange={event => setTwoRounds(event.target.checked)}
+                    className="size-5 accent-primary"
+                  />
+                  <span className="text-sm font-medium">{t('caddies:calendar.twoRounds')}</span>
+                </label>
+                {twoRoundsAllowed ? null : (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t('caddies:calendar.twoRoundsHint')}
+                  </p>
+                )}
+              </div>
               <Field label={t('caddies:calendar.note')}>
                 <NativeTextarea
                   rows={4}
