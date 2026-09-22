@@ -812,11 +812,23 @@ async fn create_field_public_invoice_payment_intent(
 ) -> Result<FieldPublicInvoicePaymentIntentResponse, AppError> {
     let path = field_public_invoice_path(collection, "payment-intent")?;
     let url = field_api_url(config, &path)?;
-    let response = http_client.post(url).send().await.map_err(|error| {
-        AppError::Provider(format!(
-            "Field invoice payment intent request failed: {error}"
-        ))
-    })?;
+    // Field's payment intent takes no body today, so this sends `{}` rather
+    // than nothing at all: `.json(..)` is also what puts
+    // `Content-Type: application/json` on the request, and `reqwest` adds the
+    // header nowhere else. The public invoice routes sit on the same axum
+    // router as writes that run a `Json<_>` extractor, and that extractor
+    // answers 415 to a request arriving without the header whether or not the
+    // body has anything in it — which is how SCC-33 broke cancel.
+    let response = http_client
+        .post(url)
+        .json(&serde_json::json!({}))
+        .send()
+        .await
+        .map_err(|error| {
+            AppError::Provider(format!(
+                "Field invoice payment intent request failed: {error}"
+            ))
+        })?;
 
     parse_field_response(response, "create public invoice payment intent").await
 }
@@ -1056,6 +1068,117 @@ struct FieldInvoiceStripePublishableKeyResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+
+    /// What the mock Field saw on the payment intent request.
+    #[derive(Clone, Debug)]
+    struct SeenIntentRequest {
+        content_type: Option<String>,
+        body: String,
+    }
+
+    fn payment_intent_config(field_api_url: &str) -> CancellationFeeConfig {
+        CancellationFeeConfig {
+            public_ui_base_url: "https://courseboard.example".to_string(),
+            sms_sender_name: "テストCC".to_string(),
+            field_api_url: Some(field_api_url.to_string()),
+            field_upstream_authorization: None,
+            twilio_account_sid: None,
+            twilio_auth_token: None,
+            twilio_messaging_service_sid: None,
+            twilio_from_number: None,
+            multi_course_product_writes: false,
+            settlement_source: SettlementSource::Field,
+            field_shift_writeback: false,
+            field_generic_paths: false,
+        }
+    }
+
+    fn payment_intent_collection() -> CancellationFeeCollection {
+        CancellationFeeCollection {
+            id: "cfc_test".to_string(),
+            tenant_id: "tenant_test".to_string(),
+            reference: None,
+            customer_name: "高田 卓哉".to_string(),
+            customer_phone: "+819012345678".to_string(),
+            amount: 5_000,
+            currency: "JPY".to_string(),
+            due_date: "2026-09-30".to_string(),
+            reason: None,
+            notes: None,
+            public_token: "token_test".to_string(),
+            payment_url: "https://courseboard.example/pay/token_test".to_string(),
+            field_invoice_id: Some("inv_test".to_string()),
+            field_invoice_payment_url: None,
+            status: "sent".to_string(),
+            sms_status: "skipped".to_string(),
+            sms_message: None,
+            sms_provider_message_id: None,
+            sms_error: None,
+            stripe_payment_intent_id: None,
+            stripe_client_secret: None,
+            paid_at: None,
+            created_at: "2026-09-20T00:00:00Z".to_string(),
+            updated_at: "2026-09-20T00:00:00Z".to_string(),
+        }
+    }
+
+    /// The public invoice routes share a router with writes that run an axum
+    /// `Json<_>` extractor, and that extractor refuses a request arriving
+    /// without `Content-Type: application/json` with 415 — empty body or not.
+    /// `reqwest` only sets the header when `.json(..)` is called, so a
+    /// bodyless `POST` used to leave it off entirely. SCC-33 was that same
+    /// mistake on cancel; this pins the header (and the `{}` that carries it)
+    /// onto the payment intent before it can break a payment page.
+    #[tokio::test]
+    async fn creating_a_payment_intent_sends_a_json_body_with_its_content_type() {
+        let seen: Arc<Mutex<Option<SeenIntentRequest>>> = Arc::new(Mutex::new(None));
+        let recorder = seen.clone();
+        let app = axum::Router::new().route(
+            "/v1/public/invoices/:tenant_id/:id/payment-intent",
+            axum::routing::post(move |headers: HeaderMap, body: String| {
+                let recorder = recorder.clone();
+                async move {
+                    let content_type = headers
+                        .get(CONTENT_TYPE)
+                        .and_then(|value| value.to_str().ok())
+                        .map(ToOwned::to_owned);
+                    *recorder.lock().expect("recorder lock") =
+                        Some(SeenIntentRequest { content_type, body });
+                    Json(serde_json::json!({
+                        "clientSecret": "cs_test",
+                        "publishableKey": "pk_test",
+                        "paymentIntentId": "pi_test",
+                    }))
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock Field");
+        let address = listener.local_addr().expect("mock Field address");
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve mock Field");
+        });
+
+        let intent = create_field_public_invoice_payment_intent(
+            &reqwest::Client::new(),
+            &payment_intent_config(&format!("http://{address}")),
+            &payment_intent_collection(),
+        )
+        .await
+        .expect("create payment intent");
+
+        assert_eq!(intent.payment_intent_id, "pi_test");
+        let seen = seen
+            .lock()
+            .expect("recorder lock")
+            .clone()
+            .expect("request");
+        assert_eq!(seen.content_type.as_deref(), Some("application/json"));
+        assert_eq!(seen.body, "{}");
+        server.abort();
+    }
 
     #[test]
     fn field_invoice_body_serializes_typed_bill_to_without_legacy_client_id() {
