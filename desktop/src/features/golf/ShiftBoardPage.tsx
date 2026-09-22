@@ -189,6 +189,20 @@ function employmentStatusLabel(status: string) {
   return i18next.t('shifts:employment.unknown')
 }
 
+/**
+ * Whether the handed-out sheet prints anything for one day.
+ *
+ * The sheet answers one question — who is on the course that day — so a day
+ * nobody works is left blank instead of carrying 休 (SCC-24). The screen keeps
+ * showing every day as it is: that is where the desk reads who asked for what.
+ *
+ * Days nobody has filed for are blank for the same reason, and that is why a
+ * row with nothing printed on it is dropped rather than handed round empty.
+ */
+function printsOnTheSheet(cell: ShiftCell) {
+  return cell.kind !== 'off' && cell.kind !== 'none'
+}
+
 function exportWeekend(date: string): ShiftExportWeekend {
   const day = weekdayIndex(date)
   if (day === 6) return 'saturday'
@@ -234,15 +248,13 @@ function buildShiftExportDocument({
         timezone,
       ),
     }))
-    // A month that is 休 on every single day — they filed the whole month off,
-    // or the plan gave it to them — is a row with nothing in it to read. The
-    // sheet is handed round to find who is on the course, so those rows are
-    // left out. Days nobody has filed for yet are not 休: somebody whose
-    // requests have not arrived stays on the sheet, which is where the desk
-    // notices them.
-    .filter(({ row }) => row.cells.some(cell => cell.kind !== 'off'))
+    // Nothing to print for the whole month means nothing to hand round.
+    .filter(({ row }) => row.cells.some(printsOnTheSheet))
     .map(({ profile, row }) => {
       const values = row.cells.map(cell => {
+        // The marks go with the day: 「固定」 or 「※変更」 alone in a square
+        // would read as a state of its own.
+        if (!printsOnTheSheet(cell)) return ''
         const marks = []
         if (source.changedDays?.has(shiftKey({ caddieProfileId: profile.id, date: cell.date }))) {
           marks.push(i18next.t('shifts:export.changedMark'))
@@ -263,15 +275,26 @@ function buildShiftExportDocument({
           ...values,
         ],
         employmentStatus: row.employmentStatus,
-        dayStyles: row.cells.map(cell => ({
-          kind: cell.kind,
-          weekend: exportWeekend(cell.date),
-          longStreak: cell.inLongStreak,
-          changed: source.changedDays?.has(
-            shiftKey({ caddieProfileId: profile.id, date: cell.date }),
-          ) ?? false,
-          pinned: cell.confirmed?.origin === 'pinned',
-        })),
+        // A blank square is blank in Excel too: keeping the day-off fill would
+        // say 休 in colour after the mark was taken out. The weekend tint is
+        // the calendar, not the shift, so it stays.
+        dayStyles: row.cells.map(cell => (printsOnTheSheet(cell)
+          ? {
+            kind: cell.kind,
+            weekend: exportWeekend(cell.date),
+            longStreak: cell.inLongStreak,
+            changed: source.changedDays?.has(
+              shiftKey({ caddieProfileId: profile.id, date: cell.date }),
+            ) ?? false,
+            pinned: cell.confirmed?.origin === 'pinned',
+          }
+          : {
+            kind: 'none',
+            weekend: exportWeekend(cell.date),
+            longStreak: false,
+            changed: false,
+            pinned: false,
+          })),
       }
     })
   return {
@@ -612,7 +635,36 @@ export function ShiftBoardPage() {
     }
   }, [])
 
+  /**
+   * The sheet this source would produce.
+   *
+   * Built for the print path too, even though the printable table builds its
+   * own rows: a month nobody works now leaves that table empty, and the print
+   * stylesheet hides the app behind it — printing would hand somebody a blank
+   * page rather than say why (SCC-16 was that, from a different cause).
+   */
+  const buildSheet = useCallback((source: ShiftPrintSource) => buildShiftExportDocument({
+    source,
+    yearMonth,
+    timezone,
+    dates,
+    profiles: profilesResource.data?.items ?? [],
+    availabilities: availabilityResource.data?.items ?? [],
+    assignments: assignmentsResource.data?.items ?? [],
+  }), [
+    yearMonth,
+    timezone,
+    dates,
+    profilesResource.data,
+    availabilityResource.data,
+    assignmentsResource.data,
+  ])
+
   const printBoard = useCallback((source: ShiftPrintSource) => {
+    if (buildSheet(source).rows.length === 0) {
+      showToast({ tone: 'info', message: t('shifts:export.emptyMonth') })
+      return
+    }
     // The printable table is rendered in a body-level portal. Flush it before
     // opening the native dialog so the browser captures all 31 days, not only
     // the horizontally visible part of the on-screen table.
@@ -620,22 +672,18 @@ export function ShiftBoardPage() {
     if (originalPrintTitle.current === null) originalPrintTitle.current = document.title
     document.title = exportFileStem(source)
     window.print()
-  }, [exportFileStem])
+  }, [buildSheet, exportFileStem, t])
 
   const exportBoard = useCallback(async (
     source: ShiftPrintSource,
     format: 'csv' | 'xlsx',
   ) => {
     try {
-      const document = buildShiftExportDocument({
-        source,
-        yearMonth,
-        timezone,
-        dates,
-        profiles: profilesResource.data?.items ?? [],
-        availabilities: availabilityResource.data?.items ?? [],
-        assignments: assignmentsResource.data?.items ?? [],
-      })
+      const document = buildSheet(source)
+      if (document.rows.length === 0) {
+        showToast({ tone: 'info', message: t('shifts:export.emptyMonth') })
+        return
+      }
       const filename = `${exportFileStem(source)}.${format}`
       if (format === 'csv') {
         downloadText(filename, shiftExportCsv(document))
@@ -653,16 +701,7 @@ export function ShiftBoardPage() {
         message: error instanceof Error ? error.message : String(error),
       })
     }
-  }, [
-    yearMonth,
-    timezone,
-    dates,
-    profilesResource.data,
-    availabilityResource.data,
-    assignmentsResource.data,
-    exportFileStem,
-    t,
-  ])
+  }, [buildSheet, exportFileStem, t])
 
   const showCurrentWeek = useCallback(() => {
     setYearMonth(today(timezone).slice(0, 7))
@@ -1077,17 +1116,20 @@ function ShiftBoardPrintView({
   const { t } = useTranslation(['shifts'])
   const rows = useMemo(() => {
     if (!source) return []
-    return profiles.map(profile => ({
-      profile,
-      row: buildShiftRow(
+    return profiles
+      .map(profile => ({
         profile,
-        dates,
-        availabilities,
-        assignments,
-        source.shifts,
-        timezone,
-      ),
-    }))
+        row: buildShiftRow(
+          profile,
+          dates,
+          availabilities,
+          assignments,
+          source.shifts,
+          timezone,
+        ),
+      }))
+      // Same sheet, same rule as the CSV and the workbook.
+      .filter(({ row }) => row.cells.some(printsOnTheSheet))
   }, [source, profiles, dates, availabilities, assignments, timezone])
 
   if (!source || rows.length === 0 || typeof document === 'undefined') return null
@@ -1113,7 +1155,6 @@ function ShiftBoardPrintView({
       <div className="shift-board-print-legend" aria-label={t('shifts:legend.label')}>
         <span><i data-kind="assigned" /> {t('shifts:legend.assigned')}</span>
         <span><i data-kind="available" /> {t('shifts:legend.available')}</span>
-        <span><i data-kind="off" /> {t('shifts:legend.off')}</span>
         <span><i data-kind="morning" /> {t('shifts:legend.morning')}</span>
         <span><i data-kind="afternoon" /> {t('shifts:legend.afternoon')}</span>
         <span><i data-kind="light" /> {t('shifts:legend.light')}</span>
@@ -1151,20 +1192,25 @@ function ShiftBoardPrintView({
                   ? t('shifts:streak.days', { n: String(row.maxStreak) })
                   : '—'}
               </td>
-              {row.cells.map(cell => (
-                <td
-                  key={cell.date}
-                  data-kind={cell.kind}
-                  data-long-streak={cell.inLongStreak || undefined}
-                  data-pinned={cell.confirmed?.origin === 'pinned' || undefined}
-                  data-draft-change={source.changedDays?.has(
-                    shiftKey({ caddieProfileId: profile.id, date: cell.date }),
-                  ) || undefined}
-                  className={weekdayClassName(cell.date)}
-                >
-                  <span className="shift-board-print-mark">{cellDisplay(cell)}</span>
-                </td>
-              ))}
+              {row.cells.map(cell => {
+                const printed = printsOnTheSheet(cell)
+                return (
+                  <td
+                    key={cell.date}
+                    data-kind={printed ? cell.kind : 'none'}
+                    data-long-streak={(printed && cell.inLongStreak) || undefined}
+                    data-pinned={(printed && cell.confirmed?.origin === 'pinned') || undefined}
+                    data-draft-change={(printed && source.changedDays?.has(
+                      shiftKey({ caddieProfileId: profile.id, date: cell.date }),
+                    )) || undefined}
+                    className={weekdayClassName(cell.date)}
+                  >
+                    <span className="shift-board-print-mark">
+                      {printed ? cellDisplay(cell) : ''}
+                    </span>
+                  </td>
+                )
+              })}
             </tr>
           ))}
         </tbody>
