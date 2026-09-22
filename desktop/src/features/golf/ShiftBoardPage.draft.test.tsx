@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearResourceCache } from '../../hooks/useResource'
 import { i18next } from '../../i18n'
 import { PageReloadProvider } from '../../lib/pageReload'
+import { showToast } from '../../lib/toast'
 import { ShiftBoardPage } from './ShiftBoardPage'
 import type { ConfirmedShift } from './shiftBoard'
 
@@ -61,25 +62,36 @@ const calls: Array<{ path: string; method: string }> = []
 let employmentStatus = 'active'
 /** The saved month the board reads. Tests that need a working day replace it. */
 let confirmedShift: ConfirmedShift = confirmed
+/** Caddies the board reads beside the one every test starts with. */
+let extraProfiles: Array<{ id: string; displayName: string; employmentStatus: string }> = []
+/** Their saved month, when a test needs one. */
+let extraShifts: ConfirmedShift[] = []
 
 beforeEach(() => {
   clearResourceCache()
   calls.length = 0
   employmentStatus = 'active'
   confirmedShift = confirmed
+  extraProfiles = []
+  extraShifts = []
   api.json.mockReset()
   api.downloadBlob.mockReset()
   api.downloadText.mockReset()
   api.downloadBlob.mockResolvedValue(undefined)
+  vi.mocked(showToast).mockClear()
   vi.spyOn(window, 'print').mockImplementation(() => undefined)
   api.json.mockImplementation(async (path: string, init?: RequestInit) => {
     calls.push({ path, method: init?.method ?? 'GET' })
     if (path === '/v1/course/caddie-profiles') {
-      return { items: [{ id: CADDIE, displayName: '高田 卓哉', employmentStatus }] }
+      return {
+        items: [{ id: CADDIE, displayName: '高田 卓哉', employmentStatus }, ...extraProfiles],
+      }
     }
     if (path.startsWith('/v1/course/caddie-availabilities?')) return { items: [] }
     if (path.startsWith('/v1/course/caddie-assignments?')) return { items: [] }
-    if (path.startsWith('/v1/course/caddie-shifts?')) return { items: [confirmedShift] }
+    if (path.startsWith('/v1/course/caddie-shifts?')) {
+      return { items: [confirmedShift, ...extraShifts] }
+    }
     if (path.startsWith('/v1/course/caddie-availability-deadlines/')) return null
     if (path.startsWith('/v1/course/caddie-availability-submissions/')) return { items: [] }
     if (path === '/v1/course/courses') {
@@ -217,6 +229,14 @@ describe('planning a month before confirming it', () => {
   })
 
   it('prints the complete confirmed month from a dedicated print table', async () => {
+    // Day 2 is worked, so the month has a sheet; day 1 stays a rest day, which
+    // the sheet leaves blank.
+    extraShifts = [{
+      ...confirmed,
+      date: `${MONTH}-02`,
+      isWorking: true,
+      roundsCapacity: 1,
+    }]
     const { container } = renderBoard()
     await waitFor(() => expect(firstDayCell(container).dataset.kind).toBe('off'))
     const originalTitle = document.title
@@ -232,8 +252,12 @@ describe('planning a month before confirming it', () => {
     const printable = document.body.querySelector<HTMLElement>('.shift-board-print')
     expect(printable?.dataset.printSource).toBe('confirmed')
     expect(printable?.querySelectorAll('thead th')).toHaveLength(DAYS_IN_MONTH + 2)
-    expect(printable?.querySelector<HTMLTableCellElement>('tbody td[data-kind]')?.dataset.kind)
-      .toBe('off')
+    // The screen still says 休 for day 1; the printed page leaves it blank.
+    const printedDays = printable?.querySelectorAll<HTMLTableCellElement>('tbody td[data-kind]')
+    expect(printedDays?.[0]?.dataset.kind).toBe('none')
+    expect(printedDays?.[0]?.textContent).toBe('')
+    expect(printedDays?.[1]?.dataset.kind).toBe('available')
+    expect(printable?.textContent).not.toContain(i18next.t('shifts:cell.off'))
 
     window.dispatchEvent(new Event('afterprint'))
     expect(document.title).toBe(originalTitle)
@@ -267,6 +291,13 @@ describe('planning a month before confirming it', () => {
   })
 
   it('exports the confirmed month as a BOM-prefixed CSV', async () => {
+    // Day 2 is worked: a month with no working day at all has no sheet.
+    extraShifts = [{
+      ...confirmed,
+      date: `${MONTH}-02`,
+      isWorking: true,
+      roundsCapacity: 1,
+    }]
     const { container } = renderBoard()
     await waitFor(() => expect(firstDayCell(container).dataset.kind).toBe('off'))
 
@@ -306,6 +337,76 @@ describe('planning a month before confirming it', () => {
     const [, contents] = api.downloadText.mock.calls[0] as [string, string]
     expect(contents).toContain(i18next.t('shifts:cell.available'))
     expect(contents).not.toContain('東')
+  })
+
+  it('leaves the days nobody works blank instead of marking them 休', async () => {
+    // The sheet answers "who is on the course that day", so a rest day is an
+    // empty square. 休 in every other square was what made the handout
+    // unreadable (SCC-24).
+    confirmedShift = { ...confirmed, isWorking: true, roundsCapacity: 1 }
+    extraShifts = [{ ...confirmed, date: `${MONTH}-02` }]
+    const { container } = renderBoard()
+    await waitFor(() => expect(firstDayCell(container).dataset.kind).toBe('available'))
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: i18next.t('shifts:export.action') }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: i18next.t('shifts:export.csv') }))
+
+    const [, contents] = api.downloadText.mock.calls[0] as [string, string]
+    const row = contents.split('\r\n').find(line => line.startsWith('高田 卓哉'))
+    const cells = row?.split(',') ?? []
+    // name, employment, streak, then one square per day.
+    expect(cells[3]).toBe(i18next.t('shifts:cell.available'))
+    expect(cells[4]).toBe('')
+    expect(contents).not.toContain(i18next.t('shifts:cell.off'))
+  })
+
+  it('says so rather than handing round a blank sheet for a month nobody works', async () => {
+    const { container } = renderBoard()
+    await waitFor(() => expect(firstDayCell(container).dataset.kind).toBe('off'))
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: i18next.t('shifts:export.action') }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: i18next.t('shifts:export.csv') }))
+
+    expect(api.downloadText).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({
+      message: i18next.t('shifts:export.emptyMonth'),
+    }))
+  })
+
+  it('leaves a caddie who is off all month out of the exported sheet', async () => {
+    // The sheet is read to find who is on the course, and a row of nothing but
+    // 休 answers nobody. Days nobody has filed for are a different thing: the
+    // caddie the test starts with has one saved day off and no request for the
+    // rest of the month, and has to stay on the sheet.
+    const AWAY = 'caddie-away'
+    extraProfiles = [{ id: AWAY, displayName: '沼田 登', employmentStatus: 'active' }]
+    confirmedShift = { ...confirmed, isWorking: true, roundsCapacity: 1 }
+    extraShifts = Array.from({ length: DAYS_IN_MONTH }, (_, index) => ({
+      ...confirmed,
+      caddieProfileId: AWAY,
+      date: `${MONTH}-${String(index + 1).padStart(2, '0')}`,
+    }))
+    renderBoard()
+    // Both caddies are drawn on the board (screen and print view); only the
+    // sheet leaves one out.
+    await waitFor(() => expect(screen.getAllByText('沼田 登').length).toBeGreaterThan(0))
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: i18next.t('shifts:export.action') }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: i18next.t('shifts:export.csv') }))
+
+    expect(api.downloadText).toHaveBeenCalledOnce()
+    const [, contents] = api.downloadText.mock.calls[0] as [string, string]
+    expect(contents).toContain('高田 卓哉')
+    expect(contents).not.toContain('沼田 登')
   })
 
   it('exports the proposed month as a real Excel workbook', async () => {
