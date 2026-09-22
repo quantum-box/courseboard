@@ -24,6 +24,7 @@ import {
   Panel,
   resourceErrorText,
 } from '../../../components/Page'
+import { courseLabel } from '../models'
 import { importReservationReport, listReservationReportEntries, previewReservationReport } from './api'
 import {
   RESERVATION_REPORT_PDF_ROTATIONS,
@@ -187,7 +188,7 @@ export function ReservationReportImportPage() {
     [currentPreviewMonth, preview],
   )
   const courseNames = useMemo(
-    () => new Map(courses.map(course => [course.id, course.shortName?.trim() || course.name] as const)),
+    () => new Map(courses.map(course => [course.id, courseLabel(course)] as const)),
     [courses],
   )
   const unlinkedFacilities = useMemo(
@@ -546,7 +547,7 @@ export function ReservationReportImportPage() {
                       <option value="">{t('reservationReportImport:mapping.unselected')}</option>
                       {courses.filter(course => course.isActive !== false).map(course => (
                         <option key={course.id} value={course.id}>
-                          {course.shortName?.trim() || course.name}
+                          {courseLabel(course)}
                         </option>
                       ))}
                     </NativeSelect>

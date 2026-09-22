@@ -33,7 +33,7 @@ import {
   inventoryHorizonGap,
   type BookingHorizonStatusResponse,
 } from './bookingHorizon'
-import type { GolfCourse } from './models'
+import { courseLabel, type GolfCourse } from './models'
 
 const coursesPath = '/v1/course/courses'
 const bookingHorizonPath = '/v1/course/booking-horizon'
@@ -80,10 +80,6 @@ function toSaveRule(rule: EditableRule): SaveAvailabilityRule {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? resourceErrorText(error) : i18next.t('products:error.generic')
-}
-
-function courseLabel(course: GolfCourse) {
-  return course.shortName?.trim() || course.name
 }
 
 

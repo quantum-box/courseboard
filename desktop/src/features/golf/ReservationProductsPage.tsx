@@ -35,6 +35,7 @@ import {
   defaultDuration,
   emptyProductDraft,
   productCourseIds,
+  courseLabel,
   productToDraft,
   sortSlots,
   weekdayLabel,
@@ -94,10 +95,6 @@ function upsertProduct(
         product.reservationServiceId === saved.reservationServiceId ? saved : product,
       )
     : [...products, saved]
-}
-
-function courseLabel(course: GolfCourse) {
-  return course.shortName?.trim() || course.name
 }
 
 /**

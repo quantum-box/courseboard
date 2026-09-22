@@ -14,6 +14,23 @@ export type GolfCourse = {
   updatedAt: string
 }
 
+/**
+ * How a course is named wherever a screen writes one down.
+ *
+ * One rule everywhere: the full name. The same course used to read 「東コース」
+ * on the timeline and 「東」 on the products and schedule screens, so the desk
+ * could not tell whether two screens were talking about the same course
+ * (SCC-18). The abbreviation stays where it earns its keep — beside the name
+ * on the course settings screen, and in the reservation sheet import, which
+ * matches whatever the sheet happens to call a course against both.
+ *
+ * A course with a blank name falls back to the abbreviation rather than
+ * rendering an empty cell.
+ */
+export function courseLabel(course: { name: string; shortName?: string | null }) {
+  return course.name.trim() || course.shortName?.trim() || ''
+}
+
 export type GolfCourseDraft = {
   name: string
   shortName: string
