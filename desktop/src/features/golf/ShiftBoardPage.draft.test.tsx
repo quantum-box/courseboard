@@ -28,6 +28,19 @@ vi.mock('../../api', async importOriginal => {
 
 vi.mock('../../lib/toast', () => ({ showToast: vi.fn() }))
 
+/** Every document handed to the workbook writer, which still writes it. */
+const workbook = vi.hoisted(() => ({ documents: [] as Array<{ note: string }> }))
+vi.mock('./shiftBoardExport', async importOriginal => {
+  const actual = await importOriginal<typeof import('./shiftBoardExport')>()
+  return {
+    ...actual,
+    shiftExportXlsx: async (document: Parameters<typeof actual.shiftExportXlsx>[0]) => {
+      workbook.documents.push(document)
+      return actual.shiftExportXlsx(document)
+    },
+  }
+})
+
 const CADDIE = 'caddie-a'
 const MONTH = new Intl.DateTimeFormat('sv-SE', {
   timeZone: 'Asia/Tokyo',
@@ -85,6 +98,7 @@ beforeEach(() => {
   api.downloadText.mockReset()
   api.downloadBlob.mockResolvedValue(undefined)
   vi.mocked(showToast).mockClear()
+  workbook.documents = []
   vi.spyOn(window, 'print').mockImplementation(() => undefined)
   api.json.mockImplementation(async (path: string, init?: RequestInit) => {
     calls.push({ path, method: init?.method ?? 'GET' })
@@ -264,6 +278,12 @@ describe('planning a month before confirming it', () => {
     expect(printedDays?.[0]?.textContent).toBe('')
     expect(printedDays?.[1]?.dataset.kind).toBe('available')
     expect(printable?.textContent).not.toContain(i18next.t('shifts:cell.off'))
+    // The printed legend is the workbook's: it says what a blank square means,
+    // and leaves out marks the sheet can no longer print (SCC-43, SCC-44).
+    const legend = printable?.querySelector('.shift-board-print-legend')?.textContent ?? ''
+    expect(legend).toContain(i18next.t('shifts:export.legend.blank'))
+    expect(legend).not.toContain(i18next.t('shifts:legend.light'))
+    expect(legend).not.toContain(i18next.t('shifts:export.legend.changed'))
 
     window.dispatchEvent(new Event('afterprint'))
     expect(document.title).toBe(originalTitle)
@@ -473,5 +493,22 @@ describe('planning a month before confirming it', () => {
     expect(filename).toBe(`キャディシフト案_${MONTH_LABEL}.xlsx`)
     expect(blob.type).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
     expect(blob.size).toBeGreaterThan(1000)
+
+    // SCC-44: the workbook explains its own marks. It used to say only that
+    // they "match the screen", which nobody holding the paper could look up.
+    // Read from what went into the workbook rather than by unzipping it:
+    // under jsdom fflate is handed a Uint8Array from another realm and files
+    // the bytes as folders, which a real browser never does.
+    const sheet = workbook.documents.at(-1)?.note ?? ''
+    const entry = (mark: string, meaning: string) => i18next.t('shifts:export.legendEntry', {
+      mark,
+      meaning: i18next.t(meaning as 'shifts:export.legend.working'),
+    })
+    expect(sheet).toContain(entry(i18next.t('shifts:cell.available'), 'shifts:export.legend.working'))
+    expect(sheet).toContain(entry(i18next.t('shifts:cell.morning'), 'shifts:export.legend.morning'))
+    expect(sheet).toContain(i18next.t('shifts:export.legend.blank'))
+    // A plan's sheet marks the days the plan changes, so it says what that is.
+    expect(sheet).toContain(entry(i18next.t('shifts:export.changedMark'), 'shifts:export.legend.changed'))
+    expect(sheet).not.toContain('記号は画面と同じです')
   })
 })
