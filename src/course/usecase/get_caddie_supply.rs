@@ -10,6 +10,7 @@ use crate::course::domain::{
     compute_caddie_supply, free_halves, parse_tenant_timezone, AvailabilityQuery,
     AvailabilityStatus, CaddieAvailability, CaddieDayCapacity, CaddieDutyGateway, CaddieSupply,
     CourseError, GatewayCredentials, GolfCatalogGateway, GolfOpsGateway, ReservationGateway,
+    ShiftRulesGateway,
 };
 
 /// What the caddie is left free for once the other work is taken off.
@@ -58,6 +59,9 @@ pub struct GetCaddieSupplyUseCase {
     catalog: Arc<dyn GolfCatalogGateway>,
     reservations: Arc<dyn ReservationGateway>,
     duties: Arc<dyn CaddieDutyGateway>,
+    /// Where the tenant says how a day nobody filed for is read — the same
+    /// rule the shift run uses, so supply and the plan agree about it.
+    rules: Arc<dyn ShiftRulesGateway>,
 }
 
 impl GetCaddieSupplyUseCase {
@@ -66,12 +70,14 @@ impl GetCaddieSupplyUseCase {
         catalog: Arc<dyn GolfCatalogGateway>,
         reservations: Arc<dyn ReservationGateway>,
         duties: Arc<dyn CaddieDutyGateway>,
+        rules: Arc<dyn ShiftRulesGateway>,
     ) -> Self {
         Self {
             ops,
             catalog,
             reservations,
             duties,
+            rules,
         }
     }
 
@@ -117,6 +123,7 @@ impl GetCaddieSupplyUseCase {
             )?;
             Some(CaddieDayCapacity {
                 active: caddie.is_active(),
+                filed: availability.is_some(),
                 status,
                 can_two_rounds: caddie.can_two_rounds(),
                 two_round_request: availability
@@ -146,11 +153,14 @@ impl GetCaddieSupplyUseCase {
             })
             .count() as i64;
 
+        let policy = self.rules.get_shift_policy(credentials.operator_id).await?;
+
         Ok(compute_caddie_supply(
             date,
             capacities,
             safety_buffer.unwrap_or(0),
             current_caddie_attached,
+            policy.unfiled_request(),
         ))
     }
 }
