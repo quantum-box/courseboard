@@ -108,7 +108,7 @@ function worksheetXml(document: ShiftExportDocument) {
   </cols>
   <sheetData>
     <row r="1" ht="28" customHeight="1">${inlineCell(1, 0, document.title, 1)}</row>
-    <row r="2" ht="32" customHeight="1">${inlineCell(2, 0, document.note, 2)}</row>
+    <row r="2" ht="40" customHeight="1">${inlineCell(2, 0, document.note, 2)}</row>
     <row r="3" ht="24" customHeight="1">${headerCells}</row>
     ${dataRows}
   </sheetData>

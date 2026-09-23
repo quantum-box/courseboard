@@ -222,6 +222,33 @@ function emptySheetReason(source: ShiftPrintSource, document: ShiftExportDocumen
   return null
 }
 
+/**
+ * What the marks on a handed-out sheet mean, in the order they are read.
+ *
+ * Built from the marks the sheet actually prints, so the two cannot drift
+ * apart. The workbook used to say only "the marks match the screen", which
+ * nobody holding the paper could look up (SCC-44). 軽 and ？ are not here:
+ * they only ever come from a request, and the sheet prints no requests
+ * (SCC-43).
+ */
+function exportLegend(source: ShiftPrintSource) {
+  const entry = (mark: string, meaning: string) => i18next.t('shifts:export.legendEntry', {
+    mark,
+    meaning: i18next.t(meaning as 'shifts:export.legend.working'),
+  })
+  return [
+    entry(i18next.t('shifts:cell.assigned'), 'shifts:export.legend.assigned'),
+    entry(i18next.t('shifts:cell.available'), 'shifts:export.legend.working'),
+    entry(i18next.t('shifts:cell.morning'), 'shifts:export.legend.morning'),
+    entry(i18next.t('shifts:cell.afternoon'), 'shifts:export.legend.afternoon'),
+    i18next.t('shifts:export.legend.blank'),
+    entry(i18next.t('shifts:export.pinnedMark'), 'shifts:export.legend.pinned'),
+    ...(source.kind === 'draft'
+      ? [entry(i18next.t('shifts:export.changedMark'), 'shifts:export.legend.changed')]
+      : []),
+  ]
+}
+
 function exportWeekend(date: string): ShiftExportWeekend {
   const day = weekdayIndex(date)
   if (day === 6) return 'saturday'
@@ -318,7 +345,7 @@ function buildShiftExportDocument({
     })
   return {
     title,
-    note: i18next.t('shifts:export.note'),
+    note: [i18next.t('shifts:export.note'), exportLegend(source).join('　')].join('\n'),
     sheetName: i18next.t(source.kind === 'draft'
       ? 'shifts:export.draftSheet'
       : 'shifts:export.confirmedSheet'),
@@ -1117,6 +1144,17 @@ function ShiftExportMenu({
  * A3 landscape page, which the native dialog can send to a printer or save as
  * PDF without changing any shift data.
  */
+/** The colour chip beside each `exportLegend` entry, in the same order. */
+const PRINT_LEGEND_SWATCHES: Array<Record<string, string>> = [
+  { 'data-kind': 'assigned' },
+  { 'data-kind': 'available' },
+  { 'data-kind': 'morning' },
+  { 'data-kind': 'afternoon' },
+  { 'data-kind': 'none' },
+  { 'data-pinned': 'true' },
+  { 'data-draft-change': 'true' },
+]
+
 function ShiftBoardPrintView({
   source,
   yearMonth,
@@ -1174,16 +1212,11 @@ function ShiftBoardPrintView({
       </header>
 
       <div className="shift-board-print-legend" aria-label={t('shifts:legend.label')}>
-        <span><i data-kind="assigned" /> {t('shifts:legend.assigned')}</span>
-        <span><i data-kind="available" /> {t('shifts:legend.available')}</span>
-        <span><i data-kind="morning" /> {t('shifts:legend.morning')}</span>
-        <span><i data-kind="afternoon" /> {t('shifts:legend.afternoon')}</span>
-        <span><i data-kind="light" /> {t('shifts:legend.light')}</span>
-        <span><i data-kind="unknown" /> {t('shifts:legend.unknown')}</span>
-        <span><i data-pinned="true" /> {t('shifts:legend.pinned')}</span>
-        {source.kind === 'draft' ? (
-          <span><i data-draft-change="true" /> {t('shifts:draft.legendChanged')}</span>
-        ) : null}
+        {exportLegend(source).map((entry, index) => (
+          <span key={entry}>
+            <i {...PRINT_LEGEND_SWATCHES[index]} /> {entry}
+          </span>
+        ))}
       </div>
 
       <table aria-label={t('shifts:print.aria', { month: yearMonth })}>
