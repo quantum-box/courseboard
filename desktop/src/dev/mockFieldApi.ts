@@ -3195,7 +3195,20 @@ function resolveGet(path: string): Json | null | undefined {
     // Derived from the roster and the day's board rather than fixed: with a
     // club-sized roster the old constants said eight groups next to a sheet
     // holding forty.
-    const available = mockCaddies.filter(caddie => caddie.employmentStatus === 'active')
+    const active = mockCaddies.filter(caddie => caddie.employmentStatus === 'active')
+    // Who answered for this day at all, and how the club reads the rest —
+    // the same split the API makes (courseboard#90).
+    const filedToday = resolveGet(
+      `/v1/erp/extensions/golf-course/caddie-availabilities?from=${date}&to=${date}`,
+    ) as { items: Array<{ caddieProfileId: string; date: string }> } | null
+    const filedIds = new Set(
+      (filedToday?.items ?? []).filter(entry => entry.date === date).map(entry => entry.caddieProfileId),
+    )
+    const unfiledCaddies = active.filter(caddie => !filedIds.has(caddie.id)).length
+    const unfiledReadAs = mockShiftRules.unfiledRequest === 'off' ? 'off' : 'working'
+    const available = unfiledReadAs === 'off'
+      ? active.filter(caddie => filedIds.has(caddie.id))
+      : active
     const twoRoundCapable = available.filter(caddie => caddie.canTwoRounds)
     const caddieSupply = available.length + twoRoundCapable.length
     const currentCaddieAttached = mockTeeReservations.filter(
@@ -3213,6 +3226,8 @@ function resolveGet(path: string): Json | null | undefined {
       caddieAttachedCap,
       currentCaddieAttached,
       remaining: caddieAttachedCap - currentCaddieAttached,
+      unfiledCaddies,
+      unfiledReadAs,
     }
   }
 
