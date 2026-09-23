@@ -1,0 +1,768 @@
+import { courseboardApiJson, today } from '../../api'
+import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
+import { i18next } from '../../i18n'
+import { formatCourseDate } from '../../lib/clock'
+import {
+  HORIZON_MAX_DAYS,
+  HORIZON_MIN_DAYS,
+  addDays,
+  emptyHorizonDraft,
+  horizonDraftFrom,
+  horizonIssue,
+  horizonPayload,
+  sameHorizon,
+  type BookingHorizonResponse,
+  type HorizonDraft,
+} from './bookingHorizon'
+import { useRegisterPageReload } from '../../lib/pageReload'
+import { showToast } from '../../lib/toast'
+import {
+  Field,
+  FormGrid,
+  LoadingState,
+  NativeSelect,
+  Notice,
+  Panel,
+  ResourceError,
+} from '../../components/Page'
+import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
+import {
+  ArrowLeft,
+  Clock3,
+  Plus,
+  Save,
+  ShieldCheck,
+  Trash2,
+  Users,
+  WalletCards,
+} from 'lucide-react'
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useState,
+} from 'react'
+import { useTranslation } from 'react-i18next'
+import { navigate } from '../../lib/router'
+
+type SelfLockWindow = {
+  weekdays: string[]
+  start: string
+  end: string
+}
+
+type GolfPolicyHooks = {
+  [key: string]: unknown
+  selfLock?: {
+    enabled: boolean
+    windows: SelfLockWindow[]
+  }
+  spendJudgment?: {
+    enabled: boolean
+    minPerPlayer?: number | null
+    action?: 'reject' | 'review'
+  }
+}
+
+type GolfReservationPolicy = {
+  tenantId: string
+  reservationTypeId: string
+  defaultHoles: number
+  maxPlayersPerTeeTime: number
+  cartPolicy: string
+  memberDepositBps: number
+  guestDepositBps: number
+  cutoffHours: number
+  policyHooksJson: GolfPolicyHooks | null
+  metadataJson: unknown
+}
+
+/** `policy` is null until the club saves its rules for the first time. */
+type ReservationPolicyRead = {
+  policy: GolfReservationPolicy | null
+}
+
+type BookingHorizon = BookingHorizonResponse
+
+type PolicyDraft = {
+  reservationTypeId: string
+  defaultHoles: string
+  maxPlayersPerTeeTime: string
+  cartPolicy: string
+  memberDepositPercent: string
+  guestDepositPercent: string
+  cutoffHours: string
+  selfLockEnabled: boolean
+  windows: SelfLockWindow[]
+  spendJudgmentEnabled: boolean
+  minPerPlayer: string
+  spendAction: 'reject' | 'review'
+}
+
+const WEEKDAYS = [
+  { key: 'mon' },
+  { key: 'tue' },
+  { key: 'wed' },
+  { key: 'thu' },
+  { key: 'fri' },
+  { key: 'sat' },
+  { key: 'sun' },
+] as const
+
+/** Weekday captions come from the active locale, not the constant table. */
+function weekdayLabel(key: string) {
+  return i18next.t(`common:weekday.${key}` as 'common:weekday.mon')
+}
+
+const WEEKDAY_ORDER = new Map<string, number>(
+  WEEKDAYS.map((day, index) => [day.key, index] as const),
+)
+
+function emptyDraft(): PolicyDraft {
+  return {
+    reservationTypeId: '',
+    defaultHoles: '18',
+    maxPlayersPerTeeTime: '4',
+    cartPolicy: 'optional',
+    memberDepositPercent: '20',
+    guestDepositPercent: '30',
+    cutoffHours: '24',
+    selfLockEnabled: false,
+    windows: [{ weekdays: ['sat', 'sun'], start: '07:00', end: '10:00' }],
+    spendJudgmentEnabled: false,
+    minPerPlayer: '',
+    spendAction: 'review',
+  }
+}
+
+function policyToDraft(policy: GolfReservationPolicy | null): PolicyDraft {
+  if (!policy) return emptyDraft()
+  return {
+    reservationTypeId: policy.reservationTypeId ?? '',
+    defaultHoles: String(policy.defaultHoles ?? 18),
+    maxPlayersPerTeeTime: String(policy.maxPlayersPerTeeTime ?? 4),
+    cartPolicy: policy.cartPolicy || 'optional',
+    memberDepositPercent: String((policy.memberDepositBps ?? 2000) / 100),
+    guestDepositPercent: String((policy.guestDepositBps ?? 3000) / 100),
+    cutoffHours: String(policy.cutoffHours ?? 24),
+    selfLockEnabled: policy.policyHooksJson?.selfLock?.enabled ?? false,
+    windows: policy.policyHooksJson?.selfLock?.windows
+      ?? [{ weekdays: ['sat', 'sun'], start: '07:00', end: '10:00' }],
+    spendJudgmentEnabled:
+      policy.policyHooksJson?.spendJudgment?.enabled ?? false,
+    minPerPlayer:
+      policy.policyHooksJson?.spendJudgment?.minPerPlayer == null
+        ? ''
+        : String(policy.policyHooksJson.spendJudgment.minPerPlayer),
+    spendAction:
+      policy.policyHooksJson?.spendJudgment?.action === 'reject'
+        ? 'reject'
+        : 'review',
+  }
+}
+
+function timeToMinutes(value: string) {
+  const match = /^(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return null
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (hours > 23 || minutes > 59) return null
+  return hours * 60 + minutes
+}
+
+function validateWindows(windows: SelfLockWindow[]) {
+  const errors: string[] = []
+  const normalized = windows.map((window, index) => {
+    const start = timeToMinutes(window.start)
+    const end = timeToMinutes(window.end)
+    if (start === null || end === null) {
+      errors.push(i18next.t('policy:validation.slotTimes', { n: String(index + 1) }))
+    } else if (start >= end) {
+      errors.push(i18next.t('policy:validation.slotOrder', { n: String(index + 1) }))
+    }
+    return { window, start, end, index }
+  })
+
+  for (let left = 0; left < normalized.length; left += 1) {
+    for (let right = left + 1; right < normalized.length; right += 1) {
+      const a = normalized[left]
+      const b = normalized[right]
+      if (!a || !b || a.start === null || a.end === null || b.start === null || b.end === null) {
+        continue
+      }
+      const sharedDay = a.window.weekdays.length === 0
+        ? (b.window.weekdays[0] ?? 'all')
+        : b.window.weekdays.length === 0
+          ? (a.window.weekdays[0] ?? 'all')
+          : a.window.weekdays.find(day => b.window.weekdays.includes(day))
+      if (sharedDay && a.start < b.end && b.start < a.end) {
+        const positions = { a: String(a.index + 1), b: String(b.index + 1) }
+        errors.push(sharedDay === 'all'
+          ? i18next.t('policy:validation.overlapAllDays', positions)
+          : i18next.t('policy:validation.overlapOnDay', {
+              ...positions,
+              day: weekdayLabel(sharedDay),
+            }))
+      }
+    }
+  }
+  return errors
+}
+
+function policyValidation(draft: PolicyDraft) {
+  const errors: string[] = []
+  const defaultHoles = Number(draft.defaultHoles)
+  const maxPlayers = Number(draft.maxPlayersPerTeeTime)
+  const memberDeposit = Number(draft.memberDepositPercent)
+  const guestDeposit = Number(draft.guestDepositPercent)
+  const cutoffHours = Number(draft.cutoffHours)
+  const minPerPlayer = draft.minPerPlayer === '' ? null : Number(draft.minPerPlayer)
+
+  if (![9, 18].includes(defaultHoles)) errors.push(i18next.t('policy:validation.holes'))
+  if (!Number.isInteger(maxPlayers) || maxPlayers < 1 || maxPlayers > 4) {
+    errors.push(i18next.t('policy:validation.maxPlayers'))
+  }
+  if (
+    draft.memberDepositPercent.trim() === ''
+    || !Number.isFinite(memberDeposit)
+    || memberDeposit < 0
+    || memberDeposit > 100
+  ) {
+    errors.push(i18next.t('policy:validation.memberDeposit'))
+  }
+  if (
+    draft.guestDepositPercent.trim() === ''
+    || !Number.isFinite(guestDeposit)
+    || guestDeposit < 0
+    || guestDeposit > 100
+  ) {
+    errors.push(i18next.t('policy:validation.guestDeposit'))
+  }
+  if (
+    draft.cutoffHours.trim() === ''
+    || !Number.isInteger(cutoffHours)
+    || cutoffHours < 0
+    || cutoffHours > 2_147_483_647
+  ) {
+    errors.push(i18next.t('policy:validation.cutoff'))
+  }
+  if (
+    draft.spendJudgmentEnabled
+    && minPerPlayer !== null
+    && (!Number.isSafeInteger(minPerPlayer) || minPerPlayer < 0)
+  ) {
+    errors.push(i18next.t('policy:validation.spendThreshold'))
+  }
+  if (draft.selfLockEnabled) errors.push(...validateWindows(draft.windows))
+
+  return { errors }
+}
+
+export function PolicyPage() {
+  const { t } = useTranslation(['policy', 'common', 'nav', 'courses'])
+  const timezone = useTenantTimezone()
+  const [draft, setDraft] = useState<PolicyDraft>(emptyDraft)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<unknown>(null)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string[] | null>(null)
+  const [exists, setExists] = useState(false)
+  const [preservedHooks, setPreservedHooks] = useState<GolfPolicyHooks>({})
+  const [preservedMetadata, setPreservedMetadata] = useState<unknown>({})
+  /**
+   * How far ahead the book is open. Stored apart from the Field policy — it is
+   * a golf operating rule CourseBoard owns — but it belongs on this screen,
+   * beside the cutoff that closes the same window from the other end.
+   */
+  const [horizon, setHorizon] = useState<HorizonDraft>(emptyHorizonDraft)
+  const [savedHorizon, setSavedHorizon] = useState<HorizonDraft>(emptyHorizonDraft)
+  const [bookableThrough, setBookableThrough] = useState<string | null>(null)
+  // The club's own day, not the browser's: a date picker bounded by a UTC
+  // "today" refuses this morning's date at a desk in Japan.
+  const courseToday = today(timezone)
+  const horizonClosed = bookableThrough !== null && bookableThrough < courseToday
+
+  const loadHorizon = useCallback(async () => {
+    try {
+      const stored = await courseboardApiJson<BookingHorizon>('/v1/course/booking-horizon')
+      setHorizon(horizonDraftFrom(stored))
+      setSavedHorizon(horizonDraftFrom(stored))
+      setBookableThrough(stored.bookableThrough)
+    } catch {
+      // The rest of the policy screen still works without it; leaving the
+      // field blank is better than refusing to open the page.
+      setHorizon(emptyHorizonDraft())
+      setSavedHorizon(emptyHorizonDraft())
+      setBookableThrough(null)
+    }
+  }, [])
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setLoadError(null)
+    void loadHorizon()
+    try {
+      const { policy } = await courseboardApiJson<ReservationPolicyRead>(
+        '/v1/course/reservation-policy',
+      )
+      setDraft(policy ? policyToDraft(policy) : emptyDraft())
+      setPreservedHooks(policy?.policyHooksJson ?? {})
+      setPreservedMetadata(policy?.metadataJson ?? {})
+      setExists(policy !== null)
+      setSaveError(null)
+    } catch (error) {
+      setLoadError(error)
+    } finally {
+      setLoading(false)
+    }
+  }, [loadHorizon])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  useRegisterPageReload(load)
+
+  function changeHorizon(patch: Partial<HorizonDraft>) {
+    setHorizon(previous => ({ ...previous, ...patch }))
+    setSaveError(null)
+  }
+
+  function changeDraft(patch: Partial<PolicyDraft>) {
+    setDraft(previous => ({ ...previous, ...patch }))
+    setSaveError(null)
+  }
+
+  function updateWindow(index: number, patch: Partial<SelfLockWindow>) {
+    changeDraft({
+      windows: draft.windows.map((window, windowIndex) => (
+        windowIndex === index ? { ...window, ...patch } : window
+      )),
+    })
+  }
+
+  function toggleWeekday(index: number, weekday: string) {
+    const window = draft.windows[index]
+    if (!window) return
+    const weekdays = window.weekdays.includes(weekday)
+      ? window.weekdays.filter(value => value !== weekday)
+      : [...window.weekdays, weekday].sort(
+          (left, right) => (WEEKDAY_ORDER.get(left) ?? 99) - (WEEKDAY_ORDER.get(right) ?? 99),
+        )
+    updateWindow(index, { weekdays })
+  }
+
+  async function savePolicy(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const validation = policyValidation(draft)
+    const issue = horizonIssue(horizon, courseToday)
+    if (issue === 'days') {
+      validation.errors.push(i18next.t('policy:validation.bookingHorizon'))
+    } else if (issue === 'through') {
+      validation.errors.push(i18next.t('policy:validation.bookingHorizonThrough'))
+    }
+    if (validation.errors.length > 0) {
+      setSaveError(validation.errors)
+      return
+    }
+
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await courseboardApiJson<unknown>(
+        '/v1/course/reservation-policy',
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            reservationTypeId: draft.reservationTypeId.trim() || undefined,
+            defaultHoles: Number(draft.defaultHoles),
+            maxPlayersPerTeeTime: Number(draft.maxPlayersPerTeeTime),
+            cartPolicy: draft.cartPolicy,
+            memberDepositBps: Math.round(Number(draft.memberDepositPercent) * 100),
+            guestDepositBps: Math.round(Number(draft.guestDepositPercent) * 100),
+            cutoffHours: Number(draft.cutoffHours),
+            policyHooksJson: {
+              ...preservedHooks,
+              selfLock: {
+                enabled: draft.selfLockEnabled,
+                windows: draft.windows,
+              },
+              spendJudgment: {
+                enabled: draft.spendJudgmentEnabled,
+                minPerPlayer:
+                  draft.minPerPlayer === '' ? null : Number(draft.minPerPlayer),
+                action: draft.spendAction,
+              },
+            } satisfies GolfPolicyHooks,
+            // Advanced integration JSON is edited under Settings, not here.
+            metadataJson: preservedMetadata ?? {},
+          }),
+        },
+      )
+      setExists(true)
+      // Only when it moved: writing the horizon rebuilds every course's tee
+      // times, which is not something an unrelated save should set off.
+      if (!sameHorizon(horizon, savedHorizon)) {
+        const stored = await courseboardApiJson<BookingHorizon>('/v1/course/booking-horizon', {
+          method: 'PUT',
+          body: JSON.stringify(horizonPayload(horizon)),
+        })
+        setHorizon(horizonDraftFrom(stored))
+        setSavedHorizon(horizonDraftFrom(stored))
+        setBookableThrough(stored.bookableThrough)
+      }
+      showToast({
+        tone: 'success',
+        title: t('policy:saved.title'),
+        message: t('policy:saved.description'),
+      })
+    } catch (error) {
+      showToast({
+        tone: 'danger',
+        title: t('policy:saveFailed'),
+        message: error instanceof Error ? error.message : t('policy:saveFailed'),
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) return <LoadingState label={t('policy:loading')} />
+  if (loadError) return <ResourceError error={loadError} onRetry={() => void load()} />
+
+  return (
+    <form className="page-stack" onSubmit={savePolicy}>
+      <div className="page-toolbar">
+        <Button type="button" variant="ghost" onClick={() => navigate('settings')}>
+          <ArrowLeft /> {t('common:action.backToSettings')}
+        </Button>
+        <Badge variant={exists ? 'success' : 'warning'}>
+          {exists ? t('policy:status.configured') : t('policy:status.missing')}
+        </Badge>
+        <Button type="submit" variant="primary" disabled={saving}>
+          <Save /> {saving ? t('common:action.saving') : t('common:action.save')}
+        </Button>
+      </div>
+
+      {exists ? null : (
+        <Notice tone="warning" title={t('policy:unset.title')}>
+          {t('policy:unset.description')}
+        </Notice>
+      )}
+
+      <Panel
+        title={t('policy:basics.title')}
+        description={t('policy:basics.description')}
+        actions={<ShieldCheck className="size-4 text-subtle-foreground" />}
+      >
+        <FormGrid columns={3}>
+          <Field
+            label={t('policy:basics.reservationTypeId')}
+            hint={t('policy:basics.reservationTypeIdHint')}
+          >
+            <Input
+              value={draft.reservationTypeId}
+              onChange={event => changeDraft({ reservationTypeId: event.target.value })}
+              placeholder="golf_standard"
+            />
+          </Field>
+          <Field label={t('policy:basics.defaultHoles')} required>
+            <NativeSelect
+              required
+              value={draft.defaultHoles}
+              onChange={event => changeDraft({ defaultHoles: event.target.value })}
+            >
+              <option value="9">{t('courses:option.holes9')}</option>
+              <option value="18">{t('courses:option.holes18')}</option>
+            </NativeSelect>
+          </Field>
+          <Field label={t('policy:basics.maxPlayers')} required>
+            <Input
+              required
+              type="number"
+              min="1"
+              max="4"
+              step="1"
+              value={draft.maxPlayersPerTeeTime}
+              onChange={event => changeDraft({ maxPlayersPerTeeTime: event.target.value })}
+            />
+          </Field>
+          <Field label={t('policy:basics.cart')} required>
+            <NativeSelect
+              required
+              value={draft.cartPolicy}
+              onChange={event => changeDraft({ cartPolicy: event.target.value })}
+            >
+              <option value="optional">{t('policy:cartOption.optional')}</option>
+              <option value="required">{t('policy:cartOption.required')}</option>
+              <option value="unavailable">{t('policy:cartOption.unavailable')}</option>
+            </NativeSelect>
+          </Field>
+          <Field label={t('policy:basics.cutoff')} required hint={t('policy:basics.cutoffHint')}>
+            <Input
+              required
+              type="number"
+              min="0"
+              step="1"
+              value={draft.cutoffHours}
+              onChange={event => changeDraft({ cutoffHours: event.target.value })}
+            />
+          </Field>
+          {/* The other end of the same window: the cutoff closes the book as a
+              tee time approaches, this opens it as far ahead as the club sells.
+              A club that plays all year wants the rolling day count; one with a
+              season wants a date, because a day count would have to be edited
+              every week to keep the same closing day. */}
+          <Field label={t('policy:basics.bookingHorizonMode')} required>
+            <NativeSelect
+              value={horizon.mode}
+              onChange={event => changeHorizon({
+                mode: event.target.value === 'through' ? 'through' : 'days',
+              })}
+            >
+              <option value="days">{t('policy:basics.bookingHorizonModeDays')}</option>
+              <option value="through">{t('policy:basics.bookingHorizonModeThrough')}</option>
+            </NativeSelect>
+          </Field>
+          {horizon.mode === 'through' ? (
+            <Field
+              label={t('policy:basics.bookingHorizonThroughLabel')}
+              required
+              hint={horizonClosed
+                ? t('policy:basics.bookingHorizonClosed')
+                : t('policy:basics.bookingHorizonThroughHint')}
+            >
+              <Input
+                required
+                type="date"
+                min={courseToday}
+                max={addDays(courseToday, HORIZON_MAX_DAYS)}
+                value={horizon.through}
+                onChange={event => changeHorizon({ through: event.target.value })}
+              />
+            </Field>
+          ) : (
+            <Field
+              label={t('policy:basics.bookingHorizon')}
+              required
+              hint={bookableThrough
+                ? t('policy:basics.bookingHorizonThrough', {
+                    date: formatCourseDate(bookableThrough, i18next.language),
+                  })
+                : t('policy:basics.bookingHorizonHint')}
+            >
+              <Input
+                required
+                type="number"
+                min={HORIZON_MIN_DAYS}
+                max={HORIZON_MAX_DAYS}
+                step="1"
+                value={horizon.days}
+                onChange={event => changeHorizon({ days: event.target.value })}
+              />
+            </Field>
+          )}
+        </FormGrid>
+      </Panel>
+
+      <Panel
+        title={t('policy:deposit.title')}
+        description={t('policy:deposit.description')}
+        actions={<WalletCards className="size-4 text-subtle-foreground" />}
+      >
+        <FormGrid columns={2}>
+          <Field label={t('policy:deposit.member')} required hint={t('policy:deposit.hint')}>
+            <Input
+              required
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              value={draft.memberDepositPercent}
+              onChange={event => changeDraft({ memberDepositPercent: event.target.value })}
+            />
+          </Field>
+          <Field label={t('policy:deposit.guest')} required hint={t('policy:deposit.hint')}>
+            <Input
+              required
+              type="number"
+              min="0"
+              max="100"
+              step="0.01"
+              value={draft.guestDepositPercent}
+              onChange={event => changeDraft({ guestDepositPercent: event.target.value })}
+            />
+          </Field>
+        </FormGrid>
+      </Panel>
+
+      <Panel
+        title={t('policy:selfLock.title')}
+        description={t('policy:selfLock.description')}
+        actions={(
+          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={draft.selfLockEnabled}
+              onChange={event => changeDraft({ selfLockEnabled: event.target.checked })}
+            />
+            {t('policy:selfLock.enabled')}
+          </label>
+        )}
+      >
+        <div className={`grid gap-3 ${draft.selfLockEnabled ? '' : 'opacity-60'}`}>
+          {draft.windows.map((window, index) => (
+            <div
+              key={index}
+              className="grid gap-3 rounded-md border border-border bg-surface p-3 lg:grid-cols-[minmax(280px,1fr)_120px_16px_120px_auto] lg:items-end"
+            >
+              <div className="field">
+                <span className="field-label">
+                  {t('policy:selfLock.slotWeekdays', { n: String(index + 1) })}
+                  <Badge variant="neutral">{t('policy:selfLock.allDays')}</Badge>
+                </span>
+                <div className="flex flex-wrap gap-1">
+                  {WEEKDAYS.map(day => {
+                    const active = window.weekdays.includes(day.key)
+                    return (
+                      <Button
+                        key={day.key}
+                        type="button"
+                        size="sm"
+                        variant={active ? 'primary' : 'secondary'}
+                        aria-pressed={active}
+                        aria-label={active
+                          ? t('policy:selfLock.unselectDay', { day: weekdayLabel(day.key) })
+                          : t('policy:selfLock.selectDay', { day: weekdayLabel(day.key) })}
+                        onClick={() => toggleWeekday(index, day.key)}
+                        disabled={!draft.selfLockEnabled}
+                      >
+                        {weekdayLabel(day.key)}
+                      </Button>
+                    )
+                  })}
+                </div>
+              </div>
+              <Field label={t('policy:selfLock.start')} required>
+                <Input
+                  type="time"
+                  value={window.start}
+                  onChange={event => updateWindow(index, { start: event.target.value })}
+                  disabled={!draft.selfLockEnabled}
+                />
+              </Field>
+              <span className="hidden pb-2 text-center text-subtle-foreground lg:block">–</span>
+              <Field label={t('policy:selfLock.end')} required>
+                <Input
+                  type="time"
+                  value={window.end}
+                  onChange={event => updateWindow(index, { end: event.target.value })}
+                  disabled={!draft.selfLockEnabled}
+                />
+              </Field>
+              <Button
+                type="button"
+                variant="ghost"
+                className="text-destructive"
+                onClick={() => changeDraft({
+                  windows: draft.windows.filter((_, windowIndex) => windowIndex !== index),
+                })}
+                disabled={!draft.selfLockEnabled}
+              >
+                <Trash2 /> {t('common:action.delete')}
+              </Button>
+            </div>
+          ))}
+          <div>
+            <Button
+              type="button"
+              onClick={() => changeDraft({
+                windows: [
+                  ...draft.windows,
+                  { weekdays: [], start: '07:00', end: '10:00' },
+                ],
+              })}
+              disabled={!draft.selfLockEnabled}
+            >
+              <Plus /> {t('policy:selfLock.addSlot')}
+            </Button>
+          </div>
+        </div>
+      </Panel>
+
+      <Panel
+        title={t('policy:spend.title')}
+        description={t('policy:spend.description')}
+        actions={(
+          <label className="flex cursor-pointer items-center gap-2 text-xs font-medium">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={draft.spendJudgmentEnabled}
+              onChange={event => changeDraft({ spendJudgmentEnabled: event.target.checked })}
+            />
+            {t('policy:spend.enabled')}
+          </label>
+        )}
+      >
+        <div className={draft.spendJudgmentEnabled ? '' : 'opacity-60'}>
+          <FormGrid columns={2}>
+            <Field
+              label={t('policy:spend.threshold')}
+              hint={t('policy:spend.thresholdHint')}
+            >
+              <Input
+                type="number"
+                min="0"
+                step="1"
+                value={draft.minPerPlayer}
+                onChange={event => changeDraft({ minPerPlayer: event.target.value })}
+                placeholder={t('policy:spend.thresholdPlaceholder')}
+                disabled={!draft.spendJudgmentEnabled}
+              />
+            </Field>
+            <Field label={t('policy:spend.belowAction')} required>
+              <NativeSelect
+                value={draft.spendAction}
+                onChange={event => changeDraft({
+                  spendAction: event.target.value === 'reject' ? 'reject' : 'review',
+                })}
+                disabled={!draft.spendJudgmentEnabled}
+              >
+                <option value="review">{t('policy:spend.review')}</option>
+                <option value="reject">{t('policy:spend.reject')}</option>
+              </NativeSelect>
+            </Field>
+          </FormGrid>
+        </div>
+      </Panel>
+
+      {saveError ? (
+        <Notice tone="danger" title={t('policy:invalid.title')}>
+          <ul className="list-disc space-y-1 pl-4">
+            {saveError.map(error => <li key={error}>{error}</li>)}
+          </ul>
+        </Notice>
+      ) : null}
+
+      <div className="sticky bottom-3 z-10 flex flex-col gap-2 rounded-lg border border-border bg-background/95 p-3 shadow-overlay backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <span className="inline-flex items-center gap-1">
+            <Users className="size-3.5" />
+            {t('policy:summary.maxPlayers', { n: draft.maxPlayersPerTeeTime || '—' })}
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Clock3 className="size-3.5" />
+            {t('policy:summary.cutoff', { n: draft.cutoffHours || '—' })}
+          </span>
+        </div>
+        <Button type="submit" variant="primary" size="lg" disabled={saving}>
+          <Save /> {saving ? t('common:action.saving') : t('policy:save')}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
+export default PolicyPage

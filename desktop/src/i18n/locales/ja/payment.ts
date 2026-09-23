@@ -1,0 +1,53 @@
+/** Customer-facing payment page and the invoice PDF. */
+export const payment = {
+  meta: {
+    description: 'Course Board から届いたキャンセル料のお支払い手続きを行います。',
+  },
+  unavailable: 'この支払いリンクは今は使えません。お手数ですが、ゴルフ場へお問い合わせください。',
+  loadFailed: '支払いの情報を読み込めませんでした',
+  formFailed: '支払いのフォームを用意できませんでした',
+  cannotOpen: '支払いページを開けません',
+  loading: '読み込んでいます…',
+  paid: {
+    title: 'お支払いは終わっています',
+    description: 'キャンセル料のお支払いを確認しました。',
+  },
+  title: 'キャンセル料のお支払い',
+  field: {
+    client: 'お名前',
+    reference: '対象',
+    due: 'お支払い期限',
+    reason: '理由',
+  },
+  form: {
+    unavailableTitle: '支払いのフォームを用意できません',
+    preparing: '支払いのフォームを用意しています…',
+    initFailed: '支払いのフォームを開始できませんでした',
+    initFailedTitle: '支払いのフォームを開始できません',
+    loading: '支払いのフォームを読み込んでいます…',
+    loadFailed: '支払いのフォームを読み込めませんでした',
+    amount: 'お支払いの金額',
+    submit: 'お支払いを終える',
+    submitting: '手続きをしています…',
+    failed: 'お支払いができませんでした',
+    succeeded: 'お支払いを確認しました',
+    processing: 'お支払いを受け付けました。確認まで少しお待ちください。',
+  },
+  pdf: {
+    fontFailed: '請求書のPDF用のフォントを読み込めませんでした。',
+    title: '請求書',
+    titleContinued: '請求書（続き）',
+    due: 'お支払い期限  {{date}}',
+    columns: {
+      item: '品目',
+      quantity: '数量',
+      unitPrice: '単価',
+      amount: '金額',
+    },
+    subtotal: '小計',
+    tax: '税',
+    total: '合計',
+    notes: '備考',
+    paymentLink: 'お支払いのリンク',
+  },
+} as const

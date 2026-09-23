@@ -1,0 +1,227 @@
+apiVersion: apps.tachy.one/v1alpha
+kind: CloudApps
+metadata:
+  name: courseboard
+  tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
+spec:
+  apps:
+    # --- Shared React/Tauri frontend — Vite SPA on Worker Static Assets.
+    # React owns direct Cognito USER_PASSWORD_AUTH and sends the Cognito access
+    # token to courseboard-api. No Hosted UI, Amplify, or BFF is deployed.
+    - name: courseboard
+      repository:
+        url: https://github.com/quantum-box/courseboard
+        owner: quantum-box
+        name: courseboard
+        defaultBranch: main
+      rootDirectory: desktop
+      # Tachyon uses `worker` as the deployment runner classification. The UI
+      # itself is still the Vite-built React SPA served from static assets.
+      framework: worker
+      deploymentTarget: cloudflare_workers
+      # The React app calls the secretless Cognito public client directly.
+      auth:
+        enabled: false
+      watchPaths:
+        - desktop/**
+      build:
+        installCommand: npm ci --no-audit --no-fund
+        command: npm run build
+        outputDirectory: dist
+        nodeVersion: "24"
+      envVars:
+        - name: VITE_BASE_PATH
+          value: /
+        - name: VITE_COURSEBOARD_AUTH_MODE
+          value: cognito-direct
+        # Cognito client IDs are public identifiers. Never add a client secret to
+        # this browser build.
+        - name: VITE_COURSEBOARD_BROWSER_CLIENT_ID
+          value: 5oafg9ptonbjumdh1pc7khirp1
+        - name: VITE_COURSEBOARD_COGNITO_REGION
+          value: ap-northeast-1
+        - name: VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT
+          value: https://courseboard-api.txcloud.app/v1/me
+        - name: VITE_COURSEBOARD_BROWSER_SCOPES
+          value: openid profile email
+        - name: VITE_COURSEBOARD_API_BASE_URL
+          value: https://courseboard-api.txcloud.app
+        - name: VITE_COURSEBOARD_PUBLIC_API_BASE_URL
+          value: https://courseboard-api.txcloud.app
+        - name: VITE_COURSEBOARD_PLATFORM_ID
+          value: tn_01hjjn348rn3t49zz6hvmfq67p
+
+    # --- Rust course-api — AWS Lambda.
+    # React/Tauri send Cognito bearer tokens directly to this app.
+    - name: courseboard-api
+      repository:
+        url: https://github.com/quantum-box/courseboard
+        owner: quantum-box
+        name: courseboard
+        defaultBranch: main
+      rootDirectory: ""
+      framework: cargo_lambda
+      deploymentTarget: lambda
+      # PLT-3819: declare the production database as a managed resource.
+      # Apply provisions the fixed-name database and the db-scoped SQL
+      # user on the txcloud cluster and materializes the DSN at the
+      # canonical databaseRef path, replacing the PLT-2750 one-shot
+      # bootstrap. Both already exist, so this reconciles as a no-op
+      # (ReuseExisting) and never rotates the stored credential.
+      databases:
+        - name: tidb_courseboard_prod
+          # Moved from txcloud on 2026-08-22 (PLT-3819). Explicit until the
+          # platform default (tachyon-cloud-apps) rolls out.
+          cluster: tachyon-cloud-apps
+          provider: tidb
+          user: courseboard_api
+      auth:
+        enabled: false
+      readinessProof:
+        path: /healthz
+        expectedStatus: 200
+        expectedBody: '"status":"ok"'
+      # The postDeploy hook targets Tachyon's isolated candidate alias. It runs
+      # after the provider has created the candidate but before stable traffic
+      # is promoted; a FunctionError discards the candidate and leaves the
+      # currently serving Lambda untouched.
+      hooks:
+        postDeploy:
+          - name: migration-gate-before-activation
+            lambdaInvoke:
+              appName: courseboard-api
+              payload:
+                version: "2.0"
+                routeKey: COURSEBOARD_MIGRATION_GATE
+                rawPath: /healthz
+                rawQueryString: ""
+                headers:
+                  host: courseboard-migration-gate.internal
+                requestContext:
+                  domainName: courseboard-migration-gate.internal
+                  http:
+                    method: GET
+                    path: /healthz
+            timeoutSeconds: 900
+      production:
+        # PLT-3819: the production database moved to the PrivateLink-only
+        # tachyon-cloud-apps cluster, which the GitHub-hosted gate runners
+        # cannot reach, so the Actions-based release check is retired.
+        # Migration safety is enforced by the migration-gate-before-activation
+        # lambdaInvoke hook above: it validates and applies migrations in-VPC
+        # against the candidate before promotion, and a failure discards the
+        # candidate while the serving Lambda keeps running (the PLT-3433
+        # protection).
+      watchPaths:
+        - Cargo.toml
+        - Cargo.lock
+        - rust-toolchain.toml
+        - bin/**
+        - migrations/**
+        - src/**
+        - tooling/repair_cargo_registry_cache.sh
+      build:
+        # The shared Cargo home restored from the build cache can carry a
+        # registry source directory whose files were pruned while `.cargo-ok`
+        # survived. Cargo trusts the marker, skips unpacking, and aborts with
+        # `failed to read .../Cargo.toml` before compiling. Drop those entries
+        # so Cargo downloads them again.
+        # The builder disables implicit rustup installation. Provision the
+        # pinned channel and Lambda target before any Cargo command runs.
+        # Only rustup uses the image's Cargo home; Cargo keeps the build cache.
+        installCommand: >-
+          CARGO_HOME=/usr/local/cargo rustup toolchain install nightly-2026-06-04 --profile minimal
+          --component rustfmt --component clippy --target aarch64-unknown-linux-gnu
+          && sh tooling/repair_cargo_registry_cache.sh
+        package: courseboard
+        binary: lambda-courseboard
+        release: true
+        arch: arm64
+      envVars:
+        - name: DATABASE_URL
+          type: credential
+          valueFrom:
+            databaseRef:
+              name: tidb_courseboard_prod
+              field: url
+        - name: COURSEBOARD_PUBLIC_UI_BASE_URL
+          value: https://courseboard.txcloud.app
+        - name: OIDC_ISSUER_URL
+          value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+        - name: EXPECTED_AUDIENCE
+          # Public Cognito client used directly by the React/Tauri form.
+          value: 5oafg9ptonbjumdh1pc7khirp1
+        - name: EXPECTED_CLIENT_ID
+          value: 5oafg9ptonbjumdh1pc7khirp1
+        # Lambda cannot resolve Cloudflare Worker service bindings. Store the
+        # public Field API URL so course gateways and /field-api proxy get a
+        # real https base (internalService leaves a literal
+        # $internal_service_ref:... placeholder that Url::parse rejects).
+        - name: TACHYON_FIELD_API_URL
+          value: https://tachyon-field-api.txcloud.app
+        # SCC-19 / ADR-0010. Sends the reservation report import to Field's
+        # generic `/v1/bridge/tabular/analyze` instead of the golf extension
+        # alias. Safe only because the golf policies now carry
+        # `field:PreviewBridgeRun` (applied 2026-08-29); without that grant the
+        # import 403s. Set back to "false" to roll back — Field serves both
+        # paths, so nothing has to change there.
+        - name: COURSEBOARD_FIELD_GENERIC_PATHS
+          value: "true"
+      environments:
+        production:
+          envVars:
+            - name: DATABASE_URL
+              type: credential
+              valueFrom:
+                databaseRef:
+                  name: tidb_courseboard_prod
+                  field: url
+            - name: COURSEBOARD_PUBLIC_UI_BASE_URL
+              value: https://courseboard.txcloud.app
+            - name: OIDC_ISSUER_URL
+              value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+            - name: EXPECTED_AUDIENCE
+              value: 5oafg9ptonbjumdh1pc7khirp1
+            - name: EXPECTED_CLIENT_ID
+              value: 5oafg9ptonbjumdh1pc7khirp1
+            - name: TACHYON_FIELD_API_URL
+              value: https://tachyon-field-api.txcloud.app
+            # SCC-19 / ADR-0010. Sends the reservation report import to Field's
+            # generic `/v1/bridge/tabular/analyze` instead of the golf extension
+            # alias. Safe only because the golf policies now carry
+            # `field:PreviewBridgeRun` (applied 2026-08-29); without that grant the
+            # import 403s. Set back to "false" to roll back — Field serves both
+            # paths, so nothing has to change there.
+            - name: COURSEBOARD_FIELD_GENERIC_PATHS
+              value: "true"
+        preview:
+          # Tachyon provisions an isolated database and scoped user for each PR.
+          # DATABASE_URL is injected from the matching PR-scoped secret.
+          provisionedDatabase:
+            provider: tidb
+            engine: mysql
+            envVar: DATABASE_URL
+          envVars:
+            - name: COURSEBOARD_PUBLIC_UI_BASE_URL
+              value: https://courseboard.txcloud.app
+            - name: OIDC_ISSUER_URL
+              value: https://cognito-idp.ap-northeast-1.amazonaws.com/ap-northeast-1_8Ga4bK5M4
+            - name: EXPECTED_AUDIENCE
+              value: 5oafg9ptonbjumdh1pc7khirp1
+            - name: EXPECTED_CLIENT_ID
+              value: 5oafg9ptonbjumdh1pc7khirp1
+            - name: TACHYON_FIELD_API_URL
+              value: https://tachyon-field-api.txcloud.app
+---
+apiVersion: apps.tachy.one/v1alpha
+kind: FeatureFlags
+metadata:
+  name: courseboard-flags
+  tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
+spec:
+  flags:
+    - key: feature.courseboard.flag-evaluation-smoke
+      name: CourseBoard feature flag evaluation smoke test
+      description: Non-functional canary for validating the CourseBoard evaluation path
+      enabled: true
+      defaultValue: false

@@ -1,0 +1,95 @@
+import type { DeepPartial } from '../../types'
+import type { schedule as source } from '../ja/schedule'
+
+/** See `ja-plain/common.ts` for what this locale is for. */
+export const schedule: DeepPartial<typeof source> = {
+  title: '予約を受ける時間 · {{course}}',
+  description: '曜日ごとに「何時から何時まで予約を受けるか」を決めます。保存すると、その内容から日ごとのスタート枠が、ひとりでに作られます。予約が入るのは、その枠です。',
+  back: 'コースの一覧に戻る',
+  eyebrow: 'コース',
+  onSale: {
+    through: '今、予約を受けられるのは {{date}} までです。',
+    change: '何日先まで受けるかを、変える',
+  },
+  inventoryGap: {
+    title: '予約を受ける日と、スタート枠の日が合っていません',
+    missing: '{{date}}まで予約を受ける決まりですが、スタート枠はまだありません。',
+    behind: '{{date}}まで予約を受ける決まりですが、スタート枠は{{generatedThrough}}までしかありません。',
+  },
+  week: {
+    badge: '毎週の決めごと',
+    title: '予約を受ける時間',
+    description: '曜日ごとに、何時から何時まで受けるかを入れます。同じ時間に出せる組の数と、組と組の間の時間で、その時間に何組出せるかが決まります。',
+    total: '今の内容だと、1週間で {{n}} スタートです。',
+    empty: 'まだ時間がありません。曜日のカードから時間を足してください。',
+  },
+  notLinked: {
+    title: 'このコースは、まだ予約のリソースとつながっていません',
+    description: '時間を決めるには、コースと予約のリソースのつながりが要ります。設定を確かめてください。',
+  },
+  link: {
+    title: 'このコースには、予約を受ける時間を置く場所がまだありません',
+    description: '時間と、そこから作るスタート枠は、予約のリソースの上に置かれます。用意すると、このコース専用のリソースを作ってつなぎます。すでにある場合は作りません。',
+    action: '置く場所を用意する',
+    working: '用意しています…',
+    done: {
+      title: '置く場所を用意しました',
+      body: '{{course}} の時間を決められるようになりました。',
+    },
+    failed: '置く場所を用意できませんでした',
+  },
+  loadFailed: {
+    title: '今の時間を読み込めませんでした',
+    description: '中身が空のまま保存すると、今ある時間が消えてしまうことがあります。読み込み直してから直してください。',
+  },
+  dayLabel: '{{day}}曜日',
+  bandCount: '{{n}}本',
+  closed: '受けつけません',
+  add: '時間を足す',
+  addAria: '{{day}}曜日に時間を足す',
+  copyAria: '{{day}}曜日の時間を、ほかの曜日にコピーする',
+  copyPlaceholder: 'ほかの曜日にコピーする…',
+  copyWeekdays: '平日（月〜金）へ',
+  copyWeekend: '土曜と日曜へ',
+  copyAll: '毎日へ',
+  copyDay: '{{day}}曜日へ',
+  capacity: '同じ時間に出せる組の数',
+  interval: '組と組の間の時間',
+  unitGroups: '組',
+  unitInterval: '分おき',
+  starts: '{{n}}スタート',
+  issue: {
+    time: '始まりと終わりの時刻を入れてください。',
+    order: '終わりは、始まりより後にしてください。',
+    capacity: '組の数は 1 以上で入れてください。',
+    interval: '組と組の間の時間は 1〜1440 分で入れてください。',
+    overlap: '同じ曜日で時間が重なっています。重なると、同じスタート枠が2回作られます。',
+  },
+  save: '時間を保存する',
+  saveFailed: '時間を保存できません',
+  missingRuleId: '保存した時間を見分けられません。画面を読みこみなおして、もう一度ためしてください。',
+  newRuleHasId: '新しくふやした時間の状態が正しくありません。画面を読みこみなおして、もう一度ためしてください。',
+  hasIssues: '{{n}} 本の時間に、まちがいがあります。赤い行を直してから保存してください。',
+  confirmRemove: 'この保存で {{n}} 本の時間がなくなります。その時間のスタート枠も止まります。進めますか。',
+  saved: {
+    title: '時間を保存しました',
+    body: '{{course}} の1週間ぶんを入れかえて、{{date}} まで予約を受けられるようにしました。',
+    notBuilt: {
+      title: '時間は保存しましたが、スタート枠を作れませんでした',
+      body: '時間そのものは保存できています。でも、スタート枠がまだ作られていないので、このままでは予約を受けられません。もう一度ためしてください。',
+      retry: 'スタート枠を作りなおす',
+    },
+  },
+  pending: {
+    title: '{{course}} · まだ保存していません',
+    added: 'ふやした時間 {{n}}',
+    removed: 'けした時間 {{n}}',
+    changed: 'なおした時間 {{n}}',
+    revert: 'もとにもどす',
+    weekly: '1週間で {{n}} スタート',
+  },
+  confirm: {
+    discardOnReload: '保存していない時間があります。捨てて読み込み直しますか。',
+    discardOnLeave: '保存していない時間があります。捨てて、この画面を出ますか。',
+  },
+}

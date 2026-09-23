@@ -1,0 +1,201 @@
+//! CreateCourseUseCase: one use case, one public entrypoint (`execute`).
+
+use std::sync::Arc;
+
+use crate::course::domain::actions;
+use crate::course::domain::{
+    Course, CourseError, GatewayCredentials, GolfCatalogGateway, UpsertCourse,
+};
+
+pub struct CreateCourseUseCase {
+    catalog: Arc<dyn GolfCatalogGateway>,
+}
+
+impl CreateCourseUseCase {
+    pub fn new(catalog: Arc<dyn GolfCatalogGateway>) -> Self {
+        Self { catalog }
+    }
+
+    pub async fn execute(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        input: UpsertCourse,
+    ) -> Result<Course, CourseError> {
+        credentials.require(actions::MANAGE_COURSES).await?;
+        self.catalog.create_course(credentials, input).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::sync::Mutex;
+
+    use crate::course::domain::{
+        CourseId, ProductSlot, ReservationProduct, ReservationServiceId, Resource, ResourceId,
+        SaveCourseResource, UpsertReservationProduct,
+    };
+
+    struct FakeCatalog {
+        courses: Mutex<Vec<Course>>,
+    }
+
+    #[async_trait]
+    impl GolfCatalogGateway for FakeCatalog {
+        async fn get_course_order(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<crate::course::domain::CourseOrder, CourseError> {
+            Ok(crate::course::domain::CourseOrder::default())
+        }
+
+        async fn replace_course_order(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            order: &crate::course::domain::CourseOrder,
+        ) -> Result<crate::course::domain::CourseOrder, CourseError> {
+            Ok(order.clone())
+        }
+
+        async fn list_courses(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<Course>, CourseError> {
+            Ok(self.courses.lock().expect("lock").clone())
+        }
+
+        async fn get_tenant_timezone(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<String, CourseError> {
+            Ok(crate::course::domain::DEFAULT_TIMEZONE.to_string())
+        }
+
+        async fn create_course(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            input: UpsertCourse,
+        ) -> Result<Course, CourseError> {
+            let course = Course::reconstitute(
+                "course_new",
+                input.name,
+                input.short_name,
+                input.hole_count.get(),
+                crate::course::domain::DEFAULT_TIMEZONE,
+                input.start_interval_minutes.get(),
+                input.is_active,
+                None,
+                None,
+                None,
+                None,
+            );
+            self.courses.lock().expect("lock").push(course.clone());
+            Ok(course)
+        }
+
+        async fn update_course(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _course_id: &CourseId,
+            _input: UpsertCourse,
+        ) -> Result<Course, CourseError> {
+            Err(CourseError::Provider("unused".into()))
+        }
+
+        async fn delete_course(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _course_id: &CourseId,
+        ) -> Result<(), CourseError> {
+            Ok(())
+        }
+
+        async fn list_resources(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<Resource>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn create_reservation_resource(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _name: &str,
+        ) -> Result<ResourceId, CourseError> {
+            Err(CourseError::Provider("unused".into()))
+        }
+
+        async fn save_course_resource(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: SaveCourseResource,
+        ) -> Result<Resource, CourseError> {
+            Err(CourseError::Provider("unused".into()))
+        }
+
+        async fn list_reservation_products(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+        ) -> Result<Vec<ReservationProduct>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn upsert_reservation_product(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _input: UpsertReservationProduct,
+        ) -> Result<ReservationProduct, CourseError> {
+            Err(CourseError::Provider("unused".into()))
+        }
+
+        async fn list_product_slots(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _service_id: &ReservationServiceId,
+        ) -> Result<Vec<ProductSlot>, CourseError> {
+            Ok(Vec::new())
+        }
+
+        async fn replace_product_slots(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            _service_id: &ReservationServiceId,
+            _slots: Vec<ProductSlot>,
+        ) -> Result<Vec<ProductSlot>, CourseError> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[tokio::test]
+    async fn create_course_persists_through_port() {
+        let catalog = Arc::new(FakeCatalog {
+            courses: Mutex::new(Vec::new()),
+        });
+        let use_case = CreateCourseUseCase::new(catalog.clone());
+        let input =
+            UpsertCourse::try_new("East", Some("E".into()), 18, 8, true, None).expect("valid");
+        let course = use_case
+            .execute(
+                GatewayCredentials {
+                    authorization: "Bearer t",
+                    operator_id: "scc",
+                    platform_id: None,
+                    authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                    caller_bearer: "Bearer test",
+                },
+                input,
+            )
+            .await
+            .expect("create");
+        assert_eq!(course.name(), "East");
+        assert_eq!(course.hole_count().get(), 18);
+        assert_eq!(catalog.courses.lock().expect("lock").len(), 1);
+    }
+
+    #[test]
+    fn upsert_course_rejects_invalid_interval() {
+        let error = UpsertCourse::try_new("East", None, 18, 0, true, None).unwrap_err();
+        assert!(matches!(error, CourseError::BadRequest(_)));
+    }
+}

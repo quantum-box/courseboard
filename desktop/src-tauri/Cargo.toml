@@ -1,0 +1,39 @@
+[package]
+name = "courseboard-desktop"
+version = "0.1.1"
+description = "Course Board desktop wrapper"
+authors = ["Quantum Box"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[features]
+default = []
+web-distribution = [
+    "dep:tauri-plugin-dialog",
+    "dep:tauri-plugin-updater",
+]
+
+[lib]
+name = "courseboard_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["unstable"] }
+tauri-plugin-deep-link = "2"
+tauri-plugin-dialog = { version = "2", optional = true }
+tauri-plugin-log = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-updater = { version = "2", optional = true }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+tokio-tungstenite = "0.24"
+futures-util = "0.3"
+photon-engine = { git = "https://github.com/quantum-box/photon", rev = "d2d47798f5792b5fdb53bec28e38d6c14a21efbf", default-features = false }
+
+[target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

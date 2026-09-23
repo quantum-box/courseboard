@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.DS_Store
+src-tauri/target/
+src-tauri/gen/
+*.log
+e2e/.auth/
+e2e/test-results/
+e2e/playwright-report/

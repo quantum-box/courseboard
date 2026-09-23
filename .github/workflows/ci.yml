@@ -1,0 +1,414 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# PLT-4940: 同じ PR / 同じ main への新しい push が来たら、古い run を取り消す。
+# PR は PR 番号ごと、main は ref ごとに group を分けるので、別 PR や PR と main が
+# 互いを取り消すことはない。ci.yml には deploy・release・署名・外部更新が無く、
+# artifact は失敗時の診断用だけなので、途中の run を打ち切っても副作用は残らない。
+# 取り消されるのは同じ group に後から queue された run より古い run で、通常は
+# main の最新 SHA の run が残る。ただし GitHub は group 内の順序を保証しないし、
+# 古い main run を手動で re-run すると進行中の最新 run を取り消す。古い SHA の
+# re-run は main の run が全部終わってから行う。
+# PR だけに戻す場合は group の github.ref を github.run_id に、
+# cancel-in-progress を ${{ github.event_name == 'pull_request' }} にする（2 行）。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  rust:
+    name: Rust
+    # clippy --all-targets --all-features と cargo test は compile-heavy なため、
+    # standard runner ではなく 4vcpu scale set を使う（ADR-0027）。
+    runs-on: tachyoncloud-4vcpu
+    services:
+      tidb:
+        image: pingcap/tidb:v8.5.7
+        ports:
+          - 4000:4000
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-06-04
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test
+
+  frontend:
+    name: React / Vite frontend
+    runs-on: tachyoncloud
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run type-check
+
+      - name: Unit tests
+        run: npm run test
+
+      - name: Build web assets
+        run: npm run build
+        env:
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
+          VITE_COURSEBOARD_AUTH_MODE: browser-pkce
+          VITE_COURSEBOARD_BROWSER_CLIENT_ID: 5oafg9ptonbjumdh1pc7khirp1
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
+
+      - name: Verify profile proxy endpoint
+        run: |
+          if grep -R -F -q "https://api.n1.tachy.one/v1/me" dist; then
+            echo "web bundle contains direct Tachyon profile endpoint" >&2
+            exit 1
+          fi
+          # Vite may deduplicate the profile URL with API_BASE_URL during minification.
+          grep -R -F -q "https://courseboard-api.txcloud.app" dist
+
+  e2e:
+    name: E2E (Playwright)
+    runs-on: tachyoncloud
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ブラウザのキャッシュキーは @playwright/test の版に紐づける。
+      # 版が上がるとブラウザの revision も変わるため、キーを固定すると
+      # 古いブラウザを引いて起動に失敗する。
+      - name: Resolve Playwright version
+        id: playwright
+        run: |
+          version="$(node -p "require('@playwright/test/package.json').version")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # tachyoncloud の runner image は Playwright を前提にしていないので、
+      # 共有ライブラリごと入れる。ここが sudo 不可で落ちるようなら、
+      # container: mcr.microsoft.com/playwright:v<版>-noble に切り替える。
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      # モックモードの Vite を playwright.config.ts が自前で起動する。
+      # バックエンド・Cognito・DB は要らない。
+      - name: Run E2E
+        run: npm run e2e
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            desktop/e2e/playwright-report/**
+            desktop/e2e/test-results/**
+          if-no-files-found: warn
+          retention-days: 3
+
+  desktop_bundle:
+    name: Desktop bundle (${{ matrix.platform }})
+    # Bundle only after a merge to main; PRs do not need a release bundle.
+    if: github.event_name == 'push'
+    needs: frontend
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Tauri の release build は compile-heavy で、standard runner の
+          # 4 GiB では runner ごと落ちる。ADR-0027 の heavy Rust job 扱い。
+          - platform: linux-x64
+            os: tachyoncloud-4vcpu
+          # GitHub-hosted Windows runners bill at twice the Linux rate, and this
+          # leg cost $15 of the org's $59 Windows spend in 2026-08 while only
+          # re-proving what desktop-release.yml already builds. Disabled here;
+          # restore the entry below to bring post-merge coverage back.
+          # ADR-0027 例外: Windows 固有 job は GitHub-hosted matrix を維持する。
+          # - platform: windows-x64
+          #   os: windows-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate private native dependencies
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.PHOTON_DEPLOY_KEY }}
+
+      - name: Use SSH for private GitHub dependencies
+        run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
+
+      # tachyoncloud の runner image には GitHub-hosted image と違い github.com の
+      # host key が入っていない。CARGO_NET_GIT_FETCH_WITH_CLI により cargo は git を
+      # 呼ぶため、photon の取得が Host key verification failed で落ちる。
+      # ssh-keyscan の TOFU ではなく、TLS 検証を通る meta API の公開鍵を使う。
+      # runner.os ガードは Windows leg を復帰させたときのために残す。
+      - name: Trust github.com SSH host key
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: /
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          curl -fsSL https://api.github.com/meta \
+            | jq -r '.ssh_keys[] | "github.com \(.)"' >> ~/.ssh/known_hosts
+          sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
+
+      # tachyoncloud の runner image は libgtk-3-dev / libwebkit2gtk-4.1-dev を
+      # 持つが、Tauri の bundler が使う xdg-mime (xdg-utils) と file は入って
+      # いない。GitHub-hosted image には両方あるため従来は不要だった。
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libayatana-appindicator3-dev librsvg2-dev \
+            libwebkit2gtk-4.1-dev xdg-utils file
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-06-04
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build unsigned bundle
+        run: npm run tauri:build
+        env:
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
+          VITE_COURSEBOARD_AUTH_MODE: browser-pkce
+          VITE_COURSEBOARD_BROWSER_CLIENT_ID: 5oafg9ptonbjumdh1pc7khirp1
+          VITE_COURSEBOARD_BROWSER_REDIRECT_URI: https://courseboard.txcloud.app/oauth/callback
+          VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
+          VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
+          VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
+
+      # Keep successful builds honest without storing every debug bundle:
+      # verify a concrete bundle exists independently of artifact upload.
+      - name: Verify desktop bundle exists
+        shell: bash
+        run: |
+          bundle_dir="src-tauri/target/release/bundle"
+          if [[ ! -d "${bundle_dir}" ]] || [[ -z "$(find "${bundle_dir}" -type f -print | sed -n '1p')" ]]; then
+            echo "Desktop build completed without producing a bundle in ${bundle_dir}" >&2
+            exit 1
+          fi
+
+      # Failed builds may legitimately leave no bundle. Warn so this diagnostic
+      # upload does not mask the original error with a second failure.
+      - name: Upload desktop bundle
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: courseboard-${{ matrix.platform }}
+          path: |
+            desktop/src-tauri/target/release/bundle/**
+          if-no-files-found: warn
+          retention-days: 3
+
+  android_bundle:
+    name: Android debug bundle
+    if: github.event_name == 'push'
+    needs: frontend
+    # 4 ABI 分の Rust をコンパイルするため standard runner の 4 GiB では
+    # runner が CPU/Memory 不足で server との通信を失って落ちる。
+    # ADR-0027 の heavy Rust job 扱い。
+    runs-on: tachyoncloud-4vcpu
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Four Android targets of Rust debug objects plus Gradle packaging used to
+      # fill the GitHub-hosted runner's 14 GB, and `:app:packageUniversalDebug`
+      # died with "No space left on device" — sometimes taking the runner with
+      # it, which surfaced as a job that failed with no failing step. None of
+      # those preinstalled toolchains are used here.
+      #
+      # tachyoncloud の runner Pod にはこれらの path が存在しないため、実在する
+      # ものだけを回収する。df は Android SDK / NDK 展開前の残容量を記録する。
+      - name: Report and reclaim runner disk space
+        working-directory: /
+        run: |
+          df -h /
+          for path in /usr/share/dotnet /usr/local/lib/android/sdk/ndk \
+            /opt/ghc /usr/local/.ghcup /usr/local/share/powershell \
+            /usr/local/share/boost /usr/share/swift; do
+            [ -e "${path}" ] || continue
+            if command -v sudo >/dev/null 2>&1; then
+              sudo rm -rf "${path}"
+            else
+              rm -rf "${path}"
+            fi
+          done
+          df -h /
+
+      - name: Authenticate private native dependencies
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.PHOTON_DEPLOY_KEY }}
+
+      - name: Use SSH for private GitHub dependencies
+        run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
+
+      # tachyoncloud の runner image には github.com の host key が無く、photon の
+      # 取得が Host key verification failed で落ちる。desktop_bundle と同じ対処。
+      - name: Trust github.com SSH host key
+        working-directory: /
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          curl -fsSL https://api.github.com/meta \
+            | jq -r '.ssh_keys[] | "github.com \(.)"' >> ~/.ssh/known_hosts
+          sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # action の既定値 `tools platform-tools` の `tools` は廃止済みで、
+          # Google の SDK リポジトリから消えたため sdkmanager が
+          # "Failed to find package 'tools'" で落ちる。sdkmanager 自体は
+          # cmdline-tools が提供するので platform-tools だけを入れる。
+          packages: platform-tools
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;27.0.12077973"
+
+      - name: Install Rust Android targets
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-06-04
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+          # Android leaves too little disk for rust-cache's post-job save after
+          # the APK is uploaded. Restore the cache, but skip saving this job.
+          save-if: false
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate Android project
+        run: npm run tauri:android:init
+
+      - name: Build Android debug bundle
+        # The debug CI smoke only needs an installable artifact. Building the
+        # universal AAB as well can fail in bundletool's signing finalizer after
+        # every Rust ABI has compiled successfully, so keep this path APK-only.
+        run: NDK_HOME="${ANDROID_HOME}/ndk/27.0.12077973" npm run tauri:android:build -- --debug --apk
+        env:
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
+          VITE_COURSEBOARD_AUTH_MODE: browser-pkce
+          VITE_COURSEBOARD_BROWSER_CLIENT_ID: 5oafg9ptonbjumdh1pc7khirp1
+          VITE_COURSEBOARD_BROWSER_REDIRECT_URI: https://courseboard.txcloud.app/oauth/callback
+          VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
+          VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
+          VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
+
+      # Keep successful builds honest without storing every debug APK:
+      # verify a concrete APK exists independently of artifact upload.
+      - name: Verify Android APK exists
+        shell: bash
+        run: |
+          apk_dir="src-tauri/gen/android/app/build/outputs/apk"
+          if [[ ! -d "${apk_dir}" ]] || [[ -z "$(find "${apk_dir}" -type f -name '*.apk' -print | sed -n '1p')" ]]; then
+            echo "Android build completed without producing an APK in ${apk_dir}" >&2
+            exit 1
+          fi
+
+      # Failed builds may legitimately leave no bundle. Warn so this diagnostic
+      # upload does not mask the original error with a second failure.
+      - name: Upload Android bundle
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: courseboard-android-debug
+          path: |
+            desktop/src-tauri/gen/android/app/build/outputs/apk/**/*.apk
+            desktop/src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
+          if-no-files-found: warn
+          retention-days: 3

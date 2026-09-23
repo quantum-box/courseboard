@@ -1,0 +1,488 @@
+actions:
+- context: field_extension_golf
+  name: ListTeeSheet
+  description: Reading the tee sheet and the ledger behind it.
+  global: true
+- context: field_extension_golf
+  name: ManageReservations
+  description: Taking, moving, and cancelling bookings.
+  global: true
+- context: field_extension_golf
+  name: ListSlotOverrides
+  description: Reading the desk's manual open/close overrides on tee times.
+  global: true
+- context: field_extension_golf
+  name: ManageSlotOverrides
+  description: Opening and closing tee times by hand.
+  global: true
+- context: field_extension_golf
+  name: ListCourses
+  description: Reading courses, their order, resources, and schedules.
+  global: true
+- context: field_extension_golf
+  name: ManageCourses
+  description: Creating and editing courses, their order, resources, schedules, and how far ahead booking is open.
+  global: true
+- context: field_extension_golf
+  name: ListProducts
+  description: Reading the plans sold on the tee sheet and their slots.
+  global: true
+- context: field_extension_golf
+  name: ManageProducts
+  description: Editing the plans sold on the tee sheet and their slots.
+  global: true
+- context: field_extension_golf
+  name: ListReservationPolicy
+  description: Reading the booking rules the desk works under.
+  global: true
+- context: field_extension_golf
+  name: ManageReservationPolicy
+  description: Changing the booking rules, including the golf extension's own config.
+  global: true
+- context: field_extension_golf
+  name: ListCustomers
+  description: Reading the customer ledger.
+  global: true
+- context: field_extension_golf
+  name: ManageCustomers
+  description: Registering customers and drafting a reception sheet.
+  global: true
+- context: field_extension_golf
+  name: ListMembership
+  description: Reading membership plans and who holds one.
+  global: true
+- context: field_extension_golf
+  name: ManageMembershipPlans
+  description: Defining the membership plans a club sells.
+  global: true
+- context: field_extension_golf
+  name: AssignMembership
+  description: Putting a customer on a membership plan.
+  global: true
+- context: field_extension_golf
+  name: ListCaddies
+  description: Reading the caddie roster and which courses each caddie works.
+  global: true
+- context: field_extension_golf
+  name: ManageCaddies
+  description: Editing the caddie roster and course assignments.
+  global: true
+- context: field_extension_golf
+  name: ListCaddieAssignments
+  description: Reading who is on which round.
+  global: true
+- context: field_extension_golf
+  name: ManageCaddieAssignments
+  description: Putting caddies on rounds, by hand or by the auto-placement.
+  global: true
+- context: field_extension_golf
+  name: ListCaddieAvailability
+  description: Reading who said they can work, and by when they had to say.
+  global: true
+- context: field_extension_golf
+  name: ManageCaddieAvailability
+  description: Recording availability and setting the deadline for it.
+  global: true
+- context: field_extension_golf
+  name: ListShifts
+  description: Reading shift plans and the rules they are generated under.
+  global: true
+- context: field_extension_golf
+  name: ManageShifts
+  description: Generating and editing shift plans, and the rules behind them.
+  global: true
+- context: field_extension_golf
+  name: ListCaddieInsights
+  description: Reading attendance, supply, reinforcement, and rating figures.
+  global: true
+- context: field_extension_golf
+  name: ListCaddieRankFees
+  description: Reading what each caddie grade is paid.
+  global: true
+- context: field_extension_golf
+  name: ManageCaddieRankFees
+  description: Setting what each caddie grade is paid.
+  global: true
+- context: field_extension_golf
+  name: ListPayroll
+  description: Reading what the caddies are owed. Names against pay, so it is its own permission rather than part of the roster.
+  global: true
+- context: field_extension_golf
+  name: ListSettlement
+  description: Reading the month's takings.
+  global: true
+- context: field_extension_golf
+  name: ListBudgets
+  description: Reading the daily budgets and how the club is tracking against them.
+  global: true
+- context: field_extension_golf
+  name: ManageBudgets
+  description: Setting the daily budgets, by hand or by import.
+  global: true
+- context: field_extension_golf
+  name: CalculateFees
+  description: Running fee and golf-course-tax simulations.
+  global: true
+- context: field_extension_golf
+  name: ManageCancellationFees
+  description: Collecting a cancellation fee and issuing its invoice.
+  global: true
+- context: field_extension_golf
+  name: ListReservationReports
+  description: Reading the reservation reports taken off a spreadsheet.
+  global: true
+- context: field_extension_golf
+  name: ImportReservationReports
+  description: Taking a reservation report off a spreadsheet and onto the board.
+  global: true
+- context: field_extension_golf
+  name: ListExtensionStatus
+  description: Reading which parts of the golf extension this tenant has switched on.
+  global: true
+- context: field_extension_golf
+  name: CalculateTax
+  description: Held by `field-extension:golf:calculator` alone; no member role grants it, and no screen requires it.
+  global: true
+- context: field_extension_golf
+  name: SeedDemoBoard
+  description: Filling a tenant's board with demo rounds and rosters.
+  global: true
+policies:
+- name: field-extension:golf:viewer
+  description: Read-only access to the golf board - tee sheet, courses, caddies, shifts, budgets, and fee simulation. Payroll and settlement are not included
+  global: true
+  actions:
+  - action: field:ListReservations
+    effect: allow
+  - action: field:ListHrm
+    effect: allow
+  - action: field:ListCustomers
+    effect: allow
+  - action: field:ListMembership
+    effect: allow
+  - action: field_extension_golf:ListTeeSheet
+    effect: allow
+  - action: field_extension_golf:ListSlotOverrides
+    effect: allow
+  - action: field_extension_golf:ListCourses
+    effect: allow
+  - action: field_extension_golf:ListProducts
+    effect: allow
+  - action: field_extension_golf:ListReservationPolicy
+    effect: allow
+  - action: field_extension_golf:ListCustomers
+    effect: allow
+  - action: field_extension_golf:ListMembership
+    effect: allow
+  - action: field_extension_golf:ListCaddies
+    effect: allow
+  - action: field_extension_golf:ListCaddieAssignments
+    effect: allow
+  - action: field_extension_golf:ListCaddieAvailability
+    effect: allow
+  - action: field_extension_golf:ListShifts
+    effect: allow
+  - action: field_extension_golf:ListCaddieInsights
+    effect: allow
+  - action: field_extension_golf:ListCaddieRankFees
+    effect: allow
+  - action: field_extension_golf:ListBudgets
+    effect: allow
+  - action: field_extension_golf:ListReservationReports
+    effect: allow
+  - action: field_extension_golf:ListExtensionStatus
+    effect: allow
+  - action: field_extension_golf:CalculateFees
+    effect: allow
+  action_patterns: []
+- name: field-extension:golf:reception
+  description: Front-desk work - take and change bookings, run the tee sheet, register customers and put them on a plan. No caddie roster administration, pricing, or payroll; reads caddie shift planning for the tee ledger
+  global: true
+  actions:
+  - action: field:ListReservations
+    effect: allow
+  - action: field:ManageReservations
+    effect: allow
+  - action: field:ListCustomers
+    effect: allow
+  - action: field:ManageCustomers
+    effect: allow
+  - action: field:ListMembership
+    effect: allow
+  - action: field:RegisterMembership
+    effect: allow
+  - action: field_extension_golf:ListTeeSheet
+    effect: allow
+  - action: field_extension_golf:ManageReservations
+    effect: allow
+  - action: field_extension_golf:ListSlotOverrides
+    effect: allow
+  - action: field_extension_golf:ManageSlotOverrides
+    effect: allow
+  - action: field_extension_golf:ListCourses
+    effect: allow
+  - action: field_extension_golf:ListProducts
+    effect: allow
+  - action: field_extension_golf:ListReservationPolicy
+    effect: allow
+  - action: field_extension_golf:ListCustomers
+    effect: allow
+  - action: field_extension_golf:ManageCustomers
+    effect: allow
+  - action: field_extension_golf:ListMembership
+    effect: allow
+  - action: field_extension_golf:AssignMembership
+    effect: allow
+  - action: field_extension_golf:ListCaddieAssignments
+    effect: allow
+  # SCC-27: ListShifts covers the three endpoints used by the ledger:
+  # caddie-shifts, caddie-shift-rules, and caddie-shift-plans/:year_month/field-sync.
+  - action: field_extension_golf:ListShifts
+    effect: allow
+  - action: field_extension_golf:ListExtensionStatus
+    effect: allow
+  - action: field_extension_golf:CalculateFees
+    effect: allow
+  action_patterns: []
+- name: field-extension:golf:caddie-master
+  description: Caddie operations - the roster, who is on which round, availability, and shift planning. Reads the tee sheet it plans against
+  global: true
+  actions:
+  - action: field:ListReservations
+    effect: allow
+  - action: field:ManageReservations
+    effect: allow
+  - action: field:ListHrm
+    effect: allow
+  - action: field:ManageHrm
+    effect: allow
+  - action: field_extension_golf:ListTeeSheet
+    effect: allow
+  - action: field_extension_golf:ListSlotOverrides
+    effect: allow
+  - action: field_extension_golf:ListCourses
+    effect: allow
+  - action: field_extension_golf:ListCaddies
+    effect: allow
+  - action: field_extension_golf:ManageCaddies
+    effect: allow
+  - action: field_extension_golf:ListCaddieAssignments
+    effect: allow
+  - action: field_extension_golf:ManageCaddieAssignments
+    effect: allow
+  - action: field_extension_golf:ListCaddieAvailability
+    effect: allow
+  - action: field_extension_golf:ManageCaddieAvailability
+    effect: allow
+  - action: field_extension_golf:ListShifts
+    effect: allow
+  - action: field_extension_golf:ManageShifts
+    effect: allow
+  - action: field_extension_golf:ListCaddieInsights
+    effect: allow
+  - action: field_extension_golf:ListCaddieRankFees
+    effect: allow
+  - action: field_extension_golf:ListExtensionStatus
+    effect: allow
+  action_patterns: []
+- name: field-extension:golf:accounting
+  description: Golf money - settlement, payroll, budgets, caddie grade fees, and cancellation fees. Reservations and the roster stay read-only
+  global: true
+  actions:
+  - action: field:ListReservations
+    effect: allow
+  - action: field:ManageReservations
+    effect: allow
+  - action: field:ListHrm
+    effect: allow
+  - action: field:ListCustomers
+    effect: allow
+  - action: field:ListMembership
+    effect: allow
+  # Field's generic table analyzer, used by the reservation report import
+  # (SCC-19). Only the two roles that carry `ImportReservationReports` get it,
+  # so the permission to import and the permission to analyse stay in step.
+  # Analysing parses the file and proposes column mappings; it writes nothing.
+  # Granting this is what lets the import call `/v1/bridge/tabular/analyze`
+  # instead of the golf extension alias (ADR-0010). Apply this before turning
+  # `COURSEBOARD_FIELD_GENERIC_PATHS` on, or the import 403s.
+  - action: field:PreviewBridgeRun
+    effect: allow
+  - action: accounting:CreateInvoice
+    effect: allow
+  # Everything the cancellation-fee screens do, not just the create. The list
+  # and the detail are `GET /v1/invoices*` (`accounting:ListInvoices`), the
+  # send and the resend are `POST .../fulfill` (`accounting:SendReminder`), and
+  # the SMS leg of that send is evaluated against the operator's own bearer at
+  # `POST /v1/notifications/sms` (`notification:SendSms`). Granting the create
+  # alone left this role able to write a cancellation fee it could then neither
+  # open nor send — and the SMS failed while the email went out, because email
+  # is the one channel with no permission gate.
+  - action: accounting:ListInvoices
+    effect: allow
+  - action: accounting:SendReminder
+    effect: allow
+  - action: notification:SendSms
+    effect: allow
+  - action: field_extension_golf:ListTeeSheet
+    effect: allow
+  - action: field_extension_golf:ListCourses
+    effect: allow
+  - action: field_extension_golf:ListProducts
+    effect: allow
+  - action: field_extension_golf:ListCustomers
+    effect: allow
+  - action: field_extension_golf:ListMembership
+    effect: allow
+  - action: field_extension_golf:ListCaddies
+    effect: allow
+  - action: field_extension_golf:ListCaddieAssignments
+    effect: allow
+  - action: field_extension_golf:ListShifts
+    effect: allow
+  - action: field_extension_golf:ListCaddieInsights
+    effect: allow
+  - action: field_extension_golf:ListCaddieRankFees
+    effect: allow
+  - action: field_extension_golf:ManageCaddieRankFees
+    effect: allow
+  - action: field_extension_golf:ListPayroll
+    effect: allow
+  - action: field_extension_golf:ListSettlement
+    effect: allow
+  - action: field_extension_golf:ListBudgets
+    effect: allow
+  - action: field_extension_golf:ManageBudgets
+    effect: allow
+  - action: field_extension_golf:CalculateFees
+    effect: allow
+  - action: field_extension_golf:ManageCancellationFees
+    effect: allow
+  - action: field_extension_golf:ListReservationReports
+    effect: allow
+  - action: field_extension_golf:ImportReservationReports
+    effect: allow
+  - action: field_extension_golf:ListExtensionStatus
+    effect: allow
+  action_patterns: []
+- name: field-extension:golf:manager
+  description: Full golf operations - everything the golf roles cover. Member management stays with the Field administrator role
+  global: true
+  actions:
+  - action: field:ListReservations
+    effect: allow
+  - action: field:ManageReservations
+    effect: allow
+  - action: field:ListHrm
+    effect: allow
+  - action: field:ManageHrm
+    effect: allow
+  - action: field:ListCustomers
+    effect: allow
+  - action: field:ManageCustomers
+    effect: allow
+  - action: field:ListMembership
+    effect: allow
+  - action: field:ManageMembership
+    effect: allow
+  - action: field:RegisterMembership
+    effect: allow
+  # Field's generic table analyzer, used by the reservation report import
+  # (SCC-19). Only the two roles that carry `ImportReservationReports` get it,
+  # so the permission to import and the permission to analyse stay in step.
+  # Analysing parses the file and proposes column mappings; it writes nothing.
+  # Granting this is what lets the import call `/v1/bridge/tabular/analyze`
+  # instead of the golf extension alias (ADR-0010). Apply this before turning
+  # `COURSEBOARD_FIELD_GENERIC_PATHS` on, or the import 403s.
+  - action: field:PreviewBridgeRun
+    effect: allow
+  - action: accounting:CreateInvoice
+    effect: allow
+  # Same set as `field-extension:golf:accounting`: this role covers everything
+  # the golf roles cover, so it has to reach the cancellation fee it creates.
+  - action: accounting:ListInvoices
+    effect: allow
+  - action: accounting:SendReminder
+    effect: allow
+  - action: notification:SendSms
+    effect: allow
+  - action: field_extension_golf:AssignMembership
+    effect: allow
+  - action: field_extension_golf:CalculateFees
+    effect: allow
+  - action: field_extension_golf:ImportReservationReports
+    effect: allow
+  - action: field_extension_golf:ListBudgets
+    effect: allow
+  - action: field_extension_golf:ListCaddieAssignments
+    effect: allow
+  - action: field_extension_golf:ListCaddieAvailability
+    effect: allow
+  - action: field_extension_golf:ListCaddieInsights
+    effect: allow
+  - action: field_extension_golf:ListCaddieRankFees
+    effect: allow
+  - action: field_extension_golf:ListCaddies
+    effect: allow
+  - action: field_extension_golf:ListCourses
+    effect: allow
+  - action: field_extension_golf:ListCustomers
+    effect: allow
+  - action: field_extension_golf:ListExtensionStatus
+    effect: allow
+  - action: field_extension_golf:ListMembership
+    effect: allow
+  - action: field_extension_golf:ListPayroll
+    effect: allow
+  - action: field_extension_golf:ListProducts
+    effect: allow
+  - action: field_extension_golf:ListReservationPolicy
+    effect: allow
+  - action: field_extension_golf:ListReservationReports
+    effect: allow
+  - action: field_extension_golf:ListSettlement
+    effect: allow
+  - action: field_extension_golf:ListShifts
+    effect: allow
+  - action: field_extension_golf:ListSlotOverrides
+    effect: allow
+  - action: field_extension_golf:ListTeeSheet
+    effect: allow
+  - action: field_extension_golf:ManageBudgets
+    effect: allow
+  - action: field_extension_golf:ManageCaddieAssignments
+    effect: allow
+  - action: field_extension_golf:ManageCaddieAvailability
+    effect: allow
+  - action: field_extension_golf:ManageCaddieRankFees
+    effect: allow
+  - action: field_extension_golf:ManageCaddies
+    effect: allow
+  - action: field_extension_golf:ManageCancellationFees
+    effect: allow
+  - action: field_extension_golf:ManageCourses
+    effect: allow
+  - action: field_extension_golf:ManageCustomers
+    effect: allow
+  - action: field_extension_golf:ManageMembershipPlans
+    effect: allow
+  - action: field_extension_golf:ManageProducts
+    effect: allow
+  - action: field_extension_golf:ManageReservationPolicy
+    effect: allow
+  - action: field_extension_golf:ManageReservations
+    effect: allow
+  - action: field_extension_golf:ManageShifts
+    effect: allow
+  - action: field_extension_golf:ManageSlotOverrides
+    effect: allow
+  - action: field_extension_golf:SeedDemoBoard
+    effect: allow
+  action_patterns: []
+- name: field-extension:golf:calculator
+  description: Allows TACHYON Field core to call the golf extension tax calculation API
+  global: true
+  actions:
+  - action: field_extension_golf:CalculateTax
+    effect: allow
+  action_patterns: []

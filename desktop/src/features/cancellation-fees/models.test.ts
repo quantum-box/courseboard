@@ -1,0 +1,449 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  cancellationFeeInvoiceRequestBody,
+  customerRegistrationRequestBody,
+  deliveryFailures,
+  EDITABLE_INVOICE_STATUSES,
+  filterDisplayedInvoices,
+  fulfillmentIssue,
+  invoiceDisplayStatus,
+  invoiceBillTo,
+  isInvoiceUpdateAllowed,
+  normalizePhone,
+  recipientEmail,
+  recipientPhone,
+  summarize,
+} from './CancellationFeesPage'
+import {
+  CANCELLATION_FEE_MARKER,
+  cancellationFeeIdempotencyKey,
+  cancellationFeeSources,
+  invoicedReservationIds,
+  isCancellationFeeInvoice,
+  INVOICE_SOURCE_MAX_COUNT,
+} from './models'
+
+afterEach(() => {
+  vi.useRealTimers()
+})
+
+describe('cancellation fee display status', () => {
+  it('derives overdue from the tenant business date, including timezone boundaries', () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-31T15:30:00.000Z'))
+    const invoice = { status: 'Sent' as const, dueDate: '2026-08-31' }
+
+    // The same instant is September 1 in Tokyo but still August 31 in New
+    // York, so only the Tokyo invoice is overdue.
+    expect(invoiceDisplayStatus(invoice, 'Asia/Tokyo')).toBe('Overdue')
+    expect(invoiceDisplayStatus(invoice, 'America/New_York')).toBe('Sent')
+  })
+
+  it('does not mark the due date itself overdue', () => {
+    expect(invoiceDisplayStatus(
+      { status: 'SendFailed', dueDate: '2026-09-01' },
+      'Asia/Tokyo',
+      '2026-09-01',
+    )).toBe('SendFailed')
+  })
+
+  it('preserves paid and stored overdue states regardless of due date', () => {
+    expect(invoiceDisplayStatus(
+      { status: 'Paid', dueDate: '2026-01-01' },
+      'Asia/Tokyo',
+      '2026-09-01',
+    )).toBe('Paid')
+    expect(invoiceDisplayStatus(
+      { status: 'Overdue', dueDate: '2026-12-31' },
+      'Asia/Tokyo',
+      '2026-09-01',
+    )).toBe('Overdue')
+  })
+
+  it('falls back to the stored state for malformed due dates', () => {
+    expect(invoiceDisplayStatus(
+      { status: 'Sent', dueDate: '2026-02-31' },
+      'Asia/Tokyo',
+      '2026-09-01',
+    )).toBe('Sent')
+    expect(invoiceDisplayStatus(
+      { status: 'Draft', dueDate: 'not-a-date' },
+      'Asia/Tokyo',
+      '2026-09-01',
+    )).toBe('Draft')
+  })
+
+  it('uses the same derived state for filtering and summary totals', () => {
+    const invoices = [
+      { id: 'sent-overdue', status: 'Sent' as const, dueDate: '2026-08-31', totalAmount: 1_000 },
+      { id: 'sent-current', status: 'Sent' as const, dueDate: '2026-09-01', totalAmount: 2_000 },
+      { id: 'paid', status: 'Paid' as const, dueDate: '2026-08-01', totalAmount: 3_000 },
+    ]
+    const displayed = invoices.map(invoice => ({
+      ...invoice,
+      status: invoiceDisplayStatus(invoice, 'Asia/Tokyo', '2026-09-01'),
+    }))
+
+    expect(filterDisplayedInvoices(displayed, 'Overdue').map(invoice => invoice.id)).toEqual(['sent-overdue'])
+    expect(summarize(invoices, 'Asia/Tokyo', '2026-09-01')).toEqual({
+      count: 3,
+      unpaid: 3_000,
+      overdue: 1,
+      paid: 3_000,
+    })
+  })
+})
+
+describe('cancellation fee status operations', () => {
+  it('does not expose Paid as an ordinary editable state', () => {
+    expect(EDITABLE_INVOICE_STATUSES).toEqual(['Draft', 'Sent', 'SendFailed', 'Overdue'])
+    expect(EDITABLE_INVOICE_STATUSES).not.toContain('Paid')
+  })
+
+  it('locks all invoice updates after payment', () => {
+    expect(isInvoiceUpdateAllowed({ status: 'Paid' })).toBe(false)
+    expect(isInvoiceUpdateAllowed({ status: 'Sent' })).toBe(true)
+  })
+})
+
+describe('cancellation fee invoice request', () => {
+  it('puts a typed client billTo in each POST body without a legacy clientId', () => {
+    const billTo = invoiceBillTo({
+      kind: 'client',
+      clientId: ' cl_company_x ',
+      affiliationId: ' ccaf_person_a_company_x ',
+    })
+    expect(billTo).toEqual({
+      kind: 'client',
+      clientId: 'cl_company_x',
+      affiliationId: 'ccaf_person_a_company_x',
+    })
+
+    const base = {
+      billTo: billTo!,
+      clientName: 'Company X',
+      dueDate: '2026-08-31',
+      taxAmount: 0,
+      amount: 5_000,
+      sendEmail: false,
+      sendSms: false,
+      idempotencyKey: 'retry-key',
+    }
+    const bodies = [
+      cancellationFeeInvoiceRequestBody({
+        ...base,
+        notes: 'Cancellation RSV-1001',
+        description: 'Cancellation fee (RSV-1001)',
+      }),
+      cancellationFeeInvoiceRequestBody({
+        ...base,
+        notes: 'Cancellation RSV-1002',
+        description: 'Cancellation fee (RSV-1002)',
+      }),
+    ].map(body => JSON.parse(JSON.stringify(body)) as Record<string, unknown>)
+
+    for (const body of bodies) {
+      expect(body.billTo).toEqual({
+        kind: 'client',
+        clientId: 'cl_company_x',
+        affiliationId: 'ccaf_person_a_company_x',
+      })
+      expect(body).not.toHaveProperty('clientId')
+      expect(JSON.stringify(body)).not.toContain('courseboard:')
+    }
+    expect(bodies[0]?.billTo).toEqual(bodies[1]?.billTo)
+  })
+
+  it('builds a typed customer recipient and rejects incomplete identities', () => {
+    expect(invoiceBillTo({ kind: 'customer', customerId: ' cus_person_a ' })).toEqual({
+      kind: 'customer',
+      customerId: 'cus_person_a',
+    })
+    expect(invoiceBillTo({ kind: 'customer', customerId: ' ' })).toBeUndefined()
+  })
+
+  it('bills a company that has no affiliation on file', () => {
+    // The affiliation is optional upstream. Requiring it here meant a company
+    // whose only contact was never given one could not be invoiced at all.
+    expect(invoiceBillTo({ kind: 'client', clientId: ' cl_company_x ' })).toEqual({
+      kind: 'client',
+      clientId: 'cl_company_x',
+    })
+    expect(invoiceBillTo({ kind: 'client', clientId: ' ', affiliationId: 'ccaf_x' }))
+      .toBeUndefined()
+  })
+
+  it('bills somebody who is not in the ledger from a name and a number', () => {
+    // The whole point of the unregistered recipient: no identifier is asked
+    // for, so nothing has to be invented to stand in for one.
+    expect(invoiceBillTo({
+      kind: 'unregistered',
+      name: ' 山田 太郎 ',
+      phone: ' +819000000000 ',
+    })).toEqual({
+      kind: 'unregistered',
+      name: '山田 太郎',
+      phone: '+819000000000',
+    })
+    // Blank contact details are left out rather than sent as empty strings —
+    // Field stores this snapshot as the record of who was billed.
+    expect(invoiceBillTo({ kind: 'unregistered', name: '山田 太郎', phone: '', email: '' }))
+      .toEqual({ kind: 'unregistered', name: '山田 太郎' })
+    expect(invoiceBillTo({ kind: 'unregistered', name: '  ' })).toBeUndefined()
+  })
+
+  it('carries the retry key in the body, where Field reads it', () => {
+    // Sent as a header it protected nothing: Field takes it off the body and
+    // derives the invoice number from it, which is what makes a retry of a
+    // request whose answer was lost land on the invoice already created.
+    const body = cancellationFeeInvoiceRequestBody({
+      billTo: { kind: 'unregistered', name: '山田 太郎' },
+      clientName: '山田 太郎',
+      dueDate: '2026-08-31',
+      taxAmount: 0,
+      notes: 'Cancellation RSV-1001',
+      description: 'Cancellation fee (RSV-1001)',
+      amount: 5_000,
+      sendEmail: false,
+      sendSms: false,
+      idempotencyKey: 'retry-key',
+    })
+    expect(body.idempotencyKey).toBe('retry-key')
+    expect('retry-key'.length).toBeLessThanOrEqual(48)
+  })
+
+  it('leaves the retry key out when the caller did not give one', () => {
+    // The extraction screen bills without one on purpose: a second press there
+    // means "bill the ones that did not go through", and an empty key would
+    // reach Field as a blank invoice number rather than as no key at all.
+    const body = cancellationFeeInvoiceRequestBody({
+      billTo: { kind: 'customer', customerId: 'cus_person_a' },
+      clientName: '山田 太郎',
+      dueDate: '2026-08-31',
+      taxAmount: 0,
+      notes: 'Cancellation RSV-1001',
+      description: 'Cancellation fee (RSV-1001)',
+      amount: 5_000,
+      sendEmail: false,
+      sendSms: false,
+    })
+    expect(body).not.toHaveProperty('idempotencyKey')
+  })
+
+  it('answers the same charge with the same retry key, and a changed one with a new key', () => {
+    // Content, not the press. Two presses describing the same charge have to
+    // collapse into one invoice; a charge that changed has to raise its own,
+    // or an edited amount is answered with the invoice raised before the edit.
+    const charge = ['cus_person_a', '2026-09-11', '5000', 'rsv_1', 'rsv_2']
+    expect(cancellationFeeIdempotencyKey(charge))
+      .toBe(cancellationFeeIdempotencyKey([...charge]))
+    expect(cancellationFeeIdempotencyKey(charge))
+      .not.toBe(cancellationFeeIdempotencyKey(['cus_person_a', '2026-09-11', '5000', 'rsv_1']))
+    expect(cancellationFeeIdempotencyKey(charge))
+      .not.toBe(cancellationFeeIdempotencyKey(['cus_person_a', '2026-09-11', '6000', 'rsv_1', 'rsv_2']))
+  })
+
+  it('cannot spell one key from two different splits of the same characters', () => {
+    // The separator is what stops ("ab", "c") and ("a", "bc") from hashing the
+    // same charge — two people's bookings run together otherwise.
+    expect(cancellationFeeIdempotencyKey(['ab', 'c']))
+      .not.toBe(cancellationFeeIdempotencyKey(['a', 'bc']))
+  })
+
+  it('keeps the retry key short enough to read out as an invoice number', () => {
+    // Field spells the key into `INV-{key}`, and that number is what the desk
+    // reads to a guest over the phone. It also has to fit Field's 48 bytes.
+    const key = cancellationFeeIdempotencyKey(['cus_person_a', 'rsv_1'])
+    expect(key.length).toBeLessThanOrEqual(20)
+    expect(key).toMatch(/^CF-[0-9a-z]+$/)
+  })
+
+  it('registers the recipient under a key derived from the attempt, not the press', () => {
+    expect(customerRegistrationRequestBody({
+      name: ' 山田 太郎 ',
+      phone: ' +819000000000 ',
+      email: '',
+      idempotencyKey: 'cbfee-cus-1',
+    })).toEqual({
+      name: '山田 太郎',
+      phone: '+819000000000',
+      idempotencyKey: 'cbfee-cus-1',
+    })
+  })
+})
+
+describe('who a cancellation fee can be reached at', () => {
+  it('falls back to the recipient snapshot when no channel filled the destination', () => {
+    // Verified against production Field: an unregistered bill-to raised
+    // without SMS comes back with `clientPhone: null` and the number on the
+    // snapshot. Reading only the destination left the desk with no way to ring
+    // the guest about the fee.
+    const invoice = {
+      clientPhone: null,
+      clientEmail: null,
+      billTo: {
+        kind: 'unregistered',
+        snapshot: { name: '山田 太郎', phone: '+819000000000', email: 'guest@example.com' },
+      },
+    }
+    expect(recipientPhone(invoice)).toBe('+819000000000')
+    expect(recipientEmail(invoice)).toBe('guest@example.com')
+  })
+
+  it('prefers the destination Field actually sent to', () => {
+    expect(recipientPhone({
+      clientPhone: '+819011111111',
+      billTo: { kind: 'unregistered', snapshot: { phone: '+819000000000' } },
+    })).toBe('+819011111111')
+  })
+
+  it('has nothing to show for an invoice that carries no snapshot', () => {
+    expect(recipientPhone({ clientPhone: null })).toBeNull()
+    expect(recipientEmail({ clientEmail: null, billTo: null })).toBeNull()
+  })
+})
+
+describe('cancellation fee fulfillment', () => {
+  const sentInvoice = {
+    status: 'Sent' as const,
+    paymentLinkStatus: 'Ready' as const,
+    paymentLinkUrl: 'https://buy.stripe.com/example',
+    emailDeliveryStatus: 'Sent' as const,
+    smsDeliveryStatus: 'Sent' as const,
+  }
+
+  it('accepts only a ready payment link and selected sent deliveries', () => {
+    expect(fulfillmentIssue(sentInvoice, { sendEmail: true, sendSms: true })).toBeUndefined()
+  })
+
+  it('rejects a successful HTTP response without a ready URL', () => {
+    expect(fulfillmentIssue(
+      { ...sentInvoice, paymentLinkStatus: 'Pending', paymentLinkUrl: null },
+      { sendEmail: true, sendSms: false },
+    )).toContain('支払いリンク')
+  })
+
+  it('rejects incomplete selected delivery', () => {
+    expect(fulfillmentIssue(
+      { ...sentInvoice, smsDeliveryStatus: 'Failed' },
+      { sendEmail: false, sendSms: true },
+    )).toContain('SMS')
+  })
+
+  it('names the fix when Field says why the send failed', () => {
+    const issue = fulfillmentIssue(
+      { ...sentInvoice, smsDeliveryStatus: 'Failed', smsDeliveryFailureCode: 'PermissionDenied' },
+      { sendEmail: false, sendSms: true },
+    )
+    expect(issue).toContain('SMS')
+    expect(issue).toContain('権限')
+  })
+
+  it('reads a snake_case failure code as the same cause', () => {
+    expect(deliveryFailures({
+      emailDeliveryStatus: null,
+      smsDeliveryStatus: 'Failed',
+      smsDeliveryFailureCode: 'billing_not_ready',
+    })).toEqual([
+      { channel: 'sms', label: 'SMS', reason: expect.stringContaining('残高') },
+    ])
+  })
+
+  it('falls back to all three causes while Field sends no code', () => {
+    const [failure] = deliveryFailures({
+      emailDeliveryStatus: null,
+      smsDeliveryStatus: 'Failed',
+    })
+    expect(failure?.reason).toContain('送り先')
+  })
+
+  it('reports nothing for a channel the invoice never asked for', () => {
+    expect(deliveryFailures({ emailDeliveryStatus: null, smsDeliveryStatus: 'Sent' })).toEqual([])
+  })
+})
+
+describe('normalizePhone', () => {
+  it('normalizes Japanese mobile numbers and E.164 values', () => {
+    expect(normalizePhone('090-1234-5678')).toBe('+819012345678')
+    expect(normalizePhone('+81 90 1234 5678')).toBe('+819012345678')
+  })
+
+  it('rejects invalid destinations', () => {
+    expect(normalizePhone('123')).toBe('')
+    expect(normalizePhone('+0123456789')).toBe('')
+  })
+})
+
+describe('what an invoice was raised from', () => {
+  it('declares every cancelled booking on the invoice', () => {
+    const sources = cancellationFeeSources(['res_1', 'res_2'])
+    expect(sources).toEqual([
+      { sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' },
+      { sourceType: 'reservation', sourceId: 'res_2', reason: 'cancellation_fee' },
+    ])
+  })
+
+  it('never sends more origins than Field accepts', () => {
+    // Past the cap Field rejects the request, and losing one booking's
+    // upstream origin is a far smaller harm than losing the whole invoice.
+    const many = Array.from({ length: INVOICE_SOURCE_MAX_COUNT + 5 }, (_, i) => `res_${i}`)
+    expect(cancellationFeeSources(many)).toHaveLength(INVOICE_SOURCE_MAX_COUNT)
+  })
+
+  it('drops blanks and repeats', () => {
+    expect(cancellationFeeSources(['res_1', ' res_1 ', '', '  '])).toHaveLength(1)
+  })
+
+  it('omits the origins entirely rather than claiming an empty search', () => {
+    const body = cancellationFeeInvoiceRequestBody({
+      billTo: { kind: 'customer', customerId: 'cus_1' },
+      sources: [],
+      clientName: '本田 康彦',
+      dueDate: '2026-06-17',
+      taxAmount: 0,
+      notes: '',
+      description: 'キャンセル料',
+      amount: 5_000,
+      sendEmail: false,
+      sendSms: false,
+    })
+    expect('sources' in body).toBe(false)
+  })
+})
+
+describe('finding cancellation fees among ordinary invoices', () => {
+  it('reads the declared source', () => {
+    expect(isCancellationFeeInvoice({
+      sources: [{ sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' }],
+    })).toBe(true)
+  })
+
+  it('still finds the ones raised before invoices could say what they were for', () => {
+    // Dropping this reading would empty the list of its whole history.
+    expect(isCancellationFeeInvoice({ notes: `${CANCELLATION_FEE_MARKER}\nご請求です` })).toBe(true)
+    expect(isCancellationFeeInvoice({
+      lineItems: [{ description: 'キャンセル料（4名）' }],
+    })).toBe(true)
+  })
+
+  it('leaves ordinary invoices alone', () => {
+    expect(isCancellationFeeInvoice({
+      sources: [{ sourceType: 'order', sourceId: 'ord_1', reason: 'late_delivery' }],
+      notes: 'ご請求です',
+      lineItems: [{ description: 'プレー料金' }],
+    })).toBe(false)
+  })
+
+  it('collects the bookings already billed, ignoring other kinds of origin', () => {
+    const billed = invoicedReservationIds([
+      { sources: [
+        { sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' },
+        { sourceType: 'reservation', sourceId: 'res_2', reason: 'no_show_fee' },
+        { sourceType: 'order', sourceId: 'res_1', reason: 'cancellation_fee' },
+      ] },
+      { sources: null },
+      {},
+    ])
+    expect([...billed]).toEqual(['res_1'])
+  })
+})

@@ -1,0 +1,552 @@
+import type { HelpCatalog } from './types'
+
+export const helpEn: HelpCatalog = {
+  fallback: {
+    title: 'Course Board',
+    summary: 'The operations screen for a golf course. Open each task from the menu on the left.',
+    usage: [
+      {
+        heading: 'Finding a screen',
+        body: 'The menu is grouped into bookings & courses, caddies, and revenue & billing. Pin the ones you use most to the top.',
+      },
+      {
+        heading: 'Jump with search',
+        body: 'Press ⌘K (Ctrl+K on Windows), type a screen name, and go straight there.',
+      },
+      {
+        heading: 'Using this guide',
+        body: 'Open it with the “?” at the top right. It follows whichever screen you are on.',
+      },
+    ],
+    data: [
+      {
+        heading: 'Course',
+        body: 'The name at the top right is the course you are working on. Everything you save and list stays inside it.',
+      },
+    ],
+  },
+  routes: {
+    golf: {
+      title: 'Home',
+      summary: 'Where the day starts: shortcuts to the screens you use most, in the order you use them.',
+      usage: [
+        {
+          heading: 'Start with the timeline',
+          body: 'Open today’s timeline first to see the day’s bookings and caddie assignments.',
+        },
+        {
+          heading: 'Work top to bottom',
+          body: 'Timeline → caddie assignments → revenue & billing → monthly close. Each step hands the same data to the next.',
+        },
+        {
+          heading: 'Setup lives elsewhere',
+          body: 'Courses and booking rules are one-time setup; open them from Settings.',
+        },
+      ],
+      data: [],
+    },
+
+    'golf/timeline': {
+      title: 'Timeline',
+      summary: 'The day’s bookings and caddie assignments on one shared time axis.',
+      usage: [
+        {
+          heading: 'Pick the day and course',
+          body: 'Use the date and course controls at the top. “Today” jumps back to today.',
+        },
+        {
+          heading: 'Spot gaps and clashes',
+          body: 'Colour carries the state: orange is a booking with nobody assigned, red is one caddie double-booked.',
+        },
+        {
+          heading: 'Go fix it',
+          body: 'Press a block to see its details on the right, then “Open assignments” to change who works it.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Tee sheet',
+          body: 'One lane per course, bookings in time order. Block length is the expected round time.',
+        },
+        {
+          heading: 'Caddie lanes',
+          body: 'One lane per caddie showing their assignments. A red outline means overlapping times.',
+        },
+      ],
+    },
+
+    'golf/products': {
+      title: 'Play products',
+      summary: 'What each plan you sell is made of. The bookable hours live on the course.',
+      usage: [
+        {
+          heading: 'Add a plan',
+          body: 'Press “Add a booking service” and set the plan name, booking service ID, course, play type, holes, and expected duration. Saving opens that plan’s own screen.',
+        },
+        {
+          heading: 'Change a plan',
+          body: 'Select a row to open the plan, then “Plan settings” to edit it. Only the booking service ID is fixed once created. Leave players per group empty to follow the reservation policy.',
+        },
+        {
+          heading: 'Hours are edited on the course',
+          body: 'The bookable week belongs to the course. From the plan, press “Open the hours for <course>” and edit them there. Older per-plan slots are shown read-only and cannot be changed here.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Play type',
+          body: 'With caddie or self play. Only bookings sold as with-caddie need a caddie assigned on the timeline and the assignment board. Switching it also resets the expected duration.',
+        },
+        {
+          heading: 'Course',
+          body: 'The course this plan is sold on. Opening hours and bookable hours belong to the course, so a plan without one cannot open them — the list flags those at the top.',
+        },
+      ],
+    },
+
+    'course-map': {
+      title: 'Course map',
+      summary: 'Where each cart is on the course right now. Open it from Settings or the ⌘K search.',
+      usage: [
+        {
+          heading: 'Check the state',
+          body: 'The top left shows whether you are connected and how many carts are displayed.',
+        },
+        {
+          heading: 'What the colours mean',
+          body: 'Yellow is on the round, red is running late, blue is waiting.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Cart position',
+          body: 'Comes from the on-course trackers. While disconnected, the last known position stays on screen.',
+        },
+      ],
+    },
+
+    'golf/caddies': {
+      title: 'Caddie roster',
+      summary: 'Caddie details, staff links, day-off requests, ratings, and attendance.',
+      usage: [
+        {
+          heading: 'Link to staff',
+          body: 'Being a caddie is one staff role, so a newly added caddie is linked from their name automatically. Older unlinked profiles are flagged at the top; attendance and payroll only include linked caddies.',
+        },
+        {
+          heading: 'Record day-off requests',
+          body: 'On the day-off tab, click a date to open it in a panel on the right. Set availability and a condition note, then save — assignments and capacity use them.',
+        },
+        {
+          heading: 'Record attendance',
+          body: 'Switch to the Attendance tab above to compare the day’s assignments with clock-ins and record them on the spot.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Skill and rank',
+          body: 'Skill is rookie, regular, or veteran. Rank is the rounds-per-month guideline. Auto-assign uses both.',
+        },
+        {
+          heading: 'Daily limit',
+          body: 'How many rounds this caddie can work in a day. Two-round caddies have a limit of 2.',
+        },
+      ],
+    },
+
+    'golf/caddies/dispatch': {
+      title: 'Caddie assignments',
+      summary: 'Decide who takes each group on a given day — today or weeks ahead.',
+      usage: [
+        {
+          heading: 'Pick the day',
+          body: 'Set the date at the top of the board. Pick a future date to staff it in advance; caddies do not need to have clocked in.',
+        },
+        {
+          heading: 'Adjust assignments',
+          body: 'Complete or cancel assignments from the list. Clock-ins happen on the roster’s Attendance tab.',
+        },
+        {
+          heading: 'Fill the gaps automatically',
+          body: 'Press “Preview assignments”, review the result, then commit it.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Caddie-required capacity',
+          body: 'The safe ceiling on caddie-required groups, derived from availability and two-round capability.',
+        },
+        {
+          heading: 'Safety buffer',
+          body: 'Groups held back from the ceiling to absorb last-minute absences.',
+        },
+      ],
+    },
+
+    'golf/caddies/attendance': {
+      title: 'Attendance',
+      summary: 'Compare the day’s assignments with clock-ins and record attendance here.',
+      usage: [
+        {
+          heading: 'Record attendance',
+          body: 'Use the clock-in and clock-out buttons in the list.',
+        },
+        {
+          heading: 'Catch what is missing',
+          body: '“Needs a look” lists caddies who have an assignment but no clock-in.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Attendance state',
+          body: 'Not clocked in, working, or clocked out. Caddies without a staff link cannot be clocked in.',
+        },
+      ],
+    },
+
+    'golf/caddies/shifts': {
+      title: 'Shift board',
+      summary: 'A month of caddie schedules in one table — requested days off and assignments together, so long working streaks stand out.',
+      usage: [
+        {
+          heading: 'Pick a month and scan',
+          body: 'Choose the month at the top. Rows are caddies, columns are days; W means assigned, O means a requested day off.',
+        },
+        {
+          heading: 'Spot long streaks',
+          body: 'Six or more assigned days in a row are highlighted in red, with the streak length in the left column. Adjust via the roster or assignments.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Symbols',
+          body: 'W = assigned, O = day off requested, AM/PM = half day, L = light duty. Blank means nothing planned.',
+        },
+      ],
+    },
+    'golf/caddies/payroll': {
+      title: 'Payroll',
+      summary: 'A month priced off the rank fees, reconciled against attendance and ready to hand to payroll as CSV.',
+      usage: [
+        {
+          heading: 'Pick the month, then narrow it',
+          body: 'Choose the month at the top to list the caddies. Search by name, staff id, or rank, and click a header to sort.',
+        },
+        {
+          heading: 'Set the rank fees',
+          body: 'Press "Set the fees" to enter what one round pays at each rank, A through D. Every amount on the screen is priced off that table.',
+        },
+        {
+          heading: 'Check before exporting',
+          body: 'Look for missing staff links, missing clock-outs, and assignments without a clock-in first.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Pay',
+          body: 'The rounds worked that month times the per-round fee. Cancelled assignments are excluded.',
+        },
+        {
+          heading: 'Per round',
+          body: "Normally the caddie's rank fee. A caddie with a fee of their own is paid that instead, and the row says so. Correcting a fee re-prices months that are already closed.",
+        },
+      ],
+    },
+
+    'golf/reservation-report-import': {
+      title: 'Import reservation reports',
+      summary: "Read a report exported from the club's booking system and store the daily group counts.",
+      usage: [
+        {
+          heading: 'Choose a report and a year',
+          body: 'Pick an Excel, CSV, or PDF report and choose the year it covers — the report itself does not say. Files larger than 5 MB are refused. When a scanned PDF comes out sideways or upside down, set the PDF orientation before previewing; a PDF whose own text can be recovered reads the same at any orientation.',
+        },
+        {
+          heading: 'Map the columns and the courses',
+          body: 'A known daily report is read as-is. Anything else comes back with a suggested column mapping to check and approve, and then you pick the Course Board course for each facility in the report.',
+        },
+        {
+          heading: 'Check the month before saving',
+          body: 'Morning and afternoon groups, and caddie-attached groups, are laid out for the month. Nothing is written yet; save once it looks right. Re-importing the same facility, date, and half-day updates the value rather than adding a second row.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Groups and caddie-attached groups',
+          body: 'Groups booked for each half of the day, and how many of those asked for a caddie. Start times and per-booking caddie flags are not in the export.',
+        },
+        {
+          heading: 'No individual bookings',
+          body: 'Only the daily totals are stored: without a booker, a party size, or a start time there is nothing to put on the tee sheet. A PDF with no readable text is sent to Tachyon AI OCR, and what it read is shown before anything is saved.',
+        },
+      ],
+    },
+    'golf/budgets': {
+      title: 'Revenue targets',
+      summary: 'Set daily revenue targets and compare them with actual bookings.',
+      usage: [
+        {
+          heading: 'Pick month and course',
+          body: 'Choose the month at the top. The course filter applies to the list below.',
+        },
+        {
+          heading: 'Enter one day',
+          body: 'Set course, date, target revenue, target per player, and caddie share, then save.',
+        },
+        {
+          heading: 'Import in bulk',
+          body: 'Load a CSV in the same shape to register a whole month at once. Grab the template from the button.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Attainment',
+          body: 'Actual revenue ÷ target revenue. It turns green above 100%.',
+        },
+        {
+          heading: 'Per player',
+          body: 'Revenue divided by the number of players. The booking rules can check against it.',
+        },
+      ],
+    },
+
+    'golf/settlement': {
+      title: 'Monthly close',
+      summary: 'Check a month of revenue, caddie cost, cancellation fees, and payments before closing.',
+      usage: [
+        {
+          heading: 'Pick the month',
+          body: 'Choose the month at the top to see the totals.',
+        },
+        {
+          heading: 'Clear what is unpaid',
+          body: 'Unpaid cancellation fees can be invoiced and sent from this screen.',
+        },
+        {
+          heading: 'Export the CSV',
+          body: 'Once it looks right, export the detail for accounting.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Cost as assigned and pay',
+          body: 'Cost as assigned uses the fee when the round was assigned; pay uses the current rank fees. Correcting a fee opens a gap. Pay is what is paid.',
+        },
+        {
+          heading: 'Unmatched rows',
+          body: 'Payment records not yet tied to a booking. Ideally this is zero.',
+        },
+      ],
+    },
+
+    'cancellation-fees': {
+      title: 'Cancellation fees',
+      summary: 'Create and send cancellation fee invoices, then confirm payment.',
+      usage: [
+        {
+          heading: 'Create an invoice',
+          body: 'Press “New invoice” and fill in the booking, amount, billing details, and due date.',
+        },
+        {
+          heading: 'Choose how to send it',
+          body: 'Email, SMS, or both. Sending SMS requires confirming the recipient’s consent.',
+        },
+        {
+          heading: 'Confirm payment',
+          body: 'You are done when the status reads “Paid”. Resend from the invoice page if needed.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Payment link',
+          body: 'The URL the customer opens to pay. It is issued with the invoice and inserted into the message.',
+        },
+        {
+          heading: 'Overdue',
+          body: 'Past the due date with no payment received.',
+        },
+      ],
+    },
+
+    'golf/courses': {
+      title: 'Course setup',
+      summary: 'One-time setup for your courses. Play products and caddie coverage build on it.',
+      usage: [
+        {
+          heading: 'How to open it',
+          body: 'Settings → Initial setup. You will rarely open it day to day.',
+        },
+        {
+          heading: 'Add a course',
+          body: 'Enter the name, hole count, start interval, and time zone, then save.',
+        },
+        {
+          heading: 'Take one out of use',
+          body: 'Edit it and set the status to disabled. It stops appearing in play products without being deleted.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Start interval',
+          body: 'Minutes between groups going out. It determines how many slots a day holds.',
+        },
+      ],
+    },
+
+    'golf/courses/schedule': {
+      title: 'Bookable hours',
+      summary: 'Set the hours you take bookings in, per weekday. Saving builds the dated tee times from them automatically.',
+      usage: [
+        {
+          heading: 'Set the hours',
+          body: 'On each weekday card, set when the course opens, how many groups go out at once, and how far apart they start. Build one day, then use “Copy to…” for the rest of the week. Saving replaces the whole week, so check the added/removed/changed counts at the bottom first.',
+        },
+        {
+          heading: 'Saving builds the tee times',
+          body: 'Saving turns the hours into dated tee times, and those are what a booking lands on. The date at the top of the screen says how far the book now reaches. Change how far ahead you sell under “Booking rules”.',
+        },
+        {
+          heading: 'Caddie cover lives elsewhere',
+          body: 'The group count here is what one tee can send out — a course constraint. Whether the caddies cover the day is answered on “Today’s placement”, against each course’s roster and its caddie-attached bookings.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Bookable hours',
+          body: 'Per weekday and band: groups out at once, and the tee interval. A rule that repeats every week — nothing books against it directly.',
+        },
+        {
+          heading: 'Tee times',
+          body: 'The dated, one-group slots built from the hours. Slots holding a booking or a payment hold are never reduced below what they already carry.',
+        },
+      ],
+    },
+
+    'golf/policy': {
+      title: 'Booking rules',
+      summary: 'One-time setup for the conditions under which you accept bookings.',
+      usage: [
+        {
+          heading: 'Set the slot basics',
+          body: 'Default holes, players per slot, cart handling, and the booking cutoff.',
+        },
+        {
+          heading: 'Set the deposit',
+          body: 'How much is paid up front, set separately for members and guests.',
+        },
+        {
+          heading: 'Protect busy times',
+          body: 'Reserve time bands for caddie-accompanied play, and decide what to do with low-value bookings.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Cutoff',
+          body: 'How many hours before the tee time bookings stop being accepted.',
+        },
+        {
+          heading: 'Per-player spend check',
+          body: 'Sends bookings below your threshold to review, or refuses them.',
+        },
+      ],
+    },
+
+    'settings/advanced': {
+      title: 'System integration details',
+      summary: 'Runtime status of the golf features and the settings for connecting other systems. Not needed day to day.',
+      usage: [
+        {
+          heading: 'Check the runtime status',
+          body: 'Confirm the golf features read as enabled and validation passes; any problems are listed on this page.',
+        },
+        {
+          heading: 'Edit the integration settings',
+          body: 'Edit and save the metadataJson used when bookings are sent to external systems. Daily reception never touches this.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Config version',
+          body: 'Increments on every save; “default” means nothing has been saved yet.',
+        },
+      ],
+    },
+
+    staff: {
+      title: 'Staff roster',
+      summary: 'Everyone the club employs. Caddies appear here as one of the roles staff hold.',
+      usage: [
+        {
+          heading: 'Register, edit, or remove staff',
+          body: 'Use "Register staff" to enter a name and employment type. Later, "Edit basics" on the staff detail changes the name, the employment type, and the employment status (employed, on leave, retired). Staff on leave or retired drop out of the employed list, and a linked caddie profile is set to match. "Remove" on the detail takes somebody off the roster for good — for someone who simply left, retire them instead.',
+        },
+        {
+          heading: 'Give the caddie role',
+          body: '"Make a caddie" gives that staff member the role. Any caddie profile still without a person can be picked up instead of starting fresh.',
+        },
+        {
+          heading: 'Search',
+          body: 'Search by name, staff ID, or caddie name, and filter by employment status or role.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Staff records',
+          body: 'Held by Field HRM (/v1/erp/staff). Name, employment type, and employment status are all editable here, and staff can be removed. A removal hides the record upstream, so attendance and payroll are kept.',
+        },
+        {
+          heading: 'Today’s attendance',
+          body: 'Read from caddie punches, so non-caddie staff stay as “—”.',
+        },
+      ],
+    },
+    'settings/members': {
+      title: 'Members & roles',
+      summary: 'List, invite, and manage the roles of everyone who can use this facility.',
+      usage: [
+        {
+          heading: 'Change roles',
+          body: 'Use Edit on a row to swap roles. Admin, staff and viewer are exclusive; per-domain roles can stack. Picking admin makes every other role unnecessary.',
+        },
+        {
+          heading: 'Invite a member',
+          body: 'Invite with an email address and roles. New addresses receive an invitation email; assign their roles here after they accept.',
+        },
+        {
+          heading: 'Remove a member',
+          body: 'Remove detaches every role. The owner cannot be changed.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Roles',
+          body: 'Admin: everything including member management. Staff: day-to-day edits. Viewer: read only. The owner always has full access.',
+        },
+        {
+          heading: 'Member data',
+          body: 'Managed by Field IAM (/v1/field/iam/*). Actions require the field:ManageUsers permission; owners always pass.',
+        },
+      ],
+    },
+    settings: {
+      title: 'Settings',
+      summary: 'One-time setup and integrations with other services.',
+      usage: [
+        {
+          heading: 'Initial setup',
+          body: 'Course setup and booking rules open from here.',
+        },
+        {
+          heading: 'Currency and time zone',
+          body: 'Used across the whole course. Set once during setup.',
+        },
+      ],
+      data: [
+        {
+          heading: 'Integration metadata',
+          body: 'Settings used when bookings sync to other systems. Not touched during day-to-day work.',
+        },
+      ],
+    },
+  },
+}

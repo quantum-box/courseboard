@@ -1,0 +1,7551 @@
+@import '@tachyon-sdk/native-ui/src/styles/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Course Board's one deliberate visual signature: the DS accent is shifted
+     from generic indigo to a restrained fairway green. */
+  --nui-primary: 158 49% 31%;
+  --nui-selected: 154 38% 94%;
+  --nui-ring: 158 49% 31%;
+  --course-turf: #286f5a;
+  --course-turf-dark: #1d5544;
+  --course-sand: #b88942;
+  --course-ink: #252b28;
+  --course-danger: #b64740;
+  /*
+   * One height for every control that can sit in the same row. Desktop keeps
+   * the design system's 28px density (same as buttons); the narrow-screen
+   * media query raises the variable to 40px for touch. Kept as a variable so
+   * a toolbar cannot drift again — never hard-code a control height per page.
+   */
+  --control-height: 28px;
+  font-family: var(--nui-font-sans);
+  color-scheme: light;
+  color: hsl(var(--nui-foreground));
+  background: hsl(var(--nui-background));
+}
+
+.dark {
+  --nui-primary: 154 48% 58%;
+  --nui-selected: 155 28% 19%;
+  --nui-ring: 154 48% 58%;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  overflow: auto;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-foreground));
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100%;
+}
+
+.desktop-root {
+  display: flex;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  flex-direction: column;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* Prevent iOS Safari from zooming the viewport when a text-entry control is focused. */
+@media (pointer: coarse), (max-width: 800px) {
+  :is(
+    input:not([type]),
+    input[type='text'],
+    input[type='search'],
+    input[type='email'],
+    input[type='url'],
+    input[type='tel'],
+    input[type='password'],
+    input[type='number'],
+    input[type='date'],
+    input[type='month'],
+    input[type='week'],
+    input[type='time'],
+    input[type='datetime-local'],
+    select,
+    textarea
+  ) {
+    font-size: 16px !important;
+  }
+}
+
+button,
+[role='button'] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* A recommendation is a decision aid, not a grade. Keep the rank and its
+   factual reasons readable; the unbounded ordering value lives in disclosure.
+   One of these prints per candidate, so readable means the app's body text —
+   at 16px with a 44px disclosure the shortlist was three names to a screen. */
+.recommendation-explanation {
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.recommendation-explanation-summary {
+  margin-top: 2px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.recommendation-explanation details {
+  margin-top: 2px;
+}
+
+.recommendation-explanation summary {
+  padding-block: 4px;
+  color: hsl(var(--nui-primary));
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.recommendation-explanation dl {
+  display: grid;
+  gap: 4px;
+  margin: 0 0 6px;
+}
+
+.recommendation-explanation dl > div {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr);
+  gap: 12px;
+}
+
+.recommendation-explanation dt {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.recommendation-explanation dd {
+  margin: 0;
+  color: hsl(var(--nui-foreground));
+  font-weight: 600;
+}
+
+.recommendation-order-value {
+  margin-top: 10px;
+  color: hsl(var(--nui-foreground));
+  font-weight: 600;
+}
+
+.recommendation-order-note {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.app-shell {
+  display: flex;
+  width: 100%;
+  height: auto;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-foreground));
+}
+
+/* Notifications are status text, not controls. They must never intercept the
+   next click even if a timer is paused while the page is in the background. */
+.courseboard-toaster,
+.courseboard-toaster [data-sonner-toast] {
+  pointer-events: none;
+}
+
+.courseboard-toaster [data-sonner-toast][data-styled='true'] {
+  font-size: 16px;
+}
+
+/* A persistent, non-modal heads-up: floats over the workspace, never blocks
+   input, and never pushes the layout it sits above. Not built on the shared
+   `showToast`/`Toaster` (sonner) — that system is deliberately transient and
+   non-interactive (see the doc comment in `lib/toast.ts` and the
+   `.courseboard-toaster` rule below: "status text, not controls"), which is
+   the opposite of what a stay-until-acted-on reload prompt needs. It shares
+   that system's design instead, on the two axes that matter here:
+     - same tokens as a sonner toast (`--nui-popover`/`-foreground`,
+       `--nui-border`, `--nui-shadow-overlay`, `--nui-primary` for the action
+       button) so it visually reads as the same family of notice.
+     - the same "never intercept the next click" technique: `pointer-events:
+       none` on the card itself, `auto` only on the two buttons that need it.
+   `position: absolute` inside `.app-workspace` (not `fixed` to the viewport):
+   the sidebar is a sibling flex item beside that column, so anchoring here
+   keeps the banner inside the content area at every sidebar width — expanded,
+   resized, or collapsed to an overlay — instead of a fixed viewport offset
+   that would sit partly underneath the sidebar and hide the message text.
+   Bottom-left, not bottom-right: Sheets/dialogs (native-ui z-50) anchor to the
+   right edge and stick their submit bar to their own bottom, so a right-side
+   banner would sit on top of it. z-index stays below every real interactive
+   overlay it could coincide with — the ledger right-click menu (60), the
+   board-only takeover (40), and any open Sheet/dialog (50, native-ui) — so
+   those still cover it instead of the other way around. */
+.new-version-banner {
+  position: absolute;
+  z-index: 30;
+  left: 16px;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  display: flex;
+  max-width: min(360px, calc(100% - 32px));
+  align-items: center;
+  gap: 10px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-lg);
+  padding: 10px 12px;
+  background: hsl(var(--nui-popover));
+  color: hsl(var(--nui-popover-foreground));
+  box-shadow: var(--nui-shadow-overlay);
+  pointer-events: none;
+}
+
+.new-version-banner-message {
+  flex: 1;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.new-version-banner-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+.new-version-banner-reload {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: var(--nui-radius-md);
+  padding: 6px 10px;
+  background: hsl(var(--nui-primary));
+  color: hsl(var(--nui-primary-foreground));
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.new-version-banner-reload svg {
+  width: 14px;
+  height: 14px;
+}
+
+.new-version-banner-dismiss {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--nui-radius-md);
+  padding: 0;
+  background: transparent;
+  color: hsl(var(--nui-muted-foreground));
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.new-version-banner-dismiss:hover,
+.new-version-banner-dismiss:focus-visible {
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-foreground));
+  outline: none;
+}
+
+.new-version-banner-dismiss svg {
+  width: 14px;
+  height: 14px;
+}
+
+.desktop-sidebar {
+  position: relative;
+  z-index: 40;
+  height: 100%;
+  flex: none;
+}
+
+/* Width is user-set on the shell; the panel is the only thing that carries it. */
+.desktop-sidebar .courseboard-sidebar {
+  width: var(--courseboard-sidebar-width, 240px);
+}
+
+/* Same 5px strip serves both gestures: drag to resize, click to close. */
+.sidebar-resize-handle {
+  position: absolute;
+  inset: 0 -2px 0 auto;
+  z-index: 1;
+  width: 5px;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.sidebar-resize-handle::after {
+  content: '';
+  position: absolute;
+  inset: 0 2px;
+  background: hsl(var(--nui-primary));
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.sidebar-resize-handle:hover::after,
+.sidebar-resize-handle:focus-visible::after,
+.app-shell[data-sidebar-resizing] .sidebar-resize-handle::after {
+  opacity: 1;
+}
+
+.sidebar-resize-handle:focus-visible {
+  outline: none;
+}
+
+/* A hidden sidebar has no edge to grab, and the strip would sit on the reveal zone. */
+.desktop-sidebar[data-collapsed-overlay] .sidebar-resize-handle {
+  display: none;
+}
+
+.app-shell[data-sidebar-resizing] {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* Collapsed leaves no rail at all: the sidebar slides off-screen and comes back
+   as an overlay when the pointer reaches the window edge. */
+.desktop-sidebar[data-collapsed-overlay] {
+  width: 0;
+}
+
+.desktop-sidebar[data-collapsed-overlay] .courseboard-sidebar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform 140ms ease, visibility 0s linear 140ms;
+}
+
+.desktop-sidebar[data-collapsed-overlay][data-hover-expanded] .courseboard-sidebar {
+  visibility: visible;
+  transform: translateX(0);
+  transition: transform 140ms ease;
+  box-shadow:
+    4px 0 24px rgb(0 0 0 / 8%),
+    1px 0 0 hsl(var(--nui-border));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .desktop-sidebar[data-collapsed-overlay] .courseboard-sidebar {
+    transition: none;
+  }
+}
+
+.courseboard-sidebar {
+  padding-top: max(8px, env(safe-area-inset-top));
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+
+.brand-row {
+  position: relative;
+  height: 64px !important;
+  min-height: 64px;
+}
+
+.brand-mark {
+  display: block;
+  width: 28px;
+  height: 28px;
+  flex: none;
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.brand-lockup {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+}
+
+.brand-wordmark {
+  display: block;
+  height: 56px;
+  width: auto;
+  max-width: 190px;
+  object-fit: contain;
+}
+
+.brand-row .desktop-collapse,
+.brand-row .mobile-close {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+}
+
+.mobile-close,
+.mobile-menu,
+.mobile-nav-layer {
+  display: none;
+}
+
+/* Persistent escape hatches once the sidebar is fully hidden. */
+.desktop-collapsed-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.desktop-sidebar-open,
+.desktop-home-shortcut {
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
+  flex: none;
+}
+
+.desktop-home-shortcut[data-active] {
+  background: hsl(var(--nui-selected));
+  color: hsl(var(--nui-primary));
+}
+
+.shortcut-pair {
+  display: flex;
+  gap: 2px;
+}
+
+.nav-row {
+  position: relative;
+}
+
+.nav-row .nav-pin {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  z-index: 1;
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  padding: 0;
+  background: transparent;
+  color: hsl(var(--nui-muted-foreground));
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%);
+  transition: opacity 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.nav-row .nav-pin svg {
+  width: 13px;
+  height: 13px;
+}
+
+.nav-row:hover .nav-pin,
+.nav-row:focus-within .nav-pin,
+.nav-row[data-pinned] .nav-pin {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.nav-row .nav-pin:hover,
+.nav-row .nav-pin:focus-visible {
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-foreground));
+  outline: none;
+}
+
+.nav-row[data-pinned] .nav-pin {
+  color: hsl(var(--nui-foreground));
+}
+
+.nav-row[data-pinned] .nav-pin svg {
+  fill: currentColor;
+}
+
+.runtime-dot {
+  padding-inline: 5px;
+  font-size: 10px;
+}
+
+.app-workspace {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.workspace-bar {
+  display: flex;
+  height: 40px;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 0 12px;
+  background: color-mix(in srgb, hsl(var(--nui-background)) 92%, transparent);
+  backdrop-filter: blur(14px);
+  user-select: none;
+}
+
+.workspace-title {
+  flex: 1;
+  font-weight: 600;
+}
+
+.workspace-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: hsl(var(--nui-muted-foreground));
+  font-family: var(--nui-font-mono);
+  font-size: 11px;
+}
+
+.workspace-tenant {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  max-width: min(280px, 36vw);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.workspace-tenant-name,
+.workspace-tenant-slug {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace-tenant-slug {
+  opacity: 0.72;
+}
+
+.workspace-help-trigger {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.workspace-help-trigger:hover,
+.workspace-help-trigger[data-active] {
+  color: hsl(var(--nui-foreground));
+  background: hsl(var(--nui-muted));
+}
+
+.workspace-body {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.workspace-help-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 0 0 auto;
+  border-left: 1px solid hsl(var(--nui-border));
+  background: hsl(var(--nui-surface));
+  padding: 12px 12px 12px 16px;
+  overflow: hidden;
+}
+
+.workspace-help-panel[data-resizing] {
+  transition: none;
+}
+
+.workspace-help-resize {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.workspace-help-resize::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background var(--nui-duration-fast) var(--nui-ease-out);
+}
+
+.workspace-help-resize:hover::after,
+.workspace-help-resize:focus-visible::after,
+.workspace-help-panel[data-resizing] .workspace-help-resize::after {
+  background: hsl(var(--nui-primary) / 0.55);
+}
+
+.workspace-help-resize:focus-visible {
+  outline: none;
+}
+
+.workspace-help-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.workspace-help-kicker {
+  margin: 0 0 2px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.workspace-help-panel-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.workspace-help-summary {
+  margin: 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-help-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 4px;
+}
+
+.workspace-help-block h3 {
+  margin: 0 0 8px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.workspace-help-block ul {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 10px 12px;
+  list-style: none;
+  border-radius: 8px;
+  background: hsl(var(--nui-muted) / 0.45);
+}
+
+.workspace-help-block li strong {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.workspace-help-block li p {
+  margin: 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.workspace-content {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.member-name-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.member-status-invited {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.member-status-invited small {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.member-role-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.member-policy-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.member-invite-dialog-form {
+  display: grid;
+  gap: 14px;
+}
+
+.member-roles-checklist {
+  display: grid;
+  gap: 8px;
+}
+
+.member-roles-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.member-roles-checklist label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.member-roles-checklist input[type='checkbox'] {
+  margin-top: 3px;
+  accent-color: hsl(var(--nui-primary));
+}
+
+.member-roles-checklist span {
+  display: flex;
+  flex-direction: column;
+}
+
+.member-roles-checklist small {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.member-roles-checklist label[data-disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.member-roles-divider {
+  margin: 2px 0;
+  border-top: 1px solid hsl(var(--nui-border));
+}
+
+.member-invite-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+}
+
+.member-invite-hint svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.settings-master-link {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--nui-duration-fast) var(--nui-ease-out);
+}
+
+.settings-master-link:hover {
+  background: hsl(var(--nui-muted) / 0.55);
+}
+
+.settings-master-icon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: hsl(var(--nui-selected));
+  color: hsl(var(--nui-primary));
+}
+
+.settings-master-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.settings-master-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.settings-master-copy strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.settings-master-copy small {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.settings-master-arrow {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.settings-option-field {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 12px;
+}
+
+.settings-option-field legend {
+  padding: 0 4px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.settings-option-field > p {
+  margin: 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.settings-option-list {
+  display: grid;
+  gap: 6px;
+}
+
+.settings-option-row {
+  display: grid;
+  grid-template-columns: minmax(0, 360px) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Breathing room between blocks; the old 14px made every page read as one wall. */
+.page-stack {
+  display: flex;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  /* App density: the workspace bar already frames the page, so content
+     starts right below it instead of opening with website-like whitespace. */
+  padding: 10px 14px 20px;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.page-narrow {
+  max-width: 1080px;
+}
+
+/* A button dropped straight into a page is a back link or a single action, not
+   a control the width of the workspace. Left to the column's default stretch it
+   spans the page with its label stranded in the middle, reading as a banner —
+   and every new screen would have to remember a class to avoid that. Stated
+   once here instead. A button that genuinely wants the full width says so with
+   its own `width: 100%`; one inside `.page-toolbar` or a panel is unaffected. */
+.page-stack > button {
+  align-self: flex-start;
+}
+
+/* Actions-only strip that replaces PageHeader: the workspace bar names the
+   page, so screens open with their controls instead of a repeated title. */
+.page-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Every sheet's close glyph is small, but the operation still needs a full
+   target. It sits in the panel's corner, so a large target here costs no form
+   any height — which is why this is the one 44px rule the app still keeps. */
+.courseboard-sheet > button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Adding a course is an occasional action, so its form lives in the shared
+   sheet while the list stays put. `.course-add-button` carries no style of its
+   own: it is a toolbar button like the one beside it, and the height a control
+   gets is the app's. Only the header needs a rule, to clear the close glyph. */
+.course-editor-sheet > :first-child {
+  padding-right: 40px;
+}
+
+.page-header {
+  display: flex;
+  min-height: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 0;
+}
+
+.page-header-copy {
+  min-width: 0;
+  max-width: 780px;
+}
+
+.page-eyebrow {
+  margin-bottom: 3px;
+  color: hsl(var(--nui-primary));
+  font-family: var(--nui-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.page-header h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -.02em;
+  line-height: 26px;
+}
+
+.page-header p {
+  max-width: 680px;
+  margin: 6px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.app-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.section-title {
+  margin: 0;
+  padding: 0 2px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.page-actions,
+.panel-actions,
+.toolbar-row {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.panel-header {
+  display: flex;
+  min-height: 0;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 0;
+  padding: 0 2px;
+}
+
+.panel-header h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.panel-header p {
+  margin: 3px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.panel > :not(.panel-header):not(.data-table-scroll):not(.data-table-frame) {
+  margin: 0;
+}
+
+.panel > form,
+.panel > .form-grid,
+.panel > .collection-editor {
+  padding: 10px;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.dark .panel > form,
+.dark .panel > .form-grid,
+.dark .panel > .collection-editor {
+  background: hsl(var(--nui-muted) / .62);
+}
+
+.panel .data-table-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.dark .panel .data-table-scroll {
+  background: hsl(var(--nui-muted) / .62);
+}
+
+.panel > .loading-state,
+.panel > .empty-state {
+  min-height: 80px;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.dark .panel > .loading-state,
+.dark .panel > .empty-state {
+  background: hsl(var(--nui-muted) / .62);
+}
+
+.panel > .inline-status {
+  padding: 2px;
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border: 0;
+  border-left: 3px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 8px 10px 8px 12px;
+  background: hsl(var(--nui-muted) / .45);
+  line-height: 19px;
+}
+
+.notice > svg {
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  flex: none;
+}
+
+.notice-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.notice-copy > strong {
+  display: block;
+  margin-bottom: 1px;
+}
+
+/* Untranslated server wording kept as a support detail under the readable copy. */
+.notice-detail {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: .75;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Wraps a notice that sits above the whole app shell, for a setting that every
+ * screen depends on. Page-level notices live inside the page body instead; this
+ * one has to be visible no matter which route is open.
+ */
+.page-banner {
+  padding: 8px 12px 0;
+}
+
+.notice-info { border-left-color: hsl(var(--nui-primary)); background: hsl(var(--nui-selected)); }
+.notice-success { border-left-color: hsl(var(--nui-success)); background: hsl(var(--nui-success) / .08); }
+.notice-warning { border-left-color: hsl(var(--nui-warning)); background: hsl(var(--nui-warning) / .08); }
+.notice-danger { border-left-color: hsl(var(--nui-destructive)); background: hsl(var(--nui-destructive) / .08); color: hsl(var(--nui-destructive)); }
+
+.notice-actions,
+.notice-inline-action {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+
+.notice-inline-action {
+  margin-top: 8px;
+}
+
+.loading-state,
+.empty-state {
+  display: flex;
+  min-height: 100px;
+  align-items: center;
+  justify-content: center;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.loading-state {
+  gap: 8px;
+}
+
+.loading-state svg,
+.empty-state > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.empty-state {
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px;
+  text-align: center;
+}
+
+.empty-state strong {
+  color: hsl(var(--nui-foreground));
+  font-weight: 600;
+}
+
+.empty-state p {
+  max-width: 420px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.spin {
+  animation: spin .8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* A grey bar where a value will be, for screens that draw their own shape while
+ * the slow part of the page is still on the way. Sized by the caller so it
+ * takes the room the real value will take and nothing moves when it lands. */
+.skeleton-bar {
+  display: inline-block;
+  border-radius: 3px;
+  background: hsl(var(--nui-muted-foreground) / 18%);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(var(--nui-muted-foreground) / 10%) 50%,
+    transparent 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 160px 100%;
+  animation: skeleton-sweep 1.4s linear infinite;
+}
+
+@keyframes skeleton-sweep {
+  from { background-position: -160px 0; }
+  to { background-position: calc(100% + 160px) 0; }
+}
+
+/* The sweep is decoration; the bars still say the page is working without it. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-bar {
+    animation: none;
+  }
+}
+
+.form-grid {
+  display: grid;
+  align-items: start;
+  gap: 12px;
+}
+
+.form-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.form-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+.field {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 5px;
+}
+
+.field > :where(input, select, button, textarea) {
+  align-self: start;
+}
+
+/* "任意" is running text continuing the label, so it sits on the label's
+   baseline. Centred, at two thirds the label's size and six pixels off its
+   shoulder, it read as a superscript hung above and to the right of the word it
+   belongs to. The badge is a pill rather than running text, so it keeps
+   centring, and keeps the wider gap that a pill needs. */
+.field-label {
+  display: flex;
+  min-height: 18px;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.field-label > *:not(.optional) {
+  align-self: center;
+  margin-left: 2px;
+}
+
+.field-label .optional {
+  color: hsl(var(--nui-subtle-foreground));
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.field-hint {
+  color: hsl(var(--nui-subtle-foreground));
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.native-select,
+.native-textarea {
+  width: 100%;
+  border: 1px solid hsl(var(--nui-border-strong));
+  border-radius: var(--nui-radius-md);
+  outline: none;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-foreground));
+  transition: border-color var(--nui-duration-fast), box-shadow var(--nui-duration-fast);
+}
+
+.native-select {
+  height: var(--control-height);
+  padding: 0 28px 0 9px;
+}
+
+.native-textarea {
+  min-height: 72px;
+  padding: 8px 9px;
+  line-height: 20px;
+  resize: vertical;
+}
+
+.native-select:focus,
+.native-textarea:focus {
+  border-color: hsl(var(--nui-ring));
+  box-shadow: 0 0 0 2px hsl(var(--nui-ring) / .18);
+}
+
+.native-select:disabled,
+.native-textarea:disabled {
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-subtle-foreground));
+}
+
+/*
+ * Wraps instead of squeezing: pages with eight or nine metrics used to shrink
+ * every tile until the numbers were unreadable. The 1px grid gap draws the
+ * hairline separators, so wrapped rows stay clean without per-cell borders.
+ */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(168px, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 0;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-border));
+}
+
+.metric {
+  display: flex;
+  min-width: 0;
+  min-height: 68px;
+  justify-content: center;
+  padding: 12px 14px;
+  flex-direction: column;
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.dark .metric {
+  background: hsl(var(--nui-muted) / .62);
+}
+
+.metric > span { color: hsl(var(--nui-muted-foreground)); font-size: 12px; }
+.metric > strong { overflow: hidden; margin-top: 2px; font-size: 20px; font-weight: 600; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+.metric > small { overflow: hidden; color: hsl(var(--nui-subtle-foreground)); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.metric-success > strong { color: hsl(var(--nui-success)); }
+.metric-warning > strong { color: hsl(var(--nui-warning)); }
+.metric-danger > strong { color: hsl(var(--nui-destructive)); }
+.metric-with-icon { display: inline-flex; align-items: center; gap: 7px; }
+.metric-with-icon svg { width: 17px; height: 17px; }
+
+/* Search box, table, and pager as one block. Only tables that opt into those
+   controls get the extra rows; a plain DataTable renders the same as before. */
+.data-table-frame {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+}
+
+/* The next page is loading; the rows on screen are the previous one. */
+.data-table-frame[aria-busy="true"] .data-table-scroll {
+  opacity: 0.55;
+  transition: opacity 120ms ease;
+}
+
+.data-table-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.data-table-toolbar input[type="search"] {
+  flex: 1 1 200px;
+  max-width: 320px;
+}
+
+.data-table-count {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.data-table-pager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.data-table-pager-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The whole header cell is the sort target, so the hit area matches what the
+   eye reads as the column title. */
+.data-table-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: none;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.data-table th.align-right .data-table-sort { justify-content: flex-end; }
+.data-table th.align-center .data-table-sort { justify-content: center; }
+.data-table-sort:hover { color: hsl(var(--nui-foreground)); }
+
+.data-table-sort:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid hsl(var(--nui-ring) / .6);
+  outline-offset: 2px;
+}
+
+.data-table-sort svg { flex-shrink: 0; width: 12px; height: 12px; }
+
+/* The idle glyph is a hover affordance, not decoration: showing four of them at
+   rest turns the header row into noise. */
+.data-table-sort-idle { opacity: 0; transition: opacity var(--nui-duration-fast, 120ms); }
+.data-table-sort:hover .data-table-sort-idle,
+.data-table-sort:focus-visible .data-table-sort-idle { opacity: .55; }
+
+.panel .data-table-frame > .empty-state {
+  min-height: 80px;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.dark .panel .data-table-frame > .empty-state {
+  background: hsl(var(--nui-muted) / .62);
+}
+
+.data-table-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: auto;
+}
+
+@media (min-width: 801px) {
+  .data-table {
+    min-width: 720px;
+  }
+}
+
+.data-table thead {
+  background: transparent;
+}
+
+.data-table th {
+  height: 32px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 0 10px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  white-space: nowrap;
+}
+
+.data-table td {
+  min-height: 34px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 6px 10px;
+  vertical-align: middle;
+}
+
+/* Keep status chips from stacking glyphs when the guide panel narrows the
+   workspace — scroll the table horizontally instead of crushing cells. */
+.data-table td .inline-flex {
+  flex-shrink: 0;
+  max-width: none;
+  white-space: nowrap;
+}
+
+.data-table tbody tr:last-child td { border-bottom: 0; }
+.data-table tbody tr:hover { background: hsl(var(--nui-muted) / .55); }
+/* The second round of somebody's day, on the caddie boards. Read at a glance
+   down a column of otherwise identical rows, so it is a band on the edge and a
+   tint rather than a badge the eye has to find. */
+.data-table tbody tr.second-round-row { background: hsl(var(--nui-primary) / .09); box-shadow: inset 3px 0 hsl(var(--nui-primary)); }
+.data-table tbody tr.second-round-row:hover { background: hsl(var(--nui-primary) / .16); }
+.data-table .clickable-row { cursor: pointer; outline: none; }
+.data-table .clickable-row:focus-visible { box-shadow: inset 2px 0 hsl(var(--nui-primary)), inset 0 0 0 1px hsl(var(--nui-ring) / .4); background: hsl(var(--nui-selected)); }
+
+/* Monthly close is a reconciliation screen: the operator compares several
+   bookings at once, so the panel scrolls the list rather than enlarging it.
+   The 44px rows and 16px cells this used to carry cut the panel to six
+   bookings and made the one table on the screen read as a different product
+   from every other list in the app. It is a data-table; it looks like one. */
+.settlement-reservations-panel .data-table-scroll {
+  max-height: 360px;
+  overflow: auto;
+}
+
+.settlement-reservation-unavailable {
+  display: grid;
+  gap: 2px;
+}
+
+.settlement-reservation-unavailable span {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.align-left { text-align: left; }
+.align-center { text-align: center; }
+.align-right { text-align: right; }
+
+.primary-cell {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.primary-cell strong { font-weight: 500; }
+.primary-cell small { color: hsl(var(--nui-subtle-foreground)); font-family: var(--nui-font-mono); font-size: 10px; }
+
+.home-launcher-intro {
+  position: relative;
+  max-width: 720px;
+  padding: 4px 0 4px 18px;
+}
+
+.home-launcher-intro::before {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  width: 3px;
+  border-radius: 999px;
+  background: hsl(var(--nui-primary));
+  content: '';
+}
+
+.home-launcher-intro > span {
+  color: hsl(var(--nui-primary));
+  font-family: var(--nui-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.home-launcher-intro h1 {
+  margin: 3px 0 0;
+  font-size: clamp(24px, 3vw, 32px);
+  font-weight: 650;
+  letter-spacing: -.035em;
+  line-height: 1.15;
+}
+
+.home-launcher-intro p {
+  margin: 7px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.home-featured-grid,
+.feature-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.home-featured-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.feature-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+.feature-tile {
+  position: relative;
+  display: flex;
+  min-height: 112px;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 14px;
+  background: hsl(var(--nui-muted) / .38);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--nui-duration-fast),
+    box-shadow var(--nui-duration-fast),
+    transform var(--nui-duration-fast);
+}
+
+.dark .feature-tile { background: hsl(var(--nui-muted) / .54); }
+
+.feature-tile:hover {
+  border-color: hsl(var(--nui-primary) / .42);
+  box-shadow: 0 8px 20px hsl(var(--nui-foreground) / .07);
+  transform: translateY(-2px);
+}
+
+.feature-tile:focus-visible {
+  outline: 2px solid hsl(var(--nui-ring) / .6);
+  outline-offset: 2px;
+}
+
+.feature-tile--featured {
+  min-height: 142px;
+  border-color: hsl(var(--nui-primary) / .28);
+  background:
+    linear-gradient(135deg, hsl(var(--nui-selected) / .95), hsl(var(--nui-muted) / .32));
+}
+
+.dark .feature-tile--featured {
+  background:
+    linear-gradient(135deg, hsl(var(--nui-selected) / .7), hsl(var(--nui-muted) / .55));
+}
+
+.feature-tile--featured::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 3px;
+  background: hsl(var(--nui-primary));
+  content: '';
+}
+
+.feature-icon {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  place-items: center;
+  border-radius: 9px;
+  background: hsl(var(--nui-selected));
+  color: hsl(var(--nui-primary));
+}
+
+.feature-icon svg { width: 18px; height: 18px; }
+.feature-tile--featured .feature-icon { width: 44px; height: 44px; }
+.feature-tile--featured .feature-icon svg { width: 21px; height: 21px; }
+
+.feature-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.feature-copy strong { font-size: 14px; font-weight: 600; line-height: 19px; }
+.feature-tile--featured .feature-copy strong { font-size: 17px; line-height: 22px; }
+
+.feature-copy small {
+  margin-top: 4px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.feature-tile--featured .feature-copy small { max-width: 38ch; font-size: 12px; }
+
+.feature-arrow {
+  position: absolute;
+  top: 16px;
+  right: 14px;
+  width: 16px;
+  height: 16px;
+  color: hsl(var(--nui-subtle-foreground));
+  opacity: .65;
+  transition: transform var(--nui-duration-fast), opacity var(--nui-duration-fast);
+}
+
+.feature-tile:hover .feature-arrow { opacity: 1; transform: translateX(2px); }
+
+@media (max-width: 1180px) {
+  .feature-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.operations-track {
+  display: flex;
+  overflow: hidden;
+  flex-direction: column;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.dark .operations-track {
+  background: hsl(var(--nui-muted) / .62);
+}
+
+.operations-step {
+  display: grid;
+  min-height: 0;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+  gap: 0 10px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 8px 10px;
+  background: transparent;
+}
+
+.operations-step:last-child { border-bottom: 0; }
+
+.operations-step > span {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  grid-row: 1 / 3;
+  place-items: center;
+  align-self: center;
+  border-radius: 50%;
+  background: hsl(var(--nui-selected));
+  color: hsl(var(--nui-primary));
+  font-family: var(--nui-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.operations-step > strong { margin-top: 1px; font-size: 13px; font-weight: 500; }
+.operations-step > small { grid-column: 2; margin-top: 1px; color: hsl(var(--nui-muted-foreground)); font-size: 11px; line-height: 16px; }
+
+.inline-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.inline-status > svg { width: 16px; height: 16px; color: hsl(var(--nui-success)); }
+.compact-list { margin: 5px 0 0; padding-left: 18px; }
+
+.collection-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.delivery-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.delivery-choice {
+  display: grid;
+  min-height: 64px;
+  grid-template-columns: auto 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 10px 12px;
+  background: hsl(var(--nui-background));
+  cursor: pointer;
+}
+
+.delivery-choice.selected { border-color: hsl(var(--nui-primary) / .5); background: hsl(var(--nui-selected)); }
+.delivery-choice > svg { width: 18px; height: 18px; color: hsl(var(--nui-muted-foreground)); }
+.delivery-choice > span { display: flex; flex-direction: column; }
+.delivery-choice strong { font-weight: 600; }
+.delivery-choice small { color: hsl(var(--nui-muted-foreground)); font-size: 11px; }
+
+/* The bill a bulk cancellation-fee collection is about to raise: one line per
+   person, read before anything is sent. Dense on purpose — the desk is
+   checking a list, not reading a document. */
+/* The day's cancellations under the tee sheet. One line each, reason first,
+   because the reason is what the next shift is reading for. */
+.day-cancellation-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.day-cancellation-list > li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid hsl(var(--nui-border));
+}
+
+.day-cancellation-list > li:last-child { border-bottom: 0; }
+
+.fee-plan-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.fee-plan-list > li {
+  padding: 6px 8px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 6px;
+}
+
+/* The bookings a collection cannot address yet, fixed in place rather than
+ * reported and dropped. One block per booking, because the two boxes belong to
+ * that booking and a flat list of inputs reads as one recipient. */
+.fee-recipient-editor > h4 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.fee-recipient-editor > p {
+  margin: 2px 0 6px;
+  font-size: 11px;
+}
+
+.fee-recipient-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.fee-recipient-list > li {
+  padding: 8px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.consent-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 10px 12px;
+  background: hsl(var(--nui-surface));
+}
+
+.consent-check input { margin-top: 3px; }
+.consent-check span { display: flex; flex-direction: column; }
+.consent-check strong { font-weight: 600; }
+.consent-check small { color: hsl(var(--nui-muted-foreground)); line-height: 17px; }
+
+.operation-checks {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  align-self: end;
+}
+
+.panel-footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.sticky-submit {
+  position: sticky;
+  z-index: 4;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid hsl(var(--nui-border-strong));
+  border-radius: var(--nui-radius-lg);
+  padding: 8px 10px;
+  background: hsl(var(--nui-background) / .94);
+  box-shadow: var(--nui-shadow-overlay);
+  backdrop-filter: blur(12px);
+}
+
+.sticky-submit > div { display: flex; flex-direction: column; }
+.sticky-submit span { color: hsl(var(--nui-muted-foreground)); font-size: 10px; }
+.sticky-submit strong { font-size: 18px; font-weight: 600; }
+.sticky-submit > .sticky-submit-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* How far the book actually reaches. The hours above are a rule; this one date
+   is the only thing on the screen that says what a customer can book, so it
+   sits above the editor rather than inside it. */
+.on-sale-through {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-lg);
+  padding: 9px 12px;
+  background: hsl(var(--nui-surface));
+  font-size: 13px;
+}
+
+.on-sale-through > svg {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: hsl(var(--nui-success));
+}
+
+.link-button {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: hsl(var(--nui-primary));
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.link-button:hover { text-decoration: none; }
+
+/* Weekly slot editor: one card per weekday, closed days included, so the week
+   reads as a week instead of as a pile of rows sorted by when they were added. */
+.slot-week {
+  display: grid;
+  gap: 8px;
+}
+
+.slot-day {
+  overflow: hidden;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-lg);
+  background: hsl(var(--nui-card));
+}
+
+.slot-day.is-empty {
+  border-style: dashed;
+  background: transparent;
+}
+
+.slot-day-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 6px 10px;
+  background: hsl(var(--nui-surface));
+}
+
+.slot-day.is-empty .slot-day-header {
+  border-bottom: 0;
+  background: transparent;
+}
+
+.slot-day-name { font-size: 13px; font-weight: 600; }
+.slot-day-closed { color: hsl(var(--nui-muted-foreground)); font-size: 11px; }
+
+.slot-day-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.slot-copy-select {
+  width: auto;
+  min-width: 160px;
+  height: 30px;
+  padding-block: 0;
+  font-size: 12px;
+}
+
+.slot-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 10px;
+}
+
+.slot-row + .slot-row { border-top: 1px dashed hsl(var(--nui-border)); }
+.slot-row.has-issue { background: hsl(var(--nui-destructive) / .07); }
+.slot-row .slot-time { width: 8.5rem; }
+.slot-range-sep { color: hsl(var(--nui-muted-foreground)); }
+
+.slot-count { display: inline-flex; align-items: center; gap: 4px; }
+.slot-count .slot-number { width: 4.75rem; text-align: right; }
+.slot-unit { color: hsl(var(--nui-muted-foreground)); font-size: 12px; }
+
+.slot-unlimited {
+  border-radius: 999px;
+  padding: 1px 6px;
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+}
+
+.slot-row-remove { margin-left: auto; }
+
+.slot-row-issues {
+  flex-basis: 100%;
+  margin: 0;
+  color: hsl(var(--nui-destructive));
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* Distinct from an issue: the row still saves, it just cannot all tee off. */
+.slot-row-warning {
+  flex-basis: 100%;
+  margin: 0;
+  color: hsl(var(--nui-warning));
+  font-size: 11px;
+  line-height: 16px;
+}
+
+/* The plans still missing a course, listed so each one is one click away. */
+.course-backlog-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+/* A plan can be sold on several courses; the cell names each one. */
+.course-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.course-checklist {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.course-checklist-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+
+/* The toggle for the whole list sits above it, told apart from the courses
+   themselves by weight rather than by a rule that would eat a row of height. */
+.course-checklist-all {
+  font-weight: 500;
+}
+
+.course-checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.capacity-weekday-note {
+  margin: 8px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+/* What the whole week adds up to, said once where the week is edited rather
+   than only in the unsaved bar. */
+.slot-week-total {
+  margin: 10px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+}
+
+.sticky-submit .slot-diff {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.slot-diff-added { color: hsl(var(--nui-success)); }
+.slot-diff-removed { color: hsl(var(--nui-destructive)); }
+.slot-diff-changed { color: hsl(var(--nui-warning)); }
+
+/* Says the row opens something, rather than doing something in place. */
+.row-open {
+  display: inline-flex;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.row-open > svg { width: 16px; height: 16px; }
+.data-table tbody tr:hover .row-open { color: hsl(var(--nui-foreground)); }
+
+.detail-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+}
+
+.detail-list div { min-width: 0; }
+.detail-list dt { color: hsl(var(--nui-muted-foreground)); font-size: 11px; }
+.detail-list dd { margin: 2px 0 0; overflow-wrap: anywhere; }
+.notes-block { overflow-x: auto; border-radius: var(--nui-radius-md); padding: 10px; background: hsl(var(--nui-surface)); color: hsl(var(--nui-muted-foreground)); font-family: var(--nui-font-mono); font-size: 11px; white-space: pre-wrap; }
+.sms-preview {
+  /* The payment link is one unbroken token, and pre-wrap will not break
+     inside it: without this the end of the URL scrolls out of sight, in
+     the one place the whole message is meant to be readable. */
+  overflow-x: visible;
+  overflow-wrap: anywhere;
+}
+
+.command-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.command-copy strong { font-weight: 500; }
+.command-copy small { color: hsl(var(--nui-muted-foreground)); font-size: 10px; }
+
+.workspace-content:has(> .course-map-page) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.course-map-page {
+  display: grid;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: 36px minmax(0, 1fr);
+  background: #1a2b1f;
+}
+
+.map-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 14px;
+  background: #142219;
+  color: #d9e6dc;
+  font-family: var(--nui-font-mono);
+  font-size: 10px;
+}
+
+.map-toolbar > div { display: flex; align-items: center; gap: 7px; }
+.map-toolbar > span { color: #91a598; }
+.connection-dot { width: 7px; height: 7px; border-radius: 50%; background: #718078; }
+.connection-dot.online { background: #55cf8a; box-shadow: 0 0 0 3px rgb(85 207 138 / .12); }
+.course-map-stage { position: relative; min-height: 0; }
+.course-map-stage .map-container { width: 100%; height: 100%; }
+
+.not-found-page {
+  display: flex;
+  min-height: 70vh;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  flex-direction: column;
+  text-align: center;
+}
+
+.not-found-page > svg { width: 28px; height: 28px; color: hsl(var(--nui-primary)); }
+.not-found-page h1 { margin: 12px 0 0; font-size: 20px; font-weight: 600; }
+.not-found-page p { margin: 5px 0 18px; color: hsl(var(--nui-muted-foreground)); }
+
+@media (max-width: 800px) {
+  .desktop-sidebar { display: none; }
+  .desktop-sidebar-open { display: none; }
+  .desktop-collapsed-actions { display: none; }
+  .mobile-menu { display: inline-flex; }
+  .mobile-nav-layer {
+    position: fixed;
+    z-index: 60;
+    inset: 0;
+    display: block;
+    background: hsl(var(--nui-overlay));
+    animation: fade-in var(--nui-duration-base) var(--nui-ease-out);
+  }
+  .mobile-sidebar {
+    width: min(88vw, 320px);
+    height: 100%;
+    animation: slide-in var(--nui-duration-base) var(--nui-ease-out);
+  }
+  .mobile-sidebar .courseboard-sidebar { width: 100%; }
+  .mobile-sidebar .mobile-close { display: inline-flex; }
+  .mobile-sidebar .desktop-collapse { display: none; }
+  .mobile-sidebar .courseboard-sidebar button { min-height: 40px; }
+  .workspace-bar {
+    height: calc(40px + env(safe-area-inset-top));
+    min-height: calc(40px + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top);
+    padding-inline: 12px;
+  }
+  .workspace-context > span { display: none; }
+  .workspace-body { position: relative; }
+  .workspace-help-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    box-shadow: -12px 0 32px hsl(0 0% 0% / 0.12);
+  }
+  .page-stack { padding: 12px 12px calc(24px + env(safe-area-inset-bottom)); gap: 16px; }
+  .page-header { min-height: 0; flex-direction: column; gap: 10px; }
+  .page-header h1 { font-size: 21px; line-height: 28px; }
+  .page-actions { width: 100%; }
+  .page-actions > button { min-height: 40px; flex: 1; }
+  .panel-header { align-items: flex-start; flex-direction: column; }
+  .panel-actions { width: 100%; }
+  .toolbar-row { width: 100%; flex-wrap: wrap; }
+  .toolbar-row > * { min-height: 38px; }
+  .toolbar-row > select { flex: 1; }
+  /* Narrow screens: two per row, sized by the grid rather than by max-width. */
+  .metric-grid { grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); }
+  .metric { min-height: 72px; }
+  .metric > strong { font-size: 17px; }
+  .form-grid-2,
+  .form-grid-3 { grid-template-columns: 1fr; }
+  :root { --control-height: 40px; }
+  .field input,
+  .field button { min-height: var(--control-height); }
+  .native-textarea { min-height: 96px; }
+  .home-featured-grid { grid-template-columns: minmax(0, 1fr); }
+  .feature-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .feature-tile { min-height: 108px; padding: 12px; }
+  .feature-tile--featured { min-height: 132px; }
+  .operations-step { padding: 8px 10px; }
+  .delivery-choices { grid-template-columns: 1fr; }
+  .delivery-choice { min-height: 72px; }
+  .operation-checks { grid-template-columns: 1fr; }
+  .sticky-submit { bottom: max(8px, env(safe-area-inset-bottom)); }
+  .sticky-submit button { min-height: 44px; }
+  .detail-list { grid-template-columns: 1fr; }
+  .course-map-page { min-height: calc(100dvh - 40px - env(safe-area-inset-top)); }
+  .map-toolbar > span { display: none; }
+
+  .data-table thead { display: none; }
+  .data-table,
+  .data-table tbody,
+  .data-table tr,
+  .data-table td { display: block; width: 100%; }
+  .data-table tbody tr { border-bottom: 1px solid hsl(var(--nui-border)); padding: 6px 10px; }
+  .data-table tbody tr:last-child { border-bottom: 0; }
+  .data-table td { display: grid; min-height: 0; grid-template-columns: minmax(84px, .55fr) minmax(0, 1fr); align-items: center; gap: 10px; border: 0; padding: 5px 0; text-align: left !important; }
+  .data-table td::before { content: attr(data-label); color: hsl(var(--nui-muted-foreground)); font-size: 10px; font-weight: 500; }
+}
+
+@keyframes fade-in { from { opacity: 0; } }
+@keyframes slide-in { from { transform: translateX(-20px); opacity: .7; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+
+.app {
+  display: grid;
+  grid-template-rows: 48px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 16px;
+  background: #156c3b;
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.app-header h1 {
+  font-size: 16px;
+  margin: 0;
+}
+
+.app-header .status {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.app-header .status .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  background: #888;
+  vertical-align: middle;
+}
+
+.app-header .status .dot.online {
+  background: #4ade80;
+  box-shadow: 0 0 6px #4ade80;
+}
+
+.map-container {
+  position: relative;
+  background: #1a2b1f;
+}
+
+.map-container canvas {
+  display: block;
+}
+
+.hole-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.hole-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.92);
+  color: #1a3a22;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 999px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.cart-legend {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  backdrop-filter: blur(6px);
+}
+
+.cart-legend .row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cart-legend .swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.course-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.4;
+  backdrop-filter: blur(6px);
+}
+
+.course-badge .title {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.course-badge .sub {
+  font-size: 11px;
+  opacity: 0.7;
+  letter-spacing: 0.06em;
+}
+
+.poi {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+}
+
+.poi-clubhouse {
+  background: #2d4a78;
+  color: #fff;
+}
+
+.poi-restroom {
+  background: #fff;
+  color: #1a3a22;
+}
+
+.poi-vending {
+  background: #d2453d;
+  color: #fff;
+}
+
+.course-side-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: #5fa2ce;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+}
+
+.course-side-label.in-course {
+  color: #ffffff;
+}
+
+.payment-shell {
+  min-height: 100vh;
+  background:
+    linear-gradient(120deg, rgba(40, 111, 90, 0.12), transparent 36%),
+    #f7f5ef;
+  color: #20231f;
+}
+
+.payment-summary,
+.payment-panel {
+  min-width: 0;
+  border: 1px solid #d9d2c2;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 18px 44px rgba(36, 43, 34, 0.08);
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #286f5a;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.payment-summary h1,
+.payment-panel h1 {
+  margin: 0;
+  font-size: 32px;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.payment-panel p {
+  color: #62675e;
+  line-height: 1.7;
+}
+
+.stripe-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.form-total span {
+  color: #686d64;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.stripe-form button {
+  min-height: 46px;
+  border: 0;
+  border-radius: 6px;
+  background: #286f5a;
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.stripe-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.payment-amount {
+  font-size: 38px;
+  line-height: 1;
+}
+
+.error-box {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid #f0b4a8;
+  border-radius: 6px;
+  background: #fff1ee;
+  color: #8d2f20;
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.payment-shell {
+  display: grid;
+  grid-template-columns: minmax(280px, 440px) minmax(320px, 520px);
+  gap: 24px;
+  align-items: start;
+  justify-content: center;
+  padding: 48px 24px;
+}
+
+.payment-summary,
+.payment-panel {
+  border-radius: 8px;
+  padding: 28px;
+}
+
+.payment-summary dl {
+  display: grid;
+  gap: 14px;
+  margin: 28px 0 0;
+}
+
+.payment-summary dl div {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid #e5dece;
+  padding-top: 12px;
+}
+
+.payment-summary dt {
+  color: #686d64;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.payment-summary dd {
+  margin: 0;
+  font-weight: 650;
+}
+
+.payment-amount {
+  margin-top: 24px;
+  color: #1f624f;
+  font-weight: 800;
+}
+
+.payment-panel.success {
+  grid-column: 1 / -1;
+  max-width: 560px;
+  justify-self: center;
+}
+
+.stripe-form {
+  display: grid;
+  gap: 18px;
+}
+
+.payment-element-host {
+  min-height: 176px;
+  border: 1px solid #d9d2c2;
+  border-radius: 6px;
+  background: #fff;
+  padding: 14px;
+}
+
+.payment-element-loading {
+  margin: 0 0 12px;
+  color: #686d64;
+  font-size: 13px;
+}
+
+.form-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #e5dece;
+  padding-bottom: 14px;
+}
+
+.form-total strong {
+  font-size: 24px;
+}
+
+.form-message {
+  border-left: 4px solid #286f5a;
+  background: #eef7f3;
+  color: #1f624f;
+  padding: 10px 12px;
+}
+
+.auth-neutral-loading {
+  display: grid;
+  min-height: 100dvh;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 32px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-muted-foreground));
+  text-align: center;
+}
+
+.auth-neutral-loading h2 {
+  margin: 0;
+  color: hsl(var(--nui-foreground));
+  font-size: 18px;
+  font-weight: 620;
+  letter-spacing: -.02em;
+}
+
+.auth-neutral-loading p {
+  margin: 0;
+  max-width: 320px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.auth-session-toast {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 80;
+  display: flex;
+  max-width: min(360px, calc(100vw - 40px));
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 12px 12px 14px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 12px;
+  background: hsl(var(--nui-card));
+  box-shadow: 0 10px 30px rgb(15 23 42 / 12%);
+  color: hsl(var(--nui-foreground));
+}
+
+.auth-session-toast > svg {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  color: hsl(var(--nui-warning));
+}
+
+.auth-session-toast > p {
+  flex: 1;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.auth-session-toast-dismiss {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.auth-session-toast-dismiss:hover {
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-foreground));
+}
+
+.auth-shell {
+  display: grid;
+  min-height: 100dvh;
+  grid-template-columns: minmax(320px, .92fr) minmax(420px, 1.08fr);
+  background: hsl(var(--nui-background));
+}
+
+.auth-shell-session-expired {
+  display: grid;
+  min-height: 100%;
+  place-items: center;
+  padding: clamp(24px, 6vw, 76px);
+  background: hsl(var(--nui-muted));
+}
+
+.auth-brand-panel {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: clamp(28px, 5vw, 64px);
+  background: var(--course-turf-dark);
+  color: #fff;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+}
+
+.auth-brand-lockup {
+  display: block;
+  height: 56px;
+  max-width: min(190px, 100%);
+}
+
+.auth-brand-lockup img {
+  display: block;
+  height: 100%;
+  width: auto;
+  max-width: 100%;
+  object-fit: contain;
+}
+
+.auth-brand-copy {
+  max-width: 500px;
+}
+
+.auth-brand-copy h1 {
+  margin: 0 0 18px;
+  color: #fff;
+  font-size: clamp(34px, 4vw, 58px);
+  font-weight: 720;
+  letter-spacing: -.055em;
+  line-height: 1.08;
+}
+
+.auth-brand-copy p {
+  max-width: 430px;
+  margin: 0;
+  color: rgb(255 255 255 / 68%);
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.auth-platforms {
+  display: flex;
+  gap: 18px;
+  color: rgb(255 255 255 / 54%);
+  font-family: var(--nui-font-mono);
+  font-size: 10px;
+  letter-spacing: .03em;
+}
+
+.auth-content-panel {
+  display: grid;
+  min-width: 0;
+  place-items: center;
+  padding: clamp(24px, 6vw, 76px);
+  background: hsl(var(--nui-muted));
+}
+
+.auth-card {
+  width: min(100%, 410px);
+  padding: 30px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-lg);
+  background: hsl(var(--nui-background));
+  box-shadow: var(--nui-shadow-modal);
+}
+
+.auth-card-wide {
+  display: flex;
+  width: min(100%, 520px);
+  max-height: calc(100dvh - clamp(48px, 12vw, 152px));
+  flex-direction: column;
+}
+
+.auth-card h2 {
+  margin: 7px 0 8px;
+  font-size: 24px;
+  letter-spacing: -.035em;
+}
+
+.auth-card > p {
+  margin: 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.auth-kicker {
+  color: hsl(var(--nui-primary));
+  font-family: var(--nui-font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.auth-actions {
+  display: grid;
+  gap: 9px;
+  margin-top: 24px;
+}
+
+.auth-actions > button {
+  width: 100%;
+  justify-content: center;
+}
+
+.auth-login-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 24px;
+}
+
+.auth-login-form label {
+  display: grid;
+  gap: 6px;
+  color: hsl(var(--nui-foreground));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.auth-login-form input {
+  width: 100%;
+  height: 40px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 0 12px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-foreground));
+}
+
+.auth-login-form input:focus {
+  border-color: hsl(var(--nui-primary));
+  outline: 2px solid hsl(var(--nui-primary) / 18%);
+  outline-offset: 1px;
+}
+
+.auth-login-form > button {
+  width: 100%;
+  justify-content: center;
+  margin-top: 3px;
+}
+
+.google-mark {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.auth-card .auth-legal {
+  margin-top: 18px;
+  font-size: 10px;
+  text-align: center;
+}
+
+.auth-notice {
+  display: flex;
+  gap: 10px;
+  margin-top: 20px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 12px;
+  background: hsl(var(--nui-muted));
+}
+
+.auth-notice > svg {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: hsl(var(--nui-primary));
+}
+
+.auth-notice strong,
+.auth-notice span {
+  display: block;
+}
+
+.auth-notice strong {
+  margin-bottom: 3px;
+  font-size: 12px;
+}
+
+.auth-notice span {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.auth-centered {
+  text-align: center;
+}
+
+.auth-spinner {
+  width: 27px;
+  height: 27px;
+  color: hsl(var(--nui-primary));
+  animation: auth-spin .8s linear infinite;
+}
+
+@keyframes auth-spin {
+  to { transform: rotate(360deg); }
+}
+
+.tenant-list {
+  display: grid;
+  min-height: 0;
+  flex: 1 1 auto;
+  gap: 8px;
+  margin: 22px 0 14px;
+  padding-right: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.tenant-option {
+  display: flex;
+  min-width: 0;
+  min-height: 62px;
+  align-items: center;
+  gap: 11px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 9px 11px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-foreground));
+  text-align: left;
+  cursor: pointer;
+}
+
+.tenant-option:hover,
+.tenant-option:focus-visible {
+  border-color: hsl(var(--nui-primary));
+  background: hsl(var(--nui-selected));
+  outline: none;
+}
+
+.tenant-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-primary));
+}
+
+.tenant-icon svg,
+.tenant-option > svg {
+  width: 15px;
+  height: 15px;
+}
+
+.tenant-option > svg {
+  flex: none;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.tenant-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.tenant-copy strong,
+.tenant-copy small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tenant-copy strong {
+  font-size: 12px;
+}
+
+.tenant-copy small {
+  margin-top: 3px;
+  color: hsl(var(--nui-muted-foreground));
+  font-family: var(--nui-font-mono);
+  font-size: 9px;
+}
+
+.auth-problem-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 16px;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--course-danger) 12%, transparent);
+  color: var(--course-danger);
+}
+
+.auth-problem-icon.configuration {
+  background: hsl(var(--nui-selected));
+  color: hsl(var(--nui-primary));
+}
+
+.auth-problem-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.account-menu {
+  width: 250px;
+}
+
+/*
+ * Stands in for the checkmark on unselected rows so every label in the language
+ * menu starts at the same x. Matches the dropdown item's `[&_svg]:size-3.5`.
+ */
+.menu-check-spacer {
+  display: block;
+  flex: none;
+  width: 0.875rem;
+  height: 0.875rem;
+}
+
+.account-menu-title,
+.account-menu-detail {
+  display: block;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu-title {
+  font-size: 12px;
+}
+
+.account-menu-detail {
+  margin-top: 2px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  font-weight: 400;
+}
+
+/* ── Operations timeline (tee sheet + caddy lanes) ─────────────── */
+
+.timeline-page {
+  --timeline-lane-width: 168px;
+  --timeline-row-height: 72px;
+  --timeline-block-height: 56px;
+  --timeline-turf: var(--course-turf);
+  --timeline-sand: var(--course-sand);
+  --timeline-ink: var(--course-ink);
+  gap: 8px;
+  padding-top: 6px;
+  padding-bottom: 16px;
+}
+
+.timeline-chrome {
+  display: grid;
+  gap: 8px;
+  flex: none;
+}
+
+.timeline-page > .page-header,
+.timeline-chrome > .page-header {
+  align-items: center;
+  gap: 10px;
+}
+
+.timeline-page .page-header h1,
+.timeline-chrome .page-header h1 {
+  font-size: 17px;
+  line-height: 22px;
+}
+
+.timeline-page .page-header p,
+.timeline-chrome .page-header p {
+  margin-top: 1px;
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.timeline-summary {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .35);
+}
+
+.timeline-summary.has-attention {
+  border-color: color-mix(in srgb, hsl(var(--nui-warning)) 45%, hsl(var(--nui-border)));
+}
+
+.timeline-summary-item {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+  border-right: 1px solid hsl(var(--nui-border));
+  padding: 5px 10px;
+}
+
+.timeline-summary-item > span {
+  flex: none;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.timeline-summary-item > strong {
+  flex: none;
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -.02em;
+  line-height: 1;
+}
+
+.timeline-summary-item > small {
+  min-width: 0;
+  overflow: hidden;
+  color: hsl(var(--nui-subtle-foreground));
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-summary-item.is-warning > strong {
+  color: hsl(var(--nui-warning));
+}
+
+.timeline-summary-item.is-danger > strong {
+  color: hsl(var(--nui-destructive));
+}
+
+.timeline-summary-attention {
+  display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 4px 8px 4px 10px;
+  background: hsl(var(--nui-warning) / .1);
+  color: color-mix(in srgb, hsl(var(--nui-warning)) 75%, var(--course-ink));
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.timeline-summary-attention.is-clear {
+  background: transparent;
+  color: hsl(var(--nui-muted-foreground));
+  font-weight: 500;
+}
+
+.timeline-summary-attention > svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+.timeline-summary-attention > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.timeline-summary-attention > button {
+  margin-left: auto;
+  min-height: 28px;
+  height: 28px;
+}
+
+.timeline-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 0;
+}
+
+.timeline-date-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.timeline-inline-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.timeline-inline-field > span {
+  flex: none;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.timeline-inline-field input,
+.timeline-inline-field .native-select {
+  min-height: 32px;
+  height: 32px;
+}
+
+.timeline-inline-field input[type='date'] {
+  width: 148px;
+}
+
+.timeline-inline-field .native-select {
+  min-width: 140px;
+}
+
+.timeline-view-toggle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 2px;
+  background: hsl(var(--nui-background));
+}
+
+.timeline-view-toggle > button {
+  min-height: 28px;
+  height: 28px;
+  gap: 4px;
+  padding-inline: 8px;
+}
+
+.timeline-view-toggle > button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.timeline-zoom-controls {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 2px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 2px;
+  background: hsl(var(--nui-background));
+}
+
+.timeline-zoom-controls > button {
+  min-height: 28px;
+  height: 28px;
+}
+
+.timeline-zoom-controls > button svg {
+  width: 13px;
+  height: 13px;
+}
+
+.timeline-zoom-label {
+  display: inline-flex;
+  min-width: 48px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  padding: 0 6px;
+  background: transparent;
+  color: hsl(var(--nui-foreground));
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.timeline-zoom-label:hover {
+  color: hsl(var(--nui-primary));
+}
+
+.timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.timeline-panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timeline-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.timeline-legend-item::before {
+  content: '';
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+}
+
+.timeline-legend-item.coverage-assigned::before {
+  background: color-mix(in srgb, var(--course-turf) 78%, white);
+  border-color: var(--course-turf-dark);
+}
+
+.timeline-legend-item.coverage-second-round::before {
+  background: color-mix(in srgb, var(--course-turf) 32%, white);
+  border-color: var(--course-turf-dark);
+  box-shadow: inset 4px 0 var(--course-turf-dark);
+}
+
+.timeline-legend-item.coverage-unassigned::before {
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      color-mix(in srgb, var(--course-sand) 55%, white),
+      color-mix(in srgb, var(--course-sand) 55%, white) 3px,
+      color-mix(in srgb, var(--course-sand) 28%, white) 3px,
+      color-mix(in srgb, var(--course-sand) 28%, white) 6px
+    );
+  border-color: var(--course-sand);
+}
+
+.timeline-legend-item.coverage-self::before {
+  background: hsl(var(--nui-muted));
+  border-color: hsl(var(--nui-border));
+}
+
+.timeline-legend-item.coverage-conflict::before {
+  background: color-mix(in srgb, var(--course-danger) 18%, white);
+  border-color: var(--course-danger);
+}
+
+.timeline-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.timeline-tile-board {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.timeline-tile-panel {
+  min-width: 0;
+}
+
+.timeline-tile-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.timeline-tile-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 2px;
+}
+
+.timeline-tile-section-head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.timeline-tile-section-head span {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.timeline-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 8px;
+}
+
+.timeline-tile {
+  display: grid;
+  gap: 4px;
+  min-height: 104px;
+  align-content: start;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 10px;
+  background: hsl(var(--nui-background));
+  color: var(--course-ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.dark .timeline-tile {
+  color: hsl(var(--nui-foreground));
+}
+
+.timeline-tile:hover,
+.timeline-tile:focus-visible {
+  border-color: hsl(var(--nui-primary));
+  box-shadow: 0 6px 16px rgb(0 0 0 / 8%);
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.timeline-tile.is-selected {
+  border-color: hsl(var(--nui-primary));
+  box-shadow: 0 0 0 2px hsl(var(--nui-primary) / 28%);
+}
+
+.timeline-tile-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.timeline-tile-top time {
+  font-family: var(--nui-font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+.timeline-tile strong {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.timeline-tile small,
+.timeline-tile em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-tile small {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+}
+
+.timeline-tile em {
+  margin-top: 2px;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.timeline-tile-assigned {
+  border-left: 3px solid var(--course-turf);
+}
+
+.timeline-tile-unassigned {
+  border-left: 3px solid var(--course-sand);
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      hsl(var(--nui-background)),
+      hsl(var(--nui-background)) 6px,
+      color-mix(in srgb, var(--course-sand) 10%, hsl(var(--nui-background))) 6px,
+      color-mix(in srgb, var(--course-sand) 10%, hsl(var(--nui-background))) 12px
+    );
+}
+
+.timeline-tile-partial {
+  border-left: 3px solid color-mix(in srgb, var(--course-turf) 55%, white);
+}
+
+.timeline-tile-not_required {
+  border-left: 3px solid hsl(var(--nui-border));
+}
+
+.timeline-tile.is-conflict {
+  border-color: var(--course-danger);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--course-danger) 28%, transparent);
+}
+
+.timeline-boards {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.timeline-boards > .timeline-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: visible;
+}
+
+.timeline-boards > .timeline-panel > .timeline-board {
+  flex: none;
+}
+
+.timeline-board.is-dense {
+  --timeline-row-height: 84px;
+  --timeline-block-height: 64px;
+}
+
+.timeline-board.is-dense .timeline-block {
+  padding: 8px 10px;
+}
+
+.timeline-board.is-dense .timeline-block strong {
+  font-size: 12px;
+}
+
+.timeline-board.is-dense .timeline-block small {
+  font-size: 11px;
+}
+
+.timeline-panel {
+  overflow: visible;
+}
+
+.timeline-panel .panel-header {
+  align-items: flex-start;
+  gap: 10px;
+  flex: none;
+}
+
+.timeline-panel .panel-header p {
+  overflow-wrap: anywhere;
+}
+
+.timeline-panel .panel-actions {
+  flex: none;
+  white-space: nowrap;
+}
+
+.timeline-board {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  overflow: visible;
+  touch-action: pan-x pan-y;
+}
+
+.timeline-board-scroll {
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-x: contain;
+}
+
+.timeline-board-head,
+.timeline-row {
+  display: grid;
+  grid-template-columns: var(--timeline-lane-width) var(--timeline-track-width);
+  width: calc(var(--timeline-lane-width) + var(--timeline-track-width));
+  gap: 0;
+  min-width: 0;
+}
+
+.timeline-board-head {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  height: 28px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--course-turf) 8%, hsl(var(--nui-background))) 0%,
+      hsl(var(--nui-background)) 100%
+    );
+}
+
+.timeline-board-head .timeline-lane-label {
+  z-index: 6;
+  min-height: 0;
+  height: 28px;
+  padding: 0 10px 0 4px;
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--course-turf) 8%, hsl(var(--nui-background))) 0%,
+      hsl(var(--nui-background)) 100%
+    );
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.timeline-lane-label {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  display: grid;
+  align-content: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: var(--timeline-row-height);
+  padding: 8px 12px 8px 4px;
+  border-right: 1px solid hsl(var(--nui-border));
+  background: hsl(var(--nui-background));
+  color: var(--course-ink);
+}
+
+.dark .timeline-lane-label {
+  color: hsl(var(--nui-foreground));
+}
+
+.timeline-lane-label strong,
+.timeline-lane-label small {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-lane-label strong {
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.timeline-lane-label small {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.timeline-track {
+  position: relative;
+  width: var(--timeline-track-width);
+  min-width: var(--timeline-track-width);
+  /* One sub-row per overlap level; --timeline-stack-count comes from the row. */
+  min-height: calc(
+    16px
+    + var(--timeline-stack-count, 1) * var(--timeline-block-height)
+    + (var(--timeline-stack-count, 1) - 1) * 6px
+  );
+  overflow: visible;
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--course-turf) 5%, transparent),
+      transparent 28%,
+      transparent 72%,
+      color-mix(in srgb, var(--course-sand) 6%, transparent)
+    );
+}
+
+.timeline-track-hours {
+  height: 28px;
+  min-height: 28px;
+  overflow: visible;
+  padding-inline: 2px;
+  background: transparent;
+}
+
+.timeline-hour {
+  position: absolute;
+  top: 50%;
+  translate: -50% -50%;
+  color: hsl(var(--nui-muted-foreground));
+  font-family: var(--nui-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.timeline-hour.is-minor {
+  font-size: 9px;
+  font-weight: 500;
+  opacity: 0.72;
+}
+
+.timeline-hour.is-major:first-child {
+  translate: 0 -50%;
+}
+
+.timeline-hour.is-major:last-child {
+  translate: -100% -50%;
+}
+
+.timeline-board-body {
+  display: grid;
+  align-content: start;
+}
+
+.timeline-row {
+  border-bottom: 1px solid hsl(var(--nui-border) / 70%);
+  animation: timeline-row-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--timeline-row-index, 0) * 45ms);
+}
+
+.timeline-gridlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* The course's tee interval, drawn as a ruler behind the blocks: a gap between
+   two groups becomes a number of open tee times you can count off the track. */
+.timeline-gridlines.has-tee-ticks {
+  /* Keyed off the foreground, not the border: the border token is nearly the
+     track's own colour in dark mode, which left the ruler invisible there. */
+  background-image: repeating-linear-gradient(
+    to right,
+    hsl(var(--nui-muted-foreground) / 22%) 0 1px,
+    transparent 1px var(--timeline-tee-step)
+  );
+  background-position-x: var(--timeline-tee-offset, 0px);
+}
+
+.timeline-gridlines > span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: hsl(var(--nui-border) / 55%);
+}
+
+.timeline-gridlines > span.is-minor {
+  background: hsl(var(--nui-border) / 30%);
+}
+
+.timeline-gridlines > span.is-major {
+  background: hsl(var(--nui-border) / 70%);
+}
+
+.timeline-now {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 3;
+  width: 2px;
+  background: var(--course-ink);
+  pointer-events: none;
+  animation: timeline-now-pulse 2.4s ease-in-out infinite;
+}
+
+.dark .timeline-now {
+  background: hsl(var(--nui-primary));
+}
+
+.timeline-now > span {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--course-ink);
+  color: white;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.dark .timeline-now > span {
+  background: hsl(var(--nui-primary));
+  color: hsl(var(--nui-primary-foreground, 0 0% 100%));
+}
+
+.timeline-block {
+  position: absolute;
+  top: calc(8px + var(--timeline-stack-index, 0) * (var(--timeline-block-height) + 6px));
+  height: var(--timeline-block-height);
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  min-width: 72px;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 8px;
+  color: var(--course-ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease;
+  animation: timeline-block-in 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.timeline-block:hover,
+.timeline-block:focus-visible {
+  z-index: 4;
+  transform: translateY(-1px) scale(1.01);
+  box-shadow: 0 8px 18px rgb(0 0 0 / 10%);
+  outline: none;
+}
+
+.timeline-block.is-selected {
+  z-index: 5;
+  box-shadow:
+    0 0 0 2px hsl(var(--nui-primary) / 35%),
+    0 10px 22px rgb(0 0 0 / 12%);
+}
+
+.timeline-block-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+  width: 100%;
+}
+
+.timeline-block strong,
+.timeline-block small,
+.timeline-block em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timeline-block strong {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.timeline-block small {
+  font-size: 10px;
+  line-height: 1.25;
+  opacity: 0.82;
+}
+
+.timeline-block em {
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 1.25;
+  opacity: 0.78;
+}
+
+.timeline-block.is-compact .timeline-block-copy {
+  gap: 0;
+}
+
+.timeline-block.is-compact small,
+.timeline-block.is-compact em {
+  display: none;
+}
+
+.timeline-block-caddie.timeline-coverage-assigned {
+  background: color-mix(in srgb, var(--course-turf) 72%, white);
+  border-color: color-mix(in srgb, var(--course-turf-dark) 70%, black);
+  color: white;
+}
+
+.timeline-block-caddie.timeline-coverage-unassigned {
+  background:
+    repeating-linear-gradient(
+      -45deg,
+      color-mix(in srgb, var(--course-sand) 62%, white),
+      color-mix(in srgb, var(--course-sand) 62%, white) 4px,
+      color-mix(in srgb, var(--course-sand) 38%, white) 4px,
+      color-mix(in srgb, var(--course-sand) 38%, white) 8px
+    );
+  border-color: var(--course-sand);
+}
+
+.timeline-block-caddie.timeline-coverage-partial {
+  background: color-mix(in srgb, var(--course-turf) 42%, white);
+  border-color: var(--course-turf);
+  border-style: dashed;
+}
+
+.timeline-block-self,
+.timeline-coverage-not_required {
+  background: hsl(var(--nui-muted));
+  border-color: hsl(var(--nui-border));
+  color: hsl(var(--nui-foreground));
+}
+
+.timeline-block-assignment {
+  background: color-mix(in srgb, var(--course-turf) 18%, hsl(var(--nui-background)));
+  border-color: color-mix(in srgb, var(--course-turf) 55%, hsl(var(--nui-border)));
+}
+
+/* The second round of a caddie's day. The same turf as any other assignment,
+   banded and deepened rather than recoloured: a second round is not a
+   different kind of work, it is the half of a two-round day the desk is
+   checking landed. Conflict is declared after this and still wins the block. */
+.timeline-block-assignment.is-second-round {
+  background: color-mix(in srgb, var(--course-turf) 32%, hsl(var(--nui-background)));
+  box-shadow: inset 4px 0 var(--course-turf-dark);
+}
+
+.timeline-block-assignment.is-conflict {
+  background: color-mix(in srgb, var(--course-danger) 14%, hsl(var(--nui-background)));
+  border-color: var(--course-danger);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--course-danger) 35%, transparent);
+}
+
+.timeline-coverage {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  border-radius: 4px;
+  padding: 0 7px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.timeline-coverage-assigned {
+  background: color-mix(in srgb, var(--course-turf) 16%, transparent);
+  color: var(--course-turf-dark);
+}
+
+.timeline-coverage-unassigned {
+  background: color-mix(in srgb, var(--course-sand) 22%, transparent);
+  color: #7a5a22;
+}
+
+.timeline-coverage-partial {
+  background: color-mix(in srgb, var(--course-turf) 10%, transparent);
+  color: var(--course-turf);
+}
+
+.timeline-coverage-not_required {
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.timeline-detail-card {
+  display: grid;
+  gap: 14px;
+}
+
+.timeline-detail-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.timeline-detail-list > div {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.timeline-detail-list dt {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.timeline-detail-list dd {
+  margin: 0;
+  font-size: 12px;
+}
+
+.timeline-detail-conflict {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timeline-detail-conflict svg {
+  width: 14px;
+  height: 14px;
+}
+
+.timeline-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@keyframes timeline-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes timeline-block-in {
+  from {
+    opacity: 0;
+    transform: scaleX(0.92);
+    transform-origin: left center;
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes timeline-now-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 1100px) {
+  .timeline-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .timeline-detail {
+    position: static;
+    max-height: none;
+  }
+
+  .timeline-legend {
+    margin-left: 0;
+  }
+
+  .timeline-summary {
+    flex-wrap: wrap;
+  }
+
+  .timeline-summary-item {
+    flex: 1 1 40%;
+  }
+
+  .timeline-summary-attention {
+    flex: 1 1 100%;
+    border-top: 1px solid hsl(var(--nui-border));
+    white-space: normal;
+  }
+}
+
+@media (max-width: 860px) {
+  .auth-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .auth-brand-panel {
+    min-height: 230px;
+    gap: 32px;
+    padding: 26px;
+  }
+
+  .auth-brand-copy h1 {
+    font-size: 31px;
+  }
+
+  .auth-brand-copy p {
+    display: none;
+  }
+
+  .auth-platforms {
+    display: none;
+  }
+
+  .auth-content-panel {
+    place-items: start center;
+    padding: 24px 18px;
+  }
+
+  .auth-card {
+    padding: 24px;
+  }
+
+  .auth-card-wide {
+    max-height: calc(100dvh - 48px);
+  }
+
+  .payment-shell {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 18px;
+  }
+
+  .payment-summary h1,
+  .payment-panel h1 {
+    font-size: 26px;
+  }
+}
+
+.download-page {
+  min-height: 100dvh;
+  padding: 64px 24px;
+  color: #f8fafc;
+  background:
+    radial-gradient(circle at 15% 10%, rgb(16 185 129 / 18%), transparent 34rem),
+    linear-gradient(145deg, #06131c, #0f172a 62%, #111827);
+}
+
+.download-shell {
+  width: min(980px, 100%);
+  margin: 0 auto;
+}
+
+.download-header {
+  max-width: 760px;
+  margin-bottom: 56px;
+}
+
+.download-header p {
+  margin: 0 0 12px;
+  color: #6ee7b7;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.24em;
+}
+
+.download-header h1 {
+  margin: 0;
+  font-size: clamp(2.2rem, 6vw, 4.8rem);
+  line-height: 1.04;
+  letter-spacing: -0.04em;
+}
+
+.download-header span,
+.download-mobile p {
+  display: block;
+  margin-top: 20px;
+  color: #cbd5e1;
+}
+
+.download-page h2 {
+  margin: 0 0 18px;
+  font-size: 1.35rem;
+}
+
+.download-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.download-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 14px;
+  padding: 24px;
+  color: inherit;
+  text-decoration: none;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 20px;
+  background: rgb(255 255 255 / 6%);
+  transition: 160ms ease;
+}
+
+.download-card:hover,
+.download-card:focus-visible {
+  border-color: rgb(110 231 183 / 70%);
+  background: rgb(255 255 255 / 10%);
+  transform: translateY(-2px);
+}
+
+.download-card svg {
+  grid-row: 1 / span 3;
+  color: #6ee7b7;
+}
+
+.download-card span {
+  color: #cbd5e1;
+  font-size: 0.9rem;
+}
+
+.download-card small {
+  color: #6ee7b7;
+  font-weight: 700;
+}
+
+.download-mobile {
+  margin-top: 36px;
+  padding: 24px;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 20px;
+  background: rgb(255 255 255 / 4%);
+}
+
+.download-mobile p {
+  margin-bottom: 0;
+}
+
+.download-release-link {
+  display: inline-block;
+  margin-top: 28px;
+  color: #cbd5e1;
+  text-underline-offset: 4px;
+}
+
+@media (max-width: 680px) {
+  .download-page {
+    padding: 40px 18px;
+  }
+
+  .download-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- Shift board ---------- */
+
+.shift-board-page {
+  --shift-board-name-width: 176px;
+  --shift-board-streak-width: 64px;
+  /* A calendar convention, kept deliberately quieter than the shift-state
+     colours: blue marks Saturday, red marks Sunday, and the day's actual
+     working/off state still does the heavier semantic work. */
+  --shift-saturday: 211 74% 54%;
+  --shift-sunday: 355 67% 55%;
+}
+
+.shift-board-month-picker {
+  width: min(100%, 300px);
+}
+
+.shift-board-toolbar [role='group'] .native-select:first-of-type {
+  width: 104px;
+  min-width: 104px;
+}
+
+.shift-board-toolbar [role='group'] .native-select:last-of-type {
+  width: 72px;
+  min-width: 72px;
+}
+
+.shift-board-tools {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.shift-board-navigation {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.shift-board-scroll {
+  position: relative;
+  max-height: clamp(320px, calc(100dvh - 260px), 720px);
+  overflow: auto;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  outline: none;
+  scrollbar-gutter: stable;
+}
+
+.shift-board-scroll:focus-visible {
+  box-shadow: 0 0 0 2px hsl(var(--nui-ring) / .35);
+}
+
+.shift-board {
+  border-collapse: collapse;
+  min-width: 100%;
+  width: max-content;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* A club is forty-odd caddies against a month. The cell is as tall as the
+   glyph and the course name it stacks, not as tall as a fingertip: at 44px a
+   screen held twelve of the roster, which is not enough of a month's shape to
+   see who is working every weekend. */
+.shift-board th,
+.shift-board td {
+  border: 1px solid hsl(var(--nui-border));
+  min-width: 28px;
+  height: 30px;
+  padding: 0 2px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.shift-board thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  height: 34px;
+  background: color-mix(
+    in srgb,
+    hsl(var(--nui-muted)) 50%,
+    hsl(var(--nui-background))
+  );
+  font-weight: 500;
+  color: hsl(var(--nui-muted-foreground));
+  padding: 2px;
+}
+
+.shift-board thead .shift-board-day {
+  display: block;
+  font-size: 12px;
+  line-height: 15px;
+  color: hsl(var(--nui-foreground));
+}
+
+.shift-board thead .shift-board-dow {
+  display: block;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.shift-board .shift-board-name {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  width: var(--shift-board-name-width);
+  min-width: var(--shift-board-name-width);
+  max-width: var(--shift-board-name-width);
+  background: hsl(var(--nui-background));
+  padding: 4px 10px;
+  text-align: left;
+  font-weight: 500;
+}
+
+.shift-board thead .shift-board-name {
+  z-index: 5;
+  background: hsl(var(--nui-muted));
+}
+
+.shift-board-profile {
+  display: grid;
+  align-items: start;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* One line per caddie, always. A long name wrapping made its row taller than
+   its neighbours, and a month read across forty rows of uneven height is
+   harder to follow than a name cut short — which the hover card spells out in
+   full anyway.
+   The cut is made on the name itself and nowhere above it: an `overflow:
+   hidden` on an ancestor of the hover card clips the card away with it. */
+.shift-board-profile-name {
+  min-width: 0;
+}
+
+.shift-board-profile-name .caddie-link-wrap,
+.shift-board-profile-name .caddie-link {
+  max-width: 100%;
+}
+
+.shift-board-profile-name .caddie-link-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The hovered name has to sit above the rows below it. Every sticky name cell
+   shares one z-index, so without this the card is painted over by whichever
+   row comes next in the table. */
+.shift-board tbody .shift-board-name:hover,
+.shift-board tbody .shift-board-name:focus-within {
+  z-index: 4;
+}
+
+/* The scroll region necessarily clips overflow. Near its lower edge the
+   profile card therefore opens upward, keeping the last caddies readable. */
+.shift-board tbody tr:nth-last-child(-n + 4) .caddie-preview {
+  top: auto;
+  bottom: calc(100% - 4px);
+}
+
+.shift-board-profile-status {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.shift-board .shift-board-streak {
+  position: sticky;
+  left: var(--shift-board-name-width);
+  z-index: 2;
+  width: var(--shift-board-streak-width);
+  min-width: var(--shift-board-streak-width);
+  max-width: var(--shift-board-streak-width);
+  padding: 4px 6px;
+  background: hsl(var(--nui-background));
+  font-variant-numeric: tabular-nums;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.shift-board thead .shift-board-streak {
+  z-index: 4;
+  background: hsl(var(--nui-muted));
+}
+
+.shift-board .shift-board-streak-warning {
+  color: hsl(var(--nui-destructive));
+  font-weight: 600;
+}
+
+.shift-board td.shift-board-saturday,
+.shift-board td.shift-board-sunday {
+  /* An image layer tints whatever state colour the cell already owns. */
+  background-image: linear-gradient(
+    hsl(var(--shift-day-tint) / .09),
+    hsl(var(--shift-day-tint) / .09)
+  );
+}
+
+.shift-board .shift-board-saturday {
+  --shift-day-tint: var(--shift-saturday);
+}
+
+.shift-board .shift-board-sunday {
+  --shift-day-tint: var(--shift-sunday);
+}
+
+.shift-board thead th.shift-board-saturday,
+.shift-board thead th.shift-board-sunday {
+  /* Mix two opaque colours instead of laying a translucent weekend tint over
+     whatever happens to be behind the sticky header. */
+  background-color: color-mix(
+    in srgb,
+    hsl(var(--shift-day-tint)) 14%,
+    hsl(var(--nui-background))
+  );
+  color: hsl(var(--shift-day-tint));
+}
+
+.shift-board thead th.shift-board-saturday .shift-board-day,
+.shift-board thead th.shift-board-sunday .shift-board-day {
+  color: hsl(var(--shift-day-tint));
+}
+
+.shift-board td[data-kind='assigned'],
+.shift-board td[data-kind='available'] { background: hsl(var(--nui-success) / .14); }
+.shift-board td[data-kind='off'] { background: hsl(var(--nui-muted) / .8); color: hsl(var(--nui-muted-foreground)); }
+.shift-board td[data-kind='morning'],
+.shift-board td[data-kind='afternoon'],
+.shift-board td[data-kind='light'] { background: hsl(var(--nui-warning) / .14); }
+.shift-board td[data-kind='unknown'] { background: hsl(var(--nui-warning) / .2); }
+.shift-board td[data-long-streak] {
+  background: hsl(var(--nui-destructive) / .16);
+  box-shadow: inset 0 -2px 0 hsl(var(--nui-destructive));
+}
+
+/* Employment has stopped, so the whole line recedes instead of adding a
+   second visible label that makes this one row taller than every neighbour. */
+.shift-board tbody tr:is(
+  [data-employment-status='inactive'],
+  [data-employment-status='suspended']
+) > th,
+.shift-board tbody tr:is(
+  [data-employment-status='inactive'],
+  [data-employment-status='suspended']
+) > td {
+  background-color: hsl(var(--nui-muted) / .78);
+  background-image: none;
+  color: hsl(var(--nui-muted-foreground));
+  box-shadow: none;
+}
+
+.shift-board tbody tr:is(
+  [data-employment-status='inactive'],
+  [data-employment-status='suspended']
+) .caddie-link-initial {
+  background: hsl(var(--nui-muted-foreground) / .12);
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.shift-board-mark {
+  display: inline-flex;
+  width: 100%;
+  justify-content: center;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* Which weekdays the club keeps clear of rest days. */
+.shift-board-rest-rule {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+}
+
+.shift-board-weekday-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 4px;
+}
+
+/* Seven of these sit on one line, so the label is as tall as the box beside
+   it: a tap target here only pushed the rule below them off the sheet. */
+.shift-board-weekday-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.shift-board-weekday-toggle input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  accent-color: hsl(var(--nui-primary));
+}
+
+/* The rules sheet holds the same controls the toolbar does, so it keeps the
+   same heights — which are the app's, not a per-page pair of numbers. */
+.shift-rules-sheet .shift-board-deadline {
+  padding-bottom: 0;
+}
+
+.shift-board-rest-rule-hint {
+  margin-top: 4px;
+  max-width: 44ch;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* The whole cell opens the day for editing, so the hit area is the cell —
+   wide rather than tall, which is the direction that costs the board nothing. */
+.shift-board-cell-button {
+  display: flex;
+  width: 100%;
+  min-height: 26px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.shift-board-cell-button:focus-visible {
+  outline: 2px solid hsl(var(--nui-ring));
+  outline-offset: -2px;
+}
+
+/* A border rather than a shadow, so a pinned day inside a long run of working
+   days still shows the run's own warning underline. */
+.shift-board td[data-pinned] { border-left: 3px solid hsl(var(--nui-primary)); }
+
+/* A day the proposed month would change. An outline rather than a background,
+   so the day still reads as whatever state it is being changed to. */
+.shift-board td[data-draft-change] {
+  outline: 2px dashed hsl(var(--nui-primary) / 70%);
+  outline-offset: -2px;
+}
+
+/* Nothing is written while a plan is on screen, so the cells do not open. */
+.shift-board-cell-button:disabled {
+  cursor: default;
+}
+
+.shift-draft-actions {
+  margin-top: 8px;
+}
+
+.shift-board-legend {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  font-size: 11px;
+  line-height: 18px;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.shift-board-legend i {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 3px;
+  vertical-align: -3px;
+}
+
+.shift-board-legend i[data-kind='assigned'],
+.shift-board-legend i[data-kind='available'] { background: hsl(var(--nui-success) / .2); }
+.shift-board-legend i[data-kind='off'] { background: hsl(var(--nui-muted)); }
+.shift-board-legend i[data-kind='morning'],
+.shift-board-legend i[data-kind='afternoon'],
+.shift-board-legend i[data-kind='light'] { background: hsl(var(--nui-warning) / .2); }
+.shift-board-legend i[data-kind='unknown'] { background: hsl(var(--nui-warning) / .3); }
+.shift-board-legend i[data-long-streak] { background: hsl(var(--nui-destructive) / .25); }
+.shift-board-legend i[data-pinned] { border-left: 3px solid hsl(var(--nui-primary)); }
+.shift-board-legend i[data-draft-change] { border: 2px dashed hsl(var(--nui-primary) / 70%); }
+
+/* The interactive board is clipped and sticky by design. Printing uses a
+   separate, non-interactive table so every day is present even when the
+   operator had only one week scrolled into view. */
+.shift-board-print {
+  display: none;
+}
+
+/* A monthly proposal needs the whole viewport: 31 days across and the roster
+   down. The dialog still keeps its header and decision footer fixed while the
+   summary and board use the centre as their scroll region. */
+.shift-board-preview-dialog {
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100dvh !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform: none !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+}
+
+.shift-board-preview-dialog-body {
+  overscroll-behavior: contain;
+}
+
+.shift-board-preview-dialog .shift-board-scroll {
+  max-height: calc(100dvh - 180px);
+}
+
+@page shift-board {
+  size: A3 landscape;
+  margin: 8mm;
+}
+
+@media print {
+  /* The page name has to start at the root, not at the table.
+     A named page begins a new page box wherever the name changes, so declaring
+     it only on `.shift-board-print` put the default page first — and every
+     other child of body is hidden, so that page came out blank. One sheet of
+     nothing, every time, ahead of the board.
+     Naming the page on the element that owns the whole printed document means
+     there is no change to break on. */
+  html:has(> body > .shift-board-print),
+  body:has(> .shift-board-print) {
+    page: shift-board;
+  }
+
+  body:has(> .shift-board-print) {
+    background: #fff !important;
+  }
+
+  body:has(> .shift-board-print) > :not(.shift-board-print) {
+    display: none !important;
+  }
+
+  .shift-board-print {
+    display: block;
+    width: 100%;
+    color: #202124;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 7.5pt;
+    line-height: 1.15;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .shift-board-print-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 2.5mm;
+    border-bottom: .35mm solid #356d5a;
+    padding-bottom: 1.5mm;
+  }
+
+  .shift-board-print-header h1,
+  .shift-board-print-header p {
+    margin: 0;
+  }
+
+  .shift-board-print-header h1 {
+    font-size: 14pt;
+    line-height: 1.2;
+  }
+
+  .shift-board-print-brand {
+    color: #356d5a;
+    font-size: 7pt;
+    font-weight: 700;
+    letter-spacing: .08em;
+  }
+
+  .shift-board-print-header > p {
+    color: #666;
+    font-size: 7pt;
+  }
+
+  .shift-board-print-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.2mm 3mm;
+    margin-bottom: 2mm;
+    color: #555;
+    font-size: 6.5pt;
+  }
+
+  .shift-board-print-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: .8mm;
+  }
+
+  .shift-board-print-legend i {
+    display: inline-block;
+    width: 3mm;
+    height: 3mm;
+    border: .2mm solid #c7ccd1;
+    border-radius: .5mm;
+  }
+
+  .shift-board-print table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+
+  .shift-board-print th,
+  .shift-board-print td {
+    height: 5.4mm;
+    border: .2mm solid #c7ccd1;
+    padding: 0 .5mm;
+    overflow: hidden;
+    text-align: center;
+    vertical-align: middle;
+  }
+
+  .shift-board-print thead th {
+    height: 7.5mm;
+    background: #f1f3f4;
+    font-weight: 600;
+  }
+
+  .shift-board-print thead th span,
+  .shift-board-print thead th small,
+  .shift-board-print td span {
+    display: block;
+    line-height: 1.05;
+  }
+
+  .shift-board-print thead th small {
+    color: #666;
+    font-size: 5.5pt;
+  }
+
+  .shift-board-print .shift-board-print-name {
+    width: 38mm;
+    padding: 0 1.5mm;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .shift-board-print .shift-board-print-streak {
+    width: 11mm;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .shift-board-print td[data-kind='assigned'],
+  .shift-board-print td[data-kind='available'],
+  .shift-board-print-legend i[data-kind='assigned'],
+  .shift-board-print-legend i[data-kind='available'] {
+    background: #e0f0e7;
+  }
+
+  .shift-board-print td[data-kind='off'],
+  .shift-board-print-legend i[data-kind='off'] {
+    background: #edf0f2;
+    color: #666;
+  }
+
+  .shift-board-print td[data-kind='morning'],
+  .shift-board-print td[data-kind='afternoon'],
+  .shift-board-print td[data-kind='light'],
+  .shift-board-print-legend i[data-kind='morning'],
+  .shift-board-print-legend i[data-kind='afternoon'],
+  .shift-board-print-legend i[data-kind='light'] {
+    background: #fff0d9;
+  }
+
+  .shift-board-print td[data-kind='unknown'],
+  .shift-board-print-legend i[data-kind='unknown'] {
+    background: #ffe5bf;
+  }
+
+  .shift-board-print td.shift-board-saturday,
+  .shift-board-print th.shift-board-saturday {
+    background-image: linear-gradient(rgb(51 135 225 / 10%), rgb(51 135 225 / 10%));
+  }
+
+  .shift-board-print td.shift-board-sunday,
+  .shift-board-print th.shift-board-sunday {
+    background-image: linear-gradient(rgb(217 63 76 / 10%), rgb(217 63 76 / 10%));
+  }
+
+  .shift-board-print th.shift-board-saturday {
+    color: #276fbf;
+  }
+
+  .shift-board-print th.shift-board-sunday {
+    color: #bd3341;
+  }
+
+  .shift-board-print td[data-long-streak],
+  .shift-board-print-legend i[data-long-streak] {
+    box-shadow: inset 0 -1mm 0 #d13f4d;
+  }
+
+  .shift-board-print td[data-pinned],
+  .shift-board-print-legend i[data-pinned] {
+    border-left: 1mm solid #356d5a;
+  }
+
+  .shift-board-print td[data-draft-change],
+  .shift-board-print-legend i[data-draft-change] {
+    outline: .6mm dashed #356d5a;
+    outline-offset: -.8mm;
+  }
+
+  .shift-board-print tr:is(
+    [data-employment-status='inactive'],
+    [data-employment-status='suspended']
+  ) > * {
+    background: #eceff1;
+    background-image: none;
+    color: #777;
+  }
+
+  .shift-board-print tr {
+    break-inside: avoid;
+  }
+}
+
+@media (max-width: 800px) {
+  .shift-board-page {
+    --shift-board-name-width: 152px;
+    --shift-board-streak-width: 60px;
+  }
+
+  .shift-board-tools {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .shift-board-navigation {
+    justify-content: flex-start;
+  }
+}
+
+/* Slots a plan carried before inventory moved to the course. Read-only, so it
+   reads as a list rather than as a table of fields. */
+.legacy-slot-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.legacy-slot-list > li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  border-bottom: 1px dashed hsl(var(--nui-border));
+  padding: 5px 2px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+}
+
+.legacy-slot-list > li:last-child { border-bottom: 0; }
+.legacy-slot-list strong { min-width: 4.5rem; color: hsl(var(--nui-foreground)); font-weight: 600; }
+
+/* What a band actually puts on sale; the two numbers beside it decide it, but
+   neither says it alone. */
+.slot-starts {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.sticky-submit .slot-diff-weekly { color: hsl(var(--nui-muted-foreground)); font-size: 12px; }
+
+/* ─── Start ledger ───────────────────────────────────────────────────────────
+ *
+ * The start desk's board: a table per course, a row per tee time. Rows exist
+ * whether or not anything is booked into them, so the grid itself has to read
+ * as a countable list of open slots rather than as a background behind blocks.
+ */
+
+.ledger-page {
+  --ledger-time-width: 76px;
+  --ledger-group-width: 190px;
+  --ledger-seat-width: 108px;
+  gap: 8px;
+  padding-top: 6px;
+  padding-bottom: 16px;
+}
+
+.ledger-chrome {
+  display: grid;
+  gap: 8px;
+  flex: none;
+}
+
+/* Board-only: the table takes the window, so a busy day can be read from
+ * across the desk. Fixed rather than a tall page — the surrounding app chrome
+ * is exactly what this mode is getting out of the way. */
+.ledger-page.is-board-only {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  padding: 8px 12px 12px;
+  background: hsl(var(--nui-background));
+}
+
+/* Sits over the sheet it guards rather than replacing it, so the desk can see
+ * the form it is about to lose while it decides. */
+.ledger-discard-guard {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  padding: 16px;
+  background: hsl(var(--nui-foreground) / 32%);
+  place-items: center;
+}
+
+.ledger-discard-guard-box {
+  display: grid;
+  width: min(360px, 100%);
+  padding: 16px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+  box-shadow: 0 16px 40px hsl(var(--nui-foreground) / 24%);
+  gap: 6px;
+}
+
+.ledger-discard-guard-box h2 {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ledger-discard-guard-box p {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 13px;
+}
+
+.ledger-discard-guard-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+  gap: 8px;
+}
+
+/* Right-click menu on a row. Fixed to the pointer, above the board. */
+.ledger-context-menu {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  min-width: 232px;
+  padding: 4px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-popover, var(--nui-background)));
+  box-shadow: 0 12px 32px hsl(var(--nui-foreground) / 18%);
+  gap: 1px;
+}
+
+.ledger-context-menu-head {
+  padding: 6px 10px 4px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ledger-context-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  border-radius: var(--nui-radius-sm);
+  padding: 8px 10px;
+  background: none;
+  color: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-context-menu button:hover,
+.ledger-context-menu button:focus-visible {
+  outline: none;
+  background: hsl(var(--nui-muted) / .7);
+}
+
+.ledger-context-menu button.is-danger {
+  color: hsl(var(--nui-danger));
+}
+
+.ledger-context-menu button svg {
+  width: 15px;
+  height: 15px;
+  flex: none;
+}
+
+/* The columns take the whole window, not the 68vh a page-embedded board is
+ * capped at: the point of this mode is to see more rows at once. */
+.ledger-page.is-board-only .ledger-board {
+  align-items: stretch;
+  min-height: 100%;
+}
+
+.ledger-page.is-board-only .ledger-column-scroll {
+  max-height: none;
+  flex: 1;
+}
+
+.ledger-board-only-bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ledger-summary {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .35);
+}
+
+.ledger-summary-item {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  align-items: baseline;
+  gap: 6px;
+  border-right: 1px solid hsl(var(--nui-border));
+  padding: 5px 10px;
+}
+
+.ledger-summary-item:last-child {
+  border-right: none;
+}
+
+.ledger-summary-item > span {
+  flex: none;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.ledger-summary-item > strong {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+.ledger-summary-item > small {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.ledger-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ledger-date-controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ledger-inline-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ledger-inline-field > span {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.ledger-inline-field input[type='date'],
+.ledger-inline-field .native-select {
+  height: 28px;
+  font-size: 12px;
+}
+
+.ledger-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.ledger-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.ledger-legend-item::before {
+  content: '';
+  width: 10px;
+  height: 10px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 3px;
+  background: hsl(var(--nui-background));
+}
+
+.ledger-legend-item.tone-partial::before {
+  background: color-mix(in srgb, hsl(var(--nui-primary)) 22%, hsl(var(--nui-background)));
+}
+
+.ledger-legend-item.tone-full::before {
+  background: hsl(var(--nui-muted));
+}
+
+.ledger-legend-item.tone-closed::before {
+  background: repeating-linear-gradient(
+    -45deg,
+    hsl(var(--nui-muted-foreground) / 35%) 0 3px,
+    transparent 3px 6px
+  );
+}
+
+.ledger-legend-item.tone-special::before {
+  background: color-mix(in srgb, hsl(var(--nui-warning)) 35%, hsl(var(--nui-background)));
+}
+
+.ledger-mark-hint {
+  margin: 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+/* The mark controls live in a sheet; the board behind it must not move when a
+ * row is selected. */
+.ledger-mark-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 4px 2px 2px;
+}
+
+.ledger-mark-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ledger-mark-reservation {
+  display: grid;
+  gap: 8px;
+}
+
+/* The board scrolls sideways as a whole so course columns stay side by side,
+ * the way they sit on the paper sheet. */
+.ledger-workspace {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+}
+
+.ledger-board {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: min-content;
+}
+
+.ledger-column {
+  display: flex;
+  /* Never shrink: columns keep the width their seat count needs and the board
+   * scrolls sideways, the way the paper sheet is read. Letting flex squeeze
+   * them collapses every cell to a few characters. */
+  flex: none;
+  flex-direction: column;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+  overflow: hidden;
+}
+
+.ledger-column-head {
+  display: grid;
+  gap: 2px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 8px 10px;
+  background: hsl(var(--nui-muted) / .4);
+}
+
+.ledger-column-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ledger-column-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+/* Reads as the heading it is; the underline arrives on hover and focus so a
+   board of four columns is not four blue links across the top. */
+.ledger-column-name {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-column-name:hover,
+.ledger-column-name:focus-visible {
+  text-decoration: underline;
+}
+
+.ledger-column-move {
+  display: flex;
+  flex: none;
+  gap: 2px;
+}
+
+.ledger-column-move > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-sm, 4px);
+  padding: 0;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-muted-foreground));
+  cursor: pointer;
+}
+
+.ledger-column-move > button:hover:not(:disabled) {
+  border-color: hsl(var(--nui-primary));
+  color: hsl(var(--nui-primary));
+}
+
+/* Kept visible rather than hidden at the ends: a control that disappears makes
+ * the header jump as columns are rearranged. */
+.ledger-column-move > button:disabled {
+  opacity: .35;
+  cursor: default;
+}
+
+.ledger-column-move svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ledger-column-totals {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ledger-column-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.ledger-column-caddie-anomalies {
+  margin: 0;
+  color: hsl(var(--nui-warning-foreground, var(--nui-muted-foreground)));
+  font-size: 11px;
+  line-height: 15px;
+}
+
+/* Sold past what the day's caddies can take. The rest of the meta line is grey
+ * on purpose — this is the one item there that the desk has to act on. */
+.ledger-column-oversold {
+  color: hsl(var(--nui-destructive));
+  font-weight: 600;
+}
+
+.ledger-column-derived {
+  margin: 0;
+  color: hsl(var(--nui-warning-foreground, var(--nui-muted-foreground)));
+  font-size: 11px;
+}
+
+.ledger-column-scroll {
+  max-height: 68vh;
+  overflow: auto;
+}
+
+.ledger-table {
+  /* Fixed, so the declared column widths hold. Left to auto, the seat columns
+   * squeeze the group column until "山田会 1組" clamps to "山田会 …" — and the
+   * group number is the half the desk searches by. */
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.ledger-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 5px 8px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.ledger-col-time { width: var(--ledger-time-width); }
+.ledger-col-group { width: var(--ledger-group-width); }
+.ledger-col-seat { width: var(--ledger-seat-width); }
+
+.ledger-table td,
+.ledger-table tbody th {
+  border-bottom: 1px solid hsl(var(--nui-border) / 60%);
+  border-right: 1px solid hsl(var(--nui-border) / 40%);
+  padding: 0;
+  vertical-align: top;
+}
+
+.ledger-table td:last-child {
+  border-right: none;
+}
+
+/* The time column stays put while the seat columns scroll under it: the row a
+ * name belongs to is the whole point of the board. */
+.ledger-cell-time {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: hsl(var(--nui-background));
+  font-weight: 400;
+  text-align: left;
+}
+
+.ledger-time-button {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  border: none;
+  padding: 5px 8px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-time-button time {
+  font-family: var(--nui-font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+}
+
+.ledger-time-button:hover,
+.ledger-time-button:focus-visible {
+  outline: none;
+  background: hsl(var(--nui-muted) / .6);
+}
+
+.ledger-slot-status {
+  display: block;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  line-height: 13px;
+}
+
+.ledger-now-flag {
+  display: block;
+  padding: 0 8px 4px;
+  color: hsl(var(--nui-primary));
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.ledger-row.is-now > .ledger-cell-time {
+  box-shadow: inset 2px 0 0 hsl(var(--nui-primary));
+}
+
+.ledger-row.is-selected > .ledger-cell-time,
+.ledger-row.is-selected > td {
+  background: hsl(var(--nui-primary) / 12%);
+}
+
+/* A booked row opens its group from anywhere on it, so the whole row shows the
+ * affordance — not just the one cell that happens to hold a button. The time
+ * column keeps its own pointer and its own action. */
+.ledger-row.is-booked > td {
+  cursor: pointer;
+}
+
+.ledger-row.is-booked:hover > td {
+  background: hsl(var(--nui-muted) / .6);
+}
+
+/* Tones. An open row is plain background so a full board reads as busy and an
+ * empty one reads as empty, without any row shouting. */
+.ledger-row-partial > td,
+.ledger-row-partial > .ledger-cell-time {
+  background: color-mix(in srgb, hsl(var(--nui-primary)) 6%, hsl(var(--nui-background)));
+}
+
+.ledger-row-full > td,
+.ledger-row-full > .ledger-cell-time {
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.ledger-row-special > td,
+.ledger-row-special > .ledger-cell-time {
+  background: color-mix(in srgb, hsl(var(--nui-warning)) 14%, hsl(var(--nui-background)));
+}
+
+.ledger-row-closed > td,
+.ledger-row-closed > .ledger-cell-time,
+.ledger-row-retired > td,
+.ledger-row-retired > .ledger-cell-time {
+  background: repeating-linear-gradient(
+    -45deg,
+    hsl(var(--nui-muted-foreground) / 12%) 0 4px,
+    transparent 4px 8px
+  );
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.ledger-cell-empty {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+/* No min-height: the row is as tall as the time beside it and no taller. A
+   44px touch target here pushed every empty row past the time column's own
+   height, and a day's worth of them turned a board that showed the morning at a
+   glance into one the desk has to scroll. The whole cell is the target, which
+   is the full width of the column — narrow only in the one direction that costs
+   nothing to hit. */
+/* The stand-in board reuses the real column and table classes so the rows sit
+ * where they will sit; only the cell padding has to be restated, because the
+ * real one comes from the button inside the cell. */
+.ledger-skeleton-cell {
+  display: block;
+  padding: 5px 8px;
+}
+
+.ledger-board.is-skeleton .ledger-column {
+  /* No column can be reordered or opened yet, so nothing here invites a click. */
+  pointer-events: none;
+}
+
+.ledger-empty-button {
+  display: block;
+  width: 100%;
+  border: none;
+  padding: 5px 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Reads at the same size as the remaining count it stands in for, so a column
+   of blocked rows lines up with a column of open ones. */
+.ledger-reservation-block-label {
+  display: block;
+}
+
+.ledger-empty-button:hover,
+.ledger-empty-button:focus-visible {
+  outline: none;
+  background: hsl(var(--nui-muted) / .6);
+}
+
+.ledger-group-button {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  border: none;
+  padding: 5px 8px;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-group-button:hover,
+.ledger-group-button:focus-visible {
+  outline: none;
+  background: hsl(var(--nui-muted) / .6);
+}
+
+.ledger-cell-group.is-selected {
+  box-shadow: inset 0 0 0 2px hsl(var(--nui-primary) / 45%);
+}
+
+/* A caddie-attached round with nobody covering it, on a day the shifts are
+ * already confirmed (SCC-27). `.is-selected` uses `box-shadow`, so this uses
+ * `outline` instead — the same property would have one declaration win over
+ * the other and hide whichever state came second, but the two properties
+ * paint independently and both stay visible on a selected, unassigned row. */
+.ledger-cell-group.is-unassigned-caddie {
+  outline: 2px solid hsl(var(--nui-destructive) / 65%);
+  outline-offset: -2px;
+}
+
+/* `.ledger-group-text small` below sets every <small> in the group cell to
+ * the muted colour, and its element+class selector otherwise outranks a
+ * bare `.ledger-unassigned-badge` regardless of source order — scoped under
+ * `.ledger-group-text` too so this one wins on specificity, not luck. */
+.ledger-group-text .ledger-unassigned-badge {
+  display: block;
+  color: hsl(var(--nui-destructive));
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.ledger-group-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+/* A competition name plus its group number rarely fits on one line, and the
+ * number is the half a desk searches by — so it wraps rather than ellipsising
+ * the number away. */
+.ledger-group-text strong {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 15px;
+}
+
+.ledger-group-text small {
+  overflow: hidden;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* C / S, the same one-letter mark the paper ledger puts at the head of a row. */
+.ledger-play-type {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.ledger-play-type-caddie {
+  background: color-mix(in srgb, hsl(var(--nui-primary)) 22%, hsl(var(--nui-background)));
+  color: hsl(var(--nui-primary));
+}
+
+.ledger-play-type-self {
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.ledger-cell-seat {
+  padding: 5px 8px;
+}
+
+.ledger-seat-tag {
+  display: block;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+  line-height: 12px;
+}
+
+.ledger-seat-name {
+  display: block;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* An unfilled seat and a seat outside the group must not look the same: the
+ * first is work to do, the second is nothing at all. */
+.ledger-cell-seat.is-unnamed {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.ledger-cell-seat.is-outside {
+  background: hsl(var(--nui-muted) / .25);
+}
+
+.ledger-party-editor {
+  display: grid;
+  gap: 14px;
+  padding: 0 2px 12px;
+}
+
+/* The plan is never optional, so it sits open on the sheet as a list. A box
+ * rather than a bare stack: the desk needs to see where the choices end, and
+ * the list scrolls once a club sells more plans than fit. */
+.ledger-plan-picker {
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ledger-plan-picker > legend {
+  margin-bottom: 5px;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ledger-plan-list {
+  display: grid;
+  /* Half a row, so a clipped list cannot be mistaken for a complete one. */
+  max-height: 157px;
+  overflow-y: auto;
+  border: 1px solid hsl(var(--nui-border-strong));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+  /* Fades the bottom edge while plans remain below it, and lifts the fade on
+   * the last one. A scroll timeline is inactive when nothing overflows, so a
+   * club with three plans keeps its third row at full strength. */
+  animation: ledger-plan-more linear both;
+  animation-timeline: scroll(self block);
+}
+
+@keyframes ledger-plan-more {
+  from {
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 26px), transparent);
+  }
+
+  to {
+    mask-image: linear-gradient(to bottom, #000 100%, transparent);
+  }
+}
+
+/* macOS hides its overlay scrollbar until you already scroll, which is no use
+ * for saying the list can be scrolled. Styling it at all opts this one list
+ * out of overlay, so the bar stays put whenever there is more to reach. */
+.ledger-plan-list::-webkit-scrollbar {
+  width: 10px;
+}
+
+.ledger-plan-list::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: hsl(var(--nui-muted-foreground) / .45);
+  background-clip: content-box;
+}
+
+.ledger-plan-list::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--nui-muted-foreground) / .7);
+  background-clip: content-box;
+}
+
+.ledger-plan-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.ledger-plan-option + .ledger-plan-option {
+  border-top: 1px solid hsl(var(--nui-border));
+}
+
+/* The name takes the slack so the badge stays on the right edge, where the eye
+ * can run down the column and pick out the caddie rounds in one pass. */
+.ledger-plan-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ledger-plan-badge {
+  flex: none;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.ledger-plan-option:hover {
+  background: hsl(var(--nui-muted) / .6);
+}
+
+.ledger-plan-option.is-selected {
+  background: hsl(var(--nui-primary) / 12%);
+  font-weight: 600;
+}
+
+/* The radio itself is what takes focus, so the row has to show it. */
+.ledger-plan-option:focus-within {
+  outline: 2px solid hsl(var(--nui-primary) / 45%);
+  outline-offset: -2px;
+}
+
+/* The check-in list. A row is a name and a tick, so it is a plain list rather
+ * than the two-line grid the editable player rows need — the desk reads down
+ * it to see who is still to arrive. */
+.ledger-party-checkins {
+  display: grid;
+  gap: 8px;
+}
+
+.ledger-party-checkins h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ledger-checkin-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ledger-checkin-row label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.ledger-checkin-done {
+  display: flex;
+  align-items: center;
+  /* Lines up with the checkboxes above it so the column of names stays
+   * straight as a group is checked in one seat at a time. */
+  padding-left: 21px;
+}
+
+.ledger-party-players {
+  display: grid;
+  gap: 12px;
+}
+
+.ledger-party-players h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* One player takes two lines, not four squeezed columns. In a 512px sheet a
+ * column narrow enough to fit four of them wraps its own label — "プレイヤー
+ * 区分" over two lines — and a wrapped label reads as a broken form rather
+ * than a tight one. */
+.ledger-party-player {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-areas:
+    'name name remove'
+    'tag  member remove';
+  /* Top-aligned so "会員番号" keeps its label level with "プレイヤー区分".
+   * Bottom-aligning drops it a line whenever the tag turns into a free-text
+   * field and grows a second input. */
+  align-items: start;
+  gap: 10px;
+  border-top: 1px dashed hsl(var(--nui-border));
+  padding-top: 12px;
+}
+
+/* The first player opens the section; a rule above it would read as a divider
+ * from the heading. */
+.ledger-party-player:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.ledger-party-player--new {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    'name name'
+    'tag  member';
+}
+
+.ledger-party-field-name { grid-area: name; }
+.ledger-party-field-tag { grid-area: tag; }
+.ledger-party-field-member { grid-area: member; }
+
+.ledger-party-remove {
+  grid-area: remove;
+  align-self: end;
+}
+
+.ledger-player-tag-input {
+  display: grid;
+  gap: 6px;
+}
+
+/* Picking who a name belongs to in the customer ledger. The candidates sit in
+ * the flow rather than in a floating menu: the sheet is already a scrolling
+ * form, and an overlay would be clipped by it on the row that needs it most —
+ * the last player in the group. */
+/* Positioned so the candidate list can hang off it without taking part in the
+ * layout. The list used to sit in the flow and push the plan select and the
+ * whole player roster down the sheet every time the desk typed a name. */
+.ledger-customer-picker {
+  display: grid;
+  gap: 6px;
+  position: relative;
+}
+
+.ledger-customer-picker__linked {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.ledger-customer-picker__badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: hsl(var(--nui-muted) / .6);
+}
+
+.ledger-customer-picker__candidates {
+  /* Floats over what follows: an autocomplete that reflows the form moves the
+   * next field out from under the cursor mid-typing. */
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  margin-top: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px hsl(0 0% 0% / .16);
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 6px;
+  background: hsl(var(--nui-background));
+}
+
+.ledger-customer-picker__candidate {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ledger-customer-picker__candidate:hover {
+  background: hsl(var(--nui-muted) / .5);
+}
+
+.ledger-customer-picker__candidate-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Whatever tells two people with the same name apart. Without it the list is
+ * a column of identical rows and the desk picks the first one. */
+.ledger-customer-picker__candidate-detail {
+  font-size: 11px;
+  opacity: .75;
+}
+
+.ledger-customer-picker__note {
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 11px;
+  opacity: .75;
+}
+
+.ledger-party-players__ledger-note {
+  margin: 0;
+  font-size: 11px;
+  opacity: .75;
+}
+
+/* Member or visitor for the person on this row, beside the name it belongs to.
+ * Inline with the name rather than in a column of its own: the desk reads it
+ * while looking at the name, not while scanning a table. */
+.ledger-membership {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The badge holds a plan name the club invented, so it can be any length, and
+ * it sits in rows that are already tight. Without these it wraps one character
+ * per line and "正会員" reads as a column. */
+.ledger-membership > * {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.ledger-membership__loading {
+  font-size: 11px;
+  opacity: .7;
+}
+
+/* Asked once the booking sheet has closed and the booking is drawn on the
+ * board behind it. Fixed rather than scoped to the sheet: the sheet is gone by
+ * the time this appears, which is the point — the booking is finished, and
+ * this is an optional follow-up rather than a step it is waiting on. */
+.ledger-register-dialog {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  /* Sits low and leaves the board visible above it. The desk has just been
+   * told the booking is in; covering the row it landed on would undo that. */
+  place-items: end center;
+  padding: 24px;
+  /* Barely tinted: this dims nothing the desk still needs to read. */
+  background: hsl(var(--nui-background) / .35);
+  z-index: 20;
+}
+
+.ledger-register-dialog__panel {
+  display: grid;
+  gap: 12px;
+  width: min(420px, calc(100% - 32px));
+  padding: 20px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 8px;
+  background: hsl(var(--nui-card, var(--nui-background)));
+  box-shadow: 0 12px 32px hsl(0 0% 0% / .18);
+}
+
+.ledger-register-dialog__title {
+  margin: 0;
+  font-size: 16px;
+}
+
+.ledger-register-dialog__lead {
+  margin: 0;
+  font-size: 13px;
+  opacity: .8;
+}
+
+.ledger-register-dialog__names {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ledger-register-dialog__names label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.ledger-register-dialog__name {
+  font-weight: 600;
+}
+
+.ledger-register-dialog__role {
+  font-size: 11px;
+  opacity: .7;
+}
+
+.ledger-register-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Says what the rows below are, without taking the weight of a Notice — this
+   is the screen's normal state, not something that happened. */
+.customer-ledger-hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: .7;
+}
+
+.customer-ledger-detail {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  align-items: center;
+}
+
+.customer-ledger-detail dt {
+  font-size: 12px;
+  opacity: .7;
+}
+
+.customer-ledger-detail dd {
+  margin: 0;
+}
+
+/* Membership activity is a quiet audit feed, separate from the visit ledger.
+ * The event kind stays prominent while actor/source/target remain readable
+ * metadata, including a consent event whose target has no id. */
+.membership-activity-list {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid hsl(var(--nui-border));
+}
+
+.membership-activity-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid hsl(var(--nui-border));
+}
+
+.membership-activity-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  margin-top: 2px;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.membership-activity-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.membership-activity-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.membership-activity-heading strong {
+  overflow-wrap: anywhere;
+}
+
+.membership-activity-heading span {
+  overflow-wrap: anywhere;
+}
+
+.membership-activity-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 14px;
+  margin: 4px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.membership-activity-meta > div {
+  display: inline-flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.membership-activity-meta dt::after {
+  content: ':';
+}
+
+.membership-activity-meta dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.membership-activity-snapshots {
+  margin-top: 8px;
+  font-size: 12px;
+}
+
+.membership-activity-snapshots summary {
+  width: fit-content;
+  color: hsl(var(--nui-muted-foreground));
+  cursor: pointer;
+}
+
+.membership-activity-snapshots dl {
+  display: grid;
+  gap: 3px 10px;
+  margin: 6px 0 0;
+}
+
+.membership-activity-snapshots dl > div {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+}
+
+.membership-activity-snapshots dt {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.membership-activity-snapshots dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.membership-activity-load-more {
+  display: flex;
+  justify-content: center;
+  padding-top: 12px;
+}
+
+/* Visit history status. Colour carries the reading at a glance — a cancelled
+   round and a played one are scanned down a column, not read one by one — but
+   the word is always there, so nothing depends on the colour alone. */
+.visit-kind {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.visit-kind-visited {
+  font-weight: 600;
+}
+
+.visit-kind-upcoming {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.visit-kind-no-show {
+  color: hsl(var(--nui-destructive));
+  font-weight: 600;
+}
+
+.visit-kind-cancelled {
+  color: hsl(var(--nui-muted-foreground));
+  text-decoration: line-through;
+}
+
+.customer-ledger-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 720px) {
+  .customer-ledger-detail {
+    grid-template-columns: 1fr;
+    gap: 2px 0;
+  }
+
+  .customer-ledger-detail dd {
+    margin-bottom: 8px;
+  }
+}
+
+/* ── Registering from a scanned reception sheet ─────────────────────────────
+   Two columns because the work is comparison: the rows on the left, the sheet
+   they were read from on the right. Desk density throughout — this screen is
+   worked through during a morning rush, not tapped at. */
+
+.visually-hidden-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.reception-hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: .7;
+}
+
+/* Reception-field settings stay next to the sheet workflow. Keep the standard
+   rows compact, while custom definitions get a wrapped editor on narrow panes. */
+.reception-settings {
+  display: grid;
+  gap: 16px;
+}
+
+.reception-settings-section {
+  display: grid;
+  gap: 8px;
+}
+
+.reception-settings-section h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.reception-settings-hint,
+.reception-settings-empty {
+  margin: 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.reception-analysis-preview {
+  display: grid;
+  gap: 6px;
+  max-width: 360px;
+}
+
+.reception-analysis-preview img {
+  width: 100%;
+  max-height: 260px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  object-fit: contain;
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.reception-settings-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.reception-consent-candidates {
+  display: grid;
+  gap: 8px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 10px;
+  background: hsl(var(--nui-muted) / .2);
+}
+
+.reception-consent-candidate-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.reception-consent-candidate-list li {
+  display: grid;
+  gap: 2px;
+  padding-block: 4px;
+  border-bottom: 1px solid hsl(var(--nui-border) / .7);
+}
+
+.reception-consent-candidate-list li:last-child {
+  border-bottom: 0;
+}
+
+.reception-consent-candidate-list small,
+.reception-consent-candidate-list span {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.reception-settings-table-wrap {
+  overflow-x: auto;
+}
+
+.reception-settings-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 620px;
+}
+
+.reception-settings-table th,
+.reception-settings-table td {
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 7px 8px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.reception-settings-table th {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.reception-settings-table td:first-child {
+  min-width: 180px;
+}
+
+.reception-settings-table td > strong,
+.reception-settings-table td > small {
+  display: block;
+}
+
+.reception-settings-table td > small {
+  margin-top: 2px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 10px;
+}
+
+.reception-settings-table input[type='checkbox'],
+.reception-custom-field-check input[type='checkbox'] {
+  accent-color: hsl(var(--nui-primary));
+}
+
+.reception-settings-table .field input,
+.reception-custom-field input,
+.reception-custom-field select,
+.reception-custom-field textarea {
+  width: 100%;
+}
+
+.reception-custom-field-list {
+  display: grid;
+  gap: 8px;
+}
+
+.reception-custom-field {
+  display: grid;
+  gap: 8px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 10px;
+}
+
+.reception-custom-field-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(140px, 1.2fr) minmax(110px, .8fr) auto auto auto;
+  align-items: end;
+  gap: 8px 12px;
+}
+
+.reception-custom-field-check {
+  display: inline-flex;
+  min-height: var(--control-height);
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.reception-custom-field-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.reception-custom-field-actions button {
+  padding-inline: 6px;
+}
+
+.reception-custom-field-options {
+  max-width: 560px;
+}
+
+.reception-custom-field-options textarea {
+  min-height: 64px;
+}
+
+.reception-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+}
+
+/* The scan stays put while the rows scroll: a value checked against a sheet
+   that has scrolled away is a value checked against memory. */
+.reception-preview {
+  position: sticky;
+  top: 0;
+}
+
+.reception-preview-list {
+  display: grid;
+  max-height: 80vh;
+  overflow-y: auto;
+  gap: 12px;
+}
+
+.reception-preview-page {
+  display: grid;
+  margin: 0;
+  gap: 4px;
+}
+
+.reception-preview-frame,
+.reception-preview-image {
+  width: 100%;
+  max-height: 72vh;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .3);
+}
+
+.reception-preview-frame {
+  height: 72vh;
+}
+
+.reception-preview-image {
+  height: auto;
+  object-fit: contain;
+}
+
+.reception-row-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: 8px;
+  list-style: none;
+}
+
+.reception-row {
+  display: grid;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 10px;
+  gap: 8px;
+}
+
+/* Registered rows stay on screen, dimmed: the desk counts them off against
+   the paper, and a row that vanished would read as a row that was lost. */
+.reception-row-saved {
+  background: hsl(var(--nui-muted) / .35);
+  opacity: .8;
+}
+
+.reception-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reception-row-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.reception-address-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
+}
+
+.reception-address-part {
+  display: grid;
+  gap: 3px;
+}
+
+.reception-address-part-label {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+}
+
+.reception-boolean-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  font-size: 13px;
+}
+
+/* Under the input it belongs to, so correcting and comparing happen without
+   the eye leaving the field. */
+.reception-read-value {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  opacity: .7;
+  overflow-wrap: anywhere;
+}
+
+/* The tick boxes, stacked under the person's fields.
+   One per line rather than in the two-column grid the fields use: the labels
+   are whole sentences off the paper, and wrapping them into half a row is how
+   a declaration stops being read before it is ticked. */
+.reception-row-consents {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.reception-consent {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 2px 8px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.reception-consent input {
+  margin-top: 2px;
+}
+
+.reception-consent-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Sits under the label, in the column the label is in, so an unread box reads
+   as a note about that box rather than as a line of its own. */
+.reception-consent .reception-read-value {
+  grid-column: 2;
+}
+
+.reception-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (max-width: 1100px) {
+  .reception-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .reception-preview {
+    position: static;
+  }
+}
+
+@media (max-width: 720px) {
+  .reception-settings-section-head {
+    flex-direction: column;
+  }
+
+  .reception-custom-field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reception-custom-field-actions {
+    justify-content: flex-end;
+  }
+
+  .reception-row-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .reception-address-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.ledger-party-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* The sheet's fields are the app's fields. They were pushed to a 44px touch
+   target with 16px text, which on a four-player booking is a form the desk has
+   to scroll through while someone is on the phone — and it read as a different
+   product from every other screen. */
+
+@media (max-width: 720px) {
+  .ledger-party-player {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'name   remove'
+      'tag    tag'
+      'member member';
+  }
+
+  .ledger-party-player--new {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'name'
+      'tag'
+      'member';
+  }
+
+  .ledger-legend {
+    margin-left: 0;
+  }
+}
+
+/* Which courses get a column. Chips rather than a select: the set is small, and
+ * seeing every course at once is how the desk notices one is missing from the
+ * board. */
+.ledger-course-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ledger-course-picker > legend {
+  float: left;
+  padding: 0 6px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  line-height: 24px;
+}
+
+.ledger-course-chip {
+  height: 24px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 999px;
+  padding: 0 10px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.ledger-course-chip:hover {
+  border-color: hsl(var(--nui-primary) / 50%);
+}
+
+.ledger-course-chip.is-on {
+  border-color: hsl(var(--nui-primary));
+  background: hsl(var(--nui-primary) / 12%);
+  color: hsl(var(--nui-primary));
+  font-weight: 600;
+}
+
+.ledger-course-chip:focus-visible {
+  outline: 2px solid hsl(var(--nui-primary));
+  outline-offset: 1px;
+}
+
+.ledger-course-chip.is-skeleton {
+  display: inline-flex;
+  align-items: center;
+  cursor: default;
+}
+
+/* Supporting figures the operator opens when they want them. The row is a
+   heading, sized by its own padding — there is one per section, so it needs no
+   target of its own. */
+.collapsible-section {
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+}
+
+.collapsible-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.collapsible-summary::-webkit-details-marker {
+  display: none;
+}
+
+.collapsible-summary svg {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  color: hsl(var(--nui-muted-foreground));
+  transition: transform 120ms ease;
+}
+
+.collapsible-section[open] .collapsible-summary svg {
+  transform: rotate(90deg);
+}
+
+.collapsible-summary:focus-visible {
+  outline: 2px solid hsl(var(--nui-primary));
+  outline-offset: 1px;
+}
+
+.collapsible-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-top: 1px solid hsl(var(--nui-border));
+  padding: 16px 14px;
+}
+
+/* How far ahead the unassigned list looks. A chip switch like the ledger's,
+   and the same size as one: the height a control gets on this screen is the
+   app's, never a number this page picked for itself. */
+.horizon-switch {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.horizon-chip {
+  display: inline-flex;
+  height: var(--control-height);
+  align-items: center;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  padding: 0 10px;
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+
+.horizon-chip:hover {
+  border-color: hsl(var(--nui-primary) / 50%);
+}
+
+.horizon-chip.is-on {
+  border-color: hsl(var(--nui-primary));
+  background: hsl(var(--nui-primary) / 12%);
+  color: hsl(var(--nui-primary));
+  font-weight: 600;
+}
+
+.horizon-chip:focus-visible {
+  outline: 2px solid hsl(var(--nui-primary));
+  outline-offset: 1px;
+}
+
+/* A fortnight of a club-sized board is a couple of hundred groups. The list
+   scrolls inside its panel so the rest of the screen stays put. */
+.unassigned-scroll {
+  display: flex;
+  max-height: 60vh;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.unassigned-day-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  background: hsl(var(--nui-background));
+  padding: 5px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+
+.unassigned-day-count {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* A caddie's name, wherever one is shown — and it is shown once per row, on a
+   board of forty of them. The badge beside the name already gives the row its
+   height; a 44px target on top of that is height every other row pays for. */
+.caddie-link,
+.caddie-link-plain {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  line-height: 18px;
+  text-align: left;
+}
+
+.caddie-link {
+  border: 0;
+  border-radius: var(--nui-radius-md);
+  padding: 0 6px 0 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* Sized to the name it sits beside, because it is what sets the row's height
+   wherever a roster prints one per line. */
+.caddie-link-initial {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: hsl(var(--nui-primary) / 12%);
+  color: hsl(var(--nui-primary));
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.caddie-link-name {
+  text-decoration: underline;
+  text-decoration-color: hsl(var(--nui-border));
+  text-underline-offset: 3px;
+}
+
+.caddie-link:hover .caddie-link-name {
+  text-decoration-color: hsl(var(--nui-primary));
+}
+
+.caddie-link:focus-visible {
+  outline: 2px solid hsl(var(--nui-primary));
+  outline-offset: 1px;
+}
+
+/* The name preview. Hover and focus both open it; nothing in it is only here,
+   so a device that cannot hover loses no information — the same control opens
+   the caddie's screen, where all of it is shown. */
+.caddie-link-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.caddie-preview {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% - 4px);
+  left: 0;
+  display: flex;
+  width: max-content;
+  max-width: 260px;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  box-shadow: 0 8px 24px hsl(0deg 0% 0% / 12%);
+  background: hsl(var(--nui-background));
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 18px;
+  pointer-events: none;
+}
+
+.caddie-preview-name {
+  font-weight: 600;
+}
+
+.caddie-preview-line {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.caddie-preview-warning {
+  color: hsl(var(--nui-destructive));
+}
+
+.caddie-preview-hint {
+  margin-top: 4px;
+  border-top: 1px solid hsl(var(--nui-border));
+  padding-top: 4px;
+  color: hsl(var(--nui-muted-foreground));
+}
+
+/* Daily reservation report import: a quiet paper-and-fairway treatment keeps
+ * the long monthly table calm while the green rail makes the four-step path
+ * obvious. New copy and controls intentionally meet the 16px/44px UI rule. */
+.reservation-report-import-page {
+  max-width: 1280px;
+  gap: 18px;
+  padding: 20px 24px 40px;
+}
+
+.reservation-report-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  border-left: 5px solid var(--course-turf);
+  padding: 4px 0 4px 18px;
+}
+
+.reservation-report-hero-mark {
+  display: grid;
+  width: 52px;
+  height: 52px;
+  flex: none;
+  place-items: center;
+  border-radius: 14px;
+  background: hsl(var(--nui-selected));
+  color: hsl(var(--nui-primary));
+}
+
+.reservation-report-hero-mark svg {
+  width: 26px;
+  height: 26px;
+}
+
+.reservation-report-kicker {
+  margin: 0 0 4px;
+  color: hsl(var(--nui-primary));
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.reservation-report-hero h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -.03em;
+  line-height: 1.2;
+}
+
+.reservation-report-hero p:last-child {
+  max-width: 760px;
+  margin: 8px 0 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.reservation-report-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-lg);
+  background: hsl(var(--nui-border));
+}
+
+.reservation-report-step {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: hsl(var(--nui-muted) / .32);
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.reservation-report-step > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: none;
+  place-items: center;
+  border-radius: 50%;
+  background: hsl(var(--nui-background));
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.reservation-report-step > strong {
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.reservation-report-step[data-current] {
+  background: hsl(var(--nui-selected));
+  color: hsl(var(--nui-foreground));
+}
+
+.reservation-report-step[data-current] > span {
+  background: hsl(var(--nui-primary));
+  color: hsl(var(--nui-primary-foreground));
+}
+
+.reservation-report-import-page > .notice {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.reservation-report-import-page > .notice > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.reservation-report-import-page .notice-copy > strong,
+.reservation-report-import-page .notice-copy > div {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.reservation-report-panel {
+  gap: 16px;
+}
+
+.reservation-report-panel .panel-header h2 {
+  font-size: 20px;
+  line-height: 1.35;
+}
+
+.reservation-report-panel .panel-header p {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.reservation-report-panel > form,
+.reservation-report-panel > .reservation-report-mapping-list,
+.reservation-report-panel > .reservation-report-column-mapping,
+.reservation-report-panel > .reservation-report-table-scroll,
+.reservation-report-panel > .reservation-report-empty-month,
+.reservation-report-panel > .reservation-report-totals,
+.reservation-report-panel > .reservation-report-result-grid,
+.reservation-report-panel > .reservation-report-result-heading,
+.reservation-report-panel > .reservation-report-preview-toolbar,
+.reservation-report-panel > .reservation-report-saved-toolbar {
+  margin: 0;
+}
+
+.reservation-report-choose-form {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr);
+  gap: 18px;
+  padding: 18px;
+}
+
+.reservation-report-import-page .field {
+  gap: 8px;
+}
+
+.reservation-report-import-page .field-label {
+  min-height: 24px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.reservation-report-import-page .field-label .inline-flex {
+  min-height: 24px;
+  height: auto;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.reservation-report-import-page .field-hint,
+.reservation-report-import-page .optional {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.reservation-report-import-page .loading-state,
+.reservation-report-import-page .notice-detail {
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.reservation-report-import-page .native-select,
+.reservation-report-import-page input[type='month'] {
+  min-height: 44px;
+  height: 44px;
+  padding: 8px 38px 8px 12px;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.reservation-report-import-page input[type='month'] {
+  width: min(260px, 100%);
+  border: 1px solid hsl(var(--nui-border-strong));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+  color: hsl(var(--nui-foreground));
+}
+
+.reservation-report-import-page button {
+  min-height: 44px;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.reservation-report-file-control {
+  position: relative;
+  display: flex;
+  min-height: 44px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.reservation-report-file-control > input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.reservation-report-file-name {
+  min-width: 0;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+/* The chosen file has to read as a different state from the empty one at a
+   glance, so it gets a filled row of its own rather than the same muted
+   sentence with different words in it. */
+.reservation-report-file-selected {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: 8px;
+  background: hsl(var(--nui-muted));
+  color: hsl(var(--nui-foreground));
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.reservation-report-file-selected > svg {
+  flex: none;
+  color: hsl(var(--nui-primary));
+}
+
+.reservation-report-file-selected-name {
+  min-width: 0;
+  flex: 1;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.reservation-report-field-error {
+  display: block;
+  color: hsl(var(--nui-destructive));
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.reservation-report-form-actions {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.reservation-report-mapping-list {
+  display: grid;
+  gap: 1px;
+  overflow: hidden;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-border));
+}
+
+.reservation-report-mapping-row {
+  display: grid;
+  grid-template-columns: minmax(180px, .9fr) minmax(220px, 1.3fr) auto;
+  align-items: end;
+  gap: 16px;
+  min-height: 90px;
+  padding: 14px 16px;
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.reservation-report-source {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.reservation-report-source strong {
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.reservation-report-source span {
+  color: hsl(var(--nui-muted-foreground));
+  font-family: var(--nui-font-mono);
+  font-size: 16px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.reservation-report-mapping-row .field-label {
+  display: none;
+}
+
+.reservation-report-mapping-row .inline-flex {
+  min-height: 44px;
+  align-self: center;
+  font-size: 16px;
+}
+
+.reservation-report-column-mapping {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid hsl(var(--nui-border));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .28);
+}
+
+.reservation-report-column-mapping h3 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.reservation-report-column-mapping p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.reservation-report-mapping-note {
+  color: hsl(var(--nui-muted-foreground));
+}
+
+.reservation-report-column-mapping td .native-select {
+  min-width: 180px;
+}
+
+.reservation-report-column-mapping td > strong,
+.reservation-report-column-mapping td > small {
+  display: block;
+}
+
+.reservation-report-column-mapping td > small {
+  max-width: 260px;
+  margin-top: 4px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.reservation-report-column-approval {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid hsl(var(--nui-border-strong));
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-background));
+  cursor: pointer;
+}
+
+.reservation-report-column-approval input {
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  accent-color: hsl(var(--nui-primary));
+}
+
+.reservation-report-column-approval span,
+.reservation-report-column-approval small {
+  display: block;
+}
+
+.reservation-report-column-approval small {
+  margin-top: 4px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.reservation-report-preview-toolbar,
+.reservation-report-saved-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.reservation-report-preview-count {
+  padding-bottom: 8px;
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.reservation-report-table-scroll {
+  max-width: 100%;
+  overflow: auto;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.reservation-report-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.reservation-report-table th,
+.reservation-report-table td {
+  min-height: 44px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+  padding: 10px 14px;
+  font-size: 16px;
+  line-height: 24px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.reservation-report-table th {
+  height: 44px;
+  background: hsl(var(--nui-surface));
+  color: hsl(var(--nui-muted-foreground));
+  font-weight: 700;
+}
+
+.reservation-report-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.reservation-report-table .align-right {
+  text-align: right;
+}
+
+.reservation-report-empty-month {
+  min-height: 80px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-muted) / .45);
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.reservation-report-totals,
+.reservation-report-result-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border-radius: var(--nui-radius-md);
+  background: hsl(var(--nui-border));
+}
+
+.reservation-report-result-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.reservation-report-totals > div,
+.reservation-report-result-grid > div {
+  display: flex;
+  min-height: 84px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 14px 16px;
+  background: hsl(var(--nui-muted) / .45);
+}
+
+.reservation-report-totals span,
+.reservation-report-result-grid span {
+  color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.reservation-report-totals strong,
+.reservation-report-result-grid strong {
+  font-size: 24px;
+  line-height: 1.2;
+}
+
+.reservation-report-review-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 4px;
+  line-height: 1.6;
+}
+
+.reservation-report-result-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: hsl(var(--nui-success));
+  font-size: 20px;
+  line-height: 1.4;
+}
+
+.reservation-report-result-heading svg {
+  width: 28px;
+  height: 28px;
+}
+
+.reservation-report-saved-panel .panel-actions button {
+  min-width: 44px;
+}
+
+@media (max-width: 800px) {
+  .reservation-report-import-page {
+    padding: 16px 12px 32px;
+  }
+
+  .reservation-report-hero h1 {
+    font-size: 24px;
+  }
+
+  .reservation-report-steps {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .reservation-report-choose-form {
+    grid-template-columns: 1fr;
+  }
+
+  .reservation-report-mapping-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+    gap: 10px;
+  }
+
+  .reservation-report-mapping-row .inline-flex {
+    justify-self: start;
+  }
+
+  .reservation-report-totals,
+  .reservation-report-result-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .reservation-report-hero {
+    gap: 10px;
+    padding-left: 12px;
+  }
+
+  .reservation-report-hero-mark {
+    width: 44px;
+    height: 44px;
+  }
+
+  .reservation-report-hero-mark svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .reservation-report-kicker,
+  .reservation-report-hero p:last-child,
+  .reservation-report-step > strong {
+    font-size: 16px;
+  }
+
+  .reservation-report-step {
+    min-height: 58px;
+    padding: 8px 10px;
+  }
+
+  .reservation-report-step > span {
+    width: 30px;
+    height: 30px;
+  }
+
+  .reservation-report-form-actions {
+    justify-content: stretch;
+  }
+
+  .reservation-report-form-actions > button {
+    flex: 1 1 100%;
+  }
+}
+

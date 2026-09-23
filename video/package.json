@@ -1,0 +1,33 @@
+{
+  "name": "courseboard-video",
+  "version": "1.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "type-check": "tsc --noEmit",
+    "render": "remotion render src/index.ts CourseBoardPromo out/courseboard-promo.mp4 --codec h264 --crf 18 --pixel-format yuv420p",
+    "render:poster": "remotion still src/index.ts CourseBoardPromoPoster out/courseboard-promo-poster.png",
+    "render:reception-tutorial": "remotion render src/index.ts ReceptionTutorial out/courseboard-reception-tutorial.mp4 --codec h264 --crf 18 --pixel-format yuv420p",
+    "narration": "node scripts/build-narration.mjs reception",
+    "render:reception-tutorial:poster": "remotion still src/index.ts ReceptionTutorialPoster out/courseboard-reception-tutorial-poster.png",
+    "narration:dispatch": "node scripts/build-narration.mjs dispatch",
+    "render:dispatch-tutorial": "remotion render src/index.ts DispatchTutorial out/courseboard-dispatch-tutorial.mp4 --codec h264 --crf 18 --pixel-format yuv420p",
+    "render:dispatch-tutorial:poster": "remotion still src/index.ts DispatchTutorialPoster out/courseboard-dispatch-tutorial-poster.png"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.349",
+    "@remotion/fonts": "^4.0.349",
+    "@remotion/media": "^4.0.349",
+    "@remotion/transitions": "^4.0.349",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "remotion": "^4.0.349"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "~5.6.3"
+  }
+}

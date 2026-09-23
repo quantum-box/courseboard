@@ -1,0 +1,439 @@
+//! OpenAPI documentation for `/v1/course/*` HTTP surfaces.
+//!
+//! Served at `/openapi.json` and browsable via `/swagger-ui`.
+
+use serde::Serialize;
+use utoipa::{
+    openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme},
+    Modify, OpenApi, ToSchema,
+};
+
+use super::http;
+use super::http_caddie_fee_alignment;
+use super::http_cancellations;
+use super::http_commercial;
+use super::http_customers;
+use super::http_field;
+use super::http_ops;
+use super::http_reservation_report;
+use super::http_simulator;
+use crate::{feature_flags, profile_proxy};
+
+/// Standard API error body returned by [`crate::AppError`].
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorBody {
+    pub error: String,
+    pub message: String,
+}
+
+struct SecurityAddon;
+
+impl Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        let components = openapi.components.get_or_insert_with(Default::default);
+        components.add_security_scheme(
+            "bearer_auth",
+            SecurityScheme::Http(
+                HttpBuilder::new()
+                    .scheme(HttpAuthScheme::Bearer)
+                    .bearer_format("JWT")
+                    .description(Some(
+                        "Bearer access token. Tenant-scoped course requests also require `x-operator-id`; Field SDK requests additionally require `x-platform-id`.",
+                    ))
+                    .build(),
+            ),
+        );
+    }
+}
+
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "CourseBoard Course API",
+        description = "HTTP surface for CourseBoard identity and golf course operations.",
+        version = "0.1.1"
+    ),
+    paths(
+        http::get_tee_sheet,
+        http::get_tee_ledger,
+        http::create_reservation,
+        http::cancel_reservation,
+        http::update_reservation_booking,
+        http::update_reservation_party,
+        http::list_reservation_checkins,
+        http::record_reservation_checkins,
+        http::change_reservation_plan,
+        http_reservation_report::preview_reservation_report,
+        http_reservation_report::import_reservation_report,
+        http_reservation_report::list_reservation_report_entries,
+        http_reservation_report::migrate_reservation_reports,
+        http::seed_demo_board,
+        http::get_course_order,
+        http::replace_course_order,
+        http::list_slot_overrides,
+        http::upsert_slot_overrides,
+        http::delete_slot_overrides,
+        http::list_courses,
+        http::create_course,
+        http::update_course,
+        http::delete_course,
+        http::list_resources,
+        http::link_course_resource,
+        http::list_reservation_products,
+        http::upsert_reservation_product,
+        http::get_course_schedule,
+        http::replace_course_schedule,
+        http::generate_course_time_slots,
+        http::get_booking_horizon,
+        http::set_booking_horizon,
+        http::list_product_slots,
+        http::replace_product_slots,
+        http::list_caddies,
+        http::list_caddie_assignments,
+        http_customers::search_customers,
+        http_customers::create_customer,
+        http_customers::delete_customer,
+        http_customers::get_customer,
+        http_customers::get_customer_visits,
+        http_customers::get_customer_membership_activities,
+        http_customers::list_customer_summaries,
+        http_cancellations::list_reservation_cancellations,
+        http_cancellations::settle_cancellation_fees,
+        http_customers::get_customer_registration,
+        http_customers::get_customer_grade_rules,
+        http_customers::replace_customer_grade_rules,
+        http_customers::get_membership_discounts,
+        http_customers::replace_membership_discounts,
+        http_customers::get_membership_play_windows,
+        http_customers::replace_membership_play_windows,
+        http_customers::draft_customer_reception,
+        http_customers::list_customer_consent_items,
+        http_customers::create_customer_consent_item,
+        http_customers::get_customer_reception_fields,
+        http_customers::replace_customer_reception_fields,
+        http_customers::analyze_customer_reception_fields,
+        http_customers::record_reception_customer_values,
+        http_customers::list_membership_plans,
+        http_customers::create_membership_plan,
+        http_customers::update_membership_plan,
+        http_customers::get_customer_membership,
+        http_customers::assign_membership_plan,
+        http_customers::set_member_number,
+        http_ops::create_caddie,
+        http_ops::update_caddie,
+        http_ops::delete_caddie,
+        http_ops::create_caddie_assignment,
+        http_ops::get_course_caddie_supply,
+        http_ops::list_caddie_reinforcements,
+        http_ops::get_shift_rules,
+        http_ops::update_shift_rules,
+        http_ops::list_caddie_shifts,
+        http_ops::generate_caddie_shifts,
+        http_ops::sync_caddie_shifts_to_field,
+        http_ops::get_field_sync_status,
+        http_ops::preview_caddie_shifts,
+        http_ops::update_caddie_shift,
+        http_ops::update_caddie_assignment,
+        http_ops::list_caddie_memberships,
+        http_ops::replace_caddie_memberships,
+        http_ops::list_caddie_availabilities,
+        http_ops::upsert_caddie_availability,
+        http_ops::delete_caddie_availability,
+        http_ops::list_caddie_recommendations,
+        http_ops::get_attendance_snapshot,
+        http_ops::list_attendance_period_snapshots,
+        http_ops::get_caddie_supply,
+        http_ops::auto_assign_caddies,
+        http_ops::get_availability_deadline,
+        http_ops::upsert_availability_deadline,
+        http_ops::list_unsubmitted_caddies,
+        http_ops::get_caddie_rank_fees,
+        http_ops::replace_caddie_rank_fees,
+        http_ops::list_caddie_rank_fee_changes,
+        http_caddie_fee_alignment::preview_caddie_fee_alignment,
+        http_caddie_fee_alignment::align_caddie_fees,
+        http_ops::get_payroll_summary,
+        http_ops::export_payroll_csv,
+        http_ops::list_caddie_ratings,
+        http_commercial::get_reservation_policy,
+        http_commercial::update_reservation_policy,
+        http_commercial::list_daily_budgets,
+        http_commercial::upsert_daily_budget,
+        http_commercial::import_daily_budgets_csv,
+        http_commercial::list_budget_achievements,
+        http_commercial::get_monthly_settlement,
+        http_commercial::export_monthly_settlement_csv,
+        http_commercial::get_extension_status,
+        http_commercial::update_extension_config,
+        http_simulator::calculate_fee,
+        http_simulator::simulate_range,
+        http_ops::reassign_caddie_assignment,
+        http_ops::get_caddie_duties,
+        http_ops::replace_caddie_duties,
+        http_ops::list_caddie_duty_assignments,
+        http_ops::assign_caddie_duty,
+        http_ops::clear_caddie_duty,
+        http_commercial::get_player_tag_options,
+        http_commercial::replace_player_tag_options,
+        http_simulator::get_pricing_settings,
+        http_simulator::replace_pricing_settings,
+        feature_flags::evaluate_feature_flags,
+        http_field::get_client_capabilities,
+        profile_proxy::get_me,
+    ),
+    components(
+        schemas(
+            ErrorBody,
+            http::TeeSheetQueryParams,
+            http::TeeSheetItemDto,
+            http::TeeSheetResponse,
+            http::PartyDto,
+            http::VisitCheckinDto,
+            http::CheckinPlayerDto,
+            http::RecordCheckinRequest,
+            http::PartyPlayerDto,
+            http::UpdateReservationBookingRequest,
+            http::UpdateReservationPartyRequest,
+            http::ChangeReservationPlanRequest,
+            http::CreateReservationRequest,
+            http::CreatedReservationDto,
+            http_customers::CustomerDto,
+            http_customers::CustomerSearchParams,
+            http_customers::CreateCustomerRequest,
+            http_customers::ReceptionAddressRequest,
+            http_customers::CustomerVisitDto,
+            http_customers::CustomerRegistrationDto,
+            http_customers::CustomerVisitSummaryDto,
+            http_customers::CustomerVisitHistoryDto,
+            http_customers::CustomerVisitParams,
+            http_customers::MembershipActivityActorDto,
+            http_customers::MembershipActivitySourceDto,
+            http_customers::MembershipActivityTargetDto,
+            http_customers::MembershipActivityDto,
+            http_customers::MembershipActivityListResponse,
+            http_customers::MembershipActivityParams,
+            http_customers::CustomerGradeRuleDto,
+            http_customers::ReplaceCustomerGradeRulesRequest,
+            http_customers::MembershipDiscountDto,
+            http_customers::ReplaceMembershipDiscountsRequest,
+            http_customers::MembershipPlayWindowDto,
+            http_customers::ReplaceMembershipPlayWindowsRequest,
+            http_customers::ReceptionDraftDto,
+            http_customers::ReceptionDraftRowDto,
+            http_customers::CustomerReceptionFieldDto,
+            http_customers::CustomerReceptionFieldsResponse,
+            http_customers::CustomerReceptionFieldsAnalysisResponse,
+            http_customers::CustomerReceptionFieldRequest,
+            http_customers::ReplaceCustomerReceptionFieldsRequest,
+            http_customers::MembershipPlanDto,
+            http_customers::MembershipPlanListParams,
+            http_customers::UpsertMembershipPlanRequest,
+            http_customers::CustomerMembershipDto,
+            http_customers::AssignMembershipPlanRequest,
+            http_customers::SetMemberNumberRequest,
+            http::CancelReservationRequest,
+            http::LedgerSlotDto,
+            http::LedgerColumnDto,
+            http::TeeLedgerResponse,
+            http::SeedDemoBoardResponse,
+            http::CourseOrderResponse,
+            http::ReplaceCourseOrderRequest,
+            http::SlotOverrideDto,
+            http::UpsertSlotOverridesRequest,
+            http::DeleteSlotOverridesRequest,
+            http::DeleteSlotOverridesResponse,
+            http::CourseDto,
+            http::BusinessHoursDto,
+            http::UpsertCourseRequest,
+            http::ResourceDto,
+            http::ReservationProductDto,
+            http::UpsertReservationProductRequest,
+            http::AvailabilityRuleDto,
+            http::GenerationSummaryDto,
+            http::SavedScheduleDto,
+            http::BookingHorizonDto,
+            http::BookingHorizonStatusDto,
+            http::SetBookingHorizonRequest,
+            http::ProductSlotDto,
+            http::ReplaceProductSlotsRequest,
+            http_reservation_report::ReservationReportFacilityDto,
+            http_reservation_report::ReservationReportRowDto,
+            http_reservation_report::ReservationReportTotalsDto,
+            http_reservation_report::ReservationReportPreviewResponse,
+            http_reservation_report::ReservationReportReviewDto,
+            http_reservation_report::ReservationReportAnalysisDto,
+            http_reservation_report::ReservationReportMappingDto,
+            http_reservation_report::ReservationReportMappingFieldDto,
+            http_reservation_report::ReservationReportImportResponse,
+            http_reservation_report::ReservationReportEntryDto,
+            http_reservation_report::ReservationReportEntriesResponse,
+            http_reservation_report::ReservationReportEntriesQuery,
+            http_reservation_report::ReservationReportMigrationRequest,
+            http_reservation_report::ReservationReportMigrationResponse,
+            http::CaddieDto,
+            http::CaddieAssignmentDto,
+            http::CaddieAssignmentQueryParams,
+            http_ops::UpsertCaddieRequest,
+            http_ops::PatchCaddieRequest,
+            http_ops::NameCaddieForRoundRequest,
+            http_ops::UpsertCaddieAssignmentRequest,
+            http_ops::MembershipDto,
+            http_ops::ReplaceMembershipsRequest,
+            http_ops::AvailabilityDto,
+            http_ops::AvailabilityQueryParams,
+            http_ops::UpsertAvailabilityRequest,
+            http_ops::RecommendationDto,
+            http_ops::RecommendationQueryParams,
+            http_ops::AttendanceSnapshotDto,
+            http_ops::AttendanceReportDto,
+            http_ops::AttendanceQueryParams,
+            http_ops::CaddieSupplyDto,
+            http_ops::SupplyQueryParams,
+            http_ops::AutoAssignRequest,
+            http_ops::AutoAssignPlanItemDto,
+            http_ops::AutoAssignSkippedDto,
+            http_ops::AutoAssignResultDto,
+            http_ops::DeadlineWarningDto,
+            http_ops::CaddieShiftDto,
+            http_ops::ReassignCaddieRequest,
+            http_ops::CaddieDutyOptionsDto,
+            http_ops::CaddieDutyAssignmentDto,
+            http_ops::AssignCaddieDutyRequest,
+            http_ops::ShiftRulesDto,
+            http_ops::UpdateShiftRulesRequest,
+            http_ops::CourseCaddieSupplyDto,
+            http_ops::ReinforcementDto,
+            http_ops::DayCaddieSupplyDto,
+            http_ops::GeneratedMonthDto,
+            http_ops::ShiftPlanPreviewDto,
+            http_ops::UpdateCaddieShiftRequest,
+            http_ops::AvailabilityDeadlineDto,
+            http_ops::UpsertAvailabilityDeadlineRequest,
+            http_ops::UnsubmittedCaddieDto,
+            http_ops::PayrollPeriodDto,
+            http_ops::CaddieRankFeesDto,
+            http_ops::ReplaceCaddieRankFeesRequest,
+            http_ops::CaddieRankFeeChangeDto,
+            http_caddie_fee_alignment::FeeAlignmentCandidateDto,
+            http_caddie_fee_alignment::CaddieFeeChangeDto,
+            http_caddie_fee_alignment::FeeAlignmentPreviewResponse,
+            http_caddie_fee_alignment::FeeAlignmentItemRequest,
+            http_caddie_fee_alignment::AlignCaddieFeesRequest,
+            http_caddie_fee_alignment::FeeAlignmentResultDto,
+            http_caddie_fee_alignment::AlignCaddieFeesResponse,
+            http_ops::PayrollRowDto,
+            http_ops::PayrollSummaryDto,
+            http_ops::YearMonthQuery,
+            http_ops::RatingDto,
+            http_ops::RatingsQueryParams,
+            http_commercial::ReservationPolicyDto,
+            http_commercial::ReservationPolicyReadDto,
+            http_commercial::UpdateReservationPolicyRequest,
+            http_commercial::DailyBudgetDto,
+            http_commercial::DailyBudgetQueryParams,
+            http_commercial::UpsertDailyBudgetRequest,
+            http_commercial::BudgetAchievementDto,
+            http_commercial::AchievementQueryParams,
+            http_commercial::MonthlySettlementDto,
+            http_commercial::SettlementPeriodDto,
+            http_commercial::SettlementReservationsDto,
+            http_commercial::SettlementCaddieFeesDto,
+            http_commercial::SettlementCancellationsDto,
+            http_commercial::SettlementSquareDto,
+            http_commercial::UnpaidCancellationDto,
+            http_commercial::SettlementReservationDto,
+            http_commercial::SettlementDrilldownDto,
+            http_commercial::YearMonthQuery,
+            http_commercial::ExtensionStatusDto,
+            http_commercial::ExtensionValidationDto,
+            http_commercial::UpdateExtensionConfigRequest,
+            http_commercial::PlayerTagOptionsDto,
+            http_simulator::PricingSettingsDto,
+            http_simulator::CalculateFeeRequest,
+            http_simulator::CalculateFeeResponse,
+            http_simulator::PlayerBreakdownDto,
+            http_simulator::SimulateRangeRequest,
+            http_simulator::SimulateRangeResponse,
+            http_simulator::SimulateRangeRowDto,
+            feature_flags::EvaluateFeatureFlagsRequest,
+            feature_flags::EvaluateFeatureFlagsResponse,
+            feature_flags::FeatureFlagValue,
+            http_field::ClientCapabilitiesResponse,
+            http_field::AgentDocumentCapabilitiesResponse,
+            http_field::DocumentQueueCapabilitiesResponse,
+            profile_proxy::ProfileResponse,
+            profile_proxy::ProfileUser,
+            profile_proxy::ProfileTenant,
+            profile_proxy::ProfileErrorResponse,
+        )
+    ),
+    modifiers(&SecurityAddon),
+    tags(
+        (name = "course", description = "Courses, tee sheet, resources, and reservation products"),
+        (name = "course-ops", description = "Caddie operations, payroll, and assignments"),
+        (name = "course-commercial", description = "Budgets, settlement, policy, and extension config"),
+        (name = "feature-flags", description = "CourseBoard-owned tenant feature evaluation"),
+        (name = "field", description = "SDK-backed TACHYON Field operations"),
+        (name = "identity", description = "Authenticated CourseBoard profile"),
+    ),
+    security(
+        ("bearer_auth" = [])
+    )
+)]
+pub struct CourseApiDoc;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use utoipa::OpenApi;
+
+    #[test]
+    fn course_openapi_includes_core_paths() {
+        let doc = CourseApiDoc::openapi();
+        let json = serde_json::to_value(doc).expect("serialize openapi");
+        let paths = json
+            .get("paths")
+            .and_then(|v| v.as_object())
+            .expect("paths object");
+        assert!(paths.contains_key("/v1/course/tee-sheet"));
+        assert!(paths.contains_key("/v1/course/courses"));
+        assert!(paths.contains_key("/v1/course/caddie-profiles"));
+        assert!(paths.contains_key("/v1/course/feature-flags/evaluate"));
+        assert!(paths.contains_key("/v1/course/caddie-attendance-snapshots"));
+        assert!(paths.contains_key("/v1/course/reservation-policy"));
+        assert!(paths.contains_key("/v1/course/daily-budgets"));
+        assert!(paths.contains_key("/v1/course/reservation-report-imports"));
+        assert!(paths.contains_key("/v1/course/reservation-report-entries"));
+        let membership_activities = paths
+            .get("/v1/course/customers/{customer_id}/membership-activities")
+            .and_then(|value| value.as_object())
+            .expect("membership activity path");
+        let membership_activity_get = membership_activities
+            .get("get")
+            .and_then(|value| value.as_object())
+            .expect("membership activity GET operation");
+        let responses = membership_activity_get
+            .get("responses")
+            .and_then(|value| value.as_object())
+            .expect("membership activity responses");
+        assert!(responses.contains_key("200"));
+        assert!(responses.contains_key("403"));
+        assert!(responses.contains_key("404"));
+        assert!(responses.contains_key("424"));
+        assert!(paths.contains_key("/v1/field/client-capabilities"));
+        assert!(paths.contains_key("/v1/me"));
+        let components = json
+            .pointer("/components/schemas")
+            .and_then(|v| v.as_object())
+            .expect("schemas");
+        assert!(components.contains_key("TeeSheetResponse"));
+        assert!(components.contains_key("CourseDto"));
+        assert!(components.contains_key("ReservationReportPreviewResponse"));
+        assert!(components.contains_key("ErrorBody"));
+        assert!(components.contains_key("ProfileResponse"));
+        assert!(components.contains_key("ProfileErrorResponse"));
+        assert!(components.contains_key("MembershipActivityDto"));
+        assert!(components.contains_key("MembershipActivityTargetDto"));
+    }
+}

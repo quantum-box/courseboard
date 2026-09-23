@@ -1,0 +1,321 @@
+name: Mobile release
+
+on:
+  push:
+    tags:
+      - "ios-v*.*.*"
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Mobile platform to build
+        required: true
+        default: both
+        type: choice
+        options: [both, ios, android]
+      version:
+        description: Semantic app version
+        required: true
+        type: string
+      build_number:
+        description: Monotonically increasing store build number
+        required: true
+        type: string
+      upload:
+        description: Upload to TestFlight and Google Play internal testing
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: "24"
+  ANDROID_NDK_VERSION: 27.0.12077973
+  CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+
+jobs:
+  validate:
+    name: Validate release inputs
+    runs-on: tachyoncloud
+    outputs:
+      platform: ${{ steps.release.outputs.platform }}
+      version: ${{ steps.release.outputs.version }}
+      build_number: ${{ steps.release.outputs.build_number }}
+      upload: ${{ steps.release.outputs.upload }}
+    steps:
+      - name: Resolve and validate release
+        id: release
+        shell: bash
+        env:
+          MANUAL_PLATFORM: ${{ inputs.platform }}
+          MANUAL_VERSION: ${{ inputs.version }}
+          MANUAL_BUILD_NUMBER: ${{ inputs.build_number }}
+          MANUAL_UPLOAD: ${{ inputs.upload }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            platform=ios
+            version="${TAG_NAME#ios-v}"
+            build_number="${GITHUB_RUN_NUMBER}"
+            upload=true
+          else
+            platform="${MANUAL_PLATFORM}"
+            version="${MANUAL_VERSION}"
+            build_number="${MANUAL_BUILD_NUMBER}"
+            upload="${MANUAL_UPLOAD}"
+          fi
+          [[ "${platform}" =~ ^(both|ios|android)$ ]]
+          [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "${build_number}" =~ ^[1-9][0-9]*$ ]]
+          [[ "${upload}" =~ ^(true|false)$ ]]
+          {
+            echo "platform=${platform}"
+            echo "version=${version}"
+            echo "build_number=${build_number}"
+            echo "upload=${upload}"
+          } >> "${GITHUB_OUTPUT}"
+
+  android:
+    name: Android release AAB
+    needs: validate
+    if: needs.validate.outputs.platform == 'both' || needs.validate.outputs.platform == 'android'
+    # 4 ABI 分の Rust をコンパイルするため standard runner の 4 GiB では
+    # runner が CPU/Memory 不足で落ちる。ADR-0027 の heavy Rust job 扱い。
+    runs-on: tachyoncloud-4vcpu
+    environment: mobile-release
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate private native dependencies
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.PHOTON_DEPLOY_KEY }}
+
+      - name: Use SSH for private GitHub dependencies
+        run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
+
+      # tachyoncloud の runner image には github.com の host key が無く、photon の
+      # 取得が Host key verification failed で落ちる。ci.yml と同じ対処。
+      - name: Trust github.com SSH host key
+        working-directory: /
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          curl -fsSL https://api.github.com/meta \
+            | jq -r '.ssh_keys[] | "github.com \(.)"' >> ~/.ssh/known_hosts
+          sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          # action の既定値 `tools platform-tools` の `tools` は廃止済みで、
+          # Google の SDK リポジトリから消えたため sdkmanager が
+          # "Failed to find package 'tools'" で落ちる。sdkmanager 自体は
+          # cmdline-tools が提供するので platform-tools だけを入れる。
+          packages: platform-tools
+
+      - name: Install Android NDK
+        run: sdkmanager "ndk;${ANDROID_NDK_VERSION}"
+
+      - name: Install Rust Android targets
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-06-04
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install dependencies and generate Android project
+        run: |
+          npm ci
+          npm run tauri:android:init -- --ci
+
+      - name: Import Android upload key
+        env:
+          ANDROID_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          test -n "${ANDROID_UPLOAD_KEYSTORE_BASE64}"
+          printf '%s' "${ANDROID_UPLOAD_KEYSTORE_BASE64}" | base64 --decode > "${RUNNER_TEMP}/courseboard-upload.jks"
+
+      - name: Configure Android release signing
+        run: node scripts/configure-android-signing.mjs
+
+      - name: Build signed Android App Bundle
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/courseboard-upload.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
+          VITE_COURSEBOARD_AUTH_MODE: browser-pkce
+          VITE_COURSEBOARD_BROWSER_CLIENT_ID: 5oafg9ptonbjumdh1pc7khirp1
+          VITE_COURSEBOARD_BROWSER_REDIRECT_URI: https://courseboard.txcloud.app/oauth/callback
+          VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
+          VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
+          VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
+        run: |
+          NDK_HOME="${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" npm run tauri:android:build -- \
+            --aab --ci --config '{"version":"${{ needs.validate.outputs.version }}","bundle":{"android":{"versionCode":${{ needs.validate.outputs.build_number }}}}}'
+
+      - name: Upload signed AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: courseboard-android-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.build_number }}
+          path: desktop/src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload to Google Play internal testing
+        if: needs.validate.outputs.upload == 'true'
+        uses: r0adkll/upload-google-play@v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.quantumbox.courseboard
+          releaseFiles: desktop/src-tauri/gen/android/app/build/outputs/bundle/**/*.aab
+          tracks: internal
+          status: draft
+          releaseName: ${{ needs.validate.outputs.version }} (${{ needs.validate.outputs.build_number }})
+
+  ios:
+    name: iOS release IPA
+    needs: validate
+    if: needs.validate.outputs.platform == 'both' || needs.validate.outputs.platform == 'ios'
+    # ADR-0027 例外: macOS 固有 job は GitHub-hosted matrix を維持する。
+    # Xcode による IPA 生成と Apple 署名は Linux runner で代替できない。
+    runs-on: macos-26
+    environment: mobile-release
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate private native dependencies
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.PHOTON_DEPLOY_KEY }}
+
+      - name: Use SSH for private GitHub dependencies
+        run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Rust iOS target
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          toolchain: nightly-2026-06-04
+          targets: aarch64-apple-ios
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+
+      - name: Install dependencies and generate iOS project
+        run: |
+          npm ci
+          npm run tauri:ios:init -- --ci
+
+      - name: Import Apple distribution identity and provisioning profile
+        env:
+          APPLE_CERTIFICATE_BASE64: ${{ secrets.APPLE_CERTIFICATE_BASE64 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.APPLE_PROVISIONING_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ secrets.APPLE_CI_KEYCHAIN_PASSWORD }}
+        run: |
+          test -n "${APPLE_CERTIFICATE_BASE64}"
+          test -n "${APPLE_PROVISIONING_PROFILE_BASE64}"
+          certificate_path="${RUNNER_TEMP}/courseboard-distribution.p12"
+          profile_path="${RUNNER_TEMP}/courseboard.mobileprovision"
+          profile_plist_path="${RUNNER_TEMP}/courseboard-profile.plist"
+          keychain_path="${RUNNER_TEMP}/courseboard-signing.keychain-db"
+          printf '%s' "${APPLE_CERTIFICATE_BASE64}" | base64 --decode > "${certificate_path}"
+          printf '%s' "${APPLE_PROVISIONING_PROFILE_BASE64}" | base64 --decode > "${profile_path}"
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${keychain_path}"
+          security set-keychain-settings -lut 21600 "${keychain_path}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${keychain_path}"
+          security import "${certificate_path}" -P "${APPLE_CERTIFICATE_PASSWORD}" -A -t cert -f pkcs12 -k "${keychain_path}"
+          security list-keychain -d user -s "${keychain_path}"
+          security set-key-partition-list -S apple-tool:,apple: -k "${KEYCHAIN_PASSWORD}" "${keychain_path}"
+          mkdir -p "${HOME}/Library/MobileDevice/Provisioning Profiles"
+          security cms -D -i "${profile_path}" > "${profile_plist_path}"
+          profile_uuid="$(/usr/libexec/PlistBuddy -c 'Print :UUID' "${profile_plist_path}")"
+          cp "${profile_path}" "${HOME}/Library/MobileDevice/Provisioning Profiles/${profile_uuid}.mobileprovision"
+
+      - name: Configure manual App Store signing
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_PROVISIONING_PROFILE_SPECIFIER: CourseBoard App Store 20260719
+          APPLE_BUNDLE_ID: com.quantumbox.courseboard
+        run: node scripts/configure-ios-signing.mjs
+
+      - name: Build signed App Store IPA
+        env:
+          APPLE_DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+          VITE_COURSEBOARD_API_BASE_URL: https://courseboard-api.txcloud.app
+          VITE_COURSEBOARD_AUTH_MODE: browser-pkce
+          VITE_COURSEBOARD_BROWSER_CLIENT_ID: 5oafg9ptonbjumdh1pc7khirp1
+          VITE_COURSEBOARD_BROWSER_REDIRECT_URI: https://courseboard.txcloud.app/oauth/callback
+          VITE_COURSEBOARD_BROWSER_LOGIN_ENDPOINT: https://api.n1.tachy.one/oauth2/login
+          VITE_COURSEBOARD_BROWSER_AUTHORIZATION_ENDPOINT: https://api.n1.tachy.one/oauth2/authorize
+          VITE_COURSEBOARD_BROWSER_TOKEN_ENDPOINT: https://api.n1.tachy.one/oauth2/token
+          VITE_COURSEBOARD_BROWSER_PROFILE_ENDPOINT: https://courseboard-api.txcloud.app/v1/me
+        run: npm run tauri:ios:build -- --ci --export-method app-store-connect --build-number "${{ needs.validate.outputs.build_number }}" --config '{"version":"${{ needs.validate.outputs.version }}"}'
+
+      - name: Upload signed IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: courseboard-ios-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.build_number }}
+          path: desktop/src-tauri/gen/apple/build/**/*.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Install App Store Connect API key
+        if: needs.validate.outputs.upload == 'true'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_PRIVATE_KEY_BASE64: ${{ secrets.APPLE_API_PRIVATE_KEY_BASE64 }}
+        run: |
+          mkdir -p "${HOME}/.appstoreconnect/private_keys"
+          printf '%s' "${APPLE_API_PRIVATE_KEY_BASE64}" | base64 --decode > "${HOME}/.appstoreconnect/private_keys/AuthKey_${APPLE_API_KEY_ID}.p8"
+
+      - name: Upload to App Store Connect
+        if: needs.validate.outputs.upload == 'true'
+        env:
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+        run: |
+          ipa="$(find src-tauri/gen/apple/build -type f -name '*.ipa' -print -quit)"
+          test -n "${ipa}"
+          xcrun altool --upload-app --type ios --file "${ipa}" --apiKey "${APPLE_API_KEY_ID}" --apiIssuer "${APPLE_API_ISSUER_ID}"

@@ -1,0 +1,122 @@
+#!/usr/bin/env node
+/**
+ * 使い方動画のナレーションを Tachyon CLI の TTS で作り、音声の長さを
+ * 機能ごとの manifest（JSON）に書き出す。
+ *
+ * 動画側はこの JSON を読んでシーンの尺を決めるので、原稿を直したら
+ * このスクリプトを流し直すだけで尺が合う。原稿が変わっていない音声は
+ * 作り直さない（TTS は毎回まったく同じ音にはならないため）。
+ *
+ *   npm run narration                    # 受付。変更のあった原稿だけ作り直す
+ *   npm run narration:dispatch           # キャディの配置
+ *   npm run narration -- --force         # 全部作り直す
+ *
+ * 原稿と出力先は `scripts/narration/<機能>.mjs` にある。新しい動画を足すときは
+ * そこにファイルを増やし、package.json に `narration:<機能>` を足す。
+ *
+ * 認証は Tachyon CLI の profile を使う。既定は admin / CourseBoard のテナントで、
+ * TACHYON_PROFILE と TACHYON_TENANT_ID で上書きできる。
+ */
+import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {mkdirSync, readFileSync, writeFileSync, existsSync} from 'node:fs';
+import {dirname, join} from 'node:path';
+import {fileURLToPath, pathToFileURL} from 'node:url';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+const PROFILE = process.env.TACHYON_PROFILE ?? 'admin';
+const TENANT = process.env.TACHYON_TENANT_ID ?? 'tn_01hjjn348rn3t49zz6hvmfq67p';
+const VOICE = process.env.NARRATION_VOICE ?? 'Kore';
+const MODEL = process.env.NARRATION_MODEL ?? 'gemini-2.5-flash-preview-tts';
+
+const args = process.argv.slice(2);
+const force = args.includes('--force');
+const feature = args.find((arg) => !arg.startsWith('--')) ?? 'reception';
+
+const scriptPath = join(ROOT, 'scripts/narration', `${feature}.mjs`);
+if (!existsSync(scriptPath)) {
+  console.error(`原稿がない: ${scriptPath}`);
+  process.exit(1);
+}
+const {audioDir, manifest: manifestPath, clips: NARRATION} = (
+  await import(pathToFileURL(scriptPath).href)
+).default;
+const AUDIO_DIR = join(ROOT, audioDir);
+const MANIFEST = join(ROOT, manifestPath);
+
+/**
+ * WAV の再生秒数。ffprobe を呼ばずに済むよう RIFF チャンクを直接歩く。
+ * Gemini TTS は 24kHz / 16bit / モノラルの PCM しか返さないが、
+ * 念のため fmt チャンクから実際のバイトレートを読む。
+ */
+function wavSeconds(path) {
+  const buf = readFileSync(path);
+  if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') {
+    throw new Error(`${path} は WAV ではない`);
+  }
+  let offset = 12;
+  let byteRate = null;
+  while (offset + 8 <= buf.length) {
+    const id = buf.toString('ascii', offset, offset + 4);
+    const size = buf.readUInt32LE(offset + 4);
+    const body = offset + 8;
+    if (id === 'fmt ') byteRate = buf.readUInt32LE(body + 8);
+    if (id === 'data') {
+      if (!byteRate) throw new Error(`${path} に fmt チャンクがない`);
+      return buf.readUInt32LE(offset + 4) / byteRate;
+    }
+    offset = body + size + (size % 2);
+  }
+  throw new Error(`${path} に data チャンクがない`);
+}
+
+const digest = (entry) =>
+  createHash('sha256')
+    .update([entry.text, VOICE, MODEL].join(' '))
+    .digest('hex')
+    .slice(0, 16);
+
+mkdirSync(AUDIO_DIR, {recursive: true});
+const previous = existsSync(MANIFEST) ? JSON.parse(readFileSync(MANIFEST, 'utf8')) : {};
+const manifest = {};
+
+for (const entry of NARRATION) {
+  const file = join(AUDIO_DIR, `${entry.id}.wav`);
+  const hash = digest(entry);
+  const unchanged =
+    !force && existsSync(file) && previous.clips?.[entry.id]?.hash === hash;
+
+  if (unchanged) {
+    console.log(`skip   ${entry.id}`);
+  } else {
+    console.log(`speak  ${entry.id}`);
+    execFileSync(
+      'tachyon',
+      [
+        'tts',
+        'synthesize',
+        '--profile', PROFILE,
+        '--tenant-id', TENANT,
+        '--model', MODEL,
+        '--voice', VOICE,
+        '--text', entry.text,
+        '--output', file,
+      ],
+      {stdio: ['ignore', 'ignore', 'inherit']},
+    );
+  }
+
+  manifest[entry.id] = {
+    hash,
+    text: entry.text,
+    seconds: Number(wavSeconds(file).toFixed(3)),
+  };
+}
+
+const total = Object.values(manifest).reduce((sum, clip) => sum + clip.seconds, 0);
+writeFileSync(
+  MANIFEST,
+  `${JSON.stringify({voice: VOICE, model: MODEL, clips: manifest}, null, 2)}\n`,
+);
+console.log(`\n${feature}: ${NARRATION.length} clips / ${total.toFixed(1)}s -> ${manifestPath}`);

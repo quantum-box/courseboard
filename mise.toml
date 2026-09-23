@@ -1,0 +1,73 @@
+# CourseBoard local Mise tasks.
+# Secrets stay in gitignored env files (.env.browser-pkce, .env.prod-field, desktop/.env.local).
+# Preferred flow: browser-pkce + production Field (password login at :5173).
+# Local course-api always targets Field (default https://tachyon-field-api.txcloud.app).
+# empty://local is refused by the api start scripts.
+#
+# Scripts live under desktop/scripts/:
+#   configure.mjs  — auth | pkce | field | prod-api | prod-api-pkce
+#   dev.sh         — pkce | field | prod-api  ×  api | vite | both
+# course-api hot reload: `mise run courseboard:api` uses bacon (job: api).
+# Prerequisite: `mise install` (provides cargo:bacon). Plain cargo run does not hot-reload.
+# Outbound Field auth uses the browser-pkce login bearer (no hourly CLI token refresh).
+
+[tools]
+rust = "nightly-2026-06-04"
+"cargo:bacon" = "3.18.0"
+
+[tasks."courseboard:pkce-env"]
+description = "Write browser-pkce + prod Field env (OIDC inbound; login bearer forwarded to Field)"
+dir = "desktop"
+run = "npm run pkce:env"
+
+[tasks."courseboard:field-env"]
+description = "Refresh CLI JWT shortcut env (writes .env.prod-field + desktop/.env.local; no login UI)"
+dir = "desktop"
+run = "npm run field:env"
+
+[tasks."courseboard:api"]
+description = "Start course-api on :8080 with bacon --headless (.env.browser-pkce; OIDC inbound, prod Field outbound). Run in your own terminal — agents pkill :8080."
+run = "desktop/scripts/dev.sh pkce api"
+
+[tasks."courseboard:api-refresh"]
+description = "Rewrite browser-pkce env (public client / OIDC audience). Field auth uses UI login — re-login if the session expired"
+run = """
+mise run courseboard:pkce-env
+echo ""
+echo "Wrote .env.browser-pkce (no CLI Field bearer). If bacon is running it may restart on file change."
+echo "For Field 401/502 after this change: sign out and sign in again at http://127.0.0.1:5173"
+"""
+
+[tasks."courseboard:api-once"]
+description = "Start course-api once with cargo run (no watch; same env as courseboard:api)"
+run = "env COURSEBOARD_API_ONCE=1 desktop/scripts/dev.sh pkce api"
+
+[tasks."courseboard:vite"]
+description = "Start Vite desktop on http://127.0.0.1:5173 (browser-pkce via desktop/.env.local)"
+run = "desktop/scripts/dev.sh pkce vite"
+
+[tasks."courseboard:dev"]
+description = "Start course-api (bacon --headless) + Vite together (prefer two terminals: courseboard:api / courseboard:vite)"
+run = "desktop/scripts/dev.sh pkce both"
+
+[tasks."courseboard:field-api"]
+description = "Start course-api on :8080 with bacon hot-reload (.env.prod-field; CLI JWT + prod Field)"
+run = "desktop/scripts/dev.sh field api"
+
+[tasks."courseboard:field-vite"]
+description = "Start Vite on :5173 with development + CLI JWT (field:env)"
+run = "desktop/scripts/dev.sh field vite"
+
+[tasks."courseboard:prod-api-env"]
+description = "Write desktop/.env.prod-api.local with CLI JWT / Local operator (Vite → https://courseboard-api.txcloud.app). Prefer courseboard:prod-api-pkce-env for real users"
+dir = "desktop"
+run = "npm run prod-api:env"
+
+[tasks."courseboard:prod-api-pkce-env"]
+description = "Write desktop/.env.prod-api.local with React password login + JSON PKCE (real user). Leaves .env.local untouched"
+dir = "desktop"
+run = "npm run prod-api:pkce-env"
+
+[tasks."courseboard:vite-prod-api"]
+description = "Start Vite :5173 --mode prod-api using production courseboard-api directly (no local :8080). Restart yourself if :5173 is busy"
+run = "desktop/scripts/dev.sh prod-api vite"
