@@ -227,7 +227,8 @@ fn to_tee_sheet_item(
         reservation.notes().map(str::to_string),
     )
     .with_party(reservation.party().clone())
-    .with_customer_id(reservation.customer_id().cloned()))
+    .with_customer_id(reservation.customer_id().cloned())
+    .with_paid_amount(reservation.billing().paid_amount))
 }
 
 #[cfg(test)]
