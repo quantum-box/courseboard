@@ -273,6 +273,10 @@ type CaddieSupply = {
   caddieAttachedCap: number
   currentCaddieAttached: number
   remaining: number
+  /** Active caddies who filed nothing for the day (courseboard#90). */
+  unfiledCaddies: number
+  /** Whether those caddies are in the numbers above (`working`) or not (`off`). */
+  unfiledReadAs: 'working' | 'off'
 }
 
 type AutoAssignPlanItem = {
@@ -1279,6 +1283,17 @@ function DailySupplyPanel({ date }: { date: string }) {
               afternoon: String(resource.data.afternoonCapacity),
             })}
           </p>
+          {/* The numbers above quietly assumed something about these people.
+              Counted as working, the supply may be more than anyone promised;
+              counted as off, it is short until they file. Either way the desk
+              should know before selling on it (courseboard#90). */}
+          {resource.data.unfiledCaddies > 0 ? (
+            <Notice tone={resource.data.unfiledReadAs === 'working' ? 'warning' : 'info'}>
+              {t(`caddies:supply.unfiled.${resource.data.unfiledReadAs === 'off' ? 'off' : 'working'}`, {
+                n: String(resource.data.unfiledCaddies),
+              })}
+            </Notice>
+          ) : null}
         </div>
       ) : null}
     </Panel>
