@@ -31,6 +31,8 @@ export type TeeReservation = {
   notes?: string | null
   /** Competition, group number, and named players. Absent until entered. */
   party?: PartyDetails | null
+  /** Money already taken, deposit included. Absent when nothing is paid. */
+  paidAmount?: number | null
 }
 
 export type TimelineAssignment = {

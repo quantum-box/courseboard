@@ -32,18 +32,26 @@ export function ReservationCheckins({
   reservationId,
   players,
   dirty,
+  onArrivalsChange,
 }: {
   reservationId: string
   /** The roster as saved. Blank rows are already gone by the time it is here. */
   players: readonly PartyPlayer[]
   /** Whether the form above has edits the roster below does not reflect yet. */
   dirty: boolean
+  /** How many seats are checked in, whenever that changes. */
+  onArrivalsChange?: (count: number) => void
 }) {
   const { t } = useTranslation(['ledger', 'common'])
   const timezone = useTenantTimezone()
   const [existing, setExisting] = useState<VisitCheckin[]>([])
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [saving, setSaving] = useState(false)
+
+  // The sheet above settles the plan once anybody has arrived (SCC-9).
+  useEffect(() => {
+    onArrivalsChange?.(existing.length)
+  }, [existing, onArrivalsChange])
 
   useEffect(() => {
     let cancelled = false
