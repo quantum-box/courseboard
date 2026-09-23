@@ -876,7 +876,13 @@ pub fn compute_caddie_supply(
         if afternoon {
             afternoon_capacity += 1;
         }
-        let two_rounds = capacity.can_two_rounds && capacity.two_round_request && !light_duty;
+        // Two rounds take the whole day. Somebody free for only half of it
+        // walks one, whatever they asked for — the rule the shift run already
+        // applies (`capacity_for`). Counting the request anyway sold a second
+        // caddie-attached group nobody could walk (SCC-42).
+        let whole_day = morning && afternoon;
+        let two_rounds =
+            capacity.can_two_rounds && capacity.two_round_request && !light_duty && whole_day;
         if two_rounds {
             two_round_capable += 1;
         }
@@ -1002,6 +1008,43 @@ mod supply_tests {
         assert_eq!(supply.caddie_attached_cap(), 2);
         assert_eq!(supply.remaining(), -1);
         assert!(supply.is_over_capacity());
+    }
+
+    #[test]
+    fn half_a_day_never_counts_two_rounds_whatever_was_asked() {
+        // SCC-42: a morning-only or afternoon-only caddie who also asked for
+        // two rounds used to count as two caddie-attached groups.
+        let supply = compute_caddie_supply(
+            date(),
+            [
+                capacity(true, Some(AvailabilityStatus::MorningOnly), true, true),
+                capacity(true, Some(AvailabilityStatus::AfternoonOnly), true, true),
+                capacity(true, Some(AvailabilityStatus::Available), true, true),
+            ],
+            0,
+            0,
+            UnfiledRequest::Working,
+        );
+
+        assert_eq!(supply.two_round_capable(), 1);
+        assert_eq!(supply.caddie_supply(), 4);
+    }
+
+    #[test]
+    fn a_full_day_narrowed_by_other_work_walks_one_round() {
+        // Filed for the whole day with two rounds, then a morning job took
+        // half of it: what is left is one afternoon, and one round.
+        let narrowed = CaddieDayCapacity {
+            active: true,
+            filed: true,
+            status: Some(AvailabilityStatus::AfternoonOnly),
+            can_two_rounds: true,
+            two_round_request: true,
+        };
+
+        let supply = compute_caddie_supply(date(), [narrowed], 0, 0, UnfiledRequest::Working);
+        assert_eq!(supply.two_round_capable(), 0);
+        assert_eq!(supply.caddie_supply(), 1);
     }
 
     #[test]
