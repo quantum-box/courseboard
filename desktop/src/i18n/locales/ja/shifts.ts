@@ -74,6 +74,7 @@ export const shifts = {
     confirmedFilename: 'キャディシフト表_{{month}}月',
     draftFilename: 'キャディシフト案_{{month}}月',
     emptyMonth: 'この月は出勤する人がいないため、書き出す内容がありません。',
+    notConfirmed: 'この月はまだシフトが確定していません。確定するか、シフト案を書き出してください。',
     done: '{{format}}を書き出しました',
     failed: 'エクスポートできませんでした',
   },
