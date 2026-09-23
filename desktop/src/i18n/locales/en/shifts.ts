@@ -73,6 +73,7 @@ export const shifts: DeepPartial<typeof source> = {
     pinnedMark: 'Pinned',
     note: 'Working days only. Symbols match the board. Pinned=pinned day; Changed=changed by the proposed plan.',
     emptyMonth: 'Nobody works this month, so there is nothing to hand round.',
+    notConfirmed: 'This month has no confirmed shifts yet. Confirm the month, or export the proposed plan instead.',
     confirmedSheet: 'Monthly shifts',
     draftSheet: 'Shift plan',
     confirmedFilename: 'caddie-shift-board_{{month}}',
