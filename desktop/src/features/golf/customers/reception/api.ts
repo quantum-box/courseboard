@@ -6,6 +6,7 @@ import {
   normalizeReceptionConsentItem,
   normalizeReceptionConsentItems,
   normalizeReceptionFields,
+  receptionSheetBatches,
   uploadFileName,
   type ReceptionDraft,
   type ReceptionConsentItem,
@@ -84,18 +85,41 @@ export async function analyzeReceptionForm(file: File): Promise<ReceptionFormPro
 }
 
 /**
- * Reads the sheets of one group together, as pages in the order given; the rows
- * come back in that order. Nothing is stored anywhere along the way — not the
- * files, not the text upstream made of them — so a re-read means picking the
- * files again.
+ * Reads up to fifty sheets in order. Field limits each request by page count
+ * and upload size, so send fitting batches sequentially and combine the drafts.
  */
-export function draftReceptionSheets(files: readonly File[]) {
-  const form = new FormData()
-  for (const file of files) form.append('file', file, uploadFileName(file))
-  return courseboardApiJson<ReceptionDraft>(RECEPTION_DRAFT_PATH, {
-    method: 'POST',
-    body: form,
-  })
+export async function draftReceptionSheets(
+  files: readonly File[],
+  options: {
+    onBatchProgress?: (current: number, total: number) => void
+    formatBatchWarning?: (warning: string, firstSheet: number, lastSheet: number) => string
+  } = {},
+): Promise<ReceptionDraft> {
+  const batches = receptionSheetBatches(files)
+  const total = batches.length
+  const visitors: ReceptionDraft['visitors'] = []
+  const warnings: string[] = []
+  let firstSheet = 1
+
+  for (const [index, batch] of batches.entries()) {
+    const lastSheet = firstSheet + batch.length - 1
+    options.onBatchProgress?.(index + 1, total)
+    const form = new FormData()
+    for (const file of batch) {
+      form.append('file', file, uploadFileName(file))
+    }
+    const draft = await courseboardApiJson<ReceptionDraft>(RECEPTION_DRAFT_PATH, {
+      method: 'POST',
+      body: form,
+    })
+    visitors.push(...(draft.visitors ?? []))
+    warnings.push(...(draft.warnings ?? []).map(warning => (
+      options.formatBatchWarning?.(warning, firstSheet, lastSheet) ?? warning
+    )))
+    firstSheet = lastSheet + 1
+  }
+
+  return { visitors, warnings }
 }
 
 /**

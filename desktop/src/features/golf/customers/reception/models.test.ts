@@ -99,15 +99,16 @@ describe('several sheets in one read', () => {
     expect(sheetsValidationError([file('image/jpeg'), file('application/pdf')])).toBeNull()
   })
 
-  it('refuses nothing, too many, or too heavy together, each for its own reason', () => {
+  it('refuses missing or excessive sheets and any file that cannot fit one request', () => {
     expect(sheetsValidationError([])).toBe('required')
     expect(
       sheetsValidationError(Array.from({ length: MAX_RECEPTION_SHEETS + 1 }, () => file('image/jpeg'))),
     ).toBe('count')
     const half = MAX_RECEPTION_UPLOAD_BYTES / 2
-    expect(sheetsValidationError([file('image/jpeg', half), file('image/png', half + 1)])).toBe(
-      'totalSize',
-    )
+    expect(sheetsValidationError([file('image/jpeg', half), file('image/png', half + 1)])).toBeNull()
+    expect(
+      sheetsValidationError([file('application/pdf', MAX_RECEPTION_UPLOAD_BYTES + 1)]),
+    ).toBe('totalSize')
     expect(sheetsValidationError([file('image/jpeg'), file('text/csv')])).toBe('type')
   })
 

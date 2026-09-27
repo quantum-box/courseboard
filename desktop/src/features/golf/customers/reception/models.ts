@@ -21,17 +21,15 @@ export const RECEPTION_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'application/p
 
 export const MAX_RECEPTION_SHEET_BYTES = 10 * 1024 * 1024
 
-/**
- * How many sheets one read may carry. A group that arrives on several sheets
- * is picked and read together, and comes back as one list of rows in the order
- * the sheets were picked. Eight is what the reader takes in one go.
- */
-export const MAX_RECEPTION_SHEETS = 8
+/** How many sheets the desk may select for one reception read. */
+export const MAX_RECEPTION_SHEETS = 50
+
+/** Field reads at most eight sheets in one request, so larger sets are batched. */
+export const MAX_RECEPTION_BATCH_SHEETS = 8
 
 /**
- * What the sheets of one read may weigh together once they are ready to send.
- * They travel in one request, and the platform drops a request over this
- * without anything getting to say why.
+ * What one batch may weigh once it is ready to send. Larger selections are
+ * split into batches, each sent as a separate request.
  */
 export const MAX_RECEPTION_UPLOAD_BYTES = 4_000_000
 
@@ -852,8 +850,7 @@ export function fileValidationError(file: File | null): 'required' | 'size' | 't
 export type ReceptionSheetsError = 'required' | 'count' | 'size' | 'totalSize' | 'type'
 
 /**
- * The sheets of one read, checked the way they will be uploaded: each one a
- * format the reader takes, and all of them together inside one request.
+ * The selected sheets, checked against the batches that will be uploaded.
  */
 export function sheetsValidationError(files: readonly File[]): ReceptionSheetsError | null {
   if (files.length === 0) return 'required'
@@ -862,7 +859,11 @@ export function sheetsValidationError(files: readonly File[]): ReceptionSheetsEr
     const invalid = fileValidationError(file)
     if (invalid) return invalid
   }
-  if (totalBytes(files) > MAX_RECEPTION_UPLOAD_BYTES) return 'totalSize'
+  for (const batch of receptionSheetBatches(files)) {
+    if (totalBytes(batch) > MAX_RECEPTION_UPLOAD_BYTES) {
+      return 'totalSize'
+    }
+  }
   return null
 }
 
@@ -870,26 +871,79 @@ function totalBytes(files: readonly File[]) {
   return files.reduce((sum, file) => sum + file.size, 0)
 }
 
+/** Pack sheets in order under Field's per-request page-count and size limits. */
+export function receptionSheetBatches(files: readonly File[]): File[][] {
+  const batches: File[][] = []
+  let batch: File[] = []
+  let bytes = 0
+
+  for (const file of files) {
+    if (
+      batch.length > 0
+      && (batch.length === MAX_RECEPTION_BATCH_SHEETS || bytes + file.size > MAX_RECEPTION_UPLOAD_BYTES)
+    ) {
+      batches.push(batch)
+      batch = []
+      bytes = 0
+    }
+    batch.push(file)
+    bytes += file.size
+  }
+
+  if (batch.length > 0) batches.push(batch)
+  return batches
+}
+
 /**
  * The picked sheets as they will be uploaded, in the order they were picked.
- *
- * Each is prepared as a single sheet would be (HEIC to JPEG, labels fixed from
- * the bytes). If the set is then too heavy for one request, the photos — never
- * the PDFs, which a browser cannot redraw — are re-encoded smaller, one step at
- * a time, until it fits or there is no smaller step left. What is still too
- * heavy after that is left for `sheetsValidationError` to refuse.
+ * Prepare no more than one upstream batch at a time so a large selection does
+ * not decode all fifty phone photos into memory together.
  */
 export async function prepareReceptionSheets(picked: readonly File[]): Promise<File[]> {
-  const prepared = await Promise.all(picked.map(file => prepareReceptionSheet(file)))
-  if (totalBytes(prepared) <= MAX_RECEPTION_UPLOAD_BYTES) return prepared
-  let current = prepared
+  const prepared: File[] = []
+  for (let start = 0; start < picked.length; start += MAX_RECEPTION_BATCH_SHEETS) {
+    const batch: File[] = []
+    for (const file of picked.slice(start, start + MAX_RECEPTION_BATCH_SHEETS)) {
+      batch.push(await prepareReceptionSheet(file))
+    }
+    prepared.push(...await prepareReceptionBatch(batch))
+  }
+  return prepared
+}
+
+async function prepareReceptionBatch(picked: readonly File[]): Promise<File[]> {
+  if (totalBytes(picked) <= MAX_RECEPTION_UPLOAD_BYTES) return [...picked]
+  const fixedBytes = picked
+    .filter(file => !isShrinkable(file))
+    .reduce((sum, file) => sum + file.size, 0)
+  if (fixedBytes > MAX_RECEPTION_UPLOAD_BYTES) {
+    return prepareOversizedImages(picked)
+  }
+
+  let current = [...picked]
   for (const edge of SHRINK_EDGES) {
-    current = await Promise.all(
-      prepared.map(file => (isShrinkable(file) ? shrinkSheetImage(file, edge) : file)),
-    )
+    current = []
+    for (const file of picked) {
+      current.push(isShrinkable(file) ? await shrinkSheetImage(file, edge) : file)
+    }
     if (totalBytes(current) <= MAX_RECEPTION_UPLOAD_BYTES) return current
   }
-  return current
+  return prepareOversizedImages(picked)
+}
+
+async function prepareOversizedImages(picked: readonly File[]): Promise<File[]> {
+  const prepared: File[] = []
+  for (const file of picked) {
+    let current = file
+    if (isShrinkable(file) && file.size > MAX_RECEPTION_UPLOAD_BYTES) {
+      for (const edge of SHRINK_EDGES) {
+        current = await shrinkSheetImage(file, edge)
+        if (current.size <= MAX_RECEPTION_UPLOAD_BYTES) break
+      }
+    }
+    prepared.push(current)
+  }
+  return prepared
 }
 
 function isShrinkable(file: File) {
