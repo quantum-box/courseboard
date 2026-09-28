@@ -45,6 +45,8 @@ export const customers: DeepPartial<typeof source> = {
     reading: 'Reading the reception sheet. This takes a moment.',
     readingBatch: 'Reading reception sheets (batch {{current}} of {{total}})…',
     batchWarning: 'Sheets {{firstSheet}}–{{lastSheet}}: {{warning}}',
+    rowLimitWarning: 'The reader returned more than {{count}} people. Only the first {{count}} are shown; the rest were omitted.',
+    retryRemaining: 'Retry remaining sheets',
     choose: {
       open: 'Choose a reception sheet',
       again: 'Read another sheet',
@@ -122,6 +124,8 @@ export const customers: DeepPartial<typeof source> = {
       cancel: 'Cancel proposal',
       applied: 'Fields suggested from the sheet. Review them and save.',
       failed: 'Could not read the blank sheet',
+      sourcePreviewTitle: 'Selected sheet',
+      sourcePreviewAlt: 'Preview of the selected reception sheet',
       previewTitle: 'Analysis preview',
       previewAlt: 'Preview of the analyzed reception sheet',
     },

@@ -46,6 +46,8 @@ export const customers: DeepPartial<typeof source> = {
     reading: '受付の 紙を 読んで います。すこし 待って ください。',
     readingBatch: '受付の 紙を 読んで います（{{total}}回の {{current}}回目）。',
     batchWarning: '{{firstSheet}}から{{lastSheet}}まい目：{{warning}}',
+    rowLimitWarning: '読んだ 人が{{count}}人より 多かったので、はじめの{{count}}人だけ 出して います。のこりは 出して いません。',
+    retryRemaining: 'のこりの 紙を 読み直す',
     choose: {
       open: '受付の 紙を えらぶ',
       again: 'ほかの 紙を 読む',
@@ -123,6 +125,8 @@ export const customers: DeepPartial<typeof source> = {
       cancel: '提案を 取り消す',
       applied: '紙から 項目を えらびました。たしかめて 保存してください。',
       failed: 'まっさらな 紙を 読めませんでした',
+      sourcePreviewTitle: 'えらんだ 受付の 紙',
+      sourcePreviewAlt: 'えらんだ 受付の 紙の 画像',
       previewTitle: '読んだ 紙の 画像',
       previewAlt: '読んだ 受付の 紙の 画像',
     },
