@@ -31,6 +31,11 @@ function renderPage() {
 
 describe('ReceptionFieldsPage analysis proposal', () => {
   beforeEach(async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue({
+      width: 800,
+      height: 1000,
+      close: vi.fn(),
+    } as ImageBitmap))
     await i18next.changeLanguage('ja')
     window.history.replaceState({}, '', '/settings/reception-fields')
     clearResourceCache()
@@ -120,6 +125,7 @@ describe('ReceptionFieldsPage analysis proposal', () => {
   afterEach(() => {
     cleanup()
     clearResourceCache()
+    vi.unstubAllGlobals()
   })
 
   it('restores manual unsaved edits when the operator cancels an analysis proposal', async () => {

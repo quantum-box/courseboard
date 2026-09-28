@@ -6,6 +6,8 @@ import {
   normalizeReceptionConsentItem,
   normalizeReceptionConsentItems,
   normalizeReceptionFields,
+  MAX_RECEPTION_ROWS,
+  receptionSheetBatches,
   uploadFileName,
   type ReceptionDraft,
   type ReceptionConsentItem,
@@ -20,6 +22,21 @@ const RECEPTION_DRAFT_PATH = '/v1/course/customers/reception-draft'
 export const RECEPTION_FIELDS_PATH = '/v1/course/customer-reception-fields'
 export const RECEPTION_FIELDS_ANALYSIS_PATH = `${RECEPTION_FIELDS_PATH}/analysis`
 export const RECEPTION_CONSENT_ITEMS_PATH = '/v1/course/customer-consent-items'
+
+/** Carries completed OCR work so the failed batch can be retried independently. */
+export class ReceptionBatchError extends Error {
+  readonly originalError: unknown
+
+  constructor(
+    readonly partialDraft: ReceptionDraft,
+    readonly nextBatchIndex: number,
+    originalError: unknown,
+  ) {
+    super(originalError instanceof Error ? originalError.message : String(originalError))
+    this.name = 'ReceptionBatchError'
+    this.originalError = originalError
+  }
+}
 
 /**
  * The CourseBoard API returns a complete list (`{ items }`) after merging the
@@ -84,18 +101,65 @@ export async function analyzeReceptionForm(file: File): Promise<ReceptionFormPro
 }
 
 /**
- * Reads the sheets of one group together, as pages in the order given; the rows
- * come back in that order. Nothing is stored anywhere along the way — not the
- * files, not the text upstream made of them — so a re-read means picking the
- * files again.
+ * Reads sheets in order, respecting Field's per-request limits. A failed
+ * request carries completed batches so the operator can resume at that batch.
  */
-export function draftReceptionSheets(files: readonly File[]) {
-  const form = new FormData()
-  for (const file of files) form.append('file', file, uploadFileName(file))
-  return courseboardApiJson<ReceptionDraft>(RECEPTION_DRAFT_PATH, {
-    method: 'POST',
-    body: form,
-  })
+export async function draftReceptionSheets(
+  files: readonly File[],
+  options: {
+    onBatchProgress?: (current: number, total: number) => void
+    formatBatchWarning?: (warning: string, firstSheet: number, lastSheet: number) => string
+    formatRowLimitWarning?: (maxRows: number) => string
+  } = {},
+  resume?: { draft: ReceptionDraft; nextBatchIndex: number },
+): Promise<ReceptionDraft> {
+  const batches = receptionSheetBatches(files)
+  const total = batches.length
+  const startBatchIndex = resume?.nextBatchIndex ?? 0
+  const visitors: ReceptionDraft['visitors'] = [...(resume?.draft.visitors ?? [])]
+  const warnings: string[] = [...(resume?.draft.warnings ?? [])]
+  let rowLimitExceeded = resume?.draft.rowLimitExceeded ?? false
+  let firstSheet = 1
+
+  for (const [index, batch] of batches.entries()) {
+    const lastSheet = firstSheet + batch.length - 1
+    if (index < startBatchIndex) {
+      firstSheet = lastSheet + 1
+      continue
+    }
+    options.onBatchProgress?.(index + 1, total)
+    try {
+      const form = new FormData()
+      for (const file of batch) {
+        form.append('file', file, uploadFileName(file))
+      }
+      const draft = await courseboardApiJson<ReceptionDraft>(RECEPTION_DRAFT_PATH, {
+        method: 'POST',
+        body: form,
+      })
+      const incomingVisitors = draft.visitors ?? []
+      const remainingRows = Math.max(0, MAX_RECEPTION_ROWS - visitors.length)
+      visitors.push(...incomingVisitors.slice(0, remainingRows))
+      if (incomingVisitors.length > remainingRows) rowLimitExceeded = true
+      warnings.push(...(draft.warnings ?? []).map(warning => (
+        options.formatBatchWarning?.(warning, firstSheet, lastSheet) ?? warning
+      )))
+      if (rowLimitExceeded) {
+        const rowLimitWarning = options.formatRowLimitWarning?.(MAX_RECEPTION_ROWS)
+          ?? 'Only the first ' + MAX_RECEPTION_ROWS + ' reception rows are shown; additional rows were omitted.'
+        if (!warnings.includes(rowLimitWarning)) warnings.push(rowLimitWarning)
+      }
+    } catch (error) {
+      throw new ReceptionBatchError(
+        { visitors, warnings, rowLimitExceeded },
+        index,
+        error,
+      )
+    }
+    firstSheet = lastSheet + 1
+  }
+
+  return { visitors, warnings, rowLimitExceeded }
 }
 
 /**

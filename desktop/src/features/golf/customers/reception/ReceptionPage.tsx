@@ -8,6 +8,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  RotateCw,
   Save,
   ScanLine,
   Trash2,
@@ -31,6 +32,7 @@ import {
 import { useResource } from '../../../../hooks/useResource'
 import { navigate, navigateFromClick } from '../../../../lib/router'
 import { showToast } from '../../../../lib/toast'
+import { autoOrientReceptionSheet, rotateReceptionSheet, type ReceptionRotation } from './orientation'
 import {
   analyzeReceptionForm,
   createReceptionConsentItem,
@@ -39,6 +41,7 @@ import {
   listReceptionFields,
   registerReceptionRow,
   retryReceptionValues,
+  ReceptionBatchError,
   saveReceptionFields,
 } from './api'
 import {
@@ -69,6 +72,7 @@ import {
   DEFAULT_RECEPTION_CONSENT_ITEMS,
   activeReceptionConsentItems,
   type ReceptionAddress,
+  type ReceptionDraft,
   type ReceptionConsentCandidate,
   type ReceptionConsentItem,
   type ReceptionConsentItemWriteInput,
@@ -109,9 +113,17 @@ export function ReceptionPage() {
     { cacheKey: 'course:customer-consent-items-active' },
   )
   const [files, setFiles] = useState<File[]>([])
+  const [orientationSources, setOrientationSources] = useState<File[]>([])
+  const [manualRotations, setManualRotations] = useState<ReceptionRotation[]>([])
   const [previewUrls, setPreviewUrls] = useState<string[]>([])
   const [reading, setReading] = useState(false)
+  const [readProgress, setReadProgress] = useState<{ current: number; total: number } | null>(null)
   const [readError, setReadError] = useState<string | null>(null)
+  const [batchResume, setBatchResume] = useState<{
+    files: File[]
+    nextBatchIndex: number
+    draft: ReceptionDraft
+  } | null>(null)
   const [warnings, setWarnings] = useState<string[]>([])
   const [rows, setRows] = useState<ReceptionRow[]>([])
   const [registeringAll, setRegisteringAll] = useState(false)
@@ -139,27 +151,92 @@ export function ReceptionPage() {
     setRows(current => current.map(row => (row.key === key ? { ...row, ...patch } : row)))
   }
 
+  function receptionDraftOptions() {
+    return {
+      onBatchProgress: (current: number, total: number) => setReadProgress({ current, total }),
+      formatBatchWarning: (warning: string, firstSheet: number, lastSheet: number) => t(
+        'customers:reception.batchWarning',
+        { warning, firstSheet: String(firstSheet), lastSheet: String(lastSheet) },
+      ),
+      formatRowLimitWarning: (maxRows: number) => t(
+        'customers:reception.rowLimitWarning',
+        { count: maxRows },
+      ),
+    }
+  }
+
+  function handleBatchFailure(
+    error: unknown,
+    sourceFiles: File[],
+    previousDraft?: ReceptionDraft,
+  ): error is ReceptionBatchError {
+    if (!(error instanceof ReceptionBatchError)) return false
+    const newVisitors = error.partialDraft.visitors.slice(previousDraft?.visitors.length ?? 0)
+    const newRows = rowsFromDraft(
+      { ...error.partialDraft, visitors: newVisitors },
+      receptionFields,
+      receptionConsentItems,
+      previousDraft?.visitors.length ?? 0,
+    )
+    if (previousDraft) {
+      setRows(current => [...current, ...newRows])
+    } else {
+      setRows(newRows)
+    }
+    setWarnings(error.partialDraft.warnings ?? [])
+    setBatchResume({
+      files: sourceFiles,
+      nextBatchIndex: error.nextBatchIndex,
+      draft: error.partialDraft,
+    })
+    return true
+  }
+
+  function readErrorMessage(error: unknown) {
+    const failure = receptionReadFailure(error)
+    if (failure === 'billing') return t('customers:reception.readerFailure.billing')
+    if (failure === 'rateLimited') return t('customers:reception.readerFailure.rateLimited')
+    if (failure === 'unavailable') return t('customers:reception.readerFailure.unavailable')
+    return resourceErrorText(error)
+  }
+
   async function read(picked: File[]) {
+    setBatchResume(null)
     setRows([])
     setWarnings([])
     setReadError(null)
-    // Refused before anything is converted: a ninth photo is not worth
-    // decoding eight others for.
+    setReadProgress(null)
+    // Refuse an oversized selection before decoding any of its photos.
     if (picked.length > MAX_RECEPTION_SHEETS) {
       setFiles([])
+      setOrientationSources([])
+      setManualRotations([])
       setReadError(t('customers:reception.file.count', { count: MAX_RECEPTION_SHEETS }))
       return
     }
     setReading(true)
+    setFiles([])
+    setOrientationSources([])
+    setManualRotations([])
+    let next: File[] = []
     try {
       // Converting phone photos can take a second each on large images, so the
       // screen is already in its reading state before it starts.
-      let next: File[]
       try {
         next = await prepareReceptionSheets(picked)
       } catch {
         setFiles([])
         setReadError(t('customers:reception.file.convert'))
+        return
+      }
+      try {
+        const oriented: File[] = []
+        for (const file of next) oriented.push(await autoOrientReceptionSheet(file))
+        next = oriented
+        next = await prepareReceptionSheets(next)
+      } catch {
+        setFiles([])
+        setReadError(t('customers:reception.file.orientationFailed'))
         return
       }
       const invalid = sheetsValidationError(next)
@@ -169,16 +246,19 @@ export function ReceptionPage() {
         return
       }
       setFiles(next)
-      const draft = await draftReceptionSheets(next)
+      setOrientationSources(next)
+      setManualRotations(next.map(() => 0 as const))
+      const draft = await draftReceptionSheets(next, receptionDraftOptions())
       setRows(rowsFromDraft(draft, receptionFields, receptionConsentItems))
       setWarnings(draft.warnings ?? [])
     } catch (error) {
-      setRows([])
+      if (!handleBatchFailure(error, next)) setRows([])
       // A reader that never ran is not a sheet that could not be read. Saying
       // so is the whole point: the generic copy would send the desk back to
       // the scanner for an outage no photograph can fix, which is exactly what
       // happened while an upstream 402 was arriving as an empty draft.
-      const failure = receptionReadFailure(error)
+      const readError = error instanceof ReceptionBatchError ? error.originalError : error
+      const failure = receptionReadFailure(readError)
       setReadError(
         failure
           ? t(`customers:reception.readerFailure.${failure}`)
@@ -186,6 +266,99 @@ export function ReceptionPage() {
       )
     } finally {
       setReading(false)
+      setReadProgress(null)
+    }
+  }
+
+  async function rotateSheet(index: number, step: -90 | 90) {
+    const originalSource = orientationSources[index]
+    if (rotationLocked || !originalSource || !files[index]) return
+    const currentRotation = manualRotations[index] ?? 0
+    const nextRotation = ((currentRotation + step + 360) % 360) as ReceptionRotation
+    setBatchResume(null)
+    setRows([])
+    setWarnings([])
+    setReadError(null)
+    setReadProgress(null)
+    setReading(true)
+
+    let turned: File[]
+    try {
+      const rotated = nextRotation === 0
+        ? originalSource
+        : await rotateReceptionSheet(originalSource, nextRotation)
+      const prepared = await prepareReceptionSheets([rotated])
+      const selectedFile = prepared[0]
+      if (!selectedFile) throw new Error('Rotated reception sheet was not prepared')
+      turned = [...files]
+      turned[index] = selectedFile
+    } catch {
+      setReadError(t('customers:reception.file.orientationFailed'))
+      setReading(false)
+      return
+    }
+
+    const invalid = sheetsValidationError(turned)
+    if (invalid) {
+      setReadError(t(`customers:reception.file.${invalid}`, { count: MAX_RECEPTION_SHEETS }))
+      setReading(false)
+      return
+    }
+    setFiles(turned)
+    setManualRotations(current => current.map((rotation, page) => (
+      page === index ? nextRotation : rotation
+    )))
+
+    try {
+      const draft = await draftReceptionSheets(turned, receptionDraftOptions())
+      setRows(rowsFromDraft(draft, receptionFields, receptionConsentItems))
+      setWarnings(draft.warnings ?? [])
+    } catch (error) {
+      if (!handleBatchFailure(error, turned)) setRows([])
+      const readError = error instanceof ReceptionBatchError ? error.originalError : error
+      const failure = receptionReadFailure(readError)
+      setReadError(
+        failure
+          ? t(`customers:reception.readerFailure.${failure}`)
+          : resourceErrorText(error),
+      )
+    } finally {
+      setReading(false)
+      setReadProgress(null)
+    }
+  }
+
+  async function retryRemainingBatches() {
+    const resume = batchResume
+    if (!resume || busy) return
+    setReadError(null)
+    setReadProgress(null)
+    setReading(true)
+    try {
+      const draft = await draftReceptionSheets(
+        resume.files,
+        receptionDraftOptions(),
+        { draft: resume.draft, nextBatchIndex: resume.nextBatchIndex },
+      )
+      const newVisitors = draft.visitors.slice(resume.draft.visitors.length)
+      const newRows = rowsFromDraft(
+        { ...draft, visitors: newVisitors },
+        receptionFields,
+        receptionConsentItems,
+        resume.draft.visitors.length,
+      )
+      setRows(current => [...current, ...newRows])
+      setWarnings(draft.warnings ?? [])
+      setBatchResume(null)
+    } catch (error) {
+      if (!handleBatchFailure(error, resume.files, resume.draft)) {
+        setBatchResume(resume)
+      }
+      const underlyingError = error instanceof ReceptionBatchError ? error.originalError : error
+      setReadError(readErrorMessage(underlyingError))
+    } finally {
+      setReading(false)
+      setReadProgress(null)
     }
   }
 
@@ -260,6 +433,7 @@ export function ReceptionPage() {
     || Boolean(fieldSettings.error)
     || consentSettings.loading
     || Boolean(consentSettings.error)
+  const rotationLocked = busy || saved > 0 || rows.some(row => row.status === 'saving')
 
   return (
     <div className="page-stack">
@@ -309,6 +483,18 @@ export function ReceptionPage() {
       >
         <p className="reception-hint">{t('customers:reception.choose.hint')}</p>
         {readError ? <Notice tone="danger">{readError}</Notice> : null}
+        {batchResume && !reading ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => void retryRemainingBatches()}
+          >
+            <RefreshCw />
+            {t('customers:reception.retryRemaining')}
+          </Button>
+        ) : null}
         {/* Said once, above the rows: a partial read looks exactly like a
             complete one, and this is the only thing that sends the desk back
             to the paper. */}
@@ -327,7 +513,16 @@ export function ReceptionPage() {
         />
       ) : null}
 
-      {reading ? <LoadingState label={t('customers:reception.reading')} /> : null}
+      {reading ? (
+        <LoadingState
+          label={readProgress && readProgress.total > 1
+            ? t('customers:reception.readingBatch', {
+                current: String(readProgress.current),
+                total: String(readProgress.total),
+              })
+            : t('customers:reception.reading')}
+        />
+      ) : null}
 
       {files.length === 0 && !reading ? (
         <Panel>
@@ -432,16 +627,42 @@ export function ReceptionPage() {
                 return (
                   <figure key={url} className="reception-preview-page">
                     {label ? <figcaption className="reception-hint">{label}</figcaption> : null}
+                    <div className="reception-preview-page-actions">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={t('customers:reception.preview.rotateLeft', { index: String(index + 1) })}
+                        disabled={rotationLocked}
+                        onClick={() => void rotateSheet(index, -90)}
+                      >
+                        <RotateCcw />
+                        {t('customers:reception.preview.rotateLeftShort')}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label={t('customers:reception.preview.rotateRight', { index: String(index + 1) })}
+                        disabled={rotationLocked}
+                        onClick={() => void rotateSheet(index, 90)}
+                      >
+                        <RotateCw />
+                        {t('customers:reception.preview.rotateRightShort')}
+                      </Button>
+                    </div>
                     {previewKind(file) === 'pdf' ? (
                       <iframe
                         className="reception-preview-frame"
                         src={url}
+                        loading="lazy"
                         title={label ?? t('customers:reception.preview.title')}
                       />
                     ) : (
                       <img
                         className="reception-preview-image"
                         src={url}
+                        loading="lazy"
                         alt={label
                           ? `${t('customers:reception.preview.alt')} (${label})`
                           : t('customers:reception.preview.alt')}
@@ -451,6 +672,9 @@ export function ReceptionPage() {
                 )
               })}
             </div>
+            {saved > 0 ? (
+              <p className="reception-hint">{t('customers:reception.preview.rotationLocked')}</p>
+            ) : null}
           </Panel>
         </div>
       ) : null}
@@ -540,14 +764,39 @@ export function ReceptionFieldSettingsPanel({
   const [proposedConsentItems, setProposedConsentItems] = useState<ReceptionConsentCandidate[]>([])
   const [analysisWarnings, setAnalysisWarnings] = useState<string[]>([])
   const [analysisPreview, setAnalysisPreview] = useState<string | null>(null)
+  const [analysisFile, setAnalysisFile] = useState<File | null>(null)
+  const [analysisDisplayFile, setAnalysisDisplayFile] = useState<File | null>(null)
+  const [analysisDisplayUrl, setAnalysisDisplayUrl] = useState<{
+    file: File
+    url: string
+  } | null>(null)
+  const [analysisRotation, setAnalysisRotation] = useState<ReceptionRotation>(0)
   const analysisInputRef = useRef<HTMLInputElement | null>(null)
   const proposalSnapshotRef = useRef<ReceptionFieldDraft[] | null>(null)
+  const analysisLocalPreviewUrl = analysisDisplayUrl?.file === analysisDisplayFile
+    ? analysisDisplayUrl.url
+    : null
+
+  useEffect(() => {
+    if (!analysisDisplayFile || typeof URL.createObjectURL !== 'function') {
+      setAnalysisDisplayUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(analysisDisplayFile)
+    setAnalysisDisplayUrl({ file: analysisDisplayFile, url })
+    return () => {
+      if (typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url)
+    }
+  }, [analysisDisplayFile])
 
   useEffect(() => {
     setDrafts(cloneReceptionFields(fields))
     setProposalActive(false)
     setAnalysisWarnings([])
     setAnalysisPreview(null)
+    setAnalysisFile(null)
+    setAnalysisDisplayFile(null)
+    setAnalysisRotation(0)
     setProposedConsentItems([])
     proposalSnapshotRef.current = null
   }, [fields])
@@ -631,24 +880,50 @@ export function ReceptionFieldSettingsPanel({
     setProposalActive(false)
     setAnalysisWarnings([])
     setAnalysisPreview(null)
+    setAnalysisFile(null)
+    setAnalysisDisplayFile(null)
+    setAnalysisRotation(0)
     setProposedConsentItems([])
     proposalSnapshotRef.current = null
   }
 
-  async function analyzeBlankForm(picked: File) {
-    const beforeAnalysis = cloneReceptionFields(drafts)
+  async function analyzeBlankForm(
+    picked: File,
+    rotation: ReceptionRotation = 0,
+    alreadyOriented = false,
+  ) {
+    const beforeAnalysis = proposalSnapshotRef.current ?? cloneReceptionFields(drafts)
     setAnalyzing(true)
     try {
-      let prepared: File
+      let source: File
       try {
-        prepared = await prepareReceptionSheet(picked)
+        source = alreadyOriented ? picked : await prepareReceptionSheet(picked)
       } catch {
         throw new Error(t('customers:reception.file.convert'))
       }
+      if (!alreadyOriented) {
+        try {
+          source = await autoOrientReceptionSheet(source)
+        } catch {
+          throw new Error(t('customers:reception.file.orientationFailed'))
+        }
+      }
+      const prepared = rotation === 0 ? source : await rotateReceptionSheet(source, rotation)
       const invalid = fileValidationError(prepared)
       if (invalid) throw new Error(t(`customers:reception.file.${invalid}`))
+      if (!analysisFile) {
+        // Keep a local recovery preview when the first server request fails.
+        setAnalysisFile(source)
+        setAnalysisDisplayFile(prepared)
+        setAnalysisRotation(rotation)
+        setAnalysisPreview(null)
+      }
       const proposal = await analyzeReceptionForm(prepared)
       proposalSnapshotRef.current = beforeAnalysis
+      setAnalysisFile(source)
+      setAnalysisDisplayFile(prepared)
+      setAnalysisRotation(rotation)
+      setAnalysisPreview(proposal.previewImage ?? null)
       setDrafts(cloneReceptionFields(applyReceptionFormProposal(beforeAnalysis, proposal)))
       const existingConsentKeys = new Set(consentItems.map(item => item.consentKey))
       setProposedConsentItems(proposal.consentItems.filter(
@@ -656,7 +931,6 @@ export function ReceptionFieldSettingsPanel({
       ))
       setProposalActive(true)
       setAnalysisWarnings(proposal.warnings)
-      setAnalysisPreview(proposal.previewImage ?? null)
       showToast({ tone: 'success', message: t('customers:reception.analysis.applied') })
     } catch (analysisError) {
       showToast({
@@ -762,6 +1036,9 @@ export function ReceptionFieldSettingsPanel({
       setProposalActive(false)
       setAnalysisWarnings([])
       setAnalysisPreview(null)
+      setAnalysisFile(null)
+      setAnalysisDisplayFile(null)
+      setAnalysisRotation(0)
       setProposedConsentItems([])
       proposalSnapshotRef.current = null
       showToast({ tone: 'success', message: t('customers:reception.settings.saved') })
@@ -881,6 +1158,63 @@ export function ReceptionFieldSettingsPanel({
               </li>
             ))}
           </ul>
+        </div>
+      ) : null}
+      {analysisFile ? (
+        <div className="reception-analysis-preview">
+          {analysisDisplayFile && analysisLocalPreviewUrl ? (
+            <>
+              <p className="reception-settings-hint">
+                {t('customers:reception.analysis.sourcePreviewTitle')}
+              </p>
+              {previewKind(analysisDisplayFile) === 'pdf' ? (
+                <iframe
+                  className="reception-preview-frame reception-analysis-source-frame"
+                  src={analysisLocalPreviewUrl}
+                  loading="lazy"
+                  title={t('customers:reception.analysis.sourcePreviewTitle')}
+                />
+              ) : (
+                <img
+                  className="reception-preview-image"
+                  src={analysisLocalPreviewUrl}
+                  alt={t('customers:reception.analysis.sourcePreviewAlt')}
+                />
+              )}
+            </>
+          ) : null}
+          <div className="reception-preview-page-actions">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={changing}
+              aria-label={t('customers:reception.preview.rotateLeft', { index: '1' })}
+              onClick={() => void analyzeBlankForm(
+                analysisFile,
+                ((analysisRotation + 270) % 360) as ReceptionRotation,
+                true,
+              )}
+            >
+              <RotateCcw />
+              {t('customers:reception.preview.rotateLeftShort')}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={changing}
+              aria-label={t('customers:reception.preview.rotateRight', { index: '1' })}
+              onClick={() => void analyzeBlankForm(
+                analysisFile,
+                ((analysisRotation + 90) % 360) as ReceptionRotation,
+                true,
+              )}
+            >
+              <RotateCw />
+              {t('customers:reception.preview.rotateRightShort')}
+            </Button>
+          </div>
         </div>
       ) : null}
       {receptionPreviewImageSrc(analysisPreview) ? (

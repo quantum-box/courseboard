@@ -6460,6 +6460,12 @@ button,
   gap: 4px;
 }
 
+.reception-preview-page-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
 .reception-preview-frame,
 .reception-preview-image {
   width: 100%;
@@ -6471,6 +6477,11 @@ button,
 
 .reception-preview-frame {
   height: 72vh;
+}
+
+.reception-analysis-source-frame {
+  height: 260px;
+  max-height: 260px;
 }
 
 .reception-preview-image {
@@ -7548,4 +7559,3 @@ button,
     flex: 1 1 100%;
   }
 }
-
