@@ -6479,6 +6479,11 @@ button,
   height: 72vh;
 }
 
+.reception-analysis-source-frame {
+  height: 260px;
+  max-height: 260px;
+}
+
 .reception-preview-image {
   height: auto;
   object-fit: contain;

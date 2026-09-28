@@ -124,6 +124,8 @@ export const customers: DeepPartial<typeof source> = {
       cancel: 'Cancel proposal',
       applied: 'Fields suggested from the sheet. Review them and save.',
       failed: 'Could not read the blank sheet',
+      sourcePreviewTitle: 'Selected sheet',
+      sourcePreviewAlt: 'Preview of the selected reception sheet',
       previewTitle: 'Analysis preview',
       previewAlt: 'Preview of the analyzed reception sheet',
     },

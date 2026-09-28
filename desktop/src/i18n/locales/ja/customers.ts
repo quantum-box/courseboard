@@ -128,6 +128,8 @@ export const customers = {
       cancel: '提案を取り消す',
       applied: '用紙の項目を提案しました。確認して保存してください。',
       failed: '空の用紙を読み取れませんでした',
+      sourcePreviewTitle: '選んだ受付用紙',
+      sourcePreviewAlt: '選んだ受付用紙のプレビュー',
       previewTitle: '分析プレビュー',
       previewAlt: '分析した受付用紙のプレビュー',
     },

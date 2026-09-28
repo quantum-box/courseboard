@@ -125,6 +125,8 @@ export const customers: DeepPartial<typeof source> = {
       cancel: '提案を 取り消す',
       applied: '紙から 項目を えらびました。たしかめて 保存してください。',
       failed: 'まっさらな 紙を 読めませんでした',
+      sourcePreviewTitle: 'えらんだ 受付の 紙',
+      sourcePreviewAlt: 'えらんだ 受付の 紙の 画像',
       previewTitle: '読んだ 紙の 画像',
       previewAlt: '読んだ 受付の 紙の 画像',
     },

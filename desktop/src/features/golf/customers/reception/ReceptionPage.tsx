@@ -761,9 +761,29 @@ export function ReceptionFieldSettingsPanel({
   const [analysisWarnings, setAnalysisWarnings] = useState<string[]>([])
   const [analysisPreview, setAnalysisPreview] = useState<string | null>(null)
   const [analysisFile, setAnalysisFile] = useState<File | null>(null)
+  const [analysisDisplayFile, setAnalysisDisplayFile] = useState<File | null>(null)
+  const [analysisDisplayUrl, setAnalysisDisplayUrl] = useState<{
+    file: File
+    url: string
+  } | null>(null)
   const [analysisRotation, setAnalysisRotation] = useState<ReceptionRotation>(0)
   const analysisInputRef = useRef<HTMLInputElement | null>(null)
   const proposalSnapshotRef = useRef<ReceptionFieldDraft[] | null>(null)
+  const analysisLocalPreviewUrl = analysisDisplayUrl?.file === analysisDisplayFile
+    ? analysisDisplayUrl.url
+    : null
+
+  useEffect(() => {
+    if (!analysisDisplayFile || typeof URL.createObjectURL !== 'function') {
+      setAnalysisDisplayUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(analysisDisplayFile)
+    setAnalysisDisplayUrl({ file: analysisDisplayFile, url })
+    return () => {
+      if (typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url)
+    }
+  }, [analysisDisplayFile])
 
   useEffect(() => {
     setDrafts(cloneReceptionFields(fields))
@@ -771,6 +791,7 @@ export function ReceptionFieldSettingsPanel({
     setAnalysisWarnings([])
     setAnalysisPreview(null)
     setAnalysisFile(null)
+    setAnalysisDisplayFile(null)
     setAnalysisRotation(0)
     setProposedConsentItems([])
     proposalSnapshotRef.current = null
@@ -856,6 +877,7 @@ export function ReceptionFieldSettingsPanel({
     setAnalysisWarnings([])
     setAnalysisPreview(null)
     setAnalysisFile(null)
+    setAnalysisDisplayFile(null)
     setAnalysisRotation(0)
     setProposedConsentItems([])
     proposalSnapshotRef.current = null
@@ -885,10 +907,12 @@ export function ReceptionFieldSettingsPanel({
       const prepared = rotation === 0 ? source : await rotateReceptionSheet(source, rotation)
       const invalid = fileValidationError(prepared)
       if (invalid) throw new Error(t(`customers:reception.file.${invalid}`))
+      setAnalysisFile(source)
+      setAnalysisDisplayFile(prepared)
+      setAnalysisRotation(rotation)
+      setAnalysisPreview(null)
       const proposal = await analyzeReceptionForm(prepared)
       proposalSnapshotRef.current = beforeAnalysis
-      setAnalysisFile(source)
-      setAnalysisRotation(rotation)
       setDrafts(cloneReceptionFields(applyReceptionFormProposal(beforeAnalysis, proposal)))
       const existingConsentKeys = new Set(consentItems.map(item => item.consentKey))
       setProposedConsentItems(proposal.consentItems.filter(
@@ -1003,6 +1027,7 @@ export function ReceptionFieldSettingsPanel({
       setAnalysisWarnings([])
       setAnalysisPreview(null)
       setAnalysisFile(null)
+      setAnalysisDisplayFile(null)
       setAnalysisRotation(0)
       setProposedConsentItems([])
       proposalSnapshotRef.current = null
@@ -1125,6 +1150,63 @@ export function ReceptionFieldSettingsPanel({
           </ul>
         </div>
       ) : null}
+      {analysisFile ? (
+        <div className="reception-analysis-preview">
+          {analysisDisplayFile && analysisLocalPreviewUrl ? (
+            <>
+              <p className="reception-settings-hint">
+                {t('customers:reception.analysis.sourcePreviewTitle')}
+              </p>
+              {previewKind(analysisDisplayFile) === 'pdf' ? (
+                <iframe
+                  className="reception-preview-frame reception-analysis-source-frame"
+                  src={analysisLocalPreviewUrl}
+                  loading="lazy"
+                  title={t('customers:reception.analysis.sourcePreviewTitle')}
+                />
+              ) : (
+                <img
+                  className="reception-preview-image"
+                  src={analysisLocalPreviewUrl}
+                  alt={t('customers:reception.analysis.sourcePreviewAlt')}
+                />
+              )}
+            </>
+          ) : null}
+          <div className="reception-preview-page-actions">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={changing}
+              aria-label={t('customers:reception.preview.rotateLeft', { index: '1' })}
+              onClick={() => void analyzeBlankForm(
+                analysisFile,
+                ((analysisRotation + 270) % 360) as ReceptionRotation,
+                true,
+              )}
+            >
+              <RotateCcw />
+              {t('customers:reception.preview.rotateLeftShort')}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={changing}
+              aria-label={t('customers:reception.preview.rotateRight', { index: '1' })}
+              onClick={() => void analyzeBlankForm(
+                analysisFile,
+                ((analysisRotation + 90) % 360) as ReceptionRotation,
+                true,
+              )}
+            >
+              <RotateCw />
+              {t('customers:reception.preview.rotateRightShort')}
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {receptionPreviewImageSrc(analysisPreview) ? (
         <div className="reception-analysis-preview">
           <p className="reception-settings-hint">{t('customers:reception.analysis.previewTitle')}</p>
@@ -1132,40 +1214,6 @@ export function ReceptionFieldSettingsPanel({
             src={receptionPreviewImageSrc(analysisPreview) ?? undefined}
             alt={t('customers:reception.analysis.previewAlt')}
           />
-          {analysisFile ? (
-            <div className="reception-preview-page-actions">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={changing}
-                aria-label={t('customers:reception.preview.rotateLeft', { index: '1' })}
-                onClick={() => void analyzeBlankForm(
-                  analysisFile,
-                  ((analysisRotation + 270) % 360) as ReceptionRotation,
-                  true,
-                )}
-              >
-                <RotateCcw />
-                {t('customers:reception.preview.rotateLeftShort')}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                disabled={changing}
-                aria-label={t('customers:reception.preview.rotateRight', { index: '1' })}
-                onClick={() => void analyzeBlankForm(
-                  analysisFile,
-                  ((analysisRotation + 90) % 360) as ReceptionRotation,
-                  true,
-                )}
-              >
-                <RotateCw />
-                {t('customers:reception.preview.rotateRightShort')}
-              </Button>
-            </div>
-          ) : null}
         </div>
       ) : null}
       {loading ? <LoadingState label={t('customers:reception.settings.loading')} /> : null}
