@@ -271,7 +271,8 @@ export function ReceptionPage() {
   }
 
   async function rotateSheet(index: number, step: -90 | 90) {
-    if (rotationLocked || !orientationSources[index]) return
+    const originalSource = orientationSources[index]
+    if (rotationLocked || !originalSource || !files[index]) return
     const currentRotation = manualRotations[index] ?? 0
     const nextRotation = ((currentRotation + step + 360) % 360) as ReceptionRotation
     setBatchResume(null)
@@ -283,11 +284,14 @@ export function ReceptionPage() {
 
     let turned: File[]
     try {
-      turned = await Promise.all(orientationSources.map((source, page) => {
-        const rotation = page === index ? nextRotation : manualRotations[page] ?? 0
-        return rotation === 0 ? source : rotateReceptionSheet(source, rotation)
-      }))
-      turned = await prepareReceptionSheets(turned)
+      const rotated = nextRotation === 0
+        ? originalSource
+        : await rotateReceptionSheet(originalSource, nextRotation)
+      const prepared = await prepareReceptionSheets([rotated])
+      const selectedFile = prepared[0]
+      if (!selectedFile) throw new Error('Rotated reception sheet was not prepared')
+      turned = [...files]
+      turned[index] = selectedFile
     } catch {
       setReadError(t('customers:reception.file.orientationFailed'))
       setReading(false)
