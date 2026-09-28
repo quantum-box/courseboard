@@ -907,12 +907,19 @@ export function ReceptionFieldSettingsPanel({
       const prepared = rotation === 0 ? source : await rotateReceptionSheet(source, rotation)
       const invalid = fileValidationError(prepared)
       if (invalid) throw new Error(t(`customers:reception.file.${invalid}`))
+      if (!analysisFile) {
+        // Keep a local recovery preview when the first server request fails.
+        setAnalysisFile(source)
+        setAnalysisDisplayFile(prepared)
+        setAnalysisRotation(rotation)
+        setAnalysisPreview(null)
+      }
+      const proposal = await analyzeReceptionForm(prepared)
+      proposalSnapshotRef.current = beforeAnalysis
       setAnalysisFile(source)
       setAnalysisDisplayFile(prepared)
       setAnalysisRotation(rotation)
-      setAnalysisPreview(null)
-      const proposal = await analyzeReceptionForm(prepared)
-      proposalSnapshotRef.current = beforeAnalysis
+      setAnalysisPreview(proposal.previewImage ?? null)
       setDrafts(cloneReceptionFields(applyReceptionFormProposal(beforeAnalysis, proposal)))
       const existingConsentKeys = new Set(consentItems.map(item => item.consentKey))
       setProposedConsentItems(proposal.consentItems.filter(
@@ -920,7 +927,6 @@ export function ReceptionFieldSettingsPanel({
       ))
       setProposalActive(true)
       setAnalysisWarnings(proposal.warnings)
-      setAnalysisPreview(proposal.previewImage ?? null)
       showToast({ tone: 'success', message: t('customers:reception.analysis.applied') })
     } catch (analysisError) {
       showToast({
