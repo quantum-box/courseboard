@@ -24,6 +24,9 @@ export const MAX_RECEPTION_SHEET_BYTES = 10 * 1024 * 1024
 /** How many sheets the desk may select for one reception read. */
 export const MAX_RECEPTION_SHEETS = 50
 
+/** Keep the combined OCR draft within the number of rows the desk can verify. */
+export const MAX_RECEPTION_ROWS = 50
+
 /** Field reads at most eight sheets in one request, so larger sets are batched. */
 export const MAX_RECEPTION_BATCH_SHEETS = 8
 
@@ -33,11 +36,7 @@ export const MAX_RECEPTION_BATCH_SHEETS = 8
  */
 export const MAX_RECEPTION_UPLOAD_BYTES = 4_000_000
 
-/**
- * The long edges to try, largest first, when several photos do not fit in one
- * upload as they are. The reader shrinks every page far below the first of
- * these before it looks, so nothing it would have read is lost until the last.
- */
+/** Long edges to try, largest first, for a photo larger than one upload allows. */
 const SHRINK_EDGES = [2400, 1800, 1400, 1100] as const
 
 /**
@@ -79,6 +78,8 @@ export function receptionReadFailure(error: unknown): ReceptionReadFailure | nul
 export type ReceptionDraft = {
   visitors: ReceptionDraftVisitor[]
   warnings: string[]
+  /** Set by the desktop when multiple capped API batches are combined. */
+  rowLimitExceeded?: boolean
 }
 
 export type ReceptionAddress = {
@@ -906,29 +907,9 @@ export async function prepareReceptionSheets(picked: readonly File[]): Promise<F
     for (const file of picked.slice(start, start + MAX_RECEPTION_BATCH_SHEETS)) {
       batch.push(await prepareReceptionSheet(file))
     }
-    prepared.push(...await prepareReceptionBatch(batch))
+    prepared.push(...await prepareOversizedImages(batch))
   }
   return prepared
-}
-
-async function prepareReceptionBatch(picked: readonly File[]): Promise<File[]> {
-  if (totalBytes(picked) <= MAX_RECEPTION_UPLOAD_BYTES) return [...picked]
-  const fixedBytes = picked
-    .filter(file => !isShrinkable(file))
-    .reduce((sum, file) => sum + file.size, 0)
-  if (fixedBytes > MAX_RECEPTION_UPLOAD_BYTES) {
-    return prepareOversizedImages(picked)
-  }
-
-  let current = [...picked]
-  for (const edge of SHRINK_EDGES) {
-    current = []
-    for (const file of picked) {
-      current.push(isShrinkable(file) ? await shrinkSheetImage(file, edge) : file)
-    }
-    if (totalBytes(current) <= MAX_RECEPTION_UPLOAD_BYTES) return current
-  }
-  return prepareOversizedImages(picked)
 }
 
 async function prepareOversizedImages(picked: readonly File[]): Promise<File[]> {
@@ -1161,9 +1142,10 @@ export function rowsFromDraft(
   draft: ReceptionDraft,
   fields: readonly ReceptionField[] = DEFAULT_RECEPTION_FIELDS,
   consentItems: readonly ReceptionConsentItem[] = DEFAULT_RECEPTION_CONSENT_ITEMS,
+  startingIndex = 0,
 ): ReceptionRow[] {
   return (draft.visitors ?? []).map((visitor, index) => (
-    rowFromVisitor(visitor, index, fields, consentItems)
+    rowFromVisitor(visitor, startingIndex + index, fields, consentItems)
   ))
 }
 

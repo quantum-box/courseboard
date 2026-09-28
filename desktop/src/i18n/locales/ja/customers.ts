@@ -43,6 +43,8 @@ export const customers = {
     reading: '受付用紙を読み取っています。しばらくお待ちください。',
     readingBatch: '受付用紙を読み取っています（{{current}}/{{total}}回目）。',
     batchWarning: '{{firstSheet}}〜{{lastSheet}}枚目：{{warning}}',
+    rowLimitWarning: '読み取り結果が{{count}}人を超えたため、先頭の{{count}}人のみ表示しています。残りは省略しました。',
+    retryRemaining: '残りの用紙を読み直す',
     choose: {
       open: '受付用紙をえらぶ',
       again: '別の用紙を読み取る',

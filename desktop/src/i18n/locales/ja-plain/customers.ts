@@ -46,6 +46,8 @@ export const customers: DeepPartial<typeof source> = {
     reading: '受付の 紙を 読んで います。すこし 待って ください。',
     readingBatch: '受付の 紙を 読んで います（{{total}}回の {{current}}回目）。',
     batchWarning: '{{firstSheet}}から{{lastSheet}}まい目：{{warning}}',
+    rowLimitWarning: '読んだ 人が{{count}}人より 多かったので、はじめの{{count}}人だけ 出して います。のこりは 出して いません。',
+    retryRemaining: 'のこりの 紙を 読み直す',
     choose: {
       open: '受付の 紙を えらぶ',
       again: 'ほかの 紙を 読む',
