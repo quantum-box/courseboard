@@ -19,9 +19,6 @@ spec:
       # itself is still the Vite-built React SPA served from static assets.
       framework: worker
       deploymentTarget: cloudflare_workers
-      # The React app calls the secretless Cognito public client directly.
-      auth:
-        enabled: false
       watchPaths:
         - desktop/**
       build:
@@ -75,8 +72,6 @@ spec:
           cluster: tachyon-cloud-apps
           provider: tidb
           user: courseboard_api
-      auth:
-        enabled: false
       readinessProof:
         path: /healthz
         expectedStatus: 200
