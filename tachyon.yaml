@@ -19,9 +19,10 @@ spec:
       # itself is still the Vite-built React SPA served from static assets.
       framework: worker
       deploymentTarget: cloudflare_workers
-      # The React app calls the secretless Cognito public client directly.
-      auth:
-        enabled: false
+      # No platform auth block: the React app calls the secretless Cognito
+      # public client directly. `spec.auth` was removed from the Cloud App
+      # contract, and the OAuth2Client that replaces it only exists for apps
+      # that want the platform to sign users in — this one never did.
       watchPaths:
         - desktop/**
       build:
@@ -75,8 +76,9 @@ spec:
           cluster: tachyon-cloud-apps
           provider: tidb
           user: courseboard_api
-      auth:
-        enabled: false
+      # No platform auth block here either: React/Tauri send the Cognito bearer
+      # straight to this API, which verifies it itself (see the OIDC env vars
+      # below).
       readinessProof:
         path: /healthz
         expectedStatus: 200
