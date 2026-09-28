@@ -160,7 +160,7 @@ export function ReceptionPage() {
       ),
       formatRowLimitWarning: (maxRows: number) => t(
         'customers:reception.rowLimitWarning',
-        { count: String(maxRows) },
+        { count: maxRows },
       ),
     }
   }
