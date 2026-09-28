@@ -195,7 +195,7 @@ export function ReceptionPage() {
         onBatchProgress: (current, total) => setReadProgress({ current, total }),
         formatBatchWarning: (warning, firstSheet, lastSheet) => t(
           'customers:reception.batchWarning',
-          { warning, firstSheet, lastSheet },
+          { warning, firstSheet: String(firstSheet), lastSheet: String(lastSheet) },
         ),
       })
       setRows(rowsFromDraft(draft, receptionFields, receptionConsentItems))
@@ -256,7 +256,7 @@ export function ReceptionPage() {
         onBatchProgress: (current, total) => setReadProgress({ current, total }),
         formatBatchWarning: (warning, firstSheet, lastSheet) => t(
           'customers:reception.batchWarning',
-          { warning, firstSheet, lastSheet },
+          { warning, firstSheet: String(firstSheet), lastSheet: String(lastSheet) },
         ),
       })
       setRows(rowsFromDraft(draft, receptionFields, receptionConsentItems))
@@ -415,7 +415,10 @@ export function ReceptionPage() {
       {reading ? (
         <LoadingState
           label={readProgress && readProgress.total > 1
-            ? t('customers:reception.readingBatch', readProgress)
+            ? t('customers:reception.readingBatch', {
+                current: String(readProgress.current),
+                total: String(readProgress.total),
+              })
             : t('customers:reception.reading')}
         />
       ) : null}
@@ -528,7 +531,7 @@ export function ReceptionPage() {
                         type="button"
                         variant="ghost"
                         size="sm"
-                        aria-label={t('customers:reception.preview.rotateLeft', { index: index + 1 })}
+                        aria-label={t('customers:reception.preview.rotateLeft', { index: String(index + 1) })}
                         disabled={busy || saved > 0}
                         onClick={() => void rotateSheet(index, -90)}
                       >
@@ -539,7 +542,7 @@ export function ReceptionPage() {
                         type="button"
                         variant="ghost"
                         size="sm"
-                        aria-label={t('customers:reception.preview.rotateRight', { index: index + 1 })}
+                        aria-label={t('customers:reception.preview.rotateRight', { index: String(index + 1) })}
                         disabled={busy || saved > 0}
                         onClick={() => void rotateSheet(index, 90)}
                       >
@@ -1039,7 +1042,7 @@ export function ReceptionFieldSettingsPanel({
                 variant="ghost"
                 size="sm"
                 disabled={changing}
-                aria-label={t('customers:reception.preview.rotateLeft', { index: 1 })}
+                aria-label={t('customers:reception.preview.rotateLeft', { index: '1' })}
                 onClick={() => void analyzeBlankForm(
                   analysisFile,
                   ((analysisRotation + 270) % 360) as ReceptionRotation,
@@ -1054,7 +1057,7 @@ export function ReceptionFieldSettingsPanel({
                 variant="ghost"
                 size="sm"
                 disabled={changing}
-                aria-label={t('customers:reception.preview.rotateRight', { index: 1 })}
+                aria-label={t('customers:reception.preview.rotateRight', { index: '1' })}
                 onClick={() => void analyzeBlankForm(
                   analysisFile,
                   ((analysisRotation + 90) % 360) as ReceptionRotation,
