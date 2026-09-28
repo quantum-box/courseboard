@@ -57,9 +57,8 @@ npm run e2e:report
 （モックモードの Vite を自前で起動するので、バックエンドも認証情報も要らない）。
 失敗時は HTML レポートとトレースが artifact `playwright-report` に上がる。
 
-`tachyoncloud` runner に Playwright の実行環境が無い場合は
-`npx playwright install --with-deps` が落ちる。そのときは job を
-`container: mcr.microsoft.com/playwright:v<@playwright/test の版>-noble` に切り替える。
+CI は `npx playwright install --with-deps chromium` で Chromium と OS 依存ライブラリを
+runner に導入する。導入に失敗する場合は、Playwright の版に合った公式 container を使う。
 
 ## 拡張するとき
 

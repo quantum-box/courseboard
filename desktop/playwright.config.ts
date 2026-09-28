@@ -13,13 +13,8 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   // 本番相手は同時接続を絞る。
-  // CI も数を固定する。既定の「CPU 数の半分」は os.cpus() を見るが、
-  // tachyoncloud の runner は pod なので返るのはノードのコア数で、pod の
-  // 2 vCPU ではない。32 コアのノードに載ると 16 並列の Chromium が 2 vCPU を
-  // 取り合い、遷移だけで 20〜40 秒かかって全テストがタイムアウトする
-  // （16 workers の run は全滅、8 workers の run は 3〜4 分で通っていた）。
-  // 4 workers でも runner Pod の memory limit 4Gi で OOMKilled される run が
-  // 出た（courseboard#346、2026-09-16 に 3 Pod）ので 2 で比較する。
+  // CI も数を固定する。既定の CPU 数連動にせず、Vite preview と Chromium の
+  // 並列負荷を抑えるため 2 workers にする。
   workers: target === 'prod' ? 2 : process.env.CI ? 2 : undefined,
   reporter: [
     ['list'],

@@ -25,9 +25,9 @@ env:
 jobs:
   rust:
     name: Rust
-    # clippy --all-targets --all-features と cargo test は compile-heavy なため、
-    # standard runner ではなく 4vcpu scale set を使う（ADR-0027）。
-    runs-on: tachyoncloud-4vcpu
+    # 公開リポジトリの standard Ubuntu runner は 4 vCPU / 16 GB。
+    # 現行の 4vcpu scale set と同等の CPU / メモリで Rust job を実行できる。
+    runs-on: ubuntu-24.04
     services:
       tidb:
         image: pingcap/tidb:v8.5.7
@@ -58,7 +58,7 @@ jobs:
 
   frontend:
     name: React / Vite frontend
-    runs-on: tachyoncloud
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: desktop
@@ -101,7 +101,7 @@ jobs:
 
   e2e:
     name: E2E (Playwright)
-    runs-on: tachyoncloud
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: desktop
@@ -134,9 +134,8 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
-      # tachyoncloud の runner image は Playwright を前提にしていないので、
-      # 共有ライブラリごと入れる。ここが sudo 不可で落ちるようなら、
-      # container: mcr.microsoft.com/playwright:v<版>-noble に切り替える。
+      # Playwright の browser revision と OS 依存ライブラリを runner に合わせて入れる。
+      # sudo での依存導入が失敗する場合は、対応する Playwright container を使う。
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
@@ -165,15 +164,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Tauri の release build は compile-heavy で、standard runner の
-          # 4 GiB では runner ごと落ちる。ADR-0027 の heavy Rust job 扱い。
+          # 公開リポジトリの standard Ubuntu runner は 4 vCPU / 16 GB。
           - platform: linux-x64
-            os: tachyoncloud-4vcpu
-          # GitHub-hosted Windows runners bill at twice the Linux rate, and this
-          # leg cost $15 of the org's $59 Windows spend in 2026-08 while only
-          # re-proving what desktop-release.yml already builds. Disabled here;
-          # restore the entry below to bring post-merge coverage back.
-          # ADR-0027 例外: Windows 固有 job は GitHub-hosted matrix を維持する。
+            os: ubuntu-24.04
+          # Windows の release package は desktop-release.yml で検証する。
           # - platform: windows-x64
           #   os: windows-latest
     runs-on: ${{ matrix.os }}
@@ -192,30 +186,13 @@ jobs:
       - name: Use SSH for private GitHub dependencies
         run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
 
-      # tachyoncloud の runner image には GitHub-hosted image と違い github.com の
-      # host key が入っていない。CARGO_NET_GIT_FETCH_WITH_CLI により cargo は git を
-      # 呼ぶため、photon の取得が Host key verification failed で落ちる。
-      # ssh-keyscan の TOFU ではなく、TLS 検証を通る meta API の公開鍵を使う。
-      # runner.os ガードは Windows leg を復帰させたときのために残す。
-      - name: Trust github.com SSH host key
-        if: runner.os == 'Linux'
-        shell: bash
-        working-directory: /
-        run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          curl -fsSL https://api.github.com/meta \
-            | jq -r '.ssh_keys[] | "github.com \(.)"' >> ~/.ssh/known_hosts
-          sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
-
-      # tachyoncloud の runner image は libgtk-3-dev / libwebkit2gtk-4.1-dev を
-      # 持つが、Tauri の bundler が使う xdg-mime (xdg-utils) と file は入って
-      # いない。GitHub-hosted image には両方あるため従来は不要だった。
+      # Tauri の Linux build に必要な system dependencies を明示的に入れる。
       - name: Install Linux system dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libayatana-appindicator3-dev librsvg2-dev \
-            libwebkit2gtk-4.1-dev xdg-utils file
+          sudo apt-get install -y build-essential curl file libayatana-appindicator3-dev \
+            libssl-dev librsvg2-dev libwebkit2gtk-4.1-dev libxdo-dev wget xdg-utils
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -276,10 +253,8 @@ jobs:
     name: Android debug bundle
     if: github.event_name == 'push'
     needs: frontend
-    # 4 ABI 分の Rust をコンパイルするため standard runner の 4 GiB では
-    # runner が CPU/Memory 不足で server との通信を失って落ちる。
-    # ADR-0027 の heavy Rust job 扱い。
-    runs-on: tachyoncloud-4vcpu
+    # 公開リポジトリの standard Ubuntu runner は 4 vCPU / 16 GB。
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: desktop
@@ -287,14 +262,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Four Android targets of Rust debug objects plus Gradle packaging used to
-      # fill the GitHub-hosted runner's 14 GB, and `:app:packageUniversalDebug`
-      # died with "No space left on device" — sometimes taking the runner with
-      # it, which surfaced as a job that failed with no failing step. None of
-      # those preinstalled toolchains are used here.
-      #
-      # tachyoncloud の runner Pod にはこれらの path が存在しないため、実在する
-      # ものだけを回収する。df は Android SDK / NDK 展開前の残容量を記録する。
+      # Rust の 4 Android targets と Gradle packaging が使うため、14 GB の
+      # GitHub-hosted disk を SDK / NDK 展開前に確保する。存在する path だけ削除する。
       - name: Report and reclaim runner disk space
         working-directory: /
         run: |
@@ -318,16 +287,6 @@ jobs:
 
       - name: Use SSH for private GitHub dependencies
         run: git config --global url."ssh://git@github.com/".insteadOf "https://github.com/"
-
-      # tachyoncloud の runner image には github.com の host key が無く、photon の
-      # 取得が Host key verification failed で落ちる。desktop_bundle と同じ対処。
-      - name: Trust github.com SSH host key
-        working-directory: /
-        run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          curl -fsSL https://api.github.com/meta \
-            | jq -r '.ssh_keys[] | "github.com \(.)"' >> ~/.ssh/known_hosts
-          sort -u ~/.ssh/known_hosts -o ~/.ssh/known_hosts
 
       - name: Setup Node
         uses: actions/setup-node@v4
