@@ -32,6 +32,25 @@ function absoluteUrl(path: string, origin: string) {
 }
 
 export function metadataForRoute(route: string, siteOrigin = OFFICIAL_SITE_ORIGIN): PageMetadata {
+  if (route === 'privacy' || route === 'terms') {
+    const title = route === 'privacy' ? 'プライバシーポリシー' : '利用規約'
+    const description = `Course Boardの${title}です。`
+    const url = absoluteUrl(`/${route}`, siteOrigin)
+    return {
+      title: pageTitle(title),
+      description,
+      robots: INDEXABLE_ROBOTS,
+      canonicalUrl: url,
+      openGraph: {
+        title,
+        description,
+        url,
+        imageUrl: absoluteUrl('/brand/courseboard-favicon-light-rounded.png', siteOrigin),
+        locale: i18next.language === 'en' ? 'en_US' : 'ja_JP',
+      },
+    }
+  }
+
   if (route === 'download') {
     const url = absoluteUrl('/download', siteOrigin)
     const title = i18next.t('download:meta.title')

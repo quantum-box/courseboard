@@ -15,6 +15,10 @@ export const payment: DeepPartial<typeof source> = {
     description: 'We have confirmed your cancellation fee payment.',
   },
   title: 'Cancellation fee payment',
+  commercialDisclosure: 'Specified Commercial Transactions Act',
+  privacyPolicy: 'Privacy Policy',
+  termsOfService: 'Terms of Service',
+  legalLinksLabel: 'Legal information',
   field: {
     client: 'Name',
     reference: 'For',

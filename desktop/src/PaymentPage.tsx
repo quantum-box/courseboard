@@ -8,6 +8,7 @@ import { loadStripe, Stripe } from '@stripe/stripe-js'
 import { Component, FormEvent, ReactNode, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { i18next } from './i18n'
+import { LegalLinks } from './LegalLinks'
 import {
   apiJson,
   CancellationFeeCollection,
@@ -82,6 +83,7 @@ export function PaymentPage({ token }: PaymentPageProps) {
           <h1>{t('payment:cannotOpen')}</h1>
           <pre className="error-box">{loadError}</pre>
         </section>
+        <LegalLinks className="payment-legal-link" />
       </main>
     )
   }
@@ -93,6 +95,7 @@ export function PaymentPage({ token }: PaymentPageProps) {
           <p className="eyebrow">Course Board</p>
           <h1>{t('payment:loading')}</h1>
         </section>
+        <LegalLinks className="payment-legal-link" />
       </main>
     )
   }
@@ -105,6 +108,7 @@ export function PaymentPage({ token }: PaymentPageProps) {
           <h1>{t('payment:paid.title')}</h1>
           <p>{t('payment:paid.description')}</p>
         </section>
+        <LegalLinks className="payment-legal-link" />
       </main>
     )
   }
@@ -163,6 +167,7 @@ export function PaymentPage({ token }: PaymentPageProps) {
           <p>{t('payment:form.preparing')}</p>
         )}
       </section>
+      <LegalLinks className="payment-legal-link" />
     </main>
   )
 }

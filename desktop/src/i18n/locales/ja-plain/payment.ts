@@ -18,6 +18,10 @@ export const payment: DeepPartial<typeof source> = {
     title: 'お支払いは済んでいます',
     description: 'キャンセル料のお支払いを確認しました。ありがとうございました。',
   },
+  commercialDisclosure: '特定商取引法に基づく表記',
+  privacyPolicy: 'プライバシーポリシー',
+  termsOfService: '利用規約',
+  legalLinksLabel: '法的情報',
   field: {
     client: 'お名前',
     reference: '対象の予約',
