@@ -87,6 +87,8 @@ const ROUTE_ROOTS = new Set([
   'course-map',
   'pay',
   'download',
+  'privacy',
+  'terms',
 ])
 
 /** The whole path, tenant included, with no leading or trailing slash. */

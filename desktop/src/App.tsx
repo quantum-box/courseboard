@@ -44,6 +44,7 @@ import { useCartUpdates } from './hooks/useCartUpdates'
 import { navigate, useRoute } from './lib/router'
 import { DownloadPage } from './DownloadPage'
 import { PaymentPage } from './PaymentPage'
+import { LegalDocumentPage } from './LegalDocumentPage'
 import { MacOSTabStrip } from './components/MacOSTabStrip'
 import { TenantTimezoneProvider } from './context/TenantTimezoneProvider'
 import { FeatureFlagProvider } from './feature-flags/FeatureFlags'
@@ -66,6 +67,10 @@ function AppContent() {
 
   if (route === 'download') {
     return <><PageMetadata route={route} /><DownloadPage /></>
+  }
+
+  if (route === 'privacy' || route === 'terms') {
+    return <><PageMetadata route={route} /><LegalDocumentPage document={route} /></>
   }
 
   if (route.startsWith('pay/')) {

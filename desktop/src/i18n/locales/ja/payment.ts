@@ -13,6 +13,10 @@ export const payment = {
     description: 'キャンセル料のお支払いを確認しました。',
   },
   title: 'キャンセル料のお支払い',
+  commercialDisclosure: '特定商取引法に基づく表記',
+  privacyPolicy: 'プライバシーポリシー',
+  termsOfService: '利用規約',
+  legalLinksLabel: '法的情報',
   field: {
     client: 'お名前',
     reference: '対象',

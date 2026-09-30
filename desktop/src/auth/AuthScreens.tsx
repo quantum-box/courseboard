@@ -12,6 +12,7 @@ import {
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { CourseBoardBrand } from '../components/CourseBoardBrand'
+import { LegalLinks } from '../LegalLinks'
 import type { AuthReason, AuthTenant } from './types'
 
 // Google login is not verified yet; keep the auth adapter logic but hide the UI entry point.
@@ -29,7 +30,10 @@ function AuthFrame({ children }: { children: ReactNode }) {
         </div>
         <div className="auth-platforms"><span>Web</span><span>Desktop</span><span>iOS / Android</span></div>
       </section>
-      <section className="auth-content-panel">{children}</section>
+      <section className="auth-content-panel">
+        {children}
+        <LegalLinks className="auth-legal-links" />
+      </section>
     </main>
   )
 }
