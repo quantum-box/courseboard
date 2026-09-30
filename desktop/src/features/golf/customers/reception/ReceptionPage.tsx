@@ -82,11 +82,29 @@ import {
   rowsFromDraft,
   savedCount,
   sheetsValidationError,
+  receptionSheetReviewBatches,
+  MAX_RECEPTION_BATCH_SHEETS,
   MAX_RECEPTION_SHEETS,
   RECEPTION_SHEET_ACCEPT,
   type ReceptionConsentKey,
   type ReceptionRow,
 } from './models'
+
+type ReceptionReviewBatchResult = {
+  status: 'queued' | 'reading' | 'ready' | 'failed'
+  rows: ReceptionRow[]
+  warnings: string[]
+  rotations: ReceptionRotation[]
+  resume?: { nextBatchIndex: number; draft: ReceptionDraft }
+  error?: string
+}
+
+class ReceptionPreparationError extends Error {
+  constructor(readonly key: string) {
+    super(key)
+    this.name = 'ReceptionPreparationError'
+  }
+}
 
 /**
  * Registering a group off the paper it arrived on.
@@ -112,20 +130,19 @@ export function ReceptionPage() {
     [],
     { cacheKey: 'course:customer-consent-items-active' },
   )
+  const [reviewBatches, setReviewBatches] = useState<File[][]>([])
+  const [batchResults, setBatchResults] = useState<ReceptionReviewBatchResult[]>([])
+  const batchResultsRef = useRef<ReceptionReviewBatchResult[]>([])
+  const [activeBatchIndex, setActiveBatchIndex] = useState(0)
+  const activeBatchIndexRef = useRef(0)
+  const [processingBatchIndex, setProcessingBatchIndex] = useState<number | null>(null)
   const [files, setFiles] = useState<File[]>([])
   const [orientationSources, setOrientationSources] = useState<File[]>([])
-  const [manualRotations, setManualRotations] = useState<ReceptionRotation[]>([])
   const [previewUrls, setPreviewUrls] = useState<string[]>([])
   const [reading, setReading] = useState(false)
+  const [loadingBatchPreview, setLoadingBatchPreview] = useState(false)
   const [readProgress, setReadProgress] = useState<{ current: number; total: number } | null>(null)
   const [readError, setReadError] = useState<string | null>(null)
-  const [batchResume, setBatchResume] = useState<{
-    files: File[]
-    nextBatchIndex: number
-    draft: ReceptionDraft
-  } | null>(null)
-  const [warnings, setWarnings] = useState<string[]>([])
-  const [rows, setRows] = useState<ReceptionRow[]>([])
   const [registeringAll, setRegisteringAll] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const addedRowsRef = useRef(0)
@@ -139,7 +156,13 @@ export function ReceptionPage() {
     return () => urls.forEach(url => URL.revokeObjectURL(url))
   }, [files])
 
-  const duplicates = useMemo(() => duplicateNameKeys(rows), [rows])
+  const activeResult = batchResults[activeBatchIndex]
+  const rows = activeResult?.rows ?? []
+  const warnings = activeResult?.warnings ?? []
+  const duplicates = useMemo(
+    () => duplicateNameKeys(batchResults.flatMap(result => result.rows)),
+    [batchResults],
+  )
   const receptionFields = fieldSettings.data ?? DEFAULT_RECEPTION_FIELDS
   const receptionConsentItems = activeReceptionConsentItems(
     consentSettings.data ?? DEFAULT_RECEPTION_CONSENT_ITEMS,
@@ -147,16 +170,42 @@ export function ReceptionPage() {
   const pending = pendingRows(rows, receptionFields, receptionConsentItems)
   const saved = savedCount(rows)
 
-  function updateRow(key: string, patch: Partial<ReceptionRow>) {
-    setRows(current => current.map(row => (row.key === key ? { ...row, ...patch } : row)))
+  function updateBatchResult(
+    index: number,
+    update: (current: ReceptionReviewBatchResult) => ReceptionReviewBatchResult,
+  ) {
+    const next = [...batchResultsRef.current]
+    const current = next[index]
+    if (!current) return
+    next[index] = update(current)
+    batchResultsRef.current = next
+    setBatchResults(next)
   }
 
-  function receptionDraftOptions() {
+  function activateBatch(index: number) {
+    activeBatchIndexRef.current = index
+    setActiveBatchIndex(index)
+  }
+
+  function updateActiveRows(update: (current: ReceptionRow[]) => ReceptionRow[]) {
+    updateBatchResult(activeBatchIndex, current => ({ ...current, rows: update(current.rows) }))
+  }
+
+  function updateRow(key: string, patch: Partial<ReceptionRow>) {
+    updateActiveRows(current => current.map(row => (row.key === key ? { ...row, ...patch } : row)))
+  }
+
+  function receptionDraftOptions(batchIndex: number) {
+    const sheetOffset = batchIndex * MAX_RECEPTION_BATCH_SHEETS
     return {
       onBatchProgress: (current: number, total: number) => setReadProgress({ current, total }),
       formatBatchWarning: (warning: string, firstSheet: number, lastSheet: number) => t(
         'customers:reception.batchWarning',
-        { warning, firstSheet: String(firstSheet), lastSheet: String(lastSheet) },
+        {
+          warning,
+          firstSheet: String(firstSheet + sheetOffset),
+          lastSheet: String(lastSheet + sheetOffset),
+        },
       ),
       formatRowLimitWarning: (maxRows: number) => t(
         'customers:reception.rowLimitWarning',
@@ -165,31 +214,27 @@ export function ReceptionPage() {
     }
   }
 
-  function handleBatchFailure(
-    error: unknown,
-    sourceFiles: File[],
-    previousDraft?: ReceptionDraft,
-  ): error is ReceptionBatchError {
-    if (!(error instanceof ReceptionBatchError)) return false
-    const newVisitors = error.partialDraft.visitors.slice(previousDraft?.visitors.length ?? 0)
-    const newRows = rowsFromDraft(
-      { ...error.partialDraft, visitors: newVisitors },
+  function rowsBeforeBatch(index: number) {
+    return batchResultsRef.current
+      .slice(0, index)
+      .reduce((count, result) => count + result.rows.length, 0)
+  }
+
+  function rowsForDraft(index: number, draft: ReceptionDraft, preserveExisting: boolean) {
+    const draftedRows = rowsFromDraft(
+      draft,
       receptionFields,
       receptionConsentItems,
-      previousDraft?.visitors.length ?? 0,
+      rowsBeforeBatch(index),
     )
-    if (previousDraft) {
-      setRows(current => [...current, ...newRows])
-    } else {
-      setRows(newRows)
-    }
-    setWarnings(error.partialDraft.warnings ?? [])
-    setBatchResume({
-      files: sourceFiles,
-      nextBatchIndex: error.nextBatchIndex,
-      draft: error.partialDraft,
-    })
-    return true
+    if (!preserveExisting) return draftedRows
+    const existingRows = batchResultsRef.current[index]?.rows ?? []
+    const existingByKey = new Map(existingRows.map(row => [row.key, row]))
+    const draftedKeys = new Set(draftedRows.map(row => row.key))
+    return [
+      ...draftedRows.map(row => existingByKey.get(row.key) ?? row),
+      ...existingRows.filter(row => !draftedKeys.has(row.key)),
+    ]
   }
 
   function readErrorMessage(error: unknown) {
@@ -200,165 +245,197 @@ export function ReceptionPage() {
     return resourceErrorText(error)
   }
 
+  async function prepareReviewBatch(
+    picked: readonly File[],
+    rotations: readonly ReceptionRotation[],
+  ) {
+    let prepared: File[]
+    try {
+      prepared = await prepareReceptionSheets(picked)
+    } catch {
+      throw new ReceptionPreparationError('convert')
+    }
+    let orientationSources: File[]
+    try {
+      orientationSources = []
+      for (const file of prepared) orientationSources.push(await autoOrientReceptionSheet(file))
+      const turned: File[] = []
+      for (const [index, file] of orientationSources.entries()) {
+        const rotation = rotations[index] ?? 0
+        turned.push(rotation === 0 ? file : await rotateReceptionSheet(file, rotation))
+      }
+      prepared = await prepareReceptionSheets(turned)
+    } catch {
+      throw new ReceptionPreparationError('orientationFailed')
+    }
+    const invalid = sheetsValidationError(prepared)
+    if (invalid) throw new ReceptionPreparationError(invalid)
+    // Keep only this review batch's upright source images for the rotate controls.
+    return { files: prepared, orientationSources }
+  }
+
+  async function processReviewBatch(
+    groups: readonly File[][],
+    index: number,
+    forceFresh = false,
+  ) {
+    const group = groups[index]
+    const initial = batchResultsRef.current[index]
+    if (!group || !initial) return false
+    let presentation: Awaited<ReturnType<typeof prepareReviewBatch>> | null = null
+    setProcessingBatchIndex(index)
+    updateBatchResult(index, current => ({ ...current, status: 'reading', error: undefined }))
+    try {
+      const prepared = await prepareReviewBatch(group, initial.rotations)
+      presentation = prepared
+      if (activeBatchIndexRef.current === index) {
+        setFiles(prepared.files)
+        setOrientationSources(prepared.orientationSources)
+      }
+      const resume = forceFresh ? undefined : initial.resume
+      const draft = await draftReceptionSheets(
+        prepared.files,
+        receptionDraftOptions(index),
+        resume,
+      )
+      updateBatchResult(index, current => ({
+        ...current,
+        status: 'ready',
+        rows: rowsForDraft(index, draft, Boolean(resume)),
+        warnings: draft.warnings ?? [],
+        resume: undefined,
+        error: undefined,
+      }))
+      setReadError(null)
+      return true
+    } catch (error) {
+      const batchError = error instanceof ReceptionBatchError ? error : null
+      const message = error instanceof ReceptionPreparationError
+        ? t(`customers:reception.file.${error.key}`, { count: MAX_RECEPTION_SHEETS })
+        : readErrorMessage(batchError?.originalError ?? error)
+      updateBatchResult(index, current => ({
+        ...current,
+        status: 'failed',
+        rows: batchError
+          ? rowsForDraft(index, batchError.partialDraft, Boolean(initial.resume))
+          : current.rows,
+        warnings: batchError?.partialDraft.warnings ?? current.warnings,
+        resume: batchError
+          ? { nextBatchIndex: batchError.nextBatchIndex, draft: batchError.partialDraft }
+          : current.resume,
+        error: message,
+      }))
+      activateBatch(index)
+      setReadError(message)
+      if (error instanceof ReceptionPreparationError) {
+        setFiles([])
+        setOrientationSources([])
+      } else if (presentation) {
+        setFiles(presentation.files)
+        setOrientationSources(presentation.orientationSources)
+      }
+      return false
+    }
+  }
+
+  async function processReviewBatches(groups: readonly File[][], startIndex: number) {
+    for (let index = startIndex; index < groups.length; index += 1) {
+      const completed = await processReviewBatch(groups, index)
+      if (!completed) return
+    }
+  }
+
   async function read(picked: File[]) {
-    setBatchResume(null)
-    setRows([])
-    setWarnings([])
     setReadError(null)
     setReadProgress(null)
-    // Refuse an oversized selection before decoding any of its photos.
+    setFiles([])
+    setOrientationSources([])
     if (picked.length > MAX_RECEPTION_SHEETS) {
-      setFiles([])
-      setOrientationSources([])
-      setManualRotations([])
+      setReviewBatches([])
+      activateBatch(0)
+      batchResultsRef.current = []
+      setBatchResults([])
       setReadError(t('customers:reception.file.count', { count: MAX_RECEPTION_SHEETS }))
       return
     }
+    const groups = receptionSheetReviewBatches(picked)
+    const initialResults = groups.map(group => ({
+      status: 'queued' as const,
+      rows: [],
+      warnings: [],
+      rotations: group.map(() => 0 as ReceptionRotation),
+    }))
+    setReviewBatches(groups)
+    activateBatch(0)
+    batchResultsRef.current = initialResults
+    setBatchResults(initialResults)
     setReading(true)
-    setFiles([])
-    setOrientationSources([])
-    setManualRotations([])
-    let next: File[] = []
     try {
-      // Converting phone photos can take a second each on large images, so the
-      // screen is already in its reading state before it starts.
-      try {
-        next = await prepareReceptionSheets(picked)
-      } catch {
-        setFiles([])
-        setReadError(t('customers:reception.file.convert'))
-        return
-      }
-      try {
-        const oriented: File[] = []
-        for (const file of next) oriented.push(await autoOrientReceptionSheet(file))
-        next = oriented
-        next = await prepareReceptionSheets(next)
-      } catch {
-        setFiles([])
-        setReadError(t('customers:reception.file.orientationFailed'))
-        return
-      }
-      const invalid = sheetsValidationError(next)
-      if (invalid) {
-        setFiles([])
-        setReadError(t(`customers:reception.file.${invalid}`, { count: MAX_RECEPTION_SHEETS }))
-        return
-      }
-      setFiles(next)
-      setOrientationSources(next)
-      setManualRotations(next.map(() => 0 as const))
-      const draft = await draftReceptionSheets(next, receptionDraftOptions())
-      setRows(rowsFromDraft(draft, receptionFields, receptionConsentItems))
-      setWarnings(draft.warnings ?? [])
-    } catch (error) {
-      if (!handleBatchFailure(error, next)) setRows([])
-      // A reader that never ran is not a sheet that could not be read. Saying
-      // so is the whole point: the generic copy would send the desk back to
-      // the scanner for an outage no photograph can fix, which is exactly what
-      // happened while an upstream 402 was arriving as an empty draft.
-      const readError = error instanceof ReceptionBatchError ? error.originalError : error
-      const failure = receptionReadFailure(readError)
-      setReadError(
-        failure
-          ? t(`customers:reception.readerFailure.${failure}`)
-          : resourceErrorText(error),
-      )
+      await processReviewBatches(groups, 0)
     } finally {
       setReading(false)
       setReadProgress(null)
+      setProcessingBatchIndex(null)
+    }
+  }
+
+  async function retryFailedBatch() {
+    if (busy || activeResult?.status !== 'failed') return
+    setReadError(null)
+    setReadProgress(null)
+    setReading(true)
+    try {
+      await processReviewBatches(reviewBatches, activeBatchIndex)
+    } finally {
+      setReading(false)
+      setReadProgress(null)
+      setProcessingBatchIndex(null)
+    }
+  }
+
+  async function selectReviewBatch(index: number) {
+    const result = batchResultsRef.current[index]
+    const group = reviewBatches[index]
+    if (busy || !result || !group || result.status === 'queued') return
+    activateBatch(index)
+    setReadError(result.error ?? null)
+    setLoadingBatchPreview(true)
+    try {
+      const prepared = await prepareReviewBatch(group, result.rotations)
+      setFiles(prepared.files)
+      setOrientationSources(prepared.orientationSources)
+    } catch (error) {
+      setFiles([])
+      setOrientationSources([])
+      setReadError(error instanceof ReceptionPreparationError
+        ? t(`customers:reception.file.${error.key}`, { count: MAX_RECEPTION_SHEETS })
+        : resourceErrorText(error))
+    } finally {
+      setLoadingBatchPreview(false)
     }
   }
 
   async function rotateSheet(index: number, step: -90 | 90) {
-    const originalSource = orientationSources[index]
-    if (rotationLocked || !originalSource || !files[index]) return
-    const currentRotation = manualRotations[index] ?? 0
-    const nextRotation = ((currentRotation + step + 360) % 360) as ReceptionRotation
-    setBatchResume(null)
-    setRows([])
-    setWarnings([])
-    setReadError(null)
-    setReadProgress(null)
-    setReading(true)
-
-    let turned: File[]
-    try {
-      const rotated = nextRotation === 0
-        ? originalSource
-        : await rotateReceptionSheet(originalSource, nextRotation)
-      const prepared = await prepareReceptionSheets([rotated])
-      const selectedFile = prepared[0]
-      if (!selectedFile) throw new Error('Rotated reception sheet was not prepared')
-      turned = [...files]
-      turned[index] = selectedFile
-    } catch {
-      setReadError(t('customers:reception.file.orientationFailed'))
-      setReading(false)
-      return
-    }
-
-    const invalid = sheetsValidationError(turned)
-    if (invalid) {
-      setReadError(t(`customers:reception.file.${invalid}`, { count: MAX_RECEPTION_SHEETS }))
-      setReading(false)
-      return
-    }
-    setFiles(turned)
-    setManualRotations(current => current.map((rotation, page) => (
-      page === index ? nextRotation : rotation
-    )))
-
-    try {
-      const draft = await draftReceptionSheets(turned, receptionDraftOptions())
-      setRows(rowsFromDraft(draft, receptionFields, receptionConsentItems))
-      setWarnings(draft.warnings ?? [])
-    } catch (error) {
-      if (!handleBatchFailure(error, turned)) setRows([])
-      const readError = error instanceof ReceptionBatchError ? error.originalError : error
-      const failure = receptionReadFailure(readError)
-      setReadError(
-        failure
-          ? t(`customers:reception.readerFailure.${failure}`)
-          : resourceErrorText(error),
-      )
-    } finally {
-      setReading(false)
-      setReadProgress(null)
-    }
-  }
-
-  async function retryRemainingBatches() {
-    const resume = batchResume
-    if (!resume || busy) return
+    const result = batchResultsRef.current[activeBatchIndex]
+    const currentRotation = result?.rotations[index] ?? 0
+    if (rotationLocked || !result || !orientationSources[index] || !files[index]) return
+    const rotations = [...result.rotations]
+    rotations[index] = ((currentRotation + step + 360) % 360) as ReceptionRotation
+    updateBatchResult(activeBatchIndex, current => ({
+      ...current,
+      rotations,
+      resume: undefined,
+      error: undefined,
+    }))
     setReadError(null)
     setReadProgress(null)
     setReading(true)
     try {
-      const draft = await draftReceptionSheets(
-        resume.files,
-        receptionDraftOptions(),
-        { draft: resume.draft, nextBatchIndex: resume.nextBatchIndex },
-      )
-      const newVisitors = draft.visitors.slice(resume.draft.visitors.length)
-      const newRows = rowsFromDraft(
-        { ...draft, visitors: newVisitors },
-        receptionFields,
-        receptionConsentItems,
-        resume.draft.visitors.length,
-      )
-      setRows(current => [...current, ...newRows])
-      setWarnings(draft.warnings ?? [])
-      setBatchResume(null)
-    } catch (error) {
-      if (!handleBatchFailure(error, resume.files, resume.draft)) {
-        setBatchResume(resume)
-      }
-      const underlyingError = error instanceof ReceptionBatchError ? error.originalError : error
-      setReadError(readErrorMessage(underlyingError))
+      await processReviewBatch(reviewBatches, activeBatchIndex, true)
     } finally {
       setReading(false)
       setReadProgress(null)
+      setProcessingBatchIndex(null)
     }
   }
 
@@ -371,7 +448,7 @@ export function ReceptionPage() {
       // back to the sheet once the sheet is gone.
       const created = await registerReceptionRow(
         row,
-        rows.findIndex(candidate => candidate.key === row.key),
+        rowsBeforeBatch(activeBatchIndex) + rows.findIndex(candidate => candidate.key === row.key),
         receptionFields,
         receptionConsentItems,
       )
@@ -428,7 +505,9 @@ export function ReceptionPage() {
   }
 
   const busy = reading
+    || loadingBatchPreview
     || registeringAll
+    || batchResults.some(result => result.rows.some(row => row.status === 'saving'))
     || fieldSettings.loading
     || Boolean(fieldSettings.error)
     || consentSettings.loading
@@ -483,18 +562,6 @@ export function ReceptionPage() {
       >
         <p className="reception-hint">{t('customers:reception.choose.hint')}</p>
         {readError ? <Notice tone="danger">{readError}</Notice> : null}
-        {batchResume && !reading ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={busy}
-            onClick={() => void retryRemainingBatches()}
-          >
-            <RefreshCw />
-            {t('customers:reception.retryRemaining')}
-          </Button>
-        ) : null}
         {/* Said once, above the rows: a partial read looks exactly like a
             complete one, and this is the only thing that sends the desk back
             to the paper. */}
@@ -502,6 +569,58 @@ export function ReceptionPage() {
           <Notice key={warning} tone="warning">{warning}</Notice>
         ))}
       </Panel>
+
+      {reviewBatches.length > 0 ? (
+        <Panel
+          className="reception-batches"
+          title={t('customers:reception.batch.title')}
+          description={t('customers:reception.batch.description', {
+            count: String(reviewBatches.length),
+            size: String(MAX_RECEPTION_BATCH_SHEETS),
+          })}
+        >
+          <div className="reception-batch-list" aria-label={t('customers:reception.batch.listLabel')}>
+            {reviewBatches.map((group, index) => {
+              const result = batchResults[index]
+              if (!result) return null
+              const firstSheet = index * MAX_RECEPTION_BATCH_SHEETS + 1
+              const lastSheet = firstSheet + group.length - 1
+              return (
+                <Button
+                  key={index}
+                  type="button"
+                  size="sm"
+                  variant={index === activeBatchIndex ? 'primary' : 'ghost'}
+                  disabled={busy || result.status === 'queued' || result.status === 'reading'}
+                  aria-current={index === activeBatchIndex ? 'step' : undefined}
+                  onClick={() => void selectReviewBatch(index)}
+                >
+                  {t('customers:reception.batch.button', {
+                    batch: String(index + 1),
+                    total: String(reviewBatches.length),
+                    first: String(firstSheet),
+                    last: String(lastSheet),
+                    count: String(result.rows.length),
+                    status: t(`customers:reception.batch.status.${result.status}`),
+                  })}
+                </Button>
+              )
+            })}
+          </div>
+          {activeResult?.status === 'failed' && !reading ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => void retryFailedBatch()}
+            >
+              <RefreshCw />
+              {t('customers:reception.batch.retry')}
+            </Button>
+          ) : null}
+        </Panel>
+      ) : null}
 
       {fieldSettings.error ? (
         <ResourceError error={fieldSettings.error} onRetry={() => void fieldSettings.refresh()} />
@@ -515,16 +634,30 @@ export function ReceptionPage() {
 
       {reading ? (
         <LoadingState
-          label={readProgress && readProgress.total > 1
-            ? t('customers:reception.readingBatch', {
-                current: String(readProgress.current),
-                total: String(readProgress.total),
-              })
+          label={processingBatchIndex !== null
+            ? `${t('customers:reception.batch.reading', {
+                batch: String(processingBatchIndex + 1),
+                total: String(reviewBatches.length),
+                first: String(processingBatchIndex * MAX_RECEPTION_BATCH_SHEETS + 1),
+                last: String(Math.min(
+                  (processingBatchIndex + 1) * MAX_RECEPTION_BATCH_SHEETS,
+                  reviewBatches.reduce((count, group) => count + group.length, 0),
+                )),
+              })}${readProgress && readProgress.total > 1
+                ? ` ${t('customers:reception.readingBatch', {
+                    current: String(readProgress.current),
+                    total: String(readProgress.total),
+                  })}`
+                : ''}`
             : t('customers:reception.reading')}
         />
       ) : null}
 
-      {files.length === 0 && !reading ? (
+      {loadingBatchPreview ? (
+        <LoadingState label={t('customers:reception.batch.loadingPreview')} />
+      ) : null}
+
+      {files.length === 0 && rows.length === 0 && !reading && !loadingBatchPreview ? (
         <Panel>
           <EmptyState
             title={t('customers:reception.empty.title')}
@@ -539,7 +672,7 @@ export function ReceptionPage() {
         </Panel>
       ) : null}
 
-      {files.length > 0 && !reading ? (
+      {(files.length > 0 || rows.length > 0) && !reading && !loadingBatchPreview ? (
         <div className="reception-workspace">
           <Panel
             className="reception-rows"
@@ -550,10 +683,10 @@ export function ReceptionPage() {
                 <Button
                   type="button"
                   variant="ghost"
-                  disabled={busy}
+                  disabled={busy || files.length === 0}
                   onClick={() => {
                     addedRowsRef.current += 1
-                    setRows(current => [
+                    updateActiveRows(current => [
                       ...current,
                       blankRow(
                         `added-${addedRowsRef.current}`,
@@ -569,7 +702,7 @@ export function ReceptionPage() {
                 <Button
                   type="button"
                   variant="primary"
-                  disabled={busy || pending.length === 0}
+                  disabled={busy || files.length === 0 || pending.length === 0}
                   onClick={() => void registerAll()}
                 >
                   {registeringAll
@@ -601,7 +734,7 @@ export function ReceptionPage() {
                   consentItems={receptionConsentItems}
                   index={index}
                   duplicate={duplicates.has(row.key)}
-                  disabled={busy}
+                  disabled={busy || files.length === 0}
                   onChange={patch => updateRow(row.key, patch)}
                   onRegister={() => void register(row).catch(() => {})}
                   onRetryCustomValues={() => void retryCustomValues(row)}
@@ -615,63 +748,69 @@ export function ReceptionPage() {
             title={t('customers:reception.preview.title')}
             description={t('customers:reception.preview.description')}
           >
-            <div className="reception-preview-list">
-              {files.map((file, index) => {
-                const url = previewUrls[index]
-                if (!url) return null
-                // Numbered only when there is more than one, so a single sheet
-                // looks the way it always did.
-                const label = files.length > 1
-                  ? t('customers:reception.preview.page', { index: String(index + 1), total: String(files.length) })
-                  : null
-                return (
-                  <figure key={url} className="reception-preview-page">
-                    {label ? <figcaption className="reception-hint">{label}</figcaption> : null}
-                    <div className="reception-preview-page-actions">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        aria-label={t('customers:reception.preview.rotateLeft', { index: String(index + 1) })}
-                        disabled={rotationLocked}
-                        onClick={() => void rotateSheet(index, -90)}
-                      >
-                        <RotateCcw />
-                        {t('customers:reception.preview.rotateLeftShort')}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        aria-label={t('customers:reception.preview.rotateRight', { index: String(index + 1) })}
-                        disabled={rotationLocked}
-                        onClick={() => void rotateSheet(index, 90)}
-                      >
-                        <RotateCw />
-                        {t('customers:reception.preview.rotateRightShort')}
-                      </Button>
-                    </div>
-                    {previewKind(file) === 'pdf' ? (
-                      <iframe
-                        className="reception-preview-frame"
-                        src={url}
-                        loading="lazy"
-                        title={label ?? t('customers:reception.preview.title')}
-                      />
-                    ) : (
-                      <img
-                        className="reception-preview-image"
-                        src={url}
-                        loading="lazy"
-                        alt={label
-                          ? `${t('customers:reception.preview.alt')} (${label})`
-                          : t('customers:reception.preview.alt')}
-                      />
-                    )}
-                  </figure>
-                )
-              })}
-            </div>
+            {files.length === 0 ? (
+              <p className="reception-hint">{t('customers:reception.batch.previewUnavailable')}</p>
+            ) : (
+              <div className="reception-preview-list">
+                {files.map((file, index) => {
+                  const url = previewUrls[index]
+                  if (!url) return null
+                  const overallSheetIndex = activeBatchIndex * MAX_RECEPTION_BATCH_SHEETS + index + 1
+                  const label = reviewBatches.length > 1
+                    ? t('customers:reception.preview.page', {
+                        index: String(overallSheetIndex),
+                        total: String(reviewBatches.reduce((count, group) => count + group.length, 0)),
+                      })
+                    : null
+                  return (
+                    <figure key={url} className="reception-preview-page">
+                      {label ? <figcaption className="reception-hint">{label}</figcaption> : null}
+                      <div className="reception-preview-page-actions">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={t('customers:reception.preview.rotateLeft', { index: String(overallSheetIndex) })}
+                          disabled={rotationLocked}
+                          onClick={() => void rotateSheet(index, -90)}
+                        >
+                          <RotateCcw />
+                          {t('customers:reception.preview.rotateLeftShort')}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-label={t('customers:reception.preview.rotateRight', { index: String(overallSheetIndex) })}
+                          disabled={rotationLocked}
+                          onClick={() => void rotateSheet(index, 90)}
+                        >
+                          <RotateCw />
+                          {t('customers:reception.preview.rotateRightShort')}
+                        </Button>
+                      </div>
+                      {previewKind(file) === 'pdf' ? (
+                        <iframe
+                          className="reception-preview-frame"
+                          src={url}
+                          loading="lazy"
+                          title={label ?? t('customers:reception.preview.title')}
+                        />
+                      ) : (
+                        <img
+                          className="reception-preview-image"
+                          src={url}
+                          loading="lazy"
+                          alt={label
+                            ? `${t('customers:reception.preview.alt')} (${label})`
+                            : t('customers:reception.preview.alt')}
+                        />
+                      )}
+                    </figure>
+                  )
+                })}
+              </div>
+            )}
             {saved > 0 ? (
               <p className="reception-hint">{t('customers:reception.preview.rotationLocked')}</p>
             ) : null}

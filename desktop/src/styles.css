@@ -6440,6 +6440,21 @@ button,
   gap: 12px;
 }
 
+.reception-batch-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.reception-batch-list button {
+  height: auto;
+  min-height: 36px;
+  justify-content: flex-start;
+  text-align: left;
+  white-space: normal;
+}
+
 /* The scan stays put while the rows scroll: a value checked against a sheet
    that has scrolled away is a value checked against memory. */
 .reception-preview {

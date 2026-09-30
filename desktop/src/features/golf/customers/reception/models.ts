@@ -21,10 +21,10 @@ export const RECEPTION_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'application/p
 
 export const MAX_RECEPTION_SHEET_BYTES = 10 * 1024 * 1024
 
-/** How many sheets the desk may select for one reception read. */
-export const MAX_RECEPTION_SHEETS = 50
+/** How many sheets the desk may select for one reception batch run. */
+export const MAX_RECEPTION_SHEETS = 300
 
-/** Keep the combined OCR draft within the number of rows the desk can verify. */
+/** Keep each eight-sheet review batch within the number of rows the desk can verify. */
 export const MAX_RECEPTION_ROWS = 50
 
 /** Field reads at most eight sheets in one request, so larger sets are batched. */
@@ -895,10 +895,19 @@ export function receptionSheetBatches(files: readonly File[]): File[][] {
   return batches
 }
 
+/** Group a large selection into review batches while preserving picker order. */
+export function receptionSheetReviewBatches(files: readonly File[]): File[][] {
+  const batches: File[][] = []
+  for (let start = 0; start < files.length; start += MAX_RECEPTION_BATCH_SHEETS) {
+    batches.push(files.slice(start, start + MAX_RECEPTION_BATCH_SHEETS))
+  }
+  return batches
+}
+
 /**
  * The picked sheets as they will be uploaded, in the order they were picked.
- * Prepare no more than one upstream batch at a time so a large selection does
- * not decode all fifty phone photos into memory together.
+ * Prepare only the active review batch so a large selection does not decode
+ * hundreds of phone photos into memory together.
  */
 export async function prepareReceptionSheets(picked: readonly File[]): Promise<File[]> {
   const prepared: File[] = []
