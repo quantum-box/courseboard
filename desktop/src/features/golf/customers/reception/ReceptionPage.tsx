@@ -577,10 +577,7 @@ export function ReceptionPage() {
         <Panel
           className="reception-batches"
           title={t('customers:reception.batch.title')}
-          description={t('customers:reception.batch.description', {
-            count: reviewBatches.length,
-            size: MAX_RECEPTION_BATCH_SHEETS,
-          })}
+          description={t('customers:reception.batch.description')}
         >
           <div className="reception-batch-list" aria-label={t('customers:reception.batch.listLabel')}>
             {reviewBatches.map((group, index) => {

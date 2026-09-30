@@ -49,7 +49,7 @@ export const customers: DeepPartial<typeof source> = {
     rowLimitWarning: 'この まとめで 読んだ 人が{{count}}人より 多かったので、はじめの{{count}}人だけ 出して います。のこりは 出して いません。',
     batch: {
       title: '読み取りの まとめ',
-      description: '{{count}}個の まとめを じゅんに 読みます。1つの まとめは{{size}}まいまでです。たしかめた 内容や のせた 人は、まとめを かえても のこります。',
+      description: '8まいまでの まとめに 分けて じゅんに 読みます。たしかめた 内容や のせた 人は、まとめを かえても のこります。',
       listLabel: '受付の 紙の まとめ一覧',
       button: 'まとめ {{batch}}/{{total}}・{{first}}〜{{last}}まい・{{count}}人・{{status}}',
       retry: 'この まとめを もう一度 読み、つづきを 読む',

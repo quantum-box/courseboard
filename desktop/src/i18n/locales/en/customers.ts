@@ -48,7 +48,7 @@ export const customers: DeepPartial<typeof source> = {
     rowLimitWarning: 'This batch returned more than {{count}} people. Only the first {{count}} are shown; the rest were omitted.',
     batch: {
       title: 'Read batches',
-      description: 'Process {{count}} batches in order, with up to {{size}} sheets each. Reviews and registrations are kept when you switch batches.',
+      description: 'Process batches in order, with up to eight sheets each. Reviews and registrations are kept when you switch batches.',
       listLabel: 'Reception sheet batches',
       button: 'Batch {{batch}}/{{total}} · sheets {{first}}–{{last}} · {{count}} people · {{status}}',
       retry: 'Retry this batch and continue',

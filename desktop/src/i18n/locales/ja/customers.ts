@@ -46,7 +46,7 @@ export const customers = {
     rowLimitWarning: 'このbatchの読み取り結果が{{count}}人を超えたため、先頭の{{count}}人のみ表示しています。残りは省略しました。',
     batch: {
       title: '読み取りbatch',
-      description: '{{count}}個のbatchを順に処理します。各batchは最大{{size}}枚で、確認・登録内容は切り替えても保持されます。',
+      description: '最大8枚ずつのbatchに分けて順に処理します。確認・登録内容は切り替えても保持されます。',
       listLabel: '読み取りbatch一覧',
       button: 'batch {{batch}}/{{total}}・{{first}}〜{{last}}枚・{{count}}人・{{status}}',
       retry: 'このbatchを再試行して、後続を続ける',
