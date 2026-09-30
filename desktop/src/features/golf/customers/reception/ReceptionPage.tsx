@@ -79,6 +79,7 @@ import {
   type ReceptionField,
   type ReceptionFieldValue,
   type ReceptionFieldType,
+  type ReceptionSheetsError,
   rowsFromDraft,
   savedCount,
   sheetsValidationError,
@@ -99,8 +100,10 @@ type ReceptionReviewBatchResult = {
   error?: string
 }
 
+type ReceptionPreparationErrorKey = ReceptionSheetsError | 'convert' | 'orientationFailed'
+
 class ReceptionPreparationError extends Error {
-  constructor(readonly key: string) {
+  constructor(readonly key: ReceptionPreparationErrorKey) {
     super(key)
     this.name = 'ReceptionPreparationError'
   }
@@ -575,8 +578,8 @@ export function ReceptionPage() {
           className="reception-batches"
           title={t('customers:reception.batch.title')}
           description={t('customers:reception.batch.description', {
-            count: String(reviewBatches.length),
-            size: String(MAX_RECEPTION_BATCH_SHEETS),
+            count: reviewBatches.length,
+            size: MAX_RECEPTION_BATCH_SHEETS,
           })}
         >
           <div className="reception-batch-list" aria-label={t('customers:reception.batch.listLabel')}>
@@ -600,7 +603,7 @@ export function ReceptionPage() {
                     total: String(reviewBatches.length),
                     first: String(firstSheet),
                     last: String(lastSheet),
-                    count: String(result.rows.length),
+                    count: result.rows.length,
                     status: t(`customers:reception.batch.status.${result.status}`),
                   })}
                 </Button>
