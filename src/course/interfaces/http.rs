@@ -309,6 +309,10 @@ pub struct TeeSheetItemDto {
     pub holes: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    /// Money already taken against the booking, deposit included. Absent when
+    /// nothing has been paid; present, the plan can no longer be changed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paid_amount: Option<i64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -415,6 +419,7 @@ impl From<&TeeSheetItem> for TeeSheetItemDto {
             status: value.status().as_str().to_string(),
             holes: value.holes(),
             notes: value.notes().map(str::to_string),
+            paid_amount: Some(value.paid_amount()).filter(|amount| *amount > 0),
         }
     }
 }
@@ -1185,8 +1190,11 @@ pub async fn change_reservation_plan(
     Json(request): Json<ChangeReservationPlanRequest>,
 ) -> Result<StatusCode, AppError> {
     let credentials = credentials(&state, &headers)?;
-    let use_case =
-        ChangeReservationPlanUseCase::new(reservation_gateway(&state), catalog_gateway(&state));
+    let use_case = ChangeReservationPlanUseCase::new(
+        reservation_gateway(&state),
+        catalog_gateway(&state),
+        state.visit_checkins.clone(),
+    );
     use_case
         .execute(
             credentials,

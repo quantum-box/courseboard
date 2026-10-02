@@ -87,6 +87,12 @@ pub struct TeeSheetItem {
     holes: i32,
     #[getter(skip)]
     notes: Option<String>,
+    /// Money already taken against the booking, deposit included.
+    ///
+    /// Carried so the board can say up front that the plan is settled, rather
+    /// than letting the desk pick another one and be refused on save (SCC-9).
+    #[getter(copy)]
+    paid_amount: i64,
 }
 
 impl TeeSheetItem {
@@ -130,7 +136,13 @@ impl TeeSheetItem {
             status,
             holes: if holes > 0 { holes } else { 18 },
             notes,
+            paid_amount: 0,
         }
+    }
+
+    pub fn with_paid_amount(mut self, paid_amount: i64) -> Self {
+        self.paid_amount = paid_amount.max(0);
+        self
     }
 
     pub fn with_party(mut self, party: PartyDetails) -> Self {

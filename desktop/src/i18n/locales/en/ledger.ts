@@ -239,6 +239,11 @@ export const ledger = {
     failed: 'Could not record the check-in',
   },
   party: {
+    planLocked: {
+      paid: 'Money has been taken for this booking, so its plan cannot change. Cancel and rebook to change it.',
+      checkedIn: 'The group has checked in, so the plan cannot change.',
+      over: 'This booking is over or cancelled, so its plan cannot change.',
+    },
     title: 'Booking detail',
     description: 'The name it is booked under, the headcount, the competition, and the players by name.',
     competition: 'Competition',
