@@ -64,6 +64,7 @@ export const shifts: DeepPartial<typeof source> = {
     pinnedMark: '動かさない',
     note: '出る日だけを出しています。しるしは画面と同じです。「動かさない」は変えない日、「変わる」は案で変わる日です。',
     emptyMonth: 'この月は出る人がいないので、出すものがありません。',
+    notConfirmed: 'この月のシフトはまだ決まっていません。決めるか、シフトの案を出してください。',
     confirmedSheet: 'ひと月のシフト',
     draftSheet: 'シフトの案',
     confirmedFilename: 'キャディシフト表_{{month}}月',
