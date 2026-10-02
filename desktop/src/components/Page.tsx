@@ -196,6 +196,10 @@ const NETWORK_FAILURE_PATTERNS = [
   'err_connection',
 ].map(pattern => new RegExp(`(?:^|[^a-z])${pattern}`))
 
+function isBrowserOffline() {
+  return typeof navigator !== 'undefined' && navigator.onLine === false
+}
+
 /** `message` must already be lower-cased. */
 function isNetworkFailureMessage(message: string) {
   return NETWORK_FAILURE_PATTERNS.some(pattern => pattern.test(message))
@@ -229,7 +233,10 @@ export function resourceErrorCopy(error: unknown): {
   const raw = error.message
   const lower = raw.toLowerCase()
   if (error instanceof TypeError || isNetworkFailureMessage(lower)) {
-    return { key: 'error.offline' }
+    // A 5xx without CORS headers (e.g. a Cloudflare 502 page) also rejects
+    // fetch with a TypeError. Only the browser knows the device is truly
+    // offline; otherwise the server was reached or unreachable, not the user.
+    return { key: isBrowserOffline() ? 'error.offline' : 'error.apiUnreachable' }
   }
   if (
     lower.includes('verify_user')

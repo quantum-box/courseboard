@@ -1,10 +1,19 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resourceErrorCopy, resourceErrorText } from './Page'
 import { ApiError } from '../api'
 import { ja } from '../i18n/locales/ja'
 
 describe('resourceErrorCopy', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reads a transport failure as an unreachable API while the browser is online', () => {
+    // A CORS-less 502 from the edge rejects fetch with the same TypeError.
+    vi.stubGlobal('navigator', { onLine: true })
+    expect(resourceErrorCopy(new TypeError('Failed to fetch')).key).toBe('error.apiUnreachable')
+  })
+
   it('maps engine-specific transport failures onto the offline copy', () => {
+    vi.stubGlobal('navigator', { onLine: false })
     // These reach the operator verbatim today: Chrome/WebKit wording differs.
     expect(resourceErrorCopy(new TypeError('Failed to fetch')).key).toBe('error.offline')
     expect(resourceErrorCopy(new TypeError('Load failed')).key).toBe('error.offline')
@@ -22,6 +31,7 @@ describe('resourceErrorCopy', () => {
   })
 
   it('still recognises a transport failure that is not at the start of the message', () => {
+    vi.stubGlobal('navigator', { onLine: false })
     expect(resourceErrorCopy(new Error('GET /v1/course: Load failed')).key).toBe('error.offline')
     expect(resourceErrorCopy(new Error('net::ERR_CONNECTION_REFUSED')).key).toBe('error.offline')
   })
