@@ -5,38 +5,14 @@
  * どの形式を通すかの判断は `models.ts` が持つ。
  */
 
-/**
- * The long edge of the JPEG that leaves here.
- *
- * A 24MP phone photo re-encodes to more than the reader accepts, and a
- * reception sheet is legible long before that: an A4 sheet at 3000px is around
- * 250dpi, which reads handwriting the desk itself can read.
- */
-const MAX_SHEET_EDGE = 3000
-
+/** JPEG quality used for the format conversion. */
 const SHEET_JPEG_QUALITY = 0.9
 
 /** The picked photo as a JPEG, decoded whichever way this browser can. */
 export async function heifToJpeg(file: File): Promise<File> {
   const bitmap = await decode(file)
   try {
-    return await encodeJpeg(bitmap, file.lastModified, MAX_SHEET_EDGE)
-  } finally {
-    bitmap.close()
-  }
-}
-
-/**
- * A JPEG or PNG sheet re-encoded as a JPEG no longer than `maxEdge`.
- *
- * Only used when several sheets are read together and would not fit in one
- * upload as they are: the reader shrinks them to a far smaller budget anyway,
- * so what is given up here is bytes the reader would never have seen.
- */
-export async function shrinkSheetImage(file: File, maxEdge: number): Promise<File> {
-  const bitmap = await createImageBitmap(file)
-  try {
-    return await encodeJpeg(bitmap, file.lastModified, maxEdge)
+    return await encodeJpeg(bitmap, file.lastModified)
   } finally {
     bitmap.close()
   }
@@ -60,8 +36,8 @@ async function decode(file: File): Promise<ImageBitmap> {
   return heicTo({ blob: file, type: 'bitmap' })
 }
 
-function encodeJpeg(bitmap: ImageBitmap, lastModified: number, maxEdge: number): Promise<File> {
-  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height))
+function encodeJpeg(bitmap: ImageBitmap, lastModified: number): Promise<File> {
+  const scale = 1
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(bitmap.width * scale))
   canvas.height = Math.max(1, Math.round(bitmap.height * scale))

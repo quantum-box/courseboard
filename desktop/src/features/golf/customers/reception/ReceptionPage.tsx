@@ -71,6 +71,7 @@ import {
   DEFAULT_RECEPTION_FIELDS,
   DEFAULT_RECEPTION_CONSENT_ITEMS,
   activeReceptionConsentItems,
+  MAX_RECEPTION_ANALYSIS_SHEET_BYTES,
   type ReceptionAddress,
   type ReceptionDraft,
   type ReceptionConsentCandidate,
@@ -85,6 +86,7 @@ import {
   sheetsValidationError,
   receptionSheetReviewBatches,
   MAX_RECEPTION_BATCH_SHEETS,
+  MAX_RECEPTION_SELECTED_BYTES,
   MAX_RECEPTION_SHEETS,
   RECEPTION_SHEET_ACCEPT,
   type ReceptionConsentKey,
@@ -96,7 +98,11 @@ type ReceptionReviewBatchResult = {
   rows: ReceptionRow[]
   warnings: string[]
   rotations: ReceptionRotation[]
-  resume?: { nextBatchIndex: number; draft: ReceptionDraft }
+  resume?: {
+    nextBatchIndex: number
+    draft: ReceptionDraft
+    job?: { idempotencyKey: string; jobId?: string }
+  }
   error?: string
 }
 
@@ -324,7 +330,11 @@ export function ReceptionPage() {
           : current.rows,
         warnings: batchError?.partialDraft.warnings ?? current.warnings,
         resume: batchError
-          ? { nextBatchIndex: batchError.nextBatchIndex, draft: batchError.partialDraft }
+          ? {
+              nextBatchIndex: batchError.nextBatchIndex,
+              draft: batchError.partialDraft,
+              ...(batchError.jobResume ? { job: batchError.jobResume } : {}),
+            }
           : current.resume,
         error: message,
       }))
@@ -359,6 +369,15 @@ export function ReceptionPage() {
       batchResultsRef.current = []
       setBatchResults([])
       setReadError(t('customers:reception.file.count', { count: MAX_RECEPTION_SHEETS }))
+      return
+    }
+    const selectedBytes = picked.reduce((total, file) => total + file.size, 0)
+    if (selectedBytes > MAX_RECEPTION_SELECTED_BYTES) {
+      setReviewBatches([])
+      activateBatch(0)
+      batchResultsRef.current = []
+      setBatchResults([])
+      setReadError(t('customers:reception.file.totalSize'))
       return
     }
     const groups = receptionSheetReviewBatches(picked)
@@ -1048,8 +1067,13 @@ export function ReceptionFieldSettingsPanel({
         }
       }
       const prepared = rotation === 0 ? source : await rotateReceptionSheet(source, rotation)
-      const invalid = fileValidationError(prepared)
-      if (invalid) throw new Error(t(`customers:reception.file.${invalid}`))
+      const invalid = fileValidationError(prepared, MAX_RECEPTION_ANALYSIS_SHEET_BYTES)
+      if (invalid) {
+        const message = invalid === 'size'
+          ? t('customers:reception.file.analysisSize')
+          : t(`customers:reception.file.${invalid}`)
+        throw new Error(message)
+      }
       if (!analysisFile) {
         // Keep a local recovery preview when the first server request fails.
         setAnalysisFile(source)

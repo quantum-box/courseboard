@@ -29,18 +29,31 @@ use super::NewCustomer;
 /// here keeps a scan the desk cannot use from crossing the network twice.
 pub const MAX_RECEPTION_SHEET_BYTES: usize = 10 * 1024 * 1024;
 
-/// How many sheets one read may carry. A group that arrives on several
-/// sheets — or one sheet photographed front and back — is read in one go
-/// rather than one file at a time, and Field reads them as consecutive pages
-/// of one document. Eight is Field's own ceiling on pictures per read: past it
-/// each page would have to be shrunk below what handwriting survives.
+/// How many sheets the legacy synchronous multipart endpoint may carry.
+/// Persistent Storage jobs use `MAX_RECEPTION_JOB_SHEETS` instead.
 pub const MAX_RECEPTION_SHEETS: usize = 8;
+
+/// How many individually uploaded sheets one persistent read may contain.
+/// The synchronous multipart route remains capped at `MAX_RECEPTION_SHEETS`.
+pub const MAX_RECEPTION_JOB_SHEETS: usize = 32;
 
 /// What all the sheets of one read may weigh together. Field takes them in
 /// one synchronous request whose file budget is 4,000,000 bytes, and a body
 /// above that is dropped by the platform before anything can say it was too
 /// large — so the check lives here, where it can still be a 400.
 pub const MAX_RECEPTION_UPLOAD_BYTES: usize = 4_000_000;
+
+/// One sheet as a stored upload may weigh (64 MiB), which is Field's
+/// `OCR_JOB_MAX_SOURCE_BYTES`. The persistent-job path keeps the document out
+/// of every request body, so the 4MB platform budget that
+/// [`MAX_RECEPTION_UPLOAD_BYTES`] guards no longer applies — the ceiling
+/// left is the reader's own, mirrored here so the refusal is still a 400.
+pub const MAX_RECEPTION_JOB_SHEET_BYTES: u64 = 64 * 1024 * 1024;
+
+/// What all the sheets of one job may weigh together (1 GiB). Mirrors
+/// Field's `OCR_JOB_MAX_TOTAL_BYTES`; checked here so the refusal is a 400
+/// the desk can act on rather than an upstream rejection after the upload.
+pub const MAX_RECEPTION_JOB_UPLOAD_BYTES: u64 = 1024 * 1024 * 1024;
 
 /// The generic entity Field drafts for. A golf visitor is an individual
 /// customer in the tenant's ledger — the same record the counter registers by
@@ -261,6 +274,164 @@ impl From<ReceptionSheet> for ReceptionSheets {
     fn from(sheet: ReceptionSheet) -> Self {
         Self(vec![sheet])
     }
+}
+
+/// One sheet a persistent read job should carry: content type and declared
+/// size only. The bytes never travel this way — the desk PUTs them to Tachyon
+/// Storage on a capability Field minted, and Field downloads them itself, so
+/// nothing on the request path can drop the document for size.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReceptionOcrJobSheet {
+    content_type: &'static str,
+    size: u64,
+}
+
+impl ReceptionOcrJobSheet {
+    /// The types are declared, so the bytes cannot be sniffed here — the
+    /// document lives client-side until Field opens it. Type checking there
+    /// is Field's `from_stored_source`; the declared check stays because a
+    /// mismatch Field answers is a refusal the desk could have been told
+    /// before a large upload left the machine.
+    pub fn try_new(content_type: &str, size: u64) -> Result<Self, CourseError> {
+        if size == 0 || size > MAX_RECEPTION_JOB_SHEET_BYTES {
+            return Err(CourseError::BadRequest(
+                "a reception sheet must be between 1 byte and 64MB",
+            ));
+        }
+        let declared = content_type
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase();
+        let media_type = match declared.as_str() {
+            "image/jpeg" => "image/jpeg",
+            "image/png" => "image/png",
+            "application/pdf" => "application/pdf",
+            _ => {
+                return Err(CourseError::BadRequest(
+                    "reception sheet must be JPEG, PNG, or PDF",
+                ))
+            }
+        };
+        Ok(Self {
+            content_type: media_type,
+            size,
+        })
+    }
+
+    pub fn content_type(&self) -> &'static str {
+        self.content_type
+    }
+
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+}
+
+/// The sheets of one job, in the order the desk picked them. Jobs can carry
+/// more parts than the synchronous multipart route because every part is
+/// uploaded directly to Storage.
+#[derive(Debug)]
+pub struct ReceptionOcrJobSheets(Vec<ReceptionOcrJobSheet>);
+
+impl ReceptionOcrJobSheets {
+    pub fn try_new(sheets: Vec<ReceptionOcrJobSheet>) -> Result<Self, CourseError> {
+        if sheets.is_empty() {
+            return Err(CourseError::BadRequest(
+                "a reception read needs at least one sheet",
+            ));
+        }
+        if sheets.len() > MAX_RECEPTION_JOB_SHEETS {
+            return Err(CourseError::BadRequest(
+                "a reception job may contain at most 32 sheets",
+            ));
+        }
+        let total: u64 = sheets.iter().map(ReceptionOcrJobSheet::size).sum();
+        if total > MAX_RECEPTION_JOB_UPLOAD_BYTES {
+            return Err(CourseError::BadRequest(
+                "reception sheets are larger than 1GB in total",
+            ));
+        }
+        Ok(Self(sheets))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &ReceptionOcrJobSheet> {
+        self.0.iter()
+    }
+}
+
+/// Where one persistent read stands. The strings are Field's own: they are
+/// the contract the handler and the screen branch on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReceptionOcrJobStatus {
+    Uploading,
+    Ready,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+    Expired,
+}
+
+impl ReceptionOcrJobStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Uploading => "uploading",
+            Self::Ready => "ready",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Expired => "expired",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Some(match value {
+            "uploading" => Self::Uploading,
+            "ready" => Self::Ready,
+            "running" => Self::Running,
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            "cancelled" => Self::Cancelled,
+            "expired" => Self::Expired,
+            _ => return None,
+        })
+    }
+}
+
+/// A persistent read as the desk sees it: progress numbers, and the draft so
+/// far mapped the same way the synchronous path maps it. Storage keys and
+/// document bytes stay upstream — the job row never carries personal data to
+/// CourseBoard.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReceptionOcrJob {
+    pub id: String,
+    pub status: ReceptionOcrJobStatus,
+    pub completed_units: u32,
+    /// Unknown until every document has been opened: a PDF's pages only count
+    /// once Field has read it, and a running job answers None until then.
+    pub total_units: Option<u32>,
+    pub draft: ReceptionDraft,
+}
+
+/// What a fresh job answers with: the job itself, and one presigned PUT per
+/// sheet in the same order as the request. The URLs are the only way the
+/// sheets leave the desk's machine — CourseBoard and the request path never
+/// see the bytes at all.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReceptionOcrJobCreated {
+    pub job: ReceptionOcrJob,
+    pub uploads: Vec<ReceptionOcrJobUpload>,
+}
+
+/// One presigned PUT target for a sheet the job already holds a key for.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReceptionOcrJobUpload {
+    pub storage_key: String,
+    pub upload_url: String,
+    pub expires_at: String,
 }
 
 fn is_jpeg(bytes: &[u8]) -> bool {
@@ -911,6 +1082,71 @@ mod tests {
     fn sheets_that_fit_one_by_one_can_still_be_too_heavy_together() {
         let half = MAX_RECEPTION_UPLOAD_BYTES / 2;
         let error = ReceptionSheets::try_new(vec![sheet_of(half), sheet_of(half)]).unwrap_err();
+        assert!(matches!(error, CourseError::BadRequest(_)));
+    }
+
+    fn job_sheet(size: u64) -> ReceptionOcrJobSheet {
+        ReceptionOcrJobSheet::try_new("image/jpeg", size).unwrap()
+    }
+
+    #[test]
+    fn a_job_sheet_declared_as_an_unreadable_type_is_refused_before_upload() {
+        let error = ReceptionOcrJobSheet::try_new("image/heic", 100).unwrap_err();
+        assert!(matches!(error, CourseError::BadRequest(_)));
+        let sheet = ReceptionOcrJobSheet::try_new("application/pdf; q=1", 100).unwrap();
+        assert_eq!(sheet.content_type(), "application/pdf");
+    }
+
+    #[test]
+    fn a_job_sheet_past_the_readers_own_ceiling_never_leaves_the_desk() {
+        assert!(matches!(
+            ReceptionOcrJobSheet::try_new("image/jpeg", MAX_RECEPTION_JOB_SHEET_BYTES + 1)
+                .unwrap_err(),
+            CourseError::BadRequest(_)
+        ));
+        assert!(matches!(
+            ReceptionOcrJobSheet::try_new("image/jpeg", 0).unwrap_err(),
+            CourseError::BadRequest(_)
+        ));
+        assert!(ReceptionOcrJobSheet::try_new("image/jpeg", MAX_RECEPTION_JOB_SHEET_BYTES).is_ok());
+    }
+
+    #[test]
+    fn a_job_accepts_up_to_32_sheets_independently_of_the_synchronous_limit() {
+        assert!(matches!(
+            ReceptionOcrJobSheets::try_new(Vec::new()).unwrap_err(),
+            CourseError::BadRequest(_)
+        ));
+        let thirty_three = (0..=MAX_RECEPTION_JOB_SHEETS)
+            .map(|_| job_sheet(1))
+            .collect();
+        assert!(matches!(
+            ReceptionOcrJobSheets::try_new(thirty_three).unwrap_err(),
+            CourseError::BadRequest(_)
+        ));
+        let thirty_two = (0..MAX_RECEPTION_JOB_SHEETS)
+            .map(|_| job_sheet(1))
+            .collect();
+        assert_eq!(
+            ReceptionOcrJobSheets::try_new(thirty_two)
+                .unwrap()
+                .iter()
+                .count(),
+            32
+        );
+    }
+
+    /// Large scans each pass the per-sheet ceiling; what one job may carry in
+    /// total is the next thing that stops it, still before a single byte is
+    /// uploaded.
+    #[test]
+    fn job_sheets_that_fit_one_by_one_can_still_be_too_heavy_together() {
+        let error = ReceptionOcrJobSheets::try_new(
+            (0..17)
+                .map(|_| job_sheet(MAX_RECEPTION_JOB_SHEET_BYTES))
+                .collect(),
+        )
+        .unwrap_err();
         assert!(matches!(error, CourseError::BadRequest(_)));
     }
 

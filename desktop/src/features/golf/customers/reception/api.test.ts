@@ -1,33 +1,179 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import { ApiError } from '../../../../api'
 
 const api = vi.hoisted(() => ({ json: vi.fn() }))
 
-vi.mock('../../../../api', () => ({
-  courseboardApiJson: api.json,
-}))
+vi.mock('../../../../api', async importOriginal => {
+  const original = await importOriginal<typeof import('../../../../api')>()
+  return { ...original, courseboardApiJson: api.json }
+})
 
 import {
   analyzeReceptionForm,
   createReceptionConsentItem,
   draftReceptionSheets,
   listReceptionConsentItems,
+  ReceptionBatchError,
 } from './api'
 
 describe('reception draft API adapter', () => {
-  it('sends every picked sheet as a file part, in order, without the desk filenames', async () => {
-    api.json.mockResolvedValueOnce({ visitors: [], warnings: [] })
+  beforeEach(() => api.json.mockReset())
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('uploads original sheets directly to Storage and advances the server job', async () => {
     const photo = new File(['a'], 'IMG_0001.jpg', { type: 'image/jpeg' })
     const scan = new File(['b'], 'scanner-0930.pdf', { type: 'application/pdf' })
+    const storageFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+    vi.stubGlobal('fetch', storageFetch)
+    api.json
+      .mockResolvedValueOnce({
+        id: 'job-1',
+        status: 'uploading',
+        completedUnits: 0,
+        draft: { visitors: [], warnings: [] },
+        uploads: [
+          { storageKey: 'one', uploadUrl: 'https://storage.example/one', expiresAt: 'later' },
+          { storageKey: 'two', uploadUrl: 'https://storage.example/two', expiresAt: 'later' },
+        ],
+      })
+      .mockResolvedValueOnce({
+        id: 'job-1',
+        status: 'ready',
+        completedUnits: 0,
+        draft: { visitors: [], warnings: [] },
+      })
+      .mockResolvedValueOnce({
+        id: 'job-1',
+        status: 'completed',
+        completedUnits: 2,
+        totalUnits: 2,
+        draft: { visitors: [{ name: '本田 康彦' }], warnings: [] },
+      })
 
-    await draftReceptionSheets([photo, scan])
+    await expect(draftReceptionSheets([photo, scan])).resolves.toMatchObject({
+      visitors: [{ name: '本田 康彦' }],
+      warnings: [],
+    })
 
-    const [path, init] = api.json.mock.calls.at(-1) as [string, { method: string; body: FormData }]
-    expect(path).toBe('/v1/course/customers/reception-draft')
+    const [path, init] = api.json.mock.calls[0] as [string, RequestInit]
+    expect(path).toBe('/v1/course/customers/reception-draft/jobs')
     expect(init.method).toBe('POST')
-    const parts = init.body.getAll('file') as File[]
-    expect(parts.map(part => [part.name, part.type])).toEqual([
-      ['document.jpg', 'image/jpeg'],
-      ['document.pdf', 'application/pdf'],
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      sheets: [
+        { contentType: 'image/jpeg', size: photo.size },
+        { contentType: 'application/pdf', size: scan.size },
+      ],
+    })
+    expect(String(init.body)).not.toContain('IMG_0001.jpg')
+    expect(storageFetch.mock.calls.map(([url]) => url)).toEqual([
+      'https://storage.example/one',
+      'https://storage.example/two',
+    ])
+    expect(storageFetch.mock.calls[0]?.[1]).toMatchObject({
+      method: 'PUT',
+      body: photo,
+    })
+    expect(new Headers(storageFetch.mock.calls[0]?.[1]?.headers).has('authorization')).toBe(false)
+    expect(api.json.mock.calls.map(([url]) => url)).toEqual([
+      '/v1/course/customers/reception-draft/jobs',
+      '/v1/course/customers/reception-draft/jobs/job-1/confirm',
+      '/v1/course/customers/reception-draft/jobs/job-1/advance',
+    ])
+  })
+
+  it('reuses the same job key after a transient advance failure', async () => {
+    const photo = new File(['a'], 'scan.jpg', { type: 'image/jpeg' })
+    api.json
+      .mockResolvedValueOnce({
+        id: 'job-retry',
+        status: 'uploading',
+        completedUnits: 0,
+        draft: { visitors: [], warnings: [] },
+        uploads: [{ storageKey: 'one', uploadUrl: 'mock://one', expiresAt: 'later' }],
+      })
+      .mockResolvedValueOnce({
+        id: 'job-retry',
+        status: 'ready',
+        completedUnits: 0,
+        draft: { visitors: [], warnings: [] },
+      })
+      .mockRejectedValueOnce(new ApiError('reader unavailable', 429))
+
+    let caught: ReceptionBatchError | undefined
+    try {
+      await draftReceptionSheets([photo])
+    } catch (error) {
+      if (error instanceof ReceptionBatchError) caught = error
+    }
+    expect(caught?.jobResume).toMatchObject({ jobId: 'job-retry' })
+    const resume = caught?.jobResume
+    expect(resume).toBeDefined()
+
+    api.json
+      .mockResolvedValueOnce({
+        id: 'job-retry',
+        status: 'running',
+        completedUnits: 0,
+        draft: { visitors: [], warnings: [] },
+      })
+      .mockResolvedValueOnce({
+        id: 'job-retry',
+        status: 'completed',
+        completedUnits: 1,
+        totalUnits: 1,
+        draft: { visitors: [{ name: '西村 隆' }], warnings: [] },
+      })
+    await expect(draftReceptionSheets(
+      [photo],
+      {},
+      {
+        draft: caught!.partialDraft,
+        nextBatchIndex: caught!.nextBatchIndex,
+        job: resume,
+      },
+    )).resolves.toMatchObject({ visitors: [{ name: '西村 隆' }] })
+    expect(JSON.parse(String((api.json.mock.calls[3]?.[1] as RequestInit).body)).idempotencyKey)
+      .toBe(JSON.parse(String((api.json.mock.calls[0]?.[1] as RequestInit).body)).idempotencyKey)
+    expect(api.json.mock.calls.slice(3).map(([path]) => path)).toEqual([
+      '/v1/course/customers/reception-draft/jobs',
+      '/v1/course/customers/reception-draft/jobs/job-retry/advance',
+    ])
+  })
+
+  it('checks progress after a concurrent advance conflict', async () => {
+    const photo = new File(['a'], 'scan.jpg', { type: 'image/jpeg' })
+    api.json
+      .mockResolvedValueOnce({
+        id: 'job-busy',
+        status: 'uploading',
+        completedUnits: 0,
+        draft: { visitors: [], warnings: [] },
+        uploads: [{ storageKey: 'one', uploadUrl: 'mock://one', expiresAt: 'later' }],
+      })
+      .mockResolvedValueOnce({
+        id: 'job-busy',
+        status: 'ready',
+        completedUnits: 0,
+        draft: { visitors: [], warnings: [] },
+      })
+      .mockRejectedValueOnce(new ApiError('another advance is in flight', 409))
+      .mockResolvedValueOnce({
+        id: 'job-busy',
+        status: 'completed',
+        completedUnits: 1,
+        totalUnits: 1,
+        draft: { visitors: [{ name: '田中 花子' }], warnings: [] },
+      })
+
+    await expect(draftReceptionSheets([photo])).resolves.toMatchObject({
+      visitors: [{ name: '田中 花子' }],
+    })
+    expect(api.json.mock.calls.map(([path]) => path)).toEqual([
+      '/v1/course/customers/reception-draft/jobs',
+      '/v1/course/customers/reception-draft/jobs/job-busy/confirm',
+      '/v1/course/customers/reception-draft/jobs/job-busy/advance',
+      '/v1/course/customers/reception-draft/jobs/job-busy',
     ])
   })
 })

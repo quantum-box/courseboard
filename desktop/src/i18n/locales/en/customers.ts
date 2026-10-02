@@ -48,7 +48,7 @@ export const customers: DeepPartial<typeof source> = {
     rowLimitWarning: 'This batch returned more than {{count}} people. Only the first {{count}} are shown; the rest were omitted.',
     batch: {
       title: 'Read batches',
-      description: 'Process batches in order, with up to eight sheets each. Reviews and registrations are kept when you switch batches.',
+      description: 'Process batches in order, with up to 32 sheets each. Reviews and registrations are kept when you switch batches.',
       listLabel: 'Reception sheet batches',
       button: 'Batch {{batch}}/{{total}} · sheets {{first}}–{{last}} · {{count}} people · {{status}}',
       retry: 'Retry this batch and continue',
@@ -65,13 +65,14 @@ export const customers: DeepPartial<typeof source> = {
     choose: {
       open: 'Choose a reception sheet',
       again: 'Read another sheet',
-      hint: 'Choose up to 300 JPEG, PNG, HEIC/HEIF, or PDF sheets at once. They are read in order in batches of up to eight. Review and register each batch separately, and resume from a failed batch. Landscape sheets are turned upright automatically. Use the preview rotation buttons to adjust and reread a sheet if needed. Large photos are downscaled before reading. The sheets themselves are not stored.',
+      hint: 'Choose up to 300 JPEG, PNG, HEIC/HEIF, or PDF sheets at once, up to 1 GB total. They are processed automatically in batches of up to 32. Large PDFs are read sequentially on the server by page, so you do not need to split them yourself. Photos are not downscaled. Review and register each batch separately. Uploaded sheets are deleted after reading.',
     },
     file: {
       required: 'Choose a reception sheet file.',
-      size: 'That file is too large. Choose a file of 10MB or less.',
+      size: 'This file exceeds the 64MB reading limit for a single sheet.',
+      totalSize: 'The selected sheets may total up to 1 GB.',
+      analysisSize: 'Choose a blank reception sheet of 10MB or less.',
       count: 'Choose up to {{count}} sheets at once.',
-      totalSize: 'A photo or PDF is too large to read. Photos are downscaled automatically; split oversized PDFs.',
       type: 'Choose a JPEG, PNG, HEIC/HEIF, or PDF file.',
       convert: 'That iPhone photo (HEIC/HEIF) could not be converted. Export it as JPEG from the Photos app and try again.',
       orientationFailed: 'Could not correct the sheet orientation. Choose another file and try again.',

@@ -1,4 +1,4 @@
-import { courseboardApiJson } from '../../../../api'
+import { ApiError, courseboardApiJson } from '../../../../api'
 import { customersPath, type Customer } from '../models'
 import {
   customerPayload,
@@ -6,7 +6,9 @@ import {
   normalizeReceptionConsentItem,
   normalizeReceptionConsentItems,
   normalizeReceptionFields,
+  MAX_RECEPTION_BATCH_SHEETS,
   MAX_RECEPTION_ROWS,
+  MAX_RECEPTION_SELECTED_BYTES,
   receptionSheetBatches,
   uploadFileName,
   type ReceptionDraft,
@@ -19,6 +21,10 @@ import {
 } from './models'
 
 const RECEPTION_DRAFT_PATH = '/v1/course/customers/reception-draft'
+const RECEPTION_DRAFT_JOBS_PATH = `${RECEPTION_DRAFT_PATH}/jobs`
+// Field processes at most eight PDF pages per advance, with at most 64 pages
+// per source. A 32-source job therefore needs no more than 256 advances.
+const MAX_RECEPTION_JOB_ADVANCES = MAX_RECEPTION_BATCH_SHEETS * 8
 export const RECEPTION_FIELDS_PATH = '/v1/course/customer-reception-fields'
 export const RECEPTION_FIELDS_ANALYSIS_PATH = `${RECEPTION_FIELDS_PATH}/analysis`
 export const RECEPTION_CONSENT_ITEMS_PATH = '/v1/course/customer-consent-items'
@@ -31,12 +37,31 @@ export class ReceptionBatchError extends Error {
     readonly partialDraft: ReceptionDraft,
     readonly nextBatchIndex: number,
     originalError: unknown,
+    readonly jobResume?: { idempotencyKey: string; jobId?: string },
   ) {
     super(originalError instanceof Error ? originalError.message : String(originalError))
     this.name = 'ReceptionBatchError'
     this.originalError = originalError
   }
 }
+
+type ReceptionOcrJob = {
+  id: string
+  status: 'uploading' | 'ready' | 'running' | 'completed' | 'failed' | 'cancelled' | 'expired'
+  completedUnits: number
+  totalUnits?: number | null
+  draft: ReceptionDraft
+}
+
+type CreatedReceptionOcrJob = ReceptionOcrJob & {
+  uploads: Array<{
+    storageKey: string
+    uploadUrl: string
+    expiresAt: string
+  }>
+}
+
+type ReceptionJobResume = { idempotencyKey: string; jobId?: string }
 
 /**
  * The CourseBoard API returns a complete list (`{ items }`) after merging the
@@ -111,8 +136,15 @@ export async function draftReceptionSheets(
     formatBatchWarning?: (warning: string, firstSheet: number, lastSheet: number) => string
     formatRowLimitWarning?: (maxRows: number) => string
   } = {},
-  resume?: { draft: ReceptionDraft; nextBatchIndex: number },
+  resume?: {
+    draft: ReceptionDraft
+    nextBatchIndex: number
+    job?: ReceptionJobResume
+  },
 ): Promise<ReceptionDraft> {
+  if (files.reduce((total, file) => total + file.size, 0) > MAX_RECEPTION_SELECTED_BYTES) {
+    throw new Error('選択した用紙の合計サイズは1GBまでです。')
+  }
   const batches = receptionSheetBatches(files)
   const total = batches.length
   const startBatchIndex = resume?.nextBatchIndex ?? 0
@@ -128,15 +160,55 @@ export async function draftReceptionSheets(
       continue
     }
     options.onBatchProgress?.(index + 1, total)
+    let jobResume = index === startBatchIndex ? resume?.job : undefined
     try {
-      const form = new FormData()
-      for (const file of batch) {
-        form.append('file', file, uploadFileName(file))
-      }
-      const draft = await courseboardApiJson<ReceptionDraft>(RECEPTION_DRAFT_PATH, {
+      const idempotencyKey = jobResume?.idempotencyKey ?? crypto.randomUUID()
+      jobResume = { idempotencyKey, ...(jobResume?.jobId ? { jobId: jobResume.jobId } : {}) }
+      const createdJob = await courseboardApiJson<CreatedReceptionOcrJob>(RECEPTION_DRAFT_JOBS_PATH, {
         method: 'POST',
-        body: form,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          idempotencyKey,
+          sheets: batch.map(file => ({ contentType: file.type, size: file.size })),
+        }),
       })
+      let job: ReceptionOcrJob = createdJob
+      jobResume = { idempotencyKey, jobId: job.id }
+
+      if (createdJob.status === 'uploading') {
+        if (createdJob.uploads.length !== batch.length) {
+          throw new Error('アップロード先の数が受付用紙と一致しません。')
+        }
+        for (const [sheetIndex, file] of batch.entries()) {
+          await putReceptionSheet(createdJob.uploads[sheetIndex]!, file)
+        }
+        job = await courseboardApiJson<ReceptionOcrJob>(
+          `${RECEPTION_DRAFT_JOBS_PATH}/${encodeURIComponent(job.id)}/confirm`,
+          { method: 'POST' },
+        )
+      }
+
+      let advances = 0
+      while (job.status !== 'completed' && advances < MAX_RECEPTION_JOB_ADVANCES) {
+        if (job.status === 'failed' || job.status === 'cancelled' || job.status === 'expired') {
+          throw new Error('受付用紙の読み取りジョブを続行できません。')
+        }
+        try {
+          job = await courseboardApiJson<ReceptionOcrJob>(
+            `${RECEPTION_DRAFT_JOBS_PATH}/${encodeURIComponent(job.id)}/advance`,
+            { method: 'POST' },
+          )
+          advances += 1
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 409) throw error
+          job = await waitForReceptionJob(job.id, job.completedUnits)
+        }
+      }
+      if (job.status !== 'completed') {
+        throw new Error('受付用紙の読み取りに時間がかかっています。もう一度お試しください。')
+      }
+
+      const draft = job.draft
       const incomingVisitors = draft.visitors ?? []
       const remainingRows = Math.max(0, MAX_RECEPTION_ROWS - visitors.length)
       visitors.push(...incomingVisitors.slice(0, remainingRows))
@@ -154,12 +226,52 @@ export async function draftReceptionSheets(
         { visitors, warnings, rowLimitExceeded },
         index,
         error,
+        jobResume,
       )
     }
     firstSheet = lastSheet + 1
   }
 
   return { visitors, warnings, rowLimitExceeded }
+}
+
+async function waitForReceptionJob(
+  jobId: string,
+  previousCompletedUnits: number,
+): Promise<ReceptionOcrJob> {
+  const path = `${RECEPTION_DRAFT_JOBS_PATH}/${encodeURIComponent(jobId)}`
+  let latest: ReceptionOcrJob | undefined
+  for (let attempt = 0; attempt < 150; attempt += 1) {
+    const job = await courseboardApiJson<ReceptionOcrJob>(path)
+    latest = job
+    if (job.status !== 'running' || job.completedUnits > previousCompletedUnits) return job
+    await new Promise(resolve => window.setTimeout(resolve, 1000))
+  }
+  if (latest && latest.status !== 'running') return latest
+  throw new Error('受付用紙の読み取りに時間がかかっています。もう一度お試しください。')
+}
+
+/**
+ * Sends the bytes to the Storage capability directly. This fetch deliberately
+ * does not use CourseBoard's authenticated API client: a presigned URL is
+ * already the authorization, and the user's bearer must never reach Storage.
+ */
+async function putReceptionSheet(
+  upload: { uploadUrl: string },
+  file: File,
+): Promise<void> {
+  // Development fixtures use a marker URL so the mock flow stays offline.
+  if (upload.uploadUrl.startsWith('mock://')) return
+  const headers = new Headers()
+  if (file.type) headers.set('Content-Type', file.type)
+  const response = await fetch(upload.uploadUrl, {
+    body: file,
+    headers,
+    method: 'PUT',
+  })
+  if (!response.ok) {
+    throw new Error(`Tachyon Storageへのアップロードに失敗しました（${response.status}）。`)
+  }
 }
 
 /**

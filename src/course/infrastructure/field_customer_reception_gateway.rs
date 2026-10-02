@@ -19,16 +19,19 @@ use serde::Deserialize;
 
 use crate::course::domain::{
     reception_sheet_schema_for_fields_and_consents, CourseError, CustomerReceptionField,
-    CustomerReceptionOcrGateway, GatewayCredentials, ProposedConsentItem,
-    ReceptionConsentDefinition, ReceptionDraft, ReceptionDraftRow, ReceptionFieldInput,
-    ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal, ReceptionReaderFailure,
-    ReceptionSheet, ReceptionSheets, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY,
-    RECEPTION_ROW_EMAIL, RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
+    CustomerReceptionOcrGateway, CustomerReceptionOcrJobGateway, GatewayCredentials,
+    ProposedConsentItem, ReceptionConsentDefinition, ReceptionDraft, ReceptionDraftRow,
+    ReceptionFieldInput, ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal,
+    ReceptionOcrJob, ReceptionOcrJobCreated, ReceptionOcrJobSheet, ReceptionOcrJobSheets,
+    ReceptionOcrJobStatus, ReceptionOcrJobUpload, ReceptionReaderFailure, ReceptionSheet,
+    ReceptionSheets, RECEPTION_OCR_ENTITY_KEY, RECEPTION_ROWS_KEY, RECEPTION_ROW_EMAIL,
+    RECEPTION_ROW_NAME, RECEPTION_ROW_NAME_KANA, RECEPTION_ROW_PHONE,
     STANDARD_RECEPTION_FIELD_KEYS,
 };
 
 use super::field_gateway::{
-    field_send_multipart_classified, normalize_base_url, urlencoding_path, FieldStatusFailure,
+    field_send_json_classified, field_send_multipart_classified, normalize_base_url,
+    urlencoding_path, FieldStatusFailure,
 };
 
 /// Reads reception sheets through Field's generic document reader.
@@ -107,6 +110,242 @@ impl CustomerReceptionOcrGateway for FieldCustomerReceptionGateway {
         .await?;
         Ok(map_form_proposal(credentials.operator_id, response))
     }
+}
+
+/// Persistent reads through `/v1/field/ocr/{entity}/jobs`.
+///
+/// The browser PUTs each sheet to a presigned Storage URL Field minted at
+/// create time, so CourseBoard — and every body limit on the way to it —
+/// only ever sees the small JSON envelopes below. The schema travels inside
+/// create's body exactly as it does in the synchronous draft's multipart
+/// part: what a golf reception sheet has on it stays golf knowledge.
+#[async_trait]
+impl CustomerReceptionOcrJobGateway for FieldCustomerReceptionGateway {
+    async fn create_reception_ocr_job(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        idempotency_key: &str,
+        sheets: &ReceptionOcrJobSheets,
+        fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
+    ) -> Result<ReceptionOcrJobCreated, CourseError> {
+        let schema = reception_sheet_schema_for_fields_and_consents(fields, consents)?;
+        let body = serde_json::json!({
+            "idempotencyKey": idempotency_key,
+            "schema": schema,
+            "documents": sheets
+                .iter()
+                .map(|sheet: &ReceptionOcrJobSheet| {
+                    serde_json::json!({
+                        "contentType": sheet.content_type(),
+                        "size": sheet.size(),
+                    })
+                })
+                .collect::<Vec<_>>(),
+        });
+        let path = format!(
+            "/v1/field/ocr/{}/jobs",
+            urlencoding_path(RECEPTION_OCR_ENTITY_KEY)
+        );
+        let response: FieldCreateOcrJobResponse = field_send_json_classified(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            &path,
+            credentials,
+            Some(&body),
+            reader_failure,
+        )
+        .await?;
+        Ok(ReceptionOcrJobCreated {
+            job: map_job(response.job, fields, consents)?,
+            uploads: response
+                .uploads
+                .into_iter()
+                .map(|upload| ReceptionOcrJobUpload {
+                    storage_key: upload.storage_key,
+                    upload_url: upload.upload_url,
+                    expires_at: upload.expires_at,
+                })
+                .collect(),
+        })
+    }
+
+    async fn confirm_reception_ocr_job(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        job_id: &str,
+        fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
+    ) -> Result<ReceptionOcrJob, CourseError> {
+        self.send_job_step(credentials, job_id, "confirm", fields, consents)
+            .await
+    }
+
+    async fn get_reception_ocr_job(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        job_id: &str,
+        fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
+    ) -> Result<ReceptionOcrJob, CourseError> {
+        let path = format!(
+            "/v1/field/ocr/{}/jobs/{}",
+            urlencoding_path(RECEPTION_OCR_ENTITY_KEY),
+            urlencoding_path(job_id)
+        );
+        let response: FieldOcrJobResponse = field_send_json_classified(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::GET,
+            &path,
+            credentials,
+            None,
+            reader_failure,
+        )
+        .await?;
+        map_job(response, fields, consents)
+    }
+
+    async fn advance_reception_ocr_job(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        job_id: &str,
+        fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
+    ) -> Result<ReceptionOcrJob, CourseError> {
+        self.send_job_step(credentials, job_id, "advance", fields, consents)
+            .await
+    }
+
+    async fn cancel_reception_ocr_job(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        job_id: &str,
+        fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
+    ) -> Result<ReceptionOcrJob, CourseError> {
+        let path = format!(
+            "/v1/field/ocr/{}/jobs/{}",
+            urlencoding_path(RECEPTION_OCR_ENTITY_KEY),
+            urlencoding_path(job_id)
+        );
+        let response: FieldOcrJobResponse = field_send_json_classified(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::DELETE,
+            &path,
+            credentials,
+            None,
+            reader_failure,
+        )
+        .await?;
+        map_job(response, fields, consents)
+    }
+}
+
+impl FieldCustomerReceptionGateway {
+    /// POST .../confirm and POST .../advance share everything but the verb.
+    async fn send_job_step(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        job_id: &str,
+        step: &str,
+        fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
+    ) -> Result<ReceptionOcrJob, CourseError> {
+        let path = format!(
+            "/v1/field/ocr/{}/jobs/{}/{}",
+            urlencoding_path(RECEPTION_OCR_ENTITY_KEY),
+            urlencoding_path(job_id),
+            step
+        );
+        let response: FieldOcrJobResponse = field_send_json_classified(
+            &self.client,
+            &self.base_url,
+            reqwest::Method::POST,
+            &path,
+            credentials,
+            None,
+            reader_failure,
+        )
+        .await?;
+        map_job(response, fields, consents)
+    }
+}
+
+/// Field's job shape. The draft is the same shape the synchronous draft
+/// answers with — a read is a read however the document arrived — so the
+/// same `map_draft` turns it into rows for the desk.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldOcrJobResponse {
+    id: String,
+    status: String,
+    #[serde(default)]
+    completed_units: u32,
+    #[serde(default)]
+    total_units: Option<u32>,
+    #[serde(default)]
+    draft: FieldGenericOcrDraft,
+    #[serde(default)]
+    failure_code: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldCreateOcrJobResponse {
+    #[serde(flatten)]
+    job: FieldOcrJobResponse,
+    #[serde(default)]
+    uploads: Vec<FieldOcrJobUpload>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldOcrJobUpload {
+    storage_key: String,
+    upload_url: String,
+    expires_at: String,
+}
+
+/// Terminal job states still answer 200 — Field replays the stored job — so a
+/// job failure arrives here as a status string plus its code rather than as an
+/// HTTP status `reader_failure` can classify. The same classes apply:
+/// billing, rate-limit and unavailable codes become the reader's own
+/// failures, and anything else — a document Field could not read, an expired
+/// job — is a request this side can correct or retry, never a provider error.
+fn map_job(
+    response: FieldOcrJobResponse,
+    fields: &[CustomerReceptionField],
+    consents: &[ReceptionConsentDefinition],
+) -> Result<ReceptionOcrJob, CourseError> {
+    let status = ReceptionOcrJobStatus::parse(&response.status).ok_or_else(|| {
+        CourseError::Provider(format!(
+            "Field OCR job answered an unknown status {}",
+            response.status
+        ))
+    })?;
+    match status {
+        ReceptionOcrJobStatus::Failed => {
+            if let Some(failure) =
+                ReceptionReaderFailure::classify(0, response.failure_code.as_deref())
+            {
+                return Err(CourseError::ReceptionReaderFailed(failure));
+            }
+            return Err(CourseError::BadRequest(
+                "the reception sheets could not be read; check the documents and try again",
+            ));
+        }
+        _ => {}
+    }
+    Ok(ReceptionOcrJob {
+        id: response.id,
+        status,
+        completed_units: response.completed_units,
+        total_units: response.total_units,
+        draft: map_draft(response.draft, fields, consents),
+    })
 }
 
 fn sheet_part(sheet: ReceptionSheet) -> Result<reqwest::multipart::Part, CourseError> {
@@ -429,7 +668,7 @@ fn reader_failure(failure: &FieldStatusFailure<'_>) -> Option<CourseError> {
 /// echoing every schema key with an empty value — `null` where this gateway
 /// asked for rows. That is a normal answer with warnings attached, not a
 /// decoding failure, and a stricter type would turn it into a 424.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct FieldGenericOcrDraft {
     #[serde(default)]

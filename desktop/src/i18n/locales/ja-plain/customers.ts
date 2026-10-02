@@ -49,7 +49,7 @@ export const customers: DeepPartial<typeof source> = {
     rowLimitWarning: 'この まとめで 読んだ 人が{{count}}人より 多かったので、はじめの{{count}}人だけ 出して います。のこりは 出して いません。',
     batch: {
       title: '読み取りの まとめ',
-      description: '8まいまでの まとめに 分けて じゅんに 読みます。たしかめた 内容や のせた 人は、まとめを かえても のこります。',
+      description: '32まいまでの まとめに 分けて じゅんに 読みます。たしかめた 内容や のせた 人は、まとめを かえても のこります。',
       listLabel: '受付の 紙の まとめ一覧',
       button: 'まとめ {{batch}}/{{total}}・{{first}}〜{{last}}まい・{{count}}人・{{status}}',
       retry: 'この まとめを もう一度 読み、つづきを 読む',
@@ -66,13 +66,14 @@ export const customers: DeepPartial<typeof source> = {
     choose: {
       open: '受付の 紙を えらぶ',
       again: 'ほかの 紙を 読む',
-      hint: 'JPEG・PNG・HEIC/HEIF・PDFを 一度に 300まいまで えらべます。8まいまでの まとめに 分けて、えらんだ じゅんに 読みます。まとめごとに 内容を たしかめて 登録します。失敗した まとめから もう一度 読めます。横むきの 紙は 自動で たてむきに します。ちがう ときは、画像の 回す ボタンで なおして 読み直せます。大きい 写真は 読む まえに ちいさく します。紙は のこりません。',
+      hint: 'JPEG・PNG・HEIC/HEIF・PDFを 一度に 300まい、ぜんぶで 1GBまで えらべます。32まいまで 自動で 読みます。大きい PDFも、こちらで 分けなくても ページごとに 読みます。写真は 小さくしません。読んだ あとは 紙の データを 消します。',
     },
     file: {
       required: '受付の 紙の ファイルを えらんで ください。',
-      size: 'ファイルが 大きすぎます。10MBまでの ファイルを えらんで ください。',
+      size: '1つの ファイルの 読み取り上限（64MB）を こえています。',
+      totalSize: 'えらんだ 紙の 合計サイズは 1GBまでです。',
+      analysisSize: '白紙の 受付用紙は 10MB以下の ファイルを えらんで ください。',
       count: '一度に えらべる 紙は {{count}}まいまでです。',
-      totalSize: '写真や PDFが 大きすぎて 読めません。写真は 小さく します。大きい PDFは わけて 読んで ください。',
       type: 'JPEG・PNG・HEIC/HEIF・PDFの ファイルを えらんで ください。',
       convert: 'iPhoneの 写真（HEIC/HEIF）を かえられませんでした。写真アプリで JPEGに 書き出してから ためして ください。',
       orientationFailed: '画像の 向きを なおせませんでした。ほかの ファイルを えらんで ためして ください。',

@@ -16,6 +16,11 @@ import {
   generateReservations,
   shiftDate,
 } from './mockVolume'
+import {
+  MAX_RECEPTION_BATCH_SHEETS,
+  MAX_RECEPTION_JOB_SHEET_BYTES,
+  MAX_RECEPTION_JOB_UPLOAD_BYTES,
+} from '../features/golf/customers/reception/models'
 
 export function isMockFieldDataEnabled() {
   if (import.meta.env.VITE_COURSEBOARD_AUTH_MODE !== 'development') return false
@@ -154,6 +159,75 @@ let mockReceptionFields: MockReceptionField[] = [
     options: [],
   },
 ]
+
+type MockReceptionOcrJob = {
+  id: string
+  idempotencyKey: string
+  status: 'uploading' | 'ready' | 'running' | 'completed' | 'cancelled'
+  completedUnits: number
+  totalUnits: number | null
+  draft: { visitors: Array<Record<string, unknown>>; warnings: string[] }
+  sheets: Array<{ contentType: string; size: number }>
+  uploads: Array<{ storageKey: string; uploadUrl: string; expiresAt: string }>
+}
+
+const mockReceptionOcrJobs = new Map<string, MockReceptionOcrJob>()
+const mockReceptionOcrJobKeys = new Map<string, string>()
+let mockReceptionOcrJobSequence = 0
+
+function mockReceptionOcrDraft(): MockReceptionOcrJob['draft'] {
+  return {
+    visitors: [
+      {
+        name: '本田 康彦',
+        nameKana: 'ホンダ ヤスヒコ',
+        phone: '090-1234-5678',
+        email: 'honda@example.com',
+        birthDate: '1978-04-03',
+        sex: '男性',
+        address: {
+          postalCode: '100-0001',
+          state: '東京都',
+          city: '千代田区',
+          address1: '千代田1-1-1',
+          address2: 'サンプルビル',
+        },
+        customFields: { membership_class: '正会員', newsletter: true },
+        consents: [
+          { key: 'golf_antisocial_and_course_terms', accepted: true },
+          { key: 'golf_cart_terms', accepted: true },
+          { key: 'golf_marketing_contact', accepted: false },
+          { key: 'golf_photo_release', accepted: true },
+        ],
+      },
+      {
+        name: '増田 公陽',
+        nameKana: 'マスダ キミハル',
+        phone: '090-2222-3333',
+        consents: [
+          { key: 'golf_antisocial_and_course_terms', accepted: true },
+          { key: 'golf_cart_terms', accepted: false },
+          { key: 'golf_marketing_contact', accepted: true },
+          { key: 'golf_photo_release', accepted: false },
+        ],
+      },
+      { name: '辻 俊行', consents: [{ key: 'golf_cart_terms', accepted: true }] },
+      { phone: '080-4444-5555' },
+    ],
+    warnings: ['読み取れない項目があります。原本を見ながらすべての項目を確認してください。'],
+  }
+}
+
+function mockReceptionOcrJobResponse(job: MockReceptionOcrJob, includeUploads = false) {
+  return {
+    id: job.id,
+    status: job.status,
+    completedUnits: job.completedUnits,
+    totalUnits: job.totalUnits,
+    draft: job.draft,
+    ...(includeUploads ? { uploads: job.uploads } : {}),
+  }
+}
 
 function cloneMockReceptionFields() {
   return mockReceptionFields.map(field => ({ ...field, options: [...field.options] }))
@@ -2801,6 +2875,14 @@ function resolveGet(path: string): Json | null | undefined {
     return items(cloneMockReceptionFields())
   }
 
+  const receptionOcrJobMatch = pathname.match(
+    /^\/v1\/course\/customers\/reception-draft\/jobs\/([^/]+)$/,
+  )
+  if (receptionOcrJobMatch) {
+    const job = mockReceptionOcrJobs.get(decodeURIComponent(receptionOcrJobMatch[1] ?? ''))
+    return job ? mockReceptionOcrJobResponse(job) : null
+  }
+
   if (pathname === '/v1/course/customer-consent-items') {
     const includeInactive = url.searchParams.get('includeInactive') === 'true'
     return items(cloneMockReceptionConsentItems().filter(item =>
@@ -3668,6 +3750,93 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
     && method === 'PUT'
   ) {
     return hit({ recorded: true })
+  }
+
+  if (pathname === '/v1/course/customers/reception-draft/jobs' && method === 'POST') {
+    const idempotencyKey = typeof body?.idempotencyKey === 'string'
+      ? body.idempotencyKey.trim()
+      : ''
+    const incomingSheets = Array.isArray(body?.sheets) ? body.sheets : null
+    if (!idempotencyKey || !incomingSheets || incomingSheets.length === 0 || incomingSheets.length > MAX_RECEPTION_BATCH_SHEETS) {
+      return error(400, `idempotencyKey and 1 to ${MAX_RECEPTION_BATCH_SHEETS} sheets are required`)
+    }
+
+    const existingId = mockReceptionOcrJobKeys.get(idempotencyKey)
+    const existingJob = existingId ? mockReceptionOcrJobs.get(existingId) : undefined
+    if (existingJob) return hit(mockReceptionOcrJobResponse(existingJob, true))
+
+    const sheets = incomingSheets.flatMap(value => {
+      if (typeof value !== 'object' || value === null) return []
+      const sheet = value as Record<string, unknown>
+      if (typeof sheet.contentType !== 'string' || typeof sheet.size !== 'number') return []
+      return [{ contentType: sheet.contentType, size: sheet.size }]
+    })
+    if (sheets.length !== incomingSheets.length) return error(400, 'invalid sheet metadata')
+    if (sheets.some(sheet => sheet.size <= 0 || sheet.size > MAX_RECEPTION_JOB_SHEET_BYTES)) {
+      return error(400, 'each sheet must be between 1 byte and 64 MiB')
+    }
+    if (sheets.reduce((total, sheet) => total + sheet.size, 0) > MAX_RECEPTION_JOB_UPLOAD_BYTES) {
+      return error(400, 'sheets together must be at most 1 GiB')
+    }
+
+    const sequence = mockReceptionOcrJobSequence++
+    const id = 'mock_reception_ocr_' + sequence
+    const uploads = sheets.map((_, index) => ({
+      storageKey: id + '/' + index,
+      uploadUrl: 'mock://' + id + '/' + index,
+      expiresAt: NOW,
+    }))
+    const job: MockReceptionOcrJob = {
+      id,
+      idempotencyKey,
+      status: 'uploading',
+      completedUnits: 0,
+      totalUnits: null,
+      draft: { visitors: [], warnings: [] },
+      sheets,
+      uploads,
+    }
+    mockReceptionOcrJobs.set(id, job)
+    mockReceptionOcrJobKeys.set(idempotencyKey, id)
+    return hit(mockReceptionOcrJobResponse(job, true))
+  }
+
+  const receptionOcrJobStepMatch = pathname.match(
+    /^\/v1\/course\/customers\/reception-draft\/jobs\/([^/]+)\/(confirm|advance)$/,
+  )
+  if (receptionOcrJobStepMatch && method === 'POST') {
+    const id = decodeURIComponent(receptionOcrJobStepMatch[1] ?? '')
+    const step = receptionOcrJobStepMatch[2]
+    const job = mockReceptionOcrJobs.get(id)
+    if (!job) return error(404, 'reception OCR job was not found')
+    if (step === 'confirm') {
+      if (job.status === 'uploading') {
+        job.status = 'ready'
+        job.totalUnits = job.sheets.length
+      }
+      return hit(mockReceptionOcrJobResponse(job))
+    }
+    if (job.status === 'uploading') return error(409, 'reception OCR job uploads are not confirmed')
+    if (job.status === 'ready' || job.status === 'running') {
+      job.status = 'running'
+      job.completedUnits += 1
+      if (job.completedUnits >= (job.totalUnits ?? job.sheets.length)) {
+        job.status = 'completed'
+        job.draft = mockReceptionOcrDraft()
+      }
+    }
+    return hit(mockReceptionOcrJobResponse(job))
+  }
+
+  const receptionOcrJobCancelMatch = pathname.match(
+    /^\/v1\/course\/customers\/reception-draft\/jobs\/([^/]+)$/,
+  )
+  if (receptionOcrJobCancelMatch && method === 'DELETE') {
+    const id = decodeURIComponent(receptionOcrJobCancelMatch[1] ?? '')
+    const job = mockReceptionOcrJobs.get(id)
+    if (!job) return error(404, 'reception OCR job was not found')
+    if (job.status !== 'completed' && job.status !== 'cancelled') job.status = 'cancelled'
+    return hit(mockReceptionOcrJobResponse(job))
   }
 
   if (pathname === '/v1/course/customers/reception-draft' && method === 'POST') {
