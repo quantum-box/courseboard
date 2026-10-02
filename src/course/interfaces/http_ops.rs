@@ -959,6 +959,13 @@ pub struct CaddieSupplyDto {
     pub caddie_attached_cap: i64,
     pub current_caddie_attached: i64,
     pub remaining: i64,
+    /// Active caddies who filed nothing for the day. Whether they are in the
+    /// numbers above is the tenant's shift rule; either way the desk sees how
+    /// many there are (courseboard#90).
+    pub unfiled_caddies: i64,
+    /// `working` when those caddies are counted in the supply above, `off`
+    /// when they are left out of it.
+    pub unfiled_read_as: String,
 }
 
 impl From<&CaddieSupply> for CaddieSupplyDto {
@@ -974,6 +981,8 @@ impl From<&CaddieSupply> for CaddieSupplyDto {
             caddie_attached_cap: value.caddie_attached_cap(),
             current_caddie_attached: value.current_caddie_attached(),
             remaining: value.remaining(),
+            unfiled_caddies: value.unfiled_caddies(),
+            unfiled_read_as: value.unfiled_read_as().as_str().to_string(),
         }
     }
 }
@@ -1010,6 +1019,7 @@ pub async fn get_caddie_supply(
         catalog_gateway(&state),
         reservation_gateway(&state),
         caddie_duty_gateway(&state),
+        state.shift_rules(),
     );
     let supply = use_case
         .execute(credentials, query.date, query.safety_buffer)

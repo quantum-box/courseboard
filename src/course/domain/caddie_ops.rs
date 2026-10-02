@@ -7,7 +7,7 @@ use derive_getters::Getters;
 
 use super::{
     AssignmentId, AvailabilityId, Caddie, CaddieId, CaddiePlacement, CaddieRank, CaddieSkillLevel,
-    CourseError, CourseId, MembershipId, RatingId, ReservationId,
+    CourseError, CourseId, MembershipId, RatingId, ReservationId, UnfiledRequest,
 };
 
 /// Input for creating or updating a caddie profile.
@@ -749,6 +749,18 @@ pub struct CaddieSupply {
     caddie_attached_cap: i64,
     current_caddie_attached: i64,
     remaining: i64,
+    /// Active caddies who filed nothing for the day.
+    ///
+    /// Reported whichever way the tenant's rule reads them, because the
+    /// desk needs the number for opposite reasons: counted as working, it
+    /// says how much of the supply above nobody has actually promised;
+    /// counted as off, it says how much supply is missing until the
+    /// requests come in (courseboard#90).
+    unfiled_caddies: i64,
+    /// Which of those two the numbers above mean, so a screen can say the
+    /// right one.
+    #[getter(copy)]
+    unfiled_read_as: UnfiledRequest,
 }
 
 impl CaddieSupply {
@@ -764,6 +776,8 @@ impl CaddieSupply {
         caddie_attached_cap: i64,
         current_caddie_attached: i64,
         remaining: i64,
+        unfiled_caddies: i64,
+        unfiled_read_as: UnfiledRequest,
     ) -> Self {
         Self {
             date,
@@ -776,6 +790,8 @@ impl CaddieSupply {
             caddie_attached_cap,
             current_caddie_attached,
             remaining,
+            unfiled_caddies,
+            unfiled_read_as,
         }
     }
 
@@ -788,8 +804,15 @@ impl CaddieSupply {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CaddieDayCapacity {
     pub active: bool,
-    /// Declared availability for the day. `None` means no declaration, which
-    /// counts as fully available.
+    /// Whether the caddie filed anything for this day at all.
+    ///
+    /// Separate from `status`, which other work can narrow on its own: a
+    /// caddie who filed nothing and has a morning job reads as
+    /// afternoon-only, and the tenant's rule still has to decide whether an
+    /// afternoon nobody promised may be sold.
+    pub filed: bool,
+    /// Declared availability for the day, after other work has narrowed it.
+    /// `None` means nothing is declared and nothing narrowed it.
     pub status: Option<AvailabilityStatus>,
     pub can_two_rounds: bool,
     /// Whether the caddie asked for two rounds on this specific day.
@@ -817,6 +840,7 @@ pub fn compute_caddie_supply(
     capacities: impl IntoIterator<Item = CaddieDayCapacity>,
     safety_buffer: i64,
     current_caddie_attached: i64,
+    unfiled: UnfiledRequest,
 ) -> CaddieSupply {
     let safety_buffer = safety_buffer.max(0);
     let mut available_caddies = 0;
@@ -824,10 +848,22 @@ pub fn compute_caddie_supply(
     let mut caddie_supply = 0;
     let mut morning_capacity = 0;
     let mut afternoon_capacity = 0;
+    let mut unfiled_caddies = 0;
 
     for capacity in capacities {
         if !capacity.active {
             continue;
+        }
+        if !capacity.filed {
+            unfiled_caddies += 1;
+            // Whether a day nobody has filed for may be sold is the tenant's
+            // rule, the same one the shift run reads. A club where filing is
+            // how you say you are coming used to have those days counted as
+            // supply anyway, which opened caddie-attached slots nobody had
+            // promised to walk (courseboard#90).
+            if unfiled == UnfiledRequest::Off {
+                continue;
+            }
         }
         let (works, morning, afternoon, light_duty) = availability_flags(capacity.status);
         if !works {
@@ -859,6 +895,8 @@ pub fn compute_caddie_supply(
         caddie_attached_cap,
         current_caddie_attached,
         caddie_attached_cap - current_caddie_attached,
+        unfiled_caddies,
+        unfiled,
     )
 }
 
@@ -874,10 +912,19 @@ mod supply_tests {
     ) -> CaddieDayCapacity {
         CaddieDayCapacity {
             active,
+            // A status of its own is something the caddie filed; `None` is the
+            // day nobody answered for. `unfiled` below builds the other shape.
+            filed: status.is_some(),
             status,
             can_two_rounds,
             two_round_request,
         }
+    }
+
+    /// An active caddie who filed nothing, which is the case courseboard#90 is
+    /// about.
+    fn unfiled() -> CaddieDayCapacity {
+        capacity(true, None, false, false)
     }
 
     fn date() -> NaiveDate {
@@ -898,6 +945,7 @@ mod supply_tests {
             ],
             0,
             0,
+            UnfiledRequest::Working,
         );
 
         assert_eq!(supply.available_caddies(), 4);
@@ -919,6 +967,7 @@ mod supply_tests {
             )],
             0,
             0,
+            UnfiledRequest::Working,
         );
         assert_eq!(supply.two_round_capable(), 0);
         assert_eq!(supply.caddie_supply(), 1);
@@ -926,7 +975,13 @@ mod supply_tests {
 
     #[test]
     fn safety_buffer_lowers_the_cap_but_never_below_zero() {
-        let supply = compute_caddie_supply(date(), [capacity(true, None, false, false)], 5, 0);
+        let supply = compute_caddie_supply(
+            date(),
+            [capacity(true, None, false, false)],
+            5,
+            0,
+            UnfiledRequest::Working,
+        );
         assert_eq!(supply.safety_buffer(), 5);
         assert_eq!(supply.caddie_attached_cap(), 0);
         assert_eq!(supply.remaining(), 0);
@@ -942,10 +997,71 @@ mod supply_tests {
             ],
             0,
             3,
+            UnfiledRequest::Working,
         );
         assert_eq!(supply.caddie_attached_cap(), 2);
         assert_eq!(supply.remaining(), -1);
         assert!(supply.is_over_capacity());
+    }
+
+    #[test]
+    fn a_club_that_reads_silence_as_off_does_not_sell_unfiled_days() {
+        // courseboard#90: where filing is how a caddie says they are coming,
+        // a day nobody answered for is not supply. It used to be counted as a
+        // full working day regardless, opening slots nobody had promised.
+        let caddies = [
+            capacity(true, Some(AvailabilityStatus::Available), false, false),
+            unfiled(),
+            unfiled(),
+        ];
+
+        let working = compute_caddie_supply(date(), caddies, 0, 0, UnfiledRequest::Working);
+        let off = compute_caddie_supply(date(), caddies, 0, 0, UnfiledRequest::Off);
+
+        assert_eq!(working.caddie_supply(), 3);
+        assert_eq!(off.caddie_supply(), 1);
+        assert_eq!(off.available_caddies(), 1);
+        assert_eq!(off.morning_capacity(), 1);
+    }
+
+    #[test]
+    fn the_unfiled_count_is_reported_whichever_way_the_rule_reads_them() {
+        // Counted as working, the number says how much supply nobody promised;
+        // counted as off, how much is missing until the requests come in.
+        // An inactive caddie is neither.
+        let caddies = [
+            capacity(true, Some(AvailabilityStatus::Unavailable), false, false),
+            unfiled(),
+            unfiled(),
+            capacity(false, None, false, false),
+        ];
+
+        for rule in [UnfiledRequest::Working, UnfiledRequest::Off] {
+            let supply = compute_caddie_supply(date(), caddies, 0, 0, rule);
+            assert_eq!(supply.unfiled_caddies(), 2, "{rule:?}");
+            assert_eq!(supply.unfiled_read_as(), rule);
+        }
+    }
+
+    #[test]
+    fn a_caddie_whose_day_only_other_work_narrowed_is_still_unfiled() {
+        // A morning job turns an unanswered day into afternoon-only, but the
+        // afternoon is still one nobody promised.
+        let narrowed = CaddieDayCapacity {
+            active: true,
+            filed: false,
+            status: Some(AvailabilityStatus::AfternoonOnly),
+            can_two_rounds: false,
+            two_round_request: false,
+        };
+
+        let off = compute_caddie_supply(date(), [narrowed], 0, 0, UnfiledRequest::Off);
+        assert_eq!(off.caddie_supply(), 0);
+        assert_eq!(off.unfiled_caddies(), 1);
+
+        let working = compute_caddie_supply(date(), [narrowed], 0, 0, UnfiledRequest::Working);
+        assert_eq!(working.afternoon_capacity(), 1);
+        assert_eq!(working.morning_capacity(), 0);
     }
 }
 
