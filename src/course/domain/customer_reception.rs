@@ -980,9 +980,18 @@ pub struct ReceptionDraft {
 }
 
 impl ReceptionDraft {
-    pub fn new(rows: Vec<ReceptionDraftRow>, warnings: Vec<String>) -> Self {
+    pub fn new(rows: Vec<ReceptionDraftRow>, mut warnings: Vec<String>) -> Self {
         let mut rows: Vec<ReceptionDraftRow> =
             rows.into_iter().filter(|row| !row.is_empty()).collect();
+        if rows.len() > MAX_RECEPTION_ROWS {
+            let warning = format!(
+                "受付票の読み取り結果が上限の{}人を超えたため、先頭{}人のみ表示しています。残りは原本で確認してください。",
+                MAX_RECEPTION_ROWS, MAX_RECEPTION_ROWS
+            );
+            if !warnings.contains(&warning) {
+                warnings.push(warning);
+            }
+        }
         rows.truncate(MAX_RECEPTION_ROWS);
         Self { rows, warnings }
     }
