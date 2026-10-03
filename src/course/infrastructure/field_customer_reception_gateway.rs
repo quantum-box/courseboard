@@ -326,18 +326,15 @@ fn map_job(
             response.status
         ))
     })?;
-    match status {
-        ReceptionOcrJobStatus::Failed => {
-            if let Some(failure) =
-                ReceptionReaderFailure::classify(0, response.failure_code.as_deref())
-            {
-                return Err(CourseError::ReceptionReaderFailed(failure));
-            }
-            return Err(CourseError::BadRequest(
-                "the reception sheets could not be read; check the documents and try again",
-            ));
+    if status == ReceptionOcrJobStatus::Failed {
+        if let Some(failure) =
+            ReceptionReaderFailure::classify(0, response.failure_code.as_deref())
+        {
+            return Err(CourseError::ReceptionReaderFailed(failure));
         }
-        _ => {}
+        return Err(CourseError::BadRequest(
+            "the reception sheets could not be read; check the documents and try again",
+        ));
     }
     Ok(ReceptionOcrJob {
         id: response.id,
