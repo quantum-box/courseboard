@@ -327,7 +327,8 @@ fn map_job(
         ))
     })?;
     if status == ReceptionOcrJobStatus::Failed {
-        if let Some(failure) = ReceptionReaderFailure::classify(0, response.failure_code.as_deref()) {
+        if let Some(failure) = ReceptionReaderFailure::classify(0, response.failure_code.as_deref())
+        {
             return Err(CourseError::ReceptionReaderFailed(failure));
         }
         return Err(CourseError::BadRequest(
