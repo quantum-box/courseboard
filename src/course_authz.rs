@@ -419,6 +419,26 @@ const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     ),
     (
         "*",
+        "/v1/course/customers/reception-draft/jobs",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/customers/reception-draft/jobs/:job_id",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/customers/reception-draft/jobs/:job_id/confirm",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
+        "/v1/course/customers/reception-draft/jobs/:job_id/advance",
+        RouteAuthorization::UpstreamEnforced,
+    ),
+    (
+        "*",
         "/v1/course/customers/:customer_id",
         RouteAuthorization::UpstreamEnforced,
     ),
