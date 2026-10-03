@@ -99,6 +99,12 @@ describe('reception draft API adapter', () => {
         draft: { visitors: [], warnings: [] },
       })
       .mockRejectedValueOnce(new ApiError('reader unavailable', 429))
+      .mockResolvedValueOnce({
+        id: 'job-retry',
+        status: 'running',
+        completedUnits: 0,
+        draft: { visitors: [], warnings: [] },
+      })
 
     let caught: ReceptionBatchError | undefined
     try {
@@ -133,9 +139,9 @@ describe('reception draft API adapter', () => {
         job: resume,
       },
     )).resolves.toMatchObject({ visitors: [{ name: '西村 隆' }] })
-    expect(JSON.parse(String((api.json.mock.calls[3]?.[1] as RequestInit).body)).idempotencyKey)
+    expect(JSON.parse(String((api.json.mock.calls[4]?.[1] as RequestInit).body)).idempotencyKey)
       .toBe(JSON.parse(String((api.json.mock.calls[0]?.[1] as RequestInit).body)).idempotencyKey)
-    expect(api.json.mock.calls.slice(3).map(([path]) => path)).toEqual([
+    expect(api.json.mock.calls.slice(4).map(([path]) => path)).toEqual([
       '/v1/course/customers/reception-draft/jobs',
       '/v1/course/customers/reception-draft/jobs/job-retry/advance',
     ])
