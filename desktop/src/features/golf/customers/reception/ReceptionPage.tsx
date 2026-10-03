@@ -43,6 +43,7 @@ import {
   retryReceptionValues,
   ReceptionBatchError,
   saveReceptionFields,
+  cancelReceptionOcrJob,
 } from './api'
 import {
   blankRow,
@@ -71,6 +72,7 @@ import {
   DEFAULT_RECEPTION_FIELDS,
   DEFAULT_RECEPTION_CONSENT_ITEMS,
   activeReceptionConsentItems,
+  MAX_RECEPTION_ANALYSIS_SHEET_BYTES,
   type ReceptionAddress,
   type ReceptionDraft,
   type ReceptionConsentCandidate,
@@ -85,6 +87,7 @@ import {
   sheetsValidationError,
   receptionSheetReviewBatches,
   MAX_RECEPTION_BATCH_SHEETS,
+  MAX_RECEPTION_SELECTED_BYTES,
   MAX_RECEPTION_SHEETS,
   RECEPTION_SHEET_ACCEPT,
   type ReceptionConsentKey,
@@ -96,7 +99,11 @@ type ReceptionReviewBatchResult = {
   rows: ReceptionRow[]
   warnings: string[]
   rotations: ReceptionRotation[]
-  resume?: { nextBatchIndex: number; draft: ReceptionDraft }
+  resume?: {
+    nextBatchIndex: number
+    draft: ReceptionDraft
+    job?: { idempotencyKey: string; jobId?: string }
+  }
   error?: string
 }
 
@@ -149,6 +156,9 @@ export function ReceptionPage() {
   const [registeringAll, setRegisteringAll] = useState(false)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const addedRowsRef = useRef(0)
+  const preparedByteAdjustmentsRef = useRef(new Map<number, number>())
+  const readingControllerRef = useRef<AbortController | null>(null)
+  const activeOcrJobIdRef = useRef<string | null>(null)
 
   // The previews are object URLs over the files the desk picked; they are
   // revoked when the files change so a morning of scans does not accumulate
@@ -158,6 +168,15 @@ export function ReceptionPage() {
     setPreviewUrls(urls)
     return () => urls.forEach(url => URL.revokeObjectURL(url))
   }, [files])
+
+  useEffect(() => () => {
+    const controller = readingControllerRef.current
+    const jobId = activeOcrJobIdRef.current
+    readingControllerRef.current = null
+    activeOcrJobIdRef.current = null
+    controller?.abort()
+    if (jobId) void cancelReceptionOcrJob(jobId).catch(() => undefined)
+  }, [])
 
   const activeResult = batchResults[activeBatchIndex]
   const rows = activeResult?.rows ?? []
@@ -281,6 +300,7 @@ export function ReceptionPage() {
     groups: readonly File[][],
     index: number,
     forceFresh = false,
+    signal?: AbortSignal,
   ) {
     const group = groups[index]
     const initial = batchResultsRef.current[index]
@@ -290,7 +310,19 @@ export function ReceptionPage() {
     updateBatchResult(index, current => ({ ...current, status: 'reading', error: undefined }))
     try {
       const prepared = await prepareReviewBatch(group, initial.rotations)
+      if (signal?.aborted) return false
       presentation = prepared
+      const selectedOriginalBytes = groups.flat().reduce((total, file) => total + file.size, 0)
+      const originalBatchBytes = group.reduce((total, file) => total + file.size, 0)
+      const preparedBatchBytes = prepared.files.reduce((total, file) => total + file.size, 0)
+      const previousAdjustments = [...preparedByteAdjustmentsRef.current]
+        .filter(([batchIndex]) => batchIndex !== index)
+        .reduce((total, [, bytes]) => total + bytes, 0)
+      const adjustment = preparedBatchBytes - originalBatchBytes
+      if (selectedOriginalBytes + previousAdjustments + adjustment > MAX_RECEPTION_SELECTED_BYTES) {
+        throw new ReceptionPreparationError('totalSize')
+      }
+      preparedByteAdjustmentsRef.current.set(index, adjustment)
       if (activeBatchIndexRef.current === index) {
         setFiles(prepared.files)
         setOrientationSources(prepared.orientationSources)
@@ -298,7 +330,20 @@ export function ReceptionPage() {
       const resume = forceFresh ? undefined : initial.resume
       const draft = await draftReceptionSheets(
         prepared.files,
-        receptionDraftOptions(index),
+        {
+          ...receptionDraftOptions(index),
+          signal,
+          onJobStarted: jobId => {
+            if (signal?.aborted) {
+              void cancelReceptionOcrJob(jobId).catch(() => undefined)
+            } else {
+              activeOcrJobIdRef.current = jobId
+            }
+          },
+          onJobFinished: jobId => {
+            if (activeOcrJobIdRef.current === jobId) activeOcrJobIdRef.current = null
+          },
+        },
         resume,
       )
       updateBatchResult(index, current => ({
@@ -312,6 +357,7 @@ export function ReceptionPage() {
       setReadError(null)
       return true
     } catch (error) {
+      if (signal?.aborted) return false
       const batchError = error instanceof ReceptionBatchError ? error : null
       const message = error instanceof ReceptionPreparationError
         ? t(`customers:reception.file.${error.key}`, { count: MAX_RECEPTION_SHEETS })
@@ -324,13 +370,17 @@ export function ReceptionPage() {
           : current.rows,
         warnings: batchError?.partialDraft.warnings ?? current.warnings,
         resume: batchError
-          ? { nextBatchIndex: batchError.nextBatchIndex, draft: batchError.partialDraft }
+          ? {
+              nextBatchIndex: batchError.nextBatchIndex,
+              draft: batchError.partialDraft,
+              ...(batchError.jobResume ? { job: batchError.jobResume } : {}),
+            }
           : current.resume,
         error: message,
       }))
       activateBatch(index)
       setReadError(message)
-      if (error instanceof ReceptionPreparationError) {
+      if (error instanceof ReceptionPreparationError && !presentation) {
         setFiles([])
         setOrientationSources([])
       } else if (presentation) {
@@ -341,9 +391,13 @@ export function ReceptionPage() {
     }
   }
 
-  async function processReviewBatches(groups: readonly File[][], startIndex: number) {
+  async function processReviewBatches(
+    groups: readonly File[][],
+    startIndex: number,
+    signal?: AbortSignal,
+  ) {
     for (let index = startIndex; index < groups.length; index += 1) {
-      const completed = await processReviewBatch(groups, index)
+      const completed = await processReviewBatch(groups, index, false, signal)
       if (!completed) return
     }
   }
@@ -353,12 +407,22 @@ export function ReceptionPage() {
     setReadProgress(null)
     setFiles([])
     setOrientationSources([])
+    preparedByteAdjustmentsRef.current.clear()
     if (picked.length > MAX_RECEPTION_SHEETS) {
       setReviewBatches([])
       activateBatch(0)
       batchResultsRef.current = []
       setBatchResults([])
       setReadError(t('customers:reception.file.count', { count: MAX_RECEPTION_SHEETS }))
+      return
+    }
+    const selectedBytes = picked.reduce((total, file) => total + file.size, 0)
+    if (selectedBytes > MAX_RECEPTION_SELECTED_BYTES) {
+      setReviewBatches([])
+      activateBatch(0)
+      batchResultsRef.current = []
+      setBatchResults([])
+      setReadError(t('customers:reception.file.totalSize'))
       return
     }
     const groups = receptionSheetReviewBatches(picked)
@@ -373,12 +437,17 @@ export function ReceptionPage() {
     batchResultsRef.current = initialResults
     setBatchResults(initialResults)
     setReading(true)
+    const controller = new AbortController()
+    readingControllerRef.current = controller
     try {
-      await processReviewBatches(groups, 0)
+      await processReviewBatches(groups, 0, controller.signal)
     } finally {
-      setReading(false)
-      setReadProgress(null)
-      setProcessingBatchIndex(null)
+      if (readingControllerRef.current === controller) {
+        readingControllerRef.current = null
+        setReading(false)
+        setReadProgress(null)
+        setProcessingBatchIndex(null)
+      }
     }
   }
 
@@ -387,12 +456,17 @@ export function ReceptionPage() {
     setReadError(null)
     setReadProgress(null)
     setReading(true)
+    const controller = new AbortController()
+    readingControllerRef.current = controller
     try {
-      await processReviewBatches(reviewBatches, activeBatchIndex)
+      await processReviewBatches(reviewBatches, activeBatchIndex, controller.signal)
     } finally {
-      setReading(false)
-      setReadProgress(null)
-      setProcessingBatchIndex(null)
+      if (readingControllerRef.current === controller) {
+        readingControllerRef.current = null
+        setReading(false)
+        setReadProgress(null)
+        setProcessingBatchIndex(null)
+      }
     }
   }
 
@@ -1048,8 +1122,13 @@ export function ReceptionFieldSettingsPanel({
         }
       }
       const prepared = rotation === 0 ? source : await rotateReceptionSheet(source, rotation)
-      const invalid = fileValidationError(prepared)
-      if (invalid) throw new Error(t(`customers:reception.file.${invalid}`))
+      const invalid = fileValidationError(prepared, MAX_RECEPTION_ANALYSIS_SHEET_BYTES)
+      if (invalid) {
+        const message = invalid === 'size'
+          ? t('customers:reception.file.analysisSize')
+          : t(`customers:reception.file.${invalid}`)
+        throw new Error(message)
+      }
       if (!analysisFile) {
         // Keep a local recovery preview when the first server request fails.
         setAnalysisFile(source)

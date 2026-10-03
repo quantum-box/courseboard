@@ -20,7 +20,8 @@ use super::{
     MembershipPlanId, MembershipPlayWindows, MonthlySettlement, NewCustomer,
     NewCustomerRegistration, NewReservation, NewReservationCancellation, PartyDetails,
     PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionConsentDefinition,
-    ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal, ReceptionSheet, ReceptionSheets,
+    ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal, ReceptionOcrJob,
+    ReceptionOcrJobCreated, ReceptionOcrJobSheets, ReceptionSheet, ReceptionSheets,
     RecordedCaddieFeeChange, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate,
     ReservationCancellation, ReservationId, ReservationPolicy, ReservationProduct,
     ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
@@ -1206,6 +1207,76 @@ pub trait CustomerReceptionOcrGateway: Send + Sync {
         credentials: GatewayCredentials<'_>,
         sheet: ReceptionSheet,
     ) -> Result<ReceptionFormProposal, CourseError>;
+}
+
+/// Port for reading sheets too large to travel in a request body.
+///
+/// The synchronous [`CustomerReceptionOcrGateway::draft_reception`] asks Field
+/// to take the document *in* the request, which is exactly what the platform's
+/// body limit drops. This port moves the bytes around that limit instead of
+/// through it: create returns presigned PUT targets on Tachyon Storage, the
+/// caller uploads the sheets straight there, confirm verifies the uploads
+/// landed, and advance reads one bounded piece at a time until the draft is
+/// complete. Field stores nothing but the storage keys; CourseBoard stores
+/// nothing at all.
+///
+/// Sheets are described by content type and size, never carried — by the time
+/// a read needs this port, CourseBoard holds no bytes at all.
+#[async_trait]
+pub trait CustomerReceptionOcrJobGateway: Send + Sync {
+    /// Reserves one job and returns it with a presigned PUT per sheet, in the
+    /// order the sheets were declared. The caller's bearer is what Field
+    /// writes the storage capabilities against.
+    async fn create_reception_ocr_job(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        idempotency_key: &str,
+        sheets: &ReceptionOcrJobSheets,
+        fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
+    ) -> Result<ReceptionOcrJobCreated, CourseError>;
+
+    /// Verifies every upload reached Storage and marks the job ready to read.
+    /// Safe to repeat: once every source is confirmed it replays as read-only.
+    async fn confirm_reception_ocr_job(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        job_id: &str,
+        fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
+    ) -> Result<ReceptionOcrJob, CourseError>;
+
+    /// Reads the current progress without claiming work. Callers use this
+    /// after reconnecting if an earlier advance may still be processing.
+    async fn get_reception_ocr_job(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        job_id: &str,
+        fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
+    ) -> Result<ReceptionOcrJob, CourseError>;
+
+    /// Reads the next bounded piece — at most one upstream-sized chunk of a
+    /// PDF, or one image — and answers with the job so far. Call it again
+    /// until the status is completed; the draft on a completed job is the
+    /// whole read.
+    async fn advance_reception_ocr_job(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        job_id: &str,
+        fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
+    ) -> Result<ReceptionOcrJob, CourseError>;
+
+    /// Abandons a job and retires its stored sheets. Terminal jobs replay
+    /// their stored answer rather than erroring.
+    async fn cancel_reception_ocr_job(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        job_id: &str,
+        fields: &[CustomerReceptionField],
+        consents: &[ReceptionConsentDefinition],
+    ) -> Result<ReceptionOcrJob, CourseError>;
 }
 
 /// Port for the reception-only Field ERP customer create capability.

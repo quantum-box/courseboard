@@ -32,8 +32,9 @@ use crate::course::domain::{
     MembershipPlan, MembershipPlanId, MembershipPlayWindow, MembershipPlayWindows,
     MembershipPlayWindowsGateway, NewCustomer, PlayableDays, ProposedConsentItem, ReceptionAddress,
     ReceptionConsentAnswer, ReceptionCustomerInput, ReceptionDraftRow, ReceptionFieldInput,
-    ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal, ReceptionSheet, ReceptionSheets,
-    SetMemberNumber, UpsertMembershipPlan, MAX_RECEPTION_SHEETS,
+    ReceptionFieldKind, ReceptionFieldType, ReceptionFormProposal, ReceptionOcrJob,
+    ReceptionOcrJobSheet, ReceptionOcrJobSheets, ReceptionSheet, ReceptionSheets, SetMemberNumber,
+    UpsertMembershipPlan, MAX_RECEPTION_JOB_SHEETS, MAX_RECEPTION_SHEETS,
 };
 use crate::course::infrastructure::{
     FieldCustomerConsentGateway, FieldCustomerGateway, FieldCustomerReceptionCreateGateway,
@@ -46,7 +47,7 @@ use crate::course::usecase::{
     DraftCustomerReceptionUseCase, GetCustomerGradeRulesUseCase, GetCustomerMembershipUseCase,
     GetCustomerReceptionFieldsUseCase, GetCustomerRegistrationUseCase, GetCustomerUseCase,
     GetCustomerVisitsUseCase, ListCustomerConsentItemsUseCase, ListCustomerSummariesUseCase,
-    ListMembershipActivitiesUseCase, ListMembershipPlansUseCase,
+    ListMembershipActivitiesUseCase, ListMembershipPlansUseCase, ReceptionOcrJobUseCase,
     RecordReceptionCustomerValuesUseCase, ReplaceCustomerGradeRulesUseCase,
     ReplaceCustomerReceptionFieldsUseCase, SearchCustomersUseCase, SetMemberNumberUseCase,
     UpdateMembershipPlanUseCase,
@@ -2049,6 +2050,293 @@ pub async fn draft_customer_reception(
             .collect(),
         warnings: draft.warnings().to_vec(),
     }))
+}
+
+// ─── Reception sheet OCR jobs ────────────────────────────────────────────────
+//
+// The synchronous endpoint above carries the document in the request body,
+// which is the body the platform drops past 4MB. These endpoints keep the
+// bytes off the request path entirely: create returns presigned Tachyon
+// Storage PUTs the caller writes to directly, confirm verifies the upload
+// landed, and each advance reads one bounded piece until the draft is whole.
+
+/// One sheet the caller will PUT to Storage: type and declared size only.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceptionOcrJobSheetDto {
+    pub content_type: String,
+    pub size: u64,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateReceptionOcrJobRequest {
+    /// Retried creates with the same key answer the same job, so a dropped
+    /// response never doubles a read or its upload URLs.
+    pub idempotency_key: String,
+    /// 1 to 32 sheets, in the order the desk picked them.
+    pub sheets: Vec<ReceptionOcrJobSheetDto>,
+}
+
+/// One presigned PUT target, in the same order as the request's sheets.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceptionOcrJobUploadDto {
+    pub storage_key: String,
+    pub upload_url: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceptionOcrJobDto {
+    pub id: String,
+    /// uploading | ready | running | completed
+    pub status: String,
+    pub completed_units: u32,
+    /// Absent until every document has been opened and its pages counted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_units: Option<u32>,
+    /// The draft so far, mapped exactly like the synchronous draft. On a
+    /// completed job this is the whole read.
+    pub draft: ReceptionDraftDto,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateReceptionOcrJobResponse {
+    #[serde(flatten)]
+    pub job: ReceptionOcrJobDto,
+    /// In the same order as the request's sheets.
+    pub uploads: Vec<ReceptionOcrJobUploadDto>,
+}
+
+fn reception_draft_dto(draft: &crate::course::domain::ReceptionDraft) -> ReceptionDraftDto {
+    ReceptionDraftDto {
+        visitors: draft
+            .rows()
+            .iter()
+            .map(ReceptionDraftRowDto::from)
+            .collect(),
+        warnings: draft.warnings().to_vec(),
+    }
+}
+
+fn reception_ocr_job_dto(job: ReceptionOcrJob) -> ReceptionOcrJobDto {
+    ReceptionOcrJobDto {
+        id: job.id,
+        status: job.status.as_str().to_string(),
+        completed_units: job.completed_units,
+        total_units: job.total_units,
+        draft: reception_draft_dto(&job.draft),
+    }
+}
+
+const MAX_JOB_IDEMPOTENCY_KEY_LENGTH: usize = 128;
+
+/// POST /v1/course/customers/reception-draft/jobs
+///
+/// Reserves a persistent read for sheets too large for one request. Answers
+/// with one presigned PUT per sheet; the caller uploads each sheet to its URL
+/// and calls confirm, then advance until the job completes.
+#[utoipa::path(
+    post,
+    path = "/v1/course/customers/reception-draft/jobs",
+    tag = "course",
+    request_body = CreateReceptionOcrJobRequest,
+    responses(
+        (status = 200, description = "Job created; upload each sheet to its presigned URL", body = CreateReceptionOcrJobResponse),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 402, description = "The reader is unavailable until upstream billing is linked and funded (reception_reader_billing_unsatisfied)", body = ErrorBody),
+        (status = 424, description = "Upstream provider error, including a reader that is down (reception_reader_unavailable)", body = ErrorBody),
+        (status = 429, description = "The reader is rate limited upstream (reception_reader_rate_limited)", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn create_reception_ocr_job(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(request): Json<CreateReceptionOcrJobRequest>,
+) -> Result<Json<CreateReceptionOcrJobResponse>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    if request.sheets.is_empty() || request.sheets.len() > MAX_RECEPTION_JOB_SHEETS {
+        return Err(AppError::BadRequest(
+            "a reception job carries between 1 and 32 sheets",
+        ));
+    }
+    let key = request.idempotency_key.trim();
+    if key.is_empty() || key.len() > MAX_JOB_IDEMPOTENCY_KEY_LENGTH {
+        return Err(AppError::BadRequest(
+            "idempotency key must be 1 to 128 characters",
+        ));
+    }
+    let sheets = request
+        .sheets
+        .iter()
+        .map(|sheet| ReceptionOcrJobSheet::try_new(&sheet.content_type, sheet.size))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(AppError::from)?;
+    let sheets = ReceptionOcrJobSheets::try_new(sheets).map_err(AppError::from)?;
+    let created = ReceptionOcrJobUseCase::new(
+        reception_gateway(&state),
+        reception_fields_gateway(&state),
+        customer_consent_gateway(&state),
+    )
+    .create(credentials, key, sheets)
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(CreateReceptionOcrJobResponse {
+        job: reception_ocr_job_dto(created.job),
+        uploads: created
+            .uploads
+            .into_iter()
+            .map(|upload| ReceptionOcrJobUploadDto {
+                storage_key: upload.storage_key,
+                upload_url: upload.upload_url,
+                expires_at: upload.expires_at,
+            })
+            .collect(),
+    }))
+}
+
+/// POST /v1/course/customers/reception-draft/jobs/:job_id/confirm
+#[utoipa::path(
+    post,
+    path = "/v1/course/customers/reception-draft/jobs/{job_id}/confirm",
+    tag = "course",
+    params(("job_id" = String, Path)),
+    responses(
+        (status = 200, description = "Uploads verified; the job is ready to read", body = ReceptionOcrJobDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Job not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn confirm_reception_ocr_job(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(job_id): Path<String>,
+) -> Result<Json<ReceptionOcrJobDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let job = ReceptionOcrJobUseCase::new(
+        reception_gateway(&state),
+        reception_fields_gateway(&state),
+        customer_consent_gateway(&state),
+    )
+    .confirm(credentials, &job_id)
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(reception_ocr_job_dto(job)))
+}
+
+/// GET /v1/course/customers/reception-draft/jobs/:job_id
+///
+/// Reads job status without claiming another unit. Used to recover the
+/// accumulated draft if the caller lost the response from an in-flight read.
+#[utoipa::path(
+    get,
+    path = "/v1/course/customers/reception-draft/jobs/{job_id}",
+    tag = "course",
+    params(("job_id" = String, Path)),
+    responses(
+        (status = 200, description = "Current job status and draft", body = ReceptionOcrJobDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Job not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn get_reception_ocr_job(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(job_id): Path<String>,
+) -> Result<Json<ReceptionOcrJobDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let job = ReceptionOcrJobUseCase::new(
+        reception_gateway(&state),
+        reception_fields_gateway(&state),
+        customer_consent_gateway(&state),
+    )
+    .get(credentials, &job_id)
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(reception_ocr_job_dto(job)))
+}
+
+/// POST /v1/course/customers/reception-draft/jobs/:job_id/advance
+///
+/// Reads the next bounded piece — at most 8 PDF pages or one image. Call it
+/// again until the status is completed; the draft on the last answer is the
+/// whole read.
+#[utoipa::path(
+    post,
+    path = "/v1/course/customers/reception-draft/jobs/{job_id}/advance",
+    tag = "course",
+    params(("job_id" = String, Path)),
+    responses(
+        (status = 200, description = "One unit read; call again until status is completed", body = ReceptionOcrJobDto),
+        (status = 400, description = "Bad request", body = ErrorBody),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Job not found", body = ErrorBody),
+        (status = 409, description = "Another advance is in flight or uploads are not confirmed", body = ErrorBody),
+        (status = 402, description = "The reader is unavailable until upstream billing is linked and funded (reception_reader_billing_unsatisfied)", body = ErrorBody),
+        (status = 424, description = "Upstream provider error, including a reader that is down (reception_reader_unavailable)", body = ErrorBody),
+        (status = 429, description = "The reader is rate limited upstream (reception_reader_rate_limited)", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn advance_reception_ocr_job(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(job_id): Path<String>,
+) -> Result<Json<ReceptionOcrJobDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let job = ReceptionOcrJobUseCase::new(
+        reception_gateway(&state),
+        reception_fields_gateway(&state),
+        customer_consent_gateway(&state),
+    )
+    .advance(credentials, &job_id)
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(reception_ocr_job_dto(job)))
+}
+
+/// DELETE /v1/course/customers/reception-draft/jobs/:job_id
+///
+/// Abandons the job and retires its stored sheets. A job that already
+/// finished answers its stored state instead of failing.
+#[utoipa::path(
+    delete,
+    path = "/v1/course/customers/reception-draft/jobs/{job_id}",
+    tag = "course",
+    params(("job_id" = String, Path)),
+    responses(
+        (status = 200, description = "Job cancelled (or its terminal state replayed)", body = ReceptionOcrJobDto),
+        (status = 401, description = "Unauthorized", body = ErrorBody),
+        (status = 404, description = "Job not found", body = ErrorBody),
+        (status = 424, description = "Upstream provider error", body = ErrorBody),
+    ),
+    security(("bearer_auth" = []))
+)]
+pub async fn cancel_reception_ocr_job(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(job_id): Path<String>,
+) -> Result<Json<ReceptionOcrJobDto>, AppError> {
+    let credentials = credentials(&state, &headers)?;
+    let job = ReceptionOcrJobUseCase::new(
+        reception_gateway(&state),
+        reception_fields_gateway(&state),
+        customer_consent_gateway(&state),
+    )
+    .cancel(credentials, &job_id)
+    .await
+    .map_err(AppError::from)?;
+    Ok(Json(reception_ocr_job_dto(job)))
 }
 
 /// A blank form is one form: analysis reads exactly one sheet.

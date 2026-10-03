@@ -46,7 +46,7 @@ export const customers = {
     rowLimitWarning: 'このbatchの読み取り結果が{{count}}人を超えたため、先頭の{{count}}人のみ表示しています。残りは省略しました。',
     batch: {
       title: '読み取りbatch',
-      description: '最大8枚ずつのbatchに分けて順に処理します。確認・登録内容は切り替えても保持されます。',
+      description: '最大32枚ずつのbatchに分けて順に処理します。確認・登録内容は切り替えても保持されます。',
       listLabel: '読み取りbatch一覧',
       button: 'batch {{batch}}/{{total}}・{{first}}〜{{last}}枚・{{count}}人・{{status}}',
       retry: 'このbatchを再試行して、後続を続ける',
@@ -63,13 +63,14 @@ export const customers = {
     choose: {
       open: '受付用紙をえらぶ',
       again: '別の用紙を読み取る',
-      hint: 'JPEG・PNG・HEIC/HEIF・PDFを一度に最大300枚までえらべます。最大8枚ずつのbatchに分け、えらんだ順に読み取ります。batchごとに結果を確認・登録でき、失敗したbatchから再開できます。横向きの用紙は自動で縦向きに直します。向きが違う場合は、プレビューの回転ボタンで直して読み直せます。大きい写真は読み取り前に縮小します。用紙は保存されません。',
+      hint: 'JPEG・PNG・HEIC/HEIF・PDFを一度に最大300枚、合計1GBまでえらべます。最大32枚ずつ自動で処理し、batchごとに結果を確認・登録できます。大きいPDFもページごとにサーバーで順次読み取ります。写真は縮小しません。横向きの用紙は自動で縦向きに直します。読み取り後、用紙データは削除されます。',
     },
     file: {
       required: '受付用紙のファイルをえらんでください。',
-      size: 'ファイルが大きすぎます。10MBまでのファイルをえらんでください。',
+      size: '1ファイルの読み取り上限（64MB）を超えています。',
+      totalSize: '選択した用紙の合計サイズは1GBまでです。',
+      analysisSize: '白紙の受付用紙は10MB以下のファイルをえらんでください。',
       count: '一度に選べる用紙は{{count}}枚までです。',
-      totalSize: '写真やPDFが大きすぎて読み取れません。写真は縮小されます。大きいPDFは分けて読み取ってください。',
       type: 'JPEG・PNG・HEIC/HEIF・PDFのファイルをえらんでください。',
       convert: 'iPhoneの写真（HEIC/HEIF）を変換できませんでした。写真アプリでJPEGとして書き出してからお試しください。',
       orientationFailed: '画像の向きを直せませんでした。別のファイルを選んでお試しください。',

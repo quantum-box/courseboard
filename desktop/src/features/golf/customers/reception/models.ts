@@ -1,7 +1,7 @@
 /** 受付用紙を読み取って顧客台帳に入れるまでの、画面側の型と判断。 */
 
 import { ApiError } from '../../../../api'
-import { heifToJpeg, shrinkSheetImage } from './heif'
+import { heifToJpeg } from './heif'
 
 /**
  * What the desk may pick.
@@ -19,25 +19,30 @@ export const RECEPTION_SHEET_ACCEPT =
 /** What actually reaches the API, after any conversion. */
 export const RECEPTION_UPLOAD_TYPES = ['image/jpeg', 'image/png', 'application/pdf']
 
-export const MAX_RECEPTION_SHEET_BYTES = 10 * 1024 * 1024
+export const MAX_RECEPTION_SHEET_BYTES = 64 * 1024 * 1024
+
+/** Blank-form analysis still uses the synchronous Field endpoint. */
+export const MAX_RECEPTION_ANALYSIS_SHEET_BYTES = 10 * 1024 * 1024
 
 /** How many sheets the desk may select for one reception batch run. */
 export const MAX_RECEPTION_SHEETS = 300
 
-/** Keep each eight-sheet review batch within the number of rows the desk can verify. */
+/** Maximum rows kept for one review batch. */
 export const MAX_RECEPTION_ROWS = 50
 
-/** Field reads at most eight sheets in one request, so larger sets are batched. */
-export const MAX_RECEPTION_BATCH_SHEETS = 8
+/** Field reads at most 32 sources in one Storage job. */
+export const MAX_RECEPTION_BATCH_SHEETS = 32
 
 /**
- * What one batch may weigh once it is ready to send. Larger selections are
- * split into batches, each sent as a separate request.
+ * One sheet as a stored job upload may weigh. Mirrors Field's
+ * OCR_JOB_MAX_SOURCE_BYTES (64 MiB): bytes go straight to Storage, so the
+ * 4MB request budget that once forced shrinking is off the path entirely.
  */
-export const MAX_RECEPTION_UPLOAD_BYTES = 4_000_000
+export const MAX_RECEPTION_JOB_SHEET_BYTES = 64 * 1024 * 1024
 
-/** Long edges to try, largest first, for a photo larger than one upload allows. */
-const SHRINK_EDGES = [2400, 1800, 1400, 1100] as const
+/** What all the sheets in one Storage job and one selection may weigh (1 GiB). */
+export const MAX_RECEPTION_JOB_UPLOAD_BYTES = 1024 * 1024 * 1024
+export const MAX_RECEPTION_SELECTED_BYTES = MAX_RECEPTION_JOB_UPLOAD_BYTES
 
 /**
  * Why nothing was read, when the sheet is not the reason.
@@ -841,9 +846,12 @@ export type ReceptionRow = {
  * Size too: a HEIC is roughly half the JPEG it becomes, so a photo that passed
  * on the way in can be over the limit by the time it would be sent.
  */
-export function fileValidationError(file: File | null): 'required' | 'size' | 'type' | null {
+export function fileValidationError(
+  file: File | null,
+  maxBytes = MAX_RECEPTION_SHEET_BYTES,
+): 'required' | 'size' | 'type' | null {
   if (!file) return 'required'
-  if (file.size > MAX_RECEPTION_SHEET_BYTES) return 'size'
+  if (file.size > maxBytes) return 'size'
   if (!RECEPTION_UPLOAD_TYPES.includes(file.type)) return 'type'
   return null
 }
@@ -856,23 +864,17 @@ export type ReceptionSheetsError = 'required' | 'count' | 'size' | 'totalSize' |
 export function sheetsValidationError(files: readonly File[]): ReceptionSheetsError | null {
   if (files.length === 0) return 'required'
   if (files.length > MAX_RECEPTION_SHEETS) return 'count'
+  if (files.reduce((total, file) => total + file.size, 0) > MAX_RECEPTION_SELECTED_BYTES) {
+    return 'totalSize'
+  }
   for (const file of files) {
     const invalid = fileValidationError(file)
     if (invalid) return invalid
   }
-  for (const batch of receptionSheetBatches(files)) {
-    if (totalBytes(batch) > MAX_RECEPTION_UPLOAD_BYTES) {
-      return 'totalSize'
-    }
-  }
   return null
 }
 
-function totalBytes(files: readonly File[]) {
-  return files.reduce((sum, file) => sum + file.size, 0)
-}
-
-/** Pack sheets in order under Field's per-request page-count and size limits. */
+/** Pack sheets in order under Field's per-job Storage budget and count. */
 export function receptionSheetBatches(files: readonly File[]): File[][] {
   const batches: File[][] = []
   let batch: File[] = []
@@ -881,7 +883,10 @@ export function receptionSheetBatches(files: readonly File[]): File[][] {
   for (const file of files) {
     if (
       batch.length > 0
-      && (batch.length === MAX_RECEPTION_BATCH_SHEETS || bytes + file.size > MAX_RECEPTION_UPLOAD_BYTES)
+      && (
+        batch.length === MAX_RECEPTION_BATCH_SHEETS
+        || bytes + file.size > MAX_RECEPTION_JOB_UPLOAD_BYTES
+      )
     ) {
       batches.push(batch)
       batch = []
@@ -916,28 +921,9 @@ export async function prepareReceptionSheets(picked: readonly File[]): Promise<F
     for (const file of picked.slice(start, start + MAX_RECEPTION_BATCH_SHEETS)) {
       batch.push(await prepareReceptionSheet(file))
     }
-    prepared.push(...await prepareOversizedImages(batch))
+    prepared.push(...batch)
   }
   return prepared
-}
-
-async function prepareOversizedImages(picked: readonly File[]): Promise<File[]> {
-  const prepared: File[] = []
-  for (const file of picked) {
-    let current = file
-    if (isShrinkable(file) && file.size > MAX_RECEPTION_UPLOAD_BYTES) {
-      for (const edge of SHRINK_EDGES) {
-        current = await shrinkSheetImage(file, edge)
-        if (current.size <= MAX_RECEPTION_UPLOAD_BYTES) break
-      }
-    }
-    prepared.push(current)
-  }
-  return prepared
-}
-
-function isShrinkable(file: File) {
-  return file.type === 'image/jpeg' || file.type === 'image/png'
 }
 
 /**

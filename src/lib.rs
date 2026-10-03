@@ -752,6 +752,37 @@ pub fn build_router(state: AppState) -> Router {
                     require_valid_token,
                 )),
         )
+        // Sheets too large for one request go through Storage: the caller
+        // PUTs them to presigned URLs and these small JSON endpoints drive
+        // the read. Static segments before :customer_id win routing, so the
+        // jobs paths never resolve as a customer id.
+        .route(
+            "/v1/course/customers/reception-draft/jobs",
+            post(course::interfaces::http_customers::create_reception_ocr_job).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/customers/reception-draft/jobs/:job_id",
+            get(course::interfaces::http_customers::get_reception_ocr_job)
+                .delete(course::interfaces::http_customers::cancel_reception_ocr_job)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/customers/reception-draft/jobs/:job_id/confirm",
+            post(course::interfaces::http_customers::confirm_reception_ocr_job).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/customers/reception-draft/jobs/:job_id/advance",
+            post(course::interfaces::http_customers::advance_reception_ocr_job).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
         .route(
             "/v1/course/customers/:customer_id",
             get(course::interfaces::http_customers::get_customer)
