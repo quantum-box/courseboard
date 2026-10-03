@@ -7,6 +7,7 @@
 
 /** JPEG quality used for the format conversion. */
 const SHEET_JPEG_QUALITY = 0.9
+const MAX_HEIF_DIMENSION = 3000
 
 /** The picked photo as a JPEG, decoded whichever way this browser can. */
 export async function heifToJpeg(file: File): Promise<File> {
@@ -37,7 +38,7 @@ async function decode(file: File): Promise<ImageBitmap> {
 }
 
 function encodeJpeg(bitmap: ImageBitmap, lastModified: number): Promise<File> {
-  const scale = 1
+  const scale = Math.min(1, MAX_HEIF_DIMENSION / Math.max(bitmap.width, bitmap.height))
   const canvas = document.createElement('canvas')
   canvas.width = Math.max(1, Math.round(bitmap.width * scale))
   canvas.height = Math.max(1, Math.round(bitmap.height * scale))

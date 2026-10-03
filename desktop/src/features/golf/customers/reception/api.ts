@@ -135,6 +135,9 @@ export async function draftReceptionSheets(
     onBatchProgress?: (current: number, total: number) => void
     formatBatchWarning?: (warning: string, firstSheet: number, lastSheet: number) => string
     formatRowLimitWarning?: (maxRows: number) => string
+    onJobStarted?: (jobId: string) => void
+    onJobFinished?: (jobId: string) => void
+    signal?: AbortSignal
   } = {},
   resume?: {
     draft: ReceptionDraft
@@ -162,6 +165,7 @@ export async function draftReceptionSheets(
     options.onBatchProgress?.(index + 1, total)
     let jobResume = index === startBatchIndex ? resume?.job : undefined
     try {
+      throwIfAborted(options.signal)
       const idempotencyKey = jobResume?.idempotencyKey ?? crypto.randomUUID()
       jobResume = { idempotencyKey, ...(jobResume?.jobId ? { jobId: jobResume.jobId } : {}) }
       const createdJob = await courseboardApiJson<CreatedReceptionOcrJob>(RECEPTION_DRAFT_JOBS_PATH, {
@@ -171,42 +175,56 @@ export async function draftReceptionSheets(
           idempotencyKey,
           sheets: batch.map(file => ({ contentType: file.type, size: file.size })),
         }),
+        signal: options.signal,
       })
       let job: ReceptionOcrJob = createdJob
       jobResume = { idempotencyKey, jobId: job.id }
+      options.onJobStarted?.(job.id)
+      throwIfAborted(options.signal)
 
       if (createdJob.status === 'uploading') {
         if (createdJob.uploads.length !== batch.length) {
           throw new Error('アップロード先の数が受付用紙と一致しません。')
         }
         for (const [sheetIndex, file] of batch.entries()) {
-          await putReceptionSheet(createdJob.uploads[sheetIndex]!, file)
+          throwIfAborted(options.signal)
+          await putReceptionSheet(createdJob.uploads[sheetIndex]!, file, options.signal)
         }
+        throwIfAborted(options.signal)
         job = await courseboardApiJson<ReceptionOcrJob>(
           `${RECEPTION_DRAFT_JOBS_PATH}/${encodeURIComponent(job.id)}/confirm`,
-          { method: 'POST' },
+          { method: 'POST', signal: options.signal },
         )
       }
 
       let advances = 0
       while (job.status !== 'completed' && advances < MAX_RECEPTION_JOB_ADVANCES) {
+        throwIfAborted(options.signal)
         if (job.status === 'failed' || job.status === 'cancelled' || job.status === 'expired') {
+          options.onJobFinished?.(job.id)
+          jobResume = undefined
           throw new Error('受付用紙の読み取りジョブを続行できません。')
         }
         try {
           job = await courseboardApiJson<ReceptionOcrJob>(
             `${RECEPTION_DRAFT_JOBS_PATH}/${encodeURIComponent(job.id)}/advance`,
-            { method: 'POST' },
+            { method: 'POST', signal: options.signal },
           )
           advances += 1
         } catch (error) {
           if (!(error instanceof ApiError) || error.status !== 409) throw error
-          job = await waitForReceptionJob(job.id, job.completedUnits)
+          job = await waitForReceptionJob(job.id, job.completedUnits, options.signal)
         }
       }
       if (job.status !== 'completed') {
+        if (job.status === 'failed' || job.status === 'cancelled' || job.status === 'expired') {
+          options.onJobFinished?.(job.id)
+          jobResume = undefined
+        }
         throw new Error('受付用紙の読み取りに時間がかかっています。もう一度お試しください。')
       }
+      options.onJobFinished?.(job.id)
+      jobResume = undefined
 
       const draft = job.draft
       const incomingVisitors = draft.visitors ?? []
@@ -222,6 +240,11 @@ export async function draftReceptionSheets(
         if (!warnings.includes(rowLimitWarning)) warnings.push(rowLimitWarning)
       }
     } catch (error) {
+      if (options.signal?.aborted) throw error
+      if (jobResume?.jobId && await isTerminalReceptionJob(jobResume.jobId, options.signal)) {
+        options.onJobFinished?.(jobResume.jobId)
+        jobResume = undefined
+      }
       throw new ReceptionBatchError(
         { visitors, warnings, rowLimitExceeded },
         index,
@@ -235,17 +258,42 @@ export async function draftReceptionSheets(
   return { visitors, warnings, rowLimitExceeded }
 }
 
+async function isTerminalReceptionJob(jobId: string, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const job = await courseboardApiJson<ReceptionOcrJob>(
+      `${RECEPTION_DRAFT_JOBS_PATH}/${encodeURIComponent(jobId)}`,
+      signal ? { signal } : undefined,
+    )
+    return job.status === 'failed' || job.status === 'cancelled' || job.status === 'expired'
+  } catch (error) {
+    // A status read does not call the OCR provider. Its client error therefore
+    // means the persisted job is terminal; auth, throttling, and server errors
+    // remain inconclusive so a runnable job keeps its resume key.
+    return error instanceof ApiError
+      && error.status >= 400
+      && error.status < 500
+      && error.status !== 401
+      && error.status !== 403
+      && error.status !== 429
+  }
+}
+
 async function waitForReceptionJob(
   jobId: string,
   previousCompletedUnits: number,
+  signal?: AbortSignal,
 ): Promise<ReceptionOcrJob> {
   const path = `${RECEPTION_DRAFT_JOBS_PATH}/${encodeURIComponent(jobId)}`
   let latest: ReceptionOcrJob | undefined
   for (let attempt = 0; attempt < 150; attempt += 1) {
-    const job = await courseboardApiJson<ReceptionOcrJob>(path)
+    throwIfAborted(signal)
+    const job = await courseboardApiJson<ReceptionOcrJob>(
+      path,
+      signal ? { signal } : undefined,
+    )
     latest = job
     if (job.status !== 'running' || job.completedUnits > previousCompletedUnits) return job
-    await new Promise(resolve => window.setTimeout(resolve, 1000))
+    await abortableDelay(1000, signal)
   }
   if (latest && latest.status !== 'running') return latest
   throw new Error('受付用紙の読み取りに時間がかかっています。もう一度お試しください。')
@@ -259,6 +307,7 @@ async function waitForReceptionJob(
 async function putReceptionSheet(
   upload: { uploadUrl: string },
   file: File,
+  signal?: AbortSignal,
 ): Promise<void> {
   // Development fixtures use a marker URL so the mock flow stays offline.
   if (upload.uploadUrl.startsWith('mock://')) return
@@ -268,10 +317,40 @@ async function putReceptionSheet(
     body: file,
     headers,
     method: 'PUT',
+    signal,
   })
   if (!response.ok) {
     throw new Error(`Tachyon Storageへのアップロードに失敗しました（${response.status}）。`)
   }
+}
+
+/** Best-effort cancellation used when the reception screen is closed mid-read. */
+export async function cancelReceptionOcrJob(jobId: string): Promise<void> {
+  await courseboardApiJson<ReceptionOcrJob>(
+    `${RECEPTION_DRAFT_JOBS_PATH}/${encodeURIComponent(jobId)}`,
+    { method: 'DELETE' },
+  )
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+}
+
+function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (!signal) return new Promise(resolve => window.setTimeout(resolve, milliseconds))
+  throwIfAborted(signal)
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      signal.removeEventListener('abort', abort)
+      resolve()
+    }, milliseconds)
+    const abort = () => {
+      window.clearTimeout(timeout)
+      signal.removeEventListener('abort', abort)
+      reject(new DOMException('The operation was aborted.', 'AbortError'))
+    }
+    signal.addEventListener('abort', abort, { once: true })
+  })
 }
 
 /**
