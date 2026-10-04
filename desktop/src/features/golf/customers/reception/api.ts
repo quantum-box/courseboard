@@ -136,6 +136,7 @@ export async function draftReceptionSheets(
     onBatchProgress?: (current: number, total: number) => void
     formatBatchWarning?: (warning: string, firstSheet: number, lastSheet: number) => string
     formatRowLimitWarning?: (maxRows: number) => string
+    onJobProgress?: (progress: { completed: number; total?: number | null; draft: ReceptionDraft }) => void
     onJobStarted?: (jobId: string) => void
     onJobFinished?: (jobId: string) => void
     signal?: AbortSignal
@@ -198,6 +199,8 @@ export async function draftReceptionSheets(
         )
       }
 
+      const reportProgress = () => options.onJobProgress?.({ completed: job.completedUnits, total: job.totalUnits, draft: job.draft })
+      reportProgress()
       let advances = 0
       while (job.status !== 'completed' && advances < MAX_RECEPTION_JOB_ADVANCES) {
         throwIfAborted(options.signal)
@@ -216,6 +219,7 @@ export async function draftReceptionSheets(
           if (!(error instanceof ApiError) || error.status !== 409) throw error
           job = await waitForReceptionJob(job.id, job.completedUnits, options.signal)
         }
+        reportProgress()
       }
       if (job.status !== 'completed') {
         if (job.status === 'failed' || job.status === 'cancelled' || job.status === 'expired') {

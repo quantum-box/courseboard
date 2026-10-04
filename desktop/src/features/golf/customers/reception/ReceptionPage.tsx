@@ -166,6 +166,7 @@ export function ReceptionPage() {
   const [previewUrls, setPreviewUrls] = useState<string[]>([])
   const [reading, setReading] = useState(false)
   const [loadingBatchPreview, setLoadingBatchPreview] = useState(false)
+  const [pageProgress, setPageProgress] = useState<{ completed: number; total?: number | null; remainingMinutes?: number } | null>(null)
   const [readProgress, setReadProgress] = useState<{ current: number; total: number } | null>(null)
   const [readError, setReadError] = useState<string | null>(null)
   const [registeringAll, setRegisteringAll] = useState(false)
@@ -321,6 +322,8 @@ export function ReceptionPage() {
     const initial = batchResultsRef.current[index]
     if (!group || !initial) return false
     let presentation: Awaited<ReturnType<typeof prepareReviewBatch>> | null = null
+    setPageProgress(null)
+    const startedAt = Date.now()
     setProcessingBatchIndex(index)
     updateBatchResult(index, current => ({ ...current, status: 'reading', error: undefined }))
     try {
@@ -348,6 +351,18 @@ export function ReceptionPage() {
         {
           ...receptionDraftOptions(index),
           signal,
+          onJobProgress: progress => {
+            if (signal?.aborted) return
+            const remainingMinutes = progress.total && progress.completed > 0
+              ? Math.ceil((Date.now() - startedAt) / progress.completed * (progress.total - progress.completed) / 60000)
+              : undefined
+            setPageProgress({ completed: progress.completed, total: progress.total, remainingMinutes })
+            updateBatchResult(index, current => ({
+              ...current,
+              rows: rowsForDraft(index, progress.draft, Boolean(resume)),
+              warnings: progress.draft.warnings,
+            }))
+          },
           onJobStarted: jobId => {
             if (signal?.aborted) {
               void cancelReceptionOcrJob(jobId).catch(() => undefined)
@@ -739,7 +754,10 @@ export function ReceptionPage() {
                   (processingBatchIndex + 1) * MAX_RECEPTION_BATCH_SHEETS,
                   reviewBatches.reduce((count, group) => count + group.length, 0),
                 )),
-              })}${readProgress && readProgress.total > 1
+              })}${pageProgress?.total
+                ? ` ${t('customers:reception.pageProgress', { completed: String(pageProgress.completed), total: String(pageProgress.total) })}${pageProgress.remainingMinutes
+                  ? ` ${t('customers:reception.remainingMinutes', { count: pageProgress.remainingMinutes })}` : ''}`
+                : ''}${readProgress && readProgress.total > 1
                 ? ` ${t('customers:reception.readingBatch', {
                     current: String(readProgress.current),
                     total: String(readProgress.total),
@@ -768,7 +786,7 @@ export function ReceptionPage() {
         </Panel>
       ) : null}
 
-      {(files.length > 0 || rows.length > 0) && !reading && !loadingBatchPreview ? (
+      {(files.length > 0 || rows.length > 0) && !loadingBatchPreview ? (
         <div className="reception-workspace">
           <Panel
             className="reception-rows"

@@ -36,6 +36,9 @@ export const customers = {
     failed: '顧客を台帳から削除できませんでした',
   },
   reception: {
+    pageProgress: '完了 {{completed}} / {{total}}ページ',
+    remainingMinutes: '残り約{{count}}分（目安）',
+
     open: '受付用紙から登録する',
     title: '受付用紙から顧客を登録する',
     description: '受付用紙をスキャンした画像やPDFを読み取り、書かれている人を台帳に登録します。',
