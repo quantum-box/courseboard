@@ -422,6 +422,7 @@ pub struct ReceptionOcrJob {
     pub total_units: Option<u32>,
     pub draft: ReceptionDraft,
     pub failure_code: Option<String>,
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// What a fresh job answers with: the job itself, and one presigned PUT per

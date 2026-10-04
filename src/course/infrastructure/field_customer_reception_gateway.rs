@@ -290,6 +290,8 @@ struct FieldOcrJobResponse {
     draft: FieldGenericOcrDraft,
     #[serde(default)]
     failure_code: Option<String>,
+    #[serde(default)]
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -329,6 +331,7 @@ fn map_job(
         total_units: response.total_units,
         draft: map_draft(response.draft, fields, consents),
         failure_code: response.failure_code,
+        expires_at: response.expires_at,
     })
 }
 

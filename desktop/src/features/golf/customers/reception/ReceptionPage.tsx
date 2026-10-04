@@ -17,6 +17,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ApiError } from '../../../../api'
 
 import {
   EmptyState,
@@ -403,44 +404,51 @@ export function ReceptionPage() {
   }
 
   async function read(picked: File[]) {
+    if (readingControllerRef.current) return
     setReadError(null)
-    setReadProgress(null)
-    setFiles([])
-    setOrientationSources([])
-    preparedByteAdjustmentsRef.current.clear()
     if (picked.length > MAX_RECEPTION_SHEETS) {
-      setReviewBatches([])
-      activateBatch(0)
-      batchResultsRef.current = []
-      setBatchResults([])
       setReadError(t('customers:reception.file.count', { count: MAX_RECEPTION_SHEETS }))
       return
     }
     const selectedBytes = picked.reduce((total, file) => total + file.size, 0)
     if (selectedBytes > MAX_RECEPTION_SELECTED_BYTES) {
-      setReviewBatches([])
-      activateBatch(0)
-      batchResultsRef.current = []
-      setBatchResults([])
       setReadError(t('customers:reception.file.totalSize'))
       return
     }
-    const groups = receptionSheetReviewBatches(picked)
-    const initialResults = groups.map(group => ({
-      status: 'queued' as const,
-      rows: [],
-      warnings: [],
-      rotations: group.map(() => 0 as ReceptionRotation),
-    }))
-    setReviewBatches(groups)
-    activateBatch(0)
-    batchResultsRef.current = initialResults
-    setBatchResults(initialResults)
     setReading(true)
     const controller = new AbortController()
     readingControllerRef.current = controller
     try {
+      const previousJobId = activeOcrJobIdRef.current
+      if (previousJobId) {
+        // Keep the failed batch reviewable if cancelling it is unavailable.
+        try {
+          await cancelReceptionOcrJob(previousJobId)
+        } catch (error) {
+          // A retired context or a missing upstream job cannot be resumed.
+          if (!(error instanceof ApiError) || error.status !== 404) throw error
+        }
+        if (activeOcrJobIdRef.current === previousJobId) activeOcrJobIdRef.current = null
+      }
+      if (controller.signal.aborted) return
+      setReadProgress(null)
+      setFiles([])
+      setOrientationSources([])
+      preparedByteAdjustmentsRef.current.clear()
+      const groups = receptionSheetReviewBatches(picked)
+      const initialResults = groups.map(group => ({
+        status: 'queued' as const,
+        rows: [],
+        warnings: [],
+        rotations: group.map(() => 0 as ReceptionRotation),
+      }))
+      setReviewBatches(groups)
+      activateBatch(0)
+      batchResultsRef.current = initialResults
+      setBatchResults(initialResults)
       await processReviewBatches(groups, 0, controller.signal)
+    } catch (error) {
+      if (!controller.signal.aborted) setReadError(readErrorMessage(error))
     } finally {
       if (readingControllerRef.current === controller) {
         readingControllerRef.current = null

@@ -1295,7 +1295,13 @@ pub trait CustomerReceptionOcrJobContextGateway: Send + Sync {
         context: &ReceptionOcrJobContext,
     ) -> Result<ReceptionOcrJobContext, CourseError>;
 
-    async fn bind_job(&self, tenant_id: &str, key: &str, job_id: &str) -> Result<(), CourseError>;
+    async fn bind_job(
+        &self,
+        tenant_id: &str,
+        key: &str,
+        job_id: &str,
+        expires_at: Option<DateTime<Utc>>,
+    ) -> Result<(), CourseError>;
 
     async fn find_by_job(
         &self,

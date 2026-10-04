@@ -1,6 +1,7 @@
 //! Durable schema snapshots for Field OCR jobs. No sheets or draft rows are stored.
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use sqlx::{MySqlPool, Row};
 
 use crate::course::domain::{
@@ -35,7 +36,7 @@ impl CustomerReceptionOcrJobContextGateway for MySqlReceptionOcrJobContextReposi
         key: &str,
     ) -> Result<Option<ReceptionOcrJobContext>, CourseError> {
         sqlx::query(
-            "SELECT CAST(context_json AS CHAR) AS context_json FROM golf_reception_ocr_job_contexts WHERE tenant_id = ? AND idempotency_key = ?",
+            "SELECT CAST(context_json AS CHAR) AS context_json FROM golf_reception_ocr_job_contexts WHERE tenant_id = ? AND idempotency_key = ? AND COALESCE(expires_at, created_at + INTERVAL 24 HOUR) > CURRENT_TIMESTAMP(6)",
         )
         .bind(tenant_id)
         .bind(key)
@@ -52,10 +53,18 @@ impl CustomerReceptionOcrJobContextGateway for MySqlReceptionOcrJobContextReposi
         key: &str,
         context: &ReceptionOcrJobContext,
     ) -> Result<ReceptionOcrJobContext, CourseError> {
+        // Each new intake retires expired metadata across tenants, including
+        // reservations whose upstream create failed. Limit each sweep's work.
+        sqlx::query(
+            "DELETE FROM golf_reception_ocr_job_contexts WHERE expires_at <= CURRENT_TIMESTAMP(6) OR (expires_at IS NULL AND created_at <= CURRENT_TIMESTAMP(6) - INTERVAL 24 HOUR) LIMIT 1000",
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(provider)?;
         let json = serde_json::to_string(context)
             .map_err(|error| CourseError::Provider(format!("invalid OCR job context: {error}")))?;
         sqlx::query(
-            "INSERT INTO golf_reception_ocr_job_contexts (tenant_id, idempotency_key, context_json) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE idempotency_key = idempotency_key",
+            "INSERT INTO golf_reception_ocr_job_contexts (tenant_id, idempotency_key, context_json, expires_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP(6) + INTERVAL 24 HOUR) ON DUPLICATE KEY UPDATE idempotency_key = idempotency_key",
         )
         .bind(tenant_id)
         .bind(key)
@@ -68,11 +77,18 @@ impl CustomerReceptionOcrJobContextGateway for MySqlReceptionOcrJobContextReposi
             .ok_or_else(|| CourseError::Provider("OCR job context disappeared".into()))
     }
 
-    async fn bind_job(&self, tenant_id: &str, key: &str, job_id: &str) -> Result<(), CourseError> {
+    async fn bind_job(
+        &self,
+        tenant_id: &str,
+        key: &str,
+        job_id: &str,
+        expires_at: Option<DateTime<Utc>>,
+    ) -> Result<(), CourseError> {
         sqlx::query(
-            "UPDATE golf_reception_ocr_job_contexts SET job_id = ? WHERE tenant_id = ? AND idempotency_key = ? AND (job_id IS NULL OR job_id = ?)",
+            "UPDATE golf_reception_ocr_job_contexts SET job_id = ?, expires_at = COALESCE(?, expires_at) WHERE tenant_id = ? AND idempotency_key = ? AND (job_id IS NULL OR job_id = ?)",
         )
         .bind(job_id)
+        .bind(expires_at)
         .bind(tenant_id)
         .bind(key)
         .bind(job_id)
@@ -93,7 +109,7 @@ impl CustomerReceptionOcrJobContextGateway for MySqlReceptionOcrJobContextReposi
         job_id: &str,
     ) -> Result<Option<ReceptionOcrJobContext>, CourseError> {
         sqlx::query(
-            "SELECT CAST(context_json AS CHAR) AS context_json FROM golf_reception_ocr_job_contexts WHERE tenant_id = ? AND job_id = ?",
+            "SELECT CAST(context_json AS CHAR) AS context_json FROM golf_reception_ocr_job_contexts WHERE tenant_id = ? AND job_id = ? AND COALESCE(expires_at, created_at + INTERVAL 24 HOUR) > CURRENT_TIMESTAMP(6)",
         )
         .bind(tenant_id)
         .bind(job_id)
@@ -127,7 +143,7 @@ mod tests {
             .await
             .unwrap();
         repository
-            .bind_job(&tenant, "retry-key", "job-original")
+            .bind_job(&tenant, "retry-key", "job-original", None)
             .await
             .unwrap();
         let mut changed = original.clone();
@@ -154,8 +170,37 @@ mod tests {
             .unwrap()
             .is_none());
         assert!(repository
-            .bind_job(&tenant, "retry-key", "different-job")
+            .bind_job(&tenant, "retry-key", "different-job", None)
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn expired_contexts_are_unreadable_and_the_next_intake_removes_them() {
+        let pool = test_pool().await;
+        let repository = MySqlReceptionOcrJobContextRepository::new(pool.clone());
+        let tenant = test_tenant("ocr-context-expiry");
+        let context = ReceptionOcrJobContext {
+            fields: vec![],
+            consents: vec![],
+        };
+        repository
+            .reserve(&tenant, "expired-key", &context)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE golf_reception_ocr_job_contexts SET expires_at = CURRENT_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE tenant_id = ?")
+            .bind(&tenant).execute(&pool).await.unwrap();
+        assert!(repository
+            .find_by_key(&tenant, "expired-key")
+            .await
+            .unwrap()
+            .is_none());
+        repository
+            .reserve(&tenant, "new-key", &context)
+            .await
+            .unwrap();
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM golf_reception_ocr_job_contexts WHERE tenant_id = ? AND idempotency_key = 'expired-key'")
+            .bind(&tenant).fetch_one(&pool).await.unwrap();
+        assert_eq!(count, 0);
     }
 }

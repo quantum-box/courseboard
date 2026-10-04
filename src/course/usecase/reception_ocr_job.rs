@@ -105,7 +105,12 @@ impl ReceptionOcrJobUseCase {
             )
             .await?;
         self.contexts
-            .bind_job(credentials.operator_id, idempotency_key, &created.job.id)
+            .bind_job(
+                credentials.operator_id,
+                idempotency_key,
+                &created.job.id,
+                created.job.expires_at,
+            )
             .await?;
         Ok(created)
     }
