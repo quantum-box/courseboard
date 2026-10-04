@@ -65,7 +65,7 @@ export const customers: DeepPartial<typeof source> = {
     choose: {
       open: 'Choose a reception sheet',
       again: 'Read another sheet',
-      hint: 'Choose up to 300 JPEG, PNG, HEIC/HEIF, or PDF sheets at once, up to 1 GB total. They are processed automatically in batches of up to 32. Large PDFs are read sequentially on the server by page, so you do not need to split them yourself. Photos are not downscaled. Review and register each batch separately. Uploaded sheets are deleted after reading.',
+      hint: 'Choose up to 300 JPEG, PNG, HEIC/HEIF, or PDF sheets at once, up to 1 GB total. They are processed automatically in batches of up to 32. Large PDFs are read sequentially on the server by page, so you do not need to split them yourself. Photos are not downscaled. PDFs keep their original orientation; use the preview rotation buttons to turn them. Review and register each batch separately. Uploaded sheets are deleted after reading.',
     },
     file: {
       required: 'Choose a reception sheet file.',

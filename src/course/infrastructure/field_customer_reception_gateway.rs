@@ -12,7 +12,10 @@
 //! The visitor is drafted as `consumer` — Field's individual-customer entity,
 //! the same record `/v1/storekit/customers` writes.
 
-use std::collections::{BTreeMap, HashSet};
+use std::{
+    collections::{BTreeMap, HashSet},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -30,8 +33,8 @@ use crate::course::domain::{
 };
 
 use super::field_gateway::{
-    field_send_json_classified, field_send_multipart_classified, normalize_base_url,
-    urlencoding_path, FieldStatusFailure,
+    field_send_json_classified, field_send_json_classified_with_timeout,
+    field_send_multipart_classified, normalize_base_url, urlencoding_path, FieldStatusFailure,
 };
 
 /// Reads reception sheets through Field's generic document reader.
@@ -260,7 +263,7 @@ impl FieldCustomerReceptionGateway {
             urlencoding_path(job_id),
             step
         );
-        let response: FieldOcrJobResponse = field_send_json_classified(
+        let response: FieldOcrJobResponse = field_send_json_classified_with_timeout(
             &self.client,
             &self.base_url,
             reqwest::Method::POST,
@@ -268,10 +271,16 @@ impl FieldCustomerReceptionGateway {
             credentials,
             None,
             reader_failure,
+            reception_job_step_timeout(step),
         )
         .await?;
         map_job(response, fields, consents)
     }
+}
+
+// An advance includes PDF rendering and provider inference, unlike confirm.
+fn reception_job_step_timeout(step: &str) -> Duration {
+    Duration::from_secs(if step == "advance" { 90 } else { 15 })
 }
 
 /// Field's job shape. The draft is the same shape the synchronous draft
@@ -1308,5 +1317,22 @@ mod tests {
         let schema = serde_json::to_value(crate::course::domain::reception_sheet_schema()).unwrap();
         assert_eq!(schema[0]["key"], RECEPTION_ROWS_KEY);
         assert_eq!(schema[0]["itemFields"][0]["key"], RECEPTION_ROW_NAME);
+    }
+}
+
+#[cfg(test)]
+mod ocr_job_timeout_tests {
+    use super::*;
+
+    #[test]
+    fn only_advance_waits_for_provider_inference() {
+        assert_eq!(
+            reception_job_step_timeout("advance"),
+            Duration::from_secs(90)
+        );
+        assert_eq!(
+            reception_job_step_timeout("confirm"),
+            Duration::from_secs(15)
+        );
     }
 }
