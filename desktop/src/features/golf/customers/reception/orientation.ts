@@ -5,11 +5,26 @@ const JPEG_QUALITY = 0.9
 
 export type ReceptionRotation = 0 | 90 | 180 | 270
 
-/** Preserves PDF page orientation and normalizes image orientation. */
-export async function autoOrientReceptionSheet(file: File): Promise<File> {
-  // Page dimensions cannot distinguish an upright scan from an upside-down one.
-  // Keep the author-provided PDF rotation; operators can turn it explicitly.
-  if (file.type === 'application/pdf') return file
+const orientedPdfs = new WeakMap<File, Promise<File>>()
+
+/** Detects PDF text direction and normalizes image orientation. */
+export async function autoOrientReceptionSheet(
+  file: File,
+  onProgress?: (progress: { completed: number; total: number }) => void,
+): Promise<File> {
+  if (file.type === 'application/pdf') {
+    const cached = orientedPdfs.get(file)
+    if (cached) return cached
+    const result = import('./pdfOrientation').then(({ orientPdf }) => orientPdf(file, onProgress))
+    orientedPdfs.set(file, result)
+    try {
+      return await result
+    } catch {
+      // Detection is optional: a missing model or unreadable page must not block OCR.
+      orientedPdfs.delete(file)
+      return file
+    }
+  }
   if (file.type !== 'image/jpeg' && file.type !== 'image/png') return file
 
   const exifOrientation = file.type === 'image/jpeg' ? await jpegExifOrientation(file) : 1

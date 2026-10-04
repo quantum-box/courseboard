@@ -36,6 +36,7 @@ export const customers = {
     failed: '顧客を台帳から削除できませんでした',
   },
   reception: {
+    orientingPages: 'PDFの向きを確認中：{{completed}} / {{total}}ページ',
     pageProgress: '完了 {{completed}} / {{total}}ページ',
     remainingMinutes: '残り約{{count}}分（目安）',
 
@@ -66,7 +67,7 @@ export const customers = {
     choose: {
       open: '受付用紙をえらぶ',
       again: '別の用紙を読み取る',
-      hint: 'JPEG・PNG・HEIC/HEIF・PDFを一度に最大300枚、合計1GBまでえらべます。最大32枚ずつ自動で処理し、batchごとに結果を確認・登録できます。大きいPDFもページごとにサーバーで順次読み取ります。写真は縮小しません。写真の横向きは自動で補正します。PDFは原本の向きを保ち、プレビューの回転ボタンで向きを直せます。読み取り後、用紙データは削除されます。',
+      hint: 'JPEG・PNG・HEIC/HEIF・PDFを一度に最大300枚、合計1GBまでえらべます。最大32枚ずつ自動で処理し、batchごとに結果を確認・登録できます。大きいPDFもページごとにサーバーで順次読み取ります。写真は縮小しません。写真の横向きは自動で補正します。PDFは文字の向きをページごとに確認して自動補正します。判定が不確かなページは原本の向きを保ちます。プレビューの回転ボタンでも直せます。読み取り後、用紙データは削除されます。',
     },
     file: {
       required: '受付用紙のファイルをえらんでください。',

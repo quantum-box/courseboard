@@ -166,6 +166,7 @@ export function ReceptionPage() {
   const [previewUrls, setPreviewUrls] = useState<string[]>([])
   const [reading, setReading] = useState(false)
   const [loadingBatchPreview, setLoadingBatchPreview] = useState(false)
+  const [orientationProgress, setOrientationProgress] = useState<{ completed: number; total: number } | null>(null)
   const [pageProgress, setPageProgress] = useState<{ completed: number; total?: number | null; remainingMinutes?: number } | null>(null)
   const [readProgress, setReadProgress] = useState<{ current: number; total: number } | null>(null)
   const [readError, setReadError] = useState<string | null>(null)
@@ -296,7 +297,10 @@ export function ReceptionPage() {
     let orientationSources: File[]
     try {
       orientationSources = []
-      for (const file of prepared) orientationSources.push(await autoOrientReceptionSheet(file))
+      for (const file of prepared) {
+        orientationSources.push(await autoOrientReceptionSheet(file, setOrientationProgress))
+      }
+      setOrientationProgress(null)
       const turned: File[] = []
       for (const [index, file] of orientationSources.entries()) {
         const rotation = rotations[index] ?? 0
@@ -304,6 +308,7 @@ export function ReceptionPage() {
       }
       prepared = await prepareReceptionSheets(turned)
     } catch {
+      setOrientationProgress(null)
       throw new ReceptionPreparationError('orientationFailed')
     }
     const invalid = sheetsValidationError(prepared)
@@ -628,9 +633,11 @@ export function ReceptionPage() {
     || Boolean(consentSettings.error)
   const rotationLocked = busy || saved > 0 || rows.some(row => row.status === 'saving')
 
+  const compactReview = files.length > 0 || rows.length > 0
+
   return (
-    <div className="page-stack">
-      <Button
+    <div className={`page-stack ${compactReview ? 'reception-review-compact' : ''}`}>
+      {!compactReview ? <Button
         type="button"
         variant="ghost"
         size="sm"
@@ -638,13 +645,18 @@ export function ReceptionPage() {
       >
         <ChevronLeft />
         {t('customers:reception.back')}
-      </Button>
+      </Button> : null}
 
       <Panel
-        title={t('customers:reception.title')}
-        description={t('customers:reception.description')}
+        className="reception-toolbar"
+        title={compactReview ? undefined : t('customers:reception.title')}
+        description={compactReview ? undefined : t('customers:reception.description')}
         actions={(
           <>
+            {compactReview ? <Button type="button" variant="ghost" size="sm"
+              onClick={event => navigateFromClick(event, 'golf/customers')}>
+              <ChevronLeft />{t('customers:reception.back')}
+            </Button> : null}
             <input
               ref={fileInputRef}
               type="file"
@@ -662,6 +674,7 @@ export function ReceptionPage() {
             />
             <Button
               type="button"
+              size={compactReview ? 'sm' : undefined}
               variant={files.length > 0 ? 'ghost' : 'primary'}
               disabled={busy}
               onClick={() => fileInputRef.current?.click()}
@@ -674,7 +687,6 @@ export function ReceptionPage() {
           </>
         )}
       >
-        <p className="reception-hint">{t('customers:reception.choose.hint')}</p>
         {readError ? <Notice tone="danger">{readError}</Notice> : null}
         {/* Said once, above the rows: a partial read looks exactly like a
             complete one, and this is the only thing that sends the desk back
@@ -684,11 +696,11 @@ export function ReceptionPage() {
         ))}
       </Panel>
 
-      {reviewBatches.length > 0 ? (
+      {reviewBatches.length > 0 && (!compactReview || reviewBatches.length > 1 || activeResult?.status === 'failed') ? (
         <Panel
           className="reception-batches"
-          title={t('customers:reception.batch.title')}
-          description={t('customers:reception.batch.description')}
+          title={compactReview ? undefined : t('customers:reception.batch.title')}
+          description={compactReview ? undefined : t('customers:reception.batch.description')}
         >
           <div className="reception-batch-list" aria-label={t('customers:reception.batch.listLabel')}>
             {reviewBatches.map((group, index) => {
@@ -745,7 +757,11 @@ export function ReceptionPage() {
 
       {reading ? (
         <LoadingState
-          label={processingBatchIndex !== null
+          label={orientationProgress
+            ? t('customers:reception.orientingPages', {
+                completed: String(orientationProgress.completed), total: String(orientationProgress.total),
+              })
+            : processingBatchIndex !== null
             ? `${t('customers:reception.batch.reading', {
                 batch: String(processingBatchIndex + 1),
                 total: String(reviewBatches.length),
@@ -791,7 +807,7 @@ export function ReceptionPage() {
           <Panel
             className="reception-rows"
             title={t('customers:reception.rows.title')}
-            description={t('customers:reception.rows.description')}
+            description={compactReview ? undefined : t('customers:reception.rows.description')}
             actions={(
               <>
                 <Button
@@ -860,12 +876,13 @@ export function ReceptionPage() {
           <Panel
             className="reception-preview"
             title={t('customers:reception.preview.title')}
-            description={t('customers:reception.preview.description')}
+            description={compactReview ? undefined : t('customers:reception.preview.description')}
+            actions={files.length > 0 ? <label className="reception-hint"><input type="checkbox" checked={syncEnabled} onChange={event => setSyncEnabled(event.target.checked)} /> {t('customers:reception.preview.syncScroll')}</label> : undefined}
           >
             {files.length === 0 ? (
               <p className="reception-hint">{t('customers:reception.batch.previewUnavailable')}</p>
             ) : (
-              <><label className="reception-hint"><input type="checkbox" checked={syncEnabled} onChange={event => setSyncEnabled(event.target.checked)} /> {t('customers:reception.preview.syncScroll')}</label>
+              <>
               <div ref={previewListRef} className="reception-preview-list" onScroll={() => syncReviewScroll('preview')}>
                 {files.map((file, index) => {
                   const url = previewUrls[index]

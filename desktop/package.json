@@ -1,7 +1,7 @@
 {
   "name": "courseboard-ui",
   "private": true,
-  "version": "0.1.17",
+  "version": "0.1.18",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -43,6 +43,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-i18next": "^15.7.4",
+    "tesseract.js": "^6.0.1",
     "three": "^0.169.0"
   },
   "devDependencies": {

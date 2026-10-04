@@ -38,6 +38,7 @@ export const customers: DeepPartial<typeof source> = {
     failed: 'Could not remove the customer from the ledger',
   },
   reception: {
+    orientingPages: 'Checking PDF orientation: {{completed}} / {{total}} pages',
     pageProgress: '{{completed}} / {{total}} pages complete',
     remainingMinutes: 'About {{count}} minutes remaining (estimate)',
 
@@ -68,7 +69,7 @@ export const customers: DeepPartial<typeof source> = {
     choose: {
       open: 'Choose a reception sheet',
       again: 'Read another sheet',
-      hint: 'Choose up to 300 JPEG, PNG, HEIC/HEIF, or PDF sheets at once, up to 1 GB total. They are processed automatically in batches of up to 32. Large PDFs are read sequentially on the server by page, so you do not need to split them yourself. Photos are not downscaled. PDFs keep their original orientation; use the preview rotation buttons to turn them. Review and register each batch separately. Uploaded sheets are deleted after reading.',
+      hint: 'Choose up to 300 JPEG, PNG, HEIC/HEIF, or PDF sheets at once, up to 1 GB total. They are processed automatically in batches of up to 32. Large PDFs are read sequentially on the server by page, so you do not need to split them yourself. Photos are not downscaled. PDF text orientation is checked and corrected page by page. Uncertain pages keep their original orientation. You can also use the preview rotation buttons. Review and register each batch separately. Uploaded sheets are deleted after reading.',
     },
     file: {
       required: 'Choose a reception sheet file.',
