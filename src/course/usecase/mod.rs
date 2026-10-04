@@ -75,6 +75,7 @@ mod player_tag_options;
 mod pricing_settings;
 mod quote_golf_fee;
 mod reassign_caddie_assignment;
+mod reception_ocr_job;
 mod record_reception_customer_values;
 mod record_visit_checkin;
 mod refresh_customer_summaries;
@@ -196,6 +197,7 @@ pub use player_tag_options::{GetPlayerTagOptionsUseCase, ReplacePlayerTagOptions
 pub use pricing_settings::{GetPricingSettingsUseCase, ReplacePricingSettingsUseCase};
 pub use quote_golf_fee::QuoteGolfFeeUseCase;
 pub use reassign_caddie_assignment::{MoveTheRound, ReassignCaddieAssignmentUseCase};
+pub use reception_ocr_job::ReceptionOcrJobUseCase;
 pub use record_reception_customer_values::RecordReceptionCustomerValuesUseCase;
 pub use record_visit_checkin::RecordVisitCheckinUseCase;
 pub use refresh_customer_summaries::{

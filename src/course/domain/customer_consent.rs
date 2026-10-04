@@ -15,10 +15,10 @@
 //! original, and an inverted question would not match the page in front of
 //! them — and the flip happens here, once, on the way to Field.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Which way a printed box points once it becomes a consent record.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConsentPolarity {
     /// The box is ticked to agree. Most of the sheet.
     TickMeansAccepted,
@@ -66,11 +66,10 @@ pub struct ReceptionConsent {
 /// A consent definition projected from Field's tenant catalog for one
 /// reception-sheet read.
 ///
-/// CourseBoard deliberately does not persist this value.  The Field catalog
-/// is loaded immediately before OCR or registration and this owned form keeps
-/// the OCR port independent of the HTTP/Field DTO.  `body` is preferred as
-/// the OCR prompt when present; otherwise the catalog label is used.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// Synchronous reads and registration load the current Field catalog; persistent
+/// OCR jobs retain this definition so later settings cannot reinterpret a read.
+/// `body` is preferred as the OCR prompt when present; otherwise the label is used.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceptionConsentDefinition {
     pub key: String,
     pub label: String,

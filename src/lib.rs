@@ -43,8 +43,9 @@ use course::infrastructure::{
     MySqlCustomerSummaryRepository, MySqlGeneratedThroughRepository,
     MySqlGolfProductSettingsRepository, MySqlMembershipDiscountsRepository,
     MySqlMembershipPlayWindowsRepository, MySqlPlayerTagOptionsRepository,
-    MySqlPricingSettingsRepository, MySqlReservationCancellationRepository,
-    MySqlShiftRulesRepository, MySqlSlotOverrideRepository, MySqlVisitCheckinRepository,
+    MySqlPricingSettingsRepository, MySqlReceptionOcrJobContextRepository,
+    MySqlReservationCancellationRepository, MySqlShiftRulesRepository, MySqlSlotOverrideRepository,
+    MySqlVisitCheckinRepository,
 };
 use field_api::{DynFieldApi, FieldApiClient};
 use serde::{Deserialize, Serialize};
@@ -75,6 +76,7 @@ pub struct AppState {
     player_tag_options: Arc<MySqlPlayerTagOptionsRepository>,
     customer_grade_rules: Arc<MySqlCustomerGradeRulesRepository>,
     customer_reception_fields: Arc<MySqlCustomerReceptionFieldsRepository>,
+    reception_ocr_job_contexts: Arc<MySqlReceptionOcrJobContextRepository>,
     customer_reception_values: Arc<MySqlCustomerReceptionValuesRepository>,
     customer_registrations: Arc<MySqlCustomerRegistrationRepository>,
     customer_summaries: Arc<MySqlCustomerSummaryRepository>,
@@ -128,6 +130,9 @@ impl AppState {
             player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
             customer_grade_rules: Arc::new(MySqlCustomerGradeRulesRepository::new(pool.clone())),
             customer_reception_fields: Arc::new(MySqlCustomerReceptionFieldsRepository::new(
+                pool.clone(),
+            )),
+            reception_ocr_job_contexts: Arc::new(MySqlReceptionOcrJobContextRepository::new(
                 pool.clone(),
             )),
             customer_reception_values: Arc::new(MySqlCustomerReceptionValuesRepository::new(
@@ -208,6 +213,9 @@ impl AppState {
             customer_reception_fields: Arc::new(MySqlCustomerReceptionFieldsRepository::new(
                 pool.clone(),
             )),
+            reception_ocr_job_contexts: Arc::new(MySqlReceptionOcrJobContextRepository::new(
+                pool.clone(),
+            )),
             customer_reception_values: Arc::new(MySqlCustomerReceptionValuesRepository::new(
                 pool.clone(),
             )),
@@ -271,6 +279,9 @@ impl AppState {
                 customer_reception_fields: Arc::new(MySqlCustomerReceptionFieldsRepository::new(
                     pool.clone(),
                 )),
+                reception_ocr_job_contexts: Arc::new(MySqlReceptionOcrJobContextRepository::new(
+                    pool.clone(),
+                )),
                 customer_reception_values: Arc::new(MySqlCustomerReceptionValuesRepository::new(
                     pool.clone(),
                 )),
@@ -328,6 +339,9 @@ impl AppState {
                 product_settings: Arc::new(MySqlGolfProductSettingsRepository::new(pool.clone())),
                 player_tag_options: Arc::new(MySqlPlayerTagOptionsRepository::new(pool.clone())),
                 customer_reception_fields: Arc::new(MySqlCustomerReceptionFieldsRepository::new(
+                    pool.clone(),
+                )),
+                reception_ocr_job_contexts: Arc::new(MySqlReceptionOcrJobContextRepository::new(
                     pool.clone(),
                 )),
                 customer_reception_values: Arc::new(MySqlCustomerReceptionValuesRepository::new(
@@ -424,6 +438,10 @@ impl AppState {
     /// CourseBoard-owned standard and custom reception-sheet field settings.
     pub fn customer_reception_fields(&self) -> Arc<MySqlCustomerReceptionFieldsRepository> {
         self.customer_reception_fields.clone()
+    }
+
+    pub fn reception_ocr_job_contexts(&self) -> Arc<MySqlReceptionOcrJobContextRepository> {
+        self.reception_ocr_job_contexts.clone()
     }
 
     /// CourseBoard-owned answers to custom reception-sheet fields.
@@ -751,6 +769,37 @@ pub fn build_router(state: AppState) -> Router {
                     state.clone(),
                     require_valid_token,
                 )),
+        )
+        // Sheets too large for one request go through Storage: the caller
+        // PUTs them to presigned URLs and these small JSON endpoints drive
+        // the read. Static segments before :customer_id win routing, so the
+        // jobs paths never resolve as a customer id.
+        .route(
+            "/v1/course/customers/reception-draft/jobs",
+            post(course::interfaces::http_customers::create_reception_ocr_job).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/customers/reception-draft/jobs/:job_id",
+            get(course::interfaces::http_customers::get_reception_ocr_job)
+                .delete(course::interfaces::http_customers::cancel_reception_ocr_job)
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/customers/reception-draft/jobs/:job_id/confirm",
+            post(course::interfaces::http_customers::confirm_reception_ocr_job).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/customers/reception-draft/jobs/:job_id/advance",
+            post(course::interfaces::http_customers::advance_reception_ocr_job).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
         )
         .route(
             "/v1/course/customers/:customer_id",
