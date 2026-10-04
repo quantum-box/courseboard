@@ -6717,7 +6717,7 @@ button,
   gap: 8px;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 900px) {
   .reception-workspace {
     grid-template-columns: 1fr;
   }
@@ -7677,6 +7677,19 @@ button,
 
 .reception-pdf-page { min-height: 600px; overflow-anchor: none; }
 .reception-pdf-page canvas { width: 100%; height: auto; display: block; }
-@media (min-width: 1101px) {
+@media (min-width: 901px) {
   .reception-row-list { max-height: 80vh; overflow-y: auto; overflow-anchor: none; }
+}
+
+/* Keep review controls short so the scanned sheets start near the top. */
+.reception-review-compact { gap: 8px; }
+.reception-review-compact > .loading-state { min-height: 28px; justify-content: flex-start; font-size: 12px; }
+.reception-review-compact .reception-toolbar .panel-header > div:first-child { display: none; }
+.reception-review-compact .reception-toolbar .panel-actions { width: 100%; justify-content: space-between; }
+.reception-review-compact .reception-batch-list { display: flex; flex-wrap: wrap; margin-bottom: 0; gap: 4px; }
+.reception-review-compact .reception-workspace .panel-header { align-items: center; }
+.reception-review-compact .reception-preview-list,
+.reception-review-compact .reception-row-list { max-height: calc(100dvh - 210px); }
+@media (max-width: 900px) {
+  .reception-review-compact .reception-row-list { max-height: none; }
 }

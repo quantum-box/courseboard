@@ -633,9 +633,11 @@ export function ReceptionPage() {
     || Boolean(consentSettings.error)
   const rotationLocked = busy || saved > 0 || rows.some(row => row.status === 'saving')
 
+  const compactReview = files.length > 0 || rows.length > 0
+
   return (
-    <div className="page-stack">
-      <Button
+    <div className={`page-stack ${compactReview ? 'reception-review-compact' : ''}`}>
+      {!compactReview ? <Button
         type="button"
         variant="ghost"
         size="sm"
@@ -643,13 +645,18 @@ export function ReceptionPage() {
       >
         <ChevronLeft />
         {t('customers:reception.back')}
-      </Button>
+      </Button> : null}
 
       <Panel
-        title={t('customers:reception.title')}
-        description={t('customers:reception.description')}
+        className="reception-toolbar"
+        title={compactReview ? undefined : t('customers:reception.title')}
+        description={compactReview ? undefined : t('customers:reception.description')}
         actions={(
           <>
+            {compactReview ? <Button type="button" variant="ghost" size="sm"
+              onClick={event => navigateFromClick(event, 'golf/customers')}>
+              <ChevronLeft />{t('customers:reception.back')}
+            </Button> : null}
             <input
               ref={fileInputRef}
               type="file"
@@ -667,6 +674,7 @@ export function ReceptionPage() {
             />
             <Button
               type="button"
+              size={compactReview ? 'sm' : undefined}
               variant={files.length > 0 ? 'ghost' : 'primary'}
               disabled={busy}
               onClick={() => fileInputRef.current?.click()}
@@ -688,11 +696,11 @@ export function ReceptionPage() {
         ))}
       </Panel>
 
-      {reviewBatches.length > 0 ? (
+      {reviewBatches.length > 0 && (!compactReview || reviewBatches.length > 1 || activeResult?.status === 'failed') ? (
         <Panel
           className="reception-batches"
-          title={t('customers:reception.batch.title')}
-          description={t('customers:reception.batch.description')}
+          title={compactReview ? undefined : t('customers:reception.batch.title')}
+          description={compactReview ? undefined : t('customers:reception.batch.description')}
         >
           <div className="reception-batch-list" aria-label={t('customers:reception.batch.listLabel')}>
             {reviewBatches.map((group, index) => {
@@ -799,7 +807,7 @@ export function ReceptionPage() {
           <Panel
             className="reception-rows"
             title={t('customers:reception.rows.title')}
-            description={t('customers:reception.rows.description')}
+            description={compactReview ? undefined : t('customers:reception.rows.description')}
             actions={(
               <>
                 <Button
@@ -868,12 +876,13 @@ export function ReceptionPage() {
           <Panel
             className="reception-preview"
             title={t('customers:reception.preview.title')}
-            description={t('customers:reception.preview.description')}
+            description={compactReview ? undefined : t('customers:reception.preview.description')}
+            actions={files.length > 0 ? <label className="reception-hint"><input type="checkbox" checked={syncEnabled} onChange={event => setSyncEnabled(event.target.checked)} /> {t('customers:reception.preview.syncScroll')}</label> : undefined}
           >
             {files.length === 0 ? (
               <p className="reception-hint">{t('customers:reception.batch.previewUnavailable')}</p>
             ) : (
-              <><label className="reception-hint"><input type="checkbox" checked={syncEnabled} onChange={event => setSyncEnabled(event.target.checked)} /> {t('customers:reception.preview.syncScroll')}</label>
+              <>
               <div ref={previewListRef} className="reception-preview-list" onScroll={() => syncReviewScroll('preview')}>
                 {files.map((file, index) => {
                   const url = previewUrls[index]
