@@ -692,7 +692,11 @@ fn map_draft(
                         column(row, RECEPTION_ROW_EMAIL),
                         consents,
                     )
-                    .with_configured_fields(fields, row);
+                    .with_configured_fields(fields, row)
+                    .with_source(
+                        column(row, "_source_index").and_then(|v| v.parse().ok()),
+                        column(row, "_source_page").and_then(|v| v.parse().ok()),
+                    );
                     consents.iter().fold(draft, |draft, consent| {
                         draft.with_consent_definition(
                             consent,

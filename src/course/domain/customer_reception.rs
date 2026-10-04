@@ -641,6 +641,8 @@ fn sorted_consent_definitions(
 /// beside it. Dropping it would silently lose a player from the group.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReceptionDraftRow {
+    source_index: Option<u32>,
+    source_page: Option<u32>,
     name: Option<String>,
     name_kana: Option<String>,
     phone: Option<String>,
@@ -676,6 +678,8 @@ impl ReceptionDraftRow {
         consents: &[ReceptionConsentDefinition],
     ) -> Self {
         Self {
+            source_index: None,
+            source_page: None,
             name: normalize(name),
             name_kana: normalize(name_kana),
             phone: normalize(phone),
@@ -689,6 +693,18 @@ impl ReceptionDraftRow {
                 .map(|consent| ReceptionConsentAnswer::new(consent.key.clone(), None))
                 .collect(),
         }
+    }
+
+    pub fn with_source(mut self, index: Option<u32>, page: Option<u32>) -> Self {
+        self.source_index = index;
+        self.source_page = page.filter(|page| *page > 0);
+        self
+    }
+    pub fn source_index(&self) -> Option<u32> {
+        self.source_index
+    }
+    pub fn source_page(&self) -> Option<u32> {
+        self.source_page
     }
 
     /// Adds configured standard/custom values from one Field `items` row.
@@ -990,8 +1006,10 @@ pub struct ReceptionDraft {
 
 impl ReceptionDraft {
     pub fn new(rows: Vec<ReceptionDraftRow>, mut warnings: Vec<String>) -> Self {
-        let mut rows: Vec<ReceptionDraftRow> =
-            rows.into_iter().filter(|row| !row.is_empty()).collect();
+        let mut rows: Vec<ReceptionDraftRow> = rows
+            .into_iter()
+            .filter(|row| !row.is_empty() || row.source_page().is_some())
+            .collect();
         if rows.len() > MAX_RECEPTION_ROWS {
             let warning = format!(
                 "受付票の読み取り結果が上限の{}人を超えたため、先頭{}人のみ表示しています。残りは原本で確認してください。",
@@ -1356,5 +1374,27 @@ mod tests {
         }
         let error = reception_sheet_schema_for_fields(&fields).unwrap_err();
         assert!(matches!(error, CourseError::BadRequest(_)));
+    }
+}
+
+#[cfg(test)]
+mod page_coverage_tests {
+    use super::*;
+    #[test]
+    fn unreadable_pages_are_retained_without_creating_people() {
+        let draft = ReceptionDraft::new(
+            (1..=25)
+                .map(|page| ReceptionDraftRow::default().with_source(Some(0), Some(page)))
+                .collect(),
+            Vec::new(),
+        );
+        assert_eq!(draft.rows().len(), 25);
+        assert!(draft.rows().iter().all(ReceptionDraftRow::is_empty));
+        assert_eq!(draft.rows()[24].source_page(), Some(25));
+        assert!(
+            ReceptionDraft::new(vec![ReceptionDraftRow::default()], Vec::new())
+                .rows()
+                .is_empty()
+        );
     }
 }
