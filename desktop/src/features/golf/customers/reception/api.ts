@@ -327,12 +327,20 @@ async function putReceptionSheet(
   if (upload.uploadUrl.startsWith('mock://')) return
   const headers = new Headers()
   if (file.type) headers.set('Content-Type', file.type)
-  const response = await fetch(upload.uploadUrl, {
-    body: file,
-    headers,
-    method: 'PUT',
-    signal,
-  })
+  let response: Response
+  try {
+    response = await fetch(upload.uploadUrl, {
+      body: file,
+      headers,
+      method: 'PUT',
+      signal,
+    })
+  } catch (error) {
+    if (signal?.aborted) throw error
+    // A blocked or dropped Storage PUT rejects with the same TypeError as an
+    // unreachable CourseBoard API; name Storage so the cause is not misread.
+    throw new Error('受付用紙をTachyon Storageへ送信できませんでした。通信状況を確認してもう一度お試しください。解決しない場合は管理者にStorageの接続設定を確認してください。', { cause: error })
+  }
   if (!response.ok) {
     throw new Error(`Tachyon Storageへのアップロードに失敗しました（${response.status}）。`)
   }

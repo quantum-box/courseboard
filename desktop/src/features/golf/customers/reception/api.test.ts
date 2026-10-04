@@ -82,6 +82,35 @@ describe('reception draft API adapter', () => {
     ])
   })
 
+  it('names Storage when the browser cannot reach the presigned upload', async () => {
+    const photo = new File(['a'], 'scan.jpg', { type: 'image/jpeg' })
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+    api.json
+      .mockResolvedValueOnce({
+        id: 'job-cors',
+        status: 'uploading',
+        completedUnits: 0,
+        draft: { visitors: [], warnings: [] },
+        uploads: [{ storageKey: 'one', uploadUrl: 'https://storage.example/one', expiresAt: 'later' }],
+      })
+      .mockResolvedValueOnce({
+        id: 'job-cors',
+        status: 'uploading',
+        completedUnits: 0,
+        draft: { visitors: [], warnings: [] },
+      })
+
+    let caught: ReceptionBatchError | undefined
+    try {
+      await draftReceptionSheets([photo])
+    } catch (error) {
+      if (error instanceof ReceptionBatchError) caught = error
+    }
+    expect(caught?.originalError).not.toBeInstanceOf(TypeError)
+    expect(caught?.message).toContain('Tachyon Storage')
+    expect(caught?.message).not.toMatch(/failed to fetch/i)
+  })
+
   it('reuses the same job key after a transient advance failure', async () => {
     const photo = new File(['a'], 'scan.jpg', { type: 'image/jpeg' })
     api.json
