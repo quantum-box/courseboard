@@ -5,9 +5,11 @@ const JPEG_QUALITY = 0.9
 
 export type ReceptionRotation = 0 | 90 | 180 | 270
 
-/** Turns landscape sheets upright and normalizes JPEG EXIF orientation. */
+/** Preserves PDF page orientation and normalizes image orientation. */
 export async function autoOrientReceptionSheet(file: File): Promise<File> {
-  if (file.type === 'application/pdf') return autoOrientPdf(file)
+  // Page dimensions cannot distinguish an upright scan from an upside-down one.
+  // Keep the author-provided PDF rotation; operators can turn it explicitly.
+  if (file.type === 'application/pdf') return file
   if (file.type !== 'image/jpeg' && file.type !== 'image/png') return file
 
   const exifOrientation = file.type === 'image/jpeg' ? await jpegExifOrientation(file) : 1
@@ -36,22 +38,6 @@ export async function rotateReceptionSheet(
   } finally {
     bitmap.close()
   }
-}
-
-async function autoOrientPdf(file: File): Promise<File> {
-  const document = await PDFDocument.load(await file.arrayBuffer())
-  let changed = false
-  for (const page of document.getPages()) {
-    const { width, height } = page.getSize()
-    const current = normalizeAngle(page.getRotation().angle)
-    const displayedWidth = current % 180 === 0 ? width : height
-    const displayedHeight = current % 180 === 0 ? height : width
-    if (displayedWidth > displayedHeight) {
-      page.setRotation(degrees((current + 90) % 360))
-      changed = true
-    }
-  }
-  return changed ? savePdf(document, file) : file
 }
 
 async function rotatePdf(file: File, rotation: ReceptionRotation): Promise<File> {

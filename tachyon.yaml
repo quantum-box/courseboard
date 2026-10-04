@@ -59,6 +59,8 @@ spec:
       rootDirectory: ""
       framework: cargo_lambda
       deploymentTarget: lambda
+      # Allow a bounded OCR advance (90s) to finish before the Lambda deadline.
+      lambdaTimeout: 120
       # PLT-3819: declare the production database as a managed resource.
       # Apply provisions the fixed-name database and the db-scoped SQL
       # user on the txcloud cluster and materializes the DSN at the

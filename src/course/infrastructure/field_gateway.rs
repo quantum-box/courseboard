@@ -1739,15 +1739,46 @@ where
     T: for<'de> Deserialize<'de>,
     F: FnOnce(&FieldStatusFailure<'_>) -> Option<CourseError>,
 {
+    field_send_json_classified_with_timeout(
+        client,
+        base_url,
+        method,
+        path_and_query,
+        credentials,
+        body,
+        classify,
+        FIELD_UPSTREAM_TIMEOUT,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn field_send_json_classified_with_timeout<T, F>(
+    client: &reqwest::Client,
+    base_url: &str,
+    method: reqwest::Method,
+    path_and_query: &str,
+    credentials: GatewayCredentials<'_>,
+    body: Option<&Value>,
+    classify: F,
+    timeout: Duration,
+) -> Result<T, CourseError>
+where
+    T: for<'de> Deserialize<'de>,
+    F: FnOnce(&FieldStatusFailure<'_>) -> Option<CourseError>,
+{
     if is_empty_course_store(base_url) {
         return Err(empty_course_store_error());
     }
     let url = format!("{base_url}{path_and_query}");
-    let mut request = field_request(client, method.clone(), &url, credentials);
+    let mut request = field_request(client, method.clone(), &url, credentials).timeout(timeout);
     if let Some(body) = body {
         request = request.json(body);
     }
-    let response = request.send().await.map_err(map_field_request_error)?;
+    let response = request
+        .send()
+        .await
+        .map_err(|error| map_field_request_error_with_timeout(error, timeout))?;
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
@@ -1760,9 +1791,10 @@ where
             classify(&failure).unwrap_or_else(|| map_field_status_error(status, failure.body))
         );
     }
-    response.json().await.map_err(|error| {
-        map_field_body_error_with_timeout(&method, path_and_query, error, FIELD_UPSTREAM_TIMEOUT)
-    })
+    response
+        .json()
+        .await
+        .map_err(|error| map_field_body_error_with_timeout(&method, path_and_query, error, timeout))
 }
 
 /// Name the call that failed.
@@ -2208,6 +2240,50 @@ mod tests {
             axum::serve(listener, app).await.expect("serve mock Field");
         });
         (format!("http://{address}"), server)
+    }
+
+    #[tokio::test]
+    async fn classified_json_honors_the_callers_timeout() {
+        let app = Router::new().route(
+            "/read",
+            axum::routing::post(|| async {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                Json(json!({ "read": true }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let client = reqwest::Client::new();
+        let short: Result<Value, _> = field_send_json_classified_with_timeout(
+            &client,
+            &base,
+            reqwest::Method::POST,
+            "/read",
+            schedule_credentials(),
+            None,
+            |_| None,
+            Duration::from_millis(50),
+        )
+        .await;
+        assert!(short
+            .unwrap_err()
+            .to_string()
+            .contains("timed out after 0 seconds"));
+        let read: Value = field_send_json_classified_with_timeout(
+            &client,
+            &base,
+            reqwest::Method::POST,
+            "/read",
+            schedule_credentials(),
+            None,
+            |_| None,
+            Duration::from_secs(2),
+        )
+        .await
+        .unwrap();
+        assert_eq!(read, json!({ "read": true }));
+        server.abort();
     }
 
     fn schedule_credentials() -> GatewayCredentials<'static> {
