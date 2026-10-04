@@ -82,6 +82,21 @@ describe('reception draft API adapter', () => {
     ])
   })
 
+  it('reports PDF page progress and accumulated drafts after each advance', async () => {
+    const draft = { visitors: [{ sourceIndex: 0, sourcePage: 1, name: 'Test visitor' }], warnings: [] }
+    api.json
+      .mockResolvedValueOnce({ id: 'pages', status: 'ready', completedUnits: 0, draft: { visitors: [], warnings: [] }, uploads: [] })
+      .mockResolvedValueOnce({ id: 'pages', status: 'running', completedUnits: 0, totalUnits: 25, draft: { visitors: [], warnings: [] } })
+      .mockResolvedValueOnce({ id: 'pages', status: 'running', completedUnits: 1, totalUnits: 25, draft })
+      .mockResolvedValueOnce({ id: 'pages', status: 'completed', completedUnits: 25, totalUnits: 25, draft })
+    const onJobProgress = vi.fn()
+    await draftReceptionSheets([new File(['pdf'], 'scan.pdf', { type: 'application/pdf' })], { onJobProgress })
+    expect(onJobProgress.mock.calls.map(([progress]) => [progress.completed, progress.total])).toEqual([
+      [0, undefined], [0, 25], [1, 25], [25, 25],
+    ])
+    expect(onJobProgress.mock.calls[2]?.[0].draft).toEqual(draft)
+  })
+
   it('names Storage when the browser cannot reach the presigned upload', async () => {
     const photo = new File(['a'], 'scan.jpg', { type: 'image/jpeg' })
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))

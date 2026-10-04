@@ -38,6 +38,9 @@ export const customers: DeepPartial<typeof source> = {
     failed: 'Could not remove the customer from the ledger',
   },
   reception: {
+    pageProgress: '{{completed}} / {{total}} pages complete',
+    remainingMinutes: 'About {{count}} minutes remaining (estimate)',
+
     open: 'Register from a reception sheet',
     title: 'Register customers from a reception sheet',
     description: 'Read a scanned reception sheet — image or PDF — and register the people written on it.',
