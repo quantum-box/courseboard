@@ -35,7 +35,7 @@ impl CustomerReceptionOcrJobContextGateway for MySqlReceptionOcrJobContextReposi
         key: &str,
     ) -> Result<Option<ReceptionOcrJobContext>, CourseError> {
         sqlx::query(
-            "SELECT context_json FROM golf_reception_ocr_job_contexts WHERE tenant_id = ? AND idempotency_key = ?",
+            "SELECT CAST(context_json AS CHAR) AS context_json FROM golf_reception_ocr_job_contexts WHERE tenant_id = ? AND idempotency_key = ?",
         )
         .bind(tenant_id)
         .bind(key)
@@ -93,7 +93,7 @@ impl CustomerReceptionOcrJobContextGateway for MySqlReceptionOcrJobContextReposi
         job_id: &str,
     ) -> Result<Option<ReceptionOcrJobContext>, CourseError> {
         sqlx::query(
-            "SELECT context_json FROM golf_reception_ocr_job_contexts WHERE tenant_id = ? AND job_id = ?",
+            "SELECT CAST(context_json AS CHAR) AS context_json FROM golf_reception_ocr_job_contexts WHERE tenant_id = ? AND job_id = ?",
         )
         .bind(tenant_id)
         .bind(job_id)
