@@ -135,6 +135,7 @@ impl CustomerReceptionOcrJobGateway for FieldCustomerReceptionGateway {
         let schema = reception_sheet_schema_for_fields_and_consents(fields, consents)?;
         let body = serde_json::json!({
             "idempotencyKey": idempotency_key,
+            "sourceApp": "courseboard",
             "schema": schema,
             "documents": sheets
                 .iter()
@@ -160,6 +161,11 @@ impl CustomerReceptionOcrJobGateway for FieldCustomerReceptionGateway {
             reader_failure,
         )
         .await?;
+        if response.job.source_app.as_deref() != Some("courseboard") {
+            return Err(CourseError::Provider(
+                "Field OCR page metering is unavailable; update Field before accepting reception reads".into(),
+            ));
+        }
         Ok(ReceptionOcrJobCreated {
             job: map_job(response.job, fields, consents)?,
             uploads: response
@@ -290,6 +296,8 @@ fn reception_job_step_timeout(step: &str) -> Duration {
 #[serde(rename_all = "camelCase")]
 struct FieldOcrJobResponse {
     id: String,
+    #[serde(default)]
+    source_app: Option<String>,
     status: String,
     #[serde(default)]
     completed_units: u32,
@@ -746,6 +754,64 @@ mod tests {
         legacy_reception_consent_definitions, CONSENT_ANTISOCIAL_AND_COURSE_TERMS,
         CONSENT_CART_TERMS, CONSENT_MARKETING_CONTACT, RECEPTION_CONSENTS,
     };
+
+    #[tokio::test]
+    async fn reception_jobs_require_field_metering_acknowledgement() {
+        use axum::{routing::post, Json, Router};
+        for supported in [true, false] {
+            let app = Router::new().route(
+                "/v1/field/ocr/consumer/jobs",
+                post(move |Json(body): Json<serde_json::Value>| async move {
+                    assert_eq!(body["sourceApp"], "courseboard");
+                    assert_eq!(body["idempotencyKey"], "same-retry-key");
+                    let mut response = serde_json::json!({
+                        "id": "goj_test", "status": "uploading", "uploads": []
+                    });
+                    if supported {
+                        response["sourceApp"] = "courseboard".into();
+                    }
+                    Json(response)
+                }),
+            );
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app).await.unwrap();
+            });
+            let gateway = FieldCustomerReceptionGateway::new(
+                reqwest::Client::new(),
+                Some(&format!("http://{address}")),
+            );
+            let result = gateway
+                .create_reception_ocr_job(
+                    GatewayCredentials {
+                        authorization: "Bearer test-token",
+                        operator_id: "operator-test",
+                        platform_id: None,
+                        authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                        caller_bearer: "Bearer test-token",
+                    },
+                    "same-retry-key",
+                    &ReceptionOcrJobSheets::try_new(vec![ReceptionOcrJobSheet::try_new(
+                        "image/jpeg",
+                        100,
+                    )
+                    .unwrap()])
+                    .unwrap(),
+                    &CustomerReceptionField::merge_with_defaults("operator-test", Vec::new()),
+                    &legacy_reception_consent_definitions(),
+                )
+                .await;
+            if supported {
+                assert!(result.is_ok());
+            } else {
+                assert!(
+                    matches!(result, Err(CourseError::Provider(message)) if message.contains("metering"))
+                );
+            }
+            server.abort();
+        }
+    }
 
     fn draft_from(json: serde_json::Value) -> ReceptionDraft {
         let consents = legacy_reception_consent_definitions();
