@@ -26,6 +26,16 @@ export const helpEn: HelpCatalog = {
     ],
   },
   routes: {
+    'golf/customers/reception': {
+      title: "Register customers from reception sheets",
+      summary: "Read reception sheets from images or PDFs, review their contents, and register customers.",
+      usage: [
+        { heading: "Choose sheets", body: "Choose JPEG, PNG, HEIC/HEIF, or PDF files: up to 300 sheets and 1 GB total at once." },
+        { heading: "Read and register", body: "Sheets are processed sequentially in batches of up to 32. Large PDFs are read page by page without manual splitting. Review, edit, and register each batch." },
+        { heading: "Sheet orientation", body: "Sideways photos are corrected automatically. PDF text direction is detected and corrected per page; uncertain pages retain their original orientation. You can also use the preview rotation buttons." },
+      ],
+      data: [{ heading: "Sheet data", body: "Photos are not downscaled. Uploaded sheet data is deleted after reading." }],
+    },
     golf: {
       title: 'Home',
       summary: 'Where the day starts: shortcuts to the screens you use most, in the order you use them.',

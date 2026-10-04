@@ -679,7 +679,6 @@ export function ReceptionPage() {
           </>
         )}
       >
-        <p className="reception-hint">{t('customers:reception.choose.hint')}</p>
         {readError ? <Notice tone="danger">{readError}</Notice> : null}
         {/* Said once, above the rows: a partial read looks exactly like a
             complete one, and this is the only thing that sends the desk back

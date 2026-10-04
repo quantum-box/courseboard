@@ -31,6 +31,16 @@ export const helpJaPlain: HelpCatalog = {
     ],
   },
   routes: {
+    'golf/customers/reception': {
+      title: "紙から お客さまを 登録する",
+      summary: "画像や PDFの 紙を 読みます。中身を たしかめて、お客さまを 登録します。",
+      usage: [
+        { heading: "紙を えらぶ", body: "JPEG・PNG・HEIC/HEIF・PDFを、一度に 300まい、ぜんぶで 1GBまで えらべます。" },
+        { heading: "読んで 登録する", body: "32まいまで 順に 読みます。大きい PDFは、こちらで 分けなくても ページごとに 読みます。まとまりごとに 中身を たしかめて、直して 登録できます。" },
+        { heading: "紙の 向き", body: "写真と PDFの 文字の 向きを 自動で 直します。PDFで 向きが わからない ページは、そのままにします。右の 紙の 回転ボタンでも 直せます。" },
+      ],
+      data: [{ heading: "紙の データ", body: "写真は 小さくしません。読んだ あとは、送った 紙の データを 消します。" }],
+    },
     golf: {
       title: '最初の画面',
       summary: '今日の仕事はここから始めます。よく使う画面へのボタンと、進める順番が並んでいます。',
