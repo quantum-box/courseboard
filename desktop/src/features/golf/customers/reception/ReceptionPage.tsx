@@ -166,6 +166,7 @@ export function ReceptionPage() {
   const [previewUrls, setPreviewUrls] = useState<string[]>([])
   const [reading, setReading] = useState(false)
   const [loadingBatchPreview, setLoadingBatchPreview] = useState(false)
+  const [orientationProgress, setOrientationProgress] = useState<{ completed: number; total: number } | null>(null)
   const [pageProgress, setPageProgress] = useState<{ completed: number; total?: number | null; remainingMinutes?: number } | null>(null)
   const [readProgress, setReadProgress] = useState<{ current: number; total: number } | null>(null)
   const [readError, setReadError] = useState<string | null>(null)
@@ -296,7 +297,10 @@ export function ReceptionPage() {
     let orientationSources: File[]
     try {
       orientationSources = []
-      for (const file of prepared) orientationSources.push(await autoOrientReceptionSheet(file))
+      for (const file of prepared) {
+        orientationSources.push(await autoOrientReceptionSheet(file, setOrientationProgress))
+      }
+      setOrientationProgress(null)
       const turned: File[] = []
       for (const [index, file] of orientationSources.entries()) {
         const rotation = rotations[index] ?? 0
@@ -304,6 +308,7 @@ export function ReceptionPage() {
       }
       prepared = await prepareReceptionSheets(turned)
     } catch {
+      setOrientationProgress(null)
       throw new ReceptionPreparationError('orientationFailed')
     }
     const invalid = sheetsValidationError(prepared)
@@ -745,7 +750,11 @@ export function ReceptionPage() {
 
       {reading ? (
         <LoadingState
-          label={processingBatchIndex !== null
+          label={orientationProgress
+            ? t('customers:reception.orientingPages', {
+                completed: String(orientationProgress.completed), total: String(orientationProgress.total),
+              })
+            : processingBatchIndex !== null
             ? `${t('customers:reception.batch.reading', {
                 batch: String(processingBatchIndex + 1),
                 total: String(reviewBatches.length),
