@@ -2091,7 +2091,7 @@ pub struct ReceptionOcrJobUploadDto {
 #[serde(rename_all = "camelCase")]
 pub struct ReceptionOcrJobDto {
     pub id: String,
-    /// uploading | ready | running | completed
+    /// uploading | ready | running | completed | failed | cancelled | expired
     pub status: String,
     pub completed_units: u32,
     /// Absent until every document has been opened and its pages counted.
@@ -2100,6 +2100,8 @@ pub struct ReceptionOcrJobDto {
     /// The draft so far, mapped exactly like the synchronous draft. On a
     /// completed job this is the whole read.
     pub draft: ReceptionDraftDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure_code: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -2129,6 +2131,7 @@ fn reception_ocr_job_dto(job: ReceptionOcrJob) -> ReceptionOcrJobDto {
         completed_units: job.completed_units,
         total_units: job.total_units,
         draft: reception_draft_dto(&job.draft),
+        failure_code: job.failure_code,
     }
 }
 
@@ -2182,6 +2185,7 @@ pub async fn create_reception_ocr_job(
         reception_gateway(&state),
         reception_fields_gateway(&state),
         customer_consent_gateway(&state),
+        state.reception_ocr_job_contexts(),
     )
     .create(credentials, key, sheets)
     .await
@@ -2225,6 +2229,7 @@ pub async fn confirm_reception_ocr_job(
         reception_gateway(&state),
         reception_fields_gateway(&state),
         customer_consent_gateway(&state),
+        state.reception_ocr_job_contexts(),
     )
     .confirm(credentials, &job_id)
     .await
@@ -2259,6 +2264,7 @@ pub async fn get_reception_ocr_job(
         reception_gateway(&state),
         reception_fields_gateway(&state),
         customer_consent_gateway(&state),
+        state.reception_ocr_job_contexts(),
     )
     .get(credentials, &job_id)
     .await
@@ -2298,6 +2304,7 @@ pub async fn advance_reception_ocr_job(
         reception_gateway(&state),
         reception_fields_gateway(&state),
         customer_consent_gateway(&state),
+        state.reception_ocr_job_contexts(),
     )
     .advance(credentials, &job_id)
     .await
@@ -2332,6 +2339,7 @@ pub async fn cancel_reception_ocr_job(
         reception_gateway(&state),
         reception_fields_gateway(&state),
         customer_consent_gateway(&state),
+        state.reception_ocr_job_contexts(),
     )
     .cancel(credentials, &job_id)
     .await

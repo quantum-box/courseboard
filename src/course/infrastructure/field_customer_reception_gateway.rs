@@ -309,12 +309,8 @@ struct FieldOcrJobUpload {
     expires_at: String,
 }
 
-/// Terminal job states still answer 200 — Field replays the stored job — so a
-/// job failure arrives here as a status string plus its code rather than as an
-/// HTTP status `reader_failure` can classify. The same classes apply:
-/// billing, rate-limit and unavailable codes become the reader's own
-/// failures, and anything else — a document Field could not read, an expired
-/// job — is a request this side can correct or retry, never a provider error.
+/// Persisted failures remain job responses. HTTP throttling and a failed job
+/// must stay distinguishable so a retry can abandon a terminal resume key.
 fn map_job(
     response: FieldOcrJobResponse,
     fields: &[CustomerReceptionField],
@@ -326,21 +322,13 @@ fn map_job(
             response.status
         ))
     })?;
-    if status == ReceptionOcrJobStatus::Failed {
-        if let Some(failure) = ReceptionReaderFailure::classify(0, response.failure_code.as_deref())
-        {
-            return Err(CourseError::ReceptionReaderFailed(failure));
-        }
-        return Err(CourseError::BadRequest(
-            "the reception sheets could not be read; check the documents and try again",
-        ));
-    }
     Ok(ReceptionOcrJob {
         id: response.id,
         status,
         completed_units: response.completed_units,
         total_units: response.total_units,
         draft: map_draft(response.draft, fields, consents),
+        failure_code: response.failure_code,
     })
 }
 
@@ -1096,6 +1084,20 @@ mod tests {
         }));
         assert!(draft.rows().is_empty());
         assert_eq!(draft.warnings().len(), 1);
+    }
+
+    #[test]
+    fn a_persisted_rate_limit_failure_keeps_its_terminal_job_status() {
+        let response = serde_json::from_value(serde_json::json!({
+            "id": "job-failed",
+            "status": "failed",
+            "failureCode": "TOO_MANY_REQUESTS",
+            "draft": {"fields": {}, "warnings": []}
+        }))
+        .unwrap();
+        let job = map_job(response, &[], &[]).unwrap();
+        assert_eq!(job.status, ReceptionOcrJobStatus::Failed);
+        assert_eq!(job.failure_code.as_deref(), Some("TOO_MANY_REQUESTS"));
     }
 
     fn failure_for(status: u16, body: &str) -> Option<CourseError> {

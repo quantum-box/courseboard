@@ -147,6 +147,49 @@ describe('reception draft API adapter', () => {
     ])
   })
 
+  it('drops the resume key when throttling belongs to a persisted failed job', async () => {
+    const photo = new File(['a'], 'scan.jpg', { type: 'image/jpeg' })
+    api.json
+      .mockResolvedValueOnce({
+        id: 'job-rate-limit',
+        status: 'ready',
+        completedUnits: 0,
+        draft: { visitors: [], warnings: [] },
+        uploads: [],
+      })
+      .mockRejectedValueOnce(new ApiError('reader unavailable', 429))
+      .mockResolvedValueOnce({
+        id: 'job-rate-limit',
+        status: 'failed',
+        failureCode: 'TOO_MANY_REQUESTS',
+        completedUnits: 0,
+        draft: { visitors: [], warnings: [] },
+      })
+    let caught: ReceptionBatchError | undefined
+    try {
+      await draftReceptionSheets([photo])
+    } catch (error) {
+      if (error instanceof ReceptionBatchError) caught = error
+    }
+    expect(caught).toBeDefined()
+    expect(caught?.jobResume).toBeUndefined()
+    const firstKey = JSON.parse(String((api.json.mock.calls[0]?.[1] as RequestInit).body)).idempotencyKey
+    api.json.mockResolvedValueOnce({
+      id: 'job-fresh',
+      status: 'completed',
+      completedUnits: 1,
+      draft: { visitors: [], warnings: [] },
+      uploads: [],
+    })
+    await draftReceptionSheets([photo], {}, {
+      draft: caught!.partialDraft,
+      nextBatchIndex: caught!.nextBatchIndex,
+      job: caught?.jobResume,
+    })
+    expect(JSON.parse(String((api.json.mock.calls[3]?.[1] as RequestInit).body)).idempotencyKey)
+      .not.toBe(firstKey)
+  })
+
   it('checks progress after a concurrent advance conflict', async () => {
     const photo = new File(['a'], 'scan.jpg', { type: 'image/jpeg' })
     api.json

@@ -51,6 +51,7 @@ type ReceptionOcrJob = {
   completedUnits: number
   totalUnits?: number | null
   draft: ReceptionDraft
+  failureCode?: string | null
 }
 
 type CreatedReceptionOcrJob = ReceptionOcrJob & {
@@ -203,7 +204,7 @@ export async function draftReceptionSheets(
         if (job.status === 'failed' || job.status === 'cancelled' || job.status === 'expired') {
           options.onJobFinished?.(job.id)
           jobResume = undefined
-          throw new Error('受付用紙の読み取りジョブを続行できません。')
+          throw terminalReceptionJobError(job)
         }
         try {
           job = await courseboardApiJson<ReceptionOcrJob>(
@@ -220,6 +221,7 @@ export async function draftReceptionSheets(
         if (job.status === 'failed' || job.status === 'cancelled' || job.status === 'expired') {
           options.onJobFinished?.(job.id)
           jobResume = undefined
+          throw terminalReceptionJobError(job)
         }
         throw new Error('受付用紙の読み取りに時間がかかっています。もう一度お試しください。')
       }
@@ -266,9 +268,8 @@ async function isTerminalReceptionJob(jobId: string, signal?: AbortSignal): Prom
     )
     return job.status === 'failed' || job.status === 'cancelled' || job.status === 'expired'
   } catch (error) {
-    // A status read does not call the OCR provider. Its client error therefore
-    // means the persisted job is terminal; auth, throttling, and server errors
-    // remain inconclusive so a runnable job keeps its resume key.
+    // Persisted failures return status: failed even for TOO_MANY_REQUESTS.
+    // Auth, HTTP throttling, and server errors remain inconclusive.
     return error instanceof ApiError
       && error.status >= 400
       && error.status < 500
@@ -276,6 +277,19 @@ async function isTerminalReceptionJob(jobId: string, signal?: AbortSignal): Prom
       && error.status !== 403
       && error.status !== 429
   }
+}
+
+function terminalReceptionJobError(job: ReceptionOcrJob): Error {
+  if (job.failureCode === 'TOO_MANY_REQUESTS') {
+    return new ApiError('受付用紙の読み取りが混み合っています。時間をおいて再試行してください。', 429)
+  }
+  if (job.failureCode === 'PAYMENT_REQUIRED') {
+    return new ApiError('受付用紙の読み取りには請求設定と残高の確認が必要です。', 402)
+  }
+  if (job.failureCode === 'SERVICE_UNAVAILABLE') {
+    return new ApiError('受付用紙の読み取りサービスに接続できません。', 424)
+  }
+  return new Error('受付用紙の読み取りジョブを続行できません。')
 }
 
 async function waitForReceptionJob(

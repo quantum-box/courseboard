@@ -16,19 +16,16 @@ use crate::course::domain::actions;
 use crate::course::domain::{
     active_reception_consent_definitions, reception_sheet_schema_for_fields_and_consents,
     CourseError, CustomerConsentCatalogGateway, CustomerReceptionField,
-    CustomerReceptionFieldsGateway, CustomerReceptionOcrJobGateway, GatewayCredentials,
-    ReceptionConsentDefinition, ReceptionOcrJob, ReceptionOcrJobCreated, ReceptionOcrJobSheets,
+    CustomerReceptionFieldsGateway, CustomerReceptionOcrJobContextGateway,
+    CustomerReceptionOcrJobGateway, GatewayCredentials, ReceptionOcrJob, ReceptionOcrJobContext,
+    ReceptionOcrJobCreated, ReceptionOcrJobSheets,
 };
 
 pub struct ReceptionOcrJobUseCase {
     jobs: Arc<dyn CustomerReceptionOcrJobGateway>,
     fields: Arc<dyn CustomerReceptionFieldsGateway>,
     consents: Arc<dyn CustomerConsentCatalogGateway>,
-}
-
-struct ReadContext {
-    fields: Vec<CustomerReceptionField>,
-    consents: Vec<ReceptionConsentDefinition>,
+    contexts: Arc<dyn CustomerReceptionOcrJobContextGateway>,
 }
 
 impl ReceptionOcrJobUseCase {
@@ -36,22 +33,21 @@ impl ReceptionOcrJobUseCase {
         jobs: Arc<dyn CustomerReceptionOcrJobGateway>,
         fields: Arc<dyn CustomerReceptionFieldsGateway>,
         consents: Arc<dyn CustomerConsentCatalogGateway>,
+        contexts: Arc<dyn CustomerReceptionOcrJobContextGateway>,
     ) -> Self {
         Self {
             jobs,
             fields,
             consents,
+            contexts,
         }
     }
 
-    /// The permission plus the schema inputs every job step needs. Draft
-    /// mapping happens on this side of the Field boundary, so confirm,
-    /// advance and cancel all want the same tenant configuration create did.
+    /// Current settings are consulted only when reserving a new job.
     async fn context(
         &self,
         credentials: GatewayCredentials<'_>,
-    ) -> Result<ReadContext, CourseError> {
-        credentials.require(actions::MANAGE_CUSTOMERS).await?;
+    ) -> Result<ReceptionOcrJobContext, CourseError> {
         let stored = self
             .fields
             .list_customer_reception_fields(credentials.operator_id)
@@ -60,7 +56,19 @@ impl ReceptionOcrJobUseCase {
         let catalog = self.consents.list_consent_items(credentials, false).await?;
         let consents = active_reception_consent_definitions(&catalog);
         reception_sheet_schema_for_fields_and_consents(&fields, &consents)?;
-        Ok(ReadContext { fields, consents })
+        Ok(ReceptionOcrJobContext { fields, consents })
+    }
+
+    async fn job_context(
+        &self,
+        credentials: GatewayCredentials<'_>,
+        job_id: &str,
+    ) -> Result<ReceptionOcrJobContext, CourseError> {
+        credentials.require(actions::MANAGE_CUSTOMERS).await?;
+        self.contexts
+            .find_by_job(credentials.operator_id, job_id)
+            .await?
+            .ok_or(CourseError::NotFound("OCR job context not found"))
     }
 
     /// Reserves the job and answers with the presigned upload targets. The
@@ -72,8 +80,22 @@ impl ReceptionOcrJobUseCase {
         idempotency_key: &str,
         sheets: ReceptionOcrJobSheets,
     ) -> Result<ReceptionOcrJobCreated, CourseError> {
-        let context = self.context(credentials).await?;
-        self.jobs
+        credentials.require(actions::MANAGE_CUSTOMERS).await?;
+        let context = match self
+            .contexts
+            .find_by_key(credentials.operator_id, idempotency_key)
+            .await?
+        {
+            Some(context) => context,
+            None => {
+                let current = self.context(credentials).await?;
+                self.contexts
+                    .reserve(credentials.operator_id, idempotency_key, &current)
+                    .await?
+            }
+        };
+        let created = self
+            .jobs
             .create_reception_ocr_job(
                 credentials,
                 idempotency_key,
@@ -81,7 +103,11 @@ impl ReceptionOcrJobUseCase {
                 &context.fields,
                 &context.consents,
             )
-            .await
+            .await?;
+        self.contexts
+            .bind_job(credentials.operator_id, idempotency_key, &created.job.id)
+            .await?;
+        Ok(created)
     }
 
     /// Verifies the uploads landed. Retried confirms replay the same job.
@@ -90,7 +116,7 @@ impl ReceptionOcrJobUseCase {
         credentials: GatewayCredentials<'_>,
         job_id: &str,
     ) -> Result<ReceptionOcrJob, CourseError> {
-        let context = self.context(credentials).await?;
+        let context = self.job_context(credentials, job_id).await?;
         self.jobs
             .confirm_reception_ocr_job(credentials, job_id, &context.fields, &context.consents)
             .await
@@ -102,7 +128,7 @@ impl ReceptionOcrJobUseCase {
         credentials: GatewayCredentials<'_>,
         job_id: &str,
     ) -> Result<ReceptionOcrJob, CourseError> {
-        let context = self.context(credentials).await?;
+        let context = self.job_context(credentials, job_id).await?;
         self.jobs
             .get_reception_ocr_job(credentials, job_id, &context.fields, &context.consents)
             .await
@@ -117,7 +143,7 @@ impl ReceptionOcrJobUseCase {
         credentials: GatewayCredentials<'_>,
         job_id: &str,
     ) -> Result<ReceptionOcrJob, CourseError> {
-        let context = self.context(credentials).await?;
+        let context = self.job_context(credentials, job_id).await?;
         self.jobs
             .advance_reception_ocr_job(credentials, job_id, &context.fields, &context.consents)
             .await
@@ -131,7 +157,7 @@ impl ReceptionOcrJobUseCase {
         credentials: GatewayCredentials<'_>,
         job_id: &str,
     ) -> Result<ReceptionOcrJob, CourseError> {
-        let context = self.context(credentials).await?;
+        let context = self.job_context(credentials, job_id).await?;
         self.jobs
             .cancel_reception_ocr_job(credentials, job_id, &context.fields, &context.consents)
             .await

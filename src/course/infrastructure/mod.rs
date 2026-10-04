@@ -36,6 +36,7 @@ mod player_tag_options_repository;
 mod policy_authorizer;
 mod pricing_settings_repository;
 mod product_settings_repository;
+mod reception_ocr_job_context_repository;
 mod reservation_cancellation_repository;
 mod reservation_report_gateway;
 mod reservation_report_repository;
@@ -76,6 +77,7 @@ pub use player_tag_options_repository::MySqlPlayerTagOptionsRepository;
 pub use policy_authorizer::{AllowAllAuthorizer, PolicyCourseAuthorizer, ALLOW_ALL};
 pub use pricing_settings_repository::MySqlPricingSettingsRepository;
 pub use product_settings_repository::{GolfProductSettings, MySqlGolfProductSettingsRepository};
+pub use reception_ocr_job_context_repository::MySqlReceptionOcrJobContextRepository;
 pub use reservation_cancellation_repository::MySqlReservationCancellationRepository;
 pub use reservation_report_gateway::{FieldReservationReportGateway, DEFAULT_FIELD_GENERIC_PATHS};
 pub use reservation_report_repository::{

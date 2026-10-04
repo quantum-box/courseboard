@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::customer_consent::{
@@ -23,7 +23,7 @@ use super::customer_consent::{
     ReceptionConsentDefinition,
 };
 use super::error::CourseError;
-use super::NewCustomer;
+use super::{CustomerReceptionField, NewCustomer};
 
 /// Field's own ceiling for one document (10 MiB). Rejecting oversized uploads
 /// here keeps a scan the desk cannot use from crossing the network twice.
@@ -401,6 +401,13 @@ impl ReceptionOcrJobStatus {
     }
 }
 
+/// The settings used to create a persistent read, without document data.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReceptionOcrJobContext {
+    pub fields: Vec<CustomerReceptionField>,
+    pub consents: Vec<ReceptionConsentDefinition>,
+}
+
 /// A persistent read as the desk sees it: progress numbers, and the draft so
 /// far mapped the same way the synchronous path maps it. Storage keys and
 /// document bytes stay upstream — the job row never carries personal data to
@@ -414,6 +421,7 @@ pub struct ReceptionOcrJob {
     /// once Field has read it, and a running job answers None until then.
     pub total_units: Option<u32>,
     pub draft: ReceptionDraft,
+    pub failure_code: Option<String>,
 }
 
 /// What a fresh job answers with: the job itself, and one presigned PUT per

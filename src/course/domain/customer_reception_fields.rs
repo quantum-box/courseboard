@@ -131,7 +131,7 @@ pub struct ReceptionFieldInput {
 }
 
 /// A tenant's reception field definition.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CustomerReceptionField {
     pub tenant_id: String,
     pub field_key: String,

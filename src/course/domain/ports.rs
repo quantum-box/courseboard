@@ -21,15 +21,15 @@ use super::{
     NewCustomerRegistration, NewReservation, NewReservationCancellation, PartyDetails,
     PlayerTagOptions, ProductSlot, ReceptionConsentAnswer, ReceptionConsentDefinition,
     ReceptionCustomerInput, ReceptionDraft, ReceptionFormProposal, ReceptionOcrJob,
-    ReceptionOcrJobCreated, ReceptionOcrJobSheets, ReceptionSheet, ReceptionSheets,
-    RecordedCaddieFeeChange, ReplaceCaddieMemberships, Reservation, ReservationBookingUpdate,
-    ReservationCancellation, ReservationId, ReservationPolicy, ReservationProduct,
-    ReservationServiceId, Resource, ResourceId, ResourceTimeSlot, SaveCourseResource,
-    SeededReservation, SetMemberNumber, ShiftPolicy, SlotOverride, SlotOverrideQuery,
-    TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig, UpdateReservationPolicy, UpsertCaddie,
-    UpsertCaddieAssignment, UpsertCaddieAvailability, UpsertCourse, UpsertDailyBudget,
-    UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin, VisitCheckinRequest,
-    WorkedMinutes, YearMonth,
+    ReceptionOcrJobContext, ReceptionOcrJobCreated, ReceptionOcrJobSheets, ReceptionSheet,
+    ReceptionSheets, RecordedCaddieFeeChange, ReplaceCaddieMemberships, Reservation,
+    ReservationBookingUpdate, ReservationCancellation, ReservationId, ReservationPolicy,
+    ReservationProduct, ReservationServiceId, Resource, ResourceId, ResourceTimeSlot,
+    SaveCourseResource, SeededReservation, SetMemberNumber, ShiftPolicy, SlotOverride,
+    SlotOverrideQuery, TaxRuleSnapshot, UnsyncedShift, UpdateExtensionConfig,
+    UpdateReservationPolicy, UpsertCaddie, UpsertCaddieAssignment, UpsertCaddieAvailability,
+    UpsertCourse, UpsertDailyBudget, UpsertMembershipPlan, UpsertReservationProduct, VisitCheckin,
+    VisitCheckinRequest, WorkedMinutes, YearMonth,
 };
 
 /// Answers whether the caller may perform one CourseBoard action.
@@ -1217,8 +1217,7 @@ pub trait CustomerReceptionOcrGateway: Send + Sync {
 /// through it: create returns presigned PUT targets on Tachyon Storage, the
 /// caller uploads the sheets straight there, confirm verifies the uploads
 /// landed, and advance reads one bounded piece at a time until the draft is
-/// complete. Field stores nothing but the storage keys; CourseBoard stores
-/// nothing at all.
+/// complete. Field retains the read; CourseBoard retains only its schema inputs.
 ///
 /// Sheets are described by content type and size, never carried — by the time
 /// a read needs this port, CourseBoard holds no bytes at all.
@@ -1277,6 +1276,32 @@ pub trait CustomerReceptionOcrJobGateway: Send + Sync {
         fields: &[CustomerReceptionField],
         consents: &[ReceptionConsentDefinition],
     ) -> Result<ReceptionOcrJob, CourseError>;
+}
+
+/// Durable create-time schema inputs, scoped to the tenant and idempotency key.
+#[async_trait]
+pub trait CustomerReceptionOcrJobContextGateway: Send + Sync {
+    async fn find_by_key(
+        &self,
+        tenant_id: &str,
+        key: &str,
+    ) -> Result<Option<ReceptionOcrJobContext>, CourseError>;
+
+    /// First writer wins, including concurrent creates with the same key.
+    async fn reserve(
+        &self,
+        tenant_id: &str,
+        key: &str,
+        context: &ReceptionOcrJobContext,
+    ) -> Result<ReceptionOcrJobContext, CourseError>;
+
+    async fn bind_job(&self, tenant_id: &str, key: &str, job_id: &str) -> Result<(), CourseError>;
+
+    async fn find_by_job(
+        &self,
+        tenant_id: &str,
+        job_id: &str,
+    ) -> Result<Option<ReceptionOcrJobContext>, CourseError>;
 }
 
 /// Port for the reception-only Field ERP customer create capability.
