@@ -98,6 +98,8 @@ export type ReceptionAddress = {
 export type ReceptionFieldValue = string | number | boolean | ReceptionAddress | null
 
 export type ReceptionDraftVisitor = {
+  sourceIndex?: number | null
+  sourcePage?: number | null
   name?: string | null
   nameKana?: string | null
   /** The API may use the database spelling for fields in a draft. */
@@ -805,6 +807,8 @@ export type ReceptionFieldValues = Record<string, ReceptionFieldValue>
  * when corrected cannot be compared to anything.
  */
 export type ReceptionRow = {
+  sourceIndex?: number | null
+  sourcePage?: number | null
   key: string
   name: string
   nameKana: string
@@ -1112,6 +1116,8 @@ export function rowFromVisitor(
     // Position, not content: two players in a family share a phone number and
     // sometimes a surname, and a key made of those collapses them into one row.
     key: `visitor-${index}`,
+    sourceIndex: visitor.sourceIndex,
+    sourcePage: visitor.sourcePage,
     name: read.name,
     nameKana: read.nameKana,
     phone: read.phone,

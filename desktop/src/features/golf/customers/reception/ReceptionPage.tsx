@@ -1,3 +1,5 @@
+import { syncReceptionScroll } from './scrollSync'
+import { PdfPages } from './PdfPages'
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import {
   ArrowDown,
@@ -149,6 +151,18 @@ export function ReceptionPage() {
   const [processingBatchIndex, setProcessingBatchIndex] = useState<number | null>(null)
   const [files, setFiles] = useState<File[]>([])
   const [orientationSources, setOrientationSources] = useState<File[]>([])
+  const rowListRef = useRef<HTMLOListElement>(null)
+  const previewListRef = useRef<HTMLDivElement>(null)
+  const syncUntilRef = useRef(0)
+  const [syncEnabled, setSyncEnabled] = useState(true)
+  function syncReviewScroll(from: 'rows' | 'preview') {
+    if (!syncEnabled || Date.now() < syncUntilRef.current) return
+    const origin = from === 'rows' ? rowListRef.current : previewListRef.current
+    const target = from === 'rows' ? previewListRef.current : rowListRef.current
+    if (!origin || !target) return
+    syncUntilRef.current = Date.now() + 200
+    syncReceptionScroll(origin, target)
+  }
   const [previewUrls, setPreviewUrls] = useState<string[]>([])
   const [reading, setReading] = useState(false)
   const [loadingBatchPreview, setLoadingBatchPreview] = useState(false)
@@ -807,7 +821,7 @@ export function ReceptionPage() {
               />
             ) : null}
 
-            <ol className="reception-row-list">
+            <ol ref={rowListRef} className="reception-row-list" onScroll={() => syncReviewScroll('rows')}>
               {rows.map((row, index) => (
                 <ReceptionRowCard
                   key={row.key}
@@ -833,7 +847,8 @@ export function ReceptionPage() {
             {files.length === 0 ? (
               <p className="reception-hint">{t('customers:reception.batch.previewUnavailable')}</p>
             ) : (
-              <div className="reception-preview-list">
+              <><label className="reception-hint"><input type="checkbox" checked={syncEnabled} onChange={event => setSyncEnabled(event.target.checked)} /> {t('customers:reception.preview.syncScroll')}</label>
+              <div ref={previewListRef} className="reception-preview-list" onScroll={() => syncReviewScroll('preview')}>
                 {files.map((file, index) => {
                   const url = previewUrls[index]
                   if (!url) return null
@@ -872,15 +887,12 @@ export function ReceptionPage() {
                         </Button>
                       </div>
                       {previewKind(file) === 'pdf' ? (
-                        <iframe
-                          className="reception-preview-frame"
-                          src={url}
-                          loading="lazy"
-                          title={label ?? t('customers:reception.preview.title')}
-                        />
+                        <PdfPages url={url} sourceIndex={index} />
                       ) : (
                         <img
                           className="reception-preview-image"
+                          data-source-index={index}
+                          data-source-page={1}
                           src={url}
                           loading="lazy"
                           alt={label
@@ -891,7 +903,7 @@ export function ReceptionPage() {
                     </figure>
                   )
                 })}
-              </div>
+              </div></>
             )}
             {saved > 0 ? (
               <p className="reception-hint">{t('customers:reception.preview.rotationLocked')}</p>
@@ -1881,7 +1893,8 @@ function ReceptionRowCard({
   const missingConsents = missingRequiredConsentItems(row, consentItems)
 
   return (
-    <li className={`reception-row${saved ? ' reception-row-saved' : ''}`}>
+    <li className={`reception-row${saved ? ' reception-row-saved' : ''}`} data-source-index={row.sourceIndex ?? undefined} data-source-page={row.sourcePage ?? undefined}>
+      {row.sourcePage ? <p className="reception-hint">{t('customers:reception.preview.sourcePage', { source: String((row.sourceIndex ?? 0) + 1), page: String(row.sourcePage) })}</p> : null}
       <div className="reception-row-head">
         <strong>{t('customers:reception.rows.person', { index: String(index + 1) })}</strong>
         {saved ? (

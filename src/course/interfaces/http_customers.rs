@@ -1929,6 +1929,10 @@ pub async fn replace_membership_play_windows(
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ReceptionDraftRowDto {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_index: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_page: Option<u32>,
     /// Absent when the reader could not make the name out. The row is still
     /// returned: the desk has the original on screen beside it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1974,6 +1978,8 @@ pub struct ReceptionDraftConsentDto {
 impl From<&ReceptionDraftRow> for ReceptionDraftRowDto {
     fn from(value: &ReceptionDraftRow) -> Self {
         Self {
+            source_index: value.source_index(),
+            source_page: value.source_page(),
             name: value.name().map(str::to_string),
             name_kana: value.name_kana().map(str::to_string),
             phone: value.phone().map(str::to_string),

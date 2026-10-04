@@ -189,6 +189,13 @@ export const customers: DeepPartial<typeof source> = {
       retryCustomFields: 'Retry additional fields',
     },
     preview: {
+      syncScroll: 'Sync scrolling',
+      sourcePage: 'Document {{source}} · Page {{page}}',
+      pdfLoading: 'Loading PDF…',
+      pdfError: 'Could not display the PDF.',
+      pageError: 'Could not display this page.',
+      pdfPage: 'Page {{page}} / {{total}}',
+
       title: 'Reception sheet',
       description: 'The sheet this read came from.',
       alt: 'Scanned reception sheet',

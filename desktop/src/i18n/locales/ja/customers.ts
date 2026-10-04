@@ -193,6 +193,13 @@ export const customers = {
       retryCustomFields: '追加項目だけ再記録',
     },
     preview: {
+      syncScroll: 'スクロールを連動する',
+      sourcePage: '用紙 {{source}}・{{page}}ページ',
+      pdfLoading: 'PDFを準備中…',
+      pdfError: 'PDFを表示できませんでした。',
+      pageError: 'このページを表示できませんでした。',
+      pdfPage: '{{page}} / {{total}}ページ',
+
       title: '受付用紙',
       description: '読み取りのもとになった用紙です。',
       alt: '受付用紙のスキャン画像',
