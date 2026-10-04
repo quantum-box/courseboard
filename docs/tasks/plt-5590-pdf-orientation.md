@@ -15,3 +15,10 @@
 - PDF回転テスト5件と既存受付API/モデルテスト64件、TypeScriptチェック、UI build、Rustの対象2ファイルのrustfmt、git diff --checkが成功。
 - Rustはビルドキャッシュが無いため重いlocal compilationを行わず、追加した短時間のHTTP timeout結合テストとRust全体の型検証をPR CIに委ねる。
 - 本番OCR完走と修正後UIの本番確認は未完了。
+
+## Page coverage and synchronized review
+
+- Field #1543 reads reception PDFs one page per advance and supplies server-owned source/page provenance. Unreadable pages remain review rows.
+- CourseBoard retains empty rows with provenance, renders all PDF pages locally with PDF.js, and synchronizes the two review panes by source/page. The operator may disable synchronization.
+- Local validation: 67 frontend tests, type check, production build, Rust formatting/metadata. Synthetic 25-page PDF browser proof: both panes showed page 7 after left scroll, page 8 after right scroll.
+- Production PDF acceptance remains pending deployment; old drafts require a fresh read to gain provenance.

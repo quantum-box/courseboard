@@ -7674,3 +7674,9 @@ button,
     flex: 1 1 100%;
   }
 }
+
+.reception-pdf-page { min-height: 600px; overflow-anchor: none; }
+.reception-pdf-page canvas { width: 100%; height: auto; display: block; }
+@media (min-width: 1101px) {
+  .reception-row-list { max-height: 80vh; overflow-y: auto; overflow-anchor: none; }
+}

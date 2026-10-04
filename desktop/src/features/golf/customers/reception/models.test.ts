@@ -882,3 +882,10 @@ describe('reception field settings', () => {
     })
   })
 })
+
+it('retains all unreadable source pages for review without enabling registration', () => {
+  const rows = rowsFromDraft({ visitors: Array.from({ length: 25 }, (_, index) => ({ sourceIndex: 0, sourcePage: index + 1 })), warnings: [] })
+  expect(rows).toHaveLength(25)
+  expect(rows[24].sourcePage).toBe(25)
+  expect(rows.every(row => !canRegister(row))).toBe(true)
+})

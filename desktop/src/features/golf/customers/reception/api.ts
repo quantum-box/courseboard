@@ -22,9 +22,9 @@ import {
 
 const RECEPTION_DRAFT_PATH = '/v1/course/customers/reception-draft'
 const RECEPTION_DRAFT_JOBS_PATH = `${RECEPTION_DRAFT_PATH}/jobs`
-// Field processes at most eight PDF pages per advance, with at most 64 pages
-// per source. A 32-source job therefore needs no more than 256 advances.
-const MAX_RECEPTION_JOB_ADVANCES = MAX_RECEPTION_BATCH_SHEETS * 8
+// Reception reads one PDF page per advance; include each source inspection
+// as well as all page reads in the safety bound.
+const MAX_RECEPTION_JOB_ADVANCES = MAX_RECEPTION_BATCH_SHEETS * 2 + 64
 export const RECEPTION_FIELDS_PATH = '/v1/course/customer-reception-fields'
 export const RECEPTION_FIELDS_ANALYSIS_PATH = `${RECEPTION_FIELDS_PATH}/analysis`
 export const RECEPTION_CONSENT_ITEMS_PATH = '/v1/course/customer-consent-items'
