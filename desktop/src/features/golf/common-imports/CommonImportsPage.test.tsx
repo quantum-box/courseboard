@@ -41,8 +41,8 @@ describe('reservation report course catalog', () => {
     await screen.findByText(/コース一覧を取得できないため/)
     const file = screen.getByLabelText('CSV／Excel') as HTMLInputElement
     expect(file.disabled).toBe(true)
-    fireEvent.click(screen.getByRole('button', { name: '確認する', exact: true }))
-    const confirm = await screen.findByRole('button', { name: '確認して取り込む', exact: true }) as HTMLButtonElement
+    fireEvent.click(screen.getByRole('button', { name: '確認する' }))
+    const confirm = await screen.findByRole('button', { name: '確認して取り込む' }) as HTMLButtonElement
     expect(confirm.disabled).toBe(true)
     fireEvent.click(confirm)
     expect(mock.step).not.toHaveBeenCalled()
