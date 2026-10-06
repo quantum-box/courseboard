@@ -207,6 +207,14 @@ policies:
     effect: allow
   - action: field:ManageCustomers
     effect: allow
+  # Customer common imports use Bridge discovery, validation, and execution.
+  # Each target still requires its owning business permissions.
+  - action: field:ListBridgeDefinitions
+    effect: allow
+  - action: field:PreviewBridgeRun
+    effect: allow
+  - action: field:ExecuteBridgeDrafts
+    effect: allow
   - action: field:ListMembership
     effect: allow
   - action: field:RegisterMembership
