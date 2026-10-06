@@ -76,7 +76,7 @@ pub enum RouteAuthorization {
 const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     (
         "*",
-        "/v1/course/data-imports/*",
+        "/v1/course/data-imports/*path",
         RouteAuthorization::HandlerEnforced,
     ),
     (
@@ -758,7 +758,7 @@ fn pattern_matches(pattern: &str, path: &str) -> bool {
     loop {
         match (pattern_segments.next(), path_segments.next()) {
             (None, None) => return true,
-            (Some("*"), _) => return true,
+            (Some(segment), _) if segment.starts_with('*') => return true,
             (Some(pattern_segment), Some(path_segment)) => {
                 if !pattern_segment.starts_with(':') && pattern_segment != path_segment {
                     return false;

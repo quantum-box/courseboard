@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from '@playwright/test'
 import type { ImportJob, ImportRow } from '../src/features/golf/common-imports/api'
 
 const root = '/v1/course/data-imports'
+const sourceUrl = 'https://storage.example.invalid/__import-source'
 const row = (number = 2, name = '確認済み'): ImportRow => ({ rowNumber: number, id: null, object: { name }, warnings: [], error: null, outcome: null })
 async function fixture(page: Page, options: { batch?: boolean; invalidLater?: boolean; pauseUpload?: boolean } = {}) {
   const calls: string[] = []
@@ -26,7 +27,7 @@ async function fixture(page: Page, options: { batch?: boolean; invalidLater?: bo
     if (path.includes('/imports/')) {
       const request = route.request().postDataJSON()
       job = { id:'dtj_fixture', objectKey:path.split('/')[2], status: options.batch ? 'uploading' : 'ready', mode:'create_only', processed:0,total:options.batch ? null : 1,created:0,updated:0,errors:0,validationErrors:[],preview:options.batch ? [] : [row()],batch:!!options.batch,previewPage:0,previewPages: options.batch ? 0 : 1,filename:request.filename,failure:null,importOptions:request.importOptions,sourceSha256:request.sha256 ?? '',createdAt:'2026-10-07T00:00:00Z' }
-      return reply(route, options.batch ? {job,uploadUrl:new URL('/__import-source',url).href,contentType:'text/csv'} : job)
+      return reply(route, options.batch ? {job,uploadUrl:sourceUrl,contentType:'text/csv'} : job)
     }
     if (!job) return route.fulfill({ status:404,json:{message:'not found'} })
     if (path.endsWith('/validate')) {
@@ -34,7 +35,7 @@ async function fixture(page: Page, options: { batch?: boolean; invalidLater?: bo
       job={...job,status:validations===1?'validating':options.invalidLater?'invalid':'ready',total:501,previewPages:2,preview:validations===1?[row(2)]:[],validationErrors:validations>1&&options.invalidLater?[{rowNumber:503,message:'後続行の値が不正です'}]:[]}
     } else if (path.endsWith('/advance')) job={...job,status:'completed',processed:job.total??501,created:job.total??501,preview:[]}
     else if (path.endsWith('/cancel')) { beforeCancel=job.status;job={...job,status:'cancelled'} }
-    else if (path.endsWith('/resume')) job={...job,status:beforeCancel,sourceUploadUrl:new URL('/__import-source',url).href,sourceContentType:'text/csv'}
+    else if (path.endsWith('/resume')) job={...job,status:beforeCancel,sourceUploadUrl:sourceUrl,sourceContentType:'text/csv'}
     else if (path.endsWith('/preview/1')) { await delayedPage;return reply(route,{...job,previewPage:1,preview:[row(103,'次のページ')]}) }
     else if (path.endsWith('/preview/0')) return reply(route,{...job,previewPage:0,preview:[row(2)]})
     await reply(route,route.request().method()==='GET'&&!job.batch?{...job,preview:[row()]}:job)

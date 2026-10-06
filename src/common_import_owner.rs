@@ -373,7 +373,7 @@ pub async fn handle(
                     .filter(|n| *n > 0)
                     .ok_or(AppError::BadRequest("invalid import total"))?;
                 check_job(&state, &headers, &request, Some(total)).await?;
-                let (count, staged): (i64,i64) = sqlx::query_as("SELECT COUNT(*),COALESCE(SUM(staged),0) FROM courseboard_common_import_rows WHERE tenant_id=? AND job_id=?")
+                let (count, staged): (i64,i64) = sqlx::query_as("SELECT COUNT(*),CAST(COALESCE(SUM(staged),0) AS SIGNED) FROM courseboard_common_import_rows WHERE tenant_id=? AND job_id=?")
                     .bind(tenant).bind(&request.job_id).fetch_one(&mut *tx).await.map_err(database)?;
                 if status != "ready" || count as usize != total || staged as usize != total {
                     return Err(AppError::Conflict("not every validated row is staged"));

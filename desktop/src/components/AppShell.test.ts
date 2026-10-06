@@ -15,6 +15,7 @@ describe('sidebar navigation', () => {
     const finalSection = sidebarNavigationSections.at(-1)
     expect(finalSection?.id).toBe('dataIntegration')
     expect(finalSection?.items.map(item => item.route)).toEqual([
+      'golf/data-imports',
       'golf/reservation-report-import',
     ])
   })
