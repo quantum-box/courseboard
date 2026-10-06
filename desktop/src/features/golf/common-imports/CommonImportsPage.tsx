@@ -62,6 +62,7 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
   const selected = availableTargets.find(target => target.key === key)
   const report = key === reportKey
   const reportBlocked = report && courseError !== ''
+  const reconcilingReceipt = report && job?.status === 'running' && job.total !== null && job.total > 0 && job.processed >= job.total
   const pageCount = job?.batch ? job.previewPages : Math.ceil(preview.length / 100)
   const shown = job?.batch ? preview : preview.slice(page * 100, (page + 1) * 100)
   const labels = useMemo(() => ({ ...Object.fromEntries((selected?.import.fields ?? []).map(f => [f.key, f.label])), sourceCourseName: '施設名', date: '日付', dayPart: '午前・午後', groupCount: '組数', caddieAttachedGroupCount: 'キャディ付き組数' }), [selected])
@@ -130,7 +131,7 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
     finally { if (live(version)) setBusy(false) }
   }
   async function execute() {
-    if (!job || dirty || reportBlocked) return
+    if (!job || dirty || (reportBlocked && !reconcilingReceipt)) return
     const { signal, version } = begin(); setBusy(true); setError('')
     try { await runLoop(job, 'advance', version, signal) }
     catch (e) { if (live(version)) setError(e instanceof Error ? e.message : '処理を再開してください。') }
@@ -222,7 +223,7 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
       <div className="flex gap-2">
         {job.status === 'ready' && <Button variant="primary" disabled={busy || dirty || reportBlocked} onClick={() => void execute()}>確認して取り込む</Button>}
         {job.status === 'cancelled' && <Button disabled={busy || dirty || reportBlocked} onClick={() => void resume()}>中止した取込を再開</Button>}
-        {job.status === 'running' && <Button variant="primary" disabled={busy || dirty || reportBlocked} onClick={() => void execute()}>処理を再開</Button>}
+        {job.status === 'running' && <Button variant="primary" disabled={busy || dirty || (reportBlocked && !reconcilingReceipt)} onClick={() => void execute()}>処理を再開</Button>}
         {job.status === 'uploading' && !busy && <Field label="元のファイルを選んでアップロードを再開"><Input type="file" accept=".csv,.xls,.xlsx" disabled={reportBlocked} onChange={event => { const source = event.target.files?.[0]; if (source) { setFile(source); void resume(source) } }} /></Field>}
         {job.status === 'validating' && !busy && <Button disabled={reportBlocked} onClick={() => { const { signal, version } = begin(); setBusy(true); void runLoop(job, 'validate', version, signal).catch(e => { if (live(version)) setError(String(e)) }).finally(() => { if (live(version)) setBusy(false) }) }}>検証を再開</Button>}
         {!['completed', 'completed_with_errors', 'cancelled'].includes(job.status) && <Button onClick={() => void cancel()}>中止</Button>}

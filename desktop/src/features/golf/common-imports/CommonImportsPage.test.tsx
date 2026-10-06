@@ -64,4 +64,21 @@ describe('reservation report course catalog', () => {
     const mapping = screen.getByLabelText('対応するコース') as HTMLSelectElement
     expect(Array.from(mapping.options).map(option => option.value)).toEqual(['', 'active'])
   })
+  it('allows a fully staged job to reconcile its receipt while the catalog is unavailable', async () => {
+    const running = { ...ready, status: 'running', processed: 1, created: 1 }
+    mock.json.mockRejectedValue(new Error('catalog unavailable'))
+    mock.jobs.mockResolvedValue([running])
+    mock.job.mockResolvedValue(running)
+    mock.step.mockResolvedValue({ ...running, status: 'completed' })
+    renderPage()
+    await screen.findByText(/コース一覧を取得できないため/)
+    fireEvent.click(screen.getByRole('button', { name: '確認する' }))
+    const reconcile = await screen.findByRole('button', { name: '処理を再開' }) as HTMLButtonElement
+    expect(reconcile.disabled).toBe(false)
+    expect((screen.getByLabelText('CSV／Excel') as HTMLInputElement).disabled).toBe(true)
+    fireEvent.click(reconcile)
+    await screen.findByText('完了：1 / 1 行')
+    expect(mock.step).toHaveBeenCalledTimes(1)
+    expect(mock.step).toHaveBeenCalledWith('dtj_report', 'advance', expect.any(AbortSignal))
+  })
 })
