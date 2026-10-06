@@ -5171,7 +5171,7 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
 }
 
 export function resolveMockFieldApiJson(path: string, init?: RequestInit): MockFieldResult<Json> {
-  if (!isMockFieldDataEnabled()) return { kind: 'disabled' }
+  if (!isMockFieldDataEnabled() || pathnameOf(path).startsWith('/v1/course/data-imports/')) return { kind: 'disabled' }
   const method = methodOf(init)
   if (method === 'GET' || method === 'HEAD') {
     const result = resolveGet(path)

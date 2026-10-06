@@ -25,6 +25,9 @@ use crate::course::domain::{
     TabularAnalyzeResult,
 };
 
+#[path = "common_import_repository.rs"]
+mod common_import;
+
 const UNLINKED_BUCKET_PREFIX: &str = "unlinked:";
 
 fn provider(error: sqlx::Error) -> CourseError {

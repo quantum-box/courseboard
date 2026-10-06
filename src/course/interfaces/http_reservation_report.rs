@@ -205,7 +205,7 @@ pub struct ReservationReportMigrationResponse {
     pub config_key_deleted: bool,
 }
 
-fn reservation_report_credentials<'a>(
+pub(crate) fn reservation_report_credentials<'a>(
     authorizer: &'a dyn crate::course::domain::CourseAuthorizer,
     headers: &'a HeaderMap,
 ) -> Result<GatewayCredentials<'a>, AppError> {

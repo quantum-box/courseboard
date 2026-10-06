@@ -98,6 +98,7 @@ export type NavigationRoute =
   | 'golf'
   | 'golf/ledger'
   | 'golf/customers'
+  | 'golf/data-imports'
   | 'golf/reservation-report-import'
   | 'golf/timeline'
   | 'golf/products'
@@ -183,7 +184,7 @@ export const navigationSections: NavigationSection[] = [
   {
     id: 'dataIntegration',
     showLabel: true,
-    items: [{ route: 'golf/reservation-report-import', icon: FileSpreadsheet }],
+    items: [{ route: 'golf/data-imports', icon: FileSpreadsheet }, { route: 'golf/reservation-report-import', icon: FileSpreadsheet }],
   },
 ]
 

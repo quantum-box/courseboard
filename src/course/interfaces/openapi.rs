@@ -55,6 +55,8 @@ impl Modify for SecurityAddon {
         version = "0.1.1"
     ),
     paths(
+        crate::common_import_owner::handle,
+        crate::common_import_proxy::proxy,
         http::get_tee_sheet,
         http::get_tee_ledger,
         http::create_reservation,
