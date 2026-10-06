@@ -1,0 +1,105 @@
+.data-exports-page,
+.data-export-editor {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.data-exports-page {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.data-exports-page button,
+.data-export-editor button,
+.data-export-editor input:not([type='checkbox']),
+.data-export-editor select,
+.data-export-editor textarea,
+.data-export-help summary {
+  min-height: 44px;
+  min-width: 44px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.data-exports-page .data-table th,
+.data-exports-page .data-table td,
+.data-exports-page p,
+.data-export-editor p,
+.data-export-editor .field-label,
+.data-export-editor .field-hint,
+.data-export-editor .optional,
+.data-export-editor .field-label span,
+.data-exports-page td span {
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.data-export-fields {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.data-export-columns {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.data-export-columns li {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid hsl(var(--nui-border));
+}
+
+.data-export-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.data-export-checkbox input {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+}
+
+.data-export-column-actions,
+.data-export-column-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.data-export-column-toolbar {
+  justify-content: space-between;
+}
+
+.data-export-download {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+}
+
+.data-export-error,
+.data-export-validation {
+  white-space: normal;
+  text-align: start;
+}
+
+.data-export-help summary {
+  display: list-item;
+  cursor: pointer;
+  padding: 8px;
+}

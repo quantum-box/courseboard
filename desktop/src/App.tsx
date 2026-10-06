@@ -39,6 +39,7 @@ import { CancellationsPage } from './features/golf/customers/CancellationsPage'
 import { CustomersPage } from './features/golf/customers/CustomersPage'
 import { ReceptionPage } from './features/golf/customers/reception/ReceptionPage'
 import { SettingsPage } from './features/settings/SettingsPage'
+import { DataExportsPage } from './features/data-exports/DataExportsPage'
 import { StaffPage } from './features/staff/StaffPage'
 import { useCartUpdates } from './hooks/useCartUpdates'
 import { navigate, useRoute } from './lib/router'
@@ -185,6 +186,7 @@ function RouteContent({ route }: { route: string }) {
   }
   if (route === 'settings') return <SettingsPage />
   if (route === 'settings/advanced') return <SettingsAdvancedPage />
+  if (route === 'settings/data-exports') return <DataExportsPage />
   if (route === 'settings/members') return <MembersPage />
   if (route === 'settings/membership-plans') return <MembershipPlansPage />
   if (route === 'settings/membership-discounts') return <MembershipDiscountsPage />

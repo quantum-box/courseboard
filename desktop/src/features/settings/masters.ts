@@ -9,6 +9,12 @@
  */
 export const SETTINGS_MASTERS = [
   {
+    route: 'settings/data-exports',
+    key: 'dataExports',
+    titleKey: 'dataExports:title',
+    descriptionKey: 'dataExports:linkDescription',
+  },
+  {
     route: 'settings/membership-plans',
     key: 'membership',
     titleKey: 'settings:membership.title',

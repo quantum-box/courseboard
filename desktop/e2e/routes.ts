@@ -87,6 +87,7 @@ export const appRoutes: AppRoute[] = [
   { path: 'course-map', title: 'コースマップ' },
   { path: 'settings', title: '設定' },
   { path: 'settings/advanced', title: 'システム連携の詳細' },
+  { path: 'settings/data-exports', title: 'データ出力' },
   { path: 'settings/members', title: 'メンバーと権限' },
   { path: 'settings/membership-plans', title: '会員種別' },
   { path: 'settings/membership-discounts', title: '会員割引' },

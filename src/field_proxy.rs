@@ -187,11 +187,17 @@ fn is_allowed_path(path: &str) -> bool {
         || is_reservation_billing_invoice_path(path)
         || is_order_detail_path(path)
         || is_invoice_path(path)
+        || is_bridge_export_path(path)
 }
 
 fn is_allowed_route(method: &Method, path: &str) -> bool {
     if !is_allowed_path(path) {
         return false;
+    }
+
+    if is_bridge_export_path(path) {
+        return method == Method::GET
+            || (method == Method::POST && path == "/v1/bridge/exports/definitions");
     }
 
     if path == "/v1/erp/reservation-types" {
@@ -255,6 +261,22 @@ fn has_safe_segments(path: &str) -> bool {
             .split('/')
             .skip(1)
             .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
+}
+
+/// Only the shared export catalogue, definition list/create, and CSV download.
+/// Field checks the user's Bridge permission and the source's read permission.
+fn is_bridge_export_path(path: &str) -> bool {
+    if path == "/v1/bridge/exports/objects" || path == "/v1/bridge/exports/definitions" {
+        return true;
+    }
+    let Some(suffix) = path.strip_prefix("/v1/bridge/exports/definitions/") else {
+        return false;
+    };
+    let mut segments = suffix.split('/');
+    matches!(
+        (segments.next(), segments.next(), segments.next()),
+        (Some(definition_id), Some("csv"), None) if !definition_id.is_empty()
+    )
 }
 
 fn is_non_empty_subpath(path: &str, prefix: &str) -> bool {
@@ -491,6 +513,42 @@ mod tests {
             &Method::POST,
             "/v1/erp/reservation-types"
         ));
+    }
+
+    #[test]
+    fn bridge_exports_allow_only_catalogue_create_list_and_csv_download() {
+        for path in [
+            "/v1/bridge/exports/objects",
+            "/v1/bridge/exports/definitions",
+            "/v1/bridge/exports/definitions/bxd_1/csv",
+        ] {
+            assert!(is_allowed_route(&Method::GET, path));
+            for method in [Method::PUT, Method::PATCH, Method::DELETE, Method::HEAD] {
+                assert!(!is_allowed_route(&method, path));
+            }
+        }
+        assert!(is_allowed_route(
+            &Method::POST,
+            "/v1/bridge/exports/definitions"
+        ));
+        for path in [
+            "/v1/bridge/exports/objects",
+            "/v1/bridge/exports/definitions/bxd_1/csv",
+        ] {
+            assert!(!is_allowed_route(&Method::POST, path));
+        }
+        for path in [
+            "/v1/bridge/imports/definitions",
+            "/v1/bridge/exports",
+            "/v1/bridge/exports/definitions/bxd_1",
+            "/v1/bridge/exports/definitions/bxd_1/csv/private",
+            "/v1/bridge/exports/definitions/../csv",
+            "/v1/bridge/exports/definitions//csv",
+            "/v1/bridge/exports/definitions/bxd_1/csv/",
+            "/v1/bridge/exports/definitions-private",
+        ] {
+            assert!(!is_allowed_path(path));
+        }
     }
 
     #[test]

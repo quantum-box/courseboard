@@ -21,6 +21,7 @@ import {
   MAX_RECEPTION_JOB_SHEET_BYTES,
   MAX_RECEPTION_JOB_UPLOAD_BYTES,
 } from '../features/golf/customers/reception/models'
+import type { ExportDefinition } from '../features/data-exports/api'
 
 export function isMockFieldDataEnabled() {
   if (import.meta.env.VITE_COURSEBOARD_AUTH_MODE !== 'development') return false
@@ -5172,7 +5173,27 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
 
 export function resolveMockFieldApiJson(path: string, init?: RequestInit): MockFieldResult<Json> {
   if (!isMockFieldDataEnabled()) return { kind: 'disabled' }
+  const pathname = pathnameOf(path)
   const method = methodOf(init)
+  if (pathname === '/v1/bridge/exports/objects' && method === 'GET') {
+    return hit({ items: [{
+      key: 'reservation', label: 'Reservation（予約）',
+      fields: [
+        { field: 'reservation_number', label: '予約番号' },
+        { field: 'customer_name', label: '顧客名' },
+        { field: 'starts_at', label: '開始日時' },
+      ],
+    }] })
+  }
+  if (pathname === '/v1/bridge/exports/definitions') {
+    if (method === 'GET') return hit({ items: [...mockExportDefinitions] })
+    if (method === 'POST') {
+      const input = parseBody(init) as Omit<ExportDefinition, 'id'>
+      const definition = { ...input, id: `bxd_mock_${mockExportDefinitions.length + 1}` }
+      mockExportDefinitions.push(definition)
+      return hit(definition)
+    }
+  }
   if (method === 'GET' || method === 'HEAD') {
     const result = resolveGet(path)
     if (result === undefined) {
@@ -5189,10 +5210,35 @@ export function resolveMockFieldApiJson(path: string, init?: RequestInit): MockF
   return resolveMutation(path, init)
 }
 
+const mockExportDefinitions: ExportDefinition[] = [{
+  id: 'bxd_mock_reservations', name: '予約一覧', sourceObject: 'reservation',
+  destinationType: 'csv', status: 'active',
+  mapping: { fields: [
+    { source: 'reservation_number', target: '予約番号', required: false, approved: true },
+    { source: 'customer_name', target: '顧客名', required: false, approved: true },
+  ] },
+}]
+
 export function resolveMockFieldApiText(path: string, init?: RequestInit): MockFieldResult<string> {
   if (!isMockFieldDataEnabled()) return { kind: 'disabled' }
   const pathname = pathnameOf(path)
   const method = methodOf(init)
+
+  const exportMatch = pathname.match(/^\/v1\/bridge\/exports\/definitions\/([^/]+)\/csv$/)
+  if (exportMatch && method === 'GET') {
+    const definition = mockExportDefinitions.find(item => item.id === decodeURIComponent(exportMatch[1]!))
+    if (!definition) return error(404, 'Export definition not found')
+    if (definition.status !== 'active') return error(400, 'Export definition is inactive')
+    const row: Record<string, string> = {
+      reservation_number: 'RES-001', customer_name: '山田 太郎', starts_at: `${TODAY}T08:00:00+09:00`,
+    }
+    const csvCell = (value: string) => `"${value.replace(/"/g, '""')}"`
+    const fields = definition.mapping.fields
+    return hit([
+      fields.map(field => csvCell(field.target)).join(','),
+      fields.map(field => csvCell(row[field.source] ?? '')).join(','),
+    ].join('\r\n') + '\r\n')
+  }
 
   const normalized = normalizeMockPath(pathname)
 
