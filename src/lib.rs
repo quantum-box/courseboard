@@ -1710,6 +1710,18 @@ mod migration_set {
         // place, and a run of them lands on a database in an order nobody
         // intended.
         for migration in MIGRATOR.iter() {
+            // PR #382's first preview already applied this version. Preserve
+            // its exact bytes rather than rename an applied migration. This
+            // single historical exception cannot admit another undated file.
+            if migration.version == 20_261_007_090_000 {
+                assert_eq!(migration.description, "common reservation imports");
+                assert_eq!(
+                    migration.checksum.iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
+                    "68fc05bfbf6b62f56d373ec98208d9660fec437bad6fde9aeadcd2ff1125bb90caf7ad33773d4ae39ff9d8fbfa9ffec9",
+                    "the already-applied common-import migration must stay immutable",
+                );
+                continue;
+            }
             assert!(
                 (202_001_010_000..=209_912_319_999).contains(&migration.version),
                 "{} is numbered {}, which is not a YYYYMMDDNNNN stamp",
