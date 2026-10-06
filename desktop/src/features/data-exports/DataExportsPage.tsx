@@ -14,7 +14,7 @@ import { showToast } from '../../lib/toast'
 import { SettingsSubPage } from '../settings/SettingsSubPage'
 import {
   createExportDefinition, downloadExportCsv, emptyExportDraft, exportDraftError,
-  exportErrorMessage, loadDataExports, type ExportDefinition, type ExportDraft, type ExportObject,
+  exportErrorMessage, exportObjectLabel, loadDataExports, type ExportDefinition, type ExportDraft, type ExportObject,
 } from './api'
 import './dataExports.css'
 
@@ -50,7 +50,10 @@ export function DataExportsPage() {
     { key: 'name', header: t('dataExports:name'), cell: row => row.name },
     {
       key: 'source', header: t('dataExports:source'),
-      cell: row => objects.find(object => object.key === row.sourceObject)?.label ?? row.sourceObject,
+      cell: row => {
+        const object = objects.find(item => item.key === row.sourceObject)
+        return object ? exportObjectLabel(object) : row.sourceObject
+      },
     },
     {
       key: 'columns', header: t('dataExports:columns'),
@@ -183,7 +186,7 @@ function ExportDefinitionEditor({ objects, onClose, onSaved }: {
           <Field label={t('dataExports:source')} required>
             <NativeSelect value={draft.sourceObject} onChange={event => changeSource(event.target.value)}>
               <option value="">{t('dataExports:chooseSource')}</option>
-              {objects.map(object => <option key={object.key} value={object.key}>{object.label}</option>)}
+              {objects.map(object => <option key={object.key} value={object.key}>{exportObjectLabel(object)}</option>)}
             </NativeSelect>
           </Field>
           <Field label={t('dataExports:description')} requirement="optional">

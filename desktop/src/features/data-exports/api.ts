@@ -9,6 +9,23 @@ export type ExportObject = {
   fields: { field: string; label: string }[]
 }
 
+const SOURCE_LABEL_KEYS = {
+  reservation: 'dataExports:sourceLabels.reservation',
+  salesLedgerDraft: 'dataExports:sourceLabels.sales',
+  purchaseLedgerDraft: 'dataExports:sourceLabels.purchases',
+  journalLine: 'dataExports:sourceLabels.journal',
+  generalLedgerRow: 'dataExports:sourceLabels.generalLedger',
+  trialBalanceRow: 'dataExports:sourceLabels.trialBalance',
+  arApItem: 'dataExports:sourceLabels.arAp',
+} as const
+
+/** Labels are translated locally; availability and fields still come from Field. */
+export function exportObjectLabel(object: ExportObject) {
+  if (!Object.prototype.hasOwnProperty.call(SOURCE_LABEL_KEYS, object.key)) return object.label
+  const key = SOURCE_LABEL_KEYS[object.key as keyof typeof SOURCE_LABEL_KEYS]
+  return i18next.t(key)
+}
+
 export type ExportMappingField = {
   source: string
   target: string
