@@ -97,9 +97,6 @@ async fn courses(
     request: &OwnerRequest,
 ) -> Result<Vec<Course>, AppError> {
     let credentials = reservation_report_credentials(state.course_authorizer(), headers)?;
-    credentials
-        .require(actions::IMPORT_RESERVATION_REPORTS)
-        .await?;
     let courses = catalog_gateway(state).list_courses(credentials).await?;
     let active: HashSet<_> = courses
         .iter()
@@ -116,6 +113,24 @@ async fn courses(
         ));
     }
     Ok(courses)
+}
+fn check_owner_identity(
+    job: &sqlx::mysql::MySqlRow,
+    subject: &str,
+    request: &OwnerRequest,
+    options_hash: &str,
+) -> Result<(), AppError> {
+    if job.try_get::<String, _>("subject").map_err(database)? != subject
+        || job.try_get::<String, _>("actor_id").map_err(database)? != request.actor_id
+        || job
+            .try_get::<String, _>("source_sha256")
+            .map_err(database)?
+            != request.source_sha256
+        || job.try_get::<String, _>("options_hash").map_err(database)? != options_hash
+    {
+        return Err(AppError::Forbidden);
+    }
+    Ok(())
 }
 async fn check_job(
     state: &AppState,
@@ -207,10 +222,28 @@ pub async fn handle(
         return Err(AppError::BadRequest("invalid common-import identity"));
     }
     year(&request.options)?;
+    let credentials = reservation_report_credentials(state.course_authorizer(), &headers)?;
+    if request.options["platformId"].as_str() != credentials.platform_id {
+        return Err(AppError::Forbidden);
+    }
+    credentials
+        .require(actions::IMPORT_RESERVATION_REPORTS)
+        .await?;
     if operation == "stage" || operation == "finish" {
         reservation_report_credentials(state.course_authorizer(), &headers)?
             .require("field:ExecuteBridgeDrafts")
             .await?;
+    }
+    let options_hash = hash(&request.options)?;
+    // Committed receipts are immutable. Reauthorize the caller and source,
+    // then reconcile a lost response before refreshing mutable dependencies.
+    if operation == "finish" {
+        if let Some(job) = sqlx::query("SELECT subject,actor_id,source_sha256,options_hash,result_json FROM courseboard_common_import_jobs WHERE tenant_id=? AND job_id=? AND status='committed'")
+            .bind(tenant).bind(&request.job_id).fetch_optional(&state.common_import_pool).await.map_err(database)?
+        {
+            check_owner_identity(&job, subject, &request, &options_hash)?;
+            return Ok(Json(job.try_get::<Option<Value>, _>("result_json").map_err(database)?.unwrap_or_else(|| json!({}))));
+        }
     }
     let current_courses = courses(&state, &headers, &request).await?;
     if operation == "source" {
@@ -229,23 +262,13 @@ pub async fn handle(
     } else {
         Vec::new()
     };
-    let options_hash = hash(&request.options)?;
     let mut tx = state.common_import_pool.begin().await.map_err(database)?;
     sqlx::query("INSERT INTO courseboard_common_import_jobs (tenant_id,job_id,subject,actor_id,source_sha256,options_hash) VALUES (?,?,?,?,?,?) ON DUPLICATE KEY UPDATE job_id=job_id")
         .bind(tenant).bind(&request.job_id).bind(subject).bind(&request.actor_id).bind(&request.source_sha256).bind(&options_hash)
         .execute(&mut *tx).await.map_err(database)?;
     let job=sqlx::query("SELECT subject,actor_id,source_sha256,options_hash,status,result_json FROM courseboard_common_import_jobs WHERE tenant_id=? AND job_id=? FOR UPDATE")
         .bind(tenant).bind(&request.job_id).fetch_one(&mut *tx).await.map_err(database)?;
-    if job.try_get::<String, _>("subject").map_err(database)? != subject
-        || job.try_get::<String, _>("actor_id").map_err(database)? != request.actor_id
-        || job
-            .try_get::<String, _>("source_sha256")
-            .map_err(database)?
-            != request.source_sha256
-        || job.try_get::<String, _>("options_hash").map_err(database)? != options_hash
-    {
-        return Err(AppError::Forbidden);
-    }
+    check_owner_identity(&job, subject, &request, &options_hash)?;
     let status: String = job.try_get("status").map_err(database)?;
     let response = match operation.as_str() {
         "validate" => {

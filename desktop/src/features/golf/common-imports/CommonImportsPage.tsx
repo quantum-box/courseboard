@@ -13,6 +13,15 @@ const reportKey = 'courseboardReservationReports'
 const reportFields = [{ key: 'facilityName', label: '施設名' }, { key: 'date', label: '日付' }, { key: 'dayPart', label: '午前・午後' }, { key: 'groupCount', label: '組数' }, { key: 'caddieAttachedGroupCount', label: 'キャディ付き組数' }]
 const resultRoutes: Record<string, string> = { customer: 'golf/customers', dailyBudgets: 'golf/budgets', [reportKey]: 'golf/reservation-report-import' }
 const hidden = new Set(['id', 'sourceCourseKey', 'tenantId', 'sourceFileSha256', 'bucket'])
+type ImportCourse = { id: string; name: string; isActive?: boolean }
+async function courseCatalog(signal: AbortSignal) {
+  try {
+    const response = await courseboardApiJson<{ items: ImportCourse[] }>('/v1/course/courses', { signal })
+    return { items: response.items.filter(course => course.isActive !== false), error: '' }
+  } catch (error) {
+    return { items: [], error: error instanceof Error ? error.message : 'コース一覧を取得できませんでした。' }
+  }
+}
 
 export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarget?: string }) {
   const auth = useAuth()
@@ -22,7 +31,8 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
   const [key, setKey] = useState(initialTarget)
   const [mode, setMode] = useState<ImportMode>(initialTarget === 'dailyBudgets' ? 'upsert' : 'create_only')
   const [options, setOptions] = useState<ImportOptions>({ year: new Date().getFullYear(), courseMappings: {}, columnMappings: {} })
-  const [courses, setCourses] = useState<{ id: string; name: string }[]>([])
+  const [courses, setCourses] = useState<ImportCourse[]>([])
+  const [courseError, setCourseError] = useState<string | null>(null)
   const [facility, setFacility] = useState('')
   const [file, setFile] = useState<File | null>(null)
   const [job, setJob] = useState<ImportJob | null>(null)
@@ -51,6 +61,7 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
   const availableTargets = targets.filter(target => target.key !== reportKey || reportGate === 'visible')
   const selected = availableTargets.find(target => target.key === key)
   const report = key === reportKey
+  const reportBlocked = report && courseError !== ''
   const pageCount = job?.batch ? job.previewPages : Math.ceil(preview.length / 100)
   const shown = job?.batch ? preview : preview.slice(page * 100, (page + 1) * 100)
   const labels = useMemo(() => ({ ...Object.fromEntries((selected?.import.fields ?? []).map(f => [f.key, f.label])), sourceCourseName: '施設名', date: '日付', dayPart: '午前・午後', groupCount: '組数', caddieAttachedGroupCount: 'キャディ付き組数' }), [selected])
@@ -58,10 +69,10 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
   useEffect(() => {
     const { signal, version } = begin()
     setJob(null); currentJob.current = null; setPreview([]); setFile(null); setError(''); setBusy(false)
-    setTargets([]); setHistory([]); setCourses([]); setPlan(''); setPage(0); setDirty(false); setFacility('')
+    setTargets([]); setHistory([]); setCourses([]); setCourseError(null); setPlan(''); setPage(0); setDirty(false); setFacility('')
     setOptions({ year: new Date().getFullYear(), courseMappings: {}, columnMappings: {} })
-    Promise.all([listTargets(signal), listJobs(signal), courseboardApiJson<{ items: { id: string; name: string }[] }>('/v1/course/courses', { signal }).catch(() => ({ items: [] }))])
-      .then(([catalog, jobs, catalogCourses]) => { if (live(version)) { setTargets(catalog); setHistory(jobs); setCourses(catalogCourses.items); if (!catalog.some(t => t.key === key)) setKey(catalog[0]?.key ?? '') } })
+    Promise.all([listTargets(signal), listJobs(signal), courseCatalog(signal)])
+      .then(([catalog, jobs, catalogCourses]) => { if (live(version)) { setTargets(catalog); setHistory(jobs); setCourses(catalogCourses.items); setCourseError(catalogCourses.error); if (!catalog.some(t => t.key === key)) setKey(catalog[0]?.key ?? '') } })
       .catch(e => { if (live(version)) setError(e instanceof Error ? e.message : '取込対象を取得できませんでした。') })
     return () => { generation.current++; controller.current?.abort() }
   // Tenant changes invalidate the entire import session, including delayed replies.
@@ -75,6 +86,12 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
   }, [targets, key, mode, reportGate, selected, availableTargets])
   function configure(next: ImportOptions) {
     controller.current?.abort(); generation.current++; setBusy(false); setOptions(next); setDirty(Boolean(job))
+  }
+  async function reloadCourses() {
+    const { signal, version } = begin()
+    setBusy(true); setCourseError(null)
+    const catalog = await courseCatalog(signal)
+    if (live(version)) { setCourses(catalog.items); setCourseError(catalog.error); setBusy(false) }
   }
   async function runLoop(next: ImportJob, operation: 'validate' | 'advance', version: number, signal: AbortSignal) {
     while (live(version) && (operation === 'validate' ? ['uploading', 'validating'].includes(next.status) : ['ready', 'running'].includes(next.status))) {
@@ -91,7 +108,7 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
     }
   }
   async function validate(selectedFile = file) {
-    if (!selectedFile || !selected) return
+    if (!selectedFile || !selected || reportBlocked) return
     const previous = currentJob.current
     const { signal, version } = begin()
     setBusy(true); setError(''); setDirty(false); setPreview([]); setPage(0); setJob(null); currentJob.current = null
@@ -113,14 +130,14 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
     finally { if (live(version)) setBusy(false) }
   }
   async function execute() {
-    if (!job || dirty) return
+    if (!job || dirty || reportBlocked) return
     const { signal, version } = begin(); setBusy(true); setError('')
     try { await runLoop(job, 'advance', version, signal) }
     catch (e) { if (live(version)) setError(e instanceof Error ? e.message : '処理を再開してください。') }
     finally { if (live(version)) setBusy(false) }
   }
   async function resume(source = file) {
-    if (!job || dirty) return
+    if (!job || dirty || reportBlocked) return
     const { signal, version } = begin(); setBusy(true); setError('')
     try { const next = await stepJob(job.id, 'resume', signal); if (live(version)) { apply(next); if (next.status === 'uploading') { if (!source) throw new Error('元のファイルを選び直すと、同じ取込のアップロードを再開できます。'); await reuploadSource(next, source, signal) } if (['uploading', 'validating'].includes(next.status)) await runLoop(next, 'validate', version, signal) } }
     catch (e) { if (live(version)) setError(e instanceof Error ? e.message : '再開できませんでした。') }
@@ -176,6 +193,8 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
       </NativeSelect></Field>}
       {key === 'dailyBudgets' && <Notice>コース・日付に既存の予算がある場合は「新規登録・更新」を選んでください。</Notice>}
       {report && <>
+        {courseError === null && <LoadingState label="コース一覧を確認中…" />}
+        {courseError && <><Notice tone="danger">コース一覧を取得できないため、予約表集計の取込を停止しています。{courseError}</Notice><Button disabled={busy} onClick={() => void reloadCourses()}>コース一覧を再取得</Button></>}
         <Field label="対象年"><Input type="number" min="1" max="9999" value={options.year ?? ''} disabled={busy} onChange={event => configure({ ...options, year: Number(event.target.value) })} /></Field>
         <details><summary>列の対応を指定</summary>{reportFields.map(field => <Field key={field.key} label={field.label}><Input value={options.columnMappings?.[field.key] ?? ''} placeholder="元ファイルの列名（空欄は自動対応）" disabled={busy} onChange={event => configure({ ...options, columnMappings: { ...options.columnMappings, [field.key]: event.target.value } })} /></Field>)}</details>
         <details><summary>施設とコースの対応</summary>
@@ -186,10 +205,10 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
           <p>対応を指定しない施設も、未連携施設として保存されます。</p>
         </details>
       </>}
-      <Field label="CSV／Excel"><input aria-label="CSV／Excel" type="file" accept=".csv,.xls,.xlsx" disabled={!selected} onChange={event => { const chosen = event.target.files?.[0]; if (chosen) { setFile(chosen); void validate(chosen) } }} /></Field>
+      <Field label="CSV／Excel"><input aria-label="CSV／Excel" type="file" accept=".csv,.xls,.xlsx" disabled={!selected || reportBlocked} onChange={event => { const chosen = event.target.files?.[0]; if (chosen) { setFile(chosen); void validate(chosen) } }} /></Field>
       {file && <p>{file.name}</p>}{plan && <p>{plan}</p>}
       {dirty && <Notice tone="warning">設定が変わりました。元のファイルを選び、全行を再検証してください。</Notice>}
-      {dirty && file && <Button disabled={busy} onClick={() => void validate()}>この設定で再検証</Button>}
+      {dirty && file && <Button disabled={busy || reportBlocked} onClick={() => void validate()}>この設定で再検証</Button>}
     </Panel>
     {job && <Panel title="2. 検証結果と実行確認">
       <p role="status">{statusLabels[job.status] ?? '状態を確認中'}：{job.processed} / {job.total ?? '確認中'} 行</p>
@@ -201,11 +220,11 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
       </tbody></table></div>}
       {pageCount > 1 && <div className="flex gap-2"><Button disabled={busy || page === 0} onClick={() => void changePage(page - 1)}>前のページ</Button><span>{page + 1} / {pageCount} ページ</span><Button disabled={busy || page + 1 >= pageCount} onClick={() => void changePage(page + 1)}>次のページ</Button></div>}
       <div className="flex gap-2">
-        {job.status === 'ready' && <Button variant="primary" disabled={busy || dirty} onClick={() => void execute()}>確認して取り込む</Button>}
-        {job.status === 'cancelled' && <Button disabled={busy || dirty} onClick={() => void resume()}>中止した取込を再開</Button>}
-        {job.status === 'running' && <Button variant="primary" disabled={busy || dirty} onClick={() => void execute()}>処理を再開</Button>}
-        {job.status === 'uploading' && !busy && <Field label="元のファイルを選んでアップロードを再開"><Input type="file" accept=".csv,.xls,.xlsx" onChange={event => { const source = event.target.files?.[0]; if (source) { setFile(source); void resume(source) } }} /></Field>}
-        {job.status === 'validating' && !busy && <Button onClick={() => { const { signal, version } = begin(); setBusy(true); void runLoop(job, 'validate', version, signal).catch(e => { if (live(version)) setError(String(e)) }).finally(() => { if (live(version)) setBusy(false) }) }}>検証を再開</Button>}
+        {job.status === 'ready' && <Button variant="primary" disabled={busy || dirty || reportBlocked} onClick={() => void execute()}>確認して取り込む</Button>}
+        {job.status === 'cancelled' && <Button disabled={busy || dirty || reportBlocked} onClick={() => void resume()}>中止した取込を再開</Button>}
+        {job.status === 'running' && <Button variant="primary" disabled={busy || dirty || reportBlocked} onClick={() => void execute()}>処理を再開</Button>}
+        {job.status === 'uploading' && !busy && <Field label="元のファイルを選んでアップロードを再開"><Input type="file" accept=".csv,.xls,.xlsx" disabled={reportBlocked} onChange={event => { const source = event.target.files?.[0]; if (source) { setFile(source); void resume(source) } }} /></Field>}
+        {job.status === 'validating' && !busy && <Button disabled={reportBlocked} onClick={() => { const { signal, version } = begin(); setBusy(true); void runLoop(job, 'validate', version, signal).catch(e => { if (live(version)) setError(String(e)) }).finally(() => { if (live(version)) setBusy(false) }) }}>検証を再開</Button>}
         {!['completed', 'completed_with_errors', 'cancelled'].includes(job.status) && <Button onClick={() => void cancel()}>中止</Button>}
         {['completed', 'completed_with_errors'].includes(job.status) && <Button onClick={() => navigate(resultRoutes[job.objectKey])}>保存先の画面を開く</Button>}
       </div>

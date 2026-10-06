@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 struct FieldFixture {
     tenant: String,
     current: Arc<Mutex<Value>>,
+    catalog: Arc<Mutex<Value>>,
 }
 async fn field_fixture(
     State(f): State<FieldFixture>,
@@ -27,7 +28,14 @@ async fn field_fixture(
         );
     }
     let body = if uri.path().ends_with("/courses") {
-        json!({"items":[{"id":"course-old","name":"旧コース","isActive":true},{"id":"course-new","name":"新コース","isActive":true}]})
+        let catalog = f.catalog.lock().unwrap().clone();
+        if catalog.is_null() {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(json!({"message":"catalog unavailable"})),
+            );
+        }
+        catalog
     } else {
         f.current.lock().unwrap().clone()
     };
@@ -89,6 +97,9 @@ async fn report_owner_db_contract_validates_every_page_commits_atomically_and_re
     });
     repo.seed(&tenant, &entries).await.unwrap();
     let current = Arc::new(Mutex::new(Value::Null));
+    let catalog = Arc::new(Mutex::new(
+        json!({"items":[{"id":"course-old","name":"旧コース","isActive":true},{"id":"course-new","name":"新コース","isActive":true}]}),
+    ));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let router = Router::new()
@@ -96,6 +107,7 @@ async fn report_owner_db_contract_validates_every_page_commits_atomically_and_re
         .with_state(FieldFixture {
             tenant: tenant.clone(),
             current: current.clone(),
+            catalog: catalog.clone(),
         });
     let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
     let state = AppState::new_with_cancellation_fee_config(
@@ -227,6 +239,43 @@ async fn report_owner_db_contract_validates_every_page_commits_atomically_and_re
     );
     let count:i64=sqlx::query_scalar("SELECT group_count FROM golf_reservation_report_rows WHERE tenant_id=? AND bucket='course-new' AND report_date='2026-01-01'").bind(&tenant).fetch_one(&pool).await.unwrap();
     assert_eq!(count, 99, "receipt replay must preserve a newer edit");
+    let active_catalog = catalog.lock().unwrap().clone();
+    for changed_catalog in [
+        json!({"items":[{"id":"course-new","name":"新コース","isActive":false}]}),
+        Value::Null,
+    ] {
+        *catalog.lock().unwrap() = changed_catalog;
+        assert_eq!(
+            invoke(
+                &state,
+                &tenant,
+                "subject-a",
+                "finish",
+                with_input(&request, json!({"total":total}))
+            )
+            .await
+            .unwrap(),
+            result
+        );
+        assert!(matches!(
+            invoke(
+                &state,
+                &tenant,
+                "subject-b",
+                "finish",
+                with_input(&request, json!({"total":total}))
+            )
+            .await,
+            Err(AppError::Forbidden)
+        ));
+        let mut wrong_source = with_input(&request, json!({"total":total}));
+        wrong_source.source_sha256 = "b".repeat(64);
+        assert!(matches!(
+            invoke(&state, &tenant, "subject-a", "finish", wrong_source).await,
+            Err(AppError::Forbidden)
+        ));
+    }
+    *catalog.lock().unwrap() = active_catalog;
     // A second preview cannot overwrite a facility edited after validation.
     let mut second = with_input(&request, Value::Null);
     second.job_id = "dtj_owner_conflict".into();
