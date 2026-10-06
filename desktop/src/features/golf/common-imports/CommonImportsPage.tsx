@@ -12,7 +12,7 @@ import { importFilePlanLabels, inspectImportFile } from './import-file-inspectio
 const reportKey = 'courseboardReservationReports'
 const reportFields = [{ key: 'facilityName', label: '施設名' }, { key: 'date', label: '日付' }, { key: 'dayPart', label: '午前・午後' }, { key: 'groupCount', label: '組数' }, { key: 'caddieAttachedGroupCount', label: 'キャディ付き組数' }]
 const resultRoutes: Record<string, string> = { customer: 'golf/customers', dailyBudgets: 'golf/budgets', [reportKey]: 'golf/reservation-report-import' }
-const hidden = new Set(['id', 'sourceCourseKey', 'golfCourseId', 'tenantId', 'sourceFileSha256', 'bucket'])
+const hidden = new Set(['id', 'sourceCourseKey', 'tenantId', 'sourceFileSha256', 'bucket'])
 
 export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarget?: string }) {
   const auth = useAuth()

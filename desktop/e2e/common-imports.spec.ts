@@ -22,11 +22,11 @@ async function fixture(page: Page, options: { batch?: boolean; invalidLater?: bo
   await page.route(`**${root}/**`, async route => {
     const url = new URL(route.request().url()); const path = url.pathname.slice(root.length)
     calls.push(`${route.request().method()} ${path}`)
-    if (path === '/objects') return reply(route, { items: ['customer', 'dailyBudgets', 'courseboardReservationReports'].map(key => ({ key, label: ({ customer:'顧客台帳',dailyBudgets:'日次予算',courseboardReservationReports:'予約表集計' })[key], importModes:['create_only'], import: { writable:true,fields:[{key:'name',label:'名称',required:true}] } })) })
+    if (path === '/objects') return reply(route, { items: ['customer', 'dailyBudgets', 'courseboardReservationReports'].map(key => ({ key, label: ({ customer:'顧客台帳',dailyBudgets:'日次予算',courseboardReservationReports:'予約表集計' })[key], importModes:['create_only'], import: { writable:true,fields:[{key:'name',label:'名称',required:true}, ...(key === 'dailyBudgets' ? [{key:'golfCourseId',label:'コース',required:true}] : [])] } })) })
     if (path === '/jobs') return reply(route, { items: job ? [{...job,preview:[]}] : [] })
     if (path.includes('/imports/')) {
       const request = route.request().postDataJSON()
-      job = { id:'dtj_fixture', objectKey:path.split('/')[2], status: options.batch ? 'uploading' : 'ready', mode:'create_only', processed:0,total:options.batch ? null : 1,created:0,updated:0,errors:0,validationErrors:[],preview:options.batch ? [] : [row()],batch:!!options.batch,previewPage:0,previewPages: options.batch ? 0 : 1,filename:request.filename,failure:null,importOptions:request.importOptions,sourceSha256:request.sha256 ?? '',createdAt:'2026-10-07T00:00:00Z' }
+      job = { id:'dtj_fixture', objectKey:path.split('/')[2], status: options.batch ? 'uploading' : 'ready', mode:'create_only', processed:0,total:options.batch ? null : 1,created:0,updated:0,errors:0,validationErrors:[],preview:options.batch ? [] : [{...row(),object:{...row().object,...(path.split('/')[2] === 'dailyBudgets' ? {golfCourseId:'course-a'} : {})}}],batch:!!options.batch,previewPage:0,previewPages: options.batch ? 0 : 1,filename:request.filename,failure:null,importOptions:request.importOptions,sourceSha256:request.sha256 ?? '',createdAt:'2026-10-07T00:00:00Z' }
       return reply(route, options.batch ? {job,uploadUrl:sourceUrl,contentType:'text/csv'} : job)
     }
     if (!job) return route.fulfill({ status:404,json:{message:'not found'} })
@@ -52,6 +52,10 @@ for (const key of ['customer','dailyBudgets','courseboardReservationReports']) {
     await page.locator('input[type="file"]').first().setInputFiles(file())
     await expect(page.locator('p[role="status"]')).toContainText('実行確認待ち')
     await expect(page.getByText('確認済み',{exact:true})).toBeVisible()
+    if (key === 'dailyBudgets') {
+      await expect(page.getByRole('columnheader', {name:'コース',exact:true})).toBeVisible()
+      await expect(page.getByRole('cell', {name:'course-a',exact:true})).toBeVisible()
+    }
     expect(mock.calls.filter(call=>call.endsWith('/advance'))).toHaveLength(0)
     await page.getByRole('button',{name:'確認して取り込む',exact:true}).click()
     await expect(page.locator('p[role="status"]')).toContainText('完了：1 / 1')
