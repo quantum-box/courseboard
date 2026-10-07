@@ -139,6 +139,74 @@ mod tests {
             .iter()
             .any(|field| field.field == "custom.membership_type"));
         assert!(!objects.iter().any(|object| object.key == "payroll"));
+        assert!(objects.iter().any(|object| object.key == "cancellations"));
+        assert_eq!(gateway.0.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn data_export_cancellations_require_customer_access_not_report_access() {
+        struct RowsGateway(AtomicUsize);
+        #[async_trait::async_trait]
+        impl DataExportGateway for RowsGateway {
+            async fn custom_fields(&self, _: &str) -> Result<Vec<DataExportField>, CourseError> {
+                Ok(vec![])
+            }
+            async fn rows(
+                &self,
+                _: GatewayCredentials<'_>,
+                _: &DataExportObject,
+                _: u32,
+                _: u32,
+            ) -> Result<Vec<serde_json::Value>, CourseError> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(vec![serde_json::json!({ "customer_name": "Customer" })])
+            }
+        }
+        struct ReportReader;
+        #[async_trait::async_trait]
+        impl CourseAuthorizer for ReportReader {
+            async fn require(
+                &self,
+                _: GatewayCredentials<'_>,
+                action: &'static str,
+            ) -> Result<(), CourseError> {
+                if action == actions::LIST_RESERVATION_REPORTS {
+                    Ok(())
+                } else {
+                    Err(CourseError::Forbidden(action))
+                }
+            }
+        }
+        let gateway = Arc::new(RowsGateway(AtomicUsize::new(0)));
+        let use_case = DataExportsUseCase::new(gateway.clone());
+        let customer = GatewayCredentials {
+            authorization: "Bearer caller",
+            caller_bearer: "Bearer caller",
+            operator_id: "tenant-a",
+            platform_id: None,
+            authorizer: &CustomerReader,
+        };
+        assert_eq!(
+            use_case
+                .rows(customer, "cancellations", 0, 100)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+        let reports = GatewayCredentials {
+            authorizer: &ReportReader,
+            ..customer
+        };
+        assert!(!use_case
+            .objects(reports)
+            .await
+            .unwrap()
+            .iter()
+            .any(|object| object.key == "cancellations"));
+        assert!(
+            matches!(use_case.rows(reports, "cancellations", 0, 100).await, Err(CourseError::Forbidden(action)) if action == actions::LIST_CUSTOMERS)
+        );
         assert_eq!(gateway.0.load(Ordering::SeqCst), 1);
     }
 }

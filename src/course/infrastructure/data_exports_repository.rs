@@ -163,6 +163,23 @@ mod tests {
             sqlx::query("INSERT INTO golf_customer_reception_values (tenant_id, customer_id, field_key, value_json) VALUES (?, 'customer', 'removed_field', ?)")
                 .bind(scope).bind(serde_json::to_string(answer).unwrap()).execute(&pool).await.unwrap();
         }
+        for (month, deadline) in [("2026-10", "2026-09-20"), ("2026-11", "2026-10-20")] {
+            sqlx::query("INSERT INTO golf_availability_deadlines (tenant_id, `year_month`, deadline_date) VALUES (?, ?, ?)")
+                .bind(&tenant).bind(month).bind(deadline).execute(&pool).await.unwrap();
+        }
+        let deadline_source = data_export_objects()
+            .iter()
+            .find(|object| object.key == "availabilityDeadlines")
+            .unwrap();
+        let deadlines = repository
+            .rows(credentials, deadline_source, 0, 100)
+            .await
+            .unwrap();
+        assert_eq!(deadlines.len(), 2);
+        assert_eq!(deadlines[0]["year_month"], "2026-10");
+        assert_eq!(deadlines[0]["deadline_date"], "2026-09-20");
+        assert_eq!(deadlines[1]["year_month"], "2026-11");
+        assert_eq!(deadlines[1]["deadline_date"], "2026-10-20");
         let fields = repository.custom_fields(&tenant).await.unwrap();
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].field, "custom.removed_field");

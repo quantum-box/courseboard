@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createExportDefinition, downloadExportCsv, emptyExportDraft, exportDraftError,
-  loadDataExports, type ExportDefinition, type ExportDraft,
+  exportObjectLabel, loadDataExports, type ExportDefinition, type ExportDraft,
 } from './api'
+import objects from '../../dev/mockExportObjects.json'
+import { i18next } from '../../i18n'
 
 const api = vi.hoisted(() => ({ tenant: 'tenant-a', json: vi.fn(), course: vi.fn(), text: vi.fn(), download: vi.fn() }))
 vi.mock('../../api', async original => ({
@@ -76,6 +78,24 @@ describe('Field shared data exports', () => {
       : { items: [] }))
     api.course.mockResolvedValue({ items: [{ key: 'external:courseboard:reception' }] })
     expect((await loadDataExports()).objects.map(object => object.key)).toEqual(['external:courseboard:reception', 'customer'])
+  })
+
+  it('translates every CourseBoard source label when the locale changes', async () => {
+    const previous = i18next.language
+    try {
+      await i18next.changeLanguage('en')
+      for (const object of objects) {
+        const label = exportObjectLabel(object)
+        expect(label).not.toMatch(/[\u3040-\u30ff\u3400-\u9fff]/)
+        expect(label).not.toContain('courseboardSources.')
+      }
+      expect(exportObjectLabel(objects[0]!)).toBe('Reception registrations')
+      await i18next.changeLanguage('ja')
+      expect(exportObjectLabel(objects[0]!)).toBe('受付登録データ')
+      expect(exportObjectLabel({ key: 'external:unknown:future', label: 'Future source', fields: [] })).toBe('Future source')
+    } finally {
+      await i18next.changeLanguage(previous)
+    }
   })
 
   it('renders all reception pages through Field, selects custom answers and preserves quoted multiline headers once', async () => {
