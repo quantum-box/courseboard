@@ -143,6 +143,7 @@ impl CustomerReceptionOcrJobGateway for FieldCustomerReceptionGateway {
                     serde_json::json!({
                         "contentType": sheet.content_type(),
                         "size": sheet.size(),
+                        "sha256": sheet.sha256(),
                     })
                 })
                 .collect::<Vec<_>>(),
@@ -165,6 +166,21 @@ impl CustomerReceptionOcrJobGateway for FieldCustomerReceptionGateway {
             return Err(CourseError::Provider(
                 "Field OCR page metering is unavailable; update Field before accepting reception reads".into(),
             ));
+        }
+        if sheets.iter().any(|sheet| sheet.sha256().is_some()) {
+            let declarations = sheets.iter().collect::<Vec<_>>();
+            if declarations.len() != response.job.sources.len()
+                || declarations
+                    .iter()
+                    .zip(&response.job.sources)
+                    .any(|(declared, source)| {
+                        source.sha256.as_deref() != declared.sha256()
+                            || source.size != declared.size()
+                            || source.content_type != declared.content_type()
+                    })
+            {
+                return Err(CourseError::Provider("Field immutable document manifests are unavailable; update Field before document imports".into()));
+            }
         }
         Ok(ReceptionOcrJobCreated {
             job: map_job(response.job, fields, consents)?,
@@ -297,6 +313,8 @@ fn reception_job_step_timeout(step: &str) -> Duration {
 struct FieldOcrJobResponse {
     id: String,
     #[serde(default)]
+    sources: Vec<FieldOcrJobSource>,
+    #[serde(default)]
     source_app: Option<String>,
     status: String,
     #[serde(default)]
@@ -309,6 +327,15 @@ struct FieldOcrJobResponse {
     failure_code: Option<String>,
     #[serde(default)]
     expires_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FieldOcrJobSource {
+    content_type: String,
+    size: u64,
+    #[serde(default)]
+    sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -809,6 +836,50 @@ mod tests {
                     matches!(result, Err(CourseError::Provider(message)) if message.contains("metering"))
                 );
             }
+            server.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn immutable_reception_jobs_require_the_manifest_acknowledgement() {
+        use axum::{routing::post, Json, Router};
+        for supported in [false, true] {
+            let app=Router::new().route("/v1/field/ocr/consumer/jobs",post(move |Json(body):Json<serde_json::Value>| async move {
+                assert_eq!(body["documents"][0]["sha256"],"a".repeat(64));
+                Json(serde_json::json!({"id":"goj_test","status":"uploading","sourceApp":"courseboard","uploads":[],
+                    "sources":if supported {serde_json::json!([{"contentType":"image/jpeg","size":100,"sha256":"a".repeat(64)}])} else {serde_json::json!([])} }))
+            }));
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+            let gateway = FieldCustomerReceptionGateway::new(
+                reqwest::Client::new(),
+                Some(&format!("http://{address}")),
+            );
+            let sheets = ReceptionOcrJobSheets::try_new(vec![ReceptionOcrJobSheet::try_new(
+                "image/jpeg",
+                100,
+            )
+            .unwrap()
+            .with_sha256(Some("a".repeat(64)))
+            .unwrap()])
+            .unwrap();
+            let result = gateway
+                .create_reception_ocr_job(
+                    GatewayCredentials {
+                        authorization: "Bearer test-token",
+                        operator_id: "operator-test",
+                        platform_id: None,
+                        authorizer: &crate::course::infrastructure::ALLOW_ALL,
+                        caller_bearer: "Bearer test-token",
+                    },
+                    "same-key",
+                    &sheets,
+                    &CustomerReceptionField::merge_with_defaults("operator-test", Vec::new()),
+                    &legacy_reception_consent_definitions(),
+                )
+                .await;
+            assert_eq!(result.is_ok(), supported);
             server.abort();
         }
     }

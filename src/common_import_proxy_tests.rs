@@ -158,3 +158,29 @@ async fn common_import_bff_denies_unowned_jobs_and_missing_business_grants() {
     assert_eq!(capture.requests.lock().unwrap().len(), 1);
     server.abort();
 }
+
+#[tokio::test]
+async fn document_link_preserves_its_strict_body_and_current_credentials() {
+    let (state, capture, authorizer, server) = state(true).await;
+    proxy(
+        State(state),
+        Path("objects/customerReception/imports/document-link".into()),
+        request(Method::POST, json!({"ocrJobId":"goj_existing"})),
+    )
+    .await
+    .unwrap();
+    let calls = capture.requests.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].0,
+        "/v1/bridge/data-objects/customerReception/imports/document-link"
+    );
+    assert_eq!(calls[0].2, json!({"ocrJobId":"goj_existing"}));
+    assert_eq!(calls[0].1["authorization"], "Bearer current-user");
+    assert_eq!(calls[0].1["x-platform-id"], "platform-a");
+    assert_eq!(
+        *authorizer.calls.lock().unwrap(),
+        vec![actions::MANAGE_CUSTOMERS]
+    );
+    server.abort();
+}

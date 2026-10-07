@@ -2072,6 +2072,8 @@ pub async fn draft_customer_reception(
 pub struct ReceptionOcrJobSheetDto {
     pub content_type: String,
     pub size: u64,
+    #[serde(default)]
+    pub sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -2183,7 +2185,10 @@ pub async fn create_reception_ocr_job(
     let sheets = request
         .sheets
         .iter()
-        .map(|sheet| ReceptionOcrJobSheet::try_new(&sheet.content_type, sheet.size))
+        .map(|sheet| {
+            ReceptionOcrJobSheet::try_new(&sheet.content_type, sheet.size)?
+                .with_sha256(sheet.sha256)
+        })
         .collect::<Result<Vec<_>, _>>()
         .map_err(AppError::from)?;
     let sheets = ReceptionOcrJobSheets::try_new(sheets).map_err(AppError::from)?;
