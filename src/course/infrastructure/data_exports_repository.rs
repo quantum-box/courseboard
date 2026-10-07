@@ -153,6 +153,23 @@ mod tests {
             !["reception"].contains(&object.key.as_str())
                 && !["api", "computed"].contains(&object.table.as_str())
         }) {
+            // A settings export must retain every persisted value needed to
+            // reconstruct its rule. The tenant is supplied by the request.
+            let columns: Vec<String> = sqlx::query_scalar(
+                "SELECT COLUMN_NAME FROM information_schema.columns WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME <> 'tenant_id'",
+            )
+            .bind(&object.table)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+            assert!(!columns.is_empty());
+            for column in columns {
+                assert!(
+                    object.fields.iter().any(|field| field.field == column),
+                    "{} export omits persisted column {column}",
+                    object.key
+                );
+            }
             assert!(repository
                 .rows(credentials, object, 0, 100)
                 .await
@@ -224,5 +241,53 @@ mod tests {
         assert_eq!(rows[0]["postalCode"], "1000001");
         assert_eq!(rows[0]["custom.removed_field"], "mine");
         server.abort();
+    }
+
+    #[tokio::test]
+    async fn data_export_settings_preserve_time_bounds_and_pricing_assumptions() {
+        let pool = test_pool().await;
+        let tenant = test_tenant("data-export-settings");
+        sqlx::query("INSERT INTO golf_membership_play_windows (tenant_id, plan_id, playable_days, from_time, to_time) VALUES (?, 'weekday-plan', 31, '09:00:00', '15:00:00'), (?, 'all-day-plan', 127, NULL, NULL)")
+            .bind(&tenant).bind(&tenant).execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO golf_pricing_settings (tenant_id, prefecture, tax_grade, taxable_ratio, price_elasticity, fixed_cost_per_day, variable_cost_per_visitor) VALUES (?, 'Tokyo', 'A', 0.6, -0.8, 250000, 2000)")
+            .bind(&tenant).execute(&pool).await.unwrap();
+        let repository = MySqlDataExportRepository::new(
+            pool,
+            reqwest::Client::new(),
+            Some("http://127.0.0.1:1"),
+        );
+        let credentials = GatewayCredentials::for_outbound("Bearer caller", &tenant, None);
+        let objects = data_export_objects();
+        let source = objects
+            .iter()
+            .find(|object| object.key == "membershipPlayWindows")
+            .unwrap();
+        let windows = repository.rows(credentials, source, 0, 100).await.unwrap();
+        assert_eq!(windows.len(), 2);
+        assert_eq!(windows[0]["playable_days"], 31);
+        let time = |field: &str| {
+            chrono::NaiveTime::parse_from_str(windows[0][field].as_str().unwrap(), "%H:%M:%S%.f")
+                .unwrap()
+        };
+        assert_eq!(
+            time("from_time"),
+            chrono::NaiveTime::from_hms_opt(9, 0, 0).unwrap()
+        );
+        assert_eq!(
+            time("to_time"),
+            chrono::NaiveTime::from_hms_opt(15, 0, 0).unwrap()
+        );
+        assert_eq!(windows[1]["from_time"], Value::Null);
+        assert_eq!(windows[1]["to_time"], Value::Null);
+        let source = objects
+            .iter()
+            .find(|object| object.key == "pricingSettings")
+            .unwrap();
+        let settings = repository.rows(credentials, source, 0, 100).await.unwrap();
+        assert_eq!(settings.len(), 1);
+        assert_eq!(settings[0]["taxable_ratio"], 0.6);
+        assert_eq!(settings[0]["price_elasticity"], -0.8);
+        assert_eq!(settings[0]["fixed_cost_per_day"], 250000);
+        assert_eq!(settings[0]["variable_cost_per_visitor"], 2000);
     }
 }
