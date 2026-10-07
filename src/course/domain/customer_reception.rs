@@ -682,7 +682,7 @@ impl ReceptionDraftRow {
             source_page: None,
             name: normalize(name),
             name_kana: normalize(name_kana),
-            phone: normalize(phone),
+            phone: normalize_ocr_phone(phone),
             email: normalize(email),
             birth_date: None,
             sex: None,
@@ -728,7 +728,7 @@ impl ReceptionDraftRow {
                     self.name_kana = column(row, RECEPTION_ROW_NAME_KANA);
                 }
                 (super::ReceptionFieldKind::Standard, "phone") => {
-                    self.phone = column(row, RECEPTION_ROW_PHONE);
+                    self.phone = normalize_ocr_phone(column(row, RECEPTION_ROW_PHONE));
                 }
                 (super::ReceptionFieldKind::Standard, "email") => {
                     self.email = column(row, RECEPTION_ROW_EMAIL);
@@ -939,6 +939,22 @@ fn normalize(value: Option<String>) -> Option<String> {
     value
         .map(|text| text.trim().to_string())
         .filter(|text| !text.is_empty())
+}
+
+/// Do not turn an uncertain OCR number into a different callable number.
+fn normalize_ocr_phone(value: Option<String>) -> Option<String> {
+    let value = normalize(value)?;
+    if value.contains(['?', '？']) {
+        return None;
+    }
+    normalize(Some(
+        value
+            .chars()
+            .filter(|character| {
+                !matches!(character, '(' | ')' | '（' | '）') && !character.is_whitespace()
+            })
+            .collect(),
+    ))
 }
 
 /// Why no read happened at all, when the sheet is not the reason.
@@ -1213,6 +1229,24 @@ mod tests {
         assert_eq!(draft.rows().len(), 1);
         assert_eq!(draft.rows()[0].name(), None);
         assert_eq!(draft.warnings().len(), 1);
+    }
+
+    #[test]
+    fn ocr_phone_removes_parentheses_and_omits_uncertain_numbers() {
+        let fields = super::super::CustomerReceptionField::merge_with_defaults("default", vec![]);
+        for (input, expected) in [
+            ("090 (8976) 7317", Some("09089767317")),
+            ("090（8976）7317", Some("09089767317")),
+            ("090-1234-5678", Some("090-1234-5678")),
+            ("090-? ?-02-77", None),
+            ("090-？-02-77", None),
+            (" () ", None),
+        ] {
+            let row = ReceptionDraftRow::new(None, None, Some(input.into()), None);
+            assert_eq!(row.phone(), expected, "{input}");
+            let row = row.with_configured_fields(&fields, &serde_json::json!({"phone": input}));
+            assert_eq!(row.phone(), expected, "configured: {input}");
+        }
     }
 
     #[test]
