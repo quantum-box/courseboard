@@ -2,6 +2,8 @@
 //!
 //! Field API HTTP clients live here only.
 
+mod data_exports_repository;
+pub use data_exports_repository::MySqlDataExportRepository;
 mod availability_deadline_repository;
 mod booking_horizon_config;
 mod caddie_duty_repository;

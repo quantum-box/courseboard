@@ -2,6 +2,8 @@ import type { DeepPartial } from '../../types'
 import type { dataExports as source } from '../ja/dataExports'
 
 export const dataExports: DeepPartial<typeof source> = {
+  month: "何月のデータ",
+  monthHint: "お給料と月の精算に使います。他のデータは全部出します。",
   title: 'データを表に保存',
   linkDescription: '保存する情報と列を選び、表のファイルにする',
   create: '保存する表の設定を追加',
@@ -23,5 +25,5 @@ export const dataExports: DeepPartial<typeof source> = {
   downloadNamed: '{{name}}の表のファイル（CSV）を保存',
   editorDescription: '表に入れる情報と列を選んでください。列の名前と順番を保存すると、次も同じ形で出せます。',
   emptyDescription: '「保存する表の設定を追加」を押し、表にする情報と列を選んでください。',
-  helpDescription: '設定を追加したら、一覧から表のファイル（CSV）を保存できます。日付では絞り込めません。情報の種類ごとに出せる件数が決まっています。保存した表はExcelで開けます。',
+  helpDescription: "出すデータと列を決めて「CSVを保存」を押します。受付で登録した名前・連絡先・追加の答えも出せます。お給料と精算は月を選べます。他のデータは全部読み込み、多すぎる場合は途中のファイルを出さず止まります。",
 }

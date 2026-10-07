@@ -64,6 +64,7 @@ use utoipa_swagger_ui::SwaggerUi;
 pub(crate) const COURSEBOARD_AUTHORIZATION_HEADER: &str = "x-courseboard-authorization";
 #[derive(Clone)]
 pub struct AppState {
+    data_exports: Arc<course::infrastructure::MySqlDataExportRepository>,
     rules: Arc<MySqlTaxRuleRepository>,
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
@@ -118,6 +119,11 @@ impl AppState {
         cancellation_fee_config: CancellationFeeConfig,
     ) -> Self {
         Self {
+            data_exports: Arc::new(course::infrastructure::MySqlDataExportRepository::new(
+                pool.clone(),
+                reqwest::Client::new(),
+                cancellation_fee_config.field_api_url.as_deref(),
+            )),
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
@@ -199,6 +205,11 @@ impl AppState {
         cancellation_fee_config: CancellationFeeConfig,
     ) -> Self {
         Self {
+            data_exports: Arc::new(course::infrastructure::MySqlDataExportRepository::new(
+                pool.clone(),
+                reqwest::Client::new(),
+                cancellation_fee_config.field_api_url.as_deref(),
+            )),
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
@@ -266,6 +277,11 @@ impl AppState {
     ) -> Self {
         match field_api {
             Ok(client) => Self {
+                data_exports: Arc::new(course::infrastructure::MySqlDataExportRepository::new(
+                    pool.clone(),
+                    reqwest::Client::new(),
+                    cancellation_fee_config.field_api_url.as_deref(),
+                )),
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
@@ -328,6 +344,11 @@ impl AppState {
                 policy_cache: None,
             },
             Err(error) => Self {
+                data_exports: Arc::new(course::infrastructure::MySqlDataExportRepository::new(
+                    pool.clone(),
+                    reqwest::Client::new(),
+                    cancellation_fee_config.field_api_url.as_deref(),
+                )),
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
@@ -727,6 +748,18 @@ pub fn build_router(state: AppState) -> Router {
                     state.clone(),
                     require_valid_token,
                 )),
+        )
+        .route(
+            "/v1/course/data-exports/objects",
+            get(course::interfaces::http_data_exports::list_data_export_objects).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
+        )
+        .route(
+            "/v1/course/data-exports/:source_key/rows",
+            get(course::interfaces::http_data_exports::list_data_export_rows).route_layer(
+                middleware::from_fn_with_state(state.clone(), require_valid_token),
+            ),
         )
         .route(
             "/v1/course/customer-reception-fields",

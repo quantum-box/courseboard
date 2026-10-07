@@ -21,6 +21,7 @@ import {
   MAX_RECEPTION_JOB_SHEET_BYTES,
   MAX_RECEPTION_JOB_UPLOAD_BYTES,
 } from '../features/golf/customers/reception/models'
+import mockExportObjects from './mockExportObjects.json'
 import type { ExportDefinition } from '../features/data-exports/api'
 
 export function isMockFieldDataEnabled() {
@@ -5176,7 +5177,7 @@ export function resolveMockFieldApiJson(path: string, init?: RequestInit): MockF
   const pathname = pathnameOf(path)
   const method = methodOf(init)
   if (pathname === '/v1/bridge/exports/objects' && method === 'GET') {
-    return hit({ items: [{
+    return hit({ clientDataSupported: true, items: [{
       key: 'reservation', label: 'Reservation（予約）',
       fields: [
         { field: 'reservation_number', label: '予約番号' },
@@ -5184,6 +5185,21 @@ export function resolveMockFieldApiJson(path: string, init?: RequestInit): MockF
         { field: 'starts_at', label: '開始日時' },
       ],
     }] })
+  }
+  if (pathname === '/v1/course/data-exports/objects' && method === 'GET') {
+    return hit({ items: mockExportObjects.map(object => object.key === 'external:courseboard:reception'
+      ? { ...object, fields: [...object.fields, { field: 'custom.membership_type', label: '会員区分' }, { field: 'custom.cart_required', label: 'カート希望' }] }
+      : object) })
+  }
+  const localExport = pathname.match(/^\/v1\/course\/data-exports\/([^/]+)\/rows$/)
+  if (localExport && method === 'GET') {
+    const offset = Number(new URL(path, 'http://localhost').searchParams.get('offset') ?? 0)
+    if (offset) return hit({ items: [], nextOffset: null })
+    const row = localExport[1] === 'reception' ? {
+      customer_id: 'cus_reception_1', name: '山田 太郎', name_kana: 'ヤマダ タロウ', phone: '09012345678',
+      email: 'yamada@example.com', source: 'reception_sheet', 'custom.membership_type': '正会員', 'custom.cart_required': true,
+    } : { yearMonth: TODAY.slice(0, 7), displayName: '佐藤 花子', feeTotal: 25000, currency: 'JPY' }
+    return hit({ items: [row], nextOffset: null })
   }
   if (pathname === '/v1/bridge/exports/definitions') {
     if (method === 'GET') return hit({ items: [...mockExportDefinitions] })
@@ -5224,19 +5240,20 @@ export function resolveMockFieldApiText(path: string, init?: RequestInit): MockF
   const pathname = pathnameOf(path)
   const method = methodOf(init)
 
-  const exportMatch = pathname.match(/^\/v1\/bridge\/exports\/definitions\/([^/]+)\/csv$/)
-  if (exportMatch && method === 'GET') {
+  const exportMatch = pathname.match(/^\/v1\/bridge\/exports\/definitions\/([^/]+)\/(csv|render)$/)
+  if (exportMatch && ((exportMatch[2] === 'csv' && method === 'GET') || (exportMatch[2] === 'render' && method === 'POST'))) {
     const definition = mockExportDefinitions.find(item => item.id === decodeURIComponent(exportMatch[1]!))
     if (!definition) return error(404, 'Export definition not found')
     if (definition.status !== 'active') return error(400, 'Export definition is inactive')
-    const row: Record<string, string> = {
+    const row: Record<string, unknown> = {
       reservation_number: 'RES-001', customer_name: '山田 太郎', starts_at: `${TODAY}T08:00:00+09:00`,
     }
+    const rows = exportMatch[2] === 'render' ? (parseBody(init) as { rows: Record<string, unknown>[] }).rows : [row]
     const csvCell = (value: string) => `"${value.replace(/"/g, '""')}"`
     const fields = definition.mapping.fields
     return hit([
       fields.map(field => csvCell(field.target)).join(','),
-      fields.map(field => csvCell(row[field.source] ?? '')).join(','),
+      ...rows.map(item => fields.map(field => csvCell(item[field.source] == null ? '' : String(item[field.source]))).join(',')),
     ].join('\r\n') + '\r\n')
   }
 

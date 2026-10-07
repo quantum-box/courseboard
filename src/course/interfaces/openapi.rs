@@ -55,6 +55,8 @@ impl Modify for SecurityAddon {
         version = "0.1.1"
     ),
     paths(
+        super::http_data_exports::list_data_export_objects,
+        super::http_data_exports::list_data_export_rows,
         http::get_tee_sheet,
         http::get_tee_ledger,
         http::create_reservation,

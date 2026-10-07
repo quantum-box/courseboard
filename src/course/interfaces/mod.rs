@@ -5,6 +5,7 @@ pub mod http_caddie_fee_alignment;
 pub mod http_cancellations;
 pub mod http_commercial;
 pub mod http_customers;
+pub mod http_data_exports;
 pub mod http_field;
 pub mod http_ops;
 pub mod http_reservation_report;

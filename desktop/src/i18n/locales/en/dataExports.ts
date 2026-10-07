@@ -2,6 +2,8 @@ import type { DeepPartial } from '../../types'
 import type { dataExports as source } from '../ja/dataExports'
 
 export const dataExports: DeepPartial<typeof source> = {
+  month: "Reporting month",
+  monthHint: "Used for payroll and monthly settlement. Other sources export all records.",
   title: 'Data export',
   linkDescription: 'Choose data and columns, then save a CSV',
   create: 'Add export settings',
@@ -41,7 +43,7 @@ export const dataExports: DeepPartial<typeof source> = {
   emptyDescription: 'Use “Add export settings” to choose data and columns.',
   noSources: 'No data is available for export. Ask an administrator to check your export permissions.',
   helpTitle: 'How to export data',
-  helpDescription: 'Add export settings, then choose “Save CSV” in the list. Exports currently have no date filter and follow each data source’s row limit. Japanese CSV files can also be opened in Excel.',
+  helpDescription: "Create an export definition and choose Save CSV. Reception exports include registered names, contact details and custom answers. Choose a reporting month for payroll and settlement. Other sources retrieve all records and stop if the export exceeds its limits.",
   validation: {
     name: 'Enter an export settings name.',
     nameTooLong: 'Use 255 characters or fewer for the export settings name.',
@@ -51,6 +53,8 @@ export const dataExports: DeepPartial<typeof source> = {
     duplicate: 'Export headers are duplicated. Use a different name for each column.',
   },
   error: {
+    tooLarge: 'This dataset exceeds the export size or row limit.',
+    incomplete: "The complete dataset could not be retrieved. Please retry.",
     forbidden: 'You do not have permission to export data. Ask an administrator.',
     notFound: 'The export settings or source could not be found. Reload the page.',
     invalid: 'The inputs could not be saved. Check the data and columns you selected.',

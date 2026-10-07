@@ -2,7 +2,7 @@ import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import { ArrowDown, ArrowUp, Download, Plus, RotateCcw } from 'lucide-react'
 import { useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { fieldPlatformId, fieldTenant } from '../../api'
+import { fieldPlatformId, fieldTenant, today } from '../../api'
 import {
   DataTable, EmptyState, Field, FormGrid, LoadingState, NativeSelect,
   NativeTextarea, Notice, Panel, type DataTableColumn,
@@ -22,6 +22,7 @@ export function DataExportsPage() {
   const { t } = useTranslation(['dataExports', 'common'])
   const resource = useResource(loadDataExports, [], { cacheKey: 'bridge:exports' })
   useRegisterPageReload(resource.refresh)
+  const [month, setMonth] = useState(() => today().slice(0, 7))
   const [creating, setCreating] = useState(false)
   const [downloading, setDownloading] = useState<string | null>(null)
   const downloadInFlight = useRef(false)
@@ -33,7 +34,7 @@ export function DataExportsPage() {
     setDownloading(definition.id)
     setDownloadError(null)
     try {
-      await downloadExportCsv(definition)
+      await downloadExportCsv(definition, month)
       showToast({ tone: 'success', message: t('dataExports:downloaded') })
     } catch (error) {
       const message = exportErrorMessage(error, t('dataExports:error.download'))
@@ -69,7 +70,7 @@ export function DataExportsPage() {
       key: 'download', header: '', align: 'right',
       cell: row => {
         const available = objects.some(object => object.key === row.sourceObject)
-        const enabled = row.status === 'active' && row.destinationType === 'csv' && available
+        const enabled = row.status === 'active' && row.destinationType === 'csv' && available && (!objects.find(object => object.key === row.sourceObject)?.requiresMonth || /^\d{4}-\d{2}$/.test(month))
         return <div className="data-export-download">
           <Button
             type="button"
@@ -96,6 +97,10 @@ export function DataExportsPage() {
         disabled={!resource.data || !objects.length || Boolean(resource.error)}>
         <Plus aria-hidden="true" /> {t('dataExports:create')}
       </Button>}>
+        {objects.some(object => object.requiresMonth) ? <Field label={t('dataExports:month')}>
+          <Input type="month" value={month} onChange={event => setMonth(event.target.value)} />
+          <small>{t('dataExports:monthHint')}</small>
+        </Field> : null}
         {resource.loading ? <LoadingState /> : null}
         {resource.error ? <Notice tone="danger" actions={<Button type="button"
           onClick={() => void resource.refresh()}>{t('common:action.retry')}</Button>}>

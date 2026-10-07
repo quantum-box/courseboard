@@ -43,6 +43,31 @@ test.describe('データ出力', () => {
     expect(bytes.toString('utf8')).toBe('\uFEFF"お客様","予約番号"\r\n"山田 太郎","RES-001"\r\n')
   })
 
+  test('受付の登録情報と独自項目をCSVに出力できる', async ({ page }) => {
+    test.skip(!e2eManagedMockServer(), 'Writes are limited to the managed mock server')
+    await page.goto('/settings/data-exports')
+    await page.getByRole('button', { name: '出力設定を追加' }).click()
+    const editor = page.getByRole('dialog')
+    await editor.getByRole('textbox', { name: /出力設定名/ }).fill('受付登録の確認表')
+    const source = editor.getByRole('combobox', { name: /出力するデータ/ })
+    expect(await source.locator('option').count()).toBeGreaterThanOrEqual(35)
+    await source.selectOption('external:courseboard:reception')
+    await editor.getByRole('checkbox', { name: '氏名', exact: true }).check()
+    await editor.getByRole('checkbox', { name: '電話番号', exact: true }).check()
+    await editor.getByRole('checkbox', { name: '会員区分', exact: true }).check()
+    await editor.getByRole('checkbox', { name: 'カート希望', exact: true }).check()
+    await editor.getByRole('button', { name: '保存', exact: true }).click()
+    await expect(editor).toBeHidden()
+    const event = page.waitForEvent('download')
+    await page.getByRole('button', { name: '受付登録の確認表のCSVを保存' }).click()
+    const download = await event
+    const stream = await download.createReadStream()
+    if (!stream) throw new Error('CSV download was not readable')
+    const chunks: Buffer[] = []
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk))
+    expect(Buffer.concat(chunks).toString('utf8')).toBe('\uFEFF"氏名","電話番号","会員区分","カート希望"\r\n"山田 太郎","09012345678","正会員","true"\r\n')
+  })
+
   test('3言語と200%表示で出力設定の操作が読める', async ({ page }, testInfo) => {
     await page.goto('/settings/data-exports')
     for (const [locale, title, createLabel] of [
@@ -56,7 +81,7 @@ test.describe('データ出力', () => {
       await page.getByRole('button', { name: createLabel! }).click()
       const editor = page.getByRole('dialog')
       await expect(editor).toBeVisible()
-      await editor.getByRole('combobox').first().selectOption('reservation')
+      await editor.getByRole('combobox').first().selectOption('external:courseboard:reception')
       // Read dimensions after the sheet's opening animation has settled.
       await expect.poll(() => editor.locator('input:not([type="checkbox"])').first().evaluate(element =>
         element.getBoundingClientRect().height,

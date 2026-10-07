@@ -10,6 +10,7 @@
   min-width: 0;
 }
 
+.data-exports-page input,
 .data-exports-page button,
 .data-export-editor button,
 .data-export-editor input:not([type='checkbox']),
@@ -25,6 +26,8 @@
 .data-exports-page .data-table th,
 .data-exports-page .data-table td,
 .data-exports-page p,
+.data-exports-page small,
+.data-exports-page .field-label,
 .data-export-editor p,
 .data-export-editor .field-label,
 .data-export-editor .field-hint,

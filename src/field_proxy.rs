@@ -196,8 +196,9 @@ fn is_allowed_route(method: &Method, path: &str) -> bool {
     }
 
     if is_bridge_export_path(path) {
-        return method == Method::GET
-            || (method == Method::POST && path == "/v1/bridge/exports/definitions");
+        return (method == Method::GET && !path.ends_with("/render"))
+            || (method == Method::POST
+                && (path == "/v1/bridge/exports/definitions" || path.ends_with("/render")));
     }
 
     if path == "/v1/erp/reservation-types" {
@@ -275,7 +276,7 @@ fn is_bridge_export_path(path: &str) -> bool {
     let mut segments = suffix.split('/');
     matches!(
         (segments.next(), segments.next(), segments.next()),
-        (Some(definition_id), Some("csv"), None) if !definition_id.is_empty()
+        (Some(definition_id), Some("csv" | "render"), None) if !definition_id.is_empty()
     )
 }
 
@@ -530,6 +531,14 @@ mod tests {
         assert!(is_allowed_route(
             &Method::POST,
             "/v1/bridge/exports/definitions"
+        ));
+        assert!(is_allowed_route(
+            &Method::POST,
+            "/v1/bridge/exports/definitions/bxd_1/render"
+        ));
+        assert!(!is_allowed_route(
+            &Method::GET,
+            "/v1/bridge/exports/definitions/bxd_1/render"
         ));
         for path in [
             "/v1/bridge/exports/objects",
