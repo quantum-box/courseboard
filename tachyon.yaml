@@ -215,7 +215,8 @@ apiVersion: apps.tachy.one/v1alpha
 kind: FeatureFlags
 metadata:
   name: courseboard-flags
-  tenantId: tn_01ks18jhh1xvggktfzjx5jqsen
+  # Feature flags are evaluated by the platform, not the app operator tenant.
+  tenantId: tn_01hjjn348rn3t49zz6hvmfq67p
 spec:
   flags:
     - key: feature.courseboard.flag-evaluation-smoke
