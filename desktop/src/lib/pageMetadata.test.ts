@@ -49,6 +49,7 @@ describe('metadataForRoute', () => {
     'staff/staff-1',
     'settings',
     'settings/advanced',
+    'settings/data-exports',
     'settings/members',
     'settings/reception-fields',
   ]

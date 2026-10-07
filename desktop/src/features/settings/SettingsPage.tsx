@@ -3,6 +3,7 @@ import {
   CalendarClock,
   ChevronRight,
   ClipboardList,
+  Download,
   IdCard,
   Percent,
   Plug,
@@ -31,6 +32,7 @@ const MASTER_ICONS: Record<string, LucideIcon> = {
   grades: Award,
   caddieDuties: ClipboardList,
   receptionFields: ScanLine,
+  dataExports: Download,
 }
 
 function MasterLink({
@@ -61,7 +63,7 @@ function MasterLink({
 }
 
 export function SettingsPage() {
-  const { t } = useTranslation(['settings', 'nav'])
+  const { t } = useTranslation(['settings', 'nav', 'dataExports'])
 
   return (
     <div className="page-stack">

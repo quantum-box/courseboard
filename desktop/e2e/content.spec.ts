@@ -14,6 +14,119 @@ import { e2eManagedMockServer, MOCK_FIXTURE_DATE } from './routes'
 
 const D = MOCK_FIXTURE_DATE
 
+test.describe('データ出力', () => {
+  test('設定から出力列を保存し、CSVをダウンロードできる', async ({ page }) => {
+    test.skip(!e2eManagedMockServer(), 'Writes are limited to the managed mock server')
+    await page.goto('/settings')
+    await page.getByRole('button', { name: /データ出力/ }).click()
+    await expect(page).toHaveTitle('データ出力 | Course Board')
+    await page.getByRole('button', { name: '出力設定を追加' }).click()
+    const editor = page.getByRole('dialog')
+    await editor.getByRole('textbox', { name: /出力設定名/ }).fill('予約の確認表')
+    await editor.getByRole('combobox', { name: /出力するデータ/ }).selectOption('reservation')
+    await editor.getByRole('checkbox', { name: '顧客名' }).check()
+    await editor.getByRole('checkbox', { name: '予約番号' }).check()
+    await editor.getByRole('textbox', { name: '顧客名の出力列名' }).fill('お客様')
+    await editor.getByRole('button', { name: '顧客名を上へ' }).click()
+    await editor.getByRole('button', { name: '保存', exact: true }).click()
+    await expect(editor).toBeHidden()
+    const downloadEvent = page.waitForEvent('download')
+    await page.getByRole('button', { name: '予約の確認表のCSVを保存' }).click()
+    const download = await downloadEvent
+    expect(download.suggestedFilename()).toMatch(/^予約の確認表_\d{4}-\d{2}-\d{2}\.csv$/)
+    const stream = await download.createReadStream()
+    if (!stream) throw new Error('CSV download was not readable')
+    const chunks: Buffer[] = []
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk))
+    const bytes = Buffer.concat(chunks)
+    expect([...bytes.subarray(0, 3)]).toEqual([239, 187, 191])
+    expect(bytes.toString('utf8')).toBe('\uFEFF"お客様","予約番号"\r\n"山田 太郎","RES-001"\r\n')
+  })
+
+  test('受付の登録情報と独自項目をCSVに出力できる', async ({ page }) => {
+    test.skip(!e2eManagedMockServer(), 'Writes are limited to the managed mock server')
+    await page.goto('/settings/data-exports')
+    await page.getByRole('button', { name: '出力設定を追加' }).click()
+    const editor = page.getByRole('dialog')
+    await editor.getByRole('textbox', { name: /出力設定名/ }).fill('受付登録の確認表')
+    const source = editor.getByRole('combobox', { name: /出力するデータ/ })
+    expect(await source.locator('option').count()).toBeGreaterThanOrEqual(35)
+    await source.selectOption('external:courseboard:reception')
+    await editor.getByRole('checkbox', { name: '氏名', exact: true }).check()
+    await editor.getByRole('checkbox', { name: '電話番号', exact: true }).check()
+    await editor.getByRole('checkbox', { name: '会員区分', exact: true }).check()
+    await editor.getByRole('checkbox', { name: 'カート希望', exact: true }).check()
+    await editor.getByRole('button', { name: '保存', exact: true }).click()
+    await expect(editor).toBeHidden()
+    const event = page.waitForEvent('download')
+    await page.getByRole('button', { name: '受付登録の確認表のCSVを保存' }).click()
+    const download = await event
+    const stream = await download.createReadStream()
+    if (!stream) throw new Error('CSV download was not readable')
+    const chunks: Buffer[] = []
+    for await (const chunk of stream) chunks.push(Buffer.from(chunk))
+    expect(Buffer.concat(chunks).toString('utf8')).toBe('\uFEFF"氏名","電話番号","会員区分","カート希望"\r\n"山田 太郎","09012345678","正会員","true"\r\n')
+  })
+
+  test('3言語と200%表示で出力設定の操作が読める', async ({ page }, testInfo) => {
+    await page.goto('/settings/data-exports')
+    for (const [locale, title, createLabel] of [
+      ['ja', 'データ出力', '出力設定を追加'],
+      ['ja-plain', 'データを表に保存', '保存する表の設定を追加'],
+      ['en', 'Data export', 'Add export settings'],
+    ]) {
+      await page.evaluate(value => localStorage.setItem('courseboard.locale', value), locale!)
+      await page.reload()
+      await expect(page).toHaveTitle(`${title} | Course Board`)
+      await page.getByRole('button', { name: createLabel! }).click()
+      const editor = page.getByRole('dialog')
+      await expect(editor).toBeVisible()
+      await editor.getByRole('combobox').first().selectOption('external:courseboard:reception')
+      // Read dimensions after the sheet's opening animation has settled.
+      await expect.poll(() => editor.locator('input:not([type="checkbox"])').first().evaluate(element =>
+        element.getBoundingClientRect().height,
+      )).toBeGreaterThanOrEqual(44)
+      const controls = await editor.locator('button, input:not([type="checkbox"]), select, textarea').evaluateAll(elements =>
+        elements.map(element => {
+          const rect = element.getBoundingClientRect()
+          return { width: rect.width, height: rect.height, font: Number.parseFloat(getComputedStyle(element).fontSize) }
+        }),
+      )
+      for (const control of controls) {
+        expect(control.width).toBeGreaterThanOrEqual(44)
+        expect(control.height).toBeGreaterThanOrEqual(44)
+        expect(control.font).toBeGreaterThanOrEqual(16)
+      }
+      const textSizes = await editor.locator('p, label, strong').evaluateAll(elements =>
+        elements.map(element => Number.parseFloat(getComputedStyle(element).fontSize)),
+      )
+      expect(Math.min(...textSizes)).toBeGreaterThanOrEqual(16)
+      await page.screenshot({ path: testInfo.outputPath(`data-export-${locale}.png`) })
+      // A 1280 × 720 window at 200% has a 640 × 360 CSS viewport.
+      await page.setViewportSize({ width: 640, height: 360 })
+      await expect.poll(() => editor.evaluate(element => element.getBoundingClientRect().height))
+        .toBeLessThanOrEqual(360)
+      await expect(editor.getByRole('combobox').first()).toBeVisible()
+      const dimensions = await editor.evaluate(element => ({ width: element.clientWidth, scroll: element.scrollWidth }))
+      expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.width + 1)
+      await expect.poll(async () => {
+        const save = editor.locator('button[type="submit"]')
+        await save.scrollIntoViewIfNeeded()
+        return save.evaluate(element => element.getBoundingClientRect().bottom <= window.innerHeight)
+      }).toBe(true)
+      await expect(editor.locator('button[type="submit"]')).toBeInViewport()
+      await page.screenshot({ path: testInfo.outputPath(`data-export-${locale}-200-percent.png`) })
+      await page.setViewportSize({ width: 390, height: 844 })
+      await editor.getByRole('combobox').first().scrollIntoViewIfNeeded()
+      await expect(editor.getByRole('combobox').first()).toBeInViewport()
+      const narrow = await editor.evaluate(element => ({ width: element.clientWidth, scroll: element.scrollWidth }))
+      expect(narrow.scroll).toBeLessThanOrEqual(narrow.width + 1)
+      await page.screenshot({ path: testInfo.outputPath(`data-export-${locale}-390.png`) })
+      await page.setViewportSize({ width: 1280, height: 720 })
+    }
+  })
+})
+
 test.describe('ホーム', () => {
   test('業務タイルが表示され、予約台帳へ遷移できる', async ({ page }) => {
     await page.goto('/golf')

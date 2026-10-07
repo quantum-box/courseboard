@@ -75,6 +75,16 @@ pub enum RouteAuthorization {
 /// matches the rest of the path.
 const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
     (
+        "GET",
+        "/v1/course/data-exports/objects",
+        RouteAuthorization::HandlerEnforced,
+    ),
+    (
+        "GET",
+        "/v1/course/data-exports/:source_key/rows",
+        RouteAuthorization::HandlerEnforced,
+    ),
+    (
         "*",
         "/v1/course/data-imports/*path",
         RouteAuthorization::HandlerEnforced,

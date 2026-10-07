@@ -27,6 +27,7 @@ mod create_reservation;
 mod customer_consent_items;
 mod customer_grade_rules;
 mod customer_reception_fields;
+pub mod data_exports;
 mod delete_caddie;
 mod delete_caddie_availability;
 mod delete_course;

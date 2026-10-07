@@ -14,6 +14,7 @@ Course Board のゴルフ運用とキャンセル料請求を、1つの React 19
 - 予算マスタ: 日別予算、達成状況、CSV import
 - 予約ポリシー: 受付制御、セルフ枠、客単価判断
 - 月次精算: KPI、CSV、未収キャンセル料、Square invoice 発行
+- データ出力: 設定から出力対象・列名・列順を保存し、Fieldの汎用APIでCSVを取得する（[境界と制約](../docs/data-exports.md)）
 - キャンセル料: 一覧、集計、請求作成、Stripe link、メール / SMS、同意確認、再送、入金確認
 - コースマップ: Tauri desktop のローカルカート simulator。Vite のみの開発時は
   ブラウザ側モックへフォールバック（`VITE_COURSEBOARD_MOCK_DATA` と同じゲート）

@@ -27,6 +27,7 @@ mod customer_reception_fields;
 mod customer_registration;
 mod customer_summary;
 mod customer_visits;
+pub mod data_exports;
 mod demo_board;
 mod error;
 mod field_capabilities;
