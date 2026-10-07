@@ -5,6 +5,8 @@ use anyhow::Context;
 mod admin_ui;
 pub mod auth;
 pub mod cancellation_fees;
+mod common_import_owner;
+mod common_import_proxy;
 pub mod config;
 pub mod course;
 pub mod course_authz;
@@ -64,6 +66,7 @@ use utoipa_swagger_ui::SwaggerUi;
 pub(crate) const COURSEBOARD_AUTHORIZATION_HEADER: &str = "x-courseboard-authorization";
 #[derive(Clone)]
 pub struct AppState {
+    common_import_pool: MySqlPool,
     rules: Arc<MySqlTaxRuleRepository>,
     cancellation_fees: Arc<MySqlCancellationFeeRepository>,
     slot_overrides: Arc<MySqlSlotOverrideRepository>,
@@ -118,6 +121,7 @@ impl AppState {
         cancellation_fee_config: CancellationFeeConfig,
     ) -> Self {
         Self {
+            common_import_pool: pool.clone(),
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
@@ -199,6 +203,7 @@ impl AppState {
         cancellation_fee_config: CancellationFeeConfig,
     ) -> Self {
         Self {
+            common_import_pool: pool.clone(),
             rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
             cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
             slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
@@ -266,6 +271,7 @@ impl AppState {
     ) -> Self {
         match field_api {
             Ok(client) => Self {
+                common_import_pool: pool.clone(),
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
@@ -328,6 +334,7 @@ impl AppState {
                 policy_cache: None,
             },
             Err(error) => Self {
+                common_import_pool: pool.clone(),
                 rules: Arc::new(MySqlTaxRuleRepository::new(pool.clone())),
                 cancellation_fees: Arc::new(MySqlCancellationFeeRepository::new(pool.clone())),
                 slot_overrides: Arc::new(MySqlSlotOverrideRepository::new(pool.clone())),
@@ -949,6 +956,25 @@ pub fn build_router(state: AppState) -> Router {
             patch(course::interfaces::http::change_reservation_plan).route_layer(
                 middleware::from_fn_with_state(state.clone(), require_valid_token),
             ),
+        )
+        .route(
+            "/v1/course/data-imports/*path",
+            get(common_import_proxy::proxy)
+                .post(common_import_proxy::proxy)
+                .layer(DefaultBodyLimit::max(5 * 1024 * 1024))
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
+        )
+        .route(
+            "/v1/course/common-import-owner/:operation",
+            post(common_import_owner::handle)
+                .layer(DefaultBodyLimit::max(48 * 1024 * 1024))
+                .route_layer(middleware::from_fn_with_state(
+                    state.clone(),
+                    require_valid_token,
+                )),
         )
         .route(
             "/v1/course/reservation-report-imports/preview",
@@ -1684,6 +1710,18 @@ mod migration_set {
         // place, and a run of them lands on a database in an order nobody
         // intended.
         for migration in MIGRATOR.iter() {
+            // PR #382's first preview already applied this version. Preserve
+            // its exact bytes rather than rename an applied migration. This
+            // single historical exception cannot admit another undated file.
+            if migration.version == 20_261_007_090_000 {
+                assert_eq!(migration.description, "common reservation imports");
+                assert_eq!(
+                    migration.checksum.iter().map(|byte| format!("{byte:02x}")).collect::<String>(),
+                    "68fc05bfbf6b62f56d373ec98208d9660fec437bad6fde9aeadcd2ff1125bb90caf7ad33773d4ae39ff9d8fbfa9ffec9",
+                    "the already-applied common-import migration must stay immutable",
+                );
+                continue;
+            }
             assert!(
                 (202_001_010_000..=209_912_319_999).contains(&migration.version),
                 "{} is numbered {}, which is not a YYYYMMDDNNNN stamp",

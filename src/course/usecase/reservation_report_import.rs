@@ -124,7 +124,16 @@ pub fn parse_reservation_report(
     year: i32,
     filename: Option<&str>,
 ) -> Result<ReservationReport, CourseError> {
-    if bytes.is_empty() || bytes.len() > MAX_RESERVATION_REPORT_BYTES {
+    parse_reservation_report_with_limit(bytes, year, filename, MAX_RESERVATION_REPORT_BYTES)
+}
+
+pub(crate) fn parse_reservation_report_with_limit(
+    bytes: &[u8],
+    year: i32,
+    filename: Option<&str>,
+    limit: usize,
+) -> Result<ReservationReport, CourseError> {
+    if bytes.is_empty() || bytes.len() > limit {
         return Err(CourseError::BadRequest(
             "reservation report file must be at most 5 MiB",
         ));
@@ -261,14 +270,17 @@ pub fn parse_reservation_report(
             ] {
                 let group_count = parse_count(range.get((row, col)))?;
                 let caddie_count = parse_count(range.get((row, col + 1)))?;
-                rows.push(ReservationReportRow::new(
-                    source_key.clone(),
-                    name.clone(),
-                    date,
-                    day_part,
-                    group_count,
-                    caddie_count,
-                )?);
+                rows.push(
+                    ReservationReportRow::new(
+                        source_key.clone(),
+                        name.clone(),
+                        date,
+                        day_part,
+                        group_count,
+                        caddie_count,
+                    )?
+                    .with_source_row_number(row + 1),
+                );
             }
         }
     }
@@ -704,7 +716,7 @@ fn mapped_value<'a>(
         ))
 }
 
-fn parse_tabular_day_part(value: &str) -> Result<ReservationReportDayPart, CourseError> {
+pub(crate) fn parse_tabular_day_part(value: &str) -> Result<ReservationReportDayPart, CourseError> {
     match value.trim().to_ascii_lowercase().as_str() {
         "morning" | "am" | "a.m." | "午前" => Ok(ReservationReportDayPart::Morning),
         "afternoon" | "pm" | "p.m." | "午後" => Ok(ReservationReportDayPart::Afternoon),
@@ -714,7 +726,7 @@ fn parse_tabular_day_part(value: &str) -> Result<ReservationReportDayPart, Cours
     }
 }
 
-fn parse_tabular_count(value: &str, _target: &str) -> Result<i64, CourseError> {
+pub(crate) fn parse_tabular_count(value: &str, _target: &str) -> Result<i64, CourseError> {
     let raw = value.trim().replace('，', ",");
     if raw.contains(',') {
         let mut groups = raw.split(',');
@@ -752,7 +764,7 @@ fn parse_tabular_count(value: &str, _target: &str) -> Result<i64, CourseError> {
     ))
 }
 
-fn parse_tabular_date(value: &str, year: i32) -> Result<NaiveDate, CourseError> {
+pub(crate) fn parse_tabular_date(value: &str, year: i32) -> Result<NaiveDate, CourseError> {
     let normalized = value
         .trim()
         .chars()
@@ -890,7 +902,7 @@ impl ImportReservationReportUseCase {
     }
 }
 
-fn mapped_entries(
+pub(crate) fn mapped_entries(
     report: &ReservationReport,
     mappings: &[ReservationReportCourseMapping],
 ) -> Result<Vec<ExternalReservationReportEntry>, CourseError> {

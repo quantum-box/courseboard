@@ -130,6 +130,7 @@ export function CustomersPage() {
             >
               <CalendarX /> {t('customers:cancellations.open')}
             </Button>
+            <Button onClick={() => navigate('golf/data-imports/customer')}>顧客データをとりこむ</Button>
             <Button type="button" variant="primary" onClick={() => setCreating(true)}>
               <UserPlus /> {t('customers:create.open')}
             </Button>

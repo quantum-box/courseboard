@@ -307,6 +307,12 @@ export async function courseboardApiJson<T>(path: string, init?: RequestInit) {
   return protectedJson<T>(normalized, init)
 }
 
+export async function courseboardApiBlob(path: string, init?: RequestInit) {
+  const response = await protectedFetch(path, init)
+  if (!response.ok) throw await parseError(response)
+  return response.blob()
+}
+
 export async function courseboardApiText(path: string, init?: RequestInit) {
   const normalized = path.startsWith('/') ? path : `/${path}`
   if (normalized.startsWith('/v1/course/')) {

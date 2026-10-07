@@ -173,7 +173,7 @@ pub(crate) fn credentials<'a>(
     })
 }
 
-fn optional_header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+pub(crate) fn optional_header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers
         .get(name)
         .and_then(|value| value.to_str().ok())

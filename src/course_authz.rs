@@ -74,6 +74,16 @@ pub enum RouteAuthorization {
 /// Pattern segments starting with `:` match one segment; a trailing `*`
 /// matches the rest of the path.
 const ROUTES: &[(&str, &str, RouteAuthorization)] = &[
+    (
+        "*",
+        "/v1/course/data-imports/*path",
+        RouteAuthorization::HandlerEnforced,
+    ),
+    (
+        "POST",
+        "/v1/course/common-import-owner/:operation",
+        RouteAuthorization::Action(actions::IMPORT_RESERVATION_REPORTS),
+    ),
     // ─── CourseBoard-local: golf actions ─────────────────────────────────
     ("POST", "/calculate", RouteAuthorization::HandlerEnforced),
     (
@@ -748,7 +758,7 @@ fn pattern_matches(pattern: &str, path: &str) -> bool {
     loop {
         match (pattern_segments.next(), path_segments.next()) {
             (None, None) => return true,
-            (Some("*"), _) => return true,
+            (Some(segment), _) if segment.starts_with('*') => return true,
             (Some(pattern_segment), Some(path_segment)) => {
                 if !pattern_segment.starts_with(':') && pattern_segment != path_segment {
                     return false;
@@ -1315,6 +1325,25 @@ mod tests {
         assert_eq!(get("/admin/new-page"), None);
         // Paths outside the protected namespaces are ordinary 404s.
         assert_eq!(get("/robots.txt"), Some(RouteAuthorization::Public));
+    }
+
+    #[test]
+    fn common_import_routes_require_the_handler_or_owning_business_policy() {
+        for (method, path) in [
+            (Method::GET, "/v1/course/data-imports/objects"),
+            (Method::POST, "/v1/course/data-imports/jobs/dtj_test/resume"),
+        ] {
+            assert_eq!(
+                classify(&method, path),
+                Some(RouteAuthorization::HandlerEnforced)
+            );
+        }
+        assert_eq!(
+            classify(&Method::POST, "/v1/course/common-import-owner/finish"),
+            Some(RouteAuthorization::Action(
+                actions::IMPORT_RESERVATION_REPORTS
+            ))
+        );
     }
 
     /// Every path string registered in `build_router` must classify. The list
