@@ -68,13 +68,20 @@ pub async fn proxy_field_api(
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
     let mut outbound = client.request(method, url);
-    // Default: forward the caller's inbound bearer (browser-pkce login token).
-    // Optional TACHYON_FIELD_API_BEARER_TOKEN override remains for admin/service
-    // accounts only — not required for the normal browser-pkce path.
-    if let Some(authorization) = outbound_authorization(
+    // Bridge exports must authorize the signed-in caller upstream, even when
+    // other Field integrations use an optional service-account override.
+    let authorization = outbound_authorization(
+        &normalized_path,
         config.field_upstream_authorization.as_deref(),
         &parts.headers,
-    ) {
+    );
+    if is_bridge_export_path(&normalized_path) && authorization.is_none() {
+        return proxy_error(
+            StatusCode::UNAUTHORIZED,
+            "Bearer authentication is required",
+        );
+    }
+    if let Some(authorization) = authorization {
         outbound = outbound.header(header::AUTHORIZATION.as_str(), authorization);
     }
     for name in [header::CONTENT_TYPE, header::ACCEPT, header::IF_MATCH] {
@@ -140,11 +147,16 @@ pub async fn proxy_field_api(
         .unwrap_or_else(|_| proxy_error(StatusCode::BAD_GATEWAY, "Field API response was invalid"))
 }
 
-/// Authorization forwarded to Field: optional static override, else inbound bearer.
+/// Bridge exports use the same caller bearer the authentication middleware
+/// verified. Other integrations retain their optional static override.
 fn outbound_authorization<'a>(
+    path: &str,
     upstream_override: Option<&'a str>,
     inbound_headers: &'a axum::http::HeaderMap,
 ) -> Option<&'a str> {
+    if is_bridge_export_path(path) {
+        return crate::course::interfaces::http::caller_bearer(inbound_headers).ok();
+    }
     if let Some(value) = upstream_override.filter(|value| !value.trim().is_empty()) {
         return Some(value);
     }
@@ -568,7 +580,7 @@ mod tests {
             HeaderValue::from_static("Bearer login-access-token"),
         );
         assert_eq!(
-            outbound_authorization(None, &headers),
+            outbound_authorization("/v1/invoices", None, &headers),
             Some("Bearer login-access-token")
         );
     }
@@ -581,7 +593,7 @@ mod tests {
             HeaderValue::from_static("Bearer login-access-token"),
         );
         assert_eq!(
-            outbound_authorization(Some("Bearer cli-override"), &headers),
+            outbound_authorization("/v1/invoices", Some("Bearer cli-override"), &headers),
             Some("Bearer cli-override")
         );
     }
@@ -590,6 +602,127 @@ mod tests {
     fn ignores_empty_inbound_authorization() {
         let mut headers = HeaderMap::new();
         headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer "));
-        assert_eq!(outbound_authorization(None, &headers), None);
+        assert_eq!(outbound_authorization("/v1/invoices", None, &headers), None);
+    }
+
+    #[test]
+    fn bridge_exports_never_fall_back_to_a_service_account() {
+        for path in [
+            "/v1/bridge/exports/objects",
+            "/v1/bridge/exports/definitions",
+            "/v1/bridge/exports/definitions/bxd_1/csv",
+            "/v1/bridge/exports/definitions/bxd_1/render",
+        ] {
+            for authorization in [None, Some("Bearer "), Some("Basic user:password")] {
+                let mut headers = HeaderMap::new();
+                if let Some(value) = authorization {
+                    headers.insert(header::AUTHORIZATION, HeaderValue::from_static(value));
+                }
+                assert_eq!(
+                    outbound_authorization(path, Some("Bearer service-account"), &headers),
+                    None
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn bridge_exports_forward_the_verified_bearer_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            crate::COURSEBOARD_AUTHORIZATION_HEADER,
+            HeaderValue::from_static("Bearer fallback-login"),
+        );
+        let path = "/v1/bridge/exports/definitions/bxd_1/render";
+        assert_eq!(
+            outbound_authorization(path, Some("Bearer service-account"), &headers),
+            Some("Bearer fallback-login")
+        );
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer primary-login"),
+        );
+        assert_eq!(
+            outbound_authorization(path, Some("Bearer service-account"), &headers),
+            Some("Bearer primary-login")
+        );
+        // An invalid primary header must not select an unverified fallback.
+        headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer "));
+        assert_eq!(
+            outbound_authorization(path, Some("Bearer service-account"), &headers),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn bridge_proxy_preserves_upstream_permission_denials_with_a_service_override() {
+        use axum::{body::Body, routing::any, Router};
+        use std::sync::{Arc, Mutex};
+        use tower::ServiceExt;
+
+        let forwarded = Arc::new(Mutex::new(Vec::new()));
+        let captured = forwarded.clone();
+        let upstream = Router::new().route(
+            "/v1/bridge/exports/*path",
+            any(move |headers: HeaderMap| {
+                let captured = captured.clone();
+                async move {
+                    let authorization = headers.get(header::AUTHORIZATION).cloned();
+                    captured.lock().unwrap().push(authorization.clone());
+                    if authorization == Some(HeaderValue::from_static("Bearer service-account")) {
+                        StatusCode::OK
+                    } else {
+                        StatusCode::FORBIDDEN
+                    }
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+        // These routes never query CourseBoard's database.
+        let pool = sqlx::mysql::MySqlPoolOptions::new()
+            .connect_lazy("mysql://root@127.0.0.1:1/unused")
+            .unwrap();
+        let config = crate::cancellation_fees::CancellationFeeConfig {
+            field_api_url: Some(format!("http://{address}")),
+            field_upstream_authorization: Some("Bearer service-account".to_string()),
+            ..Default::default()
+        };
+        let app = crate::build_router(crate::AppState::new_with_cancellation_fee_config(
+            pool,
+            Arc::new(crate::auth::StaticBearerVerifier::new(
+                "caller-login".to_string(),
+            )),
+            config,
+        ));
+        for auth_header in [
+            header::AUTHORIZATION.as_str(),
+            crate::COURSEBOARD_AUTHORIZATION_HEADER,
+        ] {
+            for (method, path) in [
+                (Method::GET, "/v1/bridge/exports/objects"),
+                (Method::GET, "/v1/bridge/exports/definitions"),
+                (Method::POST, "/v1/bridge/exports/definitions"),
+                (Method::GET, "/v1/bridge/exports/definitions/bxd_1/csv"),
+                (Method::POST, "/v1/bridge/exports/definitions/bxd_1/render"),
+            ] {
+                let request = axum::http::Request::builder()
+                    .method(method)
+                    .uri(format!("/field-api{path}"))
+                    .header(auth_header, "Bearer caller-login")
+                    .header("x-operator-id", "tenant_1")
+                    .body(Body::empty())
+                    .unwrap();
+                let response = app.clone().oneshot(request).await.unwrap();
+                assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+            }
+        }
+        let forwarded = forwarded.lock().unwrap();
+        assert_eq!(forwarded.len(), 10);
+        assert!(forwarded.iter().all(|authorization| {
+            *authorization == Some(HeaderValue::from_static("Bearer caller-login"))
+        }));
+        server.abort();
     }
 }
