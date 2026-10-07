@@ -57,6 +57,8 @@ impl Modify for SecurityAddon {
     paths(
         super::http_data_exports::list_data_export_objects,
         super::http_data_exports::list_data_export_rows,
+        crate::common_import_owner::handle,
+        crate::common_import_proxy::proxy,
         http::get_tee_sheet,
         http::get_tee_ledger,
         http::create_reservation,

@@ -199,6 +199,33 @@ mod tests {
 
     const MANIFEST: &str = include_str!("../../../.tachyon/manifests/tachyonfield-golf-auth.yml");
 
+    #[test]
+    fn report_importing_roles_can_list_preview_and_execute_common_imports() {
+        for role in [
+            "field-extension:golf:accounting",
+            "field-extension:golf:manager",
+        ] {
+            let policy = MANIFEST
+                .split_once(&format!("- name: {role}\n"))
+                .unwrap()
+                .1
+                .split("\n- name:")
+                .next()
+                .unwrap();
+            for action in [
+                "field_extension_golf:ImportReservationReports",
+                "field:ListBridgeDefinitions",
+                "field:PreviewBridgeRun",
+                "field:ExecuteBridgeDrafts",
+            ] {
+                assert!(
+                    policy.contains(&format!("- action: {action}\n    effect: allow")),
+                    "{role} must grant {action}"
+                );
+            }
+        }
+    }
+
     /// An action this code requires but the manifest never declares can never
     /// be granted to anyone, so the operation behind it is refused for every
     /// member including the ones who should have it. The two lists are edited

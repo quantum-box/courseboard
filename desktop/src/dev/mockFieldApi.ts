@@ -5173,8 +5173,8 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
 }
 
 export function resolveMockFieldApiJson(path: string, init?: RequestInit): MockFieldResult<Json> {
-  if (!isMockFieldDataEnabled()) return { kind: 'disabled' }
   const pathname = pathnameOf(path)
+  if (!isMockFieldDataEnabled() || pathname.startsWith('/v1/course/data-imports/')) return { kind: 'disabled' }
   const method = methodOf(init)
   if (pathname === '/v1/bridge/exports/objects' && method === 'GET') {
     return hit({ clientDataSupported: true, items: [{

@@ -326,6 +326,7 @@ pub struct ReservationReportRow {
     day_part: ReservationReportDayPart,
     group_count: i64,
     caddie_attached_group_count: i64,
+    source_row_number: Option<usize>,
 }
 
 impl ReservationReportRow {
@@ -354,7 +355,16 @@ impl ReservationReportRow {
             day_part,
             group_count,
             caddie_attached_group_count,
+            source_row_number: None,
         })
+    }
+
+    pub fn with_source_row_number(mut self, number: usize) -> Self {
+        self.source_row_number = Some(number);
+        self
+    }
+    pub fn source_row_number(&self) -> Option<usize> {
+        self.source_row_number
     }
 
     pub fn source_course_key(&self) -> &str {

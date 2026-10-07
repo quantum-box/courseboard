@@ -429,6 +429,7 @@ export function ReservationReportImportPage() {
         </Notice>
       ) : null}
 
+      <Notice tone="info">CSV・Excelの予約表集計は共通取込で全行を確認できます。<Button onClick={() => navigate('golf/data-imports/courseboardReservationReports')}>共通取込を開く</Button></Notice>
       {stage === 'choose' ? (
         <Panel title={t('reservationReportImport:step.choose')} className="reservation-report-panel">
           <form className="reservation-report-choose-form" onSubmit={event => { void handlePreview(event) }}>

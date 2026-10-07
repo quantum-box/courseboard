@@ -26,6 +26,7 @@ export const nav: DeepPartial<typeof source> = {
       label: 'Customers',
       description: 'Members and visitors',
     },
+    'golf/data-imports': { label: 'Import data', description: 'Customers, daily budgets and reservation counts' },
     'golf/reservation-report-import': {
       label: 'Booking report',
       description: 'Review and save daily CSV, Excel, or PDF totals',

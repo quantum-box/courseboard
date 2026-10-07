@@ -207,6 +207,14 @@ policies:
     effect: allow
   - action: field:ManageCustomers
     effect: allow
+  # Customer common imports use Bridge discovery, validation, and execution.
+  # Each target still requires its owning business permissions.
+  - action: field:ListBridgeDefinitions
+    effect: allow
+  - action: field:PreviewBridgeRun
+    effect: allow
+  - action: field:ExecuteBridgeDrafts
+    effect: allow
   - action: field:ListMembership
     effect: allow
   - action: field:RegisterMembership
@@ -308,6 +316,12 @@ policies:
   # `COURSEBOARD_FIELD_GENERIC_PATHS` on, or the import 403s.
   - action: field:PreviewBridgeRun
     effect: allow
+  # Common import confirmation executes through Field; owning golf actions
+  # still restrict the available targets and writes.
+  - action: field:ListBridgeDefinitions
+    effect: allow
+  - action: field:ExecuteBridgeDrafts
+    effect: allow
   - action: accounting:CreateInvoice
     effect: allow
   # Everything the cancellation-fee screens do, not just the create. The list
@@ -395,6 +409,12 @@ policies:
   # instead of the golf extension alias (ADR-0010). Apply this before turning
   # `COURSEBOARD_FIELD_GENERIC_PATHS` on, or the import 403s.
   - action: field:PreviewBridgeRun
+    effect: allow
+  # Common import confirmation executes through Field; owning golf actions
+  # still restrict the available targets and writes.
+  - action: field:ListBridgeDefinitions
+    effect: allow
+  - action: field:ExecuteBridgeDrafts
     effect: allow
   - action: accounting:CreateInvoice
     effect: allow

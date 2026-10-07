@@ -82,7 +82,7 @@ mod record_visit_checkin;
 mod refresh_customer_summaries;
 mod replace_caddie_memberships;
 mod replace_product_slots;
-mod reservation_report_import;
+pub(crate) mod reservation_report_import;
 mod reservation_report_migration;
 mod search_customers;
 mod seed_demo_board;

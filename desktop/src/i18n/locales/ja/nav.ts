@@ -24,6 +24,7 @@ export const nav = {
       label: '顧客台帳',
       description: '会員とビジターの記録',
     },
+    'golf/data-imports': { label: 'データをとりこむ', description: '顧客台帳・日次予算・予約表集計の確認と保存' },
     'golf/reservation-report-import': {
       label: '予約表をとりこむ',
       description: 'CSV・Excel・PDFの日別集計を確認して保存する',

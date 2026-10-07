@@ -1,28 +1,21 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import {
   CalendarRange,
-  Download,
-  FileSpreadsheet,
   Save,
   Target,
-  Upload,
 } from 'lucide-react'
 import {
-  type ChangeEvent,
   type FormEvent,
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import {
   currentYearMonth,
-  downloadText,
   courseboardApiJson,
-  courseboardApiText,
   yen,
 } from '../../api'
 import { useRegisterPageReload } from '../../lib/pageReload'
@@ -41,7 +34,7 @@ import {
   ResourceError,
 } from '../../components/Page'
 import { YearMonthPicker, useRouteYearMonthValue } from '../../components/YearMonthPicker'
-import { useRouteParamState } from '../../lib/router'
+import { navigate, useRouteParamState } from '../../lib/router'
 import { yearMonthRange } from '../../lib/yearMonth'
 
 type GolfCourse = {
@@ -80,33 +73,6 @@ type BudgetDraft = {
   targetCaddyAttachedRatio: string
 }
 
-const CSV_HEADER =
-  'golf_course_id,date,target_revenue,target_average_spend,target_caddy_attached_ratio'
-
-type CsvColumn = {
-  name: string
-  labelKey:
-    | 'golfCourseId'
-    | 'date'
-    | 'targetRevenue'
-    | 'targetAverageSpend'
-    | 'targetCaddyAttachedRatio'
-  example: string
-}
-
-/**
- * The header names are the wire format the import endpoint forwards verbatim,
- * so they stay in English. Each one is paired with a translated explanation so
- * the people preparing the file can tell what belongs in the column.
- */
-const CSV_COLUMNS: CsvColumn[] = [
-  { name: 'golf_course_id', labelKey: 'golfCourseId', example: 'course_001' },
-  { name: 'date', labelKey: 'date', example: '2026-04-01' },
-  { name: 'target_revenue', labelKey: 'targetRevenue', example: '1200000' },
-  { name: 'target_average_spend', labelKey: 'targetAverageSpend', example: '12000' },
-  { name: 'target_caddy_attached_ratio', labelKey: 'targetCaddyAttachedRatio', example: '0.70' },
-]
-
 function monthRange(yearMonth: string, fallbackYearMonth: string) {
   const range = yearMonthRange(yearMonth) ?? yearMonthRange(fallbackYearMonth)
   return range
@@ -143,14 +109,6 @@ function revenueAchievementRate(actualRevenue: number, targetRevenue: number) {
   return targetRevenue > 0 ? actualRevenue / targetRevenue : null
 }
 
-function normalizeCsvHeader(contents: string) {
-  return (contents.split(/\r?\n/, 1)[0] ?? '')
-    .replace(/^\uFEFF/, '')
-    .split(',')
-    .map(value => value.trim())
-    .join(',')
-}
-
 export function BudgetsPage() {
   const { t } = useTranslation(['budgets', 'common'])
   const timezone = useTenantTimezone()
@@ -177,11 +135,7 @@ export function BudgetsPage() {
   }))
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  const [csvContents, setCsvContents] = useState('')
-  const [csvFilename, setCsvFilename] = useState('')
-  const [csvError, setCsvError] = useState<string | null>(null)
-  const [importing, setImporting] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+
 
   const range = useMemo(
     () => monthRange(yearMonth, tenantYearMonth),
@@ -327,60 +281,6 @@ export function BudgetsPage() {
     }
   }
 
-  async function chooseCsv(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    setCsvError(null)
-    if (!file) {
-      setCsvContents('')
-      setCsvFilename('')
-      return
-    }
-    try {
-      const contents = (await file.text()).replace(/^\uFEFF/, '')
-      setCsvContents(contents)
-      setCsvFilename(file.name)
-      if (normalizeCsvHeader(contents) !== CSV_HEADER) {
-        setCsvError(t('budgets:csv.headerError', { header: CSV_HEADER }))
-      }
-    } catch {
-      setCsvContents('')
-      setCsvFilename('')
-      setCsvError(t('budgets:csv.readError'))
-    }
-  }
-
-  async function importCsv(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!csvContents || csvError) return
-    setImporting(true)
-    try {
-      await courseboardApiText(
-        '/v1/course/daily-budgets/import',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/csv' },
-          body: csvContents,
-        },
-      )
-      showToast({
-        tone: 'success',
-        title: t('common:state.saved'),
-        message: t('budgets:csv.imported', { name: csvFilename }),
-      })
-      setCsvContents('')
-      setCsvFilename('')
-      if (fileInputRef.current) fileInputRef.current.value = ''
-      await load()
-    } catch (error) {
-      setCsvError(
-        error instanceof Error ? error.message : t('budgets:csv.importError'),
-      )
-    } finally {
-      setImporting(false)
-    }
-  }
-
-  const previewLines = csvContents.split(/\r?\n/).slice(0, 8).join('\n')
 
   return (
     <div className="page-stack">
@@ -622,106 +522,8 @@ export function BudgetsPage() {
               )}
             </Panel>
 
-            <Panel
-              title={t('budgets:csv.title')}
-              description={t('budgets:csv.description')}
-              actions={(
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => downloadText(
-                    'golf-daily-budgets-template.csv',
-                    `${CSV_HEADER}\ncourse_001,${yearMonth}-01,1200000,12000,0.70\n`,
-                  )}
-                >
-                  <Download /> {t('budgets:csv.template')}
-                </Button>
-              )}
-            >
-              <div className="grid gap-2 pb-3">
-                <div className="text-xs font-medium">{t('budgets:csv.columns.title')}</div>
-                <p className="text-2xs text-muted-foreground">
-                  {t('budgets:csv.columns.description')}
-                </p>
-                <DataTable
-                  rows={CSV_COLUMNS}
-                  rowKey={column => column.name}
-                  columns={[
-                    {
-                      key: 'name',
-                      header: t('budgets:csv.columns.header'),
-                      mobileLabel: t('budgets:csv.columns.header'),
-                      cell: column => <code className="text-2xs">{column.name}</code>,
-                    },
-                    {
-                      key: 'meaning',
-                      header: t('budgets:csv.columns.meaning'),
-                      mobileLabel: t('budgets:csv.columns.meaning'),
-                      cell: column => (
-                        <span className="text-xs">
-                          {t(`budgets:csv.columns.${column.labelKey}` as 'budgets:csv.columns.date')}
-                        </span>
-                      ),
-                    },
-                    {
-                      key: 'example',
-                      header: t('budgets:csv.columns.example'),
-                      mobileLabel: t('budgets:csv.columns.example'),
-                      cell: column => <code className="text-2xs">{column.example}</code>,
-                    },
-                  ]}
-                />
-                {courses.length > 0 ? (
-                  <div className="grid gap-1 rounded-md border border-border bg-muted/20 p-3">
-                    <div className="text-xs font-medium">
-                      {t('budgets:csv.columns.courseIdsTitle')}
-                    </div>
-                    <ul className="grid gap-0.5">
-                      {courses.map(course => (
-                        <li key={course.id} className="text-2xs text-muted-foreground">
-                          {course.name}
-                          {' = '}
-                          <code>{course.id}</code>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-              </div>
-
-              <form className="grid gap-3" onSubmit={importCsv}>
-                <Field
-                  label={t('budgets:csv.file')}
-                  required
-                  hint={t('budgets:csv.fileHint', { header: CSV_HEADER })}
-                >
-                  <Input
-                    ref={fileInputRef}
-                    type="file"
-                    accept=".csv,text/csv"
-                    onChange={event => void chooseCsv(event)}
-                  />
-                </Field>
-                {csvContents ? (
-                  <div className="overflow-hidden rounded-md border border-border bg-muted/30">
-                    <div className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs font-medium">
-                      <FileSpreadsheet className="size-3.5" /> {csvFilename}
-                    </div>
-                    <pre className="max-h-48 overflow-auto p-3 text-2xs leading-5 text-muted-foreground">
-                      {previewLines}
-                    </pre>
-                  </div>
-                ) : null}
-                {csvError ? <Notice tone="danger">{csvError}</Notice> : null}
-                <Button
-                  variant="primary"
-                  size="lg"
-                  type="submit"
-                  disabled={!csvContents || Boolean(csvError) || importing}
-                >
-                  <Upload /> {importing ? t('budgets:csv.importing') : t('budgets:csv.apply')}
-                </Button>
-              </form>
+            <Panel title="日次予算をとりこむ" description="CSV・Excelを全件確認してから保存します。大きいファイルは分割して処理します。">
+              <Button onClick={() => navigate('golf/data-imports/dailyBudgets')}>データ取込を開く</Button>
             </Panel>
           </div>
 
