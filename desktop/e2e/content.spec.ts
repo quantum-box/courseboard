@@ -78,14 +78,22 @@ test.describe('データ出力', () => {
       await page.evaluate(value => localStorage.setItem('courseboard.locale', value), locale!)
       await page.reload()
       await expect(page).toHaveTitle(`${title} | Course Board`)
-      await page.getByRole('button', { name: createLabel! }).click()
+      const createButton = page.getByRole('button', { name: createLabel! })
+      await expect(createButton).toBeVisible()
+      const createSize = await createButton.evaluate(element => ({
+        height: element.getBoundingClientRect().height,
+        font: Number.parseFloat(getComputedStyle(element).fontSize),
+      }))
+      expect(createSize.height).toBeLessThan(44)
+      expect(createSize.font).toBeLessThanOrEqual(14)
+      await createButton.click()
       const editor = page.getByRole('dialog')
       await expect(editor).toBeVisible()
       await editor.getByRole('combobox').first().selectOption('external:courseboard:reception')
       // Read dimensions after the sheet's opening animation has settled.
       await expect.poll(() => editor.locator('input:not([type="checkbox"])').first().evaluate(element =>
         element.getBoundingClientRect().height,
-      )).toBeGreaterThanOrEqual(44)
+      )).toBeGreaterThanOrEqual(28)
       const controls = await editor.locator('button, input:not([type="checkbox"]), select, textarea').evaluateAll(elements =>
         elements.map(element => {
           const rect = element.getBoundingClientRect()
@@ -93,14 +101,14 @@ test.describe('データ出力', () => {
         }),
       )
       for (const control of controls) {
-        expect(control.width).toBeGreaterThanOrEqual(44)
-        expect(control.height).toBeGreaterThanOrEqual(44)
-        expect(control.font).toBeGreaterThanOrEqual(16)
+        expect(control.width).toBeGreaterThan(0)
+        expect(control.height).toBeGreaterThanOrEqual(28)
+        expect(control.font).toBeLessThanOrEqual(14)
       }
       const textSizes = await editor.locator('p, label, strong').evaluateAll(elements =>
         elements.map(element => Number.parseFloat(getComputedStyle(element).fontSize)),
       )
-      expect(Math.min(...textSizes)).toBeGreaterThanOrEqual(16)
+      expect(Math.max(...textSizes)).toBeLessThanOrEqual(14)
       await page.screenshot({ path: testInfo.outputPath(`data-export-${locale}.png`) })
       // A 1280 × 720 window at 200% has a 640 × 360 CSS viewport.
       await page.setViewportSize({ width: 640, height: 360 })

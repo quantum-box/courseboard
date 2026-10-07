@@ -1,41 +1,7 @@
-.data-exports-page,
-.data-export-editor {
-  font-size: 16px;
-  line-height: 1.5;
-}
-
 .data-exports-page {
   display: grid;
   gap: 16px;
   min-width: 0;
-}
-
-.data-exports-page input,
-.data-exports-page button,
-.data-export-editor button,
-.data-export-editor input:not([type='checkbox']),
-.data-export-editor select,
-.data-export-editor textarea,
-.data-export-help summary {
-  min-height: 44px;
-  min-width: 44px;
-  font-size: 16px;
-  line-height: 1.5;
-}
-
-.data-exports-page .data-table th,
-.data-exports-page .data-table td,
-.data-exports-page p,
-.data-exports-page small,
-.data-exports-page .field-label,
-.data-export-editor p,
-.data-export-editor .field-label,
-.data-export-editor .field-hint,
-.data-export-editor .optional,
-.data-export-editor .field-label span,
-.data-exports-page td span {
-  font-size: 16px;
-  line-height: 1.5;
 }
 
 .data-export-fields {
@@ -66,14 +32,13 @@
 .data-export-checkbox {
   display: flex;
   align-items: center;
-  gap: 12px;
-  min-height: 44px;
+  gap: 8px;
   cursor: pointer;
 }
 
 .data-export-checkbox input {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 
