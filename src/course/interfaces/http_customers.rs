@@ -2187,7 +2187,7 @@ pub async fn create_reception_ocr_job(
         .iter()
         .map(|sheet| {
             ReceptionOcrJobSheet::try_new(&sheet.content_type, sheet.size)?
-                .with_sha256(sheet.sha256)
+                .with_sha256(sheet.sha256.clone())
         })
         .collect::<Result<Vec<_>, _>>()
         .map_err(AppError::from)?;
