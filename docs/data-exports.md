@@ -43,6 +43,8 @@ CourseBoardの保存データはページ末尾まで取得する。Fieldへの�
 
 ## リリース順序と検証
 
+ゴルフ場の既存ロール（閲覧・受付・キャディ管理・会計・管理者）に、Fieldの出力設定参照・保存・CSV生成権限を追加する。リリース時に`.tachyon/manifests/tachyonfield-golf-auth.yml`の更新も反映する。各出力元の参照権限による制限は維持する。計算専用ロールには追加しない。
+
 Field PR [#1575](https://github.com/quantum-box/tachyonfield/pull/1575)を先に反映する。`clientDataSupported: true`を返すAPIでのみCourseBoardの追加出力元を表示する。従来のAPIではFieldの既存出力元を引き続き使える。
 
 ローカルの開発用モックには全出力元カタログと受付の独自項目回答を用意する。E2Eで設定保存・並び替え・受付CSVの実バイト・3言語・200%相当と390px表示を検証する。Rustでは出力元の権限、未認証リクエスト、SQLと実スキーマの整合、テナントをまたぐ回答の分離、Field標準項目と独自回答の結合を検証する。

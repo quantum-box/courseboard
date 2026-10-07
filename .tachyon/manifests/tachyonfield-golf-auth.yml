@@ -152,6 +152,14 @@ policies:
   description: Read-only access to the golf board - tee sheet, courses, caddies, shifts, budgets, and fee simulation. Payroll and settlement are not included
   global: true
   actions:
+  # Shared export settings and CSV rendering; each source retains its own
+  # read permission in CourseBoard or Field.
+  - action: field:ListBridgeExportDefinitions
+    effect: allow
+  - action: field:ManageBridgeExportDefinitions
+    effect: allow
+  - action: field:ExportBridgeDefinition
+    effect: allow
   - action: field:ListReservations
     effect: allow
   - action: field:ListHrm
@@ -199,6 +207,14 @@ policies:
   description: Front-desk work - take and change bookings, run the tee sheet, register customers and put them on a plan. No caddie roster administration, pricing, or payroll; reads caddie shift planning for the tee ledger
   global: true
   actions:
+  # Shared export settings and CSV rendering; each source retains its own
+  # read permission in CourseBoard or Field.
+  - action: field:ListBridgeExportDefinitions
+    effect: allow
+  - action: field:ManageBridgeExportDefinitions
+    effect: allow
+  - action: field:ExportBridgeDefinition
+    effect: allow
   - action: field:ListReservations
     effect: allow
   - action: field:ManageReservations
@@ -256,6 +272,14 @@ policies:
   description: Caddie operations - the roster, who is on which round, availability, and shift planning. Reads the tee sheet it plans against
   global: true
   actions:
+  # Shared export settings and CSV rendering; each source retains its own
+  # read permission in CourseBoard or Field.
+  - action: field:ListBridgeExportDefinitions
+    effect: allow
+  - action: field:ManageBridgeExportDefinitions
+    effect: allow
+  - action: field:ExportBridgeDefinition
+    effect: allow
   - action: field:ListReservations
     effect: allow
   - action: field:ManageReservations
@@ -297,6 +321,14 @@ policies:
   description: Golf money - settlement, payroll, budgets, caddie grade fees, and cancellation fees. Reservations and the roster stay read-only
   global: true
   actions:
+  # Shared export settings and CSV rendering; each source retains its own
+  # read permission in CourseBoard or Field.
+  - action: field:ListBridgeExportDefinitions
+    effect: allow
+  - action: field:ManageBridgeExportDefinitions
+    effect: allow
+  - action: field:ExportBridgeDefinition
+    effect: allow
   - action: field:ListReservations
     effect: allow
   - action: field:ManageReservations
@@ -383,6 +415,14 @@ policies:
   description: Full golf operations - everything the golf roles cover. Member management stays with the Field administrator role
   global: true
   actions:
+  # Shared export settings and CSV rendering; each source retains its own
+  # read permission in CourseBoard or Field.
+  - action: field:ListBridgeExportDefinitions
+    effect: allow
+  - action: field:ManageBridgeExportDefinitions
+    effect: allow
+  - action: field:ExportBridgeDefinition
+    effect: allow
   - action: field:ListReservations
     effect: allow
   - action: field:ManageReservations
