@@ -63,6 +63,13 @@ export function exportObjectLabel(object: ExportObject) {
   return i18next.t(key)
 }
 
+/** Custom labels belong to the club; built-in columns follow the UI locale. */
+export function exportFieldLabel(object: ExportObject, field: ExportObject['fields'][number]) {
+  const source = object.key.match(/^external:courseboard:([A-Za-z0-9_-]+)$/)?.[1]
+  if (!source || field.field.startsWith('custom.')) return field.label
+  return i18next.t(`dataExports:courseboardFields.${source}.${field.field.replaceAll('.', '__')}`, { defaultValue: field.label })
+}
+
 export type ExportMappingField = {
   source: string
   target: string

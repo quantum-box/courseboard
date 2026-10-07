@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   createExportDefinition, downloadExportCsv, emptyExportDraft, exportDraftError,
-  exportObjectLabel, loadDataExports, type ExportDefinition, type ExportDraft,
+  exportFieldLabel, exportObjectLabel, loadDataExports, type ExportDefinition, type ExportDraft,
 } from './api'
 import objects from '../../dev/mockExportObjects.json'
 import { i18next } from '../../i18n'
@@ -93,6 +93,28 @@ describe('Field shared data exports', () => {
       await i18next.changeLanguage('ja')
       expect(exportObjectLabel(objects[0]!)).toBe('受付登録データ')
       expect(exportObjectLabel({ key: 'external:unknown:future', label: 'Future source', fields: [] })).toBe('Future source')
+    } finally {
+      await i18next.changeLanguage(previous)
+    }
+  })
+
+  it('provides translated, distinct default headers for every built-in source', async () => {
+    const previous = i18next.language
+    try {
+      for (const locale of ['ja', 'ja-plain', 'en']) {
+        await i18next.changeLanguage(locale)
+        for (const object of objects) {
+          const columns = object.fields.map(field => {
+            const label = exportFieldLabel(object, field)
+            if (locale === 'en') expect(label).not.toMatch(/[\u3040-\u30ff\u3400-\u9fff]/)
+            return { ...field, label, target: label, included: true }
+          })
+          expect(exportDraftError({ ...draft, sourceObject: object.key, columns })).toBeNull()
+        }
+      }
+      const object = objects[0]!
+      expect(exportFieldLabel(object, { field: 'custom.name', label: 'ゴルフ場独自の質問' })).toBe('ゴルフ場独自の質問')
+      expect(exportFieldLabel(object, { field: 'future_field', label: 'Future field' })).toBe('Future field')
     } finally {
       await i18next.changeLanguage(previous)
     }

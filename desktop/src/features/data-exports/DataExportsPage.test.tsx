@@ -6,6 +6,8 @@ import { clearResourceCache } from '../../hooks/useResource'
 import { PageReloadProvider } from '../../lib/pageReload'
 import { DataExportsPage } from './DataExportsPage'
 import type { ExportDefinition } from './api'
+import catalogue from '../../dev/mockExportObjects.json'
+import { i18next } from '../../i18n'
 
 const api = vi.hoisted(() => ({ json: vi.fn(), text: vi.fn(), download: vi.fn() }))
 vi.mock('../../api', async original => ({
@@ -75,6 +77,43 @@ describe('data export settings page', () => {
     expect(JSON.parse(request.body).mapping.fields.map((field: { source: string; target: string }) => [field.source, field.target]))
       .toEqual([['reservation_number', '予約番号'], ['customer_name', 'お客様']])
     expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('saves all cancellation columns with English labels and distinct reservation headers', async () => {
+    const previous = i18next.language
+    try {
+      await i18next.changeLanguage('en')
+      const object = catalogue.find(source => source.key === 'external:courseboard:cancellations')!
+      definitions = []
+      api.json.mockImplementation(async (path: string, init?: RequestInit) => {
+        if (path.endsWith('/objects')) return { items: [object] }
+        if (path.endsWith('/definitions') && init?.method === 'POST') {
+          const saved = { ...JSON.parse(String(init.body)), id: 'bxd_new' }
+          definitions.push(saved)
+          return saved
+        }
+        return { items: [...definitions] }
+      })
+      renderPage()
+      fireEvent.click(await screen.findByRole('button', { name: 'Add export settings' }))
+      const dialog = await screen.findByRole('dialog')
+      fireEvent.change(within(dialog).getByRole('textbox', { name: /Export settings name/ }), { target: { value: 'Cancellation export' } })
+      fireEvent.change(within(dialog).getByRole('combobox', { name: /Data to export/ }), { target: { value: object.key } })
+      expect(within(dialog).getByRole('checkbox', { name: 'Reservation ID' })).toBeTruthy()
+      expect(within(dialog).getByRole('checkbox', { name: 'Reservation number' })).toBeTruthy()
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Select all columns' }))
+      const save = within(dialog).getByRole<HTMLButtonElement>('button', { name: 'Save' })
+      expect(save.disabled).toBe(false)
+      fireEvent.click(save)
+      await screen.findByText('Cancellation export')
+      expect(definitions[0]!.mapping.fields.filter(field => field.source.startsWith('reservation_'))
+        .map(field => [field.source, field.target])).toEqual([
+        ['reservation_id', 'Reservation ID'], ['reservation_number', 'Reservation number'],
+      ])
+    } finally {
+      cleanup()
+      await i18next.changeLanguage(previous)
+    }
   })
 
   it('keeps download failures beside the affected row and retries without saving an error body as a CSV', async () => {

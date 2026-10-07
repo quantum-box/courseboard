@@ -14,7 +14,7 @@ import { showToast } from '../../lib/toast'
 import { SettingsSubPage } from '../settings/SettingsSubPage'
 import {
   createExportDefinition, downloadExportCsv, emptyExportDraft, exportDraftError,
-  exportErrorMessage, exportObjectLabel, loadDataExports, type ExportDefinition, type ExportDraft, type ExportObject,
+  exportErrorMessage, exportFieldLabel, exportObjectLabel, loadDataExports, type ExportDefinition, type ExportDraft, type ExportObject,
 } from './api'
 import './dataExports.css'
 
@@ -143,7 +143,10 @@ function ExportDefinitionEditor({ objects, onClose, onSaved }: {
     const source = objects.find(object => object.key === key)
     setDraft(current => ({
       ...current, sourceObject: key,
-      columns: (source?.fields ?? []).map(field => ({ ...field, included: false, target: field.label })),
+      columns: source ? source.fields.map(field => {
+        const label = exportFieldLabel(source, field)
+        return { ...field, label, included: false, target: label }
+      }) : [],
     }))
     setSaveError(null)
   }
