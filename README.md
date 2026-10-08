@@ -380,6 +380,18 @@ apply 対象にするため、古い copy が残っていると global な actio
 巻き戻します。Field 側の権限を確認したいときは
 `quantum-box/tachyonfield` の `.tachyon/manifests/tachyonfield-auth.yml` を直接参照します。
 
+キャンセル料専用Policy（PLT-5224）はFieldが所有する
+`field:CancellationFeeViewer`（Listのみ）と`field:CancellationFeeBilling`（List＋Manage）です。
+メンバー画面は対象テナントのカタログに現れたPolicyを名前で解決し、基本ロールなしで
+選択・保存できます。`field:viewer`やゴルフ経理を動作の補助として追加しないでください。
+
+この段階はカタログ表示の準備です。専用の請求経路はまだ公開していません。
+Field側のAction・Policy登録を確認した後、PLT-5226/5227/5228のサーバー所有の請求目的と
+専用API、PLT-5225/5229のログイン・共通設定・UIガードを揃えて切り替えます。
+旧`field_extension_golf:ManageCancellationFees`の置換はこの切替に合わせて行います。
+旧Actionや通常請求書・SMSの権限を専用ユーザーへfallbackとして付与しないでください。
+適用手順はFieldの`docs/cancellation-fee-policy-rollout.md`を参照してください。
+
 ### Feature flags
 
 Feature flag の配置は deployment-managed platform tenant の責務です。tenant 固有の

@@ -550,6 +550,14 @@ test.describe('設定', () => {
     await page.getByRole('button', { name: '高橋 誠 のロールを編集' }).click()
     await expect(page.getByRole('dialog')).toBeVisible()
     await page.keyboard.press('Escape')
+
+    await page.getByRole('button', { name: 'メンバーを招待', exact: true }).click()
+    const invitation = page.getByRole('dialog')
+    await expect(invitation.getByRole('checkbox', { checked: true })).toHaveCount(0)
+    await invitation.getByRole('checkbox', { name: /^キャンセル料請求担当/ }).check()
+    await expect(invitation.getByRole('checkbox', { checked: true })).toHaveCount(1)
+    await expect(invitation.getByRole('checkbox', { name: /^スタッフ/ })).not.toBeChecked()
+    await page.keyboard.press('Escape')
   })
 })
 

@@ -153,6 +153,14 @@ export function domainPolicies(catalog: ErpCustomPolicy[]): ErpCustomPolicy[] {
  * policies stay recognizable instead of rendering blank.
  */
 const POLICY_TEXT: ReadonlyMap<string, { label: () => string; description: () => string }> = new Map([
+  ['field:CancellationFeeViewer', {
+    label: () => i18next.t('members:policies.cancellationFeeViewer.label'),
+    description: () => i18next.t('members:policies.cancellationFeeViewer.description'),
+  }],
+  ['field:CancellationFeeBilling', {
+    label: () => i18next.t('members:policies.cancellationFeeBilling.label'),
+    description: () => i18next.t('members:policies.cancellationFeeBilling.description'),
+  }],
   ['field:sales', {
     label: () => i18next.t('members:policies.fieldSales.label'),
     description: () => i18next.t('members:policies.fieldSales.description'),

@@ -449,16 +449,6 @@ function EditRolesDialog({
   )
 }
 
-/**
- * Everyday access, preselected — but only if this tenant actually has the
- * policy. A default id that is not in the catalogue would be rejected on
- * submit, with nothing on screen explaining why.
- */
-function defaultInvitePolicyIds(catalog: ErpCustomPolicy[]) {
-  const staff = policyIdByName(catalog, 'field:staff')
-  return staff ? [staff] : []
-}
-
 function InviteDialog({
   catalog,
   onInvited,
@@ -469,7 +459,8 @@ function InviteDialog({
   const { t } = useTranslation(['members', 'common'])
   const [open, setOpen] = useState(false)
   const [email, setEmail] = useState('')
-  const [selected, setSelected] = useState<string[]>(() => defaultInvitePolicyIds(catalog))
+  // Every grant is explicit: preselecting staff would widen a dedicated policy.
+  const [selected, setSelected] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -496,7 +487,7 @@ function InviteDialog({
         }),
       })
       setEmail('')
-      setSelected(defaultInvitePolicyIds(catalog))
+      setSelected([])
       setOpen(false)
       onInvited(response, selected)
     } catch (cause) {

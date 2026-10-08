@@ -775,6 +775,8 @@ const mockIamCustomPolicies = [
   { id: 'pol_role_admin', name: 'field:admin', description: 'テナント全体の管理' },
   { id: 'pol_role_staff', name: 'field:staff', description: '日々の業務操作' },
   { id: 'pol_role_viewer', name: 'field:viewer', description: '閲覧のみ' },
+  { id: 'pol_cancellation_fee_viewer', name: 'field:CancellationFeeViewer', description: 'Read cancellation-fee invoices only' },
+  { id: 'pol_cancellation_fee_billing', name: 'field:CancellationFeeBilling', description: 'Read, create, update, and send cancellation-fee invoices only' },
   { id: 'pol_caddie_viewer', name: 'キャディ管理閲覧者', description: '名簿・配置・勤怠・給与の閲覧' },
   { id: 'pol_caddie_admin', name: 'キャディ管理管理者', description: '名簿・配置・勤怠・給与の作成・更新' },
   { id: 'pol_billing_viewer', name: '経理閲覧者', description: '予算・精算・キャンセル料の閲覧' },
