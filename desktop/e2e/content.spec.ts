@@ -435,9 +435,10 @@ test.describe('キャンセル料', () => {
     await expect(page.getByRole('heading', { name: 'Taro Yamada' })).toBeVisible()
     await expect(page.getByRole('heading', { name: '請求の明細' })).toBeVisible()
     await expect(page.getByText('￥11,000').first()).toBeVisible()
-    const statusSelect = page.locator('select')
-    await expect(statusSelect).toBeVisible()
-    await expect(statusSelect.locator('option', { hasText: '入金ずみ' })).toHaveCount(0)
+    // The dedicated boundary exposes only notes and destination-email updates;
+    // invoice status is display-only and delivery has its own send action.
+    await expect(page.locator('input[type="email"]')).toBeVisible()
+    await expect(page.getByRole('button', { name: '変更する' })).toBeVisible()
   })
 
   test('新規請求フォームが表示される', async ({ page }) => {
@@ -463,10 +464,11 @@ test.describe('キャンセル料', () => {
     await page.getByRole('textbox', { name: '送り先のメール' }).fill('e2e@example.com')
     await page.getByRole('button', { name: '送る内容を確認する' }).click()
 
-    // Nothing is sent until the recipient, the amount, the due date and
-    // whether this also writes to the ledger have been shown once.
+    // Nothing is sent until the recipient snapshot, amount, due date, and
+    // delivery destination have been shown once.
     await expect(page.getByText('この内容で送ります')).toBeVisible()
-    await expect(page.getByText('登録ずみの相手です')).toBeVisible()
+    await expect(page.getByText('本田 康彦').last()).toBeVisible()
+    await expect(page.getByText('e2e@example.com')).toBeVisible()
     await page.getByRole('button', { name: '請求を作って送る' }).click()
 
     await expect(page).toHaveURL(/\/cancellation-fees\/inv_mock_created_\d+$/)
@@ -481,12 +483,8 @@ test.describe('キャンセル料', () => {
     await expect(page.getByRole('heading', { name: 'Paid Demo Customer' })).toBeVisible()
     await expect(page.getByText('入金ずみ').first()).toBeVisible()
 
-    await expect(page.locator('select')).toBeDisabled()
-    const checkboxes = page.locator('input[type="checkbox"]')
-    await expect(checkboxes).toHaveCount(2)
-    for (const checkbox of await checkboxes.all()) {
-      await expect(checkbox).toBeDisabled()
-    }
+    await expect(page.locator('input[type="email"]')).toBeDisabled()
+    await expect(page.locator('textarea')).toBeDisabled()
     await expect(page.getByRole('button', { name: '変更する' })).toBeDisabled()
     await expect(page.getByRole('button', { name: 'リンクを作って送り直す' })).toBeDisabled()
   })

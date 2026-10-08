@@ -234,6 +234,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
       regenerateLink: 'Regenerate the payment link',
       sendEmail: 'Send email',
       email: 'Destination email',
+      emailRequired: 'The destination email cannot be cleared here.',
       notes: 'Notes',
       submit: 'Update',
       submitting: 'Updating…',

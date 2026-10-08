@@ -218,6 +218,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
       regenerateLink: '支払い用のリンクを作り直す',
       sendEmail: 'メールを送る',
       email: '送信先メールアドレス',
+      emailRequired: '送信先のメールアドレスを空にすることはできません。',
       notes: '備考',
       submit: 'この内容にする',
       submitting: '変えています…',

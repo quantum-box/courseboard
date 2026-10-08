@@ -70,6 +70,67 @@ export {
 type InvoiceStatus = 'Draft' | 'Sent' | 'SendFailed' | 'Paid' | 'Overdue'
 
 const DELIVERY_KEY_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+const CREATE_KEY_STORAGE_PREFIX = 'courseboard:cancellation-fee:create-keys'
+
+function createIdentityHash(identity: string) {
+  // The form payload can contain recipient PII. Store a compact identity
+  // fingerprint instead of the payload itself while retaining deterministic
+  // lookup after a reload.
+  let first = 0x811c9dc5
+  let second = 0x9e3779b9
+  for (let index = 0; index < identity.length; index += 1) {
+    const code = identity.charCodeAt(index)
+    first = Math.imul(first ^ code, 0x01000193)
+    second = Math.imul(second ^ (code + index), 0x85ebca6b)
+  }
+  return `${(first >>> 0).toString(16).padStart(8, '0')}${(second >>> 0).toString(16).padStart(8, '0')}`
+}
+
+function createKeyStorageKey() {
+  return `${CREATE_KEY_STORAGE_PREFIX}:${fieldTenant()}`
+}
+
+function loadPersistedCreateKeys() {
+  try {
+    const raw = sessionStorage.getItem(createKeyStorageKey())
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([identityHash, key]) => (
+        /^[0-9a-f]{16}$/.test(identityHash)
+        && typeof key === 'string'
+        && DELIVERY_KEY_PATTERN.test(key)
+      )),
+    )
+  } catch {
+    return {}
+  }
+}
+
+function persistedCreateKey(identity: string) {
+  return loadPersistedCreateKeys()[createIdentityHash(identity)]
+}
+
+function savePersistedCreateKey(identity: string, key: string) {
+  try {
+    const keys = loadPersistedCreateKeys()
+    keys[createIdentityHash(identity)] = key
+    sessionStorage.setItem(createKeyStorageKey(), JSON.stringify(keys))
+  } catch {
+    // Session storage is a retry aid; the request itself remains valid without it.
+  }
+}
+
+function clearPersistedCreateKey(identity: string) {
+  try {
+    const keys = loadPersistedCreateKeys()
+    delete keys[createIdentityHash(identity)]
+    sessionStorage.setItem(createKeyStorageKey(), JSON.stringify(keys))
+  } catch {
+    // Ignore storage failures after the server has reconciled the invoice.
+  }
+}
 
 /** Keep a resend tied to this invoice when the detail page is remounted. */
 function persistedDeliveryKey(invoiceId: string) {
@@ -467,11 +528,15 @@ export function NewCancellationFeePage() {
       // the earlier body under the old key.
       const identity = JSON.stringify(submission)
       if (requestIdentity.current !== identity) {
-        if (requestIdentity.current !== null) {
-          requestKey.current = newCancellationFeeIdempotencyKey()
-        }
+        requestKey.current = persistedCreateKey(identity)
+          ?? (requestIdentity.current === null
+            ? requestKey.current
+            : newCancellationFeeIdempotencyKey())
         requestIdentity.current = identity
       }
+      // Save before the network call. If the response is lost after Field
+      // accepts the invoice, a remounted form can replay the same operation.
+      savePersistedCreateKey(identity, requestKey.current)
       const invoice = await createCancellationFee<InvoiceData>({
         idempotencyKey: requestKey.current,
         billTo: submission.billTo,
@@ -489,6 +554,7 @@ export function NewCancellationFeePage() {
         sendEmail: submission.sendEmail,
         sendSms: submission.sendSms,
       })
+      clearPersistedCreateKey(identity)
       setPending(null)
       setCreated(invoice)
       setSent(submission)
@@ -1064,9 +1130,14 @@ function InvoiceOperations({
     if (isPaid) return
     setSaving(true)
     try {
+      const email = clientEmail.trim()
+      if (!email && invoice.clientEmail?.trim()) {
+        onNotice({ tone: 'danger', message: t('cancellationFees:detail.update.emailRequired') })
+        return
+      }
       await updateCancellationFee<InvoiceData>(invoice.id, {
         notes,
-        clientEmail: clientEmail.trim() || undefined,
+        ...(email ? { clientEmail: email } : {}),
       })
       onNotice({ tone: 'success', message: t('cancellationFees:detail.notice.statusUpdated') })
       onRefresh()

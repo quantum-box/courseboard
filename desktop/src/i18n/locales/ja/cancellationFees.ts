@@ -229,6 +229,7 @@ export const cancellationFees = {
       regenerateLink: '支払いリンクを作り直す',
       sendEmail: 'メールを送る',
       email: '送信先メールアドレス',
+      emailRequired: '送信先メールアドレスを空にすることはできません。',
       notes: '備考',
       submit: '変更する',
       submitting: '変更中…',
