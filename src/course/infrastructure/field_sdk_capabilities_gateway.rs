@@ -89,28 +89,32 @@ impl FieldCapabilitiesGateway for FieldSdkCapabilitiesGateway {
         configuration.base_path = self.base_url.clone();
 
         let url = format!("{}/v1/field/client-capabilities", configuration.base_path);
-        let response = tokio::time::timeout(
-            FIELD_REQUEST_TIMEOUT,
-            configuration
+        // Keep the deadline around both the response headers and body. A Field
+        // edge can return headers and then stall while streaming the JSON; that
+        // must not leave capability-gated startup waiting without a bound.
+        let request = async {
+            let response = configuration
                 .client
                 .request(Method::GET, url)
                 .bearer_auth(context.access_token())
-                .send(),
-        )
-        .await
-        .map_err(|_| CourseError::Provider("Field API request timed out".to_string()))?
-        .map_err(|error| {
-            if error.is_timeout() {
-                CourseError::Provider("Field API request timed out".to_string())
-            } else {
-                CourseError::Provider(format!("Field API request failed: {error}"))
-            }
-        })?;
-
-        let status = response.status();
-        let body = response.text().await.map_err(|error| {
-            CourseError::Provider(format!("Field capabilities response read failed: {error}"))
-        })?;
+                .send()
+                .await
+                .map_err(|error| {
+                    if error.is_timeout() {
+                        CourseError::Provider("Field API request timed out".to_string())
+                    } else {
+                        CourseError::Provider(format!("Field API request failed: {error}"))
+                    }
+                })?;
+            let status = response.status();
+            let body = response.text().await.map_err(|error| {
+                CourseError::Provider(format!("Field capabilities response read failed: {error}"))
+            })?;
+            Ok::<_, CourseError>((status, body))
+        };
+        let (status, body) = tokio::time::timeout(FIELD_REQUEST_TIMEOUT, request)
+            .await
+            .map_err(|_| CourseError::Provider("Field API request timed out".to_string()))??;
         if !status.is_success() {
             return Err(map_field_status_error(status, &body));
         }
