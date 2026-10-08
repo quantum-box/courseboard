@@ -82,6 +82,44 @@ describe('protected API 401 handling', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('does not dispatch a request when the auth context changes while the token resolves', async () => {
+    let releaseToken!: (token: string | undefined) => void
+    const oldUnauthorized = vi.fn()
+    const oldForbidden = vi.fn()
+    const getAccessToken = vi.fn(() => new Promise<string | undefined>(resolve => {
+      releaseToken = resolve
+    }))
+    configureApiAuth({
+      tenantId: 'tenant_old',
+      operatorId: 'operator_old',
+      platformId: 'platform_old',
+      userId: 'user_old',
+      getAccessToken,
+      onUnauthorized: oldUnauthorized,
+      onForbidden: oldForbidden,
+    })
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const request = courseboardApiJson('/cancellation-fee-collections')
+    await Promise.resolve()
+    configureApiAuth({
+      tenantId: 'tenant_new',
+      operatorId: 'operator_new',
+      platformId: 'platform_new',
+      userId: 'user_new',
+      getAccessToken: async () => 'new-token',
+      onUnauthorized: vi.fn(),
+      onForbidden: vi.fn(),
+    })
+    releaseToken('old-token')
+
+    await expect(request).rejects.toMatchObject({ status: 409 })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(oldUnauthorized).not.toHaveBeenCalled()
+    expect(oldForbidden).not.toHaveBeenCalled()
+  })
+
   it('refreshes before the first request when the current token is unavailable', async () => {
     const getAccessToken = vi.fn(async (force?: boolean) =>
       force ? 'initial-refreshed-token' : undefined)

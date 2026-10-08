@@ -110,15 +110,21 @@ export function fieldPlatformId() {
     ?? (import.meta.env.DEV ? 'tn_01hjjn348rn3t49zz6hvmfq67p' : '')
 }
 
-function requestHeaders(init?: RequestInit, token?: string) {
+function requestHeaders(
+  init?: RequestInit,
+  token?: string,
+  authContext: ApiAuthContext | null = apiAuthContext,
+) {
   const headers = new Headers(init?.headers)
   // Let the browser add the multipart boundary for FormData. Setting JSON here
   // makes xlsx uploads fail before the CourseBoard endpoint can parse them.
   if (!headers.has('Content-Type') && init?.body && !(init.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
-  const operatorId = apiAuthContext?.operatorId ?? fieldTenant()
-  const platformId = fieldPlatformId()
+  const operatorId = authContext?.operatorId ?? fieldTenant()
+  const platformId = authContext?.platformId
+    ?? import.meta.env.VITE_COURSEBOARD_PLATFORM_ID
+    ?? (import.meta.env.DEV ? 'tn_01hjjn348rn3t49zz6hvmfq67p' : '')
   if (operatorId && !headers.has('x-operator-id')) {
     headers.set('x-operator-id', operatorId)
   }
@@ -226,16 +232,28 @@ async function isUpstreamAuthenticationExpired(response: Response) {
   }
 }
 
-async function accessTokenForProtectedRequest() {
-  const context = apiAuthContext
+class AuthContextChangedError extends ApiError {
+  constructor() {
+    super('認証状態が変わったため、処理を中止しました', 409)
+    this.name = 'AuthContextChangedError'
+  }
+}
+
+function assertAuthContextCurrent(context: ApiAuthContext | null) {
+  if (context !== apiAuthContext) throw new AuthContextChangedError()
+}
+
+async function accessTokenForProtectedRequest(context: ApiAuthContext | null) {
   if (!context) {
     throw new ApiError(i18next.t('common:error.authNotReady'), 401)
   }
 
   const current = await context.getAccessToken(false)
+  assertAuthContextCurrent(context)
   if (current) return current
 
   const refreshed = await context.getAccessToken(true)
+  assertAuthContextCurrent(context)
   if (refreshed) return refreshed
 
   context.onUnauthorized()
@@ -247,8 +265,11 @@ async function protectedFetch(
   init?: RequestInit,
   retried = false,
   tokenOverride?: string,
+  expectedContext?: ApiAuthContext | null,
 ) {
-  const token = tokenOverride ?? await accessTokenForProtectedRequest()
+  const context = expectedContext === undefined ? apiAuthContext : expectedContext
+  const token = tokenOverride ?? await accessTokenForProtectedRequest(context)
+  assertAuthContextCurrent(context)
   const requestUrl = join(operatorApiBaseUrl(), path)
   const isNative = '__TAURI_INTERNALS__' in window
   const defaultCredentials = protectedRequestCredentials(
@@ -259,20 +280,22 @@ async function protectedFetch(
   const response = await fetch(requestUrl, {
     ...init,
     credentials: init?.credentials ?? defaultCredentials,
-    headers: requestHeaders(init, token),
+    headers: requestHeaders(init, token, context),
   })
 
   const upstreamAuthenticationExpired = await isUpstreamAuthenticationExpired(response)
+  assertAuthContextCurrent(context)
   if (response.status === 401) {
-    if (!retried && apiAuthContext) {
-      const refreshed = await apiAuthContext.getAccessToken(true)
-      if (refreshed) return protectedFetch(path, init, true, refreshed)
+    if (!retried && context) {
+      const refreshed = await context.getAccessToken(true)
+      assertAuthContextCurrent(context)
+      if (refreshed) return protectedFetch(path, init, true, refreshed, context)
       if (shouldSoftSignOutOn401({
         hasAuthContext: true,
         alreadyRetried: false,
         refreshProducedToken: false,
       })) {
-        apiAuthContext.onUnauthorized()
+        context.onUnauthorized()
         return response
       }
     }
@@ -281,12 +304,12 @@ async function protectedFetch(
     // explicit upstream authentication-expiry code is safe to sign out.
   }
   if (upstreamAuthenticationExpired) {
-    apiAuthContext?.onUnauthorized()
+    context?.onUnauthorized()
   } else if (
     response.status === 403
     && response.headers.get('x-courseboard-auth-denial') === 'tenant'
   ) {
-    apiAuthContext?.onForbidden()
+    context?.onForbidden()
   }
   return response
 }

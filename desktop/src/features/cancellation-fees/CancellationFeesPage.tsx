@@ -151,6 +151,15 @@ type CreateRecovery = {
   key: string
   scope: string
   submission: PendingSubmission
+  /** Set after Field has accepted create; retained through initial fulfilment. */
+  invoiceId?: string
+}
+
+class CreateScopeChangedError extends Error {
+  constructor() {
+    super('cancellation-fee create scope changed while the request was in flight')
+    this.name = 'CreateScopeChangedError'
+  }
 }
 
 function createRecoveryStorageKey(scope = createStorageScope()) {
@@ -202,6 +211,9 @@ function loadPersistedCreateRecovery(): CreateRecovery | null {
       key: candidate.key,
       scope: candidate.scope,
       submission: candidate.submission,
+      ...(typeof candidate.invoiceId === 'string' && candidate.invoiceId
+        ? { invoiceId: candidate.invoiceId }
+        : {}),
     }
   } catch {
     return null
@@ -545,7 +557,15 @@ export function NewCancellationFeePage() {
   const timezone = useTenantTimezone()
   const storageScope = createStorageScope()
   const initialStorageScopeRef = useRef<string | null | undefined>(undefined)
+  const renderedScopeRef = useRef<string | null | undefined>(undefined)
+  const scopeGenerationRef = useRef(0)
   const recoveredCreateRef = useRef<CreateRecovery | null | undefined>(undefined)
+  if (renderedScopeRef.current === undefined) {
+    renderedScopeRef.current = storageScope
+  } else if (renderedScopeRef.current !== storageScope) {
+    renderedScopeRef.current = storageScope
+    scopeGenerationRef.current += 1
+  }
   if (initialStorageScopeRef.current === undefined) {
     initialStorageScopeRef.current = storageScope
     recoveredCreateRef.current = loadPersistedCreateRecovery()
@@ -578,6 +598,10 @@ export function NewCancellationFeePage() {
   const activeCreateRecovery = createRecovery?.scope === storageScope ? createRecovery : null
   const recoveryScopeMismatch = createRecovery !== null && createRecovery.scope !== storageScope
 
+  function isCurrentCreateScope(scope: string, generation: number) {
+    return createStorageScope() === scope && scopeGenerationRef.current === generation
+  }
+
   useEffect(() => {
     if (initialStorageScopeRef.current === storageScope) return
     initialStorageScopeRef.current = storageScope
@@ -590,6 +614,8 @@ export function NewCancellationFeePage() {
     setSent(null)
     setDeliveryError(null)
     setInitialDeliveryUncertain(false)
+    setSubmitting(false)
+    setResending(false)
     setError(null)
   }, [storageScope])
 
@@ -671,6 +697,7 @@ export function NewCancellationFeePage() {
     setDeliveryError(null)
     setInitialDeliveryUncertain(false)
     const currentScope = createStorageScope()
+    const currentScopeGeneration = scopeGenerationRef.current
     if (createRecovery && createRecovery.scope !== currentScope) {
       setError(t('cancellationFees:new.error.scopeChanged'))
       setSubmitting(false)
@@ -678,6 +705,13 @@ export function NewCancellationFeePage() {
     }
     const frozenSubmission = createRecovery?.submission ?? submission
     const identity = createRecovery?.identity ?? JSON.stringify(frozenSubmission)
+    let recovery: CreateRecovery = {
+      identity,
+      key: requestKey.current,
+      scope: currentScope ?? '',
+      submission: frozenSubmission,
+      ...(createRecovery?.invoiceId ? { invoiceId: createRecovery.invoiceId } : {}),
+    }
     try {
       if (createRecovery) {
         requestIdentity.current = createRecovery.identity
@@ -689,11 +723,9 @@ export function NewCancellationFeePage() {
             : newCancellationFeeIdempotencyKey())
         requestIdentity.current = identity
       }
-      const recovery: CreateRecovery = {
-        identity,
+      recovery = {
+        ...recovery,
         key: requestKey.current,
-        scope: currentScope ?? '',
-        submission: frozenSubmission,
       }
       // A lost response is recoverable only if the complete request was
       // durably saved before dispatch. Refuse the mutation when storage is
@@ -707,6 +739,37 @@ export function NewCancellationFeePage() {
       // Save before the network call. If the response is lost after Field
       // accepts the invoice, a remounted form can replay the same operation.
       savePersistedCreateKey(identity, recovery.key)
+
+      // A create that already returned an invoice must be reconciled through
+      // that invoice's initial operation. Never POST create again after a
+      // remount or a lost fulfilment response.
+      if (recovery.invoiceId) {
+        setPending(null)
+        setSent(frozenSubmission)
+        const fulfilled = await runInitialFulfillment(
+          recovery.invoiceId,
+          recovery.scope,
+          currentScopeGeneration,
+        )
+        if (!isCurrentCreateScope(recovery.scope, currentScopeGeneration)) {
+          throw new CreateScopeChangedError()
+        }
+        setCreated(fulfilled)
+        const incomplete = fulfillmentIssue(fulfilled, {
+          sendEmail: frozenSubmission.sendEmail,
+          sendSms: frozenSubmission.sendSms,
+        })
+        if (incomplete) {
+          setDeliveryError(incomplete)
+        } else {
+          clearPersistedCreateRecovery(recovery)
+          clearPersistedCreateKey(identity)
+          setCreateRecovery(null)
+          navigate(`cancellation-fees/${fulfilled.id}`)
+        }
+        return
+      }
+
       const invoice = await createCancellationFee<InvoiceData>({
         idempotencyKey: recovery.key,
         billTo: frozenSubmission.billTo,
@@ -724,8 +787,17 @@ export function NewCancellationFeePage() {
         sendEmail: frozenSubmission.sendEmail,
         sendSms: frozenSubmission.sendSms,
       })
-      clearPersistedCreateRecovery(recovery)
-      setCreateRecovery(null)
+      if (!isCurrentCreateScope(recovery.scope, currentScopeGeneration)) {
+        throw new CreateScopeChangedError()
+      }
+      recovery = { ...recovery, invoiceId: invoice.id }
+      // The create has succeeded, so keep the frozen body and invoice ID until
+      // the initial fulfilment is definitely complete. A remount during an
+      // uncertain fulfilment must replay fulfil, never mint a new invoice.
+      if (!savePersistedCreateRecovery(recovery)) {
+        setError(t('cancellationFees:new.error.persistence'))
+      }
+      setCreateRecovery(recovery)
       setPending(null)
       setCreated(invoice)
       setSent(frozenSubmission)
@@ -739,8 +811,11 @@ export function NewCancellationFeePage() {
           sendSms: frozenSubmission.sendSms,
         })
         const fulfilled = shouldFulfill
-          ? await runInitialFulfillment(invoice.id)
+          ? await runInitialFulfillment(invoice.id, recovery.scope, currentScopeGeneration)
           : invoice
+        if (!isCurrentCreateScope(recovery.scope, currentScopeGeneration)) {
+          throw new CreateScopeChangedError()
+        }
         setCreated(fulfilled)
         const incomplete = fulfillmentIssue(fulfilled, {
           sendEmail: frozenSubmission.sendEmail,
@@ -749,17 +824,40 @@ export function NewCancellationFeePage() {
         if (incomplete) {
           setDeliveryError(incomplete)
         } else {
-          // Creation and its initial delivery are one user-visible operation.
-          // Keep the create key until this reconciliation response is definite.
+          clearPersistedCreateRecovery(recovery)
           clearPersistedCreateKey(identity)
+          setCreateRecovery(null)
           navigate(`cancellation-fees/${fulfilled.id}`)
         }
       } catch (reason) {
+        if (reason instanceof CreateScopeChangedError
+          || !isCurrentCreateScope(recovery.scope, currentScopeGeneration)) {
+          savePersistedCreateRecovery(recovery)
+          return
+        }
         setDeliveryError(reason instanceof Error
           ? reason.message
           : t('cancellationFees:new.error.delivery'))
       }
     } catch (reason) {
+      if (reason instanceof CreateScopeChangedError
+        || !isCurrentCreateScope(recovery.scope, currentScopeGeneration)) {
+        const scopeRecovery = recovery
+        savePersistedCreateRecovery(scopeRecovery)
+        return
+      }
+      // A recovered invoice already exists. A fulfilment error must retain its
+      // invoice ID and frozen body; clearing it here would make a remount POST
+      // a second invoice.
+      if (recovery.invoiceId) {
+        savePersistedCreateRecovery(recovery)
+        if (isCurrentCreateScope(recovery.scope, currentScopeGeneration)) {
+          setCreateRecovery(recovery)
+          setPending(frozenSubmission)
+          setError(reason instanceof Error ? reason.message : t('cancellationFees:new.error.delivery'))
+        }
+        return
+      }
       const definitiveFailure = reason instanceof ApiError
         && reason.status >= 400
         && reason.status < 500
@@ -769,7 +867,7 @@ export function NewCancellationFeePage() {
       if (definitiveFailure) {
         clearPersistedCreateRecovery({
           identity,
-          key: requestKey.current,
+          key: recovery.key,
           scope: currentScope ?? '',
           submission: frozenSubmission,
         })
@@ -780,28 +878,42 @@ export function NewCancellationFeePage() {
         // The server may have accepted the invoice before the connection
         // failed. Keep the exact operation and body for the next retry,
         // including after a page reload; never mint a second payable invoice.
-        const recovery: CreateRecovery = {
+        const retryRecovery: CreateRecovery = {
           identity,
-          key: requestKey.current,
+          key: recovery.key,
           scope: currentScope ?? '',
           submission: frozenSubmission,
         }
-        savePersistedCreateRecovery(recovery)
-        setCreateRecovery(recovery)
+        savePersistedCreateRecovery(retryRecovery)
+        setCreateRecovery(retryRecovery)
         setPending(frozenSubmission)
       }
       setError(reason instanceof Error ? reason.message : t('cancellationFees:new.error.create'))
     } finally {
-      setSubmitting(false)
+      if (isCurrentCreateScope(recovery.scope, currentScopeGeneration)) setSubmitting(false)
     }
   }
 
-  async function runInitialFulfillment(invoiceId: string) {
+  async function runInitialFulfillment(
+    invoiceId: string,
+    expectedScope?: string,
+    expectedGeneration = scopeGenerationRef.current,
+  ) {
+    if (expectedScope && !isCurrentCreateScope(expectedScope, expectedGeneration)) {
+      throw new CreateScopeChangedError()
+    }
     try {
       const fulfilled = await fulfillCancellationFee<InvoiceData>(invoiceId)
+      if (expectedScope && !isCurrentCreateScope(expectedScope, expectedGeneration)) {
+        throw new CreateScopeChangedError()
+      }
       setInitialDeliveryUncertain(false)
       return fulfilled
     } catch (reason) {
+      if (reason instanceof CreateScopeChangedError) throw reason
+      if (expectedScope && !isCurrentCreateScope(expectedScope, expectedGeneration)) {
+        throw new CreateScopeChangedError()
+      }
       // Any non-response can leave the durable initial claim active. Keep the
       // retry on the same initial operation until Field gives a definitive
       // response; /send would use a new key and can race it.
@@ -820,12 +932,15 @@ export function NewCancellationFeePage() {
   async function resendDelivery() {
     if (!created || !sent || initialDeliveryUncertain) return
     setResending(true)
+    const requestScope = createStorageScope()
+    const requestGeneration = scopeGenerationRef.current
     try {
       const fulfilled = await sendCancellationFee<InvoiceData>(created.id, {
         idempotencyKey: resendKey.current ?? (resendKey.current = persistedDeliveryKey(created.id)),
         sendEmail: sent.sendEmail,
         sendSms: sent.sendSms,
       })
+      if (requestScope && !isCurrentCreateScope(requestScope, requestGeneration)) return
       setCreated(fulfilled)
       const incomplete = fulfillmentIssue(fulfilled, {
         sendEmail: sent.sendEmail,
@@ -833,24 +948,32 @@ export function NewCancellationFeePage() {
       })
       setDeliveryError(incomplete ?? null)
       if (!incomplete) {
+        if (activeCreateRecovery) {
+          clearPersistedCreateRecovery(activeCreateRecovery)
+          setCreateRecovery(null)
+        }
         clearPersistedCreateKey(JSON.stringify(sent))
         resendKey.current = rotatePersistedDeliveryKey(created.id)
         navigate(`cancellation-fees/${fulfilled.id}`)
       }
     } catch (reason) {
+      if (requestScope && !isCurrentCreateScope(requestScope, requestGeneration)) return
       setDeliveryError(reason instanceof Error
         ? reason.message
         : t('cancellationFees:new.error.delivery'))
     } finally {
-      setResending(false)
+      if (!requestScope || isCurrentCreateScope(requestScope, requestGeneration)) setResending(false)
     }
   }
 
   async function retryInitialDelivery() {
     if (!created || !sent || !initialDeliveryUncertain) return
     setResending(true)
+    const requestScope = createStorageScope()
+    const requestGeneration = scopeGenerationRef.current
     try {
-      const fulfilled = await runInitialFulfillment(created.id)
+      const fulfilled = await runInitialFulfillment(created.id, requestScope ?? undefined, requestGeneration)
+      if (requestScope && !isCurrentCreateScope(requestScope, requestGeneration)) return
       setCreated(fulfilled)
       const incomplete = fulfillmentIssue(fulfilled, {
         sendEmail: sent.sendEmail,
@@ -858,15 +981,20 @@ export function NewCancellationFeePage() {
       })
       setDeliveryError(incomplete ?? null)
       if (!incomplete) {
+        if (activeCreateRecovery) {
+          clearPersistedCreateRecovery(activeCreateRecovery)
+          setCreateRecovery(null)
+        }
         clearPersistedCreateKey(JSON.stringify(sent))
         navigate(`cancellation-fees/${fulfilled.id}`)
       }
     } catch (reason) {
+      if (requestScope && !isCurrentCreateScope(requestScope, requestGeneration)) return
       setDeliveryError(reason instanceof Error
         ? reason.message
         : t('cancellationFees:new.error.delivery'))
     } finally {
-      setResending(false)
+      if (!requestScope || isCurrentCreateScope(requestScope, requestGeneration)) setResending(false)
     }
   }
 
@@ -887,9 +1015,11 @@ export function NewCancellationFeePage() {
       {error ? (
         <Notice tone="danger" title={t('cancellationFees:new.createFailed')}>{error}</Notice>
       ) : null}
-      {activeCreateRecovery ? (
+      {activeCreateRecovery && !created ? (
         <Notice tone="warning" title={t('cancellationFees:new.recovery.title')}>
-          {t('cancellationFees:new.recovery.description')}
+          {activeCreateRecovery.invoiceId
+            ? t('cancellationFees:new.recovery.deliveryDescription')
+            : t('cancellationFees:new.recovery.description')}
           <div className="notice-inline-action">
             <Button type="button" size="sm" onClick={() => setPending(activeCreateRecovery.submission)}>
               {t('cancellationFees:new.recovery.retry')}

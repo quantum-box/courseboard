@@ -290,6 +290,50 @@ describe('the dedicated cancellation fee form', () => {
     expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
   })
 
+  it('keeps the created invoice recovery through remount after initial fulfilment times out', async () => {
+    let createAttempts = 0
+    let fulfillAttempts = 0
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees') {
+        createAttempts += 1
+        return invoice({
+          status: 'Draft',
+          paymentLinkUrl: null,
+          paymentLinkStatus: 'Pending',
+          emailDeliveryStatus: null,
+          smsDeliveryStatus: 'Pending',
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
+        if (fulfillAttempts === 1) throw new Error('initial delivery timed out')
+        return invoice()
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+    const firstRender = renderPage()
+    fillSnapshot('初回の請求先', '090-0000-0000')
+
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求書は作れました')
+    await waitFor(() => expect(fulfillAttempts).toBe(1))
+
+    firstRender.unmount()
+    renderPage()
+    expect(screen.getByText(/請求書はできていますが、最初のお知らせの結果を確認できていません/)).toBeTruthy()
+    const recipient = screen.getByLabelText('請求先の名前', { exact: false }) as HTMLInputElement
+    expect(recipient.disabled).toBe(true)
+    fireEvent.change(recipient, { target: { value: '別の請求先' } })
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+
+    await waitFor(() => expect(router.navigate).toHaveBeenCalledWith('cancellation-fees/inv_1'))
+    expect(createAttempts).toBe(1)
+    expect(fulfillAttempts).toBe(2)
+    expect(api.field.mock.calls.filter(call => call[0] === '/v1/cancellation-fees')).toHaveLength(1)
+  })
+
   it('freezes and restores a create whose response was lost before allowing another invoice', async () => {
     const creates: unknown[][] = []
     api.field.mockImplementation(async (path: string, init?: RequestInit) => {

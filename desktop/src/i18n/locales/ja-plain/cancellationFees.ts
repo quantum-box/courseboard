@@ -58,6 +58,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
     recovery: {
       title: '前回の請求書の作成を確認してください',
       description: '前回の請求書を作った結果が分かりません。内容を変えずに、同じ作成をもう一度してください。',
+      deliveryDescription: '請求書はできていますが、最初に知らせた結果が分かりません。内容を変えずに、同じ最初の処理をもう一度してください。',
       retry: '同じ作成をもう一度する',
     },
     partial: {

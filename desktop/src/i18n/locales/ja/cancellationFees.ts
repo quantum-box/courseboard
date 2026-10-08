@@ -60,6 +60,7 @@ export const cancellationFees = {
     recovery: {
       title: '前回の請求作成を確認してください',
       description: '前回の請求作成結果を確認できていません。元の内容を変えずに、同じ処理をやり直してください。',
+      deliveryDescription: '請求書はできていますが、最初のお知らせの結果を確認できていません。元の内容を変えずに、同じ初回処理を確認してください。',
       retry: '同じ内容でやり直す',
     },
     partial: {

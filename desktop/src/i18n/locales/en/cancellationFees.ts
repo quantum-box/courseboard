@@ -63,6 +63,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
     recovery: {
       title: 'The previous invoice is still being checked',
       description: 'The result of the previous invoice request is unknown. Retry the same request without changing its details.',
+      deliveryDescription: 'The invoice exists, but the initial delivery result is unknown. Retry the same initial operation without changing its details.',
       retry: 'Retry the same request',
     },
     partial: {
