@@ -60,7 +60,9 @@ export const cancellationFees = {
     partial: {
       title: '請求書は作れました',
       description: '{{message}}。請求書はできているので、送信だけやり直します。',
+      initialDescription: '{{message}}。請求書はできていますが、最初の送信結果を確認できませんでした。同じ初回処理をもう一度確認します。',
       resend: '送信だけやり直す',
+      initialRetry: '初回の送信をもう一度確認する',
       resending: '送り直しています…',
       openDetail: '請求の画面へ',
     },

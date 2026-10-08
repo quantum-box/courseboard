@@ -123,7 +123,44 @@ describe('the dedicated cancellation fee form', () => {
     expect(screen.queryByLabelText(/請求先の種類/)).toBeNull()
   })
 
-  it('replays the initial delivery after a create response reports a timeout', async () => {
+  it('retries the same initial delivery after its response times out', async () => {
+    let fulfillAttempts = 0
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees') {
+        return invoice({
+          status: 'Draft',
+          paymentLinkUrl: null,
+          paymentLinkStatus: 'Pending',
+          smsDeliveryStatus: 'Pending',
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
+        if (fulfillAttempts === 1) throw new Error('initial delivery timed out')
+        return invoice()
+      }
+      if (path.endsWith('/send')) throw new Error('explicit resend must wait for the operator')
+      return invoice()
+    })
+    renderPage()
+    fillSnapshot()
+
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求書は作れました')
+    await waitFor(() => expect(fulfillAttempts).toBe(1))
+    expect(screen.getByRole('button', { name: '初回の送信をもう一度確認する' })).toBeTruthy()
+    expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
+
+    fireEvent.click(screen.getByRole('button', { name: '初回の送信をもう一度確認する' }))
+    await waitFor(() => expect(router.navigate).toHaveBeenCalledWith('cancellation-fees/inv_1'))
+    expect(fulfillAttempts).toBe(2)
+    expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
+  })
+
+  it('replays the initial delivery when the create response reports SendFailed', async () => {
+    let fulfillAttempts = 0
     api.field.mockImplementation(async (path: string) => {
       if (path === '/v1/cancellation-fees') {
         return invoice({
@@ -133,6 +170,7 @@ describe('the dedicated cancellation fee form', () => {
         })
       }
       if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
         return invoice({
           status: 'SendFailed',
           smsDeliveryStatus: 'Failed',
@@ -152,6 +190,7 @@ describe('the dedicated cancellation fee form', () => {
     await waitFor(() => expect(
       api.field.mock.calls.some(call => String(call[0]).endsWith('/fulfill')),
     ).toBe(true))
+    expect(fulfillAttempts).toBe(1)
     expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
     expect(screen.getByRole('button', { name: '送信だけやり直す' })).toBeTruthy()
   })

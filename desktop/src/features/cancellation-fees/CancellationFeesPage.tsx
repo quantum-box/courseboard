@@ -457,6 +457,7 @@ export function NewCancellationFeePage() {
   const [sent, setSent] = useState<PendingSubmission | null>(null)
   const [deliveryError, setDeliveryError] = useState<string | null>(null)
   const [resending, setResending] = useState(false)
+  const [initialDeliveryUncertain, setInitialDeliveryUncertain] = useState(false)
 
   /**
    * Read the form, check it, and hand it to the confirmation step.
@@ -470,6 +471,7 @@ export function NewCancellationFeePage() {
     const form = new FormData(event.currentTarget)
     setError(null)
     setDeliveryError(null)
+    setInitialDeliveryUncertain(false)
     if (!sendEmail && !sendSms) {
       setError(t('cancellationFees:new.validation.channel'))
       return
@@ -533,6 +535,7 @@ export function NewCancellationFeePage() {
     setSubmitting(true)
     setError(null)
     setDeliveryError(null)
+    setInitialDeliveryUncertain(false)
     try {
       // A retry of the same frozen confirmation keeps its key. If the desk
       // goes back, edits the form, and confirms a different payload after a
@@ -574,11 +577,12 @@ export function NewCancellationFeePage() {
         // initial operation for a draft or an unpaid partial/failed result, but
         // do not call it again for a completed Sent/Overdue replay (and never
         // attempt to mutate a paid invoice).
-        const fulfilled = needsInitialFulfillment(invoice, {
+        const shouldFulfill = needsInitialFulfillment(invoice, {
           sendEmail: submission.sendEmail,
           sendSms: submission.sendSms,
         })
-          ? await fulfillCancellationFee<InvoiceData>(invoice.id)
+        const fulfilled = shouldFulfill
+          ? await runInitialFulfillment(invoice.id)
           : invoice
         setCreated(fulfilled)
         const incomplete = fulfillmentIssue(fulfilled, {
@@ -606,6 +610,20 @@ export function NewCancellationFeePage() {
     }
   }
 
+  async function runInitialFulfillment(invoiceId: string) {
+    try {
+      const fulfilled = await fulfillCancellationFee<InvoiceData>(invoiceId)
+      setInitialDeliveryUncertain(false)
+      return fulfilled
+    } catch (reason) {
+      // Any non-response can leave the durable initial claim active. Keep the
+      // retry on the same initial operation until Field gives a definitive
+      // response; /send would use a new key and can race it.
+      setInitialDeliveryUncertain(true)
+      throw reason
+    }
+  }
+
   /**
    * Send the notification again for an invoice that already exists.
    *
@@ -614,7 +632,7 @@ export function NewCancellationFeePage() {
    * chasing two payments for one cancellation.
    */
   async function resendDelivery() {
-    if (!created || !sent) return
+    if (!created || !sent || initialDeliveryUncertain) return
     setResending(true)
     try {
       const fulfilled = await sendCancellationFee<InvoiceData>(created.id, {
@@ -622,15 +640,41 @@ export function NewCancellationFeePage() {
         sendEmail: sent.sendEmail,
         sendSms: sent.sendSms,
       })
-      clearPersistedCreateKey(JSON.stringify(sent))
-      resendKey.current = rotatePersistedDeliveryKey(created.id)
       setCreated(fulfilled)
       const incomplete = fulfillmentIssue(fulfilled, {
         sendEmail: sent.sendEmail,
         sendSms: sent.sendSms,
       })
       setDeliveryError(incomplete ?? null)
-      if (!incomplete) navigate(`cancellation-fees/${fulfilled.id}`)
+      if (!incomplete) {
+        clearPersistedCreateKey(JSON.stringify(sent))
+        resendKey.current = rotatePersistedDeliveryKey(created.id)
+        navigate(`cancellation-fees/${fulfilled.id}`)
+      }
+    } catch (reason) {
+      setDeliveryError(reason instanceof Error
+        ? reason.message
+        : t('cancellationFees:new.error.delivery'))
+    } finally {
+      setResending(false)
+    }
+  }
+
+  async function retryInitialDelivery() {
+    if (!created || !sent || !initialDeliveryUncertain) return
+    setResending(true)
+    try {
+      const fulfilled = await runInitialFulfillment(created.id)
+      setCreated(fulfilled)
+      const incomplete = fulfillmentIssue(fulfilled, {
+        sendEmail: sent.sendEmail,
+        sendSms: sent.sendSms,
+      })
+      setDeliveryError(incomplete ?? null)
+      if (!incomplete) {
+        clearPersistedCreateKey(JSON.stringify(sent))
+        navigate(`cancellation-fees/${fulfilled.id}`)
+      }
     } catch (reason) {
       setDeliveryError(reason instanceof Error
         ? reason.message
@@ -659,12 +703,23 @@ export function NewCancellationFeePage() {
       ) : null}
       {created && deliveryError ? (
         <Notice tone="warning" title={t('cancellationFees:new.partial.title')}>
-          {t('cancellationFees:new.partial.description', { message: deliveryError })}
+          {initialDeliveryUncertain
+            ? t('cancellationFees:new.partial.initialDescription', { message: deliveryError })
+            : t('cancellationFees:new.partial.description', { message: deliveryError })}
           <div className="notice-inline-action">
-            <Button type="button" size="sm" disabled={resending} onClick={() => void resendDelivery()}>
+            <Button
+              type="button"
+              size="sm"
+              disabled={resending}
+              onClick={() => void (initialDeliveryUncertain
+                ? retryInitialDelivery()
+                : resendDelivery())}
+            >
               {resending
                 ? t('cancellationFees:new.partial.resending')
-                : t('cancellationFees:new.partial.resend')}
+                : initialDeliveryUncertain
+                  ? t('cancellationFees:new.partial.initialRetry')
+                  : t('cancellationFees:new.partial.resend')}
             </Button>
             <Button type="button" size="sm" onClick={() => navigate(`cancellation-fees/${created.id}`)}>
               {t('cancellationFees:new.partial.openDetail')}

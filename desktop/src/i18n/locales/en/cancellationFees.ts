@@ -63,7 +63,9 @@ export const cancellationFees: DeepPartial<typeof source> = {
     partial: {
       title: 'The invoice was created',
       description: '{{message}}. The invoice exists, so only the sending is retried.',
+      initialDescription: '{{message}}. The invoice exists, but the initial delivery result is uncertain. The same initial operation will be retried.',
       resend: 'Retry sending only',
+      initialRetry: 'Retry the initial delivery',
       resending: 'Resending…',
       openDetail: 'Open the invoice',
     },
