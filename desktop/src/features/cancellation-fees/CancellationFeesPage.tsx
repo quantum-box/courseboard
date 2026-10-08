@@ -1105,6 +1105,7 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
       <InvoiceOperations
         key={`${storedInvoice.status}-${storedInvoice.paymentLinkStatus}-${storedInvoice.updatedAt ?? ''}`}
         invoice={storedInvoice}
+        onUpdated={updated => resource.setData(updated)}
         onRefresh={resource.refresh}
         onNotice={setNotice}
       />
@@ -1150,6 +1151,7 @@ function InvoiceOperations({
   onNotice,
 }: {
   invoice: InvoiceData
+  onUpdated(invoice: InvoiceData): void
   onRefresh(): void
   onNotice(notice: { tone: 'success' | 'danger'; message: string }): void
 }) {
@@ -1168,10 +1170,14 @@ function InvoiceOperations({
         onNotice({ tone: 'danger', message: t('cancellationFees:detail.update.emailRequired') })
         return
       }
-      await updateCancellationFee<InvoiceData>(invoice.id, {
+      const updated = await updateCancellationFee<InvoiceData>(invoice.id, {
         notes,
         ...(email ? { clientEmail: email } : {}),
       })
+      // Apply the authoritative PATCH response before starting the background
+      // refresh. This makes a newly added email available to the resend action
+      // immediately, even while the follow-up GET is in flight.
+      onUpdated(updated)
       onNotice({ tone: 'success', message: t('cancellationFees:detail.notice.statusUpdated') })
       onRefresh()
     } catch (reason) {

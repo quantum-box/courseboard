@@ -257,6 +257,22 @@ function feeGroupKey(recipient: FeeRecipient, row: ReservationCancellation): str
 }
 
 /**
+ * The persisted Field idempotency key belongs to this exact reservation set.
+ * Amount, due date, recipient details, and delivery choices may be edited
+ * after a failed CourseBoard write-back, but a changed set must not replay an
+ * invoice raised for a different set of bookings.
+ */
+function reservationSetKey(group: CustomerFeeGroup) {
+  const reservationIds = group.rows
+    .map(row => row.reservationId)
+    .sort()
+  if (group.recipient.kind === 'unregistered' && reservationIds.length === 1) {
+    return `reservation:${reservationIds[0]}`
+  }
+  return `${group.key}:reservations:${reservationIds.join(',')}`
+}
+
+/**
  * What a bulk collection would actually send.
  *
  * Built before anything is posted so the sheet can show the desk the bill it
@@ -321,7 +337,10 @@ export function planCancellationFees(
     })
   }
 
-  const ordered = [...groups.values()]
+  const ordered = [...groups.values()].map(group => ({
+    ...group,
+    key: reservationSetKey(group),
+  }))
   return {
     groups: ordered,
     unbillable,
