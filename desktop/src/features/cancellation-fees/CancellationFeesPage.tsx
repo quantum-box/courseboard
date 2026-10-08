@@ -148,6 +148,18 @@ function persistedDeliveryKey(invoiceId: string) {
   }
 }
 
+/** A completed send response gets a fresh key for the next intentional retry. */
+function rotatePersistedDeliveryKey(invoiceId: string) {
+  const storageKey = `courseboard:cancellation-fee:delivery:${fieldTenant()}:${invoiceId}`
+  const generated = newCancellationFeeIdempotencyKey()
+  try {
+    sessionStorage.setItem(storageKey, generated)
+  } catch {
+    // The in-memory ref still carries the rotated key when storage is blocked.
+  }
+  return generated
+}
+
 type InvoiceLineItem = {
   description: string
   quantity: number
@@ -554,12 +566,14 @@ export function NewCancellationFeePage() {
         sendEmail: submission.sendEmail,
         sendSms: submission.sendSms,
       })
-      clearPersistedCreateKey(identity)
       setPending(null)
       setCreated(invoice)
       setSent(submission)
       try {
         const fulfilled = await fulfillCancellationFee<InvoiceData>(invoice.id)
+        // Creation and its initial delivery are one user-visible operation.
+        // Keep the create key until this reconciliation response is definite.
+        clearPersistedCreateKey(identity)
         setCreated(fulfilled)
         const incomplete = fulfillmentIssue(fulfilled, {
           sendEmail: submission.sendEmail,
@@ -599,6 +613,8 @@ export function NewCancellationFeePage() {
         sendEmail: sent.sendEmail,
         sendSms: sent.sendSms,
       })
+      clearPersistedCreateKey(JSON.stringify(sent))
+      resendKey.current = rotatePersistedDeliveryKey(created.id)
       setCreated(fulfilled)
       const incomplete = fulfillmentIssue(fulfilled, {
         sendEmail: sent.sendEmail,
@@ -908,6 +924,9 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
             sendSms,
           })
         : await fulfillCancellationFee<InvoiceData>(invoiceId)
+      if (sendEmail || sendSms) {
+        resendKey.current = rotatePersistedDeliveryKey(invoiceId)
+      }
       const issue = fulfillmentIssue(fulfilled, {
         sendEmail,
         sendSms,
