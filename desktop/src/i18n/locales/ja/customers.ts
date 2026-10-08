@@ -376,6 +376,7 @@ export const customers = {
       unlinkedPhoneUnreadable: '日本の携帯番号か E.164 の形で入れてください。このままでは請求書に残しません。',
       unbillableTitle: '請求できない予約があります',
       unbillable: '{{count}}件は請求先の名前が空のままです。名前を入れると請求できます。',
+      reconcile: '既存の請求を反映する',
       invoiceNote: 'キャンセル料のご請求です（{{count}}件）。',
       invoiceLine: '{{date}} キャンセル（{{reason}}）{{note}}',
       lineItem: {

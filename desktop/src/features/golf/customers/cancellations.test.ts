@@ -191,34 +191,6 @@ describe('what a bulk collection would send', () => {
     expect(plan.total).toBe(10_000)
   })
 
-  it('scopes a linked batch key to its reservation set', () => {
-    const first = planCancellationFees(
-      [
-        row({ reservationId: 'res_b', customerId: 'cus_1' }),
-        row({ reservationId: 'res_a', customerId: 'cus_1' }),
-      ],
-      5_000,
-    )
-    const changedAmount = planCancellationFees(
-      [
-        row({ reservationId: 'res_b', customerId: 'cus_1' }),
-        row({ reservationId: 'res_a', customerId: 'cus_1' }),
-      ],
-      9_000,
-    )
-    const changedSet = planCancellationFees(
-      [
-        row({ reservationId: 'res_b', customerId: 'cus_1' }),
-        row({ reservationId: 'res_c', customerId: 'cus_1' }),
-      ],
-      5_000,
-    )
-
-    expect(first.groups[0]?.key).toBe('customer:cus_1:reservations:res_a,res_b')
-    expect(changedAmount.groups[0]?.key).toBe(first.groups[0]?.key)
-    expect(changedSet.groups[0]?.key).not.toBe(first.groups[0]?.key)
-  })
-
   it('leaves out a booking Field already holds an invoice for', () => {
     // Our own row says unsettled, which is why the desk selected it. Field
     // says otherwise, which means the invoice went out and the write back

@@ -257,22 +257,6 @@ function feeGroupKey(recipient: FeeRecipient, row: ReservationCancellation): str
 }
 
 /**
- * The persisted Field idempotency key belongs to this exact reservation set.
- * Amount, due date, recipient details, and delivery choices may be edited
- * after a failed CourseBoard write-back, but a changed set must not replay an
- * invoice raised for a different set of bookings.
- */
-function reservationSetKey(group: CustomerFeeGroup) {
-  const reservationIds = group.rows
-    .map(row => row.reservationId)
-    .sort()
-  if (group.recipient.kind === 'unregistered' && reservationIds.length === 1) {
-    return `reservation:${reservationIds[0]}`
-  }
-  return `${group.key}:reservations:${reservationIds.join(',')}`
-}
-
-/**
  * What a bulk collection would actually send.
  *
  * Built before anything is posted so the sheet can show the desk the bill it
@@ -283,9 +267,9 @@ export function planCancellationFees(
   rows: ReservationCancellation[],
   perPlayerAmount: number,
   /**
-   * Bookings Field already has a cancellation-fee invoice for. Empty when the
-   * lookup could not be made, which leaves the batch exactly as it was before
-   * the guard existed rather than blocking it.
+   * Bookings Field already has a cancellation-fee invoice for. The caller
+   * must only pass a successful source-backed lookup; a pending or failed
+   * lookup must keep the billing action disabled.
    */
   alreadyInvoiced: ReadonlySet<string> = new Set(),
   /** What the desk filled in for the bookings with no ledger link. */
@@ -337,10 +321,7 @@ export function planCancellationFees(
     })
   }
 
-  const ordered = [...groups.values()].map(group => ({
-    ...group,
-    key: reservationSetKey(group),
-  }))
+  const ordered = [...groups.values()]
   return {
     groups: ordered,
     unbillable,
@@ -376,8 +357,8 @@ function recipientName(
   assignment: CancellationFeeAssignment | undefined,
 ): string {
   if (recipient.kind === 'unregistered') return recipient.name
-  return assignment?.customer?.name.trim()
-    || row.customerName?.trim()
+  return row.customerName?.trim()
+    || assignment?.customer?.name.trim()
     || recipient.customerId
 }
 

@@ -1,9 +1,9 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import { ChevronLeft, ReceiptText, Ban } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { courseboardApiJson, fieldTenant, yen } from '../../../api'
+import { courseboardApiJson, fieldApiJson, yen } from '../../../api'
 import {
   DataTable,
   type DataTableColumn,
@@ -25,13 +25,15 @@ import { today } from '../../../lib/clock'
 import { navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import {
-  createCancellationFee,
-  fulfillCancellationFee,
-  newCancellationFeeIdempotencyKey,
-} from '../../cancellation-fees/cancellation-fee-api'
-import {
   CANCELLATION_FEE_MARKER,
+  CANCELLATION_FEE_REASON,
+  cancellationFeeIdempotencyKey,
+  cancellationFeeInvoiceRequestBody,
+  cancellationFeeInvoicesPath,
+  cancellationFeeSources,
+  invoicedReservationIds,
   normalizePhone,
+  type InvoiceSource,
 } from '../../cancellation-fees/models'
 import {
   addDays,
@@ -61,7 +63,22 @@ import { visitDate } from './visits'
 /** What a club most often charges per round given up. Editable on the sheet. */
 const DEFAULT_PER_PLAYER_FEE = 3_000
 
-type InvoiceResponse = { id: string; invoiceNumber?: string }
+type InvoiceStatus = 'Draft' | 'Sent' | 'SendFailed' | 'Paid' | 'Overdue'
+
+type InvoiceResponse = {
+  id: string
+  invoiceNumber?: string
+  status?: InvoiceStatus | string
+  sources?: InvoiceSource[] | null
+  paymentLinkUrl?: string | null
+  paymentLinkStatus?: 'Pending' | 'Ready' | 'Failed' | null
+  emailDeliveryStatus?: 'Pending' | 'Sent' | 'Failed' | null
+  smsDeliveryStatus?: 'Pending' | 'Sent' | 'Failed' | null
+}
+
+type InvoiceListResponse = {
+  items: { id: string; sources?: InvoiceSource[] | null }[]
+}
 
 /**
  * Who gave up a tee time, why, and who still owes for it.
@@ -447,38 +464,60 @@ function describeFeeLine(
 /** What one customer's invoice attempt came to. */
 type BillingResult = { group: CustomerFeeGroup; invoiceId?: string; error?: string }
 
-const BATCH_KEYS_STORAGE_PREFIX = 'courseboard:cancellation-fee:batch-keys'
-const OPERATION_KEY_PATTERN = /^[a-z0-9._:-]{1,48}$/
-
-function batchKeysStorageKey() {
-  return `${BATCH_KEYS_STORAGE_PREFIX}:${fieldTenant()}`
+/**
+ * Existing source-backed invoices are authoritative evidence that a booking
+ * was billed. Keep their ids so a lost CourseBoard write-back can be repaired
+ * rather than merely hiding the booking from the next batch.
+ */
+function cancellationFeeInvoiceMatches(
+  invoices: InvoiceResponse[],
+  rows: ReservationCancellation[],
+) {
+  const rowIds = new Set(rows.map(row => row.reservationId))
+  const matches = new Map<string, string>()
+  for (const invoice of invoices) {
+    for (const source of invoice.sources ?? []) {
+      if (
+        source.sourceType === 'reservation'
+        && source.reason === CANCELLATION_FEE_REASON
+        && rowIds.has(source.sourceId)
+      ) {
+        matches.set(source.sourceId, invoice.id)
+      }
+    }
+  }
+  return matches
 }
 
-function loadBatchKeys() {
-  try {
-    const raw = sessionStorage.getItem(batchKeysStorageKey())
-    if (!raw) return {}
-    const parsed: unknown = JSON.parse(raw)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    return Object.fromEntries(
-      Object.entries(parsed).filter(([, value]) => (
-        typeof value === 'string' && OPERATION_KEY_PATTERN.test(value)
-      )),
-    )
-  } catch {
-    return {}
+/**
+ * Generic invoice creation owns initial delivery for the batch path. A
+ * response that says delivery was only partly completed must remain visible
+ * as an error even though its invoice id is safe to reconcile.
+ */
+function fulfillmentIssueKind(
+  invoice: InvoiceResponse,
+  delivery: { sendEmail: boolean; sendSms: boolean },
+): 'noPaymentLink' | 'deliveryPartial' | undefined {
+  if (
+    invoice.paymentLinkStatus !== undefined
+    || invoice.paymentLinkUrl !== undefined
+  ) {
+    if (invoice.paymentLinkStatus !== 'Ready' || !invoice.paymentLinkUrl) {
+      return 'noPaymentLink'
+    }
   }
-}
-
-function persistBatchKeys(keys: Map<string, string>) {
-  try {
-    sessionStorage.setItem(
-      batchKeysStorageKey(),
-      JSON.stringify(Object.fromEntries(keys)),
-    )
-  } catch {
-    // Session storage is a retry aid; the request itself remains valid without it.
+  if (invoice.status === 'SendFailed' || invoice.status === 'Draft') {
+    return 'deliveryPartial'
   }
+  const selectedDeliveriesSent =
+    (!delivery.sendEmail
+      || invoice.emailDeliveryStatus === undefined
+      || invoice.emailDeliveryStatus === 'Sent')
+    && (!delivery.sendSms
+      || invoice.smsDeliveryStatus === undefined
+      || invoice.smsDeliveryStatus === 'Sent')
+  if (!selectedDeliveriesSent) return 'deliveryPartial'
+  return undefined
 }
 
 /**
@@ -531,10 +570,31 @@ function BillCancellationFeesSheet({
   // and means nothing to the bookings it is not about.
   const [edits, setEdits] = useState<Map<string, RecipientEdit>>(new Map())
 
+  // What Field already holds a cancellation fee for (PLT-4158).
+  //
+  // CourseBoard's own rows answer this for every batch it managed to record.
+  // The case worth catching is the one it could not: the invoice went out and
+  // the write back failed, leaving the row `unsettled` so the next extraction
+  // offers it again. A read that fails keeps the billing action disabled until
+  // the source-backed reconciliation has completed.
+  const invoiced = useResource(
+    () => fieldApiJson<InvoiceListResponse>(cancellationFeeInvoicesPath),
+    [open],
+    { enabled: open, cacheKey: 'field:invoices:cancellation-fee' },
+  )
+  const alreadyInvoiced = useMemo(
+    () => invoicedReservationIds(invoiced.data?.items ?? []),
+    [invoiced.data],
+  )
+  const existingInvoiceMatches = useMemo(
+    () => cancellationFeeInvoiceMatches(invoiced.data?.items ?? [], rows),
+    [invoiced.data, rows],
+  )
+
   /** The bookings the sheet has to ask about: no ledger link on the row. */
   const unlinkedRows = useMemo(
-    () => rows.filter(row => !row.customerId?.trim()),
-    [rows],
+    () => rows.filter(row => !row.customerId?.trim() && !alreadyInvoiced.has(row.reservationId)),
+    [rows, alreadyInvoiced],
   )
   const editFor = (row: ReservationCancellation) =>
     edits.get(row.reservationId) ?? recipientEditFor(row)
@@ -566,73 +626,84 @@ function BillCancellationFeesSheet({
     return decided
   }, [unlinkedRows, edits])
 
-  const requestKeys = useRef(new Map<string, string>(Object.entries(loadBatchKeys())))
-
   const plan = useMemo(
-    // The dedicated Field DTO carries a recipient snapshot only. Reservation
-    // attribution remains CourseBoard state until a separately authorized,
-    // server-verified source writer exists.
-    () => planCancellationFees(rows, perPlayer, new Set(), assignments),
-    [rows, perPlayer, assignments],
+    () => planCancellationFees(rows, perPlayer, alreadyInvoiced, assignments),
+    [rows, perPlayer, alreadyInvoiced, assignments],
   )
 
   if (!open) return null
 
   const unnamed = plan.unbillable.filter(entry => entry.reason === 'unnamed')
+  const alreadyBilled = plan.unbillable.filter(entry => entry.reason === 'already_invoiced')
+  const onlyReconcile = plan.groups.length === 0 && existingInvoiceMatches.size > 0
+  const reconciliationReady = Boolean(invoiced.data)
+    && !invoiced.loading
+    && !invoiced.error
 
   const submit = async () => {
+    if (!reconciliationReady) return
     setSaving(true)
     setResults(null)
     const attempts: BillingResult[] = []
     for (const group of plan.groups) {
       try {
-        // Keep one key for the unresolved reservation/customer group. The
-        // CourseBoard write-back can fail after Field has created and sent the
-        // invoice; indexing by amount, date, or delivery choice would lose
-        // that key after an edit and raise a second payable invoice on retry.
-        const idempotencyKey = requestKeys.current.get(group.key)
-          ?? newCancellationFeeIdempotencyKey()
-        requestKeys.current.set(group.key, idempotencyKey)
-        persistBatchKeys(requestKeys.current)
-        // The reservation/customer selection remains a CourseBoard concern.
-        // The dedicated Field writer receives only the verified snapshot; a
-        // future reservation source action must do its own upstream lookup.
-        const invoice = await createCancellationFee<InvoiceResponse>({
-          idempotencyKey,
-          billTo: {
-            name: group.customerName,
-            ...(group.customerPhone ? { phone: normalizePhone(group.customerPhone) } : {}),
-            ...(group.customerEmail ? { email: group.customerEmail } : {}),
-          },
-          lineItems: [{
+        const invoice = await fieldApiJson<InvoiceResponse>('/v1/invoices', {
+          method: 'POST',
+          body: JSON.stringify(cancellationFeeInvoiceRequestBody({
+            // The ledger entry when there is one, and the name the booking was
+            // taken under when there is not (PLT-4159).
+            billTo: group.recipient,
+            // Keyed on the charge itself, so pressing the button twice bills
+            // this person once. A retry of the whole sheet still does what the
+            // desk means by it: the groups that went through are answered with
+            // the invoice they already have, and the ones that failed are
+            // created. A key generated per press would bill everybody again,
+            // and it used to be sent as a header Field never reads.
+            idempotencyKey: cancellationFeeIdempotencyKey([
+              // The recipient as the charge names them, not the grouping key:
+              // a key that changed shape would answer a batch already sent
+              // with a second invoice for the same bookings.
+              group.recipient.kind === 'customer'
+                ? group.recipient.customerId
+                : `name:${group.recipient.name}`,
+              dueDate,
+              String(group.amount),
+              ...group.rows.map(row => row.reservationId).sort(),
+            ]),
+            // What this invoice is for, machine-readable. The notes marker
+            // below is kept as well: it is what every invoice raised before
+            // PLT-4158 has, and the list still reads both.
+            sources: cancellationFeeSources(group.rows.map(row => row.reservationId)),
+            clientName: group.customerName,
+            clientEmail: sendEmail ? group.customerEmail : undefined,
+            dueDate,
+            taxAmount: 0,
+            notes: [
+              CANCELLATION_FEE_MARKER,
+              t('customers:cancellations.bill.invoiceNote', { count: group.rows.length }),
+              ...group.rows.map(row => t('customers:cancellations.bill.invoiceLine', {
+                date: row.playedOn ?? '',
+                reason: t(`customers:cancellations.reason.${row.reason}`, {
+                  defaultValue: t('customers:cancellations.reason.other'),
+                }),
+                note: row.reasonNote ?? '',
+              })),
+            ].join('\n'),
             description: describeFeeLine(group, t),
-            quantity: 1,
-            unitPrice: group.amount,
-          }],
-          dueDate,
-          currency: 'JPY',
-          taxCategory: 'out_of_scope',
-          taxAmount: 0,
-          notes: [
-            CANCELLATION_FEE_MARKER,
-            t('customers:cancellations.bill.invoiceNote', { count: group.rows.length }),
-            ...group.rows.map(row => t('customers:cancellations.bill.invoiceLine', {
-              date: row.playedOn ?? '',
-              reason: t(`customers:cancellations.reason.${row.reason}`, {
-                defaultValue: t('customers:cancellations.reason.other'),
-              }),
-              note: row.reasonNote ?? '',
-            })),
-          ].join('\n'),
-          createPaymentLink: true,
+            amount: group.amount,
+            sendEmail: sendEmail && Boolean(group.customerEmail),
+            sendSms: false,
+          })),
+        })
+        const issue = fulfillmentIssueKind(invoice, {
           sendEmail: sendEmail && Boolean(group.customerEmail),
           sendSms: false,
         })
-        // Creation queues the requested channels. Fulfilment is the dedicated
-        // initial delivery action; leaving it out would create a Draft and
-        // still mark CourseBoard's reservation as invoiced.
-        const fulfilled = await fulfillCancellationFee<InvoiceResponse>(invoice.id)
-        attempts.push({ group, invoiceId: fulfilled.id })
+        attempts.push({
+          group,
+          invoiceId: invoice.id,
+          ...(issue ? { error: t(`cancellationFees:new.error.${issue}`) } : {}),
+        })
       } catch (error) {
         attempts.push({
           group,
@@ -642,7 +713,23 @@ function BillCancellationFeesSheet({
     }
 
     const invoiced = attempts.filter(attempt => attempt.invoiceId)
-    if (invoiced.length > 0) {
+    const existingDecisions = rows
+      .filter(row => existingInvoiceMatches.has(row.reservationId))
+      .map(row => ({
+        reservationId: row.reservationId,
+        state: 'invoiced',
+        invoiceId: existingInvoiceMatches.get(row.reservationId),
+      }))
+    const newDecisions = invoiced.flatMap(attempt =>
+      splitFeeAcrossRows(attempt.group).map(share => ({
+        reservationId: share.reservationId,
+        state: 'invoiced',
+        invoiceId: attempt.invoiceId,
+        amount: share.amount,
+      })))
+    const decisions = [...existingDecisions, ...newDecisions]
+    let settlementError: string | undefined
+    if (decisions.length > 0) {
       try {
         await courseboardApiJson('/v1/course/reservation-cancellations/fees', {
           method: 'POST',
@@ -650,22 +737,12 @@ function BillCancellationFeesSheet({
           body: JSON.stringify({
             // Attributed back to the bookings by rounds given up, so the rows
             // add up to the invoice exactly.
-            decisions: invoiced.flatMap(attempt =>
-              splitFeeAcrossRows(attempt.group).map(share => ({
-                reservationId: share.reservationId,
-                state: 'invoiced',
-                invoiceId: attempt.invoiceId,
-                amount: share.amount,
-              }))),
+            decisions,
           }),
         })
-        // The upstream invoice and the CourseBoard rows are reconciled now;
-        // a later extraction may start a fresh billing operation for a newly
-        // unsettled group. Failed write-backs deliberately retain their keys.
-        for (const attempt of invoiced) requestKeys.current.delete(attempt.group.key)
-        persistBatchKeys(requestKeys.current)
         onSettled()
       } catch (error) {
+        settlementError = error instanceof Error ? error.message : String(error)
         // The invoices exist and CourseBoard's rows do not say so, so the
         // bookings come round again on the next extraction. Billing them a
         // second time is what the retry key now prevents; what is left is to
@@ -674,7 +751,7 @@ function BillCancellationFeesSheet({
         showToast({
           tone: 'danger',
           title: t('customers:cancellations.bill.recordFailed'),
-          message: error instanceof Error ? error.message : String(error),
+          message: settlementError,
         })
       }
     }
@@ -682,10 +759,12 @@ function BillCancellationFeesSheet({
     setResults(attempts)
     setSaving(false)
     const failed = attempts.filter(attempt => attempt.error)
-    if (failed.length === 0 && invoiced.length > 0) {
+    const completed = attempts.filter(attempt => attempt.invoiceId && !attempt.error)
+    const settledCount = existingDecisions.length + completed.length
+    if (failed.length === 0 && !settlementError && settledCount > 0) {
       showToast({
         tone: 'success',
-        message: t('customers:cancellations.bill.done', { count: invoiced.length }),
+        message: t('customers:cancellations.bill.done', { count: settledCount }),
       })
       onClose()
     }
@@ -733,6 +812,13 @@ function BillCancellationFeesSheet({
             <small>{t('customers:cancellations.bill.sendEmailHint')}</small>
           </span>
         </label>
+
+        {invoiced.loading ? (
+          <LoadingState label={t('cancellationFees:list.loading')} />
+        ) : null}
+        {invoiced.error ? (
+          <ResourceError error={invoiced.error} onRetry={invoiced.refresh} />
+        ) : null}
 
         {/* Who the club has no ledger link for, and the two ways out of it:
             recognise them in the ledger, or bill the name as it stands. These
@@ -837,6 +923,12 @@ function BillCancellationFeesSheet({
           </Notice>
         ) : null}
 
+        {alreadyBilled.length > 0 ? (
+          <Notice tone="warning" title={t('customers:cancellations.bill.alreadyInvoicedTitle')}>
+            {t('customers:cancellations.bill.alreadyInvoiced', { count: alreadyBilled.length })}
+          </Notice>
+        ) : null}
+
         {results ? (
           <Notice
             tone={results.some(result => result.error) ? 'danger' : 'success'}
@@ -861,11 +953,13 @@ function BillCancellationFeesSheet({
             type="button"
             variant="primary"
             onClick={submit}
-            disabled={saving || plan.groups.length === 0}
+            disabled={saving || !reconciliationReady || (plan.groups.length === 0 && !onlyReconcile)}
           >
             {saving
               ? t('customers:cancellations.bill.saving')
-              : t('customers:cancellations.bill.submit', { total: yen(plan.total) })}
+              : onlyReconcile
+                ? t('customers:cancellations.bill.reconcile')
+                : t('customers:cancellations.bill.submit', { total: yen(plan.total) })}
           </Button>
         </div>
       </div>

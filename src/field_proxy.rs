@@ -68,7 +68,7 @@ pub async fn proxy_field_api(
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
     let mut outbound = client.request(method, url);
-    // Bridge exports and dedicated cancellation-fee actions authorize the
+    // User-origin invoice and dedicated cancellation-fee actions authorize the
     // signed-in caller upstream, even when other Field integrations use an
     // optional service-account override.
     let authorization = outbound_authorization(
@@ -78,6 +78,7 @@ pub async fn proxy_field_api(
     );
     if (is_bridge_export_path(&normalized_path)
         || is_cancellation_fee_path(&normalized_path)
+        || is_invoice_path(&normalized_path)
         || is_field_client_context_path(&normalized_path))
         && authorization.is_none()
     {
@@ -152,8 +153,9 @@ pub async fn proxy_field_api(
         .unwrap_or_else(|_| proxy_error(StatusCode::BAD_GATEWAY, "Field API response was invalid"))
 }
 
-/// Bridge exports use the same caller bearer the authentication middleware
-/// verified. Other integrations retain their optional static override.
+/// User-origin invoice and bridge actions use the same caller bearer the
+/// authentication middleware verified. Other integrations retain their
+/// optional static override.
 fn outbound_authorization<'a>(
     path: &str,
     upstream_override: Option<&'a str>,
@@ -164,6 +166,7 @@ fn outbound_authorization<'a>(
     // with a broad Field service token from configuration.
     if is_bridge_export_path(path)
         || is_cancellation_fee_path(path)
+        || is_invoice_path(path)
         || is_field_client_context_path(path)
     {
         return crate::course::interfaces::http::caller_bearer(inbound_headers).ok();
@@ -671,16 +674,22 @@ mod tests {
     }
 
     #[test]
-    fn prefers_static_field_bearer_override_when_configured() {
+    fn generic_invoice_routes_forward_the_caller_bearer_even_with_static_override() {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
             HeaderValue::from_static("Bearer login-access-token"),
         );
-        assert_eq!(
-            outbound_authorization("/v1/invoices", Some("Bearer cli-override"), &headers),
-            Some("Bearer cli-override")
-        );
+        for path in [
+            "/v1/invoices",
+            "/v1/invoices/inv_1",
+            "/v1/invoices/inv_1/fulfill",
+        ] {
+            assert_eq!(
+                outbound_authorization(path, Some("Bearer cli-override"), &headers),
+                Some("Bearer login-access-token")
+            );
+        }
     }
 
     #[test]
@@ -688,6 +697,10 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer "));
         assert_eq!(outbound_authorization("/v1/invoices", None, &headers), None);
+        assert_eq!(
+            outbound_authorization("/v1/invoices", Some("Bearer service-account"), &headers),
+            None
+        );
     }
 
     #[test]
