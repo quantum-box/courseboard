@@ -8,7 +8,7 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Notice } from '../components/Page'
-import { getCancellationFeeContext, type CancellationFeeContext } from '../features/cancellation-fees/cancellation-fee-api'
+import { getFieldClientContext, type CancellationFeeContext } from '../features/cancellation-fees/cancellation-fee-api'
 import { useResource } from '../hooks/useResource'
 import { DEFAULT_TIME_ZONE } from '../lib/clock'
 import { isSupportedTimezone } from '../lib/timezone'
@@ -39,8 +39,8 @@ function resolveTimezone(context: CancellationFeeContext | null) {
 
 export function TenantTimezoneProvider({ children }: { children: ReactNode }) {
   const [updatedTimezone, setUpdatedTimezone] = useState<string | null>(null)
-  const loader = useMemo(() => () => getCancellationFeeContext(), [])
-  const resource = useResource(loader, [], { cacheKey: 'field:cancellation-fee-context' })
+  const loader = useMemo(() => () => getFieldClientContext(), [])
+  const resource = useResource(loader, [], { cacheKey: 'field:client-context' })
   useEffect(() => {
     const update = (event: Event) => {
       const timezone = (event as CustomEvent<string>).detail

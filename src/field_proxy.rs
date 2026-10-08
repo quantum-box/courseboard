@@ -76,7 +76,9 @@ pub async fn proxy_field_api(
         config.field_upstream_authorization.as_deref(),
         &parts.headers,
     );
-    if (is_bridge_export_path(&normalized_path) || is_cancellation_fee_path(&normalized_path))
+    if (is_bridge_export_path(&normalized_path)
+        || is_cancellation_fee_path(&normalized_path)
+        || is_field_client_context_path(&normalized_path))
         && authorization.is_none()
     {
         return proxy_error(
@@ -160,7 +162,10 @@ fn outbound_authorization<'a>(
     // Dedicated cancellation-fee actions are user operations. Preserve the
     // bearer that CourseBoard's auth layer verified instead of replacing it
     // with a broad Field service token from configuration.
-    if is_bridge_export_path(path) || is_cancellation_fee_path(path) {
+    if is_bridge_export_path(path)
+        || is_cancellation_fee_path(path)
+        || is_field_client_context_path(path)
+    {
         return crate::course::interfaces::http::caller_bearer(inbound_headers).ok();
     }
     if let Some(value) = upstream_override.filter(|value| !value.trim().is_empty()) {
@@ -204,6 +209,7 @@ fn is_allowed_path(path: &str) -> bool {
         || is_field_iam_path(path)
         || is_reservation_billing_invoice_path(path)
         || is_order_detail_path(path)
+        || is_field_client_context_path(path)
         || is_cancellation_fee_path(path)
         || is_invoice_path(path)
         || is_bridge_export_path(path)
@@ -259,10 +265,10 @@ fn is_allowed_route(method: &Method, path: &str) -> bool {
     if is_order_detail_path(path) {
         return method == Method::GET;
     }
+    if is_field_client_context_path(path) {
+        return method == Method::GET;
+    }
     if is_cancellation_fee_path(path) {
-        if path == "/v1/cancellation-fees/context" {
-            return method == Method::GET;
-        }
         if path == "/v1/cancellation-fees" {
             return method == Method::GET || method == Method::POST;
         }
@@ -415,7 +421,7 @@ fn is_invoice_path(path: &str) -> bool {
 /// available to other CourseBoard screens, but the cancellation-fee UI has no
 /// route back to them.
 fn is_cancellation_fee_path(path: &str) -> bool {
-    if path == "/v1/cancellation-fees" || path == "/v1/cancellation-fees/context" {
+    if path == "/v1/cancellation-fees" {
         return true;
     }
     let Some(suffix) = path.strip_prefix("/v1/cancellation-fees/") else {
@@ -428,6 +434,10 @@ fn is_cancellation_fee_path(path: &str) -> bool {
             | (Some(invoice_id), Some("fulfill" | "send"), None)
             if !invoice_id.is_empty()
     )
+}
+
+fn is_field_client_context_path(path: &str) -> bool {
+    path == "/v1/field/client-context"
 }
 
 #[cfg(test)]
@@ -470,7 +480,7 @@ mod tests {
         assert!(is_allowed_path("/v1/invoices/inv_1"));
         assert!(is_allowed_path("/v1/invoices/inv_1/fulfill"));
         assert!(is_allowed_path("/v1/cancellation-fees"));
-        assert!(is_allowed_path("/v1/cancellation-fees/context"));
+        assert!(is_allowed_path("/v1/field/client-context"));
         assert!(is_allowed_path("/v1/cancellation-fees/inv_1"));
         assert!(is_allowed_path("/v1/cancellation-fees/inv_1/fulfill"));
         assert!(is_allowed_path("/v1/cancellation-fees/inv_1/send"));
@@ -510,10 +520,7 @@ mod tests {
             "/v1/invoices/inv_1/fulfill"
         ));
         assert!(is_allowed_route(&Method::GET, "/v1/cancellation-fees"));
-        assert!(is_allowed_route(
-            &Method::GET,
-            "/v1/cancellation-fees/context"
-        ));
+        assert!(is_allowed_route(&Method::GET, "/v1/field/client-context"));
         assert!(is_allowed_route(&Method::POST, "/v1/cancellation-fees"));
         assert!(is_allowed_route(
             &Method::GET,
@@ -740,7 +747,7 @@ mod tests {
             HeaderValue::from_static("Bearer cancellation-user"),
         );
         for path in [
-            "/v1/cancellation-fees/context",
+            "/v1/field/client-context",
             "/v1/cancellation-fees",
             "/v1/cancellation-fees/inv_1",
             "/v1/cancellation-fees/inv_1/fulfill",

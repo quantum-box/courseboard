@@ -1,7 +1,7 @@
 import { fieldApiJson } from '../../api'
 
 export const CANCELLATION_FEES_PATH = '/v1/cancellation-fees'
-export const CANCELLATION_FEE_CONTEXT_PATH = `${CANCELLATION_FEES_PATH}/context`
+export const FIELD_CLIENT_CONTEXT_PATH = '/v1/field/client-context'
 
 export type CancellationFeeContext = {
   tenantName?: string
@@ -48,8 +48,8 @@ export type CancellationFeeListQuery = {
   offset?: number
 }
 
-export function getCancellationFeeContext<T = CancellationFeeContext>() {
-  return fieldApiJson<T>(CANCELLATION_FEE_CONTEXT_PATH)
+export function getFieldClientContext<T = CancellationFeeContext>() {
+  return fieldApiJson<T>(FIELD_CLIENT_CONTEXT_PATH)
 }
 
 function cancellationFeePath(invoiceId: string, suffix = '') {

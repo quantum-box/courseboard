@@ -16,7 +16,7 @@ const api = vi.hoisted(() => ({ context: vi.fn() }))
 
 vi.mock('../features/cancellation-fees/cancellation-fee-api', async importOriginal => {
   const actual = await importOriginal<typeof import('../features/cancellation-fees/cancellation-fee-api')>()
-  return { ...actual, getCancellationFeeContext: api.context }
+  return { ...actual, getFieldClientContext: api.context }
 })
 
 function Child() {

@@ -3391,7 +3391,7 @@ function resolveGet(path: string): Json | null | undefined {
     return settlementReport(url.searchParams.get('yearMonth') ?? TODAY.slice(0, 7))
   }
 
-  if (pathname === '/v1/cancellation-fees/context') {
+  if (pathname === '/v1/field/client-context') {
     return { tenantName: 'Mock Course', timezone: 'Asia/Tokyo' }
   }
 
