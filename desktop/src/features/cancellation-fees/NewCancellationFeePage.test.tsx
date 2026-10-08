@@ -24,6 +24,7 @@ vi.mock('../../lib/router', async importOriginal => {
 
 afterEach(() => {
   cleanup()
+  sessionStorage.clear()
   api.field.mockReset()
   router.navigate.mockReset()
   vi.unstubAllGlobals()
@@ -188,6 +189,54 @@ describe('the dedicated cancellation fee form', () => {
       api.field.mock.calls.some(call => String(call[0]).endsWith('/fulfill')),
     ).toBe(true))
     expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
+  })
+
+  it('keeps the resend key for a partial response and rotates after completion', async () => {
+    vi.stubGlobal('crypto', {
+      randomUUID: vi.fn()
+        .mockReturnValueOnce('123e4567-e89b-42d3-a456-426614174000')
+        .mockReturnValueOnce('123e4567-e89b-42d3-a456-426614174001')
+        .mockReturnValueOnce('123e4567-e89b-42d3-a456-426614174002'),
+    })
+    let sendAttempts = 0
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees/inv_1') {
+        return invoice({
+          status: 'Sent',
+          emailDeliveryStatus: 'Sent',
+          smsDeliveryStatus: 'Sent',
+        })
+      }
+      if (path.endsWith('/fulfill')) throw new Error('completed invoice must use explicit resend')
+      if (path.endsWith('/send')) {
+        sendAttempts += 1
+        return sendAttempts === 1
+          ? invoice({
+              status: 'SendFailed',
+              emailDeliveryStatus: 'Failed',
+              smsDeliveryStatus: 'Failed',
+              smsDeliveryFailureCode: 'BillingNotReady',
+            })
+          : invoice({ emailDeliveryStatus: 'Sent', smsDeliveryStatus: 'Sent' })
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+    renderDetailPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(sendAttempts).toBe(1))
+    const firstSend = api.field.mock.calls.find(call => String(call[0]).endsWith('/send'))!
+    const firstKey = bodyOf(firstSend).idempotencyKey
+
+    fireEvent.click(screen.getByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(sendAttempts).toBe(2))
+    const sends = api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))
+    expect(bodyOf(sends[1]!)).toMatchObject({ idempotencyKey: firstKey })
+
+    fireEvent.click(screen.getByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(sendAttempts).toBe(3))
+    const completedSends = api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))
+    expect(bodyOf(completedSends[2]!).idempotencyKey).not.toBe(firstKey)
   })
 
   it('retries the same initial delivery after its response times out', async () => {

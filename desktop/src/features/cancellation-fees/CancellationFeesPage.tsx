@@ -995,6 +995,7 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
         sendEmail,
         sendSms,
       })
+      const explicitResend = !initialFulfillment && (sendEmail || sendSms)
       const fulfilled = initialFulfillment
         ? await fulfillCancellationFee<InvoiceData>(invoiceId)
         : sendEmail || sendSms
@@ -1004,13 +1005,16 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
             sendSms,
           })
           : resource.data
-      if (sendEmail || sendSms) {
-        resendKey.current = rotatePersistedDeliveryKey(invoiceId)
-      }
       const issue = fulfillmentIssue(fulfilled, {
         sendEmail,
         sendSms,
       })
+      // Keep the same resend claim while Field has returned a partial or
+      // failed result. Rotate only after a complete response so a retry of an
+      // incomplete delivery cannot race a still-active provider operation.
+      if (explicitResend && !issue) {
+        resendKey.current = rotatePersistedDeliveryKey(invoiceId)
+      }
       setNotice(issue
         ? { tone: 'danger', message: issue }
         : { tone: 'success', message: t('cancellationFees:detail.notice.resent') })
