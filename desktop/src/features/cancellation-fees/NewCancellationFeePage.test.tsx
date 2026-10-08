@@ -78,6 +78,13 @@ function fillSnapshot(name = '山田 太郎', phone = '090-0000-0000') {
   fireEvent.click(checkbox(/取引のSMSを受け取ることに同意/))
 }
 
+function fillLinkOnlySnapshot(name = '山田 太郎') {
+  fireEvent.click(checkbox(/請求書と支払いリンク/))
+  fireEvent.change(screen.getByLabelText('請求先の名前', { exact: false }), {
+    target: { value: name },
+  })
+}
+
 function bodyOf(call: unknown[]) {
   const init = call[1] as RequestInit
   return JSON.parse(String(init.body)) as Record<string, any>
@@ -121,6 +128,31 @@ describe('the dedicated cancellation fee form', () => {
     expect(screen.queryByText(/顧客台帳にも登録/)).toBeNull()
     expect(screen.queryByLabelText(/SMSの文面/)).toBeNull()
     expect(screen.queryByLabelText(/請求先の種類/)).toBeNull()
+  })
+
+  it('opens a link-only draft when Field returns a ready payment link', async () => {
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees') {
+        return invoice({
+          status: 'Draft',
+          emailDeliveryStatus: null,
+          smsDeliveryStatus: null,
+        })
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path} ${init?.method ?? 'GET'}`)
+    })
+    renderPage()
+    fillLinkOnlySnapshot()
+
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+
+    await waitFor(() => expect(router.navigate).toHaveBeenCalledWith('cancellation-fees/inv_1'))
+    const create = api.field.mock.calls.find(call => call[0] === '/v1/cancellation-fees')!
+    expect(bodyOf(create)).toMatchObject({ sendEmail: false, sendSms: false })
+    expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/fulfill'))).toBe(false)
+    expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
   })
 
   it('retries the same initial delivery after its response times out', async () => {

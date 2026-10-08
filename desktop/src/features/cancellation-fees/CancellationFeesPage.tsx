@@ -472,10 +472,6 @@ export function NewCancellationFeePage() {
     setError(null)
     setDeliveryError(null)
     setInitialDeliveryUncertain(false)
-    if (!sendEmail && !sendSms) {
-      setError(t('cancellationFees:new.validation.channel'))
-      return
-    }
     if (sendSms && form.get('smsConsent') !== 'on') {
       setError(t('cancellationFees:new.validation.consent'))
       return
@@ -1381,6 +1377,7 @@ export function fulfillmentIssue(
   if (invoice.paymentLinkStatus !== 'Ready' || !invoice.paymentLinkUrl) {
     return i18next.t('cancellationFees:new.error.noPaymentLink')
   }
+  if (!delivery.sendEmail && !delivery.sendSms) return undefined
   // Name the channel and the fix when the send actually failed. `deliveryPartial`
   // below stays for the states that are not a failure yet — a delivery still
   // Pending, or an invoice Field left short of `Sent`.
@@ -1419,6 +1416,7 @@ function needsInitialFulfillment(
 ) {
   if (invoice.status === 'Paid') return false
   const paymentLinkReady = invoice.paymentLinkStatus === 'Ready' && Boolean(invoice.paymentLinkUrl)
+  if (paymentLinkReady && !delivery.sendEmail && !delivery.sendSms) return false
   const selectedDeliveriesSent =
     (!delivery.sendEmail || invoice.emailDeliveryStatus === 'Sent')
     && (!delivery.sendSms || invoice.smsDeliveryStatus === 'Sent')
