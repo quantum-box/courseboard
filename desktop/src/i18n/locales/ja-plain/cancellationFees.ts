@@ -58,7 +58,9 @@ export const cancellationFees: DeepPartial<typeof source> = {
     partial: {
       title: '請求書は作れました',
       description: '{{message}}。請求書はできています。送るところだけ、やり直します。',
+      initialDescription: '{{message}}。請求書はできていますが、最初に送った結果が分かりません。同じ最初の処理をもう一度確認します。',
       resend: '送るところだけやり直す',
+      initialRetry: '最初の送信をもう一度確認する',
       resending: 'もう一度送っています…',
       openDetail: '請求書の画面を開く',
     },
