@@ -5310,6 +5310,16 @@ export function resolveMockFieldApiJson(path: string, init?: RequestInit): MockF
   const pathname = pathnameOf(path)
   if (!isMockFieldDataEnabled() || pathname.startsWith('/v1/course/data-imports/')) return { kind: 'disabled' }
   const method = methodOf(init)
+  if (pathname === '/v1/field/client-capabilities' && method === 'GET') {
+    return hit({
+      navigation: { otherBusinessAccess: true },
+      agentDocuments: {
+        invoices: { list: true, send: true },
+        quotations: { list: true, send: true },
+      },
+      cancellationFees: { list: true, manage: true },
+    })
+  }
   if (pathname === '/v1/bridge/exports/objects' && method === 'GET') {
     return hit({ clientDataSupported: true, items: [{
       key: 'reservation', label: 'Reservation（予約）',

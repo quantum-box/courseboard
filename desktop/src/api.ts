@@ -299,6 +299,10 @@ async function protectedJson<T>(path: string, init?: RequestInit): Promise<T> {
 
 export async function courseboardApiJson<T>(path: string, init?: RequestInit) {
   const normalized = path.startsWith('/') ? path : `/${path}`
+  if (normalized === '/v1/field/client-capabilities') {
+    const mocked = unwrapMockResult(resolveMockFieldApiJson(normalized, init))
+    if (mocked !== undefined) return mocked as T
+  }
   // Course-domain mocks share the development fixture gate with Field mocks.
   if (normalized.startsWith('/v1/course/')) {
     const mocked = unwrapMockResult(resolveMockFieldApiJson(normalized, init))
