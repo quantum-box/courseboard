@@ -874,6 +874,17 @@ export function NewCancellationFeePage() {
         && reason.status !== 409
         && reason.status !== 429
       if (definitiveFailure) {
+        // A previous uncertain dispatch may already have created the invoice
+        // even when its replay now fails with an auth or validation response.
+        // Keep that operation recoverable until it is positively reconciled;
+        // only the first dispatch may clear a definitive client failure.
+        if (createRecovery) {
+          updatePersistedCreateRecovery(recovery)
+          setCreateRecovery(recovery)
+          setPending(frozenSubmission)
+          setError(reason instanceof Error ? reason.message : t('cancellationFees:new.error.create'))
+          return
+        }
         clearPersistedCreateRecovery({
           identity,
           key: recovery.key,
@@ -1347,6 +1358,10 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
             sendSms,
           })
           : resource.data
+      // Apply the authoritative mutation response before the action is enabled
+      // again. A revalidation may be in flight, so a second click must use the
+      // completed invoice and select /send rather than repeating /fulfill.
+      resource.setData(fulfilled)
       const issue = fulfillmentIssue(fulfilled, {
         sendEmail,
         sendSms,

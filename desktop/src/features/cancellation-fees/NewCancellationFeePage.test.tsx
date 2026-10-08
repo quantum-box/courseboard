@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { configureApiAuth } from '../../api'
+import { ApiError, configureApiAuth } from '../../api'
 import { i18next } from '../../i18n'
 import { PageReloadProvider } from '../../lib/pageReload'
 import { CancellationFeeDetailPage, NewCancellationFeePage } from './CancellationFeesPage'
@@ -206,6 +206,48 @@ describe('the dedicated cancellation fee form', () => {
     expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
   })
 
+  it('applies a completed fulfilment before an immediate resend click', async () => {
+    let detailLoads = 0
+    let fulfillAttempts = 0
+    let sendAttempts = 0
+    let resolveRefresh!: (value: unknown) => void
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees/inv_1') {
+        detailLoads += 1
+        if (detailLoads === 1) {
+          return invoice({
+            status: 'Draft',
+            emailDeliveryStatus: 'Pending',
+            smsDeliveryStatus: 'Pending',
+          })
+        }
+        return new Promise(resolve => { resolveRefresh = resolve })
+      }
+      if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
+        if (fulfillAttempts > 1) throw new Error('completed draft must not fulfil twice')
+        return invoice({ status: 'Sent', emailDeliveryStatus: 'Sent', smsDeliveryStatus: 'Sent' })
+      }
+      if (path.endsWith('/send')) {
+        sendAttempts += 1
+        return invoice({ status: 'Sent', emailDeliveryStatus: 'Sent', smsDeliveryStatus: 'Sent' })
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+    renderDetailPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(fulfillAttempts).toBe(1))
+    const resend = await screen.findByRole('button', { name: 'リンクを作って送り直す' })
+    await waitFor(() => expect((resend as HTMLButtonElement).disabled).toBe(false))
+    expect(screen.getByText('送りました')).toBeTruthy()
+
+    fireEvent.click(resend)
+    await waitFor(() => expect(sendAttempts).toBe(1))
+    expect(fulfillAttempts).toBe(1)
+    resolveRefresh(invoice({ status: 'Sent', emailDeliveryStatus: 'Sent', smsDeliveryStatus: 'Sent' }))
+  })
+
   it('keeps the resend key for a partial response and rotates after completion', async () => {
     vi.stubGlobal('crypto', {
       randomUUID: vi.fn()
@@ -387,6 +429,44 @@ describe('the dedicated cancellation fee form', () => {
     expect(secondBody.notes).toBe(firstBody.notes)
     expect(secondBody.sendEmail).toBe(firstBody.sendEmail)
     expect(secondBody.sendSms).toBe(firstBody.sendSms)
+  })
+
+  it('keeps an uncertain create after a replay auth failure', async () => {
+    const creates: unknown[][] = []
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees') {
+        creates.push([path, init])
+        if (creates.length === 1) throw new Error('create response lost')
+        if (creates.length === 2) throw new ApiError('権限を確認できません', 401)
+        return invoice()
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+
+    const firstRender = renderPage()
+    fillSnapshot('認証切れ前の請求先', '090-0000-0000')
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('create response lost')
+    firstRender.unmount()
+
+    const retryRender = renderPage()
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('権限を確認できません')
+    expect(sessionStorage.getItem('courseboard:cancellation-fee:create-recovery:tenant_test:user_test')).not.toBeNull()
+    retryRender.unmount()
+
+    // Re-authorize the same tenant/principal and retry the original body/key.
+    configureTestUser('user_test')
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await waitFor(() => expect(router.navigate).toHaveBeenCalledWith('cancellation-fees/inv_1'))
+
+    const firstBody = bodyOf(creates[0]!)
+    expect(bodyOf(creates[1]!).idempotencyKey).toBe(firstBody.idempotencyKey)
+    expect(bodyOf(creates[2]!).idempotencyKey).toBe(firstBody.idempotencyKey)
+    expect(bodyOf(creates[2]!).billTo).toEqual(firstBody.billTo)
   })
 
   it('does not restore another user’s unresolved create in the same tenant', async () => {
