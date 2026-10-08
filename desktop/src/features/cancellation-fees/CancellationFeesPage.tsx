@@ -1352,6 +1352,7 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
       const addedEmailForLinkOnlyDraft = paymentLinkReady
         && resource.data.status === 'Draft'
         && sendEmail
+        && !sendSms
         && (resource.data.emailDeliveryStatus === null
           || resource.data.emailDeliveryStatus === undefined)
       const initialFulfillment = addedEmailForLinkOnlyDraft

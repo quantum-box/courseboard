@@ -266,6 +266,51 @@ describe('the dedicated cancellation fee form', () => {
     }))
   })
 
+  it('keeps initial fulfilment for a draft with pending SMS when email is added', async () => {
+    let fulfillAttempts = 0
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees/inv_1' && !init?.method) {
+        return invoice({
+          status: 'Draft',
+          paymentLinkStatus: 'Ready',
+          paymentLinkUrl: 'https://example.com/pay/inv_1',
+          emailDeliveryStatus: null,
+          smsDeliveryStatus: 'Pending',
+          clientEmail: null,
+        })
+      }
+      if (path === '/v1/cancellation-fees/inv_1' && init?.method === 'PATCH') {
+        return invoice({
+          status: 'Draft',
+          paymentLinkStatus: 'Ready',
+          paymentLinkUrl: 'https://example.com/pay/inv_1',
+          emailDeliveryStatus: null,
+          smsDeliveryStatus: 'Pending',
+          clientEmail: 'added@example.com',
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
+        return invoice({ status: 'Sent', emailDeliveryStatus: 'Sent', smsDeliveryStatus: 'Sent' })
+      }
+      if (path.endsWith('/send')) throw new Error('pending SMS must keep the initial fulfilment')
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+    renderDetailPage()
+
+    fireEvent.change(await screen.findByLabelText('送信先メールアドレス'), {
+      target: { value: 'added@example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '変更する' }))
+    await waitFor(() => expect(api.field.mock.calls.some(
+      call => call[0] === '/v1/cancellation-fees/inv_1' && (call[1] as RequestInit)?.method === 'PATCH',
+    )).toBe(true))
+
+    fireEvent.click(screen.getByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(fulfillAttempts).toBe(1))
+    expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
+  })
+
   it('applies a completed fulfilment before an immediate resend click', async () => {
     let detailLoads = 0
     let fulfillAttempts = 0
