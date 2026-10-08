@@ -49,7 +49,10 @@ function mockField(
   invoice: Record<string, unknown> = { id: 'inv_1', invoiceNumber: 'INV-1' },
 ) {
   api.field.mockImplementation(async (path: string, init?: RequestInit) => {
-    if (path.startsWith('/v1/invoices?')) return { items: billedSources }
+    if (path.startsWith('/v1/invoices?')) {
+      const offset = Number(new URL(path, 'https://courseboard.test').searchParams.get('offset') ?? 0)
+      return { items: billedSources.slice(offset, offset + 100) }
+    }
     if (path === '/v1/invoices' && init?.method === 'POST') return invoice
     return {}
   })
@@ -198,6 +201,69 @@ describe('the cancellation extraction', () => {
     expect(JSON.parse((settle?.[1] as RequestInit).body as string).decisions).toEqual([
       { reservationId: 'res_1', state: 'invoiced', invoiceId: 'inv_old' },
     ])
+    expect(invoicePosts()).toHaveLength(0)
+  })
+
+  it('pages through every source-backed invoice before allowing reconciliation', async () => {
+    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: `inv_old_${index}`,
+      sources: [{
+        sourceType: 'reservation',
+        sourceId: `res_old_${index}`,
+        reason: 'cancellation_fee',
+      }],
+    }))
+    mockField([...firstPage, {
+      id: 'inv_second_page',
+      sources: [{
+        sourceType: 'reservation',
+        sourceId: 'res_1',
+        reason: 'cancellation_fee',
+      }],
+    }])
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+
+    expect(screen.getByRole('button', { name: '既存の請求を反映する' })).toBeTruthy()
+    expect(api.field.mock.calls.filter(call => String(call[0]).startsWith('/v1/invoices?')))
+      .toHaveLength(2)
+  })
+
+  it('revalidates reconciliation after the sheet is reopened', async () => {
+    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
+    let billedSources: unknown[] = []
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.startsWith('/v1/invoices?')) {
+        const offset = Number(new URL(path, 'https://courseboard.test').searchParams.get('offset') ?? 0)
+        return { items: billedSources.slice(offset, offset + 100) }
+      }
+      if (path === '/v1/invoices' && init?.method === 'POST') {
+        return { id: 'inv_1', invoiceNumber: 'INV-1' }
+      }
+      return {}
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }))
+    })
+
+    billedSources = [{
+      id: 'inv_reopened',
+      sources: [{ sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' }],
+    }]
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
+    })
+
+    expect(screen.getByRole('button', { name: '既存の請求を反映する' })).toBeTruthy()
     expect(invoicePosts()).toHaveLength(0)
   })
 

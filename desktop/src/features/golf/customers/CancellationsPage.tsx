@@ -109,6 +109,7 @@ export function CancellationsPage() {
   // made on, and billing needs the whole row for bookings no longer on screen.
   const [selected, setSelected] = useState<Map<string, ReservationCancellation>>(new Map())
   const [billing, setBilling] = useState(false)
+  const [billingRun, setBillingRun] = useState(0)
   const [waiving, setWaiving] = useState(false)
 
   const query = cancellationsQuery(filters, order, pageIndex)
@@ -375,7 +376,14 @@ export function CancellationsPage() {
             <Button type="button" variant="ghost" onClick={() => setWaiving(true)}>
               <Ban /> {t('customers:cancellations.waive.open', { count: selectedRows.length })}
             </Button>
-            <Button type="button" variant="primary" onClick={() => setBilling(true)}>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => {
+                setBillingRun(current => current + 1)
+                setBilling(true)
+              }}
+            >
               <ReceiptText /> {t('customers:cancellations.bill.open', { count: selectedRows.length })}
             </Button>
           </>
@@ -416,6 +424,7 @@ export function CancellationsPage() {
       </Panel>
 
       <BillCancellationFeesSheet
+        key={billingRun}
         open={billing}
         rows={selectedRows}
         businessDate={businessDate}
@@ -520,6 +529,26 @@ function fulfillmentIssueKind(
   return undefined
 }
 
+const CANCELLATION_FEE_LIST_PAGE_SIZE = 100
+
+/** Read every source-backed cancellation invoice before enabling billing. */
+async function loadCancellationFeeInvoices(): Promise<InvoiceListResponse> {
+  const items: InvoiceResponse[] = []
+  for (let offset = 0; ; offset += CANCELLATION_FEE_LIST_PAGE_SIZE) {
+    const separator = cancellationFeeInvoicesPath.includes('?') ? '&' : '?'
+    const response = await fieldApiJson<InvoiceListResponse>(
+      `${cancellationFeeInvoicesPath}${separator}limit=${CANCELLATION_FEE_LIST_PAGE_SIZE}&offset=${offset}`,
+    )
+    if (!response || !Array.isArray(response.items)) {
+      throw new Error('Field returned an invalid cancellation-fee invoice list')
+    }
+    items.push(...response.items)
+    if (response.items.length < CANCELLATION_FEE_LIST_PAGE_SIZE) {
+      return { items }
+    }
+  }
+}
+
 /**
  * What the desk typed into the sheet for a booking the ledger has no link for.
  *
@@ -578,9 +607,9 @@ function BillCancellationFeesSheet({
   // offers it again. A read that fails keeps the billing action disabled until
   // the source-backed reconciliation has completed.
   const invoiced = useResource(
-    () => fieldApiJson<InvoiceListResponse>(cancellationFeeInvoicesPath),
+    loadCancellationFeeInvoices,
     [open],
-    { enabled: open, cacheKey: 'field:invoices:cancellation-fee' },
+    { enabled: open },
   )
   const alreadyInvoiced = useMemo(
     () => invoicedReservationIds(invoiced.data?.items ?? []),
