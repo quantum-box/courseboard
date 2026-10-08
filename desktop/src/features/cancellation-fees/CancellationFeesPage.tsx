@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ApiError, downloadBlob, fieldOperatorId, fieldTenant, yen } from '../../api'
+import { ApiError, downloadBlob, fieldTenant, fieldUserId, yen } from '../../api'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import {
@@ -75,8 +75,8 @@ const CREATE_RECOVERY_STORAGE_PREFIX = 'courseboard:cancellation-fee:create-reco
 
 function createStorageScope() {
   const tenant = fieldTenant()
-  const operator = fieldOperatorId()
-  return tenant && operator ? `${tenant}:${operator}` : null
+  const user = fieldUserId()
+  return tenant && user ? `${tenant}:${user}` : null
 }
 
 function createIdentityHash(identity: string) {
@@ -210,8 +210,8 @@ function loadPersistedCreateRecovery(): CreateRecovery | null {
 
 /**
  * Keep the complete frozen request only while its create result is unknown.
- * It is scoped to the authenticated tenant and operator so a later sign-in
- * cannot see or replay another operator's recipient snapshot.
+ * It is scoped to the authenticated tenant and user so a later sign-in
+ * cannot see or replay another user's recipient snapshot.
  */
 function savePersistedCreateRecovery(recovery: CreateRecovery) {
   const storageKey = createRecoveryStorageKey(recovery.scope)
@@ -576,6 +576,7 @@ export function NewCancellationFeePage() {
   const [resending, setResending] = useState(false)
   const [initialDeliveryUncertain, setInitialDeliveryUncertain] = useState(false)
   const activeCreateRecovery = createRecovery?.scope === storageScope ? createRecovery : null
+  const recoveryScopeMismatch = createRecovery !== null && createRecovery.scope !== storageScope
 
   useEffect(() => {
     if (initialStorageScopeRef.current === storageScope) return
@@ -923,7 +924,7 @@ export function NewCancellationFeePage() {
         </Notice>
       ) : null}
 
-      <form className="collection-editor" onSubmit={review}>
+      <form className="collection-editor" hidden={recoveryScopeMismatch} onSubmit={review}>
         <fieldset className="collection-editor-fields" disabled={createRecovery !== null}>
         <Panel
           title={t('cancellationFees:new.detail.title')}
@@ -1080,7 +1081,7 @@ export function NewCancellationFeePage() {
       </form>
 
       <Sheet
-        open={pending !== null}
+        open={pending !== null && !recoveryScopeMismatch}
         onOpenChange={open => { if (!open && !submitting) setPending(null) }}
         title={t('cancellationFees:new.confirm.title')}
         description={t('cancellationFees:new.confirm.description')}

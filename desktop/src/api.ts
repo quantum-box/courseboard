@@ -57,6 +57,8 @@ export type ApiAuthContext = {
   tenantId: string
   operatorId: string
   platformId: string
+  /** Verified authenticated user id, distinct from the tenant operator id. */
+  userId?: string
   getAccessToken(forceRefresh?: boolean): Promise<string | undefined>
   onUnauthorized(): void
   onForbidden(): void
@@ -97,9 +99,9 @@ export function fieldTenant() {
     ?? (import.meta.env.DEV ? 'courseboard_id' : '')
 }
 
-/** The authenticated operator scope used for tenant-local recovery state. */
-export function fieldOperatorId() {
-  return apiAuthContext?.operatorId ?? ''
+/** The verified authenticated user scope used for tenant-local recovery state. */
+export function fieldUserId() {
+  return apiAuthContext?.userId ?? ''
 }
 
 export function fieldPlatformId() {

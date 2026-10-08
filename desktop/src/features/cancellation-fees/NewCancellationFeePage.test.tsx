@@ -106,16 +106,21 @@ function bodyOf(call: unknown[]) {
   return JSON.parse(String(init.body)) as Record<string, any>
 }
 
+function configureTestUser(userId: string) {
+  configureApiAuth({
+    tenantId: 'tenant_test',
+    operatorId: 'operator_test',
+    platformId: 'platform_test',
+    userId,
+    getAccessToken: async () => undefined,
+    onUnauthorized: vi.fn(),
+    onForbidden: vi.fn(),
+  })
+}
+
 describe('the dedicated cancellation fee form', () => {
   beforeEach(() => {
-    configureApiAuth({
-      tenantId: 'tenant_test',
-      operatorId: 'operator_test',
-      platformId: 'platform_test',
-      getAccessToken: async () => undefined,
-      onUnauthorized: vi.fn(),
-      onForbidden: vi.fn(),
-    })
+    configureTestUser('user_test')
     vi.stubGlobal('crypto', { randomUUID: () => '123e4567-e89b-42d3-a456-426614174000' })
   })
 
@@ -327,6 +332,39 @@ describe('the dedicated cancellation fee form', () => {
     expect(secondBody.notes).toBe(firstBody.notes)
     expect(secondBody.sendEmail).toBe(firstBody.sendEmail)
     expect(secondBody.sendSms).toBe(firstBody.sendSms)
+  })
+
+  it('does not restore another user’s unresolved create in the same tenant', async () => {
+    let createAttempts = 0
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees') {
+        createAttempts += 1
+        throw new Error('create response lost')
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+    configureTestUser('user_a')
+    const userARender = renderPage()
+    fillSnapshot('ユーザーAの請求先')
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('create response lost')
+    fireEvent.click(screen.getByRole('button', { name: '戻って直す' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    userARender.unmount()
+
+    configureTestUser('user_b')
+    const userBRender = renderPage()
+    expect(screen.queryByText('前回の請求作成を確認してください')).toBeNull()
+    expect((screen.getByLabelText('請求先の名前', { exact: false }) as HTMLInputElement).disabled).toBe(false)
+    expect(createAttempts).toBe(1)
+    userBRender.unmount()
+
+    configureTestUser('user_a')
+    renderPage()
+    expect(screen.getByText('前回の請求作成を確認してください')).toBeTruthy()
+    expect(screen.getByText('ユーザーAの請求先')).toBeTruthy()
   })
 
   it('replays the initial delivery when the create response reports SendFailed', async () => {
