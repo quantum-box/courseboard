@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { downloadBlob, fieldApiJson, yen } from '../../api'
+import { downloadBlob, yen } from '../../api'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import {
@@ -34,27 +34,31 @@ import { useResource } from '../../hooks/useResource'
 import { useRegisterPageReload } from '../../lib/pageReload'
 import { showToast } from '../../lib/toast'
 import { openExternal } from '../../lib/platform'
-import { currentRouteSearchParams, navigate } from '../../lib/router'
-import { CustomerPicker } from '../golf/customers/CustomerPicker'
-import type { Customer } from '../golf/customers/models'
+import { navigate } from '../../lib/router'
 import { DEFAULT_TIME_ZONE, normalizeIsoDate, today } from '../../lib/clock'
 import { Sheet } from '../../components/Sheet'
+import { CustomerPicker } from '../golf/customers/CustomerPicker'
+import type { Customer } from '../golf/customers/models'
 import {
-  cancellationFeeIdempotencyKey,
+  createCancellationFee,
+  fulfillCancellationFee,
+  getCancellationFee,
+  listCancellationFees,
+  newCancellationFeeIdempotencyKey,
+  sendCancellationFee,
+  updateCancellationFee,
+} from './cancellation-fee-api'
+import {
   cancellationFeeInvoiceRequestBody,
   customerRegistrationRequestBody,
   invoiceBillTo,
   normalizePhone,
   CANCELLATION_FEE_MARKER,
-  isCancellationFeeInvoice,
-  type BillToKind,
   type InvoiceBillTo,
   type InvoiceSource,
 } from './models'
-import { renderSmsPreview, smsCharacterCount, smsPartCount } from './smsMessage'
-
-// Re-exported so the existing tests and any importer of this screen keep
-// reaching them at the name they already use.
+// Kept exported for the existing model consumers while the page itself uses
+// only the dedicated adapter below.
 export {
   cancellationFeeInvoiceRequestBody,
   customerRegistrationRequestBody,
@@ -123,17 +127,6 @@ type InvoiceData = {
   updatedAt?: string
 }
 
-type OrderData = {
-  id: string
-  orderNumber: string
-  clientId: string
-  clientName?: string | null
-  clientEmail?: string | null
-  totalAmount: number
-  currency: string
-  status: string
-}
-
 const INVOICE_STATUSES: InvoiceStatus[] = ['Draft', 'Sent', 'SendFailed', 'Paid', 'Overdue']
 
 /**
@@ -186,34 +179,6 @@ function statusLabel(status: InvoiceStatus) {
   return i18next.t(`cancellationFees:status.${status}` as 'cancellationFees:status.Draft')
 }
 
-/**
- * The ERP order status is a pass-through string rather than a closed enum, so
- * anything outside this set falls back to a label that still shows the raw
- * value instead of leaking bare English into the UI.
- */
-const ORDER_STATUS_KEYS = new Set([
-  'draft',
-  'pending',
-  'confirmed',
-  'processing',
-  'completed',
-  'fulfilled',
-  'paid',
-  'unpaid',
-  'canceled',
-  'cancelled',
-  'refunded',
-  'failed',
-])
-
-function orderStatusLabel(status: string) {
-  const key = status.trim().toLowerCase()
-  if (ORDER_STATUS_KEYS.has(key)) {
-    return i18next.t(`cancellationFees:orderStatus.${key}` as 'cancellationFees:orderStatus.draft')
-  }
-  return i18next.t('cancellationFees:orderStatus.unknown', { value: status.trim() || '—' })
-}
-
 const statusVariants: Record<InvoiceStatus, 'neutral' | 'accent' | 'warning' | 'success' | 'destructive'> = {
   Draft: 'neutral',
   Sent: 'accent',
@@ -222,12 +187,7 @@ const statusVariants: Record<InvoiceStatus, 'neutral' | 'accent' | 'warning' | '
   Overdue: 'warning',
 }
 
-/**
- * Since PLT-4158 an invoice declares what it was raised from, so the honest
- * reading is its `sources`. The two older readings stay because every invoice
- * raised before then has one of them and nothing else: dropping either would
- * empty this list of its own history. See `isCancellationFeeInvoice`.
- */
+/** The dedicated Field list is already scoped to cancellation-fee invoices. */
 
 export function CancellationFeesPage() {
   const { t } = useTranslation(['cancellationFees', 'common'])
@@ -238,8 +198,8 @@ export function CancellationFeesPage() {
     // Do not pass the saved status filter to Field. A Sent invoice can be
     // overdue according to the tenant's business date even while Field still
     // stores it as Sent, so filtering happens after deriving the display state.
-    const response = await fieldApiJson<{ items: InvoiceData[] }>('/v1/invoices')
-    return response.items.filter(isCancellationFeeInvoice)
+    const response = await listCancellationFees<{ items: InvoiceData[] }>({ limit: 100, offset: 0 })
+    return response.items
   }, [])
   const resource = useResource(loader, [])
   const displayedInvoices = useMemo(
@@ -355,24 +315,11 @@ export function CancellationFeesPage() {
 }
 
 /**
- * Who the desk says it is billing, which is all it is asked to decide.
- *
- * A person is one answer, not two: whether the name typed into the box turns
- * out to be in the customer ledger is what the picker answers, not a choice
- * made before anything has been typed. A company is genuinely different — it
- * is billed against an account Field holds, and the order it came from names
- * that account.
- */
-type RecipientKind = 'person' | 'client'
-
-/**
  * What the confirmation step is holding: everything the send will use, read
  * off the form once so the operator confirms the same values that go upstream.
  */
 type PendingSubmission = {
-  billTo: InvoiceBillTo
-  /** Whether the recipient still has to be put in the ledger before invoicing. */
-  registerCustomer: boolean
+  billTo: { name: string; phone?: string; email?: string }
   recipientName: string
   clientEmail?: string
   clientPhone?: string
@@ -383,59 +330,26 @@ type PendingSubmission = {
   amount: number
   sendEmail: boolean
   sendSms: boolean
-  smsMessage?: string
 }
 
 export function NewCancellationFeePage() {
   const { t } = useTranslation(['cancellationFees', 'common'])
   const timezone = useTenantTimezone()
-  /**
-   * One key per visit to this screen, not per attempt. A retry after a timeout
-   * has to carry the key of the attempt that may already have landed, or the
-   * recipient gets a second ledger entry and a second invoice.
-   *
-   * Kept short because Field spells it into the invoice number (`INV-{key}`),
-   * and that number is what the desk reads out over the phone. Half a UUID is
-   * 64 bits, which is far more than one club's cancellation fees can collide
-   * across.
-   */
-  const requestKey = useRef(cancellationFeeIdempotencyKey([crypto.randomUUID()]))
-  /** Set once the recipient is in the ledger, so a retry skips that call. */
-  const registeredCustomerId = useRef<string | null>(null)
-  const orderId = currentRouteSearchParams().get('orderId')?.trim() ?? ''
-  const orderLoader = useCallback(async () => {
-    if (!orderId) return null
-    return fieldApiJson<OrderData>(`/v1/erp/orders/${encodeURIComponent(orderId)}`)
-  }, [orderId])
-  const orderResource = useResource(orderLoader, [orderId])
-  const order = orderResource.data
+  // One stable UUID per form visit makes a timeout retry safe. Field rejects
+  // arbitrary identifiers, and this value is the only create idempotency key
+  // sent to the dedicated endpoint.
+  const requestKey = useRef(newCancellationFeeIdempotencyKey())
+  const requestIdentity = useRef<string | null>(null)
+  const resendKey = useRef<string | null>(null)
   const [year, month, day] = today(timezone).split('-').map(Number)
   const due = new Date(Date.UTC(year!, month! - 1, day! + 7)).toISOString().slice(0, 10)
   const [sendEmail, setSendEmail] = useState(true)
   const [sendSms, setSendSms] = useState(false)
-  // An order names a company, so it arrives with an identifier. Everything else
-  // is a person, and which kind of person is not something the desk can answer
-  // before it has typed the name.
-  const [recipientKind, setRecipientKind] = useState<RecipientKind>(orderId ? 'client' : 'person')
-  // The person being billed, chosen from the ledger rather than typed as an
-  // id. A cancellation fee is always somebody the club already has a booking
-  // for, and asking the desk to copy `cus_01j…` off another screen is how the
-  // wrong person gets invoiced.
   const [customer, setCustomer] = useState<Customer | null>(null)
-  const [customerName, setCustomerName] = useState(order?.clientName ?? '')
-  const [registerCustomer, setRegisterCustomer] = useState(false)
+  const [customerName, setCustomerName] = useState('')
   const [amount, setAmount] = useState(5000)
-  // Held rather than read off the form at submit like the other fields: the
-  // SMS counter has to move as these change, and all three feed the text it
-  // counts. `review` still reads them back out of the form, so the submitted
-  // values are the ones the operator can see.
   const [taxAmount, setTaxAmount] = useState(0)
   const [dueDate, setDueDate] = useState(due)
-  // Typed explicitly: the i18n resources give `t` a literal return type, and
-  // inferring it here would leave the state unable to hold an edit.
-  const [smsMessage, setSmsMessage] = useState<string>(
-    () => i18next.t('cancellationFees:new.delivery.smsBodyDefault'),
-  )
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState<PendingSubmission | null>(null)
@@ -445,31 +359,11 @@ export function NewCancellationFeePage() {
   const [resending, setResending] = useState(false)
 
   /**
-   * Which of Field's three recipients this invoice is actually addressed to.
-   *
-   * Derived, never chosen: a person the desk recognised in the ledger is billed
-   * as that customer, and the same person typed in and left unrecognised is
-   * billed by name. Both are ordinary — a caller who has never paid the club
-   * anything has no ledger entry to pick, and being asked for one is what used
-   * to stop the desk mid-call.
-   */
-  const billToKind: BillToKind = recipientKind === 'client'
-    ? 'client'
-    : customer ? 'customer' : 'unregistered'
-
-  function changeRecipientKind(kind: RecipientKind) {
-    setRecipientKind(kind)
-    // The picked entry answered "who is this person in the ledger"; it means
-    // nothing once the form is addressing a company account.
-    if (kind === 'client') setCustomer(null)
-  }
-
-  /**
    * Read the form, check it, and hand it to the confirmation step.
    *
-   * Nothing is sent here. The desk gets one look at the recipient, the amount,
-   * the due date and whether this also creates a ledger entry, because all four
-   * are hard to walk back once the payment link is out.
+   * Nothing is sent here. The dedicated API accepts an unregistered recipient
+   * snapshot only; ledger and reservation linking require a separate audited
+   * action and never belong in this request.
    */
   function review(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -485,33 +379,17 @@ export function NewCancellationFeePage() {
       return
     }
     const reference = String(form.get('reference') ?? '').trim()
-    const clientName = (billToKind === 'client'
-      ? String(form.get('clientName') ?? '')
-      : (customer?.name ?? customerName)).trim()
+    const clientName = (customer?.name ?? customerName).trim()
     const clientEmail = String(form.get('clientEmail') ?? '').trim()
     const reason = String(form.get('reason') ?? '').trim()
     const notes = String(form.get('notes') ?? '').trim()
     const typedPhone = String(form.get('clientPhone') ?? '').trim()
     const customerPhone = normalizePhone(typedPhone)
-    // The number is part of the recipient itself for somebody who is not in the
-    // ledger, so an unreadable one is refused here rather than upstream: Field
-    // rejects the whole invoice for it, and the desk would see that as a
-    // failure with no field to fix.
-    const phoneIsSent = sendSms || billToKind === 'unregistered'
-    const billTo = invoiceBillTo({
-      kind: billToKind,
-      customerId: customer?.id ?? '',
-      clientId: String(form.get('clientId') ?? ''),
-      affiliationId: String(form.get('affiliationId') ?? ''),
-      name: clientName,
-      phone: customerPhone,
-      email: clientEmail,
-    })
     if (!Number.isFinite(amount) || amount <= 0) {
       setError(t('cancellationFees:new.validation.amount'))
       return
     }
-    if (phoneIsSent && typedPhone && !customerPhone) {
+    if (typedPhone && !customerPhone) {
       setError(t('cancellationFees:new.validation.phone'))
       return
     }
@@ -519,17 +397,20 @@ export function NewCancellationFeePage() {
       setError(t('cancellationFees:new.validation.phone'))
       return
     }
-    if (!billTo) {
+    if (!clientName) {
       setError(t('cancellationFees:new.validation.billTo'))
       return
     }
 
     setPending({
-      billTo,
-      registerCustomer: billTo.kind === 'unregistered' && registerCustomer,
+      billTo: {
+        name: clientName,
+        ...(customerPhone ? { phone: customerPhone } : {}),
+        ...(clientEmail ? { email: clientEmail } : {}),
+      },
       recipientName: clientName,
-      clientEmail: sendEmail ? clientEmail : undefined,
-      clientPhone: sendSms ? customerPhone : undefined,
+      clientEmail: clientEmail || undefined,
+      clientPhone: customerPhone || undefined,
       dueDate: String(form.get('dueDate') ?? ''),
       taxAmount: Number(form.get('taxAmount') ?? 0),
       notes: [
@@ -545,7 +426,6 @@ export function NewCancellationFeePage() {
       amount,
       sendEmail,
       sendSms,
-      smsMessage: sendSms ? String(form.get('smsMessage') ?? '') : undefined,
     })
   }
 
@@ -553,65 +433,40 @@ export function NewCancellationFeePage() {
     setSubmitting(true)
     setError(null)
     setDeliveryError(null)
-    let billTo = submission.billTo
-    if (submission.registerCustomer && submission.billTo.kind === 'unregistered') {
-      try {
-        const customerId = registeredCustomerId.current ?? (await fieldApiJson<{ id: string }>(
-          '/v1/erp/customers',
-          {
-            method: 'POST',
-            body: JSON.stringify(customerRegistrationRequestBody({
-              name: submission.billTo.name,
-              phone: submission.billTo.phone,
-              email: submission.billTo.email,
-              // A different namespace from the invoice: Field derives the
-              // customer id from this key, and reusing one string for both
-              // would tie two unrelated records to the same value.
-              idempotencyKey: `customer-${requestKey.current}`,
-            })),
-          },
-        )).id
-        registeredCustomerId.current = customerId
-        billTo = { kind: 'customer', customerId }
-      } catch (reason) {
-        // Stop rather than quietly invoicing an unregistered recipient: the
-        // operator asked for a ledger entry, and the usual cause is a missing
-        // permission that an administrator has to grant.
-        setPending(null)
-        setError(reason instanceof Error
-          ? reason.message
-          : t('cancellationFees:new.error.registerCustomer'))
-        setSubmitting(false)
-        return
-      }
-    }
     try {
-      const invoice = await fieldApiJson<InvoiceData>('/v1/invoices', {
-        method: 'POST',
-        body: JSON.stringify(cancellationFeeInvoiceRequestBody({
-          billTo,
-          clientName: submission.recipientName,
-          clientEmail: submission.clientEmail,
-          clientPhone: submission.clientPhone,
-          dueDate: submission.dueDate,
-          taxAmount: submission.taxAmount,
-          notes: submission.notes,
+      // A retry of the same frozen confirmation keeps its key. If the desk
+      // goes back, edits the form, and confirms a different payload after a
+      // failed request, start a new idempotent operation instead of replaying
+      // the earlier body under the old key.
+      const identity = JSON.stringify(submission)
+      if (requestIdentity.current !== identity) {
+        if (requestIdentity.current !== null) {
+          requestKey.current = newCancellationFeeIdempotencyKey()
+        }
+        requestIdentity.current = identity
+      }
+      const invoice = await createCancellationFee<InvoiceData>({
+        idempotencyKey: requestKey.current,
+        billTo: submission.billTo,
+        lineItems: [{
           description: submission.description,
-          amount: submission.amount,
-          sendEmail: submission.sendEmail,
-          sendSms: submission.sendSms,
-          smsMessage: submission.smsMessage,
-          idempotencyKey: requestKey.current,
-        })),
+          quantity: 1,
+          unitPrice: submission.amount,
+        }],
+        dueDate: submission.dueDate,
+        currency: 'JPY',
+        taxCategory: 'out_of_scope',
+        taxAmount: submission.taxAmount,
+        notes: submission.notes,
+        createPaymentLink: true,
+        sendEmail: submission.sendEmail,
+        sendSms: submission.sendSms,
       })
       setPending(null)
       setCreated(invoice)
       setSent(submission)
       try {
-        const fulfilled = await fieldApiJson<InvoiceData>(`/v1/invoices/${encodeURIComponent(invoice.id)}/fulfill`, {
-          method: 'POST',
-          body: JSON.stringify({}),
-        })
+        const fulfilled = await fulfillCancellationFee<InvoiceData>(invoice.id)
         setCreated(fulfilled)
         const incomplete = fulfillmentIssue(fulfilled, {
           sendEmail: submission.sendEmail,
@@ -646,18 +501,11 @@ export function NewCancellationFeePage() {
     if (!created || !sent) return
     setResending(true)
     try {
-      const fulfilled = await fieldApiJson<InvoiceData>(
-        `/v1/invoices/${encodeURIComponent(created.id)}/payment-link/resend`,
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            sendEmail: sent.sendEmail,
-            sendSms: sent.sendSms,
-            clientPhone: sent.clientPhone,
-            smsMessage: sent.smsMessage,
-          }),
-        },
-      )
+      const fulfilled = await sendCancellationFee<InvoiceData>(created.id, {
+        idempotencyKey: resendKey.current ?? (resendKey.current = newCancellationFeeIdempotencyKey()),
+        sendEmail: sent.sendEmail,
+        sendSms: sent.sendSms,
+      })
       setCreated(fulfilled)
       const incomplete = fulfillmentIssue(fulfilled, {
         sendEmail: sent.sendEmail,
@@ -707,35 +555,7 @@ export function NewCancellationFeePage() {
         </Notice>
       ) : null}
 
-      {orderId && orderResource.loading ? (
-        <LoadingState label={t('cancellationFees:new.orderLoading')} />
-      ) : null}
-      {orderId && orderResource.error ? (
-        <Notice tone="warning" title={t('cancellationFees:new.orderFailed.title')}>
-          {t('cancellationFees:new.orderFailed.description')}
-        </Notice>
-      ) : null}
-
-      {order ? (
-        <Panel
-          title={t('cancellationFees:new.order.title')}
-          description={t('cancellationFees:new.order.description')}
-        >
-          <dl className="detail-list">
-            <div><dt>{t('cancellationFees:new.order.number')}</dt><dd>{order.orderNumber}</dd></div>
-            <div>
-              <dt>{t('cancellationFees:new.order.amount')}</dt>
-              <dd>{yen(order.totalAmount, order.currency)}</dd>
-            </div>
-            <div>
-              <dt>{t('cancellationFees:new.order.status')}</dt>
-              <dd>{orderStatusLabel(order.status)}</dd>
-            </div>
-          </dl>
-        </Panel>
-      ) : null}
-
-      {orderId && orderResource.loading ? null : <form className="collection-editor" onSubmit={review}>
+      <form className="collection-editor" onSubmit={review}>
         <Panel
           title={t('cancellationFees:new.detail.title')}
           description={t('cancellationFees:new.detail.description')}
@@ -745,7 +565,6 @@ export function NewCancellationFeePage() {
               <Input
                 name="reference"
                 placeholder="RSV-1001 / ORD-1001"
-                defaultValue={order ? order.orderNumber : ''}
               />
             </Field>
             <Field label={t('cancellationFees:new.detail.amount')} required>
@@ -778,70 +597,26 @@ export function NewCancellationFeePage() {
           description={t('cancellationFees:new.client.description')}
         >
           <FormGrid>
-            <Field label={t('cancellationFees:new.client.kind')} required>
-              <NativeSelect
-                name="recipientKind"
-                value={recipientKind}
-                onChange={event => changeRecipientKind(event.target.value as RecipientKind)}
-              >
-                <option value="person">{t('cancellationFees:new.client.person')}</option>
-                <option value="client">{t('cancellationFees:new.client.company')}</option>
-              </NativeSelect>
-            </Field>
-            {recipientKind === 'person' ? (
-              // One box for the whole question. The desk types the name it was
-              // given, the ledger offers whoever answers to it, and picking is
-              // optional — an identifier the caller would have to be looked up
-              // by is not something anybody has on the phone.
-              <Field
-                label={t('cancellationFees:new.client.name')}
-                hint={t('cancellationFees:new.client.nameHint')}
+            <Field
+              label={t('cancellationFees:new.client.name')}
+              hint={t('cancellationFees:new.client.nameHint')}
+              required
+            >
+              <CustomerPicker
+                name={customerName}
+                customerId={customer?.id ?? null}
                 required
-              >
-                <CustomerPicker
-                  name={customerName}
-                  customerId={customer?.id ?? null}
-                  required
-                  // The ledger entry is written by the checkbox below, when the
-                  // invoice goes out, so the picker does not offer to write one
-                  // of its own here.
-                  allowRegister={false}
-                  onNameChange={value => {
-                    setCustomerName(value)
-                    // Editing the name after a pick means the desk is looking
-                    // for somebody else; keeping the old link would invoice
-                    // the person whose name is no longer on screen.
-                    if (customer && value !== customer.name) setCustomer(null)
-                  }}
-                  onSelect={picked => {
-                    setCustomer(picked)
-                    if (picked) setCustomerName(picked.name)
-                  }}
-                />
-              </Field>
-            ) : (
-              <>
-                <Field label={t('cancellationFees:new.client.name')} required>
-                  <Input name="clientName" required defaultValue={order?.clientName ?? ''} />
-                </Field>
-                <Field label={t('cancellationFees:new.client.id')}>
-                  <Input
-                    name="clientId"
-                    placeholder={t('cancellationFees:new.client.idPlaceholder')}
-                    defaultValue={order?.clientId ?? ''}
-                  />
-                </Field>
-                <Field
-                  label={t('cancellationFees:new.client.affiliationId')}
-                  hint={t('cancellationFees:new.client.affiliationIdHint')}
-                >
-                  <Input
-                    name="affiliationId"
-                    placeholder={t('cancellationFees:new.client.affiliationIdPlaceholder')}
-                  />
-                </Field>
-              </>
-            )}
+                allowRegister={false}
+                onNameChange={name => {
+                  setCustomerName(name)
+                  if (customer && name !== customer.name) setCustomer(null)
+                }}
+                onSelect={picked => {
+                  setCustomer(picked)
+                  if (picked) setCustomerName(picked.name)
+                }}
+              />
+            </Field>
             <Field label={t('cancellationFees:new.client.due')} required>
               <Input
                 name="dueDate"
@@ -853,21 +628,6 @@ export function NewCancellationFeePage() {
             </Field>
           </FormGrid>
 
-          {/* Only offered for somebody the ledger does not already hold: a
-              recipient picked from it is in there by definition. */}
-          {billToKind === 'unregistered' ? (
-            <label className="consent-check">
-              <input
-                type="checkbox"
-                checked={registerCustomer}
-                onChange={event => setRegisterCustomer(event.target.checked)}
-              />
-              <span>
-                <strong>{t('cancellationFees:new.client.register')}</strong>
-                <small>{t('cancellationFees:new.client.registerDetail')}</small>
-              </span>
-            </label>
-          ) : null}
         </Panel>
 
         <Panel
@@ -898,18 +658,15 @@ export function NewCancellationFeePage() {
                 name="clientEmail"
                 type="email"
                 required={sendEmail}
-                disabled={!sendEmail}
                 placeholder="guest@example.com"
-                key={customer?.id ?? order?.id ?? 'blank'}
-                defaultValue={customer?.email ?? order?.clientEmail ?? ''}
+                key={customer?.id ?? 'blank'}
+                defaultValue={customer?.email ?? ''}
               />
             </Field>
             <Field
               label={t('cancellationFees:new.delivery.smsTo')}
               required={sendSms}
-              hint={billToKind === 'unregistered'
-                ? t('cancellationFees:new.delivery.smsToHint')
-                : undefined}
+              hint={t('cancellationFees:new.delivery.smsToHint')}
             >
               {/* Kept usable without SMS for an unregistered recipient: the
                   number is how the club will reach them later, so it belongs on
@@ -918,7 +675,6 @@ export function NewCancellationFeePage() {
                 name="clientPhone"
                 type="tel"
                 required={sendSms}
-                disabled={!sendSms && billToKind !== 'unregistered'}
                 placeholder="09012345678"
                 key={customer?.id ?? 'blank'}
                 defaultValue={customer?.phone ?? ''}
@@ -934,22 +690,7 @@ export function NewCancellationFeePage() {
                   <small>{t('cancellationFees:new.delivery.consentDetail')}</small>
                 </span>
               </label>
-              <Field
-                label={t('cancellationFees:new.delivery.smsBody')}
-                hint={t('cancellationFees:new.delivery.smsBodyHint')}
-              >
-                <NativeTextarea
-                  name="smsMessage"
-                  rows={4}
-                  value={smsMessage}
-                  onChange={event => setSmsMessage(event.target.value)}
-                />
-                <SmsPartsHint
-                  template={smsMessage}
-                  amount={amount + taxAmount}
-                  dueDate={dueDate}
-                />
-              </Field>
+              <p className="field-hint">{t('cancellationFees:new.delivery.smsBodyHint')}</p>
             </>
           ) : null}
         </Panel>
@@ -965,7 +706,7 @@ export function NewCancellationFeePage() {
             {t('cancellationFees:new.review')}
           </Button>
         </div>
-      </form>}
+      </form>
 
       <Sheet
         open={pending !== null}
@@ -992,24 +733,7 @@ export function NewCancellationFeePage() {
                 <dt>{t('cancellationFees:new.confirm.due')}</dt>
                 <dd>{pending.dueDate}</dd>
               </div>
-              <div>
-                <dt>{t('cancellationFees:new.confirm.ledger')}</dt>
-                <dd>
-                  {pending.registerCustomer
-                    ? t('cancellationFees:new.confirm.ledgerRegister')
-                    : pending.billTo.kind === 'unregistered'
-                      ? t('cancellationFees:new.confirm.ledgerSkip')
-                      : t('cancellationFees:new.confirm.ledgerExisting')}
-                </dd>
-              </div>
             </dl>
-            {pending.sendSms && pending.smsMessage ? (
-              <SmsPreview
-                template={pending.smsMessage}
-                amount={pending.amount + pending.taxAmount}
-                dueDate={pending.dueDate}
-              />
-            ) : null}
             <div className="toolbar-row">
               <Button type="button" disabled={submitting} onClick={() => setPending(null)}>
                 {t('cancellationFees:new.confirm.back')}
@@ -1050,76 +774,6 @@ export function recipientEmail(invoice: Pick<InvoiceData, 'clientEmail' | 'billT
   return invoice.clientEmail ?? invoice.billTo?.snapshot?.email ?? null
 }
 
-/**
- * The SMS as it will arrive, for the confirmation step.
- *
- * This is the last point where the finished text can still be read: Field
- * substitutes the placeholders after the send is handed over, so up to here
- * the desk has only seen a template. The part count rides along because the
- * text is editable and AWS bills per part — the shipped wording leaves sixteen
- * characters under the two-part ceiling, so one added phrase makes every send
- * half again as expensive without looking any different.
- *
- * `amount` is the invoice total: the message asks for what the guest owes, and
- * a preview that quoted the fee before tax would be a different number from
- * the one on the payment page.
- */
-function SmsPreview({
-  template,
-  amount,
-  dueDate,
-}: {
-  template: string
-  amount: number
-  dueDate: string
-}) {
-  const { t } = useTranslation(['cancellationFees'])
-  // The payment link does not exist yet, so this renders against a stand-in of
-  // the same length rather than leaving `{url}` showing.
-  const text = renderSmsPreview({ template, amount, dueDate })
-  // Not a `Field`: that renders a `<label>`, and the preview is a block of
-  // text rather than a control for the label to name.
-  return (
-    <div className="field">
-      <span className="field-label">{t('cancellationFees:new.confirm.smsPreview')}</span>
-      <p className="notes-block sms-preview">{text}</p>
-      <span className="field-hint">{t('cancellationFees:new.confirm.smsPreviewHint')}</span>
-      <SmsPartsHint template={template} amount={amount} dueDate={dueDate} />
-    </div>
-  )
-}
-
-/**
- * How long the message runs and what AWS will bill it as.
- *
- * Shown under the text while it is being written as well as on the
- * confirmation step. The confirmation step alone is too late to be much use:
- * by then the operator has finished writing, and the only way to answer a
- * third part is to go back. Under the textarea the count moves as they type,
- * so the sentence that costs 11.8円 more is visible while they are still
- * deciding whether to keep it.
- */
-function SmsPartsHint({
-  template,
-  amount,
-  dueDate,
-}: {
-  template: string
-  amount: number
-  dueDate: string
-}) {
-  const { t } = useTranslation(['cancellationFees'])
-  const text = renderSmsPreview({ template, amount, dueDate })
-  return (
-    <span className="field-hint">
-      {t('cancellationFees:new.delivery.smsParts', {
-        characters: String(smsCharacterCount(text)),
-        parts: String(smsPartCount(text)),
-      })}
-    </span>
-  )
-}
-
 /** Where the payment link is going, for the confirmation step. */
 function destinationSummary(pending: Pick<PendingSubmission, 'clientEmail' | 'clientPhone'>) {
   const destinations = [pending.clientEmail, pending.clientPhone]
@@ -1134,7 +788,7 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
   const { t } = useTranslation(['cancellationFees', 'common'])
   const timezone = useTenantTimezone()
   const businessDate = today(timezone)
-  const loader = useCallback(() => fieldApiJson<InvoiceData>(`/v1/invoices/${encodeURIComponent(invoiceId)}`), [invoiceId])
+  const loader = useCallback(() => getCancellationFee<InvoiceData>(invoiceId), [invoiceId])
   const resource = useResource(loader, [invoiceId])
   useRegisterPageReload(resource.refresh)
   const [fulfilling, setFulfilling] = useState(false)
@@ -1149,10 +803,7 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
     setFulfilling(true)
     setNotice(null)
     try {
-      const fulfilled = await fieldApiJson<InvoiceData>(`/v1/invoices/${encodeURIComponent(invoiceId)}/fulfill`, {
-        method: 'POST',
-        body: JSON.stringify({}),
-      })
+      const fulfilled = await fulfillCancellationFee<InvoiceData>(invoiceId)
       const issue = fulfillmentIssue(fulfilled, {
         sendEmail: fulfilled.emailDeliveryStatus !== null && fulfilled.emailDeliveryStatus !== undefined,
         sendSms: fulfilled.smsDeliveryStatus !== null && fulfilled.smsDeliveryStatus !== undefined,
@@ -1366,9 +1017,8 @@ function InvoiceOperations({
   onNotice(notice: { tone: 'success' | 'danger'; message: string }): void
 }) {
   const { t } = useTranslation(['cancellationFees', 'common'])
-  const [status, setStatus] = useState<InvoiceStatus>(invoice.status)
-  const [createPaymentLink, setCreatePaymentLink] = useState(false)
-  const [sendEmail, setSendEmail] = useState(false)
+  const [notes, setNotes] = useState(invoice.notes ?? '')
+  const [clientEmail, setClientEmail] = useState(invoice.clientEmail ?? '')
   const [saving, setSaving] = useState(false)
   const isPaid = !isInvoiceUpdateAllowed(invoice)
 
@@ -1376,18 +1026,11 @@ function InvoiceOperations({
     if (isPaid) return
     setSaving(true)
     try {
-      await fieldApiJson<InvoiceData>(`/v1/invoices/${encodeURIComponent(invoice.id)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          status,
-          createPaymentLink,
-          paymentLinkProvider: 'stripe',
-          sendEmail,
-        }),
+      await updateCancellationFee<InvoiceData>(invoice.id, {
+        notes,
+        clientEmail: clientEmail.trim() || undefined,
       })
       onNotice({ tone: 'success', message: t('cancellationFees:detail.notice.statusUpdated') })
-      setCreatePaymentLink(false)
-      setSendEmail(false)
       onRefresh()
     } catch (reason) {
       onNotice({
@@ -1407,38 +1050,23 @@ function InvoiceOperations({
       description={t('cancellationFees:detail.update.description')}
     >
       <FormGrid>
-        <Field label={t('cancellationFees:detail.update.status')}>
-          <NativeSelect
-            value={status}
+        <Field label={t('cancellationFees:detail.update.email')}>
+          <Input
+            type="email"
+            value={clientEmail}
             disabled={isPaid}
-            onChange={event => setStatus(event.target.value as InvoiceStatus)}
-          >
-            {(isPaid ? [invoice.status] : EDITABLE_INVOICE_STATUSES).map(value => (
-              <option key={value} value={value}>{statusLabel(value)}</option>
-            ))}
-          </NativeSelect>
+            onChange={event => setClientEmail(event.target.value)}
+          />
         </Field>
-        <div className="operation-checks">
-          <label className="consent-check">
-            <input
-              type="checkbox"
-              checked={createPaymentLink}
-              disabled={isPaid}
-              onChange={event => setCreatePaymentLink(event.target.checked)}
-            />
-            <span><strong>{t('cancellationFees:detail.update.regenerateLink')}</strong></span>
-          </label>
-          <label className="consent-check">
-            <input
-              type="checkbox"
-              checked={sendEmail}
-              disabled={isPaid}
-              onChange={event => setSendEmail(event.target.checked)}
-            />
-            <span><strong>{t('cancellationFees:detail.update.sendEmail')}</strong></span>
-          </label>
-        </div>
       </FormGrid>
+      <Field label={t('cancellationFees:detail.update.notes')}>
+        <NativeTextarea
+          rows={4}
+          value={notes}
+          disabled={isPaid}
+          onChange={event => setNotes(event.target.value)}
+        />
+      </Field>
       <div className="panel-footer-actions">
         <Button
           type="button"

@@ -357,8 +357,8 @@ function recipientName(
   assignment: CancellationFeeAssignment | undefined,
 ): string {
   if (recipient.kind === 'unregistered') return recipient.name
-  return row.customerName?.trim()
-    || assignment?.customer?.name.trim()
+  return assignment?.customer?.name.trim()
+    || row.customerName?.trim()
     || recipient.customerId
 }
 

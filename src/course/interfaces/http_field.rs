@@ -23,6 +23,7 @@ use crate::{AppError, AppState, COURSEBOARD_AUTHORIZATION_HEADER};
 #[serde(rename_all = "camelCase")]
 pub struct ClientCapabilitiesResponse {
     pub agent_documents: AgentDocumentCapabilitiesResponse,
+    pub cancellation_fees: CancellationFeeCapabilitiesResponse,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -37,6 +38,12 @@ pub struct DocumentQueueCapabilitiesResponse {
     pub send: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct CancellationFeeCapabilitiesResponse {
+    pub list: bool,
+    pub manage: bool,
+}
+
 impl From<FieldClientCapabilities> for ClientCapabilitiesResponse {
     fn from(value: FieldClientCapabilities) -> Self {
         Self {
@@ -49,6 +56,10 @@ impl From<FieldClientCapabilities> for ClientCapabilitiesResponse {
                     list: value.agent_documents.quotations.list,
                     send: value.agent_documents.quotations.send,
                 },
+            },
+            cancellation_fees: CancellationFeeCapabilitiesResponse {
+                list: value.cancellation_fees.list,
+                manage: value.cancellation_fees.manage,
             },
         }
     }
@@ -228,7 +239,8 @@ mod tests {
             "agentDocuments": {
                 "invoices": {"list": true, "send": false},
                 "quotations": {"list": false, "send": true}
-            }
+            },
+            "cancellationFees": {"list": true, "manage": false}
         }))
         .into_response()
     }
@@ -370,6 +382,8 @@ mod tests {
         let body_a: serde_json::Value = serde_json::from_slice(&body_a).unwrap();
         assert_eq!(body_a["agentDocuments"]["invoices"]["list"], true);
         assert_eq!(body_a["agentDocuments"]["quotations"]["send"], true);
+        assert_eq!(body_a["cancellationFees"]["list"], true);
+        assert_eq!(body_a["cancellationFees"]["manage"], false);
 
         let mut observed = requests.lock().unwrap().clone();
         observed.sort_by(|left, right| left.authorization.cmp(&right.authorization));

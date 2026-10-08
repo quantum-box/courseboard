@@ -3391,6 +3391,35 @@ function resolveGet(path: string): Json | null | undefined {
     return settlementReport(url.searchParams.get('yearMonth') ?? TODAY.slice(0, 7))
   }
 
+  if (pathname === '/v1/cancellation-fees/context') {
+    return { tenantName: 'Mock Course', timezone: 'Asia/Tokyo' }
+  }
+
+  if (pathname === '/v1/cancellation-fees') {
+    const status = url.searchParams.get('status')
+    const filtered = status
+      ? mockInvoices.filter(invoice => invoice.status === status)
+      : mockInvoices
+    const offset = Math.max(0, Number(url.searchParams.get('offset') ?? 0) || 0)
+    const requestedLimit = Number(url.searchParams.get('limit') ?? 100)
+    const limit = Math.max(1, Math.min(500, Number.isFinite(requestedLimit) ? requestedLimit : 100))
+    return items(filtered.slice(offset, offset + limit).map(invoice => cloneMockInvoice({
+      ...invoice,
+      tenantId: TENANT_ID() || invoice.tenantId,
+    })))
+  }
+
+  const cancellationFeeMatch = pathname.match(/^\/v1\/cancellation-fees\/([^/]+)$/)
+  if (cancellationFeeMatch) {
+    const invoiceId = decodeURIComponent(cancellationFeeMatch[1] ?? '')
+    const invoice = mockInvoices.find(item => item.id === invoiceId)
+    if (!invoice) return null
+    return cloneMockInvoice({
+      ...invoice,
+      tenantId: TENANT_ID() || invoice.tenantId,
+    })
+  }
+
   if (pathname === '/v1/invoices') {
     const status = url.searchParams.get('status')
     const filtered = status
@@ -3420,6 +3449,109 @@ function resolveMutation(path: string, init?: RequestInit): MockFieldResult<Json
   const pathname = normalizeMockPath(pathnameOf(path))
   const method = methodOf(init)
   const body = parseBody(init) as Record<string, unknown> | undefined
+
+  if (pathname === '/v1/cancellation-fees' && method === 'POST') {
+    const allowedKeys = new Set([
+      'idempotencyKey',
+      'billTo',
+      'lineItems',
+      'dueDate',
+      'currency',
+      'taxCategory',
+      'taxAmount',
+      'notes',
+      'createPaymentLink',
+      'paymentLinkProvider',
+      'sendEmail',
+      'sendSms',
+    ])
+    if (!body || Object.keys(body).some(key => !allowedKeys.has(key))) {
+      return error(400, 'unsupported cancellation-fee field')
+    }
+    const idempotencyKey = typeof body.idempotencyKey === 'string'
+      ? body.idempotencyKey.trim()
+      : ''
+    if (!/^[a-z0-9._:-]{1,48}$/.test(idempotencyKey)) {
+      return error(400, 'idempotencyKey must contain 1-48 lowercase ASCII characters')
+    }
+    const rawBillTo = body?.billTo
+    const billTo = rawBillTo && typeof rawBillTo === 'object'
+      ? rawBillTo as Record<string, unknown>
+      : undefined
+    if (!billTo || Object.keys(billTo).some(key => !['name', 'phone', 'email'].includes(key))) {
+      return error(400, 'billTo must be a recipient snapshot')
+    }
+    if (body.paymentLinkProvider !== undefined
+      && body.paymentLinkProvider !== 'stripe'
+      && body.paymentLinkProvider !== 'square') {
+      return error(400, 'paymentLinkProvider must be stripe or square')
+    }
+    const name = typeof billTo?.name === 'string' ? billTo.name.trim() : ''
+    const lineItems = Array.isArray(body?.lineItems) ? body.lineItems : []
+    if (!name || lineItems.length === 0) return error(400, 'billTo and lineItems are required')
+    const translated: RequestInit = {
+      ...init,
+      body: JSON.stringify({
+        ...body,
+        billTo: {
+          kind: 'unregistered',
+          name,
+          ...(typeof billTo?.phone === 'string' ? { phone: billTo.phone } : {}),
+          ...(typeof billTo?.email === 'string' ? { email: billTo.email } : {}),
+        },
+        clientName: name,
+        clientEmail: typeof billTo?.email === 'string' ? billTo.email : undefined,
+        clientPhone: typeof billTo?.phone === 'string' ? billTo.phone : undefined,
+      }),
+    }
+    return resolveMutation('/v1/invoices', translated)
+  }
+
+  const cancellationFeeSendMatch = pathname.match(/^\/v1\/cancellation-fees\/([^/]+)\/send$/)
+  if (cancellationFeeSendMatch && method === 'POST') {
+    if (!body || Object.keys(body).some(key => !['idempotencyKey', 'sendEmail', 'sendSms'].includes(key))) {
+      return error(400, 'unsupported cancellation-fee send field')
+    }
+    const idempotencyKey = typeof body?.idempotencyKey === 'string'
+      ? body.idempotencyKey.trim()
+      : ''
+    if (!/^[a-z0-9._:-]{1,48}$/.test(idempotencyKey)) {
+      return error(400, 'idempotencyKey must contain 1-48 lowercase ASCII characters')
+    }
+    const invoiceId = decodeURIComponent(cancellationFeeSendMatch[1] ?? '')
+    const invoice = mockInvoices.find(item => item.id === invoiceId)
+    if (!invoice) return error(404, 'Mock Field API invoice was not found')
+    if (invoice.status === 'Paid') return error(400, 'Paid invoices cannot be resent')
+    invoice.paymentLinkUrl = `https://example.com/pay/${invoice.id}`
+    invoice.paymentLinkStatus = 'Ready'
+    if (body?.sendEmail === true) invoice.emailDeliveryStatus = 'Sent'
+    if (body?.sendSms === true) invoice.smsDeliveryStatus = 'Sent'
+    invoice.status = 'Sent'
+    invoice.sentAt = NOW
+    invoice.updatedAt = NOW
+    return hit(cloneMockInvoice(invoice))
+  }
+
+  const cancellationFeeFulfillMatch = pathname.match(/^\/v1\/cancellation-fees\/([^/]+)\/fulfill$/)
+  if (cancellationFeeFulfillMatch && method === 'POST') {
+    const invoiceId = decodeURIComponent(cancellationFeeFulfillMatch[1] ?? '')
+    return resolveMutation(`/v1/invoices/${encodeURIComponent(invoiceId)}/fulfill`, init)
+  }
+
+  const cancellationFeeUpdateMatch = pathname.match(/^\/v1\/cancellation-fees\/([^/]+)$/)
+  if (cancellationFeeUpdateMatch && method === 'PATCH') {
+    if (!body || Object.keys(body).some(key => !['notes', 'clientEmail'].includes(key))) {
+      return error(400, 'only notes and clientEmail can be updated')
+    }
+    const invoiceId = decodeURIComponent(cancellationFeeUpdateMatch[1] ?? '')
+    const invoice = mockInvoices.find(item => item.id === invoiceId)
+    if (!invoice) return error(404, 'Mock Field API invoice was not found')
+    if (invoice.status === 'Paid') return error(409, 'Paid invoices cannot be updated')
+    if (typeof body?.notes === 'string') invoice.notes = body.notes
+    if (typeof body?.clientEmail === 'string') invoice.clientEmail = body.clientEmail
+    invoice.updatedAt = NOW
+    return hit(cloneMockInvoice(invoice))
+  }
 
   if (pathname === '/v1/invoices' && method === 'POST') {
     const rawBillTo = body?.billTo

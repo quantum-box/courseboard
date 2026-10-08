@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -40,20 +40,12 @@ function cancellation(overrides: Record<string, unknown> = {}) {
   }
 }
 
-/**
- * Field answers two different calls here: the reverse lookup that guards
- * against billing twice, and the invoice creation itself.
- */
-function mockField(billedSources: unknown[] = []) {
-  api.field.mockImplementation(async (path: string) => {
-    if (path.startsWith('/v1/invoices?')) return { items: billedSources }
-    return { id: 'inv_1', invoiceNumber: 'INV-1' }
-  })
+function mockField() {
+  api.field.mockResolvedValue({ id: 'inv_1', invoiceNumber: 'INV-1' })
 }
 
-/** The POST calls only — the guard's GET is not an invoice being raised. */
 function invoicePosts() {
-  return api.field.mock.calls.filter(call => call[0] === '/v1/invoices')
+  return api.field.mock.calls.filter(call => call[0] === '/v1/cancellation-fees')
 }
 
 function renderPage() {
@@ -64,16 +56,28 @@ function renderPage() {
   )
 }
 
+function bodyOf(call: unknown[]) {
+  return JSON.parse(String((call[1] as RequestInit).body)) as Record<string, any>
+}
+
+function settlementCall() {
+  return api.course.mock.calls.find(
+    call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
+  )
+}
+
 describe('the cancellation extraction', () => {
   beforeEach(async () => {
     api.course.mockReset()
     api.field.mockReset()
+    vi.stubGlobal('crypto', { randomUUID: () => '123e4567-e89b-42d3-a456-426614174000' })
     await i18next.changeLanguage('ja')
   })
 
   afterEach(() => {
     cleanup()
     clearResourceCache()
+    vi.unstubAllGlobals()
   })
 
   async function selectAllAndOpenSheet() {
@@ -91,7 +95,7 @@ describe('the cancellation extraction', () => {
     })
   }
 
-  it('opens on the chargeable cancellations nobody has settled, and shows why each one was', async () => {
+  it('opens on chargeable unsettled cancellations and shows their reason', async () => {
     api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
 
     await act(async () => {
@@ -101,15 +105,12 @@ describe('the cancellation extraction', () => {
     const query = api.course.mock.calls[0]?.[0] as string
     expect(query).toContain('feeStates=unsettled')
     expect(query).toContain('feeExpectedOnly=true')
-    // The reason is the point of the screen: a list of dates and names is what
-    // the club already had.
-    // Scoped to the rows: the same words are in the reason filter above them.
     const rows = within(screen.getByRole('table'))
     expect(rows.getByText('連絡なし')).toBeTruthy()
     expect(rows.getByText('連絡がつかず')).toBeTruthy()
   })
 
-  it('bills one invoice per person and records it against every booking on it', async () => {
+  it('creates one dedicated snapshot invoice per customer and records every booking', async () => {
     api.course.mockResolvedValue({
       items: [
         cancellation({ reservationId: 'res_1', players: 4 }),
@@ -122,71 +123,30 @@ describe('the cancellation extraction', () => {
     await act(async () => {
       renderPage()
     })
+    await selectAllAndOpenSheet()
+    await pressBill()
+    await waitFor(() => expect(invoicePosts()).toHaveLength(1))
 
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText('このページをすべて選ぶ'))
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /を請求する$/ }))
-    })
-
-    // One person, two cancelled bookings, one invoice — not two bills the
-    // caller has to reconcile themselves.
-    expect(invoicePosts()).toHaveLength(1)
-    const invoiceBody = JSON.parse(
-      (invoicePosts()[0]?.[1] as RequestInit).body as string,
-    )
-    expect(invoiceBody.billTo).toEqual({ kind: 'customer', customerId: 'cus_1' })
-    // Six rounds given up at the default 3,000 each.
+    const invoiceBody = bodyOf(invoicePosts()[0]!)
+    expect(invoiceBody.billTo).toEqual({ name: '本田 康彦', email: 'honda@example.com' })
     expect(invoiceBody.lineItems[0].unitPrice).toBe(18_000)
-    // Both bookings are declared upstream, so Field can answer "has this one
-    // already been billed" without CourseBoard's own table (PLT-4158).
-    expect(invoiceBody.sources).toEqual([
-      { sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' },
-      { sourceType: 'reservation', sourceId: 'res_2', reason: 'cancellation_fee' },
-    ])
+    expect(invoiceBody.idempotencyKey).toBe('123e4567-e89b-42d3-a456-426614174000')
+    expect(invoiceBody).not.toHaveProperty('clientId')
+    expect(invoiceBody).not.toHaveProperty('sources')
+    expect(invoiceBody).not.toHaveProperty('status')
+    expect(invoiceBody).not.toHaveProperty('purpose')
+    expect(api.field.mock.calls.some(call => String(call[0]).startsWith('/v1/invoices'))).toBe(false)
+    expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/v1/cancellation-fees/inv_1/fulfill'))).toBe(true)
 
-    const settle = api.course.mock.calls.find(
-      call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
-    )
+    const settle = settlementCall()
     expect(settle).toBeTruthy()
-    const decisions = JSON.parse((settle?.[1] as RequestInit).body as string).decisions
+    const decisions = JSON.parse(String((settle?.[1] as RequestInit).body)).decisions
     expect(decisions).toHaveLength(2)
     expect(decisions.every((decision: { state: string; invoiceId: string }) =>
       decision.state === 'invoiced' && decision.invoiceId === 'inv_1')).toBe(true)
   })
 
-  it('leaves out a booking Field already holds an invoice for, and says so', async () => {
-    // Our own row says unsettled — that is why it is on the list. Field says
-    // otherwise, which means the invoice went out and the write back failed.
-    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
-    mockField([
-      { id: 'inv_old', sources: [
-        { sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' },
-      ] },
-    ])
-
-    await act(async () => {
-      renderPage()
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText('このページをすべて選ぶ'))
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
-    })
-
-    expect(screen.getByText('すでに請求済みの予約があります')).toBeTruthy()
-    // Nothing left to bill, so the button cannot raise a second invoice.
-    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
-  })
-
-  it('bills a booking with no ledger link by the name it was taken under', async () => {
-    // The cancellation taken over the phone. It used to be reported as
-    // unbillable and dropped, so a club could not collect on any of them.
+  it('sends an unlinked booking as the entered snapshot without a ledger or reservation id', async () => {
     api.course.mockResolvedValue({
       items: [cancellation({
         reservationId: 'res_1',
@@ -203,42 +163,23 @@ describe('the cancellation extraction', () => {
       renderPage()
     })
     await selectAllAndOpenSheet()
-
-    // The booking is shown as something to decide, not as a failure.
-    expect(screen.getByText('台帳と結びついていない予約')).toBeTruthy()
-    expect(screen.queryByText('請求できない予約があります')).toBeNull()
-    expect(screen.getByText('台帳に無い相手として、この名前で請求します。')).toBeTruthy()
-
-    // The number the desk took over the phone, in the form it was given. An
-    // unlinked booking carries no contact details of its own.
     await act(async () => {
       fireEvent.change(screen.getByLabelText('電話番号', { exact: false }), {
         target: { value: '090-0000-0000' },
       })
     })
-
     await pressBill()
+    await waitFor(() => expect(invoicePosts()).toHaveLength(1))
 
-    expect(invoicePosts()).toHaveLength(1)
-    const invoiceBody = JSON.parse((invoicePosts()[0]?.[1] as RequestInit).body as string)
-    expect(invoiceBody.billTo).toEqual({
-      kind: 'unregistered',
-      name: '本田 康彦',
-      phone: '+819000000000',
-    })
-    // Two rounds given up at the default 3,000 each, recorded against the
-    // booking exactly as a linked one would be.
+    const invoiceBody = bodyOf(invoicePosts()[0]!)
+    expect(invoiceBody.billTo).toEqual({ name: '本田 康彦', phone: '+819000000000' })
     expect(invoiceBody.lineItems[0].unitPrice).toBe(6_000)
-    const settle = api.course.mock.calls.find(
-      call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
-    )
-    const decisions = JSON.parse((settle?.[1] as RequestInit).body as string).decisions
-    expect(decisions).toEqual([
-      { reservationId: 'res_1', state: 'invoiced', invoiceId: 'inv_1', amount: 6_000 },
-    ])
+    expect(invoiceBody.billTo).not.toHaveProperty('kind')
+    expect(invoiceBody).not.toHaveProperty('clientId')
+    expect(invoiceBody).not.toHaveProperty('sources')
   })
 
-  it('bills the ledger customer the desk recognised for an unlinked booking', async () => {
+  it('turns a selected customer into a snapshot without sending its ledger id', async () => {
     api.course.mockImplementation(async (path: string) => {
       if (path.startsWith('/v1/course/customers')) {
         return { items: [{ id: 'cus_9', name: '本田 康彦', email: 'honda@example.com' }] }
@@ -264,70 +205,27 @@ describe('the cancellation extraction', () => {
       renderPage()
     })
     await selectAllAndOpenSheet()
-
-    // The box opens holding the name the booking was taken under, so landing
-    // in it asks the ledger who that is. Nothing is picked automatically: two
-    // members called 本田 are one row apart in the list.
     await act(async () => {
-      // `focusIn`, not `focus`: React listens for the bubbling one.
       fireEvent.focusIn(screen.getByLabelText('請求先の名前', { exact: false }))
     })
-    // Awaited outside `act`: the search is debounced, and a `findBy` nested in
-    // an `act` never sees the timer fire.
     const candidate = await screen.findByRole('button', { name: /本田 康彦/ })
     await act(async () => {
       fireEvent.click(candidate)
     })
     await pressBill()
+    await waitFor(() => expect(invoicePosts()).toHaveLength(1))
 
-    const invoiceBody = JSON.parse((invoicePosts()[0]?.[1] as RequestInit).body as string)
-    expect(invoiceBody.billTo).toEqual({ kind: 'customer', customerId: 'cus_9' })
+    const invoiceBody = bodyOf(invoicePosts()[0]!)
+    expect(invoiceBody.billTo).toEqual({ name: '本田 康彦', email: 'honda@example.com' })
+    expect(invoiceBody).not.toHaveProperty('clientId')
+    expect(invoiceBody).not.toHaveProperty('sources')
   })
 
-  it('says which selected bookings cannot be billed rather than quietly leaving them out', async () => {
-    // Nothing to address an invoice to: no ledger link and no name on the
-    // booking either. The name box is there, and until it is filled in the
-    // sheet says why this row is not on the bill.
-    api.course.mockResolvedValue({
-      items: [cancellation({
-        reservationId: 'res_1',
-        customerId: null,
-        customerName: null,
-        billable: false,
-      })],
-      total: 1,
-    })
-    mockField()
-
-    await act(async () => {
-      renderPage()
-    })
-    await selectAllAndOpenSheet()
-
-    expect(screen.getByText('請求できない予約があります')).toBeTruthy()
-    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
-
-    await act(async () => {
-      fireEvent.change(screen.getByLabelText('請求先の名前', { exact: false }), {
-        target: { value: '名前のわかった人' },
-      })
-    })
-
-    expect(screen.queryByText('請求できない予約があります')).toBeNull()
-    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', false)
-  })
-
-  function keyOf(index: number) {
-    const init = invoicePosts()[index]![1] as RequestInit
-    return (JSON.parse(String(init.body)) as { idempotencyKey?: string }).idempotencyKey
-  }
-
-  it('bills one person once when the same cancellation comes round twice', async () => {
-    // The guard that keeps a booking out of a second batch reads a page of
-    // Field's invoices, so it can come back empty while the invoice exists —
-    // and the row is offered again. The key used to travel in a header Field
-    // never reads, so that second pass raised a second invoice for the same
-    // cancellation. Keyed on the charge, it reaches the invoice already there.
+  it('uses a new key when the amount changes and reuses it for an identical retry', async () => {
+    const randomUUID = vi.fn()
+      .mockReturnValueOnce('123e4567-e89b-42d3-a456-426614174000')
+      .mockReturnValueOnce('123e4567-e89b-42d3-a456-426614174001')
+    vi.stubGlobal('crypto', { randomUUID })
     api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
     mockField()
 
@@ -336,27 +234,13 @@ describe('the cancellation extraction', () => {
     })
     await selectAllAndOpenSheet()
     await pressBill()
-    expect(keyOf(0)).toMatch(/^CF-[0-9a-z]+$/)
-    // Nothing rides on the header any more.
-    expect((invoicePosts()[0]![1] as RequestInit).headers).toBeUndefined()
+    await waitFor(() => expect(invoicePosts()).toHaveLength(1))
+    const firstKey = bodyOf(invoicePosts()[0]!).idempotencyKey
 
     await selectAllAndOpenSheet()
     await pressBill()
-    expect(invoicePosts()).toHaveLength(2)
-    expect(keyOf(1)).toBe(keyOf(0))
-  })
-
-  it('gives a changed charge its own key rather than the invoice raised before the change', async () => {
-    // A key fixed per person would answer a corrected amount with the invoice
-    // the desk was trying to correct.
-    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
-    mockField()
-
-    await act(async () => {
-      renderPage()
-    })
-    await selectAllAndOpenSheet()
-    await pressBill()
+    await waitFor(() => expect(invoicePosts()).toHaveLength(2))
+    expect(bodyOf(invoicePosts()[1]!).idempotencyKey).toBe(firstKey)
 
     await selectAllAndOpenSheet()
     await act(async () => {
@@ -365,35 +249,21 @@ describe('the cancellation extraction', () => {
       })
     })
     await pressBill()
-
-    expect(keyOf(1)).not.toBe(keyOf(0))
+    await waitFor(() => expect(invoicePosts()).toHaveLength(3))
+    expect(bodyOf(invoicePosts()[2]!).idempotencyKey).not.toBe(firstKey)
   })
 
-  it('never records a fee for an invoice that failed to be raised', async () => {
-    // The order the whole flow depends on: a row marked invoiced that points at
-    // nothing never comes back on the next extraction.
+  it('does not write CourseBoard settlement when the dedicated create fails', async () => {
     api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
-    api.field.mockImplementation(async (path: string) => {
-      if (path.startsWith('/v1/invoices?')) return { items: [] }
-      throw new Error('field is down')
-    })
+    api.field.mockRejectedValue(new Error('field is down'))
 
     await act(async () => {
       renderPage()
     })
-    await act(async () => {
-      fireEvent.click(screen.getByLabelText('このページをすべて選ぶ'))
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: /を請求する$/ }))
-    })
+    await selectAllAndOpenSheet()
+    await pressBill()
 
-    expect(api.course.mock.calls.some(
-      call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
-    )).toBe(false)
-    expect(screen.getByText(/field is down/)).toBeTruthy()
+    await waitFor(() => expect(invoicePosts()).toHaveLength(1))
+    expect(settlementCall()).toBeUndefined()
   })
 })
