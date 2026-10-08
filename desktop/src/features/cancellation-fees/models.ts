@@ -136,8 +136,8 @@ export function isCancellationFeeInvoice(invoice: {
  * still `unsettled` and the next extraction offers it again. Until PLT-4158
  * there was no way to ask upstream at all.
  *
- * Best effort by nature — it reads a page of invoices, not all of them — so it
- * narrows a batch and never widens one.
+ * The cancellation extraction reads every available page before using this
+ * guard, so a source match narrows a batch and never widens one.
  */
 export function invoicedReservationIds(
   invoices: { sources?: InvoiceSource[] | null }[],
