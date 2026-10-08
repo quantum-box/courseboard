@@ -883,6 +883,21 @@ export function recipientEmail(invoice: Pick<InvoiceData, 'clientEmail' | 'billT
   return invoice.clientEmail ?? invoice.billTo?.snapshot?.email ?? null
 }
 
+/**
+ * An email added after creation is an explicit resend destination even when
+ * the original invoice never requested email delivery and therefore still
+ * has a null delivery status. The bill-to snapshot is intentionally excluded:
+ * it may contain an email the operator chose not to send to at creation time.
+ */
+export function shouldResendEmail(
+  invoice: Pick<InvoiceData, 'emailDeliveryStatus' | 'clientEmail'>,
+) {
+  return (
+    (invoice.emailDeliveryStatus !== null && invoice.emailDeliveryStatus !== undefined)
+    || Boolean(invoice.clientEmail?.trim())
+  )
+}
+
 /** Where the payment link is going, for the confirmation step. */
 function destinationSummary(pending: Pick<PendingSubmission, 'clientEmail' | 'clientPhone'>) {
   const destinations = [pending.clientEmail, pending.clientPhone]
@@ -913,8 +928,7 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
     setFulfilling(true)
     setNotice(null)
     try {
-      const sendEmail = resource.data.emailDeliveryStatus !== null
-        && resource.data.emailDeliveryStatus !== undefined
+      const sendEmail = shouldResendEmail(resource.data)
       const sendSms = resource.data.smsDeliveryStatus !== null
         && resource.data.smsDeliveryStatus !== undefined
       const fulfilled = sendEmail || sendSms

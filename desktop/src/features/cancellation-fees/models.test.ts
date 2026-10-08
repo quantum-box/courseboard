@@ -12,6 +12,7 @@ import {
   normalizePhone,
   recipientEmail,
   recipientPhone,
+  shouldResendEmail,
   summarize,
 } from './CancellationFeesPage'
 import {
@@ -300,6 +301,15 @@ describe('who a cancellation fee can be reached at', () => {
   it('has nothing to show for an invoice that carries no snapshot', () => {
     expect(recipientPhone({ clientPhone: null })).toBeNull()
     expect(recipientEmail({ clientEmail: null, billTo: null })).toBeNull()
+  })
+
+  it('sends to an email added after creation even when the original delivery was disabled', () => {
+    expect(shouldResendEmail({ emailDeliveryStatus: null, clientEmail: null })).toBe(false)
+    expect(shouldResendEmail({
+      emailDeliveryStatus: null,
+      clientEmail: 'guest@example.com',
+    })).toBe(true)
+    expect(shouldResendEmail({ emailDeliveryStatus: 'Failed', clientEmail: null })).toBe(true)
   })
 })
 

@@ -586,32 +586,13 @@ function BillCancellationFeesSheet({
     const attempts: BillingResult[] = []
     for (const group of plan.groups) {
       try {
-        // Keep a retry of the same payload on the same key, while letting an
-        // intentional amount or recipient correction start a new idempotent
-        // operation. A group key alone would reuse the old invoice after a
-        // correction made while the CourseBoard write-back was still pending.
-        const rowIdentity = group.rows
-          .map(row => [
-            row.reservationId,
-            row.playedOn ?? '',
-            row.reason,
-            row.reasonNote ?? '',
-            row.players,
-          ])
-          .sort(([left], [right]) => String(left).localeCompare(String(right)))
-        const requestIdentity = JSON.stringify([
-          group.key,
-          group.amount,
-          dueDate,
-          sendEmail,
-          group.customerName,
-          group.customerEmail ?? '',
-          group.customerPhone ?? '',
-          rowIdentity,
-        ])
-        const idempotencyKey = requestKeys.current.get(requestIdentity)
+        // Keep one key for the unresolved reservation/customer group. The
+        // CourseBoard write-back can fail after Field has created and sent the
+        // invoice; indexing by amount, date, or delivery choice would lose
+        // that key after an edit and raise a second payable invoice on retry.
+        const idempotencyKey = requestKeys.current.get(group.key)
           ?? newCancellationFeeIdempotencyKey()
-        requestKeys.current.set(requestIdentity, idempotencyKey)
+        requestKeys.current.set(group.key, idempotencyKey)
         persistBatchKeys(requestKeys.current)
         // The reservation/customer selection remains a CourseBoard concern.
         // The dedicated Field writer receives only the verified snapshot; a
@@ -678,6 +659,11 @@ function BillCancellationFeesSheet({
               }))),
           }),
         })
+        // The upstream invoice and the CourseBoard rows are reconciled now;
+        // a later extraction may start a fresh billing operation for a newly
+        // unsettled group. Failed write-backs deliberately retain their keys.
+        for (const attempt of invoiced) requestKeys.current.delete(attempt.group.key)
+        persistBatchKeys(requestKeys.current)
         onSettled()
       } catch (error) {
         // The invoices exist and CourseBoard's rows do not say so, so the

@@ -77,6 +77,7 @@ describe('the cancellation extraction', () => {
   afterEach(() => {
     cleanup()
     clearResourceCache()
+    sessionStorage.clear()
     vi.unstubAllGlobals()
   })
 
@@ -221,10 +222,11 @@ describe('the cancellation extraction', () => {
     expect(invoiceBody).not.toHaveProperty('sources')
   })
 
-  it('uses a new key when the amount changes and reuses it for an identical retry', async () => {
+  it('starts a new operation after settlement succeeds', async () => {
     const randomUUID = vi.fn()
       .mockReturnValueOnce('123e4567-e89b-42d3-a456-426614174000')
       .mockReturnValueOnce('123e4567-e89b-42d3-a456-426614174001')
+      .mockReturnValueOnce('123e4567-e89b-42d3-a456-426614174002')
     vi.stubGlobal('crypto', { randomUUID })
     api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
     mockField()
@@ -240,7 +242,7 @@ describe('the cancellation extraction', () => {
     await selectAllAndOpenSheet()
     await pressBill()
     await waitFor(() => expect(invoicePosts()).toHaveLength(2))
-    expect(bodyOf(invoicePosts()[1]!).idempotencyKey).toBe(firstKey)
+    expect(bodyOf(invoicePosts()[1]!).idempotencyKey).not.toBe(firstKey)
 
     await selectAllAndOpenSheet()
     await act(async () => {
@@ -250,7 +252,55 @@ describe('the cancellation extraction', () => {
     })
     await pressBill()
     await waitFor(() => expect(invoicePosts()).toHaveLength(3))
-    expect(bodyOf(invoicePosts()[2]!).idempotencyKey).not.toBe(firstKey)
+    expect(bodyOf(invoicePosts()[2]!).idempotencyKey).not.toBe(
+      bodyOf(invoicePosts()[1]!).idempotencyKey,
+    )
+  })
+
+  it('keeps the group key when the CourseBoard write-back fails', async () => {
+    const firstKey = '123e4567-e89b-42d3-a456-426614174000'
+    const secondKey = '123e4567-e89b-42d3-a456-426614174001'
+    const randomUUID = vi.fn()
+      .mockReturnValueOnce(firstKey)
+      .mockReturnValueOnce(secondKey)
+    vi.stubGlobal('crypto', { randomUUID })
+    let settlementAttempts = 0
+    api.course.mockImplementation(async (path: string) => {
+      if (path.startsWith('/v1/course/reservation-cancellations?')) {
+        return { items: [cancellation()], total: 1 }
+      }
+      if (path === '/v1/course/reservation-cancellations/fees') {
+        settlementAttempts += 1
+        if (settlementAttempts === 1) throw new Error('write-back unavailable')
+        return {}
+      }
+      return {}
+    })
+    mockField()
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await pressBill()
+    await waitFor(() => expect(invoicePosts()).toHaveLength(1))
+    await waitFor(() => expect(settlementAttempts).toBe(1))
+    expect(bodyOf(invoicePosts()[0]!).idempotencyKey).toBe(firstKey)
+
+    cleanup()
+    clearResourceCache()
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await act(async () => {
+      fireEvent.change(screen.getByLabelText('1名あたりの金額', { exact: false }), {
+        target: { value: '9000' },
+      })
+    })
+    await pressBill()
+    await waitFor(() => expect(invoicePosts()).toHaveLength(2))
+    expect(bodyOf(invoicePosts()[1]!).idempotencyKey).toBe(firstKey)
   })
 
   it('does not write CourseBoard settlement when the dedicated create fails', async () => {
