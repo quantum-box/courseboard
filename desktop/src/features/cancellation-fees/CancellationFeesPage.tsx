@@ -134,11 +134,12 @@ function savePersistedCreateKey(identity: string, key: string) {
   }
 }
 
-function clearPersistedCreateKey(identity: string) {
+function clearPersistedCreateKey(identity: string, expectedKey?: string) {
   try {
     const storageKey = createKeyStorageKey()
     if (!storageKey) return
     const keys = loadPersistedCreateKeys()
+    if (expectedKey && keys[createIdentityHash(identity)] !== expectedKey) return
     delete keys[createIdentityHash(identity)]
     sessionStorage.setItem(storageKey, JSON.stringify(keys))
   } catch {
@@ -221,9 +222,9 @@ function loadPersistedCreateRecovery(): CreateRecovery | null {
 }
 
 /**
- * Keep the complete frozen request only while its create result is unknown.
- * It is scoped to the authenticated tenant and user so a later sign-in
- * cannot see or replay another user's recipient snapshot.
+ * Keep the complete frozen request until create and its initial delivery are
+ * reconciled. It is scoped to the authenticated tenant and user so a later
+ * sign-in cannot see or replay another user's recipient snapshot.
  */
 function savePersistedCreateRecovery(recovery: CreateRecovery) {
   const storageKey = createRecoveryStorageKey(recovery.scope)
@@ -232,6 +233,23 @@ function savePersistedCreateRecovery(recovery: CreateRecovery) {
     const serialized = JSON.stringify(recovery)
     sessionStorage.setItem(storageKey, serialized)
     return sessionStorage.getItem(storageKey) === serialized
+  } catch {
+    return false
+  }
+}
+
+/** Update an in-flight record only while it still belongs to this operation. */
+function updatePersistedCreateRecovery(recovery: CreateRecovery) {
+  const storageKey = createRecoveryStorageKey(recovery.scope)
+  if (!storageKey) return false
+  try {
+    const raw = sessionStorage.getItem(storageKey)
+    if (!raw) return false
+    const current = JSON.parse(raw) as Partial<CreateRecovery>
+    if (current.scope !== recovery.scope
+      || current.identity !== recovery.identity
+      || current.key !== recovery.key) return false
+    return savePersistedCreateRecovery(recovery)
   } catch {
     return false
   }
@@ -249,6 +267,25 @@ function clearPersistedCreateRecovery(recovery: CreateRecovery) {
     }
   } catch {
     // Ignore storage failures after Field has resolved the create operation.
+  }
+}
+
+/** Detail-page recovery must retire the create key once the invoice is complete. */
+function clearPersistedCreateRecoveryForInvoice(invoiceId: string) {
+  try {
+    const storageKey = createRecoveryStorageKey()
+    if (!storageKey) return
+    const raw = sessionStorage.getItem(storageKey)
+    if (!raw) return
+    const current = JSON.parse(raw) as Partial<CreateRecovery>
+    if (current.invoiceId !== invoiceId
+      || typeof current.identity !== 'string'
+      || typeof current.key !== 'string') return
+    sessionStorage.removeItem(storageKey)
+    clearPersistedCreateKey(current.identity, current.key)
+  } catch {
+    // Leave the recovery in place when storage is unavailable; it is safer to
+    // replay the known operation than to mint a second invoice.
   }
 }
 
@@ -740,36 +777,9 @@ export function NewCancellationFeePage() {
       // accepts the invoice, a remounted form can replay the same operation.
       savePersistedCreateKey(identity, recovery.key)
 
-      // A create that already returned an invoice must be reconciled through
-      // that invoice's initial operation. Never POST create again after a
-      // remount or a lost fulfilment response.
-      if (recovery.invoiceId) {
-        setPending(null)
-        setSent(frozenSubmission)
-        const fulfilled = await runInitialFulfillment(
-          recovery.invoiceId,
-          recovery.scope,
-          currentScopeGeneration,
-        )
-        if (!isCurrentCreateScope(recovery.scope, currentScopeGeneration)) {
-          throw new CreateScopeChangedError()
-        }
-        setCreated(fulfilled)
-        const incomplete = fulfillmentIssue(fulfilled, {
-          sendEmail: frozenSubmission.sendEmail,
-          sendSms: frozenSubmission.sendSms,
-        })
-        if (incomplete) {
-          setDeliveryError(incomplete)
-        } else {
-          clearPersistedCreateRecovery(recovery)
-          clearPersistedCreateKey(identity)
-          setCreateRecovery(null)
-          navigate(`cancellation-fees/${fulfilled.id}`)
-        }
-        return
-      }
-
+      // A recovered create is replayed with the same frozen body and key. Field
+      // returns the current invoice (including Paid) so we can decide whether
+      // the initial operation still needs reconciliation without a List call.
       const invoice = await createCancellationFee<InvoiceData>({
         idempotencyKey: recovery.key,
         billTo: frozenSubmission.billTo,
@@ -790,13 +800,12 @@ export function NewCancellationFeePage() {
       if (!isCurrentCreateScope(recovery.scope, currentScopeGeneration)) {
         throw new CreateScopeChangedError()
       }
-      recovery = { ...recovery, invoiceId: invoice.id }
+      const invoiceRecovery: CreateRecovery = { ...recovery, invoiceId: invoice.id }
       // The create has succeeded, so keep the frozen body and invoice ID until
       // the initial fulfilment is definitely complete. A remount during an
       // uncertain fulfilment must replay fulfil, never mint a new invoice.
-      if (!savePersistedCreateRecovery(recovery)) {
-        setError(t('cancellationFees:new.error.persistence'))
-      }
+      if (!updatePersistedCreateRecovery(invoiceRecovery)) return
+      recovery = invoiceRecovery
       setCreateRecovery(recovery)
       setPending(null)
       setCreated(invoice)
@@ -825,14 +834,14 @@ export function NewCancellationFeePage() {
           setDeliveryError(incomplete)
         } else {
           clearPersistedCreateRecovery(recovery)
-          clearPersistedCreateKey(identity)
+          clearPersistedCreateKey(identity, recovery.key)
           setCreateRecovery(null)
           navigate(`cancellation-fees/${fulfilled.id}`)
         }
       } catch (reason) {
         if (reason instanceof CreateScopeChangedError
           || !isCurrentCreateScope(recovery.scope, currentScopeGeneration)) {
-          savePersistedCreateRecovery(recovery)
+          updatePersistedCreateRecovery(recovery)
           return
         }
         setDeliveryError(reason instanceof Error
@@ -843,14 +852,14 @@ export function NewCancellationFeePage() {
       if (reason instanceof CreateScopeChangedError
         || !isCurrentCreateScope(recovery.scope, currentScopeGeneration)) {
         const scopeRecovery = recovery
-        savePersistedCreateRecovery(scopeRecovery)
+        updatePersistedCreateRecovery(scopeRecovery)
         return
       }
       // A recovered invoice already exists. A fulfilment error must retain its
       // invoice ID and frozen body; clearing it here would make a remount POST
       // a second invoice.
       if (recovery.invoiceId) {
-        savePersistedCreateRecovery(recovery)
+        if (!updatePersistedCreateRecovery(recovery)) return
         if (isCurrentCreateScope(recovery.scope, currentScopeGeneration)) {
           setCreateRecovery(recovery)
           setPending(frozenSubmission)
@@ -871,7 +880,7 @@ export function NewCancellationFeePage() {
           scope: currentScope ?? '',
           submission: frozenSubmission,
         })
-        clearPersistedCreateKey(identity)
+        clearPersistedCreateKey(identity, recovery.key)
         setCreateRecovery(null)
         setPending(null)
       } else {
@@ -884,7 +893,7 @@ export function NewCancellationFeePage() {
           scope: currentScope ?? '',
           submission: frozenSubmission,
         }
-        savePersistedCreateRecovery(retryRecovery)
+        if (!updatePersistedCreateRecovery(retryRecovery)) return
         setCreateRecovery(retryRecovery)
         setPending(frozenSubmission)
       }
@@ -952,7 +961,7 @@ export function NewCancellationFeePage() {
           clearPersistedCreateRecovery(activeCreateRecovery)
           setCreateRecovery(null)
         }
-        clearPersistedCreateKey(JSON.stringify(sent))
+        clearPersistedCreateKey(JSON.stringify(sent), activeCreateRecovery?.key)
         resendKey.current = rotatePersistedDeliveryKey(created.id)
         navigate(`cancellation-fees/${fulfilled.id}`)
       }
@@ -985,7 +994,7 @@ export function NewCancellationFeePage() {
           clearPersistedCreateRecovery(activeCreateRecovery)
           setCreateRecovery(null)
         }
-        clearPersistedCreateKey(JSON.stringify(sent))
+        clearPersistedCreateKey(JSON.stringify(sent), activeCreateRecovery?.key)
         navigate(`cancellation-fees/${fulfilled.id}`)
       }
     } catch (reason) {
@@ -1342,6 +1351,7 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
         sendEmail,
         sendSms,
       })
+      if (!issue) clearPersistedCreateRecoveryForInvoice(invoiceId)
       // Keep the same resend claim while Field has returned a partial or
       // failed result. Rotate only after a complete response so a retry of an
       // incomplete delivery cannot race a still-active provider operation.
@@ -1717,6 +1727,10 @@ export function fulfillmentIssue(
     | 'emailDeliveryFailureCode' | 'smsDeliveryFailureCode'>,
   delivery: { sendEmail: boolean; sendSms: boolean },
 ) {
+  // Payment is already an accounting fact. A paid invoice is terminal even if
+  // an older response has stale delivery/link fields; never block recovery or
+  // attempt another notification from those fields.
+  if (invoice.status === 'Paid') return undefined
   if (invoice.paymentLinkStatus !== 'Ready' || !invoice.paymentLinkUrl) {
     return i18next.t('cancellationFees:new.error.noPaymentLink')
   }
@@ -1738,7 +1752,6 @@ export function fulfillmentIssue(
     (!delivery.sendEmail || invoice.emailDeliveryStatus === 'Sent')
     && (!delivery.sendSms || invoice.smsDeliveryStatus === 'Sent')
   const deliveredStatus = invoice.status === 'Sent'
-    || invoice.status === 'Paid'
     || invoice.status === 'Overdue'
   if (!deliveredStatus || !selectedDeliveriesSent) {
     return i18next.t('cancellationFees:new.error.deliveryPartial')

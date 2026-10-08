@@ -290,19 +290,26 @@ describe('the dedicated cancellation fee form', () => {
     expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
   })
 
-  it('keeps the created invoice recovery through remount after initial fulfilment times out', async () => {
+  it('replays the same create key after fulfilment timeout and clears a completed Paid invoice', async () => {
     let createAttempts = 0
     let fulfillAttempts = 0
     api.field.mockImplementation(async (path: string) => {
       if (path === '/v1/cancellation-fees') {
         createAttempts += 1
-        return invoice({
-          status: 'Draft',
-          paymentLinkUrl: null,
-          paymentLinkStatus: 'Pending',
-          emailDeliveryStatus: null,
-          smsDeliveryStatus: 'Pending',
-        })
+        return createAttempts === 1
+          ? invoice({
+              status: 'Draft',
+              paymentLinkUrl: null,
+              paymentLinkStatus: 'Pending',
+              emailDeliveryStatus: null,
+              smsDeliveryStatus: 'Pending',
+            })
+          : invoice({
+              status: 'Paid',
+              paymentLinkUrl: null,
+              paymentLinkStatus: 'Pending',
+              smsDeliveryStatus: 'Failed',
+            })
       }
       if (path.endsWith('/fulfill')) {
         fulfillAttempts += 1
@@ -329,9 +336,13 @@ describe('the dedicated cancellation fee form', () => {
     fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
 
     await waitFor(() => expect(router.navigate).toHaveBeenCalledWith('cancellation-fees/inv_1'))
-    expect(createAttempts).toBe(1)
-    expect(fulfillAttempts).toBe(2)
-    expect(api.field.mock.calls.filter(call => call[0] === '/v1/cancellation-fees')).toHaveLength(1)
+    expect(createAttempts).toBe(2)
+    expect(fulfillAttempts).toBe(1)
+    expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
+    const creates = api.field.mock.calls.filter(call => call[0] === '/v1/cancellation-fees')
+    expect(creates).toHaveLength(2)
+    expect(bodyOf(creates[1]!).idempotencyKey).toBe(bodyOf(creates[0]!).idempotencyKey)
+    expect(sessionStorage.getItem('courseboard:cancellation-fee:create-recovery:tenant_test:user_test')).toBeNull()
   })
 
   it('freezes and restores a create whose response was lost before allowing another invoice', async () => {
@@ -478,5 +489,102 @@ describe('the dedicated cancellation fee form', () => {
       sendSms: true,
     })
     expect(api.field.mock.calls.some(call => String(call[0]).startsWith('/v1/invoices'))).toBe(false)
+  })
+
+  it('retires the create recovery and key after detail delivery completes', async () => {
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees') {
+        return invoice({
+          status: 'SendFailed',
+          smsDeliveryStatus: 'Failed',
+          smsDeliveryFailureCode: 'BillingNotReady',
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        return invoice({
+          status: 'SendFailed',
+          smsDeliveryStatus: 'Failed',
+          smsDeliveryFailureCode: 'BillingNotReady',
+        })
+      }
+      if (path === '/v1/cancellation-fees/inv_1') {
+        return invoice({ status: 'Sent', smsDeliveryStatus: 'Sent' })
+      }
+      if (path.endsWith('/send')) return invoice()
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+    const newPage = renderPage()
+    fillSnapshot()
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求書は作れました')
+    await waitFor(() => expect(
+      api.field.mock.calls.some(call => String(call[0]).endsWith('/fulfill')),
+    ).toBe(true))
+    newPage.unmount()
+
+    renderDetailPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(
+      api.field.mock.calls.some(call => String(call[0]).endsWith('/send')),
+    ).toBe(true))
+
+    expect(sessionStorage.getItem('courseboard:cancellation-fee:create-recovery:tenant_test:user_test')).toBeNull()
+    expect(JSON.parse(sessionStorage.getItem('courseboard:cancellation-fee:create-keys:tenant_test:user_test')!)).toEqual({})
+  })
+
+  it('does not let a stale create completion replace a newer same-scope recovery', async () => {
+    let uuidCalls = 0
+    vi.stubGlobal('crypto', {
+      randomUUID: vi.fn(() => `123e4567-e89b-42d3-a456-${(uuidCalls++).toString(16).padStart(12, '0')}`),
+    })
+    let createAttempts = 0
+    let resolveFirst!: (value: unknown) => void
+    let resolveThird!: (value: unknown) => void
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees') {
+        createAttempts += 1
+        if (createAttempts === 1) {
+          return new Promise(resolve => { resolveFirst = resolve })
+        }
+        if (createAttempts === 2) return invoice()
+        return new Promise(resolve => { resolveThird = resolve })
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+
+    const firstPage = renderPage()
+    fillSnapshot('古い請求先')
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await waitFor(() => expect(createAttempts).toBe(1))
+    const firstKey = bodyOf(api.field.mock.calls[0]!).idempotencyKey
+    firstPage.unmount()
+
+    const replayPage = renderPage()
+    expect(screen.getByText('前回の請求作成を確認してください')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await waitFor(() => expect(createAttempts).toBe(2))
+    await waitFor(() => expect(router.navigate).toHaveBeenCalledWith('cancellation-fees/inv_1'))
+    replayPage.unmount()
+
+    renderPage()
+    fillSnapshot('新しい請求先')
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await waitFor(() => expect(createAttempts).toBe(3))
+    const recoveryStorageKey = 'courseboard:cancellation-fee:create-recovery:tenant_test:user_test'
+    const newerRecovery = JSON.parse(sessionStorage.getItem(recoveryStorageKey)!) as { key: string }
+    expect(newerRecovery.key).not.toBe(firstKey)
+
+    resolveFirst(invoice({ status: 'Draft', paymentLinkUrl: null, paymentLinkStatus: 'Pending' }))
+    await waitFor(() => expect(
+      (JSON.parse(sessionStorage.getItem(recoveryStorageKey)!) as { key: string }).key,
+    ).toBe(newerRecovery.key))
+
+    resolveThird(invoice())
   })
 })

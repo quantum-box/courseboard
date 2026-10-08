@@ -326,6 +326,16 @@ describe('cancellation fee fulfillment', () => {
     expect(fulfillmentIssue(sentInvoice, { sendEmail: true, sendSms: true })).toBeUndefined()
   })
 
+  it('treats a paid invoice as terminal despite stale link or delivery fields', () => {
+    expect(fulfillmentIssue({
+      ...sentInvoice,
+      status: 'Paid',
+      paymentLinkStatus: 'Pending',
+      paymentLinkUrl: null,
+      smsDeliveryStatus: 'Failed',
+    }, { sendEmail: false, sendSms: true })).toBeUndefined()
+  })
+
   it('rejects a successful HTTP response without a ready URL', () => {
     expect(fulfillmentIssue(
       { ...sentInvoice, paymentLinkStatus: 'Pending', paymentLinkUrl: null },
