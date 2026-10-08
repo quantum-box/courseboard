@@ -9,7 +9,7 @@ import { navigate } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { getJob, issueMessage, listTargets, type ImportJob, type ImportOptions, type ImportTarget } from './api'
 import { executeDocumentRevision, fetchDocumentOriginal, readReservationDocument, reserveReservationDocument, saveDocumentRevision, uploadDocumentSources, type DocumentRow, type DocumentSource } from './document-api'
-import { businessValues, mappedValues, operationStorageKey, persistDocumentOperation, readDocumentOperation, reservationFields, reviewedRows, sourceCells, type DocumentOperation, type ReservationField, type ReservationValues } from './document-review'
+import { businessValues, operationStorageKey, persistDocumentOperation, readDocumentOperation, remapReviewedRow, reservationFields, reviewedRows, sourceCells, type DocumentOperation, type ReservationField, type ReservationValues } from './document-review'
 import './document-import.css'
 import { PdfPages } from '../customers/reception/PdfPages'
 
@@ -39,12 +39,13 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
   const [originalUrl, setOriginalUrl] = useState('')
   const [verifiedSource, setVerifiedSource] = useState<number>()
   const [renderedPage, setRenderedPage] = useState<number>()
+  const [discardConfirmation, setDiscardConfirmation] = useState(false)
   const controller = useRef<AbortController | undefined>(undefined)
   const blobUrl = useRef('')
   const current = useRef<ImportJob | undefined>(undefined)
   const document = job?.document
   const expired = !!document && Date.now() >= Date.parse(document.expiresAt)
-  const locked = !!document?.executionConfirmed || expired
+  const locked = !!document?.executionConfirmed || expired || ['failed', 'cancelled', 'expired'].includes(document?.ocrStatus ?? '')
   const canCreate = target?.documentImport?.pricingStatus === 'undecided' && catalogReady
   const columns = [...new Set(rows.flatMap(row => Object.keys(sourceCells(row))))]
   const facilities = [...new Set(rows.filter(row => !row.excludedReason).flatMap(row => businessValues(row).map(value => value.facilityName)).filter(Boolean))]
@@ -125,13 +126,13 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
   function editValue(index: number, manualIndex: number, field: ReservationField, value: string) {
     edit(index, row => {
       const values = businessValues(row); values[manualIndex] = { ...values[manualIndex]!, [field]: value }
-      return { ...row, values: { ...row.values, ...(Array.isArray(row.values.manualRows) ? { manualRows: values } : { normalized: values[0] }) } }
+      return { ...row, values: { ...row.values, editedFields: [...new Set([...(Array.isArray(row.values.editedFields) ? row.values.editedFields : []), field])], ...(Array.isArray(row.values.manualRows) ? { manualRows: values } : { normalized: values[0] }) } }
     })
   }
   function changeMapping(field: ReservationField, column: string) {
     const mappings = { ...options.columnMappings, [field]: column }
     setOptions(previous => ({ ...previous, columnMappings: mappings }))
-    setRows(previous => previous.map(row => ({ ...row, values: { ...row.values, normalized: mappedValues(row, mappings), originalConfirmed: false } }))); setDirty(true)
+    setRows(previous => previous.map(row => remapReviewedRow(row, options.columnMappings ?? {}, mappings))); setDirty(true)
   }
   async function inspect(signal: AbortSignal) {
     const restored = (await readReservationDocument(job!.id, 'inspect', signal)).job
@@ -169,6 +170,8 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
     persistDocumentOperation(storageKey, operation)
     current.current = undefined; setJob(undefined); setRows([]); setFiles([]); setRotations([]); setDirty(false); setOriginalUrl(''); setVerifiedSource(undefined)
     if (blobUrl.current) URL.revokeObjectURL(blobUrl.current); blobUrl.current = ''
+    setDiscardConfirmation(false)
+    if (jobId) navigate(`${listRoute}/documents`)
   }
 
   return <div className="document-import-page">
@@ -188,6 +191,9 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
     {job && document && <>
       <p role="status">{t(`status.${job.status}`, { defaultValue: t('status.reading') })} · {document.executionConfirmed ? `${job.processed} / ${job.total ?? rows.length}` : rows.length} {t('rows')}</p>
       {expired && <Notice tone="warning">{t('expiredMessage')}</Notice>}
+      {!document.executionConfirmed && (expired || ['failed', 'cancelled', 'expired'].includes(document.ocrStatus)) && <Panel title={t('newDocument')}><p>{t('newReadMessage')}</p><Button disabled={busy} onClick={() => void run(async () => newDocument())}>{t('newDocument')}</Button></Panel>}
+      {!document.executionConfirmed && document.ocrStatus !== 'cancelled' && <Button disabled={busy} onClick={() => setDiscardConfirmation(true)}>{t('discard')}</Button>}
+      {discardConfirmation && <Panel title={t('discard')}><p>{t('discardMessage')}</p><div className="document-controls"><Button disabled={busy} onClick={() => setDiscardConfirmation(false)}>{t('keepDocument')}</Button><Button disabled={busy} onClick={() => void run(async signal => { apply((await readReservationDocument(job.id, 'discard', signal)).job); setDiscardConfirmation(false) })}>{t('confirmDiscard')}</Button></div></Panel>}
       {document.ocrStatus === 'uploading' && <Panel title={t('resumeUpload')}><Field label={t('files')}><Input type="file" accept="application/pdf,.pdf" multiple disabled={busy} onChange={event => chooseFiles(Array.from(event.target.files ?? []))} /></Field><Button disabled={busy || !target?.documentImport || !files.length} onClick={() => void run(resumeUpload)}>{t('resumeUpload')}</Button></Panel>}
       {!['uploading', 'completed', 'failed', 'cancelled', 'expired'].includes(document.ocrStatus) && <Button variant="primary" disabled={busy || !target?.documentImport} onClick={() => void run(signal => readAll(job, signal))}>{t('resumeRead')}</Button>}
       {document.extracted && <>

@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { businessValues, operationStorageKey, persistDocumentOperation, readDocumentOperation, reviewedRows } from './document-review'
+import { businessValues, operationStorageKey, persistDocumentOperation, readDocumentOperation, remapReviewedRow, reviewedRows } from './document-review'
 import type { DocumentImport } from './document-api'
 
 const document = {
@@ -36,6 +36,16 @@ describe('document review recovery', () => {
     const rows = invalid.extracted!.fields.rows as Record<string, unknown>[]
     delete rows[0]!._source_page
     expect(() => reviewedRows(invalid)).toThrow()
+  })
+  it('keeps manual corrections when changing mappings, including explicitly emptied fields', () => {
+    const original = reviewedRows(document)[0]!
+    original.values.normalized = { ...businessValues(original)[0], groupCount: '99', date: '' }
+    original.values.editedFields = ['date']
+    original.values.originalConfirmed = true
+    const updated = remapReviewedRow(original, {}, { facilityName: 'groupCount', groupCount: 'facilityName', date: 'facilityName' })
+    expect(businessValues(updated)[0]).toMatchObject({ facilityName: '2', groupCount: '99', date: '' })
+    expect(updated.values.originalConfirmed).toBe(false)
+    expect(original.values.originalConfirmed).toBe(true)
   })
   it('persists one retry handle scoped to tenant, platform and actor without source data', () => {
     const key = operationStorageKey('tenant-a', 'platform-a', 'actor-a')

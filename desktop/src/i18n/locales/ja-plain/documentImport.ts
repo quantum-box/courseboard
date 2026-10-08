@@ -2,6 +2,8 @@ import type { DeepPartial } from '../../types'
 import type { documentImport as source } from '../ja/documentImport'
 
 export const documentImport: DeepPartial<typeof source> = {
+  "newReadMessage": "この読みとりは再開できません。次のPDFを選ぶと、新しい読みとりを始めます。元の文書と結果は、とりこみの履歴から確認できます。",
+  "discardMessage": "原本のファイルを消します。この文書の読みとり・保存は再開できなくなります。読みとった結果と修正の履歴は残ります。画面を閉じるだけなら、原本は消えません。",
   "error": {
     "storage": "再開に必要な情報を、この端末に保存できません。同じ端末・同じ利用者で、とりこみの履歴を確認してください。新しく読みとらず、保存した文書から再開してください。",
     "files": "文書は1回に1〜32ファイルを選んでください。",

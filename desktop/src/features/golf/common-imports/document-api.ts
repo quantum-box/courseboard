@@ -75,7 +75,7 @@ export async function saveDocumentRevision(job: ImportJob, rows: DocumentRow[], 
 export { getJob as getDocumentImport }
 
 export type DocumentReadResult = { job: ImportJob; ocr: { id: string; status: string }; uploads: OcrReservation['uploads'] }
-export function readReservationDocument(id: string, operation: 'confirm' | 'advance' | 'inspect' | 'uploads', signal?: AbortSignal) {
+export function readReservationDocument(id: string, operation: 'confirm' | 'advance' | 'inspect' | 'uploads' | 'discard', signal?: AbortSignal) {
   return courseboardApiJson<DocumentReadResult>(`${ROOT}/jobs/${encodeURIComponent(id)}/document-read`, { method: 'POST', signal, body: JSON.stringify({ operation }) })
 }
 export async function reserveReservationDocument(files: readonly File[], rotations: DocumentSource['rotation'][], pages: string, importOptions: ImportOptions, idempotencyKey: string, signal: AbortSignal) {

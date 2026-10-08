@@ -42,6 +42,12 @@ export function businessValues(row: DocumentRow): ReservationValues[] {
   const values = Array.isArray(row.values.manualRows) ? row.values.manualRows : [row.values.normalized ?? mappedValues(row)]
   return values.map(value => Object.fromEntries(reservationFields.map(field => [field, String((value as Record<string, unknown>)?.[field] ?? '')])) as ReservationValues)
 }
+export function remapReviewedRow(row: DocumentRow, previous: Record<string, string>, next: Record<string, string>): DocumentRow {
+  const before = mappedValues(row, previous), after = mappedValues(row, next)
+  const normalized = businessValues(row)[0]!
+  const edited = Array.isArray(row.values.editedFields) ? row.values.editedFields : []
+  return { ...row, values: { ...row.values, originalConfirmed: false, normalized: Object.fromEntries(reservationFields.map(field => [field, edited.includes(field) || normalized[field] !== before[field] ? normalized[field] : after[field]])) } }
+}
 export type DocumentOperation = { idempotencyKey: string; jobId?: string }
 export function operationStorageKey(tenant: string, platform: string, actor: string) { return `courseboard.document-operation:${tenant}:${platform}:${actor}` }
 export function readDocumentOperation(key: string): DocumentOperation | null {

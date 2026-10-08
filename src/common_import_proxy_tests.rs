@@ -74,7 +74,7 @@ async fn reservation_document_bff_preserves_revision_and_authorizes_every_operat
     .unwrap();
     assert_eq!(
         authorizer.calls.lock().unwrap().as_slice(),
-        [actions::MANAGE_RESERVATIONS; 4]
+        [actions::IMPORT_RESERVATION_REPORTS; 4]
     );
     assert_eq!(
         capture.requests.lock().unwrap().last().unwrap().0,
