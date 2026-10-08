@@ -46,6 +46,7 @@ pub struct CancellationFeeCapabilitiesResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct NavigationCapabilitiesResponse {
     /// `None` is serialized as null when Field's action batch was incomplete.
     pub other_business_access: Option<bool>,

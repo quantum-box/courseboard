@@ -56,6 +56,7 @@ struct CancellationFeeCapabilitiesResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct NavigationCapabilitiesResponse {
     #[serde(default)]
     other_business_access: Option<bool>,
