@@ -94,6 +94,14 @@ export const members: DeepPartial<typeof source> = {
     },
   },
   policies: {
+    cancellationFeeViewer: {
+      label: 'Cancellation-fee viewer',
+      description: 'Can only read cancellation-fee invoices. Cannot create, update, or send them.',
+    },
+    cancellationFeeBilling: {
+      label: 'Cancellation-fee billing',
+      description: 'Can only read, create, update, and send cancellation-fee invoices. Payment confirmation, voids, and refunds are excluded.',
+    },
     golfManager: {
       label: 'Course manager',
       description: 'Can create and update everything in golf operations — reservations, tee sheet, caddies, shifts, customers, memberships, settlement, and cancellation fees. Member management is not included.',

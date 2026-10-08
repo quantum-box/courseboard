@@ -95,6 +95,14 @@ export const members: DeepPartial<typeof source> = {
     },
   },
   policies: {
+    cancellationFeeViewer: {
+      label: 'キャンセル料を見る係',
+      description: 'キャンセル料の請求だけを見ることができます。請求を作る、直す、送ることはできません。',
+    },
+    cancellationFeeBilling: {
+      label: 'キャンセル料を請求する係',
+      description: 'キャンセル料の請求だけを見たり、作ったり、直したり、送ったりできます。入金を決める、取り消す、返金することはできません。',
+    },
     golfManager: {
       label: '支配人',
       description: 'ゴルフ場の仕事ぜんぶ（予約・ティーシート・キャディ・シフト・お客さま・お金）を入れたり直したりできます。メンバーを決めることはできません。',

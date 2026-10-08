@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { i18next } from '../../i18n'
 import {
   customPolicyNames,
   domainPolicies,
@@ -48,6 +49,43 @@ const CATALOG: ErpCustomPolicy[] = [
   { id: 'pol_reservations', name: 'field:reservations', description: '予約担当' },
   { id: 'pol_golf_reception', name: 'field-extension:golf:reception', description: 'Front-desk work' },
 ]
+
+describe('standalone cancellation-fee policies', () => {
+  const dedicated = [
+    { id: 'pol_this_tenant_read', name: 'field:CancellationFeeViewer' },
+    { id: 'pol_this_tenant_bill', name: 'field:CancellationFeeBilling' },
+  ]
+  const catalog = [...CATALOG, ...dedicated]
+
+  it.each(dedicated)('preserves $name through invitation and re-edit without adding a basic role', policy => {
+    expect(domainPolicies(catalog)).toContainEqual(policy)
+    const id = policyIdByName(catalog, policy.name)!
+    const selected = togglePolicySelection(catalog, [], id, true)
+    expect(selected).toEqual([policy.id])
+    const invited = pendingMemberRow({ email: 'billing@example.com', policyIds: selected })
+    expect(memberPolicyIds(invited, catalog)).toEqual([policy.id])
+    const persisted = member({ customPolicyIds: selected, role: null })
+    expect(memberPolicyIds(persisted, catalog)).toEqual([policy.id])
+    expect(customPolicyNames(persisted, catalog)).toEqual([policyDisplay(policy).label])
+    expect(togglePolicySelection(catalog, memberPolicyIds(persisted, catalog), id, false)).toEqual([])
+  })
+
+  it('follows the active language for both dedicated policies', async () => {
+    try {
+      for (const [language, viewer, billing] of [
+        ['ja', 'キャンセル料閲覧担当', 'キャンセル料請求担当'],
+        ['en', 'Cancellation-fee viewer', 'Cancellation-fee billing'],
+        ['ja-plain', 'キャンセル料を見る係', 'キャンセル料を請求する係'],
+      ]) {
+        await i18next.changeLanguage(language)
+        expect(policyDisplay(dedicated[0]).label).toBe(viewer)
+        expect(policyDisplay(dedicated[1]).label).toBe(billing)
+      }
+    } finally {
+      await i18next.changeLanguage('ja')
+    }
+  })
+})
 
 describe('roleLabel', () => {
   it('maps ERP roles to fieldadmin-consistent labels', () => {

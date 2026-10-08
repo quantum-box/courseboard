@@ -96,6 +96,14 @@ export const members = {
    * そのまま見せない。「何を書けて、何が閲覧のみか」で書く。
    */
   policies: {
+    cancellationFeeViewer: {
+      label: 'キャンセル料閲覧担当',
+      description: 'キャンセル料の請求だけを閲覧できます。作成・更新・送信はできません。',
+    },
+    cancellationFeeBilling: {
+      label: 'キャンセル料請求担当',
+      description: 'キャンセル料の請求だけを閲覧・作成・更新・送信できます。入金確定・取消・返金は含みません。',
+    },
     golfManager: {
       label: '支配人',
       description: 'ゴルフ運用のすべて（予約・ティーシート・キャディ・シフト・顧客・会員・精算・キャンセル料）を登録・更新できます。メンバー管理は含みません。',

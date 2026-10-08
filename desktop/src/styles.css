@@ -740,6 +740,18 @@ button,
 .member-invite-dialog-form {
   display: grid;
   gap: 14px;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.member-invite-dialog-form button,
+.member-invite-dialog-form input:not([type='checkbox']) {
+  min-height: 44px;
+  font-size: 16px;
+}
+
+.member-invite-dialog-form .field-label {
+  font-size: 16px;
 }
 
 .member-roles-checklist {
@@ -758,6 +770,9 @@ button,
   align-items: flex-start;
   gap: 8px;
   cursor: pointer;
+  min-height: 44px;
+  font-size: 16px;
+  line-height: 1.5;
 }
 
 .member-roles-checklist input[type='checkbox'] {
@@ -772,6 +787,7 @@ button,
 
 .member-roles-checklist small {
   color: hsl(var(--nui-muted-foreground));
+  font-size: 16px;
 }
 
 .member-roles-checklist label[data-disabled] {
