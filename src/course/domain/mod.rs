@@ -160,8 +160,8 @@ pub use demo_board::{
 pub use error::CourseError;
 pub use field_capabilities::{
     FieldAccessToken, FieldAgentDocumentCapabilities, FieldCancellationFeeCapabilities,
-    FieldCapabilityCoverage, FieldClientCapabilities, FieldDocumentQueueCapabilities,
-    FieldOperatorId, FieldOtherBusinessCapabilities, FieldPlatformId, FieldRequestContext,
+    FieldClientCapabilities, FieldDocumentQueueCapabilities, FieldNavigationCapabilities,
+    FieldOperatorId, FieldPlatformId, FieldRequestContext,
 };
 pub use ids::{
     AssignmentId, AvailabilityId, BudgetId, CaddieId, CourseId, CustomerId, MembershipId,

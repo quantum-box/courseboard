@@ -93,47 +93,16 @@ impl FieldRequestContext {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldClientCapabilities {
-    /// Whether this snapshot covers every CourseBoard product action.
-    ///
-    /// A partial snapshot is useful for downstream route guards, but it must
-    /// never be used to infer that a product is absent. During a rolling
-    /// deploy the Field API may omit this additive field, so the adapter
-    /// fails closed to `Partial`.
-    pub capability_coverage: FieldCapabilityCoverage,
-    pub other_business: FieldOtherBusinessCapabilities,
+    pub navigation: FieldNavigationCapabilities,
     pub agent_documents: FieldAgentDocumentCapabilities,
     pub cancellation_fees: FieldCancellationFeeCapabilities,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FieldCapabilityCoverage {
-    Complete,
-    Partial,
-}
-
-impl FieldCapabilityCoverage {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Complete => "complete",
-            Self::Partial => "partial",
-        }
-    }
-}
-
-/// Product-level presence derived from Field's business action grants.
-///
-/// These values intentionally collapse the action sets needed by CourseBoard
-/// startup navigation. They are meaningful only in a `Complete` snapshot;
-/// absent or partial snapshots remain unknown to callers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct FieldOtherBusinessCapabilities {
-    /// Aggregate of every non-document, non-cancellation CourseBoard action.
-    pub has_any: bool,
-    pub reservations: bool,
-    pub hrm: bool,
-    pub customers: bool,
-    pub memberships: bool,
-    pub usage: bool,
+pub struct FieldNavigationCapabilities {
+    /// `None` means Field could not complete the action batch. CourseBoard
+    /// must not infer fee-only access from that state.
+    pub other_business_access: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

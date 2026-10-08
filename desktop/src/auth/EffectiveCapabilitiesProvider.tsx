@@ -17,21 +17,13 @@ export type DocumentCapabilities = {
   send: boolean
 }
 
-export type CapabilityCoverage = 'complete' | 'partial'
-
-export type OtherBusinessCapabilities = {
-  /** Aggregate of all non-document, non-cancellation CourseBoard actions. */
-  hasAny: boolean
-  reservations: boolean
-  hrm: boolean
-  customers: boolean
-  memberships: boolean
-  usage: boolean
+export type NavigationCapabilities = {
+  /** null means the Field action batch was incomplete or unavailable. */
+  otherBusinessAccess: boolean | null
 }
 
 export type EffectiveCapabilities = {
-  capabilityCoverage: CapabilityCoverage
-  otherBusiness: OtherBusinessCapabilities
+  navigation: NavigationCapabilities
   agentDocuments: {
     invoices: DocumentCapabilities
     quotations: DocumentCapabilities
@@ -50,15 +42,7 @@ type CapabilitiesState = {
 }
 
 const EMPTY_CAPABILITIES: EffectiveCapabilities = {
-  capabilityCoverage: 'partial',
-  otherBusiness: {
-    hasAny: false,
-    reservations: false,
-    hrm: false,
-    customers: false,
-    memberships: false,
-    usage: false,
-  },
+  navigation: { otherBusinessAccess: null },
   agentDocuments: {
     invoices: { list: false, send: false },
     quotations: { list: false, send: false },
@@ -78,15 +62,14 @@ function boolean(value: unknown) {
 }
 
 function normalizeCapabilities(raw: Partial<EffectiveCapabilities> | null | undefined): EffectiveCapabilities {
+  const otherBusinessAccess = raw?.navigation?.otherBusinessAccess
   return {
-    capabilityCoverage: raw?.capabilityCoverage === 'complete' ? 'complete' : 'partial',
-    otherBusiness: {
-      hasAny: boolean(raw?.otherBusiness?.hasAny),
-      reservations: boolean(raw?.otherBusiness?.reservations),
-      hrm: boolean(raw?.otherBusiness?.hrm),
-      customers: boolean(raw?.otherBusiness?.customers),
-      memberships: boolean(raw?.otherBusiness?.memberships),
-      usage: boolean(raw?.otherBusiness?.usage),
+    navigation: {
+      otherBusinessAccess: otherBusinessAccess === true
+        ? true
+        : otherBusinessAccess === false
+          ? false
+          : null,
     },
     agentDocuments: {
       invoices: {
@@ -115,16 +98,12 @@ export function startupRouteForCapabilities(
   route: string,
   capabilities: EffectiveCapabilities,
 ) {
-  // Only a complete snapshot can establish that every other product is
-  // absent. Partial or legacy responses leave startup on the requested route
-  // until the downstream product guard has its own complete information.
-  if (capabilities.capabilityCoverage !== 'complete') return null
+  // Only an explicit false from Field's complete action batch can establish
+  // that every other product is absent. True and unknown keep the requested
+  // route so mixed-product callers are never redirected into fee-only UI.
+  if (capabilities.navigation.otherBusinessAccess !== false) return null
   const hasCancellationFees = capabilities.cancellationFees.list || capabilities.cancellationFees.manage
-  const hasDocumentProduct = Object.values(capabilities.agentDocuments).some(document =>
-    document.list || document.send)
-  const hasOtherBusinessProduct = Object.values(capabilities.otherBusiness).some(Boolean)
-  const hasOtherProduct = hasDocumentProduct || hasOtherBusinessProduct
-  if (!hasCancellationFees || hasOtherProduct) return null
+  if (!hasCancellationFees) return null
   if (route === 'cancellation-fees' || route.startsWith('cancellation-fees/')) return null
   return 'cancellation-fees'
 }

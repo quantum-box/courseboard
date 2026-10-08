@@ -2,15 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { startupRouteForCapabilities, type EffectiveCapabilities } from './EffectiveCapabilitiesProvider'
 
 const cancellationOnly: EffectiveCapabilities = {
-  capabilityCoverage: 'complete',
-  otherBusiness: {
-    hasAny: false,
-    reservations: false,
-    hrm: false,
-    customers: false,
-    memberships: false,
-    usage: false,
-  },
+  navigation: { otherBusinessAccess: false },
   agentDocuments: {
     invoices: { list: false, send: false },
     quotations: { list: false, send: false },
@@ -32,6 +24,7 @@ describe('startupRouteForCapabilities', () => {
   it('leaves mixed-product and unentitled operators to the downstream guard', () => {
     const mixed = {
       ...cancellationOnly,
+      navigation: { otherBusinessAccess: true },
       agentDocuments: {
         ...cancellationOnly.agentDocuments,
         invoices: { list: true, send: false },
@@ -40,11 +33,11 @@ describe('startupRouteForCapabilities', () => {
     expect(startupRouteForCapabilities('golf', mixed)).toBeNull()
     expect(startupRouteForCapabilities('golf', {
       ...cancellationOnly,
-      otherBusiness: { ...cancellationOnly.otherBusiness, hasAny: true, reservations: true },
+      navigation: { otherBusinessAccess: true },
     })).toBeNull()
     expect(startupRouteForCapabilities('golf', {
       ...cancellationOnly,
-      capabilityCoverage: 'partial',
+      navigation: { otherBusinessAccess: null },
     })).toBeNull()
     expect(startupRouteForCapabilities('golf', {
       ...cancellationOnly,
