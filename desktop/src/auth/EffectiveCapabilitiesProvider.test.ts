@@ -4,6 +4,7 @@ import { startupRouteForCapabilities, type EffectiveCapabilities } from './Effec
 const cancellationOnly: EffectiveCapabilities = {
   capabilityCoverage: 'complete',
   otherBusiness: {
+    hasAny: false,
     reservations: false,
     hrm: false,
     customers: false,
@@ -39,7 +40,7 @@ describe('startupRouteForCapabilities', () => {
     expect(startupRouteForCapabilities('golf', mixed)).toBeNull()
     expect(startupRouteForCapabilities('golf', {
       ...cancellationOnly,
-      otherBusiness: { ...cancellationOnly.otherBusiness, reservations: true },
+      otherBusiness: { ...cancellationOnly.otherBusiness, hasAny: true, reservations: true },
     })).toBeNull()
     expect(startupRouteForCapabilities('golf', {
       ...cancellationOnly,

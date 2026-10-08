@@ -127,6 +127,8 @@ impl FieldCapabilityCoverage {
 /// absent or partial snapshots remain unknown to callers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FieldOtherBusinessCapabilities {
+    /// Aggregate of every non-document, non-cancellation CourseBoard action.
+    pub has_any: bool,
     pub reservations: bool,
     pub hrm: bool,
     pub customers: bool,

@@ -59,10 +59,17 @@ struct CancellationFeeCapabilitiesResponse {
 
 #[derive(Debug, Deserialize)]
 struct OtherBusinessCapabilitiesResponse {
+    #[serde(default)]
+    has_any: Option<bool>,
+    #[serde(default)]
     reservations: bool,
+    #[serde(default)]
     hrm: bool,
+    #[serde(default)]
     customers: bool,
+    #[serde(default)]
     memberships: bool,
+    #[serde(default)]
     usage: bool,
 }
 
@@ -144,6 +151,7 @@ impl FieldCapabilitiesGateway for FieldSdkCapabilitiesGateway {
         let other_business = response
             .other_business
             .map(|value| FieldOtherBusinessCapabilities {
+                has_any: value.has_any.unwrap_or(false),
                 reservations: value.reservations,
                 hrm: value.hrm,
                 customers: value.customers,

@@ -20,6 +20,8 @@ export type DocumentCapabilities = {
 export type CapabilityCoverage = 'complete' | 'partial'
 
 export type OtherBusinessCapabilities = {
+  /** Aggregate of all non-document, non-cancellation CourseBoard actions. */
+  hasAny: boolean
   reservations: boolean
   hrm: boolean
   customers: boolean
@@ -50,6 +52,7 @@ type CapabilitiesState = {
 const EMPTY_CAPABILITIES: EffectiveCapabilities = {
   capabilityCoverage: 'partial',
   otherBusiness: {
+    hasAny: false,
     reservations: false,
     hrm: false,
     customers: false,
@@ -78,6 +81,7 @@ function normalizeCapabilities(raw: Partial<EffectiveCapabilities> | null | unde
   return {
     capabilityCoverage: raw?.capabilityCoverage === 'complete' ? 'complete' : 'partial',
     otherBusiness: {
+      hasAny: boolean(raw?.otherBusiness?.hasAny),
       reservations: boolean(raw?.otherBusiness?.reservations),
       hrm: boolean(raw?.otherBusiness?.hrm),
       customers: boolean(raw?.otherBusiness?.customers),

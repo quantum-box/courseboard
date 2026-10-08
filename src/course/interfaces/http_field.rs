@@ -51,6 +51,8 @@ pub struct CancellationFeeCapabilitiesResponse {
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct OtherBusinessCapabilitiesResponse {
+    /// Aggregate of every non-document, non-cancellation CourseBoard action.
+    pub has_any: bool,
     pub reservations: bool,
     pub hrm: bool,
     pub customers: bool,
@@ -63,6 +65,7 @@ impl From<FieldClientCapabilities> for ClientCapabilitiesResponse {
         Self {
             capability_coverage: value.capability_coverage.as_str().to_string(),
             other_business: OtherBusinessCapabilitiesResponse {
+                has_any: value.other_business.has_any,
                 reservations: value.other_business.reservations,
                 hrm: value.other_business.hrm,
                 customers: value.other_business.customers,
@@ -260,6 +263,7 @@ mod tests {
         Json(serde_json::json!({
             "capabilityCoverage": "complete",
             "otherBusiness": {
+                "hasAny": false,
                 "reservations": false,
                 "hrm": false,
                 "customers": false,
