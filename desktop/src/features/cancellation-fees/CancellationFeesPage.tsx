@@ -10,9 +10,9 @@ import {
   Save,
   Send,
 } from 'lucide-react'
-import { useCallback, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { downloadBlob, fieldTenant, yen } from '../../api'
+import { ApiError, downloadBlob, fieldOperatorId, fieldTenant, yen } from '../../api'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import {
@@ -71,6 +71,13 @@ type InvoiceStatus = 'Draft' | 'Sent' | 'SendFailed' | 'Paid' | 'Overdue'
 
 const DELIVERY_KEY_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const CREATE_KEY_STORAGE_PREFIX = 'courseboard:cancellation-fee:create-keys'
+const CREATE_RECOVERY_STORAGE_PREFIX = 'courseboard:cancellation-fee:create-recovery'
+
+function createStorageScope() {
+  const tenant = fieldTenant()
+  const operator = fieldOperatorId()
+  return tenant && operator ? `${tenant}:${operator}` : null
+}
 
 function createIdentityHash(identity: string) {
   // The form payload can contain recipient PII. Store a compact identity
@@ -87,12 +94,15 @@ function createIdentityHash(identity: string) {
 }
 
 function createKeyStorageKey() {
-  return `${CREATE_KEY_STORAGE_PREFIX}:${fieldTenant()}`
+  const scope = createStorageScope()
+  return scope ? `${CREATE_KEY_STORAGE_PREFIX}:${scope}` : null
 }
 
 function loadPersistedCreateKeys() {
   try {
-    const raw = sessionStorage.getItem(createKeyStorageKey())
+    const storageKey = createKeyStorageKey()
+    if (!storageKey) return {}
+    const raw = sessionStorage.getItem(storageKey)
     if (!raw) return {}
     const parsed: unknown = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
@@ -114,9 +124,11 @@ function persistedCreateKey(identity: string) {
 
 function savePersistedCreateKey(identity: string, key: string) {
   try {
+    const storageKey = createKeyStorageKey()
+    if (!storageKey) return
     const keys = loadPersistedCreateKeys()
     keys[createIdentityHash(identity)] = key
-    sessionStorage.setItem(createKeyStorageKey(), JSON.stringify(keys))
+    sessionStorage.setItem(storageKey, JSON.stringify(keys))
   } catch {
     // Session storage is a retry aid; the request itself remains valid without it.
   }
@@ -124,11 +136,107 @@ function savePersistedCreateKey(identity: string, key: string) {
 
 function clearPersistedCreateKey(identity: string) {
   try {
+    const storageKey = createKeyStorageKey()
+    if (!storageKey) return
     const keys = loadPersistedCreateKeys()
     delete keys[createIdentityHash(identity)]
-    sessionStorage.setItem(createKeyStorageKey(), JSON.stringify(keys))
+    sessionStorage.setItem(storageKey, JSON.stringify(keys))
   } catch {
     // Ignore storage failures after the server has reconciled the invoice.
+  }
+}
+
+type CreateRecovery = {
+  identity: string
+  key: string
+  scope: string
+  submission: PendingSubmission
+}
+
+function createRecoveryStorageKey(scope = createStorageScope()) {
+  return scope ? `${CREATE_RECOVERY_STORAGE_PREFIX}:${scope}` : null
+}
+
+function isPendingSubmission(value: unknown): value is PendingSubmission {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const candidate = value as Record<string, unknown>
+  const billTo = candidate.billTo
+  if (!billTo || typeof billTo !== 'object' || Array.isArray(billTo)) return false
+  const recipient = billTo as Record<string, unknown>
+  return typeof recipient.name === 'string'
+    && (recipient.phone === undefined || typeof recipient.phone === 'string')
+    && (recipient.email === undefined || typeof recipient.email === 'string')
+    && typeof candidate.recipientName === 'string'
+    && (candidate.clientEmail === undefined || typeof candidate.clientEmail === 'string')
+    && (candidate.clientPhone === undefined || typeof candidate.clientPhone === 'string')
+    && typeof candidate.dueDate === 'string'
+    && typeof candidate.taxAmount === 'number'
+    && Number.isFinite(candidate.taxAmount)
+    && typeof candidate.notes === 'string'
+    && typeof candidate.description === 'string'
+    && typeof candidate.amount === 'number'
+    && Number.isFinite(candidate.amount)
+    && typeof candidate.sendEmail === 'boolean'
+    && typeof candidate.sendSms === 'boolean'
+}
+
+function loadPersistedCreateRecovery(): CreateRecovery | null {
+  try {
+    const storageKey = createRecoveryStorageKey()
+    if (!storageKey) return null
+    const raw = sessionStorage.getItem(storageKey)
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const candidate = parsed as Record<string, unknown>
+    if (typeof candidate.identity !== 'string'
+      || typeof candidate.key !== 'string'
+      || !DELIVERY_KEY_PATTERN.test(candidate.key)
+      || typeof candidate.scope !== 'string'
+      || candidate.scope !== createStorageScope()
+      || !isPendingSubmission(candidate.submission)) {
+      return null
+    }
+    return {
+      identity: candidate.identity,
+      key: candidate.key,
+      scope: candidate.scope,
+      submission: candidate.submission,
+    }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Keep the complete frozen request only while its create result is unknown.
+ * It is scoped to the authenticated tenant and operator so a later sign-in
+ * cannot see or replay another operator's recipient snapshot.
+ */
+function savePersistedCreateRecovery(recovery: CreateRecovery) {
+  const storageKey = createRecoveryStorageKey(recovery.scope)
+  if (!storageKey) return false
+  try {
+    const serialized = JSON.stringify(recovery)
+    sessionStorage.setItem(storageKey, serialized)
+    return sessionStorage.getItem(storageKey) === serialized
+  } catch {
+    return false
+  }
+}
+
+function clearPersistedCreateRecovery(recovery: CreateRecovery) {
+  try {
+    const storageKey = createRecoveryStorageKey(recovery.scope)
+    if (!storageKey) return
+    const raw = sessionStorage.getItem(storageKey)
+    if (!raw) return
+    const current = JSON.parse(raw) as Partial<CreateRecovery>
+    if (current.identity === recovery.identity && current.key === recovery.key) {
+      sessionStorage.removeItem(storageKey)
+    }
+  } catch {
+    // Ignore storage failures after Field has resolved the create operation.
   }
 }
 
@@ -435,11 +543,19 @@ type PendingSubmission = {
 export function NewCancellationFeePage() {
   const { t } = useTranslation(['cancellationFees', 'common'])
   const timezone = useTenantTimezone()
+  const storageScope = createStorageScope()
+  const initialStorageScopeRef = useRef<string | null | undefined>(undefined)
+  const recoveredCreateRef = useRef<CreateRecovery | null | undefined>(undefined)
+  if (initialStorageScopeRef.current === undefined) {
+    initialStorageScopeRef.current = storageScope
+    recoveredCreateRef.current = loadPersistedCreateRecovery()
+  }
+  const recoveredCreate = recoveredCreateRef.current ?? null
   // One stable UUID per form visit makes a timeout retry safe. Field rejects
   // arbitrary identifiers, and this value is the only create idempotency key
   // sent to the dedicated endpoint.
-  const requestKey = useRef(newCancellationFeeIdempotencyKey())
-  const requestIdentity = useRef<string | null>(null)
+  const requestKey = useRef(recoveredCreate?.key ?? newCancellationFeeIdempotencyKey())
+  const requestIdentity = useRef<string | null>(recoveredCreate?.identity ?? null)
   const resendKey = useRef<string | null>(null)
   const [year, month, day] = today(timezone).split('-').map(Number)
   const due = new Date(Date.UTC(year!, month! - 1, day! + 7)).toISOString().slice(0, 10)
@@ -452,12 +568,29 @@ export function NewCancellationFeePage() {
   const [dueDate, setDueDate] = useState(due)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [pending, setPending] = useState<PendingSubmission | null>(null)
+  const [createRecovery, setCreateRecovery] = useState<CreateRecovery | null>(recoveredCreate)
+  const [pending, setPending] = useState<PendingSubmission | null>(recoveredCreate?.submission ?? null)
   const [created, setCreated] = useState<InvoiceData | null>(null)
   const [sent, setSent] = useState<PendingSubmission | null>(null)
   const [deliveryError, setDeliveryError] = useState<string | null>(null)
   const [resending, setResending] = useState(false)
   const [initialDeliveryUncertain, setInitialDeliveryUncertain] = useState(false)
+  const activeCreateRecovery = createRecovery?.scope === storageScope ? createRecovery : null
+
+  useEffect(() => {
+    if (initialStorageScopeRef.current === storageScope) return
+    initialStorageScopeRef.current = storageScope
+    const recovered = loadPersistedCreateRecovery()
+    requestIdentity.current = recovered?.identity ?? null
+    requestKey.current = recovered?.key ?? newCancellationFeeIdempotencyKey()
+    setCreateRecovery(recovered)
+    setPending(recovered?.submission ?? null)
+    setCreated(null)
+    setSent(null)
+    setDeliveryError(null)
+    setInitialDeliveryUncertain(false)
+    setError(null)
+  }, [storageScope])
 
   /**
    * Read the form, check it, and hand it to the confirmation step.
@@ -468,6 +601,10 @@ export function NewCancellationFeePage() {
    */
   function review(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (createRecovery) {
+      setPending(createRecovery.submission)
+      return
+    }
     const form = new FormData(event.currentTarget)
     setError(null)
     setDeliveryError(null)
@@ -532,58 +669,81 @@ export function NewCancellationFeePage() {
     setError(null)
     setDeliveryError(null)
     setInitialDeliveryUncertain(false)
+    const currentScope = createStorageScope()
+    if (createRecovery && createRecovery.scope !== currentScope) {
+      setError(t('cancellationFees:new.error.scopeChanged'))
+      setSubmitting(false)
+      return
+    }
+    const frozenSubmission = createRecovery?.submission ?? submission
+    const identity = createRecovery?.identity ?? JSON.stringify(frozenSubmission)
     try {
-      // A retry of the same frozen confirmation keeps its key. If the desk
-      // goes back, edits the form, and confirms a different payload after a
-      // failed request, start a new idempotent operation instead of replaying
-      // the earlier body under the old key.
-      const identity = JSON.stringify(submission)
-      if (requestIdentity.current !== identity) {
+      if (createRecovery) {
+        requestIdentity.current = createRecovery.identity
+        requestKey.current = createRecovery.key
+      } else if (requestIdentity.current !== identity) {
         requestKey.current = persistedCreateKey(identity)
           ?? (requestIdentity.current === null
             ? requestKey.current
             : newCancellationFeeIdempotencyKey())
         requestIdentity.current = identity
       }
+      const recovery: CreateRecovery = {
+        identity,
+        key: requestKey.current,
+        scope: currentScope ?? '',
+        submission: frozenSubmission,
+      }
+      // A lost response is recoverable only if the complete request was
+      // durably saved before dispatch. Refuse the mutation when storage is
+      // unavailable instead of promising a retry that would change the key.
+      if (!savePersistedCreateRecovery(recovery)) {
+        setPending(frozenSubmission)
+        setError(t('cancellationFees:new.error.persistence'))
+        return
+      }
+      setCreateRecovery(recovery)
       // Save before the network call. If the response is lost after Field
       // accepts the invoice, a remounted form can replay the same operation.
-      savePersistedCreateKey(identity, requestKey.current)
+      savePersistedCreateKey(identity, recovery.key)
       const invoice = await createCancellationFee<InvoiceData>({
-        idempotencyKey: requestKey.current,
-        billTo: submission.billTo,
+        idempotencyKey: recovery.key,
+        billTo: frozenSubmission.billTo,
         lineItems: [{
-          description: submission.description,
+          description: frozenSubmission.description,
           quantity: 1,
-          unitPrice: submission.amount,
+          unitPrice: frozenSubmission.amount,
         }],
-        dueDate: submission.dueDate,
+        dueDate: frozenSubmission.dueDate,
         currency: 'JPY',
         taxCategory: 'out_of_scope',
-        taxAmount: submission.taxAmount,
-        notes: submission.notes,
+        taxAmount: frozenSubmission.taxAmount,
+        notes: frozenSubmission.notes,
         createPaymentLink: true,
-        sendEmail: submission.sendEmail,
-        sendSms: submission.sendSms,
+        sendEmail: frozenSubmission.sendEmail,
+        sendSms: frozenSubmission.sendSms,
       })
+      clearPersistedCreateRecovery(recovery)
+      setCreateRecovery(null)
       setPending(null)
       setCreated(invoice)
-      setSent(submission)
+      setSent(frozenSubmission)
       try {
         // A replay can return an invoice that was already delivered. Reuse the
         // initial operation for a draft or an unpaid partial/failed result, but
         // do not call it again for a completed Sent/Overdue replay (and never
         // attempt to mutate a paid invoice).
         const shouldFulfill = needsInitialFulfillment(invoice, {
-          sendEmail: submission.sendEmail,
-          sendSms: submission.sendSms,
+          sendEmail: frozenSubmission.sendEmail,
+          sendSms: frozenSubmission.sendSms,
         })
         const fulfilled = shouldFulfill
           ? await runInitialFulfillment(invoice.id)
           : invoice
         setCreated(fulfilled)
         const incomplete = fulfillmentIssue(fulfilled, {
-          sendEmail: submission.sendEmail,
-          sendSms: submission.sendSms,
+          sendEmail: frozenSubmission.sendEmail,
+          sendSms: frozenSubmission.sendSms,
         })
         if (incomplete) {
           setDeliveryError(incomplete)
@@ -599,7 +759,36 @@ export function NewCancellationFeePage() {
           : t('cancellationFees:new.error.delivery'))
       }
     } catch (reason) {
-      setPending(null)
+      const definitiveFailure = reason instanceof ApiError
+        && reason.status >= 400
+        && reason.status < 500
+        && reason.status !== 408
+        && reason.status !== 409
+        && reason.status !== 429
+      if (definitiveFailure) {
+        clearPersistedCreateRecovery({
+          identity,
+          key: requestKey.current,
+          scope: currentScope ?? '',
+          submission: frozenSubmission,
+        })
+        clearPersistedCreateKey(identity)
+        setCreateRecovery(null)
+        setPending(null)
+      } else {
+        // The server may have accepted the invoice before the connection
+        // failed. Keep the exact operation and body for the next retry,
+        // including after a page reload; never mint a second payable invoice.
+        const recovery: CreateRecovery = {
+          identity,
+          key: requestKey.current,
+          scope: currentScope ?? '',
+          submission: frozenSubmission,
+        }
+        savePersistedCreateRecovery(recovery)
+        setCreateRecovery(recovery)
+        setPending(frozenSubmission)
+      }
       setError(reason instanceof Error ? reason.message : t('cancellationFees:new.error.create'))
     } finally {
       setSubmitting(false)
@@ -697,6 +886,16 @@ export function NewCancellationFeePage() {
       {error ? (
         <Notice tone="danger" title={t('cancellationFees:new.createFailed')}>{error}</Notice>
       ) : null}
+      {activeCreateRecovery ? (
+        <Notice tone="warning" title={t('cancellationFees:new.recovery.title')}>
+          {t('cancellationFees:new.recovery.description')}
+          <div className="notice-inline-action">
+            <Button type="button" size="sm" onClick={() => setPending(activeCreateRecovery.submission)}>
+              {t('cancellationFees:new.recovery.retry')}
+            </Button>
+          </div>
+        </Notice>
+      ) : null}
       {created && deliveryError ? (
         <Notice tone="warning" title={t('cancellationFees:new.partial.title')}>
           {initialDeliveryUncertain
@@ -725,6 +924,7 @@ export function NewCancellationFeePage() {
       ) : null}
 
       <form className="collection-editor" onSubmit={review}>
+        <fieldset className="collection-editor-fields" disabled={createRecovery !== null}>
         <Panel
           title={t('cancellationFees:new.detail.title')}
           description={t('cancellationFees:new.detail.description')}
@@ -775,6 +975,7 @@ export function NewCancellationFeePage() {
                 name={customerName}
                 customerId={customer?.id ?? null}
                 required
+                disabled={createRecovery !== null}
                 allowRegister={false}
                 onNameChange={name => {
                   setCustomerName(name)
@@ -875,6 +1076,7 @@ export function NewCancellationFeePage() {
             {t('cancellationFees:new.review')}
           </Button>
         </div>
+        </fieldset>
       </form>
 
       <Sheet

@@ -97,6 +97,11 @@ export function fieldTenant() {
     ?? (import.meta.env.DEV ? 'courseboard_id' : '')
 }
 
+/** The authenticated operator scope used for tenant-local recovery state. */
+export function fieldOperatorId() {
+  return apiAuthContext?.operatorId ?? ''
+}
+
 export function fieldPlatformId() {
   return apiAuthContext?.platformId
     ?? import.meta.env.VITE_COURSEBOARD_PLATFORM_ID

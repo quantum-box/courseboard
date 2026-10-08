@@ -60,6 +60,11 @@ export const cancellationFees: DeepPartial<typeof source> = {
     backToList: 'Back to list',
     refreshOrder: 'Reload the order',
     createFailed: 'Could not create it',
+    recovery: {
+      title: 'The previous invoice is still being checked',
+      description: 'The result of the previous invoice request is unknown. Retry the same request without changing its details.',
+      retry: 'Retry the same request',
+    },
     partial: {
       title: 'The invoice was created',
       description: '{{message}}. The invoice exists, so only the sending is retried.',
@@ -162,6 +167,8 @@ export const cancellationFees: DeepPartial<typeof source> = {
     error: {
       delivery: 'Could not send the notification',
       create: 'Could not create the invoice',
+      persistence: 'The invoice was not sent because its details could not be saved safely. Enable browser storage and try again.',
+      scopeChanged: 'The signed-in tenant or operator changed, so the previous invoice cannot continue here. Return to its original sign-in to check it.',
       registerCustomer: 'Could not add the recipient to the ledger. No invoice was created.',
       noPaymentLink: 'No payment link was issued. Try again from the invoice page.',
       deliveryPartial:

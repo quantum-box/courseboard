@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { configureApiAuth } from '../../api'
 import { i18next } from '../../i18n'
 import { PageReloadProvider } from '../../lib/pageReload'
 import { CancellationFeeDetailPage, NewCancellationFeePage } from './CancellationFeesPage'
@@ -24,6 +25,7 @@ vi.mock('../../lib/router', async importOriginal => {
 
 afterEach(() => {
   cleanup()
+  configureApiAuth(null)
   sessionStorage.clear()
   api.field.mockReset()
   router.navigate.mockReset()
@@ -53,7 +55,7 @@ function invoice(overrides: Record<string, unknown> = {}) {
 }
 
 function renderPage() {
-  render(
+  return render(
     <I18nextProvider i18n={i18next}>
       <TooltipProvider>
         <NewCancellationFeePage />
@@ -106,6 +108,14 @@ function bodyOf(call: unknown[]) {
 
 describe('the dedicated cancellation fee form', () => {
   beforeEach(() => {
+    configureApiAuth({
+      tenantId: 'tenant_test',
+      operatorId: 'operator_test',
+      platformId: 'platform_test',
+      getAccessToken: async () => undefined,
+      onUnauthorized: vi.fn(),
+      onForbidden: vi.fn(),
+    })
     vi.stubGlobal('crypto', { randomUUID: () => '123e4567-e89b-42d3-a456-426614174000' })
   })
 
@@ -273,6 +283,50 @@ describe('the dedicated cancellation fee form', () => {
     await waitFor(() => expect(router.navigate).toHaveBeenCalledWith('cancellation-fees/inv_1'))
     expect(fulfillAttempts).toBe(2)
     expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
+  })
+
+  it('freezes and restores a create whose response was lost before allowing another invoice', async () => {
+    const creates: unknown[][] = []
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees') {
+        creates.push([path, init])
+        if (creates.length === 1) throw new Error('create response lost')
+        return invoice()
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+    const firstRender = renderPage()
+    fillSnapshot('元の請求先', '090-0000-0000')
+
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('create response lost')
+
+    const recipient = screen.getByLabelText('請求先の名前', { exact: false }) as HTMLInputElement
+    expect(recipient.disabled).toBe(true)
+    fireEvent.change(recipient, { target: { value: '別の請求先' } })
+    fireEvent.click(screen.getByRole('button', { name: '戻って直す' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+
+    firstRender.unmount()
+    renderPage()
+    expect(screen.getByText('同じ内容でやり直す')).toBeTruthy()
+    expect(screen.getByText('元の請求先')).toBeTruthy()
+    expect((screen.getByLabelText('請求先の名前', { exact: false }) as HTMLInputElement).disabled).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await waitFor(() => expect(router.navigate).toHaveBeenCalledWith('cancellation-fees/inv_1'))
+
+    const firstBody = bodyOf(creates[0]!)
+    const secondBody = bodyOf(creates[1]!)
+    expect(secondBody.idempotencyKey).toBe(firstBody.idempotencyKey)
+    expect(secondBody.billTo).toEqual(firstBody.billTo)
+    expect(secondBody.lineItems).toEqual(firstBody.lineItems)
+    expect(secondBody.dueDate).toBe(firstBody.dueDate)
+    expect(secondBody.taxAmount).toBe(firstBody.taxAmount)
+    expect(secondBody.notes).toBe(firstBody.notes)
+    expect(secondBody.sendEmail).toBe(firstBody.sendEmail)
+    expect(secondBody.sendSms).toBe(firstBody.sendSms)
   })
 
   it('replays the initial delivery when the create response reports SendFailed', async () => {

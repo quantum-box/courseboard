@@ -55,6 +55,11 @@ export const cancellationFees: DeepPartial<typeof source> = {
     backToList: '一覧に戻る',
     refreshOrder: '注文の内容を読み直す',
     createFailed: '作れませんでした',
+    recovery: {
+      title: '前回の請求書の作成を確認してください',
+      description: '前回の請求書を作った結果が分かりません。内容を変えずに、同じ作成をもう一度してください。',
+      retry: '同じ作成をもう一度する',
+    },
     partial: {
       title: '請求書は作れました',
       description: '{{message}}。請求書はできています。送るところだけ、やり直します。',
@@ -148,6 +153,8 @@ export const cancellationFees: DeepPartial<typeof source> = {
     error: {
       delivery: 'お知らせを送れませんでした',
       create: '請求書を作れませんでした',
+      persistence: '請求内容を安全に保存できないため、作成を止めました。ブラウザの保存領域を有効にして、もう一度試してください。',
+      scopeChanged: 'ログイン先が変わったため、前回の請求書の作成をこの画面から続けられません。元のログイン先に戻って確認してください。',
       registerCustomer: 'お客さまの名簿に入れられませんでした。請求書は、まだ作っていません。',
       noPaymentLink: '支払い用のリンクができていません。請求書の画面からやり直してください。',
       deliveryPartial:

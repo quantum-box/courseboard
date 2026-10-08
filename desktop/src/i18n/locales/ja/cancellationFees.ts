@@ -57,6 +57,11 @@ export const cancellationFees = {
     backToList: '一覧へ',
     refreshOrder: '受注を読み直す',
     createFailed: '作れませんでした',
+    recovery: {
+      title: '前回の請求作成を確認してください',
+      description: '前回の請求作成結果を確認できていません。元の内容を変えずに、同じ処理をやり直してください。',
+      retry: '同じ内容でやり直す',
+    },
     partial: {
       title: '請求書は作れました',
       description: '{{message}}。請求書はできているので、送信だけやり直します。',
@@ -159,6 +164,8 @@ export const cancellationFees = {
     error: {
       delivery: '知らせを送れませんでした',
       create: '請求書を作れませんでした',
+      persistence: '請求内容を安全に保存できないため、作成を止めました。ブラウザの保存領域を有効にしてから、もう一度試してください。',
+      scopeChanged: 'ログイン先が変わったため、前回の請求作成をこの画面から続けられません。元のログイン先に戻って確認してください。',
       registerCustomer: '顧客台帳に登録できませんでした。請求書はまだ作っていません。',
       noPaymentLink: '支払いリンクが作られていません。請求の画面からやり直してください。',
       deliveryPartial: '支払いリンクはできましたが、選んだメールか SMS を送れませんでした。請求の画面から送り直せます。',
