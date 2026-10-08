@@ -373,8 +373,6 @@ export const customers: DeepPartial<typeof source> = {
       unbillableTitle: 'Some bookings cannot be invoiced',
       unbillable: '{{count}} still have no recipient name. Enter one and they can be billed.',
       reconcile: 'Record existing invoices',
-      reconcileMissingAmountTitle: 'The existing invoice amount is unavailable',
-      reconcileMissingAmount: 'Recording is paused because Field did not return the invoice amount. Check the invoice details and try again.',
       invoiceNote: 'Cancellation fee ({{count}} bookings).',
       invoiceLine: '{{date}} cancelled ({{reason}}) {{note}}',
       lineItem: {

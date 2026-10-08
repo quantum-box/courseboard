@@ -26,7 +26,6 @@ import { navigateFromClick } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import {
   CANCELLATION_FEE_MARKER,
-  CANCELLATION_FEE_REASON,
   cancellationFeeIdempotencyKey,
   cancellationFeeInvoiceRequestBody,
   cancellationFeeInvoicesPath,
@@ -65,20 +64,11 @@ const DEFAULT_PER_PLAYER_FEE = 3_000
 
 type InvoiceStatus = 'Draft' | 'Sent' | 'SendFailed' | 'Paid' | 'Overdue'
 
-type InvoiceLineItem = {
-  amount?: number | null
-  quantity?: number | null
-  unitPrice?: number | null
-}
-
 type InvoiceResponse = {
   id: string
   invoiceNumber?: string
   status?: InvoiceStatus | string
   sources?: InvoiceSource[] | null
-  lineItems?: InvoiceLineItem[] | null
-  subtotalAmount?: number | null
-  totalAmount?: number | null
   paymentLinkUrl?: string | null
   paymentLinkStatus?: 'Pending' | 'Ready' | 'Failed' | null
   emailDeliveryStatus?: 'Pending' | 'Sent' | 'Failed' | null
@@ -86,7 +76,7 @@ type InvoiceResponse = {
 }
 
 type InvoiceListResponse = {
-  items: InvoiceResponse[]
+  items: { id: string; sources?: InvoiceSource[] | null }[]
 }
 
 /**
@@ -482,148 +472,6 @@ function describeFeeLine(
 /** What one customer's invoice attempt came to. */
 type BillingResult = { group: CustomerFeeGroup; invoiceId?: string; error?: string }
 
-type ExistingInvoiceMatch = {
-  invoiceId: string
-  amount?: number
-}
-
-type ExistingInvoiceDecision = {
-  reservationId: string
-  state: 'invoiced'
-  invoiceId: string
-  amount: number
-}
-
-function isPositiveMinorAmount(value: unknown): value is number {
-  return typeof value === 'number'
-    && Number.isSafeInteger(value)
-    && value > 0
-}
-
-/**
- * The invoice list is a full invoice response, so the amount used for a
- * write-back comes from Field's durable record rather than the editable sheet.
- * Subtotal is the right source for this batch because its requests use zero
- * tax; line items cover older responses that did not expose subtotal.
- */
-function invoiceSubtotal(invoice: InvoiceResponse): number | undefined {
-  if (isPositiveMinorAmount(invoice.subtotalAmount)) return invoice.subtotalAmount
-
-  if (invoice.lineItems && invoice.lineItems.length > 0) {
-    let total = 0
-    for (const item of invoice.lineItems) {
-      const amount = isPositiveMinorAmount(item.amount)
-        ? item.amount
-        : typeof item.unitPrice === 'number'
-          && typeof item.quantity === 'number'
-          && Number.isSafeInteger(item.unitPrice * item.quantity)
-          && item.unitPrice * item.quantity > 0
-          ? item.unitPrice * item.quantity
-          : undefined
-      if (amount === undefined || !Number.isSafeInteger(total + amount)) return undefined
-      total += amount
-    }
-    if (isPositiveMinorAmount(total)) return total
-  }
-
-  return isPositiveMinorAmount(invoice.totalAmount) ? invoice.totalAmount : undefined
-}
-
-/**
- * Existing source-backed invoices are authoritative evidence that a booking
- * was billed. Keep their ids so a lost CourseBoard write-back can be repaired
- * rather than merely hiding the booking from the next batch.
- */
-function cancellationFeeInvoiceMatches(
-  invoices: InvoiceResponse[],
-  rows: ReservationCancellation[],
-) {
-  const rowIds = new Set(rows.map(row => row.reservationId))
-  const matches = new Map<string, ExistingInvoiceMatch>()
-  for (const invoice of invoices) {
-    for (const source of invoice.sources ?? []) {
-      if (
-        source.sourceType === 'reservation'
-        && source.reason === CANCELLATION_FEE_REASON
-        && rowIds.has(source.sourceId)
-      ) {
-        const match = {
-          invoiceId: invoice.id,
-          amount: invoiceSubtotal(invoice),
-        }
-        const previous = matches.get(source.sourceId)
-        if (previous && (
-          previous.invoiceId !== match.invoiceId
-          || previous.amount !== match.amount
-        )) {
-          // The same reservation appearing on two invoices is not safe to
-          // attribute automatically, even when one response has an amount.
-          matches.set(source.sourceId, {
-            invoiceId: previous.invoiceId,
-            amount: undefined,
-          })
-        } else {
-          matches.set(source.sourceId, match)
-        }
-      }
-    }
-  }
-  return matches
-}
-
-/**
- * Rebuild the per-booking amounts from each matched invoice's actual total.
- * A single invoice can cover several reservations, so use the same player
- * weighting and remainder rule as a new batch. Missing upstream amounts fail
- * closed instead of writing a null or editable estimate into CourseBoard.
- */
-function existingInvoiceDecisions(
-  rows: ReservationCancellation[],
-  matches: Map<string, ExistingInvoiceMatch>,
-): { decisions: ExistingInvoiceDecision[]; missingAmount: boolean } {
-  const grouped = new Map<string, {
-    invoiceId: string
-    amount?: number
-    rows: ReservationCancellation[]
-  }>()
-  for (const row of rows) {
-    const match = matches.get(row.reservationId)
-    if (!match) continue
-    const group = grouped.get(match.invoiceId) ?? {
-      invoiceId: match.invoiceId,
-      amount: match.amount,
-      rows: [],
-    }
-    // Two responses for the same invoice disagreeing on the amount are
-    // ambiguous evidence. Leave it for manual reconciliation.
-    if (group.amount !== match.amount) group.amount = undefined
-    group.rows.push(row)
-    grouped.set(match.invoiceId, group)
-  }
-
-  const decisions: ExistingInvoiceDecision[] = []
-  let missingAmount = false
-  for (const group of grouped.values()) {
-    if (!isPositiveMinorAmount(group.amount)) {
-      missingAmount = true
-      continue
-    }
-    const players = group.rows.map(row => Math.max(1, row.players))
-    const totalPlayers = players.reduce((sum, count) => sum + count, 0)
-    const shares = players.map(count => Math.floor((group.amount! * count) / totalPlayers))
-    const remainder = group.amount - shares.reduce((sum, share) => sum + share, 0)
-    group.rows.forEach((row, index) => {
-      decisions.push({
-        reservationId: row.reservationId,
-        state: 'invoiced',
-        invoiceId: group.invoiceId,
-        amount: (shares[index] ?? 0) + (index === 0 ? remainder : 0),
-      })
-    })
-  }
-  return { decisions, missingAmount }
-}
-
 /**
  * Generic invoice creation owns initial delivery for the batch path. A
  * response that says delivery was only partly completed must remain visible
@@ -731,7 +579,7 @@ function BillCancellationFeesSheet({
   // The case worth catching is the one it could not: the invoice went out and
   // the write back failed, leaving the row `unsettled` so the next extraction
   // offers it again. A read that fails keeps the billing action disabled until
-  // the source-backed reconciliation has completed.
+  // the source-backed duplicate check has completed.
   const invoiced = useResource(
     loadCancellationFeeInvoices,
     [open],
@@ -741,15 +589,6 @@ function BillCancellationFeesSheet({
     () => invoicedReservationIds(invoiced.data?.items ?? []),
     [invoiced.data],
   )
-  const existingInvoiceMatches = useMemo(
-    () => cancellationFeeInvoiceMatches(invoiced.data?.items ?? [], rows),
-    [invoiced.data, rows],
-  )
-  const existingReconciliation = useMemo(
-    () => existingInvoiceDecisions(rows, existingInvoiceMatches),
-    [rows, existingInvoiceMatches],
-  )
-
   /** The bookings the sheet has to ask about: no ledger link on the row. */
   const unlinkedRows = useMemo(
     () => rows.filter(row => !row.customerId?.trim() && !alreadyInvoiced.has(row.reservationId)),
@@ -794,11 +633,9 @@ function BillCancellationFeesSheet({
 
   const unnamed = plan.unbillable.filter(entry => entry.reason === 'unnamed')
   const alreadyBilled = plan.unbillable.filter(entry => entry.reason === 'already_invoiced')
-  const onlyReconcile = plan.groups.length === 0 && existingInvoiceMatches.size > 0
   const reconciliationReady = Boolean(invoiced.data)
     && !invoiced.loading
     && !invoiced.error
-    && !existingReconciliation.missingAmount
 
   const submit = async () => {
     if (!reconciliationReady) return
@@ -873,7 +710,6 @@ function BillCancellationFeesSheet({
     }
 
     const invoiced = attempts.filter(attempt => attempt.invoiceId)
-    const existingDecisions = existingReconciliation.decisions
     const newDecisions = invoiced.flatMap(attempt =>
       splitFeeAcrossRows(attempt.group).map(share => ({
         reservationId: share.reservationId,
@@ -881,7 +717,7 @@ function BillCancellationFeesSheet({
         invoiceId: attempt.invoiceId,
         amount: share.amount,
       })))
-    const decisions = [...existingDecisions, ...newDecisions]
+    const decisions = newDecisions
     let settlementError: string | undefined
     if (decisions.length > 0) {
       try {
@@ -914,7 +750,7 @@ function BillCancellationFeesSheet({
     setSaving(false)
     const failed = attempts.filter(attempt => attempt.error)
     const completed = attempts.filter(attempt => attempt.invoiceId && !attempt.error)
-    const settledCount = existingDecisions.length + completed.length
+    const settledCount = completed.length
     if (failed.length === 0 && !settlementError && settledCount > 0) {
       showToast({
         tone: 'success',
@@ -972,14 +808,6 @@ function BillCancellationFeesSheet({
         ) : null}
         {invoiced.error ? (
           <ResourceError error={invoiced.error} onRetry={invoiced.refresh} />
-        ) : null}
-        {existingReconciliation.missingAmount ? (
-          <Notice
-            tone="danger"
-            title={t('customers:cancellations.bill.reconcileMissingAmountTitle')}
-          >
-            {t('customers:cancellations.bill.reconcileMissingAmount')}
-          </Notice>
         ) : null}
 
         {/* Who the club has no ledger link for, and the two ways out of it:
@@ -1115,13 +943,11 @@ function BillCancellationFeesSheet({
             type="button"
             variant="primary"
             onClick={submit}
-            disabled={saving || !reconciliationReady || (plan.groups.length === 0 && !onlyReconcile)}
+            disabled={saving || !reconciliationReady || plan.groups.length === 0}
           >
             {saving
               ? t('customers:cancellations.bill.saving')
-              : onlyReconcile
-                ? t('customers:cancellations.bill.reconcile')
-                : t('customers:cancellations.bill.submit', { total: yen(plan.total) })}
+              : t('customers:cancellations.bill.submit', { total: yen(plan.total) })}
           </Button>
         </div>
       </div>

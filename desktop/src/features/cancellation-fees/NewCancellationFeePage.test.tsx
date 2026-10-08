@@ -123,6 +123,39 @@ describe('the dedicated cancellation fee form', () => {
     expect(screen.queryByLabelText(/請求先の種類/)).toBeNull()
   })
 
+  it('replays the initial delivery after a create response reports a timeout', async () => {
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees') {
+        return invoice({
+          status: 'SendFailed',
+          smsDeliveryStatus: 'Failed',
+          smsDeliveryFailureCode: 'Timeout',
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        return invoice({
+          status: 'SendFailed',
+          smsDeliveryStatus: 'Failed',
+          smsDeliveryFailureCode: 'Timeout',
+        })
+      }
+      if (path.endsWith('/send')) throw new Error('explicit resend must wait for the operator')
+      return invoice()
+    })
+    renderPage()
+    fillSnapshot()
+
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求書は作れました')
+    await waitFor(() => expect(
+      api.field.mock.calls.some(call => String(call[0]).endsWith('/fulfill')),
+    ).toBe(true))
+    expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
+    expect(screen.getByRole('button', { name: '送信だけやり直す' })).toBeTruthy()
+  })
+
   it('resends delivery through /send with a stable explicit idempotency key', async () => {
     api.field.mockImplementation(async (path: string) => {
       if (path === '/v1/cancellation-fees') return invoice({ smsDeliveryStatus: 'Pending' })

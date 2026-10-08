@@ -173,7 +173,7 @@ describe('the cancellation extraction', () => {
     mockField([
       { id: 'inv_old', sources: [
         { sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' },
-      ], subtotalAmount: 10_000 },
+      ] },
     ])
 
     await act(async () => {
@@ -187,83 +187,17 @@ describe('the cancellation extraction', () => {
     })
 
     expect(screen.getByText('すでに請求済みの予約があります')).toBeTruthy()
-    // Nothing left to bill. The only action records the existing invoice id
-    // against CourseBoard's row so a lost write-back is repaired.
-    const reconcile = screen.getByRole('button', { name: '既存の請求を反映する' })
-    expect(reconcile).toHaveProperty('disabled', false)
-    await act(async () => {
-      fireEvent.click(reconcile)
-    })
-    const settle = api.course.mock.calls.find(
-      call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
-    )
-    expect(settle).toBeTruthy()
-    expect(JSON.parse((settle?.[1] as RequestInit).body as string).decisions).toEqual([
-      { reservationId: 'res_1', state: 'invoiced', invoiceId: 'inv_old', amount: 10_000 },
-    ])
-    expect(invoicePosts()).toHaveLength(0)
-  })
-
-  it('allocates an existing invoice total across every matched booking', async () => {
-    api.course.mockResolvedValue({
-      items: [
-        cancellation({ reservationId: 'res_1', players: 4 }),
-        cancellation({ reservationId: 'res_2', players: 2 }),
-      ],
-      total: 2,
-    })
-    mockField([{
-      id: 'inv_old',
-      sources: [
-        { sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' },
-        { sourceType: 'reservation', sourceId: 'res_2', reason: 'cancellation_fee' },
-      ],
-      // This differs from the current sheet default on purpose: reconciliation
-      // must preserve Field's durable invoice total, not recompute it.
-      subtotalAmount: 10_000,
-    }])
-
-    await act(async () => {
-      renderPage()
-    })
-    await selectAllAndOpenSheet()
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: '既存の請求を反映する' }))
-    })
-
-    const settle = api.course.mock.calls.find(
-      call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
-    )
-    expect(JSON.parse((settle?.[1] as RequestInit).body as string).decisions).toEqual([
-      { reservationId: 'res_1', state: 'invoiced', invoiceId: 'inv_old', amount: 6_667 },
-      { reservationId: 'res_2', state: 'invoiced', invoiceId: 'inv_old', amount: 3_333 },
-    ])
-  })
-
-  it('does not reconcile a matched invoice when Field omits its amount', async () => {
-    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
-    mockField([{
-      id: 'inv_old',
-      sources: [{
-        sourceType: 'reservation',
-        sourceId: 'res_1',
-        reason: 'cancellation_fee',
-      }],
-    }])
-
-    await act(async () => {
-      renderPage()
-    })
-    await selectAllAndOpenSheet()
-
-    expect(screen.getByText('既存の請求額を確認できません')).toBeTruthy()
-    expect(screen.getByRole('button', { name: '既存の請求を反映する' })).toHaveProperty('disabled', true)
+    // Nothing left to bill. The source-backed invoice is kept out of the
+    // batch; writing it back without a trusted allocation would erase the
+    // booking's fee amount.
+    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
     expect(api.course.mock.calls.some(
       call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
     )).toBe(false)
+    expect(invoicePosts()).toHaveLength(0)
   })
 
-  it('pages through every source-backed invoice before allowing reconciliation', async () => {
+  it('pages through every source-backed invoice before allowing billing', async () => {
     api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
     const firstPage = Array.from({ length: 100 }, (_, index) => ({
       id: `inv_old_${index}`,
@@ -287,7 +221,7 @@ describe('the cancellation extraction', () => {
     })
     await selectAllAndOpenSheet()
 
-    expect(screen.getByRole('button', { name: '既存の請求を反映する' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
     expect(api.field.mock.calls.filter(call => String(call[0]).startsWith('/v1/invoices?')))
       .toHaveLength(2)
   })
@@ -322,7 +256,7 @@ describe('the cancellation extraction', () => {
       fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
     })
 
-    expect(screen.getByRole('button', { name: '既存の請求を反映する' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
     expect(invoicePosts()).toHaveLength(0)
   })
 
