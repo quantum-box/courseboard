@@ -111,6 +111,7 @@ describe('the dedicated cancellation fee form', () => {
     expect(body).not.toHaveProperty('sources')
     expect(body).not.toHaveProperty('smsMessage')
     expect(api.field.mock.calls.some(call => String(call[0]).startsWith('/v1/invoices'))).toBe(false)
+    expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/fulfill'))).toBe(false)
   })
 
   it('does not offer customer registration, arbitrary ids, or free SMS text', () => {
@@ -138,6 +139,9 @@ describe('the dedicated cancellation fee form', () => {
     await screen.findByText('この内容で送ります')
     fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
     await screen.findByText('請求書は作れました')
+    await waitFor(() => expect(
+      api.field.mock.calls.some(call => String(call[0]).endsWith('/fulfill')),
+    ).toBe(true))
 
     fireEvent.click(screen.getByRole('button', { name: '送信だけやり直す' }))
     await waitFor(() => expect(

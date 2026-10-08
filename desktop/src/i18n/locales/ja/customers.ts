@@ -377,6 +377,8 @@ export const customers = {
       unbillableTitle: '請求できない予約があります',
       unbillable: '{{count}}件は請求先の名前が空のままです。名前を入れると請求できます。',
       reconcile: '既存の請求を反映する',
+      reconcileMissingAmountTitle: '既存の請求額を確認できません',
+      reconcileMissingAmount: 'Fieldから請求額を読み取れないため、予約への反映を止めています。請求書の明細を確認してから再試行してください。',
       invoiceNote: 'キャンセル料のご請求です（{{count}}件）。',
       invoiceLine: '{{date}} キャンセル（{{reason}}）{{note}}',
       lineItem: {

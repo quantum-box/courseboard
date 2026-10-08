@@ -570,10 +570,16 @@ export function NewCancellationFeePage() {
       setCreated(invoice)
       setSent(submission)
       try {
-        const fulfilled = await fulfillCancellationFee<InvoiceData>(invoice.id)
-        // Creation and its initial delivery are one user-visible operation.
-        // Keep the create key until this reconciliation response is definite.
-        clearPersistedCreateKey(identity)
+        // A replay can return an invoice that was already delivered. Reuse the
+        // initial operation for a draft or an unpaid partial/failed result, but
+        // do not call it again for a completed Sent/Overdue replay (and never
+        // attempt to mutate a paid invoice).
+        const fulfilled = needsInitialFulfillment(invoice, {
+          sendEmail: submission.sendEmail,
+          sendSms: submission.sendSms,
+        })
+          ? await fulfillCancellationFee<InvoiceData>(invoice.id)
+          : invoice
         setCreated(fulfilled)
         const incomplete = fulfillmentIssue(fulfilled, {
           sendEmail: submission.sendEmail,
@@ -582,6 +588,9 @@ export function NewCancellationFeePage() {
         if (incomplete) {
           setDeliveryError(incomplete)
         } else {
+          // Creation and its initial delivery are one user-visible operation.
+          // Keep the create key until this reconciliation response is definite.
+          clearPersistedCreateKey(identity)
           navigate(`cancellation-fees/${fulfilled.id}`)
         }
       } catch (reason) {
@@ -1333,10 +1342,36 @@ export function fulfillmentIssue(
   const selectedDeliveriesSent =
     (!delivery.sendEmail || invoice.emailDeliveryStatus === 'Sent')
     && (!delivery.sendSms || invoice.smsDeliveryStatus === 'Sent')
-  if (invoice.status !== 'Sent' || !selectedDeliveriesSent) {
+  const deliveredStatus = invoice.status === 'Sent'
+    || invoice.status === 'Paid'
+    || invoice.status === 'Overdue'
+  if (!deliveredStatus || !selectedDeliveriesSent) {
     return i18next.t('cancellationFees:new.error.deliveryPartial')
   }
   return undefined
+}
+
+/**
+ * Decide whether the create response still needs the initial delivery action.
+ * Field keeps unpaid Sent/SendFailed invoices retryable, so a partial or
+ * uncertain response must go through the same initial claim again. A completed
+ * Sent/Overdue response can be shown directly, while Paid is terminal.
+ */
+function needsInitialFulfillment(
+  invoice: Pick<InvoiceData,
+    'status' | 'paymentLinkStatus' | 'paymentLinkUrl' | 'emailDeliveryStatus' | 'smsDeliveryStatus'>,
+  delivery: { sendEmail: boolean; sendSms: boolean },
+) {
+  if (invoice.status === 'Paid') return false
+  const paymentLinkReady = invoice.paymentLinkStatus === 'Ready' && Boolean(invoice.paymentLinkUrl)
+  const selectedDeliveriesSent =
+    (!delivery.sendEmail || invoice.emailDeliveryStatus === 'Sent')
+    && (!delivery.sendSms || invoice.smsDeliveryStatus === 'Sent')
+  if (paymentLinkReady && selectedDeliveriesSent
+    && (invoice.status === 'Sent' || invoice.status === 'Overdue')) {
+    return false
+  }
+  return true
 }
 
 async function copyToClipboard(value: string) {
