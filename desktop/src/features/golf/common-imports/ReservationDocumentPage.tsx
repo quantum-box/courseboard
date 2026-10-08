@@ -9,7 +9,7 @@ import { navigate } from '../../../lib/router'
 import { showToast } from '../../../lib/toast'
 import { getJob, issueMessage, listTargets, type ImportJob, type ImportOptions, type ImportTarget } from './api'
 import { executeDocumentRevision, fetchDocumentOriginal, readReservationDocument, reserveReservationDocument, saveDocumentRevision, uploadDocumentSources, type DocumentRow, type DocumentSource } from './document-api'
-import { businessValues, operationStorageKey, persistDocumentOperation, readDocumentOperation, remapReviewedRow, reservationFields, reviewedRows, sourceCells, type DocumentOperation, type ReservationField, type ReservationValues } from './document-review'
+import { businessValues, operationStorageKey, persistDocumentOperation, readDocumentOperation, remapReviewedRow, reservationFields, reviewedRows, sourceCells, type DocumentOperation, type DocumentUploadSnapshot, type ReservationField, type ReservationValues } from './document-review'
 import './document-import.css'
 import { PdfPages } from '../customers/reception/PdfPages'
 
@@ -30,6 +30,7 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
   const [files, setFiles] = useState<File[]>([])
   const [rotations, setRotations] = useState<DocumentSource['rotation'][]>([])
   const [pages, setPages] = useState('')
+  const [uploadSnapshot, setUploadSnapshot] = useState<DocumentUploadSnapshot>()
   const [busy, setBusy] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [error, setError] = useState('')
@@ -74,11 +75,16 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
   }
   useEffect(() => {
     current.current = undefined; setJob(undefined); setRows([]); setDirty(false); setTarget(undefined); setCatalogReady(false); setFiles([]); setRotations([]); setVerifiedSource(undefined)
+    setUploadSnapshot(undefined); setPages(''); setOptions({ year: new Date().getFullYear(), columnMappings: {}, courseMappings: {} })
     if (blobUrl.current) URL.revokeObjectURL(blobUrl.current)
     blobUrl.current = ''; setOriginalUrl('')
     if (!identity) return
     void run(async signal => {
       const pending = jobId ? null : readDocumentOperation(storageKey)
+      if (pending?.upload) {
+        setUploadSnapshot(pending.upload); setPages(pending.upload.pages); setRotations(pending.upload.rotations)
+        setOptions({ year: pending.upload.year, columnMappings: {}, courseMappings: {} })
+      }
       const id = jobId ?? pending?.jobId
       const [catalog, courseList, restored] = await Promise.allSettled([
         listTargets(signal), courseboardApiJson<{ items: Course[] }>('/v1/course/courses', { signal }), id ? getJob(id, signal) : undefined,
@@ -108,8 +114,12 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
   }
   async function start(signal: AbortSignal) {
     let operation = readDocumentOperation(storageKey)
-    if (!operation) { operation = { idempotencyKey: crypto.randomUUID() }; persistDocumentOperation(storageKey, operation) }
-    const reserved = await reserveReservationDocument(files, rotations, pages, options, operation.idempotencyKey, signal)
+    if (!operation) operation = { idempotencyKey: crypto.randomUUID() }
+    if (!operation.upload) operation = { ...operation, upload: { year: options.year!, pages, rotations } }
+    persistDocumentOperation(storageKey, operation)
+    const snapshot = operation.upload!
+    setUploadSnapshot(snapshot)
+    const reserved = await reserveReservationDocument(files, snapshot.rotations, snapshot.pages, { year: snapshot.year, columnMappings: {}, courseMappings: {} }, operation.idempotencyKey, signal)
     signal.throwIfAborted()
     persistDocumentOperation(storageKey, { ...operation, jobId: reserved.job.id }); apply(reserved.job, true)
     if (reserved.ocr.status === 'uploading') await uploadDocumentSources(reserved.job, reserved.ocr, files, signal)
@@ -164,11 +174,12 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
   function confirmPage() {
     setRows(previous => previous.map(row => row.source.fileIndex === sourceIndex && row.source.page === visiblePage ? { ...row, values: { ...row.values, originalConfirmed: true } } : row)); setDirty(true)
   }
-  function chooseFiles(chosen: File[]) { setFiles(chosen); setRotations(chosen.map(() => 0)) }
+  function chooseFiles(chosen: File[]) { setFiles(chosen); setRotations(chosen.map((_, index) => uploadSnapshot?.rotations[index] ?? 0)) }
   function newDocument() {
     const operation: DocumentOperation = { idempotencyKey: crypto.randomUUID() }
     persistDocumentOperation(storageKey, operation)
     current.current = undefined; setJob(undefined); setRows([]); setFiles([]); setRotations([]); setDirty(false); setOriginalUrl(''); setVerifiedSource(undefined)
+    setUploadSnapshot(undefined); setPages(''); setOptions({ year: new Date().getFullYear(), columnMappings: {}, courseMappings: {} })
     if (blobUrl.current) URL.revokeObjectURL(blobUrl.current); blobUrl.current = ''
     setDiscardConfirmation(false)
     if (jobId) navigate(`${listRoute}/documents`)
@@ -182,11 +193,12 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
     {!job && <Panel title={t('choose')}>
       {!canCreate && !busy && <Notice tone="warning">{t('unavailable')}</Notice>}
       <p>{t('pricingMessage')}</p><p>{t('limitsMessage')}</p>
-      <Field label={t('fields.year')}><Input type="number" min={1900} max={9999} value={options.year ?? ''} disabled={busy} onChange={event => setOptions(previous => ({ ...previous, year: Number(event.target.value) }))} /></Field>
-      <Field label={t('pages')} hint={t('pagesMessage')}><Input value={pages} disabled={busy} onChange={event => setPages(event.target.value)} /></Field>
+      <Field label={t('fields.year')}><Input type="number" min={1900} max={9999} value={options.year ?? ''} disabled={busy || !!uploadSnapshot} onChange={event => setOptions(previous => ({ ...previous, year: Number(event.target.value) }))} /></Field>
+      <Field label={t('pages')} hint={t('pagesMessage')}><Input value={pages} maxLength={256} disabled={busy || !!uploadSnapshot} onChange={event => setPages(event.target.value)} /></Field>
       <Field label={t('files')}><Input type="file" accept="application/pdf,.pdf" multiple disabled={busy || !canCreate} onChange={event => chooseFiles(Array.from(event.target.files ?? []))} /></Field>
-      {files.map((file, index) => <Field key={index} label={file.name}><NativeSelect aria-label={t('rotation', { file: file.name })} value={rotations[index]} disabled={busy} onChange={event => setRotations(previous => previous.map((rotation, i) => i === index ? Number(event.target.value) as DocumentSource['rotation'] : rotation))}>{[0, 90, 180, 270].map(rotation => <option key={rotation} value={rotation}>{t('degrees', { rotation })}</option>)}</NativeSelect></Field>)}
-      <Button variant="primary" disabled={busy || !canCreate || !files.length} onClick={() => void run(start)}>{t('start')}</Button>
+      {files.map((file, index) => <Field key={index} label={file.name}><NativeSelect aria-label={t('rotation', { file: file.name })} value={rotations[index]} disabled={busy || !!uploadSnapshot} onChange={event => setRotations(previous => previous.map((rotation, i) => i === index ? Number(event.target.value) as DocumentSource['rotation'] : rotation))}>{[0, 90, 180, 270].map(rotation => <option key={rotation} value={rotation}>{t('degrees', { rotation })}</option>)}</NativeSelect></Field>)}
+      <Button variant="primary" disabled={busy || !canCreate || !files.length || files.length > 32 || !Number.isInteger(options.year) || options.year! < 1900 || options.year! > 9999} onClick={() => void run(start)}>{t('start')}</Button>
+      {uploadSnapshot && <Button disabled={busy} onClick={() => void run(async () => newDocument())}>{t('newDocument')}</Button>}
     </Panel>}
     {job && document && <>
       <p role="status">{t(`status.${job.status}`, { defaultValue: t('status.reading') })} · {document.executionConfirmed ? `${job.processed} / ${job.total ?? rows.length}` : rows.length} {t('rows')}</p>

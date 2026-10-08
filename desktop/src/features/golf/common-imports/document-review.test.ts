@@ -62,4 +62,13 @@ describe('document review recovery', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })
     expect(() => persistDocumentOperation('operation', { idempotencyKey: 'read' })).toThrow()
   })
+  it('keeps the initial year, pages and rotations for a lost reserve response', () => {
+    const operation = { idempotencyKey: 'initial', upload: { year: 2025, pages: '1,3-4', rotations: [90, 0] as Array<0 | 90 | 180 | 270> } }
+    persistDocumentOperation('upload', operation)
+    expect(readDocumentOperation('upload')).toEqual(operation)
+    for (const upload of [{ ...operation.upload, year: null }, { ...operation.upload, rotations: [45] }, { ...operation.upload, pages: [] }]) {
+      localStorage.setItem('upload', JSON.stringify({ ...operation, upload }))
+      expect(() => readDocumentOperation('upload')).toThrow()
+    }
+  })
 })

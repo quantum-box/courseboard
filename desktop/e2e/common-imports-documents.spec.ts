@@ -14,10 +14,11 @@ async function fixture(page: Page, loseResponses = false) {
   pdf.addPage([600, 400]).drawText('East | 10/8 | AM | 2 | 1', { x: 30, y: 300, size: 18, font })
   const bytes = Buffer.from(await pdf.save())
   const sha256 = createHash('sha256').update(bytes).digest('hex')
-  const source = { index: 0, contentType: 'application/pdf', size: bytes.length, sha256, rotation: 0 as const }
+  const source = { index: 0, contentType: 'application/pdf', size: bytes.length, sha256, rotation: 0 as 0 | 90 | 180 | 270 }
   const raw = { _source_index: 0, _source_page: 1, _source_row: 1, cells: JSON.stringify({ facilityName: 'East', date: '10/8', dayPart: 'AM', groupCount: '2', caddieAttachedGroupCount: '1' }) }
   let job: ImportJob | undefined
   const keys: string[] = []
+  const reserveInputs: Array<{ year: unknown; pages: unknown; rotation: unknown }> = []
   let putCount = 0, ocrReads = 0, confirmationCalls = 0, businessReceipts = 0
   const uploadUrl = 'https://storage.example.invalid/__document-source'
   const reply = (route: Route, value: unknown) => route.fulfill({ json: value })
@@ -33,7 +34,10 @@ async function fixture(page: Page, loseResponses = false) {
     if (path.endsWith('/document-upload')) {
       const body = route.request().postDataJSON()
       keys.push(body.idempotencyKey)
-      if (!job) job = { id: 'dtj_document_fixture', objectKey: 'courseboardReservationReports', status: 'uploading', mode: 'create_only', processed: 0, total: null, created: 0, updated: 0, errors: 0, validationErrors: [], preview: [], batch: false, previewPage: 0, previewPages: 0, filename: null, failure: null, importOptions: body.importOptions, sourceSha256: sha256, createdAt: '2026-10-08T00:00:00Z', document: { rowField: 'rows', ocrJobId: 'goj_same', manifestSha256: 'b'.repeat(64), sources: [source], pages: null, ocrStatus: 'uploading', expiresAt: '2099-10-08T00:00:00Z', revisionVersion: 0, revisionSha256: null, executionAvailable: false } }
+      reserveInputs.push({ year: body.importOptions.year, pages: body.pages, rotation: body.documents[0].rotation })
+      source.rotation = body.documents[0].rotation
+      if (job) { expect(body.importOptions).toEqual(job.importOptions); expect(body.pages ?? null).toEqual(job.document!.pages) }
+      if (!job) job = { id: 'dtj_document_fixture', objectKey: 'courseboardReservationReports', status: 'uploading', mode: 'create_only', processed: 0, total: null, created: 0, updated: 0, errors: 0, validationErrors: [], preview: [], batch: false, previewPage: 0, previewPages: 0, filename: null, failure: null, importOptions: body.importOptions, sourceSha256: sha256, createdAt: '2026-10-08T00:00:00Z', document: { rowField: 'rows', ocrJobId: 'goj_same', manifestSha256: 'b'.repeat(64), sources: [source], pages: body.pages ?? null, ocrStatus: 'uploading', expiresAt: '2099-10-08T00:00:00Z', revisionVersion: 0, revisionSha256: null, executionAvailable: false } }
       if (loseResponses && keys.length === 1) return route.abort('failed')
       return reply(route, { job, ocr: { job: { id: 'goj_same', status: 'uploading' }, uploads: [{ storageKey: 'source', uploadUrl, expiresAt: '2099' }] } })
     }
@@ -67,21 +71,27 @@ async function fixture(page: Page, loseResponses = false) {
     }
     return reply(route, job)
   })
-  return { file: { name: 'reservation.pdf', mimeType: 'application/pdf', buffer: bytes }, keys, counts: () => ({ putCount, ocrReads, confirmationCalls, businessReceipts }) }
+  return { file: { name: 'reservation.pdf', mimeType: 'application/pdf', buffer: bytes }, keys, reserveInputs, counts: () => ({ putCount, ocrReads, confirmationCalls, businessReceipts }) }
 }
 
 test('PDF reserve and save response losses resume the same document and receipt', async ({ page }) => {
   const mock = await fixture(page, true)
   await page.goto(entry)
   await page.getByLabel(ja.files, { exact: true }).setInputFiles(mock.file)
+  await page.getByLabel(ja.fields.year, { exact: true }).fill('2025')
+  await page.getByLabel(ja.pages).fill('1')
+  await page.getByLabel(ja.rotation.replace('{{file}}', mock.file.name), { exact: true }).selectOption('90')
   await page.getByRole('button', { name: ja.start, exact: true }).click()
   await expect(page.getByRole('alert')).toBeVisible()
   await page.reload()
+  await expect(page.getByLabel(ja.fields.year, { exact: true })).toHaveValue('2025')
+  await expect(page.getByLabel(ja.pages)).toHaveValue('1')
   await page.getByLabel(ja.files, { exact: true }).setInputFiles(mock.file)
   await page.getByRole('button', { name: ja.start, exact: true }).click()
   await expect(page.getByRole('button', { name: ja.openOriginal, exact: true })).toBeVisible()
   expect(mock.keys).toHaveLength(2)
   expect(new Set(mock.keys).size).toBe(1)
+  expect(mock.reserveInputs).toEqual([{ year: 2025, pages: '1', rotation: 90 }, { year: 2025, pages: '1', rotation: 90 }])
   await expect(page.getByRole('button', { name: ja.saveRevision, exact: true })).toBeDisabled()
   await page.getByRole('button', { name: ja.openOriginal, exact: true }).click()
   const reviewPage = page.getByRole('button', { name: '1ページの各行を原本と照合した', exact: true })
