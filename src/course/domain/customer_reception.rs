@@ -284,6 +284,7 @@ impl From<ReceptionSheet> for ReceptionSheets {
 pub struct ReceptionOcrJobSheet {
     content_type: &'static str,
     size: u64,
+    sha256: Option<String>,
 }
 
 impl ReceptionOcrJobSheet {
@@ -317,7 +318,28 @@ impl ReceptionOcrJobSheet {
         Ok(Self {
             content_type: media_type,
             size,
+            sha256: None,
         })
+    }
+
+    /// New document imports bind bytes; legacy jobs retain their old contract.
+    pub fn with_sha256(mut self, hash: Option<String>) -> Result<Self, CourseError> {
+        if hash.as_ref().is_some_and(|hash| {
+            hash.len() != 64
+                || !hash
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        }) {
+            return Err(CourseError::BadRequest(
+                "source SHA256 must be lowercase hexadecimal",
+            ));
+        }
+        self.sha256 = hash;
+        Ok(self)
+    }
+
+    pub fn sha256(&self) -> Option<&str> {
+        self.sha256.as_deref()
     }
 
     pub fn content_type(&self) -> &'static str {
@@ -1430,5 +1452,27 @@ mod page_coverage_tests {
                 .rows()
                 .is_empty()
         );
+    }
+}
+
+#[cfg(test)]
+mod immutable_document_tests {
+    use super::*;
+    #[test]
+    fn immutable_sheet_requires_a_lowercase_full_content_hash() {
+        assert!(ReceptionOcrJobSheet::try_new("image/jpeg", 100)
+            .unwrap()
+            .with_sha256(Some("a".repeat(64)))
+            .is_ok());
+        for hash in ["A".repeat(64), "a".repeat(63), "z".repeat(64)] {
+            assert!(ReceptionOcrJobSheet::try_new("image/jpeg", 100)
+                .unwrap()
+                .with_sha256(Some(hash))
+                .is_err());
+        }
+        assert!(ReceptionOcrJobSheet::try_new("image/jpeg", 100)
+            .unwrap()
+            .sha256()
+            .is_none());
     }
 }

@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 
 const TARGETS: &[(&str, &str, &str)] = &[
     ("customer", actions::MANAGE_CUSTOMERS, "顧客台帳"),
+    ("customerReception", actions::MANAGE_CUSTOMERS, "受付用紙"),
     ("dailyBudgets", actions::MANAGE_BUDGETS, "日次予算"),
     (
         "courseboardReservationReports",
@@ -158,7 +159,7 @@ pub async fn proxy(
         let value = parsed(status, &bytes)?;
         let mut items = Vec::new();
         for item in value["items"].as_array().cloned().unwrap_or_default() {
-            if item["kind"] == "import"
+            if (item["kind"] == "import" || item["kind"] == "document")
                 && item["importOptions"]["sourceApp"] == "courseboard"
                 && permitted(
                     &state,
@@ -179,7 +180,8 @@ pub async fn proxy(
             format!("/v1/bridge/data-objects/{key}/template")
         }
         ["objects", key, "imports", operation]
-            if method == Method::POST && ["preview", "upload-url"].contains(operation) =>
+            if method == Method::POST
+                && ["preview", "upload-url", "document-link"].contains(operation) =>
         {
             permitted(&state, headers, key).await?;
             format!("/v1/bridge/data-objects/{key}/imports/{operation}")
@@ -187,7 +189,15 @@ pub async fn proxy(
         ["jobs", id] if method == Method::GET => authorized_job(&state, headers, id).await?,
         ["jobs", id, operation]
             if method == Method::POST
-                && ["advance", "validate", "cancel", "resume"].contains(operation) =>
+                && [
+                    "advance",
+                    "validate",
+                    "cancel",
+                    "resume",
+                    "document-sync",
+                    "document-revision",
+                ]
+                .contains(operation) =>
         {
             format!(
                 "{}/{}",
@@ -211,7 +221,10 @@ pub async fn proxy(
     } else {
         let mut value: Value = serde_json::from_slice(&bytes)
             .map_err(|_| AppError::BadRequest("invalid import JSON"))?;
-        if segments.first() == Some(&"objects") && method == Method::POST {
+        if segments.first() == Some(&"objects")
+            && method == Method::POST
+            && segments.last() != Some(&"document-link")
+        {
             if value["importOptions"].is_null() {
                 value["importOptions"] = json!({});
             }
@@ -261,7 +274,11 @@ async fn authorized_job(
     let path = format!("/v1/bridge/data-jobs/{id}");
     let (status, _, bytes) = upstream(state, headers, Method::GET, &path, None, None).await?;
     let job = parsed(status, &bytes)?;
-    if job["kind"] != "import" || job["importOptions"]["sourceApp"] != "courseboard" {
+    if !["import", "document"]
+        .iter()
+        .any(|kind| job["kind"] == *kind)
+        || job["importOptions"]["sourceApp"] != "courseboard"
+    {
         return Err(AppError::NotFound("import job is unavailable"));
     }
     permitted(
