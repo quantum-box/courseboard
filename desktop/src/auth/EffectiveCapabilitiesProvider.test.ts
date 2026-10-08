@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { startupRouteForCapabilities, type EffectiveCapabilities } from './EffectiveCapabilitiesProvider'
 
 const cancellationOnly: EffectiveCapabilities = {
+  capabilityCoverage: 'complete',
+  otherBusiness: {
+    reservations: false,
+    hrm: false,
+    customers: false,
+    memberships: false,
+    usage: false,
+  },
   agentDocuments: {
     invoices: { list: false, send: false },
     quotations: { list: false, send: false },
@@ -29,6 +37,14 @@ describe('startupRouteForCapabilities', () => {
       },
     }
     expect(startupRouteForCapabilities('golf', mixed)).toBeNull()
+    expect(startupRouteForCapabilities('golf', {
+      ...cancellationOnly,
+      otherBusiness: { ...cancellationOnly.otherBusiness, reservations: true },
+    })).toBeNull()
+    expect(startupRouteForCapabilities('golf', {
+      ...cancellationOnly,
+      capabilityCoverage: 'partial',
+    })).toBeNull()
     expect(startupRouteForCapabilities('golf', {
       ...cancellationOnly,
       cancellationFees: { list: false, manage: false },

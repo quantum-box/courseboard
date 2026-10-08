@@ -9,8 +9,8 @@ use serde::Deserialize;
 use super::field_gateway::{map_field_status_error, normalize_base_url};
 use crate::course::domain::{
     CourseError, FieldAgentDocumentCapabilities, FieldCancellationFeeCapabilities,
-    FieldCapabilitiesGateway, FieldClientCapabilities, FieldDocumentQueueCapabilities,
-    FieldRequestContext,
+    FieldCapabilitiesGateway, FieldCapabilityCoverage, FieldClientCapabilities,
+    FieldDocumentQueueCapabilities, FieldOtherBusinessCapabilities, FieldRequestContext,
 };
 
 const FIELD_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -24,14 +24,19 @@ pub struct FieldSdkCapabilitiesGateway {
 /// The checked-in Field SDK predates the cancellation-fee capability fields.
 /// Keep the outbound configuration from that SDK, but decode the response
 /// locally so CourseBoard can consume the additive fields before a regenerated
-/// SDK revision is available. `cancellationFees` is optional for rolling
-/// deploys against an older Field API and therefore fails closed.
+/// SDK revision is available. `cancellationFees`, `capabilityCoverage`, and
+/// `otherBusiness` are optional for rolling deploys against an older Field API
+/// and therefore fail closed.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ClientCapabilitiesResponse {
     agent_documents: AgentDocumentCapabilitiesResponse,
     #[serde(default)]
     cancellation_fees: Option<CancellationFeeCapabilitiesResponse>,
+    #[serde(default)]
+    capability_coverage: Option<String>,
+    #[serde(default)]
+    other_business: Option<OtherBusinessCapabilitiesResponse>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -50,6 +55,15 @@ struct DocumentQueueCapabilitiesResponse {
 struct CancellationFeeCapabilitiesResponse {
     list: bool,
     manage: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct OtherBusinessCapabilitiesResponse {
+    reservations: bool,
+    hrm: bool,
+    customers: bool,
+    memberships: bool,
+    usage: bool,
 }
 
 impl FieldSdkCapabilitiesGateway {
@@ -123,7 +137,23 @@ impl FieldCapabilitiesGateway for FieldSdkCapabilitiesGateway {
                 list: false,
                 manage: false,
             });
+        let capability_coverage = match response.capability_coverage.as_deref() {
+            Some("complete") => FieldCapabilityCoverage::Complete,
+            _ => FieldCapabilityCoverage::Partial,
+        };
+        let other_business = response
+            .other_business
+            .map(|value| FieldOtherBusinessCapabilities {
+                reservations: value.reservations,
+                hrm: value.hrm,
+                customers: value.customers,
+                memberships: value.memberships,
+                usage: value.usage,
+            })
+            .unwrap_or_default();
         Ok(FieldClientCapabilities {
+            capability_coverage,
+            other_business,
             agent_documents: FieldAgentDocumentCapabilities {
                 invoices: FieldDocumentQueueCapabilities {
                     list: invoices.list,

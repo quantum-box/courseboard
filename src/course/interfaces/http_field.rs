@@ -22,6 +22,11 @@ use crate::{AppError, AppState, COURSEBOARD_AUTHORIZATION_HEADER};
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCapabilitiesResponse {
+    /// `complete` means the snapshot includes every CourseBoard product
+    /// action. `partial` is deliberately non-authoritative for product
+    /// presence and is used during rolling upgrades or limited projections.
+    pub capability_coverage: String,
+    pub other_business: OtherBusinessCapabilitiesResponse,
     pub agent_documents: AgentDocumentCapabilitiesResponse,
     pub cancellation_fees: CancellationFeeCapabilitiesResponse,
 }
@@ -44,9 +49,26 @@ pub struct CancellationFeeCapabilitiesResponse {
     pub manage: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct OtherBusinessCapabilitiesResponse {
+    pub reservations: bool,
+    pub hrm: bool,
+    pub customers: bool,
+    pub memberships: bool,
+    pub usage: bool,
+}
+
 impl From<FieldClientCapabilities> for ClientCapabilitiesResponse {
     fn from(value: FieldClientCapabilities) -> Self {
         Self {
+            capability_coverage: value.capability_coverage.as_str().to_string(),
+            other_business: OtherBusinessCapabilitiesResponse {
+                reservations: value.other_business.reservations,
+                hrm: value.other_business.hrm,
+                customers: value.other_business.customers,
+                memberships: value.other_business.memberships,
+                usage: value.other_business.usage,
+            },
             agent_documents: AgentDocumentCapabilitiesResponse {
                 invoices: DocumentQueueCapabilitiesResponse {
                     list: value.agent_documents.invoices.list,
@@ -236,6 +258,14 @@ mod tests {
         }
 
         Json(serde_json::json!({
+            "capabilityCoverage": "complete",
+            "otherBusiness": {
+                "reservations": false,
+                "hrm": false,
+                "customers": false,
+                "memberships": false,
+                "usage": false
+            },
             "agentDocuments": {
                 "invoices": {"list": true, "send": false},
                 "quotations": {"list": false, "send": true}
@@ -384,6 +414,8 @@ mod tests {
         assert_eq!(body_a["agentDocuments"]["quotations"]["send"], true);
         assert_eq!(body_a["cancellationFees"]["list"], true);
         assert_eq!(body_a["cancellationFees"]["manage"], false);
+        assert_eq!(body_a["capabilityCoverage"], "complete");
+        assert_eq!(body_a["otherBusiness"]["reservations"], false);
 
         let mut observed = requests.lock().unwrap().clone();
         observed.sort_by(|left, right| left.authorization.cmp(&right.authorization));

@@ -8,6 +8,7 @@ import {
 } from 'react'
 
 import { courseboardApiJson } from '../api'
+import { LoadingState, ResourceError } from '../components/Page'
 import { navigate, useRoute } from '../lib/router'
 import { useAuth } from './AuthProvider'
 
@@ -16,7 +17,19 @@ export type DocumentCapabilities = {
   send: boolean
 }
 
+export type CapabilityCoverage = 'complete' | 'partial'
+
+export type OtherBusinessCapabilities = {
+  reservations: boolean
+  hrm: boolean
+  customers: boolean
+  memberships: boolean
+  usage: boolean
+}
+
 export type EffectiveCapabilities = {
+  capabilityCoverage: CapabilityCoverage
+  otherBusiness: OtherBusinessCapabilities
   agentDocuments: {
     invoices: DocumentCapabilities
     quotations: DocumentCapabilities
@@ -28,12 +41,21 @@ export type EffectiveCapabilities = {
 }
 
 type CapabilitiesState = {
+  tenantId: string
   data: EffectiveCapabilities | null
   error: Error | null
   loading: boolean
 }
 
 const EMPTY_CAPABILITIES: EffectiveCapabilities = {
+  capabilityCoverage: 'partial',
+  otherBusiness: {
+    reservations: false,
+    hrm: false,
+    customers: false,
+    memberships: false,
+    usage: false,
+  },
   agentDocuments: {
     invoices: { list: false, send: false },
     quotations: { list: false, send: false },
@@ -42,6 +64,7 @@ const EMPTY_CAPABILITIES: EffectiveCapabilities = {
 }
 
 const EffectiveCapabilitiesContext = createContext<CapabilitiesState>({
+  tenantId: '',
   data: null,
   error: null,
   loading: true,
@@ -53,6 +76,14 @@ function boolean(value: unknown) {
 
 function normalizeCapabilities(raw: Partial<EffectiveCapabilities> | null | undefined): EffectiveCapabilities {
   return {
+    capabilityCoverage: raw?.capabilityCoverage === 'complete' ? 'complete' : 'partial',
+    otherBusiness: {
+      reservations: boolean(raw?.otherBusiness?.reservations),
+      hrm: boolean(raw?.otherBusiness?.hrm),
+      customers: boolean(raw?.otherBusiness?.customers),
+      memberships: boolean(raw?.otherBusiness?.memberships),
+      usage: boolean(raw?.otherBusiness?.usage),
+    },
     agentDocuments: {
       invoices: {
         list: boolean(raw?.agentDocuments?.invoices?.list),
@@ -80,9 +111,15 @@ export function startupRouteForCapabilities(
   route: string,
   capabilities: EffectiveCapabilities,
 ) {
+  // Only a complete snapshot can establish that every other product is
+  // absent. Partial or legacy responses leave startup on the requested route
+  // until the downstream product guard has its own complete information.
+  if (capabilities.capabilityCoverage !== 'complete') return null
   const hasCancellationFees = capabilities.cancellationFees.list || capabilities.cancellationFees.manage
-  const hasOtherProduct = Object.values(capabilities.agentDocuments).some(document =>
+  const hasDocumentProduct = Object.values(capabilities.agentDocuments).some(document =>
     document.list || document.send)
+  const hasOtherBusinessProduct = Object.values(capabilities.otherBusiness).some(Boolean)
+  const hasOtherProduct = hasDocumentProduct || hasOtherBusinessProduct
   if (!hasCancellationFees || hasOtherProduct) return null
   if (route === 'cancellation-fees' || route.startsWith('cancellation-fees/')) return null
   return 'cancellation-fees'
@@ -98,30 +135,33 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
   const route = useRoute()
   const tenantId = tenant?.id ?? ''
   const [state, setState] = useState<CapabilitiesState>({
+    tenantId: '',
     data: null,
     error: null,
     loading: true,
   })
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     const controller = new AbortController()
     if (!tenantId) {
-      setState({ data: null, error: null, loading: false })
+      setState({ tenantId: '', data: null, error: null, loading: false })
       return () => controller.abort()
     }
 
-    setState({ data: null, error: null, loading: true })
+    setState({ tenantId, data: null, error: null, loading: true })
     void courseboardApiJson<Partial<EffectiveCapabilities>>('/v1/field/client-capabilities', {
       signal: controller.signal,
     })
       .then(raw => {
         if (!controller.signal.aborted) {
-          setState({ data: normalizeCapabilities(raw), error: null, loading: false })
+          setState({ tenantId, data: normalizeCapabilities(raw), error: null, loading: false })
         }
       })
       .catch(error => {
         if (!controller.signal.aborted) {
           setState({
+            tenantId,
             data: null,
             error: error instanceof Error ? error : new Error(String(error)),
             loading: false,
@@ -129,22 +169,33 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
         }
       })
     return () => controller.abort()
-  }, [tenantId])
+  }, [attempt, tenantId])
 
+  const snapshotReady = state.tenantId === tenantId && !state.loading && Boolean(state.data)
+  const startupTarget = snapshotReady && state.data
+    ? startupRouteForCapabilities(route, state.data)
+    : null
   useEffect(() => {
     // PLT-5225 owns the first screen for an operator who has only the
     // cancellation-fee product. The general route guard remains downstream:
     // this only prevents a saved/default golf home URL from becoming the
     // startup screen after the capability snapshot is known.
-    if (state.loading || state.error || !state.data) return
-    const target = startupRouteForCapabilities(route, state.data)
-    if (target) navigate(target)
-  }, [route, state.data, state.error, state.loading])
+    if (startupTarget) navigate(startupTarget)
+  }, [startupTarget])
 
   const value = useMemo<CapabilitiesState>(() => state, [state])
+  const currentError = state.tenantId === tenantId ? state.error : null
+  const waitingForSnapshot = !tenantId || state.tenantId !== tenantId || state.loading || Boolean(startupTarget)
+  const gate = currentError
+    ? <ResourceError error={currentError} onRetry={() => setAttempt(value => value + 1)} />
+    : waitingForSnapshot
+      ? <LoadingState />
+      : !state.data
+        ? <ResourceError error={new Error('Capability snapshot is unavailable')} onRetry={() => setAttempt(value => value + 1)} />
+        : children
   return (
     <EffectiveCapabilitiesContext.Provider value={value}>
-      {children}
+      {gate}
     </EffectiveCapabilitiesContext.Provider>
   )
 }
