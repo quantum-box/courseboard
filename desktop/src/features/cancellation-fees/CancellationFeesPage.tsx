@@ -1147,6 +1147,7 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
 
 function InvoiceOperations({
   invoice,
+  onUpdated,
   onRefresh,
   onNotice,
 }: {
