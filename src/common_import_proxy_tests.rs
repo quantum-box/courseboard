@@ -30,11 +30,57 @@ async fn upstream_capture(
         Json(
             json!({"kind":"import","objectKey":"customer","importOptions":{"sourceApp":"another-app"}}),
         )
+    } else if path.ends_with("dtj_document") {
+        Json(
+            json!({"kind":"document","objectKey":"courseboardReservationReports","importOptions":{"sourceApp":"courseboard"},"status":"review"}),
+        )
     } else {
         Json(
             json!({"kind":"import","objectKey":"customer","importOptions":{"sourceApp":"courseboard"},"status":"ready"}),
         )
     }
+}
+
+#[tokio::test]
+async fn reservation_document_bff_preserves_revision_and_authorizes_every_operation() {
+    let (state, capture, authorizer, server) = state(true).await;
+    for operation in ["document-read", "document-validate", "document-confirm"] {
+        let body =
+            json!({"manifestSha256":"original","revisionVersion":2,"revisionSha256":"reviewed"});
+        proxy(
+            State(state.clone()),
+            Path(format!("jobs/dtj_document/{operation}")),
+            request(Method::POST, body.clone()),
+        )
+        .await
+        .unwrap();
+        let calls = capture.requests.lock().unwrap();
+        let forwarded = calls.last().unwrap();
+        assert_eq!(
+            forwarded.0,
+            format!("/v1/bridge/data-jobs/dtj_document/{operation}")
+        );
+        assert_eq!(forwarded.1["authorization"], "Bearer current-user");
+        assert_eq!(forwarded.1["x-operator-id"], "tenant-a");
+        assert_eq!(forwarded.1["x-platform-id"], "platform-a");
+        assert_eq!(forwarded.2, body);
+    }
+    proxy(
+        State(state),
+        Path("jobs/dtj_document/document-original/0".into()),
+        request(Method::GET, Value::Null),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        authorizer.calls.lock().unwrap().as_slice(),
+        [actions::MANAGE_RESERVATIONS; 4]
+    );
+    assert_eq!(
+        capture.requests.lock().unwrap().last().unwrap().0,
+        "/v1/bridge/data-jobs/dtj_document/document-original/0"
+    );
+    server.abort();
 }
 struct Authorizer {
     allow: bool,

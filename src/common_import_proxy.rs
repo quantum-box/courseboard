@@ -161,6 +161,7 @@ pub async fn proxy(
         for item in value["items"].as_array().cloned().unwrap_or_default() {
             if (item["kind"] == "import" || item["kind"] == "document")
                 && item["importOptions"]["sourceApp"] == "courseboard"
+                && item["importOptions"]["documentParentId"].is_null()
                 && permitted(
                     &state,
                     headers,
@@ -181,7 +182,8 @@ pub async fn proxy(
         }
         ["objects", key, "imports", operation]
             if method == Method::POST
-                && ["preview", "upload-url", "document-link"].contains(operation) =>
+                && ["preview", "upload-url", "document-link", "document-upload"]
+                    .contains(operation) =>
         {
             permitted(&state, headers, key).await?;
             format!("/v1/bridge/data-objects/{key}/imports/{operation}")
@@ -196,6 +198,9 @@ pub async fn proxy(
                     "resume",
                     "document-sync",
                     "document-revision",
+                    "document-read",
+                    "document-validate",
+                    "document-confirm",
                 ]
                 .contains(operation) =>
         {
@@ -208,6 +213,14 @@ pub async fn proxy(
         ["jobs", id, "preview", page] if method == Method::GET && page.parse::<usize>().is_ok() => {
             format!(
                 "{}/preview/{page}",
+                authorized_job(&state, headers, id).await?
+            )
+        }
+        ["jobs", id, "document-original", index]
+            if method == Method::GET && index.parse::<usize>().is_ok() =>
+        {
+            format!(
+                "{}/document-original/{index}",
                 authorized_job(&state, headers, id).await?
             )
         }

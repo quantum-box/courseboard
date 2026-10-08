@@ -1,20 +1,21 @@
 import { courseboardApiJson } from '../../../api'
-import { fileDigest, getJob, type ImportJob } from './api'
+import { fileDigest, getJob, type ImportJob, type ImportOptions } from './api'
+import { i18next as i18n } from '../../../i18n'
 
 const ROOT = '/v1/course/data-imports'
 const OCR_ROOT = '/v1/course/customers/reception-draft/jobs'
 export const DOCUMENT_LIMITS = { files: 32, fileBytes: 64 * 1024 * 1024, totalBytes: 1024 * 1024 * 1024, reviewRows: 5000 } as const
 
-export type DocumentSource = { index: number; contentType: string; size: number; sha256: string; rotation: 0 }
+export type DocumentSource = { index: number; contentType: string; size: number; sha256: string; rotation: 0 | 90 | 180 | 270 }
 export type DocumentRow = { source: { fileIndex: number; page: number; row: number }; values: Record<string, unknown>; excludedReason?: string | null }
-export type DocumentRevision = { version: number; sha256: string; rows: DocumentRow[] }
-export type DocumentImport = { ocrJobId: string; manifestSha256: string; sources: DocumentSource[]; pages: string | null; ocrStatus: string; expiresAt: string; revisionVersion: number; revisionSha256: string | null; extracted?: { fields: Record<string, unknown>; warnings: string[] }; revision?: DocumentRevision; executionAvailable: false }
+export type DocumentRevision = { version: number; sha256: string; rows: DocumentRow[]; options?: ImportOptions }
+export type DocumentImport = { rowField?: 'rows' | 'visitors'; executionJobId?: string | null; executionConfirmed?: boolean; validationCursor?: number; ocrJobId: string; manifestSha256: string; sources: DocumentSource[]; pages: string | null; ocrStatus: string; expiresAt: string; revisionVersion: number; revisionSha256: string | null; extracted?: { fields: Record<string, unknown>; warnings: string[] }; revision?: DocumentRevision; executionAvailable: boolean }
 type OcrReservation = { id: string; status: string; uploads: { storageKey: string; uploadUrl: string; expiresAt: string }[] }
 
 function inspect(files: readonly File[]) {
-  if (!files.length || files.length > DOCUMENT_LIMITS.files) throw new Error('1回の文書取込は1〜32ファイルで選択してください。')
-  if (files.some(file => !['application/pdf', 'image/jpeg', 'image/png'].includes(file.type) || !file.size || file.size > DOCUMENT_LIMITS.fileBytes)) throw new Error('PDF・JPEG・PNGを1ファイル64 MiB以下で選択してください。')
-  if (files.reduce((sum, file) => sum + file.size, 0) > DOCUMENT_LIMITS.totalBytes) throw new Error('選択した文書の合計は1 GiBまでです。')
+  if (!files.length || files.length > DOCUMENT_LIMITS.files) throw new Error(i18n.t('documentImport:error.files'))
+  if (files.some(file => !['application/pdf', 'image/jpeg', 'image/png'].includes(file.type) || !file.size || file.size > DOCUMENT_LIMITS.fileBytes)) throw new Error(i18n.t('documentImport:error.size'))
+  if (files.reduce((sum, file) => sum + file.size, 0) > DOCUMENT_LIMITS.totalBytes) throw new Error(i18n.t('documentImport:error.total'))
 }
 
 /** Caller retains idempotencyKey before calling. Retrying a lost reserve/link
@@ -23,13 +24,13 @@ function inspect(files: readonly File[]) {
  */
 export async function reserveReceptionDocumentImport(files: readonly File[], idempotencyKey: string, signal: AbortSignal) {
   inspect(files)
-  if (!idempotencyKey.trim() || idempotencyKey.length > 128) throw new Error('再開用の操作IDを指定してください。')
+  if (!idempotencyKey.trim() || idempotencyKey.length > 128) throw new Error(i18n.t('documentImport:error.operation'))
   const sheets: { contentType: string; size: number; sha256: string }[] = []
   for (const file of files) sheets.push({ contentType: file.type, size: file.size, sha256: await fileDigest(file, signal) })
   signal.throwIfAborted()
   const ocr = await courseboardApiJson<OcrReservation>(OCR_ROOT, { method: 'POST', body: JSON.stringify({ idempotencyKey, sheets }), signal })
   const job = await courseboardApiJson<ImportJob>(`${ROOT}/objects/customerReception/imports/document-link`, { method: 'POST', body: JSON.stringify({ ocrJobId: ocr.id }), signal })
-  if (job.document?.ocrJobId !== ocr.id || job.document.sources.length !== sheets.length || job.document.sources.some((source, index) => source.sha256 !== sheets[index]!.sha256 || source.contentType !== sheets[index]!.contentType || source.size !== sheets[index]!.size)) throw new Error('保存された原本情報が一致しません。同じ操作IDで状態を確認してください。')
+  if (job.document?.ocrJobId !== ocr.id || job.document.sources.length !== sheets.length || job.document.sources.some((source, index) => source.sha256 !== sheets[index]!.sha256 || source.contentType !== sheets[index]!.contentType || source.size !== sheets[index]!.size)) throw new Error(i18n.t('documentImport:error.linkedManifest'))
   return { job, ocr }
 }
 
@@ -38,18 +39,18 @@ export async function reserveReceptionDocumentImport(files: readonly File[], ide
  */
 export async function uploadDocumentSources(job: ImportJob, ocr: OcrReservation, files: readonly File[], signal: AbortSignal) {
   const document = job.document
-  if (!document || document.ocrJobId !== ocr.id || document.sources.length !== files.length || ocr.uploads.length !== files.length || ocr.status !== 'uploading') throw new Error('元の文書ジョブのアップロード情報を取得し直してください。')
+  if (!document || document.ocrJobId !== ocr.id || document.sources.length !== files.length || ocr.uploads.length !== files.length || ocr.status !== 'uploading') throw new Error(i18n.t('documentImport:error.uploadInfo'))
   // Verify the entire ordered set before the first PUT.
   for (const [index, file] of files.entries()) {
     const source = document.sources[index]!
-    if (source.index !== index || source.size !== file.size || source.contentType !== file.type || source.sha256 !== await fileDigest(file, signal)) throw new Error('取込開始時と同じ文書を同じ順序で選択してください。')
+    if (source.index !== index || source.size !== file.size || source.contentType !== file.type || source.sha256 !== await fileDigest(file, signal)) throw new Error(i18n.t('documentImport:error.sameFiles'))
   }
   for (const [index, file] of files.entries()) {
     signal.throwIfAborted()
     const url = new URL(ocr.uploads[index]!.uploadUrl)
-    if (url.protocol !== 'https:') throw new Error('文書のアップロード先が不正です。')
+    if (url.protocol !== 'https:') throw new Error(i18n.t('documentImport:error.uploadUrl'))
     const response = await fetch(url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type }, credentials: 'omit', redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(4 * 60 * 1000)]) })
-    if (!response.ok) throw new Error('アップロードに失敗しました。同じ文書ジョブから再開してください。')
+    if (!response.ok) throw new Error(i18n.t('documentImport:error.uploadFailed'))
   }
 }
 
@@ -58,17 +59,66 @@ export async function uploadDocumentSources(job: ImportJob, ocr: OcrReservation,
  * through that same ID by its next call, never by a replacement OCR job.
  */
 export async function stepDocumentRead(job: ImportJob, operation: 'confirm' | 'advance', signal: AbortSignal) {
-  if (!job.document) throw new Error('文書ジョブを取得してください。')
+  if (!job.document) throw new Error(i18n.t('documentImport:error.document'))
   await courseboardApiJson(`${OCR_ROOT}/${encodeURIComponent(job.document.ocrJobId)}/${operation}`, { method: 'POST', signal })
   return syncDocumentImport(job.id, signal)
 }
 export function syncDocumentImport(id: string, signal?: AbortSignal) {
   return courseboardApiJson<ImportJob>(`${ROOT}/jobs/${encodeURIComponent(id)}/document-sync`, { method: 'POST', signal })
 }
-export async function saveDocumentRevision(job: ImportJob, rows: DocumentRow[], signal?: AbortSignal) {
+export async function saveDocumentRevision(job: ImportJob, rows: DocumentRow[], signal?: AbortSignal, importOptions?: ImportOptions) {
   const document = job.document
-  if (!document || document.ocrStatus !== 'completed') throw new Error('読取完了後に原本を確認してください。')
-  if (rows.length > DOCUMENT_LIMITS.reviewRows) throw new Error('修正結果の行数が上限を超えています。行を省略せず確認してください。')
-  return courseboardApiJson<ImportJob>(`${ROOT}/jobs/${encodeURIComponent(job.id)}/document-revision`, { method: 'POST', signal, body: JSON.stringify({ manifestSha256: document.manifestSha256, expectedVersion: document.revisionVersion, rows }) })
+  if (!document || document.ocrStatus !== 'completed') throw new Error(i18n.t('documentImport:error.readFirst'))
+  if (rows.length > DOCUMENT_LIMITS.reviewRows) throw new Error(i18n.t('documentImport:error.rowsLimit'))
+  return courseboardApiJson<ImportJob>(`${ROOT}/jobs/${encodeURIComponent(job.id)}/document-revision`, { method: 'POST', signal, body: JSON.stringify({ manifestSha256: document.manifestSha256, expectedVersion: document.revisionVersion, rows, ...(importOptions ? { importOptions } : {}) }) })
 }
 export { getJob as getDocumentImport }
+
+export type DocumentReadResult = { job: ImportJob; ocr: { id: string; status: string }; uploads: OcrReservation['uploads'] }
+export function readReservationDocument(id: string, operation: 'confirm' | 'advance' | 'inspect' | 'uploads', signal?: AbortSignal) {
+  return courseboardApiJson<DocumentReadResult>(`${ROOT}/jobs/${encodeURIComponent(id)}/document-read`, { method: 'POST', signal, body: JSON.stringify({ operation }) })
+}
+export async function reserveReservationDocument(files: readonly File[], rotations: DocumentSource['rotation'][], pages: string, importOptions: ImportOptions, idempotencyKey: string, signal: AbortSignal) {
+  inspect(files)
+  if (files.some(file => file.type !== 'application/pdf') || files.length !== rotations.length) throw new Error(i18n.t('documentImport:error.pdf'))
+  const documents: { contentType: string; size: number; sha256: string; rotation: DocumentSource['rotation'] }[] = []
+  for (const [index, file] of files.entries()) documents.push({ contentType: file.type, size: file.size, sha256: await fileDigest(file, signal), rotation: rotations[index]! })
+  const result = await courseboardApiJson<{ job: ImportJob; ocr: { job: { id: string; status: string }; uploads: OcrReservation['uploads'] } }>(`${ROOT}/objects/courseboardReservationReports/imports/document-upload`, { method: 'POST', signal, body: JSON.stringify({ idempotencyKey, documents, pages: pages.trim() || null, importOptions }) })
+  const stored = result.job.document
+  if (!stored || stored.ocrJobId !== result.ocr.job.id || stored.sources.length !== documents.length || stored.sources.some((source, i) => source.sha256 !== documents[i]!.sha256 || source.size !== documents[i]!.size || source.rotation !== documents[i]!.rotation || source.contentType !== documents[i]!.contentType)) throw new Error(i18n.t('documentImport:error.manifest'))
+  return { job: result.job, ocr: { ...result.ocr.job, uploads: result.ocr.uploads } }
+}
+function executionBody(job: ImportJob) {
+  const doc = job.document
+  if (!doc?.revisionSha256 || !doc.revisionVersion) throw new Error(i18n.t('documentImport:error.revision'))
+  return JSON.stringify({ manifestSha256: doc.manifestSha256, revisionVersion: doc.revisionVersion, revisionSha256: doc.revisionSha256 })
+}
+export function executeDocumentRevision(job: ImportJob, operation: 'validate' | 'confirm', signal?: AbortSignal) {
+  return courseboardApiJson<ImportJob>(`${ROOT}/jobs/${encodeURIComponent(job.id)}/document-${operation}`, { method: 'POST', signal, body: executionBody(job) })
+}
+export async function fetchDocumentOriginal(job: ImportJob, index: number, signal: AbortSignal) {
+  const expected = job.document?.sources[index]
+  if (!expected) throw new Error(i18n.t('documentImport:error.manifest'))
+  const signed = await courseboardApiJson<{ downloadUrl: string; source: DocumentSource }>(`${ROOT}/jobs/${encodeURIComponent(job.id)}/document-original/${index}`, { signal })
+  if (signed.source.sha256 !== expected.sha256 || signed.source.size !== expected.size || signed.source.contentType !== expected.contentType || signed.source.rotation !== expected.rotation) throw new Error(i18n.t('documentImport:error.manifest'))
+  const url = new URL(signed.downloadUrl)
+  if (url.protocol !== 'https:') throw new Error(i18n.t('documentImport:error.original'))
+  const response = await fetch(url, { signal, credentials: 'omit', redirect: 'error' })
+  if (!response.ok || !response.body) throw new Error(i18n.t('documentImport:error.original'))
+  const reader = response.body.getReader()
+  const chunks: ArrayBuffer[] = []
+  let size = 0
+  try {
+    for (;;) {
+      signal.throwIfAborted()
+      const { done, value } = await reader.read()
+      if (done) break
+      size += value.byteLength
+      if (size > expected.size || size > DOCUMENT_LIMITS.fileBytes) throw new Error(i18n.t('documentImport:error.manifest'))
+      chunks.push(new Uint8Array(value).buffer)
+    }
+  } finally { await reader.cancel(); reader.releaseLock() }
+  const original = new Blob(chunks, { type: expected.contentType })
+  if (original.size !== expected.size || await fileDigest(original, signal) !== expected.sha256) throw new Error(i18n.t('documentImport:error.manifest'))
+  return original
+}

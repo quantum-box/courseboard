@@ -49,7 +49,7 @@ export default defineConfig({
       // content.spec はモックデータ前提なのでローカルのみ
       testMatch: target === 'prod'
         ? /(pages|navigation)\.spec\.ts/
-        : /(pages|navigation|content|common-imports)\.spec\.ts/,
+        : /(pages|navigation|content|common-imports(?:-documents)?)\.spec\.ts/,
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: STORAGE_STATE },
     },

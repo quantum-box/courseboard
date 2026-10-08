@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({ json: vi.fn(), digest: vi.fn() }))
 vi.mock('../../../api', () => ({ courseboardApiJson: mocks.json }))
 vi.mock('./api', () => ({ fileDigest: mocks.digest, getJob: vi.fn() }))
-import { reserveReceptionDocumentImport, saveDocumentRevision, stepDocumentRead, uploadDocumentSources } from './document-api'
+import { executeDocumentRevision, fetchDocumentOriginal, reserveReceptionDocumentImport, reserveReservationDocument, saveDocumentRevision, stepDocumentRead, uploadDocumentSources } from './document-api'
 import type { ImportJob } from './api'
 const hash = 'a'.repeat(64)
 const file = new File(['source'], 'source.pdf', { type: 'application/pdf' })
@@ -42,5 +42,30 @@ describe('common document import adapter', () => {
     mocks.digest.mockResolvedValue('c'.repeat(64))
     await expect(uploadDocumentSources(job, { id: 'goj_1', status: 'uploading', uploads: [{ storageKey: 'key', uploadUrl: 'https://storage.example/source', expiresAt: '2099' }] }, [file], new AbortController().signal)).rejects.toThrow('同じ文書')
     expect(fetchSpy).not.toHaveBeenCalled(); fetchSpy.mockRestore()
+  })
+  it('reserves PDF rotation, year and selected physical pages under the retained operation', async () => {
+    const rotated = { ...job, document: { ...job.document!, sources: [{ ...job.document!.sources[0]!, rotation: 90 }] } }
+    mocks.json.mockResolvedValue({ job: rotated, ocr: { job: { id: 'goj_1', status: 'uploading' }, uploads: [] } })
+    await reserveReservationDocument([file], [90], '12-13', { year: 2026 }, 'retained', new AbortController().signal)
+    expect(JSON.parse(mocks.json.mock.calls[0]![1].body)).toEqual({ idempotencyKey: 'retained', documents: [{ contentType: file.type, size: file.size, sha256: hash, rotation: 90 }], pages: '12-13', importOptions: { year: 2026 } })
+    expect(mocks.json.mock.calls[0]![0]).toContain('/courseboardReservationReports/imports/document-upload')
+  })
+  it('binds execution to the manifest and exact saved revision, without reading again', async () => {
+    const reviewed = { ...job, document: { ...job.document!, revisionSha256: 'c'.repeat(64) } }
+    mocks.json.mockResolvedValue(reviewed)
+    await executeDocumentRevision(reviewed, 'confirm')
+    expect(JSON.parse(mocks.json.mock.calls[0]![1].body)).toEqual({ manifestSha256: 'b'.repeat(64), revisionVersion: 3, revisionSha256: 'c'.repeat(64) })
+    expect(mocks.json).toHaveBeenCalledTimes(1)
+    expect(mocks.json.mock.calls[0]![0]).toBe('/v1/course/data-imports/jobs/dtj_1/document-confirm')
+  })
+  it('downloads originals without app credentials and rejects modified bytes', async () => {
+    mocks.json.mockResolvedValue({ source: job.document!.sources[0], downloadUrl: 'https://storage.example/source' })
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('source'))
+    const signal = new AbortController().signal
+    expect((await fetchDocumentOriginal(job, 0, signal)).size).toBe(file.size)
+    expect(fetchSpy).toHaveBeenCalledWith(expect.any(URL), { signal, credentials: 'omit', redirect: 'error' })
+    mocks.digest.mockResolvedValue('d'.repeat(64))
+    await expect(fetchDocumentOriginal(job, 0, signal)).rejects.toThrow('一致しません')
+    fetchSpy.mockRestore()
   })
 })
