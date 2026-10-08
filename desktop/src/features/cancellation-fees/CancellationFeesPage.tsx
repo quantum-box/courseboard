@@ -1344,10 +1344,19 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
       const sendEmail = shouldResendEmail(resource.data)
       const sendSms = resource.data.smsDeliveryStatus !== null
         && resource.data.smsDeliveryStatus !== undefined
-      const initialFulfillment = needsInitialFulfillment(resource.data, {
-        sendEmail,
-        sendSms,
-      })
+      const paymentLinkReady = resource.data.paymentLinkStatus === 'Ready'
+        && Boolean(resource.data.paymentLinkUrl)
+      // A link-only Draft has no initial delivery to fulfil. If an operator
+      // adds an email through PATCH, send that new destination explicitly
+      // while the background detail refresh is still allowed to be stale.
+      const addedEmailForLinkOnlyDraft = paymentLinkReady
+        && resource.data.status === 'Draft'
+        && sendEmail
+        && (resource.data.emailDeliveryStatus === null
+          || resource.data.emailDeliveryStatus === undefined)
+      const initialFulfillment = addedEmailForLinkOnlyDraft
+        ? false
+        : needsInitialFulfillment(resource.data, { sendEmail, sendSms })
       const explicitResend = !initialFulfillment && (sendEmail || sendSms)
       const fulfilled = initialFulfillment
         ? await fulfillCancellationFee<InvoiceData>(invoiceId)

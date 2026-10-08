@@ -358,6 +358,33 @@ describe('the cancellation extraction', () => {
     expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
   })
 
+  it('treats a paid replay as terminal despite stale link and delivery fields', async () => {
+    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
+    mockField([], {
+      id: 'inv_paid',
+      status: 'Paid',
+      paymentLinkStatus: 'Failed',
+      paymentLinkUrl: null,
+      emailDeliveryStatus: 'Failed',
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await pressBill()
+
+    expect(screen.queryByText(/支払いリンクはできましたが/)).toBeNull()
+    const settle = api.course.mock.calls.find(
+      call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
+    )
+    expect(settle).toBeTruthy()
+    const decisions = JSON.parse((settle?.[1] as RequestInit).body as string).decisions
+    expect(decisions).toEqual([
+      { reservationId: 'res_1', state: 'invoiced', invoiceId: 'inv_paid', amount: 12_000 },
+    ])
+  })
+
   it('bills the ledger customer the desk recognised for an unlinked booking', async () => {
     api.course.mockImplementation(async (path: string) => {
       if (path.startsWith('/v1/course/customers')) {

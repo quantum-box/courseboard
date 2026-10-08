@@ -206,6 +206,66 @@ describe('the dedicated cancellation fee form', () => {
     expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
   })
 
+  it('sends an email added to a link-only draft through the explicit resend action', async () => {
+    let detailLoads = 0
+    let sendAttempts = 0
+    let resolveRefresh!: (value: unknown) => void
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees/inv_1' && !init?.method) {
+        detailLoads += 1
+        if (detailLoads === 1) {
+          return invoice({
+            status: 'Draft',
+            paymentLinkStatus: 'Ready',
+            paymentLinkUrl: 'https://example.com/pay/inv_1',
+            emailDeliveryStatus: null,
+            smsDeliveryStatus: null,
+            clientEmail: null,
+          })
+        }
+        return new Promise(resolve => { resolveRefresh = resolve })
+      }
+      if (path === '/v1/cancellation-fees/inv_1' && init?.method === 'PATCH') {
+        return invoice({
+          status: 'Draft',
+          paymentLinkStatus: 'Ready',
+          paymentLinkUrl: 'https://example.com/pay/inv_1',
+          emailDeliveryStatus: null,
+          smsDeliveryStatus: null,
+          clientEmail: 'added@example.com',
+        })
+      }
+      if (path.endsWith('/fulfill')) throw new Error('link-only email must use explicit resend')
+      if (path.endsWith('/send')) {
+        sendAttempts += 1
+        return invoice({ status: 'Sent', emailDeliveryStatus: 'Sent', smsDeliveryStatus: null })
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+    renderDetailPage()
+
+    const email = await screen.findByLabelText('送信先メールアドレス')
+    fireEvent.change(email, { target: { value: 'added@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '変更する' }))
+    await waitFor(() => expect(api.field.mock.calls.some(
+      call => call[0] === '/v1/cancellation-fees/inv_1' && (call[1] as RequestInit)?.method === 'PATCH',
+    )).toBe(true))
+
+    fireEvent.click(screen.getByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(sendAttempts).toBe(1))
+    expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/fulfill'))).toBe(false)
+    const send = api.field.mock.calls.find(call => String(call[0]).endsWith('/send'))!
+    expect(bodyOf(send)).toMatchObject({ sendEmail: true, sendSms: false })
+    resolveRefresh(invoice({
+      status: 'Draft',
+      paymentLinkStatus: 'Ready',
+      paymentLinkUrl: 'https://example.com/pay/inv_1',
+      emailDeliveryStatus: null,
+      smsDeliveryStatus: null,
+      clientEmail: 'added@example.com',
+    }))
+  })
+
   it('applies a completed fulfilment before an immediate resend click', async () => {
     let detailLoads = 0
     let fulfillAttempts = 0

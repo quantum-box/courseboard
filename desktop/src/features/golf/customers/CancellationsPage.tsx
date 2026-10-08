@@ -481,6 +481,9 @@ function fulfillmentIssueKind(
   invoice: InvoiceResponse,
   delivery: { sendEmail: boolean; sendSms: boolean },
 ): 'noPaymentLink' | 'deliveryPartial' | undefined {
+  // Payment is already an accounting fact. A paid replay is terminal even if
+  // its older link or delivery fields report a failure.
+  if (invoice.status === 'Paid') return undefined
   if (
     invoice.paymentLinkStatus !== undefined
     || invoice.paymentLinkUrl !== undefined
