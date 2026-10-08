@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import { useCallback, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
-import { downloadBlob, yen } from '../../api'
+import { downloadBlob, fieldTenant, yen } from '../../api'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import {
@@ -68,6 +68,24 @@ export {
 }
 
 type InvoiceStatus = 'Draft' | 'Sent' | 'SendFailed' | 'Paid' | 'Overdue'
+
+const DELIVERY_KEY_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+/** Keep a resend tied to this invoice when the detail page is remounted. */
+function persistedDeliveryKey(invoiceId: string) {
+  const storageKey = `courseboard:cancellation-fee:delivery:${fieldTenant()}:${invoiceId}`
+  try {
+    const existing = sessionStorage.getItem(storageKey)
+    if (existing && DELIVERY_KEY_PATTERN.test(existing)) return existing
+    const generated = newCancellationFeeIdempotencyKey()
+    sessionStorage.setItem(storageKey, generated)
+    return generated
+  } catch {
+    // Storage can be unavailable in a private or embedded browser context.
+    // The in-memory key still protects repeated clicks for this page visit.
+    return newCancellationFeeIdempotencyKey()
+  }
+}
 
 type InvoiceLineItem = {
   description: string
@@ -198,8 +216,17 @@ export function CancellationFeesPage() {
     // Do not pass the saved status filter to Field. A Sent invoice can be
     // overdue according to the tenant's business date even while Field still
     // stores it as Sent, so filtering happens after deriving the display state.
-    const response = await listCancellationFees<{ items: InvoiceData[] }>({ limit: 100, offset: 0 })
-    return response.items
+    const pageSize = 100
+    const invoices: InvoiceData[] = []
+    for (let offset = 0; ; offset += pageSize) {
+      const response = await listCancellationFees<{ items: InvoiceData[] }>({
+        limit: pageSize,
+        offset,
+      })
+      invoices.push(...response.items)
+      if (response.items.length < pageSize) break
+    }
+    return invoices
   }, [])
   const resource = useResource(loader, [])
   const displayedInvoices = useMemo(
@@ -502,7 +529,7 @@ export function NewCancellationFeePage() {
     setResending(true)
     try {
       const fulfilled = await sendCancellationFee<InvoiceData>(created.id, {
-        idempotencyKey: resendKey.current ?? (resendKey.current = newCancellationFeeIdempotencyKey()),
+        idempotencyKey: resendKey.current ?? (resendKey.current = persistedDeliveryKey(created.id)),
         sendEmail: sent.sendEmail,
         sendSms: sent.sendSms,
       })
@@ -792,6 +819,7 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
   const resource = useResource(loader, [invoiceId])
   useRegisterPageReload(resource.refresh)
   const [fulfilling, setFulfilling] = useState(false)
+  const resendKey = useRef<string | null>(null)
   /** Announcements are toasts; the call sites still read `setNotice(...)`. */
   const setNotice = showToast
 
@@ -803,10 +831,20 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
     setFulfilling(true)
     setNotice(null)
     try {
-      const fulfilled = await fulfillCancellationFee<InvoiceData>(invoiceId)
+      const sendEmail = resource.data.emailDeliveryStatus !== null
+        && resource.data.emailDeliveryStatus !== undefined
+      const sendSms = resource.data.smsDeliveryStatus !== null
+        && resource.data.smsDeliveryStatus !== undefined
+      const fulfilled = sendEmail || sendSms
+        ? await sendCancellationFee<InvoiceData>(invoiceId, {
+            idempotencyKey: resendKey.current ?? (resendKey.current = persistedDeliveryKey(invoiceId)),
+            sendEmail,
+            sendSms,
+          })
+        : await fulfillCancellationFee<InvoiceData>(invoiceId)
       const issue = fulfillmentIssue(fulfilled, {
-        sendEmail: fulfilled.emailDeliveryStatus !== null && fulfilled.emailDeliveryStatus !== undefined,
-        sendSms: fulfilled.smsDeliveryStatus !== null && fulfilled.smsDeliveryStatus !== undefined,
+        sendEmail,
+        sendSms,
       })
       setNotice(issue
         ? { tone: 'danger', message: issue }

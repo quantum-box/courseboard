@@ -3,7 +3,7 @@ import { ChevronLeft, ReceiptText, Ban } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { courseboardApiJson, yen } from '../../../api'
+import { courseboardApiJson, fieldTenant, yen } from '../../../api'
 import {
   DataTable,
   type DataTableColumn,
@@ -447,6 +447,40 @@ function describeFeeLine(
 /** What one customer's invoice attempt came to. */
 type BillingResult = { group: CustomerFeeGroup; invoiceId?: string; error?: string }
 
+const BATCH_KEYS_STORAGE_PREFIX = 'courseboard:cancellation-fee:batch-keys'
+const OPERATION_KEY_PATTERN = /^[a-z0-9._:-]{1,48}$/
+
+function batchKeysStorageKey() {
+  return `${BATCH_KEYS_STORAGE_PREFIX}:${fieldTenant()}`
+}
+
+function loadBatchKeys() {
+  try {
+    const raw = sessionStorage.getItem(batchKeysStorageKey())
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
+    return Object.fromEntries(
+      Object.entries(parsed).filter(([, value]) => (
+        typeof value === 'string' && OPERATION_KEY_PATTERN.test(value)
+      )),
+    )
+  } catch {
+    return {}
+  }
+}
+
+function persistBatchKeys(keys: Map<string, string>) {
+  try {
+    sessionStorage.setItem(
+      batchKeysStorageKey(),
+      JSON.stringify(Object.fromEntries(keys)),
+    )
+  } catch {
+    // Session storage is a retry aid; the request itself remains valid without it.
+  }
+}
+
 /**
  * What the desk typed into the sheet for a booking the ledger has no link for.
  *
@@ -532,7 +566,7 @@ function BillCancellationFeesSheet({
     return decided
   }, [unlinkedRows, edits])
 
-  const requestKeys = useRef(new Map<string, string>())
+  const requestKeys = useRef(new Map<string, string>(Object.entries(loadBatchKeys())))
 
   const plan = useMemo(
     // The dedicated Field DTO carries a recipient snapshot only. Reservation
@@ -578,6 +612,7 @@ function BillCancellationFeesSheet({
         const idempotencyKey = requestKeys.current.get(requestIdentity)
           ?? newCancellationFeeIdempotencyKey()
         requestKeys.current.set(requestIdentity, idempotencyKey)
+        persistBatchKeys(requestKeys.current)
         // The reservation/customer selection remains a CourseBoard concern.
         // The dedicated Field writer receives only the verified snapshot; a
         // future reservation source action must do its own upstream lookup.
