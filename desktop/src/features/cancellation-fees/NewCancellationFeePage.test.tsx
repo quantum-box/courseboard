@@ -6,7 +6,8 @@ import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { i18next } from '../../i18n'
-import { NewCancellationFeePage } from './CancellationFeesPage'
+import { PageReloadProvider } from '../../lib/pageReload'
+import { CancellationFeeDetailPage, NewCancellationFeePage } from './CancellationFeesPage'
 
 const api = vi.hoisted(() => ({ field: vi.fn() }))
 const router = vi.hoisted(() => ({ navigate: vi.fn() }))
@@ -55,6 +56,18 @@ function renderPage() {
     <I18nextProvider i18n={i18next}>
       <TooltipProvider>
         <NewCancellationFeePage />
+      </TooltipProvider>
+    </I18nextProvider>,
+  )
+}
+
+function renderDetailPage() {
+  render(
+    <I18nextProvider i18n={i18next}>
+      <TooltipProvider>
+        <PageReloadProvider>
+          <CancellationFeeDetailPage invoiceId="inv_1" />
+        </PageReloadProvider>
       </TooltipProvider>
     </I18nextProvider>,
   )
@@ -152,6 +165,28 @@ describe('the dedicated cancellation fee form', () => {
     const create = api.field.mock.calls.find(call => call[0] === '/v1/cancellation-fees')!
     expect(bodyOf(create)).toMatchObject({ sendEmail: false, sendSms: false })
     expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/fulfill'))).toBe(false)
+    expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
+  })
+
+  it('fulfills a draft with pending delivery before using the resend endpoint', async () => {
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees/inv_1') {
+        return invoice({
+          status: 'Draft',
+          emailDeliveryStatus: 'Pending',
+          smsDeliveryStatus: 'Pending',
+        })
+      }
+      if (path.endsWith('/fulfill')) return invoice()
+      if (path.endsWith('/send')) throw new Error('draft must use initial fulfilment')
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+    renderDetailPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(
+      api.field.mock.calls.some(call => String(call[0]).endsWith('/fulfill')),
+    ).toBe(true))
     expect(api.field.mock.calls.some(call => String(call[0]).endsWith('/send'))).toBe(false)
   })
 

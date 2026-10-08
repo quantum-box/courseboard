@@ -991,13 +991,19 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
       const sendEmail = shouldResendEmail(resource.data)
       const sendSms = resource.data.smsDeliveryStatus !== null
         && resource.data.smsDeliveryStatus !== undefined
-      const fulfilled = sendEmail || sendSms
-        ? await sendCancellationFee<InvoiceData>(invoiceId, {
+      const initialFulfillment = needsInitialFulfillment(resource.data, {
+        sendEmail,
+        sendSms,
+      })
+      const fulfilled = initialFulfillment
+        ? await fulfillCancellationFee<InvoiceData>(invoiceId)
+        : sendEmail || sendSms
+          ? await sendCancellationFee<InvoiceData>(invoiceId, {
             idempotencyKey: resendKey.current ?? (resendKey.current = persistedDeliveryKey(invoiceId)),
             sendEmail,
             sendSms,
           })
-        : await fulfillCancellationFee<InvoiceData>(invoiceId)
+          : resource.data
       if (sendEmail || sendSms) {
         resendKey.current = rotatePersistedDeliveryKey(invoiceId)
       }
