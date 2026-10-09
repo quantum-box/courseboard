@@ -12,10 +12,20 @@ export type DocumentRevision = { version: number; sha256: string; rows: Document
 export type DocumentImport = { rowField?: 'rows' | 'visitors'; executionJobId?: string | null; executionConfirmed?: boolean; validationCursor?: number; ocrJobId: string; manifestSha256: string; sources: DocumentSource[]; pages: string | null; ocrStatus: string; expiresAt: string; revisionVersion: number; revisionSha256: string | null; extracted?: { fields: Record<string, unknown>; warnings: string[] }; revision?: DocumentRevision; executionAvailable: boolean }
 type OcrReservation = { id: string; status: string; uploads: { storageKey: string; uploadUrl: string; expiresAt: string }[] }
 
-function inspect(files: readonly File[]) {
+async function inspect(files: readonly File[], signal: AbortSignal) {
   if (!files.length || files.length > DOCUMENT_LIMITS.files) throw new Error(i18n.t('documentImport:error.files'))
-  if (files.some(file => !['application/pdf', 'image/jpeg', 'image/png'].includes(file.type) || !file.size || file.size > DOCUMENT_LIMITS.fileBytes)) throw new Error(i18n.t('documentImport:error.size'))
+  if (files.some(file => (!['application/pdf', 'image/jpeg', 'image/png'].includes(file.type) && !(file.type === '' && /\.pdf$/i.test(file.name))) || !file.size || file.size > DOCUMENT_LIMITS.fileBytes)) throw new Error(i18n.t('documentImport:error.size'))
   if (files.reduce((sum, file) => sum + file.size, 0) > DOCUMENT_LIMITS.totalBytes) throw new Error(i18n.t('documentImport:error.total'))
+  const contentTypes: string[] = []
+  for (const file of files) {
+    signal.throwIfAborted()
+    // Some browsers omit a PDF's MIME type. Require both its extension and
+    // signature before normalizing metadata and the eventual Storage PUT.
+    if (!file.type && String.fromCharCode(...new Uint8Array(await file.slice(0, 5).arrayBuffer())) !== '%PDF-') throw new Error(i18n.t('documentImport:error.pdf'))
+    contentTypes.push(file.type || 'application/pdf')
+  }
+  signal.throwIfAborted()
+  return contentTypes
 }
 
 /** Caller retains idempotencyKey before calling. Retrying a lost reserve/link
@@ -23,10 +33,10 @@ function inspect(files: readonly File[]) {
  * Kept separate from the existing reception entry until PDF migration is ready.
  */
 export async function reserveReceptionDocumentImport(files: readonly File[], idempotencyKey: string, signal: AbortSignal) {
-  inspect(files)
+  const contentTypes = await inspect(files, signal)
   if (!idempotencyKey.trim() || idempotencyKey.length > 128) throw new Error(i18n.t('documentImport:error.operation'))
   const sheets: { contentType: string; size: number; sha256: string }[] = []
-  for (const file of files) sheets.push({ contentType: file.type, size: file.size, sha256: await fileDigest(file, signal) })
+  for (const [index, file] of files.entries()) sheets.push({ contentType: contentTypes[index]!, size: file.size, sha256: await fileDigest(file, signal) })
   signal.throwIfAborted()
   const ocr = await courseboardApiJson<OcrReservation>(OCR_ROOT, { method: 'POST', body: JSON.stringify({ idempotencyKey, sheets }), signal })
   const job = await courseboardApiJson<ImportJob>(`${ROOT}/objects/customerReception/imports/document-link`, { method: 'POST', body: JSON.stringify({ ocrJobId: ocr.id }), signal })
@@ -40,16 +50,17 @@ export async function reserveReceptionDocumentImport(files: readonly File[], ide
 export async function uploadDocumentSources(job: ImportJob, ocr: OcrReservation, files: readonly File[], signal: AbortSignal) {
   const document = job.document
   if (!document || document.ocrJobId !== ocr.id || document.sources.length !== files.length || ocr.uploads.length !== files.length || ocr.status !== 'uploading') throw new Error(i18n.t('documentImport:error.uploadInfo'))
+  const contentTypes = await inspect(files, signal)
   // Verify the entire ordered set before the first PUT.
   for (const [index, file] of files.entries()) {
     const source = document.sources[index]!
-    if (source.index !== index || source.size !== file.size || source.contentType !== file.type || source.sha256 !== await fileDigest(file, signal)) throw new Error(i18n.t('documentImport:error.sameFiles'))
+    if (source.index !== index || source.size !== file.size || source.contentType !== contentTypes[index]! || source.sha256 !== await fileDigest(file, signal)) throw new Error(i18n.t('documentImport:error.sameFiles'))
   }
   for (const [index, file] of files.entries()) {
     signal.throwIfAborted()
     const url = new URL(ocr.uploads[index]!.uploadUrl)
     if (url.protocol !== 'https:') throw new Error(i18n.t('documentImport:error.uploadUrl'))
-    const response = await fetch(url, { method: 'PUT', body: file, headers: { 'Content-Type': file.type }, credentials: 'omit', redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(4 * 60 * 1000)]) })
+    const response = await fetch(url, { method: 'PUT', body: file, headers: { 'Content-Type': contentTypes[index]! }, credentials: 'omit', redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(4 * 60 * 1000)]) })
     if (!response.ok) throw new Error(i18n.t('documentImport:error.uploadFailed'))
   }
 }
@@ -79,10 +90,10 @@ export function readReservationDocument(id: string, operation: 'confirm' | 'adva
   return courseboardApiJson<DocumentReadResult>(`${ROOT}/jobs/${encodeURIComponent(id)}/document-read`, { method: 'POST', signal, body: JSON.stringify({ operation }) })
 }
 export async function reserveReservationDocument(files: readonly File[], rotations: DocumentSource['rotation'][], pages: string, importOptions: ImportOptions, idempotencyKey: string, signal: AbortSignal) {
-  inspect(files)
-  if (files.some(file => file.type !== 'application/pdf') || files.length !== rotations.length) throw new Error(i18n.t('documentImport:error.pdf'))
+  const contentTypes = await inspect(files, signal)
+  if (contentTypes.some(contentType => contentType !== 'application/pdf') || files.length !== rotations.length) throw new Error(i18n.t('documentImport:error.pdf'))
   const documents: { contentType: string; size: number; sha256: string; rotation: DocumentSource['rotation'] }[] = []
-  for (const [index, file] of files.entries()) documents.push({ contentType: file.type, size: file.size, sha256: await fileDigest(file, signal), rotation: rotations[index]! })
+  for (const [index, file] of files.entries()) documents.push({ contentType: contentTypes[index]!, size: file.size, sha256: await fileDigest(file, signal), rotation: rotations[index]! })
   const result = await courseboardApiJson<{ job: ImportJob; ocr: { job: { id: string; status: string }; uploads: OcrReservation['uploads'] } }>(`${ROOT}/objects/courseboardReservationReports/imports/document-upload`, { method: 'POST', signal, body: JSON.stringify({ idempotencyKey, documents, pages: pages.trim() || null, importOptions }) })
   const stored = result.job.document
   if (!stored || stored.ocrJobId !== result.ocr.job.id || stored.sources.length !== documents.length || stored.sources.some((source, i) => source.sha256 !== documents[i]!.sha256 || source.size !== documents[i]!.size || source.rotation !== documents[i]!.rotation || source.contentType !== documents[i]!.contentType)) throw new Error(i18n.t('documentImport:error.manifest'))
