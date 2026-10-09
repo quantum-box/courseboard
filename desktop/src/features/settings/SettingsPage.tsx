@@ -11,6 +11,8 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { useEffectiveCapabilities } from '../../auth/EffectiveCapabilitiesProvider'
+import { capabilityRouteAllowed } from '../../auth/capabilityRoutes'
 import { Panel } from '../../components/Page'
 import { navDescription, navLabel, settingsNavigation } from '../../components/AppShell'
 import { navigateFromClick } from '../../lib/router'
@@ -64,6 +66,8 @@ function MasterLink({
 
 export function SettingsPage() {
   const { t } = useTranslation(['settings', 'nav', 'dataExports'])
+  const { capabilities } = useEffectiveCapabilities()
+  const canOpen = (route: string) => capabilityRouteAllowed(route, capabilities)
 
   return (
     <div className="page-stack">
@@ -71,7 +75,7 @@ export function SettingsPage() {
         title={t('settings:tenantMaster.title')}
         description={t('settings:tenantMaster.description')}
       >
-        {settingsNavigation.map(item => (
+        {settingsNavigation.filter(item => canOpen(item.route)).map(item => (
           <MasterLink
             key={item.route}
             route={item.route}
@@ -80,16 +84,16 @@ export function SettingsPage() {
             description={navDescription(item.route)}
           />
         ))}
-        <MasterLink
+        {canOpen('settings/advanced') ? <MasterLink
           route="settings/advanced"
           icon={Plug}
           title={t('settings:advanced.linkLabel')}
           description={t('settings:advanced.linkDescription')}
-        />
+        /> : null}
       </Panel>
 
       <Panel title={t('settings:masters.title')} description={t('settings:masters.description')}>
-        {SETTINGS_MASTERS.map(item => (
+        {SETTINGS_MASTERS.filter(item => canOpen(item.route)).map(item => (
           <MasterLink
             key={item.route}
             route={item.route}

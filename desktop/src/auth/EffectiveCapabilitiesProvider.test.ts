@@ -4,8 +4,14 @@ import {
   startupRouteForCapabilities,
   type EffectiveCapabilities,
 } from './EffectiveCapabilitiesProvider'
+import { FIELD_ACTIONS } from './capabilityRoutes'
+
+const allActionsDenied = Object.fromEntries(
+  Object.values(FIELD_ACTIONS).map(action => [action, false]),
+)
 
 const cancellationOnly: EffectiveCapabilities = {
+  actions: allActionsDenied,
   navigation: { otherBusinessAccess: false },
   agentDocuments: {
     invoices: { list: false, send: false },
@@ -63,6 +69,7 @@ describe('capabilitySnapshotReadyForRoute', () => {
   it('blocks non-fee routes when Field has not completed the navigation aggregate', () => {
     const incomplete = {
       ...cancellationOnly,
+      actions: {},
       navigation: { otherBusinessAccess: null },
     }
     expect(capabilitySnapshotReadyForRoute('golf', incomplete)).toBe(false)

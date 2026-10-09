@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   isMockFieldDataEnabled,
+  MOCK_CLIENT_CAPABILITY_ACTIONS,
   resolveMockFieldApiJson,
   resolveMockFieldApiText,
 } from './mockFieldApi'
@@ -34,6 +35,7 @@ describe('mockFieldApi', () => {
     expect(resolveMockFieldApiJson('/v1/field/client-capabilities')).toEqual({
       kind: 'hit',
       data: {
+        actions: MOCK_CLIENT_CAPABILITY_ACTIONS,
         navigation: { otherBusinessAccess: true },
         agentDocuments: {
           invoices: { list: true, send: true },

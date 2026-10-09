@@ -11,6 +11,13 @@ import { courseboardApiJson } from '../api'
 import { LoadingState, ResourceError } from '../components/Page'
 import { navigate, useRoute } from '../lib/router'
 import { useAuth } from './AuthProvider'
+import {
+  nonFeeBusinessAccessDecision,
+  routeCapabilitySnapshotKnown,
+} from './capabilityRoutes'
+
+export type CapabilityDecision = boolean | null
+export type ActionCapabilities = Record<string, CapabilityDecision>
 
 export type DocumentCapabilities = {
   list: boolean
@@ -23,6 +30,8 @@ export type NavigationCapabilities = {
 }
 
 export type EffectiveCapabilities = {
+  /** Server-evaluated canonical action decisions. Missing means unknown. */
+  actions: ActionCapabilities
   navigation: NavigationCapabilities
   agentDocuments: {
     invoices: DocumentCapabilities
@@ -43,6 +52,7 @@ type CapabilitiesState = {
 }
 
 const EMPTY_CAPABILITIES: EffectiveCapabilities = {
+  actions: {},
   navigation: { otherBusinessAccess: null },
   agentDocuments: {
     invoices: { list: false, send: false },
@@ -63,9 +73,29 @@ function boolean(value: unknown) {
   return value === true
 }
 
-function normalizeCapabilities(raw: Partial<EffectiveCapabilities> | null | undefined): EffectiveCapabilities {
-  const otherBusinessAccess = raw?.navigation?.otherBusinessAccess
+function record(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {}
+}
+
+export function normalizeCapabilities(raw: unknown): EffectiveCapabilities {
+  const root = record(raw)
+  const navigation = record(root.navigation)
+  const agentDocuments = record(root.agentDocuments)
+  const invoices = record(agentDocuments.invoices)
+  const quotations = record(agentDocuments.quotations)
+  const cancellationFees = record(root.cancellationFees)
+  const rawActions = record(root.actions)
+  const actions: ActionCapabilities = {}
+  for (const [action, value] of Object.entries(rawActions)) {
+    // A malformed action decision is unknown. It must never become an allow
+    // through truthiness or by being silently treated as a completed denial.
+    actions[action] = value === true ? true : value === false ? false : null
+  }
+  const otherBusinessAccess = navigation.otherBusinessAccess
   return {
+    actions,
     navigation: {
       otherBusinessAccess: otherBusinessAccess === true
         ? true
@@ -75,17 +105,17 @@ function normalizeCapabilities(raw: Partial<EffectiveCapabilities> | null | unde
     },
     agentDocuments: {
       invoices: {
-        list: boolean(raw?.agentDocuments?.invoices?.list),
-        send: boolean(raw?.agentDocuments?.invoices?.send),
+        list: boolean(invoices.list),
+        send: boolean(invoices.send),
       },
       quotations: {
-        list: boolean(raw?.agentDocuments?.quotations?.list),
-        send: boolean(raw?.agentDocuments?.quotations?.send),
+        list: boolean(quotations.list),
+        send: boolean(quotations.send),
       },
     },
     cancellationFees: {
-      list: boolean(raw?.cancellationFees?.list),
-      manage: boolean(raw?.cancellationFees?.manage),
+      list: boolean(cancellationFees.list),
+      manage: boolean(cancellationFees.manage),
     },
   }
 }
@@ -100,10 +130,10 @@ export function startupRouteForCapabilities(
   route: string,
   capabilities: EffectiveCapabilities,
 ) {
-  // Only an explicit false from Field's complete action batch can establish
-  // that every other product is absent. True and unknown keep the requested
-  // route so mixed-product callers are never redirected into fee-only UI.
-  if (capabilities.navigation.otherBusinessAccess !== false) return null
+  // Only a complete, explicit denial for every non-fee route can establish
+  // that this is a fee-only operator. The legacy navigation aggregate is not
+  // authoritative for route access and cannot grant or suppress Golf UI.
+  if (nonFeeBusinessAccessDecision(capabilities) !== false) return null
   const canListCancellationFees = capabilities.cancellationFees.list
   const canManageCancellationFees = capabilities.cancellationFees.manage
   if (!canListCancellationFees && !canManageCancellationFees) return null
@@ -120,16 +150,16 @@ function isCancellationFeeRoute(route: string) {
 }
 
 /**
- * The navigation aggregate is optional because Field can return a useful fee
- * decision while a larger action batch is incomplete. Fee deep links can use
- * that known fee decision; every other protected route must wait for the
- * aggregate before mounting its business loaders.
+ * A fee deep link can use its dedicated fee decision while the larger action
+ * batch is incomplete. Every other protected route waits for the exact action
+ * decisions needed by that route and its eager loaders; the aggregate is only
+ * used by the startup redirect calculation.
  */
 export function capabilitySnapshotReadyForRoute(
   route: string,
   capabilities: EffectiveCapabilities,
 ) {
-  return isCancellationFeeRoute(route) || capabilities.navigation.otherBusinessAccess !== null
+  return isCancellationFeeRoute(route) || routeCapabilitySnapshotKnown(route, capabilities)
 }
 
 const INCOMPLETE_CAPABILITY_SNAPSHOT = new Error('Capability snapshot is unavailable')
@@ -161,7 +191,7 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
     }
 
     setState({ tenantId, userId, data: null, error: null, loading: true })
-    void courseboardApiJson<Partial<EffectiveCapabilities>>('/v1/field/client-capabilities', {
+    void courseboardApiJson<unknown>('/v1/field/client-capabilities', {
       signal: controller.signal,
     })
       .then(raw => {

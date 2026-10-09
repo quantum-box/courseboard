@@ -18,6 +18,15 @@ const access = vi.hoisted(() => ({ otherBusinessAccess: true, list: true, manage
 
 vi.mock('../auth/EffectiveCapabilitiesProvider', () => ({
   useEffectiveCapabilities: () => ({ capabilities: {
+    actions: access.otherBusinessAccess ? {
+      'field_extension_golf:ListTeeSheet': true,
+      'field_extension_golf:ListSlotOverrides': true,
+      'field_extension_golf:ListCourses': true,
+      'field_extension_golf:ListProducts': true,
+      'field_extension_golf:ListCaddieInsights': true,
+      'field_extension_golf:ListCaddieAssignments': true,
+      'field_extension_golf:ListShifts': true,
+    } : {},
     navigation: { otherBusinessAccess: access.otherBusinessAccess },
     cancellationFees: { list: access.list, manage: access.manage },
   } }),

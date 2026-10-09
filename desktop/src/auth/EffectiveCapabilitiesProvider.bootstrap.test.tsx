@@ -3,6 +3,7 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EffectiveCapabilitiesProvider } from './EffectiveCapabilitiesProvider'
+import { FIELD_ACTIONS } from './capabilityRoutes'
 
 const harness = vi.hoisted(() => ({
   api: vi.fn(),
@@ -32,7 +33,12 @@ vi.mock('../components/Page', () => ({
   ),
 }))
 
+const allActionsAllowed = Object.fromEntries(
+  Object.values(FIELD_ACTIONS).map(action => [action, true]),
+)
+
 const completeCapabilities = {
+  actions: allActionsAllowed,
   navigation: { otherBusinessAccess: true },
   agentDocuments: {
     invoices: { list: true, send: false },
@@ -43,6 +49,7 @@ const completeCapabilities = {
 
 const feeCapabilitiesWithUnknownNavigation = {
   ...completeCapabilities,
+  actions: {},
   navigation: { otherBusinessAccess: null },
 }
 

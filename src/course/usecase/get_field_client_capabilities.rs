@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::course::domain::{
-    actions, CourseError, FieldCapabilitiesGateway, FieldClientCapabilities, FieldRequestContext,
+    CourseError, FieldCapabilitiesGateway, FieldClientCapabilities, FieldRequestContext,
     GatewayCredentials,
 };
 
@@ -18,10 +18,9 @@ impl GetFieldClientCapabilitiesUseCase {
 
     pub async fn execute(
         &self,
-        credentials: GatewayCredentials<'_>,
+        _credentials: GatewayCredentials<'_>,
         context: FieldRequestContext,
     ) -> Result<FieldClientCapabilities, CourseError> {
-        credentials.require(actions::LIST_EXTENSION_STATUS).await?;
         self.field.get_client_capabilities(&context).await
     }
 }

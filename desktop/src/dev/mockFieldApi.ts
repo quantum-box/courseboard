@@ -23,6 +23,12 @@ import {
 } from '../features/golf/customers/reception/models'
 import mockExportObjects from './mockExportObjects.json'
 import type { ExportDefinition } from '../features/data-exports/api'
+import { FIELD_ACTIONS } from '../auth/capabilityRoutes'
+
+/** A development tenant that can exercise every protected screen. */
+export const MOCK_CLIENT_CAPABILITY_ACTIONS = Object.freeze(
+  Object.fromEntries(Object.values(FIELD_ACTIONS).map(action => [action, true])),
+)
 
 export function isMockFieldDataEnabled() {
   if (import.meta.env.VITE_COURSEBOARD_AUTH_MODE !== 'development') return false
@@ -5312,6 +5318,7 @@ export function resolveMockFieldApiJson(path: string, init?: RequestInit): MockF
   const method = methodOf(init)
   if (pathname === '/v1/field/client-capabilities' && method === 'GET') {
     return hit({
+      actions: MOCK_CLIENT_CAPABILITY_ACTIONS,
       navigation: { otherBusinessAccess: true },
       agentDocuments: {
         invoices: { list: true, send: true },

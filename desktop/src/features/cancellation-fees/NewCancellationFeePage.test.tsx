@@ -19,6 +19,7 @@ vi.mock('../../auth/EffectiveCapabilitiesProvider', async importOriginal => {
   return {
     ...actual,
     useEffectiveCapabilities: () => ({ capabilities: {
+      actions: {},
       navigation: { otherBusinessAccess: false },
       cancellationFees: access,
       agentDocuments: {

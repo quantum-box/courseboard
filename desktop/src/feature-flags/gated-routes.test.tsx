@@ -12,6 +12,11 @@ import { GolfHomePage } from '../features/golf/GolfHomePage'
 // already authorized. Authorization must not fall back to a missing provider.
 vi.mock('../auth/EffectiveCapabilitiesProvider', () => ({
   useEffectiveCapabilities: () => ({ capabilities: {
+    actions: {
+      'field_extension_golf:ListTeeSheet': true,
+      'field_extension_golf:ListReservationReports': true,
+      'field_extension_golf:ListCourses': true,
+    },
     navigation: { otherBusinessAccess: true },
     cancellationFees: { list: true, manage: true },
   } }),
