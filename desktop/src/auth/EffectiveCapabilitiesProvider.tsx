@@ -36,6 +36,7 @@ export type EffectiveCapabilities = {
 
 type CapabilitiesState = {
   tenantId: string
+  userId: string
   data: EffectiveCapabilities | null
   error: Error | null
   loading: boolean
@@ -52,6 +53,7 @@ const EMPTY_CAPABILITIES: EffectiveCapabilities = {
 
 const EffectiveCapabilitiesContext = createContext<CapabilitiesState>({
   tenantId: '',
+  userId: '',
   data: null,
   error: null,
   loading: true,
@@ -102,11 +104,35 @@ export function startupRouteForCapabilities(
   // that every other product is absent. True and unknown keep the requested
   // route so mixed-product callers are never redirected into fee-only UI.
   if (capabilities.navigation.otherBusinessAccess !== false) return null
-  const hasCancellationFees = capabilities.cancellationFees.list || capabilities.cancellationFees.manage
-  if (!hasCancellationFees) return null
+  const canListCancellationFees = capabilities.cancellationFees.list
+  const canManageCancellationFees = capabilities.cancellationFees.manage
+  if (!canListCancellationFees && !canManageCancellationFees) return null
   if (route === 'cancellation-fees' || route.startsWith('cancellation-fees/')) return null
-  return 'cancellation-fees'
+  // A manage-only operator cannot open the list (it is guarded by the list
+  // action), but may open the dedicated create flow. Keep the list as the
+  // default whenever it is actually granted so read-only operators retain
+  // their permitted entry screen.
+  return canListCancellationFees ? 'cancellation-fees' : 'cancellation-fees/new'
 }
+
+function isCancellationFeeRoute(route: string) {
+  return route === 'cancellation-fees' || route.startsWith('cancellation-fees/')
+}
+
+/**
+ * The navigation aggregate is optional because Field can return a useful fee
+ * decision while a larger action batch is incomplete. Fee deep links can use
+ * that known fee decision; every other protected route must wait for the
+ * aggregate before mounting its business loaders.
+ */
+export function capabilitySnapshotReadyForRoute(
+  route: string,
+  capabilities: EffectiveCapabilities,
+) {
+  return isCancellationFeeRoute(route) || capabilities.navigation.otherBusinessAccess !== null
+}
+
+const INCOMPLETE_CAPABILITY_SNAPSHOT = new Error('Capability snapshot is unavailable')
 
 /**
  * Resolves Field's effective actions once per selected tenant. Downstream
@@ -114,11 +140,13 @@ export function startupRouteForCapabilities(
  * independent from reservation and extension startup requests.
  */
 export function EffectiveCapabilitiesProvider({ children }: { children: ReactNode }) {
-  const { tenant } = useAuth()
+  const { tenant, user } = useAuth()
   const route = useRoute()
   const tenantId = tenant?.id ?? ''
+  const userId = user?.id ?? ''
   const [state, setState] = useState<CapabilitiesState>({
     tenantId: '',
+    userId: '',
     data: null,
     error: null,
     loading: true,
@@ -127,24 +155,25 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
 
   useEffect(() => {
     const controller = new AbortController()
-    if (!tenantId) {
-      setState({ tenantId: '', data: null, error: null, loading: false })
+    if (!tenantId || !userId) {
+      setState({ tenantId: '', userId: '', data: null, error: null, loading: false })
       return () => controller.abort()
     }
 
-    setState({ tenantId, data: null, error: null, loading: true })
+    setState({ tenantId, userId, data: null, error: null, loading: true })
     void courseboardApiJson<Partial<EffectiveCapabilities>>('/v1/field/client-capabilities', {
       signal: controller.signal,
     })
       .then(raw => {
         if (!controller.signal.aborted) {
-          setState({ tenantId, data: normalizeCapabilities(raw), error: null, loading: false })
+          setState({ tenantId, userId, data: normalizeCapabilities(raw), error: null, loading: false })
         }
       })
       .catch(error => {
         if (!controller.signal.aborted) {
           setState({
             tenantId,
+            userId,
             data: null,
             error: error instanceof Error ? error : new Error(String(error)),
             loading: false,
@@ -152,10 +181,16 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
         }
       })
     return () => controller.abort()
-  }, [attempt, tenantId])
+  }, [attempt, tenantId, userId])
 
-  const snapshotReady = state.tenantId === tenantId && !state.loading && Boolean(state.data)
-  const startupTarget = snapshotReady && state.data
+  const snapshotReady = state.tenantId === tenantId
+    && state.userId === userId
+    && !state.loading
+    && Boolean(state.data)
+  const routeSnapshotReady = snapshotReady && state.data
+    ? capabilitySnapshotReadyForRoute(route, state.data)
+    : false
+  const startupTarget = routeSnapshotReady && state.data
     ? startupRouteForCapabilities(route, state.data)
     : null
   useEffect(() => {
@@ -167,14 +202,25 @@ export function EffectiveCapabilitiesProvider({ children }: { children: ReactNod
   }, [startupTarget])
 
   const value = useMemo<CapabilitiesState>(() => state, [state])
-  const currentError = state.tenantId === tenantId ? state.error : null
-  const waitingForSnapshot = !tenantId || state.tenantId !== tenantId || state.loading || Boolean(startupTarget)
+  const currentError = state.tenantId === tenantId && state.userId === userId ? state.error : null
+  const incompleteSnapshot = snapshotReady && state.data && !routeSnapshotReady
+  const waitingForSnapshot = !tenantId
+    || !userId
+    || state.tenantId !== tenantId
+    || state.userId !== userId
+    || state.loading
+    || Boolean(startupTarget)
   const gate = currentError
     ? <ResourceError error={currentError} onRetry={() => setAttempt(value => value + 1)} />
+    : incompleteSnapshot
+      ? <ResourceError
+        error={INCOMPLETE_CAPABILITY_SNAPSHOT}
+        onRetry={() => setAttempt(value => value + 1)}
+      />
     : waitingForSnapshot
       ? <LoadingState />
       : !state.data
-        ? <ResourceError error={new Error('Capability snapshot is unavailable')} onRetry={() => setAttempt(value => value + 1)} />
+        ? <ResourceError error={INCOMPLETE_CAPABILITY_SNAPSHOT} onRetry={() => setAttempt(value => value + 1)} />
         : children
   return (
     <EffectiveCapabilitiesContext.Provider value={value}>

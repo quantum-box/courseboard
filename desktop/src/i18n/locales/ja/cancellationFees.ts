@@ -134,6 +134,10 @@ export const cancellationFees = {
     review: '送る内容を確認する',
     submit: '請求を作って送る',
     submitting: '作って送っています…',
+    completed: {
+      title: '請求の処理が完了しました',
+      description: '請求 {{number}} の処理が完了しました。',
+    },
     confirm: {
       title: 'この内容で送ります',
       description: '送ると支払いリンクが相手に届きます。送る前に確かめてください。',

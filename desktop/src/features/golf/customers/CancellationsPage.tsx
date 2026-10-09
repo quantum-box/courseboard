@@ -1,9 +1,16 @@
 import { Badge, Button, Input } from '@tachyon-sdk/native-ui'
 import { ChevronLeft, ReceiptText, Ban } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import { courseboardApiJson, fieldApiJson, yen } from '../../../api'
+import {
+  ApiError,
+  courseboardApiJson,
+  fieldApiJson,
+  fieldTenant,
+  fieldUserId,
+  yen,
+} from '../../../api'
 import {
   DataTable,
   type DataTableColumn,
@@ -77,6 +84,11 @@ type InvoiceResponse = {
 
 type InvoiceListResponse = {
   items: { id: string; sources?: InvoiceSource[] | null }[]
+}
+
+type CancellationFeeInvoiceSnapshot = {
+  generation: number
+  response: InvoiceListResponse
 }
 
 /**
@@ -470,7 +482,175 @@ function describeFeeLine(
 }
 
 /** What one customer's invoice attempt came to. */
-type BillingResult = { group: CustomerFeeGroup; invoiceId?: string; error?: string }
+type BatchInvoiceBody = ReturnType<typeof cancellationFeeInvoiceRequestBody>
+
+type BatchDecision = { reservationId: string; amount: number }
+
+/**
+ * The exact batch request is frozen as soon as a Field create is attempted.
+ * The source set is the logical operation identity; amount, date, recipient,
+ * and delivery are payload, so a retry cannot accidentally pair a new body
+ * with an old idempotency key after the CourseBoard write-back is uncertain.
+ */
+type BatchRecovery = {
+  sourceKey: string
+  reservationIds: string[]
+  key: string
+  body: BatchInvoiceBody
+  decisions: BatchDecision[]
+  invoiceId?: string
+}
+
+type BillingResult = {
+  group: CustomerFeeGroup
+  recovery: BatchRecovery
+  invoiceId?: string
+  error?: string
+}
+
+type BatchRecoveryMap = Map<string, BatchRecovery>
+type BatchRecoveryScope = { tenantId: string; userId: string }
+
+const BATCH_RECOVERY_STORAGE_PREFIX = 'courseboard:cancellation-fee:batch-recovery'
+
+function currentBatchRecoveryScope(): BatchRecoveryScope {
+  return { tenantId: fieldTenant(), userId: fieldUserId() }
+}
+
+function batchRecoveryStorageKey(scope: BatchRecoveryScope) {
+  return `${BATCH_RECOVERY_STORAGE_PREFIX}:${JSON.stringify([
+    scope.tenantId,
+    scope.userId,
+  ])}`
+}
+
+function batchRecoveryScopeMatches(expected: BatchRecoveryScope) {
+  const current = currentBatchRecoveryScope()
+  return current.tenantId === expected.tenantId && current.userId === expected.userId
+}
+
+function batchSourceIds(group: Pick<CustomerFeeGroup, 'rows'>) {
+  return [...new Set(group.rows.map(row => row.reservationId))].sort()
+}
+
+function batchSourceKey(group: Pick<CustomerFeeGroup, 'rows'>) {
+  return JSON.stringify(batchSourceIds(group))
+}
+
+function isBatchRecovery(value: unknown): value is BatchRecovery {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const candidate = value as Partial<BatchRecovery>
+  return typeof candidate.sourceKey === 'string'
+    && Array.isArray(candidate.reservationIds)
+    && candidate.reservationIds.every(id => typeof id === 'string' && id.length > 0)
+    && typeof candidate.key === 'string'
+    && Boolean(candidate.body && typeof candidate.body === 'object')
+    && Array.isArray(candidate.decisions)
+    && candidate.decisions.every(decision => (
+      Boolean(decision)
+      && typeof decision === 'object'
+      && typeof decision.reservationId === 'string'
+      && typeof decision.amount === 'number'
+    ))
+}
+
+function loadBatchRecoveries(storageKey: string): BatchRecoveryMap {
+  try {
+    const raw = sessionStorage.getItem(storageKey)
+    if (!raw) return new Map()
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return new Map()
+    return new Map(
+      Object.entries(parsed).flatMap(([sourceKey, value]) => {
+        if (!isBatchRecovery(value) || value.sourceKey !== sourceKey) return []
+        return [[sourceKey, value] as const]
+      }),
+    )
+  } catch {
+    return new Map()
+  }
+}
+
+function persistBatchRecoveries(recoveries: BatchRecoveryMap, storageKey: string) {
+  try {
+    if (recoveries.size === 0) {
+      sessionStorage.removeItem(storageKey)
+      return
+    }
+    sessionStorage.setItem(storageKey, JSON.stringify(Object.fromEntries(recoveries)))
+  } catch {
+    // The in-memory map still protects retries during this page visit. A later
+    // remount must also pass the source-backed duplicate check before billing.
+  }
+}
+
+function makeBatchRecovery(
+  group: CustomerFeeGroup,
+  dueDate: string,
+  sendEmail: boolean,
+  t: ReturnType<typeof useTranslation<['customers', 'cancellationFees', 'common']>>['t'],
+): BatchRecovery {
+  const reservationIds = batchSourceIds(group)
+  const key = cancellationFeeIdempotencyKey([
+    group.recipient.kind === 'customer'
+      ? group.recipient.customerId
+      : `name:${group.recipient.name}`,
+    dueDate,
+    String(group.amount),
+    ...reservationIds,
+  ])
+  const body = cancellationFeeInvoiceRequestBody({
+    billTo: group.recipient,
+    sources: cancellationFeeSources(reservationIds),
+    clientName: group.customerName,
+    clientEmail: sendEmail ? group.customerEmail : undefined,
+    dueDate,
+    taxAmount: 0,
+    notes: [
+      CANCELLATION_FEE_MARKER,
+      t('customers:cancellations.bill.invoiceNote', { count: group.rows.length }),
+      ...group.rows.map(row => t('customers:cancellations.bill.invoiceLine', {
+        date: row.playedOn ?? '',
+        reason: t(`customers:cancellations.reason.${row.reason}`, {
+          defaultValue: t('customers:cancellations.reason.other'),
+        }),
+        note: row.reasonNote ?? '',
+      })),
+    ].join('\n'),
+    description: describeFeeLine(group, t),
+    amount: group.amount,
+    sendEmail: sendEmail && Boolean(group.customerEmail),
+    sendSms: false,
+    idempotencyKey: key,
+  })
+  return {
+    sourceKey: JSON.stringify(reservationIds),
+    reservationIds,
+    key,
+    body,
+    decisions: splitFeeAcrossRows(group),
+  }
+}
+
+function batchRecoveryAmount(recovery: BatchRecovery) {
+  const unitPrice = recovery.body.lineItems?.[0]?.unitPrice
+  if (typeof unitPrice === 'number' && Number.isFinite(unitPrice)) return unitPrice
+  return recovery.decisions.reduce((total, decision) => total + decision.amount, 0)
+}
+
+function batchRecoveryClientName(recovery: BatchRecovery, fallback: string) {
+  const clientName = recovery.body.clientName?.trim()
+  return clientName || fallback
+}
+
+function isDefinitiveBatchCreateFailure(error: unknown) {
+  return error instanceof ApiError
+    && error.status >= 400
+    && error.status < 500
+    && error.status !== 408
+    && error.status !== 409
+    && error.status !== 429
+}
 
 /**
  * Generic invoice creation owns initial delivery for the batch path. A
@@ -572,9 +752,28 @@ function BillCancellationFeesSheet({
   const [sendEmail, setSendEmail] = useState(true)
   const [saving, setSaving] = useState(false)
   const [results, setResults] = useState<BillingResult[] | null>(null)
+  // A billing sheet may outlive an auth refresh while a request is in flight.
+  // Keep its storage scope fixed to the verified identity that opened it; an
+  // old response must never populate the next operator's recovery map.
+  const [batchRecoveryScope] = useState(currentBatchRecoveryScope)
+  const [batchRecoveryStorageKeyForScope] = useState(() =>
+    batchRecoveryStorageKey(batchRecoveryScope))
+  const [batchRecoveries, setBatchRecoveries] = useState<BatchRecoveryMap>(() =>
+    loadBatchRecoveries(batchRecoveryStorageKeyForScope))
+  const batchRecoveriesRef = useRef(batchRecoveries)
   // Keyed by booking, so an entry survives the sheet being closed and reopened
   // and means nothing to the bookings it is not about.
   const [edits, setEdits] = useState<Map<string, RecipientEdit>>(new Map())
+
+  const updateBatchRecoveries = (
+    update: (next: BatchRecoveryMap) => void,
+  ) => {
+    const next = new Map(batchRecoveriesRef.current)
+    update(next)
+    batchRecoveriesRef.current = next
+    setBatchRecoveries(next)
+    persistBatchRecoveries(next, batchRecoveryStorageKeyForScope)
+  }
 
   // What Field already holds a cancellation fee for (PLT-4158).
   //
@@ -583,13 +782,21 @@ function BillCancellationFeesSheet({
   // the write back failed, leaving the row `unsettled` so the next extraction
   // offers it again. A read that fails keeps the billing action disabled until
   // the source-backed duplicate check has completed.
-  const invoiced = useResource(
-    loadCancellationFeeInvoices,
-    [open],
+  const reconciliationGenerationRef = useRef(0)
+  const wasOpenRef = useRef(false)
+  if (open && !wasOpenRef.current) reconciliationGenerationRef.current += 1
+  wasOpenRef.current = open
+  const reconciliationGeneration = reconciliationGenerationRef.current
+  const invoiced = useResource<CancellationFeeInvoiceSnapshot>(
+    async () => ({
+      generation: reconciliationGeneration,
+      response: await loadCancellationFeeInvoices(),
+    }),
+    [open, reconciliationGeneration],
     { enabled: open },
   )
   const alreadyInvoiced = useMemo(
-    () => invoicedReservationIds(invoiced.data?.items ?? []),
+    () => invoicedReservationIds(invoiced.data?.response.items ?? []),
     [invoiced.data],
   )
   /** The bookings the sheet has to ask about: no ledger link on the row. */
@@ -632,81 +839,125 @@ function BillCancellationFeesSheet({
     [rows, perPlayer, alreadyInvoiced, assignments],
   )
 
+  const recoveryBySourceKey = useMemo(
+    () => new Map(batchRecoveries),
+    [batchRecoveries],
+  )
+  const frozenGroupKeys = useMemo(
+    () => new Set(
+      plan.groups
+        .map(group => batchSourceKey(group))
+        .filter(sourceKey => recoveryBySourceKey.has(sourceKey)),
+    ),
+    [plan.groups, recoveryBySourceKey],
+  )
+  const hasFrozenRecovery = frozenGroupKeys.size > 0
+  const frozenReservationIds = useMemo(
+    () => new Set(
+      [...batchRecoveries.values()].flatMap(recovery => recovery.reservationIds),
+    ),
+    [batchRecoveries],
+  )
+  const recoveryConflicts = useMemo(
+    () => plan.groups.flatMap(group => {
+      const sourceKey = batchSourceKey(group)
+      const sourceIds = new Set(batchSourceIds(group))
+      return [...batchRecoveries.entries()]
+        .filter(([pendingSourceKey, recovery]) => pendingSourceKey !== sourceKey
+          && recovery.reservationIds.some(reservationId => sourceIds.has(reservationId)))
+        .map(([pendingSourceKey]) => `${sourceKey}:${pendingSourceKey}`)
+    }),
+    [plan.groups, batchRecoveries],
+  )
+  const hasRecoveryConflict = recoveryConflicts.length > 0
+  const displayGroups = useMemo(
+    () => plan.groups.map(group => {
+      const recovery = batchRecoveries.get(batchSourceKey(group))
+      return {
+        group,
+        recovery,
+        amount: recovery ? batchRecoveryAmount(recovery) : group.amount,
+      }
+    }),
+    [plan.groups, batchRecoveries],
+  )
+  const displayedTotal = displayGroups.reduce((total, entry) => total + entry.amount, 0)
+  const frozenPreviews = displayGroups.filter(
+    (entry): entry is typeof entry & { recovery: BatchRecovery } => Boolean(entry.recovery),
+  )
+
   if (!open) return null
 
   const unnamed = plan.unbillable.filter(entry => entry.reason === 'unnamed')
   const alreadyBilled = plan.unbillable.filter(entry => entry.reason === 'already_invoiced')
   const reconciliationReady = Boolean(invoiced.data)
+    && invoiced.data?.generation === reconciliationGeneration
     && !invoiced.loading
     && !invoiced.error
 
   const submit = async () => {
-    if (!reconciliationReady) return
+    if (!reconciliationReady || hasRecoveryConflict) return
     setSaving(true)
     setResults(null)
     const attempts: BillingResult[] = []
+    let scopeChanged = false
     for (const group of plan.groups) {
+      if (!batchRecoveryScopeMatches(batchRecoveryScope)) {
+        scopeChanged = true
+        break
+      }
+      const sourceKey = batchSourceKey(group)
+      const existingRecovery = batchRecoveriesRef.current.get(sourceKey)
+      const recovery = existingRecovery ?? makeBatchRecovery(group, dueDate, sendEmail, t)
+      if (!existingRecovery) {
+        // Save before dispatch. If Field accepts the invoice and the response
+        // or CourseBoard write-back is lost, the next click must replay this
+        // exact body instead of accepting a changed amount/date as new work.
+        updateBatchRecoveries(next => next.set(sourceKey, recovery))
+      }
+      if (!batchRecoveryScopeMatches(batchRecoveryScope)) {
+        scopeChanged = true
+        break
+      }
       try {
         const invoice = await fieldApiJson<InvoiceResponse>('/v1/invoices', {
           method: 'POST',
-          body: JSON.stringify(cancellationFeeInvoiceRequestBody({
-            // The ledger entry when there is one, and the name the booking was
-            // taken under when there is not (PLT-4159).
-            billTo: group.recipient,
-            // Keyed on the charge itself, so pressing the button twice bills
-            // this person once. A retry of the whole sheet still does what the
-            // desk means by it: the groups that went through are answered with
-            // the invoice they already have, and the ones that failed are
-            // created. A key generated per press would bill everybody again,
-            // and it used to be sent as a header Field never reads.
-            idempotencyKey: cancellationFeeIdempotencyKey([
-              // The recipient as the charge names them, not the grouping key:
-              // a key that changed shape would answer a batch already sent
-              // with a second invoice for the same bookings.
-              group.recipient.kind === 'customer'
-                ? group.recipient.customerId
-                : `name:${group.recipient.name}`,
-              dueDate,
-              String(group.amount),
-              ...group.rows.map(row => row.reservationId).sort(),
-            ]),
-            // What this invoice is for, machine-readable. The notes marker
-            // below is kept as well: it is what every invoice raised before
-            // PLT-4158 has, and the list still reads both.
-            sources: cancellationFeeSources(group.rows.map(row => row.reservationId)),
-            clientName: group.customerName,
-            clientEmail: sendEmail ? group.customerEmail : undefined,
-            dueDate,
-            taxAmount: 0,
-            notes: [
-              CANCELLATION_FEE_MARKER,
-              t('customers:cancellations.bill.invoiceNote', { count: group.rows.length }),
-              ...group.rows.map(row => t('customers:cancellations.bill.invoiceLine', {
-                date: row.playedOn ?? '',
-                reason: t(`customers:cancellations.reason.${row.reason}`, {
-                  defaultValue: t('customers:cancellations.reason.other'),
-                }),
-                note: row.reasonNote ?? '',
-              })),
-            ].join('\n'),
-            description: describeFeeLine(group, t),
-            amount: group.amount,
-            sendEmail: sendEmail && Boolean(group.customerEmail),
-            sendSms: false,
-          })),
+          body: JSON.stringify(recovery.body),
         })
+        if (!invoice?.id) throw new Error('Field returned an invoice without an id')
+        const completedRecovery = { ...recovery, invoiceId: invoice.id }
+        updateBatchRecoveries(next => next.set(sourceKey, completedRecovery))
+        if (!batchRecoveryScopeMatches(batchRecoveryScope)) {
+          scopeChanged = true
+          attempts.push({
+            group,
+            recovery: completedRecovery,
+            invoiceId: invoice.id,
+            error: t('cancellationFees:new.error.scopeChanged'),
+          })
+          break
+        }
         const issue = fulfillmentIssueKind(invoice, {
-          sendEmail: sendEmail && Boolean(group.customerEmail),
+          sendEmail: Boolean(recovery.body.sendEmail),
           sendSms: false,
         })
         attempts.push({
           group,
+          recovery: completedRecovery,
           invoiceId: invoice.id,
           ...(issue ? { error: t(`cancellationFees:new.error.${issue}`) } : {}),
         })
       } catch (error) {
+        // A definitive error is safe to discard only for the first attempt.
+        // A replay can fail auth after the original request was accepted; the
+        // old recovery must remain frozen so that retrying cannot mint a new
+        // key for the same source set.
+        if (!existingRecovery && isDefinitiveBatchCreateFailure(error)) {
+          updateBatchRecoveries(next => next.delete(sourceKey))
+        }
         attempts.push({
           group,
+          recovery,
           error: error instanceof Error ? error.message : String(error),
         })
       }
@@ -714,7 +965,7 @@ function BillCancellationFeesSheet({
 
     const invoiced = attempts.filter(attempt => attempt.invoiceId)
     const newDecisions = invoiced.flatMap(attempt =>
-      splitFeeAcrossRows(attempt.group).map(share => ({
+      attempt.recovery.decisions.map(share => ({
         reservationId: share.reservationId,
         state: 'invoiced',
         invoiceId: attempt.invoiceId,
@@ -722,30 +973,61 @@ function BillCancellationFeesSheet({
       })))
     const decisions = newDecisions
     let settlementError: string | undefined
-    if (decisions.length > 0) {
-      try {
-        await courseboardApiJson('/v1/course/reservation-cancellations/fees', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            // Attributed back to the bookings by rounds given up, so the rows
-            // add up to the invoice exactly.
-            decisions,
-          }),
-        })
-        onSettled()
-      } catch (error) {
-        settlementError = error instanceof Error ? error.message : String(error)
-        // The invoices exist and CourseBoard's rows do not say so, so the
-        // bookings come round again on the next extraction. Billing them a
-        // second time is what the retry key now prevents; what is left is to
-        // say the recording failed, because until somebody looks, the club's
-        // own record of who was billed is short by this batch.
+    if (scopeChanged) {
+      settlementError = t('cancellationFees:new.error.scopeChanged')
+      showToast({
+        tone: 'danger',
+        title: t('customers:cancellations.bill.recordFailed'),
+        message: settlementError,
+      })
+    } else if (decisions.length > 0) {
+      if (!batchRecoveryScopeMatches(batchRecoveryScope)) {
+        settlementError = t('cancellationFees:new.error.scopeChanged')
         showToast({
           tone: 'danger',
           title: t('customers:cancellations.bill.recordFailed'),
           message: settlementError,
         })
+      } else {
+        try {
+          await courseboardApiJson('/v1/course/reservation-cancellations/fees', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              // Attributed back to the bookings by rounds given up, so the rows
+              // add up to the invoice exactly.
+              decisions,
+            }),
+          })
+          if (!batchRecoveryScopeMatches(batchRecoveryScope)) {
+            settlementError = t('cancellationFees:new.error.scopeChanged')
+            showToast({
+              tone: 'danger',
+              title: t('customers:cancellations.bill.recordFailed'),
+              message: settlementError,
+            })
+          } else {
+            const settledSourceKeys = attempts
+              .filter(attempt => attempt.invoiceId)
+              .map(attempt => attempt.recovery.sourceKey)
+            updateBatchRecoveries(next => {
+              for (const sourceKey of settledSourceKeys) next.delete(sourceKey)
+            })
+            onSettled()
+          }
+        } catch (error) {
+          settlementError = error instanceof Error ? error.message : String(error)
+          // The invoices exist and CourseBoard's rows do not say so, so the
+          // bookings come round again on the next extraction. Billing them a
+          // second time is what the retry key now prevents; what is left is to
+          // say the recording failed, because until somebody looks, the club's
+          // own record of who was billed is short by this batch.
+          showToast({
+            tone: 'danger',
+            title: t('customers:cancellations.bill.recordFailed'),
+            message: settlementError,
+          })
+        }
       }
     }
 
@@ -782,6 +1064,7 @@ function BillCancellationFeesSheet({
               type="number"
               min={1}
               value={perPlayer}
+              disabled={saving || hasFrozenRecovery || hasRecoveryConflict}
               onChange={event => setPerPlayer(Number(event.target.value))}
             />
           </Field>
@@ -789,6 +1072,7 @@ function BillCancellationFeesSheet({
             <Input
               type="date"
               value={dueDate}
+              disabled={saving || hasFrozenRecovery || hasRecoveryConflict}
               onChange={event => setDueDate(event.target.value)}
             />
           </Field>
@@ -798,6 +1082,7 @@ function BillCancellationFeesSheet({
           <input
             type="checkbox"
             checked={sendEmail}
+            disabled={saving || hasFrozenRecovery || hasRecoveryConflict}
             onChange={event => setSendEmail(event.target.checked)}
           />
           <span>
@@ -811,6 +1096,32 @@ function BillCancellationFeesSheet({
         ) : null}
         {invoiced.error ? (
           <ResourceError error={invoiced.error} onRetry={invoiced.refresh} />
+        ) : null}
+
+        {hasRecoveryConflict ? (
+          <Notice
+            tone="warning"
+            title={t('cancellationFees:new.recovery.title')}
+          >
+            {t('cancellationFees:new.recovery.description')}
+          </Notice>
+        ) : null}
+
+        {frozenPreviews.length > 0 ? (
+          <Notice
+            tone="warning"
+            title={t('cancellationFees:new.recovery.title')}
+          >
+            <div>{t('cancellationFees:new.recovery.description')}</div>
+            <ul className="fee-plan-list">
+              {frozenPreviews.map(({ group, recovery, amount }) => (
+                <li key={recovery.sourceKey}>
+                  <strong>{batchRecoveryClientName(recovery, group.customerName)}</strong>{' '}
+                  {yen(amount)}・{recovery.body.dueDate}・{recovery.decisions.length}件
+                </li>
+              ))}
+            </ul>
+          </Notice>
         ) : null}
 
         {/* Who the club has no ledger link for, and the two ways out of it:
@@ -838,7 +1149,8 @@ function BillCancellationFeesSheet({
                         <CustomerPicker
                           name={edit.name}
                           customerId={edit.customer?.id ?? null}
-                          disabled={saving}
+                          disabled={saving || hasFrozenRecovery || hasRecoveryConflict
+                            || frozenReservationIds.has(row.reservationId)}
                           // The box opens holding the name the booking was
                           // taken under, so landing in it is a question about
                           // who that is.
@@ -872,7 +1184,9 @@ function BillCancellationFeesSheet({
                           type="tel"
                           value={edit.phone}
                           placeholder="09012345678"
-                          disabled={saving || Boolean(edit.customer)}
+                          disabled={saving || Boolean(edit.customer)
+                            || hasRecoveryConflict
+                            || frozenReservationIds.has(row.reservationId)}
                           onChange={event => patchEdit(row, { phone: event.target.value })}
                         />
                       </Field>
@@ -887,16 +1201,18 @@ function BillCancellationFeesSheet({
         {/* The bill before it is raised: who, how much, and what is being left
             out. A collection that quietly skips rows is money nobody chases. */}
         <ul className="fee-plan-list">
-          {plan.groups.map(group => (
+          {displayGroups.map(({ group, recovery, amount }) => (
             <li key={group.key}>
-              <strong>{group.customerName}</strong>{' '}
+              <strong>{recovery
+                ? batchRecoveryClientName(recovery, group.customerName)
+                : group.customerName}</strong>{' '}
               <span className="muted">
                 {t('customers:cancellations.bill.groupDetail', {
                   count: group.rows.length,
                   players: String(group.players),
                 })}
               </span>{' '}
-              {yen(group.amount)}
+              {yen(amount)}
               {group.recipient.kind === 'unregistered' ? (
                 <div className="muted">{t('customers:cancellations.bill.unregistered')}</div>
               ) : null}
@@ -946,11 +1262,11 @@ function BillCancellationFeesSheet({
             type="button"
             variant="primary"
             onClick={submit}
-            disabled={saving || !reconciliationReady || plan.groups.length === 0}
+            disabled={saving || !reconciliationReady || hasRecoveryConflict || plan.groups.length === 0}
           >
             {saving
               ? t('customers:cancellations.bill.saving')
-              : t('customers:cancellations.bill.submit', { total: yen(plan.total) })}
+              : t('customers:cancellations.bill.submit', { total: yen(displayedTotal) })}
           </Button>
         </div>
       </div>

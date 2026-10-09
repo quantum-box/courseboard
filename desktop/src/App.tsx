@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { AuthGate } from './auth/AuthGate'
 import { AuthProvider } from './auth/AuthProvider'
 import { EffectiveCapabilitiesProvider } from './auth/EffectiveCapabilitiesProvider'
+import { CapabilityGate } from './auth/CapabilityGate'
 import { AppShell } from './components/AppShell'
 import { LoadingState } from './components/Page'
 import { CourseMap } from './components/CourseMap'
@@ -94,7 +95,9 @@ function AppContent() {
             <EffectiveCapabilitiesProvider>
               <TenantTimezoneProvider>
                 <AppShell route={route}>
-                  <RouteContent route={route} />
+                  <CapabilityGate route={route}>
+                    <RouteContent route={route} />
+                  </CapabilityGate>
                 </AppShell>
               </TenantTimezoneProvider>
             </EffectiveCapabilitiesProvider>

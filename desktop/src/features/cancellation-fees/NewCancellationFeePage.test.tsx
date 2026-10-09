@@ -8,10 +8,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, configureApiAuth } from '../../api'
 import { i18next } from '../../i18n'
 import { PageReloadProvider } from '../../lib/pageReload'
-import { CancellationFeeDetailPage, NewCancellationFeePage } from './CancellationFeesPage'
+import { CancellationFeeDetailPage, CancellationFeesPage, NewCancellationFeePage } from './CancellationFeesPage'
 
 const api = vi.hoisted(() => ({ field: vi.fn() }))
 const router = vi.hoisted(() => ({ navigate: vi.fn() }))
+const access = vi.hoisted(() => ({ list: true, manage: true }))
+
+vi.mock('../../auth/EffectiveCapabilitiesProvider', async importOriginal => {
+  const actual = await importOriginal<typeof import('../../auth/EffectiveCapabilitiesProvider')>()
+  return {
+    ...actual,
+    useEffectiveCapabilities: () => ({ capabilities: {
+      navigation: { otherBusinessAccess: false },
+      cancellationFees: access,
+      agentDocuments: {
+        invoices: { list: false, send: false },
+        quotations: { list: false, send: false },
+      },
+    } }),
+  }
+})
+
+beforeEach(() => {
+  access.list = true
+  access.manage = true
+})
 
 vi.mock('../../api', async importOriginal => {
   const actual = await importOriginal<typeof import('../../api')>()
@@ -79,6 +100,45 @@ function renderDetailPage() {
 function checkbox(name: RegExp) {
   return screen.getByRole('checkbox', { name }) as HTMLInputElement
 }
+
+describe('cancellation fee action guards', () => {
+  it('rejects a saved create URL without mounting the form or making a request', () => {
+    access.manage = false
+    renderPage()
+    expect(screen.getByRole('alert').textContent).toContain('権限がありません')
+    expect(screen.queryByRole('button', { name: '送る内容を確認する' })).toBeNull()
+    expect(api.field).not.toHaveBeenCalled()
+  })
+
+  it('rejects a detail URL without List even when Manage is present', () => {
+    access.list = false
+    renderDetailPage()
+    expect(screen.getByRole('alert').textContent).toContain('権限がありません')
+    expect(api.field).not.toHaveBeenCalled()
+  })
+
+  it('keeps a list-only invoice readable without mutation controls', async () => {
+    access.manage = false
+    api.field.mockResolvedValue(invoice({ clientEmail: 'client@example.com' }))
+    renderDetailPage()
+    await screen.findByText('INV-1')
+    expect(screen.queryByRole('button', { name: /再送/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /更新/ })).toBeNull()
+    expect(screen.queryByLabelText('送り先のメールアドレス')).toBeNull()
+    expect(api.field.mock.calls.every(call => !call[1]?.method || call[1].method === 'GET')).toBe(true)
+  })
+
+  it('removes Create from a list-only list', async () => {
+    access.manage = false
+    api.field.mockResolvedValue({ items: [] })
+    render(<I18nextProvider i18n={i18next}><TooltipProvider><PageReloadProvider>
+      <CancellationFeesPage />
+    </PageReloadProvider></TooltipProvider></I18nextProvider>)
+    await waitFor(() => expect(api.field).toHaveBeenCalled())
+    expect(screen.queryByRole('button', { name: '請求を作る' })).toBeNull()
+    expect(router.navigate).not.toHaveBeenCalled()
+  })
+})
 
 function fillSnapshot(name = '山田 太郎', phone = '090-0000-0000') {
   // Email is enabled by default; turn it off so this test exercises the
@@ -157,6 +217,22 @@ describe('the dedicated cancellation fee form', () => {
     expect(screen.queryByText(/顧客台帳にも登録/)).toBeNull()
     expect(screen.queryByLabelText(/SMSの文面/)).toBeNull()
     expect(screen.queryByLabelText(/請求先の種類/)).toBeNull()
+  })
+
+  it('confirms a manage-only creation without navigating to a forbidden detail', async () => {
+    access.list = false
+    api.field.mockResolvedValue(invoice({ status: 'Draft', emailDeliveryStatus: null, smsDeliveryStatus: null }))
+    renderPage()
+    fillLinkOnlySnapshot()
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求の処理が完了しました')
+    expect(screen.getByText('請求 INV-1 の処理が完了しました。')).toBeTruthy()
+    expect(router.navigate).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: '一覧へ戻る' })).toBeNull()
+    expect(api.field.mock.calls.filter(call => String(call[0]) === '/v1/cancellation-fees')).toHaveLength(1)
+    expect(api.field.mock.calls.every(call => call[1]?.method === 'POST')).toBe(true)
   })
 
   it('opens a link-only draft when Field returns a ready payment link', async () => {

@@ -13,6 +13,8 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, downloadBlob, fieldTenant, fieldUserId, yen } from '../../api'
+import { CapabilityGate } from '../../auth/CapabilityGate'
+import { useEffectiveCapabilities } from '../../auth/EffectiveCapabilitiesProvider'
 import { useTenantTimezone } from '../../context/TenantTimezoneProvider'
 import { i18next } from '../../i18n'
 import {
@@ -438,6 +440,15 @@ const statusVariants: Record<InvoiceStatus, 'neutral' | 'accent' | 'warning' | '
 /** The dedicated Field list is already scoped to cancellation-fee invoices. */
 
 export function CancellationFeesPage() {
+  return (
+    <CapabilityGate route="cancellation-fees">
+      <CancellationFeesContent />
+    </CapabilityGate>
+  )
+}
+
+function CancellationFeesContent() {
+  const { capabilities } = useEffectiveCapabilities()
   const { t } = useTranslation(['cancellationFees', 'common'])
   const timezone = useTenantTimezone()
   const businessDate = today(timezone)
@@ -476,9 +487,9 @@ export function CancellationFeesPage() {
   return (
     <div className="page-stack">
       <div className="page-toolbar">
-        <Button type="button" variant="primary" onClick={() => navigate('cancellation-fees/new')}>
+        {capabilities.cancellationFees.manage ? <Button type="button" variant="primary" onClick={() => navigate('cancellation-fees/new')}>
           <Plus /> {t('cancellationFees:create')}
-        </Button>
+        </Button> : null}
       </div>
 
       <MetricGrid>
@@ -590,6 +601,16 @@ type PendingSubmission = {
 }
 
 export function NewCancellationFeePage() {
+  return (
+    <CapabilityGate route="cancellation-fees/new">
+      <NewCancellationFeeContent />
+    </CapabilityGate>
+  )
+}
+
+function NewCancellationFeeContent() {
+  const { capabilities } = useEffectiveCapabilities()
+  const canList = capabilities.cancellationFees.list
   const { t } = useTranslation(['cancellationFees', 'common'])
   const timezone = useTenantTimezone()
   const storageScope = createStorageScope()
@@ -836,7 +857,7 @@ export function NewCancellationFeePage() {
           clearPersistedCreateRecovery(recovery)
           clearPersistedCreateKey(identity, recovery.key)
           setCreateRecovery(null)
-          navigate(`cancellation-fees/${fulfilled.id}`)
+          if (canList) navigate(`cancellation-fees/${fulfilled.id}`)
         }
       } catch (reason) {
         if (reason instanceof CreateScopeChangedError
@@ -974,7 +995,7 @@ export function NewCancellationFeePage() {
         }
         clearPersistedCreateKey(JSON.stringify(sent), activeCreateRecovery?.key)
         resendKey.current = rotatePersistedDeliveryKey(created.id)
-        navigate(`cancellation-fees/${fulfilled.id}`)
+        if (canList) navigate(`cancellation-fees/${fulfilled.id}`)
       }
     } catch (reason) {
       if (requestScope && !isCurrentCreateScope(requestScope, requestGeneration)) return
@@ -1006,7 +1027,7 @@ export function NewCancellationFeePage() {
           setCreateRecovery(null)
         }
         clearPersistedCreateKey(JSON.stringify(sent), activeCreateRecovery?.key)
-        navigate(`cancellation-fees/${fulfilled.id}`)
+        if (canList) navigate(`cancellation-fees/${fulfilled.id}`)
       }
     } catch (reason) {
       if (requestScope && !isCurrentCreateScope(requestScope, requestGeneration)) return
@@ -1025,15 +1046,27 @@ export function NewCancellationFeePage() {
         description={t('cancellationFees:new.description')}
         actions={(
           <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={() => navigate('cancellation-fees')}>
+            {canList ? <Button type="button" onClick={() => navigate('cancellation-fees')}>
               <ArrowLeft /> {t('cancellationFees:new.backToList')}
-            </Button>
+            </Button> : null}
           </div>
         )}
       />
 
       {error ? (
         <Notice tone="danger" title={t('cancellationFees:new.createFailed')}>{error}</Notice>
+      ) : null}
+      {!canList && created && !submitting && !resending && !deliveryError && !activeCreateRecovery ? (
+        <Notice tone="success" title={t('cancellationFees:new.completed.title')}>
+          {t('cancellationFees:new.completed.description', { number: created.invoiceNumber })}
+          {created.paymentLinkUrl ? <div className="notice-inline-action">
+            <Button type="button" onClick={() => void openExternal(created.paymentLinkUrl!).catch(reason => {
+              setError(reason instanceof Error ? reason.message : t('cancellationFees:detail.notice.openFailed'))
+            })}>
+              <ExternalLink /> {t('cancellationFees:detail.payment.openPage')}
+            </Button>
+          </div> : null}
+        </Notice>
       ) : null}
       {activeCreateRecovery && !created ? (
         <Notice tone="warning" title={t('cancellationFees:new.recovery.title')}>
@@ -1067,9 +1100,9 @@ export function NewCancellationFeePage() {
                   ? t('cancellationFees:new.partial.initialRetry')
                   : t('cancellationFees:new.partial.resend')}
             </Button>
-            <Button type="button" size="sm" onClick={() => navigate(`cancellation-fees/${created.id}`)}>
+            {canList ? <Button type="button" size="sm" onClick={() => navigate(`cancellation-fees/${created.id}`)}>
               {t('cancellationFees:new.partial.openDetail')}
-            </Button>
+            </Button> : null}
           </div>
         </Notice>
       ) : null}
@@ -1322,6 +1355,16 @@ function destinationSummary(pending: Pick<PendingSubmission, 'clientEmail' | 'cl
 }
 
 export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) {
+  return (
+    <CapabilityGate route={`cancellation-fees/${invoiceId}`}>
+      <CancellationFeeDetailContent invoiceId={invoiceId} />
+    </CapabilityGate>
+  )
+}
+
+function CancellationFeeDetailContent({ invoiceId }: { invoiceId: string }) {
+  const { capabilities } = useEffectiveCapabilities()
+  const canManage = capabilities.cancellationFees.manage
   const { t } = useTranslation(['cancellationFees', 'common'])
   const timezone = useTenantTimezone()
   const businessDate = today(timezone)
@@ -1337,7 +1380,7 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
     // Payment-link fulfilment is a mutation too. A paid invoice is terminal;
     // keep the guard here in addition to disabling the button below so a
     // stale click cannot resend a paid invoice.
-    if (!resource.data || !isInvoiceUpdateAllowed(resource.data)) return
+    if (!canManage || !resource.data || !isInvoiceUpdateAllowed(resource.data)) return
     setFulfilling(true)
     setNotice(null)
     try {
@@ -1504,7 +1547,7 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
               </>
             ) : null}
             <Button type="button" onClick={() => void downloadPdf(invoice)}><Download /> PDF</Button>
-            <Button
+            {canManage ? <Button
               type="button"
               variant="primary"
               disabled={fulfilling || invoice.status === 'Paid'}
@@ -1514,7 +1557,7 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
               {fulfilling
                 ? t('cancellationFees:detail.payment.working')
                 : t('cancellationFees:detail.payment.resend')}
-            </Button>
+            </Button> : null}
           </div>
         )}
       >
@@ -1540,13 +1583,13 @@ export function CancellationFeeDetailPage({ invoiceId }: { invoiceId: string }) 
           </div>
         </dl>
       </Panel>
-      <InvoiceOperations
+      {canManage ? <InvoiceOperations
         key={`${storedInvoice.status}-${storedInvoice.paymentLinkStatus}-${storedInvoice.updatedAt ?? ''}`}
         invoice={storedInvoice}
         onUpdated={updated => resource.setData(updated)}
         onRefresh={resource.refresh}
         onNotice={setNotice}
-      />
+      /> : null}
       <Panel title={t('cancellationFees:detail.items.title')}>
         <DataTable
           rows={invoice.lineItems}

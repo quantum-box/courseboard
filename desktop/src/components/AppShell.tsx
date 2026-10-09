@@ -81,6 +81,8 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../auth/AuthProvider'
+import { capabilityRouteAllowed } from '../auth/capabilityRoutes'
+import { useEffectiveCapabilities } from '../auth/EffectiveCapabilitiesProvider'
 import { formatTenantWorkspaceLabel, tenantWorkspaceLabel } from '../auth/tenant-label'
 import { useHiddenRoutes } from '../feature-flags/gated-routes'
 import { settingsMaster } from '../features/settings/masters'
@@ -408,10 +410,17 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   // same way it is left out of the router. Pinning it earlier does not bring it
   // back, so the pinned list is filtered by the same set.
   const flaggedOffRoutes = useHiddenRoutes()
+  const { capabilities } = useEffectiveCapabilities()
+  const hiddenRoutes = useMemo(() => new Set([
+    ...flaggedOffRoutes,
+    ...[...allNavigation, ...settingsNavigation, { route: 'settings' }]
+      .filter(item => !capabilityRouteAllowed(item.route, capabilities))
+      .map(item => item.route),
+  ]), [capabilities, flaggedOffRoutes])
 
   const pinnedItems = useMemo(
     () => pinnedRoutes
-      .filter(pinnedRoute => !flaggedOffRoutes.has(pinnedRoute))
+      .filter(pinnedRoute => !hiddenRoutes.has(pinnedRoute))
       .map(pinnedRoute => (
         allNavigation.find(item => (
           item.route === pinnedRoute && !sidebarHiddenRoutes.has(item.route)
@@ -419,7 +428,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
         ?? settingsNavigation.find(item => item.route === pinnedRoute)
       ))
       .filter((item): item is NavigationItem => Boolean(item)),
-    [flaggedOffRoutes, pinnedRoutes],
+    [hiddenRoutes, pinnedRoutes],
   )
 
   const pinnedRouteSet = useMemo(() => new Set(pinnedRoutes), [pinnedRoutes])
@@ -429,11 +438,11 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
       .map(section => ({
         ...section,
         items: section.items.filter(
-          item => !pinnedRouteSet.has(item.route) && !flaggedOffRoutes.has(item.route),
+          item => !pinnedRouteSet.has(item.route) && !hiddenRoutes.has(item.route),
         ),
       }))
       .filter(section => section.items.length > 0),
-    [flaggedOffRoutes, pinnedRouteSet],
+    [hiddenRoutes, pinnedRouteSet],
   )
 
   const togglePinned = (itemRoute: string) => {
@@ -796,9 +805,9 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
             <DropdownMenuItem onSelect={auth.switchTenant}>
               <Building2 /> {t('nav:account.switchTenant')}
             </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => navigate('settings')}>
+            {!hiddenRoutes.has('settings') ? <DropdownMenuItem onSelect={() => navigate('settings')}>
               <Settings /> {t('nav:account.settings')}
-            </DropdownMenuItem>
+            </DropdownMenuItem> : null}
             <DropdownMenuItem onSelect={() => setDark(value => !value)}>
               {dark ? <Sun /> : <Moon />}
               {dark ? t('common:theme.toLight') : t('common:theme.toDark')}
@@ -894,7 +903,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
             {/* Hovering the window edge is not discoverable on its own. */}
             {collapsed ? (
               <div className="desktop-collapsed-actions">
-                <Tooltip>
+                {!hiddenRoutes.has('golf') ? <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
                       type="button"
@@ -909,7 +918,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="bottom">{navLabel('golf')}</TooltipContent>
-                </Tooltip>
+                </Tooltip> : null}
                 <Button
                   ref={sidebarOpenTriggerRef}
                   type="button"
@@ -996,7 +1005,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
           {navigationSections.map(section => (
             <CommandGroup key={section.id} heading={t(`nav:sections.${section.id}`)}>
               {/* ⌘K も画面への入口なので、フラグが降りたルートはここからも外す。 */}
-              {section.items.filter(item => !flaggedOffRoutes.has(item.route)).map(item => (
+              {section.items.filter(item => !hiddenRoutes.has(item.route)).map(item => (
                 <CommandNavigationItem
                   key={item.route}
                   item={item}
@@ -1005,7 +1014,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
               ))}
             </CommandGroup>
           ))}
-          <CommandGroup heading={t('nav:sections.settings')}>
+          {!hiddenRoutes.has('settings') ? <CommandGroup heading={t('nav:sections.settings')}>
             <CommandItem onSelect={() => { navigate('settings'); setCommandOpen(false) }}>
               <Settings />
               <span className="command-copy">
@@ -1013,14 +1022,14 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
                 <small>{navDescription('settings')}</small>
               </span>
             </CommandItem>
-            {settingsNavigation.map(item => (
+            {settingsNavigation.filter(item => !hiddenRoutes.has(item.route)).map(item => (
               <CommandNavigationItem
                 key={item.route}
                 item={item}
                 onNavigate={() => setCommandOpen(false)}
               />
             ))}
-          </CommandGroup>
+          </CommandGroup> : null}
           <CommandGroup heading={t('common:locale.label')}>
             {LOCALES.map(locale => (
               <CommandItem

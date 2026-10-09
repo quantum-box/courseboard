@@ -7,6 +7,15 @@ import { i18next } from '../i18n'
 import { PageReloadProvider } from '../lib/pageReload'
 import { AppShell } from '../components/AppShell'
 import { GolfHomePage } from '../features/golf/GolfHomePage'
+
+// These tests isolate release flags after the caller's business actions are
+// already authorized. Authorization must not fall back to a missing provider.
+vi.mock('../auth/EffectiveCapabilitiesProvider', () => ({
+  useEffectiveCapabilities: () => ({ capabilities: {
+    navigation: { otherBusinessAccess: true },
+    cancellationFees: { list: true, manage: true },
+  } }),
+}))
 import { FEATURE_FLAG_KEYS, FeatureFlagProvider } from './FeatureFlags'
 import { ROUTE_FEATURE_FLAGS, routeGateFrom } from './gated-routes'
 

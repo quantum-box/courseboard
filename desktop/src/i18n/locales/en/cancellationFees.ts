@@ -137,6 +137,10 @@ export const cancellationFees: DeepPartial<typeof source> = {
     review: 'Review before sending',
     submit: 'Create and send',
     submitting: 'Creating and sending…',
+    completed: {
+      title: 'Invoice processing completed',
+      description: 'Invoice {{number}} has been processed.',
+    },
     confirm: {
       title: 'Send this?',
       description: 'Sending puts a payment link in front of the recipient. Check it first.',

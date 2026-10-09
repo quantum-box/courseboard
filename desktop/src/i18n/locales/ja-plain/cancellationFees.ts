@@ -129,6 +129,10 @@ export const cancellationFees: DeepPartial<typeof source> = {
     review: '送る内容を確かめる',
     submit: '請求書を作って送る',
     submitting: '作って送っています…',
+    completed: {
+      title: '請求の処理が完了しました',
+      description: '請求 {{number}} の処理が完了しました。',
+    },
     confirm: {
       title: 'この内容で送ります',
       description: '送ると、支払い用のリンクが相手に届きます。送る前に確かめてください。',
