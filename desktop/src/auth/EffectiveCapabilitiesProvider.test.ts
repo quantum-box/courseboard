@@ -40,6 +40,10 @@ describe('startupRouteForCapabilities', () => {
     expect(startupRouteForCapabilities('cancellation-fees/inv_1', cancellationOnly)).toBeNull()
   })
 
+  it('does not redirect an unknown URL for a cancellation-only operator', () => {
+    expect(startupRouteForCapabilities('unknown-authenticated-route', cancellationOnly)).toBeNull()
+  })
+
   it('leaves mixed-product and unentitled operators to the downstream guard', () => {
     const mixed = {
       ...cancellationOnly,

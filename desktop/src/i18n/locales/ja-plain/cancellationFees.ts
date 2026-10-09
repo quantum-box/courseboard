@@ -10,6 +10,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
     SendFailed: '送れませんでした',
     Paid: 'お金が入りました',
     Overdue: '期限を過ぎています',
+    Void: '無効です',
     label: '今の状態',
   },
   orderStatus: {
@@ -69,6 +70,12 @@ export const cancellationFees: DeepPartial<typeof source> = {
       initialRetry: '最初の送信をもう一度確認する',
       resending: 'もう一度送っています…',
       openDetail: '請求書の画面を開く',
+      destination: {
+        title: 'メールの送り先を直す',
+        description: 'メールの送信が送り先の間違いで失敗しました。この請求書の送り先を直してから、もう一度送ってください。',
+        mismatch: '直した送り先をサーバーで確認できませんでした。請求書を確認して、もう一度やり直してください。',
+        uncertain: '送り先の変更結果が分かりません。同じ内容のまま、もう一度確認してください。',
+      },
     },
     orderLoading: '注文の内容を読み込んでいます',
     orderFailed: {

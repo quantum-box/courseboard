@@ -11,6 +11,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
     SendFailed: 'Send failed',
     Paid: 'Paid',
     Overdue: 'Overdue',
+    Void: 'Voided',
     all: 'All',
     label: 'Status',
   },
@@ -74,6 +75,12 @@ export const cancellationFees: DeepPartial<typeof source> = {
       initialRetry: 'Retry the initial delivery',
       resending: 'Resending…',
       openDetail: 'Open the invoice',
+      destination: {
+        title: 'Correct the email destination',
+        description: 'Email delivery failed because of the destination. Correct the recipient on this invoice before sending again.',
+        mismatch: 'The server did not return the corrected destination. Check the invoice and try again.',
+        uncertain: 'The destination update result is unknown. Retry the same correction without changing it.',
+      },
     },
     orderLoading: 'Loading the order',
     orderFailed: {

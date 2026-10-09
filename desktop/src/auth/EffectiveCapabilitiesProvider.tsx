@@ -13,6 +13,7 @@ import { navigate, useRoute } from '../lib/router'
 import { useAuth } from './AuthProvider'
 import {
   nonFeeBusinessAccessDecision,
+  routeCapabilityDecision,
   routeCapabilitySnapshotKnown,
 } from './capabilityRoutes'
 
@@ -130,6 +131,11 @@ export function startupRouteForCapabilities(
   route: string,
   capabilities: EffectiveCapabilities,
 ) {
+  // Unknown authenticated URLs must reach RouteContent so its NotFound branch
+  // can answer them. Fee-only startup redirection applies only to a known
+  // operator route; otherwise a saved/default URL would hide a 404 behind the
+  // cancellation-fee home.
+  if (routeCapabilityDecision(route, capabilities) === undefined) return null
   // Only a complete, explicit denial for every non-fee route can establish
   // that this is a fee-only operator. The legacy navigation aggregate is not
   // authoritative for route access and cannot grant or suppress Golf UI.

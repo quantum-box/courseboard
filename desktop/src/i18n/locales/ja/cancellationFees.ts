@@ -8,6 +8,7 @@ export const cancellationFees = {
     SendFailed: '送れませんでした',
     Paid: '入金ずみ',
     Overdue: '期限すぎ',
+    Void: '無効',
     all: 'すべて',
     label: '状態',
   },
@@ -71,6 +72,12 @@ export const cancellationFees = {
       initialRetry: '初回の送信をもう一度確認する',
       resending: '送り直しています…',
       openDetail: '請求の画面へ',
+      destination: {
+        title: 'メールの送り先を直す',
+        description: 'メールの送信が送り先のエラーで失敗しました。この請求書の送り先を直してから、もう一度送ってください。',
+        mismatch: '直した送り先をサーバーで確認できませんでした。請求書を確認して、もう一度やり直してください。',
+        uncertain: '送り先の変更結果を確認できませんでした。同じ内容のまま、もう一度確認してください。',
+      },
     },
     orderLoading: '受注を読み込んでいます',
     orderFailed: {

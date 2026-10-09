@@ -79,6 +79,7 @@ describe('cancellation fee display status', () => {
       { id: 'sent-overdue', status: 'Sent' as const, dueDate: '2026-08-31', totalAmount: 1_000 },
       { id: 'sent-current', status: 'Sent' as const, dueDate: '2026-09-01', totalAmount: 2_000 },
       { id: 'paid', status: 'Paid' as const, dueDate: '2026-08-01', totalAmount: 3_000 },
+      { id: 'void', status: 'Void' as const, dueDate: '2026-08-01', totalAmount: 9_000 },
     ]
     const displayed = invoices.map(invoice => ({
       ...invoice,
@@ -87,7 +88,7 @@ describe('cancellation fee display status', () => {
 
     expect(filterDisplayedInvoices(displayed, 'Overdue').map(invoice => invoice.id)).toEqual(['sent-overdue'])
     expect(summarize(invoices, 'Asia/Tokyo', '2026-09-01')).toEqual({
-      count: 3,
+      count: 4,
       unpaid: 3_000,
       overdue: 1,
       paid: 3_000,
@@ -104,6 +105,16 @@ describe('cancellation fee status operations', () => {
   it('locks all invoice updates after payment', () => {
     expect(isInvoiceUpdateAllowed({ status: 'Paid' })).toBe(false)
     expect(isInvoiceUpdateAllowed({ status: 'Sent' })).toBe(true)
+  })
+
+  it('preserves Field Void as a terminal display state and never makes it editable', () => {
+    expect(invoiceDisplayStatus(
+      { status: 'Void', dueDate: '2020-01-01' },
+      'Asia/Tokyo',
+      '2026-09-01',
+    )).toBe('Void')
+    expect(isInvoiceUpdateAllowed({ status: 'Void' })).toBe(false)
+    expect(EDITABLE_INVOICE_STATUSES).not.toContain('Void')
   })
 })
 
@@ -334,6 +345,17 @@ describe('cancellation fee fulfillment', () => {
       paymentLinkUrl: null,
       smsDeliveryStatus: 'Failed',
     }, { sendEmail: false, sendSms: true })).toBeUndefined()
+  })
+
+  it('treats a void invoice as terminal despite stale link or delivery fields', () => {
+    expect(fulfillmentIssue({
+      ...sentInvoice,
+      status: 'Void',
+      paymentLinkStatus: 'Pending',
+      paymentLinkUrl: null,
+      emailDeliveryStatus: 'Failed',
+      smsDeliveryStatus: 'Failed',
+    }, { sendEmail: true, sendSms: true })).toBeUndefined()
   })
 
   it('rejects a successful HTTP response without a ready URL', () => {

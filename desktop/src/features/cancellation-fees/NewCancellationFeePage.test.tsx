@@ -162,6 +162,15 @@ function fillLinkOnlySnapshot(name = '山田 太郎') {
   })
 }
 
+function fillEmailSnapshot(email = 'wrong@example.com') {
+  fireEvent.change(screen.getByLabelText('請求先の名前', { exact: false }), {
+    target: { value: '山田 太郎' },
+  })
+  fireEvent.change(screen.getByLabelText('送り先のメール', { exact: false }), {
+    target: { value: email },
+  })
+}
+
 function bodyOf(call: unknown[]) {
   const init = call[1] as RequestInit
   return JSON.parse(String(init.body)) as Record<string, any>
@@ -430,7 +439,7 @@ describe('the dedicated cancellation fee form', () => {
     resolveRefresh(invoice({ status: 'Sent', emailDeliveryStatus: 'Sent', smsDeliveryStatus: 'Sent' }))
   })
 
-  it('keeps the resend key for a partial response and rotates after completion', async () => {
+  it('rotates the resend key after every definitive partial or complete response', async () => {
     vi.stubGlobal('crypto', {
       randomUUID: vi.fn()
         .mockReturnValueOnce('123e4567-e89b-42d3-a456-426614174000')
@@ -470,12 +479,188 @@ describe('the dedicated cancellation fee form', () => {
     fireEvent.click(screen.getByRole('button', { name: 'リンクを作って送り直す' }))
     await waitFor(() => expect(sendAttempts).toBe(2))
     const sends = api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))
-    expect(bodyOf(sends[1]!)).toMatchObject({ idempotencyKey: firstKey })
+    const secondKey = bodyOf(sends[1]!).idempotencyKey
+    expect(secondKey).not.toBe(firstKey)
 
     fireEvent.click(screen.getByRole('button', { name: 'リンクを作って送り直す' }))
     await waitFor(() => expect(sendAttempts).toBe(3))
     const completedSends = api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))
-    expect(bodyOf(completedSends[2]!).idempotencyKey).not.toBe(firstKey)
+    expect(bodyOf(completedSends[2]!).idempotencyKey).not.toBe(secondKey)
+  })
+
+  it('keeps Detail resend and invoice edits locked until an unknown send is retried', async () => {
+    const sends: Array<{ resolve: (value: unknown) => void; reject: (reason?: unknown) => void }> = []
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees/inv_1') return invoice({
+        status: 'Sent',
+        clientEmail: 'customer@example.com',
+        emailDeliveryStatus: 'Sent',
+        smsDeliveryStatus: null,
+      })
+      if (path.endsWith('/fulfill')) throw new Error('completed invoice must use /send')
+      if (path.endsWith('/send')) {
+        return new Promise((resolve, reject) => sends.push({ resolve, reject }))
+      }
+      if (path === '/v1/cancellation-fees/inv_1') throw new Error('unexpected request')
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+    renderDetailPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(sends).toHaveLength(1))
+    const firstSend = api.field.mock.calls.find(call => String(call[0]).endsWith('/send'))!
+    const firstBody = bodyOf(firstSend)
+    expect((screen.getByLabelText('送信先メールアドレス') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '変更する' }) as HTMLButtonElement).disabled).toBe(true)
+
+    sends[0]!.reject(new Error('send response lost'))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect((screen.getByLabelText('送信先メールアドレス') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '変更する' }) as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(sends).toHaveLength(2))
+    const resendBody = bodyOf(api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))[1]!)
+    expect(resendBody).toMatchObject({
+      idempotencyKey: firstBody.idempotencyKey,
+      sendEmail: firstBody.sendEmail,
+      sendSms: firstBody.sendSms,
+    })
+    sends[1]!.resolve(invoice({ status: 'Sent', clientEmail: 'customer@example.com', emailDeliveryStatus: 'Sent' }))
+  })
+
+  it('replays a pending Detail send after reload without fulfil or patch', async () => {
+    let fulfillAttempts = 0
+    let patchAttempts = 0
+    const sends: Array<{ resolve: (value: unknown) => void; reject: (reason?: unknown) => void }> = []
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees/inv_1' && !init?.method) {
+        return invoice({
+          status: 'Sent',
+          clientEmail: 'customer@example.com',
+          emailDeliveryStatus: 'Sent',
+          smsDeliveryStatus: null,
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
+        throw new Error('pending resend must not fall back to fulfil')
+      }
+      if (path.endsWith('/send')) {
+        return new Promise((resolve, reject) => sends.push({ resolve, reject }))
+      }
+      if (init?.method === 'PATCH') {
+        patchAttempts += 1
+        throw new Error('pending resend must block PATCH')
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+
+    renderDetailPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(sends).toHaveLength(1))
+    const firstBody = bodyOf(api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))[0]!)
+
+    cleanup()
+    renderDetailPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(sends).toHaveLength(2))
+    const replayBody = bodyOf(api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))[1]!)
+    expect(replayBody).toMatchObject({
+      idempotencyKey: firstBody.idempotencyKey,
+      sendEmail: firstBody.sendEmail,
+      sendSms: firstBody.sendSms,
+    })
+    expect(fulfillAttempts).toBe(0)
+    expect(patchAttempts).toBe(0)
+    sends[1]!.resolve(invoice({ status: 'Sent', clientEmail: 'customer@example.com', emailDeliveryStatus: 'Sent' }))
+  })
+
+  it('replays a pending initial Detail fulfilment after reload', async () => {
+    let fulfillAttempts = 0
+    let patchAttempts = 0
+    const fulfils: Array<{ resolve: (value: unknown) => void; reject: (reason?: unknown) => void }> = []
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees/inv_1' && !init?.method) {
+        return invoice({
+          status: 'Draft',
+          emailDeliveryStatus: 'Pending',
+          smsDeliveryStatus: 'Pending',
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
+        return new Promise((resolve, reject) => fulfils.push({ resolve, reject }))
+      }
+      if (path.endsWith('/send')) throw new Error('pending initial fulfilment must not use /send')
+      if (init?.method === 'PATCH') {
+        patchAttempts += 1
+        throw new Error('pending initial fulfilment must block PATCH')
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+
+    renderDetailPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(fulfils).toHaveLength(1))
+
+    cleanup()
+    renderDetailPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(fulfils).toHaveLength(2))
+    expect(fulfillAttempts).toBe(2)
+    expect(patchAttempts).toBe(0)
+    fulfils[1]!.resolve(invoice({ status: 'Sent', emailDeliveryStatus: 'Sent', smsDeliveryStatus: 'Sent' }))
+  })
+
+  it('does not let a late Detail send response cross tenant or user scope', async () => {
+    const sends: Array<{ resolve: (value: unknown) => void; reject: (reason?: unknown) => void }> = []
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees/inv_1') return invoice({
+        status: 'Sent',
+        clientEmail: 'customer@example.com',
+        emailDeliveryStatus: 'Sent',
+        smsDeliveryStatus: null,
+      })
+      if (path.endsWith('/send')) {
+        return new Promise((resolve, reject) => sends.push({ resolve, reject }))
+      }
+      if (path.endsWith('/fulfill')) throw new Error('completed invoice must use /send')
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+
+    renderDetailPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(sends).toHaveLength(1))
+    const oldOperationKey = 'courseboard:cancellation-fee:delivery-operations:tenant_test:user_test:inv_1'
+    const newOperationKey = 'courseboard:cancellation-fee:delivery-operations:tenant_test:user_b:inv_1'
+    expect(sessionStorage.getItem(oldOperationKey)).not.toBeNull()
+
+    cleanup()
+    configureTestUser('user_b')
+    renderDetailPage()
+    await screen.findByText('INV-1')
+    expect(sessionStorage.getItem(newOperationKey)).toBeNull()
+
+    sends[0]!.resolve(invoice({ status: 'Sent', clientEmail: 'customer@example.com', emailDeliveryStatus: 'Sent' }))
+    await waitFor(() => expect(sessionStorage.getItem(oldOperationKey)).not.toBeNull())
+    expect(sessionStorage.getItem(newOperationKey)).toBeNull()
+    expect(api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))).toHaveLength(1)
+  })
+
+  it('disables Detail resend and edits for a void invoice', async () => {
+    api.field.mockResolvedValue(invoice({
+      status: 'Void',
+      clientEmail: 'customer@example.com',
+      emailDeliveryStatus: 'Failed',
+      emailDeliveryFailureCode: 'BillingNotReady',
+    }))
+    renderDetailPage()
+
+    await screen.findByText('INV-1')
+    expect((screen.getByRole('button', { name: 'リンクを作って送り直す' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByLabelText('送信先メールアドレス') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '変更する' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
   it('retries the same initial delivery after its response times out', async () => {
@@ -753,6 +938,437 @@ describe('the dedicated cancellation fee form', () => {
     expect(api.field.mock.calls.some(call => String(call[0]).startsWith('/v1/invoices'))).toBe(false)
   })
 
+  it('lets a manage-only operator correct an invalid email before a fresh resend', async () => {
+    let uuidCalls = 0
+    vi.stubGlobal('crypto', {
+      randomUUID: vi.fn(() => `123e4567-e89b-42d3-a456-${(uuidCalls++).toString(16).padStart(12, '0')}`),
+    })
+    access.list = false
+    let fulfillAttempts = 0
+    let patchAttempts = 0
+    let sendAttempts = 0
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees') {
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'wrong@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path === '/v1/cancellation-fees/inv_1' && init?.method === 'PATCH') {
+        patchAttempts += 1
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'fixed@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'wrong@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path.endsWith('/send')) {
+        sendAttempts += 1
+        return invoice({
+          status: 'Sent',
+          clientEmail: 'fixed@example.com',
+          emailDeliveryStatus: 'Sent',
+        })
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path} ${init?.method ?? 'GET'}`)
+    })
+
+    renderPage()
+    fillEmailSnapshot()
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求書は作れました')
+    await waitFor(() => expect(fulfillAttempts).toBe(1))
+
+    const create = api.field.mock.calls.find(call => call[0] === '/v1/cancellation-fees')!
+    const correction = await screen.findByLabelText('送信先メールアドレス', { exact: false })
+    expect((correction as HTMLInputElement).value).toBe('wrong@example.com')
+    fireEvent.change(correction, { target: { value: 'fixed@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '変更する' }))
+
+    await waitFor(() => expect(patchAttempts).toBe(1))
+    const patchCall = api.field.mock.calls.find(call => (
+      call[0] === '/v1/cancellation-fees/inv_1'
+      && (call[1] as RequestInit)?.method === 'PATCH'
+    ))!
+    expect(bodyOf(patchCall)).toEqual({ clientEmail: 'fixed@example.com' })
+    expect(api.field.mock.calls.filter(call => call[0] === '/v1/cancellation-fees')).toHaveLength(1)
+    expect(sendAttempts).toBe(0)
+
+    fireEvent.click(screen.getByRole('button', { name: '送信だけやり直す' }))
+    await waitFor(() => expect(sendAttempts).toBe(1))
+    const send = api.field.mock.calls.find(call => String(call[0]).endsWith('/send'))!
+    expect(bodyOf(send)).toMatchObject({
+      sendEmail: true,
+      sendSms: false,
+    })
+    expect(bodyOf(send).idempotencyKey).not.toBe(bodyOf(create).idempotencyKey)
+    expect(router.navigate).not.toHaveBeenCalled()
+  })
+
+  it('locks a corrected destination while resend is uncertain and retries the same send key', async () => {
+    access.list = false
+    let patchAttempts = 0
+    const sends: Array<{
+      resolve: (value: unknown) => void
+      reject: (reason?: unknown) => void
+    }> = []
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees') {
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'wrong@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path === '/v1/cancellation-fees/inv_1' && init?.method === 'PATCH') {
+        patchAttempts += 1
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'fixed@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'wrong@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path.endsWith('/send')) {
+        return new Promise((resolve, reject) => sends.push({ resolve, reject }))
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path} ${init?.method ?? 'GET'}`)
+    })
+
+    renderPage()
+    fillEmailSnapshot()
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求書は作れました')
+
+    const correction = await screen.findByLabelText('送信先メールアドレス', { exact: false })
+    fireEvent.change(correction, { target: { value: 'fixed@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '変更する' }))
+    await waitFor(() => expect(patchAttempts).toBe(1))
+
+    const resend = screen.getByRole('button', { name: '送信だけやり直す' })
+    fireEvent.click(resend)
+    await waitFor(() => expect(sends).toHaveLength(1))
+    expect((correction as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '変更する' }) as HTMLButtonElement).disabled).toBe(true)
+    const firstSendBody = bodyOf(api.field.mock.calls.find(call => String(call[0]).endsWith('/send'))!)
+
+    sends[0]!.reject(new Error('send response lost'))
+    await waitFor(() => expect(screen.getByRole('status').textContent).toContain('send response lost'))
+    expect((screen.getByLabelText('送信先メールアドレス', { exact: false }) as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '変更する' }) as HTMLButtonElement).disabled).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: '送信だけやり直す' }))
+    await waitFor(() => expect(sends).toHaveLength(2))
+    const secondSendBody = bodyOf(api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))[1]!)
+    expect(secondSendBody).toMatchObject({
+      idempotencyKey: firstSendBody.idempotencyKey,
+      sendEmail: firstSendBody.sendEmail,
+      sendSms: firstSendBody.sendSms,
+    })
+    sends[1]!.resolve(invoice({ status: 'Sent', clientEmail: 'fixed@example.com', emailDeliveryStatus: 'Sent' }))
+  })
+
+  it('replays the frozen create and the same pending send after reload without fulfil or patch', async () => {
+    access.list = false
+    let createAttempts = 0
+    let fulfillAttempts = 0
+    let patchAttempts = 0
+    const sends: Array<{ resolve: (value: unknown) => void; reject: (reason?: unknown) => void }> = []
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees') {
+        createAttempts += 1
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'wrong@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path === '/v1/cancellation-fees/inv_1' && init?.method === 'PATCH') {
+        patchAttempts += 1
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'fixed@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'wrong@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path.endsWith('/send')) {
+        return new Promise((resolve, reject) => sends.push({ resolve, reject }))
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path} ${init?.method ?? 'GET'}`)
+    })
+
+    const firstPage = renderPage()
+    fillEmailSnapshot()
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求書は作れました')
+    await waitFor(() => expect(fulfillAttempts).toBe(1))
+    const correction = await screen.findByLabelText('送信先メールアドレス', { exact: false })
+    fireEvent.change(correction, { target: { value: 'fixed@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '変更する' }))
+    await waitFor(() => expect(patchAttempts).toBe(1))
+    fireEvent.click(screen.getByRole('button', { name: '送信だけやり直す' }))
+    await waitFor(() => expect(sends).toHaveLength(1))
+    const creates = () => api.field.mock.calls.filter(call => call[0] === '/v1/cancellation-fees')
+    const firstCreateBody = bodyOf(creates()[0]!)
+    const firstSendBody = bodyOf(api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))[0]!)
+    firstPage.unmount()
+
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await waitFor(() => expect(createAttempts).toBe(2))
+    await waitFor(() => expect(sends).toHaveLength(2))
+    expect(fulfillAttempts).toBe(1)
+    expect(patchAttempts).toBe(1)
+    expect(bodyOf(creates()[1]!)).toEqual(firstCreateBody)
+    const replaySendBody = bodyOf(api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))[1]!)
+    expect(replaySendBody).toMatchObject({
+      idempotencyKey: firstSendBody.idempotencyKey,
+      sendEmail: firstSendBody.sendEmail,
+      sendSms: firstSendBody.sendSms,
+    })
+    sends[1]!.resolve(invoice({ status: 'Sent', clientEmail: 'fixed@example.com', emailDeliveryStatus: 'Sent' }))
+  })
+
+  it('ignores a late resend response after tenant and user scope change', async () => {
+    access.list = false
+    let createAttempts = 0
+    let fulfillAttempts = 0
+    let patchAttempts = 0
+    const sends: Array<{ resolve: (value: unknown) => void; reject: (reason?: unknown) => void }> = []
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees') {
+        createAttempts += 1
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'wrong@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path === '/v1/cancellation-fees/inv_1' && init?.method === 'PATCH') {
+        patchAttempts += 1
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'fixed@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'wrong@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path.endsWith('/send')) return new Promise((resolve, reject) => sends.push({ resolve, reject }))
+      throw new Error(`unexpected cancellation-fee request: ${path} ${init?.method ?? 'GET'}`)
+    })
+
+    const oldPage = renderPage()
+    fillEmailSnapshot()
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求書は作れました')
+    await waitFor(() => expect(fulfillAttempts).toBe(1))
+    const correction = await screen.findByLabelText('送信先メールアドレス', { exact: false })
+    fireEvent.change(correction, { target: { value: 'fixed@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '変更する' }))
+    await waitFor(() => expect(patchAttempts).toBe(1))
+    fireEvent.click(screen.getByRole('button', { name: '送信だけやり直す' }))
+    await waitFor(() => expect(sends).toHaveLength(1))
+    const oldRecoveryKey = 'courseboard:cancellation-fee:create-recovery:tenant_test:user_test'
+    const newRecoveryKey = 'courseboard:cancellation-fee:create-recovery:tenant_test:user_b'
+    const oldRecoveryBefore = sessionStorage.getItem(oldRecoveryKey)
+    expect(oldRecoveryBefore).not.toBeNull()
+
+    oldPage.unmount()
+    configureTestUser('user_b')
+    renderPage()
+    expect(screen.getByRole('button', { name: '送る内容を確認する' })).toBeTruthy()
+    expect(screen.queryByText('請求書は作れました')).toBeNull()
+    expect(sessionStorage.getItem(newRecoveryKey)).toBeNull()
+
+    sends[0]!.resolve(invoice({ status: 'Sent', clientEmail: 'fixed@example.com', emailDeliveryStatus: 'Sent' }))
+    await waitFor(() => expect(sends).toHaveLength(1))
+    expect(createAttempts).toBe(1)
+    expect(fulfillAttempts).toBe(1)
+    expect(patchAttempts).toBe(1)
+    expect(sessionStorage.getItem(oldRecoveryKey)).toBe(oldRecoveryBefore)
+    expect(sessionStorage.getItem(newRecoveryKey)).toBeNull()
+    expect(screen.queryByText('請求書は作れました')).toBeNull()
+  })
+
+  it('replays a lost recipient patch with the same email and removes it after a definite response', async () => {
+    access.list = false
+    let createAttempts = 0
+    let fulfillAttempts = 0
+    let patchAttempts = 0
+    let sendAttempts = 0
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees') {
+        createAttempts += 1
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'wrong@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path === '/v1/cancellation-fees/inv_1' && init?.method === 'PATCH') {
+        patchAttempts += 1
+        if (patchAttempts === 1) throw new Error('patch response lost')
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'fixed@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
+        return invoice({
+          status: 'SendFailed',
+          clientEmail: 'wrong@example.com',
+          emailDeliveryStatus: 'Failed',
+          emailDeliveryFailureCode: 'InvalidDestination',
+        })
+      }
+      if (path.endsWith('/send')) {
+        sendAttempts += 1
+        return invoice({ status: 'Sent', clientEmail: 'fixed@example.com', emailDeliveryStatus: 'Sent' })
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path} ${init?.method ?? 'GET'}`)
+    })
+
+    const firstPage = renderPage()
+    fillEmailSnapshot()
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求書は作れました')
+    await waitFor(() => expect(fulfillAttempts).toBe(1))
+
+    const correction = await screen.findByLabelText('送信先メールアドレス', { exact: false })
+    fireEvent.change(correction, { target: { value: 'fixed@example.com' } })
+    fireEvent.click(screen.getByRole('button', { name: '変更する' }))
+    await waitFor(() => expect(patchAttempts).toBe(1))
+    expect(screen.getByText(/送り先の変更結果を確認できません/)).toBeTruthy()
+    firstPage.unmount()
+
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await waitFor(() => expect(patchAttempts).toBe(2))
+    expect(fulfillAttempts).toBe(1)
+
+    const recovery = JSON.parse(
+      sessionStorage.getItem('courseboard:cancellation-fee:create-recovery:tenant_test:user_test')!,
+    ) as { recipientPatch?: unknown; initialDeliverySettled?: boolean }
+    expect(recovery.recipientPatch).toBeUndefined()
+    expect(recovery.initialDeliverySettled).toBe(true)
+    const patches = api.field.mock.calls.filter(call => (
+      call[0] === '/v1/cancellation-fees/inv_1'
+      && (call[1] as RequestInit)?.method === 'PATCH'
+    ))
+    expect(bodyOf(patches[0]!).clientEmail).toBe('fixed@example.com')
+    expect(bodyOf(patches[1]!).clientEmail).toBe('fixed@example.com')
+
+    fireEvent.click(screen.getByRole('button', { name: '送信だけやり直す' }))
+    await waitFor(() => expect(sendAttempts).toBe(1))
+    expect(createAttempts).toBe(2)
+  })
+
+  it('does not retry delivery or patch a terminal invoice returned by create replay', async () => {
+    let createAttempts = 0
+    let fulfillAttempts = 0
+    let sendAttempts = 0
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees') {
+        createAttempts += 1
+        return createAttempts === 1
+          ? invoice({
+              status: 'SendFailed',
+              smsDeliveryStatus: 'Failed',
+              smsDeliveryFailureCode: 'BillingNotReady',
+            })
+          : invoice({ status: 'Paid', smsDeliveryStatus: 'Failed' })
+      }
+      if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
+        return invoice({
+          status: 'SendFailed',
+          smsDeliveryStatus: 'Failed',
+          smsDeliveryFailureCode: 'BillingNotReady',
+        })
+      }
+      if (path.endsWith('/send')) {
+        sendAttempts += 1
+        throw new Error('send must not replay after terminal create response')
+      }
+      if (init?.method === 'PATCH') throw new Error('patch must not target a terminal invoice')
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+
+    const firstPage = renderPage()
+    fillSnapshot()
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求書は作れました')
+    await waitFor(() => expect(fulfillAttempts).toBe(1))
+    fireEvent.click(screen.getByRole('button', { name: '送信だけやり直す' }))
+    await waitFor(() => expect(sendAttempts).toBe(1))
+    firstPage.unmount()
+
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await waitFor(() => expect(router.navigate).toHaveBeenCalledWith('cancellation-fees/inv_1'))
+    expect(createAttempts).toBe(2)
+    expect(fulfillAttempts).toBe(1)
+    expect(sendAttempts).toBe(1)
+  })
+
   it('retires the create recovery and key after detail delivery completes', async () => {
     api.field.mockImplementation(async (path: string) => {
       if (path === '/v1/cancellation-fees') {
@@ -794,6 +1410,95 @@ describe('the dedicated cancellation fee form', () => {
 
     expect(sessionStorage.getItem('courseboard:cancellation-fee:create-recovery:tenant_test:user_test')).toBeNull()
     expect(JSON.parse(sessionStorage.getItem('courseboard:cancellation-fee:create-keys:tenant_test:user_test')!)).toEqual({})
+  })
+
+  it('reuses a Detail lost-send operation when the operator returns to New', async () => {
+    const createKey = '123e4567-e89b-42d3-a456-426614174001'
+    const recoveryStorageKey = 'courseboard:cancellation-fee:create-recovery:tenant_test:user_test'
+    sessionStorage.setItem(recoveryStorageKey, JSON.stringify({
+      identity: 'cross-page-recovery',
+      key: createKey,
+      scope: 'tenant_test:user_test',
+      invoiceId: 'inv_1',
+      initialDeliverySettled: true,
+      submission: {
+        billTo: { name: '山田 太郎', email: 'customer@example.com' },
+        recipientName: '山田 太郎',
+        clientEmail: 'customer@example.com',
+        dueDate: '2099-09-11',
+        taxAmount: 0,
+        notes: 'キャンセル料',
+        description: 'キャンセル料',
+        amount: 5000,
+        sendEmail: true,
+        sendSms: false,
+      },
+    }))
+    let createAttempts = 0
+    let fulfillAttempts = 0
+    let patchAttempts = 0
+    const sends: Array<{ resolve: (value: unknown) => void; reject: (reason?: unknown) => void }> = []
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path === '/v1/cancellation-fees/inv_1' && !init?.method) {
+        return invoice({
+          status: 'Sent',
+          clientEmail: 'customer@example.com',
+          emailDeliveryStatus: 'Sent',
+          smsDeliveryStatus: null,
+        })
+      }
+      if (path === '/v1/cancellation-fees' && init?.method === 'POST') {
+        createAttempts += 1
+        return invoice({
+          status: 'Sent',
+          clientEmail: 'customer@example.com',
+          emailDeliveryStatus: 'Sent',
+          smsDeliveryStatus: null,
+        })
+      }
+      if (path.endsWith('/fulfill')) {
+        fulfillAttempts += 1
+        throw new Error('cross-page send must not fall back to fulfil')
+      }
+      if (path.endsWith('/send')) {
+        return new Promise((resolve, reject) => sends.push({ resolve, reject }))
+      }
+      if (init?.method === 'PATCH') {
+        patchAttempts += 1
+        throw new Error('cross-page send must block recipient PATCH')
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path} ${init?.method ?? 'GET'}`)
+    })
+
+    renderDetailPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'リンクを作って送り直す' }))
+    await waitFor(() => expect(sends).toHaveLength(1))
+    const detailSendBody = bodyOf(api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))[0]!)
+    cleanup()
+
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await waitFor(() => expect(createAttempts).toBe(1))
+    await waitFor(() => expect(sends).toHaveLength(2))
+
+    const create = api.field.mock.calls.find(call => (
+      call[0] === '/v1/cancellation-fees' && (call[1] as RequestInit)?.method === 'POST'
+    ))!
+    expect(bodyOf(create).idempotencyKey).toBe(createKey)
+    const newSendBody = bodyOf(api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))[1]!)
+    expect(newSendBody).toMatchObject({
+      idempotencyKey: detailSendBody.idempotencyKey,
+      sendEmail: detailSendBody.sendEmail,
+      sendSms: detailSendBody.sendSms,
+    })
+    expect(fulfillAttempts).toBe(0)
+    expect(patchAttempts).toBe(0)
+    sends[1]!.resolve(invoice({
+      status: 'Sent',
+      clientEmail: 'customer@example.com',
+      emailDeliveryStatus: 'Sent',
+      smsDeliveryStatus: null,
+    }))
   })
 
   it('does not let a stale create completion replace a newer same-scope recovery', async () => {
