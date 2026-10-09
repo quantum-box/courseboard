@@ -47,6 +47,23 @@ describe('document review recovery', () => {
     expect(updated.values.originalConfirmed).toBe(false)
     expect(original.values.originalConfirmed).toBe(true)
   })
+  it('remaps the displayed and saved first split row while preserving manual edits and subsequent rows', () => {
+    const original = reviewedRows(document)[0]!
+    original.values.manualRows = [{ ...businessValues(original)[0], groupCount: '99', date: '', note: 'first' }, { facilityName: 'South', date: '10/9', note: 'second' }]
+    original.values.editedFields = ['date']
+    original.values.originalConfirmed = true
+    const snapshot = structuredClone(original)
+    const updated = remapReviewedRow(original, {}, { facilityName: 'groupCount', groupCount: 'facilityName', date: 'facilityName' })
+    expect(businessValues(updated)[0]).toMatchObject({ facilityName: '2', groupCount: '99', date: '' })
+    const updatedManualRows = updated.values.manualRows as Record<string, unknown>[]
+    const savedManualRows = snapshot.values.manualRows as Record<string, unknown>[]
+    expect(updatedManualRows[0]).toMatchObject({ facilityName: '2', groupCount: '99', date: '', note: 'first' })
+    expect(updatedManualRows[1]).toEqual(savedManualRows[1])
+    expect(updated.values.originalConfirmed).toBe(false)
+    expect(updated.source).toEqual(snapshot.source)
+    expect(updated.values.cells).toBe(snapshot.values.cells)
+    expect(original).toEqual(snapshot)
+  })
   it('persists one retry handle scoped to tenant, platform and actor without source data', () => {
     const key = operationStorageKey('tenant-a', 'platform-a', 'actor-a')
     const operation = { idempotencyKey: 'same-read', jobId: 'dtj_saved' }

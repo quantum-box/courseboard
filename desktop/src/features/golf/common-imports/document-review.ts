@@ -46,7 +46,9 @@ export function remapReviewedRow(row: DocumentRow, previous: Record<string, stri
   const before = mappedValues(row, previous), after = mappedValues(row, next)
   const normalized = businessValues(row)[0]!
   const edited = Array.isArray(row.values.editedFields) ? row.values.editedFields : []
-  return { ...row, values: { ...row.values, originalConfirmed: false, normalized: Object.fromEntries(reservationFields.map(field => [field, edited.includes(field) || normalized[field] !== before[field] ? normalized[field] : after[field]])) } }
+  const remapped = Object.fromEntries(reservationFields.map(field => [field, edited.includes(field) || normalized[field] !== before[field] ? normalized[field] : after[field]]))
+  const manualRows = Array.isArray(row.values.manualRows) ? row.values.manualRows.map((value, index) => index === 0 ? { ...value, ...remapped } : value) : undefined
+  return { ...row, values: { ...row.values, originalConfirmed: false, normalized: remapped, ...(manualRows ? { manualRows } : {}) } }
 }
 export type DocumentUploadSnapshot = { year: number; pages: string; rotations: Array<0 | 90 | 180 | 270> }
 export type DocumentOperation = { idempotencyKey: string; jobId?: string; upload?: DocumentUploadSnapshot }
