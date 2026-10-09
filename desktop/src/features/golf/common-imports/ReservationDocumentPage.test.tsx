@@ -22,6 +22,32 @@ const running = {
 beforeEach(async () => { vi.clearAllMocks(); localStorage.clear(); await i18next.changeLanguage('ja') })
 afterEach(cleanup)
 function mount(jobId?: string) { render(<I18nextProvider i18n={i18next}><ReservationDocumentPage jobId={jobId} /></I18nextProvider>) }
+it('remaps an unedited first split row after editing only a later split row', async () => {
+  mock.targets.mockResolvedValue([{ key: 'courseboardReservationReports', documentImport: { pricingStatus: 'undecided' } }])
+  mock.json.mockResolvedValue({ items: [] })
+  const raw = { _source_index: 0, _source_page: 1, _source_row: 1, cells: JSON.stringify({ facilityName: 'East', alternate: 'West' }) }
+  mock.get.mockResolvedValue({ ...running, status: 'review', document: { ...running.document!, executionConfirmed: false, expiresAt: '2099-01-01', revision: undefined, sources: [{ index: 0 }], extracted: { fields: { rows: [raw] }, warnings: [] } } })
+  mount(running.id)
+  fireEvent.click(await screen.findByRole('button', { name: 'この原本行に手入力の行を追加' }))
+  fireEvent.change(screen.getAllByRole('textbox', { name: '施設名' })[1]!, { target: { value: 'Manual South' } })
+  fireEvent.change(screen.getByRole('combobox', { name: '施設名' }), { target: { value: 'alternate' } })
+  expect((screen.getAllByRole('textbox', { name: '施設名' })[0] as HTMLInputElement).value).toBe('West')
+  expect((screen.getAllByRole('textbox', { name: '施設名' })[1] as HTMLInputElement).value).toBe('Manual South')
+})
+it('resets the original file and physical page when switching document routes', async () => {
+  mock.targets.mockResolvedValue([{ key: 'courseboardReservationReports', documentImport: { pricingStatus: 'undecided' } }])
+  mock.json.mockResolvedValue({ items: [] })
+  const reviewed = (id: string, sources: number, physical: number) => ({ ...running, id, status: 'review', document: { ...running.document!, executionConfirmed: false, expiresAt: '2099-01-01', revision: undefined, sources: Array.from({ length: sources }, (_, index) => ({ index })), extracted: { fields: { rows: Array.from({ length: sources }, (_, index) => ({ _source_index: index, _source_page: physical, _source_row: 1, cells: '{}' })) }, warnings: [] } } })
+  mock.get.mockResolvedValueOnce(reviewed('dtj_first', 2, 12)).mockResolvedValueOnce(reviewed('dtj_second', 1, 1))
+  const view = render(<I18nextProvider i18n={i18next}><ReservationDocumentPage jobId="dtj_first" /></I18nextProvider>)
+  await screen.findByRole('heading', { name: '原本 2 · 12ページ · 1行目' })
+  fireEvent.change(screen.getByRole('combobox', { name: '原本ファイル' }), { target: { value: '1' } })
+  expect((screen.getByRole('combobox', { name: '原本ファイル' }) as HTMLSelectElement).value).toBe('1')
+  view.rerender(<I18nextProvider i18n={i18next}><ReservationDocumentPage jobId="dtj_second" /></I18nextProvider>)
+  await screen.findByRole('heading', { name: '原本 1 · 1ページ · 1行目' })
+  expect((screen.getByRole('combobox', { name: '原本ファイル' }) as HTMLSelectElement).value).toBe('0')
+  expect((screen.getByRole('combobox', { name: '原本のページ' }) as HTMLSelectElement).value).toBe('1')
+})
 it('restores and reconciles the same confirmed job after expiry and catalog failure', async () => {
   mock.targets.mockRejectedValue(new Error('offline'))
   mock.json.mockRejectedValue(new Error('offline'))

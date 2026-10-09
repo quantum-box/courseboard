@@ -59,6 +59,7 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
   function apply(next: ImportJob, restore = false) {
     const previous = current.current
     if (next.objectKey !== targetKey || !next.document) throw new Error(t('error.job'))
+    if (previous?.id !== next.id) resetOriginal()
     current.current = next
     setJob(next)
     if (restore || previous?.id !== next.id || previous.document?.ocrStatus !== 'completed' && next.document.ocrStatus === 'completed' || previous.document?.revisionVersion !== next.document.revisionVersion) {
@@ -75,10 +76,8 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
     finally { if (controller.current === active) setBusy(false) }
   }
   useEffect(() => {
-    current.current = undefined; setJob(undefined); setRows([]); setDirty(false); setTarget(undefined); setCatalogReady(false); setFiles([]); setRotations([]); setVerifiedSource(undefined)
+    current.current = undefined; setJob(undefined); setRows([]); setDirty(false); setTarget(undefined); setCatalogReady(false); setFiles([]); setRotations([]); resetOriginal()
     setUploadSnapshot(undefined); setPages(''); setOptions({ year: new Date().getFullYear(), columnMappings: {}, courseMappings: {} })
-    if (blobUrl.current) URL.revokeObjectURL(blobUrl.current)
-    blobUrl.current = ''; setOriginalUrl('')
     if (!identity) return
     void run(async signal => {
       const pending = jobId ? null : readDocumentOperation(storageKey)
@@ -137,7 +136,7 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
   function editValue(index: number, manualIndex: number, field: ReservationField, value: string) {
     edit(index, row => {
       const values = businessValues(row); values[manualIndex] = { ...values[manualIndex]!, [field]: value }
-      return { ...row, values: { ...row.values, editedFields: [...new Set([...(Array.isArray(row.values.editedFields) ? row.values.editedFields : []), field])], ...(Array.isArray(row.values.manualRows) ? { manualRows: values } : { normalized: values[0] }) } }
+      return { ...row, values: { ...row.values, ...(manualIndex === 0 ? { editedFields: [...new Set([...(Array.isArray(row.values.editedFields) ? row.values.editedFields : []), field])] } : {}), ...(Array.isArray(row.values.manualRows) ? { manualRows: values } : { normalized: values[0] }) } }
     })
   }
   function changeMapping(field: ReservationField, column: string) {
@@ -176,12 +175,16 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
     setRows(previous => previous.map(row => row.source.fileIndex === sourceIndex && row.source.page === visiblePage ? { ...row, values: { ...row.values, originalConfirmed: true } } : row)); setDirty(true)
   }
   function chooseFiles(chosen: File[]) { setFiles(chosen); setRotations(chosen.map((_, index) => uploadSnapshot?.rotations[index] ?? 0)) }
+  function resetOriginal() {
+    setSourceIndex(0); setPhysicalPage(1); setPage(0); setRenderedPage(undefined); setVerifiedSource(undefined); setOriginalUrl('')
+    if (blobUrl.current) URL.revokeObjectURL(blobUrl.current)
+    blobUrl.current = ''
+  }
   function newDocument() {
     const operation: DocumentOperation = { idempotencyKey: crypto.randomUUID() }
     persistDocumentOperation(storageKey, operation)
-    current.current = undefined; setJob(undefined); setRows([]); setFiles([]); setRotations([]); setDirty(false); setOriginalUrl(''); setVerifiedSource(undefined)
+    current.current = undefined; setJob(undefined); setRows([]); setFiles([]); setRotations([]); setDirty(false); resetOriginal()
     setUploadSnapshot(undefined); setPages(''); setOptions({ year: new Date().getFullYear(), columnMappings: {}, courseMappings: {} })
-    if (blobUrl.current) URL.revokeObjectURL(blobUrl.current); blobUrl.current = ''
     setDiscardConfirmation(false)
     if (jobId) navigate(`${listRoute}/documents`)
   }
@@ -213,7 +216,7 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
         {document.extracted.warnings.length > 0 && <Notice tone="warning">{t('warningsMessage', { count: document.extracted.warnings.length })}</Notice>}
         <Panel title={t('original')}>
           <div className="document-controls"><NativeSelect aria-label={t('originalFile')} value={sourceIndex} disabled={busy} onChange={event => { setSourceIndex(Number(event.target.value)); setVerifiedSource(undefined); setOriginalUrl(''); if (blobUrl.current) URL.revokeObjectURL(blobUrl.current); blobUrl.current = '' }}>{document.sources.map(source => <option key={source.index} value={source.index}>{t('fileNumber', { number: source.index + 1 })}</option>)}</NativeSelect><NativeSelect aria-label={t('physicalPage')} value={visiblePage} onChange={event => setPhysicalPage(Number(event.target.value))}>{sourcePages.map(number => <option key={number} value={number}>{t('pageNumber', { number })}</option>)}</NativeSelect><Button disabled={busy || expired} onClick={() => void run(openOriginal)}>{t('openOriginal')}</Button></div>
-          {originalUrl && <><a href={`${originalUrl}#page=${visiblePage}`} target="_blank" rel="noopener noreferrer">{t('openSeparate')}</a><PdfPages key={originalUrl} url={originalUrl} sourceIndex={sourceIndex} pages={[visiblePage]} label={`${t('original')} ${visiblePage}`} onRendered={setRenderedPage} /><Button disabled={busy || locked || verifiedSource !== sourceIndex || renderedPage !== visiblePage} onClick={confirmPage}>{t('confirmPage', { number: visiblePage })}</Button></>}
+          {originalUrl && <><a href={`${originalUrl}#page=${visiblePage}`} target="_blank" rel="noopener noreferrer">{t('openSeparate')}</a><PdfPages key={originalUrl} url={originalUrl} sourceIndex={sourceIndex} rotation={document.sources[sourceIndex]?.rotation ?? 0} pages={[visiblePage]} label={`${t('original')} ${visiblePage}`} onRendered={setRenderedPage} /><Button disabled={busy || locked || verifiedSource !== sourceIndex || renderedPage !== visiblePage} onClick={confirmPage}>{t('confirmPage', { number: visiblePage })}</Button></>}
         </Panel>
         {!locked && <Panel title={t('mapping')}>
           <Field label={t('fields.year')}><Input type="number" min={1900} max={9999} value={options.year ?? ''} disabled={busy} onChange={event => { setOptions(previous => ({ ...previous, year: Number(event.target.value) })); setDirty(true) }} /></Field>
