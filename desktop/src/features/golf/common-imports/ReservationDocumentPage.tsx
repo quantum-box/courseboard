@@ -63,7 +63,7 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
     current.current = next
     setJob(next)
     if (restore || previous?.id !== next.id || previous.document?.ocrStatus !== 'completed' && next.document.ocrStatus === 'completed' || previous.document?.revisionVersion !== next.document.revisionVersion) {
-      setRows(reviewedRows(next.document)); setOptions(next.importOptions); setDirty(false); setPage(0)
+      setRows(reviewedRows(next.document)); setOptions(next.document.revision?.options ?? next.importOptions); setDirty(false); setPage(0)
     }
     if (['completed', 'completed_with_errors'].includes(next.status)) clearResourceCache('reservation-report')
   }
@@ -237,7 +237,7 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
             </section>
           })}
           <div className="document-controls"><Button disabled={page === 0} onClick={() => setPage(value => value - 1)}>{t('previous')}</Button><span>{page + 1} / {Math.max(1, Math.ceil(rows.length / 25))}</span><Button disabled={(page + 1) * 25 >= rows.length} onClick={() => setPage(value => value + 1)}>{t('next')}</Button></div>
-          {!locked && <div className="document-controls"><Button disabled={busy || !dirty} onClick={() => { setRows(reviewedRows(document)); setOptions(job.importOptions); setDirty(false) }}>{t('undo')}</Button><Button variant="primary" disabled={busy || !dirty || !completeReview} onClick={() => void run(save)}>{t('saveRevision')}</Button></div>}
+          {!locked && <div className="document-controls"><Button disabled={busy || !dirty} onClick={() => { setRows(reviewedRows(document)); setOptions(document.revision?.options ?? job.importOptions); setDirty(false) }}>{t('undo')}</Button><Button variant="primary" disabled={busy || !dirty || !completeReview} onClick={() => void run(save)}>{t('saveRevision')}</Button></div>}
           {!locked && <p>{t('reviewMessage')}</p>}
         </Panel>
         {job.validationErrors.length > 0 && <Panel title={t('validationErrors')}>{job.validationErrors.map((issue, index) => <p key={index}>{issueMessage(issue)}</p>)}</Panel>}
