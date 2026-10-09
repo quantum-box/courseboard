@@ -245,6 +245,123 @@ describe('the dedicated cancellation fee form', () => {
     expect(api.field.mock.calls.every(call => call[1]?.method === 'POST')).toBe(true)
   })
 
+  it('resets a completed manage-only form for a second invoice without reusing the first key', async () => {
+    access.list = false
+    let currentUuid = '123e4567-e89b-42d3-a456-426614174000'
+    vi.stubGlobal('crypto', {
+      randomUUID: vi.fn(() => currentUuid),
+    })
+    let createAttempts = 0
+    api.field.mockImplementation(async (path: string) => {
+      if (path === '/v1/cancellation-fees') {
+        createAttempts += 1
+        const id = `inv_${createAttempts}`
+        return invoice({
+          id,
+          invoiceNumber: `INV-${createAttempts}`,
+          paymentLinkUrl: `https://example.com/pay/${id}`,
+          status: 'Draft',
+          emailDeliveryStatus: null,
+          smsDeliveryStatus: null,
+        })
+      }
+      throw new Error(`unexpected cancellation-fee request: ${path}`)
+    })
+
+    const page = renderPage()
+    fillLinkOnlySnapshot('一人目')
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求 INV-1 の処理が完了しました。')
+    const firstCreate = api.field.mock.calls.find(call => call[0] === '/v1/cancellation-fees')!
+
+    currentUuid = '123e4567-e89b-42d3-a456-426614174001'
+    fireEvent.click(screen.getByRole('button', { name: '次のキャンセル料を作る' }))
+    expect(screen.getByText('請求 INV-1 の処理が完了しました。')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '支払いページ' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: '次のキャンセル料を作る' })).toBeNull()
+    expect((screen.getByRole('button', { name: '送る内容を確認する' }) as HTMLButtonElement).disabled).toBe(false)
+
+    fillLinkOnlySnapshot('二人目')
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求 INV-2 の処理が完了しました。')
+
+    const creates = api.field.mock.calls.filter(call => call[0] === '/v1/cancellation-fees')
+    expect(createAttempts).toBe(2)
+    expect(bodyOf(creates[0]!).idempotencyKey).toBe(bodyOf(firstCreate).idempotencyKey)
+    expect(bodyOf(creates[1]!).idempotencyKey).not.toBe(bodyOf(creates[0]!).idempotencyKey)
+    expect(bodyOf(creates[1]!).billTo.name).toBe('二人目')
+
+    configureTestUser('user_after')
+    page.rerender(
+      <I18nextProvider i18n={i18next}>
+        <TooltipProvider><NewCancellationFeePage /></TooltipProvider>
+      </I18nextProvider>,
+    )
+    await waitFor(() => {
+      expect(screen.queryByText('請求 INV-1 の処理が完了しました。')).toBeNull()
+      expect(screen.queryByText('請求 INV-2 の処理が完了しました。')).toBeNull()
+    })
+    expect(screen.queryByRole('button', { name: '支払いページ' })).toBeNull()
+  })
+
+  it.each([false, true])('does not expose a completed invoice after a child-only auth scope update (retained: %s)', async retained => {
+    access.list = false
+    api.field.mockResolvedValue(invoice({
+      status: 'Draft',
+      emailDeliveryStatus: null,
+      smsDeliveryStatus: null,
+    }))
+    renderPage()
+    fillLinkOnlySnapshot()
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText(/INV-1/)
+    if (retained) {
+      fireEvent.click(screen.getByRole('button', { name: '次のキャンセル料を作る' }))
+      expect(screen.getByText(/INV-1/)).toBeTruthy()
+    }
+
+    // NewCancellationFeePage itself does not consume the auth context. Change
+    // the auth scope first, then use the i18n consumer to force only the
+    // content child to render while the parent keeps its previous state.
+    const previousLanguage = i18next.language
+    configureTestUser('user_after')
+    try {
+      await i18next.changeLanguage(previousLanguage.startsWith('ja') ? 'en' : 'ja')
+      await waitFor(() => expect(screen.queryByText(/INV-1/)).toBeNull())
+      expect(screen.queryByRole('button', {
+        name: /次のキャンセル料を作る|Create another cancellation fee/,
+      })).toBeNull()
+    } finally {
+      await i18next.changeLanguage(previousLanguage)
+    }
+  })
+
+  it.each(['Paid', 'Void'] as const)('keeps the next-invoice reset available for a terminal %s result', async status => {
+    access.list = false
+    api.field.mockResolvedValue(invoice({
+      status,
+      emailDeliveryStatus: null,
+      smsDeliveryStatus: null,
+    }))
+    renderPage()
+    fillLinkOnlySnapshot()
+    fireEvent.click(screen.getByRole('button', { name: '送る内容を確認する' }))
+    await screen.findByText('この内容で送ります')
+    fireEvent.click(screen.getByRole('button', { name: '請求を作って送る' }))
+    await screen.findByText('請求の処理が完了しました')
+
+    fireEvent.click(screen.getByRole('button', { name: '次のキャンセル料を作る' }))
+    expect((screen.getByRole('button', { name: '送る内容を確認する' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(api.field.mock.calls.filter(call => String(call[0]).endsWith('/fulfill'))).toHaveLength(0)
+    expect(api.field.mock.calls.filter(call => String(call[0]).endsWith('/send'))).toHaveLength(0)
+  })
+
   it('opens a link-only draft when Field returns a ready payment link', async () => {
     api.field.mockImplementation(async (path: string, init?: RequestInit) => {
       if (path === '/v1/cancellation-fees') {

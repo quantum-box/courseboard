@@ -144,6 +144,7 @@ export const cancellationFees = {
     completed: {
       title: '請求の処理が完了しました',
       description: '請求 {{number}} の処理が完了しました。',
+      next: '次のキャンセル料を作る',
     },
     confirm: {
       title: 'この内容で送ります',

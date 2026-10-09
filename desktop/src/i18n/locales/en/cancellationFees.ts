@@ -147,6 +147,7 @@ export const cancellationFees: DeepPartial<typeof source> = {
     completed: {
       title: 'Invoice processing completed',
       description: 'Invoice {{number}} has been processed.',
+      next: 'Create another cancellation fee',
     },
     confirm: {
       title: 'Send this?',

@@ -801,14 +801,37 @@ type PendingSubmission = {
 }
 
 export function NewCancellationFeePage() {
+  const [attempt, setAttempt] = useState(0)
+  const [previousCompletion, setPreviousCompletion] = useState<CompletedCancellationFee | null>(null)
+
   return (
     <CapabilityGate route="cancellation-fees/new">
-      <NewCancellationFeeContent />
+      <NewCancellationFeeContent
+        key={attempt}
+        previousCompletion={previousCompletion}
+        onCreateAnother={(invoice, scope) => {
+          setPreviousCompletion({ scope, invoice })
+          setAttempt(current => current + 1)
+        }}
+      />
     </CapabilityGate>
   )
 }
 
-function NewCancellationFeeContent() {
+type CompletedCancellationFee = {
+  scope: string
+  invoice: InvoiceData
+}
+
+type NewCancellationFeeContentProps = {
+  previousCompletion: CompletedCancellationFee | null
+  onCreateAnother: (invoice: InvoiceData, scope: string) => void
+}
+
+function NewCancellationFeeContent({
+  previousCompletion,
+  onCreateAnother,
+}: NewCancellationFeeContentProps) {
   const { capabilities } = useEffectiveCapabilities()
   const canManage = capabilities.cancellationFees.manage
   const canList = capabilities.cancellationFees.list
@@ -868,6 +891,36 @@ function NewCancellationFeeContent() {
   const activeDeliveryOperation = sharedDeliveryInvoiceId
     ? loadDeliveryOperation(sharedDeliveryInvoiceId, storageScope)
     : null
+
+  const currentCompletedInvoice = storageScope
+    && initialStorageScopeRef.current === storageScope
+    && created
+    && !submitting
+    && !resending
+    && !deliveryError
+    && !activeCreateRecovery
+    && !activeDeliveryOperation
+    && !initialDeliveryUncertain
+    && !recipientPatchUncertain
+    && !resendDeliveryUncertain
+    ? created
+    : null
+  const priorCompletedInvoice = storageScope
+    && previousCompletion?.scope === storageScope
+    && !created
+    && !pending
+    && !submitting
+    && !resending
+    && !error
+    && !deliveryError
+    && !activeCreateRecovery
+    && !activeDeliveryOperation
+    && !initialDeliveryUncertain
+    && !recipientPatchUncertain
+    && !resendDeliveryUncertain
+    ? previousCompletion.invoice
+    : null
+  const completedInvoice = currentCompletedInvoice ?? priorCompletedInvoice
 
   useEffect(() => {
     const nextInvoiceId = created?.id ?? null
@@ -1646,6 +1699,19 @@ function NewCancellationFeeContent() {
     && activeDeliveryOperation.type === 'send',
   )
 
+  function createAnotherCancellationFee() {
+    if (!storageScope || createStorageScope() !== storageScope
+      || initialStorageScopeRef.current !== storageScope
+      || !currentCompletedInvoice || pending || submitting || resending || patchingRecipient
+      || deliveryError || activeCreateRecovery || activeDeliveryOperation
+      || initialDeliveryUncertain || recipientPatchUncertain || resendDeliveryUncertain) return
+    // Completion normally clears both records. Recheck storage at the point
+    // of the explicit reset so a late/unknown operation cannot be hidden by a
+    // stale render and replaced with a new invoice request.
+    if (loadPersistedCreateRecovery() || loadDeliveryOperation(currentCompletedInvoice.id, storageScope)) return
+    onCreateAnother(currentCompletedInvoice, storageScope)
+  }
+
   return (
     <div className="page-stack page-narrow">
       <PageHeader
@@ -1663,14 +1729,19 @@ function NewCancellationFeeContent() {
       {error ? (
         <Notice tone="danger" title={t('cancellationFees:new.createFailed')}>{error}</Notice>
       ) : null}
-      {!canList && created && !submitting && !resending && !deliveryError && !activeCreateRecovery ? (
+      {!canList && completedInvoice ? (
         <Notice tone="success" title={t('cancellationFees:new.completed.title')}>
-          {t('cancellationFees:new.completed.description', { number: created.invoiceNumber })}
-          {created.paymentLinkUrl ? <div className="notice-inline-action">
-            <Button type="button" onClick={() => void openExternal(created.paymentLinkUrl!).catch(reason => {
+          {t('cancellationFees:new.completed.description', { number: completedInvoice.invoiceNumber })}
+          {completedInvoice.paymentLinkUrl ? <div className="notice-inline-action">
+            <Button type="button" onClick={() => void openExternal(completedInvoice.paymentLinkUrl!).catch(reason => {
               setError(reason instanceof Error ? reason.message : t('cancellationFees:detail.notice.openFailed'))
             })}>
               <ExternalLink /> {t('cancellationFees:detail.payment.openPage')}
+            </Button>
+          </div> : null}
+          {currentCompletedInvoice ? <div className="notice-inline-action">
+            <Button type="button" onClick={createAnotherCancellationFee}>
+              <Plus /> {t('cancellationFees:new.completed.next')}
             </Button>
           </div> : null}
         </Notice>
