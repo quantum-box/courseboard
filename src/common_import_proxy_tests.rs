@@ -14,7 +14,7 @@ struct Capture {
 async fn upstream_capture(
     State(capture): State<Arc<Capture>>,
     request: Request<Body>,
-) -> Json<Value> {
+) -> Response<Body> {
     let path = request.uri().path().to_owned();
     let headers = request.headers().clone();
     let body = to_bytes(request.into_body(), 5 * 1024 * 1024)
@@ -26,15 +26,79 @@ async fn upstream_capture(
         .lock()
         .unwrap()
         .push((path.clone(), headers, body));
-    if path.ends_with("dtj_foreign") {
+    if path.contains("/document-original/") {
+        return Response::builder()
+            .header("content-type", "application/pdf")
+            .header("cache-control", "no-store")
+            .body(Body::from(vec![b'x'; 8 * 1024 * 1024 + 1]))
+            .unwrap();
+    }
+    let json = if path.ends_with("dtj_foreign") {
         Json(
             json!({"kind":"import","objectKey":"customer","importOptions":{"sourceApp":"another-app"}}),
+        )
+    } else if path.ends_with("dtj_document") {
+        Json(
+            json!({"kind":"document","objectKey":"courseboardReservationReports","importOptions":{"sourceApp":"courseboard"},"status":"review"}),
         )
     } else {
         Json(
             json!({"kind":"import","objectKey":"customer","importOptions":{"sourceApp":"courseboard"},"status":"ready"}),
         )
+    };
+    json.into_response()
+}
+
+#[tokio::test]
+async fn reservation_document_bff_preserves_revision_and_authorizes_every_operation() {
+    let (state, capture, authorizer, server) = state(true).await;
+    for operation in ["document-read", "document-validate", "document-confirm"] {
+        let body =
+            json!({"manifestSha256":"original","revisionVersion":2,"revisionSha256":"reviewed"});
+        proxy(
+            State(state.clone()),
+            Path(format!("jobs/dtj_document/{operation}")),
+            request(Method::POST, body.clone()),
+        )
+        .await
+        .unwrap();
+        let calls = capture.requests.lock().unwrap();
+        let forwarded = calls.last().unwrap();
+        assert_eq!(
+            forwarded.0,
+            format!("/v1/bridge/data-jobs/dtj_document/{operation}")
+        );
+        assert_eq!(forwarded.1["authorization"], "Bearer current-user");
+        assert_eq!(forwarded.1["x-operator-id"], "tenant-a");
+        assert_eq!(forwarded.1["x-platform-id"], "platform-a");
+        assert_eq!(forwarded.2, body);
     }
+    let original = proxy(
+        State(state),
+        Path("jobs/dtj_document/document-original/0".into()),
+        request(Method::GET, Value::Null),
+    )
+    .await
+    .unwrap();
+    assert_eq!(original.headers()["content-type"], "application/pdf");
+    assert_eq!(original.headers()["cache-control"], "no-store");
+    assert_eq!(
+        to_bytes(original.into_body(), 64 * 1024 * 1024)
+            .await
+            .unwrap()
+            .len(),
+        8 * 1024 * 1024 + 1,
+        "originals above the ordinary JSON limit remain viewable"
+    );
+    assert_eq!(
+        authorizer.calls.lock().unwrap().as_slice(),
+        [actions::IMPORT_RESERVATION_REPORTS; 4]
+    );
+    assert_eq!(
+        capture.requests.lock().unwrap().last().unwrap().0,
+        "/v1/bridge/data-jobs/dtj_document/document-original/0"
+    );
+    server.abort();
 }
 struct Authorizer {
     allow: bool,

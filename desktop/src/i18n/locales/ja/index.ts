@@ -6,6 +6,7 @@ import { common } from './common'
 import { courses } from './courses'
 import { customers } from './customers'
 import { dataExports } from './dataExports'
+import { documentImport } from './documentImport'
 import { download } from './download'
 import { help } from './help'
 import { home } from './home'
@@ -36,6 +37,7 @@ export const ja = {
   courses,
   customers,
   dataExports,
+  documentImport,
   download,
   help,
   home,

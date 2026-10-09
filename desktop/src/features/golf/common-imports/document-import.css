@@ -1,0 +1,11 @@
+.document-import-page { font-size: 16px; line-height: 1.5; display: grid; gap: 16px; min-width: 0; }
+.document-import-page p, .document-import-page span, .document-import-page label, .document-import-page summary, .document-import-page dt, .document-import-page dd { font-size: 16px; line-height: 1.5; }
+.document-import-page input, .document-import-page select, .document-import-page button, .document-import-page a, .document-import-page summary { font-size: 16px; min-height: 44px; min-width: 44px; line-height: 1.5; }
+.document-import-page a, .document-import-page summary { display: inline-flex; align-items: center; }
+.document-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 16px; }
+.document-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.document-import-page canvas { display: block; width: 100%; height: auto; margin-block: 16px; }
+.document-row { padding-block: 16px; border-bottom: 1px solid var(--border-color, #ccc); }
+.document-row h2 { font-size: 18px; }
+.document-row dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 12px; overflow-wrap: anywhere; }
+.document-row dd { margin: 0; }

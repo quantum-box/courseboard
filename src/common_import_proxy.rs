@@ -82,7 +82,12 @@ async fn upstream(
         .await
         .map_err(|e| AppError::Provider(e.to_string()))?
     {
-        if bytes.len().saturating_add(chunk.len()) > 8 * 1024 * 1024 {
+        let limit = if path.contains("/document-original/") {
+            64 * 1024 * 1024
+        } else {
+            8 * 1024 * 1024
+        };
+        if bytes.len().saturating_add(chunk.len()) > limit {
             return Err(AppError::Provider(
                 "Field import response is too large".into(),
             ));
@@ -161,6 +166,7 @@ pub async fn proxy(
         for item in value["items"].as_array().cloned().unwrap_or_default() {
             if (item["kind"] == "import" || item["kind"] == "document")
                 && item["importOptions"]["sourceApp"] == "courseboard"
+                && item["importOptions"]["documentParentId"].is_null()
                 && permitted(
                     &state,
                     headers,
@@ -181,7 +187,8 @@ pub async fn proxy(
         }
         ["objects", key, "imports", operation]
             if method == Method::POST
-                && ["preview", "upload-url", "document-link"].contains(operation) =>
+                && ["preview", "upload-url", "document-link", "document-upload"]
+                    .contains(operation) =>
         {
             permitted(&state, headers, key).await?;
             format!("/v1/bridge/data-objects/{key}/imports/{operation}")
@@ -196,6 +203,9 @@ pub async fn proxy(
                     "resume",
                     "document-sync",
                     "document-revision",
+                    "document-read",
+                    "document-validate",
+                    "document-confirm",
                 ]
                 .contains(operation) =>
         {
@@ -208,6 +218,14 @@ pub async fn proxy(
         ["jobs", id, "preview", page] if method == Method::GET && page.parse::<usize>().is_ok() => {
             format!(
                 "{}/preview/{page}",
+                authorized_job(&state, headers, id).await?
+            )
+        }
+        ["jobs", id, "document-original", index]
+            if method == Method::GET && index.parse::<usize>().is_ok() =>
+        {
+            format!(
+                "{}/document-original/{index}",
                 authorized_job(&state, headers, id).await?
             )
         }
@@ -251,6 +269,7 @@ pub async fn proxy(
     for name in [
         axum::http::header::CONTENT_TYPE,
         axum::http::header::CONTENT_DISPOSITION,
+        axum::http::header::CACHE_CONTROL,
     ] {
         if let Some(value) = out_headers.get(&name) {
             response = response.header(name, value);

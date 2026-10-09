@@ -1,5 +1,6 @@
 import { Button, Input } from '@tachyon-sdk/native-ui'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useAuth } from '../../../auth/AuthProvider'
 import { ApiError, courseboardApiJson } from '../../../api'
 import { Field, LoadingState, NativeSelect, Notice, PageHeader, Panel } from '../../../components/Page'
@@ -24,6 +25,7 @@ async function courseCatalog(signal: AbortSignal) {
 }
 
 export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarget?: string }) {
+  const { t } = useTranslation('documentImport')
   const auth = useAuth()
   const reportGate = useRouteGate('golf/reservation-report-import')
   const tenant = auth.state.status === 'ready' ? auth.state.tenant.id : ''
@@ -165,6 +167,7 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
     finally { if (live(version)) setBusy(false) }
   }
   async function openJob(item: ImportJob) {
+    if (item.document && item.objectKey === reportKey) { navigate(`golf/data-imports/${reportKey}/documents/${encodeURIComponent(item.id)}`); return }
     const { signal, version } = begin(); setBusy(true); setError('')
     try {
       const next = await getJob(item.id, signal)
@@ -206,6 +209,7 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
           <p>対応を指定しない施設も、未連携施設として保存されます。</p>
         </details>
       </>}
+      {report && selected?.documentImport && <Button onClick={() => navigate(`golf/data-imports/${reportKey}/documents`)}>{t('pdfEntry')}</Button>}
       <Field label="CSV／Excel"><input aria-label="CSV／Excel" type="file" accept=".csv,.xls,.xlsx" disabled={!selected || reportBlocked} onChange={event => { const chosen = event.target.files?.[0]; if (chosen) { setFile(chosen); void validate(chosen) } }} /></Field>
       {file && <p>{file.name}</p>}{plan && <p>{plan}</p>}
       {dirty && <Notice tone="warning">設定が変わりました。元のファイルを選び、全行を再検証してください。</Notice>}
@@ -231,6 +235,6 @@ export function CommonImportsPage({ initialTarget = 'customer' }: { initialTarge
       </div>
       {job.status === 'ready' && <p>実行確認前には対象データを書き込みません。{report ? '予約表集計は、全行を処理してから施設単位で一括反映します。' : ''}</p>}
     </Panel>}
-    <Panel title="進捗・結果・履歴">{history.filter(item => item.objectKey !== reportKey || reportGate === 'visible').length ? history.filter(item => item.objectKey !== reportKey || reportGate === 'visible').map(item => <div key={item.id} className="flex items-center justify-between gap-2"><span>{targetLabels[item.objectKey]} · {item.filename ?? 'CSV'} · {statusLabels[item.status]} · {item.processed}/{item.total ?? '確認中'}行</span><Button disabled={busy} onClick={() => void openJob(item)}>確認する</Button></div>) : <p>取込履歴はありません。</p>}</Panel>
+    <Panel title="進捗・結果・履歴">{history.filter(item => item.objectKey !== reportKey || reportGate === 'visible').length ? history.filter(item => item.objectKey !== reportKey || reportGate === 'visible').map(item => <div key={item.id} className="flex items-center justify-between gap-2"><span>{targetLabels[item.objectKey]} · {item.filename ?? (item.document ? t('files') : 'CSV')} · {statusLabels[item.status]} · {item.processed}/{item.total ?? '確認中'}行</span><Button disabled={busy} onClick={() => void openJob(item)}>確認する</Button></div>) : <p>取込履歴はありません。</p>}</Panel>
   </div>
 }

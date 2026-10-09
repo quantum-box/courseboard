@@ -13,6 +13,7 @@ import {
   NewCancellationFeePage,
 } from './features/cancellation-fees/CancellationFeesPage'
 import { CommonImportsPage } from './features/golf/common-imports/CommonImportsPage'
+import { ReservationDocumentPage } from './features/golf/common-imports/ReservationDocumentPage'
 import { BudgetsPage } from './features/golf/BudgetsPage'
 import { CaddiesPage } from './features/golf/CaddiesPage'
 import { CourseSchedulePage } from './features/golf/CourseSchedulePage'
@@ -164,6 +165,11 @@ function RouteContent({ route }: { route: string }) {
       : decodeRouteSegment(route.slice('staff/'.length).split('/')[0] ?? '')
     // Stable key: opening a person updates props instead of remounting the list.
     return <StaffPage key="staff" staffId={segment || undefined} />
+  }
+  if (route === 'golf/data-imports/courseboardReservationReports/documents' || route.startsWith('golf/data-imports/courseboardReservationReports/documents/')) {
+    if (reportImportGate === 'loading') return <LoadingState />
+    if (reportImportGate === 'hidden') return <NotFoundPage />
+    return <ReservationDocumentPage jobId={route.split('/')[4]} />
   }
   if (route === 'golf/data-imports' || route.startsWith('golf/data-imports/')) return <CommonImportsPage initialTarget={route.split('/')[2]} />
   if (route === 'golf/budgets') return <BudgetsPage />
