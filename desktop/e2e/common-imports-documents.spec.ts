@@ -51,7 +51,7 @@ async function fixture(page: Page, loseResponses = false) {
       }
       return reply(route, { job, ocr: { id: 'goj_same', status: job.document!.ocrStatus }, uploads: [] })
     }
-    if (path.endsWith('/document-original/0')) return reply(route, { source, downloadUrl: uploadUrl })
+    if (path.endsWith('/document-original/0')) return route.fulfill({ body: bytes, headers: { 'content-type': 'application/pdf', 'cache-control': 'no-store' } })
     if (path.endsWith('/document-revision')) {
       const body = route.request().postDataJSON()
       expect(body.rows).toHaveLength(1)

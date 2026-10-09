@@ -1,4 +1,4 @@
-import { courseboardApiJson } from '../../../api'
+import { courseboardApiBlob, courseboardApiJson } from '../../../api'
 import { fileDigest, getJob, type ImportJob, type ImportOptions } from './api'
 import { i18next as i18n } from '../../../i18n'
 
@@ -99,26 +99,7 @@ export function executeDocumentRevision(job: ImportJob, operation: 'validate' | 
 export async function fetchDocumentOriginal(job: ImportJob, index: number, signal: AbortSignal) {
   const expected = job.document?.sources[index]
   if (!expected) throw new Error(i18n.t('documentImport:error.manifest'))
-  const signed = await courseboardApiJson<{ downloadUrl: string; source: DocumentSource }>(`${ROOT}/jobs/${encodeURIComponent(job.id)}/document-original/${index}`, { signal })
-  if (signed.source.sha256 !== expected.sha256 || signed.source.size !== expected.size || signed.source.contentType !== expected.contentType || signed.source.rotation !== expected.rotation) throw new Error(i18n.t('documentImport:error.manifest'))
-  const url = new URL(signed.downloadUrl)
-  if (url.protocol !== 'https:') throw new Error(i18n.t('documentImport:error.original'))
-  const response = await fetch(url, { signal, credentials: 'omit', redirect: 'error' })
-  if (!response.ok || !response.body) throw new Error(i18n.t('documentImport:error.original'))
-  const reader = response.body.getReader()
-  const chunks: ArrayBuffer[] = []
-  let size = 0
-  try {
-    for (;;) {
-      signal.throwIfAborted()
-      const { done, value } = await reader.read()
-      if (done) break
-      size += value.byteLength
-      if (size > expected.size || size > DOCUMENT_LIMITS.fileBytes) throw new Error(i18n.t('documentImport:error.manifest'))
-      chunks.push(new Uint8Array(value).buffer)
-    }
-  } finally { await reader.cancel(); reader.releaseLock() }
-  const original = new Blob(chunks, { type: expected.contentType })
-  if (original.size !== expected.size || await fileDigest(original, signal) !== expected.sha256) throw new Error(i18n.t('documentImport:error.manifest'))
-  return original
+  const original = await courseboardApiBlob(`${ROOT}/jobs/${encodeURIComponent(job.id)}/document-original/${index}`, { signal })
+  if (original.size > DOCUMENT_LIMITS.fileBytes || original.size !== expected.size || await fileDigest(original, signal) !== expected.sha256) throw new Error(i18n.t('documentImport:error.manifest'))
+  return original.type === expected.contentType ? original : new Blob([original], { type: expected.contentType })
 }

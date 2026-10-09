@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ json: vi.fn(), digest: vi.fn() }))
-vi.mock('../../../api', () => ({ courseboardApiJson: mocks.json }))
+const mocks = vi.hoisted(() => ({ json: vi.fn(), blob: vi.fn(), digest: vi.fn() }))
+vi.mock('../../../api', () => ({ courseboardApiJson: mocks.json, courseboardApiBlob: mocks.blob }))
 vi.mock('./api', () => ({ fileDigest: mocks.digest, getJob: vi.fn() }))
 import { executeDocumentRevision, fetchDocumentOriginal, reserveReceptionDocumentImport, reserveReservationDocument, saveDocumentRevision, stepDocumentRead, uploadDocumentSources } from './document-api'
 import type { ImportJob } from './api'
@@ -58,13 +58,17 @@ describe('common document import adapter', () => {
     expect(mocks.json).toHaveBeenCalledTimes(1)
     expect(mocks.json.mock.calls[0]![0]).toBe('/v1/course/data-imports/jobs/dtj_1/document-confirm')
   })
-  it('downloads originals without app credentials and rejects modified bytes', async () => {
-    mocks.json.mockResolvedValue({ source: job.document!.sources[0], downloadUrl: 'https://storage.example/source' })
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('source'))
+  it('views originals through the authorized BFF and rejects modified bytes', async () => {
+    mocks.blob.mockResolvedValue(file)
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
     const signal = new AbortController().signal
     expect((await fetchDocumentOriginal(job, 0, signal)).size).toBe(file.size)
-    expect(fetchSpy).toHaveBeenCalledWith(expect.any(URL), { signal, credentials: 'omit', redirect: 'error' })
+    expect(mocks.blob).toHaveBeenCalledWith('/v1/course/data-imports/jobs/dtj_1/document-original/0', { signal })
+    expect(fetchSpy).not.toHaveBeenCalled()
     mocks.digest.mockResolvedValue('d'.repeat(64))
+    await expect(fetchDocumentOriginal(job, 0, signal)).rejects.toThrow('一致しません')
+    mocks.digest.mockResolvedValue(hash)
+    mocks.blob.mockResolvedValue(new Blob(['longer source']))
     await expect(fetchDocumentOriginal(job, 0, signal)).rejects.toThrow('一致しません')
     fetchSpy.mockRestore()
   })

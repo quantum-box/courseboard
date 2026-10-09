@@ -82,7 +82,12 @@ async fn upstream(
         .await
         .map_err(|e| AppError::Provider(e.to_string()))?
     {
-        if bytes.len().saturating_add(chunk.len()) > 8 * 1024 * 1024 {
+        let limit = if path.contains("/document-original/") {
+            64 * 1024 * 1024
+        } else {
+            8 * 1024 * 1024
+        };
+        if bytes.len().saturating_add(chunk.len()) > limit {
             return Err(AppError::Provider(
                 "Field import response is too large".into(),
             ));
@@ -264,6 +269,7 @@ pub async fn proxy(
     for name in [
         axum::http::header::CONTENT_TYPE,
         axum::http::header::CONTENT_DISPOSITION,
+        axum::http::header::CACHE_CONTROL,
     ] {
         if let Some(value) = out_headers.get(&name) {
             response = response.header(name, value);
