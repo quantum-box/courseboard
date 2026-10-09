@@ -82,7 +82,7 @@ import {
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../auth/AuthProvider'
 import { capabilityRouteAllowed } from '../auth/capabilityRoutes'
-import { useEffectiveCapabilities } from '../auth/EffectiveCapabilitiesProvider'
+import { useEffectiveCapabilities, type EffectiveCapabilities } from '../auth/EffectiveCapabilitiesProvider'
 import { formatTenantWorkspaceLabel, tenantWorkspaceLabel } from '../auth/tenant-label'
 import { useHiddenRoutes } from '../feature-flags/gated-routes'
 import { settingsMaster } from '../features/settings/masters'
@@ -292,6 +292,26 @@ function focusableWithin(root: HTMLElement) {
     .filter(element => element.getClientRects().length > 0)
 }
 
+/**
+ * Keep the fee entry's canonical route for labels and saved pins. A manage-only
+ * operator may still use the create screen, whose list action is intentionally
+ * absent from the capability decision for the parent nav item.
+ */
+function navigationItemAllowed(route: string, capabilities: EffectiveCapabilities) {
+  return capabilityRouteAllowed(route, capabilities)
+    || (route === 'cancellation-fees'
+      && capabilityRouteAllowed('cancellation-fees/new', capabilities))
+}
+
+function navigationTarget(item: NavigationItem, capabilities: EffectiveCapabilities) {
+  if (item.route === 'cancellation-fees'
+    && !capabilityRouteAllowed(item.route, capabilities)
+    && capabilityRouteAllowed('cancellation-fees/new', capabilities)) {
+    return 'cancellation-fees/new'
+  }
+  return item.route
+}
+
 // `attendance` is intentionally absent: it renders as a tab inside the
 // roster screen, so its route counts as the roster route for nav/title
 // purposes (see CADDIE_SUBVIEWS usage below).
@@ -414,7 +434,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
   const hiddenRoutes = useMemo(() => new Set([
     ...flaggedOffRoutes,
     ...[...allNavigation, ...settingsNavigation, { route: 'settings' }]
-      .filter(item => !capabilityRouteAllowed(item.route, capabilities))
+      .filter(item => !navigationItemAllowed(item.route, capabilities))
       .map(item => item.route),
   ]), [capabilities, flaggedOffRoutes])
 
@@ -743,6 +763,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
             <NavigationRow
               key={item.route}
               item={item}
+              targetRoute={navigationTarget(item, capabilities)}
               active={isActive(route, item.route)}
               pinned
               onTogglePin={() => togglePinned(item.route)}
@@ -760,6 +781,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
             <NavigationRow
               key={item.route}
               item={item}
+              targetRoute={navigationTarget(item, capabilities)}
               active={isActive(route, item.route)}
               pinned={false}
               onTogglePin={() => togglePinned(item.route)}
@@ -1009,6 +1031,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
                 <CommandNavigationItem
                   key={item.route}
                   item={item}
+                  targetRoute={navigationTarget(item, capabilities)}
                   onNavigate={() => setCommandOpen(false)}
                 />
               ))}
@@ -1026,6 +1049,7 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
               <CommandNavigationItem
                 key={item.route}
                 item={item}
+                targetRoute={navigationTarget(item, capabilities)}
                 onNavigate={() => setCommandOpen(false)}
               />
             ))}
@@ -1065,9 +1089,11 @@ function AppShellFrame({ route, children }: { route: string; children: ReactNode
 
 function CommandNavigationItem({
   item,
+  targetRoute,
   onNavigate,
 }: {
   item: NavigationItem
+  targetRoute: string
   onNavigate: () => void
 }) {
   const Icon = item.icon
@@ -1077,7 +1103,7 @@ function CommandNavigationItem({
     <CommandItem
       value={`${label} ${description} ${item.route}`}
       onSelect={() => {
-        navigate(item.route)
+        navigate(targetRoute)
         onNavigate()
       }}
     >
@@ -1089,11 +1115,13 @@ function CommandNavigationItem({
 
 function NavigationRow({
   item,
+  targetRoute,
   active,
   pinned,
   onTogglePin,
 }: {
   item: NavigationItem
+  targetRoute: string
   active: boolean
   pinned: boolean
   onTogglePin: () => void
@@ -1113,7 +1141,7 @@ function NavigationRow({
       <SidebarItem
         type="button"
         active={active}
-        onClick={event => navigateFromClick(event, item.route)}
+        onClick={event => navigateFromClick(event, targetRoute)}
       >
         <Icon />
         <SidebarItemLabel>{label}</SidebarItemLabel>

@@ -146,4 +146,33 @@ describe('AppShell layout: the new-version banner stays inside the content colum
     expect(screen.queryByRole('button', { name: i18next.t('nav:items.cancellation-fees.label') })).toBeNull()
     expect(screen.queryAllByRole('button', { name: i18next.t('nav:items.golf/ledger.label') }).length).toBeGreaterThan(0)
   })
+
+  it.each([false, true])('keeps the canonical fee entry and targets the permitted screen for a mixed caller (List: %s)', async canList => {
+    access.otherBusinessAccess = true
+    access.list = canList
+    access.manage = true
+    localStorage.setItem('courseboard.sidebar.pinned', JSON.stringify(['cancellation-fees']))
+
+    render(<I18nextProvider i18n={i18next}><AuthProvider><AuthGate>
+      <AppShell route="golf"><div>mixed-product content</div></AppShell>
+    </AuthGate></AuthProvider></I18nextProvider>)
+
+    await screen.findByText('mixed-product content')
+    const feeLabel = i18next.t('nav:items.cancellation-fees.label')
+    expect(screen.getAllByRole('button', { name: feeLabel }).length).toBeGreaterThan(0)
+    expect(JSON.parse(localStorage.getItem('courseboard.sidebar.pinned') ?? 'null'))
+      .toEqual(['cancellation-fees'])
+
+    const expectedPath = canList ? '/tenant-1/cancellation-fees' : '/tenant-1/cancellation-fees/new'
+    fireEvent.click(screen.getAllByRole('button', { name: feeLabel })[0]!)
+    expect(window.location.pathname).toBe(expectedPath)
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
+    await screen.findByRole('combobox')
+    const options = screen.getAllByRole('option').map(item => item.textContent)
+    expect(options.some(text => text?.includes(feeLabel))).toBe(true)
+    window.history.replaceState({}, '', '/tenant-1/golf')
+    fireEvent.click(screen.getAllByRole('option').find(item => item.textContent?.includes(feeLabel))!)
+    expect(window.location.pathname).toBe(expectedPath)
+  })
 })
