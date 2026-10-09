@@ -32,7 +32,8 @@ export function FeatureFlagProvider({ children }: Readonly<{ children: ReactNode
   const { tenant } = useAuth()
   const tenantId = tenant?.id ?? ''
   const [refreshKey, setRefreshKey] = useState(0)
-  const [state, setState] = useState<Omit<FeatureFlagContextValue, 'refresh'>>({
+  const [state, setState] = useState<Omit<FeatureFlagContextValue, 'refresh'> & { tenantId: string }>({
+    tenantId: '',
     error: false,
     flags: resolveFeatureFlagValues(ALL_FEATURE_FLAG_KEYS, undefined),
     isLoading: true,
@@ -52,6 +53,7 @@ export function FeatureFlagProvider({ children }: Readonly<{ children: ReactNode
     const controller = new AbortController()
     if (!tenantId) {
       setState({
+        tenantId,
         error: false,
         flags: resolveFeatureFlagValues(ALL_FEATURE_FLAG_KEYS, undefined),
         isLoading: false,
@@ -59,15 +61,25 @@ export function FeatureFlagProvider({ children }: Readonly<{ children: ReactNode
       return () => controller.abort()
     }
 
-    setState(current => ({ ...current, error: false, isLoading: true }))
+    // Background refresh must not unmount a gated form (including its file
+    // input) when the file picker returns focus or the minute timer fires.
+    setState(current => current.tenantId === tenantId
+      ? current
+      : {
+          tenantId,
+          error: false,
+          flags: resolveFeatureFlagValues(ALL_FEATURE_FLAG_KEYS, undefined),
+          isLoading: true,
+        })
     void evaluateFeatureFlags(ALL_FEATURE_FLAG_KEYS, controller.signal)
       .then(flags => {
         if (controller.signal.aborted) return
-        setState({ error: false, flags, isLoading: false })
+        setState({ tenantId, error: false, flags, isLoading: false })
       })
       .catch(() => {
         if (controller.signal.aborted) return
         setState({
+          tenantId,
           error: true,
           flags: resolveFeatureFlagValues(ALL_FEATURE_FLAG_KEYS, undefined),
           isLoading: false,
@@ -77,8 +89,13 @@ export function FeatureFlagProvider({ children }: Readonly<{ children: ReactNode
   }, [refreshKey, tenantId])
 
   const value = useMemo<FeatureFlagContextValue>(
-    () => ({ ...state, refresh }),
-    [refresh, state],
+    () => ({
+      error: state.tenantId === tenantId && state.error,
+      flags: state.tenantId === tenantId ? state.flags : resolveFeatureFlagValues(ALL_FEATURE_FLAG_KEYS, undefined),
+      isLoading: state.tenantId !== tenantId || state.isLoading,
+      refresh,
+    }),
+    [refresh, state, tenantId],
   )
   return (
     <FeatureFlagContext.Provider value={value}>
