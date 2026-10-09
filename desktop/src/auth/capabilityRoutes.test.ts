@@ -139,6 +139,23 @@ describe('capability route actions', () => {
     })).toBe(true)
   })
 
+  it('requires the Field membership reader before mounting customer details', () => {
+    const customer = {
+      ...capabilities,
+      actions: {
+        ...allActionsDenied,
+        [FIELD_ACTIONS.listCustomers]: true,
+        [FIELD_ACTIONS.listMembership]: true,
+        [FIELD_ACTIONS.listCourses]: true,
+      },
+    }
+    expect(capabilityRouteAllowed('golf/customers/customer_1', customer)).toBe(false)
+    expect(capabilityRouteAllowed('golf/customers/customer_1', {
+      ...customer,
+      actions: { ...customer.actions, [FIELD_ACTIONS.fieldListMembership]: true },
+    })).toBe(true)
+  })
+
   it('does not mount the ledger while an eager loader action is unknown or denied', () => {
     const ledger = {
       ...capabilities,

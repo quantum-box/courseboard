@@ -200,6 +200,7 @@ export function routeActionRequirement(route: string): RouteActionRequirement | 
     return allRequirements(
       FIELD_ACTIONS.listCustomers,
       FIELD_ACTIONS.listMembership,
+      FIELD_ACTIONS.fieldListMembership,
       FIELD_ACTIONS.listCourses,
     )
   }

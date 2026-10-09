@@ -212,9 +212,11 @@ fn required_header<'a>(
 #[cfg(test)]
 mod tests {
     use std::{
-        atomic::{AtomicUsize, Ordering},
         collections::BTreeMap,
-        Arc, Mutex,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
     };
 
     use async_trait::async_trait;
