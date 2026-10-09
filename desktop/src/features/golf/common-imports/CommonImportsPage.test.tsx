@@ -54,6 +54,12 @@ describe('reservation report course catalog', () => {
     await waitFor(() => expect(file.disabled).toBe(false))
     expect(mock.json).toHaveBeenCalledTimes(2)
   })
+  it('labels a PDF awaiting review in job history', async () => {
+    mock.json.mockResolvedValue({ items: [] })
+    mock.jobs.mockResolvedValue([{ ...ready, status: 'review', filename: '予約表.pdf' }])
+    renderPage()
+    expect(await screen.findByText(/予約表集計 · 予約表.pdf · 原本・修正を確認中/)).toBeTruthy()
+  })
   it('excludes inactive courses while retaining the unlinked facility option', async () => {
     mock.json.mockResolvedValue({ items: [
       { id: 'active', name: '営業中', isActive: true },

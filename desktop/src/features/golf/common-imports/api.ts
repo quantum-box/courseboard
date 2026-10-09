@@ -10,7 +10,7 @@ export type ImportTarget = { key: string; label: string; import: { fields: { key
 export type ImportRow = { rowNumber: number; object: Record<string, unknown>; warnings: unknown[]; error: string | null; outcome: string | null }
 export type ImportJob = { document?: DocumentImport; sourceUploadUrl?: string; sourceContentType?: string; id: string; objectKey: string; status: string; mode: ImportMode; processed: number; total: number | null; created: number; updated: number; errors: number; validationErrors: unknown[]; preview: ImportRow[]; batch: boolean; previewPage: number; previewPages: number; filename: string | null; failure: string | null; importOptions: ImportOptions; sourceSha256: string; createdAt: string }
 export const targetLabels: Record<string, string> = { customer: '顧客台帳', dailyBudgets: '日次予算', courseboardReservationReports: '予約表集計' }
-export const statusLabels: Record<string, string> = { uploading: 'アップロード中', validating: '全行を検証中', ready: '実行確認待ち', running: '取込中', invalid: '入力を修正してください', cancelled: '中止', completed: '完了', completed_with_errors: '一部の行でエラー' }
+export const statusLabels: Record<string, string> = { uploading: 'アップロード中', validating: '全行を検証中', review: '原本・修正を確認中', ready: '実行確認待ち', running: '取込中', invalid: '入力を修正してください', cancelled: '中止', completed: '完了', completed_with_errors: '一部の行でエラー' }
 export function batchImportLimit(filename: string) { return /\.csv$/iu.test(filename) ? 1024 * 1024 * 1024 : 32 * 1024 * 1024 }
 const encoded = (id: string) => encodeURIComponent(id)
 export async function listTargets(signal?: AbortSignal) { return (await courseboardApiJson<{ items: ImportTarget[] }>(`${ROOT}/objects`, { signal })).items }
