@@ -60,6 +60,7 @@ export const documentImport: DeepPartial<typeof source> = {
   "rows": "rows",
   "completed": "Booking save confirmed.",
   "completedMessage": "The receipt confirms that all rows were applied. Open the booking report to check the result.",
+  "completedWithErrorsMessage": "Saving has finished with some rows not applied. Open the booking report to check the saved result.",
   "viewSaved": "Open the saved booking report",
   "newDocument": "Choose the next PDF",
   "newReadMessage": "This read cannot resume. The next PDF starts a separate read. The original document and saved results remain in import history.",

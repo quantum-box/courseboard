@@ -45,6 +45,7 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
   const blobUrl = useRef('')
   const current = useRef<ImportJob | undefined>(undefined)
   const document = job?.document
+  const executionCompleted = !!job && ['completed', 'completed_with_errors'].includes(job.status)
   const expired = !!document && Date.now() >= Date.parse(document.expiresAt)
   const locked = !!document?.executionConfirmed || expired || ['failed', 'cancelled', 'expired'].includes(document?.ocrStatus ?? '')
   const canCreate = target?.documentImport?.pricingStatus === 'undecided' && catalogReady
@@ -63,7 +64,7 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
     if (restore || previous?.id !== next.id || previous.document?.ocrStatus !== 'completed' && next.document.ocrStatus === 'completed' || previous.document?.revisionVersion !== next.document.revisionVersion) {
       setRows(reviewedRows(next.document)); setOptions(next.importOptions); setDirty(false); setPage(0)
     }
-    if (next.status === 'completed') clearResourceCache('reservation-report')
+    if (['completed', 'completed_with_errors'].includes(next.status)) clearResourceCache('reservation-report')
   }
   async function run(task: (signal: AbortSignal) => Promise<void>) {
     controller.current?.abort()
@@ -240,10 +241,10 @@ export function ReservationDocumentPage({ jobId }: { jobId?: string }) {
         <div className="document-controls">
           {!locked && !!document.revisionSha256 && <Button disabled={busy || dirty || !catalogReady || !target?.documentImport || !completeReview} onClick={() => void run(signal => progress('validate', signal))}>{t(job.status === 'validating' ? 'resumeValidation' : 'validate')}</Button>}
           {job.status === 'ready' && <Button variant="primary" disabled={busy || dirty || expired || !catalogReady || !target?.documentImport} onClick={() => void run(signal => progress('confirm', signal))}>{t('confirmSave')}</Button>}
-          {document.executionConfirmed && job.status !== 'completed' && <Button variant="primary" disabled={busy} onClick={() => void run(signal => progress('confirm', signal))}>{t('reconcile')}</Button>}
+          {document.executionConfirmed && !executionCompleted && <Button variant="primary" disabled={busy} onClick={() => void run(signal => progress('confirm', signal))}>{t('reconcile')}</Button>}
           <Button disabled={busy} onClick={() => void run(inspect)}>{t('inspect')}</Button>
         </div>
-        {job.status === 'completed' && <><p>{t('completedMessage')}</p><div className="document-controls"><Button variant="primary" onClick={() => navigate('golf/reservation-report-import')}>{t('viewSaved')}</Button>{!jobId && <Button onClick={() => void run(async () => newDocument())}>{t('newDocument')}</Button>}</div></>}
+        {executionCompleted && <><p>{t(job.status === 'completed_with_errors' ? 'completedWithErrorsMessage' : 'completedMessage')}</p><div className="document-controls"><Button variant="primary" onClick={() => navigate('golf/reservation-report-import')}>{t('viewSaved')}</Button>{!jobId && <Button onClick={() => void run(async () => newDocument())}>{t('newDocument')}</Button>}</div></>}
       </>}
     </>}
   </div>

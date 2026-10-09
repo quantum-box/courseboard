@@ -57,6 +57,7 @@ export const documentImport = {
   "rows": "行",
   "completed": "予約表の保存を確認しました。",
   "completedMessage": "全行を反映した保存結果を確認できました。予約表の画面で結果を確認してください。",
+  "completedWithErrorsMessage": "保存処理は終了しました。保存できなかった行があります。予約表で保存結果を確認してください。",
   "viewSaved": "保存した予約表を開く",
   "newDocument": "次のPDFを選ぶ",
   "newReadMessage": "この読取は再開できません。次のPDFは別の読取として開始します。元の文書と保存結果は取込履歴に残ります。",

@@ -62,3 +62,41 @@ it('requires an explicit new read after a terminal failure and preserves the old
   expect(next.jobId).toBeUndefined()
   expect(mock.reserve).not.toHaveBeenCalled()
 })
+
+it('opens results and permits the next PDF after completed-with-errors without replaying terminal work', async () => {
+  mock.targets.mockResolvedValue([{ key: 'courseboardReservationReports', documentImport: { pricingStatus: 'undecided' } }])
+  mock.json.mockResolvedValue({ items: [] })
+  mock.get.mockResolvedValue({ ...running, status: 'completed_with_errors', errors: 1 })
+  const key = 'courseboard.document-operation:tenant-a:platform-a:actor-a'
+  localStorage.setItem(key, JSON.stringify({ idempotencyKey: 'old-read', jobId: running.id }))
+  mount()
+  await screen.findByText(/保存できなかった行があります/)
+  expect(screen.queryByText(/全行を反映した保存結果/)).toBeNull()
+  expect(screen.queryByRole('button', { name: '同じ保存の結果を確認・再開' })).toBeNull()
+  expect(screen.getByRole('button', { name: '保存した予約表を開く' })).toBeTruthy()
+  expect(mock.execute).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: '次のPDFを選ぶ' }))
+  await screen.findByRole('button', { name: '選んだPDFを読み取る' })
+  expect(JSON.parse(localStorage.getItem(key)!).jobId).toBeUndefined()
+  expect(mock.reserve).not.toHaveBeenCalled()
+})
+it('keeps server placeholders reviewable for unreadable pages and an entirely unreadable PDF', async () => {
+  mock.targets.mockResolvedValue([{ key: 'courseboardReservationReports', documentImport: { pricingStatus: 'undecided' } }])
+  mock.json.mockResolvedValue({ items: [] })
+  const rows = [
+    { _source_index: 0, _source_page: 1, _source_row: 2, cells: '{"facilityName":"East"}' },
+    { _source_index: 0, _source_page: 2, _source_row: 1, cells: '{}' },
+    { _source_index: 1, _source_page: 1, _source_row: 1, cells: '{}' },
+    { _source_index: 1, _source_page: 2, _source_row: 1, cells: '{}' },
+  ]
+  mock.get.mockResolvedValue({ ...running, status: 'review', document: { ...running.document!, executionConfirmed: false, expiresAt: '2099-01-01', revision: undefined,
+    sources: [{ index: 0 }, { index: 1 }], extracted: { fields: { rows }, warnings: [] } } })
+  mount(running.id)
+  await screen.findByRole('heading', { name: '原本 2 · 2ページ · 1行目' })
+  expect(screen.getAllByText(/このページから表を読み取れませんでした/)).toHaveLength(3)
+  fireEvent.change(screen.getByRole('combobox', { name: '原本ファイル' }), { target: { value: '1' } })
+  const pages = screen.getByRole('combobox', { name: '原本のページ' }) as HTMLSelectElement
+  expect(Array.from(pages.options, option => option.value)).toEqual(['1', '2'])
+  fireEvent.change(screen.getAllByRole('textbox', { name: '施設名' })[0]!, { target: { value: 'Corrected East' } })
+  expect((screen.getByRole('button', { name: '確認した修正を保存' }) as HTMLButtonElement).disabled).toBe(true)
+})
