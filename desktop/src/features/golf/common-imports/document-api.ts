@@ -94,10 +94,10 @@ export async function reserveReservationDocument(files: readonly File[], rotatio
   if (contentTypes.some(contentType => contentType !== 'application/pdf') || files.length !== rotations.length) throw new Error(i18n.t('documentImport:error.pdf'))
   const documents: { contentType: string; size: number; sha256: string; rotation: DocumentSource['rotation'] }[] = []
   for (const [index, file] of files.entries()) documents.push({ contentType: contentTypes[index]!, size: file.size, sha256: await fileDigest(file, signal), rotation: rotations[index]! })
-  const result = await courseboardApiJson<{ job: ImportJob; ocr: { job: { id: string; status: string }; uploads: OcrReservation['uploads'] } }>(`${ROOT}/objects/courseboardReservationReports/imports/document-upload`, { method: 'POST', signal, body: JSON.stringify({ idempotencyKey, documents, pages: pages.trim() || null, importOptions }) })
+  const result = await courseboardApiJson<{ job: ImportJob; ocr: OcrReservation }>(`${ROOT}/objects/courseboardReservationReports/imports/document-upload`, { method: 'POST', signal, body: JSON.stringify({ idempotencyKey, documents, pages: pages.trim() || null, importOptions }) })
   const stored = result.job.document
-  if (!stored || stored.ocrJobId !== result.ocr.job.id || stored.sources.length !== documents.length || stored.sources.some((source, i) => source.sha256 !== documents[i]!.sha256 || source.size !== documents[i]!.size || source.rotation !== documents[i]!.rotation || source.contentType !== documents[i]!.contentType)) throw new Error(i18n.t('documentImport:error.manifest'))
-  return { job: result.job, ocr: { ...result.ocr.job, uploads: result.ocr.uploads } }
+  if (!stored || stored.ocrJobId !== result.ocr.id || stored.sources.length !== documents.length || stored.sources.some((source, i) => source.sha256 !== documents[i]!.sha256 || source.size !== documents[i]!.size || source.rotation !== documents[i]!.rotation || source.contentType !== documents[i]!.contentType)) throw new Error(i18n.t('documentImport:error.manifest'))
+  return { job: result.job, ocr: result.ocr }
 }
 function executionBody(job: ImportJob) {
   const doc = job.document

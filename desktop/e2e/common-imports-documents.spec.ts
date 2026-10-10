@@ -39,7 +39,7 @@ async function fixture(page: Page, loseResponses = false) {
       if (job) { expect(body.importOptions).toEqual(job.importOptions); expect(body.pages ?? null).toEqual(job.document!.pages) }
       if (!job) job = { id: 'dtj_document_fixture', objectKey: 'courseboardReservationReports', status: 'uploading', mode: 'create_only', processed: 0, total: null, created: 0, updated: 0, errors: 0, validationErrors: [], preview: [], batch: false, previewPage: 0, previewPages: 0, filename: null, failure: null, importOptions: body.importOptions, sourceSha256: sha256, createdAt: '2026-10-08T00:00:00Z', document: { rowField: 'rows', ocrJobId: 'goj_same', manifestSha256: 'b'.repeat(64), sources: [source], pages: body.pages ?? null, ocrStatus: 'uploading', expiresAt: '2099-10-08T00:00:00Z', revisionVersion: 0, revisionSha256: null, executionAvailable: false } }
       if (loseResponses && keys.length === 1) return route.abort('failed')
-      return reply(route, { job, ocr: { job: { id: 'goj_same', status: 'uploading' }, uploads: [{ storageKey: 'source', uploadUrl, expiresAt: '2099' }] } })
+      return reply(route, { job, ocr: { id: 'goj_same', status: 'uploading', uploads: [{ storageKey: 'source', uploadUrl, expiresAt: '2099' }] } })
     }
     if (!job) return route.fulfill({ status: 404 })
     if (path.endsWith('/document-read')) {
