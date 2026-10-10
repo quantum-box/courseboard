@@ -28,7 +28,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -843,9 +843,133 @@ pub trait PolicyChecker: Send + Sync {
     ) -> Result<Decision, CheckError>;
 }
 
+/// A non-cached, tenant-scoped batch policy query used only to build the
+/// navigation capability snapshot.  Keeping this separate from
+/// [`PolicyChecker`] is deliberate: navigation must not inherit the stale
+/// read grace period of [`CachingPolicyChecker`].
+#[async_trait::async_trait]
+pub trait PolicyBatchChecker: Send + Sync {
+    async fn check_batch(
+        &self,
+        bearer: &str,
+        operator_id: &str,
+        platform_id: Option<&str>,
+        actions: &[&str],
+    ) -> Result<BTreeMap<String, Option<bool>>, CheckError>;
+}
+
+/// Explicit development-mode policy batch checker.
+///
+/// This is wired only when `COURSEBOARD_DISABLE_ACTION_AUTHZ=true`.  Keeping
+/// it separate from a missing checker matters: a plain `AppState` in tests
+/// has no policy provider and must leave navigation decisions unknown rather
+/// than silently granting every action.
+pub struct DisabledActionAuthorizationBatch;
+
+#[async_trait::async_trait]
+impl PolicyBatchChecker for DisabledActionAuthorizationBatch {
+    async fn check_batch(
+        &self,
+        _bearer: &str,
+        _operator_id: &str,
+        _platform_id: Option<&str>,
+        actions: &[&str],
+    ) -> Result<BTreeMap<String, Option<bool>>, CheckError> {
+        Ok(actions
+            .iter()
+            .map(|action| ((*action).to_string(), Some(true)))
+            .collect())
+    }
+}
+
+/// Field actions used by CourseBoard's navigation and settings entry points.
+///
+/// These are deliberately explicit.  The UI must never turn a missing action
+/// into access merely because another Field action was granted, and querying
+/// an unrelated action set would make a partial response look authoritative.
+const FIELD_NAVIGATION_ACTIONS: &[&str] = &[
+    "field:ListReservations",
+    "field:ManageReservations",
+    "field:ListHrm",
+    "field:ManageHrm",
+    "field:ListCustomers",
+    "field:ManageCustomers",
+    "field:ListMembership",
+    "field:ManageMembership",
+    "field:RegisterMembership",
+    "field:ListExtensions",
+    "field:ManageExtensions",
+    "field:ManageUsers",
+    "field:ListBridgeDefinitions",
+    "field:ManageBridgeDefinitions",
+    "field:PreviewBridgeRun",
+    "field:ExecuteBridgeDrafts",
+    "field:RunBridgeAction",
+    "field:ListBridgeExportDefinitions",
+    "field:ManageBridgeExportDefinitions",
+    "field:ExportBridgeDefinition",
+    "field:ListAccounting",
+    "field:ManageAccounting",
+];
+
+/// The canonical action keys exposed to CourseBoard clients.  The returned
+/// vector is owned because the batch checker borrows its request for the
+/// duration of the call, while callers may want to retain the snapshot.
+pub fn navigation_action_set() -> Vec<&'static str> {
+    actions::ALL
+        .iter()
+        .copied()
+        // Maintenance and machine-to-machine tax calculation are not UI
+        // entry actions.
+        .filter(|action| *action != actions::SEED_DEMO_BOARD && *action != actions::CALCULATE_TAX)
+        .chain(FIELD_NAVIGATION_ACTIONS.iter().copied())
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NavigationActionSnapshot {
+    pub actions: BTreeMap<String, Option<bool>>,
+}
+
+impl NavigationActionSnapshot {
+    fn from_actions(actions: BTreeMap<String, Option<bool>>) -> Self {
+        Self { actions }
+    }
+
+    fn unknown(action_set: &[&str]) -> Self {
+        Self::from_actions(
+            action_set
+                .iter()
+                .map(|action| ((*action).to_string(), None))
+                .collect(),
+        )
+    }
+}
+
+/// Ask Tachyon Auth for the fresh navigation snapshot.  A provider outage is
+/// represented as unknown (`null`) for every action so a transient problem
+/// cannot grant access.  Authentication and tenant-scope refusals remain
+/// errors and are propagated to the HTTP boundary.
+pub async fn fresh_navigation_snapshot(
+    checker: &dyn PolicyBatchChecker,
+    bearer: &str,
+    operator_id: &str,
+    platform_id: Option<&str>,
+    action_set: &[&str],
+) -> Result<NavigationActionSnapshot, CheckError> {
+    match checker
+        .check_batch(bearer, operator_id, platform_id, action_set)
+        .await
+    {
+        Ok(actions) => Ok(NavigationActionSnapshot::from_actions(actions)),
+        Err(CheckError::Provider(_)) => Ok(NavigationActionSnapshot::unknown(action_set)),
+        Err(error) => Err(error),
+    }
+}
+
 #[derive(Serialize)]
 struct CheckRequest<'a> {
-    actions: [&'a str; 1],
+    actions: Vec<&'a str>,
 }
 
 #[derive(Deserialize)]
@@ -857,6 +981,10 @@ struct CheckResponse {
 struct CheckOutcome {
     action: String,
     allowed: bool,
+    /// An outcome carrying an error is unknown even when `allowed` happens to
+    /// be true.  Tachyon Auth's batch contract uses a string reason here.
+    #[serde(default)]
+    error: Option<String>,
 }
 
 /// `POST {tachyon-api}/v1/auth/policies/check` with the caller's own bearer,
@@ -900,7 +1028,9 @@ impl PolicyChecker for TachyonPolicyChecker {
             .post(check_url.clone())
             .header(AUTHORIZATION, format!("Bearer {bearer}"))
             .header("x-operator-id", operator_id)
-            .json(&CheckRequest { actions: [action] });
+            .json(&CheckRequest {
+                actions: vec![action],
+            });
         if let Some(platform_id) = platform_id {
             request = request.header("x-platform-id", platform_id);
         }
@@ -923,12 +1053,291 @@ impl PolicyChecker for TachyonPolicyChecker {
         let allowed = payload
             .results
             .iter()
-            .any(|outcome| outcome.action == action && outcome.allowed);
+            .any(|outcome| outcome.action == action && outcome.error.is_none() && outcome.allowed);
         Ok(if allowed {
             Decision::Allowed
         } else {
             Decision::Denied
         })
+    }
+}
+
+#[async_trait::async_trait]
+impl PolicyBatchChecker for TachyonPolicyChecker {
+    async fn check_batch(
+        &self,
+        bearer: &str,
+        operator_id: &str,
+        platform_id: Option<&str>,
+        actions: &[&str],
+    ) -> Result<BTreeMap<String, Option<bool>>, CheckError> {
+        let Some(check_url) = &self.check_url else {
+            return Err(CheckError::Provider(
+                "tachyon api base URL is invalid".to_string(),
+            ));
+        };
+
+        let mut request = self
+            .client
+            .post(check_url.clone())
+            .header(AUTHORIZATION, format!("Bearer {bearer}"))
+            .header("x-operator-id", operator_id)
+            .json(&CheckRequest {
+                actions: actions.to_vec(),
+            });
+        if let Some(platform_id) = platform_id {
+            request = request.header("x-platform-id", platform_id);
+        }
+        request = request.timeout(Duration::from_secs(5));
+        let response = request.send().await.map_err(|error| {
+            CheckError::Provider(format!("policy batch check request failed: {error}"))
+        })?;
+        match response.status() {
+            StatusCode::UNAUTHORIZED => return Err(CheckError::Unauthorized),
+            StatusCode::FORBIDDEN => return Err(CheckError::TenantRejected),
+            status if !status.is_success() => {
+                return Err(CheckError::Provider(format!(
+                    "policy batch check answered {status}"
+                )))
+            }
+            _ => {}
+        }
+        let payload: CheckResponse = response.json().await.map_err(|error| {
+            CheckError::Provider(format!("policy batch check decode failed: {error}"))
+        })?;
+
+        Ok(strict_batch_decisions(actions, payload.results))
+    }
+}
+
+fn strict_batch_decisions(
+    actions: &[&str],
+    outcomes: Vec<CheckOutcome>,
+) -> BTreeMap<String, Option<bool>> {
+    let requested: HashSet<&str> = actions.iter().copied().collect();
+    let mut decisions = BTreeMap::new();
+    let mut requested_counts = HashMap::<&str, usize>::new();
+    for action in actions {
+        *requested_counts.entry(*action).or_default() += 1;
+        decisions.entry((*action).to_string()).or_insert(None);
+    }
+
+    let mut seen = HashSet::<String>::new();
+    for outcome in outcomes {
+        if !requested.contains(outcome.action.as_str()) {
+            continue;
+        }
+        let Some(count) = requested_counts.get(outcome.action.as_str()) else {
+            continue;
+        };
+        if *count != 1 || !seen.insert(outcome.action.clone()) {
+            decisions.insert(outcome.action, None);
+            continue;
+        }
+        if outcome.error.is_none() {
+            decisions.insert(outcome.action, Some(outcome.allowed));
+        }
+    }
+    decisions
+}
+
+#[cfg(test)]
+mod navigation_batch_tests {
+    use super::*;
+
+    #[test]
+    fn missing_duplicate_and_error_outcomes_are_unknown_per_action() {
+        let decisions = strict_batch_decisions(
+            &["allowed", "false", "missing", "duplicate", "errored"],
+            vec![
+                CheckOutcome {
+                    action: "allowed".to_string(),
+                    allowed: true,
+                    error: None,
+                },
+                CheckOutcome {
+                    action: "false".to_string(),
+                    allowed: false,
+                    error: None,
+                },
+                CheckOutcome {
+                    action: "duplicate".to_string(),
+                    allowed: true,
+                    error: None,
+                },
+                CheckOutcome {
+                    action: "duplicate".to_string(),
+                    allowed: false,
+                    error: None,
+                },
+                CheckOutcome {
+                    action: "errored".to_string(),
+                    allowed: true,
+                    error: Some("provider_error".to_string()),
+                },
+                CheckOutcome {
+                    action: "unrequested".to_string(),
+                    allowed: true,
+                    error: None,
+                },
+            ],
+        );
+        assert_eq!(decisions["allowed"], Some(true));
+        assert_eq!(decisions["false"], Some(false));
+        assert_eq!(decisions["missing"], None);
+        assert_eq!(decisions["duplicate"], None);
+        assert_eq!(decisions["errored"], None);
+        assert_eq!(decisions.len(), 5);
+    }
+
+    #[test]
+    fn unknown_snapshot_preserves_unknown_action_decisions() {
+        let action_set = ["read", "write"];
+        let complete = NavigationActionSnapshot::from_actions(
+            [
+                ("read".to_string(), Some(false)),
+                ("write".to_string(), Some(false)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(complete.actions["read"], Some(false));
+        assert_eq!(
+            NavigationActionSnapshot::unknown(&action_set).actions["read"],
+            None
+        );
+    }
+
+    struct ScriptedBatch {
+        result: Result<BTreeMap<String, Option<bool>>, BatchError>,
+    }
+
+    #[derive(Clone, Copy)]
+    enum BatchError {
+        Unauthorized,
+        TenantRejected,
+        Provider,
+    }
+
+    #[async_trait::async_trait]
+    impl PolicyBatchChecker for ScriptedBatch {
+        async fn check_batch(
+            &self,
+            _bearer: &str,
+            _operator_id: &str,
+            _platform_id: Option<&str>,
+            _actions: &[&str],
+        ) -> Result<BTreeMap<String, Option<bool>>, CheckError> {
+            match &self.result {
+                Ok(result) => Ok(result.clone()),
+                Err(BatchError::Unauthorized) => Err(CheckError::Unauthorized),
+                Err(BatchError::TenantRejected) => Err(CheckError::TenantRejected),
+                Err(BatchError::Provider) => Err(CheckError::Provider("timeout".to_string())),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn auth_and_tenant_errors_propagate_but_provider_timeout_is_unknown() {
+        let actions = ["a", "b"];
+        let unauthorized = ScriptedBatch {
+            result: Err(BatchError::Unauthorized),
+        };
+        assert!(matches!(
+            fresh_navigation_snapshot(&unauthorized, "bearer", "tenant", None, &actions).await,
+            Err(CheckError::Unauthorized)
+        ));
+
+        let tenant_rejected = ScriptedBatch {
+            result: Err(BatchError::TenantRejected),
+        };
+        assert!(matches!(
+            fresh_navigation_snapshot(&tenant_rejected, "bearer", "tenant", None, &actions).await,
+            Err(CheckError::TenantRejected)
+        ));
+
+        let provider_timeout = ScriptedBatch {
+            result: Err(BatchError::Provider),
+        };
+        let snapshot =
+            fresh_navigation_snapshot(&provider_timeout, "bearer", "tenant", None, &actions)
+                .await
+                .expect("provider failures become unknown capabilities");
+        assert_eq!(snapshot.actions["a"], None);
+        assert_eq!(snapshot.actions["b"], None);
+    }
+
+    #[derive(Clone)]
+    struct PolicyResponse {
+        status: StatusCode,
+        body: String,
+        delay: Option<Duration>,
+    }
+
+    async fn policy_response(State(state): State<PolicyResponse>) -> Response {
+        if let Some(delay) = state.delay {
+            tokio::time::sleep(delay).await;
+        }
+        (
+            state.status,
+            [(axum::http::header::CONTENT_TYPE, "application/json")],
+            state.body,
+        )
+            .into_response()
+    }
+
+    async fn spawn_policy_response(
+        status: StatusCode,
+        body: &str,
+        delay: Option<Duration>,
+    ) -> String {
+        use axum::{routing::post, Router};
+
+        let app = Router::new()
+            .route("/v1/auth/policies/check", post(policy_response))
+            .with_state(PolicyResponse {
+                status,
+                body: body.to_string(),
+                delay,
+            });
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("policy test listener");
+        let address = listener.local_addr().expect("policy test address");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("policy test server");
+        });
+        format!("http://{address}")
+    }
+
+    #[tokio::test]
+    async fn http_batch_propagates_401_and_403() {
+        let actions = ["a", "b"];
+        let unauthorized = spawn_policy_response(
+            StatusCode::UNAUTHORIZED,
+            r#"{"error":"unauthorized"}"#,
+            None,
+        )
+        .await;
+        let checker = TachyonPolicyChecker::new(reqwest::Client::new(), &unauthorized);
+        assert!(matches!(
+            checker
+                .check_batch("bearer", "tenant", None, &actions)
+                .await,
+            Err(CheckError::Unauthorized)
+        ));
+
+        let tenant_rejected =
+            spawn_policy_response(StatusCode::FORBIDDEN, r#"{"error":"tenant"}"#, None).await;
+        let checker = TachyonPolicyChecker::new(reqwest::Client::new(), &tenant_rejected);
+        assert!(matches!(
+            checker
+                .check_batch("bearer", "tenant", None, &actions)
+                .await,
+            Err(CheckError::TenantRejected)
+        ));
     }
 }
 

@@ -1,6 +1,6 @@
 //! Axum handler for SDK-backed TACHYON Field operations.
 
-use std::sync::Arc;
+use std::{collections::BTreeMap, sync::Arc};
 
 use axum::{
     extract::State,
@@ -17,12 +17,19 @@ use crate::course::domain::{
 };
 use crate::course::infrastructure::FieldSdkCapabilitiesGateway;
 use crate::course::usecase::GetFieldClientCapabilitiesUseCase;
+use crate::course_authz::{self, CheckError, NavigationActionSnapshot};
 use crate::{AppError, AppState, COURSEBOARD_AUTHORIZATION_HEADER};
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientCapabilitiesResponse {
+    pub navigation: NavigationCapabilitiesResponse,
+    /// Fresh, per-action policy results. `null` means that Auth could not
+    /// establish a decision for that canonical action; clients must not infer
+    /// access from a different action or from the aggregate below.
+    pub actions: BTreeMap<String, Option<bool>>,
     pub agent_documents: AgentDocumentCapabilitiesResponse,
+    pub cancellation_fees: CancellationFeeCapabilitiesResponse,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
@@ -37,9 +44,41 @@ pub struct DocumentQueueCapabilitiesResponse {
     pub send: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct CancellationFeeCapabilitiesResponse {
+    pub list: bool,
+    pub manage: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NavigationCapabilitiesResponse {
+    /// `None` is serialized as null when Field's action batch was incomplete.
+    pub other_business_access: Option<bool>,
+}
+
 impl From<FieldClientCapabilities> for ClientCapabilitiesResponse {
     fn from(value: FieldClientCapabilities) -> Self {
+        Self::from_parts(value, None)
+    }
+}
+
+impl ClientCapabilitiesResponse {
+    fn from_parts(
+        value: FieldClientCapabilities,
+        navigation_snapshot: Option<NavigationActionSnapshot>,
+    ) -> Self {
+        let actions = navigation_snapshot
+            .map(|snapshot| snapshot.actions)
+            .unwrap_or_default();
         Self {
+            navigation: NavigationCapabilitiesResponse {
+                // Preserve Field's aggregate contract verbatim. The
+                // CourseBoard per-action map is additive and must not infer
+                // a replacement aggregate from unrelated actions.
+                other_business_access: value.navigation.other_business_access,
+            },
+            actions,
             agent_documents: AgentDocumentCapabilitiesResponse {
                 invoices: DocumentQueueCapabilitiesResponse {
                     list: value.agent_documents.invoices.list,
@@ -49,6 +88,10 @@ impl From<FieldClientCapabilities> for ClientCapabilitiesResponse {
                     list: value.agent_documents.quotations.list,
                     send: value.agent_documents.quotations.send,
                 },
+            },
+            cancellation_fees: CancellationFeeCapabilitiesResponse {
+                list: value.cancellation_fees.list,
+                manage: value.cancellation_fees.manage,
             },
         }
     }
@@ -105,7 +148,31 @@ pub async fn get_client_capabilities(
         .execute(credentials, context)
         .await
         .map_err(AppError::from)?;
-    Ok(Json(ClientCapabilitiesResponse::from(capabilities)))
+    let action_set = course_authz::navigation_action_set();
+    let navigation_snapshot = if let Some(checker) = state.navigation_policy_checker() {
+        let bearer = bearer.strip_prefix("Bearer ").unwrap_or(bearer).trim();
+        Some(
+            course_authz::fresh_navigation_snapshot(
+                checker.as_ref(),
+                bearer,
+                &operator,
+                Some(&platform),
+                &action_set,
+            )
+            .await
+            .map_err(|error| match error {
+                CheckError::Unauthorized => AppError::Unauthorized,
+                CheckError::TenantRejected => AppError::TenantForbidden,
+                CheckError::Provider(message) => AppError::Provider(message),
+            })?,
+        )
+    } else {
+        None
+    };
+    Ok(Json(ClientCapabilitiesResponse::from_parts(
+        capabilities,
+        navigation_snapshot,
+    )))
 }
 
 fn delegated_access_token(headers: &HeaderMap) -> Result<FieldAccessToken, AppError> {
@@ -144,11 +211,15 @@ fn required_header<'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+    use std::{
+        collections::BTreeMap,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc, Mutex,
+        },
     };
 
+    use async_trait::async_trait;
     use axum::{
         body::Body,
         extract::State,
@@ -163,10 +234,25 @@ mod tests {
 
     use crate::auth::{AuthError, AuthenticatedPrincipal, TokenVerifier};
     use crate::cancellation_fees::CancellationFeeConfig;
+    use crate::course::domain::{CourseAuthorizer, CourseError, GatewayCredentials};
+    use crate::course_authz::{CheckError, DisabledActionAuthorizationBatch, PolicyBatchChecker};
     use crate::{build_router, AppState};
 
     const TOKEN_A: &str = "fixture-access-token-a";
     const TOKEN_B: &str = "fixture-access-token-b";
+
+    struct RejectingAuthorizer;
+
+    #[async_trait]
+    impl CourseAuthorizer for RejectingAuthorizer {
+        async fn require(
+            &self,
+            _credentials: GatewayCredentials<'_>,
+            action: &'static str,
+        ) -> Result<(), CourseError> {
+            Err(CourseError::Forbidden(action))
+        }
+    }
 
     #[derive(Clone)]
     struct FixtureTokenVerifier;
@@ -193,11 +279,60 @@ mod tests {
         platform_id: String,
     }
 
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct CapturedBatchRequest {
+        bearer: String,
+        operator_id: String,
+        platform_id: Option<String>,
+        actions: Vec<String>,
+    }
+
+    #[derive(Clone, Copy)]
+    enum BatchMode {
+        DenyAll,
+        Unauthorized,
+        TenantRejected,
+    }
+
+    #[derive(Clone)]
+    struct CapturingBatchChecker {
+        calls: Arc<Mutex<Vec<CapturedBatchRequest>>>,
+        mode: BatchMode,
+    }
+
+    #[async_trait]
+    impl PolicyBatchChecker for CapturingBatchChecker {
+        async fn check_batch(
+            &self,
+            bearer: &str,
+            operator_id: &str,
+            platform_id: Option<&str>,
+            actions: &[&str],
+        ) -> Result<BTreeMap<String, Option<bool>>, CheckError> {
+            self.calls.lock().unwrap().push(CapturedBatchRequest {
+                bearer: bearer.to_string(),
+                operator_id: operator_id.to_string(),
+                platform_id: platform_id.map(str::to_owned),
+                actions: actions.iter().map(|action| (*action).to_string()).collect(),
+            });
+
+            match self.mode {
+                BatchMode::DenyAll => Ok(actions
+                    .iter()
+                    .map(|action| ((*action).to_string(), Some(false)))
+                    .collect()),
+                BatchMode::Unauthorized => Err(CheckError::Unauthorized),
+                BatchMode::TenantRejected => Err(CheckError::TenantRejected),
+            }
+        }
+    }
+
     #[derive(Clone)]
     struct FakeFieldState {
         calls: Arc<AtomicUsize>,
         requests: Arc<Mutex<Vec<ObservedRequest>>>,
         denied_operator: Option<String>,
+        other_business_access: bool,
     }
 
     async fn fake_client_capabilities(
@@ -225,10 +360,14 @@ mod tests {
         }
 
         Json(serde_json::json!({
+            "navigation": {
+                "otherBusinessAccess": state.other_business_access
+            },
             "agentDocuments": {
                 "invoices": {"list": true, "send": false},
                 "quotations": {"list": false, "send": true}
-            }
+            },
+            "cancellationFees": {"list": true, "manage": false}
         }))
         .into_response()
     }
@@ -244,6 +383,13 @@ mod tests {
     async fn spawn_fake_field(
         denied_operator: Option<String>,
     ) -> (String, Arc<AtomicUsize>, Arc<Mutex<Vec<ObservedRequest>>>) {
+        spawn_fake_field_with_aggregate(denied_operator, false).await
+    }
+
+    async fn spawn_fake_field_with_aggregate(
+        denied_operator: Option<String>,
+        other_business_access: bool,
+    ) -> (String, Arc<AtomicUsize>, Arc<Mutex<Vec<ObservedRequest>>>) {
         let calls = Arc::new(AtomicUsize::new(0));
         let requests = Arc::new(Mutex::new(Vec::new()));
         let app = Router::new()
@@ -255,6 +401,7 @@ mod tests {
                 calls: calls.clone(),
                 requests: requests.clone(),
                 denied_operator,
+                other_business_access,
             });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -287,6 +434,54 @@ mod tests {
             Arc::new(FixtureTokenVerifier),
             config,
         ))
+    }
+
+    fn app_with_rejecting_authorizer(field_api_url: String) -> Router {
+        let pool = MySqlPoolOptions::new().connect_lazy_with(
+            MySqlConnectOptions::new()
+                .host("127.0.0.1")
+                .username("root")
+                .database("unused_field_capabilities_test"),
+        );
+        let config = CancellationFeeConfig {
+            field_api_url: Some(field_api_url),
+            ..CancellationFeeConfig::default()
+        };
+        build_router(
+            AppState::new_with_cancellation_fee_config(
+                pool,
+                Arc::new(FixtureTokenVerifier),
+                config,
+            )
+            .with_course_authorizer(Arc::new(RejectingAuthorizer)),
+        )
+    }
+
+    fn app_with_navigation_policy_checker(
+        field_api_url: String,
+        checker: Arc<dyn PolicyBatchChecker>,
+    ) -> Router {
+        let pool = MySqlPoolOptions::new().connect_lazy_with(
+            MySqlConnectOptions::new()
+                .host("127.0.0.1")
+                .username("root")
+                .database("unused_field_capabilities_test"),
+        );
+        let config = CancellationFeeConfig {
+            field_api_url: Some(field_api_url),
+            // Keep this override in the Field leg so the test can prove the
+            // policy batch still receives the verified caller token below.
+            field_upstream_authorization: Some("Bearer fixture-service-account".to_string()),
+            ..CancellationFeeConfig::default()
+        };
+        build_router(
+            AppState::new_with_cancellation_fee_config(
+                pool,
+                Arc::new(FixtureTokenVerifier),
+                config,
+            )
+            .with_navigation_policy_checker(Some(checker)),
+        )
     }
 
     fn tenant_id(fill: char) -> String {
@@ -370,6 +565,9 @@ mod tests {
         let body_a: serde_json::Value = serde_json::from_slice(&body_a).unwrap();
         assert_eq!(body_a["agentDocuments"]["invoices"]["list"], true);
         assert_eq!(body_a["agentDocuments"]["quotations"]["send"], true);
+        assert_eq!(body_a["cancellationFees"]["list"], true);
+        assert_eq!(body_a["cancellationFees"]["manage"], false);
+        assert_eq!(body_a["navigation"]["otherBusinessAccess"], false);
 
         let mut observed = requests.lock().unwrap().clone();
         observed.sort_by(|left, right| left.authorization.cmp(&right.authorization));
@@ -388,5 +586,99 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn capability_discovery_does_not_require_an_unrelated_course_action() {
+        let operator = tenant_id('a');
+        let platform = tenant_id('b');
+        let (origin, calls, _) = spawn_fake_field(None).await;
+        let response = app_with_rejecting_authorizer(origin)
+            .oneshot(request(TOKEN_A, Some(&operator), Some(&platform)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn fresh_policy_batch_uses_request_scope_and_preserves_field_aggregate() {
+        let operator = tenant_id('a');
+        let platform = tenant_id('b');
+        let (origin, field_calls, _) = spawn_fake_field_with_aggregate(None, true).await;
+        let checker = Arc::new(CapturingBatchChecker {
+            calls: Arc::new(Mutex::new(Vec::new())),
+            mode: BatchMode::DenyAll,
+        });
+        let checker_calls = checker.calls.clone();
+        let checker_for_state: Arc<dyn PolicyBatchChecker> = checker;
+
+        let response = app_with_navigation_policy_checker(origin, checker_for_state)
+            .oneshot(request(TOKEN_A, Some(&operator), Some(&platform)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(field_calls.load(Ordering::SeqCst), 1);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        // This remains Field's aggregate result. It must not be recomputed
+        // from the per-action Course/Auth map (which is false here).
+        assert_eq!(body["navigation"]["otherBusinessAccess"], true);
+        assert_eq!(body["actions"]["field_extension_golf:ListTeeSheet"], false);
+
+        let calls = checker_calls.lock().unwrap().clone();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].bearer, TOKEN_A);
+        assert_eq!(calls[0].operator_id, operator);
+        assert_eq!(calls[0].platform_id, Some(platform));
+        assert!(calls[0]
+            .actions
+            .iter()
+            .any(|action| action == "field_extension_golf:ListTeeSheet"));
+    }
+
+    #[tokio::test]
+    async fn fresh_policy_batch_auth_errors_reach_http_boundary() {
+        let operator = tenant_id('a');
+        let platform = tenant_id('b');
+        let (origin, field_calls, _) = spawn_fake_field(None).await;
+
+        for (mode, expected_status) in [
+            (BatchMode::Unauthorized, StatusCode::UNAUTHORIZED),
+            (BatchMode::TenantRejected, StatusCode::FORBIDDEN),
+        ] {
+            let checker = Arc::new(CapturingBatchChecker {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                mode,
+            });
+            let checker_for_state: Arc<dyn PolicyBatchChecker> = checker;
+            let response = app_with_navigation_policy_checker(origin.clone(), checker_for_state)
+                .oneshot(request(TOKEN_A, Some(&operator), Some(&platform)))
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), expected_status);
+        }
+        assert_eq!(field_calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn explicit_disabled_authz_mode_reports_known_allowed_actions() {
+        let operator = tenant_id('a');
+        let platform = tenant_id('b');
+        let (origin, _, _) = spawn_fake_field(None).await;
+        let checker: Arc<dyn PolicyBatchChecker> = Arc::new(DisabledActionAuthorizationBatch);
+
+        let response = app_with_navigation_policy_checker(origin, checker)
+            .oneshot(request(TOKEN_A, Some(&operator), Some(&platform)))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["actions"]["field_extension_golf:ListTeeSheet"], true);
     }
 }

@@ -93,7 +93,16 @@ impl FieldRequestContext {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FieldClientCapabilities {
+    pub navigation: FieldNavigationCapabilities,
     pub agent_documents: FieldAgentDocumentCapabilities,
+    pub cancellation_fees: FieldCancellationFeeCapabilities,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FieldNavigationCapabilities {
+    /// `None` means Field could not complete the action batch. CourseBoard
+    /// must not infer fee-only access from that state.
+    pub other_business_access: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,6 +115,12 @@ pub struct FieldAgentDocumentCapabilities {
 pub struct FieldDocumentQueueCapabilities {
     pub list: bool,
     pub send: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldCancellationFeeCapabilities {
+    pub list: bool,
+    pub manage: bool,
 }
 
 fn is_tachyon_tenant_id(value: &str) -> bool {

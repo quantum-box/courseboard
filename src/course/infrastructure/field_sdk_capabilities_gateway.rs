@@ -3,15 +3,14 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use field_sdk::apis::{
-    tachyon_field_identity_api::{self, GetClientCapabilitiesError},
-    Error as FieldSdkError,
-};
+use reqwest::Method;
+use serde::Deserialize;
 
 use super::field_gateway::{map_field_status_error, normalize_base_url};
 use crate::course::domain::{
-    CourseError, FieldAgentDocumentCapabilities, FieldCapabilitiesGateway, FieldClientCapabilities,
-    FieldDocumentQueueCapabilities, FieldRequestContext,
+    CourseError, FieldAgentDocumentCapabilities, FieldCancellationFeeCapabilities,
+    FieldCapabilitiesGateway, FieldClientCapabilities, FieldDocumentQueueCapabilities,
+    FieldNavigationCapabilities, FieldRequestContext,
 };
 
 const FIELD_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -20,6 +19,47 @@ const FIELD_REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 /// deliberately supplied per call through `FieldRequestContext`.
 pub struct FieldSdkCapabilitiesGateway {
     base_url: String,
+}
+
+/// The checked-in Field SDK predates the cancellation-fee capability fields.
+/// Keep the outbound configuration from that SDK, but decode the response
+/// locally so CourseBoard can consume the additive fields before a regenerated
+/// SDK revision is available. `cancellationFees` and `navigation` are
+/// optional for rolling deploys against an older Field API and therefore fail
+/// closed to an unknown navigation decision.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClientCapabilitiesResponse {
+    agent_documents: AgentDocumentCapabilitiesResponse,
+    #[serde(default)]
+    cancellation_fees: Option<CancellationFeeCapabilitiesResponse>,
+    #[serde(default)]
+    navigation: Option<NavigationCapabilitiesResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentDocumentCapabilitiesResponse {
+    invoices: DocumentQueueCapabilitiesResponse,
+    quotations: DocumentQueueCapabilitiesResponse,
+}
+
+#[derive(Debug, Deserialize)]
+struct DocumentQueueCapabilitiesResponse {
+    list: bool,
+    send: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct CancellationFeeCapabilitiesResponse {
+    list: bool,
+    manage: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NavigationCapabilitiesResponse {
+    #[serde(default)]
+    other_business_access: Option<bool>,
 }
 
 impl FieldSdkCapabilitiesGateway {
@@ -48,18 +88,62 @@ impl FieldCapabilitiesGateway for FieldSdkCapabilitiesGateway {
         })?;
         configuration.base_path = self.base_url.clone();
 
-        let response = tokio::time::timeout(
-            FIELD_REQUEST_TIMEOUT,
-            tachyon_field_identity_api::get_client_capabilities(&configuration),
-        )
-        .await
-        .map_err(|_| CourseError::Provider("Field API request timed out".to_string()))?
-        .map_err(map_sdk_error)?;
+        let url = format!("{}/v1/field/client-capabilities", configuration.base_path);
+        // Keep the deadline around both the response headers and body. A Field
+        // edge can return headers and then stall while streaming the JSON; that
+        // must not leave capability-gated startup waiting without a bound.
+        let request = async {
+            let response = configuration
+                .client
+                .request(Method::GET, url)
+                .bearer_auth(context.access_token())
+                .send()
+                .await
+                .map_err(|error| {
+                    if error.is_timeout() {
+                        CourseError::Provider("Field API request timed out".to_string())
+                    } else {
+                        CourseError::Provider(format!("Field API request failed: {error}"))
+                    }
+                })?;
+            let status = response.status();
+            let body = response.text().await.map_err(|error| {
+                CourseError::Provider(format!("Field capabilities response read failed: {error}"))
+            })?;
+            Ok::<_, CourseError>((status, body))
+        };
+        let (status, body) = tokio::time::timeout(FIELD_REQUEST_TIMEOUT, request)
+            .await
+            .map_err(|_| CourseError::Provider("Field API request timed out".to_string()))??;
+        if !status.is_success() {
+            return Err(map_field_status_error(status, &body));
+        }
+        let response =
+            serde_json::from_str::<ClientCapabilitiesResponse>(&body).map_err(|error| {
+                CourseError::Provider(format!(
+                    "Field capabilities response decode failed: {error}"
+                ))
+            })?;
 
-        let agent_documents = *response.agent_documents;
-        let invoices = *agent_documents.invoices;
-        let quotations = *agent_documents.quotations;
+        let invoices = response.agent_documents.invoices;
+        let quotations = response.agent_documents.quotations;
+        let cancellation_fees = response
+            .cancellation_fees
+            .map(|value| FieldCancellationFeeCapabilities {
+                list: value.list,
+                manage: value.manage,
+            })
+            .unwrap_or(FieldCancellationFeeCapabilities {
+                list: false,
+                manage: false,
+            });
+        let navigation = FieldNavigationCapabilities {
+            other_business_access: response
+                .navigation
+                .and_then(|value| value.other_business_access),
+        };
         Ok(FieldClientCapabilities {
+            navigation,
             agent_documents: FieldAgentDocumentCapabilities {
                 invoices: FieldDocumentQueueCapabilities {
                     list: invoices.list,
@@ -70,21 +154,7 @@ impl FieldCapabilitiesGateway for FieldSdkCapabilitiesGateway {
                     send: quotations.send,
                 },
             },
+            cancellation_fees,
         })
-    }
-}
-
-fn map_sdk_error(error: FieldSdkError<GetClientCapabilitiesError>) -> CourseError {
-    match error {
-        FieldSdkError::ResponseError(response) => {
-            map_field_status_error(response.status, &response.content)
-        }
-        FieldSdkError::Reqwest(error) => {
-            CourseError::Provider(format!("Field API request failed: {error}"))
-        }
-        FieldSdkError::Serde(error) => {
-            CourseError::Provider(format!("Field API response decode failed: {error}"))
-        }
-        FieldSdkError::Io(error) => CourseError::Provider(format!("Field SDK I/O failed: {error}")),
     }
 }

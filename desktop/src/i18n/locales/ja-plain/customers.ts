@@ -360,6 +360,7 @@ export const customers: DeepPartial<typeof source> = {
       unlinkedPhoneUnreadable: '日本のケータイ番号か E.164 の形で入れてください。このままだと請求書にのこしません。',
       unbillableTitle: 'せいきゅうできないものがあります',
       unbillable: '{{count}}件は、名前が空のままです。名前を入れるとせいきゅうできます。',
+      reconcile: 'ある請求を反映する',
       invoiceNote: 'キャンセル料のせいきゅうです（{{count}}件）。',
       invoiceLine: '{{date}} キャンセル（{{reason}}）{{note}}',
       lineItem: {

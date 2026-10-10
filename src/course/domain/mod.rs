@@ -159,8 +159,9 @@ pub use demo_board::{
 };
 pub use error::CourseError;
 pub use field_capabilities::{
-    FieldAccessToken, FieldAgentDocumentCapabilities, FieldClientCapabilities,
-    FieldDocumentQueueCapabilities, FieldOperatorId, FieldPlatformId, FieldRequestContext,
+    FieldAccessToken, FieldAgentDocumentCapabilities, FieldCancellationFeeCapabilities,
+    FieldClientCapabilities, FieldDocumentQueueCapabilities, FieldNavigationCapabilities,
+    FieldOperatorId, FieldPlatformId, FieldRequestContext,
 };
 pub use ids::{
     AssignmentId, AvailabilityId, BudgetId, CaddieId, CourseId, CustomerId, MembershipId,

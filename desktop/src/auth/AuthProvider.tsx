@@ -127,12 +127,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await adapter?.signOut(reason)
   }, [adapter, clearApiAuth])
 
-  const bindTenant = useCallback((tenant: AuthTenant) => {
+  const bindTenant = useCallback((tenant: AuthTenant, userId?: string) => {
     if (!adapter) return false
     configureApiAuth({
       tenantId: tenant.id,
       operatorId: tenant.operatorId,
       platformId: tenant.platformId,
+      userId,
       getAccessToken: force => adapter.getAccessToken(force),
       onUnauthorized: () => { void signOut('expired') },
       onForbidden: denyAccess,
@@ -142,7 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [adapter, denyAccess, signOut])
 
   const activateTenant = useCallback((user: AuthUser, tenant: AuthTenant) => {
-    if (!bindTenant(tenant)) return
+    if (!bindTenant(tenant, user.id)) return
     writeLastReadySession(user, tenant)
     // Keep the active tenant visible in the URL so links can be shared and a
     // reload always restores the same tenant, even when it was auto-selected.
@@ -162,7 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return boot.next
     })
     if (holdingSession && heldPrevious) {
-      bindTenant(heldPrevious.tenant)
+      bindTenant(heldPrevious.tenant, heldPrevious.user.id)
     } else if (!holdingSession) {
       clearApiAuth()
     }

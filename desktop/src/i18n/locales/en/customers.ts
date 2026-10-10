@@ -372,6 +372,7 @@ export const customers: DeepPartial<typeof source> = {
       unlinkedPhoneUnreadable: 'Enter a Japanese mobile number or an E.164 number. As it stands it is left off the invoice.',
       unbillableTitle: 'Some bookings cannot be invoiced',
       unbillable: '{{count}} still have no recipient name. Enter one and they can be billed.',
+      reconcile: 'Record existing invoices',
       invoiceNote: 'Cancellation fee ({{count}} bookings).',
       invoiceLine: '{{date}} cancelled ({{reason}}) {{note}}',
       lineItem: {

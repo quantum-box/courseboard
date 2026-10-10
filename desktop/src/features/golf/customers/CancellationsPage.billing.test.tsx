@@ -1,9 +1,10 @@
 /* @vitest-environment jsdom */
 
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { ApiError, configureApiAuth } from '../../../api'
 import { clearResourceCache } from '../../../hooks/useResource'
 import { i18next } from '../../../i18n'
 import { CancellationsPage } from './CancellationsPage'
@@ -44,10 +45,17 @@ function cancellation(overrides: Record<string, unknown> = {}) {
  * Field answers two different calls here: the reverse lookup that guards
  * against billing twice, and the invoice creation itself.
  */
-function mockField(billedSources: unknown[] = []) {
-  api.field.mockImplementation(async (path: string) => {
-    if (path.startsWith('/v1/invoices?')) return { items: billedSources }
-    return { id: 'inv_1', invoiceNumber: 'INV-1' }
+function mockField(
+  billedSources: unknown[] = [],
+  invoice: Record<string, unknown> = { id: 'inv_1', invoiceNumber: 'INV-1' },
+) {
+  api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+    if (path.startsWith('/v1/invoices?')) {
+      const offset = Number(new URL(path, 'https://courseboard.test').searchParams.get('offset') ?? 0)
+      return { items: billedSources.slice(offset, offset + 100) }
+    }
+    if (path === '/v1/invoices' && init?.method === 'POST') return invoice
+    return {}
   })
 }
 
@@ -64,16 +72,32 @@ function renderPage() {
   )
 }
 
+function configureTestUser(userId: string) {
+  configureApiAuth({
+    tenantId: 'tenant-cancellations',
+    operatorId: 'operator-cancellations',
+    platformId: 'platform-cancellations',
+    userId,
+    getAccessToken: async () => undefined,
+    onUnauthorized: () => undefined,
+    onForbidden: () => undefined,
+  })
+}
+
 describe('the cancellation extraction', () => {
   beforeEach(async () => {
     api.course.mockReset()
     api.field.mockReset()
+    configureApiAuth(null)
+    sessionStorage.clear()
     await i18next.changeLanguage('ja')
   })
 
   afterEach(() => {
     cleanup()
     clearResourceCache()
+    configureApiAuth(null)
+    sessionStorage.clear()
   })
 
   async function selectAllAndOpenSheet() {
@@ -180,8 +204,77 @@ describe('the cancellation extraction', () => {
     })
 
     expect(screen.getByText('すでに請求済みの予約があります')).toBeTruthy()
-    // Nothing left to bill, so the button cannot raise a second invoice.
+    // Nothing left to bill. The source-backed invoice is kept out of the
+    // batch; writing it back without a trusted allocation would erase the
+    // booking's fee amount.
     expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
+    expect(api.course.mock.calls.some(
+      call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
+    )).toBe(false)
+    expect(invoicePosts()).toHaveLength(0)
+  })
+
+  it('pages through every source-backed invoice before allowing billing', async () => {
+    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
+    const firstPage = Array.from({ length: 100 }, (_, index) => ({
+      id: `inv_old_${index}`,
+      sources: [{
+        sourceType: 'reservation',
+        sourceId: `res_old_${index}`,
+        reason: 'cancellation_fee',
+      }],
+    }))
+    mockField([...firstPage, {
+      id: 'inv_second_page',
+      sources: [{
+        sourceType: 'reservation',
+        sourceId: 'res_1',
+        reason: 'cancellation_fee',
+      }],
+    }])
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+
+    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
+    expect(api.field.mock.calls.filter(call => String(call[0]).startsWith('/v1/invoices?')))
+      .toHaveLength(2)
+  })
+
+  it('revalidates reconciliation after the sheet is reopened', async () => {
+    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
+    let billedSources: unknown[] = []
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.startsWith('/v1/invoices?')) {
+        const offset = Number(new URL(path, 'https://courseboard.test').searchParams.get('offset') ?? 0)
+        return { items: billedSources.slice(offset, offset + 100) }
+      }
+      if (path === '/v1/invoices' && init?.method === 'POST') {
+        return { id: 'inv_1', invoiceNumber: 'INV-1' }
+      }
+      return {}
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }))
+    })
+
+    billedSources = [{
+      id: 'inv_reopened',
+      sources: [{ sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' }],
+    }]
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
+    })
+
+    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
+    expect(invoicePosts()).toHaveLength(0)
   })
 
   it('bills a booking with no ledger link by the name it was taken under', async () => {
@@ -235,6 +328,121 @@ describe('the cancellation extraction', () => {
     const decisions = JSON.parse((settle?.[1] as RequestInit).body as string).decisions
     expect(decisions).toEqual([
       { reservationId: 'res_1', state: 'invoiced', invoiceId: 'inv_1', amount: 6_000 },
+    ])
+  })
+
+  it('omits an unreadable phone from the generic invoice snapshot', async () => {
+    api.course.mockResolvedValue({
+      items: [cancellation({
+        reservationId: 'res_1',
+        customerId: null,
+        customerPhone: 'not-a-phone',
+        billable: false,
+        customerEmail: null,
+        players: 1,
+      })],
+      total: 1,
+    })
+    mockField()
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await pressBill()
+
+    const invoiceBody = JSON.parse((invoicePosts()[0]?.[1] as RequestInit).body as string)
+    expect(invoiceBody.billTo).toEqual({ kind: 'unregistered', name: '本田 康彦' })
+  })
+
+  it('keeps a partially delivered invoice visible as a failed result', async () => {
+    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
+    mockField([], {
+      id: 'inv_partial',
+      status: 'SendFailed',
+      paymentLinkStatus: 'Ready',
+      paymentLinkUrl: 'https://pay.example/inv_partial',
+      emailDeliveryStatus: 'Failed',
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await pressBill()
+
+    expect(screen.getByText(/支払いリンクはできましたが/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
+  })
+
+  it('waits for a fresh source lookup after reopening before allowing billing', async () => {
+    let sourceLookups = 0
+    let releaseFreshLookup!: () => void
+    const freshLookup = new Promise<void>(resolve => {
+      releaseFreshLookup = resolve
+    })
+    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.startsWith('/v1/invoices?')) {
+        sourceLookups += 1
+        if (sourceLookups === 1) return { items: [] }
+        await freshLookup
+        return {
+          items: [{
+            id: 'inv_after_reopen',
+            sources: [{ sourceType: 'reservation', sourceId: 'res_1', reason: 'cancellation_fee' }],
+          }],
+        }
+      }
+      if (path === '/v1/invoices' && init?.method === 'POST') {
+        throw new Error('must not bill before fresh source lookup')
+      }
+      return {}
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await waitFor(() => expect(sourceLookups).toBe(1))
+    fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }))
+    fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
+    await waitFor(() => expect(sourceLookups).toBe(2))
+
+    const bill = screen.getByRole('button', { name: /を請求する$/ })
+    expect(bill).toHaveProperty('disabled', true)
+    fireEvent.click(bill)
+    expect(invoicePosts()).toHaveLength(0)
+
+    releaseFreshLookup()
+    await waitFor(() => expect(screen.getByText('すでに請求済みの予約があります')).toBeTruthy())
+    expect(screen.getByRole('button', { name: /を請求する$/ })).toHaveProperty('disabled', true)
+  })
+
+  it('treats a paid replay as terminal despite stale link and delivery fields', async () => {
+    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
+    mockField([], {
+      id: 'inv_paid',
+      status: 'Paid',
+      paymentLinkStatus: 'Failed',
+      paymentLinkUrl: null,
+      emailDeliveryStatus: 'Failed',
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await pressBill()
+
+    expect(screen.queryByText(/支払いリンクはできましたが/)).toBeNull()
+    const settle = api.course.mock.calls.find(
+      call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
+    )
+    expect(settle).toBeTruthy()
+    const decisions = JSON.parse((settle?.[1] as RequestInit).body as string).decisions
+    expect(decisions).toEqual([
+      { reservationId: 'res_1', state: 'invoiced', invoiceId: 'inv_paid', amount: 12_000 },
     ])
   })
 
@@ -367,6 +575,190 @@ describe('the cancellation extraction', () => {
     await pressBill()
 
     expect(keyOf(1)).not.toBe(keyOf(0))
+  })
+
+  it('freezes amount and due date after Field succeeds but settlement write-back fails', async () => {
+    let settlementAttempts = 0
+    api.course.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.startsWith('/v1/course/reservation-cancellations?')) {
+        return { items: [cancellation()], total: 1 }
+      }
+      if (path === '/v1/course/reservation-cancellations/fees' && init?.method === 'POST') {
+        settlementAttempts += 1
+        if (settlementAttempts === 1) throw new Error('write-back failed')
+        return {}
+      }
+      return {}
+    })
+    let fieldCreateRequests = 0
+    const fieldCreateKeys: string[] = []
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.startsWith('/v1/invoices?')) return { items: [] }
+      if (path === '/v1/invoices' && init?.method === 'POST') {
+        fieldCreateRequests += 1
+        const body = JSON.parse(String(init.body)) as { idempotencyKey: string }
+        fieldCreateKeys.push(body.idempotencyKey)
+        return { id: 'inv_frozen', invoiceNumber: 'INV-FROZEN' }
+      }
+      return {}
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await pressBill()
+
+    const amount = screen.getByLabelText('1名あたりの金額', { exact: false }) as HTMLInputElement
+    const dueDate = screen.getByLabelText('支払期日') as HTMLInputElement
+    expect(amount.disabled).toBe(true)
+    expect(dueDate.disabled).toBe(true)
+    const first = JSON.parse(String((invoicePosts()[0]![1] as RequestInit).body))
+
+    fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }))
+    fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /12,000.*を請求する/ })).toBeTruthy())
+    expect(screen.getByText(new RegExp(first.dueDate))).toBeTruthy()
+    const reopenedAmount = screen.getByLabelText('1名あたりの金額', { exact: false }) as HTMLInputElement
+    const reopenedDueDate = screen.getByLabelText('支払期日') as HTMLInputElement
+    expect(reopenedAmount).toHaveProperty('disabled', true)
+    expect(reopenedDueDate).toHaveProperty('disabled', true)
+
+    fireEvent.change(reopenedAmount, { target: { value: '9000' } })
+    fireEvent.change(reopenedDueDate, { target: { value: '2099-01-01' } })
+    await pressBill()
+
+    expect(fieldCreateRequests).toBe(2)
+    // The second HTTP request is a safe idempotent replay, not a new charge.
+    expect(new Set(fieldCreateKeys)).toHaveLength(1)
+    expect(settlementAttempts).toBe(2)
+    const posts = invoicePosts()
+    const second = JSON.parse(String((posts[1]![1] as RequestInit).body))
+    expect(second.idempotencyKey).toBe(first.idempotencyKey)
+    expect(second.lineItems[0].unitPrice).toBe(first.lineItems[0].unitPrice)
+    expect(second.dueDate).toBe(first.dueDate)
+  })
+
+  it('keeps a recovery in the opening user scope when auth changes mid-batch', async () => {
+    configureTestUser('user-a')
+    api.course.mockResolvedValue({
+      items: [
+        cancellation({ reservationId: 'res_1' }),
+        cancellation({
+          reservationId: 'res_2',
+          customerId: 'cus_2',
+          customerName: '佐藤 花子',
+          customerEmail: 'sato@example.com',
+        }),
+      ],
+      total: 2,
+    })
+    let releaseFieldCreate!: () => void
+    const fieldCreateStarted = new Promise<void>(resolve => {
+      api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+        if (path.startsWith('/v1/invoices?')) return { items: [] }
+        if (path === '/v1/invoices' && init?.method === 'POST') {
+          resolve()
+          await new Promise<void>(resolveRequest => {
+            releaseFieldCreate = resolveRequest
+          })
+          return { id: 'inv_scope' }
+        }
+        return {}
+      })
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    const pending = pressBill()
+    await fieldCreateStarted
+    configureTestUser('user-b')
+    releaseFieldCreate()
+    await pending
+
+    expect(api.course.mock.calls.some(
+      call => (call[0] as string) === '/v1/course/reservation-cancellations/fees',
+    )).toBe(false)
+    expect(Object.keys(sessionStorage).some(key => key.includes('tenant-cancellations')
+      && key.includes('user-a'))).toBe(true)
+    expect(Object.keys(sessionStorage).some(key => key.includes('user-b'))).toBe(false)
+  })
+
+  it('blocks a subset batch while the original multi-source create is unresolved', async () => {
+    let sourceLookups = 0
+    let createAttempts = 0
+    api.course.mockResolvedValue({
+      items: [
+        cancellation({ reservationId: 'res_1' }),
+        cancellation({ reservationId: 'res_2' }),
+      ],
+      total: 2,
+    })
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.startsWith('/v1/invoices?')) {
+        sourceLookups += 1
+        return { items: [] }
+      }
+      if (path === '/v1/invoices' && init?.method === 'POST') {
+        createAttempts += 1
+        throw new Error('Field response lost')
+      }
+      return {}
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await pressBill()
+    expect(createAttempts).toBe(1)
+    fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }))
+
+    const rowChecks = screen.getAllByRole('checkbox')
+    // Filter toggle, page toggle, then the two row toggles.
+    fireEvent.click(rowChecks[2]!)
+    fireEvent.click(screen.getByRole('button', { name: /キャンセル料を請求/ }))
+    await waitFor(() => expect(sourceLookups).toBe(2))
+
+    const bill = screen.getByRole('button', { name: /を請求する$/ })
+    expect(bill).toHaveProperty('disabled', true)
+    fireEvent.click(bill)
+    expect(createAttempts).toBe(1)
+  })
+
+  it('keeps the original recovery after an authentication failure on replay', async () => {
+    let createAttempts = 0
+    api.course.mockResolvedValue({ items: [cancellation()], total: 1 })
+    api.field.mockImplementation(async (path: string, init?: RequestInit) => {
+      if (path.startsWith('/v1/invoices?')) return { items: [] }
+      if (path === '/v1/invoices' && init?.method === 'POST') {
+        createAttempts += 1
+        if (createAttempts === 1) throw new Error('Field response lost')
+        if (createAttempts === 2) throw new ApiError('session changed', 401)
+        return { id: 'inv_replay' }
+      }
+      return {}
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+    await selectAllAndOpenSheet()
+    await pressBill()
+    const first = JSON.parse(String((invoicePosts()[0]![1] as RequestInit).body))
+
+    await pressBill()
+    const secondInput = screen.getByLabelText('1名あたりの金額', { exact: false }) as HTMLInputElement
+    expect(secondInput).toHaveProperty('disabled', true)
+    fireEvent.change(secondInput, { target: { value: '9000' } })
+    await pressBill()
+
+    expect(createAttempts).toBe(3)
+    const third = JSON.parse(String((invoicePosts()[2]![1] as RequestInit).body))
+    expect(third.idempotencyKey).toBe(first.idempotencyKey)
+    expect(third.lineItems[0].unitPrice).toBe(first.lineItems[0].unitPrice)
   })
 
   it('never records a fee for an invoice that failed to be raised', async () => {

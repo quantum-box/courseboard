@@ -267,9 +267,9 @@ export function planCancellationFees(
   rows: ReservationCancellation[],
   perPlayerAmount: number,
   /**
-   * Bookings Field already has a cancellation-fee invoice for. Empty when the
-   * lookup could not be made, which leaves the batch exactly as it was before
-   * the guard existed rather than blocking it.
+   * Bookings Field already has a cancellation-fee invoice for. The caller
+   * must only pass a successful source-backed lookup; a pending or failed
+   * lookup must keep the billing action disabled.
    */
   alreadyInvoiced: ReadonlySet<string> = new Set(),
   /** What the desk filled in for the bookings with no ledger link. */

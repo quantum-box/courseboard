@@ -68,14 +68,20 @@ pub async fn proxy_field_api(
         .filter(|value| !value.is_empty())
         .map(str::to_owned);
     let mut outbound = client.request(method, url);
-    // Bridge exports must authorize the signed-in caller upstream, even when
-    // other Field integrations use an optional service-account override.
+    // User-origin invoice and dedicated cancellation-fee actions authorize the
+    // signed-in caller upstream, even when other Field integrations use an
+    // optional service-account override.
     let authorization = outbound_authorization(
         &normalized_path,
         config.field_upstream_authorization.as_deref(),
         &parts.headers,
     );
-    if is_bridge_export_path(&normalized_path) && authorization.is_none() {
+    if (is_bridge_export_path(&normalized_path)
+        || is_cancellation_fee_path(&normalized_path)
+        || is_invoice_path(&normalized_path)
+        || is_field_client_context_path(&normalized_path))
+        && authorization.is_none()
+    {
         return proxy_error(
             StatusCode::UNAUTHORIZED,
             "Bearer authentication is required",
@@ -147,14 +153,22 @@ pub async fn proxy_field_api(
         .unwrap_or_else(|_| proxy_error(StatusCode::BAD_GATEWAY, "Field API response was invalid"))
 }
 
-/// Bridge exports use the same caller bearer the authentication middleware
-/// verified. Other integrations retain their optional static override.
+/// User-origin invoice and bridge actions use the same caller bearer the
+/// authentication middleware verified. Other integrations retain their
+/// optional static override.
 fn outbound_authorization<'a>(
     path: &str,
     upstream_override: Option<&'a str>,
     inbound_headers: &'a axum::http::HeaderMap,
 ) -> Option<&'a str> {
-    if is_bridge_export_path(path) {
+    // Dedicated cancellation-fee actions are user operations. Preserve the
+    // bearer that CourseBoard's auth layer verified instead of replacing it
+    // with a broad Field service token from configuration.
+    if is_bridge_export_path(path)
+        || is_cancellation_fee_path(path)
+        || is_invoice_path(path)
+        || is_field_client_context_path(path)
+    {
         return crate::course::interfaces::http::caller_bearer(inbound_headers).ok();
     }
     if let Some(value) = upstream_override.filter(|value| !value.trim().is_empty()) {
@@ -198,6 +212,8 @@ fn is_allowed_path(path: &str) -> bool {
         || is_field_iam_path(path)
         || is_reservation_billing_invoice_path(path)
         || is_order_detail_path(path)
+        || is_field_client_context_path(path)
+        || is_cancellation_fee_path(path)
         || is_invoice_path(path)
         || is_bridge_export_path(path)
 }
@@ -251,6 +267,23 @@ fn is_allowed_route(method: &Method, path: &str) -> bool {
     }
     if is_order_detail_path(path) {
         return method == Method::GET;
+    }
+    if is_field_client_context_path(path) {
+        return method == Method::GET;
+    }
+    if is_cancellation_fee_path(path) {
+        if path == "/v1/cancellation-fees" {
+            return method == Method::GET || method == Method::POST;
+        }
+        let Some(suffix) = path.strip_prefix("/v1/cancellation-fees/") else {
+            return false;
+        };
+        let mut segments = suffix.split('/');
+        return match (segments.next(), segments.next(), segments.next()) {
+            (Some(_invoice_id), None, None) => method == Method::GET || method == Method::PATCH,
+            (Some(_invoice_id), Some("fulfill" | "send"), None) => method == Method::POST,
+            _ => false,
+        };
     }
     if path == "/v1/invoices" {
         return method == Method::GET || method == Method::POST;
@@ -387,6 +420,29 @@ fn is_invoice_path(path: &str) -> bool {
     }
 }
 
+/// Dedicated cancellation-fee API surface. Generic invoice paths remain
+/// available to other CourseBoard screens, but the cancellation-fee UI has no
+/// route back to them.
+fn is_cancellation_fee_path(path: &str) -> bool {
+    if path == "/v1/cancellation-fees" {
+        return true;
+    }
+    let Some(suffix) = path.strip_prefix("/v1/cancellation-fees/") else {
+        return false;
+    };
+    let mut segments = suffix.split('/');
+    matches!(
+        (segments.next(), segments.next(), segments.next()),
+        (Some(invoice_id), None, None)
+            | (Some(invoice_id), Some("fulfill" | "send"), None)
+            if !invoice_id.is_empty()
+    )
+}
+
+fn is_field_client_context_path(path: &str) -> bool {
+    path == "/v1/field/client-context"
+}
+
 #[cfg(test)]
 mod tests {
     use axum::http::{header, HeaderMap, HeaderValue, Method, StatusCode};
@@ -426,6 +482,11 @@ mod tests {
         assert!(is_allowed_path("/v1/invoices"));
         assert!(is_allowed_path("/v1/invoices/inv_1"));
         assert!(is_allowed_path("/v1/invoices/inv_1/fulfill"));
+        assert!(is_allowed_path("/v1/cancellation-fees"));
+        assert!(is_allowed_path("/v1/field/client-context"));
+        assert!(is_allowed_path("/v1/cancellation-fees/inv_1"));
+        assert!(is_allowed_path("/v1/cancellation-fees/inv_1/fulfill"));
+        assert!(is_allowed_path("/v1/cancellation-fees/inv_1/send"));
         assert!(is_allowed_path("/v1/erp/orders/order_1"));
         assert!(is_allowed_path("/v1/field/iam/users"));
         assert!(is_allowed_path("/v1/field/iam/users/invite"));
@@ -460,6 +521,33 @@ mod tests {
         assert!(is_allowed_route(
             &Method::POST,
             "/v1/invoices/inv_1/fulfill"
+        ));
+        assert!(is_allowed_route(&Method::GET, "/v1/cancellation-fees"));
+        assert!(is_allowed_route(&Method::GET, "/v1/field/client-context"));
+        assert!(is_allowed_route(&Method::POST, "/v1/cancellation-fees"));
+        assert!(is_allowed_route(
+            &Method::GET,
+            "/v1/cancellation-fees/inv_1"
+        ));
+        assert!(is_allowed_route(
+            &Method::PATCH,
+            "/v1/cancellation-fees/inv_1"
+        ));
+        assert!(is_allowed_route(
+            &Method::POST,
+            "/v1/cancellation-fees/inv_1/fulfill"
+        ));
+        assert!(is_allowed_route(
+            &Method::POST,
+            "/v1/cancellation-fees/inv_1/send"
+        ));
+        assert!(!is_allowed_route(
+            &Method::DELETE,
+            "/v1/cancellation-fees/inv_1"
+        ));
+        assert!(!is_allowed_route(
+            &Method::GET,
+            "/v1/cancellation-fees/inv_1/send"
         ));
         assert!(!is_allowed_route(
             &Method::PATCH,
@@ -586,16 +674,22 @@ mod tests {
     }
 
     #[test]
-    fn prefers_static_field_bearer_override_when_configured() {
+    fn generic_invoice_routes_forward_the_caller_bearer_even_with_static_override() {
         let mut headers = HeaderMap::new();
         headers.insert(
             header::AUTHORIZATION,
             HeaderValue::from_static("Bearer login-access-token"),
         );
-        assert_eq!(
-            outbound_authorization("/v1/invoices", Some("Bearer cli-override"), &headers),
-            Some("Bearer cli-override")
-        );
+        for path in [
+            "/v1/invoices",
+            "/v1/invoices/inv_1",
+            "/v1/invoices/inv_1/fulfill",
+        ] {
+            assert_eq!(
+                outbound_authorization(path, Some("Bearer cli-override"), &headers),
+                Some("Bearer login-access-token")
+            );
+        }
     }
 
     #[test]
@@ -603,6 +697,10 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer "));
         assert_eq!(outbound_authorization("/v1/invoices", None, &headers), None);
+        assert_eq!(
+            outbound_authorization("/v1/invoices", Some("Bearer service-account"), &headers),
+            None
+        );
     }
 
     #[test]
@@ -650,6 +748,37 @@ mod tests {
         headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer "));
         assert_eq!(
             outbound_authorization(path, Some("Bearer service-account"), &headers),
+            None
+        );
+    }
+
+    #[test]
+    fn cancellation_fee_routes_forward_the_caller_bearer() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer cancellation-user"),
+        );
+        for path in [
+            "/v1/field/client-context",
+            "/v1/cancellation-fees",
+            "/v1/cancellation-fees/inv_1",
+            "/v1/cancellation-fees/inv_1/fulfill",
+            "/v1/cancellation-fees/inv_1/send",
+        ] {
+            assert_eq!(
+                outbound_authorization(path, Some("Bearer service-account"), &headers),
+                Some("Bearer cancellation-user")
+            );
+        }
+
+        headers.insert(header::AUTHORIZATION, HeaderValue::from_static("Bearer "));
+        assert_eq!(
+            outbound_authorization(
+                "/v1/cancellation-fees/inv_1/send",
+                Some("Bearer service-account"),
+                &headers,
+            ),
             None
         );
     }

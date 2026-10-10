@@ -105,6 +105,10 @@ pub struct AppState {
     /// Present only when authorization is enforced; the members proxy clears
     /// it when it changes who may do what.
     policy_cache: Option<Arc<course_authz::CachingPolicyChecker>>,
+    /// A fresh, uncached batch checker used only for per-action navigation
+    /// capabilities.  Navigation must not inherit the policy cache's stale
+    /// read grace period.
+    navigation_policy_checker: Option<Arc<dyn course_authz::PolicyBatchChecker>>,
 }
 
 impl AppState {
@@ -186,6 +190,7 @@ impl AppState {
             course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
             course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
             policy_cache: None,
+            navigation_policy_checker: None,
         }
     }
 
@@ -271,6 +276,7 @@ impl AppState {
             course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
             course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
             policy_cache: None,
+            navigation_policy_checker: None,
         }
     }
 
@@ -348,6 +354,7 @@ impl AppState {
                 course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
                 course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
                 policy_cache: None,
+                navigation_policy_checker: None,
             },
             Err(error) => Self {
                 data_exports: Arc::new(course::infrastructure::MySqlDataExportRepository::new(
@@ -416,6 +423,7 @@ impl AppState {
                 course_authorization: Arc::new(course_authz::CourseAuthorization::disabled()),
                 course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
                 policy_cache: None,
+                navigation_policy_checker: None,
             },
         }
     }
@@ -572,6 +580,20 @@ impl AppState {
     ) -> Self {
         self.policy_cache = cache;
         self
+    }
+
+    pub fn with_navigation_policy_checker(
+        mut self,
+        checker: Option<Arc<dyn course_authz::PolicyBatchChecker>>,
+    ) -> Self {
+        self.navigation_policy_checker = checker;
+        self
+    }
+
+    pub(crate) fn navigation_policy_checker(
+        &self,
+    ) -> Option<Arc<dyn course_authz::PolicyBatchChecker>> {
+        self.navigation_policy_checker.clone()
     }
 
     /// Drop every remembered allowance for one tenant, after this app changed
@@ -1601,6 +1623,13 @@ fn courseboard_cors_layer() -> CorsLayer {
         ])
 }
 
+struct CourseAuthorizationComponents {
+    course_authorization: course_authz::CourseAuthorization,
+    course_authorizer: Arc<dyn course::domain::CourseAuthorizer>,
+    policy_cache: Option<Arc<course_authz::CachingPolicyChecker>>,
+    navigation_policy_checker: Option<Arc<dyn course_authz::PolicyBatchChecker>>,
+}
+
 pub async fn build_app(config: RuntimeConfig) -> anyhow::Result<Router> {
     let database_url = config.database_url.clone();
     let connect_options: MySqlConnectOptions = database_url
@@ -1655,19 +1684,19 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
     // One checker behind both gates. The route gate and the use cases share
     // its cache, so a use case requiring the action its route was gated on
     // costs no second round trip.
-    let mut policy_cache: Option<Arc<course_authz::CachingPolicyChecker>> = None;
-    let (course_authorization, course_authorizer): (
-        course_authz::CourseAuthorization,
-        Arc<dyn course::domain::CourseAuthorizer>,
-    ) = if config.disable_action_authz {
+    let authorization = if config.disable_action_authz {
         tracing::warn!(
             "course action authorization is DISABLED via COURSEBOARD_DISABLE_ACTION_AUTHZ; \
              every CourseBoard route and use case accepts any valid bearer"
         );
-        (
-            course_authz::CourseAuthorization::disabled(),
-            Arc::new(course::infrastructure::AllowAllAuthorizer),
-        )
+        CourseAuthorizationComponents {
+            course_authorization: course_authz::CourseAuthorization::disabled(),
+            course_authorizer: Arc::new(course::infrastructure::AllowAllAuthorizer),
+            policy_cache: None,
+            navigation_policy_checker: Some(Arc::new(
+                course_authz::DisabledActionAuthorizationBatch,
+            )),
+        }
     } else {
         let checker_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
@@ -1676,14 +1705,21 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
         // One cache in front of one checker, shared by both gates: the route
         // gate and the use cases ask the same questions, and the second asker
         // should not pay for the answer again.
-        let checker = Arc::new(course_authz::CachingPolicyChecker::new(Arc::new(
-            course_authz::TachyonPolicyChecker::new(checker_client, &tachyon_api_url),
-        )));
-        policy_cache = Some(checker.clone());
-        (
-            course_authz::CourseAuthorization::new(checker.clone()),
-            Arc::new(course::infrastructure::PolicyCourseAuthorizer::new(checker)),
-        )
+        let fresh_checker = Arc::new(course_authz::TachyonPolicyChecker::new(
+            checker_client,
+            &tachyon_api_url,
+        ));
+        let checker = Arc::new(course_authz::CachingPolicyChecker::new(
+            fresh_checker.clone(),
+        ));
+        CourseAuthorizationComponents {
+            course_authorization: course_authz::CourseAuthorization::new(checker.clone()),
+            course_authorizer: Arc::new(course::infrastructure::PolicyCourseAuthorizer::new(
+                checker.clone(),
+            )),
+            policy_cache: Some(checker),
+            navigation_policy_checker: Some(fresh_checker),
+        }
     };
     let state =
         AppState::with_optional_field_api(pool, token_verifier, field_api, cancellation_fee_config)
@@ -1691,9 +1727,10 @@ async fn build_app_with_pool(config: RuntimeConfig, pool: MySqlPool) -> anyhow::
                 &tachyon_api_url,
             )))
             .with_profile_client(profile_client)
-            .with_course_authorization(Arc::new(course_authorization))
-            .with_course_authorizer(course_authorizer)
-            .with_policy_cache(policy_cache);
+            .with_course_authorization(Arc::new(authorization.course_authorization))
+            .with_course_authorizer(authorization.course_authorizer)
+            .with_policy_cache(authorization.policy_cache)
+            .with_navigation_policy_checker(authorization.navigation_policy_checker);
 
     Ok(build_router(state))
 }

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   isMockFieldDataEnabled,
+  MOCK_CLIENT_CAPABILITY_ACTIONS,
   resolveMockFieldApiJson,
   resolveMockFieldApiText,
 } from './mockFieldApi'
@@ -26,6 +27,23 @@ describe('mockFieldApi', () => {
     vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
     vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'false')
     expect(isMockFieldDataEnabled()).toBe(false)
+  })
+
+  it('returns the startup capability snapshot used by the development app', () => {
+    vi.stubEnv('VITE_COURSEBOARD_AUTH_MODE', 'development')
+    vi.stubEnv('VITE_COURSEBOARD_MOCK_DATA', 'true')
+    expect(resolveMockFieldApiJson('/v1/field/client-capabilities')).toEqual({
+      kind: 'hit',
+      data: {
+        actions: MOCK_CLIENT_CAPABILITY_ACTIONS,
+        navigation: { otherBusinessAccess: true },
+        agentDocuments: {
+          invoices: { list: true, send: true },
+          quotations: { list: true, send: true },
+        },
+        cancellationFees: { list: true, manage: true },
+      },
+    })
   })
 
   it('analyzes a blank reception sheet without mutating saved settings', () => {

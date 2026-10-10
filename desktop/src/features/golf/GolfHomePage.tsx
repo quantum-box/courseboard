@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { golfNavigation, navDescription, navLabel } from '../../components/AppShell'
 import { useHiddenRoutes } from '../../feature-flags/gated-routes'
 import { Panel } from '../../components/Page'
+import { capabilityRouteAllowed } from '../../auth/capabilityRoutes'
+import { useEffectiveCapabilities } from '../../auth/EffectiveCapabilitiesProvider'
 import { navigateFromClick } from '../../lib/router'
 
 const FLOW_STEPS = ['ledger', 'dispatch', 'revenue', 'settlement'] as const
@@ -41,7 +43,8 @@ export function GolfHomePage() {
   // turned on has to leave here too. Filtering only the sidebar leaves a tile
   // that walks straight into a 404.
   const hiddenRoutes = useHiddenRoutes()
-  const visible = homeNavigation.filter(item => !hiddenRoutes.has(item.route))
+  const { capabilities } = useEffectiveCapabilities()
+  const visible = homeNavigation.filter(item => !hiddenRoutes.has(item.route) && capabilityRouteAllowed(item.route, capabilities))
   const featured = visible.filter(item => FEATURED_ROUTES.has(item.route))
   const otherFeatures = visible.filter(item => !FEATURED_ROUTES.has(item.route))
 

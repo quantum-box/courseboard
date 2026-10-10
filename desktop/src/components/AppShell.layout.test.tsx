@@ -1,6 +1,6 @@
 /* @vitest-environment jsdom */
 
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AuthGate } from '../auth/AuthGate'
@@ -14,6 +14,23 @@ const authAdapter = vi.hoisted(() => ({
   signIn: vi.fn(),
   signOut: vi.fn(),
 }))
+const access = vi.hoisted(() => ({ otherBusinessAccess: true, list: true, manage: true }))
+
+vi.mock('../auth/EffectiveCapabilitiesProvider', () => ({
+  useEffectiveCapabilities: () => ({ capabilities: {
+    actions: access.otherBusinessAccess ? {
+      'field_extension_golf:ListTeeSheet': true,
+      'field_extension_golf:ListSlotOverrides': true,
+      'field_extension_golf:ListCourses': true,
+      'field_extension_golf:ListProducts': true,
+      'field_extension_golf:ListCaddieInsights': true,
+      'field_extension_golf:ListCaddieAssignments': true,
+      'field_extension_golf:ListShifts': true,
+    } : {},
+    navigation: { otherBusinessAccess: access.otherBusinessAccess },
+    cancellationFees: { list: access.list, manage: access.manage },
+  } }),
+}))
 
 vi.mock('../auth/adapters', () => ({
   createAuthAdapter: () => authAdapter,
@@ -25,6 +42,9 @@ vi.mock('../lib/newVersion', () => ({
 
 describe('AppShell layout: the new-version banner stays inside the content column', () => {
   beforeEach(async () => {
+    access.otherBusinessAccess = true
+    access.list = true
+    access.manage = true
     await i18next.changeLanguage('ja')
     localStorage.clear()
     window.history.replaceState({}, '', '/golf')
@@ -36,6 +56,12 @@ describe('AppShell layout: the new-version banner stays inside the content colum
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
     })))
+    vi.stubGlobal('ResizeObserver', class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    })
+    HTMLElement.prototype.scrollIntoView = vi.fn()
     authAdapter.bootstrap.mockReset()
     authAdapter.getAccessToken.mockReset()
     authAdapter.signIn.mockReset()
@@ -90,5 +116,63 @@ describe('AppShell layout: the new-version banner stays inside the content colum
     // old placement whose `left` offset ignored the sidebar's width entirely.
     const directShellChildren = Array.from(document.querySelector('.app-shell')?.children ?? [])
     expect(directShellChildren).not.toContain(banner)
+  })
+
+  it('removes old business pins and search entries for a fee-only caller', async () => {
+    access.otherBusinessAccess = false
+    localStorage.setItem('courseboard.sidebar.pinned', JSON.stringify(['golf/ledger', 'staff', 'cancellation-fees']))
+    render(<I18nextProvider i18n={i18next}><AuthProvider><AuthGate>
+      <AppShell route="cancellation-fees"><div>fee-only content</div></AppShell>
+    </AuthGate></AuthProvider></I18nextProvider>)
+    await screen.findByText('fee-only content')
+    expect(screen.queryByRole('button', { name: i18next.t('nav:items.golf/ledger.label') })).toBeNull()
+    expect(screen.queryByRole('button', { name: i18next.t('nav:items.staff.label') })).toBeNull()
+    expect(screen.queryAllByRole('button', { name: i18next.t('nav:items.cancellation-fees.label') }).length).toBeGreaterThan(0)
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
+    await screen.findByRole('combobox')
+    const options = screen.getAllByRole('option').map(item => item.textContent)
+    expect(options.some(text => text?.includes(i18next.t('nav:items.golf/ledger.label')))).toBe(false)
+    expect(options.some(text => text?.includes(i18next.t('nav:items.cancellation-fees.label')))).toBe(true)
+  })
+
+  it('removes fee navigation for a different-product caller without List', async () => {
+    access.list = false
+    access.manage = false
+    localStorage.setItem('courseboard.sidebar.pinned', JSON.stringify(['cancellation-fees']))
+    render(<I18nextProvider i18n={i18next}><AuthProvider><AuthGate>
+      <AppShell route="golf"><div>other-product content</div></AppShell>
+    </AuthGate></AuthProvider></I18nextProvider>)
+    await screen.findByText('other-product content')
+    expect(screen.queryByRole('button', { name: i18next.t('nav:items.cancellation-fees.label') })).toBeNull()
+    expect(screen.queryAllByRole('button', { name: i18next.t('nav:items.golf/ledger.label') }).length).toBeGreaterThan(0)
+  })
+
+  it.each([false, true])('keeps the canonical fee entry and targets the permitted screen for a mixed caller (List: %s)', async canList => {
+    access.otherBusinessAccess = true
+    access.list = canList
+    access.manage = true
+    localStorage.setItem('courseboard.sidebar.pinned', JSON.stringify(['cancellation-fees']))
+
+    render(<I18nextProvider i18n={i18next}><AuthProvider><AuthGate>
+      <AppShell route="golf"><div>mixed-product content</div></AppShell>
+    </AuthGate></AuthProvider></I18nextProvider>)
+
+    await screen.findByText('mixed-product content')
+    const feeLabel = i18next.t('nav:items.cancellation-fees.label')
+    expect(screen.getAllByRole('button', { name: feeLabel }).length).toBeGreaterThan(0)
+    expect(JSON.parse(localStorage.getItem('courseboard.sidebar.pinned') ?? 'null'))
+      .toEqual(['cancellation-fees'])
+
+    const expectedPath = canList ? '/tenant-1/cancellation-fees' : '/tenant-1/cancellation-fees/new'
+    fireEvent.click(screen.getAllByRole('button', { name: feeLabel })[0]!)
+    expect(window.location.pathname).toBe(expectedPath)
+
+    fireEvent.keyDown(window, { key: 'k', metaKey: true })
+    await screen.findByRole('combobox')
+    const options = screen.getAllByRole('option').map(item => item.textContent)
+    expect(options.some(text => text?.includes(feeLabel))).toBe(true)
+    window.history.replaceState({}, '', '/tenant-1/golf')
+    fireEvent.click(screen.getAllByRole('option').find(item => item.textContent?.includes(feeLabel))!)
+    expect(window.location.pathname).toBe(expectedPath)
   })
 })

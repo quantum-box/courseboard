@@ -12,11 +12,11 @@ import {
   useTenantTimezone,
 } from './TenantTimezoneProvider'
 
-const api = vi.hoisted(() => ({ json: vi.fn() }))
+const api = vi.hoisted(() => ({ context: vi.fn() }))
 
-vi.mock('../api', async importOriginal => {
-  const actual = await importOriginal<typeof import('../api')>()
-  return { ...actual, courseboardApiJson: api.json }
+vi.mock('../features/cancellation-fees/cancellation-fee-api', async importOriginal => {
+  const actual = await importOriginal<typeof import('../features/cancellation-fees/cancellation-fee-api')>()
+  return { ...actual, getFieldClientContext: api.context }
 })
 
 function Child() {
@@ -46,20 +46,20 @@ describe('TenantTimezoneProvider', () => {
   beforeEach(async () => {
     await i18next.changeLanguage('ja')
     clearResourceCache()
-    api.json.mockReset()
+    api.context.mockReset()
   })
 
   afterEach(cleanup)
 
   it('uses the configured zone once it arrives', async () => {
-    api.json.mockResolvedValue({ configJson: { timezone: 'Asia/Taipei' } })
+    api.context.mockResolvedValue({ timezone: 'Asia/Taipei' })
     renderProvider()
     await waitFor(() => expect(zone()).toBe('Asia/Taipei'))
     expect(warning()).toBeNull()
   })
 
   it('renders the page while the settings call is still in flight', () => {
-    api.json.mockReturnValue(new Promise(() => {}))
+    api.context.mockReturnValue(new Promise(() => {}))
     renderProvider()
     // Not a loading placeholder: the children are on screen from the first
     // paint, carrying the default zone until the real one lands.
@@ -67,7 +67,7 @@ describe('TenantTimezoneProvider', () => {
   })
 
   it('keeps the page usable and says so when the settings call fails', async () => {
-    api.json.mockRejectedValue(new Error('extension status unavailable'))
+    api.context.mockRejectedValue(new Error('tenant context unavailable'))
     renderProvider()
     await waitFor(() => expect(warning()).not.toBeNull())
     expect(zone()).toBe(DEFAULT_TIME_ZONE)
@@ -79,22 +79,22 @@ describe('TenantTimezoneProvider', () => {
   it('falls back and warns when the stored zone is not a real one', async () => {
     // A configuration mistake, not a transient failure — substituting silently
     // would leave every date on screen quietly wrong.
-    api.json.mockResolvedValue({ configJson: { timezone: 'JST' } })
+    api.context.mockResolvedValue({ timezone: 'JST' })
     renderProvider()
     await waitFor(() => expect(warning()).not.toBeNull())
     expect(zone()).toBe(DEFAULT_TIME_ZONE)
   })
 
   it('treats an absent zone as the default without warning', async () => {
-    api.json.mockResolvedValue({ configJson: {} })
+    api.context.mockResolvedValue({})
     renderProvider()
-    await waitFor(() => expect(api.json).toHaveBeenCalled())
+    await waitFor(() => expect(api.context).toHaveBeenCalled())
     expect(zone()).toBe(DEFAULT_TIME_ZONE)
     expect(warning()).toBeNull()
   })
 
   it('clears the warning when the settings screen saves a zone', async () => {
-    api.json.mockRejectedValue(new Error('extension status unavailable'))
+    api.context.mockRejectedValue(new Error('tenant context unavailable'))
     renderProvider()
     await waitFor(() => expect(warning()).not.toBeNull())
 
