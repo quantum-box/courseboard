@@ -159,12 +159,13 @@ pub struct RuntimeConfig {
 
     /// Which source `/v1/me` uses to list the caller's tenants (ADR-0011).
     ///
-    /// `extension` keeps the current Field `/v1/erp/me` extension filter.
-    /// `compare` still serves the extension answer but also runs the
-    /// policy-based path in the background and logs the difference — run it
-    /// in production for at least one business week before switching.
-    /// `policy` serves the `check-tenants` policy answer.
-    #[arg(long, env = "COURSEBOARD_TENANT_SOURCE", default_value = "extension")]
+    /// `policy` serves the platform membership list filtered by the fixed
+    /// CourseBoard Golf and cancellation-fee actions. This is the default so a
+    /// fee-only operator without the Golf extension can still choose a tenant.
+    /// `extension` keeps the legacy Field `/v1/erp/me` Golf-extension filter,
+    /// while `compare` serves that legacy answer and runs the policy path in
+    /// the background for migration diagnostics.
+    #[arg(long, env = "COURSEBOARD_TENANT_SOURCE", default_value = "policy")]
     pub tenant_source: String,
 
     /// Who works out the monthly close (ADR-0005 Phase 1).
@@ -300,8 +301,8 @@ impl RuntimeConfig {
         non_empty(self.dev_bearer_token.as_deref())
     }
 
-    /// Unknown values fall back to the extension source: a typo in an env var
-    /// must not silently change where sign-in tenant lists come from.
+    /// Unknown values fall back to the legacy extension source: a typo in an
+    /// env var must not silently change where sign-in tenant lists come from.
     pub fn tenant_source(&self) -> TenantSource {
         match self.tenant_source.trim() {
             "" | "extension" => TenantSource::Extension,
@@ -349,11 +350,11 @@ pub enum SettlementSource {
 /// Where `/v1/me` gets the caller's tenant list from (ADR-0011).
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TenantSource {
-    /// Field `/v1/erp/me` filtered by the golf extension flag (current).
+    /// Field `/v1/erp/me` filtered by the golf extension flag (legacy).
     Extension,
     /// Serve the extension answer, run the policy path too, log the diff.
     Compare,
-    /// Platform `/v1/me` + `check-tenants` policy filter (target).
+    /// Platform `/v1/me` + fixed Golf/fee `check-tenants` policy union.
     Policy,
 }
 
@@ -385,7 +386,7 @@ impl Default for RuntimeConfig {
             field_shift_writeback: false,
             field_generic_paths: DEFAULT_FIELD_GENERIC_PATHS,
             disable_action_authz: false,
-            tenant_source: "extension".to_string(),
+            tenant_source: "policy".to_string(),
             settlement_source: "field".to_string(),
             twilio_account_sid: None,
             twilio_auth_token: None,
@@ -419,6 +420,30 @@ fn parse_csv_set(value: Option<&str>) -> HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tenant_discovery_defaults_to_the_policy_union() {
+        assert_eq!(
+            RuntimeConfig::default().tenant_source(),
+            TenantSource::Policy
+        );
+        assert_eq!(
+            RuntimeConfig {
+                tenant_source: "extension".to_string(),
+                ..RuntimeConfig::default()
+            }
+            .tenant_source(),
+            TenantSource::Extension
+        );
+        assert_eq!(
+            RuntimeConfig {
+                tenant_source: "compare".to_string(),
+                ..RuntimeConfig::default()
+            }
+            .tenant_source(),
+            TenantSource::Compare
+        );
+    }
 
     /// A close that reaches accounting must never move because a value was
     /// mistyped: anything unrecognised leaves Field in charge.
