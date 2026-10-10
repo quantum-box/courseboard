@@ -10,6 +10,20 @@ vi.mock('./lib/router', () => ({ useRoute: () => state.route, navigate: vi.fn() 
 vi.mock('./feature-flags/gated-routes', () => ({ useRouteGate: () => state.gate }))
 vi.mock('./feature-flags/FeatureFlags', () => ({ FeatureFlagProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('./auth/AuthProvider', () => ({ AuthProvider: ({ children }: { children: ReactNode }) => children }))
+vi.mock('./auth/EffectiveCapabilitiesProvider', () => ({
+  EffectiveCapabilitiesProvider: ({ children }: { children: ReactNode }) => children,
+  useEffectiveCapabilities: () => ({
+    capabilities: {
+      actions: { 'field:ListBridgeDefinitions': true },
+      navigation: { otherBusinessAccess: null },
+      agentDocuments: {
+        invoices: { list: false, send: false },
+        quotations: { list: false, send: false },
+      },
+      cancellationFees: { list: false, manage: false },
+    },
+  }),
+}))
 vi.mock('./auth/AuthGate', () => ({ AuthGate: ({ children }: { children: ReactNode }) => children }))
 vi.mock('./context/TenantTimezoneProvider', () => ({ TenantTimezoneProvider: ({ children }: { children: ReactNode }) => children }))
 vi.mock('./components/AppShell', () => ({ AppShell: ({ children }: { children: ReactNode }) => children, golfNavigation: [] }))
