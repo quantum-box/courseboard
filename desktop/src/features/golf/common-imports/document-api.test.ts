@@ -45,8 +45,10 @@ describe('common document import adapter', () => {
   })
   it('reserves PDF rotation, year and selected physical pages under the retained operation', async () => {
     const rotated = { ...job, document: { ...job.document!, sources: [{ ...job.document!.sources[0]!, rotation: 90 }] } }
-    mocks.json.mockResolvedValue({ job: rotated, ocr: { job: { id: 'goj_1', status: 'uploading' }, uploads: [] } })
-    await reserveReservationDocument([file], [90], '12-13', { year: 2026 }, 'retained', new AbortController().signal)
+    mocks.json.mockResolvedValue({ job: rotated, ocr: { id: 'goj_1', status: 'uploading', uploads: [] } })
+    const result = await reserveReservationDocument([file], [90], '12-13', { year: 2026 }, 'retained', new AbortController().signal)
+    expect(result.ocr).toEqual({ id: 'goj_1', status: 'uploading', uploads: [] })
+    expect(result.job).toEqual(rotated)
     expect(JSON.parse(mocks.json.mock.calls[0]![1].body)).toEqual({ idempotencyKey: 'retained', documents: [{ contentType: file.type, size: file.size, sha256: hash, rotation: 90 }], pages: '12-13', importOptions: { year: 2026 } })
     expect(mocks.json.mock.calls[0]![0]).toContain('/courseboardReservationReports/imports/document-upload')
   })
@@ -54,7 +56,7 @@ describe('common document import adapter', () => {
     const pdf = new File(['%PDF-1.7\nsource'], '予約表.PDF')
     const normalized = { ...job, document: { ...job.document!, sources: [{ ...job.document!.sources[0]!, size: pdf.size, contentType: 'application/pdf' }] } }
     const ocr = { id: 'goj_1', status: 'uploading', uploads: [{ storageKey: 'key', uploadUrl: 'https://storage.example/source', expiresAt: '2099' }] }
-    mocks.json.mockResolvedValue({ job: normalized, ocr: { job: { id: ocr.id, status: ocr.status }, uploads: ocr.uploads } })
+    mocks.json.mockResolvedValue({ job: normalized, ocr })
     const signal = new AbortController().signal
     await reserveReservationDocument([pdf], [0], '', { year: 2026 }, 'retained', signal)
     expect(JSON.parse(mocks.json.mock.calls[0]![1].body).documents[0].contentType).toBe('application/pdf')
