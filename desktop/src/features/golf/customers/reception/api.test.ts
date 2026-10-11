@@ -18,8 +18,115 @@ import {
 } from './api'
 
 describe('reception draft API adapter', () => {
-  beforeEach(() => api.json.mockReset())
-  afterEach(() => vi.unstubAllGlobals())
+  beforeEach(() => {
+    api.json.mockReset()
+    vi.stubGlobal('window', globalThis)
+  })
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.useRealTimers()
+  })
+
+  it('retries transient create, confirm and advance failures without another job or upload', async () => {
+    vi.useFakeTimers()
+    const unavailable = () => new ApiError('reader unavailable', 424, {
+      error: 'reception_reader_unavailable',
+    })
+    const storageFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 })
+    vi.stubGlobal('fetch', storageFetch)
+    const empty = { visitors: [], warnings: [] }
+    api.json
+      .mockRejectedValueOnce(new ApiError('Field API request timed out after 15 seconds', 424, {
+        error: 'provider_error',
+      }))
+      .mockResolvedValueOnce({
+        id: 'same-job', status: 'uploading', completedUnits: 0, draft: empty,
+        uploads: [{ storageKey: 'one', uploadUrl: 'https://storage.example/one', expiresAt: 'later' }],
+      })
+      .mockRejectedValueOnce(unavailable())
+      .mockResolvedValueOnce({ id: 'same-job', status: 'ready', completedUnits: 0, draft: empty })
+      .mockRejectedValueOnce(new ApiError('gateway unavailable', 503))
+      .mockResolvedValueOnce({
+        id: 'same-job', status: 'completed', completedUnits: 1,
+        draft: { visitors: [{ name: 'Test visitor' }], warnings: [] },
+      })
+    const onJobStarted = vi.fn()
+    const result = draftReceptionSheets(
+      [new File(['image'], 'scan.jpg', { type: 'image/jpeg' })], { onJobStarted },
+    )
+    const assertion = expect(result).resolves.toMatchObject({ visitors: [{ name: 'Test visitor' }] })
+    await vi.runAllTimersAsync()
+    await assertion
+    expect(api.json.mock.calls.map(([path]) => path)).toEqual([
+      '/v1/course/customers/reception-draft/jobs',
+      '/v1/course/customers/reception-draft/jobs',
+      '/v1/course/customers/reception-draft/jobs/same-job/confirm',
+      '/v1/course/customers/reception-draft/jobs/same-job/confirm',
+      '/v1/course/customers/reception-draft/jobs/same-job/advance',
+      '/v1/course/customers/reception-draft/jobs/same-job/advance',
+    ])
+    expect(api.json.mock.calls[0]?.[1]).toEqual(api.json.mock.calls[1]?.[1])
+    expect(storageFetch).toHaveBeenCalledTimes(1)
+    expect(onJobStarted).toHaveBeenCalledTimes(1)
+    expect(onJobStarted).toHaveBeenCalledWith('same-job')
+  })
+
+  it.each([400, 401, 402, 403, 409, 429, 500, 424])('does not retry unrelated status %i on create', async status => {
+    const error = new ApiError('request rejected', status, { error: 'upstream_client_error' })
+    api.json.mockRejectedValue(error)
+    await expect(draftReceptionSheets([new File(['image'], 'scan.jpg', { type: 'image/jpeg' })]))
+      .rejects.toMatchObject({ originalError: error })
+    expect(api.json).toHaveBeenCalledTimes(1)
+  })
+
+  it('bounds transient retries and preserves the idempotency key for manual retry', async () => {
+    vi.useFakeTimers()
+    const error = new ApiError('gateway unavailable', 503)
+    api.json.mockRejectedValue(error)
+    let failure: ReceptionBatchError | undefined
+    const result = draftReceptionSheets([new File(['image'], 'scan.jpg', { type: 'image/jpeg' })])
+      .catch(error => { failure = error })
+    await vi.runAllTimersAsync()
+    await result
+    expect(api.json).toHaveBeenCalledTimes(3)
+    const bodies = api.json.mock.calls.map(([, init]) => JSON.parse(String(init.body)))
+    expect(bodies.every(body => body.idempotencyKey === bodies[0].idempotencyKey)).toBe(true)
+    expect(failure?.jobResume?.idempotencyKey).toBe(bodies[0].idempotencyKey)
+    expect(failure?.originalError).toBe(error)
+  })
+
+  it('cancels a retry delay when the reading is aborted', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    api.json.mockRejectedValue(new ApiError('gateway unavailable', 503))
+    const result = draftReceptionSheets(
+      [new File(['image'], 'scan.jpg', { type: 'image/jpeg' })], { signal: controller.signal },
+    )
+    const assertion = expect(result).rejects.toMatchObject({ name: 'AbortError' })
+    await vi.advanceTimersByTimeAsync(0)
+    controller.abort()
+    await vi.runAllTimersAsync()
+    await assertion
+    expect(api.json).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the existing job when retries and its status check remain unavailable', async () => {
+    vi.useFakeTimers()
+    api.json.mockResolvedValueOnce({
+      id: 'resume-me', status: 'ready', completedUnits: 0,
+      draft: { visitors: [], warnings: [] }, uploads: [],
+    }).mockRejectedValue(new ApiError('reader unavailable', 424, {
+      error: 'reception_reader_unavailable',
+    }))
+    let failure: ReceptionBatchError | undefined
+    const result = draftReceptionSheets([new File(['image'], 'scan.jpg', { type: 'image/jpeg' })])
+      .catch(error => { failure = error })
+    await vi.runAllTimersAsync()
+    await result
+    expect(failure?.jobResume?.jobId).toBe('resume-me')
+    expect(api.json.mock.calls.filter(([path]) => path.endsWith('/advance'))).toHaveLength(3)
+    expect(api.json.mock.calls.filter(([path]) => path.endsWith('/resume-me'))).toHaveLength(3)
+  })
 
   it('uploads original sheets directly to Storage and advances the server job', async () => {
     const photo = new File(['a'], 'IMG_0001.jpg', { type: 'image/jpeg' })
