@@ -64,6 +64,32 @@ type CreatedReceptionOcrJob = ReceptionOcrJob & {
 
 type ReceptionJobResume = { idempotencyKey: string; jobId?: string }
 
+/** Replay job operations with the same key/cursor after bounded upstream failures. */
+async function receptionJobJson<T>(path: string, init?: RequestInit): Promise<T> {
+  for (let attempt = 0; ; attempt += 1) {
+    throwIfAborted(init?.signal ?? undefined)
+    try {
+      return await courseboardApiJson<T>(path, init)
+    } catch (error) {
+      throwIfAborted(init?.signal ?? undefined)
+      const upstreamUnavailable = error instanceof ApiError
+        && error.status === 424
+        && typeof error.details === 'object'
+        && error.details !== null
+        && 'error' in error.details
+        && (error.details.error === 'reception_reader_unavailable' || error.details.error === 'provider_error')
+      const gatewayUnavailable = error instanceof ApiError
+        && [502, 503, 504].includes(error.status)
+      // Cross-origin gateway failures without CORS headers reject fetch before
+      // a status is exposed. Do not keep retrying when the browser is offline.
+      const transportUnavailable = error instanceof TypeError
+        && (typeof navigator === 'undefined' || navigator.onLine !== false)
+      if (attempt >= 2 || (!upstreamUnavailable && !gatewayUnavailable && !transportUnavailable)) throw error
+      await abortableDelay(1000 * (attempt + 1), init?.signal ?? undefined)
+    }
+  }
+}
+
 /**
  * The CourseBoard API returns a complete list (`{ items }`) after merging the
  * tenant's saved rows with defaults. Keep parsing here so the rest of the UI
@@ -170,7 +196,7 @@ export async function draftReceptionSheets(
       throwIfAborted(options.signal)
       const idempotencyKey = jobResume?.idempotencyKey ?? crypto.randomUUID()
       jobResume = { idempotencyKey, ...(jobResume?.jobId ? { jobId: jobResume.jobId } : {}) }
-      const createdJob = await courseboardApiJson<CreatedReceptionOcrJob>(RECEPTION_DRAFT_JOBS_PATH, {
+      const createdJob = await receptionJobJson<CreatedReceptionOcrJob>(RECEPTION_DRAFT_JOBS_PATH, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -193,7 +219,7 @@ export async function draftReceptionSheets(
           await putReceptionSheet(createdJob.uploads[sheetIndex]!, file, options.signal)
         }
         throwIfAborted(options.signal)
-        job = await courseboardApiJson<ReceptionOcrJob>(
+        job = await receptionJobJson<ReceptionOcrJob>(
           `${RECEPTION_DRAFT_JOBS_PATH}/${encodeURIComponent(job.id)}/confirm`,
           { method: 'POST', signal: options.signal },
         )
@@ -210,7 +236,7 @@ export async function draftReceptionSheets(
           throw terminalReceptionJobError(job)
         }
         try {
-          job = await courseboardApiJson<ReceptionOcrJob>(
+          job = await receptionJobJson<ReceptionOcrJob>(
             `${RECEPTION_DRAFT_JOBS_PATH}/${encodeURIComponent(job.id)}/advance`,
             { method: 'POST', signal: options.signal },
           )
@@ -266,7 +292,7 @@ export async function draftReceptionSheets(
 
 async function isTerminalReceptionJob(jobId: string, signal?: AbortSignal): Promise<boolean> {
   try {
-    const job = await courseboardApiJson<ReceptionOcrJob>(
+    const job = await receptionJobJson<ReceptionOcrJob>(
       `${RECEPTION_DRAFT_JOBS_PATH}/${encodeURIComponent(jobId)}`,
       signal ? { signal } : undefined,
     )
@@ -279,6 +305,7 @@ async function isTerminalReceptionJob(jobId: string, signal?: AbortSignal): Prom
       && error.status < 500
       && error.status !== 401
       && error.status !== 403
+      && error.status !== 424
       && error.status !== 429
   }
 }
@@ -305,7 +332,7 @@ async function waitForReceptionJob(
   let latest: ReceptionOcrJob | undefined
   for (let attempt = 0; attempt < 150; attempt += 1) {
     throwIfAborted(signal)
-    const job = await courseboardApiJson<ReceptionOcrJob>(
+    const job = await receptionJobJson<ReceptionOcrJob>(
       path,
       signal ? { signal } : undefined,
     )
