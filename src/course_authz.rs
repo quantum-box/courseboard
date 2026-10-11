@@ -1088,7 +1088,11 @@ impl PolicyBatchChecker for TachyonPolicyChecker {
         if let Some(platform_id) = platform_id {
             request = request.header("x-platform-id", platform_id);
         }
-        request = request.timeout(Duration::from_secs(5));
+        // Auth evaluates the complete navigation batch sequentially. A valid
+        // production response for 57 actions takes about 19 seconds, so the
+        // single-action client's five-second budget cannot cover this request.
+        // Keep a bounded batch budget within the API's 120-second deadline.
+        request = request.timeout(Duration::from_secs(30));
         let response = request.send().await.map_err(|error| {
             CheckError::Provider(format!("policy batch check request failed: {error}"))
         })?;
@@ -1144,6 +1148,50 @@ fn strict_batch_decisions(
 #[cfg(test)]
 mod navigation_batch_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn batch_can_complete_after_single_action_client_timeout() {
+        use axum::{routing::post, Router};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = Router::new().route(
+            "/v1/auth/policies/check",
+            post(|| async {
+                tokio::time::sleep(Duration::from_secs(6)).await;
+                Json(serde_json::json!({
+                    "results": [{
+                        "action": "field_extension_golf:ListCustomers",
+                        "allowed": true,
+                        "error": null
+                    }]
+                }))
+            }),
+        );
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .unwrap();
+        let checker = TachyonPolicyChecker::new(client, &format!("http://{address}"));
+
+        let result = checker
+            .check_batch(
+                "fixture-token",
+                "fixture-operator",
+                Some("fixture-platform"),
+                &["field_extension_golf:ListCustomers"],
+            )
+            .await;
+        server.abort();
+
+        assert_eq!(
+            result.unwrap()["field_extension_golf:ListCustomers"],
+            Some(true)
+        );
+    }
 
     #[test]
     fn missing_duplicate_and_error_outcomes_are_unknown_per_action() {
