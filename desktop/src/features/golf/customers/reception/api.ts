@@ -71,6 +71,7 @@ async function receptionJobJson<T>(path: string, init?: RequestInit): Promise<T>
     try {
       return await courseboardApiJson<T>(path, init)
     } catch (error) {
+      throwIfAborted(init?.signal ?? undefined)
       const upstreamUnavailable = error instanceof ApiError
         && error.status === 424
         && typeof error.details === 'object'
@@ -79,7 +80,11 @@ async function receptionJobJson<T>(path: string, init?: RequestInit): Promise<T>
         && (error.details.error === 'reception_reader_unavailable' || error.details.error === 'provider_error')
       const gatewayUnavailable = error instanceof ApiError
         && [502, 503, 504].includes(error.status)
-      if (attempt >= 2 || (!upstreamUnavailable && !gatewayUnavailable)) throw error
+      // Cross-origin gateway failures without CORS headers reject fetch before
+      // a status is exposed. Do not keep retrying when the browser is offline.
+      const transportUnavailable = error instanceof TypeError
+        && (typeof navigator === 'undefined' || navigator.onLine !== false)
+      if (attempt >= 2 || (!upstreamUnavailable && !gatewayUnavailable && !transportUnavailable)) throw error
       await abortableDelay(1000 * (attempt + 1), init?.signal ?? undefined)
     }
   }

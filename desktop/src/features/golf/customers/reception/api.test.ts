@@ -79,6 +79,33 @@ describe('reception draft API adapter', () => {
     expect(api.json).toHaveBeenCalledTimes(1)
   })
 
+  it('retries an opaque gateway fetch failure while online with the same job key', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('navigator', { onLine: true })
+    api.json.mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({
+        id: 'recovered', status: 'completed', completedUnits: 1,
+        draft: { visitors: [{ name: 'Test visitor' }], warnings: [] }, uploads: [],
+      })
+    const result = draftReceptionSheets([new File(['image'], 'scan.jpg', { type: 'image/jpeg' })])
+    const assertion = expect(result).resolves.toMatchObject({ visitors: [{ name: 'Test visitor' }] })
+    await vi.runAllTimersAsync()
+    await assertion
+    expect(api.json).toHaveBeenCalledTimes(2)
+    expect(api.json.mock.calls[0]).toEqual(api.json.mock.calls[1])
+  })
+
+  it.each([
+    [false, new TypeError('Failed to fetch')],
+    [true, new DOMException('The operation was aborted.', 'AbortError')],
+  ])('does not retry offline transport failures or aborts (%s)', async (onLine, error) => {
+    vi.stubGlobal('navigator', { onLine })
+    api.json.mockRejectedValue(error)
+    await expect(draftReceptionSheets([new File(['image'], 'scan.jpg', { type: 'image/jpeg' })]))
+      .rejects.toMatchObject({ originalError: error })
+    expect(api.json).toHaveBeenCalledTimes(1)
+  })
+
   it('bounds transient retries and preserves the idempotency key for manual retry', async () => {
     vi.useFakeTimers()
     const error = new ApiError('gateway unavailable', 503)
