@@ -1226,6 +1226,8 @@ type MockTeeReservation = {
   party?: Record<string, unknown>
   /** CourseBoard sends this to Field for a desk booking; it is not a public tee-sheet field. */
   prepaymentPolicy?: 'none'
+  /** Money already taken, deposit included; locks the plan on the sheet (SCC-9). */
+  paidAmount?: number
 }
 
 /** Day board fixtures for the operations timeline (tee sheet + caddy lanes). */
@@ -1284,6 +1286,8 @@ const initialMockTeeReservations = [
     partySize: 4,
     partyName: '当日受付',
     status: 'confirmed',
+    // A deposit taken over the phone: the plan is settled (SCC-9).
+    paidAmount: 5000,
     holes: 18,
   },
   {
