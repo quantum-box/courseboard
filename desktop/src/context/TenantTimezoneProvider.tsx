@@ -7,8 +7,8 @@ import {
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
+import { ApiError, courseboardApiJson } from '../api'
 import { Notice } from '../components/Page'
-import { getFieldClientContext, type CancellationFeeContext } from '../features/cancellation-fees/cancellation-fee-api'
 import { useResource } from '../hooks/useResource'
 import { DEFAULT_TIME_ZONE } from '../lib/clock'
 import { isSupportedTimezone } from '../lib/timezone'
@@ -16,15 +16,25 @@ import { isSupportedTimezone } from '../lib/timezone'
 const TenantTimezoneContext = createContext(DEFAULT_TIME_ZONE)
 const TIMEZONE_CHANGED_EVENT = 'courseboard:tenant-timezone-changed'
 
-/**
- * This provider wraps every page, so a failure here decides whether the app
- * renders at all. It used to throw and to withhold children while loading,
- * which turned one unreachable settings endpoint into a blank screen for the
- * whole desk. Fall back to the default zone and say so instead: a ledger
- * showing the wrong offset is recoverable, a ledger that never appears is not.
- */
-function resolveTimezone(context: CancellationFeeContext | null) {
-  const value = context?.timezone
+type TenantExtensionSettings = {
+  configJson?: { timezone?: unknown } | null
+}
+
+async function loadTimezoneSettings() {
+  const load = () => courseboardApiJson<TenantExtensionSettings | null>('/v1/course/extension-status')
+  try {
+    return await load()
+  } catch (error) {
+    // Field's cold-start auth gate can time out before a warm retry succeeds.
+    // This is a read: retry once for upstream failures, never for denied access.
+    if (!(error instanceof ApiError) || ![424, 502, 503, 504].includes(error.status)) throw error
+    return load()
+  }
+}
+
+/** Use the same golf extension setting as the settings screen and API. */
+function resolveTimezone(settings: TenantExtensionSettings | null) {
+  const value = settings?.configJson?.timezone
   if (value === undefined || value === null || String(value).trim() === '') {
     return { timezone: DEFAULT_TIME_ZONE, rejected: null as string | null }
   }
@@ -39,8 +49,8 @@ function resolveTimezone(context: CancellationFeeContext | null) {
 
 export function TenantTimezoneProvider({ children }: { children: ReactNode }) {
   const [updatedTimezone, setUpdatedTimezone] = useState<string | null>(null)
-  const loader = useMemo(() => () => getFieldClientContext(), [])
-  const resource = useResource(loader, [], { cacheKey: 'field:client-context' })
+  const loader = useMemo(() => loadTimezoneSettings, [])
+  const resource = useResource(loader, [], { cacheKey: 'course:extension-status' })
   useEffect(() => {
     const update = (event: Event) => {
       const timezone = (event as CustomEvent<string>).detail
@@ -52,9 +62,13 @@ export function TenantTimezoneProvider({ children }: { children: ReactNode }) {
 
   const resolved = resolveTimezone(resource.data)
   const timezone = updatedTimezone ?? resolved.timezone
-  // A save on the settings screen is authoritative even if the last fetch
-  // failed, so an explicit update clears the banner.
-  const fellBack = !updatedTimezone && (Boolean(resource.error) || resolved.rejected !== null)
+  // Missing settings use Tokyo normally. A failed read is different: operators
+  // without settings permission must not silently get the wrong configured zone.
+  // Keep a previously loaded zone during failed background revalidation.
+  // A successful settings save takes precedence over the last fetched value.
+  const fellBack = !updatedTimezone && (
+    resolved.rejected !== null || (resource.error !== null && resource.data === null)
+  )
 
   return (
     <TenantTimezoneContext.Provider value={timezone}>
