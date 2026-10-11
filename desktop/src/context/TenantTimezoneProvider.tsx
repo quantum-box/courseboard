@@ -53,10 +53,13 @@ export function TenantTimezoneProvider({ children }: { children: ReactNode }) {
 
   const resolved = resolveTimezone(resource.data)
   const timezone = updatedTimezone ?? resolved.timezone
-  // Tokyo is the normal default, including when optional settings cannot be
-  // read. Only an explicitly configured invalid zone needs a warning.
+  // Missing settings use Tokyo normally. A failed read is different: operators
+  // without settings permission must not silently get the wrong configured zone.
+  // Keep a previously loaded zone during failed background revalidation.
   // A successful settings save takes precedence over the last fetched value.
-  const fellBack = !updatedTimezone && resolved.rejected !== null
+  const fellBack = !updatedTimezone && (
+    resolved.rejected !== null || (resource.error !== null && resource.data === null)
+  )
 
   return (
     <TenantTimezoneContext.Provider value={timezone}>

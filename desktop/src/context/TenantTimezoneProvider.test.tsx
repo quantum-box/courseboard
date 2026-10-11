@@ -61,13 +61,15 @@ describe('TenantTimezoneProvider', () => {
     expect(zone()).toBe(DEFAULT_TIME_ZONE)
   })
 
-  it('uses Tokyo without warning when optional settings cannot be read', async () => {
-    api.context.mockRejectedValue(new Error('tenant context unavailable'))
-    await act(async () => { renderProvider() })
-    expect(api.context).toHaveBeenCalled()
-    expect(zone()).toBe(DEFAULT_TIME_ZONE)
-    expect(warning()).toBeNull()
-  })
+  it.each(['settings unavailable', '403 Forbidden: ListExtensionStatus denied'])(
+    'warns rather than silently using Tokyo when settings cannot be read: %s', async message => {
+      api.context.mockRejectedValue(new Error(message))
+      await act(async () => { renderProvider() })
+      expect(api.context).toHaveBeenCalled()
+      expect(zone()).toBe(DEFAULT_TIME_ZONE)
+      expect(warning()).not.toBeNull()
+    },
+  )
 
   it('falls back and warns when the stored zone is not a real one', async () => {
     // A configuration mistake, not a transient failure — substituting silently
