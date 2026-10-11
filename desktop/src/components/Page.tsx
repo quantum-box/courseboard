@@ -73,7 +73,7 @@ export function Panel({
     <section className={`panel ${className}`} {...props}>
       {title || description || actions ? (
         <div className="panel-header">
-          <div>
+          <div className="panel-header-copy">
             {title ? <h2>{title}</h2> : null}
             {description ? <p>{description}</p> : null}
           </div>

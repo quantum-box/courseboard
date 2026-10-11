@@ -1040,12 +1040,23 @@ button,
 
 .panel-header {
   display: flex;
+  flex-wrap: wrap;
   min-height: 0;
   align-items: flex-end;
   justify-content: space-between;
   gap: 8px;
   border-bottom: 0;
   padding: 0 2px;
+}
+
+.panel-header-copy {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.panel-actions {
+  max-width: 100%;
+  flex-wrap: wrap;
 }
 
 .panel-header h2 {
@@ -2255,6 +2266,7 @@ button,
   .page-actions { width: 100%; }
   .page-actions > button { min-height: 40px; flex: 1; }
   .panel-header { align-items: flex-start; flex-direction: column; }
+  .panel-header-copy { flex-basis: auto; }
   .panel-actions { width: 100%; }
   .toolbar-row { width: 100%; flex-wrap: wrap; }
   .toolbar-row > * { min-height: 38px; }
