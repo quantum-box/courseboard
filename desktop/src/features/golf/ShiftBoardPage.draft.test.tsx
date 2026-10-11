@@ -66,6 +66,10 @@ let confirmedShift: ConfirmedShift = confirmed
 let extraProfiles: Array<{ id: string; displayName: string; employmentStatus: string }> = []
 /** Their saved month, when a test needs one. */
 let extraShifts: ConfirmedShift[] = []
+/** Requests caddies filed, which the board shows but the sheet does not. */
+let requests: Array<{ caddieProfileId: string; date: string; status: string }> = []
+/** A month nobody has confirmed yet: the board has requests and no shifts. */
+let unconfirmedMonth = false
 
 beforeEach(() => {
   clearResourceCache()
@@ -74,6 +78,8 @@ beforeEach(() => {
   confirmedShift = confirmed
   extraProfiles = []
   extraShifts = []
+  requests = []
+  unconfirmedMonth = false
   api.json.mockReset()
   api.downloadBlob.mockReset()
   api.downloadText.mockReset()
@@ -87,10 +93,10 @@ beforeEach(() => {
         items: [{ id: CADDIE, displayName: '高田 卓哉', employmentStatus }, ...extraProfiles],
       }
     }
-    if (path.startsWith('/v1/course/caddie-availabilities?')) return { items: [] }
+    if (path.startsWith('/v1/course/caddie-availabilities?')) return { items: requests }
     if (path.startsWith('/v1/course/caddie-assignments?')) return { items: [] }
     if (path.startsWith('/v1/course/caddie-shifts?')) {
-      return { items: [confirmedShift, ...extraShifts] }
+      return { items: unconfirmedMonth ? [] : [confirmedShift, ...extraShifts] }
     }
     if (path.startsWith('/v1/course/caddie-availability-deadlines/')) return null
     if (path.startsWith('/v1/course/caddie-availability-submissions/')) return { items: [] }
@@ -361,6 +367,48 @@ describe('planning a month before confirming it', () => {
     expect(cells[3]).toBe(i18next.t('shifts:cell.available'))
     expect(cells[4]).toBe('')
     expect(contents).not.toContain(i18next.t('shifts:cell.off'))
+  })
+
+  it('prints only decided days, not the requests around them', async () => {
+    // SCC-43: day 1 is a confirmed working day; day 3 only carries a request.
+    // The sheet used to fill day 3 in from the request, handing an undecided
+    // day round as if it were a shift (and 軽 only ever comes from a request).
+    confirmedShift = { ...confirmed, isWorking: true, roundsCapacity: 1 }
+    requests = [{ caddieProfileId: CADDIE, date: `${MONTH}-03`, status: 'light_duty' }]
+    const { container } = renderBoard()
+    await waitFor(() => expect(firstDayCell(container).dataset.kind).toBe('available'))
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: i18next.t('shifts:export.action') }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: i18next.t('shifts:export.csv') }))
+
+    const [, contents] = api.downloadText.mock.calls[0] as [string, string]
+    const row = contents.split('\r\n').find(line => line.startsWith('高田 卓哉'))
+    const cells = row?.split(',') ?? []
+    expect(cells[3]).toBe(i18next.t('shifts:cell.available'))
+    expect(cells[5]).toBe('')
+    expect(contents).not.toContain(i18next.t('shifts:cell.light'))
+  })
+
+  it('says a month nobody has confirmed is not ready, instead of printing the requests', async () => {
+    // The board still shows the request; only the sheet refuses.
+    unconfirmedMonth = true
+    requests = [{ caddieProfileId: CADDIE, date: FIRST_DAY, status: 'available' }]
+    const { container } = renderBoard()
+    await waitFor(() => expect(firstDayCell(container).dataset.kind).toBe('available'))
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: i18next.t('shifts:export.action') }), {
+      button: 0,
+      ctrlKey: false,
+    })
+    fireEvent.click(await screen.findByRole('menuitem', { name: i18next.t('shifts:export.csv') }))
+
+    expect(api.downloadText).not.toHaveBeenCalled()
+    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({
+      message: i18next.t('shifts:export.notConfirmed'),
+    }))
   })
 
   it('says so rather than handing round a blank sheet for a month nobody works', async () => {
