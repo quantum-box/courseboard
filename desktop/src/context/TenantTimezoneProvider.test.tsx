@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { i18next } from '../i18n'
 import { clearResourceCache } from '../hooks/useResource'
 import { DEFAULT_TIME_ZONE } from '../lib/clock'
+import { ApiError } from '../api'
 import {
   TenantTimezoneProvider,
   notifyTenantTimezoneChanged,
@@ -77,6 +78,31 @@ describe('TenantTimezoneProvider', () => {
     api.context.mockResolvedValue({ configJson: { timezone: 'JST' } })
     renderProvider()
     await waitFor(() => expect(warning()).not.toBeNull())
+    expect(zone()).toBe(DEFAULT_TIME_ZONE)
+  })
+
+  it.each([424, 502, 503, 504])('recovers from an upstream %s with one retry', async status => {
+    api.context.mockRejectedValueOnce(new ApiError('upstream unavailable', status))
+      .mockResolvedValueOnce({ configJson: { timezone: 'Asia/Taipei' } })
+    renderProvider()
+    await waitFor(() => expect(zone()).toBe('Asia/Taipei'))
+    expect(api.context).toHaveBeenCalledTimes(2)
+    expect(warning()).toBeNull()
+  })
+
+  it('stops after one failed upstream retry and warns', async () => {
+    api.context.mockRejectedValue(new ApiError('upstream unavailable', 424))
+    renderProvider()
+    await waitFor(() => expect(warning()).not.toBeNull())
+    expect(api.context).toHaveBeenCalledTimes(2)
+    expect(zone()).toBe(DEFAULT_TIME_ZONE)
+  })
+
+  it('does not retry a settings permission denial', async () => {
+    api.context.mockRejectedValue(new ApiError('ListExtensionStatus denied', 403))
+    renderProvider()
+    await waitFor(() => expect(warning()).not.toBeNull())
+    expect(api.context).toHaveBeenCalledTimes(1)
     expect(zone()).toBe(DEFAULT_TIME_ZONE)
   })
 

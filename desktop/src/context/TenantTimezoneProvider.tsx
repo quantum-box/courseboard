@@ -7,7 +7,7 @@ import {
   type ReactNode,
 } from 'react'
 import { useTranslation } from 'react-i18next'
-import { courseboardApiJson } from '../api'
+import { ApiError, courseboardApiJson } from '../api'
 import { Notice } from '../components/Page'
 import { useResource } from '../hooks/useResource'
 import { DEFAULT_TIME_ZONE } from '../lib/clock'
@@ -18,6 +18,18 @@ const TIMEZONE_CHANGED_EVENT = 'courseboard:tenant-timezone-changed'
 
 type TenantExtensionSettings = {
   configJson?: { timezone?: unknown } | null
+}
+
+async function loadTimezoneSettings() {
+  const load = () => courseboardApiJson<TenantExtensionSettings | null>('/v1/course/extension-status')
+  try {
+    return await load()
+  } catch (error) {
+    // Field's cold-start auth gate can time out before a warm retry succeeds.
+    // This is a read: retry once for upstream failures, never for denied access.
+    if (!(error instanceof ApiError) || ![424, 502, 503, 504].includes(error.status)) throw error
+    return load()
+  }
 }
 
 /** Use the same golf extension setting as the settings screen and API. */
@@ -37,10 +49,7 @@ function resolveTimezone(settings: TenantExtensionSettings | null) {
 
 export function TenantTimezoneProvider({ children }: { children: ReactNode }) {
   const [updatedTimezone, setUpdatedTimezone] = useState<string | null>(null)
-  const loader = useMemo(
-    () => () => courseboardApiJson<TenantExtensionSettings | null>('/v1/course/extension-status'),
-    [],
-  )
+  const loader = useMemo(() => loadTimezoneSettings, [])
   const resource = useResource(loader, [], { cacheKey: 'course:extension-status' })
   useEffect(() => {
     const update = (event: Event) => {
