@@ -61,6 +61,7 @@ export function LedgerBoard({
   onOpenContextMenu,
   onSelectReservation,
   onMoveColumn,
+  movesDisabled = false,
   onOpenCourseSetup,
 }: {
   columns: LedgerColumn[]
@@ -81,6 +82,7 @@ export function LedgerBoard({
   onOpenContextMenu: (target: SlotContextTarget) => void
   onSelectReservation: (id: string) => void
   onMoveColumn: (golfCourseId: string, delta: -1 | 1) => void
+  movesDisabled?: boolean
   onOpenCourseSetup: (golfCourseId: string) => void
 }) {
   const unassignedIds = useMemo(
@@ -97,8 +99,8 @@ export function LedgerBoard({
           shiftsConfirmed={shiftsConfirmed}
           unassignedIds={unassignedIds}
           nowMinutes={nowMinutes}
-          canMoveLeft={index > 0}
-          canMoveRight={index < columns.length - 1}
+          canMoveLeft={!movesDisabled && index > 0}
+          canMoveRight={!movesDisabled && index < columns.length - 1}
           selectedTeeTimes={
             selection?.golfCourseId === column.golfCourseId ? selection.teeTimes : []
           }

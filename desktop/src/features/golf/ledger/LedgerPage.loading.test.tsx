@@ -1,7 +1,7 @@
 /* @vitest-environment jsdom */
 
 import { TooltipProvider } from '@tachyon-sdk/native-ui'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearResourceCache } from '../../../hooks/useResource'
@@ -61,6 +61,9 @@ let releaseLedger: (() => void) | null = null
 let generatedThrough: string | null = null
 let supplyFailure = false
 let supplyGetCount = 0
+let plansAvailable = false
+let releaseOrder: (() => void) | null = null
+let deferOrder = false
 let triggerReload: (() => false | Promise<void>) | null = null
 
 function ReloadBridge() {
@@ -75,6 +78,9 @@ beforeEach(async () => {
   generatedThrough = null
   supplyFailure = false
   supplyGetCount = 0
+  plansAvailable = false
+  releaseOrder = null
+  deferOrder = false
   triggerReload = null
   ledgerBody = {
     date: '2026-07-20',
@@ -112,12 +118,21 @@ beforeEach(async () => {
       })
     }
     if (path.startsWith('/v1/course/courses')) {
-      return Promise.resolve({ items: [{ id: 'course-east', name: '東コース' }] })
+      return Promise.resolve({ items: ledgerBody.columns.map(column => ({
+        id: column.golfCourseId, name: column.courseName,
+      })) })
     }
     if (path.startsWith('/v1/course/course-order')) {
+      if (deferOrder) return new Promise(resolve => {
+        releaseOrder = () => resolve({ golfCourseIds: ['course-west', 'course-east'] })
+      })
       return Promise.resolve({ golfCourseIds: ['course-east'] })
     }
-    if (path.startsWith('/v1/course/reservation-products')) return Promise.resolve({ items: [] })
+    if (path.startsWith('/v1/course/reservation-products')) return Promise.resolve({ items: plansAvailable ? [{
+      reservationServiceId: 'plan-self', displayName: 'テストプラン',
+      playType: 'self', expectedDurationMinutes: 240, golfCourseIds: ['course-east'],
+    }] : [] })
+    if (path.startsWith('/v1/course/player-tag-options')) return Promise.resolve({ items: [] })
     if (path.startsWith('/v1/course/booking-horizon')) {
       return Promise.resolve({
         bookableThrough: '2027-02-19',
@@ -172,6 +187,59 @@ function renderPage() {
 }
 
 describe('LedgerPage while the day is still loading', () => {
+  it('shows the board but prevents column moves until its saved order is available', async () => {
+    deferOrder = true
+    ledgerBody.columns.unshift({ ...ledgerBody.columns[0]!, golfCourseId: 'course-west', courseName: '西コース' })
+    renderPage()
+    releaseLedger?.()
+    const move = await screen.findByRole('button', {
+      name: i18next.t('ledger:order.moveRight', { name: '西コース' }),
+    }) as HTMLButtonElement
+    expect(move.disabled).toBe(true)
+    fireEvent.click(move)
+    expect(api.json.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+    await waitFor(() => expect(releaseOrder).not.toBeNull())
+    act(() => { releaseOrder?.() })
+    await waitFor(() => expect(move.disabled).toBe(false))
+  })
+
+  it('loads plans when an existing reservation is opened before any new booking', async () => {
+    plansAvailable = true
+    ledgerBody.columns[0]!.slots[0]!.items = [{
+      id: 'reservation-test', reservationNumber: 'R-1', reservationServiceId: 'plan-self',
+      golfCourseId: 'course-east', courseName: '東コース', teeTime: `${todayDate}T07:00:00+09:00`,
+      durationMinutes: 240, playType: 'self', partySize: 4, partyName: '予約テスト',
+      status: 'confirmed', holes: 18,
+    }]
+    renderPage()
+    releaseLedger?.()
+    fireEvent.click(await screen.findByRole('button', { name: /予約テスト/ }))
+    expect((await screen.findAllByText('テストプラン')).length).toBeGreaterThan(0)
+    expect(api.json.mock.calls.some(([path]) => path === '/v1/course/reservation-products')).toBe(true)
+  })
+
+  it('prioritizes the board and courses before auxiliary reads and loads plans on demand', async () => {
+    ledgerBody.columns[0]!.resourceId = 'resource-east'
+    renderPage()
+    await waitFor(() => expect(api.json).toHaveBeenCalledTimes(2))
+    expect(api.json.mock.calls.map(([path]) => path)).toEqual([
+      expect.stringContaining('/v1/course/tee-ledger'), '/v1/course/courses',
+    ])
+    releaseLedger?.()
+    await waitFor(() => expect(api.json.mock.calls.some(([path]) =>
+      path.startsWith('/v1/course/caddie-shifts'),
+    )).toBe(true))
+    expect(api.json.mock.calls.some(([path]) => path === '/v1/course/reservation-products')).toBe(false)
+    expect(api.json.mock.calls.some(([path]) => path === '/v1/course/player-tag-options')).toBe(false)
+    fireEvent.click(screen.getByRole('button', {
+      name: i18next.t('ledger:cell.remaining', { n: '2' }),
+    }))
+    await waitFor(() => {
+      expect(api.json.mock.calls.some(([path]) => path === '/v1/course/reservation-products')).toBe(true)
+      expect(api.json.mock.calls.some(([path]) => path === '/v1/course/player-tag-options')).toBe(true)
+    })
+  })
+
   it('keeps the date controls usable instead of blanking the page', async () => {
     // The board is one Field round trip per course plus the whole booking list.
     // Replacing the page with a spinner took the date away from the desk for as

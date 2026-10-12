@@ -212,6 +212,9 @@ export function LedgerPage() {
   }, [date, courseIds], {
     cacheKey: `tee-ledger:${date}:${courseIds ?? 'all'}`,
   })
+  // Give the board priority over auxiliary reads that fan out into Field auth.
+  const boardReady = Boolean(ledger.data)
+  const bookingOpen = bookingTarget !== null
 
   const coursesResource = useResource(
     () =>
@@ -225,13 +228,13 @@ export function LedgerPage() {
   const horizonResource = useResource(
     () => courseboardApiJson<BookingHorizonStatusResponse>(`${COURSE_API}/booking-horizon`),
     [],
-    { cacheKey: 'course:booking-horizon' },
+    { cacheKey: 'course:booking-horizon', enabled: boardReady },
   )
 
   const orderResource = useResource(
     () => courseboardApiJson<{ golfCourseIds: string[] }>(`${COURSE_API}/course-order`),
     [],
-    { cacheKey: 'courses:order' },
+    { cacheKey: 'courses:order', enabled: boardReady },
   )
 
   const productsResource = useResource(
@@ -248,13 +251,13 @@ export function LedgerPage() {
         }>
       >(`${COURSE_API}/reservation-products`),
     [],
-    { cacheKey: 'reservation-products:list' },
+    { cacheKey: 'reservation-products:list', enabled: bookingOpen || editingReservationId !== null },
   )
 
   const playerTagResource = useResource(
     () => courseboardApiJson<{ items: string[] }>(`${COURSE_API}/player-tag-options`),
     [],
-    { cacheKey: 'course:player-tag-options' },
+    { cacheKey: 'course:player-tag-options', enabled: bookingOpen || editingReservationId !== null },
   )
 
   /**
@@ -269,7 +272,7 @@ export function LedgerPage() {
       `${COURSE_API}/caddie-course-supply?date=${encodeURIComponent(date)}`,
     ),
     [date],
-    { cacheKey: `caddie-course-supply:${date}` },
+    { cacheKey: `caddie-course-supply:${date}`, enabled: boardReady },
   )
 
   /** Today's caddie assignments, joined against the board to find rounds
@@ -282,7 +285,7 @@ export function LedgerPage() {
       `${COURSE_API}/caddie-assignments?from=${encodeURIComponent(addDays(date, -1))}&to=${encodeURIComponent(addDays(date, 1))}`,
     ),
     [date],
-    { cacheKey: `caddie-assignments:${date}` },
+    { cacheKey: `caddie-assignments:${date}`, enabled: boardReady },
   )
 
   /** Whether the day has at least one confirmed caddie shift (day-wide, not
@@ -292,7 +295,7 @@ export function LedgerPage() {
       `${COURSE_API}/caddie-shifts?from=${encodeURIComponent(date)}&to=${encodeURIComponent(date)}`,
     ),
     [date],
-    { cacheKey: `caddie-shifts:${date}:${date}` },
+    { cacheKey: `caddie-shifts:${date}:${date}`, enabled: boardReady },
   )
 
   const refreshAll = () => {
@@ -389,6 +392,8 @@ export function LedgerPage() {
   // Moving a column is computed against the whole arrangement, not just the
   // columns on screen, so filtering the board never rearranges it for others.
   const storedOrder = orderResource.data?.golfCourseIds ?? []
+  const orderReady = Boolean(orderResource.data && coursesResource.data)
+    && !orderResource.error && !coursesResource.error
   const boardOrder = arrangeCourses(storedOrder, courseOptions).map(course => course.id)
   const orderedCourseOptions = arrangeCourses(storedOrder, courseOptions)
 
@@ -480,6 +485,7 @@ export function LedgerPage() {
   }
 
   const moveColumn = async (golfCourseId: string, delta: -1 | 1) => {
+    if (!orderReady || savingOrder) return
     const visible = columns.map(column => column.golfCourseId)
     const next = moveCourse(boardOrder, visible, golfCourseId, delta)
     if (next === boardOrder) return
@@ -790,7 +796,8 @@ export function LedgerPage() {
             onBookSlot={bookSlot}
             onOpenContextMenu={setContextTarget}
             onSelectReservation={setEditingReservationId}
-            onMoveColumn={savingOrder ? () => {} : moveColumn}
+            onMoveColumn={moveColumn}
+            movesDisabled={savingOrder || !orderReady}
             onOpenCourseSetup={golfCourseId => navigate(courseSetupRoute(golfCourseId))}
           />
         )}
@@ -798,7 +805,7 @@ export function LedgerPage() {
 
       {/* Under the board, not on it: the slot is genuinely free again, and
           the desk still needs to know a group let it go this morning. */}
-      <DayCancellations date={date} />
+      {boardReady ? <DayCancellations date={date} /> : null}
 
       <SlotContextMenu
         target={contextTarget}
@@ -841,7 +848,7 @@ export function LedgerPage() {
         target={bookingTarget}
         date={date}
         plans={bookablePlans}
-        plansLoading={productsResource.loading}
+        plansLoading={productsResource.loading || (bookingOpen && !productsResource.data && !productsResource.error)}
         playerTagOptions={playerTagOptions}
         onClose={() => setBookingTarget(null)}
         onCreated={booking => {

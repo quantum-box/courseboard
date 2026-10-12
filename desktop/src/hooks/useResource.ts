@@ -131,7 +131,10 @@ export function useResource<T>(
   const refresh = useCallback(async () => {
     if (!enabled) {
       setState(current => {
-        const next = { ...current, key: cacheKey, error: null, loading: false }
+        const next = {
+          ...current, key: cacheKey, error: null, loading: false,
+          data: current.key === cacheKey ? current.data : (cached<T>(cacheKey) ?? null),
+        }
         stateRef.current = next
         return next
       })
@@ -185,7 +188,10 @@ export function useResource<T>(
     if (!enabled) {
       requestIdRef.current += 1
       setState(current => {
-        const next = { ...current, key: cacheKey, error: null, loading: false }
+        const next = {
+          ...current, key: cacheKey, error: null, loading: false,
+          data: current.key === cacheKey ? current.data : (cached<T>(cacheKey) ?? null),
+        }
         stateRef.current = next
         return next
       })

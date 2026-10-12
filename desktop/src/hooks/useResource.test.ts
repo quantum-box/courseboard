@@ -28,6 +28,26 @@ afterEach(() => {
 })
 
 describe('resource cache helpers', () => {
+  it.each([undefined, 'cached-next-day'])('never carries prior-day data through a disabled new key (%s)', async cachedNextDay => {
+    selectScope('tenant-a')
+    let resolveNext!: (value: string) => void
+    const next = new Promise<string>(resolve => { resolveNext = resolve })
+    const loader = vi.fn((date: string) => date === 'old' ? Promise.resolve('prior-day') : next)
+    const resource = renderHook(({ date, enabled }) => useResource(
+      () => loader(date), [date], { cacheKey: `caddie-supply:${date}`, enabled },
+    ), { initialProps: { date: 'old', enabled: true } })
+    await waitFor(() => expect(resource.result.current.data).toBe('prior-day'))
+    if (cachedNextDay) writeResourceCache('caddie-supply:new', cachedNextDay)
+    resource.rerender({ date: 'new', enabled: false })
+    expect(resource.result.current.data).toBe(cachedNextDay ?? null)
+    expect(loader).toHaveBeenCalledTimes(1)
+    resource.rerender({ date: 'new', enabled: true })
+    expect(resource.result.current.data).toBe(cachedNextDay ?? null)
+    await act(async () => { resolveNext('new-day'); await next })
+    await waitFor(() => expect(resource.result.current.data).toBe('new-day'))
+    expect(loader).toHaveBeenCalledTimes(2)
+  })
+
   it('stores and clears keys by prefix', () => {
     writeResourceCache('caddie-courses:a', { items: [1] })
     writeResourceCache('caddie-ratings:a', { items: [2] })
